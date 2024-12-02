@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -12,14 +12,17 @@
 
 #include <windows.h>
 
+#include "base/file_path.h"
 #include "base/logging.h"
 
-GoogleChromeDistribution::GoogleChromeDistribution() {
+GoogleChromeDistribution::GoogleChromeDistribution(
+    const installer::MasterPreferences& prefs)
+        : BrowserDistribution(prefs) {
 }
 
 void GoogleChromeDistribution::DoPostUninstallOperations(
-    const installer::Version& version,
-    const std::wstring& local_data_path,
+    const Version& version,
+    const FilePath& local_data_path,
     const std::wstring& distribution_data) {
 }
 
@@ -78,8 +81,7 @@ std::wstring GoogleChromeDistribution::GetStatsServerURL() {
   return std::wstring();
 }
 
-std::wstring GoogleChromeDistribution::GetDistributionData(
-    base::win::RegKey* key) {
+std::wstring GoogleChromeDistribution::GetDistributionData(HKEY root_key) {
   NOTREACHED();
   return std::wstring();
 }
@@ -99,30 +101,25 @@ std::wstring GoogleChromeDistribution::GetVersionKey() {
   return std::wstring();
 }
 
-std::wstring GoogleChromeDistribution::GetEnvVersionKey() {
-  NOTREACHED();
-  return std::wstring();
-}
-
-void GoogleChromeDistribution::UpdateDiffInstallStatus(bool system_install,
-      bool incremental_install, installer_util::InstallStatus install_status) {
+void GoogleChromeDistribution::UpdateInstallStatus(bool system_install,
+    bool incremental_install, bool multi_install,
+    installer::InstallStatus install_status) {
   NOTREACHED();
 }
 
 void GoogleChromeDistribution::LaunchUserExperiment(
-    installer_util::InstallStatus status, const installer::Version& version,
-    bool system_install) {
+    installer::InstallStatus status, const Version& version,
+    const installer::Product& installation, bool system_level) {
   NOTREACHED();
 }
 
-void GoogleChromeDistribution::InactiveUserToastExperiment(
-    int flavor,
-    bool system_install) {
+void GoogleChromeDistribution::InactiveUserToastExperiment(int flavor,
+    const installer::Product& installation) {
   NOTREACHED();
 }
 
 bool GoogleChromeDistribution::ExtractUninstallMetricsFromFile(
-    const std::wstring& file_path, std::wstring* uninstall_metrics_string) {
+    const FilePath& file_path, std::wstring* uninstall_metrics_string) {
   NOTREACHED();
   return false;
 }
@@ -139,3 +136,9 @@ bool GoogleChromeDistribution::BuildUninstallMetricsString(
   return false;
 }
 
+bool GoogleChromeDistribution::SetChannelFlags(
+    bool set,
+    installer::ChannelInfo* channel_info) {
+  NOTREACHED();
+  return false;
+}

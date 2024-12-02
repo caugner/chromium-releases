@@ -15,40 +15,11 @@
 #include "views/accelerator.h"
 #include "views/event.h"
 #include "views/focus/focus_manager.h"
+#include "views/touchui/touch_factory.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
 
 namespace views {
-
-#if defined(HAVE_XINPUT2)
-// Functions related to determining touch devices.
-class TouchFactory {
- public:
-  // Keep a list of touch devices so that it is possible to determine if a
-  // pointer event is a touch-event or a mouse-event.
-  static void SetTouchDeviceListInternal(
-      const std::vector<unsigned int>& devices) {
-    for (std::vector<unsigned int>::const_iterator iter = devices.begin();
-        iter != devices.end(); ++iter) {
-      DCHECK(*iter < touch_devices.size());
-      touch_devices[*iter] = true;
-    }
-  }
-
-  // Is the device a touch-device?
-  static bool IsTouchDevice(unsigned int deviceid) {
-    return deviceid < touch_devices.size() ? touch_devices[deviceid] : false;
-  }
-
- private:
-  // A quick lookup table for determining if a device is a touch device.
-  static std::bitset<128> touch_devices;
-
-  DISALLOW_COPY_AND_ASSIGN(TouchFactory);
-};
-
-std::bitset<128> TouchFactory::touch_devices;
-#endif
 
 namespace {
 
@@ -78,7 +49,7 @@ bool X2EventIsTouchEvent(XEvent* xev) {
     case XI_ButtonRelease:
     case XI_Motion: {
       // Is the event coming from a touch device?
-      return TouchFactory::IsTouchDevice(
+      return TouchFactory::GetInstance()->IsTouchDevice(
           static_cast<XIDeviceEvent*>(cookie->data)->sourceid);
     }
     default:
@@ -97,7 +68,7 @@ bool DispatchX2Event(RootView* root, XEvent* xev) {
     // can be used (if desired) as a mouse event.
 
     TouchEvent touch(xev);
-    if (root->OnTouchEvent(touch))
+    if (root->OnTouchEvent(touch) != views::View::TOUCH_STATUS_UNKNOWN)
       return true;
   }
 
@@ -143,14 +114,9 @@ bool DispatchXEvent(XEvent* xev) {
 
 #if defined(HAVE_XINPUT2)
   if (xev->type == GenericEvent) {
-    if (XGetEventData(xev->xgeneric.display, &xev->xcookie)) {
-      XGenericEventCookie* cookie = &xev->xcookie;
-      XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(cookie->data);
-      xwindow = xiev->event;
-    } else {
-      DLOG(WARNING) << "Error fetching XGenericEventCookie for event.";
-      return false;
-    }
+    XGenericEventCookie* cookie = &xev->xcookie;
+    XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(cookie->data);
+    xwindow = xiev->event;
   }
 #endif
 
@@ -161,14 +127,6 @@ bool DispatchXEvent(XEvent* xev) {
       case KeyPress:
       case KeyRelease: {
         KeyEvent keyev(xev);
-
-        // If it's a keypress, check to see if it triggers an accelerator.
-        if (xev->type == KeyPress) {
-          FocusManager* focus_manager = root->GetFocusManager();
-          if (focus_manager && !focus_manager->OnKeyEvent(keyev))
-            return true;
-        }
-
         return root->ProcessKeyEvent(keyev);
       }
 
@@ -202,9 +160,7 @@ bool DispatchXEvent(XEvent* xev) {
 
 #if defined(HAVE_XINPUT2)
       case GenericEvent: {
-        bool ret = DispatchX2Event(root, xev);
-        XFreeEventData(xev->xgeneric.display, &xev->xcookie);
-        return ret;
+        return DispatchX2Event(root, xev);
       }
 #endif
     }
@@ -215,7 +171,7 @@ bool DispatchXEvent(XEvent* xev) {
 
 #if defined(HAVE_XINPUT2)
 void SetTouchDeviceList(std::vector<unsigned int>& devices) {
-  TouchFactory::SetTouchDeviceListInternal(devices);
+  TouchFactory::GetInstance()->SetTouchDeviceList(devices);
 }
 #endif
 
@@ -226,8 +182,11 @@ bool AcceleratorHandler::Dispatch(GdkEvent* event) {
   return true;
 }
 
-bool AcceleratorHandler::Dispatch(XEvent* xev) {
-  return DispatchXEvent(xev);
+base::MessagePumpGlibXDispatcher::DispatchStatus AcceleratorHandler::Dispatch(
+    XEvent* xev) {
+  return DispatchXEvent(xev) ?
+      base::MessagePumpGlibXDispatcher::EVENT_PROCESSED :
+      base::MessagePumpGlibXDispatcher::EVENT_IGNORED;
 }
 
 }  // namespace views

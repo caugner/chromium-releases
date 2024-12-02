@@ -1,7 +1,7 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_PPB_VAR_H_
 #define PPAPI_C_PPB_VAR_H_
 
@@ -13,7 +13,7 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_var.h"
 
-#define PPB_VAR_INTERFACE "PPB_Var;0.2"
+#define PPB_VAR_INTERFACE "PPB_Var;0.4"
 
 /**
  * @file
@@ -33,6 +33,7 @@ enum PP_ObjectProperty_Modifier {
   PP_OBJECTPROPERTY_MODIFIER_DONTDELETE = 1 << 2,
   PP_OBJECTPROPERTY_MODIFIER_HASVALUE   = 1 << 3
 };
+PP_COMPILE_ASSERT_ENUM_SIZE_IN_BYTES(PP_ObjectProperty_Modifier, 4);
 
 struct PP_ObjectProperty {
   struct PP_Var name;
@@ -40,7 +41,16 @@ struct PP_ObjectProperty {
   struct PP_Var getter;
   struct PP_Var setter;
   uint32_t modifiers;
+
+  /** Ensure that this struct is 72 bytes wide by padding the end.  In some
+   *  compilers, PP_Var is 8-byte aligned, so those compilers align this struct
+   *  on 8-byte boundaries as well and pad it to 72 bytes even without this
+   *  padding attribute.  This padding makes its size consistent across
+   *  compilers.
+   */
+  int32_t padding;
 };
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_ObjectProperty, 72);
 
 /**
  * PPB_Var API
@@ -296,4 +306,5 @@ PP_INLINE struct PP_ObjectProperty PP_MakeSimpleProperty(struct PP_Var name,
  * @}
  * End addtogroup PPB
  */
-#endif  // PPAPI_C_PPB_VAR_H_
+#endif  /* PPAPI_C_PPB_VAR_H_ */
+

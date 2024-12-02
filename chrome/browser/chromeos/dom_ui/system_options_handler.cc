@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/string_number_conversions.h"
@@ -14,12 +13,12 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/dom_ui/system_settings_provider.h"
 #include "chrome/browser/chromeos/language_preferences.h"
-#include "chrome/common/notification_service.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 SystemOptionsHandler::SystemOptionsHandler()
     : chromeos::CrosOptionsPageUIHandler(

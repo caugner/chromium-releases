@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #endif
 
 #include "base/eintr_wrapper.h"
+#include "base/threading/platform_thread.h"
 #include "net/base/net_util.h"
 #include "net/base/listen_socket.h"
 
@@ -42,6 +43,44 @@ const int ListenSocket::kSocketError = SOCKET_ERROR;
 const SOCKET ListenSocket::kInvalidSocket = -1;
 const int ListenSocket::kSocketError = -1;
 #endif
+
+ListenSocket* ListenSocket::Listen(std::string ip, int port,
+                                   ListenSocketDelegate* del) {
+  SOCKET s = Listen(ip, port);
+  if (s == kInvalidSocket) {
+    // TODO(erikkay): error handling
+  } else {
+    ListenSocket* sock = new ListenSocket(s, del);
+    sock->Listen();
+    return sock;
+  }
+  return NULL;
+}
+
+void ListenSocket::Send(const char* bytes, int len, bool append_linefeed) {
+  SendInternal(bytes, len);
+  if (append_linefeed) {
+    SendInternal("\r\n", 2);
+  }
+}
+
+void ListenSocket::Send(const std::string& str, bool append_linefeed) {
+  Send(str.data(), static_cast<int>(str.length()), append_linefeed);
+}
+
+void ListenSocket::PauseReads() {
+  DCHECK(!reads_paused_);
+  reads_paused_ = true;
+}
+
+void ListenSocket::ResumeReads() {
+  DCHECK(reads_paused_);
+  reads_paused_ = false;
+  if (has_pending_reads_) {
+    has_pending_reads_ = false;
+    Read();
+  }
+}
 
 ListenSocket::ListenSocket(SOCKET s, ListenSocketDelegate *del)
     : socket_(s),
@@ -85,28 +124,6 @@ SOCKET ListenSocket::Listen(std::string ip, int port) {
   return s;
 }
 
-ListenSocket* ListenSocket::Listen(std::string ip, int port,
-                                   ListenSocketDelegate* del) {
-  SOCKET s = Listen(ip, port);
-  if (s == kInvalidSocket) {
-    // TODO(erikkay): error handling
-  } else {
-    ListenSocket* sock = new ListenSocket(s, del);
-    sock->Listen();
-    return sock;
-  }
-  return NULL;
-}
-
-void ListenSocket::Listen() {
-  int backlog = 10;  // TODO(erikkay): maybe don't allow any backlog?
-  listen(socket_, backlog);
-  // TODO(erikkay): error handling
-#if defined(OS_POSIX)
-  WatchSocket(WAITING_ACCEPT);
-#endif
-}
-
 SOCKET ListenSocket::Accept(SOCKET s) {
   sockaddr_in from;
   socklen_t from_len = sizeof(from);
@@ -116,6 +133,45 @@ SOCKET ListenSocket::Accept(SOCKET s) {
     net::SetNonBlocking(conn);
   }
   return conn;
+}
+
+void ListenSocket::SendInternal(const char* bytes, int len) {
+  char* send_buf = const_cast<char *>(bytes);
+  int len_left = len;
+  while (true) {
+    int sent = HANDLE_EINTR(send(socket_, send_buf, len_left, 0));
+    if (sent == len_left) {  // A shortcut to avoid extraneous checks.
+      break;
+    }
+    if (sent == kSocketError) {
+#if defined(OS_WIN)
+      if (WSAGetLastError() != WSAEWOULDBLOCK) {
+        LOG(ERROR) << "send failed: WSAGetLastError()==" << WSAGetLastError();
+#elif defined(OS_POSIX)
+      if (errno != EWOULDBLOCK && errno != EAGAIN) {
+        LOG(ERROR) << "send failed: errno==" << errno;
+#endif
+        break;
+      }
+      // Otherwise we would block, and now we have to wait for a retry.
+      // Fall through to PlatformThread::YieldCurrentThread()
+    } else {
+      // sent != len_left according to the shortcut above.
+      // Shift the buffer start and send the remainder after a short while.
+      send_buf += sent;
+      len_left -= sent;
+    }
+    base::PlatformThread::YieldCurrentThread();
+  }
+}
+
+void ListenSocket::Listen() {
+  int backlog = 10;  // TODO(erikkay): maybe don't allow any backlog?
+  listen(socket_, backlog);
+  // TODO(erikkay): error handling
+#if defined(OS_POSIX)
+  WatchSocket(WAITING_ACCEPT);
+#endif
 }
 
 void ListenSocket::Accept() {
@@ -165,17 +221,6 @@ void ListenSocket::Read() {
   } while (len == kReadBufSize);
 }
 
-void ListenSocket::CloseSocket(SOCKET s) {
-  if (s && s != kInvalidSocket) {
-    UnwatchSocket();
-#if defined(OS_WIN)
-    closesocket(s);
-#elif defined(OS_POSIX)
-    close(s);
-#endif
-  }
-}
-
 void ListenSocket::Close() {
 #if defined(OS_POSIX)
   if (wait_state_ == WAITING_CLOSE)
@@ -185,12 +230,15 @@ void ListenSocket::Close() {
   socket_delegate_->DidClose(this);
 }
 
-void ListenSocket::UnwatchSocket() {
+void ListenSocket::CloseSocket(SOCKET s) {
+  if (s && s != kInvalidSocket) {
+    UnwatchSocket();
 #if defined(OS_WIN)
-  watcher_.StopWatching();
+    closesocket(s);
 #elif defined(OS_POSIX)
-  watcher_.StopWatchingFileDescriptor();
+    close(s);
 #endif
+  }
 }
 
 void ListenSocket::WatchSocket(WaitState state) {
@@ -205,59 +253,12 @@ void ListenSocket::WatchSocket(WaitState state) {
 #endif
 }
 
-void ListenSocket::SendInternal(const char* bytes, int len) {
-  char* send_buf = const_cast<char *>(bytes);
-  int len_left = len;
-  while (true) {
-    int sent = HANDLE_EINTR(send(socket_, send_buf, len_left, 0));
-    if (sent == len_left) {  // A shortcut to avoid extraneous checks.
-      break;
-    }
-    if (sent == kSocketError) {
+void ListenSocket::UnwatchSocket() {
 #if defined(OS_WIN)
-      if (WSAGetLastError() != WSAEWOULDBLOCK) {
-        LOG(ERROR) << "send failed: WSAGetLastError()==" << WSAGetLastError();
+  watcher_.StopWatching();
 #elif defined(OS_POSIX)
-      if (errno != EWOULDBLOCK && errno != EAGAIN) {
-        LOG(ERROR) << "send failed: errno==" << errno;
+  watcher_.StopWatchingFileDescriptor();
 #endif
-        break;
-      }
-      // Otherwise we would block, and now we have to wait for a retry.
-      // Fall through to PlatformThread::YieldCurrentThread()
-    } else {
-      // sent != len_left according to the shortcut above.
-      // Shift the buffer start and send the remainder after a short while.
-      send_buf += sent;
-      len_left -= sent;
-    }
-    PlatformThread::YieldCurrentThread();
-  }
-}
-
-void ListenSocket::Send(const char* bytes, int len, bool append_linefeed) {
-  SendInternal(bytes, len);
-  if (append_linefeed) {
-    SendInternal("\r\n", 2);
-  }
-}
-
-void ListenSocket::Send(const std::string& str, bool append_linefeed) {
-  Send(str.data(), static_cast<int>(str.length()), append_linefeed);
-}
-
-void ListenSocket::PauseReads() {
-  DCHECK(!reads_paused_);
-  reads_paused_ = true;
-}
-
-void ListenSocket::ResumeReads() {
-  DCHECK(reads_paused_);
-  reads_paused_ = false;
-  if (has_pending_reads_) {
-    has_pending_reads_ = false;
-    Read();
-  }
 }
 
 // TODO(ibrar): We can add these functions into OS dependent files

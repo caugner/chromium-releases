@@ -52,7 +52,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
 
 namespace WebKit {
 class WebURLLoader;
@@ -92,7 +92,8 @@ class MultipartResponseDelegate {
   // Returns true on success.
   static bool ReadContentRanges(const WebKit::WebURLResponse& response,
                                 int* content_range_lower_bound,
-                                int* content_range_upper_bound);
+                                int* content_range_upper_bound,
+                                int* content_range_instance_size);
 
  private:
   friend class MultipartResponseDelegateTester;  // For unittests.

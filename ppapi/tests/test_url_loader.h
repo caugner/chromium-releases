@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 
 #include "ppapi/tests/test_case.h"
 
+struct PPB_FileIOTrusted_Dev;
+
 namespace pp {
 class FileIO_Dev;
 class URLLoader;
@@ -17,7 +19,7 @@ class URLRequestInfo;
 
 class TestURLLoader : public TestCase {
  public:
-  explicit TestURLLoader(TestingInstance* instance) : TestCase(instance) {}
+  explicit TestURLLoader(TestingInstance* instance);
 
   // TestCase implementation.
   virtual bool Init();
@@ -40,6 +42,9 @@ class TestURLLoader : public TestCase {
   std::string TestStreamToFile();
   std::string TestSameOriginRestriction();
   std::string TestAuditURLRedirect();
+  std::string TestAbortCalls();
+
+  const PPB_FileIOTrusted_Dev* file_io_trusted_interface_;
 };
 
 #endif  // PAPPI_TESTS_TEST_URL_LOADER_H_

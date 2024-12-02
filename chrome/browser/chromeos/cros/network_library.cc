@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+  // Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <map>
 
-#include "app/l10n_util.h"
 #include "base/i18n/time_formatting.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
@@ -15,9 +14,12 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/chromeos/network_login_observer.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/common/time_format.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -82,6 +84,9 @@ static const char* kNetworkTechnologyLteAdvanced = "LTE Advanced";
 static const char* kRoamingStateHome = "home";
 static const char* kRoamingStateRoaming = "roaming";
 static const char* kRoamingStateUnknown = "unknown";
+
+// How long we should remember that cellular plan payment was received.
+const int kRecentPlanPaymentHours = 6;
 
 static ConnectionState ParseState(const std::string& state) {
   if (state == kStateIdle)
@@ -236,14 +241,14 @@ static bool EnsureCrosLoaded() {
 // Network
 
 Network::Network(const Network& network) {
-  service_path_ = network.service_path();
-  device_path_ = network.device_path();
-  ip_address_ = network.ip_address();
-  type_ = network.type();
-  state_ = network.state();
-  error_ = network.error();
-  connectable_ = network.connectable();
-  is_active_ = network.is_active();
+  service_path_ = network.service_path_;
+  device_path_ = network.device_path_;
+  ip_address_ = network.ip_address_;
+  type_ = network.type_;
+  state_ = network.state_;
+  error_ = network.error_;
+  connectable_ = network.connectable_;
+  is_active_ = network.is_active_;
 }
 
 void Network::Clear() {
@@ -356,10 +361,10 @@ void Network::InitIPAddress() {
 // WirelessNetwork
 WirelessNetwork::WirelessNetwork(const WirelessNetwork& network)
     : Network(network) {
-  name_ = network.name();
-  strength_ = network.strength();
-  auto_connect_ = network.auto_connect();
-  favorite_ = network.favorite();
+  name_ = network.name_;
+  strength_ = network.strength_;
+  auto_connect_ = network.auto_connect_;
+  favorite_ = network.favorite_;
 }
 
 WirelessNetwork::WirelessNetwork(const ServiceInfo* service)
@@ -386,7 +391,7 @@ string16 CellularDataPlan::GetPlanDesciption() const {
     case chromeos::CELLULAR_DATA_PLAN_UNLIMITED: {
       return l10n_util::GetStringFUTF16(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PURCHASE_UNLIMITED_DATA,
-          WideToUTF16(base::TimeFormatFriendlyDate(plan_start_time)));
+          base::TimeFormatFriendlyDate(plan_start_time));
       break;
     }
     case chromeos::CELLULAR_DATA_PLAN_METERED_PAID: {
@@ -395,8 +400,7 @@ string16 CellularDataPlan::GetPlanDesciption() const {
                 FormatBytes(plan_data_bytes,
                             GetByteDisplayUnits(plan_data_bytes),
                             true),
-                WideToUTF16(base::TimeFormatFriendlyDate(
-                                plan_start_time)));
+                base::TimeFormatFriendlyDate(plan_start_time));
     }
     case chromeos::CELLULAR_DATA_PLAN_METERED_BASE: {
       return l10n_util::GetStringFUTF16(
@@ -404,8 +408,7 @@ string16 CellularDataPlan::GetPlanDesciption() const {
                 FormatBytes(plan_data_bytes,
                             GetByteDisplayUnits(plan_data_bytes),
                             true),
-                WideToUTF16(base::TimeFormatFriendlyDate(
-                                plan_start_time)));
+                base::TimeFormatFriendlyDate(plan_start_time));
     default:
       break;
     }
@@ -505,26 +508,26 @@ CellularNetwork::CellularNetwork()
 
 CellularNetwork::CellularNetwork(const CellularNetwork& network)
     : WirelessNetwork(network) {
-  activation_state_ = network.activation_state();
-  network_technology_ = network.network_technology();
-  roaming_state_ = network.roaming_state();
-  connectivity_state_ = network.connectivity_state();
-  service_name_ = network.service_name();
-  operator_name_ = network.operator_name();
-  operator_code_ = network.operator_code();
-  payment_url_ = network.payment_url();
-  meid_ = network.meid();
-  imei_ = network.imei();
-  imsi_ = network.imsi();
-  esn_ = network.esn();
-  mdn_ = network.mdn();
-  min_ = network.min();
-  model_id_ = network.model_id();
-  manufacturer_ = network.manufacturer();
-  firmware_revision_ = network.firmware_revision();
-  hardware_revision_ = network.hardware_revision();
-  last_update_ = network.last_update();
-  prl_version_ = network.prl_version();
+  activation_state_ = network.activation_state_;
+  network_technology_ = network.network_technology_;
+  roaming_state_ = network.roaming_state_;
+  connectivity_state_ = network.connectivity_state_;
+  service_name_ = network.service_name_;
+  operator_name_ = network.operator_name_;
+  operator_code_ = network.operator_code_;
+  payment_url_ = network.payment_url_;
+  meid_ = network.meid_;
+  imei_ = network.imei_;
+  imsi_ = network.imsi_;
+  esn_ = network.esn_;
+  mdn_ = network.mdn_;
+  min_ = network.min_;
+  model_id_ = network.model_id_;
+  manufacturer_ = network.manufacturer_;
+  firmware_revision_ = network.firmware_revision_;
+  hardware_revision_ = network.hardware_revision_;
+  last_update_ = network.last_update_;
+  prl_version_ = network.prl_version_;
   type_ = TYPE_CELLULAR;
 }
 
@@ -612,7 +615,7 @@ CellularNetwork::DataLeft CellularNetwork::GetDataLeft() const {
     return DATA_NONE;
   const CellularDataPlan* plan = GetSignificantDataPlan();
   if (!plan)
-    return DATA_NORMAL;
+    return DATA_UNKNOWN;
   if (plan->plan_type == CELLULAR_DATA_PLAN_UNLIMITED) {
     base::TimeDelta remaining = plan->remaining_time();
     if (remaining <= base::TimeDelta::FromSeconds(0))
@@ -750,24 +753,22 @@ WifiNetwork::WifiNetwork()
 
 WifiNetwork::WifiNetwork(const WifiNetwork& network)
     : WirelessNetwork(network) {
-  encryption_ = network.encryption();
-  passphrase_ = network.passphrase();
-  passphrase_required_ = network.passphrase_required();
-  identity_ = network.identity();
-  cert_path_ = network.cert_path();
+  encryption_ = network.encryption_;
+  passphrase_ = network.passphrase_;
+  passphrase_required_ = network.passphrase_required_;
+  identity_ = network.identity_;
+  cert_path_ = network.cert_path_;
 }
 
 WifiNetwork::WifiNetwork(const ServiceInfo* service)
     : WirelessNetwork(service) {
   encryption_ = service->security;
-  passphrase_ = SafeString(service->passphrase);
-  // TODO(stevenjb): Remove this once flimflam is setting passphrase_required
-  // correctly: http://crosbug.com/8830.
-  if (service->state == chromeos::STATE_FAILURE &&
-      service->security != chromeos::SECURITY_NONE)
-    passphrase_required_ = true;
+  // TODO(stevenjb): Remove this if/when flimflam handles multiple profiles.
+  if (UserManager::Get()->current_user_is_owner())
+    passphrase_ = SafeString(service->passphrase);
   else
-    passphrase_required_ = service->passphrase_required;
+    passphrase_.clear();
+  passphrase_required_ = service->passphrase_required;
   identity_ = SafeString(service->identity);
   cert_path_ = SafeString(service->cert_path);
   type_ = TYPE_WIFI;
@@ -797,6 +798,14 @@ std::string WifiNetwork::GetEncryptionString() {
       return "8021X";
   }
   return "Unknown";
+}
+
+bool WifiNetwork::IsPassphraseRequired() const {
+  // TODO(stevenjb): Remove error_ tests when fixed in flimflam
+  // (http://crosbug.com/10135).
+  if (error_ == ERROR_BAD_PASSPHRASE || error_ == ERROR_BAD_WEPKEY)
+    return true;
+  return passphrase_required_;
 }
 
 // Parse 'path' to determine if the certificate is stored in a pkcs#11 device.
@@ -833,6 +842,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
         connected_devices_(0),
         wifi_scanning_(false),
         offline_mode_(false),
+        is_locked_(false),
         update_task_(NULL) {
     if (EnsureCrosLoaded()) {
       Init();
@@ -841,6 +851,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
                                 this);
       data_plan_monitor_ = MonitorCellularDataPlan(&DataPlanUpdateHandler,
                                                    this);
+      network_login_observer_.reset(new NetworkLoginObserver(this));
     } else {
       InitTestData();
     }
@@ -930,6 +941,25 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     }
   }
 
+  virtual void Lock() {
+    if (is_locked_)
+      return;
+    is_locked_ = true;
+    NotifyNetworkManagerChanged();
+ }
+
+  virtual void Unlock() {
+    DCHECK(is_locked_);
+    if (!is_locked_)
+      return;
+    is_locked_ = false;
+    NotifyNetworkManagerChanged();
+  }
+
+  virtual bool IsLocked() {
+    return is_locked_;
+  }
+
   virtual void AddCellularDataPlanObserver(CellularDataPlanObserver* observer) {
     if (!data_plan_observers_.HasObserver(observer))
       data_plan_observers_.AddObserver(observer);
@@ -940,7 +970,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     data_plan_observers_.RemoveObserver(observer);
   }
 
-  virtual EthernetNetwork* ethernet_network() { return ethernet_; }
+  virtual const EthernetNetwork* ethernet_network() const { return ethernet_; }
   virtual bool ethernet_connecting() const {
     return ethernet_ ? ethernet_->connecting() : false;
   }
@@ -948,7 +978,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     return ethernet_ ? ethernet_->connected() : false;
   }
 
-  virtual WifiNetwork* wifi_network() { return wifi_; }
+  virtual const WifiNetwork* wifi_network() const { return wifi_; }
   virtual bool wifi_connecting() const {
     return wifi_ ? wifi_->connecting() : false;
   }
@@ -956,7 +986,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     return wifi_ ? wifi_->connected() : false;
   }
 
-  virtual CellularNetwork* cellular_network() { return cellular_; }
+  virtual const CellularNetwork* cellular_network() const { return cellular_; }
   virtual bool cellular_connecting() const {
     return cellular_ ? cellular_->connecting() : false;
   }
@@ -1055,7 +1085,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
       WifiNetwork* wifi = GetWirelessNetworkByPath(
           wifi_networks_, network->service_path());
       if (wifi) {
-        // Note: don't save the passphrase here, it might be incorrect.
+        wifi->set_passphrase(password);
         wifi->set_identity(identity);
         wifi->set_cert_path(certpath);
         wifi->set_connecting(true);
@@ -1128,6 +1158,18 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     if (!EnsureCrosLoaded() || !network)
       return;
     RequestCellularDataPlanUpdate(network->service_path().c_str());
+  }
+
+  // Records information that cellular play payment had happened.
+  virtual void SignalCellularPlanPayment() {
+    DCHECK(!HasRecentCellularPlanPayment());
+    cellular_plan_payment_time_ = base::Time::Now();
+  }
+
+  // Returns true if cellular plan payment had been recorded recently.
+  virtual bool HasRecentCellularPlanPayment() {
+    return (base::Time::Now() -
+              cellular_plan_payment_time_).InHours() < kRecentPlanPaymentHours;
   }
 
   virtual void DisconnectFromWirelessNetwork(const WirelessNetwork* network) {
@@ -1278,15 +1320,20 @@ class NetworkLibraryImpl : public NetworkLibrary  {
   }
 
   virtual void EnableEthernetNetworkDevice(bool enable) {
+    if (is_locked_)
+      return;
     EnableNetworkDeviceType(TYPE_ETHERNET, enable);
   }
 
   virtual void EnableWifiNetworkDevice(bool enable) {
-    wifi_scanning_ = enable;  // Cleared in UpdateNetworkManagerStatus.
+    if (is_locked_)
+      return;
     EnableNetworkDeviceType(TYPE_WIFI, enable);
   }
 
   virtual void EnableCellularNetworkDevice(bool enable) {
+    if (is_locked_)
+      return;
     EnableNetworkDeviceType(TYPE_CELLULAR, enable);
   }
 
@@ -1484,8 +1531,17 @@ class NetworkLibraryImpl : public NetworkLibrary  {
       // Once a connected ethernet service is found, disregard other ethernet
       // services that are also found
       if (service->type == TYPE_ETHERNET) {
-        if (ethernet_enabled())
+        // There could be multiple ethernet services (eth0, dummy0, etc)
+        // In this case, once you find a connected service, ignore the
+        // other ones.  Otherwise, you may choose an ethernet service
+        // that is not connected.
+        if (ethernet_enabled() &&
+            (ethernet_ == NULL || !(ethernet_->connected()))) {
+          // If previous ethernet was previously created, free it first
+          if (ethernet_ != NULL)
+            delete ethernet_;
           ethernet_ = new EthernetNetwork(service);
+        }
       } else if (service->type == TYPE_WIFI) {
         // Sometimes flimflam still returns wifi networks when disabled.
         // We don't want to show these in the UI.
@@ -1552,14 +1608,11 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     }
 
     wifi_scanning_ = false;
-    // TODO(stevenjb): Enable this code once crosbug.com/9326 is fixed.
-    // for (int i = 0; i < system->device_size; i++) {
-    //   const DeviceInfo* device = system->GetDeviceInfo(i);
-    //   if (device->type == TYPE_WIFI) {
-    //     if (device->scanning)
-    //       wifi_scanning_ = true;
-    //   }
-    // }
+    for (int i = 0; i < system->device_size; i++) {
+      const DeviceInfo* device = system->GetDeviceInfo(i);
+      if (device->type == TYPE_WIFI && device->scanning)
+        wifi_scanning_ = true;
+    }
   }
 
   void Init() {
@@ -1570,6 +1623,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
   }
 
   void InitTestData() {
+    is_locked_ = true;
     ethernet_ = new EthernetNetwork();
     ethernet_->set_connected(true);
     ethernet_->set_service_path("eth1");
@@ -1611,7 +1665,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     cellular1->set_service_path("fc1");
     cellular1->set_name("Fake Cellular 1");
     cellular1->set_strength(70);
-    cellular1->set_connected(true);
+    cellular1->set_connected(false);
     cellular1->set_activation_state(ACTIVATION_STATE_ACTIVATED);
     cellular1->set_payment_url(std::string("http://www.google.com"));
     cellular1->set_network_technology(NETWORK_TECHNOLOGY_EVDO);
@@ -1758,7 +1812,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
     bool boolval = false;
     int intval = 0;
     std::string stringval;
-    Network* network;
+    Network* network = NULL;
     if (ethernet_->service_path() == path) {
       network = ethernet_;
     } else {
@@ -1769,7 +1823,7 @@ class NetworkLibraryImpl : public NetworkLibrary  {
       if (cellular == NULL && wifi == NULL)
         return;
 
-      WirelessNetwork* wireless;
+      WirelessNetwork* wireless = NULL;
       if (wifi != NULL)
         wireless = static_cast<WirelessNetwork*>(wifi);
       else
@@ -1812,7 +1866,8 @@ class NetworkLibraryImpl : public NetworkLibrary  {
         network->InitIPAddress();
       }
     }
-    NotifyNetworkChanged(network);
+    if (network)
+      NotifyNetworkChanged(network);
   }
 
   void UpdateCellularDataPlan(const CellularDataPlanList* data_plans) {
@@ -1850,6 +1905,9 @@ class NetworkLibraryImpl : public NetworkLibrary  {
   // For monitoring data plan changes to the connected cellular network.
   DataPlanUpdateMonitor data_plan_monitor_;
 
+  // Network login observer.
+  scoped_ptr<NetworkLoginObserver> network_login_observer_;
+
   // The ethernet network.
   EthernetNetwork* ethernet_;
 
@@ -1883,8 +1941,14 @@ class NetworkLibraryImpl : public NetworkLibrary  {
   // Currently not implemented. TODO: implement or eliminate.
   bool offline_mode_;
 
+  // True if access network library is locked.
+  bool is_locked_;
+
   // Delayed task to retrieve the network information.
   CancelableTask* update_task_;
+
+  // Cellular plan payment time.
+  base::Time cellular_plan_payment_time_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkLibraryImpl);
 };
@@ -1905,21 +1969,24 @@ class NetworkLibraryStubImpl : public NetworkLibrary {
   virtual void RemoveNetworkObserver(const std::string& service_path,
                                      NetworkObserver* observer) {}
   virtual void RemoveObserverForAllNetworks(NetworkObserver* observer) {}
+  virtual void Lock() {}
+  virtual void Unlock() {}
+  virtual bool IsLocked() { return true; }
   virtual void AddCellularDataPlanObserver(
       CellularDataPlanObserver* observer) {}
   virtual void RemoveCellularDataPlanObserver(
       CellularDataPlanObserver* observer) {}
-  virtual EthernetNetwork* ethernet_network() {
+  virtual const EthernetNetwork* ethernet_network() const {
     return ethernet_;
   }
   virtual bool ethernet_connecting() const { return false; }
   virtual bool ethernet_connected() const { return true; }
-  virtual WifiNetwork* wifi_network() {
+  virtual const WifiNetwork* wifi_network() const {
     return wifi_;
   }
   virtual bool wifi_connecting() const { return false; }
   virtual bool wifi_connected() const { return false; }
-  virtual CellularNetwork* cellular_network() {
+  virtual const CellularNetwork* cellular_network() const {
     return cellular_;
   }
   virtual bool cellular_connecting() const { return false; }
@@ -1969,6 +2036,8 @@ class NetworkLibraryStubImpl : public NetworkLibrary {
     return true;
   }
   virtual void RefreshCellularDataPlans(const CellularNetwork* network) {}
+  virtual void SignalCellularPlanPayment() {}
+  virtual bool HasRecentCellularPlanPayment() { return false; }
   virtual void DisconnectFromWirelessNetwork(const WirelessNetwork* network) {}
   virtual void SaveCellularNetwork(const CellularNetwork* network) {}
   virtual void SaveWifiNetwork(const WifiNetwork* network) {}

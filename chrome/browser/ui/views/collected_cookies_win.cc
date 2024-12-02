@@ -1,24 +1,25 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/collected_cookies_win.h"
+#include "chrome/browser/ui/views/collected_cookies_win.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "chrome/browser/cookies_tree_model.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_details.h"
+#include "chrome/common/notification_source.h"
 #include "gfx/color_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "views/box_layout.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/controls/separator.h"
+#include "views/layout/box_layout.h"
 #include "views/standard_layout.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_win.h"
@@ -33,7 +34,7 @@ void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
   new CollectedCookiesWin(parent_window, tab_contents);
 }
 
-} // namespace browser
+}  // namespace browser
 
 namespace {
 // Spacing between the infobar frame and its contents.
@@ -47,7 +48,7 @@ const int kInfobarBorderSize = 1;
 const int kTreeViewWidth = 400;
 const int kTreeViewHeight = 125;
 
-} // namespace
+}  // namespace
 
 // A custom view that conditionally displays an infobar.
 class InfobarView : public views::View {
@@ -79,18 +80,21 @@ class InfobarView : public views::View {
     std::wstring label;
     switch (setting) {
       case CONTENT_SETTING_BLOCK:
-        label = l10n_util::GetStringF(
-            IDS_COLLECTED_COOKIES_BLOCK_RULE_CREATED, domain_name);
+        label = UTF16ToWide(l10n_util::GetStringFUTF16(
+            IDS_COLLECTED_COOKIES_BLOCK_RULE_CREATED,
+            WideToUTF16(domain_name)));
         break;
 
       case CONTENT_SETTING_ALLOW:
-        label = l10n_util::GetStringF(
-            IDS_COLLECTED_COOKIES_ALLOW_RULE_CREATED, domain_name);
+        label = UTF16ToWide(l10n_util::GetStringFUTF16(
+            IDS_COLLECTED_COOKIES_ALLOW_RULE_CREATED,
+            WideToUTF16(domain_name)));
         break;
 
       case CONTENT_SETTING_SESSION_ONLY:
-        label = l10n_util::GetStringF(
-            IDS_COLLECTED_COOKIES_SESSION_RULE_CREATED, domain_name);
+        label = UTF16ToWide(l10n_util::GetStringFUTF16(
+            IDS_COLLECTED_COOKIES_SESSION_RULE_CREATED,
+            WideToUTF16(domain_name)));
         break;
 
       default:
@@ -185,8 +189,8 @@ void CollectedCookiesWin::Init() {
       tab_contents_->profile()->GetHostContentSettingsMap();
 
   // Allowed Cookie list.
-  allowed_label_ = new views::Label(
-      l10n_util::GetString(IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_LABEL));
+  allowed_label_ = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
+      IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_LABEL)));
   allowed_cookies_tree_model_.reset(
       content_settings->GetAllowedCookiesTreeModel());
   allowed_cookies_tree_ = new views::TreeView();
@@ -199,10 +203,10 @@ void CollectedCookiesWin::Init() {
 
   // Blocked Cookie list.
   blocked_label_ = new views::Label(
-      l10n_util::GetString(
+      UTF16ToWide(l10n_util::GetStringUTF16(
           host_content_settings_map->BlockThirdPartyCookies() ?
               IDS_COLLECTED_COOKIES_BLOCKED_THIRD_PARTY_BLOCKING_ENABLED :
-              IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL));
+              IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL)));
   blocked_label_->SetMultiLine(true);
   blocked_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   blocked_cookies_tree_model_.reset(
@@ -217,7 +221,7 @@ void CollectedCookiesWin::Init() {
 
   using views::GridLayout;
 
-  GridLayout* layout = CreatePanelGridLayout(this);
+  GridLayout* layout = GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   const int single_column_layout_id = 0;
@@ -244,8 +248,8 @@ void CollectedCookiesWin::Init() {
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, single_column_layout_id);
-  block_allowed_button_ = new views::NativeButton(
-      this, l10n_util::GetString(IDS_COLLECTED_COOKIES_BLOCK_BUTTON));
+  block_allowed_button_ = new views::NativeButton(this, UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_BLOCK_BUTTON)));
   layout->AddView(
       block_allowed_button_, 1, 1, GridLayout::LEADING, GridLayout::CENTER);
   layout->AddPaddingRow(0, kUnrelatedControlVerticalSpacing);
@@ -266,11 +270,11 @@ void CollectedCookiesWin::Init() {
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, three_columns_layout_id);
-  allow_blocked_button_ = new views::NativeButton(
-      this, l10n_util::GetString(IDS_COLLECTED_COOKIES_ALLOW_BUTTON));
+  allow_blocked_button_ = new views::NativeButton(this, UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_ALLOW_BUTTON)));
   layout->AddView(allow_blocked_button_);
-  for_session_blocked_button_ = new views::NativeButton(
-      this, l10n_util::GetString(IDS_COLLECTED_COOKIES_SESSION_ONLY_BUTTON));
+  for_session_blocked_button_ = new views::NativeButton(this, UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_SESSION_ONLY_BUTTON)));
   layout->AddView(for_session_blocked_button_);
 
   layout->StartRow(0, single_column_layout_id);
@@ -284,7 +288,8 @@ void CollectedCookiesWin::Init() {
 // ConstrainedDialogDelegate implementation.
 
 std::wstring CollectedCookiesWin::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_COLLECTED_COOKIES_DIALOG_TITLE);
+  return UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_DIALOG_TITLE));
 }
 
 int CollectedCookiesWin::GetDialogButtons() const {
@@ -293,7 +298,7 @@ int CollectedCookiesWin::GetDialogButtons() const {
 
 std::wstring CollectedCookiesWin::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
-  return l10n_util::GetString(IDS_CLOSE);
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CLOSE));
 }
 
 void CollectedCookiesWin::DeleteDelegate() {
@@ -334,7 +339,7 @@ void CollectedCookiesWin::OnTreeViewSelectionChanged(
 
 void CollectedCookiesWin::EnableControls() {
   bool enable_allowed_buttons = false;
-  TreeModelNode* node = allowed_cookies_tree_->GetSelectedNode();
+  ui::TreeModelNode* node = allowed_cookies_tree_->GetSelectedNode();
   if (node) {
     CookieTreeNode* cookie_node = static_cast<CookieTreeNode*>(node);
     if (cookie_node->GetDetailedInfo().node_type ==

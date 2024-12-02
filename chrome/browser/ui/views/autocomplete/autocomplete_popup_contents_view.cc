@@ -1,15 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/autocomplete/autocomplete_popup_contents_view.h"
+#include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 
-#include "app/bidi_line_iterator.h"
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
-#include "app/theme_provider.h"
-#include "app/text_elider.h"
 #include "base/compiler_specific.h"
+#include "base/i18n/bidi_line_iterator.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view.h"
@@ -17,9 +13,9 @@
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/instant/promo_counter.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/views/bubble_border.h"
-#include "chrome/browser/views/location_bar/location_bar_view.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/views/bubble_border.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/color_utils.h"
 #include "gfx/insets.h"
@@ -28,6 +24,10 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/text/text_elider.h"
+#include "ui/base/theme_provider.h"
 #include "unicode/ubidi.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
@@ -38,15 +38,16 @@
 #include "views/window/window.h"
 
 #if defined(OS_WIN)
-#include <objidl.h>
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <objidl.h>
 
-#include "app/win_util.h"
+#include "base/win/scoped_gdi_object.h"
+#include "ui/base/win/hwnd_util.h"
 #endif
 
 #if defined(OS_LINUX)
-#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "gfx/skia_utils_gtk.h"
 #endif
 
@@ -199,8 +200,8 @@ class AutocompletePopupContentsView::InstantOptInView
         bg_painter_(views::Painter::CreateVerticalGradient(
                         SkColorSetRGB(255, 242, 183),
                         SkColorSetRGB(250, 230, 145))) {
-    views::Label* label =
-        new views::Label(l10n_util::GetString(IDS_INSTANT_OPT_IN_LABEL));
+    views::Label* label = new views::Label(
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_LABEL)));
     label->SetFont(label_font);
 
     views::GridLayout* layout = new views::GridLayout(this);
@@ -251,7 +252,7 @@ class AutocompletePopupContentsView::InstantOptInView
     // TODO: these buttons look crap. Figure out the right border/background to
     // use.
     views::TextButton* button =
-        new views::TextButton(this, l10n_util::GetString(id));
+        new views::TextButton(this, UTF16ToWide(l10n_util::GetStringUTF16(id)));
     button->set_border(new OptInButtonBorder());
     button->SetNormalHasBorder(true);
     button->set_tag(id);
@@ -421,7 +422,7 @@ AutocompleteResultView::AutocompleteResultView(
       model_index_(model_index),
       normal_font_(font),
       bold_font_(bold_font),
-      ellipsis_width_(font.GetStringWidth(kEllipsis)),
+      ellipsis_width_(font.GetStringWidth(WideToUTF16(kEllipsis))),
       mirroring_context_(new MirroringContext()),
       match_(NULL, 0, false, AutocompleteMatch::URL_WHAT_YOU_TYPED) {
   CHECK(model_index >= 0);
@@ -457,8 +458,8 @@ void AutocompleteResultView::Paint(gfx::Canvas* canvas) {
   // would also let us use a more properly-localizable string than we get with
   // just the IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR.
   if (!match_.description.empty()) {
-    std::wstring separator =
-        l10n_util::GetString(IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR);
+    std::wstring separator = UTF16ToWide(l10n_util::GetStringUTF16(
+        IDS_AUTOCOMPLETE_MATCH_DESCRIPTION_SEPARATOR));
     ACMatchClassifications classifications;
     classifications.push_back(
         ACMatchClassification(0, ACMatchClassification::NONE));
@@ -524,7 +525,6 @@ const SkBitmap* AutocompleteResultView::GetIcon() const {
       case IDR_OMNIBOX_HTTP:    icon = IDR_OMNIBOX_HTTP_SELECTED; break;
       case IDR_OMNIBOX_HISTORY: icon = IDR_OMNIBOX_HISTORY_SELECTED; break;
       case IDR_OMNIBOX_SEARCH:  icon = IDR_OMNIBOX_SEARCH_SELECTED; break;
-      case IDR_OMNIBOX_MORE:    icon = IDR_OMNIBOX_MORE_SELECTED; break;
       case IDR_OMNIBOX_STAR:    icon = IDR_OMNIBOX_STAR_SELECTED; break;
       default:             NOTREACHED(); break;
     }
@@ -557,8 +557,8 @@ int AutocompleteResultView::DrawString(
   // worry about whether our eliding might change the visual display in
   // unintended ways, e.g. by removing directional markings or by adding an
   // ellipsis that's not enclosed in appropriate markings.
-  BiDiLineIterator bidi_line;
-  if (!bidi_line.Open(text, base::i18n::IsRTL(), is_url))
+  base::i18n::BiDiLineIterator bidi_line;
+  if (!bidi_line.Open(WideToUTF16Hack(text), base::i18n::IsRTL(), is_url))
     return x;
   const int num_runs = bidi_line.CountRuns();
   Runs runs;
@@ -613,7 +613,8 @@ int AutocompleteResultView::DrawString(
       else
         current_data->color = GetColor(state, force_dim ? DIMMED_TEXT : TEXT);
       current_data->pixel_width =
-          current_data->font->GetStringWidth(current_data->text);
+          current_data->font->GetStringWidth(
+              WideToUTF16Hack(current_data->text));
       current_run->pixel_width += current_data->pixel_width;
     }
     DCHECK(!current_run->classifications.empty());
@@ -669,8 +670,8 @@ int AutocompleteResultView::DrawString(
     for (Classifications::const_iterator j(i->classifications.begin());
          j != i->classifications.end(); ++j) {
       int left = mirroring_context_->mirrored_left_coord(x, x + j->pixel_width);
-      canvas->DrawStringInt(j->text, *j->font, j->color, left, y,
-                            j->pixel_width, j->font->GetHeight(), flags);
+      canvas->DrawStringInt(WideToUTF16Hack(j->text), *j->font, j->color, left,
+                            y, j->pixel_width, j->font->GetHeight(), flags);
       x += j->pixel_width;
     }
   }
@@ -709,8 +710,8 @@ void AutocompleteResultView::Elide(Runs* runs, int remaining_width) const {
 
       // Can we fit at least an ellipsis?
       std::wstring elided_text(UTF16ToWideHack(
-          gfx::ElideText(WideToUTF16Hack(j->text), *j->font, remaining_width,
-                         false)));
+          ui::ElideText(WideToUTF16Hack(j->text), *j->font, remaining_width,
+                        false)));
       Classifications::reverse_iterator prior_classification(j);
       ++prior_classification;
       const bool on_first_classification =
@@ -739,7 +740,7 @@ void AutocompleteResultView::Elide(Runs* runs, int remaining_width) const {
              (prior_classification->font == &normal_font_)))
           j->font = &normal_font_;
 
-        j->pixel_width = j->font->GetStringWidth(elided_text);
+        j->pixel_width = j->font->GetStringWidth(WideToUTF16Hack(elided_text));
 
         // Erase any other classifications that come after the elided one.
         i->classifications.erase(j.base(), i->classifications.end());
@@ -937,7 +938,7 @@ const SkBitmap* AutocompletePopupContentsView::GetSpecialIcon(
 // AutocompletePopupContentsView, AnimationDelegate implementation:
 
 void AutocompletePopupContentsView::AnimationProgressed(
-    const Animation* animation) {
+    const ui::Animation* animation) {
   // We should only be running the animation when the popup is already visible.
   DCHECK(popup_ != NULL);
   popup_->SetBounds(GetPopupBounds());
@@ -1105,7 +1106,7 @@ void AutocompletePopupContentsView::MakeContentsPath(
 void AutocompletePopupContentsView::UpdateBlurRegion() {
 #if defined(OS_WIN)
   // We only support background blurring on Vista with Aero-Glass enabled.
-  if (!win_util::ShouldUseVistaFrame() || !GetWidget())
+  if (!ui::ShouldUseVistaFrame() || !GetWidget())
     return;
 
   // Provide a blurred background effect within the contents region of the
@@ -1123,7 +1124,7 @@ void AutocompletePopupContentsView::UpdateBlurRegion() {
 
   gfx::Path contents_path;
   MakeContentsPath(&contents_path, contents_rect);
-  ScopedGDIObject<HRGN> popup_region;
+  base::win::ScopedGDIObject<HRGN> popup_region;
   popup_region.Set(contents_path.CreateNativeRegion());
   bb.hRgnBlur = popup_region.Get();
   DwmEnableBlurBehindWindow(GetWidget()->GetNativeView(), &bb);

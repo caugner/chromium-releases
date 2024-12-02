@@ -6,16 +6,9 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
-#include "app/win_util.h"
-#endif
-#if defined(OS_MACOSX)
-#include "base/mac_util.h"
-#include "base/mac/scoped_cftyperef.h"
-#endif
+#include "base/lazy_instance.h"
 #include "base/scoped_handle.h"
 #include "base/shared_memory.h"
-#include "base/singleton.h"
 #include "build/build_config.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/plugin_messages.h"
@@ -24,32 +17,36 @@
 #include "chrome/plugin/npobject_util.h"
 #include "chrome/plugin/plugin_channel.h"
 #include "chrome/plugin/plugin_thread.h"
-#if defined(OS_MACOSX)
-#include "chrome/plugin/webplugin_accelerated_surface_proxy_mac.h"
-#endif
 #include "gfx/blit.h"
 #include "gfx/canvas.h"
+#include "skia/ext/platform_device.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "webkit/plugins/npapi/webplugin_delegate_impl.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
+#include "base/mac/scoped_cftyperef.h"
+#include "chrome/plugin/webplugin_accelerated_surface_proxy_mac.h"
+#endif
+
 #if defined(OS_WIN)
+#include "app/win/win_util.h"
 #include "gfx/gdi_util.h"
 #endif
-#include "skia/ext/platform_device.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
-#include "webkit/glue/plugins/webplugin_delegate_impl.h"
 
 #if defined(USE_X11)
-#include "app/x11_util_internal.h"
+#include "ui/base/x/x11_util_internal.h"
 #endif
 
 using WebKit::WebBindings;
-using webkit_glue::WebPluginResourceClient;
+
+using webkit::npapi::WebPluginResourceClient;
 #if defined(OS_MACOSX)
-using webkit_glue::WebPluginAcceleratedSurface;
+using webkit::npapi::WebPluginAcceleratedSurface;
 #endif
 
 typedef std::map<CPBrowsingContext, WebPluginProxy*> ContextMap;
-static ContextMap& GetContextMap() {
-  return *Singleton<ContextMap>::get();
-}
+static base::LazyInstance<ContextMap> g_context_map(base::LINKER_INITIALIZED);
 
 WebPluginProxy::WebPluginProxy(
     PluginChannel* channel,
@@ -76,10 +73,9 @@ WebPluginProxy::WebPluginProxy(
       // If the X server supports SHM pixmaps
       // and the color depth and masks match,
       // then consider using SHM pixmaps for windowless plugin painting.
-      Display* display = x11_util::GetXDisplay();
-      if (x11_util::QuerySharedMemorySupport(display) ==
-              x11_util::SHARED_MEMORY_PIXMAP &&
-          x11_util::BitsPerPixelForPixmapDepth(
+      Display* display = ui::GetXDisplay();
+      if (ui::QuerySharedMemorySupport(display) == ui::SHARED_MEMORY_PIXMAP &&
+          ui::BitsPerPixelForPixmapDepth(
               display, DefaultDepth(display, 0)) == 32) {
         Visual* vis = DefaultVisual(display, 0);
 
@@ -93,11 +89,11 @@ WebPluginProxy::WebPluginProxy(
 
 WebPluginProxy::~WebPluginProxy() {
   if (cp_browsing_context_)
-    GetContextMap().erase(cp_browsing_context_);
+    g_context_map.Get().erase(cp_browsing_context_);
 
 #if defined(USE_X11)
   if (windowless_shm_pixmap_ != None)
-    XFreePixmap(x11_util::GetXDisplay(), windowless_shm_pixmap_);
+    XFreePixmap(ui::GetXDisplay(), windowless_shm_pixmap_);
 #endif
 
 #if defined(OS_MACOSX)
@@ -113,6 +109,10 @@ bool WebPluginProxy::Send(IPC::Message* msg) {
 
 void WebPluginProxy::SetWindow(gfx::PluginWindowHandle window) {
   Send(new PluginHostMsg_SetWindow(route_id_, window));
+}
+
+void WebPluginProxy::SetAcceptsInputEvents(bool accepts) {
+  NOTREACHED();
 }
 
 void WebPluginProxy::WillDestroyWindow(gfx::PluginWindowHandle window) {
@@ -267,14 +267,14 @@ CPBrowsingContext WebPluginProxy::GetCPBrowsingContext() {
   if (cp_browsing_context_ == 0) {
     Send(new PluginHostMsg_GetCPBrowsingContext(route_id_,
                                                 &cp_browsing_context_));
-    GetContextMap()[cp_browsing_context_] = this;
+    g_context_map.Get()[cp_browsing_context_] = this;
   }
   return cp_browsing_context_;
 }
 
 WebPluginProxy* WebPluginProxy::FromCPBrowsingContext(
     CPBrowsingContext context) {
-  return GetContextMap()[context];
+  return g_context_map.Get()[context];
 }
 
 WebPluginResourceClient* WebPluginProxy::GetResourceClient(int id) {
@@ -321,7 +321,8 @@ void WebPluginProxy::HandleURLRequest(const char* url,
     // Please refer to https://bugzilla.mozilla.org/show_bug.cgi?id=366082
     // for more details on this.
     if (delegate_->GetQuirks() &
-        WebPluginDelegateImpl::PLUGIN_QUIRK_BLOCK_NONSTANDARD_GETURL_REQUESTS) {
+        webkit::npapi::WebPluginDelegateImpl::
+            PLUGIN_QUIRK_BLOCK_NONSTANDARD_GETURL_REQUESTS) {
       GURL request_url(url);
       if (!request_url.SchemeIs(chrome::kHttpScheme) &&
           !request_url.SchemeIs(chrome::kHttpsScheme) &&
@@ -534,7 +535,7 @@ void WebPluginProxy::SetWindowlessBuffer(
           window_rect.width(),
           window_rect.height(),
           true,
-          win_util::GetSectionFromProcess(windowless_buffer,
+          app::win::GetSectionFromProcess(windowless_buffer,
               channel_->renderer_handle(), false))) {
     windowless_canvas_.reset();
     background_canvas_.reset();
@@ -547,7 +548,7 @@ void WebPluginProxy::SetWindowlessBuffer(
             window_rect.width(),
             window_rect.height(),
             true,
-            win_util::GetSectionFromProcess(background_buffer,
+            app::win::GetSectionFromProcess(background_buffer,
                 channel_->renderer_handle(), false))) {
       windowless_canvas_.reset();
       background_canvas_.reset();
@@ -571,7 +572,7 @@ void WebPluginProxy::SetWindowlessBuffer(
       window_rect.width(),
       window_rect.height(),
       8, 4 * window_rect.width(),
-      mac_util::GetSystemColorSpace(),
+      base::mac::GetSystemColorSpace(),
       kCGImageAlphaPremultipliedFirst |
       kCGBitmapByteOrder32Host));
   CGContextTranslateCTM(windowless_context_, 0, window_rect.height());
@@ -582,7 +583,7 @@ void WebPluginProxy::SetWindowlessBuffer(
         window_rect.width(),
         window_rect.height(),
         8, 4 * window_rect.width(),
-        mac_util::GetSystemColorSpace(),
+        base::mac::GetSystemColorSpace(),
         kCGImageAlphaPremultipliedFirst |
         kCGBitmapByteOrder32Host));
     CGContextTranslateCTM(background_context_, 0, window_rect.height());
@@ -616,8 +617,8 @@ void WebPluginProxy::SetWindowlessBuffer(
   // If SHM pixmaps support is available, create a SHM pixmap and
   // pass it to the delegate for windowless plugin painting.
   if (delegate_->IsWindowless() && use_shm_pixmap_ && windowless_dib_.get()) {
-    Display* display = x11_util::GetXDisplay();
-    XID root_window = x11_util::GetX11RootWindow();
+    Display* display = ui::GetXDisplay();
+    XID root_window = ui::GetX11RootWindow();
     XShmSegmentInfo shminfo = {0};
 
     if (windowless_shm_pixmap_ != None)
@@ -652,8 +653,13 @@ void WebPluginProxy::SetDeferResourceLoading(unsigned long resource_id,
 }
 
 #if defined(OS_MACOSX)
-void WebPluginProxy::SetImeEnabled(bool enabled) {
-  IPC::Message* msg = new PluginHostMsg_SetImeEnabled(route_id_, enabled);
+void WebPluginProxy::FocusChanged(bool focused) {
+  IPC::Message* msg = new PluginHostMsg_FocusChanged(route_id_, focused);
+  Send(msg);
+}
+
+void WebPluginProxy::StartIme() {
+  IPC::Message* msg = new PluginHostMsg_StartIme(route_id_);
   // This message can be sent during event-handling, and needs to be delivered
   // within that context.
   msg->set_unblock(true);

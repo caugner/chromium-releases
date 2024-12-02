@@ -1,16 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/extensions/browser_action_overflow_menu_controller.h"
+#include "chrome/browser/ui/views/extensions/browser_action_overflow_menu_controller.h"
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/browser_actions_container.h"
-#include "chrome/browser/views/extensions/browser_action_drag_data.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/views/browser_actions_container.h"
+#include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "gfx/canvas_skia.h"
@@ -94,8 +93,13 @@ bool BrowserActionOverflowMenuController::ShowContextMenu(
     int id,
     const gfx::Point& p,
     bool is_mouse_gesture) {
+  const Extension* extension =
+      (*views_)[start_index_ + id - 1]->button()->extension();
+  if (!extension->ShowConfigureContextMenus())
+    return false;
+
   context_menu_contents_ = new ExtensionContextMenuModel(
-      (*views_)[start_index_ + id - 1]->button()->extension(),
+      extension,
       owner_->browser(),
       owner_);
   context_menu_menu_.reset(new views::Menu2(context_menu_contents_.get()));
@@ -146,13 +150,13 @@ int BrowserActionOverflowMenuController::GetDropOperation(
   if ((item->GetCommand() == 0) && (*position == DROP_BEFORE)) {
     BrowserActionDragData drop_data;
     if (!drop_data.Read(event.GetData()))
-      return DragDropTypes::DRAG_NONE;
+      return ui::DragDropTypes::DRAG_NONE;
 
     if (drop_data.index() < owner_->VisibleBrowserActions())
-      return DragDropTypes::DRAG_NONE;
+      return ui::DragDropTypes::DRAG_NONE;
   }
 
-  return DragDropTypes::DRAG_MOVE;
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 int BrowserActionOverflowMenuController::OnPerformDrop(
@@ -161,7 +165,7 @@ int BrowserActionOverflowMenuController::OnPerformDrop(
     const views::DropTargetEvent& event) {
   BrowserActionDragData drop_data;
   if (!drop_data.Read(event.GetData()))
-    return DragDropTypes::DRAG_NONE;
+    return ui::DragDropTypes::DRAG_NONE;
 
   size_t drop_index;
   ViewForId(menu->GetCommand(), &drop_index);
@@ -176,7 +180,7 @@ int BrowserActionOverflowMenuController::OnPerformDrop(
 
   if (for_drop_)
     delete this;
-  return DragDropTypes::DRAG_MOVE;
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 bool BrowserActionOverflowMenuController::CanDrag(views::MenuItemView* menu) {
@@ -195,7 +199,7 @@ void BrowserActionOverflowMenuController::WriteDragData(
 
 int BrowserActionOverflowMenuController::GetDragOperations(
     views::MenuItemView* sender) {
-  return DragDropTypes::DRAG_MOVE;
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 BrowserActionView* BrowserActionOverflowMenuController::ViewForId(

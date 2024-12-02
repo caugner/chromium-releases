@@ -52,7 +52,7 @@ class MetricsLogBase::XmlWrapper {
         buffer_(NULL),
         writer_(NULL) {
     buffer_ = xmlBufferCreate();
-    DCHECK(buffer_);
+    CHECK(buffer_);
 
     #if defined(OS_CHROMEOS)
       writer_ = xmlNewTextWriterDoc(&doc_, /* compression */ 0);
@@ -151,6 +151,8 @@ void MetricsLogBase::CloseLog() {
 
 int MetricsLogBase::GetEncodedLogSize() {
   DCHECK(locked_);
+  CHECK(xml_wrapper_);
+  CHECK(xml_wrapper_->buffer());
   return xml_wrapper_->buffer()->use;
 }
 
@@ -377,6 +379,10 @@ int64 MetricsLogBase::GetBuildTime() {
   return integral_build_time;
 }
 
+MetricsLog* MetricsLogBase::AsMetricsLog() {
+  return NULL;
+}
+
 // TODO(JAR): A The following should really be part of the histogram class.
 // Internal state is being needlessly exposed, and it would be hard to reuse
 // this code. If we moved this into the Histogram class, then we could use
@@ -498,6 +504,10 @@ void MetricsServiceBase::SnapshotProblemResolved(int amount) {
   UMA_HISTOGRAM_COUNTS("Histogram.InconsistentSnapshotBrowser",
                        std::abs(amount));
 }
+
+HistogramSender::HistogramSender() {}
+
+HistogramSender::~HistogramSender() {}
 
 void HistogramSender::TransmitAllHistograms(Histogram::Flags flag_to_set,
                                             bool send_only_uma) {

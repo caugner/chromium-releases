@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "base/lock.h"
 #include "base/ref_counted.h"
-#include "base/thread.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/thread.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class Task;
@@ -181,10 +181,10 @@ class Camera : public base::RefCountedThreadSafe<Camera> {
   SkBitmap frame_image_;
 
   // Lock that guards references to |frame_image_|.
-  mutable Lock image_lock_;
+  mutable base::Lock image_lock_;
 
   // Lock that guards references to |camera_thread_|.
-  mutable Lock thread_lock_;
+  mutable base::Lock thread_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(Camera);
 };

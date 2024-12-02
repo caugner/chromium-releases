@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
+#include "chrome/common/notification_registrar.h"
 
 class Balloon;
 class Browser;
@@ -22,7 +23,8 @@ struct WebPreferences;
 
 class BalloonHost : public RenderViewHostDelegate,
                     public RenderViewHostDelegate::View,
-                    public ExtensionFunctionDispatcher::Delegate {
+                    public ExtensionFunctionDispatcher::Delegate,
+                    public NotificationObserver {
  public:
   explicit BalloonHost(Balloon* balloon);
 
@@ -33,7 +35,7 @@ class BalloonHost : public RenderViewHostDelegate,
   void Shutdown();
 
   // ExtensionFunctionDispatcher::Delegate overrides.
-  virtual Browser* GetBrowser() const;
+  virtual Browser* GetBrowser();
   virtual gfx::NativeView GetNativeViewOfHost();
   virtual TabContents* associated_tab_contents() const;
 
@@ -49,13 +51,21 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void Close(RenderViewHost* render_view_host);
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual void RenderViewReady(RenderViewHost* render_view_host);
-  virtual void RenderViewGone(RenderViewHost* render_view_host);
+  virtual void RenderViewGone(RenderViewHost* render_view_host,
+                              base::TerminationStatus status,
+                              int error_code);
   virtual void UpdateTitle(RenderViewHost* render_view_host,
                            int32 page_id, const std::wstring& title) {}
   virtual int GetBrowserWindowID() const;
   virtual ViewType::Type GetRenderViewType() const;
   virtual RenderViewHostDelegate::View* GetViewDelegate();
   virtual void ProcessDOMUIMessage(const ViewHostMsg_DomMessage_Params& params);
+
+  // NotificationObserver override.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
 
   // RenderViewHostDelegate::View methods. Only the ones for opening new
   // windows are currently implemented.
@@ -93,9 +103,7 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void Activate() {}
   virtual void Deactivate() {}
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) {
-    return false;
-  }
+                                      bool* is_keyboard_shortcut);
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {}
   virtual void HandleMouseMove() {}
   virtual void HandleMouseDown();
@@ -111,9 +119,6 @@ class BalloonHost : public RenderViewHostDelegate,
   virtual void UpdateInspectorSetting(const std::string& key,
                                       const std::string& value);
   virtual void ClearInspectorSettings();
-
-  // Called when the render view has painted.
-  void RenderWidgetHostDidPaint();
 
  protected:
   virtual ~BalloonHost();
@@ -152,6 +157,8 @@ class BalloonHost : public RenderViewHostDelegate,
 
   // A flag to enable DOM UI.
   bool enable_dom_ui_;
+
+  NotificationRegistrar registrar_;
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_BALLOON_HOST_H_

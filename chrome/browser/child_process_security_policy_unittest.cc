@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,11 +18,11 @@ class ChildProcessSecurityPolicyTest : public testing::Test {
   // testing::Test
   virtual void SetUp() {
     // In the real world, "chrome:" is a handled scheme.
-    URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme,
-                                        &URLRequestTestJob::Factory);
+    net::URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme,
+                                             &net::URLRequestTestJob::Factory);
   }
   virtual void TearDown() {
-    URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme, NULL);
+    net::URLRequest::RegisterProtocolFactory(chrome::kChromeUIScheme, NULL);
   }
 };
 
@@ -133,7 +133,8 @@ TEST_F(ChildProcessSecurityPolicyTest, RegisterWebSafeSchemeTest) {
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   // Once we register a ProtocolFactory for "asdf", we default to deny.
-  URLRequest::RegisterProtocolFactory("asdf", &URLRequestTestJob::Factory);
+  net::URLRequest::RegisterProtocolFactory("asdf",
+                                           &net::URLRequestTestJob::Factory);
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   // We can allow new schemes by adding them to the whitelist.
@@ -141,7 +142,7 @@ TEST_F(ChildProcessSecurityPolicyTest, RegisterWebSafeSchemeTest) {
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   // Cleanup.
-  URLRequest::RegisterProtocolFactory("asdf", NULL);
+  net::URLRequest::RegisterProtocolFactory("asdf", NULL);
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("asdf:rockers")));
 
   p->Remove(kRendererID);

@@ -23,8 +23,8 @@
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/npapi/bindings/npapi.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/npruntime_util.h"
 
 // Name prefix of the event handle when a message box is displayed.
@@ -236,8 +236,6 @@ struct ParamTraits<PluginMsg_UpdateGeometry_Param> {
 
 }  // namespace IPC
 
-
-#define MESSAGES_INTERNAL_FILE "chrome/common/plugin_messages_internal.h"
-#include "ipc/ipc_message_macros.h"
+#include "chrome/common/plugin_messages_internal.h"
 
 #endif  // CHROME_COMMON_PLUGIN_MESSAGES_H_

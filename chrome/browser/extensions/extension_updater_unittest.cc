@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,19 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/version.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_updater.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/net/test_url_fetcher_factory.h"
+#include "chrome/test/testing_profile.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
@@ -46,7 +47,9 @@ int expected_load_flags =
 // Base class for further specialized test classes.
 class MockService : public ExtensionUpdateService {
  public:
-  MockService() {}
+  MockService() {
+    profile_.CreateRequestContext();
+  }
   virtual ~MockService() {}
 
   virtual const ExtensionList* extensions() const {
@@ -86,6 +89,8 @@ class MockService : public ExtensionUpdateService {
 
   virtual ExtensionPrefs* extension_prefs() { return prefs_.prefs(); }
 
+  virtual Profile* profile() { return &profile_; }
+
   PrefService* pref_service() { return prefs_.pref_service(); }
 
   // Creates test extensions and inserts them into list. The name and
@@ -112,6 +117,7 @@ class MockService : public ExtensionUpdateService {
  protected:
   PendingExtensionMap pending_extensions_;
   TestExtensionPrefs prefs_;
+  TestingProfile profile_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockService);
@@ -124,22 +130,34 @@ std::string GenerateId(std::string input) {
   return result;
 }
 
+bool ShouldInstallExtensionsOnly(const Extension& extension) {
+  return extension.GetType() == Extension::TYPE_EXTENSION;
+}
+
+bool ShouldInstallThemesOnly(const Extension& extension) {
+  return extension.is_theme();
+}
+
+bool ShouldAlwaysInstall(const Extension& extension) {
+  return true;
+}
+
 // Creates test pending extensions and inserts them into list. The
 // name and version are all based on their index.
 void CreateTestPendingExtensions(int count, const GURL& update_url,
                                  PendingExtensionMap* pending_extensions) {
-  PendingExtensionInfo::ExpectedCrxType crx_type;
   for (int i = 1; i <= count; i++) {
-    crx_type = ((i % 2) ? PendingExtensionInfo::EXTENSION
-                        : PendingExtensionInfo::THEME);
+    ShouldInstallExtensionPredicate should_install_extension =
+        (i % 2 == 0) ? &ShouldInstallThemesOnly :
+        &ShouldInstallExtensionsOnly;
     const bool kIsFromSync = true;
     const bool kInstallSilently = true;
     const Extension::State kInitialState = Extension::ENABLED;
     const bool kInitialIncognitoEnabled = false;
     std::string id = GenerateId(base::StringPrintf("extension%i", i));
     (*pending_extensions)[id] =
-        PendingExtensionInfo(update_url, crx_type, kIsFromSync,
-                             kInstallSilently, kInitialState,
+        PendingExtensionInfo(update_url, should_install_extension,
+                             kIsFromSync, kInstallSilently, kInitialState,
                              kInitialIncognitoEnabled, Extension::INTERNAL);
   }
 }
@@ -579,7 +597,7 @@ class ExtensionUpdaterTest : public testing::Test {
     EXPECT_TRUE(fetcher != NULL && fetcher->delegate() != NULL);
     EXPECT_TRUE(fetcher->load_flags() == expected_load_flags);
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, url1, URLRequestStatus(), 200, ResponseCookies(),
+        fetcher, url1, net::URLRequestStatus(), 200, ResponseCookies(),
         invalid_xml);
 
     // Now that the first request is complete, make sure the second one has
@@ -597,7 +615,7 @@ class ExtensionUpdaterTest : public testing::Test {
     EXPECT_TRUE(fetcher != NULL && fetcher->delegate() != NULL);
     EXPECT_TRUE(fetcher->load_flags() == expected_load_flags);
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, url2, URLRequestStatus(), 200, ResponseCookies(),
+        fetcher, url2, net::URLRequestStatus(), 200, ResponseCookies(),
         kValidXml);
 
     // This should run the manifest parsing, then we want to make sure that our
@@ -636,15 +654,13 @@ class ExtensionUpdaterTest : public testing::Test {
     updater->FetchUpdatedExtension(id, test_url, hash, version->GetString());
 
     if (pending) {
-      const PendingExtensionInfo::ExpectedCrxType kExpectedCrxType =
-          PendingExtensionInfo::EXTENSION;
       const bool kIsFromSync = true;
       const bool kInstallSilently = true;
       const Extension::State kInitialState = Extension::ENABLED;
       const bool kInitialIncognitoEnabled = false;
       PendingExtensionMap pending_extensions;
       pending_extensions[id] =
-          PendingExtensionInfo(test_url, kExpectedCrxType, kIsFromSync,
+          PendingExtensionInfo(test_url, &ShouldAlwaysInstall, kIsFromSync,
                                kInstallSilently, kInitialState,
                                kInitialIncognitoEnabled, Extension::INTERNAL);
       service.set_pending_extensions(pending_extensions);
@@ -656,7 +672,7 @@ class ExtensionUpdaterTest : public testing::Test {
     EXPECT_TRUE(fetcher != NULL && fetcher->delegate() != NULL);
     EXPECT_TRUE(fetcher->load_flags() == expected_load_flags);
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, test_url, URLRequestStatus(), 200, ResponseCookies(),
+        fetcher, test_url, net::URLRequestStatus(), 200, ResponseCookies(),
         extension_data);
 
     file_thread.Stop();
@@ -706,7 +722,7 @@ class ExtensionUpdaterTest : public testing::Test {
     EXPECT_TRUE(fetcher != NULL && fetcher->delegate() != NULL);
     EXPECT_TRUE(fetcher->load_flags() == expected_load_flags);
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, test_url, URLRequestStatus(), 200, ResponseCookies(),
+        fetcher, test_url, net::URLRequestStatus(), 200, ResponseCookies(),
         extension_data);
 
     message_loop.RunAllPending();
@@ -758,7 +774,7 @@ class ExtensionUpdaterTest : public testing::Test {
     EXPECT_TRUE(fetcher != NULL && fetcher->delegate() != NULL);
     EXPECT_TRUE(fetcher->load_flags() == expected_load_flags);
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, url1, URLRequestStatus(), 200, ResponseCookies(),
+        fetcher, url1, net::URLRequestStatus(), 200, ResponseCookies(),
         extension_data1);
     message_loop.RunAllPending();
 
@@ -777,7 +793,7 @@ class ExtensionUpdaterTest : public testing::Test {
     EXPECT_TRUE(fetcher != NULL && fetcher->delegate() != NULL);
     EXPECT_TRUE(fetcher->load_flags() == expected_load_flags);
     fetcher->delegate()->OnURLFetchComplete(
-        fetcher, url2, URLRequestStatus(), 200, ResponseCookies(),
+        fetcher, url2, net::URLRequestStatus(), 200, ResponseCookies(),
         extension_data2);
     message_loop.RunAllPending();
     EXPECT_EQ(id2, service.extension_id());
@@ -835,7 +851,8 @@ class ExtensionUpdaterTest : public testing::Test {
     EXPECT_TRUE(fetcher != NULL && fetcher->delegate() != NULL);
     fetched_urls.push_back(fetcher->original_url());
     fetcher->delegate()->OnURLFetchComplete(
-      fetcher, fetched_urls[0], URLRequestStatus(), 500, ResponseCookies(), "");
+      fetcher, fetched_urls[0], net::URLRequestStatus(), 500,
+      ResponseCookies(), "");
     fetcher =
       factory.GetFetcherByID(ExtensionUpdater::kManifestFetcherId);
     fetched_urls.push_back(fetcher->original_url());
@@ -985,14 +1002,14 @@ TEST(ExtensionUpdaterTest, TestManifestFetchesBuilderAddExtension) {
   // Extensions with invalid update URLs should be rejected.
   builder.AddPendingExtension(
       GenerateId("foo"), PendingExtensionInfo(GURL("http:google.com:foo"),
-                                              PendingExtensionInfo::EXTENSION,
+                                              &ShouldInstallExtensionsOnly,
                                               false, false, true, false,
                                               Extension::INTERNAL));
   EXPECT_TRUE(builder.GetFetches().empty());
 
   // Extensions with empty IDs should be rejected.
   builder.AddPendingExtension(
-      "", PendingExtensionInfo(GURL(), PendingExtensionInfo::EXTENSION,
+      "", PendingExtensionInfo(GURL(), &ShouldInstallExtensionsOnly,
                                false, false, true, false,
                                Extension::INTERNAL));
   EXPECT_TRUE(builder.GetFetches().empty());
@@ -1004,7 +1021,7 @@ TEST(ExtensionUpdaterTest, TestManifestFetchesBuilderAddExtension) {
   // filled in.
   builder.AddPendingExtension(
       GenerateId("foo"), PendingExtensionInfo(GURL(),
-                                              PendingExtensionInfo::EXTENSION,
+                                              &ShouldInstallExtensionsOnly,
                                               false, false, true, false,
                                               Extension::INTERNAL));
   std::vector<ManifestFetchData*> fetches = builder.GetFetches();
@@ -1053,8 +1070,6 @@ TEST(ExtensionUpdaterTest, TestAfterStopBehavior) {
 // TODO(asargent) - (http://crbug.com/12780) add tests for:
 // -prodversionmin (shouldn't update if browser version too old)
 // -manifests & updates arriving out of order / interleaved
-// -Profile::GetDefaultRequestContext() returning null
-//  (should not crash, but just do check later)
 // -malformed update url (empty, file://, has query, has a # fragment, etc.)
 // -An extension gets uninstalled while updates are in progress (so it doesn't
 //  "come back from the dead")

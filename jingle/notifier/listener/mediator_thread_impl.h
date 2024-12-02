@@ -28,7 +28,7 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/weak_ptr.h"
 #include "jingle/notifier/base/notifier_options.h"
 #include "jingle/notifier/communicator/login.h"
@@ -105,6 +105,7 @@ class MediatorThreadImpl : public MediatorThread, public LoginDelegate,
 
   base::Thread worker_thread_;
   scoped_ptr<net::HostResolver> host_resolver_;
+  scoped_ptr<net::CertVerifier> cert_verifier_;
 
   scoped_ptr<notifier::Login> login_;
 

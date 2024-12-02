@@ -6,7 +6,6 @@
 #define BASE_TASK_H_
 #pragma once
 
-#include "base/non_thread_safe.h"
 #include "base/raw_scoped_refptr_mismatch_checker.h"
 #include "base/tracked.h"
 #include "base/tuple.h"
@@ -149,8 +148,9 @@ class ScopedRunnableMethodFactory {
         : obj_(obj),
           meth_(meth),
           params_(params) {
-      COMPILE_ASSERT((MethodUsesScopedRefptrCorrectly<Method, Params>::value),
-                     badscopedrunnablemethodparams);
+      COMPILE_ASSERT(
+          (base::internal::ParamsUseScopedRefptrCorrectly<Params>::value),
+          badscopedrunnablemethodparams);
     }
 
     virtual void Run() {
@@ -227,7 +227,7 @@ template <class T>
 struct RunnableMethodTraits {
   RunnableMethodTraits() {
 #ifndef NDEBUG
-    origin_thread_id_ = PlatformThread::CurrentId();
+    origin_thread_id_ = base::PlatformThread::CurrentId();
 #endif
   }
 
@@ -235,7 +235,7 @@ struct RunnableMethodTraits {
 #ifndef NDEBUG
     // If destroyed on a separate thread, then we had better have been using
     // thread-safe reference counting!
-    if (origin_thread_id_ != PlatformThread::CurrentId())
+    if (origin_thread_id_ != base::PlatformThread::CurrentId())
       DCHECK(T::ImplementsThreadSafeReferenceCounting());
 #endif
   }
@@ -257,7 +257,7 @@ struct RunnableMethodTraits {
 
  private:
 #ifndef NDEBUG
-  PlatformThreadId origin_thread_id_;
+  base::PlatformThreadId origin_thread_id_;
 #endif
 };
 
@@ -317,8 +317,9 @@ class RunnableMethod : public CancelableTask {
   RunnableMethod(T* obj, Method meth, const Params& params)
       : obj_(obj), meth_(meth), params_(params) {
     traits_.RetainCallee(obj_);
-    COMPILE_ASSERT((MethodUsesScopedRefptrCorrectly<Method, Params>::value),
-                   badrunnablemethodparams);
+    COMPILE_ASSERT(
+        (base::internal::ParamsUseScopedRefptrCorrectly<Params>::value),
+        badrunnablemethodparams);
   }
 
   ~RunnableMethod() {
@@ -336,10 +337,10 @@ class RunnableMethod : public CancelableTask {
 
  private:
   void ReleaseCallee() {
-    if (obj_) {
-      traits_.ReleaseCallee(obj_);
-      obj_ = NULL;
-    }
+    T* obj = obj_;
+    obj_ = NULL;
+    if (obj)
+      traits_.ReleaseCallee(obj);
   }
 
   T* obj_;
@@ -429,8 +430,9 @@ class RunnableFunction : public CancelableTask {
  public:
   RunnableFunction(Function function, const Params& params)
       : function_(function), params_(params) {
-    COMPILE_ASSERT((FunctionUsesScopedRefptrCorrectly<Function, Params>::value),
-                   badrunnablefunctionparams);
+    COMPILE_ASSERT(
+        (base::internal::ParamsUseScopedRefptrCorrectly<Params>::value),
+        badrunnablefunctionparams);
   }
 
   ~RunnableFunction() {

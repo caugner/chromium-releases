@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,13 @@
 #include <map>
 #include <vector>
 
-#include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/scoped_handle.h"
 #include "base/stack_container.h"
+#include "base/synchronization/lock.h"
 #include "base/task.h"
+#include "base/threading/thread.h"
 #include "base/timer.h"
-#include "base/thread.h"
 #include "chrome/common/page_zoom.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -32,6 +32,7 @@
 const unsigned long kCommandExecutionTimeout = 60000;  // NOLINT, 60 seconds
 
 class ProxyFactory;
+class NavigationConstraints;
 enum AutomationPageFontSize;
 
 struct DECLSPEC_NOVTABLE ChromeFrameAutomationProxy {  // NOLINT
@@ -250,12 +251,12 @@ class AutomationProxyCacheEntry
     return thread_->message_loop();
   }
 
-  bool IsSameThread(PlatformThreadId id) const {
+  bool IsSameThread(base::PlatformThreadId id) const {
     return thread_->thread_id() == id;
   }
 
   ChromeFrameAutomationProxyImpl* proxy() const {
-    DCHECK(IsSameThread(PlatformThread::CurrentId()));
+    DCHECK(IsSameThread(base::PlatformThread::CurrentId()));
     return proxy_.get();
   }
 
@@ -302,7 +303,7 @@ class ProxyFactory {
   typedef StackVector<scoped_refptr<AutomationProxyCacheEntry>, 4> Vector;
   Vector proxies_;
   // Lock if we are going to call GetAutomationServer from more than one thread.
-  Lock lock_;
+  base::Lock lock_;
 
   // Gathers histograms to be sent to Chrome.
   ChromeFrameHistogramSnapshots chrome_frame_histograms_;
@@ -331,9 +332,11 @@ class ChromeFrameAutomationClient
   void Uninitialize();
   void NotifyAndUninitialize();
 
-  virtual bool InitiateNavigation(const std::string& url,
-                                  const std::string& referrer,
-                                  bool is_privileged);
+  virtual bool InitiateNavigation(
+      const std::string& url,
+      const std::string& referrer,
+      NavigationConstraints* navigation_constraints);
+
   virtual bool NavigateToIndex(int index);
   bool ForwardMessageFromExternalHost(const std::string& message,
                                       const std::string& origin,
@@ -456,7 +459,7 @@ class ChromeFrameAutomationClient
   virtual void AutomationServerDied();
 
   // TabProxyDelegate implementation
-  virtual void OnMessageReceived(TabProxy* tab, const IPC::Message& msg);
+  virtual bool OnMessageReceived(TabProxy* tab, const IPC::Message& msg);
   virtual void OnChannelError(TabProxy* tab);
 
   void CreateExternalTab();
@@ -497,7 +500,8 @@ class ChromeFrameAutomationClient
       const char* headers, int size, base::Time last_modified,
       const std::string& redirect_url, int redirect_status);
   virtual void OnReadComplete(int request_id, const std::string& data);
-  virtual void OnResponseEnd(int request_id, const URLRequestStatus& status);
+  virtual void OnResponseEnd(int request_id,
+                             const net::URLRequestStatus& status);
   virtual void OnCookiesRetrieved(bool success, const GURL& url,
       const std::string& cookie_string, int cookie_id);
 
@@ -506,7 +510,7 @@ class ChromeFrameAutomationClient
   }
 
   HWND parent_window_;
-  PlatformThreadId ui_thread_id_;
+  base::PlatformThreadId ui_thread_id_;
 
   void* automation_server_id_;
   ChromeFrameAutomationProxy* automation_server_;

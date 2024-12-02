@@ -2,35 +2,39 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H__
-#define NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H__
+#ifndef NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H_
+#define NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H_
 #pragma once
 
 #include <map>
 #include <string>
 #include <vector>
 
-#include "base/lock.h"
-#include "base/platform_thread.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 #include "net/url_request/url_request.h"
 
+template <typename T> struct DefaultSingletonTraits;
+
+namespace net {
+
 // This class is responsible for managing the set of protocol factories and
-// request interceptors that determine how an URLRequestJob gets created to
-// handle an URLRequest.
+// request interceptors that determine how an net::URLRequestJob gets created to
+// handle an net::URLRequest.
 //
 // MULTI-THREADING NOTICE:
-//   URLRequest is designed to have all consumers on a single thread, and so no
-//   attempt is made to support ProtocolFactory or Interceptor instances being
-//   registered/unregistered or in any way poked on multiple threads.  However,
-//   we do support checking for supported schemes FROM ANY THREAD (i.e., it is
-//   safe to call SupportsScheme on any thread).
+//   net::URLRequest is designed to have all consumers on a single thread, and
+//   so no attempt is made to support ProtocolFactory or Interceptor instances
+//   being registered/unregistered or in any way poked on multiple threads.
+//   However, we do support checking for supported schemes FROM ANY THREAD
+//   (i.e., it is safe to call SupportsScheme on any thread).
 //
 class URLRequestJobManager {
  public:
-  URLRequestJobManager();
-  ~URLRequestJobManager();
+  // Returns the singleton instance.
+  static URLRequestJobManager* GetInstance();
 
-  // Instantiate an URLRequestJob implementation based on the registered
+  // Instantiate an net::URLRequestJob implementation based on the registered
   // interceptors and protocol factories.  This will always succeed in
   // returning a job unless we are--in the extreme case--out of memory.
   net::URLRequestJob* CreateJob(net::URLRequest* request) const;
@@ -54,21 +58,25 @@ class URLRequestJobManager {
   // Register a protocol factory associated with the given scheme.  The factory
   // parameter may be null to clear any existing association.  Returns the
   // previously registered protocol factory if any.
-  URLRequest::ProtocolFactory* RegisterProtocolFactory(
-      const std::string& scheme, URLRequest::ProtocolFactory* factory);
+  net::URLRequest::ProtocolFactory* RegisterProtocolFactory(
+      const std::string& scheme, net::URLRequest::ProtocolFactory* factory);
 
   // Register/unregister a request interceptor.
-  void RegisterRequestInterceptor(URLRequest::Interceptor* interceptor);
-  void UnregisterRequestInterceptor(URLRequest::Interceptor* interceptor);
+  void RegisterRequestInterceptor(net::URLRequest::Interceptor* interceptor);
+  void UnregisterRequestInterceptor(net::URLRequest::Interceptor* interceptor);
 
   void set_enable_file_access(bool enable) { enable_file_access_ = enable; }
   bool enable_file_access() const { return enable_file_access_; }
 
  private:
-  typedef std::map<std::string, URLRequest::ProtocolFactory*> FactoryMap;
-  typedef std::vector<URLRequest::Interceptor*> InterceptorList;
+  typedef std::map<std::string, net::URLRequest::ProtocolFactory*> FactoryMap;
+  typedef std::vector<net::URLRequest::Interceptor*> InterceptorList;
+  friend struct DefaultSingletonTraits<URLRequestJobManager>;
 
-  mutable Lock lock_;
+  URLRequestJobManager();
+  ~URLRequestJobManager();
+
+  mutable base::Lock lock_;
   FactoryMap factories_;
   InterceptorList interceptors_;
   bool enable_file_access_;
@@ -76,7 +84,7 @@ class URLRequestJobManager {
 #ifndef NDEBUG
   // We use this to assert that CreateJob and the registration functions all
   // run on the same thread.
-  mutable PlatformThreadId allowed_thread_;
+  mutable base::PlatformThreadId allowed_thread_;
   mutable bool allowed_thread_initialized_;
 
   // The first guy to call this function sets the allowed thread.  This way we
@@ -86,10 +94,10 @@ class URLRequestJobManager {
   bool IsAllowedThread() const {
 #if 0
     if (!allowed_thread_initialized_) {
-      allowed_thread_ = PlatformThread::CurrentId();
+      allowed_thread_ = base::PlatformThread::CurrentId();
       allowed_thread_initialized_ = true;
     }
-    return allowed_thread_ == PlatformThread::CurrentId();
+    return allowed_thread_ == base::PlatformThread::CurrentId();
 #else
     // The previous version of this check used GetCurrentThread on Windows to
     // get thread handles to compare. Unfortunately, GetCurrentThread returns
@@ -107,4 +115,6 @@ class URLRequestJobManager {
   DISALLOW_COPY_AND_ASSIGN(URLRequestJobManager);
 };
 
-#endif  // NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H__
+}  // namespace net
+
+#endif  // NET_URL_REQUEST_URL_REQUEST_JOB_MANAGER_H_

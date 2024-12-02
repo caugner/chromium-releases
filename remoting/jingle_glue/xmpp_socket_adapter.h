@@ -27,9 +27,9 @@ class XmppSocketAdapter : public buzz::AsyncSocket,
                     bool allow_unverified_certs);
   virtual ~XmppSocketAdapter();
 
-  virtual State state() { return state_; }
-  virtual Error error() { return error_; }
-  virtual int GetError() { return wsa_error_; }
+  virtual State state();
+  virtual Error error();
+  virtual int GetError();
 
   void set_firewall(bool firewall) { firewall_ = firewall; }
 
@@ -39,7 +39,7 @@ class XmppSocketAdapter : public buzz::AsyncSocket,
   virtual bool Close();
 
 #if defined(FEATURE_ENABLE_SSL)
-  bool StartTls(const std::string& domainname);
+  virtual bool StartTls(const std::string& domainname);
   bool IsOpen() const { return state_ == STATE_OPEN
                             || state_ == STATE_TLS_OPEN; }
 #else

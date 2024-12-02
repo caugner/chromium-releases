@@ -69,11 +69,9 @@ class HttpStreamRequest : public StreamRequest {
                                          const string16& password);
   virtual LoadState GetLoadState() const;
 
-  virtual bool was_alternate_protocol_available() const {
-      return was_alternate_protocol_available_;
-  }
-  virtual bool was_npn_negotiated() const { return was_npn_negotiated_; }
-  virtual bool using_spdy() const { return using_spdy_; }
+  virtual bool was_alternate_protocol_available() const;
+  virtual bool was_npn_negotiated() const;
+  virtual bool using_spdy() const;
 
  private:
   enum AlternateProtocolMode {
@@ -109,6 +107,8 @@ class HttpStreamRequest : public StreamRequest {
   void OnNeedsProxyAuthCallback(const HttpResponseInfo& response_info,
                                 HttpAuthController* auth_controller);
   void OnNeedsClientAuthCallback(SSLCertRequestInfo* cert_info);
+  void OnHttpsProxyTunnelResponseCallback(const HttpResponseInfo& response_info,
+                                          HttpStream* stream);
   void OnPreconnectsComplete(int result);
 
   void OnIOComplete(int result);
@@ -174,6 +174,12 @@ class HttpStreamRequest : public StreamRequest {
 
   // Moves this stream request into SPDY mode.
   void SwitchToSpdyMode();
+
+  // Should we force SPDY to run over SSL for this stream request.
+  bool ShouldForceSpdySSL();
+
+  // Should we force SPDY to run without SSL for this stream request.
+  bool ShouldForceSpdyWithoutSSL();
 
   // Record histograms of latency until Connect() completes.
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);

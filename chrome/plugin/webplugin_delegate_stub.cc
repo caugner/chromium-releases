@@ -18,9 +18,9 @@
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "skia/ext/platform_device.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
-#include "webkit/glue/plugins/webplugin_delegate_impl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "webkit/plugins/npapi/webplugin_delegate_impl.h"
 #include "webkit/glue/webcursor.h"
 
 #if defined(ENABLE_GPU)
@@ -29,13 +29,15 @@
 
 using WebKit::WebBindings;
 using WebKit::WebCursorInfo;
-using webkit_glue::WebPlugin;
-using webkit_glue::WebPluginResourceClient;
+using webkit::npapi::WebPlugin;
+using webkit::npapi::WebPluginResourceClient;
 
 class FinishDestructionTask : public Task {
  public:
-  FinishDestructionTask(WebPluginDelegateImpl* delegate, WebPlugin* webplugin)
-    : delegate_(delegate), webplugin_(webplugin) { }
+  FinishDestructionTask(webkit::npapi::WebPluginDelegateImpl* delegate,
+                        WebPlugin* webplugin)
+      : delegate_(delegate), webplugin_(webplugin) {
+  }
 
   void Run() {
     // WebPlugin must outlive WebPluginDelegate.
@@ -46,8 +48,8 @@ class FinishDestructionTask : public Task {
   }
 
  private:
-  WebPluginDelegateImpl* delegate_;
-  WebPlugin* webplugin_;
+  webkit::npapi::WebPluginDelegateImpl* delegate_;
+  webkit::npapi::WebPlugin* webplugin_;
 };
 
 WebPluginDelegateStub::WebPluginDelegateStub(
@@ -86,7 +88,7 @@ WebPluginDelegateStub::~WebPluginDelegateStub() {
   }
 }
 
-void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
+bool WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
   child_process_logging::SetActiveURL(page_url_);
 
   // A plugin can execute a script to delete itself in any of its NPP methods.
@@ -96,6 +98,7 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
   if (!in_destructor_)
     AddRef();
 
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(WebPluginDelegateStub, msg)
     IPC_MESSAGE_HANDLER(PluginMsg_Init, OnInit)
     IPC_MESSAGE_HANDLER(PluginMsg_WillSendRequest, OnWillSendRequest)
@@ -122,8 +125,8 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_ContainerHidden, OnContainerHidden)
     IPC_MESSAGE_HANDLER(PluginMsg_ContainerShown, OnContainerShown)
     IPC_MESSAGE_HANDLER(PluginMsg_WindowFrameChanged, OnWindowFrameChanged)
-    IPC_MESSAGE_HANDLER(PluginMsg_ImeCompositionConfirmed,
-                        OnImeCompositionConfirmed)
+    IPC_MESSAGE_HANDLER(PluginMsg_ImeCompositionCompleted,
+                        OnImeCompositionCompleted)
 #endif
     IPC_MESSAGE_HANDLER(PluginMsg_DidReceiveManualResponse,
                         OnDidReceiveManualResponse)
@@ -144,11 +147,14 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_SetFakeAcceleratedSurfaceWindowHandle,
                         OnSetFakeAcceleratedSurfaceWindowHandle)
 #endif
-    IPC_MESSAGE_UNHANDLED_ERROR()
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
   if (!in_destructor_)
     Release();
+
+  DCHECK(handled);
+  return handled;
 }
 
 bool WebPluginDelegateStub::Send(IPC::Message* msg) {
@@ -185,7 +191,8 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
   webplugin_ = new WebPluginProxy(
       channel_, instance_id_, page_url_, params.containing_window,
       params.host_render_view_routing_id);
-  delegate_ = WebPluginDelegateImpl::Create(path, mime_type_, parent);
+  delegate_ = webkit::npapi::WebPluginDelegateImpl::Create(
+      path, mime_type_, parent);
   if (delegate_) {
     webplugin_->set_delegate(delegate_);
     *result = delegate_->Initialize(params.url,
@@ -371,9 +378,9 @@ void WebPluginDelegateStub::OnWindowFrameChanged(const gfx::Rect& window_frame,
     delegate_->WindowFrameChanged(window_frame, view_frame);
 }
 
-void WebPluginDelegateStub::OnImeCompositionConfirmed(const string16& text) {
+void WebPluginDelegateStub::OnImeCompositionCompleted(const string16& text) {
   if (delegate_)
-    delegate_->ImeCompositionConfirmed(text);
+    delegate_->ImeCompositionCompleted(text);
 }
 #endif  // OS_MACOSX
 

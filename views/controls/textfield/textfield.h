@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,16 +14,16 @@
 
 #include <string>
 
-#include "app/keyboard_codes.h"
 #include "base/basictypes.h"
+#include "base/string16.h"
+#include "gfx/font.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "views/view.h"
+
 #if !defined(OS_LINUX)
 #include "base/logging.h"
 #endif
-#include "base/string16.h"
-#include "gfx/font.h"
-#include "views/view.h"
-#include "third_party/skia/include/core/SkColor.h"
-
 #ifdef UNIT_TEST
 #include "gfx/native_widget_types.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
@@ -31,56 +31,65 @@
 
 namespace views {
 
+class KeyEvent;
 class NativeTextfieldWrapper;
+
+// TextRange specifies the range of text in the Textfield.  This is
+// used to specify selected text and will be used to change the
+// attributes of characters in the textfield. When this is used for
+// selection, the end is caret position, and the start is where
+// selection started.  The range preserves the direction, and
+// selecting from the end to the begining is considered "reverse"
+// order. (that is, start > end is reverse)
+class TextRange {
+ public:
+  TextRange() : start_(0), end_(0) {}
+  TextRange(size_t start, size_t end);
+
+  // Allow copy so that the omnibox can save the view state
+  // for each tabs.
+  explicit TextRange(const TextRange& range)
+      : start_(range.start_), end_(range.end_) {}
+
+  // Returns the start position;
+  size_t start() const { return start_; }
+
+  // Returns the end position.
+  size_t end() const { return end_; }
+
+  // Returns true if the selected text is empty.
+  bool is_empty() const { return start_ == end_; }
+
+  // Returns true if the selection is made in reverse order.
+  bool is_reverse() const { return start_ > end_; }
+
+  // Returns the min of selected range.
+  size_t GetMin() const;
+
+  // Returns the max of selected range.
+  size_t GetMax() const;
+
+  // Returns true if the the selection range is same ignoring the direction.
+  bool EqualsIgnoringDirection(const TextRange& range) const {
+    return GetMin() == range.GetMin() && GetMax() == range.GetMax();
+  }
+
+  // Set the range with |start| and |end|.
+  void SetRange(size_t start, size_t end);
+
+ private:
+  size_t start_;
+  size_t end_;
+
+  // No assign.
+  void operator=(const TextRange&);
+};
 
 // This class implements a ChromeView that wraps a native text (edit) field.
 class Textfield : public View {
  public:
   // The button's class name.
   static const char kViewClassName[];
-
-  // Keystroke provides a platform-dependent way to send keystroke events.
-  // Cross-platform code can use IsKeystrokeEnter/Escape to check for these
-  // two common key events.
-  // TODO(brettw) this should be cleaned up to be more cross-platform.
-  class Keystroke {
-   public:
-#if defined(OS_WIN)
-    const Keystroke(unsigned int m,
-              wchar_t k,
-              int r,
-              unsigned int f)
-        : message_(m),
-          key_(k),
-          repeat_count_(r),
-          flags_(f) {
-    }
-    unsigned int message() const { return message_; }
-    wchar_t key() const { return key_; }
-    int repeat_count() const { return repeat_count_; }
-    unsigned int flags() const { return flags_; }
-#else
-    explicit Keystroke(GdkEventKey* event)
-        : event_(*event) {
-    }
-    const GdkEventKey* event() const { return &event_; }
-#endif
-    app::KeyboardCode GetKeyboardCode() const;
-    bool IsControlHeld() const;
-    bool IsShiftHeld() const;
-
-   private:
-#if defined(OS_WIN)
-    unsigned int message_;
-    wchar_t key_;
-    int repeat_count_;
-    unsigned int flags_;
-#else
-    GdkEventKey event_;
-#endif
-
-    DISALLOW_COPY_AND_ASSIGN(Keystroke);
-  };
 
   // This defines the callback interface for other code to be notified of
   // changes in the state of a text field.
@@ -93,8 +102,8 @@ class Textfield : public View {
     // This method is called to get notified about keystrokes in the edit.
     // This method returns true if the message was handled and should not be
     // processed further. If it returns false the processing continues.
-    virtual bool HandleKeystroke(Textfield* sender,
-                                 const Textfield::Keystroke& keystroke) = 0;
+    virtual bool HandleKeyEvent(Textfield* sender,
+                                const KeyEvent& key_event) = 0;
   };
 
   enum StyleFlags {
@@ -169,7 +178,7 @@ class Textfield : public View {
   void UseDefaultBackgroundColor();
 
   // Gets/Sets the font used when rendering the text within the Textfield.
-  gfx::Font font() const { return font_; }
+  const gfx::Font& font() const { return font_; }
   void SetFont(const gfx::Font& font);
 
   // Sets the left and right margin (in pixels) within the text box. On Windows
@@ -226,9 +235,24 @@ class Textfield : public View {
   // Returns whether or not an IME is composing text.
   bool IsIMEComposing() const;
 
+  // Gets the selected range. This is views-implementation only and
+  // has to be called after the wrapper is created.
+  void GetSelectedRange(TextRange* range) const;
+
+  // Selects the text given by |range|. This is views-implementation only and
+  // has to be called after the wrapper is created.
+  void SelectRange(const TextRange& range);
+
+  // Returns the current cursor position. This is views-implementation
+  // only and has to be called after the wrapper is created.
+  size_t GetCursorPosition() const;
+
 #ifdef UNIT_TEST
   gfx::NativeView GetTestingHandle() const {
     return native_wrapper_ ? native_wrapper_->GetTestingHandle() : NULL;
+  }
+  NativeTextfieldWrapper* native_wrapper() const {
+    return native_wrapper_;
   }
 #endif
 
@@ -240,11 +264,16 @@ class Textfield : public View {
   virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e);
   virtual void SetEnabled(bool enabled);
   virtual void PaintFocusBorder(gfx::Canvas* canvas);
+  virtual bool OnKeyPressed(const views::KeyEvent& e);
+  virtual bool OnKeyReleased(const views::KeyEvent& e);
+  virtual void WillGainFocus();
+  virtual void DidGainFocus();
+  virtual void WillLoseFocus();
 
   // Accessibility accessors, overridden from View:
-  virtual AccessibilityTypes::Role GetAccessibleRole();
-  virtual AccessibilityTypes::State GetAccessibleState();
-  virtual std::wstring GetAccessibleValue();
+  virtual AccessibilityTypes::Role GetAccessibleRole() OVERRIDE;
+  virtual AccessibilityTypes::State GetAccessibleState() OVERRIDE;
+  virtual string16 GetAccessibleValue() OVERRIDE;
 
  protected:
   virtual void Focus();

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,7 @@
 #include "chrome/common/chrome_switches.h"
 
 #if defined(OS_MACOSX)
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #endif
 
 namespace {
@@ -39,7 +39,7 @@ bool GetInternalPluginsDirectory(FilePath* result) {
 #if defined(OS_MACOSX)
   // If called from Chrome, get internal plugins from a subdirectory of the
   // framework.
-  if (mac_util::AmIBundled()) {
+  if (base::mac::AmIBundled()) {
     *result = chrome::GetFrameworkBundlePath();
     DCHECK(!result->empty());
     *result = result->Append("Internet Plug-Ins");
@@ -79,7 +79,7 @@ bool PathProvider(int key, FilePath* result) {
 #if defined(OS_MACOSX)
       if (!PathService::Get(base::DIR_EXE, result))
         return false;
-      if (mac_util::AmIBundled()) {
+      if (base::mac::AmIBundled()) {
         // If we're called from chrome, dump it beside the app (outside the
         // app bundle), if we're called from a unittest, we'll already
         // outside the bundle so use the exe dir.
@@ -145,7 +145,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
     case chrome::DIR_RESOURCES:
 #if defined(OS_MACOSX)
-      cur = mac_util::MainAppBundlePath();
+      cur = base::mac::MainAppBundlePath();
       cur = cur.Append(FILE_PATH_LITERAL("Resources"));
 #else
       if (!PathService::Get(chrome::DIR_APP, &cur))
@@ -182,7 +182,6 @@ bool PathProvider(int key, FilePath* result) {
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("Temp"));
-      create_dir = true;
       break;
     case chrome::DIR_INTERNAL_PLUGINS:
       if (!GetInternalPluginsDirectory(&cur))
@@ -239,10 +238,22 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("libpdf.so"));
 #endif
       break;
+    case chrome::FILE_NACL_PLUGIN:
+      if (!GetInternalPluginsDirectory(&cur))
+        return false;
+#if defined(OS_WIN)
+      cur = cur.Append(FILE_PATH_LITERAL("ppGoogleNaClPluginChrome.dll"));
+#elif defined(OS_MACOSX)
+      // TODO(noelallen) Please verify this extention name is correct.
+      cur = cur.Append(FILE_PATH_LITERAL("ppGoogleNaClPluginChrome.plugin"));
+#else  // Linux and Chrome OS
+      cur = cur.Append(FILE_PATH_LITERAL("libppGoogleNaClPluginChrome.so"));
+#endif
+      break;
     case chrome::FILE_RESOURCES_PACK:
 #if defined(OS_MACOSX)
-      if (mac_util::AmIBundled()) {
-        cur = mac_util::MainAppBundlePath();
+      if (base::mac::AmIBundled()) {
+        cur = base::mac::MainAppBundlePath();
         cur = cur.Append(FILE_PATH_LITERAL("Resources"))
                  .Append(FILE_PATH_LITERAL("resources.pak"));
         break;
@@ -306,6 +317,14 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.AppendASCII(login);
       if (!file_util::PathExists(cur))  // we don't want to create this
         return false;
+      break;
+    }
+#endif
+#if defined(OS_CHROMEOS)
+    case chrome::DIR_USER_EXTERNAL_EXTENSIONS: {
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("External Extensions"));
       break;
     }
 #endif

@@ -10,6 +10,9 @@
 
 namespace remoting {
 
+using protocol::KeyEvent;
+using protocol::MouseEvent;
+
 InputHandler::InputHandler(ClientContext* context,
                            protocol::ConnectionToHost* connection,
                            ChromotingView* view)
@@ -22,7 +25,7 @@ void InputHandler::SendKeyEvent(bool press, int keycode) {
   protocol::InputStub* stub = connection_->input_stub();
   if (stub) {
     KeyEvent* event = new KeyEvent();
-    event->set_key(keycode);
+    event->set_keycode(keycode);
     event->set_pressed(press);
 
     stub->InjectKeyEvent(event, new DeleteTask<KeyEvent>(event));
@@ -41,7 +44,7 @@ void InputHandler::SendMouseMoveEvent(int x, int y) {
 }
 
 void InputHandler::SendMouseButtonEvent(bool button_down,
-                                        MouseButton button) {
+                                        MouseEvent::MouseButton button) {
   protocol::InputStub* stub = connection_->input_stub();
   if (stub) {
     MouseEvent* event = new MouseEvent();

@@ -7,11 +7,10 @@
 
 #include <string>
 
+#include "base/process.h"
 #include "base/scoped_ptr.h"
-#include "ppapi/proxy/callback_tracker.h"
+#include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/dispatcher.h"
-#include "ppapi/proxy/plugin_resource_tracker.h"
-#include "ppapi/proxy/plugin_var_tracker.h"
 
 class MessageLoop;
 
@@ -29,43 +28,43 @@ class PluginDispatcher : public Dispatcher {
   // module ID will be set upon receipt of the InitializeModule message.
   //
   // You must call Dispatcher::InitWithChannel after the constructor.
-  PluginDispatcher(GetInterfaceFunc get_interface,
+  PluginDispatcher(base::ProcessHandle remote_process_handle,
+                   GetInterfaceFunc get_interface,
                    InitModuleFunc init_module,
                    ShutdownModuleFunc shutdown_module);
   ~PluginDispatcher();
 
-  // The plugin maintains a global Dispatcher pointer. There is only one since
-  // there is only one connection to the browser. Don't call this on the
-  // browser side, see GetForInstnace.
+  // Sets/gets the global dispatcher pointer. New code should use the
+  // GetForInstance version below, this is currently here as a stopgap while
+  // the transition is being made.
+  //
+  // TODO(brettw) remove this.
   static PluginDispatcher* Get();
   static void SetGlobal(PluginDispatcher* dispatcher);
 
+  // The plugin side maintains a mapping from PP_Instance to Dispatcher so
+  // that we can send the messages to the right channel if there are multiple
+  // renderers sharing the same plugin.
+  static PluginDispatcher* GetForInstance(PP_Instance instance);
+  /* TODO(brettw) enable this when Get() is removed.
+  static void SetForInstance(PP_Instance instance,
+                             PluginDispatcher* dispatcher);
+  static void RemoveForInstance(PP_Instance instance);
+  */
+
   // Dispatcher overrides.
-  virtual bool IsPlugin() const { return true; }
+  virtual bool IsPlugin() const;
 
   // IPC::Channel::Listener implementation.
-  virtual void OnMessageReceived(const IPC::Message& msg);
-
-  // Returns the resource tracker for the plugin. In the browser process this
-  // will return NULL.
-  PluginResourceTracker* plugin_resource_tracker() {
-    return plugin_resource_tracker_.get();
-  }
-
-  // Returns the var tracker for the plugin. In the browser process this
-  // will return NULL.
-  PluginVarTracker* plugin_var_tracker() {
-    return plugin_var_tracker_.get();
-  }
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
-  void OnInitializeModule(PP_Module pp_module, bool* result);
+  // IPC message handlers.
+  void OnMsgInitializeModule(PP_Module pp_module, bool* result);
+  void OnMsgShutdown();
 
   InitModuleFunc init_module_;
   ShutdownModuleFunc shutdown_module_;
-
-  scoped_ptr<PluginResourceTracker> plugin_resource_tracker_;
-  scoped_ptr<PluginVarTracker> plugin_var_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginDispatcher);
 };

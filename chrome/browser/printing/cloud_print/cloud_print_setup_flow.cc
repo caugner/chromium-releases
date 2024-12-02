@@ -1,46 +1,48 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_flow.h"
 
-#include "app/gfx/font_util.h"
 #include "base/json/json_writer.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/dom_ui/dom_ui_util.h"
-#if defined(TOOLKIT_GTK)
-#include "chrome/browser/gtk/html_dialog_gtk.h"
-#endif  // defined(TOOLKIT_GTK)
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_message_handler.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_setup_source.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/service/service_process_control_manager.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/browser_dialogs.h"
-#endif  // defined(TOOLKIT_GTK)
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_messages.h"
 #include "gfx/font.h"
-
 #include "grit/chromium_strings.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_font_util.h"
+
+#if defined(TOOLKIT_GTK)
+#include "chrome/browser/ui/gtk/html_dialog_gtk.h"
+#endif  // defined(TOOLKIT_GTK)
+
+#if defined(TOOLKIT_VIEWS)
+#include "chrome/browser/ui/views/browser_dialogs.h"
+#endif  // defined(TOOLKIT_GTK)
 
 static const wchar_t kGaiaLoginIFrameXPath[] = L"//iframe[@id='gaialogin']";
 static const wchar_t kDoneIframeXPath[] = L"//iframe[@id='setupdone']";
@@ -101,7 +103,7 @@ CloudPrintSetupFlow::CloudPrintSetupFlow(const std::string& args,
   profile_ = profile;
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
                         &ChromeURLDataManager::AddDataSource,
                         make_scoped_refptr(new CloudPrintSetupSource())));
 }
@@ -132,16 +134,16 @@ void CloudPrintSetupFlow::GetDOMMessageHandlers(
 void CloudPrintSetupFlow::GetDialogSize(gfx::Size* size) const {
   PrefService* prefs = profile_->GetPrefs();
   gfx::Font approximate_web_font(
-      UTF8ToWide(prefs->GetString(prefs::kWebKitSansSerifFontFamily)),
+      UTF8ToUTF16(prefs->GetString(prefs::kWebKitSansSerifFontFamily)),
       prefs->GetInteger(prefs::kWebKitDefaultFontSize));
 
   if (setup_done_) {
-    *size = gfx::GetLocalizedContentsSizeForFont(
+    *size = ui::GetLocalizedContentsSizeForFont(
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_WIDTH_CHARS,
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_HEIGHT_LINES,
         approximate_web_font);
   } else {
-    *size = gfx::GetLocalizedContentsSizeForFont(
+    *size = ui::GetLocalizedContentsSizeForFont(
         IDS_CLOUD_PRINT_SETUP_WIZARD_WIDTH_CHARS,
         IDS_CLOUD_PRINT_SETUP_WIZARD_HEIGHT_LINES,
         approximate_web_font);
@@ -164,17 +166,22 @@ std::string CloudPrintSetupFlow::GetDialogArgs() const {
     return dialog_start_args_;
 }
 
-void  CloudPrintSetupFlow::OnCloseContents(TabContents* source,
-                                         bool* out_close_dialog) {
+void CloudPrintSetupFlow::OnCloseContents(TabContents* source,
+                                          bool* out_close_dialog) {
 }
 
-std::wstring  CloudPrintSetupFlow::GetDialogTitle() const {
-  return l10n_util::GetString(IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE);
+std::wstring CloudPrintSetupFlow::GetDialogTitle() const {
+  return UTF16ToWideHack(
+      l10n_util::GetStringUTF16(IDS_CLOUD_PRINT_SETUP_DIALOG_TITLE));
 }
 
-bool  CloudPrintSetupFlow::IsDialogModal() const {
+bool CloudPrintSetupFlow::IsDialogModal() const {
   // We are always modeless.
   return false;
+}
+
+bool CloudPrintSetupFlow::ShouldShowDialogTitle() const {
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -265,19 +272,20 @@ void CloudPrintSetupFlow::ShowGaiaFailed(const GoogleServiceAuthError& error) {
 
 void CloudPrintSetupFlow::ShowSetupDone() {
   setup_done_ = true;
-  std::wstring product_name = l10n_util::GetString(IDS_PRODUCT_NAME);
-  std::wstring message = l10n_util::GetStringF(IDS_CLOUD_PRINT_SETUP_DONE,
-                                               product_name,
-                                               UTF8ToWide(login_));
+  string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+  std::wstring message =
+      UTF16ToWideHack(l10n_util::GetStringFUTF16(IDS_CLOUD_PRINT_SETUP_DONE,
+                                                 product_name,
+                                                 UTF8ToUTF16(login_)));
   std::wstring javascript = L"cloudprint.setMessage('" + message + L"');";
   ExecuteJavascriptInIFrame(kDoneIframeXPath, javascript);
 
   if (dom_ui_) {
     PrefService* prefs = profile_->GetPrefs();
     gfx::Font approximate_web_font(
-        UTF8ToWide(prefs->GetString(prefs::kWebKitSansSerifFontFamily)),
+        UTF8ToUTF16(prefs->GetString(prefs::kWebKitSansSerifFontFamily)),
         prefs->GetInteger(prefs::kWebKitDefaultFontSize));
-    gfx::Size done_size = gfx::GetLocalizedContentsSizeForFont(
+    gfx::Size done_size = ui::GetLocalizedContentsSizeForFont(
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_WIDTH_CHARS,
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_HEIGHT_LINES,
         approximate_web_font);

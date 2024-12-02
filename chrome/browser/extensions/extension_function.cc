@@ -7,8 +7,8 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 
 ExtensionFunction::ExtensionFunction()
     : request_id_(-1),
@@ -22,7 +22,7 @@ ExtensionFunction::~ExtensionFunction() {
 }
 
 const Extension* ExtensionFunction::GetExtension() {
-  ExtensionsService* service = profile_->GetExtensionsService();
+  ExtensionService* service = profile_->GetExtensionService();
   DCHECK(service);
   return service->GetExtensionById(extension_id_, false);
 }
@@ -40,7 +40,7 @@ AsyncExtensionFunction::~AsyncExtensionFunction() {
 
 void AsyncExtensionFunction::SetArgs(const ListValue* args) {
   DCHECK(!args_.get());  // Should only be called once.
-  args_.reset(static_cast<ListValue*>(args->DeepCopy()));
+  args_.reset(args->DeepCopy());
 }
 
 const std::string AsyncExtensionFunction::GetResult() {

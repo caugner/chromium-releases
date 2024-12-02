@@ -34,6 +34,12 @@ void RenderViewContextMenuGtk::PlatformInit() {
   }
 }
 
+bool RenderViewContextMenuGtk::GetAcceleratorForCommandId(
+    int command_id,
+    ui::Accelerator* accelerator) {
+  return false;
+}
+
 void RenderViewContextMenuGtk::Popup(const gfx::Point& point) {
   RenderWidgetHostView* rwhv = source_tab_contents_->GetRenderWidgetHostView();
   if (rwhv)

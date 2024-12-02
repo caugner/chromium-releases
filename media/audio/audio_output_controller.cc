@@ -48,6 +48,9 @@ scoped_refptr<AudioOutputController> AudioOutputController::Create(
   if (!CheckParameters(params))
     return NULL;
 
+  if (!AudioManager::GetAudioManager())
+    return NULL;
+
   // Starts the audio controller thread.
   scoped_refptr<AudioOutputController> controller(new AudioOutputController(
       event_handler, buffer_capacity, NULL));
@@ -70,6 +73,9 @@ scoped_refptr<AudioOutputController> AudioOutputController::CreateLowLatency(
   DCHECK(sync_reader);
 
   if (!CheckParameters(params))
+    return NULL;
+
+  if (!AudioManager::GetAudioManager())
     return NULL;
 
   // Starts the audio controller thread.
@@ -123,7 +129,7 @@ void AudioOutputController::SetVolume(double volume) {
 
 void AudioOutputController::EnqueueData(const uint8* data, uint32 size) {
   // Write data to the push source and ask for more data if needed.
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   pending_request_ = false;
   // If |size| is set to 0, it indicates that the audio source doesn't have
   // more data right now, and so it doesn't make sense to send additional
@@ -141,6 +147,9 @@ void AudioOutputController::DoCreate(AudioParameters params) {
   if (state_ == kClosed)
     return;
   DCHECK(state_ == kEmpty);
+
+  if (!AudioManager::GetAudioManager())
+    return;
 
   stream_ = AudioManager::GetAudioManager()->MakeAudioOutputStreamProxy(params);
   if (!stream_) {
@@ -169,7 +178,7 @@ void AudioOutputController::DoCreate(AudioParameters params) {
 
   // If in normal latency mode then start buffering.
   if (!LowLatencyMode()) {
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
     SubmitOnMoreData_Locked();
   }
 }
@@ -219,7 +228,7 @@ void AudioOutputController::DoFlush() {
   if (!sync_reader_) {
     if (state_ != kPaused)
       return;
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
     buffer_.Clear();
   }
 }
@@ -272,7 +281,7 @@ uint32 AudioOutputController::OnMoreData(
     uint32 max_size, AudioBuffersState buffers_state) {
   // If regular latency mode is used.
   if (!sync_reader_) {
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
 
     // Save current buffers state.
     buffers_state_ = buffers_state;
@@ -317,7 +326,7 @@ void AudioOutputController::SubmitOnMoreData_Locked() {
   // If we need more data then call the event handler to ask for more data.
   // It is okay that we don't lock in this block because the parameters are
   // correct and in the worst case we are just asking more data than needed.
-  AutoUnlock auto_unlock(lock_);
+  base::AutoUnlock auto_unlock(lock_);
   handler_->OnMoreData(this, buffers_state);
 }
 

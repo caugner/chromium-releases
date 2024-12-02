@@ -9,7 +9,6 @@
 #endif
 
 #include "base/command_line.h"
-#include "base/lock.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "chrome/common/child_process.h"
@@ -23,25 +22,15 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
-GpuChannel::GpuChannel(int renderer_id)
-    : renderer_id_(renderer_id)
-#if defined(OS_POSIX)
-    , renderer_fd_(-1)
-#endif
-{
+GpuChannel::GpuChannel(GpuThread* gpu_thread, int renderer_id)
+    : gpu_thread_(gpu_thread),
+      renderer_id_(renderer_id) {
+  DCHECK(gpu_thread);
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   log_messages_ = command_line->HasSwitch(switches::kLogPluginMessages);
 }
 
 GpuChannel::~GpuChannel() {
-#if defined(OS_POSIX)
-  IPC::RemoveAndCloseChannelSocket(GetChannelName());
-
-  // If we still have the renderer FD, close it.
-  if (renderer_fd_ != -1) {
-    close(renderer_fd_);
-  }
-#endif
 }
 
 void GpuChannel::OnChannelConnected(int32 peer_pid) {
@@ -50,19 +39,18 @@ void GpuChannel::OnChannelConnected(int32 peer_pid) {
   }
 }
 
-void GpuChannel::OnMessageReceived(const IPC::Message& message) {
+bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
   if (log_messages_) {
     VLOG(1) << "received message @" << &message << " on channel @" << this
             << " with type " << message.type();
   }
 
-  if (message.routing_id() == MSG_ROUTING_CONTROL) {
-    OnControlMessageReceived(message);
-  } else {
-    // Fail silently if the GPU process has destroyed while the IPC message was
-    // en-route.
-    router_.RouteMessage(message);
-  }
+  if (message.routing_id() == MSG_ROUTING_CONTROL)
+    return OnControlMessageReceived(message);
+
+  // Fail silently if the GPU process has destroyed while the IPC message was
+  // en-route.
+  return router_.RouteMessage(message);
 }
 
 void GpuChannel::OnChannelError() {
@@ -106,7 +94,8 @@ bool GpuChannel::IsRenderViewGone(int32 renderer_route_id) {
 }
 #endif
 
-void GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
+bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(GpuChannel, msg)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_CreateViewCommandBuffer,
         OnCreateViewCommandBuffer)
@@ -118,8 +107,10 @@ void GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
         OnCreateVideoDecoder)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_DestroyVideoDecoder,
         OnDestroyVideoDecoder)
-    IPC_MESSAGE_UNHANDLED_ERROR()
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  DCHECK(handled);
+  return handled;
 }
 
 int GpuChannel::GenerateRouteID() {
@@ -149,13 +140,8 @@ void GpuChannel::OnCreateViewCommandBuffer(
   // "render target" the GpuCommandBufferStub targets.
   handle = gfx::NativeViewFromId(view_id);
 #elif defined(OS_LINUX)
-  ChildThread* gpu_thread = ChildThread::current();
   // Ask the browser for the view's XID.
-  // TODO(piman): This assumes that it doesn't change. It can change however
-  // when tearing off tabs. This needs a fix in the browser UI code. A possible
-  // alternative would be to add a socket/plug pair like with plugins but that
-  // has issues with events and focus.
-  gpu_thread->Send(new GpuHostMsg_GetViewXID(view_id, &handle));
+  gpu_thread_->Send(new GpuHostMsg_GetViewXID(view_id, &handle));
 #elif defined(OS_MACOSX)
   // On Mac OS X we currently pass a (fake) PluginWindowHandle for the
   // NativeViewId. We could allocate fake NativeViewIds on the browser
@@ -217,9 +203,11 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id) {
 
 void GpuChannel::OnCreateVideoDecoder(int32 context_route_id,
                                       int32 decoder_host_id) {
-#if defined(ENABLE_GPU)
+// TODO(cevans): do NOT re-enable this until GpuVideoService has been checked
+// for integer overflows, including the classic "width * height" overflow.
+#if 0
   VLOG(1) << "GpuChannel::OnCreateVideoDecoder";
-  GpuVideoService* service = GpuVideoService::get();
+  GpuVideoService* service = GpuVideoService::GetInstance();
   if (service == NULL) {
     // TODO(hclam): Need to send a failure message.
     return;
@@ -241,7 +229,7 @@ void GpuChannel::OnCreateVideoDecoder(int32 context_route_id,
 void GpuChannel::OnDestroyVideoDecoder(int32 decoder_id) {
 #if defined(ENABLE_GPU)
   LOG(ERROR) << "GpuChannel::OnDestroyVideoDecoder";
-  GpuVideoService* service = GpuVideoService::get();
+  GpuVideoService* service = GpuVideoService::GetInstance();
   if (service == NULL)
     return;
   service->DestroyVideoDecoder(&router_, decoder_id);
@@ -255,17 +243,8 @@ bool GpuChannel::Init() {
 
   // Map renderer ID to a (single) channel to that process.
   std::string channel_name = GetChannelName();
-#if defined(OS_POSIX)
-  // This gets called when the GpuChannel is initially created. At this
-  // point, create the socketpair and assign the GPU side FD to the channel
-  // name. Keep the renderer side FD as a member variable in the PluginChannel
-  // to be able to transmit it through IPC.
-  int gpu_fd;
-  IPC::SocketPair(&gpu_fd, &renderer_fd_);
-  IPC::AddChannelSocket(channel_name, gpu_fd);
-#endif
   channel_.reset(new IPC::SyncChannel(
-      channel_name, IPC::Channel::MODE_SERVER, this, NULL,
+      channel_name, IPC::Channel::MODE_SERVER, this,
       ChildProcess::current()->io_message_loop(), false,
       ChildProcess::current()->GetShutDownEvent()));
 
@@ -273,5 +252,16 @@ bool GpuChannel::Init() {
 }
 
 std::string GpuChannel::GetChannelName() {
-  return StringPrintf("%d.r%d", base::GetCurrentProcId(), renderer_id_);
+  return StringPrintf("%d.r%d.gpu", base::GetCurrentProcId(), renderer_id_);
 }
+
+#if defined(OS_POSIX)
+int GpuChannel::GetRendererFileDescriptor() {
+  int fd = -1;
+  if (channel_.get()) {
+    fd = channel_->GetClientFileDescriptor();
+  }
+  return fd;
+}
+#endif  // defined(OS_POSIX)
+

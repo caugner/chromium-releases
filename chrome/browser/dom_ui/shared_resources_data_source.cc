@@ -4,10 +4,10 @@
 
 #include "chrome/browser/dom_ui/shared_resources_data_source.h"
 
-#include "app/resource_bundle.h"
+#include <string>
+
 #include "base/singleton.h"
-#include "base/thread_restrictions.h"
-#include "chrome/browser/browser_process.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/io_thread.h"
@@ -18,6 +18,7 @@
 #include "grit/app_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/mime_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
@@ -31,6 +32,8 @@ int PathToIDR(const std::string& path) {
     idr = IDR_FOLDER_OPEN;
   } else if (path == "app/resources/folder_open_rtl.png") {
     idr = IDR_FOLDER_OPEN_RTL;
+  } else if (path == "app/resources/throbber.png") {
+    idr = IDR_THROBBER;
   } else {
     // The name of the files in the grd list are prefixed with the following
     // directory:
@@ -56,7 +59,7 @@ void SharedResourcesDataSource::Register() {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(source)));
 }
@@ -89,4 +92,3 @@ std::string SharedResourcesDataSource::GetMimeType(
   net::GetMimeTypeFromFile(FilePath().AppendASCII(path), &mime_type);
   return mime_type;
 }
-

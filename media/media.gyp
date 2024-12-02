@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -76,22 +76,28 @@
         'base/clock.h',
         'base/clock_impl.cc',
         'base/clock_impl.h',
+        'base/composite_filter.cc',
+        'base/composite_filter.h',
         'base/data_buffer.cc',
         'base/data_buffer.h',
         'base/djb2.cc',
         'base/djb2.h',
+        'base/filter_collection.cc',
+        'base/filter_collection.h',
         'base/filter_host.h',
         'base/filters.cc',
         'base/filters.h',
         'base/media.h',
-        'base/media_filter_collection.cc',
-        'base/media_filter_collection.h',
         'base/media_format.cc',
         'base/media_format.h',
         'base/media_posix.cc',
         'base/media_switches.cc',
         'base/media_switches.h',
         'base/media_win.cc',
+        'base/message_loop_factory.cc',
+        'base/message_loop_factory.h',
+        'base/message_loop_factory_impl.cc',
+        'base/message_loop_factory_impl.h',
         'base/pipeline.h',
         'base/pipeline_impl.cc',
         'base/pipeline_impl.h',
@@ -115,6 +121,8 @@
         'ffmpeg/ffmpeg_util.h',
         'ffmpeg/file_protocol.cc',
         'ffmpeg/file_protocol.h',
+        'filters/audio_file_reader.cc',
+        'filters/audio_file_reader.h',
         'filters/audio_renderer_algorithm_base.cc',
         'filters/audio_renderer_algorithm_base.h',
         'filters/audio_renderer_algorithm_default.cc',
@@ -209,6 +217,7 @@
       'type': 'executable',
       'dependencies': [
         'media',
+        'media_test_support',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
@@ -244,6 +253,7 @@
       'msvs_guid': 'C8C6183C-B03C-11DD-B471-DFD256D89593',
       'dependencies': [
         'media',
+        'media_test_support',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
@@ -267,16 +277,15 @@
         'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
+        'base/composite_filter_unittest.cc',
         'base/clock_impl_unittest.cc',
         'base/data_buffer_unittest.cc',
         'base/djb2_unittest.cc',
-        'base/media_filter_collection_unittest.cc',
+        'base/filter_collection_unittest.cc',
         'base/mock_ffmpeg.cc',
         'base/mock_ffmpeg.h',
-        'base/mock_filter_host.h',
-        'base/mock_filters.cc',
-        'base/mock_filters.h',
         'base/mock_reader.h',
+        'base/mock_task.cc',
         'base/mock_task.h',
         'base/pipeline_impl_unittest.cc',
         'base/pts_heap_unittest.cc',
@@ -326,10 +335,18 @@
       'dependencies': [
         'media',
         '../base/base.gyp:base',
+        '../testing/gmock.gyp:gmock',
+        '../testing/gtest.gyp:gtest',
       ],
       'sources': [
         'audio/test_audio_input_controller_factory.cc',
         'audio/test_audio_input_controller_factory.h',
+        'base/mock_callback.cc',
+        'base/mock_callback.h',
+        'base/mock_filter_host.cc',
+        'base/mock_filter_host.h',
+        'base/mock_filters.cc',
+        'base/mock_filters.h',
       ],
     },
     {
@@ -462,6 +479,52 @@
               'SubSystem': '1',         # Set /SUBSYSTEM:CONSOLE
             },
           },
+        },
+      ],
+    }],
+    ['OS!="mac"', {
+      'targets': [
+        {
+          'target_name': 'shader_bench',
+          'type': 'executable',
+          'dependencies': [
+            'media',
+            '../app/app.gyp:app_base',
+          ],
+          'sources': [
+            'tools/shader_bench/shader_bench.cc',
+            'tools/shader_bench/cpu_color_painter.cc',
+            'tools/shader_bench/cpu_color_painter.h',
+            'tools/shader_bench/gpu_color_painter.cc',
+            'tools/shader_bench/gpu_color_painter.h',
+            'tools/shader_bench/gpu_color_painter_exp.cc',
+            'tools/shader_bench/gpu_color_painter_exp.h',
+            'tools/shader_bench/gpu_painter.cc',
+            'tools/shader_bench/gpu_painter.h',
+            'tools/shader_bench/painter.cc',
+            'tools/shader_bench/painter.h',
+            'tools/shader_bench/window.cc',
+            'tools/shader_bench/window.h',
+          ],
+          'conditions': [
+            ['OS=="linux"', {
+              'dependencies': [
+                '../build/linux/system.gyp:gtk',
+              ],
+              'sources': [
+                'tools/shader_bench/window_linux.cc',
+              ],
+            }],
+            ['OS=="win"', {
+              'dependencies': [
+                '../third_party/angle/src/build_angle.gyp:libEGL',
+                '../third_party/angle/src/build_angle.gyp:libGLESv2',
+              ],
+              'sources': [
+                'tools/shader_bench/window_win.cc',
+              ],
+            }],
+          ],
         },
       ],
     }],

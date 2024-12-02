@@ -2,14 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/common/plugin_messages.h"
-
 #include "base/utf_string_conversions.h"
 #include "ipc/ipc_channel_handle.h"
 
-#define MESSAGES_INTERNAL_IMPL_FILE \
-  "chrome/common/plugin_messages_internal.h"
-#include "ipc/ipc_message_impl_macros.h"
+#define IPC_MESSAGE_IMPL
+#include "chrome/common/plugin_messages.h"
 
 PluginMsg_Init_Params::PluginMsg_Init_Params()
     : containing_window(0),
@@ -60,8 +57,8 @@ NPVariant_Param::~NPVariant_Param() {
 PluginMsg_UpdateGeometry_Param::PluginMsg_UpdateGeometry_Param()
     : transparent(false),
 #if !defined(OS_MACOSX)
-      windowless_buffer(NULL),
-      background_buffer(NULL)
+      windowless_buffer(TransportDIB::DefaultHandleValue()),
+      background_buffer(TransportDIB::DefaultHandleValue())
 #else
       ack_key(-1)
 #endif  // !defined(OS_MACOSX)

@@ -107,8 +107,7 @@ function onLoaded() {
   }
 
   // Create a view which lets you tab between the different sub-views.
-  var categoryTabSwitcher =
-      new TabSwitcherView(new DivView('categoryTabHandles'));
+  var categoryTabSwitcher = new TabSwitcherView('categoryTabHandles');
 
   // Populate the main tabs.
   categoryTabSwitcher.addTab('eventsTab', eventsView, false);
@@ -307,18 +306,19 @@ BrowserBridge.prototype.setLogLevel = function(logLevel) {
 // Messages received from the browser
 //------------------------------------------------------------------------------
 
-BrowserBridge.prototype.receivedLogEntry = function(logEntry) {
-  // Silently drop entries received before ready to receive them.
-  if (!this.areLogTypesReady_())
-    return;
-  // Assign unique ID, if needed.
-  if (logEntry.source.id == 0) {
-    logEntry.source.id = this.nextSourcelessEventId_;
-    --this.nextSourcelessEventId_;
+BrowserBridge.prototype.receivedLogEntries = function(logEntries) {
+  for (var e = 0; e < logEntries.length; ++e) {
+    var logEntry = logEntries[e];
+
+    // Assign unique ID, if needed.
+    if (logEntry.source.id == 0) {
+      logEntry.source.id = this.nextSourcelessEventId_;
+      --this.nextSourcelessEventId_;
+    }
+    this.capturedEvents_.push(logEntry);
+    for (var i = 0; i < this.logObservers_.length; ++i)
+      this.logObservers_[i].onLogEntryAdded(logEntry);
   }
-  this.capturedEvents_.push(logEntry);
-  for (var i = 0; i < this.logObservers_.length; ++i)
-    this.logObservers_[i].onLogEntryAdded(logEntry);
 };
 
 BrowserBridge.prototype.receivedLogEventTypeConstants = function(constantsMap) {
@@ -388,12 +388,24 @@ BrowserBridge.prototype.receivedServiceProviders = function(serviceProviders) {
 };
 
 BrowserBridge.prototype.receivedPassiveLogEntries = function(entries) {
-  this.numPassivelyCapturedEvents_ += entries.length;
-  for (var i = 0; i < entries.length; ++i) {
-    var entry = entries[i];
-    entry.wasPassivelyCaptured = true;
-    this.receivedLogEntry(entry);
-  }
+  // Due to an expected race condition, it is possible to receive actively
+  // captured log entries before the passively logged entries are received.
+  //
+  // When that happens, we create a copy of the actively logged entries, delete
+  // all entries, and, after handling all the passively logged entries, add back
+  // the deleted actively logged entries.
+  var earlyActivelyCapturedEvents = this.capturedEvents_.slice(0);
+  if (earlyActivelyCapturedEvents.length > 0)
+    this.deleteAllEvents();
+
+  this.numPassivelyCapturedEvents_ = entries.length;
+  for (var i = 0; i < entries.length; ++i)
+    entries[i].wasPassivelyCaptured = true;
+  this.receivedLogEntries(entries);
+
+  // Add back early actively captured events, if any.
+  if (earlyActivelyCapturedEvents.length)
+    this.receivedLogEntries(earlyActivelyCapturedEvents);
 };
 
 
@@ -425,12 +437,6 @@ BrowserBridge.prototype.receivedCompletedConnectionTestSuite = function() {
 
 BrowserBridge.prototype.receivedHttpCacheInfo = function(info) {
   this.pollableDataHelpers_.httpCacheInfo.update(info);
-};
-
-BrowserBridge.prototype.areLogTypesReady_ = function() {
-  return (LogEventType  != null &&
-          LogEventPhase != null &&
-          LogSourceType != null);
 };
 
 //------------------------------------------------------------------------------

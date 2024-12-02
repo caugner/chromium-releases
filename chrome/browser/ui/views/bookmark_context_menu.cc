@@ -1,14 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/bookmark_context_menu.h"
+#include "chrome/browser/ui/views/bookmark_context_menu.h"
 
-#include "app/l10n_util.h"
 #include "base/i18n/rtl.h"
-#include "chrome/browser/profile.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/controls/menu/menu_item_view.h"
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -60,7 +62,7 @@ bool BookmarkContextMenu::IsCommandEnabled(int command_id) const {
 }
 
 bool BookmarkContextMenu::ShouldCloseAllMenusOnExecute(int id) {
-  return id != IDS_BOOKMARK_BAR_REMOVE;
+  return id != IDC_BOOKMARK_BAR_REMOVE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -71,20 +73,18 @@ void BookmarkContextMenu::CloseMenu() {
   menu_->Cancel();
 }
 
-void BookmarkContextMenu::AddItem(int command_id) {
-  menu_->AppendMenuItemWithLabel(command_id, l10n_util::GetString(command_id));
-}
-
 void BookmarkContextMenu::AddItemWithStringId(int command_id, int string_id) {
-  menu_->AppendMenuItemWithLabel(command_id, l10n_util::GetString(string_id));
+  menu_->AppendMenuItemWithLabel(
+      command_id, UTF16ToWide(l10n_util::GetStringUTF16(string_id)));
 }
 
 void BookmarkContextMenu::AddSeparator() {
   menu_->AppendSeparator();
 }
 
-void BookmarkContextMenu::AddCheckboxItem(int command_id) {
-  menu_->AppendMenuItem(command_id, l10n_util::GetString(command_id),
+void BookmarkContextMenu::AddCheckboxItem(int command_id, int string_id) {
+  menu_->AppendMenuItem(command_id,
+                        UTF16ToWide(l10n_util::GetStringUTF16(string_id)),
                         views::MenuItemView::CHECKBOX);
 }
 

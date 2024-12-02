@@ -1,28 +1,29 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/shell_dialogs.h"
 
-#include "app/l10n_util.h"
 #include "base/callback.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/html_dialog_ui.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/views/browser_dialogs.h"
-#include "chrome/browser/views/html_dialog_view.h"
+#include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/browser/ui/views/html_dialog_view.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/window/non_client_view.h"
 #include "views/window/window.h"
 
@@ -213,7 +214,7 @@ void SelectFileDialogImpl::SelectFile(
         NOTREACHED();
         return;
     }
-    title_string = l10n_util::GetString(string_id);
+    title_string = UTF16ToWide(l10n_util::GetStringUTF16(string_id));
   } else {
     title_string = UTF16ToWide(title);
   }
@@ -263,8 +264,12 @@ void SelectFileDialogImpl::OnDialogClosed(FileBrowseDelegate* delegate,
         std::string path_string;
         if (dict->HasKey(kKeyNamePath) &&
             dict->GetString(kKeyNamePath, &path_string)) {
-          FilePath path = FilePath::FromWStringHack(UTF8ToWide(path_string));
-
+#if defined(OS_WIN)
+          FilePath path(base::SysUTF8ToWide(path_string));
+#else
+          FilePath path(
+              base::SysWideToNativeMB(base::SysUTF8ToWide(path_string)));
+#endif
           listener_->FileSelected(path, kSaveCompletePageIndex,
                                   delegate->params_);
           notification_fired = true;
@@ -280,8 +285,13 @@ void SelectFileDialogImpl::OnDialogClosed(FileBrowseDelegate* delegate,
             std::string path_string;
             if (paths_value->GetString(i, &path_string) &&
                 !path_string.empty()) {
-              paths.push_back(FilePath::FromWStringHack(
-                  UTF8ToWide(path_string)));
+#if defined(OS_WIN)
+              FilePath path(base::SysUTF8ToWide(path_string));
+#else
+              FilePath path(
+                  base::SysWideToNativeMB(base::SysUTF8ToWide(path_string)));
+#endif
+              paths.push_back(path);
             }
           }
 

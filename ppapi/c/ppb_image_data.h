@@ -1,11 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_PPB_IMAGE_DATA_H_
 #define PPAPI_C_PPB_IMAGE_DATA_H_
 
 #include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_size.h"
@@ -15,19 +17,22 @@ typedef enum {
   PP_IMAGEDATAFORMAT_BGRA_PREMUL,
   PP_IMAGEDATAFORMAT_RGBA_PREMUL
 } PP_ImageDataFormat;
+PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_ImageDataFormat, 4);
 
 struct PP_ImageDataDesc {
   PP_ImageDataFormat format;
 
-  // Size of the bitmap in pixels.
+  /** Size of the bitmap in pixels. */
   struct PP_Size size;
 
-  // The row width in bytes. This may be different than width * 4 since there
-  // may be padding at the end of the lines.
+  /** The row width in bytes. This may be different than width * 4 since there
+   * may be padding at the end of the lines.
+   */
   int32_t stride;
 };
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_ImageDataDesc, 16);
 
-#define PPB_IMAGEDATA_INTERFACE "PPB_ImageData;0.2"
+#define PPB_IMAGEDATA_INTERFACE "PPB_ImageData;0.3"
 
 /**
  * @file
@@ -54,7 +59,7 @@ struct PPB_ImageData {
   /**
    * Allocates an image data resource with the given format and size. The
    * return value will have a nonzero ID on success, or zero on failure.
-   * Failure means the module handle, image size, or format was invalid.
+   * Failure means the instance, image size, or format was invalid.
    *
    * Set the init_to_zero flag if you want the bitmap initialized to
    * transparent during the creation process. If this flag is not set, the
@@ -65,7 +70,7 @@ struct PPB_ImageData {
    * memory, but may contain data from a previous image produced by the same
    * plugin if the bitmap was cached and re-used.
    */
-  PP_Resource (*Create)(PP_Module module,
+  PP_Resource (*Create)(PP_Instance instance,
                         PP_ImageDataFormat format,
                         const struct PP_Size* size,
                         PP_Bool init_to_zero);
@@ -97,4 +102,5 @@ struct PPB_ImageData {
  * @}
  * End addtogroup PPB
  */
-#endif  // PPAPI_C_PPB_IMAGE_DATA_H_
+#endif  /* PPAPI_C_PPB_IMAGE_DATA_H_ */
+

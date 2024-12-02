@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_FRAME_CHROME_FRAME_DELEGATE_H_
 #define CHROME_FRAME_CHROME_FRAME_DELEGATE_H_
+#pragma once
 
 #include <atlbase.h>
 #include <atlwin.h>
@@ -12,7 +13,7 @@
 #include <vector>
 
 #include "base/file_path.h"
-#include "base/lock.h"
+#include "base/synchronization/lock.h"
 #include "chrome/common/automation_messages.h"
 #include "ipc/ipc_message.h"
 
@@ -35,7 +36,7 @@ class ChromeFrameDelegate {
   virtual void OnGetEnabledExtensionsComplete(
       void* user_data,
       const std::vector<FilePath>& extension_directories) = 0;
-  virtual void OnMessageReceived(const IPC::Message& msg) = 0;
+  virtual bool OnMessageReceived(const IPC::Message& msg) = 0;
   virtual void OnChannelError() = 0;
 
   // This remains in interface since we call it if Navigate()
@@ -76,10 +77,10 @@ class ChromeFrameDelegateImpl : public ChromeFrameDelegate {
       void* user_data,
       const std::vector<FilePath>& extension_directories) {}
   virtual void OnLoadFailed(int error_code, const std::string& url) {}
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
   virtual void OnChannelError() {}
 
-  static bool IsTabMessage(const IPC::Message& message, int* tab_handle);
+  static bool IsTabMessage(const IPC::Message& message);
 
   virtual bool IsValid() const {
     return true;
@@ -89,42 +90,34 @@ class ChromeFrameDelegateImpl : public ChromeFrameDelegate {
 
  protected:
   // Protected methods to be overriden.
-  virtual void OnNavigationStateChanged(int tab_handle, int flags,
-                                        const IPC::NavigationInfo& nav_info) {}
-  virtual void OnUpdateTargetUrl(int tab_handle,
-                                 const std::wstring& new_target_url) {}
-  virtual void OnAcceleratorPressed(int tab_handle, const MSG& accel_message) {}
-  virtual void OnTabbedOut(int tab_handle, bool reverse) {}
-  virtual void OnOpenURL(int tab_handle, const GURL& url,
-                         const GURL& referrer, int open_disposition) {}
-  virtual void OnDidNavigate(int tab_handle,
-                             const IPC::NavigationInfo& navigation_info) {}
-  virtual void OnNavigationFailed(int tab_handle, int error_code,
-                                  const GURL& gurl) {}
-  virtual void OnLoad(int tab_handle, const GURL& url) {}
-  virtual void OnMessageFromChromeFrame(int tab_handle,
-                                        const std::string& message,
+  virtual void OnNavigationStateChanged(
+      int flags, const NavigationInfo& nav_info) {}
+  virtual void OnUpdateTargetUrl(const std::wstring& new_target_url) {}
+  virtual void OnAcceleratorPressed(const MSG& accel_message) {}
+  virtual void OnTabbedOut(bool reverse) {}
+  virtual void OnOpenURL(
+      const GURL& url, const GURL& referrer, int open_disposition) {}
+  virtual void OnDidNavigate(const NavigationInfo& navigation_info) {}
+  virtual void OnNavigationFailed(int error_code, const GURL& gurl) {}
+  virtual void OnLoad(const GURL& url) {}
+  virtual void OnMessageFromChromeFrame(const std::string& message,
                                         const std::string& origin,
                                         const std::string& target) {}
-  virtual void OnHandleContextMenu(int tab_handle, HANDLE menu_handle,
-                                   int align_flags,
-                                   const IPC::MiniContextMenuParams& params) {}
-  virtual void OnRequestStart(int tab_handle, int request_id,
-                              const IPC::AutomationURLRequest& request) {}
-  virtual void OnRequestRead(int tab_handle, int request_id,
-                             int bytes_to_read) {}
-  virtual void OnRequestEnd(int tab_handle, int request_id,
-                            const URLRequestStatus& status) {}
-  virtual void OnDownloadRequestInHost(int tab_handle, int request_id) {}
-  virtual void OnSetCookieAsync(int tab_handle, const GURL& url,
-                                const std::string& cookie) {}
-  virtual void OnAttachExternalTab(int tab_handle,
-      const IPC::AttachExternalTabParams& attach_params) {}
-  virtual void OnGoToHistoryEntryOffset(int tab_handle, int offset) {}
+  virtual void OnHandleContextMenu(HANDLE menu_handle, int align_flags,
+                                   const MiniContextMenuParams& params) {}
+  virtual void OnRequestStart(
+      int request_id, const AutomationURLRequest& request) {}
+  virtual void OnRequestRead(int request_id, int bytes_to_read) {}
+  virtual void OnRequestEnd(int request_id,
+                            const net::URLRequestStatus& status) {}
+  virtual void OnDownloadRequestInHost(int request_id) {}
+  virtual void OnSetCookieAsync(const GURL& url, const std::string& cookie) {}
+  virtual void OnAttachExternalTab(
+      const AttachExternalTabParams& attach_params) {}
+  virtual void OnGoToHistoryEntryOffset(int offset) {}
 
-  virtual void OnGetCookiesFromHost(int tab_handle, const GURL& url,
-                                    int cookie_id) {}
-  virtual void OnCloseTab(int tab_handle) {}
+  virtual void OnGetCookiesFromHost(const GURL& url, int cookie_id) {}
+  virtual void OnCloseTab() {}
 };
 
 // This interface enables tasks to be marshaled to desired threads.
@@ -160,7 +153,7 @@ template <class T> class TaskMarshallerThroughWindowsMessages
   }
 
   void DeleteAllPendingTasks() {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
     DVLOG_IF(1, !pending_tasks_.empty()) << "Destroying "
                                          << pending_tasks_.size()
                                          << " pending tasks";
@@ -191,7 +184,7 @@ template <class T> class TaskMarshallerThroughWindowsMessages
   }
 
   inline void PushTask(Task* task) {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
     pending_tasks_.push(task);
   }
 
@@ -199,7 +192,7 @@ template <class T> class TaskMarshallerThroughWindowsMessages
   // otherwise we assume this is an already destroyed task (but Window message
   // had remained in the thread queue).
   inline bool PopTask(Task* task) {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
     if (!pending_tasks_.empty() && task == pending_tasks_.front()) {
       pending_tasks_.pop();
       return true;
@@ -208,7 +201,7 @@ template <class T> class TaskMarshallerThroughWindowsMessages
     return false;
   }
 
-  Lock lock_;
+  base::Lock lock_;
   std::queue<Task*> pending_tasks_;
 };
 

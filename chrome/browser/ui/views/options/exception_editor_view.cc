@@ -1,11 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/options/exception_editor_view.h"
+#include "chrome/browser/ui/views/options/exception_editor_view.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_exceptions_table_model.h"
 #include "googleurl/src/url_canon.h"
@@ -13,6 +11,8 @@
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/grid_layout.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
@@ -24,7 +24,7 @@ ExceptionEditorView::ExceptionEditorView(
     ContentExceptionsTableModel* model,
     bool allow_off_the_record,
     int index,
-    const HostContentSettingsMap::Pattern& pattern,
+    const ContentSettingsPattern& pattern,
     ContentSetting setting,
     bool is_off_the_record)
     : delegate_(delegate),
@@ -56,14 +56,17 @@ bool ExceptionEditorView::IsModal() const {
 }
 
 std::wstring ExceptionEditorView::GetWindowTitle() const {
-  return is_new() ? l10n_util::GetString(IDS_EXCEPTION_EDITOR_NEW_TITLE) :
-                    l10n_util::GetString(IDS_EXCEPTION_EDITOR_TITLE);
+  if (is_new())
+    return UTF16ToWide(
+        l10n_util::GetStringUTF16(IDS_EXCEPTION_EDITOR_NEW_TITLE));
+
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_EXCEPTION_EDITOR_TITLE));
 }
 
 bool ExceptionEditorView::IsDialogButtonEnabled(
     MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
-    return IsPatternValid(HostContentSettingsMap::Pattern(
+    return IsPatternValid(ContentSettingsPattern(
                           UTF16ToUTF8(pattern_tf_->text())),
                           incognito_cb_->checked());
   }
@@ -75,7 +78,7 @@ bool ExceptionEditorView::Cancel() {
 }
 
 bool ExceptionEditorView::Accept() {
-  HostContentSettingsMap::Pattern new_pattern(UTF16ToUTF8(pattern_tf_->text()));
+  ContentSettingsPattern new_pattern(UTF16ToUTF8(pattern_tf_->text()));
   ContentSetting setting =
       cb_model_.SettingForIndex(action_cb_->selected_item());
   bool is_off_the_record = incognito_cb_->checked();
@@ -91,13 +94,12 @@ views::View* ExceptionEditorView::GetContentsView() {
 void ExceptionEditorView::ContentsChanged(views::Textfield* sender,
                                           const std::wstring& new_contents) {
   GetDialogClientView()->UpdateDialogButtons();
-  UpdateImageView(pattern_iv_, IsPatternValid(HostContentSettingsMap::Pattern(
+  UpdateImageView(pattern_iv_, IsPatternValid(ContentSettingsPattern(
       UTF16ToUTF8(pattern_tf_->text())), incognito_cb_->checked()));
 }
 
-bool ExceptionEditorView::HandleKeystroke(
-    views::Textfield* sender,
-    const views::Textfield::Keystroke& key) {
+bool ExceptionEditorView::HandleKeyEvent(views::Textfield* sender,
+                                         const views::KeyEvent& key_event) {
   return false;
 }
 
@@ -110,7 +112,7 @@ void ExceptionEditorView::Init() {
 
   pattern_iv_ = new views::ImageView;
 
-  UpdateImageView(pattern_iv_, IsPatternValid(HostContentSettingsMap::Pattern(
+  UpdateImageView(pattern_iv_, IsPatternValid(ContentSettingsPattern(
       UTF16ToUTF8(pattern_tf_->text())), is_off_the_record_));
 
   action_cb_ = new views::Combobox(&cb_model_);
@@ -118,10 +120,10 @@ void ExceptionEditorView::Init() {
     action_cb_->SetSelectedItem(cb_model_.IndexForSetting(setting_));
 
   incognito_cb_ = new views::Checkbox(
-      l10n_util::GetString(IDS_EXCEPTION_EDITOR_OTR_TITLE));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_EXCEPTION_EDITOR_OTR_TITLE)));
   incognito_cb_->SetChecked(is_off_the_record_);
 
-  GridLayout* layout = CreatePanelGridLayout(this);
+  GridLayout* layout = GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   // For the Textfields.
@@ -152,13 +154,14 @@ void ExceptionEditorView::Init() {
 }
 
 views::Label* ExceptionEditorView::CreateLabel(int message_id) {
-  views::Label* label = new views::Label(l10n_util::GetString(message_id));
+  views::Label* label =
+        new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(message_id)));
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   return label;
 }
 
 bool ExceptionEditorView::IsPatternValid(
-    const HostContentSettingsMap::Pattern& pattern,
+    const ContentSettingsPattern& pattern,
     bool is_off_the_record) const {
   bool is_valid_pattern = pattern.IsValid() &&
       (model_->IndexOfExceptionByPattern(pattern, is_off_the_record) == -1);

@@ -10,9 +10,9 @@
 #include "gfx/rect.h"
 #include "gfx/size.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
-#include "webkit/glue/plugins/gtk_plugin_container.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webpreferences.h"
+#include "webkit/plugins/npapi/gtk_plugin_container.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
 using WebKit::WebDevToolsAgentClient;
@@ -28,7 +28,7 @@ WebViewHost* WebViewHost::Create(GtkWidget* parent_view,
   host->view_ = WebWidgetHost::CreateWidget(parent_view, host);
   host->plugin_container_manager_.set_host_widget(host->view_);
 
-  host->webwidget_ = WebView::create(delegate, dev_tools_client);
+  host->webwidget_ = WebView::create(delegate, dev_tools_client, NULL);
   prefs.Apply(host->webview());
   host->webview()->initializeMainFrame(delegate);
   host->webwidget_->layout();

@@ -12,13 +12,14 @@
 #include <pthread.h>
 
 #include "base/file_util.h"
-#include "base/lock.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/singleton.h"
 #include "base/string_number_conversions.h"
+#include "base/synchronization/lock.h"
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
 #include "printing/backend/cups_helper.h"
+#include "printing/backend/print_backend_consts.h"
 
 #if !defined(OS_MACOSX)
 GCRY_THREAD_OPTION_PTHREAD_IMPL;
@@ -66,6 +67,9 @@ class GcryptInitializer {
   }
 };
 
+static base::LazyInstance<GcryptInitializer> g_gcrypt_initializer(
+    base::LINKER_INITIALIZED);
+
 }  // namespace
 #endif
 
@@ -73,11 +77,10 @@ namespace printing {
 
 static const char kCUPSPrinterInfoOpt[] = "printer-info";
 static const char kCUPSPrinterStateOpt[] = "printer-state";
-static const char kCUPSPrintServerURL[] = "print_server_url";
 
 class PrintBackendCUPS : public PrintBackend {
  public:
-  explicit PrintBackendCUPS(const GURL& print_server_url);
+  PrintBackendCUPS(const GURL& print_server_url, bool blocking);
   virtual ~PrintBackendCUPS() {}
 
   // PrintBackend implementation.
@@ -97,10 +100,11 @@ class PrintBackendCUPS : public PrintBackend {
   FilePath GetPPD(const char* name);
 
   GURL print_server_url_;
+  bool blocking_;
 };
 
-PrintBackendCUPS::PrintBackendCUPS(const GURL& print_server_url)
-    : print_server_url_(print_server_url) {
+PrintBackendCUPS::PrintBackendCUPS(const GURL& print_server_url, bool blocking)
+    : print_server_url_(print_server_url), blocking_(blocking) {
 }
 
 void PrintBackendCUPS::EnumeratePrinters(PrinterList* printer_list) {
@@ -188,16 +192,19 @@ scoped_refptr<PrintBackend> PrintBackend::CreateInstance(
     const DictionaryValue* print_backend_settings) {
 #if !defined(OS_MACOSX)
   // Initialize gcrypt library.
-  Singleton<GcryptInitializer>::get();
+  g_gcrypt_initializer.Get();
 #endif
 
-  std::string print_server_url_str;
+  std::string print_server_url_str, cups_blocking;
   if (print_backend_settings) {
     print_backend_settings->GetString(kCUPSPrintServerURL,
                                       &print_server_url_str);
+
+    print_backend_settings->GetString(kCUPSBlocking,
+                                      &cups_blocking);
   }
   GURL print_server_url(print_server_url_str.c_str());
-  return new PrintBackendCUPS(print_server_url);
+  return new PrintBackendCUPS(print_server_url, cups_blocking == kValueTrue);
 }
 
 int PrintBackendCUPS::GetDests(cups_dest_t** dests) {
@@ -205,6 +212,7 @@ int PrintBackendCUPS::GetDests(cups_dest_t** dests) {
     return cupsGetDests(dests);
   } else {
     HttpConnectionCUPS http(print_server_url_);
+    http.SetBlocking(blocking_);
     return cupsGetDests2(http.http(), dests);
   }
 }
@@ -212,18 +220,47 @@ int PrintBackendCUPS::GetDests(cups_dest_t** dests) {
 FilePath PrintBackendCUPS::GetPPD(const char* name) {
   // cupsGetPPD returns a filename stored in a static buffer in CUPS.
   // Protect this code with lock.
-  static Lock ppd_lock;
-  AutoLock ppd_autolock(ppd_lock);
+  static base::Lock ppd_lock;
+  base::AutoLock ppd_autolock(ppd_lock);
   FilePath ppd_path;
   const char* ppd_file_path = NULL;
   if (print_server_url_.is_empty()) {  // Use default (local) print server.
     ppd_file_path = cupsGetPPD(name);
+    if (ppd_file_path)
+      ppd_path = FilePath(ppd_file_path);
   } else {
+    // cupsGetPPD2 gets stuck sometimes in an infinite time due to network
+    // configuration/issues. To prevent that, use non-blocking http connection
+    // here.
+    // Note: After looking at CUPS sources, it looks like non-blocking
+    // connection will timeout after 10 seconds of no data period. And it will
+    // return the same way as if data was completely and sucessfully downloaded.
+    // To distinguish error case from the normal return, will check result file
+    // size agains content length.
     HttpConnectionCUPS http(print_server_url_);
+    http.SetBlocking(blocking_);
     ppd_file_path = cupsGetPPD2(http.http(), name);
+    // Check if the get full PPD, since non-blocking call may simply return
+    // normally after timeout expired.
+    if (ppd_file_path) {
+      ppd_path = FilePath(ppd_file_path);
+      off_t content_len = httpGetLength2(http.http());
+      int64 ppd_size = 0;
+      // This is a heuristic to detect if we reached timeout. If we see content
+      // length is larger that the actual file we downloaded it means timeout
+      // reached. Sometimes http can be compressed, and in that case the
+      // the content length will be smaller than the actual payload (not sure
+      // if CUPS support such responses).
+      if (!file_util::GetFileSize(ppd_path, &ppd_size) ||
+          content_len > ppd_size) {
+        LOG(ERROR) << "Error downloading PPD file for: " << name
+                   << ", file size: "  << ppd_size
+                   << ", content length: " << content_len;
+        file_util::Delete(ppd_path, false);
+        ppd_path.clear();
+      }
+    }
   }
-  if (ppd_file_path)
-    ppd_path = FilePath(ppd_file_path);
   return ppd_path;
 }
 

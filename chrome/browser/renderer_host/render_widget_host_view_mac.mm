@@ -8,7 +8,6 @@
 
 #include "app/app_switches.h"
 #include "app/surface/io_surface_support_mac.h"
-#import "base/chrome_application_mac.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
@@ -22,8 +21,6 @@
 #include "chrome/browser/accessibility/browser_accessibility_state.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_trial.h"
-#import "chrome/browser/cocoa/rwhvm_editcommand_helper.h"
-#import "chrome/browser/cocoa/view_id_util.h"
 #include "chrome/browser/gpu_process_host.h"
 #include "chrome/browser/plugin_process_host.h"
 #include "chrome/browser/renderer_host/backing_store_mac.h"
@@ -31,6 +28,8 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host.h"
 #include "chrome/browser/spellchecker_platform_engine.h"
+#import "chrome/browser/ui/cocoa/rwhvm_editcommand_helper.h"
+#import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/edit_command.h"
@@ -39,10 +38,10 @@
 #include "chrome/common/render_messages.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "third_party/WebKit/WebKit/chromium/public/mac/WebInputEventFactory.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
-#include "webkit/glue/plugins/webplugin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebInputEventFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/webaccessibility.h"
+#include "webkit/plugins/npapi/webplugin.h"
 #import "third_party/mozilla/ComplexTextInputPanel.h"
 
 using WebKit::WebInputEvent;
@@ -64,6 +63,7 @@ static inline int ToWebKitModifiers(NSUInteger flags) {
 - (id)initWithRenderWidgetHostViewMac:(RenderWidgetHostViewMac*)r;
 - (void)keyEvent:(NSEvent *)theEvent wasKeyEquivalent:(BOOL)equiv;
 - (void)cancelChildPopups;
+- (void)checkForPluginImeCancellation;
 @end
 
 // This API was published since 10.6. Provide the declaration so it can be
@@ -92,8 +92,8 @@ WebKit::WebColor WebColorFromNSColor(NSColor *color) {
       std::max(0, std::min(static_cast<int>(lroundf(255.0f * b)), 255));
 }
 
-// Extract underline information from an attributed string.
-// Mostly copied from third_party/WebKit/WebKit/mac/WebView/WebHTMLView.mm
+// Extract underline information from an attributed string. Mostly copied from
+// third_party/WebKit/Source/WebKit/mac/WebView/WebHTMLView.mm
 void ExtractUnderlines(
     NSAttributedString* string,
     std::vector<WebKit::WebCompositionUnderline>* underlines) {
@@ -524,7 +524,7 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
 
   // Turn on accessibility only if VoiceOver is running.
   if (IsVoiceOverRunning()) {
-    Singleton<BrowserAccessibilityState>()->OnScreenReaderDetected();
+    BrowserAccessibilityState::GetInstance()->OnScreenReaderDetected();
     render_widget_host_->EnableRendererAccessibility();
   }
 }
@@ -624,15 +624,15 @@ gfx::NativeView RenderWidgetHostViewMac::GetNativeView() {
 }
 
 void RenderWidgetHostViewMac::MovePluginWindows(
-    const std::vector<webkit_glue::WebPluginGeometry>& moves) {
+    const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Handle movement of accelerated plugins, which are the only "windowed"
   // plugins that exist on the Mac.
-  for (std::vector<webkit_glue::WebPluginGeometry>::const_iterator iter =
+  for (std::vector<webkit::npapi::WebPluginGeometry>::const_iterator iter =
            moves.begin();
        iter != moves.end();
        ++iter) {
-    webkit_glue::WebPluginGeometry geom = *iter;
+    webkit::npapi::WebPluginGeometry geom = *iter;
 
     AcceleratedPluginView* view = ViewForPluginWindowHandle(geom.window);
     DCHECK(view);
@@ -794,7 +794,8 @@ void RenderWidgetHostViewMac::DidUpdateBackingStore(
     HandleDelayedGpuViewHiding();
 }
 
-void RenderWidgetHostViewMac::RenderViewGone() {
+void RenderWidgetHostViewMac::RenderViewGone(base::TerminationStatus status,
+                                             int error_code) {
   // TODO(darin): keep this around, and draw sad-tab into it.
   UpdateCursorIfOverSelf();
   Destroy();
@@ -881,8 +882,12 @@ void RenderWidgetHostViewMac::KillSelf() {
   }
 }
 
-void RenderWidgetHostViewMac::SetPluginImeEnabled(bool enabled, int plugin_id) {
-  [cocoa_view_ setPluginImeEnabled:(enabled ? YES : NO) forPlugin:plugin_id];
+void RenderWidgetHostViewMac::PluginFocusChanged(bool focused, int plugin_id) {
+  [cocoa_view_ pluginFocusChanged:(focused ? YES : NO) forPlugin:plugin_id];
+}
+
+void RenderWidgetHostViewMac::StartPluginIme() {
+  [cocoa_view_ setPluginImeActive:YES];
 }
 
 bool RenderWidgetHostViewMac::PostProcessEventForPluginIme(
@@ -898,10 +903,10 @@ bool RenderWidgetHostViewMac::PostProcessEventForPluginIme(
   return false;
 }
 
-void RenderWidgetHostViewMac::PluginImeCompositionConfirmed(
+void RenderWidgetHostViewMac::PluginImeCompositionCompleted(
     const string16& text, int plugin_id) {
   if (render_widget_host_) {
-    render_widget_host_->Send(new ViewMsg_PluginImeCompositionConfirmed(
+    render_widget_host_->Send(new ViewMsg_PluginImeCompositionCompleted(
         render_widget_host_->routing_id(), text, plugin_id));
   }
 }
@@ -1019,14 +1024,14 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceSetIOSurface(
     // Fake up a WebPluginGeometry for the root window to set the
     // container's size; we will never get a notification from the
     // browser about the root window, only plugins.
-    webkit_glue::WebPluginGeometry geom;
+    webkit::npapi::WebPluginGeometry geom;
     gfx::Rect rect(0, 0, width, height);
     geom.window = window;
     geom.window_rect = rect;
     geom.clip_rect = rect;
     geom.visible = true;
     geom.rects_valid = true;
-    MovePluginWindows(std::vector<webkit_glue::WebPluginGeometry>(1, geom));
+    MovePluginWindows(std::vector<webkit::npapi::WebPluginGeometry>(1, geom));
   }
 }
 
@@ -1124,6 +1129,17 @@ void RenderWidgetHostViewMac::AcknowledgeSwapBuffers(
     int renderer_id,
     int32 route_id,
     uint64 swap_buffers_count) {
+  // Called on the display link thread. Hand actual work off to the IO thread,
+  // because |GpuProcessHost::Get()| can only be called there.
+  // Currently, this is never called for plugins.
+  if (render_widget_host_) {
+    DCHECK_EQ(render_widget_host_->process()->id(), renderer_id);
+    // |render_widget_host_->routing_id()| and |route_id| are usually not
+    // equal: The former identifies the channel from the RWH in the browser
+    // process to the corresponding render widget in the renderer process, while
+    // the latter identifies the channel from the GpuCommandBufferStub in the
+    // GPU process to the corresponding command buffer client in the renderer.
+  }
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       new BuffersSwappedAcknowledger(
@@ -1247,6 +1263,8 @@ void RenderWidgetHostViewMac::SetActive(bool active) {
     render_widget_host_->SetActive(active);
   if (HasFocus())
     SetTextInputActive(active);
+  if (!active)
+    [cocoa_view_ setPluginImeActive:NO];
 }
 
 void RenderWidgetHostViewMac::SetWindowVisibility(bool visible) {
@@ -1320,7 +1338,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     canBeKeyView_ = YES;
     takesFocusOnlyOnMouseDown_ = NO;
     closeOnDeactivate_ = NO;
-    pluginImeIdentifier_ = -1;
+    focusedPluginIdentifier_ = -1;
   }
   return self;
 }
@@ -1476,11 +1494,17 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   hasEditCommands_ = NO;
   editCommands_.clear();
 
+  // Before doing anything with a key down, check to see if plugin IME has been
+  // cancelled, since the plugin host needs to be informed of that before
+  // receiving the keydown.
+  if ([theEvent type] == NSKeyDown)
+    [self checkForPluginImeCancellation];
+
   // Sends key down events to input method first, then we can decide what should
   // be done according to input method's feedback.
   // If a plugin is active, bypass this step since events are forwarded directly
   // to the plugin IME.
-  if (pluginImeIdentifier_ == -1)
+  if (focusedPluginIdentifier_ == -1)
     [self interpretKeyEvents:[NSArray arrayWithObject:theEvent]];
 
   handlingKeyDown_ = NO;
@@ -1754,8 +1778,6 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
     return;
   }
 
-  DCHECK(
-      renderWidgetHostView_->render_widget_host_->process()->HasConnection());
   DCHECK(!renderWidgetHostView_->about_to_validate_and_paint_);
 
   renderWidgetHostView_->about_to_validate_and_paint_ = true;
@@ -2065,14 +2087,8 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   // SpellCheckerPlatform::CheckSpelling remembers the last tag and
   // SpellCheckerPlatform::IgnoreWord assumes that is the correct tag.
   NSString* wordToIgnore = [sender stringValue];
-  if (wordToIgnore != nil) {
+  if (wordToIgnore != nil)
     SpellCheckerPlatform::IgnoreWord(base::SysNSStringToUTF16(wordToIgnore));
-
-    // Strangely, the spellingPanel doesn't send checkSpelling after a word is
-    // ignored, so we have to explicitly call AdvanceToNextMisspelling here.
-    RenderWidgetHostViewMac* thisHostView = [self renderWidgetHostViewMac];
-    thisHostView->GetRenderWidgetHost()->AdvanceToNextMisspelling();
-  }
 }
 
 - (void)showGuessPanel:(id)sender {
@@ -2396,7 +2412,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 // nil when the caret is in non-editable content or password box to avoid
 // making input methods do their work.
 - (NSTextInputContext *)inputContext {
-  if (pluginImeIdentifier_ != -1)
+  if (focusedPluginIdentifier_ != -1)
     return [[ComplexTextInputPanel sharedComplexTextInputPanel] inputContext];
 
   switch(renderWidgetHostView_->text_input_type_) {
@@ -2629,33 +2645,30 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   [self cancelComposition];
 }
 
-- (void)setPluginImeEnabled:(BOOL)enabled forPlugin:(int)pluginId {
-  if ((enabled && pluginId == pluginImeIdentifier_) ||
-      (!enabled && pluginId != pluginImeIdentifier_))
+- (void)setPluginImeActive:(BOOL)active {
+  if (active == pluginImeActive_)
     return;
 
-  // If IME was already active then either it is being cancelled, or the plugin
-  // changed; either way the current input needs to be cleared.
-  if (pluginImeIdentifier_ != -1)
-    [[ComplexTextInputPanel sharedComplexTextInputPanel] cancelInput];
+  pluginImeActive_ = active;
+  if (!active) {
+    [[ComplexTextInputPanel sharedComplexTextInputPanel] cancelComposition];
+    renderWidgetHostView_->PluginImeCompositionCompleted(
+        string16(), focusedPluginIdentifier_);
+  }
+}
 
-  pluginImeIdentifier_ = enabled ? pluginId : -1;
+- (void)pluginFocusChanged:(BOOL)focused forPlugin:(int)pluginId {
+  if (focused)
+    focusedPluginIdentifier_ = pluginId;
+  else if (focusedPluginIdentifier_ == pluginId)
+    focusedPluginIdentifier_ = -1;
+
+  // Whenever plugin focus changes, plugin IME resets.
+  [self setPluginImeActive:NO];
 }
 
 - (BOOL)postProcessEventForPluginIme:(NSEvent*)event {
-  if (pluginImeIdentifier_ == -1)
-    return false;
-
-  // ComplexTextInputPanel only works on 10.6+.
-  static BOOL sImeSupported = NO;
-  static BOOL sHaveCheckedSupport = NO;
-  if (!sHaveCheckedSupport) {
-    int32 major, minor, bugfix;
-    base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
-    sImeSupported = major > 10 || (major == 10 && minor > 5);
-    sHaveCheckedSupport = YES;
-  }
-  if (!sImeSupported)
+  if (!pluginImeActive_)
     return false;
 
   ComplexTextInputPanel* inputPanel =
@@ -2664,10 +2677,20 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   BOOL handled = [inputPanel interpretKeyEvent:event
                                         string:&composited_string];
   if (composited_string) {
-    renderWidgetHostView_->PluginImeCompositionConfirmed(
-        base::SysNSStringToUTF16(composited_string), pluginImeIdentifier_);
+    renderWidgetHostView_->PluginImeCompositionCompleted(
+        base::SysNSStringToUTF16(composited_string), focusedPluginIdentifier_);
+    pluginImeActive_ = NO;
   }
   return handled;
+}
+
+- (void)checkForPluginImeCancellation {
+  if (pluginImeActive_ &&
+      ![[ComplexTextInputPanel sharedComplexTextInputPanel] inComposition]) {
+    renderWidgetHostView_->PluginImeCompositionCompleted(
+        string16(), focusedPluginIdentifier_);
+    pluginImeActive_ = NO;
+  }
 }
 
 - (ViewID)viewID {

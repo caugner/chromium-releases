@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,6 +35,9 @@ enum {
                                 // this when a temporary file or directory will
                                 // be moved into the profile, to avoid issues
                                 // moving across volumes.  See crbug.com/13044 .
+                                // Getting this path does not create it.  Users
+                                // should check that the path exists before
+                                // using it.
   DIR_INTERNAL_PLUGINS,         // Directory where internal plugins reside.
 #if !defined(OS_MACOSX) && defined(OS_POSIX)
   DIR_POLICY_FILES,             // Directory for system-wide read-only
@@ -46,6 +49,12 @@ enum {
   DIR_MANAGED_PREFS,            // Directory that stores the managed prefs plist
                                 // files for the current user.
 #endif
+#if defined(OS_CHROMEOS)
+  DIR_USER_EXTERNAL_EXTENSIONS,  // Directory for per-user external extensions.
+                                 // Used for OEM customization on Chrome OS.
+                                 // Getting this path does not create it.
+#endif
+
   FILE_RESOURCE_MODULE,         // Full path and filename of the module that
                                 // contains embedded resources (version,
                                 // strings, images, etc.).
@@ -57,6 +66,7 @@ enum {
   FILE_GEARS_PLUGIN,            // Full path to the gears.dll plugin file.
   FILE_FLASH_PLUGIN,            // Full path to the internal Flash plugin file.
   FILE_PDF_PLUGIN,              // Full path to the internal PDF plugin file.
+  FILE_NACL_PLUGIN,             // Full path to the internal NaCl plugin file.
   FILE_LIBAVCODEC,              // Full path to libavcodec media decoding
                                 // library.
   FILE_LIBAVFORMAT,             // Full path to libavformat media parsing

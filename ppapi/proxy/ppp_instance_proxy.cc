@@ -109,7 +109,8 @@ InterfaceID PPP_Instance_Proxy::GetInterfaceId() const {
   return INTERFACE_ID_PPP_INSTANCE;
 }
 
-void PPP_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
+bool PPP_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPP_Instance_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPInstance_DidCreate,
                         OnMsgDidCreate)
@@ -125,7 +126,9 @@ void PPP_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgHandleDocumentLoad)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPPInstance_GetInstanceObject,
                         OnMsgGetInstanceObject)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void PPP_Instance_Proxy::OnMsgDidCreate(
@@ -179,7 +182,7 @@ void PPP_Instance_Proxy::OnMsgHandleInputEvent(PP_Instance instance,
 void PPP_Instance_Proxy::OnMsgHandleDocumentLoad(PP_Instance instance,
                                                  PP_Resource url_loader,
                                                  PP_Bool* result) {
-  PPB_URLLoader_Proxy::TrackPluginResource(url_loader);
+  PPB_URLLoader_Proxy::TrackPluginResource(instance, url_loader);
   *result = ppp_instance_target()->HandleDocumentLoad(
       instance, url_loader);
 }

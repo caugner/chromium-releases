@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,8 @@
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/c/ppb_audio.h"
+#include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_graphics_2d.h"
 #include "ppapi/c/ppb_image_data.h"
@@ -30,11 +32,17 @@
 #include "ppapi/c/ppb_url_request_info.h"
 #include "ppapi/c/ppb_url_response_info.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/c/private/ppb_pdf.h"
+#include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/proxy/ppb_audio_config_proxy.h"
+#include "ppapi/proxy/ppb_audio_proxy.h"
 #include "ppapi/proxy/ppb_buffer_proxy.h"
 #include "ppapi/proxy/ppb_char_set_proxy.h"
 #include "ppapi/proxy/ppb_core_proxy.h"
 #include "ppapi/proxy/ppb_cursor_control_proxy.h"
+#include "ppapi/proxy/ppb_flash_proxy.h"
 #include "ppapi/proxy/ppb_font_proxy.h"
 #include "ppapi/proxy/ppb_fullscreen_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
@@ -49,14 +57,15 @@
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/ppp_instance_proxy.h"
 #include "ppapi/proxy/var_serialization_rules.h"
-#include "webkit/glue/plugins/ppb_private.h"
 
 namespace pp {
 namespace proxy {
 
-Dispatcher::Dispatcher(GetInterfaceFunc local_get_interface)
+Dispatcher::Dispatcher(base::ProcessHandle remote_process_handle,
+                       GetInterfaceFunc local_get_interface)
     : pp_module_(0),
-      disallow_trusted_interfaces_(true),
+      remote_process_handle_(remote_process_handle),
+      disallow_trusted_interfaces_(false),  // TODO(brettw) make this settable.
       local_get_interface_(local_get_interface),
       declared_supported_remote_interfaces_(false),
       callback_tracker_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
@@ -68,38 +77,42 @@ Dispatcher::~Dispatcher() {
 }
 
 bool Dispatcher::InitWithChannel(MessageLoop* ipc_message_loop,
-                                 const std::string& channel_name,
+                                 const IPC::ChannelHandle& channel_handle,
                                  bool is_client,
                                  base::WaitableEvent* shutdown_event) {
   IPC::Channel::Mode mode = is_client ? IPC::Channel::MODE_CLIENT
                                       : IPC::Channel::MODE_SERVER;
-  channel_.reset(new IPC::SyncChannel(channel_name, mode, this, NULL,
+  channel_.reset(new IPC::SyncChannel(channel_handle, mode, this,
                                       ipc_message_loop, false, shutdown_event));
   return true;
 }
 
-void Dispatcher::OnMessageReceived(const IPC::Message& msg) {
+bool Dispatcher::OnMessageReceived(const IPC::Message& msg) {
   // Control messages.
   if (msg.routing_id() == MSG_ROUTING_CONTROL) {
+    bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(Dispatcher, msg)
       IPC_MESSAGE_HANDLER(PpapiMsg_DeclareInterfaces,
                           OnMsgDeclareInterfaces)
       IPC_MESSAGE_HANDLER(PpapiMsg_SupportsInterface, OnMsgSupportsInterface)
       IPC_MESSAGE_FORWARD(PpapiMsg_ExecuteCallback, &callback_tracker_,
                           CallbackTracker::ReceiveExecuteSerializedCallback)
+      IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
-    return;
+    return handled;
   }
 
   // Interface-specific messages.
   if (msg.routing_id() > 0 && msg.routing_id() < INTERFACE_ID_COUNT) {
     InterfaceProxy* proxy = id_to_proxy_[msg.routing_id()];
     if (proxy)
-      proxy->OnMessageReceived(msg);
-    else
-      NOTREACHED();
+      return proxy->OnMessageReceived(msg);
+
+    NOTREACHED();
     // TODO(brettw): kill the plugin if it starts sending invalid messages?
   }
+
+  return false;
 }
 
 void Dispatcher::SetSerializationRules(
@@ -216,6 +229,10 @@ void Dispatcher::OnMsgDeclareInterfaces(
 InterfaceProxy* Dispatcher::CreateProxyForInterface(
     const std::string& interface_name,
     const void* interface_functions) {
+  if (interface_name == PPB_AUDIO_CONFIG_INTERFACE)
+    return new PPB_AudioConfig_Proxy(this, interface_functions);
+  if (interface_name == PPB_AUDIO_INTERFACE)
+    return new PPB_Audio_Proxy(this, interface_functions);
   if (interface_name == PPB_BUFFER_DEV_INTERFACE)
     return new PPB_Buffer_Proxy(this, interface_functions);
   if (interface_name == PPB_CHAR_SET_DEV_INTERFACE)
@@ -234,8 +251,6 @@ InterfaceProxy* Dispatcher::CreateProxyForInterface(
     return new PPB_ImageData_Proxy(this, interface_functions);
   if (interface_name == PPB_INSTANCE_INTERFACE)
     return new PPB_Instance_Proxy(this, interface_functions);
-  if (interface_name == PPB_PRIVATE_INTERFACE)
-    return new PPB_Pdf_Proxy(this, interface_functions);
   if (interface_name == PPB_TESTING_DEV_INTERFACE)
     return new PPB_Testing_Proxy(this, interface_functions);
   if (interface_name == PPB_URLLOADER_INTERFACE)
@@ -248,6 +263,16 @@ InterfaceProxy* Dispatcher::CreateProxyForInterface(
     return new PPB_Var_Deprecated_Proxy(this, interface_functions);
   if (interface_name == PPP_INSTANCE_INTERFACE)
     return new PPP_Instance_Proxy(this, interface_functions);
+
+  // Trusted interfaces.
+  if (!disallow_trusted_interfaces_) {
+    if (interface_name == PPB_FLASH_INTERFACE)
+      return new PPB_Flash_Proxy(this, interface_functions);
+    if (interface_name == PPB_PDF_INTERFACE)
+      return new PPB_PDF_Proxy(this, interface_functions);
+    if (interface_name == PPB_URLLOADERTRUSTED_INTERFACE)
+      return new PPB_URLLoaderTrusted_Proxy(this, interface_functions);
+  }
 
   return NULL;
 }

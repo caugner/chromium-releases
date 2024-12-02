@@ -1,11 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_PPB_URL_RESPONSE_INFO_H_
 #define PPAPI_C_PPB_URL_RESPONSE_INFO_H_
 
 #include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
 
@@ -17,8 +18,9 @@ typedef enum {
   PP_URLRESPONSEPROPERTY_STATUSLINE,      // string
   PP_URLRESPONSEPROPERTY_HEADERS          // string, \n-delim
 } PP_URLResponseProperty;
+PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_URLResponseProperty, 4);
 
-#define PPB_URLRESPONSEINFO_INTERFACE "PPB_URLResponseInfo;1"
+#define PPB_URLRESPONSEINFO_INTERFACE "PPB_URLResponseInfo;0.1"
 
 struct PPB_URLResponseInfo {
   // Returns PP_TRUE if the given resource is an URLResponseInfo. Returns
@@ -40,4 +42,5 @@ struct PPB_URLResponseInfo {
   PP_Resource (*GetBodyAsFileRef)(PP_Resource response);
 };
 
-#endif  // PPAPI_C_PPB_URL_RESPONSE_INFO_H_
+#endif  /* PPAPI_C_PPB_URL_RESPONSE_INFO_H_ */
+

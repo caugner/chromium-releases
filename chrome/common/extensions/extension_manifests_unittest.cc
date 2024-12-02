@@ -8,11 +8,13 @@
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
+#include "chrome/common/extensions/extension_sidebar_defaults.h"
 #include "chrome/common/json_value_serializer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -245,6 +247,15 @@ TEST_F(ExtensionManifestTest, ChromeURLContentScriptInvalid) {
       errors::kInvalidMatch);
 }
 
+TEST_F(ExtensionManifestTest, ExperimentalPermission) {
+  LoadAndExpectError("experimental.json", errors::kExperimentalFlagRequired);
+  CommandLine old_command_line = *CommandLine::ForCurrentProcess();
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableExperimentalExtensionApis);
+  LoadAndExpectSuccess("experimental.json");
+  *CommandLine::ForCurrentProcess() = old_command_line;
+}
+
 TEST_F(ExtensionManifestTest, DevToolsExtensions) {
   LoadAndExpectError("devtools_extension_no_permissions.json",
       errors::kDevToolsExperimental);
@@ -259,6 +270,47 @@ TEST_F(ExtensionManifestTest, DevToolsExtensions) {
   extension = LoadAndExpectSuccess("devtools_extension.json");
   EXPECT_EQ(extension->url().spec() + "devtools.html",
             extension->devtools_url().spec());
+  *CommandLine::ForCurrentProcess() = old_command_line;
+}
+
+TEST_F(ExtensionManifestTest, Sidebar) {
+  LoadAndExpectError("sidebar.json",
+      errors::kExperimentalFlagRequired);
+
+  CommandLine old_command_line = *CommandLine::ForCurrentProcess();
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableExperimentalExtensionApis);
+
+  LoadAndExpectError("sidebar_no_permissions.json",
+      errors::kSidebarExperimental);
+
+  LoadAndExpectError("sidebar_icon_empty.json",
+      errors::kInvalidSidebarDefaultIconPath);
+  LoadAndExpectError("sidebar_icon_invalid_type.json",
+      errors::kInvalidSidebarDefaultIconPath);
+  LoadAndExpectError("sidebar_title_invalid_type.json",
+      errors::kInvalidSidebarDefaultTitle);
+  LoadAndExpectError("sidebar_url_invalid.json",
+      errors::kInvalidSidebarDefaultUrl);
+  LoadAndExpectError("sidebar_url_invalid_type.json",
+      errors::kInvalidSidebarDefaultUrl);
+  LoadAndExpectError("sidebar_url_no_permissions.json",
+      extension_manifest_errors::kCannotAccessPage);
+
+  scoped_refptr<Extension> extension(LoadAndExpectSuccess("sidebar.json"));
+  ASSERT_TRUE(extension->sidebar_defaults() != NULL);
+  EXPECT_EQ(extension->sidebar_defaults()->default_title(),
+            ASCIIToUTF16("Default title"));
+  EXPECT_EQ(extension->sidebar_defaults()->default_icon_path(),
+            "icon.png");
+  EXPECT_EQ(extension->url().spec() + "sidebar.html",
+            extension->sidebar_defaults()->default_url().spec());
+
+  scoped_refptr<Extension> extension_external_url(
+      LoadAndExpectSuccess("sidebar_external_url.json"));
+  EXPECT_EQ("http://sidebar.url/sidebar.html",
+            extension_external_url->sidebar_defaults()->default_url().spec());
+
   *CommandLine::ForCurrentProcess() = old_command_line;
 }
 
@@ -364,4 +416,38 @@ TEST_F(ExtensionManifestTest, DefaultPathForExtent) {
   EXPECT_EQ("/*", extension->web_extent().patterns()[0].path());
   EXPECT_TRUE(extension->web_extent().ContainsURL(
       GURL("http://www.google.com/monkey")));
+}
+
+TEST_F(ExtensionManifestTest, DefaultLocale) {
+  LoadAndExpectError("default_locale_invalid.json",
+                     extension_manifest_errors::kInvalidDefaultLocale);
+
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess("default_locale_valid.json"));
+  EXPECT_EQ("de-AT", extension->default_locale());
+}
+
+TEST_F(ExtensionManifestTest, TtsProvider) {
+  LoadAndExpectError("tts_provider_invalid_1.json",
+                     extension_manifest_errors::kInvalidTts);
+  LoadAndExpectError("tts_provider_invalid_2.json",
+                     extension_manifest_errors::kInvalidTtsVoices);
+  LoadAndExpectError("tts_provider_invalid_3.json",
+                     extension_manifest_errors::kInvalidTtsVoices);
+  LoadAndExpectError("tts_provider_invalid_4.json",
+                     extension_manifest_errors::kInvalidTtsVoicesVoiceName);
+  LoadAndExpectError("tts_provider_invalid_5.json",
+                     extension_manifest_errors::kInvalidTtsVoicesLocale);
+  LoadAndExpectError("tts_provider_invalid_6.json",
+                     extension_manifest_errors::kInvalidTtsVoicesLocale);
+  LoadAndExpectError("tts_provider_invalid_7.json",
+                     extension_manifest_errors::kInvalidTtsVoicesGender);
+
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess("tts_provider_valid.json"));
+
+  ASSERT_EQ(1u, extension->tts_voices().size());
+  EXPECT_EQ("name", extension->tts_voices()[0].voice_name);
+  EXPECT_EQ("en-US", extension->tts_voices()[0].locale);
+  EXPECT_EQ("female", extension->tts_voices()[0].gender);
 }

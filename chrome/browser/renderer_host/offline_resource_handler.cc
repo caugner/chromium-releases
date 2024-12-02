@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,7 @@ OfflineResourceHandler::OfflineResourceHandler(
     int host_id,
     int route_id,
     ResourceDispatcherHost* rdh,
-    URLRequest* request)
+    net::URLRequest* request)
     : next_handler_(handler),
       process_host_id_(host_id),
       render_view_id_(route_id),
@@ -53,7 +53,7 @@ bool OfflineResourceHandler::OnResponseStarted(int request_id,
 
 bool OfflineResourceHandler::OnResponseCompleted(
     int request_id,
-    const URLRequestStatus& status,
+    const net::URLRequestStatus& status,
     const std::string& security_info) {
   return next_handler_->OnResponseCompleted(request_id, status, security_info);
 }

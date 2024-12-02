@@ -16,6 +16,7 @@
 #include "gfx/native_widget_types.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel.h"
+#include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
 
@@ -43,16 +44,19 @@ class GpuChannelHost : public IPC::Channel::Listener,
   ~GpuChannelHost();
 
   // Connect to GPU process channel.
-  void Connect(const std::string& channel_name);
+  void Connect(const IPC::ChannelHandle& channel_handle);
 
   State state() const { return state_; }
+
+  // Change state to kLost.
+  void SetStateLost();
 
   // The GPU stats reported by the GPU process.
   void set_gpu_info(const GPUInfo& gpu_info);
   const GPUInfo& gpu_info() const;
 
   // IPC::Channel::Listener implementation:
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
   virtual void OnChannelConnected(int32 peer_pid);
   virtual void OnChannelError();
 

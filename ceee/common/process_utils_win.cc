@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,10 +9,9 @@
 #include <sddl.h>
 
 #include "base/logging.h"
-#include "base/scoped_handle.h"
+#include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "ceee/common/com_utils.h"
-
 
 namespace process_utils_win {
 
@@ -20,13 +19,13 @@ HRESULT SetThreadIntegrityLevel(HANDLE* thread, const std::wstring& level) {
   HANDLE temp_handle = NULL;
   BOOL success = ::OpenProcessToken(
       ::GetCurrentProcess(), MAXIMUM_ALLOWED, &temp_handle);
-  ScopedHandle process_token(temp_handle);
+  base::win::ScopedHandle process_token(temp_handle);
   temp_handle = NULL;
   if (success) {
     success = ::DuplicateTokenEx(
         process_token, MAXIMUM_ALLOWED, NULL, SecurityImpersonation,
         TokenImpersonation, &temp_handle);
-    ScopedHandle mic_token(temp_handle);
+    base::win::ScopedHandle mic_token(temp_handle);
     temp_handle = NULL;
     if (success) {
       PSID mic_sid = NULL;
@@ -98,7 +97,7 @@ HRESULT IsCurrentProcessUacElevated(bool* running_as_admin) {
   // All that for an admin-group member, who can run in elevated mode.
   // This logic applies to Vista/Win7. The case of earlier systems is handled
   // at the start.
-  ScopedHandle process_token(temp_handle);
+  base::win::ScopedHandle process_token(temp_handle);
   TOKEN_ELEVATION_TYPE elevation_type = TokenElevationTypeDefault;
   DWORD variable_len_dummy = 0;
   if (!::GetTokenInformation(process_token, TokenElevationType, &elevation_type,
@@ -128,6 +127,11 @@ ProcessCompatibilityCheck::ProcessCompatibilityCheck()
       integrity_checks_on_(false),
       running_integrity_(base::INTEGRITY_UNKNOWN) {
   StandardInitialize();
+}
+
+// static
+ProcessCompatibilityCheck* ProcessCompatibilityCheck::GetInstance() {
+  return Singleton<ProcessCompatibilityCheck>::get();
 }
 
 void ProcessCompatibilityCheck::StandardInitialize() {
@@ -199,8 +203,7 @@ HRESULT ProcessCompatibilityCheck::IsCompatible(HWND process_window,
 
 HRESULT ProcessCompatibilityCheck::IsCompatible(DWORD process_id,
                                                 bool* is_compatible) {
-  ProcessCompatibilityCheck* instance
-      = Singleton<ProcessCompatibilityCheck>::get();
+  ProcessCompatibilityCheck* instance = GetInstance();
 
   DCHECK(instance != NULL);
   DCHECK(is_compatible != NULL);
@@ -306,7 +309,7 @@ void ProcessCompatibilityCheck::PatchState(
     CloseHandleFuncType close_handle_func,
     IsWOW64ProcessFuncType is_wow64_process_func) {
   PatchState(open_process_func, close_handle_func, is_wow64_process_func);
-  Singleton<ProcessCompatibilityCheck>::get()->KnownStateInitialize(
+  GetInstance()->KnownStateInitialize(
       system_type, current_process_wow64,
       check_integrity, current_process_integrity);
 }
@@ -324,7 +327,7 @@ void ProcessCompatibilityCheck::PatchState(
 
 void ProcessCompatibilityCheck::ResetState() {
   PatchState(OpenProcess, CloseHandle, IsWow64Process);
-  Singleton<ProcessCompatibilityCheck>::get()->StandardInitialize();
+  GetInstance()->StandardInitialize();
 }
 
-}  // namespace com
+}  // namespace process_utils_win

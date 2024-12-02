@@ -49,10 +49,11 @@ enum ModelType {
   PREFERENCES,
   // A password folder or password object.
   PASSWORDS,
+    // An AutofillProfile Object
+  AUTOFILL_PROFILE,
   // An autofill folder or an autofill object.
   AUTOFILL,
-  // An autofill Profile Object
-  AUTOFILL_PROFILE,
+
   // A themes folder or a themes object.
   THEMES,
   // A typed_url folder or a typed_url object.
@@ -91,6 +92,14 @@ ModelType GetModelType(const sync_pb::SyncEntity& sync_entity);
 // are some ModelTypes (like TOP_LEVEL_FOLDER) that can't be inferred this way;
 // prefer using GetModelType where possible.
 ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics);
+
+// Determine a model type from the field number of its associated
+// EntitySpecifics extension.
+ModelType GetModelTypeFromExtensionFieldNumber(int field_number);
+
+// Return the field number of the EntitySpecifics extension associated with
+// a model type.
+int GetExtensionFieldNumberFromModelType(ModelType model_type);
 
 // Returns a string that represents the name of |model_type|.
 std::string ModelTypeToString(ModelType model_type);

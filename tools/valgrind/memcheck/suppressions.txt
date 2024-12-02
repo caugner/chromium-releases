@@ -204,6 +204,12 @@
    obj:/lib*/ld-2.*.so
 }
 {
+   libc_dynamiclinker_bar_2
+   Memcheck:Jump
+   obj:*
+   obj:/lib*/ld-2.*.so
+}
+{
    FIXME epoll uninitialized data 1
    Memcheck:Param
    epoll_ctl(epfd)
@@ -431,22 +437,6 @@
    fun:gtk_im_multicontext_get_slave
    fun:gtk_im_multicontext_set_client_window
    fun:gtk_im_context_set_client_window
-   fun:gtk_entry_realize
-   fun:g_cclosure_marshal_VOID__VOID
-   fun:g_type_class_meta_marshal
-   fun:g_closure_invoke
-   fun:signal_emit_unlocked_R
-   fun:g_signal_emit_valist
-   fun:g_signal_emit
-   fun:gtk_widget_realize
-   fun:gtk_widget_set_parent
-   fun:gtk_fixed_put
-   fun:gtk_fixed_add
-   fun:g_cclosure_marshal_VOID__OBJECT
-   fun:g_type_class_meta_marshal
-   fun:g_closure_invoke
-   fun:signal_emit_unlocked_R
-   fun:g_signal_emit_valist
 }
 {
    bug_51332a
@@ -597,6 +587,13 @@
    fun:_ZN23AutocompleteEditViewGtk6UpdateEPK11TabContents
    fun:_ZN15LocationBarView6UpdateEPK11TabContents
 }
+{
+   bug_66941
+   Memcheck:Leak
+   ...
+   fun:STAN_ChangeCertTrust
+   fun:CERT_ChangeCertTrust
+}
 
 #-----------------------------------------------------------------------
 # 2. intentional unit test errors, or stuff that is somehow a false positive
@@ -607,99 +604,99 @@
    Memcheck sanity test 01 (memory leak).
    Memcheck:Leak
    fun:_Zna*
-   fun:_ZN31ToolsSanityTest_MemoryLeak_Test8TestBodyEv
+   fun:_ZN4base31ToolsSanityTest_MemoryLeak_Test8TestBodyEv
 }
 {
    Memcheck sanity test 02 (malloc/read left).
    Memcheck:Addr1
    fun:*ReadValueOutOfArrayBoundsLeft*
    fun:*MakeSomeErrors*
-   fun:_ZN43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
+   fun:_ZN4base43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 03 (malloc/read right).
    Memcheck:Addr1
    fun:*ReadValueOutOfArrayBoundsRight*
    fun:*MakeSomeErrors*
-   fun:_ZN43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
+   fun:_ZN4base43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 04 (malloc/write left).
    Memcheck:Addr1
    fun:*WriteValueOutOfArrayBoundsLeft*
    fun:*MakeSomeErrors*
-   fun:_ZN43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
+   fun:_ZN4base43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 05 (malloc/write right).
    Memcheck:Addr1
    fun:*WriteValueOutOfArrayBoundsRight*
    fun:*MakeSomeErrors*
-   fun:_ZN43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
+   fun:_ZN4base43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 06 (new/read left).
    Memcheck:Addr1
    fun:*ReadValueOutOfArrayBoundsLeft*
    fun:*MakeSomeErrors*
-   fun:_ZN40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
+   fun:_ZN4base40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 07 (new/read right).
    Memcheck:Addr1
    fun:*ReadValueOutOfArrayBoundsRight*
    fun:*MakeSomeErrors*
-   fun:_ZN40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
+   fun:_ZN4base40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 08 (new/write left).
    Memcheck:Addr1
    fun:*WriteValueOutOfArrayBoundsLeft*
    fun:*MakeSomeErrors*
-   fun:_ZN40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
+   fun:_ZN4base40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 09 (new/write right).
    Memcheck:Addr1
    fun:*WriteValueOutOfArrayBoundsRight*
    fun:*MakeSomeErrors*
-   fun:_ZN40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
+   fun:_ZN4base40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 10 (write after free).
    Memcheck:Addr1
-   fun:_ZN43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
+   fun:_ZN4base43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 11 (write after delete).
    Memcheck:Addr1
-   fun:_ZN40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
+   fun:_ZN4base40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 12 (array deleted without []).
    Memcheck:Free
    ...
-   fun:_ZN46ToolsSanityTest_ArrayDeletedWithoutBraces_Test8TestBodyEv
+   fun:_ZN4base46ToolsSanityTest_ArrayDeletedWithoutBraces_Test8TestBodyEv
 }
 {
    Memcheck sanity test 13 (single element deleted with []).
    Memcheck:Free
    ...
-   fun:_ZN51ToolsSanityTest_SingleElementDeletedWithBraces_Test8TestBodyEv
+   fun:_ZN4base51ToolsSanityTest_SingleElementDeletedWithBraces_Test8TestBodyEv
 }
 {
    Memcheck sanity test 14 (malloc/read uninit).
    Memcheck:Cond
    fun:*ReadUninitializedValue*
    fun:*MakeSomeErrors*
-   fun:_ZN43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
+   fun:_ZN4base43ToolsSanityTest_AccessesToMallocMemory_Test8TestBodyEv
 }
 {
    Memcheck sanity test 15 (new/read uninit).
    Memcheck:Cond
    fun:*ReadUninitializedValue*
    fun:*MakeSomeErrors*
-   fun:_ZN40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
+   fun:_ZN4base40ToolsSanityTest_AccessesToNewMemory_Test8TestBodyEv
 }
 {
    logging::InitLogging never frees filename. It would be hard to free properly.
@@ -734,12 +731,12 @@
    bug_16096
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZNSs4_Rep9_S_createEjjRKSaIcE
-   fun:_ZNSs4_Rep8_M_cloneERKSaIcEj
-   fun:_ZNSs7reserveEj
-   fun:_ZNSs6appendEPKcj
-   fun:*StringAppendVTISsEEvPT_PKNS2_10value_typeEPc
-   fun:_ZN4base13StringAppendVEPSsPKcPc
+   fun:_ZNSs4_Rep9_S_createE*RKSaIcE
+   fun:_ZNSs4_Rep8_M_cloneERKSaIcE*
+   fun:_ZNSs7reserveE*
+   fun:_ZNSs6appendEPKc*
+   fun:*StringAppendV*
+   ...
    fun:_ZN4base12StringPrintfEPKcz
 }
 {
@@ -787,11 +784,11 @@
    fun:_ZN30ChromeURLRequestContextFactoryC2EP7Profile
    ...
    fun:_ZN11ProfileImpl36RegisterExtensionWithRequestContextsEP9Extension
-   fun:_ZN17ExtensionsService21NotifyExtensionLoadedEP9Extension
-   fun:_ZN17ExtensionsService17OnExtensionLoadedEP9Extensionb
-   fun:_ZN17ExtensionsService23LoadComponentExtensionsEv
-   fun:_ZN17ExtensionsService17LoadAllExtensionsEv
-   fun:_ZN17ExtensionsService4InitEv
+   fun:_ZN16ExtensionService21NotifyExtensionLoadedEP9Extension
+   fun:_ZN16ExtensionService17OnExtensionLoadedEP9Extensionb
+   fun:_ZN16ExtensionService23LoadComponentExtensionsEv
+   fun:_ZN16ExtensionService17LoadAllExtensionsEv
+   fun:_ZN16ExtensionService4InitEv
    fun:_ZN11ProfileImpl14InitExtensionsEv
 }
 {
@@ -801,7 +798,8 @@
    ...
    fun:_ZN30ChromeURLRequestContextFactoryC2EP7Profile
    ...
-   fun:_ZN21ResourceMessageFilterC1EP22ResourceDispatcherHostiP17AudioRendererHostP13PluginServicePN8printing15PrintJobManagerEP7ProfileP18RenderWidgetHelper
+   fun:_ZN19RenderMessageFilterC1EP22ResourceDispatcherHostiP13PluginServicePN8printing15PrintJobManagerEP7ProfileP18RenderWidgetHelper
+   fun:_ZN24BrowserRenderProcessHost20CreateMessageFiltersEv
    fun:_ZN24BrowserRenderProcessHost4InitEbb
    fun:_ZN14RenderViewHost16CreateRenderViewERKSbItN4base20string16_char_traitsESaItEE
    fun:_ZN11TabContents32CreateRenderViewForRenderManagerEP14RenderViewHost
@@ -897,7 +895,7 @@
    bug_16089
    Memcheck:Leak
    fun:*
-   fun:_ZN4base22LinuxDynamicThreadPool8PostTaskEP4Task
+   fun:_ZN4base22PosixDynamicThreadPool8PostTaskEP4Task
    ...
    fun:_ZN3net12HostResolver3Job5StartEv
 }
@@ -906,7 +904,7 @@
    bug_16089b
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN4base22LinuxDynamicThreadPool8PostTaskEP4Task
+   fun:_ZN4base22PosixDynamicThreadPool8PostTaskEP4Task
    ...
    fun:_ZN18chrome_browser_net9DnsMaster24PreLockedScheduleLookupsEv
 }
@@ -915,7 +913,7 @@
    bug_16089c
    Memcheck:Leak
    ...
-   fun:_ZN4base22LinuxDynamicThreadPool8PostTaskEP4Task
+   fun:_ZN4base22PosixDynamicThreadPool8PostTaskEP4Task
    ...
    fun:_ZN3net13TCPConnectJob13DoResolveHostEv
 }
@@ -925,7 +923,7 @@
    Memcheck:Leak
    fun:*
    ...
-   fun:_ZN4base22LinuxDynamicThreadPool8PostTaskEP4Task
+   fun:_ZN4base22PosixDynamicThreadPool8PostTaskEP4Task
    ...
    fun:_ZN3net16HostResolverImpl3Job5StartEv
 }
@@ -935,7 +933,7 @@
    Memcheck:Leak
    fun:*
    ...
-   fun:_ZN4base22LinuxDynamicThreadPool8PostTaskEP4Task
+   fun:_ZN4base22PosixDynamicThreadPool8PostTaskEP4Task
    ...
    fun:_ZN3net16HostResolverImpl16ProbeIPv6SupportEv
 }
@@ -961,7 +959,7 @@
    bug_16092b
    Memcheck:Leak
    ...
-   fun:_ZNSt11_Deque_baseIN11MessageLoop11PendingTaskESaIS1_EE17_M_initialize_mapEj
+   fun:_ZNSt11_Deque_baseIN11MessageLoop11PendingTaskESaIS1_EE17_M_initialize_mapE*
    ...
    fun:_ZN11MessageLoopC1ENS_4TypeE
    fun:_ZN4base6Thread10ThreadMainEv
@@ -1006,7 +1004,7 @@
    Memcheck:Leak
    fun:_Znw*
    ...
-   fun:_ZN3IPC11SyncChannel*Channel4ModeEPNS3_8ListenerEPNS_12ChannelProxy13MessageFilterEP11MessageLoopbPN4base13WaitableEventE
+   fun:_ZN3IPC11SyncChannelC1ERKSsNS_7Channel4ModeEPNS3_8ListenerEP11MessageLoopbPN4base13WaitableEventE
    ...
    fun:_ZN11ChildThread4InitEv
 }
@@ -1306,6 +1304,16 @@
    fun:_ZN11WebDatabase*
 }
 {
+   bug_60556f
+   Memcheck:Addr4
+   ...
+   fun:sqlite3_close
+   fun:_ZN3sql10Connection5CloseEv
+   fun:_ZN3sql10ConnectionD2Ev
+   fun:_ZN3sql10ConnectionD1Ev
+   fun:_ZN11WebDatabase*
+}
+{
    bug_20581
    Memcheck:Leak
    ...
@@ -1359,19 +1367,6 @@
    fun:start_thread
 }
 {
-   # This appears to be the NDEBUG mode version of bug_16096 -- i.e. the
-   # intermediate call to StringAppendV() is optimized away
-   bug_22109
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZNSs4_Rep9_S_createEjjRKSaIcE
-   fun:_ZNSs4_Rep8_M_cloneERKSaIcEj
-   fun:_ZNSs7reserveEj
-   fun:_ZNSs6appendEPKcj
-   fun:*StringAppendVTISsEEvPT_PKNS2_10value_typeEPc
-   fun:_ZN4base12StringPrintfEPKcz
-}
-{
    bug_22450
    Memcheck:Leak
    fun:_Znw*
@@ -1388,8 +1383,8 @@
    fun:_Znw*
    ...
    fun:_ZN13WorkerService12CreateWorker*
-   fun:_ZN21ResourceMessageFilter14OnCreateWorker*
-   fun:_Z16DispatchToMethodI21ResourceMessageFilter*
+   fun:_ZN19RenderMessageFilter14OnCreateWorker*
+   fun:_Z16DispatchToMethodI19RenderMessageFilter*
 }
 # The following three suppressions are related to the workers code.
 {
@@ -1543,10 +1538,10 @@
    fun:_ZN16UserScriptMaster9StartScanEv
    fun:_ZN16UserScriptMaster7ObserveE16NotificationTypeRK18NotificationSourceRK19NotificationDetails
    fun:_ZN19NotificationService6NotifyE16NotificationTypeRK18NotificationSourceRK19NotificationDetails
-   fun:_ZN17ExtensionsService27OnLoadedInstalledExtensionsEv
+   fun:_ZN16ExtensionService27OnLoadedInstalledExtensionsEv
    ...
-   fun:_ZN17ExtensionsService17LoadAllExtensionsEv
-   fun:_ZN17ExtensionsService4InitEv
+   fun:_ZN16ExtensionService17LoadAllExtensionsEv
+   fun:_ZN16ExtensionService4InitEv
 }
 {
    bug_29069b
@@ -1949,7 +1944,7 @@
    fun:_ZN22ResourceDispatcherHost10InitializeEv
    fun:_ZN18BrowserProcessImpl28CreateResourceDispatcherHostEv
    fun:_ZN18BrowserProcessImpl24resource_dispatcher_hostEv
-   fun:_ZN17ExtensionsService4InitEv
+   fun:_ZN16ExtensionService4InitEv
 }
 {
    bug_40877
@@ -1988,7 +1983,7 @@
    fun:_ZN7WebCore8V8Worker19constructorCallbackERKN2v89ArgumentsE
 }
 {
-   bug_42942
+   bug_42942_a
    Memcheck:Leak
    fun:_Znw*
    ...
@@ -1996,6 +1991,18 @@
    fun:_ZN3sql9MetaTable19PrepareGetStatementEPNS_9StatementEPKc
    fun:_ZN3sql9MetaTable8GetValueEPKcPi
    fun:_ZN3sql9MetaTable26GetCompatibleVersionNumberEv
+   ...
+   fun:_ZN3net13CookieMonster9InitStoreEv
+}
+{
+   bug_42942_b
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZN3sql10Connection18GetCachedStatementERKNS_11StatementIDEPKc
+   fun:_ZN3sql9MetaTable19PrepareSetStatementEPNS_9StatementEPKc
+   fun:_ZN3sql9MetaTable8SetValueEPKci
+   fun:_ZN3sql9MetaTable16SetVersionNumberEi
    ...
    fun:_ZN3net13CookieMonster9InitStoreEv
 }
@@ -2051,8 +2058,8 @@
    bug_43471
    Memcheck:Leak
    fun:_Znw*
-   fun:_ZN9__gnu_cxx13new_allocatorIPN11MessageLoop19DestructionObserverEE8allocateEjPKv
-   fun:_ZNSt12_Vector_baseIPN11MessageLoop19DestructionObserverESaIS2_EE11_M_allocateEj
+   fun:_ZN9__gnu_cxx13new_allocatorIPN11MessageLoop19DestructionObserverEE8allocateE*
+   fun:_ZNSt12_Vector_baseIPN11MessageLoop19DestructionObserverESaIS2_EE11_M_allocateE*
    fun:_ZNSt6vectorIPN11MessageLoop19DestructionObserverESaIS2_EE13_M_insert_auxEN9__gnu_cxx17__normal_iteratorIPS2_S4_EERKS2_
    fun:_ZNSt6vectorIPN11MessageLoop19DestructionObserverESaIS2_EE9push_backERKS2_
    fun:_ZN16ObserverListBaseIN11MessageLoop19DestructionObserverEE11AddObserverEPS1_
@@ -2175,39 +2182,14 @@
    fun:_ZN11MessageLoop10RunHandlerEv
 }
 {
-   bug_46162_a
+   bug_46162
    Memcheck:Leak
    ...
    fun:malloc
-   fun:_ZN3WTF10fastMallocEj
-   fun:_ZN3WTF13FastAllocBasenwEj
-   fun:_ZN3WTF14ThreadSpecificINS_13WTFThreadDataEE3setEPS1_
-   fun:_ZN3WTF14ThreadSpecificINS_13WTFThreadDataEEcvPS1_Ev
-   fun:_ZN3WTF14ThreadSpecificINS_13WTFThreadDataEEdeEv
-   fun:_ZN3WTF13wtfThreadDataEv
-   fun:_ZN7WebCore11stringTableEv
-   fun:_ZN7WebCore12AtomicString3addEPKc
-   fun:_ZN7WebCore12AtomicStringC1EPKc
-   fun:_ZN7WebCore12AtomicString4initEv
-   fun:_ZN6WebKit10initializeEPNS_12WebKitClientE
-   fun:_ZN12WebKitThread20InternalWebKitThread4InitEv
-   fun:_ZN4base6Thread10ThreadMainEv
-}
-{
-   bug_46162_b
-   Memcheck:Leak
    ...
-   fun:malloc
-   fun:_ZN3WTF10fastMallocEj
-   fun:_ZN3WTF13FastAllocBasenwEj
-   fun:_ZN3WTF14ThreadSpecificINS_13WTFThreadDataEE3setEPS1_
-   fun:_ZN3WTF14ThreadSpecificINS_13WTFThreadDataEEcvPS1_Ev
-   fun:_ZN3WTF14ThreadSpecificINS_13WTFThreadDataEEdeEv
    fun:_ZN3WTF13wtfThreadDataEv
    fun:_ZN3WTF11stringTableEv
-   fun:_ZN3WTF12AtomicString3addEPKc
-   fun:_ZN3WTF12AtomicStringC1EPKc
-   fun:_ZN3WTF12AtomicString4initEv
+   ...
    fun:_ZN6WebKit10initializeEPNS_12WebKitClientE
    fun:_ZN12WebKitThread20InternalWebKitThread4InitEv
    fun:_ZN4base6Thread10ThreadMainEv
@@ -2330,10 +2312,10 @@
    fun:_Znw*
    fun:_ZNSs4_Rep9_S_createEjjRKSaIcE
    ...
-   fun:_ZN31AutomationResourceMessageFilter17OnSetFilteredInetEb
-   fun:_Z16DispatchToMethodI31AutomationResourceMessageFilterMS0_FvbEbEvPT_T0_RK6Tuple1IT1_E
-   fun:_ZN3IPC16MessageWithTupleI6Tuple1IbEE8DispatchI31AutomationResourceMessageFilterMS5_FvbEEEbPKNS_7MessageEPT_T0_
-   fun:_ZN31AutomationResourceMessageFilter17OnMessageReceivedERKN3IPC7MessageE
+   fun:_ZN31AutomationRenderMessageFilter17OnSetFilteredInetEb
+   fun:_Z16DispatchToMethodI31AutomationRenderMessageFilterMS0_FvbEbEvPT_T0_RK6Tuple1IT1_E
+   fun:_ZN3IPC16MessageWithTupleI6Tuple1IbEE8DispatchI31AutomationRenderMessageFilterMS5_FvbEEEbPKNS_7MessageEPT_T0_
+   fun:_ZN31AutomationRenderMessageFilter17OnMessageReceivedERKN3IPC7MessageE
    fun:_ZN3IPC12ChannelProxy7Context10TryFiltersERKNS_7MessageE
    fun:_ZN3IPC11SyncChannel11SyncContext17OnMessageReceivedERKNS_7MessageE
    fun:_ZN3IPC7Channel11ChannelImpl23ProcessIncomingMessagesEv
@@ -2430,25 +2412,26 @@
    bug_49279_a
    Memcheck:Leak
    fun:_Znw*
-   ...
+   fun:*ChromeCookieMonsterDelegateC1EP7Profile
    fun:_ZN30ChromeURLRequestContextFactoryC2EP7Profile
-   fun:_ZN12_GLOBAL__N_118FactoryForOriginalC2EP7ProfileRK8FilePathS5_i
-   fun:_ZN29ChromeURLRequestContextGetter14CreateOriginalEP7ProfileRK8FilePathS4_i
-   fun:_ZN11ProfileImpl17GetRequestContextEv
 }
 {
    bug_49279_b
    Memcheck:Leak
    fun:_Znw*
    ...
-   fun:_ZN30ChromeURLRequestContextFactoryC2EP7Profile
-   fun:_ZN12_GLOBAL__N_115FactoryForMediaC2EP7ProfileRK8FilePathib
-   fun:_ZN12_GLOBAL__N_115FactoryForMediaC1EP7ProfileRK8FilePathib
    fun:_ZN29ChromeURLRequestContextGetter28CreateRequestContextForMediaEP7ProfileRK8FilePathib
    fun:_ZN29ChromeURLRequestContextGetter22CreateOriginalForMediaEP7ProfileRK8FilePathi
    fun:_ZN11ProfileImpl25GetRequestContextForMediaEv
 }
-
+{
+   bug_49279_c
+   Memcheck:Leak
+   fun:_Znw*
+   fun:*ChromeCookieMonsterDelegateC2EP7Profile
+   fun:*ChromeCookieMonsterDelegateC1EP7Profile
+   fun:_ZN30ChromeURLRequestContextFactoryC2EP7Profile
+}
 {
    bug_50056
    Memcheck:Leak
@@ -2486,9 +2469,6 @@
    Memcheck:Leak
    fun:_Znw*
    ...
-   fun:_ZN30ChromeURLRequestContextFactoryC2EP7Profile
-   fun:*FactoryForOffTheRecordC*EP7Profile
-   ...
    fun:_ZN29ChromeURLRequestContextGetter18CreateOffTheRecordEP7Profile
    ...
    fun:_ZN23OffTheRecordProfileImpl*Profile
@@ -2496,12 +2476,20 @@
    fun:_ZN11ProfileImpl22GetOffTheRecordProfileEv
 }
 {
-   bug_50968
+   bug_50968_a
    Memcheck:Leak
    ...
    fun:_ZN14WebDataService29InitializeDatabaseIfNecessaryEv
    fun:_Z16DispatchToMethodI14WebDataServiceMS0_FvvEEvPT_T0_RK6Tuple0
 }
+{
+   bug_50968_b
+   Memcheck:Addr4
+   ...
+   fun:_ZN14WebDataService29InitializeDatabaseIfNecessaryEv
+   fun:_Z16DispatchToMethodI14WebDataServiceMS0_FvvEEvPT_T0_RK6Tuple0
+}
+
 {
    bug_56359_a
    Memcheck:Leak
@@ -2517,32 +2505,6 @@
    fun:_ZN10URLRequest8StartJobEP13URLRequestJob
    fun:_ZN10URLRequest5StartEv
    fun:_ZN10URLFetcher4Core15StartURLRequestEv
-}
-{
-   bug_56359_b
-   Memcheck:Leak
-   fun:_Znw*
-   fun:_ZN3sql10Connection18GetUniqueStatementEPKc
-   fun:_ZN3sql10Connection18GetCachedStatementERKNS_11StatementIDEPKc
-   fun:_ZN3sql9MetaTable19PrepareSetStatementEPNS_9StatementEPKc
-   fun:_ZN3sql9MetaTable8SetValueEPKci
-   fun:_ZN3sql9MetaTable16SetVersionNumberEi
-   fun:_ZN3sql9MetaTable4InitEPNS_10ConnectionEii
-   fun:_ZN27SQLitePersistentCookieStore21EnsureDatabaseVersionEPN3sql10ConnectionE
-   fun:_ZN27SQLitePersistentCookieStore4LoadEPSt6vectorIPN3net13CookieMonster15CanonicalCookieESaIS4_EE
-   fun:_ZN3net13CookieMonster9InitStoreEv
-   fun:_ZN3net13CookieMonster15InitIfNecessaryEv
-   fun:_ZN3net13CookieMonster21GetCookiesWithOptionsERK4GURLRKNS_13CookieOptionsE
-   fun:_ZN17URLRequestHttpJob24OnCanGetCookiesCompletedEi
-   fun:_ZN17URLRequestHttpJob23AddCookieHeaderAndStartEv
-   fun:_ZN17URLRequestHttpJob5StartEv
-   fun:_ZN10URLRequest8StartJobEP13URLRequestJob
-   fun:_ZN10URLRequest5StartEv
-   fun:_ZN10URLFetcher4Core15StartURLRequestEv
-   fun:_Z16DispatchToMethodIN10URLFetcher4CoreEMS1_FvvEEvPT_T0_RK6Tuple0
-   fun:_ZN14RunnableMethodIN10URLFetcher4CoreEMS1_FvvE6Tuple0E3RunEv
-   fun:_ZN11MessageLoop7RunTaskEP4Task
-   fun:_ZN11MessageLoop21DeferOrRunPendingTaskERKNS_11PendingTaskE
 }
 {
    bug_51153
@@ -2563,8 +2525,8 @@
    Memcheck:Leak
    fun:_Znw*
    fun:_ZN3IPC11SyncMessage13GenerateReplyEPKNS_7MessageE
-   fun:_ZN3IPC16MessageWithReplyI6Tuple2I4GURLSsES1_IRNS_13ChannelHandleER13WebPluginInfoEE18DispatchDelayReplyI21ResourceMessageFilterMSB_FvRKS2_RKSsPNS_7MessageEEEEbPKSG_PT_T0_
-   fun:_ZN21ResourceMessageFilter17OnMessageReceivedERKN3IPC7MessageE
+   fun:_ZN3IPC16MessageWithReplyI6Tuple2I4GURLSsES1_IRNS_13ChannelHandleER13WebPluginInfoEE18DispatchDelayReplyI19RenderMessageFilterMSB_FvRKS2_RKSsPNS_7MessageEEEEbPKSG_PT_T0_
+   fun:_ZN19RenderMessageFilter17OnMessageReceivedERKN3IPC7MessageE
    fun:_ZN3IPC12ChannelProxy7Context10TryFiltersERKNS_7MessageE
    fun:_ZN3IPC11SyncChannel11SyncContext17OnMessageReceivedERKNS_7MessageE
    fun:_ZN3IPC7Channel11ChannelImpl23ProcessIncomingMessagesEv
@@ -2646,7 +2608,7 @@
    fun:_ZN7WebCore25createV8ObjectForNPObjectEP8NPObjectS1_
    fun:_ZN7WebCore16ScriptController18bindToWindowObjectEPNS_5FrameERKN3WTF6StringEP8NPObject
    fun:_ZN6WebKit12WebFrameImpl18bindToWindowObjectERKNS_9WebStringEP8NPObject
-   fun:_ZN13CppBoundClass16BindToJavascriptEPN6WebKit8WebFrameERKSbIwSt11char_traitsIwESaIwEE
+   fun:_ZN13CppBoundClass16BindToJavascriptEPN6WebKit8WebFrameERKSs
    ...
    fun:_ZN19TestWebViewDelegate20didClearWindowObjectEPN6WebKit8WebFrameE
    fun:_ZN6WebKit21FrameLoaderClientImpl35dispatchDidClearWindowObjectInWorldEPN7WebCore15DOMWrapperWorldE
@@ -2656,8 +2618,8 @@
    fun:_ZN7WebCore7V8Proxy16mainWorldContextEPNS_5FrameE
    fun:_ZN7WebCore16ScriptController18bindToWindowObjectEPNS_5FrameERKN3WTF6StringEP8NPObject
    fun:_ZN6WebKit12WebFrameImpl18bindToWindowObjectERKNS_9WebStringEP8NPObject
-   fun:_ZN13CppBoundClass16BindToJavascriptEPN6WebKit8WebFrameERKSbIwSt11char_traitsIwESaIwEE
-   fun:_ZN23AccessibilityController16BindToJavascriptEPN6WebKit8WebFrameERKSbIwSt11char_traitsIwESaIwEE
+   fun:_ZN13CppBoundClass16BindToJavascriptEPN6WebKit8WebFrameERKSs
+   fun:_ZN23AccessibilityController16BindToJavascriptEPN6WebKit8WebFrameERKSs
    fun:_ZN9TestShell21BindJSObjectsToWindowEPN6WebKit8WebFrameE
    fun:_ZN19TestWebViewDelegate20didClearWindowObjectEPN6WebKit8WebFrameE
 }
@@ -2711,8 +2673,8 @@
    ...
    fun:_ZNSt3mapISs8FilePathSt4lessISsESaISt4pairIKSsS0_EEE6insertESt17_Rb_tree_iteratorIS5_ERKS5_
    fun:_ZNSt3mapISs8FilePathSt4lessISsESaISt4pairIKSsS0_EEEixERS4_
-   fun:_ZN17ExtensionsService15UnloadExtensionERKSs
-   fun:_ZN17ExtensionsService18UninstallExtensionERKSsb
+   fun:_ZN16ExtensionService15UnloadExtensionERKSs
+   fun:_ZN16ExtensionService18UninstallExtensionERKSsb
    fun:_ZN18AutomationProvider18UninstallExtensionEiPb
 }
 {
@@ -3241,6 +3203,20 @@
    fun:CERT_FindCertIssuer
 }
 {
+   bug_69073
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:sqlite3*
+   ...
+   fun:find_objects
+   fun:find_objects_by_template
+   fun:nssToken_FindCertificatesBySubject
+   fun:nssTrustDomain_FindCertificatesBySubject
+   fun:nssCertificate_BuildChain
+   fun:NSSCertificate_BuildChain
+}
+{
    bug_61424
    Memcheck:Leak
    fun:_Znw*
@@ -3298,37 +3274,6 @@
    fun:CERT_PKIXVerifyCert
 }
 {
-   bug_62674
-   Memcheck:Addr4
-   fun:_ZN3net25SingleRequestHostResolver6CancelEv
-   fun:_ZN3net25SingleRequestHostResolverD1Ev
-   fun:_ZN3net13TCPConnectJobD0Ev
-   fun:_Z26STLDeleteContainerPointersISt23_Rb_tree_const_iteratorIPN3net10ConnectJobEEEvT_S5_
-   fun:_Z17STLDeleteElementsISt3setIPN3net10ConnectJobESt4lessIS3_ESaIS3_EEEvPT_
-   fun:_ZN3net8internal26ClientSocketPoolBaseHelper5Group13RemoveAllJobsEv
-   fun:_ZN3net8internal26ClientSocketPoolBaseHelper20CancelAllConnectJobsEv
-   fun:_ZN3net8internal26ClientSocketPoolBaseHelper5FlushEv
-   fun:_ZN3net8internal26ClientSocketPoolBaseHelperD1Ev
-   fun:_ZN3net20ClientSocketPoolBaseINS_15TCPSocketParamsEED1Ev
-   fun:_ZN3net19TCPClientSocketPoolD0Ev
-   fun:_ZN10scoped_ptrIN3net19TCPClientSocketPoolEED1Ev
-}
-{
-   bug_62801
-   Memcheck:Addr4
-   fun:pthread_mutex_lock
-   fun:PR_Lock
-   fun:_pt_thread_death_internal
-   fun:PR_DetachThread
-   fun:_ZN3net12CertVerifier7Request8DoVerifyEv
-   fun:_Z16DispatchToMethodIN3net12CertVerifier7RequestEMS2_FvvEEvPT_T0_RK6Tuple0
-   fun:_ZN14RunnableMethodIN3net12CertVerifier7RequestEMS2_FvvE6Tuple0E3RunEv
-   fun:*12WorkerThread10ThreadMainEv
-   fun:_Z10ThreadFuncPv
-   fun:start_thread
-   fun:clone
-}
-{
    bug_63015
    Memcheck:Addr2
    fun:_ZN7WebCore18stringToLengthTypeERPKtS1_
@@ -3360,3 +3305,323 @@
    fun:_ZN12browser_sync44SetCurrentThemeFromThemeSpecificsIfNecessaryERKN7sync_pb14ThemeSpecificsEP7Profile
    fun:_ZN12browser_sync76_GLOBAL__N_chrome_browser_sync_glue_theme_util_unittest.cc_00000000_6D6EFF0A69ThemeUtilTest_SetCurrentThemeIfNecessaryDefaultThemeNotNecessary_Test8TestBodyEv
 }
+{
+   bug_64804
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN4base16MessageLoopProxy22CreateForCurrentThreadEv
+   ...
+   fun:_ZN10URLFetcher4CoreC1EPS_RK4GURLNS_11RequestTypeEPNS_8DelegateE
+   fun:_ZN10URLFetcherC*ERK4GURLNS_11RequestTypeEPNS_8DelegateE
+}
+{
+   bug_64887
+   Memcheck:Value8
+   fun:_itoa_word
+   fun:vfprintf
+   fun:vsnprintf
+   fun:snprintf
+   fun:_ZN7testing*26PrintByteSegmentInObjectToEPKhmmPSo
+   fun:_ZN7testing*24PrintBytesInObjectToImplEPKhmPSo
+   fun:_ZN7testing9internal220PrintBytesInObjectToEPKhmPSo
+   fun:_ZN7testing9internal220TypeWithoutFormatterI*
+   fun:_ZN7testing9internal2lsIcSt11char_traitsIcE*
+   fun:_ZN16testing_internal26DefaultPrintNonContainerToI*
+   fun:_ZN7testing8internal14DefaultPrintToI*
+   fun:_ZN7testing8internal7PrintToI*
+   fun:_ZN7testing8internal16UniversalPrinterI*
+   fun:_ZN7testing8internal14UniversalPrintI*
+   fun:_ZN7testing8internal19UniversalTersePrintI*
+   fun:_ZN7testing13PrintToStringI*
+   fun:_ZN7testing8internal25ParameterizedTestCaseInfoI*E13RegisterTestsEv
+   fun:_ZN7testing8internal29ParameterizedTestCaseRegistry13RegisterTestsEv
+   fun:_ZN7testing8internal12UnitTestImpl26RegisterParameterizedTestsEv
+   fun:_ZN7testing8internal12UnitTestImpl19PostFlagParsingInitEv
+   fun:_ZN7testing8internal18InitGoogleTestImplIcEEvPiPPT_
+   fun:_ZN7testing14InitGoogleTestEPiPPc
+}
+{
+   bug_64930a
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZNSt3setISsSt4lessISsESaISsEE6insertERKSs
+   fun:_ZN16TranslateManager19IsSupportedLanguageERKSs
+   fun:_ZN16TranslateManager17GetTargetLanguageEv
+}
+{
+   bug_64930b
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZNSt*
+   fun:_ZN5NPAPI10PluginList*
+   ...
+   fun:_ZN13PluginService*
+}
+{
+   bug_64930c
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:*ThemeMapC1Ev
+   fun:*ThemeMapEE3NewEPv
+   fun:*ThemeMapENS_25DefaultLazyInstanceTraitsIS2_EEE7PointerEv
+   fun:*ThemeMapENS_25DefaultLazyInstanceTraitsIS2_EEE3GetEv
+   fun:_ZN13ResourcesUtil18GetThemeResourceIdERKSs
+}
+{
+   bug_65680a
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN8remoting12TraceContext3GetEv
+   fun:_ZN8remoting12TraceContext6tracerEv
+   fun:_ZN8remoting14ScreenRecorder9DoCaptureEv
+   fun:_ZN8remoting14ScreenRecorder7DoStartEv
+   fun:_Z16DispatchToMethodIN8remoting14ScreenRecorderEMS1_FvvEEvPT_T0_RK6Tuple0
+   fun:_ZN14RunnableMethodIN8remoting14ScreenRecorderEMS1_FvvE6Tuple0E3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+   ...
+   fun:_ZN8remoting38ScreenRecorderTest_OneRecordCycle_Test8TestBodyEv
+   fun:_ZN7testingL35HandleExceptionsInMethodIfSupportedINS_4TestEvEET0_PT_MS3_FS2_vEPKc
+}
+{
+   bug_65680b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN8remoting14ScreenRecorder17DoSendVideoPacketEPNS_11VideoPacketE
+   fun:_Z16DispatchToMethodIN8remoting14ScreenRecorderEMS1_FvPNS0_11VideoPacketEES3_EvPT_T0_RK6Tuple1IT1_E
+   fun:_ZN14RunnableMethodIN8remoting14ScreenRecorderEMS1_FvPNS0_11VideoPacketEE6Tuple1IS3_EE3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+   ...
+   fun:_ZN8remoting38ScreenRecorderTest_OneRecordCycle_Test8TestBodyEv
+}
+{
+   bug_65932
+   Memcheck:Value4
+   ...
+   fun:_ZN7WebCore13InlineFlowBox26placeBoxesInBlockDirectionEiiibRiS1_RbS1_S1_S2_NS_12FontBaselineE
+   fun:_ZN7WebCore13RootInlineBox26alignBoxesInBlockDirectionEiRN3WTF7HashMapIPKNS_13InlineTextBoxESt4pairINS1_6VectorIPKNS_14SimpleFontDataELj0EEENS_13GlyphOverflowEENS1_7PtrHashIS5_EENS1_10HashTraitsIS5_EENSG_ISD_EEEERNS_21VerticalPositionCacheE
+   fun:_ZN7WebCore11RenderBlock37computeBlockDirectionPositionsForLineEPNS_13RootInlineBoxEPNS_7BidiRunERN3WTF7HashMapIPKNS_13InlineTextBoxESt4pairINS5_6VectorIPKNS_14SimpleFontDataELj0EEENS_13GlyphOverflowEENS5_7PtrHashIS9_EENS5_10HashTraitsIS9_EENSK_ISH_EEEERNS_21VerticalPositionCacheE
+}
+{
+   bug_66853
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN11ProfileImpl14GetHostZoomMapEv
+   fun:_ZN30ChromeURLRequestContextFactoryC2EP7Profile
+   fun:_ZN77_GLOBAL__N_chrome_browser_net_chrome_url_request_context.cc_00000000_0FB246EB18FactoryForOriginalC1EP7ProfileRK8FilePathS5_i
+   fun:_ZN29ChromeURLRequestContextGetter14CreateOriginalEP7ProfileRK8FilePathS4_i
+   fun:_ZN11ProfileImpl17GetRequestContextEv
+   fun:_ZN19SafeBrowsingService5StartEv
+   fun:_ZN19SafeBrowsingService10InitializeEv
+   fun:_ZN22ResourceDispatcherHost10InitializeEv
+   fun:_ZN18BrowserProcessImpl28CreateResourceDispatcherHostEv
+   fun:_ZN18BrowserProcessImpl24resource_dispatcher_hostEv
+   fun:_ZN16ExtensionService4InitEv
+   fun:_ZN11ProfileImpl14InitExtensionsEv
+   fun:_ZN14ProfileManager10AddProfileEP7Profileb
+   fun:_ZN14ProfileManager10GetProfileERK8FilePathb
+   fun:_ZN14ProfileManager10GetProfileERK8FilePath
+   fun:_ZN14ProfileManager17GetDefaultProfileERK8FilePath
+}
+{
+   bug_67142
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN16ChildProcessHost13CreateChannelEv
+   fun:_ZN14GpuProcessHost4InitEv
+}
+{
+   bug_67261
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZN3sql10Connection18GetUniqueStatementEPKc
+   fun:_ZN3sql10Connection18GetCachedStatementERKNS_11StatementIDEPKc
+   fun:_ZN8appcache16AppCacheDatabase22PrepareCachedStatementERKN3sql11StatementIDEPKcPNS1_9StatementE
+}
+{
+   bug_67289
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN3net12CertVerifier6VerifyEPNS_15X509CertificateERKSsiPNS_16CertVerifyResultEP14CallbackRunnerI6Tuple1IiEEPPv
+   fun:_ZN3net25SingleRequestCertVerifier6VerifyEPNS_15X509CertificateERKSsiPNS_16CertVerifyResultEP14CallbackRunnerI6Tuple1IiEE
+}
+{
+   bug_67553
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZNSt3mapISs13scoped_refptrIK9ExtensionESt4lessISsESaISt4pairIKSsS3_EEEixERS7_
+   fun:_ZN16ExtensionInfoMap12AddExtensionEPK9Extension
+   fun:_Z16DispatchToMethodI16ExtensionInfoMapMS0_FvPK9ExtensionES3_EvPT_T0_RK6Tuple1IT1_E
+}
+{
+   bug_67676
+   Memcheck:Leak
+   fun:_Znw*
+   ...
+   fun:_ZNSt3mapISsP5ValueSt4lessISsESaISt4pairIKSsS1_EEEixERS5_
+   fun:_ZN15DictionaryValue23SetWithoutPathExpansionERKSsP5Value
+   ...
+   fun:_ZNK15DictionaryValue8DeepCopyEv
+   fun:_ZN9Extension13InitFromValueERK15DictionaryValuebPSs
+   fun:_ZN9Extension6CreateERK8FilePathNS_8LocationERK15DictionaryValuebPSs
+   fun:_ZN19extension_file_util13LoadExtensionERK8FilePathN9Extension8LocationEbPSs
+   fun:_ZN23ExtensionServiceBackend19LoadSingleExtensionERK8FilePath13scoped_refptrI16ExtensionServiceE
+}
+{
+   bug_68069a
+   Memcheck:Leak
+   ...
+   fun:_ZN3gfx15PixmapGLContext11MakeCurrentEv
+   fun:_ZN3gfx15PixmapGLContext10InitializeEPNS_9GLContextE
+   fun:_ZN3gfx9GLContext24CreateOffscreenGLContextEPS0_
+   fun:*19InitializeGLContextEv
+   fun:_ZN18gpu_info_collector19CollectGraphicsInfoEP7GPUInfo
+   fun:_ZN9GpuThread4InitERKN4base4TimeE
+   fun:_Z7GpuMainRK18MainFunctionParams
+   fun:*23RunNamedProcessTypeMainERKSsRK18MainFunctionParams
+}
+{
+   bug_68069b
+   Memcheck:Leak
+   fun:malloc
+   ...
+   fun:_ZN3gfx9GLContext16InitializeOneOffEv
+   fun:_Z7GpuMainRK18MainFunctionParams
+   fun:*23RunNamedProcessTypeMainERKSsRK18MainFunctionParams
+   fun:ChromeMain
+   fun:main
+}
+{
+   bug_68292
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN29ExecuteBrowserCommandObserver25CreateAndRegisterObserverEP18AutomationProviderP7BrowseriPN3IPC7MessageE
+   fun:_ZN25TestingAutomationProvider21ExecuteBrowserCommandEiiPN3IPC7MessageE
+   fun:_Z16DispatchToMethodI25TestingAutomationProviderMS0_FviiPN3IPC7MessageEEiiRS2_EvPT_T0_RK6Tuple2IT1_T2_EP6Tuple1IT3_E
+   fun:_ZN3IPC16MessageWithReplyI6Tuple2IiiE6Tuple1IRbEE18DispatchDelayReplyI25TestingAutomationProviderMS8_FviiPNS_7MessageEEEEbPKS9_PT_T0_
+   fun:_ZN25TestingAutomationProvider17OnMessageReceivedERKN3IPC7MessageE
+   fun:_ZN3IPC12ChannelProxy7Context17OnDispatchMessageERKNS_7MessageE
+   fun:_ZN3IPC11SyncChannel20ReceivedSyncMsgQueue16DispatchMessagesEv
+   fun:_ZN3IPC11SyncChannel11SyncContext16DispatchMessagesEv
+   fun:_ZN3IPC11SyncChannel23OnWaitableEventSignaledEPN4base13WaitableEventE
+   fun:_ZN4base17AsyncCallbackTask3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+   fun:_ZN11MessageLoop21DeferOrRunPendingTaskERKNS_11PendingTaskE
+   fun:_ZN11MessageLoop6DoWorkEv
+}
+{
+   bug_68553
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN3net25DiskCacheBasedSSLHostInfoC1ERKSsRKNS_9SSLConfigEPNS_9HttpCacheE
+   fun:_ZN3net9HttpCache25SSLHostInfoFactoryAdaptor10GetForHostERKSsRKNS_9SSLConfigE
+   fun:_ZN3net13SSLConnectJob12DoTCPConnectEv
+   fun:_ZN3net13SSLConnectJob6DoLoopEi
+   fun:_ZN3net13SSLConnectJob15ConnectInternalEv
+   fun:_ZN3net10ConnectJob7ConnectEv
+   fun:_ZN3net8internal26ClientSocketPoolBaseHelper21RequestSocketInternalERKSsPKNS1_7RequestE
+   fun:_ZN3net8internal26ClientSocketPoolBaseHelper13RequestSocketERKSsPKNS1_7RequestE
+   fun:_ZN3net20ClientSocketPoolBaseINS_15SSLSocketParamsEE13RequestSocketERKSsRK13scoped_refptrIS1_ENS_15RequestPriorityEPNS_18ClientSocketHandleEP14CallbackRunnerI6Tuple1IiEERKNS_11BoundNetLogE
+   fun:_ZN3net19SSLClientSocketPool13RequestSocketERKSsPKvNS_15RequestPriorityEPNS_18ClientSocketHandleEP14CallbackRunnerI6Tuple1IiEERKNS_11BoundNetLogE
+   fun:_ZN3net18ClientSocketHandle4InitINS_15SSLSocketParamsENS_19SSLClientSocketPoolEEEiRKSsRK13scoped_refptrIT_ENS_15RequestPriorityEP14CallbackRunnerI6Tuple1IiEEPT0_RKNS_11BoundNetLogE
+   fun:_ZN3net17HttpStreamRequest16DoInitConnectionEv
+   fun:_ZN3net17HttpStreamRequest6DoLoopEi
+   fun:_ZN3net17HttpStreamRequest7RunLoopEi
+   fun:_ZN3net17HttpStreamRequest13StartInternalEPKNS_15HttpRequestInfoEPNS_9SSLConfigEPNS_9ProxyInfoERKNS_11BoundNetLogE
+   fun:_ZN3net17HttpStreamRequest5StartEPKNS_15HttpRequestInfoEPNS_9SSLConfigEPNS_9ProxyInfoEPNS_13StreamRequest8DelegateERKNS_11BoundNetLogE
+   fun:_ZN3net17HttpStreamFactory13RequestStreamEPKNS_15HttpRequestInfoEPNS_9SSLConfigEPNS_9ProxyInfoEPNS_18HttpNetworkSessionEPNS_13StreamRequest8DelegateERKNS_11BoundNetLogE
+   fun:_ZN3net22HttpNetworkTransaction14DoCreateStreamEv
+   fun:_ZN3net22HttpNetworkTransaction6DoLoopEi
+   fun:_ZN3net22HttpNetworkTransaction5StartEPKNS_15HttpRequestInfoEP14CallbackRunnerI6Tuple1IiEERKNS_11BoundNetLogE
+   fun:_ZN3net9HttpCache11Transaction13DoSendRequestEv
+}
+{
+   Bug_69919
+   Memcheck:Leak
+   fun:calloc
+   ...
+   fun:_ZN3gfx15OSMesaGLContext10InitializeEjPNS_9GLContextE
+   fun:_ZN3gfx9GLContext24CreateOffscreenGLContextEPS0_
+   fun:*InitializeGLContextEv
+}
+{
+   Bug_69934_a
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN13NPObjectProxy10NPAllocateEP4_NPPP7NPClass
+   fun:_NPN_CreateObject
+   fun:_ZN6WebKit11WebBindings12createObjectEP4_NPPP7NPClass
+   fun:_ZN13NPObjectProxy6CreateEP17PluginChannelBaseiiRK4GURL
+   fun:_ZN14WebPluginProxy23GetWindowScriptNPObjectEv
+   fun:NPN_GetValue
+   fun:_Z12testCallbackP12PluginObjectPK10_NPVariantjPS1_
+   fun:_Z12pluginInvokeP8NPObjectPvPK10_NPVariantjPS2_
+}
+{
+   Bug_69934_b
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN3IPC11SyncMessage13GenerateReplyEPKNS_7MessageE
+   fun:_ZN3IPC16MessageWithReplyI6Tuple1I21PluginMsg_Init_ParamsES1_IRbEE18DispatchDelayReplyIN13PluginChannel13MessageFilterEMS9_FvRKS2_PNS_7MessageEEEEbPKSC_PT_T0_
+   fun:_ZN13PluginChannel13MessageFilter17OnMessageReceivedERKN3IPC7MessageE
+}
+{
+   Bug_69934_c
+   Memcheck:Addr4
+   fun:_ZN12NPObjectStub8OnInvokeEbRK18NPIdentifier_ParamRKSt6vectorI15NPVariant_ParamSaIS4_EEPN3IPC7MessageE
+   fun:_Z16DispatchToMethodI12NPObjectStubMS0_FvbRK18NPIdentifier_ParamRKSt6vectorI15NPVariant_ParamSaIS5_EEPN3IPC7MessageEEbS1_S7_RSB_EvPT_T0_RK6Tuple3IT1_T2_T3_EP6Tuple1IT4_E
+   fun:_ZN3IPC16MessageWithReplyI6Tuple3Ib18NPIdentifier_ParamSt6vectorI15NPVariant_ParamSaIS4_EEE6Tuple2IRS4_RbEE18DispatchDelayReplyI12NPObjectStubMSE_FvbRKS2_RKS6_PNS_7MessageEEEEbPKSJ_PT_T0_
+   fun:_ZN12NPObjectStub17OnMessageReceivedERKN3IPC7MessageE
+   fun:_ZN13MessageRouter12RouteMessageERKN3IPC7MessageE
+   fun:_ZN17PluginChannelBase17OnMessageReceivedERKN3IPC7MessageE
+   fun:_ZN13PluginChannel17OnMessageReceivedERKN3IPC7MessageE
+}
+{
+   Bug_70062
+   Memcheck:Leak
+   fun:calloc
+   fun:PR_Calloc
+   fun:PR_NewLock
+   ...
+   fun:InitSessionCacheLocks
+   fun:initSessionCacheLocksLazily
+   fun:PR_CallOnce
+   fun:ssl_InitSessionCacheLocks
+   fun:lock_cache
+   fun:ssl_LookupSID
+   fun:ssl2_BeginClientHandshake
+   fun:ssl_Do1stHandshake
+   fun:SSL_ForceHandshake
+   fun:_ZN3net18SSLClientSocketNSS11DoHandshakeEv
+   fun:_ZN3net18SSLClientSocketNSS15DoHandshakeLoopEi
+}
+{
+   bug_70115
+   Memcheck:Leak
+   fun:_Znw*
+   fun:_ZN15FilePathWatcherC1Ev
+   fun:_ZN13PluginServiceC1Ev
+   fun:_ZN22DefaultSingletonTraitsI13PluginServiceE3NewEv
+   fun:_ZN9SingletonI13PluginService22DefaultSingletonTraitsIS0_ES0_E3getEv
+   fun:_ZN13PluginService11GetInstanceEv
+}
+{
+   bug_70291
+   Memcheck:Leak
+   ...
+   fun:_ZN4base13RSAPrivateKey34CreateFromPrivateKeyInfoWithParamsERKSt6vectorIhSaIhEEbb
+   fun:_ZN4base13RSAPrivateKey24CreateFromPrivateKeyInfoERKSt6vectorIhSaIhEE
+   fun:_ZN8remoting8protocol17JingleSessionTest18DoCreateServerPairEv
+   fun:_Z16DispatchToMethodIN8remoting8protocol17JingleSessionTestEMS2_FvvEEvPT_T0_RK6Tuple0
+   fun:_ZN14RunnableMethodIN8remoting8protocol17JingleSessionTestEMS2_FvvE6Tuple0E3RunEv
+   fun:_ZN11MessageLoop7RunTaskEP4Task
+   fun:_ZN11MessageLoop21DeferOrRunPendingTaskERKNS_11PendingTaskE
+   fun:_ZN11MessageLoop6DoWorkEv
+   fun:_ZN8remoting12JingleThread17JingleMessagePump9OnMessageEPN9talk_base7MessageE
+   fun:_ZN9talk_base12MessageQueue8DispatchEPNS_7MessageE
+   fun:_ZN9talk_base6Thread15ProcessMessagesEi
+ }

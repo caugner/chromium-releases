@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -29,9 +27,10 @@
 #include "chrome/browser/net/passive_log_collector.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
@@ -47,15 +46,23 @@
 #include "net/http/http_network_session.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
+
 #ifdef OS_WIN
 #include "chrome/browser/net/service_providers_win.h"
 #endif
 
 namespace {
 
+// Delay between when an event occurs and when it is passed to the Javascript
+// page.  All events that occur during this period are grouped together and
+// sent to the page at once, which reduces context switching and CPU usage.
+const int kNetLogEventDelayMilliseconds = 100;
+
 // Returns the HostCache for |context|'s primary HostResolver, or NULL if
 // there is none.
-net::HostCache* GetHostResolverCache(URLRequestContext* context) {
+net::HostCache* GetHostResolverCache(net::URLRequestContext* context) {
   net::HostResolverImpl* host_resolver_impl =
       context->host_resolver()->GetAsHostResolverImpl();
 
@@ -66,7 +73,7 @@ net::HostCache* GetHostResolverCache(URLRequestContext* context) {
 }
 
 // Returns the disk cache backend for |context| if there is one, or NULL.
-disk_cache::Backend* GetDiskCacheBackend(URLRequestContext* context) {
+disk_cache::Backend* GetDiskCacheBackend(net::URLRequestContext* context) {
   if (!context->http_transaction_factory())
     return NULL;
 
@@ -79,7 +86,8 @@ disk_cache::Backend* GetDiskCacheBackend(URLRequestContext* context) {
 
 // Returns the http network session for |context| if there is one.
 // Otherwise, returns NULL.
-net::HttpNetworkSession* GetHttpNetworkSession(URLRequestContext* context) {
+net::HttpNetworkSession* GetHttpNetworkSession(
+    net::URLRequestContext* context) {
   if (!context->http_transaction_factory())
     return NULL;
 
@@ -151,14 +159,16 @@ class NetInternalsMessageHandler
   DISALLOW_COPY_AND_ASSIGN(NetInternalsMessageHandler);
 };
 
-// This class is the "real" message handler. With the exception of being
-// allocated and destroyed on the UI thread, its methods are expected to be
-// called from the IO thread.
+// This class is the "real" message handler. It is allocated and destroyed on
+// the UI thread.  With the exception of OnAddEntry, OnDOMUIDeleted, and
+// CallJavascriptFunction, its methods are all expected to be called from the IO
+// thread.  OnAddEntry and CallJavascriptFunction can be called from any thread,
+// and OnDOMUIDeleted can only be called from the UI thread.
 class NetInternalsMessageHandler::IOThreadImpl
     : public base::RefCountedThreadSafe<
           NetInternalsMessageHandler::IOThreadImpl,
           BrowserThread::DeleteOnUIThread>,
-      public ChromeNetLog::Observer,
+      public ChromeNetLog::ThreadSafeObserver,
       public ConnectionTester::Delegate {
  public:
   // Type for methods that can be used as MessageHandler callbacks.
@@ -186,12 +196,18 @@ class NetInternalsMessageHandler::IOThreadImpl
   // IO thread.
   void Detach();
 
+  // Sends all passive log entries in |passive_entries| to the Javascript
+  // handler, called on the IO thread.
+  void SendPassiveLogEntries(const ChromeNetLog::EntryList& passive_entries);
+
+  // Called when the DOMUI is deleted.  Prevents calling Javascript functions
+  // afterwards.  Called on UI thread.
+  void OnDOMUIDeleted();
+
   //--------------------------------
   // Javascript message handlers:
   //--------------------------------
 
-  // This message is called after the webpage's onloaded handler has fired.
-  // it indicates that the renderer is ready to start receiving captured data.
   void OnRendererReady(const ListValue* list);
 
   void OnGetProxySettings(const ListValue* list);
@@ -201,7 +217,6 @@ class NetInternalsMessageHandler::IOThreadImpl
   void OnGetHostResolverInfo(const ListValue* list);
   void OnClearHostResolverCache(const ListValue* list);
   void OnEnableIPv6(const ListValue* list);
-  void OnGetPassiveLogEntries(const ListValue* list);
   void OnStartConnectionTests(const ListValue* list);
   void OnGetHttpCacheInfo(const ListValue* list);
   void OnGetSocketPoolInfo(const ListValue* list);
@@ -212,7 +227,7 @@ class NetInternalsMessageHandler::IOThreadImpl
 
   void OnSetLogLevel(const ListValue* list);
 
-  // ChromeNetLog::Observer implementation:
+  // ChromeNetLog::ThreadSafeObserver implementation:
   virtual void OnAddEntry(net::NetLog::EventType type,
                           const base::TimeTicks& time,
                           const net::NetLog::Source& source,
@@ -235,9 +250,20 @@ class NetInternalsMessageHandler::IOThreadImpl
   void DispatchToMessageHandler(ListValue* arg, MessageHandler method);
 
   // Helper that executes |function_name| in the attached renderer.
-  // The function takes ownership of |arg|.
-  void CallJavascriptFunction(const std::wstring& function_name,
-                              Value* arg);
+  // The function takes ownership of |arg|.  Note that this can be called from
+  // any thread.
+  void CallJavascriptFunction(const std::wstring& function_name, Value* arg);
+
+  // Adds |entry| to the queue of pending log entries to be sent to the page via
+  // Javascript.  Must be called on the IO Thread.  Also creates a delayed task
+  // that will call PostPendingEntries, if there isn't one already.
+  void AddEntryToQueue(Value* entry);
+
+  // Sends all pending entries to the page via Javascript, and clears the list
+  // of pending entries.  Sending multiple entries at once results in a
+  // significant reduction of CPU usage when a lot of events are happening.
+  // Must be called on the IO Thread.
+  void PostPendingEntries();
 
   // Pointer to the UI-thread message handler. Only access this from
   // the UI thread.
@@ -251,9 +277,22 @@ class NetInternalsMessageHandler::IOThreadImpl
   // Helper that runs the suite of connection tests.
   scoped_ptr<ConnectionTester> connection_tester_;
 
+  // True if the DOM UI has been deleted.  This is used to prevent calling
+  // Javascript functions after the DOM UI is destroyed.  On refresh, the
+  // messages can end up being sent to the refreshed page, causing duplicate
+  // or partial entries.
+  //
+  // This is only read and written to on the UI thread.
+  bool was_domui_deleted_;
+
   // True if we have attached an observer to the NetLog already.
   bool is_observing_log_;
   friend class base::RefCountedThreadSafe<IOThreadImpl>;
+
+  // Log entries that have yet to be passed along to Javascript page.  Non-NULL
+  // when and only when there is a pending delayed task to call
+  // PostPendingEntries.  Read and written to exclusively on the IO Thread.
+  scoped_ptr<ListValue> pending_entries_;
 };
 
 // Helper class for a DOMUI::MessageCallback which when excuted calls
@@ -303,6 +342,9 @@ NetInternalsHTMLSource::NetInternalsHTMLSource()
 void NetInternalsHTMLSource::StartDataRequest(const std::string& path,
                                               bool is_off_the_record,
                                               int request_id) {
+  DictionaryValue localized_strings;
+  SetFontAndTextDirection(&localized_strings);
+
   // The provided "path" may contain a fragment, or query section. We only
   // care about the path itself, and will disregard anything else.
   std::string filename =
@@ -313,13 +355,20 @@ void NetInternalsHTMLSource::StartDataRequest(const std::string& path,
   // Note that users can type anything into the address bar, though, so we must
   // handle arbitrary input.
   if (filename.empty() || filename == "index.html") {
-    scoped_refptr<RefCountedStaticMemory> bytes(
-        ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
+    base::StringPiece html(
+        ResourceBundle::GetSharedInstance().GetRawDataResource(
             IDR_NET_INTERNALS_INDEX_HTML));
-    if (bytes && bytes->front()) {
-      SendResponse(request_id, bytes);
-      return;
-    }
+    std::string full_html(html.data(), html.size());
+    jstemplate_builder::AppendJsonHtml(&localized_strings, &full_html);
+    jstemplate_builder::AppendI18nTemplateSourceHtml(&full_html);
+    jstemplate_builder::AppendI18nTemplateProcessHtml(&full_html);
+    jstemplate_builder::AppendJsTemplateSourceHtml(&full_html);
+
+    scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
+    html_bytes->data.resize(full_html.size());
+    std::copy(full_html.begin(), full_html.end(), html_bytes->data.begin());
+    SendResponse(request_id, html_bytes);
+    return;
   }
 
   const std::string data_string("<p style='color:red'>Failed to read resource" +
@@ -344,6 +393,7 @@ NetInternalsMessageHandler::NetInternalsMessageHandler() {}
 
 NetInternalsMessageHandler::~NetInternalsMessageHandler() {
   if (proxy_) {
+    proxy_.get()->OnDOMUIDeleted();
     // Notify the handler on the IO thread that the renderer is gone.
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
         NewRunnableMethod(proxy_.get(), &IOThreadImpl::Detach));
@@ -385,9 +435,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
   dom_ui_->RegisterMessageCallback(
       "enableIPv6",
       proxy_->CreateCallback(&IOThreadImpl::OnEnableIPv6));
-  dom_ui_->RegisterMessageCallback(
-      "getPassiveLogEntries",
-      proxy_->CreateCallback(&IOThreadImpl::OnGetPassiveLogEntries));
   dom_ui_->RegisterMessageCallback(
       "startConnectionTests",
       proxy_->CreateCallback(&IOThreadImpl::OnStartConnectionTests));
@@ -432,10 +479,11 @@ NetInternalsMessageHandler::IOThreadImpl::IOThreadImpl(
     const base::WeakPtr<NetInternalsMessageHandler>& handler,
     IOThread* io_thread,
     URLRequestContextGetter* context_getter)
-    : Observer(net::NetLog::LOG_ALL_BUT_BYTES),
+    : ThreadSafeObserver(net::NetLog::LOG_ALL_BUT_BYTES),
       handler_(handler),
       io_thread_(io_thread),
       context_getter_(context_getter),
+      was_domui_deleted_(false),
       is_observing_log_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
@@ -455,20 +503,38 @@ void NetInternalsMessageHandler::IOThreadImpl::Detach() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Unregister with network stack to observe events.
   if (is_observing_log_)
-    io_thread_->globals()->net_log->RemoveObserver(this);
+    io_thread_->net_log()->RemoveObserver(this);
 
   // Cancel any in-progress connection tests.
   connection_tester_.reset();
+}
+
+void NetInternalsMessageHandler::IOThreadImpl::SendPassiveLogEntries(
+    const ChromeNetLog::EntryList& passive_entries) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  ListValue* dict_list = new ListValue();
+  for (size_t i = 0; i < passive_entries.size(); ++i) {
+    const ChromeNetLog::Entry& e = passive_entries[i];
+    dict_list->Append(net::NetLog::EntryToDictionaryValue(e.type,
+                                                          e.time,
+                                                          e.source,
+                                                          e.phase,
+                                                          e.params,
+                                                          false));
+  }
+
+  CallJavascriptFunction(L"g_browser.receivedPassiveLogEntries", dict_list);
+}
+
+void NetInternalsMessageHandler::IOThreadImpl::OnDOMUIDeleted() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  was_domui_deleted_ = true;
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
     const ListValue* list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!is_observing_log_) << "notifyReady called twice";
-
-  // Register with network stack to observe events.
-  is_observing_log_ = true;
-  io_thread_->globals()->net_log->AddObserver(this);
 
   // Tell the javascript about the relationship between event type enums and
   // their symbolic name.
@@ -617,12 +683,17 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
                                base::Int64ToString(tick_to_unix_time_ms)));
   }
 
-  OnGetPassiveLogEntries(NULL);
+  // Register with network stack to observe events.
+  is_observing_log_ = true;
+  ChromeNetLog::EntryList entries;
+  io_thread_->net_log()->AddObserverAndGetAllPassivelyCapturedEvents(this,
+                                                                     &entries);
+  SendPassiveLogEntries(entries);
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
     const ListValue* list) {
-  URLRequestContext* context = context_getter_->GetURLRequestContext();
+  net::URLRequestContext* context = context_getter_->GetURLRequestContext();
   net::ProxyService* proxy_service = context->proxy_service();
 
   DictionaryValue* dict = new DictionaryValue();
@@ -636,7 +707,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetProxySettings(
 
 void NetInternalsMessageHandler::IOThreadImpl::OnReloadProxySettings(
     const ListValue* list) {
-  URLRequestContext* context = context_getter_->GetURLRequestContext();
+  net::URLRequestContext* context = context_getter_->GetURLRequestContext();
   context->proxy_service()->ForceReloadProxyConfig();
 
   // Cause the renderer to be notified of the new values.
@@ -645,7 +716,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnReloadProxySettings(
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetBadProxies(
     const ListValue* list) {
-  URLRequestContext* context = context_getter_->GetURLRequestContext();
+  net::URLRequestContext* context = context_getter_->GetURLRequestContext();
 
   const net::ProxyRetryInfoMap& bad_proxies_map =
       context->proxy_service()->proxy_retry_info();
@@ -670,7 +741,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnGetBadProxies(
 
 void NetInternalsMessageHandler::IOThreadImpl::OnClearBadProxies(
     const ListValue* list) {
-  URLRequestContext* context = context_getter_->GetURLRequestContext();
+  net::URLRequestContext* context = context_getter_->GetURLRequestContext();
   context->proxy_service()->ClearBadProxiesCache();
 
   // Cause the renderer to be notified of the new values.
@@ -679,7 +750,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnClearBadProxies(
 
 void NetInternalsMessageHandler::IOThreadImpl::OnGetHostResolverInfo(
     const ListValue* list) {
-  URLRequestContext* context = context_getter_->GetURLRequestContext();
+  net::URLRequestContext* context = context_getter_->GetURLRequestContext();
   net::HostResolverImpl* host_resolver_impl =
       context->host_resolver()->GetAsHostResolverImpl();
   net::HostCache* cache = GetHostResolverCache(context);
@@ -761,7 +832,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnClearHostResolverCache(
 
 void NetInternalsMessageHandler::IOThreadImpl::OnEnableIPv6(
     const ListValue* list) {
-  URLRequestContext* context = context_getter_->GetURLRequestContext();
+  net::URLRequestContext* context = context_getter_->GetURLRequestContext();
   net::HostResolverImpl* host_resolver_impl =
       context->host_resolver()->GetAsHostResolverImpl();
 
@@ -774,27 +845,6 @@ void NetInternalsMessageHandler::IOThreadImpl::OnEnableIPv6(
   OnGetHostResolverInfo(NULL);
 }
 
-void NetInternalsMessageHandler::IOThreadImpl::OnGetPassiveLogEntries(
-    const ListValue* list) {
-  ChromeNetLog* net_log = io_thread_->globals()->net_log.get();
-
-  PassiveLogCollector::EntryList passive_entries;
-  net_log->passive_collector()->GetAllCapturedEvents(&passive_entries);
-
-  ListValue* dict_list = new ListValue();
-  for (size_t i = 0; i < passive_entries.size(); ++i) {
-    const PassiveLogCollector::Entry& e = passive_entries[i];
-    dict_list->Append(net::NetLog::EntryToDictionaryValue(e.type,
-                                                          e.time,
-                                                          e.source,
-                                                          e.phase,
-                                                          e.params,
-                                                          false));
-  }
-
-  CallJavascriptFunction(L"g_browser.receivedPassiveLogEntries", dict_list);
-}
-
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
     const ListValue* list) {
   // |value| should be: [<URL to test>].
@@ -805,7 +855,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTests(
   // For example, turn "www.google.com" into "http://www.google.com".
   GURL url(URLFixerUpper::FixupURL(UTF16ToUTF8(url_str), std::string()));
 
-  connection_tester_.reset(new ConnectionTester(this, io_thread_));
+  connection_tester_.reset(new ConnectionTester(
+      this, io_thread_->globals()->proxy_script_fetcher_context.get()));
   connection_tester_->RunAllTests(url);
 }
 
@@ -911,21 +962,42 @@ void NetInternalsMessageHandler::IOThreadImpl::OnSetLogLevel(
 
   DCHECK_GE(log_level, net::NetLog::LOG_ALL);
   DCHECK_LE(log_level, net::NetLog::LOG_BASIC);
-  set_log_level(static_cast<net::NetLog::LogLevel>(log_level));
+  SetLogLevel(static_cast<net::NetLog::LogLevel>(log_level));
 }
 
+// Note that unlike other methods of IOThreadImpl, this function
+// can be called from ANY THREAD.
 void NetInternalsMessageHandler::IOThreadImpl::OnAddEntry(
     net::NetLog::EventType type,
     const base::TimeTicks& time,
     const net::NetLog::Source& source,
     net::NetLog::EventPhase phase,
     net::NetLog::EventParameters* params) {
-  DCHECK(is_observing_log_);
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          this, &IOThreadImpl::AddEntryToQueue,
+          net::NetLog::EntryToDictionaryValue(type, time, source, phase,
+                                              params, false)));
+}
 
+void NetInternalsMessageHandler::IOThreadImpl::AddEntryToQueue(Value* entry) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (!pending_entries_.get()) {
+    pending_entries_.reset(new ListValue());
+    BrowserThread::PostDelayedTask(
+        BrowserThread::IO, FROM_HERE,
+        NewRunnableMethod(this, &IOThreadImpl::PostPendingEntries),
+        kNetLogEventDelayMilliseconds);
+  }
+  pending_entries_->Append(entry);
+}
+
+void NetInternalsMessageHandler::IOThreadImpl::PostPendingEntries() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   CallJavascriptFunction(
-      L"g_browser.receivedLogEntry",
-      net::NetLog::EntryToDictionaryValue(type, time, source, phase, params,
-                                          false));
+      L"g_browser.receivedLogEntries",
+      pending_entries_.release());
 }
 
 void NetInternalsMessageHandler::IOThreadImpl::OnStartConnectionTestSuite() {
@@ -967,11 +1039,12 @@ void NetInternalsMessageHandler::IOThreadImpl::DispatchToMessageHandler(
   delete arg;
 }
 
+// Note that this can be called from ANY THREAD.
 void NetInternalsMessageHandler::IOThreadImpl::CallJavascriptFunction(
     const std::wstring& function_name,
     Value* arg) {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    if (handler_) {
+    if (handler_ && !was_domui_deleted_) {
       // We check |handler_| in case it was deleted on the UI thread earlier
       // while we were running on the IO thread.
       handler_->CallJavascriptFunction(function_name, arg);
@@ -980,10 +1053,6 @@ void NetInternalsMessageHandler::IOThreadImpl::CallJavascriptFunction(
     return;
   }
 
-  // Otherwise if we were called from the IO thread, bridge the request over to
-  // the UI thread.
-
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!BrowserThread::PostTask(
            BrowserThread::UI, FROM_HERE,
            NewRunnableMethod(
@@ -1013,7 +1082,7 @@ NetInternalsUI::NetInternalsUI(TabContents* contents) : DOMUI(contents) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(html_source)));
 }

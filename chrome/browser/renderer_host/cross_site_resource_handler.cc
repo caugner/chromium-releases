@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "chrome/browser/renderer_host/cross_site_resource_handler.h"
 
 #include "base/logging.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/renderer_host/global_request_id.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
@@ -59,7 +58,7 @@ bool CrossSiteResourceHandler::OnResponseStarted(int request_id,
 
   // Look up the request and associated info.
   GlobalRequestID global_id(render_process_host_id_, request_id);
-  URLRequest* request = rdh_->GetURLRequest(global_id);
+  net::URLRequest* request = rdh_->GetURLRequest(global_id);
   if (!request) {
     DLOG(WARNING) << "Request wasn't found";
     return false;
@@ -101,7 +100,7 @@ bool CrossSiteResourceHandler::OnReadCompleted(int request_id,
 
 bool CrossSiteResourceHandler::OnResponseCompleted(
     int request_id,
-    const URLRequestStatus& status,
+    const net::URLRequestStatus& status,
     const std::string& security_info) {
   if (!in_cross_site_transition_) {
     if (has_started_response_) {
@@ -141,7 +140,7 @@ void CrossSiteResourceHandler::ResumeResponse() {
 
   // Find the request for this response.
   GlobalRequestID global_id(render_process_host_id_, request_id_);
-  URLRequest* request = rdh_->GetURLRequest(global_id);
+  net::URLRequest* request = rdh_->GetURLRequest(global_id);
   if (!request) {
     DLOG(WARNING) << "Resuming a request that wasn't found";
     return;
@@ -189,7 +188,7 @@ void CrossSiteResourceHandler::StartCrossSiteTransition(
 
   // Store this handler on the ExtraRequestInfo, so that RDH can call our
   // ResumeResponse method when the close ACK is received.
-  URLRequest* request = rdh_->GetURLRequest(global_id);
+  net::URLRequest* request = rdh_->GetURLRequest(global_id);
   if (!request) {
     DLOG(WARNING) << "Cross site response for a request that wasn't found";
     return;

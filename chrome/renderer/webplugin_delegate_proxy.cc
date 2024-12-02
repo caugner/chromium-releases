@@ -10,7 +10,6 @@
 
 #include <algorithm>
 
-#include "app/resource_bundle.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -21,7 +20,6 @@
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/child_process_logging.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/plugin/npobject_proxy.h"
@@ -41,14 +39,15 @@
 #include "net/base/mime_util.h"
 #include "printing/native_metafile.h"
 #include "skia/ext/platform_canvas.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
-#include "webkit/glue/plugins/webplugin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_POSIX)
@@ -65,7 +64,7 @@ using WebKit::WebView;
 
 // Proxy for WebPluginResourceClient.  The object owns itself after creation,
 // deleting itself after its callback has been called.
-class ResourceClientProxy : public webkit_glue::WebPluginResourceClient {
+class ResourceClientProxy : public webkit::npapi::WebPluginResourceClient {
  public:
   ResourceClientProxy(PluginChannelHost* channel, int instance_id)
     : channel_(channel), instance_id_(instance_id), resource_id_(0),
@@ -202,6 +201,12 @@ WebPluginDelegateProxy::~WebPluginDelegateProxy() {
 }
 
 void WebPluginDelegateProxy::PluginDestroyed() {
+#if defined(OS_MACOSX)
+  // Ensure that the renderer doesn't think the plugin still has focus.
+  if (render_view_)
+    render_view_->PluginFocusChanged(false, instance_id_);
+#endif
+
   if (window_)
     WillDestroyWindow();
 
@@ -267,14 +272,16 @@ static bool SilverlightColorIsTransparent(const std::string& color) {
   return false;
 }
 
-bool WebPluginDelegateProxy::Initialize(const GURL& url,
+bool WebPluginDelegateProxy::Initialize(
+    const GURL& url,
     const std::vector<std::string>& arg_names,
     const std::vector<std::string>& arg_values,
-    webkit_glue::WebPlugin* plugin,
+    webkit::npapi::WebPlugin* plugin,
     bool load_manually) {
   IPC::ChannelHandle channel_handle;
   if (!RenderThread::current()->Send(new ViewHostMsg_OpenChannelToPlugin(
-          url, mime_type_, &channel_handle, &info_))) {
+          render_view_->routing_id(), url, mime_type_, &channel_handle,
+          &info_))) {
     return false;
   }
 
@@ -292,15 +299,9 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
     return false;
   }
 
-#if defined(OS_POSIX)
-  // If we received a ChannelHandle, register it now.
-  if (channel_handle.socket.fd >= 0)
-    IPC::AddChannelSocket(channel_handle.name, channel_handle.socket.fd);
-#endif
-
   scoped_refptr<PluginChannelHost> channel_host(
       PluginChannelHost::GetPluginChannelHost(
-          channel_handle.name, ChildProcess::current()->io_message_loop()));
+          channel_handle, ChildProcess::current()->io_message_loop()));
   if (!channel_host.get())
     return false;
 
@@ -429,9 +430,10 @@ void WebPluginDelegateProxy::InstallMissingPlugin() {
   Send(new PluginMsg_InstallMissingPlugin(instance_id_));
 }
 
-void WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
+bool WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
   child_process_logging::SetActiveURL(page_url_);
 
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(WebPluginDelegateProxy, msg)
     IPC_MESSAGE_HANDLER(PluginHostMsg_SetWindow, OnSetWindow)
 #if defined(OS_WIN)
@@ -462,8 +464,10 @@ void WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
                         OnDeferResourceLoading)
 
 #if defined(OS_MACOSX)
-    IPC_MESSAGE_HANDLER(PluginHostMsg_SetImeEnabled,
-                        OnSetImeEnabled);
+    IPC_MESSAGE_HANDLER(PluginHostMsg_FocusChanged,
+                        OnFocusChanged);
+    IPC_MESSAGE_HANDLER(PluginHostMsg_StartIme,
+                        OnStartIme);
     IPC_MESSAGE_HANDLER(PluginHostMsg_BindFakePluginWindowHandle,
                         OnBindFakePluginWindowHandle);
     IPC_MESSAGE_HANDLER(PluginHostMsg_UpdateGeometry_ACK,
@@ -483,9 +487,10 @@ void WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
 #endif
     IPC_MESSAGE_HANDLER(PluginHostMsg_URLRedirectResponse,
                         OnURLRedirectResponse)
-
-    IPC_MESSAGE_UNHANDLED_ERROR()
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  DCHECK(handled);
+  return handled;
 }
 
 void WebPluginDelegateProxy::OnChannelError() {
@@ -499,6 +504,12 @@ void WebPluginDelegateProxy::OnChannelError() {
   }
   if (!channel_host_->expecting_shutdown())
     render_view_->PluginCrashed(info_.path);
+
+#if defined(OS_MACOSX)
+  // Ensure that the renderer doesn't think the plugin still has focus.
+  if (render_view_)
+    render_view_->PluginFocusChanged(false, instance_id_);
+#endif
 }
 
 void WebPluginDelegateProxy::UpdateGeometry(const gfx::Rect& window_rect,
@@ -1020,13 +1031,13 @@ void WebPluginDelegateProxy::WindowFrameChanged(gfx::Rect window_frame,
   msg->set_unblock(true);
   Send(msg);
 }
-void WebPluginDelegateProxy::ImeCompositionConfirmed(const string16& text,
+void WebPluginDelegateProxy::ImeCompositionCompleted(const string16& text,
                                                      int plugin_id) {
-  // If the text isn't intended for this plugin, there's nothing to do.
+  // If the message isn't intended for this plugin, there's nothing to do.
   if (instance_id_ != plugin_id)
     return;
 
-  IPC::Message* msg = new PluginMsg_ImeCompositionConfirmed(instance_id_,
+  IPC::Message* msg = new PluginMsg_ImeCompositionCompleted(instance_id_,
                                                             text);
   // Order relative to other key events is important.
   msg->set_unblock(true);
@@ -1355,7 +1366,7 @@ void WebPluginDelegateProxy::OnHandleURLRequest(
       params.popups_allowed, params.notify_redirects);
 }
 
-webkit_glue::WebPluginResourceClient*
+webkit::npapi::WebPluginResourceClient*
 WebPluginDelegateProxy::CreateResourceClient(
     unsigned long resource_id, const GURL& url, int notify_id) {
   if (!channel_host_)
@@ -1367,7 +1378,7 @@ WebPluginDelegateProxy::CreateResourceClient(
   return proxy;
 }
 
-webkit_glue::WebPluginResourceClient*
+webkit::npapi::WebPluginResourceClient*
 WebPluginDelegateProxy::CreateSeekableResourceClient(
     unsigned long resource_id, int range_request_id) {
   if (!channel_host_)
@@ -1380,9 +1391,14 @@ WebPluginDelegateProxy::CreateSeekableResourceClient(
 }
 
 #if defined(OS_MACOSX)
-void WebPluginDelegateProxy::OnSetImeEnabled(bool enabled) {
+void WebPluginDelegateProxy::OnFocusChanged(bool focused) {
   if (render_view_)
-    render_view_->SetPluginImeEnabled(enabled, instance_id_);
+    render_view_->PluginFocusChanged(focused, instance_id_);
+}
+
+void WebPluginDelegateProxy::OnStartIme() {
+  if (render_view_)
+    render_view_->StartPluginIme();
 }
 
 void WebPluginDelegateProxy::OnBindFakePluginWindowHandle(bool opaque) {
@@ -1410,7 +1426,7 @@ bool WebPluginDelegateProxy::BindFakePluginWindowHandle(bool opaque) {
   // Since this isn't a real window, it doesn't get initial size and location
   // information the way a real windowed plugin would, so we need to feed it its
   // starting geometry.
-  webkit_glue::WebPluginGeometry geom;
+  webkit::npapi::WebPluginGeometry geom;
   geom.window = fake_window;
   geom.window_rect = plugin_rect_;
   geom.clip_rect = clip_rect_;
@@ -1549,7 +1565,7 @@ bool WebPluginDelegateProxy::UseSynchronousGeometryUpdates() {
 
   // The move networks plugin needs to be informed of geometry updates
   // synchronously.
-  std::vector<WebPluginMimeType>::iterator index;
+  std::vector<webkit::npapi::WebPluginMimeType>::iterator index;
   for (index = info_.mime_types.begin(); index != info_.mime_types.end();
        index++) {
     if (index->mime_type == "application/x-vnd.moveplayer.qm" ||
@@ -1570,4 +1586,3 @@ void WebPluginDelegateProxy::OnURLRedirectResponse(bool allow,
 
   plugin_->URLRedirectResponse(allow, resource_id);
 }
-

@@ -2,26 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/clipboard/clipboard.h"
-#include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/window_sizer.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "gfx/codec/png_codec.h"
 #include "net/test/test_server.h"
+#include "ui/base/clipboard/clipboard.h"
 
 extern base::hash_map<std::string, int> g_test_timeout_overrides;
 
@@ -74,19 +72,21 @@ class PDFBrowserTest : public InProcessBrowserTest,
   }
 
   void Load() {
-    GURL url(ui_test_utils::GetTestUrl(
-        GetPDFTestDir(),
-        FilePath(FILE_PATH_LITERAL("pdf_browsertest.pdf"))));
-    ui_test_utils::NavigateToURL(browser(), url);
+    // Make sure to set the window size before rendering, as otherwise rendering
+    // to a smaller window and then expanding leads to slight anti-aliasing
+    // differences of the text and the pixel comparison fails.
     gfx::Rect bounds(gfx::Rect(0, 0, kBrowserWidth, kBrowserHeight));
-
     scoped_ptr<WindowSizer::MonitorInfoProvider> monitor_info(
         WindowSizer::CreateDefaultMonitorInfoProvider());
     gfx::Rect screen_bounds = monitor_info->GetPrimaryMonitorBounds();
     ASSERT_GT(screen_bounds.width(), kBrowserWidth);
     ASSERT_GT(screen_bounds.height(), kBrowserHeight);
-
     browser()->window()->SetBounds(bounds);
+
+    GURL url(ui_test_utils::GetTestUrl(
+        GetPDFTestDir(),
+        FilePath(FILE_PATH_LITERAL("pdf_browsertest.pdf"))));
+    ui_test_utils::NavigateToURL(browser(), url);
   }
 
   void VerifySnapshot(const std::string& expected_filename) {
@@ -121,10 +121,6 @@ class PDFBrowserTest : public InProcessBrowserTest,
   }
 
  private:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
-    command_line->AppendSwitch(switches::kForceInternalPDFPlugin);
-  }
-
   // NotificationObserver
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
@@ -211,31 +207,17 @@ class PDFBrowserTest : public InProcessBrowserTest,
   scoped_ptr<net::TestServer> pdf_test_server_;
 };
 
-#if defined(OS_MACOSX)
-// See http://crbug.com/63223
-#define MAYBE_Basic FLAKY_Basic
-#else
-#define MAYBE_Basic Basic
-#endif
-
 // Tests basic PDF rendering.  This can be broken depending on bad merges with
 // the vendor, so it's important that we have basic sanity checking.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Basic) {
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Basic) {
 
   ASSERT_NO_FATAL_FAILURE(Load());
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
   ASSERT_NO_FATAL_FAILURE(VerifySnapshot("pdf_browsertest.png"));
 }
 
-#if defined(OS_MACOSX)
-// See http://crbug.com/63223
-#define MAYBE_Scroll FLAKY_Scroll
-#else
-#define MAYBE_Scroll Scroll
-#endif
-
 // Tests that scrolling works.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Scroll) {
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, Scroll) {
   ASSERT_NO_FATAL_FAILURE(Load());
 
   // We use wheel mouse event since that's the only one we can easily push to
@@ -248,17 +230,17 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_Scroll) {
   TabContents* tab_contents = browser()->GetSelectedTabContents();
   tab_contents->render_view_host()->ForwardWheelEvent(wheel_event);
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
-  ASSERT_NO_FATAL_FAILURE(VerifySnapshot("pdf_browsertest_scroll.png"));
+
+  int y_offset = 0;
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractInt(
+      browser()->GetSelectedTabContents()->render_view_host(),
+      std::wstring(),
+      L"window.domAutomationController.send(plugin.pageYOffset())",
+      &y_offset));
+  ASSERT_GT(y_offset, 0);
 }
 
-#if defined(OS_MACOSX)
-// See http://crbug.com/63223
-#define MAYBE_FindAndCopy FLAKY_FindAndCopy
-#else
-#define MAYBE_FindAndCopy FindAndCopy
-#endif
-
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FindAndCopy) {
   ASSERT_NO_FATAL_FAILURE(Load());
   // Verifies that find in page works.
   ASSERT_EQ(3, ui_test_utils::FindInPage(
@@ -266,19 +248,19 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
       false, NULL));
 
   // Verify that copying selected text works.
-  Clipboard clipboard;
+  ui::Clipboard clipboard;
   // Reset the clipboard first.
-  Clipboard::ObjectMap objects;
-  Clipboard::ObjectMapParams params;
+  ui::Clipboard::ObjectMap objects;
+  ui::Clipboard::ObjectMapParams params;
   params.push_back(std::vector<char>());
-  objects[Clipboard::CBF_TEXT] = params;
+  objects[ui::Clipboard::CBF_TEXT] = params;
   clipboard.WriteObjects(objects);
 
   browser()->GetSelectedTabContents()->render_view_host()->Copy();
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
 
   std::string text;
-  clipboard.ReadAsciiText(Clipboard::BUFFER_STANDARD, &text);
+  clipboard.ReadAsciiText(ui::Clipboard::BUFFER_STANDARD, &text);
   ASSERT_EQ("adipiscing", text);
 }
 

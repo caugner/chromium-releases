@@ -5,29 +5,25 @@
 #include "chrome/common/default_plugin.h"
 
 #include "chrome/default_plugin/plugin_main.h"
-#include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 
 namespace chrome {
 
 void RegisterInternalDefaultPlugin() {
-  const NPAPI::PluginVersionInfo default_plugin = {
-    FilePath(kDefaultPluginLibraryName),
-    L"Default Plug-in",
-    L"Provides functionality for installing third-party plug-ins",
-    L"1",
-    L"*",
-    L"",
-    L"",
-    {
+  const webkit::npapi::PluginEntryPoints entry_points = {
 #if !defined(OS_POSIX) || defined(OS_MACOSX)
-      default_plugin::NP_GetEntryPoints,
+    default_plugin::NP_GetEntryPoints,
 #endif
-      default_plugin::NP_Initialize,
-      default_plugin::NP_Shutdown
-    }
+    default_plugin::NP_Initialize,
+    default_plugin::NP_Shutdown
   };
 
-  NPAPI::PluginList::Singleton()->RegisterInternalPlugin(default_plugin);
+  webkit::npapi::PluginList::Singleton()->RegisterInternalPlugin(
+      FilePath(webkit::npapi::kDefaultPluginLibraryName),
+      "Default Plug-in",
+      "Provides functionality for installing third-party plug-ins",
+      "*",
+      entry_points);
 }
 
 }  // namespace chrome

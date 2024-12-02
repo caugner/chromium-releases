@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,30 +16,14 @@
 
 namespace browser_sync {
 
-ACTION(InvokeTask) {
-  arg1->Run();
-  delete arg1;
-}
-
 class SyncBackendHostMock : public SyncBackendHost {
  public:
-  SyncBackendHostMock() {
-    // By default, the RequestPause and RequestResume methods will
-    // send the confirmation notification and return true.
-    ON_CALL(*this, RequestPause()).
-        WillByDefault(testing::DoAll(Notify(NotificationType::SYNC_PAUSED),
-                                     testing::Return(true)));
-    ON_CALL(*this, RequestResume()).
-        WillByDefault(testing::DoAll(Notify(NotificationType::SYNC_RESUMED),
-                                     testing::Return(true)));
+  SyncBackendHostMock();
+  virtual ~SyncBackendHostMock();
 
-    // By default, invoke the ready callback.
-    ON_CALL(*this, ConfigureDataTypes(testing::_, testing::_)).
-        WillByDefault(InvokeTask());
-  }
-
-  MOCK_METHOD2(ConfigureDataTypes,
-               void(const std::set<syncable::ModelType>&, CancelableTask*));
+  MOCK_METHOD3(ConfigureDataTypes,
+               void(const DataTypeController::TypeMap&,
+                    const std::set<syncable::ModelType>&, CancelableTask*));
   MOCK_METHOD0(RequestPause, bool());
   MOCK_METHOD0(RequestResume, bool());
   MOCK_METHOD0(StartSyncingWithServer, void());

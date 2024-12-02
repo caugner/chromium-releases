@@ -7,13 +7,15 @@
 #include <list>
 
 #include "base/basictypes.h"
-#include "base/condition_variable.h"
+#include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/rand_util.h"
 #include "base/ref_counted.h"
 #include "base/stl_util-inl.h"
-#include "base/thread.h"
-#include "base/thread_local.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/threading/thread.h"
+#include "base/threading/platform_thread.h"
+#include "base/threading/thread_local.h"
 #include "base/time.h"
 
 namespace remoting {
@@ -34,7 +36,7 @@ class OutputLogger {
 
   void OutputTrace(TraceBuffer* buffer) {
     scoped_ptr<TraceBuffer> buffer_ref_(buffer);
-    AutoLock l(lock_);
+    base::AutoLock l(lock_);
 
     // Drop messages if we're overwhelming the logger.
     if (buffers_.size() < 10) {
@@ -69,7 +71,7 @@ class OutputLogger {
     while(!stopped_) {
       TraceBuffer* buffer = NULL;
       {
-        AutoLock l(lock_);
+        base::AutoLock l(lock_);
         if (buffers_.size() == 0) {
           wake_.Wait();
         }
@@ -88,11 +90,11 @@ class OutputLogger {
   }
 
  private:
-  friend struct DefaultSingletonTraits<OutputLogger>;
+  friend struct base::DefaultLazyInstanceTraits<OutputLogger>;
 
   ~OutputLogger() {
     {
-      AutoLock l(lock_);
+      base::AutoLock l(lock_);
       stopped_ = true;
       wake_.Signal();
     }
@@ -101,12 +103,17 @@ class OutputLogger {
     STLDeleteElements(&buffers_);
   }
 
-  Lock lock_;
+  base::Lock lock_;
   base::Thread thread_;
   bool stopped_;
-  ConditionVariable wake_;
+  base::ConditionVariable wake_;
   std::list<TraceBuffer*> buffers_;
 };
+
+static base::LazyInstance<OutputLogger> g_output_logger(
+    base::LINKER_INITIALIZED);
+static base::LazyInstance<base::ThreadLocalPointer<TraceContext> >
+    g_thread_local_trace_context(base::LINKER_INITIALIZED);
 
 }  // namespace
 
@@ -118,7 +125,7 @@ Tracer::Tracer(const std::string& name, double sample_percent) {
 }
 
 void Tracer::PrintString(const std::string& s) {
-  AutoLock l(lock_);
+  base::AutoLock l(lock_);
   if (!buffer_.get()) {
     return;
   }
@@ -129,14 +136,14 @@ void Tracer::PrintString(const std::string& s) {
 
   // Take the pointer for the current messageloop as identifying for the
   // current thread.
-  record->set_thread_id(static_cast<uint64>(PlatformThread::CurrentId()));
+  record->set_thread_id(static_cast<uint64>(base::PlatformThread::CurrentId()));
 }
 
 Tracer::~Tracer() {
-  AutoLock l(lock_);
+  base::AutoLock l(lock_);
 
   if (buffer_.get()) {
-    Singleton<OutputLogger>::get()->OutputTrace(buffer_.release());
+    g_output_logger.Get().OutputTrace(buffer_.release());
   }
 }
 
@@ -158,11 +165,11 @@ void TraceContext::PopTracer() {
 // static
 TraceContext* TraceContext::Get() {
   TraceContext* context =
-      Singleton<base::ThreadLocalPointer<TraceContext> >::get()->Get();
+      g_thread_local_trace_context.Get().Get();
   if (context == NULL) {
     context = new TraceContext();
     context->PushTracerInternal(new Tracer("default", 0.0));
-    Singleton<base::ThreadLocalPointer<TraceContext> >::get()->Set(context);
+    g_thread_local_trace_context.Get().Set(context);
   }
   return context;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,16 +15,17 @@
 #include <tom.h>  // For ITextDocument, a COM interface to CRichEditCtrl
 #include <vsstyle.h>
 
-#include "app/menus/simple_menu_model.h"
-#include "base/scoped_comptr_win.h"
+#include "base/win/scoped_comptr.h"
 #include "gfx/insets.h"
+#include "ui/base/models/simple_menu_model.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 
 namespace views {
 
+class Menu2;
 class NativeViewHost;
 class Textfield;
-class Menu2;
+class TextRange;
 
 static const int kDefaultEditStyle = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN |
     WS_CLIPSIBLINGS;
@@ -35,7 +36,7 @@ class NativeTextfieldWin
                          CWinTraits<kDefaultEditStyle> >,
       public CRichEditCommands<NativeTextfieldWin>,
       public NativeTextfieldWrapper,
-      public menus::SimpleMenuModel::Delegate {
+      public ui::SimpleMenuModel::Delegate {
  public:
   DECLARE_WND_CLASS(L"ViewsTextfieldEdit");
 
@@ -62,16 +63,24 @@ class NativeTextfieldWin
   virtual gfx::Insets CalculateInsets();
   virtual void UpdateHorizontalMargins();
   virtual void UpdateVerticalMargins();
-  virtual void SetFocus();
+  virtual bool SetFocus();
   virtual View* GetView();
   virtual gfx::NativeView GetTestingHandle() const;
   virtual bool IsIMEComposing() const;
+  virtual void GetSelectedRange(TextRange* range) const;
+  virtual void SelectRange(const TextRange& range);
+  virtual size_t GetCursorPosition() const;
+  virtual bool HandleKeyPressed(const views::KeyEvent& e);
+  virtual bool HandleKeyReleased(const views::KeyEvent& e);
+  virtual void HandleWillGainFocus();
+  virtual void HandleDidGainFocus();
+  virtual void HandleWillLoseFocus();
 
-  // Overridden from menus::SimpleMenuModel::Delegate:
+  // Overridden from ui::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const;
   virtual bool IsCommandIdEnabled(int command_id) const;
   virtual bool GetAcceleratorForCommandId(int command_id,
-                                          menus::Accelerator* accelerator);
+                                          ui::Accelerator* accelerator);
   virtual void ExecuteCommand(int command_id);
 
   // Update accessibility information.
@@ -221,7 +230,7 @@ class NativeTextfieldWin
   bool can_discard_mousemove_;
 
   // The text of this control before a possible change.
-  std::wstring text_before_change_;
+  string16 text_before_change_;
 
   // If true, the mouse is over the edit.
   bool contains_mouse_;
@@ -229,14 +238,14 @@ class NativeTextfieldWin
   static bool did_load_library_;
 
   // The contents of the context menu for the edit.
-  scoped_ptr<menus::SimpleMenuModel> context_menu_contents_;
+  scoped_ptr<ui::SimpleMenuModel> context_menu_contents_;
   scoped_ptr<Menu2> context_menu_;
 
   // Border insets.
   gfx::Insets content_insets_;
 
   // This interface is useful for accessing the CRichEditCtrl at a low level.
-  mutable ScopedComPtr<ITextDocument> text_object_model_;
+  mutable base::win::ScopedComPtr<ITextDocument> text_object_model_;
 
   // The position and the length of the ongoing composition string.
   // These values are used for removing a composition string from a search

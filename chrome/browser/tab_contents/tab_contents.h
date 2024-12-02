@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,11 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/scoped_ptr.h"
-#include "chrome/browser/cancelable_request.h"
+#include "base/string16.h"
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
 #include "chrome/browser/download/save_package.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/fav_icon_helper.h"
-#include "chrome/browser/find_bar_controller.h"
-#include "chrome/browser/find_notification_details.h"
-#include "chrome/browser/js_modal_dialog.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/constrained_window.h"
@@ -31,6 +28,9 @@
 #include "chrome/browser/tab_contents/page_navigator.h"
 #include "chrome/browser/tab_contents/render_view_host_manager.h"
 #include "chrome/browser/tab_contents/tab_specific_content_settings.h"
+#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "chrome/browser/ui/find_bar/find_bar_controller.h"
+#include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/property_bag.h"
 #include "chrome/common/renderer_preferences.h"
@@ -38,6 +38,10 @@
 #include "chrome/common/web_apps.h"
 #include "gfx/native_widget_types.h"
 #include "net/base/load_states.h"
+
+#if defined(OS_WIN)
+#include "base/win/scoped_handle.h"
+#endif
 
 namespace gfx {
 class Rect;
@@ -51,14 +55,6 @@ namespace printing {
 class PrintViewManager;
 }
 
-namespace IPC {
-class Message;
-}
-
-namespace webkit_glue {
-struct PasswordForm;
-}
-
 class AutocompleteHistoryManager;
 class AutoFillManager;
 class BlockedContentContainer;
@@ -69,8 +65,9 @@ class FileSelectHelper;
 class InfoBarDelegate;
 class LoadNotificationDetails;
 class OmniboxSearchHint;
-class PluginInstaller;
+class PluginInstallerInfoBarDelegate;
 class Profile;
+class PrerenderManager;
 struct RendererPreferences;
 class RenderViewHost;
 class SessionStorageNamespace;
@@ -92,8 +89,6 @@ struct WebPreferences;
 class TabContents : public PageNavigator,
                     public NotificationObserver,
                     public RenderViewHostDelegate,
-                    public RenderViewHostDelegate::BrowserIntegration,
-                    public RenderViewHostDelegate::Resource,
                     public RenderViewHostManager::Delegate,
                     public JavaScriptAppModalDialogDelegate,
                     public ImageLoadingTracker::Observer,
@@ -150,11 +145,8 @@ class TabContents : public PageNavigator,
   // Returns true if contains content rendered by an extension.
   bool HostsExtension() const;
 
-  // Returns the AutoFillManager, creating it if necessary.
-  AutoFillManager* GetAutoFillManager();
-
-  // Returns the PluginInstaller, creating it if necessary.
-  PluginInstaller* GetPluginInstaller();
+  // Returns the PluginInstallerInfoBarDelegate, creating it if necessary.
+  PluginInstallerInfoBarDelegate* GetPluginInstaller();
 
   // Returns the TabContentsSSLHelper, creating it if necessary.
   TabContentsSSLHelper* GetSSLHelper();
@@ -260,7 +252,7 @@ class TabContents : public PageNavigator,
   virtual bool ShouldDisplayFavIcon();
 
   // Returns a human-readable description the tab's loading state.
-  virtual std::wstring GetStatusText() const;
+  virtual string16 GetStatusText() const;
 
   // Add and remove observers for page navigation notifications. Adding or
   // removing multiple times has no effect. The order in which notifications
@@ -308,8 +300,14 @@ class TabContents : public PageNavigator,
 
   // Indicates whether this tab should be considered crashed. The setter will
   // also notify the delegate when the flag is changed.
-  bool is_crashed() const { return is_crashed_; }
-  void SetIsCrashed(bool state);
+  bool is_crashed() const {
+    return (crashed_status_ == base::TERMINATION_STATUS_PROCESS_CRASHED ||
+            crashed_status_ == base::TERMINATION_STATUS_ABNORMAL_TERMINATION ||
+            crashed_status_ == base::TERMINATION_STATUS_PROCESS_WAS_KILLED);
+  }
+  base::TerminationStatus crashed_status() const { return crashed_status_; }
+  int crashed_error_code() const { return crashed_error_code_; }
+  void SetIsCrashed(base::TerminationStatus status, int error_code);
 
   // Call this after updating a page action to notify clients about the changes.
   void PageActionStateChanged();
@@ -356,6 +354,11 @@ class TabContents : public PageNavigator,
   RenderViewHostManager* render_manager() { return &render_manager_; }
 #endif
 
+  // In the underlying RenderViewHostManager, swaps in the provided
+  // RenderViewHost to replace the current RenderViewHost.  The current RVH
+  // will be shutdown and ultimately deleted.
+  void SwapInRenderViewHost(RenderViewHost* rvh);
+
   // Commands ------------------------------------------------------------------
 
   // Implementation of PageNavigator.
@@ -391,6 +394,9 @@ class TabContents : public PageNavigator,
   void ShowPageInfo(const GURL& url,
                     const NavigationEntry::SSLStatus& ssl,
                     bool show_history);
+
+  // Saves the favicon for the current page.
+  void SaveFavicon();
 
   // Window management ---------------------------------------------------------
 
@@ -461,6 +467,9 @@ class TabContents : public PageNavigator,
 
   // Focuses the location bar.
   virtual void SetFocusToLocationBar(bool select_all);
+
+  // Creates a view and sets the size for the specified RVH.
+  virtual void CreateViewAndSetSizeForRVH(RenderViewHost* rvh);
 
   // Infobars ------------------------------------------------------------------
 
@@ -722,14 +731,27 @@ class TabContents : public PageNavigator,
   // Shows a fade effect over this tab contents. Repeated calls will be ignored
   // until the fade is canceled. If |animate| is true the fade should animate.
   void FadeForInstant(bool animate);
+
   // Immediately removes the fade.
   void CancelInstantFade();
+
+  // Opens view-source tab for this contents.
+  void ViewSource();
 
   // Gets the minimum/maximum zoom percent.
   int minimum_zoom_percent() const { return minimum_zoom_percent_; }
   int maximum_zoom_percent() const { return maximum_zoom_percent_; }
 
   int content_restrictions() const { return content_restrictions_; }
+
+  AutocompleteHistoryManager* autocomplete_history_manager() {
+    return autocomplete_history_manager_.get();
+  }
+  AutoFillManager* autofill_manager() { return autofill_manager_.get(); }
+
+ protected:
+  // from RenderViewHostDelegate.
+  virtual bool OnMessageReceived(const IPC::Message& message);
 
  private:
   friend class NavigationController;
@@ -740,6 +762,9 @@ class TabContents : public PageNavigator,
   FRIEND_TEST_ALL_PREFIXES(TabContentsTest, NoJSMessageOnInterstitials);
   FRIEND_TEST_ALL_PREFIXES(TabContentsTest, UpdateTitle);
   FRIEND_TEST_ALL_PREFIXES(TabContentsTest, CrossSiteCantPreemptAfterUnload);
+  FRIEND_TEST_ALL_PREFIXES(FormStructureBrowserTest, HTMLFiles);
+  FRIEND_TEST_ALL_PREFIXES(NavigationControllerTest, HistoryNavigate);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewHostManagerTest, PageDoesBackAndReload);
 
   // Temporary until the view/contents separation is complete.
   friend class TabContentsView;
@@ -759,6 +784,57 @@ class TabContents : public PageNavigator,
 
   // Used to access the CreateHistoryAddPageArgs member function.
   friend class ExternalTabContainer;
+
+  // Used to access RVH Delegates.
+  friend class PrerenderManager;
+
+  // Message handlers.
+  void OnDidStartProvisionalLoadForFrame(int64 frame_id,
+                                         bool main_frame,
+                                         const GURL& url);
+  void OnDidRedirectProvisionalLoad(int32 page_id,
+                                    const GURL& source_url,
+                                    const GURL& target_url);
+  void OnDidFailProvisionalLoadWithError(int64 frame_id,
+                                         bool main_frame,
+                                         int error_code,
+                                         const GURL& url,
+                                         bool showing_repost_interstitial);
+  void OnDidLoadResourceFromMemoryCache(const GURL& url,
+                                        const std::string& frame_origin,
+                                        const std::string& main_frame_origin,
+                                        const std::string& security_info);
+  void OnDidDisplayInsecureContent();
+  void OnDidRunInsecureContent(const std::string& security_origin,
+                               const GURL& target_url);
+  void OnDocumentLoadedInFrame(int64 frame_id);
+  void OnDidFinishLoad(int64 frame_id);
+  void OnUpdateContentRestrictions(int restrictions);
+  void OnPDFHasUnsupportedFeature();
+
+  void OnFindReply(int request_id,
+                   int number_of_matches,
+                   const gfx::Rect& selection_rect,
+                   int active_match_ordinal,
+                   bool final_update);
+  void OnGoToEntryAtOffset(int offset);
+  void OnMissingPluginStatus(int status);
+  void OnCrashedPlugin(const FilePath& plugin_path);
+  void OnDidGetApplicationInfo(int32 page_id, const WebApplicationInfo& info);
+  void OnInstallApplication(const WebApplicationInfo& info);
+  void OnBlockedOutdatedPlugin(const string16& name, const GURL& update_url);
+  void OnPageContents(const GURL& url,
+                      int32 page_id,
+                      const string16& contents,
+                      const std::string& language,
+                      bool page_translatable);
+  void OnPageTranslated(int32 page_id,
+                        const std::string& original_lang,
+                        const std::string& translated_lang,
+                        TranslateErrors::Type error_type);
+  void OnSetSuggestions(int32 page_id,
+                        const std::vector<std::string>& suggestions);
+  void OnInstantSupportDetermined(int32 page_id, bool result);
 
   // Changes the IsLoading state and notifies delegate as needed
   // |details| is used to provide details on the load that just finished
@@ -865,78 +941,14 @@ class TabContents : public PageNavigator,
 
   // RenderViewHostDelegate ----------------------------------------------------
 
-  // RenderViewHostDelegate::BrowserIntegration implementation.
-  virtual void OnUserGesture();
-  virtual void OnFindReply(int request_id,
-                           int number_of_matches,
-                           const gfx::Rect& selection_rect,
-                           int active_match_ordinal,
-                           bool final_update);
-  virtual void GoToEntryAtOffset(int offset);
-  virtual void OnMissingPluginStatus(int status);
-  virtual void OnCrashedPlugin(const FilePath& plugin_path);
-  virtual void OnCrashedWorker();
-  virtual void OnDidGetApplicationInfo(int32 page_id,
-                                       const WebApplicationInfo& info);
-  virtual void OnInstallApplication(const WebApplicationInfo& info);
-  virtual void OnDisabledOutdatedPlugin(const string16& name,
-                                        const GURL& update_url);
-  virtual void OnPageContents(const GURL& url,
-                              int renderer_process_id,
-                              int32 page_id,
-                              const string16& contents,
-                              const std::string& language,
-                              bool page_translatable);
-  virtual void OnPageTranslated(int32 page_id,
-                                const std::string& original_lang,
-                                const std::string& translated_lang,
-                                TranslateErrors::Type error_type);
-  virtual void OnSetSuggestions(int32 page_id,
-                                const std::vector<std::string>& suggestions);
-  virtual void OnInstantSupportDetermined(int32 page_id, bool result);
-
-  // RenderViewHostDelegate::Resource implementation.
-  virtual void DidStartProvisionalLoadForFrame(RenderViewHost* render_view_host,
-                                               long long frame_id,
-                                               bool is_main_frame,
-                                               const GURL& url);
-  virtual void DidStartReceivingResourceResponse(
-      const ResourceRequestDetails& details);
-  virtual void DidRedirectProvisionalLoad(int32 page_id,
-                                          const GURL& source_url,
-                                          const GURL& target_url);
-  virtual void DidRedirectResource(
-      const ResourceRedirectDetails& details);
-  virtual void DidLoadResourceFromMemoryCache(
-      const GURL& url,
-      const std::string& frame_origin,
-      const std::string& main_frame_origin,
-      const std::string& security_info);
-  virtual void DidDisplayInsecureContent();
-  virtual void DidRunInsecureContent(const std::string& security_origin);
-  virtual void DidFailProvisionalLoadWithError(
-      RenderViewHost* render_view_host,
-      long long frame_id,
-      bool is_main_frame,
-      int error_code,
-      const GURL& url,
-      bool showing_repost_interstitial);
-  virtual void DocumentLoadedInFrame(long long frame_id);
-  virtual void DidFinishLoad(long long frame_id);
-
   // RenderViewHostDelegate implementation.
   virtual RenderViewHostDelegate::View* GetViewDelegate();
   virtual RenderViewHostDelegate::RendererManagement*
       GetRendererManagementDelegate();
-  virtual RenderViewHostDelegate::BrowserIntegration*
-      GetBrowserIntegrationDelegate();
-  virtual RenderViewHostDelegate::Resource* GetResourceDelegate();
   virtual RenderViewHostDelegate::ContentSettings* GetContentSettingsDelegate();
   virtual RenderViewHostDelegate::Save* GetSaveDelegate();
   virtual RenderViewHostDelegate::Printing* GetPrintingDelegate();
   virtual RenderViewHostDelegate::FavIcon* GetFavIconDelegate();
-  virtual RenderViewHostDelegate::Autocomplete* GetAutocompleteDelegate();
-  virtual RenderViewHostDelegate::AutoFill* GetAutoFillDelegate();
   virtual RenderViewHostDelegate::SSL* GetSSLDelegate();
   virtual RenderViewHostDelegate::FileSelect* GetFileSelectDelegate();
   virtual AutomationResourceRoutingDelegate*
@@ -946,7 +958,9 @@ class TabContents : public PageNavigator,
   virtual int GetBrowserWindowID() const;
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual void RenderViewReady(RenderViewHost* render_view_host);
-  virtual void RenderViewGone(RenderViewHost* render_view_host);
+  virtual void RenderViewGone(RenderViewHost* render_view_host,
+                              base::TerminationStatus status,
+                              int error_code);
   virtual void RenderViewDeleted(RenderViewHost* render_view_host);
   virtual void DidNavigate(RenderViewHost* render_view_host,
                            const ViewHostMsg_FrameNavigate_Params& params);
@@ -969,6 +983,7 @@ class TabContents : public PageNavigator,
   virtual void RequestMove(const gfx::Rect& new_bounds);
   virtual void DidStartLoading();
   virtual void DidStopLoading();
+  virtual void DidChangeLoadProgress(double progress);
   virtual void DocumentOnLoadCompletedInMainFrame(
       RenderViewHost* render_view_host,
       int32 page_id);
@@ -991,10 +1006,6 @@ class TabContents : public PageNavigator,
   virtual void ShowModalHTMLDialog(const GURL& url, int width, int height,
                                    const std::string& json_arguments,
                                    IPC::Message* reply_msg);
-  virtual void PasswordFormsFound(
-      const std::vector<webkit_glue::PasswordForm>& forms);
-  virtual void PasswordFormsVisible(
-      const std::vector<webkit_glue::PasswordForm>& visible_forms);
   virtual void PageHasOSDD(RenderViewHost* render_view_host,
                            int32 page_id,
                            const GURL& url,
@@ -1002,6 +1013,7 @@ class TabContents : public PageNavigator,
   virtual GURL GetAlternateErrorPageURL() const;
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
   virtual WebPreferences GetWebkitPrefs();
+  virtual void OnUserGesture();
   virtual void OnIgnoredUIEvent();
   virtual void OnJSOutOfMemory();
   virtual void OnCrossSiteResponse(int new_render_process_host_id,
@@ -1013,11 +1025,11 @@ class TabContents : public PageNavigator,
                                 uint64 upload_position, uint64 upload_size);
   virtual bool IsExternalTabContainer() const;
   virtual void DidInsertCSS();
-  virtual void FocusedNodeChanged();
+  virtual void FocusedNodeChanged(bool is_editable_node);
   virtual void UpdateZoomLimits(int minimum_percent,
                                 int maximum_percent,
                                 bool remember);
-  virtual void UpdateContentRestrictions(int restrictions);
+  virtual void WorkerCrashed();
 
   // RenderViewHostManager::Delegate -------------------------------------------
 
@@ -1067,6 +1079,11 @@ class TabContents : public PageNavigator,
   virtual void OnImageLoaded(SkBitmap* image, ExtensionResource resource,
                              int index);
 
+  // Checks with the PrerenderManager if the specified URL has been preloaded,
+  // and if so, swap the RenderViewHost with the preload into this TabContents
+  // object.
+  bool MaybeUsePreloadedPage(const GURL& url);
+
   // Data for core operation ---------------------------------------------------
 
   // Delegate for notifying our owner about stuff. Not owned by us.
@@ -1098,14 +1115,14 @@ class TabContents : public PageNavigator,
   // SavePackage, lazily created.
   scoped_refptr<SavePackage> save_package_;
 
-  // AutocompleteHistoryManager, lazily created.
+  // AutocompleteHistoryManager.
   scoped_ptr<AutocompleteHistoryManager> autocomplete_history_manager_;
 
-  // AutoFillManager, lazily created.
+  // AutoFillManager.
   scoped_ptr<AutoFillManager> autofill_manager_;
 
-  // PluginInstaller, lazily created.
-  scoped_ptr<PluginInstaller> plugin_installer_;
+  // PluginInstallerInfoBarDelegate, lazily created.
+  scoped_ptr<PluginInstallerInfoBarDelegate> plugin_installer_;
 
   // TabContentsSSLHelper, lazily created.
   scoped_ptr<TabContentsSSLHelper> ssl_helper_;
@@ -1134,7 +1151,8 @@ class TabContents : public PageNavigator,
   bool is_loading_;
 
   // Indicates if the tab is considered crashed.
-  bool is_crashed_;
+  base::TerminationStatus crashed_status_;
+  int crashed_error_code_;
 
   // See waiting_for_response() above.
   bool waiting_for_response_;
@@ -1150,7 +1168,7 @@ class TabContents : public PageNavigator,
 
   // The current load state and the URL associated with it.
   net::LoadState load_state_;
-  std::wstring load_state_host_;
+  string16 load_state_host_;
   // Upload progress, for displaying in the status bar.
   // Set to zero when there is no significant upload happening.
   uint64 upload_size_;
@@ -1264,7 +1282,7 @@ class TabContents : public PageNavigator,
   // Handle to an event that's set when the page is showing a message box (or
   // equivalent constrained window).  Plugin processes check this to know if
   // they should pump messages then.
-  ScopedHandle message_box_active_;
+  base::win::ScopedHandle message_box_active_;
 #endif
 
   // The time that the last javascript message was dismissed.
@@ -1319,8 +1337,6 @@ class TabContents : public PageNavigator,
   // Content restrictions, used to disable print/copy etc based on content's
   // (full-page plugins for now only) permissions.
   int content_restrictions_;
-
-  // ---------------------------------------------------------------------------
 
   DISALLOW_COPY_AND_ASSIGN(TabContents);
 };

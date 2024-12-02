@@ -10,8 +10,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/process.h"
+#include "base/shared_memory.h"
 #include "base/string16.h"
+#include "base/sync_socket.h"
 #include "ipc/ipc_message_utils.h"
+#include "ipc/ipc_platform_file.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
@@ -19,7 +23,6 @@
 #include "ppapi/proxy/ppapi_param_traits.h"
 #include "ppapi/proxy/serialized_structs.h"
 
-#define MESSAGES_INTERNAL_FILE "ppapi/proxy/ppapi_messages_internal.h"
-#include "ipc/ipc_message_macros.h"
+#include "ppapi/proxy/ppapi_messages_internal.h"
 
 #endif  // PPAPI_PROXY_PPAPI_MESSAGES_H_

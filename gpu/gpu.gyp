@@ -1,10 +1,20 @@
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
   'variables': {
     'chromium_code': 1,
+    # These are defined here because we need to build this library twice. Once
+    # with extra parameter checking. Once with no parameter checking to be 100%
+    # OpenGL ES 2.0 compliant for the conformance tests.
+    'gles2_c_lib_source_files': [
+      'command_buffer/client/gles2_c_lib.cc',
+      'command_buffer/client/gles2_c_lib_autogen.h',
+      'command_buffer/client/gles2_lib.h',
+      'command_buffer/client/gles2_lib.cc',
+	  
+    ],
     # These are defined here because we need to build this library twice. Once
     # with without support for client side arrays and once with for pepper and
     # the OpenGL ES 2.0 compliant for the conformance tests.
@@ -32,7 +42,6 @@
         'command_buffer/common/cmd_buffer_common.h',
         'command_buffer/common/cmd_buffer_common.cc',
         'command_buffer/common/command_buffer.h',
-        'command_buffer/common/command_buffer_mock.h',
         'command_buffer/common/constants.h',
         'command_buffer/common/gles2_cmd_ids_autogen.h',
         'command_buffer/common/gles2_cmd_ids.h',
@@ -44,7 +53,6 @@
         'command_buffer/common/id_allocator.cc',
         'command_buffer/common/id_allocator.h',
         'command_buffer/common/logging.h',
-        'command_buffer/common/mocks.h',
         'command_buffer/common/thread_local.h',
         'command_buffer/common/types.h',
       ],
@@ -84,7 +92,7 @@
       'target_name': 'gles2_implementation_client_side_arrays',
       'type': 'static_library',
       'defines': [
-        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1'
+        'GL_SUPPORT_CLIENT_SIDE_ARRAYS=1',
       ],
       'dependencies': [
         'gles2_cmd_helper',
@@ -100,30 +108,30 @@
       ],
     },
     {
-      # Stub to expose gles2_implementation as a namespace rather than a class
-      # so GLES2 C++ programs can work with no changes.
-      'target_name': 'gles2_lib',
-      'type': 'static_library',
-      'dependencies': [
-        'gles2_implementation',
-      ],
-      'sources': [
-        'command_buffer/client/gles2_lib.cc',
-        'command_buffer/client/gles2_lib.h',
-      ],
-    },
-    {
       # Stub to expose gles2_implemenation in C instead of C++.
       # so GLES2 C programs can work with no changes.
       'target_name': 'gles2_c_lib',
       'type': 'static_library',
       'dependencies': [
-        'gles2_lib',
+        'gles2_implementation',
       ],
       'sources': [
-        'command_buffer/client/gles2_c_lib.h',
-        'command_buffer/client/gles2_c_lib.cc',
-        'command_buffer/client/gles2_c_lib_autogen.h',
+        '<@(gles2_c_lib_source_files)',
+      ],
+    },
+    {
+      # Same as gles2_c_lib except with no parameter checking. Required for
+      # OpenGL ES 2.0 conformance tests.
+      'target_name': 'gles2_c_lib_nocheck',
+      'type': 'static_library',
+      'defines': [
+        'GLES2_CONFORMANCE_TESTS=1',
+      ],
+      'dependencies': [
+        'gles2_implementation_client_side_arrays',
+      ],
+      'sources': [
+        '<@(gles2_c_lib_source_files)',
       ],
     },
     {
@@ -239,23 +247,25 @@
       'dependencies': [
         '../app/app.gyp:app_base',
         '../testing/gmock.gyp:gmock',
-        '../testing/gmock.gyp:gmockmain',
+        '../testing/gmock.gyp:gmock_main',
         '../testing/gtest.gyp:gtest',
         'command_buffer_client',
         'command_buffer_common',
         'command_buffer_service',
+        'gpu_unittest_utils',
         'gles2_implementation_client_side_arrays',
         'gles2_cmd_helper',
       ],
       'sources': [
+        '<@(gles2_c_lib_source_files)',
         'command_buffer/client/cmd_buffer_helper_test.cc',
         'command_buffer/client/fenced_allocator_test.cc',
         'command_buffer/client/gles2_implementation_unittest.cc',
         'command_buffer/client/mapped_memory_unittest.cc',
         'command_buffer/client/ring_buffer_test.cc',
         'command_buffer/common/bitfield_helpers_test.cc',
-        'command_buffer/common/gl_mock.h',
-        'command_buffer/common/gl_mock.cc',
+        'command_buffer/common/command_buffer_mock.cc',
+        'command_buffer/common/command_buffer_mock.h',
         'command_buffer/common/gles2_cmd_format_test.cc',
         'command_buffer/common/gles2_cmd_format_test_autogen.h',
         'command_buffer/common/gles2_cmd_id_test.cc',
@@ -286,6 +296,8 @@
         'command_buffer/service/gles2_cmd_decoder_unittest_2.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_2_autogen.h',
         'command_buffer/service/id_manager_unittest.cc',
+        'command_buffer/service/mocks.cc',
+        'command_buffer/service/mocks.h',
         'command_buffer/service/program_manager_unittest.cc',
         'command_buffer/service/renderbuffer_manager_unittest.cc',
         'command_buffer/service/shader_manager_unittest.cc',
@@ -296,12 +308,27 @@
       ],
     },
     {
+      'target_name': 'gpu_unittest_utils',
+      'type': 'static_library',
+      'dependencies': [
+        '../app/app.gyp:app_base',
+        '../testing/gmock.gyp:gmock',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'command_buffer/common/gl_mock.h',
+        'command_buffer/common/gl_mock.cc',
+      ],
+    },
+    {
       'target_name': 'gles2_demo_lib',
       'type': 'static_library',
       'dependencies': [
         'command_buffer_client',
-        'gles2_lib',
-        'gles2_c_lib',
+        'gles2_c_lib_nocheck',
       ],
       'sources': [
         'command_buffer/client/gles2_demo_c.h',

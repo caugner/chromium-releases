@@ -17,17 +17,20 @@ TEST(PaintAggregator, SingleInvalidation) {
   greg.InvalidateRect(rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
-  EXPECT_TRUE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  ASSERT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_EQ(rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  ASSERT_EQ(1U, update.paint_rects.size());
+
+  EXPECT_EQ(rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, DoubleDisjointInvalidation) {
   PaintAggregator greg;
 
-  gfx::Rect r1(2, 4, 2, 4);
-  gfx::Rect r2(4, 2, 4, 2);
+  gfx::Rect r1(2, 4, 2, 40);
+  gfx::Rect r2(4, 2, 40, 2);
 
   greg.InvalidateRect(r1);
   greg.InvalidateRect(r2);
@@ -35,10 +38,37 @@ TEST(PaintAggregator, DoubleDisjointInvalidation) {
   gfx::Rect expected_bounds = r1.Union(r2);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
-  EXPECT_TRUE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  ASSERT_EQ(2U, greg.GetPendingUpdate().paint_rects.size());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_EQ(expected_bounds, greg.GetPendingUpdate().GetPaintBounds());
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(2U, update.paint_rects.size());
+
+  EXPECT_EQ(expected_bounds, update.GetPaintBounds());
+}
+
+TEST(PaintAggregator, DisjointInvalidationsCombined) {
+  PaintAggregator greg;
+
+  // Make the rectangles such that they don't overlap but cover a very large
+  // percentage of the area of covered by their union. This is so we're not
+  // very sensitive to the combining heuristic in the paint aggregator.
+  gfx::Rect r1(2, 4, 2, 1000);
+  gfx::Rect r2(5, 2, 2, 1000);
+
+  greg.InvalidateRect(r1);
+  greg.InvalidateRect(r2);
+
+  gfx::Rect expected_bounds = r1.Union(r2);
+
+  EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
+
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  ASSERT_EQ(1U, update.paint_rects.size());
+
+  EXPECT_EQ(expected_bounds, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, SingleScroll) {
@@ -49,15 +79,18 @@ TEST(PaintAggregator, SingleScroll) {
   greg.ScrollRect(delta.x(), delta.y(), rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
-  EXPECT_TRUE(greg.GetPendingUpdate().paint_rects.empty());
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_EQ(rect, greg.GetPendingUpdate().scroll_rect);
+  EXPECT_TRUE(update.paint_rects.empty());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
 
-  EXPECT_EQ(delta.x(), greg.GetPendingUpdate().scroll_delta.x());
-  EXPECT_EQ(delta.y(), greg.GetPendingUpdate().scroll_delta.y());
+  EXPECT_EQ(rect, update.scroll_rect);
 
-  gfx::Rect resulting_damage = greg.GetPendingUpdate().GetScrollDamage();
+  EXPECT_EQ(delta.x(), update.scroll_delta.x());
+  EXPECT_EQ(delta.y(), update.scroll_delta.y());
+
+  gfx::Rect resulting_damage = update.GetScrollDamage();
   gfx::Rect expected_damage(1, 2, 1, 4);
   EXPECT_EQ(expected_damage, resulting_damage);
 }
@@ -72,17 +105,20 @@ TEST(PaintAggregator, DoubleOverlappingScroll) {
   greg.ScrollRect(delta2.x(), delta2.y(), rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
-  EXPECT_TRUE(greg.GetPendingUpdate().paint_rects.empty());
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_EQ(rect, greg.GetPendingUpdate().scroll_rect);
+  EXPECT_TRUE(update.paint_rects.empty());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+
+  EXPECT_EQ(rect, update.scroll_rect);
 
   gfx::Point expected_delta(delta1.x() + delta2.x(),
                             delta1.y() + delta2.y());
-  EXPECT_EQ(expected_delta.x(), greg.GetPendingUpdate().scroll_delta.x());
-  EXPECT_EQ(expected_delta.y(), greg.GetPendingUpdate().scroll_delta.y());
+  EXPECT_EQ(expected_delta.x(), update.scroll_delta.x());
+  EXPECT_EQ(expected_delta.y(), update.scroll_delta.y());
 
-  gfx::Rect resulting_damage = greg.GetPendingUpdate().GetScrollDamage();
+  gfx::Rect resulting_damage = update.GetScrollDamage();
   gfx::Rect expected_damage(1, 2, 2, 4);
   EXPECT_EQ(expected_damage, resulting_damage);
 }
@@ -113,10 +149,13 @@ TEST(PaintAggregator, DiagonalScroll) {
   greg.ScrollRect(delta.x(), delta.y(), rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
-  EXPECT_TRUE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  ASSERT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_EQ(rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  ASSERT_EQ(1U, update.paint_rects.size());
+
+  EXPECT_EQ(rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, ContainedPaintAfterScroll) {
@@ -129,13 +168,15 @@ TEST(PaintAggregator, ContainedPaintAfterScroll) {
   greg.InvalidateRect(paint_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
   // expecting a paint rect inside the scroll rect
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
-  EXPECT_EQ(paint_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
+  EXPECT_EQ(paint_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, ContainedPaintBeforeScroll) {
@@ -148,15 +189,17 @@ TEST(PaintAggregator, ContainedPaintBeforeScroll) {
   greg.ScrollRect(2, 0, scroll_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
   // Expecting a paint rect inside the scroll rect
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
   paint_rect.Offset(2, 0);
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
-  EXPECT_EQ(paint_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
+  EXPECT_EQ(paint_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, ContainedPaintsBeforeAndAfterScroll) {
@@ -174,13 +217,15 @@ TEST(PaintAggregator, ContainedPaintsBeforeAndAfterScroll) {
   gfx::Rect expected_paint_rect = paint_rect2;
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
   // Expecting a paint rect inside the scroll rect
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
-  EXPECT_EQ(expected_paint_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
+  EXPECT_EQ(expected_paint_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, LargeContainedPaintAfterScroll) {
@@ -193,11 +238,13 @@ TEST(PaintAggregator, LargeContainedPaintAfterScroll) {
   greg.InvalidateRect(paint_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_TRUE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, LargeContainedPaintBeforeScroll) {
@@ -210,11 +257,13 @@ TEST(PaintAggregator, LargeContainedPaintBeforeScroll) {
   greg.ScrollRect(0, 1, scroll_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_TRUE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, OverlappingPaintBeforeScroll) {
@@ -229,11 +278,13 @@ TEST(PaintAggregator, OverlappingPaintBeforeScroll) {
   gfx::Rect expected_paint_rect = scroll_rect.Union(paint_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_TRUE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(expected_paint_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(expected_paint_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, OverlappingPaintAfterScroll) {
@@ -248,11 +299,13 @@ TEST(PaintAggregator, OverlappingPaintAfterScroll) {
   gfx::Rect expected_paint_rect = scroll_rect.Union(paint_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_TRUE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_TRUE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(expected_paint_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(expected_paint_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, DisjointPaintBeforeScroll) {
@@ -265,12 +318,14 @@ TEST(PaintAggregator, DisjointPaintBeforeScroll) {
   greg.ScrollRect(2, 0, scroll_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(paint_rect, greg.GetPendingUpdate().paint_rects[0]);
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
+  EXPECT_EQ(paint_rect, update.paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
 }
 
 TEST(PaintAggregator, DisjointPaintAfterScroll) {
@@ -283,12 +338,14 @@ TEST(PaintAggregator, DisjointPaintAfterScroll) {
   greg.InvalidateRect(paint_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(paint_rect, greg.GetPendingUpdate().paint_rects[0]);
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
+  EXPECT_EQ(paint_rect, update.paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
 }
 
 TEST(PaintAggregator, ContainedPaintTrimmedByScroll) {
@@ -304,12 +361,14 @@ TEST(PaintAggregator, ContainedPaintTrimmedByScroll) {
   gfx::Rect expected_paint_rect(6, 4, 4, 6);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(expected_paint_rect, greg.GetPendingUpdate().paint_rects[0]);
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
+  EXPECT_EQ(expected_paint_rect, update.paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
 }
 
 TEST(PaintAggregator, ContainedPaintEliminatedByScroll) {
@@ -322,11 +381,13 @@ TEST(PaintAggregator, ContainedPaintEliminatedByScroll) {
   greg.ScrollRect(6, 0, scroll_rect);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_TRUE(greg.GetPendingUpdate().paint_rects.empty());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_TRUE(update.paint_rects.empty());
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
 }
 
 TEST(PaintAggregator, ContainedPaintAfterScrollTrimmedByScrollDamage) {
@@ -342,13 +403,15 @@ TEST(PaintAggregator, ContainedPaintAfterScrollTrimmedByScrollDamage) {
   gfx::Rect expected_paint_rect(4, 0, 2, 10);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_EQ(1U, greg.GetPendingUpdate().paint_rects.size());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_EQ(1U, update.paint_rects.size());
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
-  EXPECT_EQ(expected_scroll_damage, greg.GetPendingUpdate().GetScrollDamage());
-  EXPECT_EQ(expected_paint_rect, greg.GetPendingUpdate().paint_rects[0]);
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
+  EXPECT_EQ(expected_scroll_damage, update.GetScrollDamage());
+  EXPECT_EQ(expected_paint_rect, update.paint_rects[0]);
 }
 
 TEST(PaintAggregator, ContainedPaintAfterScrollEliminatedByScrollDamage) {
@@ -363,10 +426,12 @@ TEST(PaintAggregator, ContainedPaintAfterScrollEliminatedByScrollDamage) {
   gfx::Rect expected_scroll_damage(0, 0, 4, 10);
 
   EXPECT_TRUE(greg.HasPendingUpdate());
+  PaintAggregator::PendingUpdate update;
+  greg.PopPendingUpdate(&update);
 
-  EXPECT_FALSE(greg.GetPendingUpdate().scroll_rect.IsEmpty());
-  EXPECT_TRUE(greg.GetPendingUpdate().paint_rects.empty());
+  EXPECT_FALSE(update.scroll_rect.IsEmpty());
+  EXPECT_TRUE(update.paint_rects.empty());
 
-  EXPECT_EQ(scroll_rect, greg.GetPendingUpdate().scroll_rect);
-  EXPECT_EQ(expected_scroll_damage, greg.GetPendingUpdate().GetScrollDamage());
+  EXPECT_EQ(scroll_rect, update.scroll_rect);
+  EXPECT_EQ(expected_scroll_damage, update.GetScrollDamage());
 }

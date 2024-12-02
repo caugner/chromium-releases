@@ -30,18 +30,14 @@ const void* GetInterfaceFromDispatcher(const char* interface) {
 
 }  // namespace
 
-PluginDispatcher::PluginDispatcher(GetInterfaceFunc get_interface,
+PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
+                                   GetInterfaceFunc get_interface,
                                    InitModuleFunc init_module,
                                    ShutdownModuleFunc shutdown_module)
-    : Dispatcher(get_interface),
+    : Dispatcher(remote_process_handle, get_interface),
       init_module_(init_module),
-      shutdown_module_(shutdown_module),
-      plugin_resource_tracker_(new PluginResourceTracker(
-          ALLOW_THIS_IN_INITIALIZER_LIST(this))),
-      plugin_var_tracker_(new PluginVarTracker(
-          ALLOW_THIS_IN_INITIALIZER_LIST(this))) {
-  SetSerializationRules(
-      new PluginVarSerializationRules(plugin_var_tracker_.get()));
+      shutdown_module_(shutdown_module) {
+  SetSerializationRules(new PluginVarSerializationRules);
 
   // As a plugin, we always support the PPP_Class interface. There's no
   // GetInterface call or name for it, so we insert it into our table now.
@@ -65,25 +61,45 @@ void PluginDispatcher::SetGlobal(PluginDispatcher* dispatcher) {
   g_dispatcher = dispatcher;
 }
 
-void PluginDispatcher::OnMessageReceived(const IPC::Message& msg) {
+// static
+PluginDispatcher* PluginDispatcher::GetForInstance(PP_Instance instance) {
+  // TODO(brettw) implement "real" per-instance dispatcher map.
+  DCHECK(instance != 0);
+  return Get();
+}
+
+bool PluginDispatcher::IsPlugin() const {
+  return true;
+}
+
+bool PluginDispatcher::OnMessageReceived(const IPC::Message& msg) {
   if (msg.routing_id() == MSG_ROUTING_CONTROL) {
     // Handle some plugin-specific control messages.
+    bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(PluginDispatcher, msg)
-      IPC_MESSAGE_HANDLER(PpapiMsg_InitializeModule, OnInitializeModule)
+      IPC_MESSAGE_HANDLER(PpapiMsg_InitializeModule, OnMsgInitializeModule)
+      IPC_MESSAGE_HANDLER(PpapiMsg_Shutdown, OnMsgShutdown)
 
       // Forward all other control messages to the superclass.
-      IPC_MESSAGE_UNHANDLED(Dispatcher::OnMessageReceived(msg))
+      IPC_MESSAGE_UNHANDLED(handled = Dispatcher::OnMessageReceived(msg))
     IPC_END_MESSAGE_MAP()
-    return;
+    return handled;
   }
 
   // All non-control messages get handled by the superclass.
-  Dispatcher::OnMessageReceived(msg);
+  return Dispatcher::OnMessageReceived(msg);
 }
 
-void PluginDispatcher::OnInitializeModule(PP_Module pp_module, bool* result) {
+void PluginDispatcher::OnMsgInitializeModule(PP_Module pp_module,
+                                             bool* result) {
   set_pp_module(pp_module);
   *result = init_module_(pp_module, &GetInterfaceFromDispatcher) == PP_OK;
+}
+
+void PluginDispatcher::OnMsgShutdown() {
+  if (shutdown_module_)
+    shutdown_module_();
+  MessageLoop::current()->Quit();
 }
 
 }  // namespace proxy

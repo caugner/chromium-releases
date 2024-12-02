@@ -18,17 +18,19 @@
 #include "chrome/renderer/render_thread.h"
 #include "gfx/point.h"
 #include "gfx/size.h"
+#include "chrome/renderer/renderer_webkitclient_impl.h"
 #include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkShader.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenu.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupMenuInfo.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
-#include "webkit/glue/plugins/webplugin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenuInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/plugins/npapi/webplugin.h"
+#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
@@ -36,7 +38,7 @@
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
 #endif  // defined(OS_POSIX)
 
-#include "third_party/WebKit/WebKit/chromium/public/WebWidget.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
 
 using WebKit::WebCompositionUnderline;
 using WebKit::WebCursorInfo;
@@ -75,7 +77,9 @@ RenderWidget::RenderWidget(RenderThreadBase* render_thread,
       popup_type_(popup_type),
       pending_window_rect_count_(0),
       suppress_next_char_events_(false),
-      is_accelerated_compositing_active_(false) {
+      is_accelerated_compositing_active_(false),
+      animation_update_pending_(false),
+      animation_task_posted_(false) {
   RenderProcess::current()->AddRefProcess();
   DCHECK(render_thread_);
 }
@@ -152,25 +156,29 @@ void RenderWidget::CompleteInit(gfx::NativeViewId parent_hwnd) {
   Send(new ViewHostMsg_RenderViewReady(routing_id_));
 }
 
-IPC_DEFINE_MESSAGE_MAP(RenderWidget)
-  IPC_MESSAGE_HANDLER(ViewMsg_Close, OnClose)
-  IPC_MESSAGE_HANDLER(ViewMsg_CreatingNew_ACK, OnCreatingNewAck)
-  IPC_MESSAGE_HANDLER(ViewMsg_Resize, OnResize)
-  IPC_MESSAGE_HANDLER(ViewMsg_WasHidden, OnWasHidden)
-  IPC_MESSAGE_HANDLER(ViewMsg_WasRestored, OnWasRestored)
-  IPC_MESSAGE_HANDLER(ViewMsg_UpdateRect_ACK, OnUpdateRectAck)
-  IPC_MESSAGE_HANDLER(ViewMsg_HandleInputEvent, OnHandleInputEvent)
-  IPC_MESSAGE_HANDLER(ViewMsg_MouseCaptureLost, OnMouseCaptureLost)
-  IPC_MESSAGE_HANDLER(ViewMsg_SetFocus, OnSetFocus)
-  IPC_MESSAGE_HANDLER(ViewMsg_SetInputMethodActive, OnSetInputMethodActive)
-  IPC_MESSAGE_HANDLER(ViewMsg_ImeSetComposition, OnImeSetComposition)
-  IPC_MESSAGE_HANDLER(ViewMsg_ImeConfirmComposition, OnImeConfirmComposition)
-  IPC_MESSAGE_HANDLER(ViewMsg_PaintAtSize, OnMsgPaintAtSize)
-  IPC_MESSAGE_HANDLER(ViewMsg_Repaint, OnMsgRepaint)
-  IPC_MESSAGE_HANDLER(ViewMsg_SetTextDirection, OnSetTextDirection)
-  IPC_MESSAGE_HANDLER(ViewMsg_Move_ACK, OnRequestMoveAck)
-  IPC_MESSAGE_UNHANDLED_ERROR()
-IPC_END_MESSAGE_MAP()
+bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RenderWidget, message)
+    IPC_MESSAGE_HANDLER(ViewMsg_Close, OnClose)
+    IPC_MESSAGE_HANDLER(ViewMsg_CreatingNew_ACK, OnCreatingNewAck)
+    IPC_MESSAGE_HANDLER(ViewMsg_Resize, OnResize)
+    IPC_MESSAGE_HANDLER(ViewMsg_WasHidden, OnWasHidden)
+    IPC_MESSAGE_HANDLER(ViewMsg_WasRestored, OnWasRestored)
+    IPC_MESSAGE_HANDLER(ViewMsg_UpdateRect_ACK, OnUpdateRectAck)
+    IPC_MESSAGE_HANDLER(ViewMsg_HandleInputEvent, OnHandleInputEvent)
+    IPC_MESSAGE_HANDLER(ViewMsg_MouseCaptureLost, OnMouseCaptureLost)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetFocus, OnSetFocus)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetInputMethodActive, OnSetInputMethodActive)
+    IPC_MESSAGE_HANDLER(ViewMsg_ImeSetComposition, OnImeSetComposition)
+    IPC_MESSAGE_HANDLER(ViewMsg_ImeConfirmComposition, OnImeConfirmComposition)
+    IPC_MESSAGE_HANDLER(ViewMsg_PaintAtSize, OnMsgPaintAtSize)
+    IPC_MESSAGE_HANDLER(ViewMsg_Repaint, OnMsgRepaint)
+    IPC_MESSAGE_HANDLER(ViewMsg_SetTextDirection, OnSetTextDirection)
+    IPC_MESSAGE_HANDLER(ViewMsg_Move_ACK, OnRequestMoveAck)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
 
 bool RenderWidget::Send(IPC::Message* message) {
   // Don't send any messages after the browser has told us to close.
@@ -389,6 +397,7 @@ void RenderWidget::ClearFocus() {
 void RenderWidget::PaintRect(const gfx::Rect& rect,
                              const gfx::Point& canvas_origin,
                              skia::PlatformCanvas* canvas) {
+
   canvas->save();
 
   // Bring the canvas into the coordinate system of the paint rect.
@@ -406,13 +415,45 @@ void RenderWidget::PaintRect(const gfx::Rect& rect,
     canvas->drawPaint(paint);
   }
 
-  webwidget_->paint(webkit_glue::ToWebCanvas(canvas), rect);
+  // First see if this rect is a plugin that can paint itself faster.
+  TransportDIB* optimized_dib = NULL;
+  gfx::Rect optimized_copy_rect, optimized_copy_location;
+  webkit::ppapi::PluginInstance* optimized_instance =
+      GetBitmapForOptimizedPluginPaint(rect, &optimized_dib,
+                                       &optimized_copy_location,
+                                       &optimized_copy_rect);
+  if (optimized_instance) {
+    // This plugin can be optimize-painted and we can just ask it to paint
+    // itself. We don't actually need the TransportDIB in this case.
+    //
+    // This is an optimization for PPAPI plugins that know they're on top of
+    // the page content. If this rect is inside such a plugin, we can save some
+    // time and avoid re-rendering the page content which we know will be
+    // covered by the plugin later (this time can be significant, especially
+    // for a playing movie that is invalidating a lot).
+    //
+    // In the plugin movie case, hopefully the similar call to
+    // GetBitmapForOptimizedPluginPaint in DoDeferredUpdate handles the
+    // painting, because that avoids copying the plugin image to a different
+    // paint rect. Unfortunately, if anything on the page is animating other
+    // than the movie, it break this optimization since the union of the
+    // invalid regions will be larger than the plugin.
+    //
+    // This code optimizes that case, where we can still avoid painting in
+    // WebKit and filling the background (which can be slow) and just painting
+    // the plugin. Unlike the DoDeferredUpdate case, an extra copy is still
+    // required.
+    optimized_instance->Paint(webkit_glue::ToWebCanvas(canvas),
+                              optimized_copy_location, rect);
+  } else {
+    // Normal painting case.
+    webwidget_->paint(webkit_glue::ToWebCanvas(canvas), rect);
+
+    // Flush to underlying bitmap.  TODO(darin): is this needed?
+    canvas->getTopPlatformDevice().accessBitmap(false);
+  }
 
   PaintDebugBorder(rect, canvas);
-
-  // Flush to underlying bitmap.  TODO(darin): is this needed?
-  canvas->getTopPlatformDevice().accessBitmap(false);
-
   canvas->restore();
 }
 
@@ -441,6 +482,48 @@ void RenderWidget::PaintDebugBorder(const gfx::Rect& rect,
   canvas->drawIRect(irect, paint);
 }
 
+void RenderWidget::AnimationCallback() {
+  animation_task_posted_ = false;
+  UMA_HISTOGRAM_CUSTOM_COUNTS("Renderer4.AnimationDelayTime", 0, 0, 16, 17);
+  CallDoDeferredUpdate();
+}
+
+void RenderWidget::AnimateIfNeeded() {
+  if (animation_update_pending_) {
+    base::Time now = base::Time::Now();
+    if (now >= animation_floor_time_) {
+      animation_floor_time_ = now + base::TimeDelta::FromMilliseconds(16);
+      // Set a timer to call us back after 16ms (targetting 60FPS) before
+      // running animation callbacks so that if a callback requests another
+      // we'll be sure to run it at the proper time.
+      MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
+          this, &RenderWidget::AnimationCallback), 16);
+      animation_task_posted_ = true;
+      animation_update_pending_ = false;
+      // Explicitly pump the WebCore Timer queue to avoid starvation on OS X.
+      // See crbug.com/71735.
+      // TODO(jamesr) Remove this call once crbug.com/72007 is fixed.
+      RenderThread::current()->GetWebKitClientImpl()->DoTimeout();
+      webwidget_->animate();
+    } else if (!animation_task_posted_) {
+      // This code uses base::Time::Now() to calculate the floor and next fire
+      // time because javascript's Date object uses base::Time::Now().  The
+      // message loop uses base::TimeTicks, which on windows can have a
+      // different granularity than base::Time.
+      // The upshot of all this is that this function might be called before
+      // base::Time::Now() has advanced past the animation_floor_time_.  To
+      // avoid exposing this delay to javascript, we keep posting delayed
+      // tasks until we observe base::Time::Now() advancing far enough.
+      int64 delay = (animation_floor_time_ - now).InMillisecondsRoundedUp();
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Renderer4.AnimationDelayTime",
+                                  static_cast<int>(delay), 0, 16, 17);
+      animation_task_posted_ = true;
+      MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
+          this, &RenderWidget::AnimationCallback), delay);
+    }
+  }
+}
+
 void RenderWidget::CallDoDeferredUpdate() {
   DoDeferredUpdate();
 
@@ -449,8 +532,7 @@ void RenderWidget::CallDoDeferredUpdate() {
 }
 
 void RenderWidget::DoDeferredUpdate() {
-  if (!webwidget_ || !paint_aggregator_.HasPendingUpdate() ||
-      update_reply_pending())
+  if (!webwidget_ || update_reply_pending())
     return;
 
   // Suppress updating when we are hidden.
@@ -460,21 +542,37 @@ void RenderWidget::DoDeferredUpdate() {
     return;
   }
 
+  AnimateIfNeeded();
+
   // Layout may generate more invalidation.  It may also enable the
   // GPU acceleration, so make sure to run layout before we send the
   // GpuRenderingActivated message.
   webwidget_->layout();
 
+  // Suppress painting if nothing is dirty.  This has to be done after updating
+  // animations running layout as these may generate further invalidations.
+  if (!paint_aggregator_.HasPendingUpdate())
+    return;
+
   // OK, save the pending update to a local since painting may cause more
   // invalidation.  Some WebCore rendering objects only layout when painted.
-  PaintAggregator::PendingUpdate update = paint_aggregator_.GetPendingUpdate();
-  paint_aggregator_.ClearPendingUpdate();
+  PaintAggregator::PendingUpdate update;
+  paint_aggregator_.PopPendingUpdate(&update);
 
   gfx::Rect scroll_damage = update.GetScrollDamage();
   gfx::Rect bounds = update.GetPaintBounds().Union(scroll_damage);
 
   // A plugin may be able to do an optimized paint. First check this, in which
   // case we can skip all of the bitmap generation and regular paint code.
+  // This optimization allows PPAPI plugins that declare themselves on top of
+  // the page (like a traditional windowed plugin) to be able to animate (think
+  // movie playing) without repeatedly re-painting the page underneath, or
+  // copying the plugin backing store (since we can send the plugin's backing
+  // store directly to the browser).
+  //
+  // This optimization only works when the entire invalid region is contained
+  // within the plugin. There is a related optimization in PaintRect for the
+  // case where there may be multiple invalid regions.
   TransportDIB::Id dib_id = TransportDIB::Id();
   TransportDIB* dib = NULL;
   std::vector<gfx::Rect> copy_rects;
@@ -483,6 +581,8 @@ void RenderWidget::DoDeferredUpdate() {
       !is_accelerated_compositing_active_ &&
       GetBitmapForOptimizedPluginPaint(bounds, &dib, &optimized_copy_location,
                                        &optimized_copy_rect)) {
+    // Only update the part of the plugin that actually changed.
+    optimized_copy_rect = optimized_copy_rect.Intersect(bounds);
     bounds = optimized_copy_location;
     copy_rects.push_back(optimized_copy_rect);
     dib_id = dib->id();
@@ -504,13 +604,6 @@ void RenderWidget::DoDeferredUpdate() {
     bounds.set_height(canvas->getDevice()->height());
 
     HISTOGRAM_COUNTS_100("MPArch.RW_PaintRectCount", update.paint_rects.size());
-
-    // TODO(darin): Re-enable painting multiple damage rects once the
-    // page-cycler regressions are resolved.  See bug 29589.
-    if (update.scroll_rect.IsEmpty()) {
-      update.paint_rects.clear();
-      update.paint_rects.push_back(bounds);
-    }
 
     // The scroll damage is just another rectangle to paint and copy.
     copy_rects.swap(update.paint_rects);
@@ -545,6 +638,7 @@ void RenderWidget::DoDeferredUpdate() {
   params.resizer_rect = resizer_rect_;
   params.plugin_window_moves.swap(plugin_window_moves_);
   params.flags = next_paint_flags_;
+  params.scroll_offset = GetScrollOffset();
 
   update_reply_pending_ = true;
   Send(new ViewHostMsg_UpdateRect(routing_id_, params));
@@ -560,9 +654,6 @@ void RenderWidget::DoDeferredUpdate() {
 // WebWidgetClient
 
 void RenderWidget::didInvalidateRect(const WebRect& rect) {
-  DCHECK(!is_accelerated_compositing_active_ ||
-    (rect.x == 0 && rect.y == 0 && rect.width == 1 && rect.height == 1));
-
   // We only want one pending DoDeferredUpdate call at any time...
   bool update_pending = paint_aggregator_.HasPendingUpdate();
 
@@ -639,6 +730,17 @@ void RenderWidget::scheduleComposite() {
   // duplicating all that code is less desirable than "faking out" the
   // invalidation path using a magical damage rect.
   didInvalidateRect(WebRect(0, 0, 1, 1));
+}
+
+void RenderWidget::scheduleAnimation() {
+  if (!animation_update_pending_) {
+    animation_update_pending_ = true;
+    if (!animation_task_posted_) {
+      animation_task_posted_ = true;
+      MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
+          this, &RenderWidget::AnimationCallback));
+    }
+  }
 }
 
 void RenderWidget::didChangeCursor(const WebCursorInfo& cursor_info) {
@@ -770,9 +872,9 @@ void RenderWidget::OnImeSetComposition(
   }
 }
 
-void RenderWidget::OnImeConfirmComposition() {
+void RenderWidget::OnImeConfirmComposition(const string16& text) {
   if (webwidget_)
-    webwidget_->confirmComposition();
+    webwidget_->confirmComposition(text);
 }
 
 // This message causes the renderer to render an image of the
@@ -871,13 +973,18 @@ void RenderWidget::OnSetTextDirection(WebTextDirection direction) {
   webwidget_->setTextDirection(direction);
 }
 
-bool RenderWidget::GetBitmapForOptimizedPluginPaint(
+webkit::ppapi::PluginInstance* RenderWidget::GetBitmapForOptimizedPluginPaint(
     const gfx::Rect& paint_bounds,
     TransportDIB** dib,
     gfx::Rect* location,
     gfx::Rect* clip) {
-  // Normal RenderWidgets don't support optimized plugin painting.
-  return false;
+  // Bare RenderWidgets don't support optimized plugin painting.
+  return NULL;
+}
+
+gfx::Size RenderWidget::GetScrollOffset() {
+  // Bare RenderWidgets don't support scroll offset.
+  return gfx::Size(0, 0);
 }
 
 void RenderWidget::SetHidden(bool hidden) {
@@ -962,7 +1069,7 @@ void RenderWidget::resetInputMethod() {
 }
 
 void RenderWidget::SchedulePluginMove(
-    const webkit_glue::WebPluginGeometry& move) {
+    const webkit::npapi::WebPluginGeometry& move) {
   size_t i = 0;
   for (; i < plugin_window_moves_.size(); ++i) {
     if (plugin_window_moves_[i].window == move.window) {

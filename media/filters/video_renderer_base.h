@@ -17,10 +17,10 @@
 
 #include <deque>
 
-#include "base/condition_variable.h"
-#include "base/lock.h"
-#include "base/platform_thread.h"
 #include "base/scoped_ptr.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 #include "media/base/filters.h"
 #include "media/base/video_frame.h"
 
@@ -29,7 +29,7 @@ namespace media {
 // TODO(scherkus): to avoid subclasses, consider using a peer/delegate interface
 // and pass in a reference to the constructor.
 class VideoRendererBase : public VideoRenderer,
-                          public PlatformThread::Delegate {
+                          public base::PlatformThread::Delegate {
  public:
   VideoRendererBase();
   virtual ~VideoRendererBase();
@@ -44,7 +44,7 @@ class VideoRendererBase : public VideoRenderer,
       VideoFrame::Format* surface_format_out,
       int* width_out, int* height_out);
 
-  // MediaFilter implementation.
+  // Filter implementation.
   virtual void Play(FilterCallback* callback);
   virtual void Pause(FilterCallback* callback);
   virtual void Flush(FilterCallback* callback);
@@ -94,9 +94,7 @@ class VideoRendererBase : public VideoRenderer,
   // class executes on.
   virtual void OnFrameAvailable() = 0;
 
-  virtual VideoDecoder* GetDecoder() {
-    return decoder_.get();
-  }
+  virtual VideoDecoder* GetDecoder();
 
   int width() { return width_; }
   int height() { return height_; }
@@ -131,7 +129,7 @@ class VideoRendererBase : public VideoRenderer,
                                          float playback_rate);
 
   // Used for accessing data members.
-  Lock lock_;
+  base::Lock lock_;
 
   scoped_refptr<VideoDecoder> decoder_;
 
@@ -146,10 +144,11 @@ class VideoRendererBase : public VideoRenderer,
   VideoFrameQueue frames_queue_ready_;
   VideoFrameQueue frames_queue_done_;
   scoped_refptr<VideoFrame> current_frame_;
+  scoped_refptr<VideoFrame> last_available_frame_;
 
   // Used to signal |thread_| as frames are added to |frames_|.  Rule of thumb:
   // always check |state_| to see if it was set to STOPPED after waking up!
-  ConditionVariable frame_available_;
+  base::ConditionVariable frame_available_;
 
   // State transition Diagram of this class:
   //       [kUninitialized] -------> [kError]
@@ -190,7 +189,7 @@ class VideoRendererBase : public VideoRenderer,
   State state_;
 
   // Video thread handle.
-  PlatformThreadHandle thread_;
+  base::PlatformThreadHandle thread_;
 
   // Previous time returned from the pipeline.
   base::TimeDelta previous_time_;
@@ -202,6 +201,7 @@ class VideoRendererBase : public VideoRenderer,
   // renderer provides buffer, |pending_reads_| is always non-negative.
   int pending_reads_;
   bool pending_paint_;
+  bool pending_paint_with_last_available_;
 
   float playback_rate_;
 

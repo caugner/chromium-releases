@@ -7,11 +7,10 @@
 #pragma once
 
 #include "base/ref_counted.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/common/notification_observer_mock.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
 
 // Helper class to add and remove observers on a non-UI thread from
 // the UI thread.

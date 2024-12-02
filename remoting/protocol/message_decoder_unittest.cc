@@ -6,16 +6,19 @@
 
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
+#include "base/string_number_conversions.h"
+#include "remoting/proto/event.pb.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/message_decoder.h"
 #include "remoting/protocol/util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace remoting {
+namespace protocol {
 
 static const int kTestKey = 142;
 
-static void AppendMessage(const ChromotingClientMessage& msg,
+static void AppendMessage(const EventMessage& msg,
                           std::string* buffer) {
   // Contains one encoded message.
   scoped_refptr<net::IOBufferWithSize> encoded_msg;
@@ -28,14 +31,13 @@ static void PrepareData(uint8** buffer, int* size) {
   // Contains all encoded messages.
   std::string encoded_data;
 
-  ChromotingClientMessage msg;
-
   // Then append 10 update sequences to the data.
   for (int i = 0; i < 10; ++i) {
-    msg.mutable_key_event()->set_key(kTestKey + i);
+    EventMessage msg;
+    msg.set_timestamp(i);
+    msg.mutable_key_event()->set_keycode(kTestKey + i);
     msg.mutable_key_event()->set_pressed((i % 2) != 0);
     AppendMessage(msg, &encoded_data);
-    msg.Clear();
   }
 
   *size = encoded_data.length();
@@ -58,32 +60,46 @@ void SimulateReadSequence(const int read_sequence[], int sequence_size) {
 
   // Then feed the protocol decoder using the above generated data and the
   // read pattern.
-  std::list<ChromotingClientMessage*> message_list;
-  for (int i = 0; i < size;) {
+  std::list<EventMessage*> message_list;
+  for (int pos = 0; pos < size;) {
+    SCOPED_TRACE("Input position: " + base::IntToString(pos));
+
     // First generate the amount to feed the decoder.
-    int read = std::min(size - i, read_sequence[i % sequence_size]);
+    int read = std::min(size - pos, read_sequence[pos % sequence_size]);
 
     // And then prepare an IOBuffer for feeding it.
     scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(read));
-    memcpy(buffer->data(), test_data + i, read);
-    decoder.ParseMessages(buffer, read, &message_list);
-    i += read;
+    memcpy(buffer->data(), test_data + pos, read);
+    decoder.AddData(buffer, read);
+    while (true) {
+      scoped_ptr<CompoundBuffer> message(decoder.GetNextMessage());
+      if (!message.get())
+        break;
+
+      EventMessage* event = new EventMessage();
+      CompoundBufferInputStream stream(message.get());
+      ASSERT_TRUE(event->ParseFromZeroCopyStream(&stream));
+      message_list.push_back(event);
+    }
+    pos += read;
   }
 
   // Then verify the decoded messages.
   EXPECT_EQ(10u, message_list.size());
 
   int index = 0;
-  for (std::list<ChromotingClientMessage*>::iterator it =
+  for (std::list<EventMessage*>::iterator it =
            message_list.begin();
        it != message_list.end(); ++it) {
-    ChromotingClientMessage* message = *it;
+    SCOPED_TRACE("Message " + base::IntToString(index));
+
+    EventMessage* message = *it;
     // Partial update stream.
     EXPECT_TRUE(message->has_key_event());
 
     // TODO(sergeyu): Don't use index here. Instead store the expected values
     // in an array.
-    EXPECT_EQ(kTestKey + index, message->key_event().key());
+    EXPECT_EQ(kTestKey + index, message->key_event().keycode());
     EXPECT_EQ((index % 2) != 0, message->key_event().pressed());
     ++index;
   }
@@ -105,4 +121,5 @@ TEST(MessageDecoderTest, EmptyReads) {
   SimulateReadSequence(kReads, arraysize(kReads));
 }
 
+}  // namespace protocol
 }  // namespace remoting

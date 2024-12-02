@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "webkit/glue/webpreferences.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/ui/gtk/gtk_util.h"
 #endif
 
 RenderViewHostDelegate::View* RenderViewHostDelegate::GetViewDelegate() {
@@ -22,16 +22,6 @@ RenderViewHostDelegate::View* RenderViewHostDelegate::GetViewDelegate() {
 
 RenderViewHostDelegate::RendererManagement*
 RenderViewHostDelegate::GetRendererManagementDelegate() {
-  return NULL;
-}
-
-RenderViewHostDelegate::BrowserIntegration*
-RenderViewHostDelegate::GetBrowserIntegrationDelegate() {
-  return NULL;
-}
-
-RenderViewHostDelegate::Resource*
-RenderViewHostDelegate::GetResourceDelegate() {
   return NULL;
 }
 
@@ -54,16 +44,6 @@ RenderViewHostDelegate::GetFavIconDelegate() {
   return NULL;
 }
 
-RenderViewHostDelegate::Autocomplete*
-RenderViewHostDelegate::GetAutocompleteDelegate() {
-  return NULL;
-}
-
-RenderViewHostDelegate::AutoFill*
-RenderViewHostDelegate::GetAutoFillDelegate() {
-  return NULL;
-}
-
 RenderViewHostDelegate::BookmarkDrag*
 RenderViewHostDelegate::GetBookmarkDragDelegate() {
   return NULL;
@@ -82,6 +62,10 @@ RenderViewHostDelegate::GetFileSelectDelegate() {
 AutomationResourceRoutingDelegate*
 RenderViewHostDelegate::GetAutomationResourceRoutingDelegate() {
   return NULL;
+}
+
+bool RenderViewHostDelegate::OnMessageReceived(const IPC::Message& message) {
+  return false;
 }
 
 const GURL& RenderViewHostDelegate::GetURL() const {

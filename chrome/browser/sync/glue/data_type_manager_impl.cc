@@ -23,6 +23,7 @@ static const syncable::ModelType kStartOrder[] = {
   syncable::BOOKMARKS,
   syncable::PREFERENCES,
   syncable::AUTOFILL,
+  syncable::AUTOFILL_PROFILE,
   syncable::THEMES,
   syncable::TYPED_URLS,
   syncable::PASSWORDS,
@@ -159,6 +160,7 @@ void DataTypeManagerImpl::Restart() {
   // The task will be invoked when updates are downloaded.
   state_ = DOWNLOAD_PENDING;
   backend_->ConfigureDataTypes(
+      controllers_,
       last_requested_types_,
       method_factory_.NewRunnableMethod(&DataTypeManagerImpl::DownloadReady));
 
@@ -339,6 +341,14 @@ void DataTypeManagerImpl::Stop() {
     FinishStop();
 }
 
+const DataTypeController::TypeMap& DataTypeManagerImpl::controllers() {
+  return controllers_;
+}
+
+DataTypeManager::State DataTypeManagerImpl::state() {
+  return state_;
+}
+
 void DataTypeManagerImpl::FinishStop() {
   DCHECK(state_== CONFIGURING ||
          state_ == STOPPING ||
@@ -348,7 +358,8 @@ void DataTypeManagerImpl::FinishStop() {
   for (DataTypeController::TypeMap::const_iterator it = controllers_.begin();
        it != controllers_.end(); ++it) {
     DataTypeController* dtc = (*it).second;
-    if (dtc->state() == DataTypeController::RUNNING) {
+    if (dtc->state() != DataTypeController::NOT_RUNNING &&
+        dtc->state() != DataTypeController::STOPPING) {
       dtc->Stop();
       VLOG(1) << "Stopped " << dtc->name();
     }

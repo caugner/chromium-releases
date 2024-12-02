@@ -1,21 +1,20 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/speech/speech_input_bubble.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/views/info_bubble.h"
+#include "chrome/browser/ui/views/info_bubble.h"
 #include "gfx/canvas.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
@@ -62,7 +61,7 @@ ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
   const gfx::Font& font = rb.GetFont(ResourceBundle::MediumFont);
 
   heading_ = new views::Label(
-      l10n_util::GetString(IDS_SPEECH_INPUT_BUBBLE_HEADING));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING)));
   heading_->SetFont(font);
   heading_->SetHorizontalAlignment(views::Label::ALIGN_CENTER);
   AddChildView(heading_);
@@ -79,12 +78,14 @@ ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
   icon_->SetHorizontalAlignment(views::ImageView::CENTER);
   AddChildView(icon_);
 
-  cancel_ = new views::NativeButton(this, l10n_util::GetString(IDS_CANCEL));
+  cancel_ = new views::NativeButton(
+      this,
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CANCEL)));
   AddChildView(cancel_);
 
   try_again_ = new views::NativeButton(
       this,
-      l10n_util::GetString(IDS_SPEECH_INPUT_TRY_AGAIN));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_TRY_AGAIN)));
   AddChildView(try_again_);
 }
 
@@ -99,11 +100,13 @@ void ContentView::UpdateLayout(SpeechInputBubbleBase::DisplayMode mode,
   if (mode == SpeechInputBubbleBase::DISPLAY_MODE_MESSAGE) {
     message_->SetText(UTF16ToWideHack(message_text));
   } else if (mode == SpeechInputBubbleBase::DISPLAY_MODE_RECORDING) {
-    heading_->SetText(l10n_util::GetString(IDS_SPEECH_INPUT_BUBBLE_HEADING));
+    heading_->SetText(UTF16ToWide(
+        l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_HEADING)));
     icon_->SetImage(*ResourceBundle::GetSharedInstance().GetBitmapNamed(
         IDR_SPEECH_INPUT_MIC_EMPTY));
   } else {
-    heading_->SetText(l10n_util::GetString(IDS_SPEECH_INPUT_BUBBLE_WORKING));
+    heading_->SetText(UTF16ToWide(
+        l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_BUBBLE_WORKING)));
   }
 }
 

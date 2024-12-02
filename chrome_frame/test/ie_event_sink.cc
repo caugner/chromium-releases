@@ -1,20 +1,22 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome_frame/test/ie_event_sink.h"
 
-#include "base/scoped_handle.h"
+#include <shlguid.h>
+#include <shobjidl.h>
+
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_bstr.h"
+#include "base/win/scoped_handle.h"
 #include "base/win/scoped_variant.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::win::ScopedBstr;
-using base::win::ScopedVariant;
 
 namespace chrome_frame_test {
 
@@ -83,6 +85,8 @@ _ATL_FUNC_INFO IEEventSink::kFileDownloadInfo = {
   }
 };
 
+bool IEEventSink::abnormal_shutdown_ = false;
+
 IEEventSink::IEEventSink()
     : ALLOW_THIS_IN_INITIALIZER_LIST(
           onmessage_(this, &IEEventSink::OnMessage)),
@@ -97,6 +101,10 @@ IEEventSink::IEEventSink()
 
 IEEventSink::~IEEventSink() {
   Uninitialize();
+}
+
+void IEEventSink::SetAbnormalShutdown(bool abnormal_shutdown) {
+  abnormal_shutdown_ = abnormal_shutdown;
 }
 
 // IEEventSink member defines
@@ -120,43 +128,48 @@ HRESULT IEEventSink::Attach(IWebBrowser2* browser) {
 }
 
 void IEEventSink::Uninitialize() {
-  DisconnectFromChromeFrame();
-  if (web_browser2_.get()) {
-    if (m_dwEventCookie != 0xFEFEFEFE) {
-      DispEventUnadvise(web_browser2_);
-      CoDisconnectObject(this, 0);
+  if (!abnormal_shutdown_) {
+    DisconnectFromChromeFrame();
+    if (web_browser2_.get()) {
+      if (m_dwEventCookie != 0xFEFEFEFE) {
+        DispEventUnadvise(web_browser2_);
+        CoDisconnectObject(this, 0);
+      }
+
+      if (!did_receive_on_quit_) {
+        // Log the browser window url for debugging purposes.
+        ScopedBstr browser_url;
+        web_browser2_->get_LocationURL(browser_url.Receive());
+        std::wstring browser_url_wstring;
+        browser_url_wstring.assign(browser_url, browser_url.Length());
+        std::string browser_url_string = WideToUTF8(browser_url_wstring);
+        EXPECT_TRUE(did_receive_on_quit_) << "OnQuit was not received for "
+                                          << "browser with url "
+                                          << browser_url_string;
+
+        web_browser2_->Quit();
+      }
+
+      base::win::ScopedHandle process;
+      process.Set(OpenProcess(SYNCHRONIZE, FALSE, ie_process_id_));
+      web_browser2_.Release();
+
+      if (!process.IsValid()) {
+        DLOG_IF(WARNING, !process.IsValid())
+            << base::StringPrintf("OpenProcess failed: %i", ::GetLastError());
+        return;
+      }
+      // IE may not have closed yet. Wait here for the process to finish.
+      // This is necessary at least on some browser/platform configurations.
+      WaitForSingleObject(process, kDefaultWaitForIEToTerminateMs);
     }
-
-    if (!did_receive_on_quit_) {
-      // Log the browser window url for debugging purposes.
-      ScopedBstr browser_url;
-      web_browser2_->get_LocationURL(browser_url.Receive());
-      std::wstring browser_url_wstring;
-      browser_url_wstring.assign(browser_url, browser_url.Length());
-      std::string browser_url_string = WideToUTF8(browser_url_wstring);
-      EXPECT_TRUE(did_receive_on_quit_) << "OnQuit was not received for "
-                                        << "browser with url "
-                                        << browser_url_string;
-
-      web_browser2_->Quit();
-    }
-
-    ScopedHandle process;
-    process.Set(OpenProcess(SYNCHRONIZE, FALSE,
-                            ie_process_id_));
-    web_browser2_.Release();
-
-    if (!process.IsValid()) {
-      DLOG_IF(WARNING, !process.IsValid())
-          << base::StringPrintf("OpenProcess failed: %i", ::GetLastError());
-      return;
-    }
-    // IE may not have closed yet. Wait here for the process to finish.
-    // This is necessary at least on some browser/platform configurations.
-    WaitForSingleObject(process, kDefaultWaitForIEToTerminateMs);
-    base::KillProcesses(chrome_frame_test::kIEImageName, 0, NULL);
-    base::KillProcesses(chrome_frame_test::kIEBrokerImageName, 0, NULL);
+  } else {
+    LOG(ERROR) << "Terminating hung IE process";
   }
+  chrome_frame_test::KillProcesses(chrome_frame_test::kIEImageName, 0,
+                                   !abnormal_shutdown_);
+  chrome_frame_test::KillProcesses(chrome_frame_test::kIEBrokerImageName, 0,
+                                   !abnormal_shutdown_);
 }
 
 bool IEEventSink::IsCFRendering() {
@@ -180,7 +193,7 @@ bool IEEventSink::IsCFRendering() {
 void IEEventSink::PostMessageToCF(const std::wstring& message,
                                   const std::wstring& target) {
   ScopedBstr message_bstr(message.c_str());
-  ScopedVariant target_variant(target.c_str());
+  base::win::ScopedVariant target_variant(target.c_str());
   EXPECT_HRESULT_SUCCEEDED(
       chrome_frame_->postMessage(message_bstr, target_variant));
 }
@@ -255,14 +268,18 @@ HWND IEEventSink::GetRendererWindow() {
       ole_window->GetWindow(&activex_window);
       EXPECT_TRUE(IsWindow(activex_window));
 
+      wchar_t class_name[MAX_PATH] = {0};
+      HWND child_window = NULL;
       // chrome tab window is the first (and the only) child of activex
       for (HWND first_child = activex_window; ::IsWindow(first_child);
            first_child = ::GetWindow(first_child, GW_CHILD)) {
-        renderer_window = first_child;
+        child_window = first_child;
+        GetClassName(child_window, class_name, arraysize(class_name));
+        if (!_wcsicmp(class_name, L"Chrome_RenderWidgetHostHWND")) {
+          renderer_window = child_window;
+          break;
+        }
       }
-      wchar_t class_name[MAX_PATH] = {0};
-      GetClassName(renderer_window, class_name, arraysize(class_name));
-      EXPECT_EQ(0, _wcsicmp(class_name, L"Chrome_RenderWidgetHostHWND"));
     }
   } else {
     DCHECK(web_browser2_);
@@ -335,8 +352,8 @@ HRESULT IEEventSink::LaunchIEAndNavigate(
 }
 
 HRESULT IEEventSink::Navigate(const std::wstring& navigate_url) {
-  VARIANT empty = ScopedVariant::kEmptyVariant;
-  ScopedVariant url;
+  VARIANT empty = base::win::ScopedVariant::kEmptyVariant;
+  base::win::ScopedVariant url;
   url.Set(navigate_url.c_str());
 
   HRESULT hr = S_OK;
@@ -355,7 +372,7 @@ HRESULT IEEventSink::CloseWebBrowser() {
 }
 
 void IEEventSink::Refresh() {
-  ScopedVariant refresh_level(REFRESH_NORMAL);
+  base::win::ScopedVariant refresh_level(REFRESH_NORMAL);
   web_browser2_->Refresh2(refresh_level.AsInput());
 }
 
@@ -377,9 +394,9 @@ void IEEventSink::ConnectToChromeFrame() {
     }
 
     if (chrome_frame_) {
-      ScopedVariant onmessage(onmessage_.ToDispatch());
-      ScopedVariant onloaderror(onloaderror_.ToDispatch());
-      ScopedVariant onload(onload_.ToDispatch());
+      base::win::ScopedVariant onmessage(onmessage_.ToDispatch());
+      base::win::ScopedVariant onloaderror(onloaderror_.ToDispatch());
+      base::win::ScopedVariant onload(onload_.ToDispatch());
       EXPECT_HRESULT_SUCCEEDED(chrome_frame_->put_onmessage(onmessage));
       EXPECT_HRESULT_SUCCEEDED(chrome_frame_->put_onloaderror(onloaderror));
       EXPECT_HRESULT_SUCCEEDED(chrome_frame_->put_onload(onload));
@@ -394,7 +411,7 @@ void IEEventSink::DisconnectFromChromeFrame() {
     // pump running in the context of the outgoing call.
     ScopedComPtr<IChromeFrame> chrome_frame(chrome_frame_);
     chrome_frame_.Release();
-    ScopedVariant dummy(static_cast<IDispatch*>(NULL));
+    base::win::ScopedVariant dummy(static_cast<IDispatch*>(NULL));
     chrome_frame->put_onmessage(dummy);
     chrome_frame->put_onload(dummy);
     chrome_frame->put_onloaderror(dummy);
@@ -514,7 +531,7 @@ STDMETHODIMP_(void) IEEventSink::OnQuit() {
 
 HRESULT IEEventSink::OnLoad(const VARIANT* param) {
   DVLOG(1) << __FUNCTION__ << " " << param->bstrVal;
-  ScopedVariant stack_object(*param);
+  base::win::ScopedVariant stack_object(*param);
   if (chrome_frame_) {
     if (listener_)
       listener_->OnLoad(param->bstrVal);
@@ -542,7 +559,7 @@ HRESULT IEEventSink::OnMessage(const VARIANT* param) {
     return S_OK;
   }
 
-  ScopedVariant data, origin, source;
+  base::win::ScopedVariant data, origin, source;
   if (param && (V_VT(param) == VT_DISPATCH)) {
     wchar_t* properties[] = { L"data", L"origin", L"source" };
     const int prop_count = arraysize(properties);

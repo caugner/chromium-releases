@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/lazy_instance.h"
-#include "base/singleton.h"
 #include "base/task.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/net/url_fetcher.h"
@@ -20,6 +19,7 @@
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/translate_errors.h"
 
+template <typename T> struct DefaultSingletonTraits;
 class GURL;
 struct PageTranslatedDetails;
 class PrefService;
@@ -34,6 +34,9 @@ class TranslateInfoBarDelegate;
 class TranslateManager : public NotificationObserver,
                          public URLFetcher::Delegate {
  public:
+  // Returns the singleton instance.
+  static TranslateManager* GetInstance();
+
   virtual ~TranslateManager();
 
   // Translates the page contents from |source_lang| to |target_lang|.
@@ -63,7 +66,7 @@ class TranslateManager : public NotificationObserver,
   // URLFetcher::Delegate implementation:
   virtual void OnURLFetchComplete(const URLFetcher* source,
                                   const GURL& url,
-                                  const URLRequestStatus& status,
+                                  const net::URLRequestStatus& status,
                                   int response_code,
                                   const ResponseCookies& cookies,
                                   const std::string& data);
@@ -77,9 +80,7 @@ class TranslateManager : public NotificationObserver,
   // Convenience method to know if a tab is showing a translate infobar.
   static bool IsShowingTranslateInfobar(TabContents* tab);
 
-  // Returns true if the URL can be translated, if it is not an internal URL
-  // (chrome:// and others) or a FTP page (as FTP pages tend to have long
-  // lists of filenames that may confuse the CLD).
+  // Returns true if the URL can be translated.
   static bool IsTranslatableURL(const GURL& url);
 
   // Fills |languages| with the list of languages that the translate server can

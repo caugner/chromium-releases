@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "chrome/browser/ssl/ssl_policy_backend.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -42,7 +43,7 @@ class SSLManager : public NotificationObserver {
   // Entry point for SSLCertificateErrors.  This function begins the process
   // of resolving a certificate error during an SSL connection.  SSLManager
   // will adjust the security UI and either call |Cancel| or
-  // |ContinueDespiteLastError| on the URLRequest.
+  // |ContinueDespiteLastError| on the net::URLRequest.
   //
   // Called on the IO thread.
   static void OnSSLCertificateError(ResourceDispatcherHost* resource_dispatcher,
@@ -66,7 +67,7 @@ class SSLManager : public NotificationObserver {
                                       int* connection_status);
 
   // Returns "<organization_name> [<country>]".
-  static std::wstring GetEVCertName(const net::X509Certificate& cert);
+  static string16 GetEVCertName(const net::X509Certificate& cert);
 
   // Construct an SSLManager for the specified tab.
   // If |delegate| is NULL, SSLPolicy::GetDefaultPolicy() is used.

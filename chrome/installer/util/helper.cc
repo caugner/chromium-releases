@@ -1,127 +1,140 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
+#include "chrome/installer/util/helper.h"
 
-#include "base/file_util.h"
+#include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process_util.h"
-#include "base/scoped_ptr.h"
+#include "base/win/registry.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/delete_tree_work_item.h"
-#include "chrome/installer/util/helper.h"
-#include "chrome/installer/util/logging_installer.h"
-#include "chrome/installer/util/util_constants.h"
-#include "chrome/installer/util/version.h"
-#include "chrome/installer/util/work_item_list.h"
+#include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/master_preferences.h"
+#include "chrome/installer/util/package_properties.h"
+
+using base::win::RegKey;
 
 namespace {
 
-std::wstring GetChromeInstallBasePath(bool system_install,
-                                      const wchar_t* subpath) {
+FilePath GetChromeInstallBasePath(bool system,
+                                  BrowserDistribution* distribution,
+                                  const wchar_t* sub_path) {
   FilePath install_path;
-  if (system_install) {
+  if (system) {
     PathService::Get(base::DIR_PROGRAM_FILES, &install_path);
   } else {
     PathService::Get(base::DIR_LOCAL_APP_DATA, &install_path);
   }
+
   if (!install_path.empty()) {
-    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    install_path = install_path.Append(dist->GetInstallSubDir());
-    install_path = install_path.Append(subpath);
+    install_path = install_path.Append(distribution->GetInstallSubDir());
+    install_path = install_path.Append(sub_path);
   }
-  return install_path.ToWStringHack();
+
+  return install_path;
 }
 
 }  // namespace
 
-std::wstring installer::GetChromeInstallPath(bool system_install) {
-  return GetChromeInstallBasePath(system_install,
-                                  installer_util::kInstallBinaryDir);
+namespace installer {
+
+bool IsInstalledAsMulti(bool system_install, BrowserDistribution* dist) {
+  bool installed_as_multi = false;
+  CommandLine cmd(CommandLine::NO_PROGRAM);
+  if (GetUninstallSwitches(system_install, dist, &cmd))
+    installed_as_multi = cmd.HasSwitch(installer::switches::kMultiInstall);
+  return installed_as_multi;
 }
 
-std::wstring installer::GetChromeUserDataPath() {
-  return GetChromeInstallBasePath(false, installer_util::kInstallUserDataDir);
-}
-
-bool installer::LaunchChrome(bool system_install) {
-  std::wstring chrome_exe(L"\"");
-  chrome_exe.append(installer::GetChromeInstallPath(system_install));
-  file_util::AppendToPath(&chrome_exe, installer_util::kChromeExe);
-  chrome_exe.append(L"\"");
-  return base::LaunchApp(chrome_exe, false, false, NULL);
-}
-
-bool installer::LaunchChromeAndWaitForResult(bool system_install,
-                                             const std::wstring& options,
-                                             int32* exit_code) {
-  std::wstring chrome_exe(installer::GetChromeInstallPath(system_install));
-  if (chrome_exe.empty())
-    return false;
-  file_util::AppendToPath(&chrome_exe, installer_util::kChromeExe);
-
-  std::wstring command_line(L"\"" + chrome_exe + L"\"");
-  command_line.append(options);
-  STARTUPINFOW si = {sizeof(si)};
-  PROCESS_INFORMATION pi = {0};
-  if (!::CreateProcessW(chrome_exe.c_str(),
-                        const_cast<wchar_t*>(command_line.c_str()),
-                        NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL,
-                        &si, &pi)) {
-    return false;
-  }
-
-  DWORD wr = ::WaitForSingleObject(pi.hProcess, INFINITE);
-  DWORD ret;
-  if (::GetExitCodeProcess(pi.hProcess, &ret) == 0)
-    return false;
-
-  if (exit_code)
-    *exit_code = ret;
-
-  ::CloseHandle(pi.hProcess);
-  ::CloseHandle(pi.hThread);
-  return true;
-}
-
-void installer::RemoveOldVersionDirs(const std::wstring& chrome_path,
-                                     const std::wstring& latest_version_str) {
-  std::wstring search_path(chrome_path);
-  file_util::AppendToPath(&search_path, L"*");
-
-  WIN32_FIND_DATA find_file_data;
-  HANDLE file_handle = FindFirstFile(search_path.c_str(), &find_file_data);
-  if (file_handle == INVALID_HANDLE_VALUE)
-    return;
-
-  BOOL ret = TRUE;
-  scoped_ptr<installer::Version> version;
-  scoped_ptr<installer::Version> latest_version(
-      installer::Version::GetVersionFromString(latest_version_str));
-
-  // We try to delete all directories whose versions are lower than
-  // latest_version.
-  while (ret) {
-    if (find_file_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-      VLOG(1) << "directory found: " << find_file_data.cFileName;
-      version.reset(
-          installer::Version::GetVersionFromString(find_file_data.cFileName));
-      if (version.get() && latest_version->IsHigherThan(version.get())) {
-        std::wstring remove_dir(chrome_path);
-        file_util::AppendToPath(&remove_dir, find_file_data.cFileName);
-        std::wstring chrome_dll_path(remove_dir);
-        file_util::AppendToPath(&chrome_dll_path, installer_util::kChromeDll);
-        VLOG(1) << "deleting directory " << remove_dir;
-        scoped_ptr<DeleteTreeWorkItem> item;
-        item.reset(WorkItem::CreateDeleteTreeWorkItem(remove_dir,
-                                                      chrome_dll_path));
-        item->Do();
+bool GetUninstallSwitches(bool system_install, BrowserDistribution* dist,
+                          CommandLine* cmd_line_switches) {
+  scoped_ptr<Version> installed(InstallUtil::GetChromeVersion(dist,
+                                                              system_install));
+  if (installed.get()) {
+    HKEY root = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+    RegKey key(root, dist->GetStateKey().c_str(), KEY_READ);
+    if (key.Valid()) {
+      std::wstring args;
+      key.ReadValue(installer::kUninstallArgumentsField, &args);
+      if (!args.empty()) {
+        args.insert(0, L"foo.exe ");
+        *cmd_line_switches = CommandLine::FromString(args);
+      } else {
+        LOG(ERROR) << "No uninstallation arguments for "
+                   << dist->GetApplicationName();
+        installed.reset();
       }
+    } else {
+      LOG(ERROR) << "Product looks to be installed but we can't access the "
+                    "state key: " << dist->GetApplicationName();
+      installed.reset();
     }
-    ret = FindNextFile(file_handle, &find_file_data);
   }
 
-  FindClose(file_handle);
+  return installed.get() != NULL;
 }
+
+FilePath GetChromeInstallPath(bool system_install, BrowserDistribution* dist) {
+  return GetChromeInstallBasePath(system_install, dist,
+                                  installer::kInstallBinaryDir);
+}
+
+FilePath GetChromeUserDataPath(BrowserDistribution* dist) {
+  return GetChromeInstallBasePath(false, dist, kInstallUserDataDir);
+}
+
+FilePath GetChromeFrameInstallPath(bool multi_install, bool system_install,
+                                   BrowserDistribution* dist) {
+  DCHECK_EQ(BrowserDistribution::CHROME_FRAME, dist->GetType());
+
+  scoped_ptr<Version> installed_version(
+      InstallUtil::GetChromeVersion(dist, system_install));
+
+  if (!multi_install) {
+    // Check if Chrome Frame is installed as multi. If it is, return an empty
+    // path and log an error.
+    if (installed_version.get() && IsInstalledAsMulti(system_install, dist)) {
+      LOG(ERROR) << "Cannot install Chrome Frame in single mode as a multi mode"
+                    " installation already exists.";
+      return FilePath();
+    }
+    VLOG(1) << "Chrome Frame will be installed as 'single'";
+    return GetChromeInstallPath(system_install, dist);
+  }
+
+  // TODO(tommi): If Chrome Frame is installed as single and the installed
+  // channel is older than the one we're installing, we should migrate
+  // CF to Chrome's install folder and change its channel.
+
+  // Multi install.  Check if Chrome Frame is already installed.
+  // If CF is installed as single (i.e. not multi), we will return an empty
+  // path (for now).  Otherwise, if CF is not installed or if it is installed
+  // as multi, we will return Chrome's install folder.
+  if (installed_version.get() && !IsInstalledAsMulti(system_install, dist)) {
+    LOG(ERROR) << "Cannot install Chrome Frame in multi mode as a single mode"
+                  " installation already exists.";
+    return FilePath();
+  }
+
+  // Return Chrome's installation folder.
+  VLOG(1) << "Chrome Frame will be installed as 'multi'";
+  const MasterPreferences& prefs = MasterPreferences::ForCurrentProcess();
+  BrowserDistribution* chrome =
+      BrowserDistribution::GetSpecificDistribution(
+          BrowserDistribution::CHROME_BROWSER, prefs);
+  return GetChromeInstallPath(system_install, chrome);
+}
+
+std::wstring GetAppGuidForUpdates(bool system_install) {
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+
+  // If we're part of a multi-install, we need to poll using the multi-installer
+  // package's app guid rather than the browser's or Chrome Frame's app guid.
+  return IsInstalledAsMulti(system_install, dist) ?
+      ActivePackageProperties().GetAppGuid() :
+      dist->GetAppGuid();
+}
+
+}  // namespace installer.

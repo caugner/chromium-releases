@@ -5,10 +5,33 @@
 #include "remoting/protocol/buffered_socket_writer.h"
 
 #include "base/message_loop.h"
+#include "base/stl_util-inl.h"
 #include "net/base/net_errors.h"
 
 namespace remoting {
 namespace protocol {
+
+class BufferedSocketWriterBase::PendingPacket {
+ public:
+  PendingPacket(scoped_refptr<net::IOBufferWithSize> data, Task* done_task)
+      : data_(data),
+        done_task_(done_task) {
+  }
+  ~PendingPacket() {
+    if (done_task_.get())
+      done_task_->Run();
+  }
+
+  net::IOBufferWithSize* data() {
+    return data_;
+  }
+
+ private:
+  scoped_refptr<net::IOBufferWithSize> data_;
+  scoped_ptr<Task> done_task_;
+
+  DISALLOW_COPY_AND_ASSIGN(PendingPacket);
+};
 
 BufferedSocketWriterBase::BufferedSocketWriterBase()
     : buffer_size_(0),
@@ -25,18 +48,18 @@ BufferedSocketWriterBase::~BufferedSocketWriterBase() { }
 void BufferedSocketWriterBase::Init(net::Socket* socket,
                                     WriteFailedCallback* callback) {
   // TODO(garykac) Save copy of WriteFailedCallback.
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   message_loop_ = MessageLoop::current();
   socket_ = socket;
   DCHECK(socket_);
 }
 
 bool BufferedSocketWriterBase::Write(
-    scoped_refptr<net::IOBufferWithSize> data) {
-  AutoLock auto_lock(lock_);
+    scoped_refptr<net::IOBufferWithSize> data, Task* done_task) {
+  base::AutoLock auto_lock(lock_);
   if (!socket_)
     return false;
-  queue_.push(data);
+  queue_.push_back(new PendingPacket(data, done_task));
   buffer_size_ += data->size();
   message_loop_->PostTask(
       FROM_HERE, NewRunnableMethod(this, &BufferedSocketWriterBase::DoWrite));
@@ -53,7 +76,7 @@ void BufferedSocketWriterBase::DoWrite() {
 
   // Don't write after Close().
   {
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
     if (closed_)
       return;
   }
@@ -62,7 +85,7 @@ void BufferedSocketWriterBase::DoWrite() {
     net::IOBuffer* current_packet;
     int current_packet_size;
     {
-      AutoLock auto_lock(lock_);
+      base::AutoLock auto_lock(lock_);
       GetNextPacket_Locked(&current_packet, &current_packet_size);
     }
 
@@ -73,7 +96,7 @@ void BufferedSocketWriterBase::DoWrite() {
     int result = socket_->Write(current_packet, current_packet_size,
                                 &written_callback_);
     if (result >= 0) {
-      AutoLock auto_lock(lock_);
+      base::AutoLock auto_lock(lock_);
       AdvanceBufferPosition_Locked(result);
     } else {
       if (result == net::ERR_IO_PENDING) {
@@ -100,7 +123,7 @@ void BufferedSocketWriterBase::OnWritten(int result) {
   }
 
   {
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
     AdvanceBufferPosition_Locked(result);
   }
 
@@ -110,44 +133,50 @@ void BufferedSocketWriterBase::OnWritten(int result) {
 }
 
 void BufferedSocketWriterBase::HandleError(int result) {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   closed_ = true;
-  while (!queue_.empty()) {
-    queue_.pop();
-  }
+  STLDeleteElements(&queue_);
 
   // Notify subclass that an error is received.
   OnError_Locked(result);
 }
 
 int BufferedSocketWriterBase::GetBufferSize() {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   return buffer_size_;
 }
 
 int BufferedSocketWriterBase::GetBufferChunks() {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   return queue_.size();
 }
 
 void BufferedSocketWriterBase::Close() {
-  AutoLock auto_lock(lock_);
+  base::AutoLock auto_lock(lock_);
   closed_ = true;
 }
 
+void BufferedSocketWriterBase::PopQueue() {
+  // This also calls |done_task|.
+  delete queue_.front();
+  queue_.pop_front();
+}
+
 BufferedSocketWriter::BufferedSocketWriter() { }
-BufferedSocketWriter::~BufferedSocketWriter() { }
+
+BufferedSocketWriter::~BufferedSocketWriter() {
+  STLDeleteElements(&queue_);
+}
 
 void BufferedSocketWriter::GetNextPacket_Locked(
     net::IOBuffer** buffer, int* size) {
-  while (!current_buf_ || current_buf_->BytesRemaining() == 0) {
+  if (!current_buf_) {
     if (queue_.empty()) {
       *buffer = NULL;
       return;  // Nothing to write.
     }
-    current_buf_ =
-        new net::DrainableIOBuffer(queue_.front(), queue_.front()->size());
-    queue_.pop();
+    current_buf_ = new net::DrainableIOBuffer(
+        queue_.front()->data(), queue_.front()->data()->size());
   }
 
   *buffer = current_buf_;
@@ -157,6 +186,11 @@ void BufferedSocketWriter::GetNextPacket_Locked(
 void BufferedSocketWriter::AdvanceBufferPosition_Locked(int written) {
   buffer_size_ -= written;
   current_buf_->DidConsume(written);
+
+  if (current_buf_->BytesRemaining() == 0) {
+    PopQueue();
+    current_buf_ = NULL;
+  }
 }
 
 void BufferedSocketWriter::OnError_Locked(int result) {
@@ -172,14 +206,14 @@ void BufferedDatagramWriter::GetNextPacket_Locked(
     *buffer = NULL;
     return;  // Nothing to write.
   }
-  *buffer = queue_.front();
-  *size = queue_.front()->size();
+  *buffer = queue_.front()->data();
+  *size = queue_.front()->data()->size();
 }
 
 void BufferedDatagramWriter::AdvanceBufferPosition_Locked(int written) {
-  DCHECK_EQ(written, queue_.front()->size());
-  buffer_size_ -= queue_.front()->size();
-  queue_.pop();
+  DCHECK_EQ(written, queue_.front()->data()->size());
+  buffer_size_ -= queue_.front()->data()->size();
+  PopQueue();
 }
 
 void BufferedDatagramWriter::OnError_Locked(int result) {

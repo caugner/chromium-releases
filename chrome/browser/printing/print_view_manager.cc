@@ -4,7 +4,6 @@
 
 #include "chrome/browser/printing/print_view_manager.h"
 
-#include "app/l10n_util.h"
 #include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -14,11 +13,13 @@
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_details.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/render_messages_params.h"
 #include "grit/generated_resources.h"
 #include "printing/native_metafile.h"
 #include "printing/printed_document.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using base::TimeDelta;
 

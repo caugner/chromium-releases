@@ -176,12 +176,21 @@ void Directory::init_kernel(const std::string& name) {
 
 Directory::PersistedKernelInfo::PersistedKernelInfo()
     : next_id(0) {
-  for (int i = 0; i < MODEL_TYPE_COUNT; ++i) {
-    last_download_timestamp[i] = 0;
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    reset_download_progress(ModelTypeFromInt(i));
   }
+  autofill_migration_state = NOT_DETERMINED;
 }
 
 Directory::PersistedKernelInfo::~PersistedKernelInfo() {}
+
+void Directory::PersistedKernelInfo::reset_download_progress(
+    ModelType model_type) {
+  download_progress[model_type].set_data_type_id(
+      GetExtensionFieldNumberFromModelType(model_type));
+  // An empty-string token indicates no prior knowledge.
+  download_progress[model_type].set_token(std::string());
+}
 
 Directory::SaveChangesSnapshot::SaveChangesSnapshot()
     : kernel_info_status(KERNEL_SHARE_INFO_INVALID) {
@@ -577,7 +586,7 @@ bool Directory::SaveChanges() {
   bool success = false;
   DCHECK(store_);
 
-  AutoLock scoped_lock(kernel_->save_changes_mutex);
+  base::AutoLock scoped_lock(kernel_->save_changes_mutex);
 
   // Snapshot and save.
   SaveChangesSnapshot snapshot;
@@ -675,7 +684,7 @@ void Directory::PurgeEntriesWithTypeIn(const std::set<ModelType>& types) {
       for (std::set<ModelType>::const_iterator it = types.begin();
            it != types.end(); ++it) {
         set_initial_sync_ended_for_type_unsafe(*it, false);
-        set_last_download_timestamp_unsafe(*it, 0);
+        kernel_->persisted_info.reset_download_progress(*it);
       }
     }
   }
@@ -704,20 +713,109 @@ void Directory::HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot) {
                                         snapshot.metahandles_to_purge.end());
 }
 
-int64 Directory::last_download_timestamp(ModelType model_type) const {
+void Directory::GetDownloadProgress(
+    ModelType model_type,
+    sync_pb::DataTypeProgressMarker* value_out) const {
   ScopedKernelLock lock(this);
-  return kernel_->persisted_info.last_download_timestamp[model_type];
+  return value_out->CopyFrom(
+      kernel_->persisted_info.download_progress[model_type]);
 }
 
-void Directory::set_last_download_timestamp(ModelType model_type,
-    int64 timestamp) {
+void Directory::GetDownloadProgressAsString(
+    ModelType model_type,
+    std::string* value_out) const {
   ScopedKernelLock lock(this);
-  set_last_download_timestamp_unsafe(model_type, timestamp);
+  kernel_->persisted_info.download_progress[model_type].SerializeToString(
+      value_out);
+}
+
+void Directory::SetDownloadProgress(
+    ModelType model_type,
+    const sync_pb::DataTypeProgressMarker& new_progress) {
+  ScopedKernelLock lock(this);
+  kernel_->persisted_info.download_progress[model_type].CopyFrom(new_progress);
 }
 
 bool Directory::initial_sync_ended_for_type(ModelType type) const {
   ScopedKernelLock lock(this);
   return kernel_->persisted_info.initial_sync_ended[type];
+}
+
+AutofillMigrationState Directory::get_autofill_migration_state() const {
+  ScopedKernelLock lock(this);
+  return kernel_->persisted_info.autofill_migration_state;
+}
+
+AutofillMigrationDebugInfo
+    Directory::get_autofill_migration_debug_info() const {
+  ScopedKernelLock lock(this);
+  return kernel_->persisted_info.autofill_migration_debug_info;
+}
+
+template <class T> void Directory::TestAndSet(
+    T* kernel_data, const T* data_to_set) {
+  if (*kernel_data != *data_to_set) {
+    *kernel_data = *data_to_set;
+    kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+  }
+}
+
+void Directory::set_autofill_migration_state_debug_info(
+    AutofillMigrationDebugInfo::PropertyToSet property_to_set,
+    const AutofillMigrationDebugInfo& info) {
+
+  ScopedKernelLock lock(this);
+  switch (property_to_set) {
+    case AutofillMigrationDebugInfo::MIGRATION_TIME: {
+      syncable::AutofillMigrationDebugInfo&
+        debug_info = kernel_->persisted_info.autofill_migration_debug_info;
+      TestAndSet<int64>(
+          &debug_info.autofill_migration_time,
+          &info.autofill_migration_time);
+      break;
+    }
+    case AutofillMigrationDebugInfo::BOOKMARK_ADDED: {
+      AutofillMigrationDebugInfo& debug_info =
+        kernel_->persisted_info.autofill_migration_debug_info;
+      TestAndSet<int>(
+          &debug_info.bookmarks_added_during_migration,
+          &info.bookmarks_added_during_migration);
+      break;
+    }
+    case AutofillMigrationDebugInfo::ENTRIES_ADDED: {
+      AutofillMigrationDebugInfo& debug_info =
+        kernel_->persisted_info.autofill_migration_debug_info;
+      TestAndSet<int>(
+          &debug_info.autofill_entries_added_during_migration,
+          &info.autofill_entries_added_during_migration);
+      break;
+    }
+    case AutofillMigrationDebugInfo::PROFILES_ADDED: {
+      AutofillMigrationDebugInfo& debug_info =
+        kernel_->persisted_info.autofill_migration_debug_info;
+      TestAndSet<int>(
+          &debug_info.autofill_profile_added_during_migration,
+          &info.autofill_profile_added_during_migration);
+      break;
+    }
+    default:
+      NOTREACHED();
+  }
+}
+
+void Directory::set_autofill_migration_state(AutofillMigrationState state) {
+  ScopedKernelLock lock(this);
+  if (state == kernel_->persisted_info.autofill_migration_state) {
+    return;
+  }
+  kernel_->persisted_info.autofill_migration_state = state;
+  if (state == MIGRATED) {
+    syncable::AutofillMigrationDebugInfo& debug_info =
+        kernel_->persisted_info.autofill_migration_debug_info;
+    debug_info.autofill_migration_time =
+        base::Time::Now().ToInternalValue();
+  }
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
 void Directory::set_initial_sync_ended_for_type(ModelType type, bool x) {
@@ -730,14 +828,6 @@ void Directory::set_initial_sync_ended_for_type_unsafe(ModelType type,
   if (kernel_->persisted_info.initial_sync_ended[type] == x)
     return;
   kernel_->persisted_info.initial_sync_ended.set(type, x);
-  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
-}
-
-void Directory::set_last_download_timestamp_unsafe(ModelType model_type,
-                                                   int64 timestamp) {
-  if (kernel_->persisted_info.last_download_timestamp[model_type] == timestamp)
-    return;
-  kernel_->persisted_info.last_download_timestamp[model_type] = timestamp;
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
@@ -971,7 +1061,7 @@ browser_sync::ChannelHookup<DirectoryChangeEvent>* Directory::AddChangeObserver(
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// ScopedKernelLocks
+// ScopedKernelLock
 
 ScopedKernelLock::ScopedKernelLock(const Directory* dir)
   :  scoped_lock_(dir->kernel_->mutex), dir_(const_cast<Directory*>(dir)) {
@@ -1009,7 +1099,7 @@ BaseTransaction::BaseTransaction(Directory* directory)
       dirkernel_(NULL),
       name_(NULL),
       source_file_(NULL),
-      line_(NULL),
+      line_(0),
       writer_(INVALID) {
 }
 
@@ -1051,7 +1141,7 @@ bool BaseTransaction::NotifyTransactionChangingAndEnding(
   {
     // Scoped_lock is only active through the calculate_changes and
     // transaction_ending events.
-    AutoLock scoped_lock(dirkernel_->changes_channel_mutex);
+    base::AutoLock scoped_lock(dirkernel_->changes_channel_mutex);
 
     // Tell listeners to calculate changes while we still have the mutex.
     DirectoryChangeEvent event = { DirectoryChangeEvent::CALCULATE_CHANGES,

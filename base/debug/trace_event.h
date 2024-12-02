@@ -31,9 +31,9 @@
 
 #include <string>
 
-#include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "base/timer.h"
 
@@ -52,7 +52,7 @@
 // Record that an event (of name, id) has begun.  All BEGIN events should have
 // corresponding END events with a matching (name, id).
 #define TRACE_EVENT_BEGIN(name, id, extra) \
-  Singleton<base::debug::TraceLog>::get()->Trace( \
+  base::debug::TraceLog::GetInstance()->Trace( \
       name, \
       base::debug::TraceLog::EVENT_BEGIN, \
       reinterpret_cast<const void*>(id), \
@@ -63,7 +63,7 @@
 // Record that an event (of name, id) has ended.  All END events should have
 // corresponding BEGIN events with a matching (name, id).
 #define TRACE_EVENT_END(name, id, extra) \
-  Singleton<base::debug::TraceLog>::get()->Trace( \
+  base::debug::TraceLog::GetInstance()->Trace( \
       name, \
       base::debug::TraceLog::EVENT_END, \
       reinterpret_cast<const void*>(id), \
@@ -73,7 +73,7 @@
 
 // Record that an event (of name, id) with no duration has happened.
 #define TRACE_EVENT_INSTANT(name, id, extra) \
-  Singleton<base::debug::TraceLog>::get()->Trace( \
+  base::debug::TraceLog::GetInstance()->Trace( \
       name, \
       base::debug::TraceLog::EVENT_INSTANT, \
       reinterpret_cast<const void*>(id), \
@@ -95,6 +95,8 @@ class TraceLog {
     EVENT_END,
     EVENT_INSTANT
   };
+
+  static TraceLog* GetInstance();
 
   // Is tracing currently enabled.
   static bool IsTracing();
@@ -133,7 +135,7 @@ class TraceLog {
 
   bool enabled_;
   FILE* log_file_;
-  Lock file_lock_;
+  base::Lock file_lock_;
   TimeTicks trace_start_time_;
   scoped_ptr<base::ProcessMetrics> process_metrics_;
   RepeatingTimer<TraceLog> timer_;

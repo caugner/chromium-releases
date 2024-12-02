@@ -9,7 +9,8 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/lock.h"
+#include "base/file_path.h"
+#include "base/synchronization/lock.h"
 
 namespace google_breakpad {
 
@@ -56,10 +57,6 @@ class CrashService {
   // The default tag if not specified is 'crash svc'.
   static const char kReporterTag[];
 
-  // Returns the actual report path.
-  std::wstring report_path() const {
-    return report_path_;
-  }
   // Returns number of crash dumps handled.
   int requests_handled() const {
     return requests_handled_;
@@ -103,7 +100,7 @@ class CrashService {
   google_breakpad::CrashReportSender* sender_;
 
   // the path to dumps and logs directory.
-  std::wstring report_path_;
+  FilePath report_path_;
   // the extra tag sent to the server with each dump.
   std::wstring reporter_tag_;
 
@@ -112,7 +109,7 @@ class CrashService {
   int requests_sent_;
   volatile long clients_connected_;
   volatile long clients_terminated_;
-  Lock sending_;
+  base::Lock sending_;
 
   DISALLOW_COPY_AND_ASSIGN(CrashService);
 };

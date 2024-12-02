@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,8 +26,9 @@
 #include "chrome/browser/net/url_request_tracking.h"
 #include "chrome/browser/plugin_download_helper.h"
 #include "chrome/browser/plugin_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
@@ -35,25 +36,49 @@
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/render_messages_params.h"
 #include "gfx/native_widget_types.h"
 #include "ipc/ipc_switches.h"
 #include "net/base/cookie_store.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "ui/base/ui_base_switches.h"
 
 #if defined(USE_X11)
 #include "gfx/gtk_native_view_id_manager.h"
 #endif
 
 #if defined(OS_MACOSX)
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "chrome/common/plugin_carbon_interpose_constants_mac.h"
 #include "gfx/rect.h"
 #endif
 
 static const char kDefaultPluginFinderURL[] =
     "https://dl-ssl.google.com/edgedl/chrome/plugins/plugins2.xml";
+
+namespace {
+
+// Helper class that we pass to ResourceMessageFilter so that it can find the
+// right net::URLRequestContext for a request.
+class PluginURLRequestContextOverride
+    : public ResourceMessageFilter::URLRequestContextOverride {
+ public:
+  PluginURLRequestContextOverride() {
+  }
+
+  virtual net::URLRequestContext* GetRequestContext(
+      const ViewHostMsg_Resource_Request& resource_request) {
+    return CPBrowsingContextManager::GetInstance()->ToURLRequestContext(
+        resource_request.request_context);
+  }
+
+ private:
+  virtual ~PluginURLRequestContextOverride() {}
+};
+
+}  // namespace
 
 #if defined(OS_WIN)
 void PluginProcessHost::OnPluginWindowDestroyed(HWND window, HWND parent) {
@@ -87,14 +112,15 @@ void PluginProcessHost::AddWindow(HWND window) {
 void PluginProcessHost::OnMapNativeViewId(gfx::NativeViewId id,
                                           gfx::PluginWindowHandle* output) {
   *output = 0;
-  Singleton<GtkNativeViewManager>()->GetXIDForId(output, id);
+  GtkNativeViewManager::GetInstance()->GetXIDForId(output, id);
 }
 #endif  // defined(TOOLKIT_USES_GTK)
 
 PluginProcessHost::PluginProcessHost()
     : BrowserChildProcessHost(
           PLUGIN_PROCESS,
-          PluginService::GetInstance()->resource_dispatcher_host()),
+          PluginService::GetInstance()->resource_dispatcher_host(),
+          new PluginURLRequestContextOverride()),
       ALLOW_THIS_IN_INITIALIZER_LIST(resolve_proxy_msg_helper_(this, NULL))
 #if defined(OS_MACOSX)
       , plugin_cursor_visible_(true)
@@ -124,22 +150,22 @@ PluginProcessHost::~PluginProcessHost() {
        window_index != plugin_fullscreen_windows_set_.end();
        window_index++) {
     if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      mac_util::ReleaseFullScreen(mac_util::kFullScreenModeHideAll);
+      base::mac::ReleaseFullScreen(base::mac::kFullScreenModeHideAll);
     } else {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableFunction(mac_util::ReleaseFullScreen,
-                              mac_util::kFullScreenModeHideAll));
+          NewRunnableFunction(base::mac::ReleaseFullScreen,
+                              base::mac::kFullScreenModeHideAll));
     }
   }
   // If the plugin hid the cursor, reset that.
   if (!plugin_cursor_visible_) {
     if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      mac_util::SetCursorVisibility(true);
+      base::mac::SetCursorVisibility(true);
     } else {
       BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(mac_util::SetCursorVisibility,
+        NewRunnableFunction(base::mac::SetCursorVisibility,
                             true));
     }
   }
@@ -148,7 +174,7 @@ PluginProcessHost::~PluginProcessHost() {
   CancelRequests();
 }
 
-bool PluginProcessHost::Init(const WebPluginInfo& info,
+bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
                              const std::string& locale) {
   info_ = info;
   set_name(UTF16ToWideHack(info_.name));
@@ -274,7 +300,8 @@ void PluginProcessHost::OnProcessLaunched() {
   }
 }
 
-void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
+bool PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PluginProcessHost, msg)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_ChannelCreated, OnChannelCreated)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_GetPluginFinderUrl,
@@ -303,8 +330,11 @@ void PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginSetCursorVisibility,
                         OnPluginSetCursorVisibility)
 #endif
-    IPC_MESSAGE_UNHANDLED_ERROR()
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+
+  DCHECK(handled);
+  return handled;
 }
 
 void PluginProcessHost::OnChannelConnected(int32 peer_pid) {
@@ -317,6 +347,10 @@ void PluginProcessHost::OnChannelConnected(int32 peer_pid) {
 
 void PluginProcessHost::OnChannelError() {
   CancelRequests();
+}
+
+bool PluginProcessHost::CanShutdown() {
+  return sent_requests_.empty();
 }
 
 void PluginProcessHost::CancelRequests() {
@@ -348,7 +382,7 @@ void PluginProcessHost::OpenChannelToPlugin(Client* client) {
 void PluginProcessHost::OnGetCookies(uint32 request_context,
                                      const GURL& url,
                                      std::string* cookies) {
-  URLRequestContext* context = CPBrowsingContextManager::Instance()->
+  net::URLRequestContext* context = CPBrowsingContextManager::GetInstance()->
         ToURLRequestContext(request_context);
   // TODO(mpcomplete): remove fallback case when Gears support is prevalent.
   if (!context)
@@ -393,12 +427,6 @@ void PluginProcessHost::OnResolveProxyCompleted(IPC::Message* reply_msg,
   PluginProcessHostMsg_ResolveProxy::WriteReplyParams(
       reply_msg, result, proxy_list);
   Send(reply_msg);
-}
-
-URLRequestContext* PluginProcessHost::GetRequestContext(
-    uint32 request_id,
-    const ViewHostMsg_Resource_Request& request_data) {
-  return CPBrowsingContextManager::Instance()->ToURLRequestContext(request_id);
 }
 
 void PluginProcessHost::RequestPluginChannel(Client* client) {

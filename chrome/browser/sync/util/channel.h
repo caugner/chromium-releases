@@ -50,9 +50,9 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "base/lock.h"
 #include "base/observer_list.h"
-#include "base/platform_thread.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/platform_thread.h"
 
 namespace browser_sync {
 
@@ -98,7 +98,7 @@ class Channel {
 
   ChannelHookup<EventType>* AddObserver(
       ChannelEventHandler<EventType>* observer) {
-    AutoLock scoped_lock(event_handlers_mutex_);
+    base::AutoLock scoped_lock(event_handlers_mutex_);
     event_handlers_.AddObserver(observer);
     return new ChannelHookup<EventType>(this, observer);
   }
@@ -106,7 +106,7 @@ class Channel {
   void RemoveObserver(ChannelEventHandler<EventType>* observer) {
     // This can be called in response to a notification, so we may already have
     // locked this channel on this thread.
-    bool need_lock = (locking_thread_ != PlatformThread::CurrentId());
+    bool need_lock = (locking_thread_ != base::PlatformThread::CurrentId());
     if (need_lock)
       event_handlers_mutex_.Acquire();
 
@@ -117,11 +117,11 @@ class Channel {
   }
 
   void Notify(const EventType& event) {
-    AutoLock scoped_lock(event_handlers_mutex_);
+    base::AutoLock scoped_lock(event_handlers_mutex_);
 
     // This may result in an observer trying to remove itself, so keep track
     // of the thread we're locked on.
-    locking_thread_ = PlatformThread::CurrentId();
+    locking_thread_ = base::PlatformThread::CurrentId();
 
     ChannelObserverList::Iterator it(event_handlers_);
     EventHandler* obs;
@@ -135,8 +135,8 @@ class Channel {
   }
 
  private:
-  Lock event_handlers_mutex_;
-  PlatformThreadId locking_thread_;
+  base::Lock event_handlers_mutex_;
+  base::PlatformThreadId locking_thread_;
   ObserverList<EventHandler> event_handlers_;
 };
 

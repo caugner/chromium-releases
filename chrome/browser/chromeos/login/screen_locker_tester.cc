@@ -14,6 +14,7 @@
 #include "views/controls/button/button.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/textfield.h"
+#include "views/event.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
 
@@ -44,9 +45,9 @@ void ScreenLockerTester::EnterPassword(const char* password) {
   GdkEvent* event = gdk_event_new(GDK_KEY_PRESS);
 
   event->key.keyval = GDK_Return;
-  views::Textfield::Keystroke ret(&event->key);
-  ScreenLocker::screen_locker_->screen_lock_view_->HandleKeystroke(pass, ret);
-
+  views::KeyEvent key_event(&event->key);
+  ScreenLocker::screen_locker_->screen_lock_view_->HandleKeyEvent(
+      pass, key_event);
   gdk_event_free(event);
 }
 

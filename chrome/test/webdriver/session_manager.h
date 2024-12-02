@@ -21,6 +21,9 @@ namespace webdriver {
 // their own profiles.
 class SessionManager {
  public:
+  // Returns the singleton instance.
+  static SessionManager* GetInstance();
+
   std::string GetIPAddress();
   bool SetIPAddress(const std::string& port);
 
@@ -37,7 +40,7 @@ class SessionManager {
   std::string IPLookup(const std::string& nic);
 
   std::map<std::string, Session*> map_;
-  Lock session_generation_;
+  base::Lock session_generation_;
   // Record the address and port for the HTTP 303 See other redirect.
   // We save the IP and Port of the machine chromedriver is running on since
   // a HTTP 303, see other,  resdirect is sent after a successful creation of

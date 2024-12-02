@@ -1,9 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/net/url_request_slow_download_job.h"
 
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
@@ -26,13 +27,15 @@ std::vector<URLRequestSlowDownloadJob*>
     URLRequestSlowDownloadJob::kPendingRequests;
 
 void URLRequestSlowDownloadJob::Start() {
-  MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &URLRequestSlowDownloadJob::StartAsync));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(
+          &URLRequestSlowDownloadJob::StartAsync));
 }
 
-/* static */
+// static
 void URLRequestSlowDownloadJob::AddUrlHandler() {
-  URLRequestFilter* filter = URLRequestFilter::GetInstance();
+  net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
   filter->AddUrlHandler(GURL(kUnknownSizeUrl),
                         &URLRequestSlowDownloadJob::Factory);
   filter->AddUrlHandler(GURL(kKnownSizeUrl),
@@ -42,7 +45,8 @@ void URLRequestSlowDownloadJob::AddUrlHandler() {
 }
 
 /*static */
-URLRequestJob* URLRequestSlowDownloadJob::Factory(URLRequest* request,
+net::URLRequestJob* URLRequestSlowDownloadJob::Factory(
+    net::URLRequest* request,
     const std::string& scheme) {
   URLRequestSlowDownloadJob* job = new URLRequestSlowDownloadJob(request);
   if (request->url().spec() != kFinishDownloadUrl)
@@ -60,12 +64,12 @@ void URLRequestSlowDownloadJob::FinishPendingRequests() {
   kPendingRequests.clear();
 }
 
-URLRequestSlowDownloadJob::URLRequestSlowDownloadJob(URLRequest* request)
-  : URLRequestJob(request),
-    first_download_size_remaining_(kFirstDownloadSize),
-    should_finish_download_(false),
-    should_send_second_chunk_(false) {
-}
+URLRequestSlowDownloadJob::URLRequestSlowDownloadJob(net::URLRequest* request)
+    : net::URLRequestJob(request),
+      first_download_size_remaining_(kFirstDownloadSize),
+      should_finish_download_(false),
+      should_send_second_chunk_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {}
 
 void URLRequestSlowDownloadJob::StartAsync() {
   if (LowerCaseEqualsASCII(kFinishDownloadUrl, request_->url().spec().c_str()))
@@ -111,7 +115,7 @@ bool URLRequestSlowDownloadJob::ReadRawData(net::IOBuffer* buf, int buf_size,
 
   // If we make it here, the first chunk has been sent and we need to wait
   // until a request is made for kFinishDownloadUrl.
-  SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
+  SetStatus(net::URLRequestStatus(net::URLRequestStatus::IO_PENDING, 0));
   MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
       this, &URLRequestSlowDownloadJob::CheckDoneStatus), 100);
   AddRef();
@@ -123,7 +127,7 @@ bool URLRequestSlowDownloadJob::ReadRawData(net::IOBuffer* buf, int buf_size,
 void URLRequestSlowDownloadJob::CheckDoneStatus() {
   if (should_finish_download_) {
     should_send_second_chunk_ = true;
-    SetStatus(URLRequestStatus());
+    SetStatus(net::URLRequestStatus());
     NotifyReadComplete(kSecondDownloadSize);
     Release();
   } else {
@@ -137,6 +141,8 @@ void URLRequestSlowDownloadJob::GetResponseInfo(net::HttpResponseInfo* info) {
   // Forward to private const version.
   GetResponseInfoConst(info);
 }
+
+URLRequestSlowDownloadJob::~URLRequestSlowDownloadJob() {}
 
 // Private const version.
 void URLRequestSlowDownloadJob::GetResponseInfoConst(

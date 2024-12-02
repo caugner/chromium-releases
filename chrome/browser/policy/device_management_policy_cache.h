@@ -7,9 +7,9 @@
 
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/lock.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 
@@ -28,6 +28,7 @@ namespace em = enterprise_management;
 class DeviceManagementPolicyCache {
  public:
   explicit DeviceManagementPolicyCache(const FilePath& backing_file_path);
+  ~DeviceManagementPolicyCache();
 
   // Loads policy information from the backing file. Non-existing or erroneous
   // cache files are ignored.
@@ -41,7 +42,7 @@ class DeviceManagementPolicyCache {
   // to the caller.
   DictionaryValue* GetPolicy();
 
-  void SetDeviceUnmanaged(bool is_device_unmanaged);
+  void SetDeviceUnmanaged();
   bool is_device_unmanaged() const {
     return is_device_unmanaged_;
   }
@@ -73,7 +74,7 @@ class DeviceManagementPolicyCache {
   const FilePath backing_file_path_;
 
   // Protects |policy_|.
-  Lock lock_;
+  base::Lock lock_;
 
   // Policy key-value information.
   scoped_ptr<DictionaryValue> policy_;

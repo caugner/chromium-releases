@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,11 +41,17 @@ class PersonalOptionsHandler : public OptionsPageUIHandler,
 
  private:
   void ObserveThemeChanged();
+  void ShowSyncActionDialog(const ListValue* args);
   void ShowSyncLoginDialog(const ListValue* args);
+  void ShowCustomizeSyncDialog(const ListValue* args);
   void ThemesReset(const ListValue* args);
 #if defined(TOOLKIT_GTK)
   void ThemesSetGTK(const ListValue* args);
 #endif
+
+  // Called when the user updates the set of enabled data types to sync. |args|
+  // is ignored.
+  void OnPreferredDataTypesUpdated(const ListValue* args);
 
   scoped_ptr<OptionsManagedBannerHandler> banner_handler_;
 

@@ -60,8 +60,7 @@ void GLES2DecoderTestBase::SpecializedSetup<CopyTexImage2D, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<CopyTexSubImage2D, 0>(
-    bool valid) {
+void GLES2DecoderTestBase::SpecializedSetup<CopyTexSubImage2D, 0>(bool valid) {
   if (valid) {
     DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
     DoTexImage2D(
@@ -71,15 +70,34 @@ void GLES2DecoderTestBase::SpecializedSetup<CopyTexSubImage2D, 0>(
 };
 
 template <>
+void GLES2DecoderTestBase::SpecializedSetup<DetachShader, 0>(bool valid) {
+  if (valid) {
+    EXPECT_CALL(*gl_,
+                AttachShader(kServiceProgramId, kServiceShaderId))
+        .Times(1)
+        .RetiresOnSaturation();
+    AttachShader attach_cmd;
+    attach_cmd.Init(client_program_id_, client_shader_id_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(attach_cmd));
+  }
+};
+
+template <>
 void GLES2DecoderTestBase::SpecializedSetup<FramebufferRenderbuffer, 0>(
     bool valid) {
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
   if (valid) {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
     // Return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT so the code
     // doesn't try to clear the buffer. That is tested else where.
     EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
         .WillOnce(Return(GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
         .RetiresOnSaturation();
   }
 };
@@ -90,10 +108,16 @@ void GLES2DecoderTestBase::SpecializedSetup<FramebufferTexture2D, 0>(
   DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
                     kServiceFramebufferId);
   if (valid) {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
     // Return GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT so the code
     // doesn't try to clear the buffer. That is tested else where.
     EXPECT_CALL(*gl_, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
         .WillOnce(Return(GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
         .RetiresOnSaturation();
   }
 };
@@ -119,6 +143,17 @@ void GLES2DecoderTestBase::SpecializedSetup<GetProgramInfoLog, 0>(
   info->set_log_info("hello");
 };
 
+template <>
+void GLES2DecoderTestBase::SpecializedSetup<GetVertexAttribfv, 0>(bool valid) {
+  DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
+  DoVertexAttribPointer(1, 1, GL_FLOAT, 0, 0);
+  if (valid) {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+  }
+};
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_1_autogen.h"
 

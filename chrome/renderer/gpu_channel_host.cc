@@ -16,10 +16,10 @@ GpuChannelHost::GpuChannelHost() : state_(kUnconnected) {
 GpuChannelHost::~GpuChannelHost() {
 }
 
-void GpuChannelHost::Connect(const std::string& channel_name) {
+void GpuChannelHost::Connect(const IPC::ChannelHandle& channel_handle) {
   // Open a channel to the GPU process.
   channel_.reset(new IPC::SyncChannel(
-      channel_name, IPC::Channel::MODE_CLIENT, this, NULL,
+      channel_handle, IPC::Channel::MODE_CLIENT, this,
       ChildProcess::current()->io_message_loop(), true,
       ChildProcess::current()->GetShutDownEvent()));
 
@@ -37,14 +37,18 @@ const GPUInfo& GpuChannelHost::gpu_info() const {
   return gpu_info_;
 }
 
-void GpuChannelHost::OnMessageReceived(const IPC::Message& message) {
+void GpuChannelHost::SetStateLost() {
+  state_ = kLost;
+}
+
+bool GpuChannelHost::OnMessageReceived(const IPC::Message& message) {
   DCHECK(message.routing_id() != MSG_ROUTING_CONTROL);
 
   // The object to which the message is addressed might have been destroyed.
   // This is expected, for example an asynchronous SwapBuffers notification
   // to a command buffer proxy that has since been destroyed. This function
   // fails silently in that case.
-  router_.RouteMessage(message);
+  return router_.RouteMessage(message);
 }
 
 void GpuChannelHost::OnChannelConnected(int32 peer_pid) {

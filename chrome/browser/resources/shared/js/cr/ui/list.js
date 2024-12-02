@@ -46,10 +46,11 @@ cr.define('cr.ui', function() {
     if (!opt_item)
       list.appendChild(item);
 
+    var rect = item.getBoundingClientRect();
     var cs = getComputedStyle(item);
     var mt = parseFloat(cs.marginTop);
     var mb = parseFloat(cs.marginBottom);
-    var h = item.offsetHeight;
+    var h = rect.height;
 
     // Handle margin collapsing.
     if (mt < 0 && mb < 0) {
@@ -87,6 +88,14 @@ cr.define('cr.ui', function() {
      * @private
      */
     itemHeight_: 0,
+
+    /**
+     * Whether or not the list is autoexpanding. If true, the list resizes
+     * its height to accomadate all children.
+     * @type {boolean}
+     * @private
+     */
+    autoExpands_: false,
 
     dataModel_: null,
 
@@ -165,6 +174,20 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * Whether or not the list auto-expands.
+     * @type {boolean}
+     */
+    get autoExpands() {
+      return this.autoExpands_;
+    },
+    set autoExpands(autoExpands) {
+      if (this.autoExpands_ == autoExpands)
+        return;
+      this.autoExpands_ = autoExpands;
+      this.redraw();
+    },
+
+    /**
      * Convenience alias for selectionModel.selectedItem
      * @type {cr.ui.ListItem}
      */
@@ -201,12 +224,14 @@ cr.define('cr.ui', function() {
     },
 
     /**
-     * The HTML elements representing the items. This is just all the element
+     * The HTML elements representing the items. This is just all the list item
      * children but subclasses may override this to filter out certain elements.
      * @type {HTMLCollection}
      */
     get items() {
-      return this.children;
+      return Array.prototype.filter.call(this.children, function(child) {
+        return !child.classList.contains('spacer');
+      });
     },
 
     batchCount_: 0,
@@ -245,6 +270,7 @@ cr.define('cr.ui', function() {
       var length = this.dataModel ? this.dataModel.length : 0;
       this.selectionModel = new ListSelectionModel(length);
 
+      this.addEventListener('dblclick', this.handleDoubleClick_);
       this.addEventListener('mousedown', this.handleMouseDownUp_);
       this.addEventListener('mouseup', this.handleMouseDownUp_);
       this.addEventListener('keydown', this.handleKeyDown);
@@ -256,11 +282,38 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * @return {number} The height of an item, measuring it if necessary.
+     * @private
+     */
+    getItemHeight_: function() {
+      if (!this.itemHeight_)
+        this.itemHeight_ = measureItem(this);
+      return this.itemHeight_;
+    },
+
+    /**
+     * Callback for the double click event.
+     * @param {Event} e The mouse event object.
+     * @private
+     */
+    handleDoubleClick_: function(e) {
+      if (this.disabled)
+        return;
+
+      var target = this.getListItemAncestor(e.target);
+      var index = target ? this.getIndexOfListItem(target) : -1;
+      this.activateItemAtIndex(index);
+    },
+
+    /**
      * Callback for mousedown and mouseup events.
      * @param {Event} e The mouse event object.
      * @private
      */
     handleMouseDownUp_: function(e) {
+      if (this.disabled)
+        return;
+
       var target = e.target;
 
       // If the target was this element we need to make sure that the user did
@@ -268,19 +321,24 @@ cr.define('cr.ui', function() {
       if (target == this && !inViewport(target, e))
         return;
 
-      while (target && target.parentNode != this) {
-        target = target.parentNode;
-      }
+      target = this.getListItemAncestor(target);
 
-      if (!target) {
-        this.selectionController_.handleMouseDownUp(e, -1);
-      } else {
-        var cs = getComputedStyle(target);
-        var top = target.offsetTop -
-                  parseFloat(cs.marginTop);
-        var index = Math.floor(top / this.itemHeight_);
-        this.selectionController_.handleMouseDownUp(e, index);
+      var index = target ? this.getIndexOfListItem(target) : -1;
+      this.selectionController_.handleMouseDownUp(e, index);
+    },
+
+    /**
+     * Returns the list item element containing the given element, or null if
+     * it doesn't belong to any list item element.
+     * @param {HTMLElement} element The element.
+     * @return {ListItem} The list item containing |element|, or null.
+     */
+    getListItemAncestor: function(element) {
+      var container = element;
+      while (container && container.parentNode != this) {
+        container = container.parentNode;
       }
+      return container;
     },
 
     /**
@@ -289,6 +347,9 @@ cr.define('cr.ui', function() {
      * @return {boolean} Whether the key event was handled.
      */
     handleKeyDown: function(e) {
+      if (this.disabled)
+        return;
+
       return this.selectionController_.handleKeyDown(e);
     },
 
@@ -354,7 +415,7 @@ cr.define('cr.ui', function() {
       if (!dataModel || index < 0 || index >= dataModel.length)
         return false;
 
-      var itemHeight = this.itemHeight_;
+      var itemHeight = this.getItemHeight_();
       var scrollTop = this.scrollTop;
       var top = index * itemHeight;
 
@@ -417,6 +478,25 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * Find the index of the given list item element.
+     * @param {ListItem} item The list item to get the index of.
+     * @return {number} The index of the list item, or -1 if not found.
+     */
+    getIndexOfListItem: function(item) {
+      var paddingTop = parseFloat(getComputedStyle(this).paddingTop);
+      var cs = getComputedStyle(item);
+      var top = item.offsetTop - parseFloat(cs.marginTop) - paddingTop;
+      var itemHeight = this.getItemHeight_();
+      var index = Math.floor((top + itemHeight / 2) / itemHeight);
+      var childIndex = index - this.firstIndex_ + 1;
+      if (childIndex >= 0 && childIndex < this.children.length &&
+          this.children[childIndex] == item) {
+        return index;
+      }
+      return -1;
+    },
+
+    /**
      * Creates a new list item.
      * @param {*} value The value to use for the item.
      * @return {!ListItem} The newly created list item.
@@ -452,10 +532,7 @@ cr.define('cr.ui', function() {
       var scrollTop = this.scrollTop;
       var clientHeight = this.clientHeight;
 
-      if (!this.itemHeight_)
-        this.itemHeight_ = measureItem(this);
-
-      var itemHeight = this.itemHeight_;
+      var itemHeight = this.getItemHeight_();
 
       // We cache the list items since creating the DOM nodes is the most
       // expensive part of redrawing.
@@ -464,8 +541,10 @@ cr.define('cr.ui', function() {
 
       var desiredScrollHeight = dataModel.length * itemHeight;
 
-      var firstIndex = Math.floor(scrollTop / itemHeight);
-      var itemsInViewPort = Math.min(dataModel.length - firstIndex,
+      var autoExpands = this.autoExpands_
+      var firstIndex = autoExpands ? 0 : Math.floor(scrollTop / itemHeight);
+      var itemsInViewPort = autoExpands ? dataModel.length : Math.min(
+          dataModel.length - firstIndex,
           Math.ceil((scrollTop + clientHeight - firstIndex * itemHeight) /
                     itemHeight));
       var lastIndex = firstIndex + itemsInViewPort;
@@ -523,7 +602,7 @@ cr.define('cr.ui', function() {
     },
 
     /**
-     * Redraws a single item
+     * Redraws a single item.
      * @param {number} index The row index to redraw.
      */
     redrawItem: function(index) {
@@ -531,8 +610,18 @@ cr.define('cr.ui', function() {
         delete this.cachedItems_[index];
         this.redraw();
       }
-    }
+    },
+
+    /**
+     * Called when a list item is activated, currently only by a double click
+     * event.
+     * @param {number} index The index of the activated item.
+     */
+    activateItemAtIndex: function(index) {
+    },
   };
+
+  cr.defineProperty(List, 'disabled', cr.PropertyKind.BOOL_ATTR);
 
   return {
     List: List

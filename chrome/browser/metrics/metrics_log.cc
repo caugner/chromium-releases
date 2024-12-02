@@ -25,6 +25,7 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/plugins/npapi/webplugininfo.h"
 
 #define OPEN_ELEMENT_FOR_SCOPE(name) ScopedElement scoped_element(this, name)
 
@@ -108,10 +109,9 @@ void MetricsLog::RecordIncrementalStabilityElements() {
   }
 }
 
-void MetricsLog::WriteStabilityElement() {
+void MetricsLog::WriteStabilityElement(PrefService* pref) {
   DCHECK(!locked_);
 
-  PrefService* pref = g_browser_process->local_state();
   DCHECK(pref);
 
   // Get stability attributes out of Local State, zeroing out stored values.
@@ -231,18 +231,51 @@ void MetricsLog::WriteRealtimeStabilityAttributes(PrefService* pref) {
     pref->SetInteger(prefs::kStabilityChildProcessCrashCount, 0);
   }
 
+#if defined(OS_CHROMEOS)
+  count = pref->GetInteger(prefs::kStabilityOtherUserCrashCount);
+  if (count) {
+    // TODO(kmixter): Write attribute once log server supports it
+    // and remove warning log.
+    // WriteIntAttribute("otherusercrashcount", count);
+    LOG(WARNING) << "Not yet able to send otherusercrashcount="
+                 << count;
+    pref->SetInteger(prefs::kStabilityOtherUserCrashCount, 0);
+  }
+
+  count = pref->GetInteger(prefs::kStabilityKernelCrashCount);
+  if (count) {
+    // TODO(kmixter): Write attribute once log server supports it
+    // and remove warning log.
+    // WriteIntAttribute("kernelcrashcount", count);
+    LOG(WARNING) << "Not yet able to send kernelcrashcount="
+                 << count;
+    pref->SetInteger(prefs::kStabilityKernelCrashCount, 0);
+  }
+
+  count = pref->GetInteger(prefs::kStabilitySystemUncleanShutdownCount);
+  if (count) {
+    // TODO(kmixter): Write attribute once log server supports it
+    // and remove warning log.
+    // WriteIntAttribute("systemuncleanshutdowns", count);
+    LOG(WARNING) << "Not yet able to send systemuncleanshutdowns="
+                 << count;
+    pref->SetInteger(prefs::kStabilitySystemUncleanShutdownCount, 0);
+  }
+#endif  // OS_CHROMEOS
+
   int64 recent_duration = GetIncrementalUptime(pref);
   if (recent_duration)
     WriteInt64Attribute("uptimesec", recent_duration);
 }
 
 void MetricsLog::WritePluginList(
-         const std::vector<WebPluginInfo>& plugin_list) {
+    const std::vector<webkit::npapi::WebPluginInfo>& plugin_list) {
   DCHECK(!locked_);
 
   OPEN_ELEMENT_FOR_SCOPE("plugins");
 
-  for (std::vector<WebPluginInfo>::const_iterator iter = plugin_list.begin();
+  for (std::vector<webkit::npapi::WebPluginInfo>::const_iterator iter =
+           plugin_list.begin();
        iter != plugin_list.end(); ++iter) {
     OPEN_ELEMENT_FOR_SCOPE("plugin");
 
@@ -262,7 +295,7 @@ void MetricsLog::WriteInstallElement() {
 }
 
 void MetricsLog::RecordEnvironment(
-         const std::vector<WebPluginInfo>& plugin_list,
+         const std::vector<webkit::npapi::WebPluginInfo>& plugin_list,
          const DictionaryValue* profile_metrics) {
   DCHECK(!locked_);
 
@@ -275,7 +308,7 @@ void MetricsLog::RecordEnvironment(
 
   WritePluginList(plugin_list);
 
-  WriteStabilityElement();
+  WriteStabilityElement(pref);
 
   {
     OPEN_ELEMENT_FOR_SCOPE("cpu");
@@ -300,10 +333,12 @@ void MetricsLog::RecordEnvironment(
 
   {
     OPEN_ELEMENT_FOR_SCOPE("gpu");
-    WriteIntAttribute("vendorid",
-                      GpuProcessHostUIShim::Get()->gpu_info().vendor_id());
-    WriteIntAttribute("deviceid",
-                      GpuProcessHostUIShim::Get()->gpu_info().device_id());
+    WriteIntAttribute(
+        "vendorid",
+        GpuProcessHostUIShim::GetInstance()->gpu_info().vendor_id());
+    WriteIntAttribute(
+        "deviceid",
+        GpuProcessHostUIShim::GetInstance()->gpu_info().device_id());
   }
 
   {

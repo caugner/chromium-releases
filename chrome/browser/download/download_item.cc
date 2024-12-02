@@ -4,15 +4,16 @@
 
 #include "chrome/browser/download/download_item.h"
 
-#include "app/l10n_util.h"
 #include "base/basictypes.h"
 #include "base/file_util.h"
+#include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/stringprintf.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_util.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_file_manager.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_manager.h"
@@ -21,9 +22,27 @@
 #include "chrome/browser/history/download_create_info.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
+#include "ui/base/l10n/l10n_util.h"
+
+// A DownloadItem normally goes through the following states:
+//      * Created (when download starts)
+//      * Made visible to consumers (e.g. Javascript) after the
+//        destination file has been determined.
+//      * Entered into the history database.
+//      * Made visible in the download shelf.
+//      * All data is received.  Note that the actual data download occurs
+//        in parallel with the above steps, but until those steps are
+//        complete, completion of the data download will be ignored.
+//      * Download file is renamed to its final name, and possibly
+//        auto-opened.
+// TODO(rdsmith): This progress should be reflected in
+// DownloadItem::DownloadState and a state transition table/state diagram.
+//
+// TODO(rdsmith): This description should be updated to reflect the cancel
+// pathways.
 
 namespace {
 
@@ -77,6 +96,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       full_path_(info.path),
       path_uniquifier_(0),
       url_(info.url),
+      original_url_(info.original_url),
       referrer_url_(info.referrer_url),
       mime_type_(info.mime_type),
       original_mime_type_(info.original_mime_type),
@@ -99,9 +119,12 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       is_extension_install_(info.is_extension_install),
       name_finalized_(false),
       is_temporary_(false),
+      all_data_saved_(false),
       opened_(false) {
   if (state_ == IN_PROGRESS)
     state_ = CANCELLED;
+  if (state_ == COMPLETE)
+    all_data_saved_ = true;
   Init(false /* don't start progress timer */);
 }
 
@@ -113,6 +136,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       full_path_(info.path),
       path_uniquifier_(info.path_uniquifier),
       url_(info.url),
+      original_url_(info.original_url),
       referrer_url_(info.referrer_url),
       mime_type_(info.mime_type),
       original_mime_type_(info.original_mime_type),
@@ -135,6 +159,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       is_extension_install_(info.is_extension_install),
       name_finalized_(false),
       is_temporary_(!info.save_info.file_path.empty()),
+      all_data_saved_(false),
       opened_(false) {
   Init(true /* start progress timer */);
 }
@@ -148,6 +173,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       full_path_(path),
       path_uniquifier_(0),
       url_(url),
+      original_url_(url),
       referrer_url_(GURL()),
       mime_type_(std::string()),
       original_mime_type_(std::string()),
@@ -169,6 +195,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       is_extension_install_(false),
       name_finalized_(false),
       is_temporary_(false),
+      all_data_saved_(false),
       opened_(false) {
   Init(true /* start progress timer */);
 }
@@ -195,8 +222,7 @@ void DownloadItem::NotifyObserversDownloadFileCompleted() {
 }
 
 bool DownloadItem::CanOpenDownload() {
-  return !Extension::IsExtension(target_name_) &&
-      !download_util::IsExecutableFile(target_name_);
+  return !Extension::IsExtension(target_name_);
 }
 
 bool DownloadItem::ShouldOpenFileBasedOnExtension() {
@@ -295,8 +321,14 @@ void DownloadItem::Cancel(bool update_history) {
     download_manager_->DownloadCancelled(id_);
 }
 
-void DownloadItem::OnAllDataSaved(int64 size) {
+void DownloadItem::MarkAsComplete() {
+  DCHECK(all_data_saved_);
   state_ = COMPLETE;
+}
+
+void DownloadItem::OnAllDataSaved(int64 size) {
+  DCHECK(!all_data_saved_);
+  all_data_saved_ = true;
   UpdateSize(size);
   StopProgressTimer();
 }
@@ -320,7 +352,7 @@ void DownloadItem::Finished() {
     auto_opened_ = true;
   }
 
-  // Notify our observers that we are complete (the call to OnAllDataSaved()
+  // Notify our observers that we are complete (the call to MarkAsComplete()
   // set the state to complete but did not notify).
   UpdateObservers();
 
@@ -328,8 +360,10 @@ void DownloadItem::Finished() {
   // finalized and the file data is downloaded. The ordering of these two
   // actions is indeterministic. Thus, if the filename is not finalized yet,
   // delay the notification.
-  if (name_finalized())
+  if (name_finalized()) {
     NotifyObserversDownloadFileCompleted();
+    download_manager_->RemoveFromActiveList(id());
+  }
 }
 
 void DownloadItem::Remove(bool delete_on_disk) {
@@ -373,6 +407,9 @@ int DownloadItem::PercentComplete() const {
 }
 
 void DownloadItem::Rename(const FilePath& full_path) {
+  VLOG(20) << " " << __FUNCTION__ << "()"
+           << " full_path = " << full_path.value()
+           << DebugString(true);
   DCHECK(!full_path.empty());
   full_path_ = full_path;
 }
@@ -391,8 +428,10 @@ void DownloadItem::OnNameFinalized() {
   // finalized and the file data is downloaded. The ordering of these two
   // actions is indeterministic. Thus, if we are still in downloading the
   // file, delay the notification.
-  if (state() == DownloadItem::COMPLETE)
+  if (state() == DownloadItem::COMPLETE) {
     NotifyObserversDownloadFileCompleted();
+    download_manager_->RemoveFromActiveList(id());
+  }
 }
 
 void DownloadItem::OnSafeDownloadFinished(DownloadFileManager* file_manager) {
@@ -403,14 +442,17 @@ void DownloadItem::OnSafeDownloadFinished(DownloadFileManager* file_manager) {
         BrowserThread::FILE, FROM_HERE,
         NewRunnableMethod(
             file_manager, &DownloadFileManager::OnFinalDownloadName,
-            id(), GetTargetFilePath(), false, download_manager_));
+            id(), GetTargetFilePath(), false,
+            make_scoped_refptr(download_manager_)));
     return;
   }
 
-  download_manager_->DownloadFinished(this);
+  Finished();
 }
 
 void DownloadItem::OnDownloadRenamedToFinalName(const FilePath& full_path) {
+  VLOG(20) << " " << __FUNCTION__ << "()"
+           << " full_path = " << full_path.value();
   bool needed_rename = NeedsRename();
 
   Rename(full_path);
@@ -419,7 +461,7 @@ void DownloadItem::OnDownloadRenamedToFinalName(const FilePath& full_path) {
   if (needed_rename && safety_state() == SAFE) {
     // This was called from OnSafeDownloadFinished; continue to call
     // DownloadFinished.
-    download_manager_->DownloadFinished(this);
+    Finished();
   }
 }
 
@@ -451,6 +493,36 @@ bool DownloadItem::MatchesQuery(const string16& query) const {
   return false;
 }
 
+void DownloadItem::SetFileCheckResults(const FilePath& path,
+                                       bool is_dangerous,
+                                       int path_uniquifier,
+                                       bool prompt,
+                                       bool is_extension_install,
+                                       const FilePath& original_name) {
+  VLOG(20) << " " << __FUNCTION__ << "()"
+           << " path = \"" << path.value() << "\""
+           << " is_dangerous = " << is_dangerous
+           << " path_uniquifier = " << path_uniquifier
+           << " prompt = " << prompt
+           << " is_extension_install = " << is_extension_install
+           << " path = \"" << path.value() << "\""
+           << " original_name = \"" << original_name.value() << "\""
+           << " " << DebugString(true);
+  // Make sure the initial file name is set only once.
+  DCHECK(full_path_.empty());
+  DCHECK(!path.empty());
+
+  full_path_ = path;
+  safety_state_ = is_dangerous ? DANGEROUS : SAFE;
+  path_uniquifier_ = path_uniquifier;
+  save_as_ = prompt;
+  is_extension_install_ = is_extension_install;
+  target_name_ = original_name;
+
+  if (target_name_.value().empty())
+    target_name_ = full_path_.BaseName();
+}
+
 FilePath DownloadItem::GetTargetFilePath() const {
   return full_path_.DirName().Append(target_name_);
 }
@@ -475,24 +547,41 @@ void DownloadItem::Init(bool start_timer) {
     target_name_ = full_path_.BaseName();
   if (start_timer)
     StartProgressTimer();
+  VLOG(20) << " " << __FUNCTION__ << "() " << DebugString(true);
 }
 
 std::string DownloadItem::DebugString(bool verbose) const {
   std::string description =
-      base::StringPrintf("{ url = \"%s\"", url().spec().c_str());
+      base::StringPrintf("{ id_ = %d"
+                         " state = %s",
+                         id_,
+                         DebugDownloadStateString(state()));
 
   if (verbose) {
     description += base::StringPrintf(
-        " target_name_ = " "\"%s\""
-        " full_path = " "\"%s\""
-        " safety_state = " "%s",
+        " db_handle = %" PRId64
+        " total_bytes = %" PRId64
+        " is_paused = " "%c"
+        " is_extension_install = " "%c"
+        " is_otr = " "%c"
+        " safety_state = " "%s"
+        " url = " "\"%s\""
+        " target_name_ = \"%" PRFilePath "\""
+        " full_path = \"%" PRFilePath "\"",
+        db_handle(),
+        total_bytes(),
+        is_paused() ? 'T' : 'F',
+        is_extension_install() ? 'T' : 'F',
+        is_otr() ? 'T' : 'F',
+        DebugSafetyStateString(safety_state()),
+        url().spec().c_str(),
         target_name_.value().c_str(),
-        full_path().value().c_str(),
-        DebugSafetyStateString(safety_state()));
+        full_path().value().c_str());
+  } else {
+    description += base::StringPrintf(" url = \"%s\"", url().spec().c_str());
   }
 
-  description += base::StringPrintf(" state = %s }",
-                                    DebugDownloadStateString(state()));
+  description += " }";
 
   return description;
 }

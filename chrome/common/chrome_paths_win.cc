@@ -10,11 +10,12 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 
-#include "app/win_util.h"
+#include "app/win/scoped_co_mem.h"
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/master_preferences.h"
 
 namespace chrome {
 
@@ -30,10 +31,10 @@ bool GetDefaultUserDataDirectory(FilePath* result) {
 bool GetChromeFrameUserDataDirectory(FilePath* result) {
   if (!PathService::Get(base::DIR_LOCAL_APP_DATA, result))
     return false;
-#if defined(GOOGLE_CHROME_BUILD)
-  *result = result->Append(FILE_PATH_LITERAL("Google"));
-#endif
-  *result = result->Append(L"Chrome Frame");
+  BrowserDistribution* dist = BrowserDistribution::GetSpecificDistribution(
+      BrowserDistribution::CHROME_FRAME,
+      installer::MasterPreferences::ForCurrentProcess());
+  *result = result->Append(dist->GetInstallSubDir());
   *result = result->Append(chrome::kUserDataDirname);
   return true;
 }
@@ -72,7 +73,7 @@ bool GetUserDownloadsDirectory(FilePath* result) {
       REFKNOWNFOLDERID, DWORD, HANDLE, PWSTR*);
   GetKnownFolderPath f = reinterpret_cast<GetKnownFolderPath>(
       GetProcAddress(GetModuleHandle(L"shell32.dll"), "SHGetKnownFolderPath"));
-  win_util::CoMemReleaser<wchar_t> path_buf;
+  app::win::ScopedCoMem<wchar_t> path_buf;
   if (f && SUCCEEDED(f(FOLDERID_Downloads, 0, NULL, &path_buf))) {
     *result = FilePath(std::wstring(path_buf));
     return true;

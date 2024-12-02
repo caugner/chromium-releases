@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,12 +117,12 @@ class NotificationType {
     // The DOM for a frame was fully constructed, but referenced resources
     // might not be fully loaded yet. The source is a
     // Source<NavigationController> corresponding to the tab in which the load
-    // occurred. Details are the long long frame ID.
+    // occurred. Details are the int64 frame ID.
     FRAME_DOM_CONTENT_LOADED,
 
     // The frame finished loading. The source is a Source<NavigationController>
     // corresponding to the tab in which the load occurred. Details are the
-    // long long frame ID.
+    // int64 frame ID.
     FRAME_DID_FINISH_LOAD,
 
     // Content was loaded from an in-memory cache.  The source will be a
@@ -138,16 +138,22 @@ class NotificationType {
     FAIL_PROVISIONAL_LOAD_WITH_ERROR,
 
     // A response has been received for a resource request.  The source will be
-    // a Source<NavigationController> corresponding to the tab in which the
+    // a Source<RenderViewHostDelegate> corresponding to the tab in which the
     // request was issued.  Details in the form of a ResourceRequestDetails
     // object are provided.
     RESOURCE_RESPONSE_STARTED,
 
     // A redirect was received while requesting a resource.  The source will be
-    // a Source<NavigationController> corresponding to the tab in which the
+    // a Source<RenderViewHostDelegate> corresponding to the tab in which the
     // request was issued.  Details in the form of a ResourceRedirectDetails
     // are provided.
     RESOURCE_RECEIVED_REDIRECT,
+
+    // A new window is created in response to a request from a renderer. The
+    // source will be a Source<TabContents> corresponding to the tab the
+    // request originates from.  Details in the form of a
+    // ViewHostMsg_CreateWindow_Params object are provided.
+    CREATING_NEW_WINDOW,
 
     // SSL ---------------------------------------------------------------------
 
@@ -182,16 +188,6 @@ class NotificationType {
     // The source will be the navigation controller associated with the state
     // change.  There are no details.
     SSL_INTERNAL_STATE_CHANGED,
-
-    // Lets resource handlers and other interested observers know when the
-    // message filter is being deleted and can no longer be used.  This will
-    // also get sent if the renderer crashes (and in that case, it'll be sent
-    // twice).
-    RESOURCE_MESSAGE_FILTER_SHUTDOWN,
-
-    // Lets interested observers know when a WorkerProcessHost is being deleted
-    // and can no longer be used.
-    WORKER_PROCESS_HOST_SHUTDOWN,
 
     // Views -------------------------------------------------------------------
 
@@ -454,6 +450,28 @@ class NotificationType {
     // the RenderWidgetHost, the details are not used.
     RENDER_WIDGET_HOST_DESTROYED,
 
+    // Sent when the widget is about to paint. The source is the
+    // RenderWidgetHost, the details are not used.
+    RENDER_WIDGET_HOST_WILL_PAINT,
+
+    // Sent after the widget has painted. The source is the RenderWidgetHost,
+    // the details are not used.
+    RENDER_WIDGET_HOST_DID_PAINT,
+
+    // Indicates the RenderWidgetHost is about to destroy the backing store. The
+    // backing store will still be valid when this call is made. The source is
+    // the RenderWidgetHost, the details is the BackingStore.
+    RENDER_WIDGET_HOST_WILL_DESTROY_BACKING_STORE,
+
+    // Indicates that the RenderWidgetHost just updated the backing store. The
+    // source is the RenderWidgetHost, the details are not used.
+    RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+
+    // This notifies the observer that a PaintAtSizeACK was received. The source
+    // is the RenderWidgetHost, the details are an instance of
+    // RenderWidgetHost::PaintAtSizeAckDetails.
+    RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
+
     // Sent from ~RenderViewHost. The source is the TabContents.
     RENDER_VIEW_HOST_DELETED,
 
@@ -502,7 +520,8 @@ class NotificationType {
     WEB_CACHE_STATS_OBSERVED,
 
     // The focused element inside a page has changed.  The source is the render
-    // view host for the page, there are no details.
+    // view host for the page.  The details are a Details<const bool> that
+    // indicates whether or not an editable node was focused.
     FOCUS_CHANGED_IN_PAGE,
 
     // Notification posted from ExecuteJavascriptInWebFrameNotifyResult. The
@@ -510,7 +529,7 @@ class NotificationType {
     // invoked on. The details are a std::pair<int, Value*> with the int giving
     // the id returned from ExecuteJavascriptInWebFrameNotifyResult and the
     // Value the results of the javascript expression. The Value is owned by
-    // RenderViewHost.
+    // RenderViewHost and may be a Null Value.
     EXECUTE_JAVASCRIPT_RESULT,
 
     // BackgroundContents ------------------------------------------------------
@@ -548,11 +567,19 @@ class NotificationType {
     // The details are in a Details<ChildProcessInfo>.
     CHILD_PROCESS_HOST_DISCONNECTED,
 
-    // This message is sent when a child process disappears unexpectedly.
-    // There is no usable source, since it is sent from an ephemeral task;
-    // register for AllSources() to receive this notification.  The details are
-    // in a Details<ChildProcessInfo>.
+    // This message is sent when a child process disappears
+    // unexpectedly as a result of a crash.  There is no usable
+    // source, since it is sent from an ephemeral task; register for
+    // AllSources() to receive this notification.  The details are in
+    // a Details<ChildProcessInfo>.
     CHILD_PROCESS_CRASHED,
+
+    // This message is sent when a child process disappears
+    // unexpectedly as a result of a termination signal.  There is no
+    // usable source, since it is sent from an ephemeral task;
+    // register for AllSources() to receive this notification.  The
+    // details are in a Details<ChildProcessInfo>.
+    CHILD_PROCESS_WAS_KILLED,
 
     // This message indicates that an instance of a particular child was
     // created in a page.  (If one page contains several regions rendered by
@@ -569,10 +596,6 @@ class NotificationType {
     // thread or the plugin thread. The source is the plugin that is disabling
     // interception.  No details are expected.
     CHROME_PLUGIN_UNLOADED,
-
-    // This is sent in the RenderView when previously blocked plugins on a page
-    // should be loaded. The source is the RenderView. No details are expected.
-    SHOULD_LOAD_PLUGINS,
 
     // Sent by the PluginUpdater when there is a change of plugin
     // enable/disable status.
@@ -736,6 +759,10 @@ class NotificationType {
     // PrefService and the details a std::string of the changed path.
     PREF_CHANGED,
 
+    // This is broadcast after the preference subsystem has completed
+    // asynchronous initalization of a PrefService.
+    PREF_INITIALIZATION_COMPLETED,
+
     // Sent when a default request context has been created, so calling
     // Profile::GetDefaultRequestContext() will not return NULL.  This is sent
     // on the thread where Profile::GetRequestContext() is first called, which
@@ -786,8 +813,9 @@ class NotificationType {
 
     // Shutdown ----------------------------------------------------------------
 
-    // Sent on the browser IO thread when an URLRequestContext is released by
-    // its owning Profile.  The source is a pointer to the URLRequestContext.
+    // Sent on the browser IO thread when an net::URLRequestContext is released
+    // by its owning Profile.  The source is a pointer to the
+    // net::URLRequestContext.
     URL_REQUEST_CONTEXT_RELEASED,
 
     // Sent when WM_ENDSESSION has been received, after the browsers have been
@@ -851,15 +879,12 @@ class NotificationType {
     EXTENSION_UNINSTALLED,
 
     // Sent when an extension is unloaded. This happens when an extension is
-    // uninstalled or disabled. The details are an Extension, and the source is
-    // a Profile.
+    // uninstalled or disabled. The details are an UnloadedExtensionInfo, and
+    // the source is a Profile.
     //
-    // Note that when this notification is sent, ExtensionsService has already
+    // Note that when this notification is sent, ExtensionService has already
     // removed the extension from its internal state.
     EXTENSION_UNLOADED,
-
-    // Same as above, but for a disabled extension.
-    EXTENSION_UNLOADED_DISABLED,
 
     // Sent when an extension has updated its user scripts. The details are an
     // Extension, and the source is a Profile.
@@ -1103,6 +1128,11 @@ class NotificationType {
     // details are None.
     DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
 
+    // Sent when the geolocation settings change. The source is the
+    // GeolocationContentSettingsMap object, the details are
+    // ContentSettingsNotificationsDetails.
+    GEOLOCATION_SETTINGS_CHANGED,
+
     // Sync --------------------------------------------------------------------
 
     // Sent when the sync backend has been paused.
@@ -1130,20 +1160,6 @@ class NotificationType {
     // Foreign sessions has been disabled. New tabs should not display foreign
     // session data.
     FOREIGN_SESSION_DISABLED,
-
-    // The syncer requires a passphrase to decrypt sensitive updates. This
-    // notification is sent when the first sensitive data type is setup by the
-    // user as well as anytime any the passphrase is changed in another synced
-    // client.  The source is the SyncBackendHost wanting a passphrase.  The
-    // details are a boolean: true if the passphrase is required for decryption,
-    // false if only required for encryption.
-    SYNC_PASSPHRASE_REQUIRED,
-
-    // Sent when the passphrase provided by the user is accepted. After this
-    // notification is sent, updates to sensitive nodes are encrypted using the
-    // accepted passphrase.  The source is the SyncBackendHost that accepted
-    // the passphrase.  No details.
-    SYNC_PASSPHRASE_ACCEPTED,
 
     // Sent when the set of data types that should be synced has been modified
     // externally (eg. by the dom_ui options screen).
@@ -1247,6 +1263,9 @@ class NotificationType {
     // os device has failed.
     OWNER_KEY_FETCH_ATTEMPT_FAILED,
 
+    // Sent after device was successfully owned.
+    OWNERSHIP_TAKEN,
+
     // This is sent to a ChromeOS settings observer when a system setting is
     // changed. The source is the CrosSettings and the details a std::string of
     // the changed setting.
@@ -1286,18 +1305,8 @@ class NotificationType {
     // |webkit_glue::PasswordForm|s that were affected.
     LOGINS_CHANGED,
 
-    // Configuration Policy ----------------------------------------------------
-    // This notification is sent whenever the administrator changes policy.
-    // The detail of this notification is not used.
-    POLICY_CHANGED,
-
-    // This notification is sent whenever the device token becomes available
-    // that the policy subsystem uses to fetch policy from the cloud.
-    DEVICE_TOKEN_AVAILABLE,
-
-    // This notification is sent whenever cloud policies are fetched and
-    // updated. The detail of this notification is not used.
-    CLOUD_POLICY_UPDATE,
+    // Sent when the applications in the NTP app launcher have been reordered.
+    EXTENSION_LAUNCHER_REORDERED,
 
     // Count (must be last) ----------------------------------------------------
     // Used to determine the number of notification types.  Not valid as

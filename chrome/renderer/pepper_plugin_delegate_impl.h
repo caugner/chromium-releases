@@ -14,8 +14,8 @@
 #include "base/ref_counted.h"
 #include "base/weak_ptr.h"
 #include "ppapi/c/pp_errors.h"
-#include "webkit/glue/plugins/pepper_plugin_delegate.h"
-#include "webkit/glue/plugins/pepper_plugin_instance.h"
+#include "webkit/plugins/ppapi/plugin_delegate.h"
+#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 class FilePath;
 class RenderView;
@@ -24,11 +24,14 @@ namespace gfx {
 class Rect;
 }
 
-namespace pepper {
-class FileIO;
+namespace webkit {
+namespace ppapi {
+
 class PluginInstance;
 class PluginModule;
-}
+
+}  // namespace ppapi
+}  // namespace webkit
 
 namespace WebKit {
 class WebFileChooserCompletion;
@@ -38,13 +41,13 @@ struct WebFileChooserParams;
 class TransportDIB;
 
 class PepperPluginDelegateImpl
-    : public pepper::PluginDelegate,
+    : public webkit::ppapi::PluginDelegate,
       public base::SupportsWeakPtr<PepperPluginDelegateImpl> {
  public:
   explicit PepperPluginDelegateImpl(RenderView* render_view);
   virtual ~PepperPluginDelegateImpl();
 
-  scoped_refptr<pepper::PluginModule> CreateOutOfProcessPepperPlugin(
+  scoped_refptr<webkit::ppapi::PluginModule> CreatePepperPlugin(
       const FilePath& path);
 
   // Called by RenderView to tell us about painting events, these two functions
@@ -54,7 +57,7 @@ class PepperPluginDelegateImpl
 
   // Called by RenderView to implement the corresponding function in its base
   // class RenderWidget (see that for more).
-  bool GetBitmapForOptimizedPluginPaint(
+  webkit::ppapi::PluginInstance* GetBitmapForOptimizedPluginPaint(
       const gfx::Rect& paint_bounds,
       TransportDIB** dib,
       gfx::Rect* location,
@@ -69,13 +72,15 @@ class PepperPluginDelegateImpl
   // notifies all of the plugins.
   void OnSetFocus(bool has_focus);
 
-  // pepper::PluginDelegate implementation.
-  virtual void InstanceCreated(pepper::PluginInstance* instance);
-  virtual void InstanceDeleted(pepper::PluginInstance* instance);
+  // PluginDelegate implementation.
+  virtual void InstanceCreated(
+      webkit::ppapi::PluginInstance* instance);
+  virtual void InstanceDeleted(
+      webkit::ppapi::PluginInstance* instance);
   virtual PlatformAudio* CreateAudio(
       uint32_t sample_rate,
       uint32_t sample_count,
-      pepper::PluginDelegate::PlatformAudio::Client* client);
+      PlatformAudio::Client* client);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
   virtual PlatformContext3D* CreateContext3D();
   virtual PlatformVideoDecoder* CreateVideoDecoder(
@@ -134,25 +139,45 @@ class PepperPluginDelegateImpl
   virtual base::PlatformFileError GetModuleLocalDirContents(
       const std::string& module_name,
       const FilePath& path,
-      PepperDirContents* contents);
+      webkit::ppapi::DirContents* contents);
   virtual scoped_refptr<base::MessageLoopProxy> GetFileThreadMessageLoopProxy();
-  virtual pepper::FullscreenContainer* CreateFullscreenContainer(
-      pepper::PluginInstance* instance);
+  virtual int32_t ConnectTcp(
+      webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
+      const char* host,
+      uint16_t port);
+  virtual int32_t ConnectTcpAddress(
+      webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
+      const struct PP_Flash_NetAddress* addr);
+  // This is the completion for both |ConnectTcp()| and |ConnectTcpAddress()|.
+  void OnConnectTcpACK(
+      int request_id,
+      base::PlatformFile socket,
+      const PP_Flash_NetAddress& local_addr,
+      const PP_Flash_NetAddress& remote_addr);
+  virtual webkit::ppapi::FullscreenContainer*
+      CreateFullscreenContainer(
+          webkit::ppapi::PluginInstance* instance);
   virtual std::string GetDefaultEncoding();
   virtual void ZoomLimitsChanged(double minimum_factor, double maximum_factor);
   virtual std::string ResolveProxy(const GURL& url);
   virtual void DidStartLoading();
   virtual void DidStopLoading();
   virtual void SetContentRestriction(int restrictions);
+  virtual void HasUnsupportedFeature();
 
  private:
   // Pointer to the RenderView that owns us.
   RenderView* render_view_;
 
-  std::set<pepper::PluginInstance*> active_instances_;
+  std::set<webkit::ppapi::PluginInstance*> active_instances_;
 
+  // TODO(viettrungluu): Get rid of |id_generator_| -- just use |IDMap::Add()|.
+  // Rename |messages_waiting_replies_| (to specify async open file).
   int id_generator_;
   IDMap<AsyncOpenFileCallback> messages_waiting_replies_;
+
+  IDMap<scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>,
+        IDMapOwnPointer> pending_connect_tcps_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPluginDelegateImpl);
 };

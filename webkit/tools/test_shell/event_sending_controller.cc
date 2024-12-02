@@ -19,7 +19,6 @@
 #include <queue>
 #include <vector>
 
-#include "app/keyboard_codes.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -29,19 +28,20 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebTouchPoint.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTouchPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/test_shell.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
 #if defined(OS_WIN)
-#include "third_party/WebKit/WebKit/chromium/public/win/WebInputEventFactory.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
 using WebKit::WebInputEventFactory;
 #endif
 
@@ -149,39 +149,36 @@ void InitMouseEvent(WebInputEvent::Type t, WebMouseEvent::Button b,
 }
 
 // Returns true if the specified key is the system key.
-bool ApplyKeyModifier(const std::wstring& arg, WebInputEvent* event) {
+bool ApplyKeyModifier(const std::string& key, WebInputEvent* event) {
   bool system_key = false;
-  const wchar_t* arg_string = arg.c_str();
-  if (!wcscmp(arg_string, L"ctrlKey")
+  if (key == "ctrlKey"
 #if !defined(OS_MACOSX)
-      || !wcscmp(arg_string, L"addSelectionKey")
+      || key == "addSelectionKey"
 #endif
       ) {
     event->modifiers |= WebInputEvent::ControlKey;
-  } else if (!wcscmp(arg_string, L"shiftKey")
-      || !wcscmp(arg_string, L"rangeSelectionKey")) {
+  } else if (key == "shiftKey" || key == "rangeSelectionKey") {
     event->modifiers |= WebInputEvent::ShiftKey;
-  } else if (!wcscmp(arg_string, L"altKey")) {
+  } else if (key == "altKey") {
     event->modifiers |= WebInputEvent::AltKey;
 #if !defined(OS_MACOSX)
     // On Windows all keys with Alt modifier will be marked as system key.
     // We keep the same behavior on Linux and everywhere non-Mac, see:
-    // third_party/WebKit/WebKit/chromium/src/gtk/WebInputEventFactory.cpp
+    // third_party/WebKit/Source/WebKit/chromium/src/gtk/WebInputEventFactory.cpp
     // If we want to change this behavior on Linux, this piece of code must be
     // kept in sync with the related code in above file.
     system_key = true;
 #endif
 #if defined(OS_MACOSX)
-  } else if (!wcscmp(arg_string, L"metaKey")
-      || !wcscmp(arg_string, L"addSelectionKey")) {
+  } else if (key == "metaKey" || key == "addSelectionKey") {
     event->modifiers |= WebInputEvent::MetaKey;
     // On Mac only command key presses are marked as system key.
     // See the related code in:
-    // third_party/WebKit/WebKit/chromium/src/mac/WebInputEventFactory.cpp
+    // third_party/WebKit/Source/WebKit/chromium/src/mac/WebInputEventFactory.cpp
     // It must be kept in sync with the related code in above file.
     system_key = true;
 #else
-  } else if (!wcscmp(arg_string, L"metaKey")) {
+  } else if (key == "metaKey") {
     event->modifiers |= WebInputEvent::MetaKey;
 #endif
   }
@@ -191,13 +188,13 @@ bool ApplyKeyModifier(const std::wstring& arg, WebInputEvent* event) {
 bool ApplyKeyModifiers(const CppVariant* arg, WebInputEvent* event) {
   bool system_key = false;
   if (arg->isObject()) {
-    std::vector<std::wstring> args = arg->ToStringVector();
-    for (std::vector<std::wstring>::const_iterator i = args.begin();
+    std::vector<std::string> args = arg->ToStringVector();
+    for (std::vector<std::string>::const_iterator i = args.begin();
          i != args.end(); ++i) {
       system_key |= ApplyKeyModifier(*i, event);
     }
   } else if (arg->isString()) {
-    system_key = ApplyKeyModifier(UTF8ToWide(arg->ToString()), event);
+    system_key = ApplyKeyModifier(arg->ToString(), event);
   }
   return system_key;
 }
@@ -210,7 +207,7 @@ bool GetEditCommand(const WebKeyboardEvent& event, std::string* name) {
   // We only cares about Left,Right,Up,Down keys with Command or Command+Shift
   // modifiers. These key events correspond to some special movement and
   // selection editor commands, and was supposed to be handled in
-  // third_party/WebKit/WebKit/chromium/src/EditorClientImpl.cpp. But these keys
+  // third_party/WebKit/Source/WebKit/chromium/src/EditorClientImpl.cpp. But these keys
   // will be marked as system key, which prevents them from being handled.
   // Thus they must be handled specially.
   if ((event.modifiers & ~WebKeyboardEvent::ShiftKey) !=
@@ -218,16 +215,16 @@ bool GetEditCommand(const WebKeyboardEvent& event, std::string* name) {
     return false;
 
   switch (event.windowsKeyCode) {
-    case app::VKEY_LEFT:
+    case ui::VKEY_LEFT:
       *name = "MoveToBeginningOfLine";
       break;
-    case app::VKEY_RIGHT:
+    case ui::VKEY_RIGHT:
       *name = "MoveToEndOfLine";
       break;
-    case app::VKEY_UP:
+    case ui::VKEY_UP:
       *name = "MoveToBeginningOfDocument";
       break;
-    case app::VKEY_DOWN:
+    case ui::VKEY_DOWN:
       *name = "MoveToEndOfDocument";
       break;
     default:
@@ -538,29 +535,29 @@ void EventSendingController::keyDown(
     bool needs_shift_key_modifier = false;
     if (L"\n" == code_str) {
       generate_char = true;
-      text = code = app::VKEY_RETURN;
+      text = code = ui::VKEY_RETURN;
     } else if (L"rightArrow" == code_str) {
-      code = app::VKEY_RIGHT;
+      code = ui::VKEY_RIGHT;
     } else if (L"downArrow" == code_str) {
-      code = app::VKEY_DOWN;
+      code = ui::VKEY_DOWN;
     } else if (L"leftArrow" == code_str) {
-      code = app::VKEY_LEFT;
+      code = ui::VKEY_LEFT;
     } else if (L"upArrow" == code_str) {
-      code = app::VKEY_UP;
+      code = ui::VKEY_UP;
     } else if (L"insert" == code_str) {
-      code = app::VKEY_INSERT;
+      code = ui::VKEY_INSERT;
     } else if (L"delete" == code_str) {
-      code = app::VKEY_DELETE;
+      code = ui::VKEY_DELETE;
     } else if (L"pageUp" == code_str) {
-      code = app::VKEY_PRIOR;
+      code = ui::VKEY_PRIOR;
     } else if (L"pageDown" == code_str) {
-      code = app::VKEY_NEXT;
+      code = ui::VKEY_NEXT;
     } else if (L"home" == code_str) {
-      code = app::VKEY_HOME;
+      code = ui::VKEY_HOME;
     } else if (L"end" == code_str) {
-      code = app::VKEY_END;
+      code = ui::VKEY_END;
     } else if (L"printScreen" == code_str) {
-      code = app::VKEY_SNAPSHOT;
+      code = ui::VKEY_SNAPSHOT;
     } else {
       // Compare the input string with the function-key names defined by the
       // DOM spec (i.e. "F1",...,"F24"). If the input string is a function-key
@@ -570,7 +567,7 @@ void EventSendingController::keyDown(
         function_key_name += L"F";
         function_key_name += UTF8ToWide(base::IntToString(i));
         if (function_key_name == code_str) {
-          code = app::VKEY_F1 + (i - 1);
+          code = ui::VKEY_F1 + (i - 1);
           break;
         }
       }
@@ -585,7 +582,7 @@ void EventSendingController::keyDown(
     }
 
     // For one generated keyboard event, we need to generate a keyDown/keyUp
-    // pair; refer to EventSender.cpp in WebKit/WebKitTools/DumpRenderTree/win.
+    // pair; refer to EventSender.cpp in WebKit/Tools/DumpRenderTree/win.
     // On Windows, we might also need to generate a char event to mimic the
     // Windows event flow; on other platforms we create a merged event and test
     // the event flow that that platform provides.
@@ -623,7 +620,7 @@ void EventSendingController::keyDown(
     // the command will be dispatched to the renderer just before dispatching
     // the keyboard event, and then it will be executed in the
     // RenderView::handleCurrentKeyboardEvent() method, which is called from
-    // third_party/WebKit/WebKit/chromium/src/EditorClientImpl.cpp.
+    // third_party/WebKit/Source/WebKit/chromium/src/EditorClientImpl.cpp.
     // We just simulate the same behavior here.
     std::string edit_command;
     if (GetEditCommand(event_down, &edit_command))
@@ -672,7 +669,7 @@ void EventSendingController::dispatchMessage(
 bool EventSendingController::NeedsShiftModifier(int key_code) {
   // If code is an uppercase letter, assign a SHIFT key to
   // event_down.modifier, this logic comes from
-  // WebKit/WebKitTools/DumpRenderTree/Win/EventSender.cpp
+  // WebKit/Tools/DumpRenderTree/Win/EventSender.cpp
   if ((key_code & 0xFF) >= 'A' && (key_code & 0xFF) <= 'Z')
     return true;
   return false;
@@ -786,12 +783,12 @@ MakeMenuItemStringsFor(const WebKit::WebContextMenuData* context_menu,
   // These constants are based on Safari's context menu because tests
   // are made for it.
   static const char* kNonEditableMenuStrings[] = {
-      "Back", "Reload Page", "Open in Dashbaord", "<separator>", 
-      "View Source", "Save Page As", "Print Page", "Inspect Element", 
+      "Back", "Reload Page", "Open in Dashbaord", "<separator>",
+      "View Source", "Save Page As", "Print Page", "Inspect Element",
       0 };
   static const char* kEditableMenuStrings[] = {
       "Cut", "Copy", "<separator>", "Paste", "Spelling and Grammar",
-      "Substitutions, Transformations", "Font", "Speech", 
+      "Substitutions, Transformations", "Font", "Speech",
       "Paragraph Direction", "<separator>", 0 };
 
   // This is possible because mouse events are cancelleable.
@@ -863,9 +860,10 @@ void EventSendingController::scheduleAsynchronousClick(
 void EventSendingController::beginDragWithFiles(
     const CppArgumentList& args, CppVariant* result) {
   current_drag_data.initialize();
-  std::vector<std::wstring> files = args[0].ToStringVector();
+  std::vector<std::string> files = args[0].ToStringVector();
   for (size_t i = 0; i < files.size(); ++i) {
-    FilePath file_path = FilePath::FromWStringHack(files[i]);
+    std::wstring file = UTF8ToWide(files[i]);
+    FilePath file_path = FilePath::FromWStringHack(file);
     file_util::AbsolutePath(&file_path);
     current_drag_data.appendToFilenames(
         webkit_glue::FilePathStringToWebString(file_path.value()));

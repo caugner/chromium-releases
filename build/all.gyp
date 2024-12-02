@@ -33,7 +33,6 @@
         '../third_party/ffmpeg/ffmpeg.gyp:*',
         '../third_party/iccjpeg/iccjpeg.gyp:*',
         '../third_party/icu/icu.gyp:*',
-        '../third_party/libjpeg/libjpeg.gyp:*',
         '../third_party/libpng/libpng.gyp:*',
         '../third_party/libwebp/libwebp.gyp:*',
         '../third_party/libxml/libxml.gyp:*',
@@ -45,12 +44,13 @@
         '../third_party/ots/ots.gyp:*',
         '../third_party/qcms/qcms.gyp:*',
         '../third_party/sqlite/sqlite.gyp:*',
-        '../third_party/WebKit/WebKit/chromium/WebKit.gyp:*',
+        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:*',
         '../third_party/zlib/zlib.gyp:*',
         '../webkit/support/webkit_support.gyp:*',
         '../webkit/webkit.gyp:*',
         'util/build_util.gyp:*',
         'temp_gyp/googleurl.gyp:*',
+        '<(libjpeg_gyp_path):*',
       ],
       'conditions': [
         ['javascript_engine=="v8"', {
@@ -188,7 +188,7 @@
             '../sandbox/sandbox.gyp:sbox_unittests',
             '../sandbox/sandbox.gyp:sbox_validation_tests',
             '../views/views.gyp:views_unittests',
-            '../third_party/WebKit/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
+            '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
             # TODO(nsylvain) ui_tests.exe depends on test_shell_common.
             # This should:
             # 1) not be the case. OR.
@@ -197,7 +197,15 @@
            ],
         }],
       ],
-     }
+    },
+    {
+      'target_name': 'chromium_gpu_builder',
+      'type': 'none',
+      'dependencies': [
+        '../chrome/chrome.gyp:gpu_tests',
+        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:DumpRenderTree',
+      ],
+    }
   ],
   'conditions': [
     ['OS=="mac"', {
@@ -296,6 +304,7 @@
             '../net/net.gyp:net_unittests',
             '../printing/printing.gyp:printing_unittests',
             '../remoting/remoting.gyp:remoting_unittests',
+            '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:sync_unit_tests',
             '../chrome/chrome.gyp:unit_tests',
             '../chrome/chrome.gyp:ui_tests',
@@ -335,6 +344,12 @@
             # mini_installer_tests depends on mini_installer. This should be
             # defined in installer.gyp.
             '../chrome/installer/mini_installer.gyp:mini_installer',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_perftests',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_reliability_tests',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
+            '../chrome_frame/chrome_frame.gyp:chrome_frame_unittests',
+            '../chrome_frame/chrome_frame.gyp:npchrome_frame',
             '../courgette/courgette.gyp:courgette_unittests',
             '../gfx/gfx.gyp:gfx_unittests',
             '../gpu/gpu.gyp:gpu_unittests',
@@ -344,19 +359,14 @@
             '../printing/printing.gyp:printing_unittests',
             '../remoting/remoting.gyp:remoting_unittests',
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
-            '../third_party/WebKit/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
+            '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
+            '../views/views.gyp:views_unittests',
             # TODO(nsylvain) ui_tests.exe depends on test_shell_common.
             # This should:
             # 1) not be the case. OR.
             # 2) be expressed in the ui tests dependencies.
             '../webkit/webkit.gyp:test_shell_common',
             'temp_gyp/googleurl.gyp:googleurl_unittests',
-            '../chrome_frame/chrome_frame.gyp:chrome_frame_net_tests',
-            '../chrome_frame/chrome_frame.gyp:chrome_frame_perftests',
-            '../chrome_frame/chrome_frame.gyp:chrome_frame_reliability_tests',
-            '../chrome_frame/chrome_frame.gyp:chrome_frame_tests',
-            '../chrome_frame/chrome_frame.gyp:chrome_frame_unittests',
-            '../chrome_frame/chrome_frame.gyp:npchrome_frame',
           ],
         },
         {
@@ -382,7 +392,7 @@
         },
       ],  # targets
       'conditions': [
-        ['(branding=="Chrome" and buildtype=="Official")', {
+        ['branding=="Chrome"', {
           'targets': [
             {
               'target_name': 'chrome_official_builder',
@@ -400,13 +410,19 @@
                 '../chrome_frame/chrome_frame.gyp:chrome_frame_unittests',
                 '../chrome_frame/chrome_frame.gyp:npchrome_frame',
                 '../courgette/courgette.gyp:courgette',
-                '../pdf/pdf.gyp:pdf',
                 '../third_party/adobe/flash/flash_player.gyp:flash_player',
                 '../webkit/webkit.gyp:test_shell',
               ],
+              'conditions': [
+                ['internal_pdf', {
+                  'dependencies': [
+                    '../pdf/pdf.gyp:pdf',
+                  ],
+                }], # internal_pdf
+              ]
             },
           ], # targets
-        }], # (branding=="Chrome" and buildtype=="Official")
+        }], # branding=="Chrome"
        ], # conditions
     }], # OS="win"
     ['chromeos==1', {

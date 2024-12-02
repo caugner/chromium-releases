@@ -1,7 +1,6 @@
 <head>
 <script>
-var botRoot = "http://build.chromium.org/buildbot";
-//var botRoot = "http://chrome-buildbot.corp.google.com:8010";
+var botRoot = "http://build.chromium.org/p/chromium";
 var waterfallURL = botRoot + "/waterfall/bot_status.json?json=1";
 var botList;
 var checkinResults;
@@ -17,7 +16,11 @@ function updateBotList(text) {
   }
   var data;
   try {
-    data = JSON.parse(results[1]);
+    // The build bot returns invalid JSON. Namely it uses single
+    // quotes and includes commas in some invalid locations. We have to
+    // run some regexps across the text to fix it up.
+    var jsonString = results[1].replace(/'/g, '"').replace(/},]/g,'}]');
+    data = JSON.parse(jsonString);
   } catch (e) {
     console.dir(e);
     console.log(text);
@@ -104,9 +107,13 @@ function requestURL(url, callback) {
   try {
     xhr.onreadystatechange = function(state) {
       if (xhr.readyState == 4) {
-        var text = xhr.responseText;
-        //console.log(text);
-        callback(text);
+        if (xhr.status == 200) {
+          var text = xhr.responseText;
+          //console.log(text);
+          callback(text);
+        } else {
+          bots.innerText = "Error.";
+        }
       }
     }
 
@@ -147,7 +154,7 @@ body {
 #links {
   background-color: #efefef;
   border: 1px solid #cccccc;
-  -webkit-border-radius: 5px;
+  border-radius: 5px;
   margin-top: 1px;
   padding: 3px;
   white-space: nowrap;
@@ -175,7 +182,7 @@ body.small .bot {
 
 .bot {
   cursor: pointer;
-  -webkit-border-radius: 5px;
+  border-radius: 5px;
   margin-top: 1px;
   padding: 3px;
   white-space: nowrap;

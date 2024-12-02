@@ -7,11 +7,11 @@
 #include <list>
 
 #include "base/file_path.h"
-#include "base/lock.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/singleton.h"
 #include "base/stl_util-inl.h"
 #include "base/string16.h"
+#include "base/synchronization/lock.h"
 
 // The vanilla error handler implements the common fucntionality for all the
 // error handlers. Specialized error handlers are expected to only override
@@ -67,19 +67,22 @@ class DefaultSQLErrorHandlerFactory : public SQLErrorHandlerFactory {
 
  private:
   void AddHandler(SQLErrorHandler* handler) {
-    AutoLock lock(lock_);
+    base::AutoLock lock(lock_);
     errors_.push_back(handler);
   }
 
   typedef std::list<SQLErrorHandler*> ErrorList;
   ErrorList errors_;
-  Lock lock_;
+  base::Lock lock_;
 };
+
+static base::LazyInstance<DefaultSQLErrorHandlerFactory>
+    g_default_sql_error_handler_factory(base::LINKER_INITIALIZED);
 
 SQLErrorHandlerFactory* GetErrorHandlerFactory() {
   // TODO(cpu): Testing needs to override the error handler.
   // Destruction of DefaultSQLErrorHandlerFactory handled by at_exit manager.
-  return Singleton<DefaultSQLErrorHandlerFactory>::get();
+  return g_default_sql_error_handler_factory.Pointer();
 }
 
 namespace sqlite_utils {

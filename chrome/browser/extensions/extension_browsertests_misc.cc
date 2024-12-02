@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,18 +13,17 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
@@ -32,7 +31,7 @@
 #include "net/test/test_server.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #endif
 
 const std::string kSubscribePage = "/subscribe.html";
@@ -51,6 +50,10 @@ const std::string kInvalidFeed1 = "files/feeds/feed_invalid1.xml";
 const std::string kInvalidFeed2 = "files/feeds/feed_invalid2.xml";
 const std::string kLocalization =
     "files/extensions/browsertest/title_localized_pa/simple.html";
+// We need a triple encoded string to prove that we are not decoding twice in
+// subscribe.js because one layer is also stripped off when subscribe.js passes
+// it to the XMLHttpRequest object.
+const std::string kFeedTripleEncoded = "files/feeds/url%25255Fdecoding.html";
 const std::string kHashPageA =
     "files/extensions/api_test/page_action/hash_change/test_page_A.html";
 const std::string kHashPageAHash = kHashPageA + "#asdf";
@@ -74,72 +77,6 @@ static ExtensionHost* FindHostWithPath(ExtensionProcessManager* manager,
   }
   EXPECT_EQ(expected_hosts, num_hosts);
   return host;
-}
-
-// Tests that extension resources can be loaded from origins which the
-// extension specifies in permissions but not from others.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, OriginPrivileges) {
-  host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
-  ASSERT_TRUE(LoadExtension(test_data_dir_
-    .AppendASCII("origin_privileges").AppendASCII("extension")));
-
-  GURL origin_privileges_index(
-      test_server()->GetURL("files/extensions/origin_privileges/index.html"));
-
-  std::string host_a("a.com");
-  GURL::Replacements make_host_a_com;
-  make_host_a_com.SetHostStr(host_a);
-
-  std::string host_b("b.com");
-  GURL::Replacements make_host_b_com;
-  make_host_b_com.SetHostStr(host_b);
-
-  // A web host that has permission.
-  ui_test_utils::NavigateToURL(
-      browser(), origin_privileges_index.ReplaceComponents(make_host_a_com));
-  std::string result;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-    browser()->GetSelectedTabContents()->render_view_host(), L"",
-      L"window.domAutomationController.send(document.title)",
-    &result));
-  EXPECT_EQ(result, "Loaded");
-
-  // A web host that does not have permission.
-  ui_test_utils::NavigateToURL(
-      browser(), origin_privileges_index.ReplaceComponents(make_host_b_com));
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser()->GetSelectedTabContents()->render_view_host(), L"",
-      L"window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ(result, "Image failed to load");
-
-  // A data URL. Data URLs should always be able to load chrome-extension://
-  // resources.
-  std::string file_source;
-  ASSERT_TRUE(file_util::ReadFileToString(
-      test_data_dir_.AppendASCII("origin_privileges")
-                    .AppendASCII("index.html"), &file_source));
-  ui_test_utils::NavigateToURL(browser(),
-      GURL(std::string("data:text/html;charset=utf-8,") + file_source));
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser()->GetSelectedTabContents()->render_view_host(), L"",
-      L"window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ(result, "Loaded");
-
-  // A different extension. Extensions should always be able to load each
-  // other's resources.
-  ASSERT_TRUE(LoadExtension(test_data_dir_
-    .AppendASCII("origin_privileges").AppendASCII("extension2")));
-  ui_test_utils::NavigateToURL(
-      browser(),
-      GURL("chrome-extension://pbkkcbgdkliohhfaeefcijaghglkahja/index.html"));
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser()->GetSelectedTabContents()->render_view_host(), L"",
-      L"window.domAutomationController.send(document.title)",
-      &result));
-  EXPECT_EQ(result, "Loaded");
 }
 
 // Tests that we can load extension pages into the tab area and they can call
@@ -171,6 +108,23 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TabContents) {
       browser()->GetSelectedTabContents()->render_view_host(), L"",
       L"testTabsAPI()", &result));
   EXPECT_TRUE(result);
+}
+
+// Tests that GPU-related WebKit preferences are set for extension background
+// pages. See http://crbug.com/64512.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebKitPrefsBackgroundPage) {
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("good").AppendASCII("Extensions")
+                    .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
+                    .AppendASCII("1.0.0.0")));
+
+  ExtensionProcessManager* manager =
+        browser()->profile()->GetExtensionProcessManager();
+  ExtensionHost* host = FindHostWithPath(manager, "/backgroundpage.html", 1);
+  WebPreferences prefs = host->GetWebkitPrefs();
+  ASSERT_FALSE(prefs.experimental_webgl_enabled);
+  ASSERT_FALSE(prefs.accelerated_compositing_enabled);
+  ASSERT_FALSE(prefs.accelerated_2d_canvas_enabled);
 }
 
 // Tests that we can load page actions in the Omnibox.
@@ -252,7 +206,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, UnloadPageAction) {
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PageActionRefreshCrash) {
   base::TimeTicks start_time = base::TimeTicks::Now();
 
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
 
   size_t size_before = service->extensions()->size();
 
@@ -321,7 +275,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, RSSMultiRelLink) {
 // Tests that tooltips of a browser action icon can be specified using UTF8.
 // See http://crbug.com/25349.
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TitleLocalizationBrowserAction) {
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   const size_t size_before = service->extensions()->size();
   FilePath extension_path(test_data_dir_.AppendASCII("browsertest")
                                         .AppendASCII("title_localized"));
@@ -344,7 +298,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TitleLocalizationBrowserAction) {
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TitleLocalizationPageAction) {
   ASSERT_TRUE(test_server()->Start());
 
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   const size_t size_before = service->extensions()->size();
 
   FilePath extension_path(test_data_dir_.AppendASCII("browsertest")
@@ -443,7 +397,7 @@ void NavigateToFeedAndValidate(net::TestServer* server,
     // TODO(finnur): Implement this is a non-flaky way.
   }
 
-  ExtensionsService* service = browser->profile()->GetExtensionsService();
+  ExtensionService* service = browser->profile()->GetExtensionService();
   const Extension* extension = service->extensions()->back();
   std::string id = extension->id();
 
@@ -606,6 +560,26 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedInvalidFeed3) {
                             "This feed contains no entries.");
 }
 
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedInvalidFeed4) {
+  ASSERT_TRUE(test_server()->Start());
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  // subscribe.js shouldn't double-decode the URL passed in. Otherwise feed
+  // links such as http://search.twitter.com/search.atom?lang=en&q=%23chrome
+  // will result in no feed being downloaded because %23 gets decoded to # and
+  // therefore #chrome is not treated as part of the Twitter query. This test
+  // uses an underscore instead of a hash, but the principle is the same. If
+  // we start erroneously double decoding again, the path (and the feed) will
+  // become valid resulting in a failure for this test.
+  NavigateToFeedAndValidate(test_server(), kFeedTripleEncoded, browser(), true,
+                            "Feed for Unknown feed name",
+                            "element 'anchor_0' not found",
+                            "element 'desc_0' not found",
+                            "This feed contains no entries.");
+}
+
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeedNoLinks) {
   ASSERT_TRUE(test_server()->Start());
 
@@ -745,7 +719,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
       tab->render_view_host(), L"", L"testPluginWorks()", &result));
   EXPECT_FALSE(result);
 
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   const size_t size_before = service->extensions()->size();
   ASSERT_TRUE(LoadExtension(extension_dir));
   EXPECT_EQ(size_before + 1, service->extensions()->size());
@@ -781,6 +755,35 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
   EXPECT_TRUE(result);
 }
 
+// disabled by kerz to enable browser tests to go green
+// Tests that private extension plugins are only visible to the extension.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DISABLED_PluginPrivate) {
+  FilePath extension_dir =
+      test_data_dir_.AppendASCII("uitest").AppendASCII("plugins_private");
+
+  ExtensionService* service = browser()->profile()->GetExtensionService();
+  const size_t size_before = service->extensions()->size();
+  ASSERT_TRUE(LoadExtension(extension_dir));
+  EXPECT_EQ(size_before + 1, service->extensions()->size());
+
+  // Load the test page through the extension URL, and the plugin should work.
+  const Extension* extension = service->extensions()->back();
+  ui_test_utils::NavigateToURL(browser(),
+      extension->GetResourceURL("test.html"));
+  TabContents* tab = browser()->GetSelectedTabContents();
+  bool result = false;
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      tab->render_view_host(), L"", L"testPluginWorks()", &result));
+  EXPECT_TRUE(result);
+
+  // Now load it through a file URL. The plugin should not load.
+  ui_test_utils::NavigateToURL(browser(),
+      net::FilePathToFileURL(extension_dir.AppendASCII("test.html")));
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      tab->render_view_host(), L"", L"testPluginWorks()", &result));
+  EXPECT_FALSE(result);
+}
+
 // Used to simulate a click on the first button named 'Options'.
 static const wchar_t* jscript_click_option_button =
     L"(function() { "
@@ -797,7 +800,7 @@ static const wchar_t* jscript_click_option_button =
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DISABLED_OptionsPage) {
   // Install an extension with an options page.
   ASSERT_TRUE(InstallExtension(test_data_dir_.AppendASCII("options.crx"), 1));
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   const ExtensionList* extensions = service->extensions();
   ASSERT_EQ(1u, extensions->size());
   const Extension* extension = extensions->at(0);

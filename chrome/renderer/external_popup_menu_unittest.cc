@@ -7,14 +7,15 @@
 #include "chrome/common/render_messages_params.h"
 #include "chrome/test/render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 // Tests for the external select popup menu (Mac specific).
 
 namespace {
 
 const char* const kSelectID = "mySelect";
+const char* const kEmptySelectID = "myEmptySelect";
 
 }  // namespace
 
@@ -31,6 +32,8 @@ class ExternalPopupMenuTest : public RenderViewTest {
                        "  <option>zero</option>"
                        "  <option selected='1'>one</option>"
                        "  <option>two</option>"
+                       "</select>"
+                       "<select id='myEmptySelect'>"
                        "</select>";
     if (ShouldRemoveSelectOnChange()) {
       html += "<script>"
@@ -107,6 +110,12 @@ TEST_F(ExternalPopupMenuTest, ShowPopupThenNavigate) {
 
   // Now the user selects something, we should not crash.
   view_->OnSelectPopupMenuItem(-1);
+}
+
+// An empty select should not cause a crash when clicked.
+// http://crbug.com/63774
+TEST_F(ExternalPopupMenuTest, EmptySelect) {
+  EXPECT_TRUE(SimulateElementClick(kEmptySelectID));
 }
 
 class ExternalPopupMenuRemoveTest : public ExternalPopupMenuTest {

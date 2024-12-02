@@ -15,18 +15,22 @@
 
 namespace remoting {
 
-static int MouseButtonToX11ButtonNumber(MouseButton button) {
+using protocol::MouseEvent;
+using protocol::KeyEvent;
+
+static int MouseButtonToX11ButtonNumber(
+    protocol::MouseEvent::MouseButton button) {
   switch (button) {
-    case MouseButtonLeft:
+    case MouseEvent::BUTTON_LEFT:
       return 1;
 
-    case MouseButtonRight:
+    case MouseEvent::BUTTON_RIGHT:
       return 2;
 
-    case MouseButtonMiddle:
+    case MouseEvent::BUTTON_MIDDLE:
       return 3;
 
-    case MouseButtonUndefined:
+    case MouseEvent::BUTTON_UNDEFINED:
     default:
       return -1;
   }
@@ -202,6 +206,7 @@ class EventExecutorLinuxPimpl {
   ~EventExecutorLinuxPimpl();
 
   bool Init();  // TODO(ajwong): Do we really want this to be synchronous?
+
   void HandleMouse(const MouseEvent* message);
   void HandleKey(const KeyEvent* key_event);
 
@@ -287,10 +292,10 @@ bool EventExecutorLinuxPimpl::Init() {
 
 void EventExecutorLinuxPimpl::HandleKey(const KeyEvent* key_event) {
   // TODO(ajwong): This will only work for QWERTY keyboards.
-  int keysym = ChromotocolKeycodeToX11Keysym(key_event->key());
+  int keysym = ChromotocolKeycodeToX11Keysym(key_event->keycode());
 
   if (keysym == -1) {
-    LOG(WARNING) << "Ignoring unknown key: " << key_event->key();
+    LOG(WARNING) << "Ignoring unknown key: " << key_event->keycode();
     return;
   }
 
@@ -298,11 +303,11 @@ void EventExecutorLinuxPimpl::HandleKey(const KeyEvent* key_event) {
   int keycode = XKeysymToKeycode(display_, keysym);
   if (keycode == 0) {
     LOG(WARNING) << "Ignoring undefined keysym: " << keysym
-                 << " for key: " << key_event->key();
+                 << " for key: " << key_event->keycode();
     return;
   }
 
-  VLOG(3) << "Got pepper key: " << key_event->key()
+  VLOG(3) << "Got pepper key: " << key_event->keycode()
           << " sending keysym: " << keysym
           << " to keycode: " << keycode;
   XTestFakeKeyEvent(display_, keycode, key_event->pressed(), CurrentTime);

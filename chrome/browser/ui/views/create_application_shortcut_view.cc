@@ -1,16 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/create_application_shortcut_view.h"
+#include "chrome/browser/ui/views/create_application_shortcut_view.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/chrome_constants.h"
@@ -25,17 +23,14 @@
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/grid_layout.h"
 #include "views/standard_layout.h"
 #include "views/window/window.h"
-
-
-#if defined(OS_WIN)
-#include "base/win_util.h"
-#endif  // defined(OS_WIN)
 
 namespace {
 
@@ -124,7 +119,7 @@ void AppInfoView::PrepareDescriptionLabel(const string16& description) {
 }
 
 void AppInfoView::SetupLayout() {
-  views::GridLayout* layout = CreatePanelGridLayout(this);
+  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   static const int kColumnSetId = 0;
@@ -240,34 +235,35 @@ void CreateApplicationShortcutView::InitControls() {
   app_info_ = new AppInfoView(shortcut_info_.title, shortcut_info_.description,
                               shortcut_info_.favicon);
   create_shortcuts_label_ = new views::Label(
-      l10n_util::GetString(IDS_CREATE_SHORTCUTS_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_LABEL)));
   create_shortcuts_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
 
-  desktop_check_box_ = AddCheckbox(
-      l10n_util::GetString(IDS_CREATE_SHORTCUTS_DESKTOP_CHKBOX),
+  desktop_check_box_ = AddCheckbox(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_DESKTOP_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateOnDesktop));
 
   menu_check_box_ = NULL;
   quick_launch_check_box_ = NULL;
 
 #if defined(OS_WIN)
-  menu_check_box_ = AddCheckbox(
-      l10n_util::GetString(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX),
+  menu_check_box_ = AddCheckbox(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInAppsMenu));
 
   quick_launch_check_box_ = AddCheckbox(
       (base::win::GetVersion() >= base::win::VERSION_WIN7) ?
-        l10n_util::GetString(IDS_PIN_TO_TASKBAR_CHKBOX) :
-        l10n_util::GetString(IDS_CREATE_SHORTCUTS_QUICK_LAUNCH_BAR_CHKBOX),
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_PIN_TO_TASKBAR_CHKBOX)) :
+        UTF16ToWide(l10n_util::GetStringUTF16(
+            IDS_CREATE_SHORTCUTS_QUICK_LAUNCH_BAR_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInQuickLaunchBar));
 #elif defined(OS_LINUX)
   menu_check_box_ = AddCheckbox(
-      l10n_util::GetString(IDS_CREATE_SHORTCUTS_MENU_CHKBOX),
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_MENU_CHKBOX)),
       profile_->GetPrefs()->GetBoolean(prefs::kWebAppCreateInAppsMenu));
 #endif
 
   // Layout controls
-  views::GridLayout* layout = CreatePanelGridLayout(this);
+  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
 
   static const int kHeaderColumnSetId = 0;
@@ -316,7 +312,7 @@ gfx::Size CreateApplicationShortcutView::GetPreferredSize() {
 std::wstring CreateApplicationShortcutView::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
-    return l10n_util::GetString(IDS_CREATE_SHORTCUTS_COMMIT);
+    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_COMMIT));
   }
 
   return std::wstring();
@@ -355,7 +351,7 @@ bool CreateApplicationShortcutView::IsModal() const {
 }
 
 std::wstring CreateApplicationShortcutView::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_CREATE_SHORTCUTS_TITLE);
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_TITLE));
 }
 
 bool CreateApplicationShortcutView::Accept() {

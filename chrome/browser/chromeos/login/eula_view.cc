@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,6 @@
 #include <sys/types.h>
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "base/task.h"
@@ -25,17 +23,19 @@
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/metrics_cros_settings_provider.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/views/dom_view.h"
-#include "chrome/browser/views/window.h"
+#include "chrome/browser/ui/views/dom_view.h"
+#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/label.h"
 #include "views/controls/throbber.h"
@@ -104,7 +104,8 @@ class TpmInfoView : public views::View,
 
   // views::View overrides:
   virtual std::wstring GetWindowTitle() const {
-    return l10n_util::GetString(IDS_EULA_SYSTEM_SECURITY_SETTING);
+    return UTF16ToWide(
+        l10n_util::GetStringUTF16(IDS_EULA_SYSTEM_SECURITY_SETTING));
   }
 
   gfx::Size GetPreferredSize() {
@@ -129,22 +130,22 @@ class TpmInfoView : public views::View,
 };
 
 void TpmInfoView::Init() {
-  views::GridLayout* layout = CreatePanelGridLayout(this);
+  views::GridLayout* layout = views::GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
                         views::GridLayout::USE_PREF, 0, 0);
   layout->StartRow(0, 0);
-  views::Label* label = new views::Label(
-      l10n_util::GetString(IDS_EULA_SYSTEM_SECURITY_SETTING_DESCRIPTION));
+  views::Label* label = new views::Label(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_EULA_SYSTEM_SECURITY_SETTING_DESCRIPTION)));
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   layout->AddView(label);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, 0);
-  label = new views::Label(
-      l10n_util::GetString(IDS_EULA_SYSTEM_SECURITY_SETTING_DESCRIPTION_KEY));
+  label = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
+      IDS_EULA_SYSTEM_SECURITY_SETTING_DESCRIPTION_KEY)));
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   layout->AddView(label);
@@ -181,7 +182,8 @@ void TpmInfoView::Init() {
   throbber_ = chromeos::CreateDefaultThrobber();
   throbber_->Start();
   layout->AddView(throbber_);
-  busy_label_ = new views::Label(l10n_util::GetString(IDS_EULA_TPM_BUSY));
+  busy_label_ = new views::Label(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_TPM_BUSY)));
   layout->AddView(busy_label_);
   layout->AddPaddingRow(0, kRelatedControlHorizontalSpacing);
 
@@ -414,26 +416,26 @@ void EulaView::UpdateLocalizedStrings() {
   // Set tooltip for usage statistics checkbox if the metric is unmanaged.
   if (!usage_statistics_checkbox_->IsEnabled()) {
     usage_statistics_checkbox_->SetTooltipText(
-        l10n_util::GetString(IDS_OPTION_DISABLED_BY_POLICY));
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_OPTION_DISABLED_BY_POLICY)));
   }
 
   // Set tooltip for system security settings link if TPM is disabled.
   if (!system_security_settings_link_->IsEnabled()) {
     system_security_settings_link_->SetTooltipText(
-        l10n_util::GetString(IDS_EULA_TPM_DISABLED));
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_TPM_DISABLED)));
   }
 
   // Load other labels from resources.
   usage_statistics_checkbox_->SetLabel(
-      l10n_util::GetString(IDS_EULA_CHECKBOX_ENABLE_LOGGING));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_CHECKBOX_ENABLE_LOGGING)));
   learn_more_link_->SetText(
-      l10n_util::GetString(IDS_LEARN_MORE));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LEARN_MORE)));
   system_security_settings_link_->SetText(
-      l10n_util::GetString(IDS_EULA_SYSTEM_SECURITY_SETTING));
-  continue_button_->SetLabel(
-      l10n_util::GetString(IDS_EULA_ACCEPT_AND_CONTINUE_BUTTON));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_SYSTEM_SECURITY_SETTING)));
+  continue_button_->SetLabel(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_EULA_ACCEPT_AND_CONTINUE_BUTTON)));
   back_button_->SetLabel(
-      l10n_util::GetString(IDS_EULA_BACK_BUTTON));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_EULA_BACK_BUTTON)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

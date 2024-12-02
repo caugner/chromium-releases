@@ -1,16 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/default_search_view.h"
+#include "chrome/browser/ui/views/default_search_view.h"
 
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/message_box_flags.h"
-#include "app/resource_bundle.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
@@ -19,6 +16,9 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/message_box_flags.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
@@ -57,7 +57,7 @@ void GetShortNameAndLogoId(PrefService* prefs,
 
 views::Label* CreateProviderLabel(int message_id) {
   views::Label* choice_label =
-      new views::Label(l10n_util::GetString(message_id));
+      new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(message_id)));
   choice_label->SetColor(SK_ColorBLACK);
   choice_label->SetFont(
       choice_label->font().DeriveFont(1, gfx::Font::NORMAL));
@@ -101,8 +101,8 @@ views::NativeButton* CreateProviderChoiceButton(
     views::ButtonListener* listener,
     int message_id,
     const std::wstring& short_name) {
-  return new views::NativeButton(listener, l10n_util::GetStringF(
-      message_id, short_name));
+  return new views::NativeButton(listener, UTF16ToWide(
+      l10n_util::GetStringFUTF16(message_id, WideToUTF16(short_name))));
 }
 
 }  // namespace
@@ -144,7 +144,7 @@ void DefaultSearchView::ButtonPressed(views::Button* sender,
 }
 
 std::wstring DefaultSearchView::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_DEFAULT_SEARCH_TITLE);
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_DEFAULT_SEARCH_TITLE));
 }
 
 views::View* DefaultSearchView::GetInitiallyFocusedView() {
@@ -156,7 +156,7 @@ views::View* DefaultSearchView::GetContentsView() {
 }
 
 int DefaultSearchView::GetDialogButtons() const {
-  return MessageBoxFlags::DIALOGBUTTON_NONE;
+  return ui::MessageBoxFlags::DIALOGBUTTON_NONE;
 }
 
 bool DefaultSearchView::Accept() {
@@ -264,9 +264,9 @@ void DefaultSearchView::SetupControls(PrefService* prefs) {
   // Add text informing the user about the requested default change.
   layout->StartRowWithPadding(0, kPaddedWholeDialogViewSetId,
                               1, kLabelToControlVerticalSpacing);
-  Label* summary_label = new Label(l10n_util::GetStringF(
+  Label* summary_label = new Label(UTF16ToWide(l10n_util::GetStringFUTF16(
       IDS_DEFAULT_SEARCH_SUMMARY,
-      proposed_short_name));
+      WideToUTF16(proposed_short_name))));
   summary_label->SetColor(SK_ColorBLACK);
   summary_label->SetFont(
       summary_label->font().DeriveFont(1, gfx::Font::NORMAL));

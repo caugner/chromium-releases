@@ -5,32 +5,33 @@
 #ifndef CHROME_BROWSER_SPEECH_SPEECH_INPUT_DISPATCHER_HOST_H_
 #define CHROME_BROWSER_SPEECH_SPEECH_INPUT_DISPATCHER_HOST_H_
 
-#include "base/basictypes.h"
-#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/browser_message_filter.h"
 #include "chrome/browser/speech/speech_input_manager.h"
-#include "ipc/ipc_message.h"
+
+struct SpeechInputHostMsg_StartRecognition_Params;
 
 namespace speech_input {
 
 // SpeechInputDispatcherHost is a delegate for Speech API messages used by
-// ResourceMessageFilter.
+// RenderMessageFilter.
 // It's the complement of SpeechInputDispatcher (owned by RenderView).
-class SpeechInputDispatcherHost
-    : public base::RefCountedThreadSafe<SpeechInputDispatcherHost>,
-      public SpeechInputManager::Delegate {
+class SpeechInputDispatcherHost : public BrowserMessageFilter,
+                                  public SpeechInputManager::Delegate {
  public:
-  explicit SpeechInputDispatcherHost(int resource_message_filter_process_id);
+  class SpeechInputCallers;
+
+  explicit SpeechInputDispatcherHost(int render_process_id);
 
   // SpeechInputManager::Delegate methods.
-  void SetRecognitionResult(int caller_id,
-                            const SpeechInputResultArray& result);
-  void DidCompleteRecording(int caller_id);
-  void DidCompleteRecognition(int caller_id);
+  virtual void SetRecognitionResult(int caller_id,
+                                    const SpeechInputResultArray& result);
+  virtual void DidCompleteRecording(int caller_id);
+  virtual void DidCompleteRecognition(int caller_id);
 
-  // Called to possibly handle the incoming IPC message. Returns true if
-  // handled.
-  bool OnMessageReceived(const IPC::Message& msg, bool* msg_was_ok);
+  // BrowserMessageFilter implementation.
+  virtual bool OnMessageReceived(const IPC::Message& message,
+                                 bool* message_was_ok);
 
   // Singleton accessor setter useful for tests.
   static void set_manager_accessor(SpeechInputManager::AccessorMethod* method) {
@@ -38,16 +39,10 @@ class SpeechInputDispatcherHost
   }
 
  private:
-  class SpeechInputCallers;
-  friend class base::RefCountedThreadSafe<SpeechInputDispatcherHost>;
-
   virtual ~SpeechInputDispatcherHost();
-  void SendMessageToRenderView(IPC::Message* message, int render_view_id);
 
-  void OnStartRecognition(int render_view_id, int request_id,
-                          const gfx::Rect& element_rect,
-                          const std::string& language,
-                          const std::string& grammar);
+  void OnStartRecognition(
+      const SpeechInputHostMsg_StartRecognition_Params &params);
   void OnCancelRecognition(int render_view_id, int request_id);
   void OnStopRecording(int render_view_id, int request_id);
 
@@ -55,8 +50,8 @@ class SpeechInputDispatcherHost
   // needed.
   SpeechInputManager* manager();
 
-  int resource_message_filter_process_id_;
-  SpeechInputCallers* callers_;  // weak reference to a singleton.
+  int render_process_id_;
+  bool may_have_pending_requests_;  // Set if we received any speech IPC request
 
   static SpeechInputManager::AccessorMethod* manager_accessor_;
 

@@ -6,13 +6,12 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
 #include "base/i18n/rtl.h"
-#include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "unicode/calendar.h"
 #include "unicode/timezone.h"
 #include "unicode/ures.h"
@@ -120,7 +120,7 @@ static const char* kTimeZones[] = {
     "Pacific/Tongatapu",
 };
 
-static Lock timezone_bundle_lock;
+static base::Lock timezone_bundle_lock;
 
 struct UResClose {
   inline void operator() (UResourceBundle* b) const {
@@ -138,7 +138,7 @@ string16 GetExemplarCity(const icu::TimeZone& zone) {
 
   UErrorCode status = U_ZERO_ERROR;
   {
-    AutoLock lock(timezone_bundle_lock);
+    base::AutoLock lock(timezone_bundle_lock);
     if (zone_bundle == NULL)
       zone_bundle = ures_open(zone_bundle_name, uloc_getDefault(), &status);
 
@@ -214,8 +214,8 @@ void SystemSettingsProvider::DoSet(const std::string& path, Value* in_value) {
 bool SystemSettingsProvider::Get(const std::string& path,
                                  Value** out_value) const {
   if (path == kSystemTimezone) {
-    *out_value = Value::CreateStringValue(
-        GetTimezoneID(CrosLibrary::Get()->GetSystemLibrary()->GetTimezone()));
+    *out_value = Value::CreateStringValue(GetKnownTimezoneID(
+        CrosLibrary::Get()->GetSystemLibrary()->GetTimezone()));
     return true;
   }
   return false;
@@ -298,6 +298,19 @@ const icu::TimeZone* SystemSettingsProvider::GetTimezone(
     }
   }
   return NULL;
+}
+
+string16 SystemSettingsProvider::GetKnownTimezoneID(
+    const icu::TimeZone& timezone) const {
+  for (std::vector<icu::TimeZone*>::const_iterator iter = timezones_.begin();
+       iter != timezones_.end(); ++iter) {
+    const icu::TimeZone* known_timezone = *iter;
+    if (known_timezone->hasSameRules(timezone))
+      return GetTimezoneID(*known_timezone);
+  }
+
+  // Not able to find a matching timezone in our list.
+  return string16();
 }
 
 }  // namespace chromeos

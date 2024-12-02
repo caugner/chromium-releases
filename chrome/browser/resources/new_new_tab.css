@@ -16,7 +16,7 @@ html[mode=app-launcher] {
 }
 
 #main {
-  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
   -webkit-transition: width .15s;
   margin: 0 auto;
   min-height: 100%;
@@ -117,6 +117,29 @@ html[anim=false] *,
   color: rgb(0, 102, 204);
 }
 
+#notification-close {
+  display: inline-block;
+  border: 0;
+  -webkit-margin-start: 10px;
+  -webkit-margin-end: auto;
+  vertical-align: middle;
+  width: 16px;
+  height: 16px;
+  background: no-repeat;
+  background-color: transparent;  
+  background-image: url('chrome://theme/IDR_CLOSE_BAR');
+  padding: 0;
+}
+
+#notification-close:hover,
+#notification-close:focus {
+  background-image: url('chrome://theme/IDR_CLOSE_BAR_H');
+}
+
+#notification-close:active {
+  background-image: url('chrome://theme/IDR_CLOSE_BAR_P');
+}
+
 #notification > * {
   display: table-cell;
   max-width: 500px;
@@ -155,7 +178,7 @@ html[anim=false] *,
   background-color: hsla(213, 63%, 93%, 0);
   display: block;
   line-height: 20px;
-  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -206,9 +229,7 @@ html[dir=rtl] .item {
   border: 1px solid rgb(118, 118, 118);
   border-radius: 3px;
   padding: 0 3px;
-  background: -webkit-gradient(linear, left top, left bottom,
-                               from(white),
-                               to(rgb(228, 229, 240)));
+  background: -webkit-linear-gradient(white, rgb(228, 229, 240));
   width: auto;
   max-width: 300px;
 }
@@ -263,8 +284,8 @@ html[dir=rtl] .foreign-session-client {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 100%;
-  margin: 0 10px;
+  font-size: 106%;
+  margin: 0;
 }
 
 .notification.hidden {
@@ -322,6 +343,10 @@ html[hasattribution=false] #attribution > div {
   font-size: 92%;
 }
 
+body.noscroll {
+  overflow: hidden;
+}
+
 html[anim=true][enable-section-animations=true] .section {
   -webkit-transition: top .15s;
 }
@@ -333,8 +358,20 @@ html[anim=true][enable-section-animations=true] .section {
   text-align: end;
 }
 
-.section.disabled,
-#closed-sections-bar .disabled {
+/* A section in menu mode doesn't display its contents at all. Instead it is
+rendered as a menu along the bottom of the screen. We have a separate class for
+this so that when a hidden section is unhidden it can go back to its previous
+collapsed state. */
+.section.menu {
+  display: none !important;
+}
+
+/* A disabled section is not rendered in the UI in any way. Examples of this
+state include the 'recently closed' section when we have no data for it, or this
+'sync status' section, when there is no status to display. We have a separate
+class for this so that when a section is enabled, it can go back to its previous
+menu and collapsed state. */
+.section.disabled {
   display: none !important;
 }
 
@@ -367,7 +404,7 @@ html[anim=true] .section > h2 > .disclosure {
   -webkit-transition: -webkit-transform .15s;
 }
 
-.section:not(.hidden) > h2 > .disclosure {
+.section:not(.collapsed) > h2 > .disclosure {
   -webkit-transform: rotate(90deg);
 }
 
@@ -431,6 +468,9 @@ html[dir=rtl] .section-close-button {
 }
 
 #closed-sections-bar > button {
+  /* We hide all these buttons by default and turn them on when needed. */
+  display: none;
+
   -webkit-appearance: none;
   background: none;
   border: 0;
@@ -458,18 +498,27 @@ html[dir=rtl] .section-close-button {
   padding: 5px 0 30px;
   position: absolute;
   -webkit-mask-attachment: fixed;
-  opacity: 1;
-}
-
-.maxiview.hiding {
   opacity: 0;
 }
 
-.maxiview.hidden {
-  display: none;
+.maxiview.opaque {
+  opacity: 1;
 }
 
-html[anim=true] .maxiview {
+.maxiview.collapsing {
+  opacity: 0;
+}
+
+.maxiview.collapsed {
+  display: none;
+  opacity: 0;
+}
+
+html[anim=true][enable-section-animations=true] .maxiview {
+  -webkit-transition: opacity .10s, top .15s;
+}
+
+html[anim=true][enable-section-animations=true] .miniview {
   -webkit-transition: opacity .15s;
 }
 
@@ -480,16 +529,24 @@ html[anim=true] .maxiview {
   overflow-x: hidden;
 }
 
-.section.hidden > * {
+.section.collapsed > * {
   display: none;
 }
 
-.section.hidden > h2,
-.section.hidden > .miniview {
+.section.collapsed > h2 {
   display: block;
 }
 
-.section.hidden > h2 {
+.section.collapsed > .miniview {
+  display: block;
+  opacity: 0;
+}
+
+.section.collapsed > .miniview.opaque {
+  opacity: 1;
+}
+
+.section.collapsed > h2 {
   margin-right: 0;
 }
 
@@ -513,23 +570,20 @@ html[anim=true] .maxiview {
 
 /* small */
 
-@media (max-width: 940px) {
+.small-layout #main,
+.small-layout .section,
+.small-layout .maxiview,
+.small-layout #login-container,
+.small-layout #notification-container {
+  width: 692px;
+}
 
-  #main,
-  .section,
-  .maxiview,
-  #login-container,
-  #notification-container {
-    width: 692px;
-  }
+.small-layout  #notification > * {
+  max-width: 300px;
+}
 
-  #notification > * {
-    max-width: 300px;
-  }
-
-  #notification > span > .blacklist-title {
-    max-width: 15ex;
-  }
+.small-layout  #notification > span > .blacklist-title {
+  max-width: 15ex;
 }
 
 /* Ensure we have at least 10px horizontal marging. */

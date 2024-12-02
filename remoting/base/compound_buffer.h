@@ -83,6 +83,7 @@ class CompoundBuffer {
 
   struct DataChunk {
     DataChunk(net::IOBuffer* buffer, const char* start, int size);
+    ~DataChunk();
 
     scoped_refptr<net::IOBuffer> buffer;
     const char* start;
@@ -103,6 +104,8 @@ class CompoundBufferInputStream
   // Caller keeps ownership of |buffer|. |buffer| must be locked.
   explicit CompoundBufferInputStream(const CompoundBuffer* buffer);
   virtual ~CompoundBufferInputStream();
+
+  int position() const { return position_; }
 
   // google::protobuf::io::ZeroCopyInputStream interface.
   virtual bool Next(const void** data, int* size);

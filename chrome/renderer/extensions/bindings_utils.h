@@ -6,10 +6,10 @@
 #define CHROME_RENDERER_EXTENSIONS_BINDINGS_UTILS_H_
 #pragma once
 
-#include "app/resource_bundle.h"
 #include "base/linked_ptr.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "v8/include/v8.h"
 
 #include <list>
@@ -50,20 +50,7 @@ class ExtensionBase : public v8::Extension {
   static v8::Handle<v8::Value> GetChromeHidden(const v8::Arguments& args);
 };
 
-template<int kResourceId>
-struct StringResourceTemplate {
-  StringResourceTemplate()
-      : resource(ResourceBundle::GetSharedInstance().GetRawDataResource(
-            kResourceId).as_string()) {
-  }
-  std::string resource;
-};
-
-template<int kResourceId>
-const char* GetStringResource() {
-  return
-      Singleton< StringResourceTemplate<kResourceId> >::get()->resource.c_str();
-}
+const char* GetStringResource(int resource_id);
 
 // Contains information about a single javascript context.
 struct ContextInfo {

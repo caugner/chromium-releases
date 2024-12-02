@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,13 @@
 #include <windows.h>
 
 #include <string>
+#include <vector>
 
 #include "chrome/installer/util/work_item.h"
 
-// A WorkItem subclass that sets a registry value with REG_SZ or REG_DWORD
-// type at the specified path. The value is only set if the target key exists.
+// A WorkItem subclass that sets a registry value with REG_SZ, REG_DWORD, or
+// REG_QWORD type at the specified path. The value is only set if the target key
+// exists.
 class SetRegValueWorkItem : public WorkItem {
  public:
   virtual ~SetRegValueWorkItem();
@@ -51,6 +53,10 @@ class SetRegValueWorkItem : public WorkItem {
                       const std::wstring& value_name, DWORD value_data,
                       bool overwrite);
 
+  SetRegValueWorkItem(HKEY predefined_root, const std::wstring& key_path,
+                      const std::wstring& value_name, int64 value_data,
+                      bool overwrite);
+
   // Root key of the target key under which the value is set. The root key can
   // only be one of the predefined keys on Windows.
   HKEY predefined_root_;
@@ -61,21 +67,16 @@ class SetRegValueWorkItem : public WorkItem {
   // Name of the value to be set.
   std::wstring value_name_;
 
-  // Data of the value to be set.
-  std::wstring value_data_str_;  // if data is of type REG_SZ
-  DWORD value_data_dword_;  // if data is of type REG_DWORD
-
   // Whether to overwrite the existing value under the target key.
   bool overwrite_;
 
-  // boolean that tells whether data value is of type REG_SZ.
-  bool is_str_type_;
+  // Type of data to store
+  DWORD type_;
+  std::vector<uint8> value_;
+  DWORD previous_type_;
+  std::vector<uint8> previous_value_;
 
   SettingStatus status_;
-
-  // Data of the previous value.
-  std::wstring previous_value_str_;  // if data is of type REG_SZ
-  DWORD previous_value_dword_;  // if data is of type REG_DWORD
 };
 
 #endif  // CHROME_INSTALLER_UTIL_SET_REG_VALUE_WORK_ITEM_H__

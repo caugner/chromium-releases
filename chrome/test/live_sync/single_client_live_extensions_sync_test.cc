@@ -5,6 +5,7 @@
 #include "chrome/test/live_sync/live_extensions_sync_test.h"
 
 #include "base/basictypes.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
 
 class SingleClientLiveExtensionsSyncTest : public LiveExtensionsSyncTest {
@@ -25,8 +26,9 @@ IN_PROC_BROWSER_TEST_F(SingleClientLiveExtensionsSyncTest,
   ASSERT_TRUE(AllProfilesHaveSameExtensionsAsVerifier());
 }
 
+// TODO(rsimha): Enable after http://crbug.com/70028 is fixed.
 IN_PROC_BROWSER_TEST_F(SingleClientLiveExtensionsSyncTest,
-                       StartWithSomeExtensions) {
+                       DISABLED_StartWithSomeExtensions) {
   ASSERT_TRUE(SetupClients());
 
   const int kNumExtensions = 5;

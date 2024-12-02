@@ -8,6 +8,7 @@
 #include <GLES2/gl2.h>
 
 #include <map>
+#include <queue>
 #include <set>
 #include <string>
 #include <vector>
@@ -67,6 +68,9 @@ class GLES2Implementation {
   // GL names for the buffers used to emulate client side buffers.
   static const GLuint kClientSideArrayId = 0xFEDCBA98u;
   static const GLuint kClientSideElementArrayId = 0xFEDCBA99u;
+
+  // Number of swap buffers allowed before waiting.
+  static const size_t kMaxSwapBuffers = 2;
 
   GLES2Implementation(
       GLES2CmdHelper* helper,
@@ -289,6 +293,8 @@ class GLES2Implementation {
   uint32 result_shm_offset_;
   std::string last_error_;
 
+  std::queue<int32> swap_buffers_tokens_;
+
   // pack alignment as last set by glPixelStorei
   GLint pack_alignment_;
 
@@ -318,6 +324,10 @@ class GLES2Implementation {
   // the pointer passed back to the client has to remain valid for eternity.
   typedef std::map<uint32, std::set<std::string> > GLStringMap;
   GLStringMap gl_strings_;
+
+  // Similar cache for glGetRequestableExtensionsCHROMIUM. We don't
+  // have an enum for this so handle it separately.
+  std::set<std::string> requestable_extensions_set_;
 
   typedef std::map<const void*, MappedBuffer> MappedBufferMap;
   MappedBufferMap mapped_buffers_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,41 +8,18 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/renderer_preferences.h"
 #include "chrome/common/url_constants.h"
 #include "webkit/glue/webpreferences.h"
-
-namespace {
-class BalloonPaintObserver : public RenderWidgetHost::PaintObserver {
- public:
-  explicit BalloonPaintObserver(BalloonHost* balloon_host)
-      : balloon_host_(balloon_host) {
-  }
-
-  virtual void RenderWidgetHostWillPaint(RenderWidgetHost* rhw) {}
-  virtual void RenderWidgetHostDidPaint(RenderWidgetHost* rwh);
-
- private:
-  BalloonHost* balloon_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(BalloonPaintObserver);
-};
-
-void BalloonPaintObserver::RenderWidgetHostDidPaint(RenderWidgetHost* rwh) {
-  balloon_host_->RenderWidgetHostDidPaint();
-  // WARNING: we may have been deleted (if the balloon host cleared the paint
-  // observer).
-}
-
-}  // namespace
 
 BalloonHost::BalloonHost(Balloon* balloon)
     : render_view_host_(NULL),
@@ -73,7 +50,7 @@ void BalloonHost::Shutdown() {
   }
 }
 
-Browser* BalloonHost::GetBrowser() const {
+Browser* BalloonHost::GetBrowser() {
   // Notifications aren't associated with a particular browser.
   return NULL;
 }
@@ -91,7 +68,8 @@ const string16& BalloonHost::GetSource() const {
 
 WebPreferences BalloonHost::GetWebkitPrefs() {
   WebPreferences web_prefs =
-      RenderViewHostDelegateHelper::GetWebkitPrefs(GetProfile(), enable_dom_ui_);
+      RenderViewHostDelegateHelper::GetWebkitPrefs(GetProfile(),
+                                                   enable_dom_ui_);
   web_prefs.allow_scripts_to_close_windows = true;
   return web_prefs;
 }
@@ -132,7 +110,9 @@ void BalloonHost::RenderViewReady(RenderViewHost* render_view_host) {
       Source<BalloonHost>(this), NotificationService::NoDetails());
 }
 
-void BalloonHost::RenderViewGone(RenderViewHost* render_view_host) {
+void BalloonHost::RenderViewGone(RenderViewHost* render_view_host,
+                                 base::TerminationStatus status,
+                                 int error_code) {
   Close(render_view_host);
 }
 
@@ -190,6 +170,11 @@ void BalloonHost::ShowCreatedWindow(int route_id,
   browser->AddTabContents(contents, disposition, initial_pos, user_gesture);
 }
 
+bool BalloonHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                         bool* is_keyboard_shortcut) {
+  return false;
+}
+
 void BalloonHost::UpdatePreferredSize(const gfx::Size& new_size) {
   balloon_->SetContentPreferredSize(new_size);
 }
@@ -208,7 +193,7 @@ void BalloonHost::Init() {
   DCHECK(!render_view_host_) << "BalloonViewHost already initialized.";
   RenderViewHost* rvh = new RenderViewHost(
       site_instance_.get(), this, MSG_ROUTING_NONE, NULL);
-  if (GetProfile()->GetExtensionsService()) {
+  if (GetProfile()->GetExtensionService()) {
     extension_function_dispatcher_.reset(
         ExtensionFunctionDispatcher::Create(
             rvh, this, balloon_->notification().content_url()));
@@ -228,7 +213,8 @@ void BalloonHost::Init() {
   rvh->set_view(render_widget_host_view());
   rvh->CreateRenderView(string16());
 #if defined(OS_MACOSX)
-  rvh->set_paint_observer(new BalloonPaintObserver(this));
+  registrar_.Add(this, NotificationType::RENDER_WIDGET_HOST_DID_PAINT,
+      Source<RenderWidgetHost>(render_view_host_));
 #endif
   rvh->NavigateToURL(balloon_->notification().content_url());
 
@@ -251,10 +237,14 @@ void BalloonHost::ClearInspectorSettings() {
   RenderViewHostDelegateHelper::ClearInspectorSettings(GetProfile());
 }
 
-void BalloonHost::RenderWidgetHostDidPaint() {
-  render_view_host_->set_paint_observer(NULL);
-  render_view_host_->EnablePreferredSizeChangedMode(
-      kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
+void BalloonHost::Observe(NotificationType type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  if (type == NotificationType::RENDER_WIDGET_HOST_DID_PAINT) {
+    registrar_.RemoveAll();
+    render_view_host_->EnablePreferredSizeChangedMode(
+        kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
+  }
 }
 
 BalloonHost::~BalloonHost() {

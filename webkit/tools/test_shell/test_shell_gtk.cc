@@ -11,7 +11,6 @@
 #include <signal.h>
 #include <unistd.h>
 
-#include "base/data_pack.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -23,9 +22,10 @@
 #include "grit/webkit_resources.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/resource/data_pack.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/webkit_glue.h"
@@ -45,7 +45,7 @@ const FcChar8* FilePathAsFcChar(const FilePath& path) {
 }
 
 // Data resources on linux.  This is a pointer to the mmapped resources file.
-base::DataPack* g_resource_data_pack = NULL;
+ui::DataPack* g_resource_data_pack = NULL;
 
 void TerminationSignalHandler(int signatl) {
   TestShell::ShutdownTestShell();
@@ -159,7 +159,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
 
   web_prefs_ = new WebPreferences;
 
-  g_resource_data_pack = new base::DataPack;
+  g_resource_data_pack = new ui::DataPack;
   FilePath data_path;
   PathService::Get(base::DIR_EXE, &data_path);
   data_path = data_path.Append("test_shell.pak");
@@ -487,7 +487,7 @@ void TestShell::ResizeSubViews() {
   // GTK manages layout for us so we do nothing.
 }
 
-/* static */ void TestShell::DumpAllBackForwardLists(std::wstring* result) {
+/* static */ void TestShell::DumpAllBackForwardLists(string16* result) {
   result->clear();
   for (WindowList::iterator iter = TestShell::windowList()->begin();
        iter != TestShell::windowList()->end(); iter++) {
@@ -626,7 +626,7 @@ void TestShell::ShowStartupDebuggingDialog() {
 }
 
 // static
-base::StringPiece TestShell::NetResourceProvider(int key) {
+base::StringPiece TestShell::ResourceProvider(int key) {
   base::StringPiece res;
   g_resource_data_pack->GetStringPiece(key, &res);
   return res;
@@ -655,7 +655,7 @@ base::StringPiece GetDataResource(int resource_id) {
       resource_id = IDR_TEXTAREA_RESIZER_TESTSHELL;
       break;
   }
-  return TestShell::NetResourceProvider(resource_id);
+  return TestShell::ResourceProvider(resource_id);
 }
 
 }  // namespace webkit_glue

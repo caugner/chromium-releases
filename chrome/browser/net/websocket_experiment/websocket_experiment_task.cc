@@ -7,7 +7,7 @@
 #include "base/hash_tables.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/browser_thread.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
@@ -295,7 +295,7 @@ void WebSocketExperimentTask::SaveResult() const {
 void WebSocketExperimentTask::OnURLFetchComplete(
     const URLFetcher* source,
     const GURL& url,
-    const URLRequestStatus& status,
+    const net::URLRequestStatus& status,
     int response_code,
     const ResponseCookies& cookies,
     const std::string& data) {

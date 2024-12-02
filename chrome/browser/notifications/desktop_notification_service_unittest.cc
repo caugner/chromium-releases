@@ -4,8 +4,10 @@
 
 #include "chrome/browser/notifications/desktop_notification_service.h"
 
+#include "base/message_loop.h"
 #include "base/ref_counted.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/notifications/notifications_prefs_cache.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_pref_update.h"
@@ -14,7 +16,7 @@
 #include "chrome/test/testing_profile.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebNotificationPresenter.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 
 namespace {
 

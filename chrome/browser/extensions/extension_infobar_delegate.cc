@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
@@ -54,17 +55,21 @@ bool ExtensionInfoBarDelegate::EqualsDelegate(InfoBarDelegate* delegate) const {
          extension_host_->extension();
 }
 
+void ExtensionInfoBarDelegate::InfoBarDismissed() {
+  closing_ = true;
+}
+
 void ExtensionInfoBarDelegate::InfoBarClosed() {
   delete this;
 }
 
-ExtensionInfoBarDelegate*
-ExtensionInfoBarDelegate::AsExtensionInfoBarDelegate() {
-  return this;
+InfoBarDelegate::Type ExtensionInfoBarDelegate::GetInfoBarType() const {
+  return PAGE_ACTION_TYPE;
 }
 
-InfoBarDelegate::Type ExtensionInfoBarDelegate::GetInfoBarType() {
-  return PAGE_ACTION_TYPE;
+ExtensionInfoBarDelegate*
+    ExtensionInfoBarDelegate::AsExtensionInfoBarDelegate() {
+  return this;
 }
 
 void ExtensionInfoBarDelegate::Observe(NotificationType type,
@@ -78,7 +83,8 @@ void ExtensionInfoBarDelegate::Observe(NotificationType type,
       break;
     }
     case NotificationType::EXTENSION_UNLOADED: {
-      const Extension* extension = Details<const Extension>(details).ptr();
+      const Extension* extension =
+          Details<UnloadedExtensionInfo>(details)->extension;
       if (extension_ == extension)
         tab_contents_->RemoveInfoBar(this);
       break;

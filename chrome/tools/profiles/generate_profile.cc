@@ -8,7 +8,6 @@
 #include "chrome/tools/profiles/thumbnail-inl.h"
 
 #include "app/app_paths.h"
-#include "app/resource_bundle.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
@@ -18,10 +17,9 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/common/chrome_paths.h"
@@ -30,6 +28,8 @@
 #include "chrome/common/notification_service.h"
 #include "gfx/codec/jpeg_codec.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_paths.h"
 
 using base::Time;
 
@@ -94,7 +94,7 @@ std::wstring RandomWords(int count) {
 // Return a random URL-looking string.
 GURL ConstructRandomURL() {
   return GURL(std::wstring(L"http://") + RandomChars(3) + L".com/" +
-      RandomChars(RandomInt(5,20)));
+      RandomChars(RandomInt(5, 20)));
 }
 
 // Return a random page title-looking string.
@@ -140,8 +140,7 @@ void InsertURLBatch(Profile* profile,
   GURL previous_url;
   PageTransition::Type transition = PageTransition::TYPED;
   const int end_page_id = page_id + batch_size;
-  history::TopSites* top_sites =
-      history::TopSites::IsEnabled() ? profile->GetTopSites() : NULL;
+  history::TopSites* top_sites = profile->GetTopSites();
   for (; page_id < end_page_id; ++page_id) {
     // Randomly decide whether this new URL simulates following a link or
     // whether it's a jump to a new URL.
@@ -226,15 +225,16 @@ int main(int argc, const char* argv[]) {
     dst_dir = current_dir.Append(dst_dir);
   }
   if (!file_util::CreateDirectory(dst_dir)) {
-    printf("Unable to create directory %ls: %ls\n",
+    printf("Unable to create directory %ls: %d\n",
            dst_dir.value().c_str(),
-           win_util::FormatLastWin32Error().c_str());
+           ::GetLastError());
   }
 
   icu_util::Initialize();
 
   chrome::RegisterPathProvider();
   app::RegisterPathProvider();
+  ui::RegisterPathProvider();
   ResourceBundle::InitSharedInstance("en-US");
   NotificationService notification_service;
   MessageLoopForUI message_loop;
@@ -278,8 +278,7 @@ int main(int argc, const char* argv[]) {
     printf("Copying file %ls to %ls\n", path.value().c_str(),
            dst_file.value().c_str());
     if (!file_util::CopyFile(path, dst_file)) {
-      printf("Copying file failed: %ls\n",
-             win_util::FormatLastWin32Error().c_str());
+      printf("Copying file failed: %d\n", ::GetLastError());
       return -1;
     }
     path = file_iterator.Next();

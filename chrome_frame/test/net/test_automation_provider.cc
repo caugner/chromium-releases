@@ -14,7 +14,7 @@ namespace {
 
 // A special command line switch to just run the unit tests without CF in
 // the picture.  Can be useful when the harness itself needs to be debugged.
-const wchar_t kNoCfTestRun[] = L"no-cf-test-run";
+const char kNoCfTestRun[] = "no-cf-test-run";
 
 bool CFTestsDisabled() {
   static bool switch_present = CommandLine::ForCurrentProcess()->
@@ -35,10 +35,10 @@ TestAutomationProvider::TestAutomationProvider(
   // ensure that we don't inadvarently end up handling http requests which
   // we don't expect. The initial chrome frame page for the network tests
   // issues http requests which our test factory should not handle.
-  URLRequest::RegisterProtocolFactory("http",
-                                      TestAutomationProvider::Factory);
-  URLRequest::RegisterProtocolFactory("https",
-                                      TestAutomationProvider::Factory);
+  net::URLRequest::RegisterProtocolFactory("http",
+                                           TestAutomationProvider::Factory);
+  net::URLRequest::RegisterProtocolFactory("https",
+                                           TestAutomationProvider::Factory);
   automation_resource_message_filter_ =
       new TestAutomationResourceMessageFilter(this);
   g_provider_instance_ = this;
@@ -48,19 +48,18 @@ TestAutomationProvider::~TestAutomationProvider() {
   g_provider_instance_ = NULL;
 }
 
-void TestAutomationProvider::OnMessageReceived(const IPC::Message& msg) {
+bool TestAutomationProvider::OnMessageReceived(const IPC::Message& msg) {
   if (automation_resource_message_filter_->OnMessageReceived(msg))
-    return;  // Message handled by the filter.
+    return true;  // Message handled by the filter.
 
-  __super::OnMessageReceived(msg);
+  return __super::OnMessageReceived(msg);
 }
 
 // IPC override to grab the tab handle.
 bool TestAutomationProvider::Send(IPC::Message* msg) {
   if (msg->type() == AutomationMsg_TabLoaded::ID) {
     DCHECK(tab_handle_ == -1) << "Currently only support one tab";
-    void* iter = NULL;
-    CHECK(msg->ReadInt(&iter, &tab_handle_));
+    tab_handle_ = msg->routing_id();
     DVLOG(1) << "Got tab handle: " << tab_handle_;
     DCHECK(tab_handle_ != -1 && tab_handle_ != 0);
     delegate_->OnInitialTabLoaded();
@@ -69,8 +68,8 @@ bool TestAutomationProvider::Send(IPC::Message* msg) {
   return AutomationProvider::Send(msg);
 }
 
-URLRequestJob* TestAutomationProvider::Factory(URLRequest* request,
-                                               const std::string& scheme) {
+net::URLRequestJob* TestAutomationProvider::Factory(net::URLRequest* request,
+                                                    const std::string& scheme) {
   if (CFTestsDisabled())
     return NULL;
 

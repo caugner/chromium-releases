@@ -7,7 +7,7 @@
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
 #include "base/task.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -73,7 +73,7 @@ void WebDataService::UnloadDatabase() {
 }
 
 void WebDataService::CancelRequest(Handle h) {
-  AutoLock l(pending_lock_);
+  base::AutoLock l(pending_lock_);
   RequestMap::iterator i = pending_requests_.find(h);
   if (i == pending_requests_.end()) {
     NOTREACHED() << "Canceling a nonexistent web data service request";
@@ -547,7 +547,7 @@ void WebDataService::RequestCompleted(Handle h) {
 }
 
 void WebDataService::RegisterRequest(WebDataRequest* request) {
-  AutoLock l(pending_lock_);
+  base::AutoLock l(pending_lock_);
   pending_requests_[request->GetHandle()] = request;
 }
 
@@ -637,7 +637,7 @@ void WebDataService::ScheduleCommit() {
 }
 
 int WebDataService::GetNextRequestHandle() {
-  AutoLock l(pending_lock_);
+  base::AutoLock l(pending_lock_);
   return ++next_request_handle_;
 }
 

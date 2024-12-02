@@ -102,6 +102,12 @@ HRESULT CeeeExecutorCreator::CreateWindowExecutor(long thread_id,
     return E_FAIL;
   }
 
+  // We have seen a case where a hook may call us in the Broker process
+  // but the DLL is not loaded anymore... This is weird... But to make sure
+  // this doesn't cause a crash when it happens, we pin ourselves here to make
+  // sure we won't be called when unloaded.
+  PinModule();
+
   // We unfortunately can't Send a synchronous message here.
   // If we do, any calls back to the broker fail with the following error:
   // "An outgoing call cannot be made since the application is dispatching an
@@ -240,7 +246,12 @@ STDMETHODIMP AsyncTabCall::Begin_GetTabInfo() {
   // We do all the work on Finish_GetTabInfo, so schedule only a noop
   // invocation. Alternatively we could schedule NULL here, though that
   // would make it more difficult to distinguish error cases.
-  return ScheduleTask(NewRunnableFunction(Noop));
+  if (!ScheduleTask(NewRunnableFunction(Noop))) {
+    LOG(ERROR) << "Failed to schedule Noop task";
+    return E_OUTOFMEMORY;
+  }
+
+  return S_OK;
 }
 
 STDMETHODIMP AsyncTabCall::Finish_GetTabInfo(CeeeTabInfo *tab_info) {
@@ -367,7 +378,11 @@ HRESULT AsyncTabCall::Signal() {
   return hr;
 }
 
-CeeeExecutor::CeeeExecutor() : hwnd_(NULL) {
+CeeeExecutor::CeeeExecutor()
+    : hwnd_(NULL),
+      // Don't restart on broker crash. It won't work because executor was
+      // already registered in dead broker.
+      broker_rpc_client_(false) {
 }
 
 CeeeExecutor::~CeeeExecutor() {
@@ -776,13 +791,21 @@ STDMETHODIMP CeeeExecutor::Navigate(BSTR url, long flags, BSTR target) {
 
   hr = tab_browser->Navigate(url, &CComVariant(flags), &CComVariant(target),
                              &CComVariant(), &CComVariant());
-  // We don't DCHECK here since there are cases where we get an error
-  // 0x800700aa "The requested resource is in use." if the main UI
+  // We don't DCHECK here since we found out that Navigate has at least
+  // two legitimate failure modes we can do nothing about. They are not
+  // entirely unexpected, even though they are rare:
+  // 1. 0x800700aa "The requested resource is in use." if the main UI
   // thread is currently blocked... and sometimes... it is blocked by
   // us... if we are too slow to respond (e.g. because too busy
   // navigating when the user performs an extension action that causes
-  // navigation again and again and again)... So we might as well
-  // abandon ship and let the UI thread be happy...
+  // navigation again and again and again). So we might as well
+  // abandon ship and let the UI thread be happy.
+  // 2. When the window is not in the state where it can navigate, E_FAIL is
+  // returned. For instance, when a modal message box is displayed (IE7/8
+  // security warning, script error etc.).
+  // TODO(motek@chromium.org): find a method of figuring out the state of
+  // the tab_browser (preferably prior to invoking the function) and DCHECK if
+  // we are indeed hitting one of these predetermined conditions.
   LOG_IF(ERROR, FAILED(hr)) << "Failed to navigate tab: " << hwnd_ <<
        " to " << url << ". " << com::LogHr(hr);
   return hr;
@@ -865,7 +888,7 @@ STDMETHODIMP CeeeExecutor::InsertCode(BSTR code, BSTR file, BOOL all_frames,
 
   hr = frame_handler_host->InsertCode(code, file, all_frames, type);
   if (FAILED(hr)) {
-    NOTREACHED() << "Failed to insert code. " << com::LogHr(hr);
+    LOG(ERROR) << "Failed to insert code. " << com::LogHr(hr);
     return hr;
   }
 

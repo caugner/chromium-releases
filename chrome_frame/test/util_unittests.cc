@@ -5,18 +5,52 @@
 #include "base/file_path.h"
 #include "base/file_version_info.h"
 #include "base/file_version_info_win.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
+#include "chrome_frame/navigation_constraints.h"
+#include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/utils.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::win::RegKey;
+using chrome_frame_test::TempRegKeyOverride;
 
 const wchar_t kChannelName[] = L"-dev";
 const wchar_t kSuffix[] = L"-fix";
 
-TEST(UtilTests, GetModuleVersionTest) {
+// Registry override in the UtilsTest will cause shell APIs to fail
+// So separate this test from the rest
+TEST(SimpleUtilTests, GetTempInternetFiles) {
+  FilePath path = GetIETemporaryFilesFolder();
+  EXPECT_FALSE(path.empty());
+}
+
+class UtilTests : public testing::Test {
+ protected:
+  void SetUp() {
+    TempRegKeyOverride::DeleteAllTempKeys();
+    DeleteAllSingletons();
+
+    hklm_pol_.reset(new TempRegKeyOverride(HKEY_LOCAL_MACHINE, L"hklm_fake"));
+    hkcu_pol_.reset(new TempRegKeyOverride(HKEY_CURRENT_USER, L"hkcu_fake"));
+  }
+
+  void TearDown() {
+    hkcu_pol_.reset(NULL);
+    hklm_pol_.reset(NULL);
+    TempRegKeyOverride::DeleteAllTempKeys();
+  }
+
+  // This is used to manage life cycle of PolicySettings singleton.
+  // base::ShadowingAtExitManager at_exit_manager_;
+  scoped_ptr<TempRegKeyOverride> hklm_pol_;
+  scoped_ptr<TempRegKeyOverride> hkcu_pol_;
+};
+
+TEST_F(UtilTests, GetModuleVersionTest) {
   HMODULE mod = GetModuleHandle(L"kernel32.dll");
   EXPECT_NE(mod, static_cast<HMODULE>(NULL));
   wchar_t path[MAX_PATH] = {0};
@@ -24,7 +58,7 @@ TEST(UtilTests, GetModuleVersionTest) {
 
   // Use the method that goes to disk
   scoped_ptr<FileVersionInfo> base_info(
-      FileVersionInfo::CreateFileVersionInfo(path));
+      FileVersionInfo::CreateFileVersionInfo(FilePath(path)));
   EXPECT_TRUE(base_info.get() != NULL);
 
   // Use the method that doesn't go to disk
@@ -43,7 +77,7 @@ TEST(UtilTests, GetModuleVersionTest) {
   EXPECT_EQ(fixed_info->dwFileVersionLS, static_cast<DWORD>(low));
 }
 
-TEST(UtilTests, HaveSameOrigin) {
+TEST_F(UtilTests, HaveSameOrigin) {
   struct OriginCompare {
     const char* a;
     const char* b;
@@ -68,7 +102,7 @@ TEST(UtilTests, HaveSameOrigin) {
   }
 }
 
-TEST(UtilTests, IsValidUrlScheme) {
+TEST_F(UtilTests, IsValidUrlScheme) {
   struct Cases {
     const wchar_t* url;
     bool is_privileged;
@@ -102,7 +136,7 @@ TEST(UtilTests, IsValidUrlScheme) {
   }
 }
 
-TEST(UtilTests, GuidToString) {
+TEST_F(UtilTests, GuidToString) {
   // {3C5E2125-35BA-48df-A841-5F669B9D69FC}
   const GUID test_guid = { 0x3c5e2125, 0x35ba, 0x48df,
       { 0xa8, 0x41, 0x5f, 0x66, 0x9b, 0x9d, 0x69, 0xfc } };
@@ -115,12 +149,7 @@ TEST(UtilTests, GuidToString) {
   EXPECT_EQ(static_cast<size_t>(lstrlenW(compare)), str_guid.length());
 }
 
-TEST(UtilTests, GetTempInternetFiles) {
-  FilePath path = GetIETemporaryFilesFolder();
-  EXPECT_FALSE(path.empty());
-}
-
-TEST(UtilTests, ParseAttachTabUrlTest) {
+TEST_F(UtilTests, ParseAttachTabUrlTest) {
   ChromeFrameUrl cf_url;
 
   static const std::string kProfileName("iexplore");
@@ -202,8 +231,36 @@ class MockIInternetSecurityManager : public IInternetSecurityManager {
       HRESULT(DWORD zone, IEnumString** enum_string, DWORD flags));
 };
 
-TEST(UtilTests, CanNavigateTest) {
-  MockIInternetSecurityManager mock;
+// This class provides a partial mock for the NavigationConstraints
+// interface by providing specialized zone overrides.
+class MockNavigationConstraintsZoneOverride
+    : public NavigationConstraintsImpl {
+ public:
+  MOCK_METHOD1(IsZoneAllowed, bool(const GURL&url));
+};
+
+// Mock NavigationConstraints
+class MockNavigationConstraints : public NavigationConstraints {
+ public:
+  MOCK_METHOD0(AllowUnsafeUrls, bool());
+  MOCK_METHOD1(IsSchemeAllowed, bool(const GURL& url));
+  MOCK_METHOD1(IsZoneAllowed, bool(const GURL& url));
+};
+
+// Matcher which returns true if the URL passed in starts with the prefix
+// specified.
+MATCHER_P(UrlPathStartsWith, url_prefix, "url starts with prefix") {
+  return StartsWith(UTF8ToWide(arg.spec()), url_prefix, false);
+}
+
+ACTION_P3(HandleZone, mock, url_prefix, zone) {
+  if (StartsWith(UTF8ToWide(arg0.spec()), url_prefix, false))
+    return zone != URLZONE_UNTRUSTED;
+  return false;
+}
+
+TEST_F(UtilTests, CanNavigateTest) {
+  MockNavigationConstraintsZoneOverride mock;
 
   struct Zones {
     const wchar_t* url_prefix;
@@ -214,6 +271,7 @@ TEST(UtilTests, CanNavigateTest) {
     { L"about:", URLZONE_TRUSTED },
     { L"view-source:", URLZONE_TRUSTED },
     { L"chrome-extension:", URLZONE_TRUSTED },
+    { L"data:", URLZONE_INTERNET },
     { L"ftp:", URLZONE_UNTRUSTED },
     { L"file:", URLZONE_LOCAL_MACHINE },
     { L"sip:", URLZONE_UNTRUSTED },
@@ -221,79 +279,150 @@ TEST(UtilTests, CanNavigateTest) {
 
   for (int i = 0; i < arraysize(test_zones); ++i) {
     const Zones& zone = test_zones[i];
-    EXPECT_CALL(mock, MapUrlToZone(testing::StartsWith(zone.url_prefix),
-                                                       testing::_, testing::_))
-      .WillRepeatedly(testing::DoAll(
-          testing::SetArgumentPointee<1>(zone.zone),
-          testing::Return(S_OK)));
+    EXPECT_CALL(mock, IsZoneAllowed(UrlPathStartsWith(zone.url_prefix)))
+        .WillRepeatedly(testing::Return(zone.zone != URLZONE_UNTRUSTED));
   }
 
   struct Cases {
     const char* url;
-    bool is_privileged;
     bool default_expected;
     bool unsafe_expected;
+    bool is_privileged;
   } test_cases[] = {
     // Invalid URL
     { "          ", false, false, false },
-    { "foo bar", true, false, false },
+    { "foo bar", false, false, false },
 
     // non-privileged test cases
-    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore", false,
-        true, true },
-    { "http://untrusted/bar.html", false, false, true },
-    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore", false,
-        true, true },
-    { "view-source:http://www.google.ca", false, true, true },
-    { "view-source:javascript:alert('foo');", false, false, true },
-    { "about:blank", false, true, true },
-    { "About:Version", false, true, true },
-    { "about:config", false, false, true },
-    { "chrome-extension://aaaaaaaaaaaaaaaaaaa/toolstrip.html", false, false,
-        true },
-    { "ftp://www.google.ca", false, false, true },
-    { "file://www.google.ca", false, false, true },
-    { "file://C:\boot.ini", false, false, true },
-    { "SIP:someone@10.1.2.3", false, false, true },
+    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore", true,
+       true, false },
+    { "http://untrusted/bar.html", false, true, false },
+    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore", true,
+       true, false },
+    { "view-source:http://www.google.ca", true, true, false },
+    { "view-source:javascript:alert('foo');", false, true, false },
+    { "about:blank", true, true, false },
+    { "About:Version", true, true, false },
+    { "about:config", false, true, false },
+    { "chrome-extension://aaaaaaaaaaaaaaaaaaa/toolstrip.html", false, true,
+       false },
+    { "ftp://www.google.ca", false, true, false },
+    { "file://www.google.ca", false, true, false },
+    { "file://C:\boot.ini", false, true, false },
+    { "SIP:someone@10.1.2.3", false, true, false },
 
     // privileged test cases
-    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore", true, true,
-        true },
-    { "http://untrusted/bar.html", true, false, true },
-    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore", true, true,
-        true },
-    { "view-source:http://www.google.ca", true, true, true },
-    { "view-source:javascript:alert('foo');", true, false, true },
-    { "about:blank", true, true, true },
-    { "About:Version", true, true, true },
-    { "about:config", true, false, true },
     { "chrome-extension://aaaaaaaaaaaaaaaaaaa/toolstrip.html", true, true,
-        true },
-    { "ftp://www.google.ca", true, false, true },
-    { "file://www.google.ca", true, false, true },
-    { "file://C:\boot.ini", true, false, true },
-    { "sip:someone@10.1.2.3", false, false, true },
+       true },
+    { "data://aaaaaaaaaaaaaaaaaaa/toolstrip.html", true, true, true },
   };
 
   for (int i = 0; i < arraysize(test_cases); ++i) {
     const Cases& test = test_cases[i];
-    bool actual = CanNavigate(GURL(test.url), &mock, test.is_privileged);
+    mock.set_is_privileged(test.is_privileged);
+    bool actual = CanNavigate(GURL(test.url), &mock);
     EXPECT_EQ(test.default_expected, actual) << "Failure url: " << test.url;
   }
-
-  bool enable_gcf = GetConfigBool(false, kAllowUnsafeURLs);
-  SetConfigBool(kAllowUnsafeURLs, true);
-
-  for (int i = 0; i < arraysize(test_cases); ++i) {
-    const Cases& test = test_cases[i];
-    bool actual = CanNavigate(GURL(test.url), &mock, test.is_privileged);
-    EXPECT_EQ(test.unsafe_expected, actual) << "Failure url: " << test.url;
-  }
-
-  SetConfigBool(kAllowUnsafeURLs, enable_gcf);
 }
 
-TEST(UtilTests, IsDefaultRendererTest) {
+TEST_F(UtilTests, CanNavigateTestDenyAll) {
+  MockNavigationConstraints mock;
+
+  EXPECT_CALL(mock, IsZoneAllowed(testing::_))
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::Return(false));
+
+  EXPECT_CALL(mock, IsSchemeAllowed(testing::_))
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::Return(false));
+
+  EXPECT_CALL(mock, AllowUnsafeUrls())
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::Return(false));
+
+  char *urls[] = {
+    { "          "},
+    { "foo bar"},
+    // non-privileged test cases
+    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore"},
+    { "http://untrusted/bar.html"},
+    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore"},
+    { "view-source:http://www.google.ca"},
+    { "view-source:javascript:alert('foo');"},
+    { "about:blank"},
+    { "About:Version"},
+    { "about:config"},
+    { "chrome-extension://aaaaaaaaaaaaaaaaaaa/toolstrip.html"},
+    { "ftp://www.google.ca"},
+    { "file://www.google.ca"},
+    { "file://C:\boot.ini"},
+    { "SIP:someone@10.1.2.3"},
+  };
+
+  for (int i = 0; i < arraysize(urls); ++i) {
+    EXPECT_FALSE(CanNavigate(GURL(urls[i]), &mock));
+  }
+}
+
+TEST_F(UtilTests, CanNavigateTestAllowAll) {
+  MockNavigationConstraints mock;
+
+  EXPECT_CALL(mock, AllowUnsafeUrls())
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::Return(false));
+
+  EXPECT_CALL(mock, IsSchemeAllowed(testing::_))
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::Return(true));
+
+  EXPECT_CALL(mock, IsZoneAllowed(testing::_))
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::Return(true));
+
+  char *urls[] = {
+    // non-privileged test cases
+    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore"},
+    { "http://untrusted/bar.html"},
+    { "http://blah/?attach_external_tab&10&1&0&0&100&100&iexplore"},
+    { "view-source:http://www.google.ca"},
+    { "view-source:javascript:alert('foo');"},
+    { "about:blank"},
+    { "About:Version"},
+    { "about:config"},
+    { "chrome-extension://aaaaaaaaaaaaaaaaaaa/toolstrip.html"},
+    { "ftp://www.google.ca"},
+    { "file://www.google.ca"},
+    { "file://C:\boot.ini"},
+    { "SIP:someone@10.1.2.3"},
+    { "gcf:about:cache"},
+    { "gcf:about:plugins"},
+  };
+
+  for (int i = 0; i < arraysize(urls); ++i) {
+    EXPECT_TRUE(CanNavigate(GURL(urls[i]), &mock));
+  }
+}
+
+TEST_F(UtilTests, CanNavigateTestAllowAllUnsafeUrls) {
+  MockNavigationConstraints mock;
+
+  EXPECT_CALL(mock, AllowUnsafeUrls())
+      .Times(testing::AnyNumber())
+      .WillRepeatedly(testing::Return(true));
+
+  char *urls[] = {
+    {"gcf:about:cache"},
+    {"gcf:http://www.google.com"},
+    {"view-source:javascript:alert('foo');"},
+    {"http://www.google.com"},
+  };
+
+  for (int i = 0; i < arraysize(urls); ++i) {
+    EXPECT_TRUE(CanNavigate(GURL(urls[i]), &mock));
+  }
+}
+
+TEST_F(UtilTests, IsDefaultRendererTest) {
   RegKey config_key(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_ALL_ACCESS);
   EXPECT_TRUE(config_key.Valid());
 
@@ -312,7 +441,7 @@ TEST(UtilTests, IsDefaultRendererTest) {
   config_key.WriteValue(kEnableGCFRendererByDefault, saved_default_renderer);
 }
 
-TEST(UtilTests, RendererTypeForUrlTest) {
+TEST_F(UtilTests, RendererTypeForUrlTest) {
   // Open all the keys we need.
   RegKey config_key(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_ALL_ACCESS);
   EXPECT_TRUE(config_key.Valid());
@@ -356,7 +485,7 @@ TEST(UtilTests, RendererTypeForUrlTest) {
   config_key.WriteValue(kEnableGCFRendererByDefault, saved_default_renderer);
 }
 
-TEST(UtilTests, XUaCompatibleDirectiveTest) {
+TEST_F(UtilTests, XUaCompatibleDirectiveTest) {
   int all_versions[] = {0, 1, 2, 5, 6, 7, 8, 9, 10, 11, 99, 100, 101, 1000};
 
   struct Cases {

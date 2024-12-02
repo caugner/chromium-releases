@@ -9,75 +9,74 @@ lastchange.py -- Chromium revision fetching utility.
 
 import optparse
 import os
-import re
 import subprocess
 import sys
 
+class VersionInfo(object):
+  def __init__(self, url, root, revision):
+    self.url = url
+    self.root = root
+    self.revision = revision
 
-def svn_fetch_revision():
+
+def FetchSVNRevision(command, directory):
   """
-  Fetch the Subversion revision for the local tree.
+  Fetch the Subversion branch and revision for the a given directory
+  by running the given command (e.g. "svn info").
 
   Errors are swallowed.
+
+  Returns:
+    a VersionInfo object or None on error.
   """
   try:
-    p = subprocess.Popen(['svn', 'info'],
-                         stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE,
-                         shell=(sys.platform=='win32'))
-  except OSError, e:
-    # 'svn' is apparently either not installed or not executable.
-    return None
-  revision = None
-  if p:
-    svn_re = re.compile('^Revision:\s+(\d+)', re.M)
-    m = svn_re.search(p.stdout.read())
-    if m:
-      revision = m.group(1)
-  return revision
-
-
-def git_fetch_id():
-  """
-  Fetch the GIT identifier for the local tree.
-
-  Errors are swallowed.
-  """
-  git_re = re.compile('^\s*git-svn-id:\s+(\S+)@(\d+)', re.M)
-  try:
-    proc = subprocess.Popen(['git', 'log', '-999'],
+    proc = subprocess.Popen(command,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
+                            cwd=directory,
                             shell=(sys.platform=='win32'))
-    for line in proc.stdout:
-      match = git_re.search(line)
-      if match:
-        id = match.group(2)
-        if id:
-          proc.stdout.close()  # Cut pipe.
-          return id
   except OSError:
-    # 'git' is apparently either not installed or not executable.
-    pass
-  return None
+    # command is apparently either not installed or not executable.
+    return None
+  if not proc:
+    return None
+
+  attrs = {}
+  for line in proc.stdout:
+    line = line.strip()
+    if not line:
+      continue
+    key, val = line.split(': ', 1)
+    attrs[key] = val
+
+  try:
+    url = attrs['URL']
+    root = attrs['Repository Root']
+    revision = attrs['Revision']
+  except KeyError:
+    return None
+
+  return VersionInfo(url, root, revision)
 
 
-def fetch_change(default_lastchange):
+def FetchVersionInfo(default_lastchange, directory=None):
   """
-  Returns the last change, from some appropriate revision control system.
+  Returns the last change (in the form of a branch, revision tuple),
+  from some appropriate revision control system.
   """
-  change = svn_fetch_revision()
-  if not change and sys.platform in ('linux2',):
-    change = git_fetch_id()
-  if not change:
+  version_info = FetchSVNRevision(['svn', 'info'], directory)
+  if not version_info and sys.platform in ('linux2',):
+    version_info = FetchSVNRevision(['git', 'svn', 'info'], directory)
+  if not version_info:
     if default_lastchange and os.path.exists(default_lastchange):
-      change = open(default_lastchange, 'r').read().strip()
+      revision = open(default_lastchange, 'r').read().strip()
+      version_info = VersionInfo(None, None, revision)
     else:
-      change = '0'
-  return change
+      version_info = VersionInfo('', '', '0')
+  return version_info
 
 
-def write_if_changed(file_name, contents):
+def WriteIfChanged(file_name, contents):
   """
   Writes the specified contents to the specified file_name
   iff the contents are different than the current contents.
@@ -97,11 +96,13 @@ def main(argv=None):
   if argv is None:
     argv = sys.argv
 
-  parser = optparse.OptionParser(usage="lastchange.py [-h] [[-o] FILE]")
+  parser = optparse.OptionParser(usage="lastchange.py [options]")
   parser.add_option("-d", "--default-lastchange", metavar="FILE",
                     help="default last change input FILE")
   parser.add_option("-o", "--output", metavar="FILE",
                     help="write last change to FILE")
+  parser.add_option("--revision-only", action='store_true',
+                    help="just print the SVN revision number")
   opts, args = parser.parse_args(argv[1:])
 
   out_file = opts.output
@@ -114,14 +115,16 @@ def main(argv=None):
     parser.print_help()
     sys.exit(2)
 
-  change = fetch_change(opts.default_lastchange)
+  version_info = FetchVersionInfo(opts.default_lastchange)
 
-  contents = "LASTCHANGE=%s\n" % change
-
-  if out_file:
-    write_if_changed(out_file, contents)
+  if opts.revision_only:
+    print version_info.revision
   else:
-    sys.stdout.write(contents)
+    contents = "LASTCHANGE=%s\n" % version_info.revision
+    if out_file:
+      WriteIfChanged(out_file, contents)
+    else:
+      sys.stdout.write(contents)
 
   return 0
 

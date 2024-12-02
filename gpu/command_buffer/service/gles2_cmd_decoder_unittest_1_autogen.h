@@ -801,12 +801,12 @@ TEST_F(GLES2DecoderTest1, FramebufferTexture2DValidArgs) {
   EXPECT_CALL(
       *gl_, FramebufferTexture2DEXT(
           GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-          kServiceTextureId, 5));
+          kServiceTextureId, 0));
   SpecializedSetup<FramebufferTexture2D, 0>(true);
   FramebufferTexture2D cmd;
   cmd.Init(
       GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, client_texture_id_,
-      5);
+      0);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -817,7 +817,7 @@ TEST_F(GLES2DecoderTest1, FramebufferTexture2DInvalidArgs0_0) {
   FramebufferTexture2D cmd;
   cmd.Init(
       GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-      client_texture_id_, 5);
+      client_texture_id_, 0);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
@@ -828,9 +828,20 @@ TEST_F(GLES2DecoderTest1, FramebufferTexture2DInvalidArgs2_0) {
   FramebufferTexture2D cmd;
   cmd.Init(
       GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_PROXY_TEXTURE_CUBE_MAP,
-      client_texture_id_, 5);
+      client_texture_id_, 0);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
+}
+
+TEST_F(GLES2DecoderTest1, FramebufferTexture2DInvalidArgs4_0) {
+  EXPECT_CALL(*gl_, FramebufferTexture2DEXT(_, _, _, _, _)).Times(0);
+  SpecializedSetup<FramebufferTexture2D, 0>(false);
+  FramebufferTexture2D cmd;
+  cmd.Init(
+      GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, client_texture_id_,
+      1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
 }
 
 TEST_F(GLES2DecoderTest1, FrontFaceValidArgs) {
@@ -1755,5 +1766,47 @@ TEST_F(GLES2DecoderTest1, GetTexParameterivInvalidArgs2_1) {
 
 // TODO(gman): GetUniformLocationBucket
 
+
+TEST_F(GLES2DecoderTest1, GetVertexAttribfvValidArgs) {
+  SpecializedSetup<GetVertexAttribfv, 0>(true);
+  typedef GetVertexAttribfv::Result Result;
+  Result* result = static_cast<Result*>(shared_memory_address_);
+  result->size = 0;
+  GetVertexAttribfv cmd;
+  cmd.Init(
+      1, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, shared_memory_id_,
+      shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(decoder_->GetGLES2Util()->GLGetNumValuesReturned(
+                GL_VERTEX_ATTRIB_ARRAY_NORMALIZED),
+            result->GetNumResults());
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_F(GLES2DecoderTest1, GetVertexAttribfvInvalidArgs2_0) {
+  EXPECT_CALL(*gl_, GetVertexAttribfv(_, _, _)).Times(0);
+  SpecializedSetup<GetVertexAttribfv, 0>(false);
+  GetVertexAttribfv::Result* result =
+      static_cast<GetVertexAttribfv::Result*>(shared_memory_address_);
+  result->size = 0;
+  GetVertexAttribfv cmd;
+  cmd.Init(1, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, kInvalidSharedMemoryId, 0);
+  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+  EXPECT_EQ(0u, result->size);
+}
+
+TEST_F(GLES2DecoderTest1, GetVertexAttribfvInvalidArgs2_1) {
+  EXPECT_CALL(*gl_, GetVertexAttribfv(_, _, _)).Times(0);
+  SpecializedSetup<GetVertexAttribfv, 0>(false);
+  GetVertexAttribfv::Result* result =
+      static_cast<GetVertexAttribfv::Result*>(shared_memory_address_);
+  result->size = 0;
+  GetVertexAttribfv cmd;
+  cmd.Init(
+      1, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, shared_memory_id_,
+      kInvalidSharedMemoryOffset);
+  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+  EXPECT_EQ(0u, result->size);
+}
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_1_AUTOGEN_H_
 

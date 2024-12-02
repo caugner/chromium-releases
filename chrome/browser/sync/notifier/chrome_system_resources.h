@@ -13,9 +13,10 @@
 #include <set>
 #include <string>
 
-#include "base/non_thread_safe.h"
+#include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
+#include "base/threading/non_thread_safe.h"
 #include "chrome/browser/sync/notifier/state_writer.h"
 #include "google/cacheinvalidation/invalidation-client.h"
 
@@ -51,12 +52,15 @@ class ChromeSystemResources : public invalidation::SystemResources {
                           invalidation::StorageCallback* callback);
 
  private:
-  NonThreadSafe non_thread_safe_;
+  base::NonThreadSafe non_thread_safe_;
   scoped_ptr<ScopedRunnableMethodFactory<ChromeSystemResources> >
       scoped_runnable_method_factory_;
   // Holds all posted tasks that have not yet been run.
   std::set<invalidation::Closure*> posted_tasks_;
   StateWriter* state_writer_;
+
+  // TODO(tim): Trying to debug bug crbug.com/64652.
+  const MessageLoop* created_on_loop_;
 
   // If the scheduler has been started, inserts |task| into
   // |posted_tasks_| and returns a Task* to post.  Otherwise,

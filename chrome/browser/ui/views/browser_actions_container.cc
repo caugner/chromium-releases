@@ -1,12 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/browser_actions_container.h"
+#include "chrome/browser/ui/views/browser_actions_container.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
-#include "app/slide_animation.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -14,18 +11,18 @@
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/view_ids.h"
-#include "chrome/browser/views/detachable_toolbar_view.h"
-#include "chrome/browser/views/extensions/browser_action_drag_data.h"
-#include "chrome/browser/views/extensions/extension_popup.h"
-#include "chrome/browser/views/toolbar_view.h"
+#include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/detachable_toolbar_view.h"
+#include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
+#include "chrome/browser/ui/views/extensions/extension_popup.h"
+#include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/notification_source.h"
@@ -38,6 +35,9 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/base/animation/slide_animation.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/menu/menu_2.h"
@@ -165,10 +165,10 @@ void BrowserActionButton::UpdateState() {
   }
 
   // If the browser action name is empty, show the extension name instead.
-  std::wstring name = UTF8ToWide(browser_action()->GetTitle(tab_id));
+  string16 name = UTF8ToUTF16(browser_action()->GetTitle(tab_id));
   if (name.empty())
-    name = UTF8ToWide(extension()->name());
-  SetTooltipText(name);
+    name = UTF8ToUTF16(extension()->name());
+  SetTooltipText(UTF16ToWideHack(name));
   SetAccessibleName(name);
   GetParent()->SchedulePaint();
 }
@@ -251,6 +251,9 @@ void BrowserActionButton::OnMouseExited(const views::MouseEvent& e) {
 
 void BrowserActionButton::ShowContextMenu(const gfx::Point& p,
                                           bool is_mouse_gesture) {
+  if (!extension()->ShowConfigureContextMenus())
+    return;
+
   showing_context_menu_ = true;
   SetButtonPushed();
 
@@ -289,7 +292,7 @@ BrowserActionView::BrowserActionView(const Extension* extension,
   AddChildView(button_);
   button_->UpdateState();
   SetAccessibleName(
-      l10n_util::GetString(IDS_ACCNAME_EXTENSIONS_BROWSER_ACTION));
+      l10n_util::GetStringUTF16(IDS_ACCNAME_EXTENSIONS_BROWSER_ACTION));
 }
 
 BrowserActionView::~BrowserActionView() {
@@ -361,25 +364,26 @@ BrowserActionsContainer::BrowserActionsContainer(Browser* browser,
       ALLOW_THIS_IN_INITIALIZER_LIST(show_menu_task_factory_(this)) {
   SetID(VIEW_ID_BROWSER_ACTION_TOOLBAR);
 
-  if (profile_->GetExtensionsService()) {
-    model_ = profile_->GetExtensionsService()->toolbar_model();
+  if (profile_->GetExtensionService()) {
+    model_ = profile_->GetExtensionService()->toolbar_model();
     model_->AddObserver(this);
   }
 
-  resize_animation_.reset(new SlideAnimation(this));
+  resize_animation_.reset(new ui::SlideAnimation(this));
   resize_area_ = new views::ResizeArea(this);
-  resize_area_->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_SEPARATOR));
+  resize_area_->SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_ACCNAME_SEPARATOR));
   AddChildView(resize_area_);
 
   chevron_ = new views::MenuButton(NULL, std::wstring(), this, false);
   chevron_->set_border(NULL);
   chevron_->EnableCanvasFlippingForRTLUI(true);
   chevron_->SetAccessibleName(
-      l10n_util::GetString(IDS_ACCNAME_EXTENSIONS_CHEVRON));
+      l10n_util::GetStringUTF16(IDS_ACCNAME_EXTENSIONS_CHEVRON));
   chevron_->SetVisible(false);
   AddChildView(chevron_);
 
-  SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_EXTENSIONS));
+  SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_EXTENSIONS));
 }
 
 BrowserActionsContainer::~BrowserActionsContainer() {
@@ -482,7 +486,8 @@ void BrowserActionsContainer::OnBrowserActionExecuted(
   // Popups just display.  No notification to the extension.
   // TODO(erikkay): should there be?
   if (!button->IsPopup()) {
-    ExtensionBrowserEventRouter::GetInstance()->BrowserActionExecuted(
+    ExtensionService* service = profile_->GetExtensionService();
+    service->browser_event_router()->BrowserActionExecuted(
         profile_, browser_action->extension_id(), browser_);
     return;
   }
@@ -632,7 +637,7 @@ int BrowserActionsContainer::OnDragUpdated(
   if (GetViewForPoint(event.location()) == chevron_) {
     if (show_menu_task_factory_.empty() && !overflow_menu_)
       StartShowFolderDropMenuTimer();
-    return DragDropTypes::DRAG_MOVE;
+    return ui::DragDropTypes::DRAG_MOVE;
   }
   StopShowFolderDropMenuTimer();
 
@@ -682,7 +687,7 @@ int BrowserActionsContainer::OnDragUpdated(
   SetDropIndicator(width_before_icons + (before_icon * IconWidth(true)) -
       (kItemSpacing / 2));
 
-  return DragDropTypes::DRAG_MOVE;
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 void BrowserActionsContainer::OnDragExited() {
@@ -695,7 +700,7 @@ int BrowserActionsContainer::OnPerformDrop(
     const views::DropTargetEvent& event) {
   BrowserActionDragData data;
   if (!data.Read(event.GetData()))
-    return DragDropTypes::DRAG_NONE;
+    return ui::DragDropTypes::DRAG_NONE;
 
   // Make sure we have the same view as we started with.
   DCHECK_EQ(browser_action_views_[data.index()]->button()->extension()->id(),
@@ -730,7 +735,7 @@ int BrowserActionsContainer::OnPerformDrop(
       browser_action_views_[data.index()]->button()->extension(), i);
 
   OnDragExited();  // Perform clean up after dragging.
-  return DragDropTypes::DRAG_MOVE;
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 void BrowserActionsContainer::OnThemeChanged() {
@@ -775,7 +780,7 @@ void BrowserActionsContainer::WriteDragData(View* sender,
 
 int BrowserActionsContainer::GetDragOperations(View* sender,
                                                const gfx::Point& p) {
-  return DragDropTypes::DRAG_MOVE;
+  return ui::DragDropTypes::DRAG_MOVE;
 }
 
 bool BrowserActionsContainer::CanStartDrag(View* sender,
@@ -797,18 +802,19 @@ void BrowserActionsContainer::OnResize(int resize_amount, bool done_resizing) {
   int max_width = IconCountToWidth(-1, false);
   container_width_ =
       std::min(std::max(0, container_width_ - resize_amount), max_width);
-  SaveDesiredSizeAndAnimate(Tween::EASE_OUT,
+  SaveDesiredSizeAndAnimate(ui::Tween::EASE_OUT,
                             WidthToIconCount(container_width_));
 }
 
-void BrowserActionsContainer::AnimationProgressed(const Animation* animation) {
+void BrowserActionsContainer::AnimationProgressed(
+    const ui::Animation* animation) {
   DCHECK_EQ(resize_animation_.get(), animation);
   resize_amount_ = static_cast<int>(resize_animation_->GetCurrentValue() *
       (container_width_ - animation_target_size_));
   OnBrowserActionVisibilityChanged();
 }
 
-void BrowserActionsContainer::AnimationEnded(const Animation* animation) {
+void BrowserActionsContainer::AnimationEnded(const ui::Animation* animation) {
   container_width_ = animation_target_size_;
   animation_target_size_ = 0;
   resize_amount_ = 0;
@@ -836,7 +842,7 @@ void BrowserActionsContainer::ExtensionPopupIsClosing(ExtensionPopup* popup) {
 
 void BrowserActionsContainer::MoveBrowserAction(const std::string& extension_id,
                                                 size_t new_index) {
-  ExtensionsService* service = profile_->GetExtensionsService();
+  ExtensionService* service = profile_->GetExtensionService();
   if (service) {
     const Extension* extension = service->GetExtensionById(extension_id, false);
     model_->MoveBrowserAction(extension, new_index);
@@ -916,9 +922,9 @@ void BrowserActionsContainer::BrowserActionAdded(const Extension* extension,
   // Enlarge the container if it was already at maximum size and we're not in
   // the middle of upgrading.
   if ((model_->GetVisibleIconCount() < 0) &&
-      !profile_->GetExtensionsService()->IsBeingUpgraded(extension)) {
+      !profile_->GetExtensionService()->IsBeingUpgraded(extension)) {
     suppress_chevron_ = true;
-    SaveDesiredSizeAndAnimate(Tween::LINEAR, visible_actions + 1);
+    SaveDesiredSizeAndAnimate(ui::Tween::LINEAR, visible_actions + 1);
   } else {
     // Just redraw the (possibly modified) visible icon set.
     OnBrowserActionVisibilityChanged();
@@ -941,7 +947,7 @@ void BrowserActionsContainer::BrowserActionRemoved(const Extension* extension) {
 
       // If the extension is being upgraded we don't want the bar to shrink
       // because the icon is just going to get re-added to the same location.
-      if (profile_->GetExtensionsService()->IsBeingUpgraded(extension))
+      if (profile_->GetExtensionService()->IsBeingUpgraded(extension))
         return;
 
       if (browser_action_views_.size() > visible_actions) {
@@ -954,7 +960,7 @@ void BrowserActionsContainer::BrowserActionRemoved(const Extension* extension) {
         // Either we went from overflow to no-overflow, or we shrunk the no-
         // overflow container by 1.  Either way the size changed, so animate.
         chevron_->SetVisible(false);
-        SaveDesiredSizeAndAnimate(Tween::EASE_OUT,
+        SaveDesiredSizeAndAnimate(ui::Tween::EASE_OUT,
                                   browser_action_views_.size());
       }
       return;
@@ -983,7 +989,7 @@ void BrowserActionsContainer::ModelLoaded() {
 }
 
 void BrowserActionsContainer::LoadImages() {
-  ThemeProvider* tp = GetThemeProvider();
+  ui::ThemeProvider* tp = GetThemeProvider();
   chevron_->SetIcon(*tp->GetBitmapNamed(IDR_BROWSER_ACTIONS_OVERFLOW));
   chevron_->SetHoverIcon(*tp->GetBitmapNamed(IDR_BROWSER_ACTIONS_OVERFLOW_H));
   chevron_->SetPushedIcon(*tp->GetBitmapNamed(IDR_BROWSER_ACTIONS_OVERFLOW_P));
@@ -1066,7 +1072,7 @@ int BrowserActionsContainer::ContainerMinSize() const {
 }
 
 void BrowserActionsContainer::SaveDesiredSizeAndAnimate(
-    Tween::Type tween_type,
+    ui::Tween::Type tween_type,
     size_t num_visible_icons) {
   // Save off the desired number of visible icons.  We do this now instead of at
   // the end of the animation so that even if the browser is shut down while
@@ -1096,5 +1102,5 @@ bool BrowserActionsContainer::ShouldDisplayBrowserAction(
     const Extension* extension) {
   // Only display incognito-enabled extensions while in incognito mode.
   return (!profile_->IsOffTheRecord() ||
-          profile_->GetExtensionsService()->IsIncognitoEnabled(extension));
+          profile_->GetExtensionService()->IsIncognitoEnabled(extension));
 }

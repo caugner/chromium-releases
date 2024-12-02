@@ -21,8 +21,8 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
-#include "base/waitable_event.h"
-#include "base/worker_pool.h"
+#include "base/threading/worker_pool.h"
+#include "base/synchronization/waitable_event.h"
 #include "net/base/net_errors.h"
 
 // We cast back and forth, so make sure it's the size we're expecting.
@@ -250,11 +250,11 @@ void FileStream::AsyncContext::InitiateAsyncRead(
   DCHECK(!callback_);
   callback_ = callback;
 
-  WorkerPool::PostTask(FROM_HERE,
-                       new BackgroundReadTask(
-                           file, buf, buf_len,
-                           &background_io_completed_callback_),
-                       true /* task_is_slow */);
+  base::WorkerPool::PostTask(FROM_HERE,
+                             new BackgroundReadTask(
+                                 file, buf, buf_len,
+                                 &background_io_completed_callback_),
+                             true /* task_is_slow */);
 }
 
 void FileStream::AsyncContext::InitiateAsyncWrite(
@@ -263,11 +263,11 @@ void FileStream::AsyncContext::InitiateAsyncWrite(
   DCHECK(!callback_);
   callback_ = callback;
 
-  WorkerPool::PostTask(FROM_HERE,
-                       new BackgroundWriteTask(
-                           file, buf, buf_len,
-                           &background_io_completed_callback_),
-                       true /* task_is_slow */);
+  base::WorkerPool::PostTask(FROM_HERE,
+                             new BackgroundWriteTask(
+                                 file, buf, buf_len,
+                                 &background_io_completed_callback_),
+                             true /* task_is_slow */);
 }
 
 void FileStream::AsyncContext::OnBackgroundIOCompleted(int result) {
@@ -454,13 +454,6 @@ int FileStream::Write(
   }
 }
 
-int FileStream::Flush() {
-  if (!IsOpen())
-    return ERR_UNEXPECTED;
-
-  return FlushFile(file_);
-}
-
 int64 FileStream::Truncate(int64 bytes) {
   if (!IsOpen())
     return ERR_UNEXPECTED;
@@ -476,6 +469,13 @@ int64 FileStream::Truncate(int64 bytes) {
   // And truncate the file.
   int result = ftruncate(file_, bytes);
   return result == 0 ? seek_position : MapErrorCode(errno);
+}
+
+int FileStream::Flush() {
+  if (!IsOpen())
+    return ERR_UNEXPECTED;
+
+  return FlushFile(file_);
 }
 
 }  // namespace net

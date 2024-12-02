@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #pragma once
 
 #include <string>
+
 #include "base/string16.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -17,8 +17,8 @@
 
 class ProfileSyncServiceMock : public ProfileSyncService {
  public:
-  ProfileSyncServiceMock() {}
-  virtual ~ProfileSyncServiceMock() {}
+  ProfileSyncServiceMock();
+  virtual ~ProfileSyncServiceMock();
 
   MOCK_METHOD0(DisableForUser, void());
   MOCK_METHOD0(OnBackendInitialized, void());

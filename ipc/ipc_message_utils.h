@@ -46,41 +46,26 @@
 // base.  Messages have unique IDs across channels in order for the IPC logging
 // code to figure out the message class from its ID.
 enum IPCMessageStart {
-  // By using a start value of 0 for automation messages, we keep backward
-  // compatibility with old builds.
   AutomationMsgStart = 0,
   ViewMsgStart,
-  ViewHostMsgStart,
-  PluginProcessMsgStart,
-  PluginProcessHostMsgStart,
   PluginMsgStart,
-  PluginHostMsgStart,
-  ProfileImportProcessMsgStart,
-  ProfileImportProcessHostMsgStart,
-  NPObjectMsgStart,
+  ProfileImportMsgStart,
   TestMsgStart,
-  DevToolsAgentMsgStart,
-  DevToolsClientMsgStart,
-  WorkerProcessMsgStart,
-  WorkerProcessHostMsgStart,
+  DevToolsMsgStart,
   WorkerMsgStart,
-  WorkerHostMsgStart,
-  NaClProcessMsgStart,
-  GpuCommandBufferMsgStart,
+  NaClMsgStart,
   UtilityMsgStart,
-  UtilityHostMsgStart,
   GpuMsgStart,
-  GpuHostMsgStart,
-  GpuChannelMsgStart,
-  GpuVideoDecoderHostMsgStart,
-  GpuVideoDecoderMsgStart,
   ServiceMsgStart,
-  ServiceHostMsgStart,
   PpapiMsgStart,
-  PpapiHostMsgStart,
-  // NOTE: When you add a new message class, also update
-  // IPCStatusView::IPCStatusView to ensure logging works.
-  LastMsgIndex
+  FirefoxImporterUnittestMsgStart,
+  FileUtilitiesMsgStart,
+  MimeRegistryMsgStart,
+  DatabaseMsgStart,
+  DOMStorageMsgStart,
+  IndexedDBMsgStart,
+  PepperFileMsgStart,
+  SpeechInputMsgStart,
 };
 
 class DictionaryValue;
@@ -937,8 +922,8 @@ class MessageWithTuple : public Message {
   static bool Read(const Message* msg, Param* p) IPC_MSG_NOINLINE;
 
   // Generic dispatcher.  Should cover most cases.
-  template<class T, class Method>
-  static bool Dispatch(const Message* msg, T* obj, Method func) {
+  template<class T, class S, class Method>
+  static bool Dispatch(const Message* msg, T* obj, S* sender, Method func) {
     Param p;
     if (Read(msg, &p)) {
       DispatchToMethod(obj, func, p);
@@ -950,8 +935,8 @@ class MessageWithTuple : public Message {
   // The following dispatchers exist for the case where the callback function
   // needs the message as well.  They assume that "Param" is a type of Tuple
   // (except the one arg case, as there is no Tuple1).
-  template<class T, typename TA>
-  static bool Dispatch(const Message* msg, T* obj,
+  template<class T, class S, typename TA>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)(const Message&, TA)) {
     Param p;
     if (Read(msg, &p)) {
@@ -961,8 +946,8 @@ class MessageWithTuple : public Message {
     return false;
   }
 
-  template<class T, typename TA, typename TB>
-  static bool Dispatch(const Message* msg, T* obj,
+  template<class T, class S, typename TA, typename TB>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)(const Message&, TA, TB)) {
     Param p;
     if (Read(msg, &p)) {
@@ -972,8 +957,8 @@ class MessageWithTuple : public Message {
     return false;
   }
 
-  template<class T, typename TA, typename TB, typename TC>
-  static bool Dispatch(const Message* msg, T* obj,
+  template<class T, class S, typename TA, typename TB, typename TC>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)(const Message&, TA, TB, TC)) {
     Param p;
     if (Read(msg, &p)) {
@@ -983,8 +968,8 @@ class MessageWithTuple : public Message {
     return false;
   }
 
-  template<class T, typename TA, typename TB, typename TC, typename TD>
-  static bool Dispatch(const Message* msg, T* obj,
+  template<class T, class S, typename TA, typename TB, typename TC, typename TD>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)(const Message&, TA, TB, TC, TD)) {
     Param p;
     if (Read(msg, &p)) {
@@ -994,9 +979,9 @@ class MessageWithTuple : public Message {
     return false;
   }
 
-  template<class T, typename TA, typename TB, typename TC, typename TD,
+  template<class T, class S, typename TA, typename TB, typename TC, typename TD,
            typename TE>
-  static bool Dispatch(const Message* msg, T* obj,
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)(const Message&, TA, TB, TC, TD, TE)) {
     Param p;
     if (Read(msg, &p)) {
@@ -1130,8 +1115,8 @@ class MessageWithReply : public SyncMessage {
       const Message* msg,
       typename TupleTypes<ReplyParam>::ValueTuple* p) IPC_MSG_NOINLINE;
 
-  template<class T, class Method>
-  static bool Dispatch(const Message* msg, T* obj, Method func) {
+  template<class T, class S, class Method>
+  static bool Dispatch(const Message* msg, T* obj, S* sender, Method func) {
     SendParam send_params;
     Message* reply = GenerateReply(msg);
     bool error;
@@ -1147,7 +1132,7 @@ class MessageWithReply : public SyncMessage {
       error = true;
     }
 
-    obj->Send(reply);
+    sender->Send(reply);
     return !error;
   }
 

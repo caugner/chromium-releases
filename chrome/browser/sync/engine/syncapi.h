@@ -47,6 +47,7 @@
 #include "base/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
+#include "chrome/browser/sync/syncable/autofill_migration.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/cryptographer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -151,6 +152,9 @@ class BaseNode {
   // on this client, but the same object on a different client may have a
   // different ID value.
   virtual int64 GetId() const;
+
+  // Returns the modification time of the object (in TimeTicks internal format).
+  int64 GetModificationTime() const;
 
   // Nodes are hierarchically arranged into a single-rooted tree.
   // InitByRootLookup on ReadNode allows access to the root. GetParentId is
@@ -347,6 +351,9 @@ class WriteNode : public BaseNode {
   // Should only be called if GetModelType() == AUTOFILL.
   void SetAutofillSpecifics(const sync_pb::AutofillSpecifics& specifics);
 
+  void SetAutofillProfileSpecifics(
+      const sync_pb::AutofillProfileSpecifics& specifics);
+
   // Set the nigori specifics.
   // Should only be called if GetModelType() == NIGORI.
   void SetNigoriSpecifics(const sync_pb::NigoriSpecifics& specifics);
@@ -398,6 +405,8 @@ class WriteNode : public BaseNode {
       const sync_pb::AppSpecifics& new_value);
   void PutAutofillSpecificsAndMarkForSyncing(
       const sync_pb::AutofillSpecifics& new_value);
+  void PutAutofillProfileSpecificsAndMarkForSyncing(
+      const sync_pb::AutofillProfileSpecifics& new_value);
   void PutBookmarkSpecificsAndMarkForSyncing(
       const sync_pb::BookmarkSpecifics& new_value);
   void PutNigoriSpecificsAndMarkForSyncing(
@@ -639,32 +648,43 @@ class SyncManager {
       // Can't connect to server, and we haven't completed the initial
       // sync yet.  So there's nothing we can do but wait for the server.
       OFFLINE_UNUSABLE,
-    };
-    Summary summary;
 
-    // Various server related information.
+      SUMMARY_STATUS_COUNT,
+    };
+
+    Summary summary;
     bool authenticated;      // Successfully authenticated via GAIA.
     bool server_up;          // True if we have received at least one good
                              // reply from the server.
     bool server_reachable;   // True if we received any reply from the server.
     bool server_broken;      // True of the syncer is stopped because of server
                              // issues.
-
     bool notifications_enabled;  // True only if subscribed for notifications.
+
+    // Notifications counters updated by the actions in synapi.
     int notifications_received;
     int notifications_sent;
 
-    // Various Syncer data.
+    // The max number of consecutive errors from any component.
+    int max_consecutive_errors;
+
     int unsynced_count;
+
     int conflicting_count;
     bool syncing;
+    // True after a client has done a first sync.
     bool initial_sync_ended;
+    // True if any syncer is stuck.
     bool syncer_stuck;
+
+    // Total updates available.  If zero, nothing left to download.
     int64 updates_available;
-    int64 updates_received;
+    // Total updates received by the syncer since browser start.
+    int updates_received;
+
+    // Of updates_received, how many were tombstones.
+    int tombstone_updates_received;
     bool disk_full;
-    bool invalid_store;
-    int max_consecutive_errors;  // The max number of errors from any component.
   };
 
   // An interface the embedding application implements to receive notifications
@@ -816,6 +836,17 @@ class SyncManager {
   // Prerequisite for calling this is that OnInitializationComplete has been
   // called.
   bool InitialSyncEndedForAllEnabledTypes();
+
+  syncable::AutofillMigrationState GetAutofillMigrationState();
+
+  void SetAutofillMigrationState(
+    syncable::AutofillMigrationState state);
+
+  syncable::AutofillMigrationDebugInfo GetAutofillMigrationDebugInfo();
+
+  void SetAutofillMigrationDebugInfo(
+      syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
+      const syncable::AutofillMigrationDebugInfo& info);
 
   // Migrate tokens from user settings DB to the token service.
   void MigrateTokens();

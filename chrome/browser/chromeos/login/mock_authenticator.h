@@ -10,6 +10,7 @@
 
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
+#include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -112,12 +113,16 @@ class MockLoginUtils : public LoginUtils {
 
   virtual void CompleteLogin(const std::string& username,
                              const std::string& password,
-                             const GaiaAuthConsumer::ClientLoginResult& res) {
+                             const GaiaAuthConsumer::ClientLoginResult& res,
+                             bool pending_requests) {
     EXPECT_EQ(expected_username_, username);
     EXPECT_EQ(expected_password_, password);
   }
 
   virtual void CompleteOffTheRecordLogin(const GURL& start_url) {
+  }
+
+  virtual void SetFirstLoginPrefs(PrefService* prefs) {
   }
 
   virtual Authenticator* CreateAuthenticator(LoginStatusConsumer* consumer) {
@@ -132,17 +137,32 @@ class MockLoginUtils : public LoginUtils {
     return true;
   }
 
-  virtual const std::string& GetAuthToken() const {
-    return auth_token_;
+  virtual void PrewarmAuthentication() {
   }
 
-  virtual void PrewarmAuthentication() {
+  virtual void FetchCookies(
+      Profile* profile,
+      const GaiaAuthConsumer::ClientLoginResult& credentials) {
+  }
+
+  virtual void FetchTokens(
+      Profile* profile,
+      const GaiaAuthConsumer::ClientLoginResult& credentials) {
+  }
+
+  void SetBackgroundView(BackgroundView* background_view) {
+    background_view_ = background_view;
+  }
+
+  BackgroundView* GetBackgroundView() {
+    return background_view_;
   }
 
  private:
   std::string expected_username_;
   std::string expected_password_;
   std::string auth_token_;
+  chromeos::BackgroundView* background_view_;
 
   DISALLOW_COPY_AND_ASSIGN(MockLoginUtils);
 };

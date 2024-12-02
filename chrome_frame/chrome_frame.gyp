@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -152,6 +152,7 @@
         'chrome_frame_privileged_mock',
         'chrome_frame_strings',
         'chrome_tab_idl',
+        'xulrunner_sdk',
       ],
       'sources': [
         'chrome_tab.h',
@@ -168,11 +169,13 @@
         'test/chrome_frame_test_utils.h',
         'test/chrome_frame_test_utils.cc',
         'test/com_message_event_unittest.cc',
+        'test/dll_redirector_test.cc',
         'test/exception_barrier_unittest.cc',
         'test/html_util_unittests.cc',
         'test/http_negotiate_unittest.cc',
-        'test/module_utils_test.cc',
+        'test/infobar_unittests.cc',
         'test/policy_settings_unittest.cc',
+        'test/ready_mode_unittest.cc',
         'test/simulate_input.h',
         'test/simulate_input.cc',
         'test/urlmon_moniker_tests.h',
@@ -186,6 +189,9 @@
         'urlmon_upload_data_stream_unittest.cc',
         'vtable_patch_manager_unittest.cc',
       ],
+      'include_dirs': [
+        '<@(xul_include_directories)',
+      ],
       'resource_include_dirs': [
         '<(INTERMEDIATE_DIR)',
         '<(SHARED_INTERMEDIATE_DIR)',
@@ -198,7 +204,6 @@
         ['coverage==0', {
           'dependencies': [
             'chrome_frame_npapi',
-            'xulrunner_sdk',
           ],
           'sources': [
             'chrome_frame_npapi_unittest.cc',
@@ -217,6 +222,17 @@
             }],
           ],
         }],
+        ['OS=="win" and buildtype=="Official"', {
+          'configurations': {
+            'Release': {
+              'msvs_settings': {
+                'VCCLCompilerTool': {
+                  'WholeProgramOptimization': 'false',
+                },
+              },
+            },
+          },
+        },],
         ['OS=="win"', {
           'link_settings': {
             'libraries': [
@@ -253,6 +269,7 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../chrome/chrome.gyp:chrome_gpu',
         '../chrome/chrome.gyp:chrome_version_header',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
@@ -262,6 +279,8 @@
         '../net/net.gyp:net_test_support',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        '../third_party/iaccessible2/iaccessible2.gyp:iaccessible2',
+        '../third_party/iaccessible2/iaccessible2.gyp:IAccessible2Proxy',
         '../third_party/libxslt/libxslt.gyp:libxslt',
         'chrome_frame_ie',
         'chrome_frame_npapi',
@@ -269,7 +288,6 @@
         'chrome_frame_utils',
         'chrome_tab_idl',
         'npchrome_frame',
-        'xulrunner_sdk',
       ],
       'sources': [
         '../base/test_suite.h',
@@ -285,8 +303,6 @@
         'test/chrome_frame_automation_mock.h',
         'test/delete_chrome_history_test.cc',
         'test/header_test.cc',
-        'test/http_server.cc',
-        'test/http_server.h',
         'test/ie_event_sink.cc',
         'test/ie_event_sink.h',
         'test/mock_ie_event_sink_actions.h',
@@ -344,7 +360,7 @@
             'Debug_Base': {
               'msvs_settings': {
                 'VCLinkerTool': {
-                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                  'LinkIncremental': '<(msvs_debug_link_nonincremental)',
                 },
               },
             },
@@ -368,6 +384,7 @@
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../chrome/chrome.gyp:chrome_gpu',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:browser',
         '../chrome/chrome.gyp:debugger',
@@ -383,7 +400,6 @@
         'chrome_frame_utils',
         'chrome_tab_idl',
         'npchrome_frame',
-        'xulrunner_sdk',
       ],
       'sources': [
         '../base/perf_test_suite.h',
@@ -416,7 +432,7 @@
             'Debug_Base': {
               'msvs_settings': {
                 'VCLinkerTool': {
-                  'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
+                  'LinkIncremental': '<(msvs_debug_link_nonincremental)',
                 },
               },
             },
@@ -425,6 +441,11 @@
             'libraries': [
               '-loleacc.lib',
             ],
+          },
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'IgnoreDefaultLibraryNames': ['nspr.lib', 'nspr4.lib'],
+            },
           },
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_handler',
@@ -447,6 +468,7 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../chrome/chrome.gyp:browser',
+        '../chrome/chrome.gyp:chrome_gpu',
         '../chrome/chrome.gyp:chrome_resources',
         '../chrome/chrome.gyp:debugger',
         '../chrome/chrome.gyp:renderer',
@@ -523,6 +545,7 @@
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
         '../chrome/chrome.gyp:browser',
+        '../chrome/chrome.gyp:chrome_gpu',
         '../chrome/chrome.gyp:debugger',
         '../chrome/chrome.gyp:renderer',
         '../chrome/chrome.gyp:test_support_common',
@@ -588,6 +611,79 @@
       ],
     },
     {
+      'target_name': 'chrome_frame_qa_tests',
+      'msvs_guid': 'D6B3174D-31DD-49D6-83C0-A63A6A135E0E',
+      'type': 'executable',
+      'dependencies': [
+        '../base/base.gyp:test_support_base',
+        '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../net/net.gyp:net_test_support',
+        '../testing/gmock.gyp:gmock',
+        '../testing/gtest.gyp:gtest',
+        '../third_party/iaccessible2/iaccessible2.gyp:iaccessible2',
+        'chrome_frame_ie',
+        'chrome_frame_npapi',
+        'chrome_frame_strings',
+        'npchrome_frame',
+      ],
+      'sources': [
+        '../base/test_suite.h',
+        'test/chrome_frame_test_utils.cc',
+        'test/chrome_frame_test_utils.h',
+        'test/chrome_frame_ui_test_utils.cc',
+        'test/chrome_frame_ui_test_utils.h',
+        'test/external_sites_test.cc',
+        'test/ie_event_sink.cc',
+        'test/ie_event_sink.h',
+        'test/mock_ie_event_sink_actions.h',
+        'test/mock_ie_event_sink_test.cc',
+        'test/mock_ie_event_sink_test.h',
+        'test/run_all_unittests.cc',
+        'test/simulate_input.cc',
+        'test/simulate_input.h',
+        'test/test_server.cc',
+        'test/test_server.h',
+        'test/test_with_web_server.cc',
+        'test/test_with_web_server.h',
+        'test/win_event_receiver.cc',
+        'test/win_event_receiver.h',
+        'chrome_tab.h',
+        'chrome_tab.idl',
+        'renderer_glue.cc',
+        'test_utils.cc',
+        'test_utils.h',
+      ],
+      'include_dirs': [
+        '<@(xul_include_directories)',
+        '<(DEPTH)/third_party/wtl/include',
+        # To allow including "chrome_tab.h"
+        '<(INTERMEDIATE_DIR)',
+      ],
+      'resource_include_dirs': [
+        '<(INTERMEDIATE_DIR)',
+      ],
+      'conditions': [
+        ['OS=="win"', {
+          'link_settings': {
+            'libraries': [
+              '-loleacc.lib',
+            ],
+          },
+          'msvs_settings': {
+            'VCLinkerTool': {
+              'DelayLoadDLLs': ['xpcom.dll', 'nspr4.dll'],
+            },
+          },
+          'dependencies': [
+            '../chrome/chrome.gyp:crash_service',
+            '../chrome/chrome.gyp:automation',
+            '../chrome/chrome.gyp:installer_util',
+            '../google_update/google_update.gyp:google_update',
+          ]
+        }],
+      ],
+    },
+    {
       'target_name': 'chrome_frame_npapi_core',
       'type': 'static_library',
       'dependencies': [
@@ -607,7 +703,6 @@
         'chrome_frame_strings',
         'chrome_frame_utils',
         '../chrome/chrome.gyp:common',
-        'xulrunner_sdk',
       ],
       'sources': [
         'chrome_frame_npapi.cc',
@@ -625,6 +720,9 @@
         'ns_associate_iid_win.h',
         'ns_isupports_impl.h',
         'scoped_ns_ptr_win.h',
+      ],
+      'include_dirs': [
+        '<@(xul_include_directories)',
       ],
     },
     {
@@ -733,6 +831,8 @@
         'com_type_info_holder.h',
         'delete_chrome_history.cc',
         'delete_chrome_history.h',
+        'dll_redirector.cc',
+        'dll_redirector.h',
         'exception_barrier.cc',
         'exception_barrier.h',
         'exception_barrier_lowlevel.asm',
@@ -746,15 +846,34 @@
         'http_negotiate.h',
         'iids.cc',
         'in_place_menu.h',
+        'infobars/infobar_content.h',
+        'infobars/internal/displaced_window_manager.cc',
+        'infobars/internal/displaced_window_manager.h',
+        'infobars/internal/host_window_manager.cc',
+        'infobars/internal/host_window_manager.h',
+        'infobars/internal/infobar_window.cc',
+        'infobars/internal/infobar_window.h',
+        'infobars/internal/subclassing_window_with_delegate.h',
+        'infobars/infobar_manager.h',
+        'infobars/infobar_manager.cc',
         'metrics_service.cc',
         'metrics_service.h',
-        'module_utils.cc',
-        'module_utils.h',
         'ole_document_impl.h',
         'policy_settings.cc',
         'policy_settings.h',
         'protocol_sink_wrap.cc',
         'protocol_sink_wrap.h',
+        'ready_mode/internal/ready_mode_state.h',
+        'ready_mode/internal/ready_mode_web_browser_adapter.cc',
+        'ready_mode/internal/ready_mode_web_browser_adapter.h',
+        'ready_mode/internal/ready_prompt_content.cc',
+        'ready_mode/internal/ready_prompt_content.h',
+        'ready_mode/internal/ready_prompt_window.cc',
+        'ready_mode/internal/ready_prompt_window.h',
+        'ready_mode/internal/registry_ready_mode_state.cc',
+        'ready_mode/internal/registry_ready_mode_state.h',
+        'ready_mode/ready_mode.cc',
+        'ready_mode/ready_mode.h',
         'register_bho.rgs',
         'stream_impl.cc',
         'stream_impl.h',
@@ -845,6 +964,8 @@
         'custom_sync_call_context.h',
         'external_tab.h',
         'external_tab.cc',
+        'navigation_constraints.h',
+        'navigation_constraints.cc',
         'plugin_url_request.h',
         'plugin_url_request.cc',
         'sync_msg_reply_dispatcher.h',
@@ -909,7 +1030,7 @@
             '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/chrome_frame_resources.rc',
           ],
           'dependencies': [
-            '../breakpad/breakpad.gyp:breakpad_handler',
+            '../breakpad/breakpad.gyp:breakpad_handler_dll',
             '../chrome/chrome.gyp:automation',
             # Make the archive build happy.
             '../chrome/chrome.gyp:syncapi',

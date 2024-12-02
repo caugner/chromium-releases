@@ -170,6 +170,9 @@
     'file_system': {
       'filepath': 'file_system/.*',
     },
+    'pepper_api': {
+      'filepath': 'ppapi/c/.*',
+    },
   },
 
   'WATCHLISTS': {
@@ -179,8 +182,6 @@
                  'glider@chromium.org'],
     'mac': ['pam+watch@chromium.org'],
     'base': ['brettw-cc@chromium.org'],
-    'views': ['ben+cc@chromium.org'],
-    'browser': ['ben+cc@chromium.org'],
     'browser_main': ['brettw-cc@chromium.org'],
     'browser_resources': ['arv@chromium.org'],
     'chromeos_login': ['nkostylev+cc@chromium.org'],
@@ -200,8 +201,8 @@
     'ftp': ['phajdan.jr@chromium.org'],
     'media': ['acolwell@chromium.org', 'ajwong@chromium.org',
               'annacc@chromium.org', 'ddorwin+watch@chromium.org',
-              'fbarchard@chromium.org', 'hclam@chromium.org',
-              'scherkus@chromium.org', 'vrk@chromium.org'],
+              'hclam@chromium.org', 'scherkus@chromium.org',
+              'sjl@chromium.org', 'vrk@chromium.org'],
     'ipc': ['jam@chromium.org', 'darin-cc@chromium.org'],
     'linux-sandboxing': ['agl@chromium.org'],
     'sync': ['tim@chromium.org', 'nick@chromium.org',
@@ -223,12 +224,14 @@
                  'hclam@chromium.org', 'dmaclach@chromium.org',
                  'garykac@chromium.org'],
     'cookie_monster': ['rdsmith@chromium.org'],
-    'autofill': ['dhollowa@chromium.org', 'jhawkins@chromium.org'],
+    'autofill': ['dhollowa@chromium.org', 'jhawkins@chromium.org',
+                 'isherman@chromium.org'],
     'webdata': ['dhollowa@chromium.org'],
     'i18n': ['jshin+watch@chromium.org'],
     'pyauto': ['anantha@chromium.org', 'jrg@chromium.org',
                'nirnimesh@chromium.org', 'dyu@chromium.org'],
     'labs': ['thakis@chromium.org'],
     'file_system': ['kinuko@chromium.org'],
+    'pepper_api': ['piman+watch@chromium.org'],
   },
 }

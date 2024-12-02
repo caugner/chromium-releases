@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/lock.h"
 #include "base/observer_list.h"
 #include "base/process_util.h"
 #include "base/ref_counted.h"
@@ -22,7 +21,7 @@
 #include "base/timer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "net/url_request/url_request_job_tracker.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
 class Extension;
 class SkBitmap;
@@ -213,7 +212,7 @@ class TaskManagerModelObserver {
 };
 
 // The model that the TaskManager is using.
-class TaskManagerModel : public URLRequestJobTracker::JobObserver,
+class TaskManagerModel : public net::URLRequestJobTracker::JobObserver,
                          public base::RefCountedThreadSafe<TaskManagerModel> {
  public:
   explicit TaskManagerModel(TaskManager* task_manager);
@@ -297,13 +296,16 @@ class TaskManagerModel : public URLRequestJobTracker::JobObserver,
   const Extension* GetResourceExtension(int index) const;
 
   // JobObserver methods:
-  void OnJobAdded(net::URLRequestJob* job);
-  void OnJobRemoved(net::URLRequestJob* job);
-  void OnJobDone(net::URLRequestJob* job, const URLRequestStatus& status);
-  void OnJobRedirect(net::URLRequestJob* job,
-                     const GURL& location,
-                     int status_code);
-  void OnBytesRead(net::URLRequestJob* job, const char* buf, int byte_count);
+  virtual void OnJobAdded(net::URLRequestJob* job);
+  virtual void OnJobRemoved(net::URLRequestJob* job);
+  virtual void OnJobDone(net::URLRequestJob* job,
+                         const net::URLRequestStatus& status);
+  virtual void OnJobRedirect(net::URLRequestJob* job,
+                             const GURL& location,
+                             int status_code);
+  virtual void OnBytesRead(net::URLRequestJob* job,
+                           const char* buf,
+                           int byte_count);
 
   void AddResourceProvider(TaskManager::ResourceProvider* provider);
   void RemoveResourceProvider(TaskManager::ResourceProvider* provider);

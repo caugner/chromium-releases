@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,10 @@
 #include <string>
 #include <vector>
 
-#include "app/download_file_interface.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/scoped_ptr.h"
+#include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/burn_library.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -22,9 +22,11 @@
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/file_stream.h"
+#include "ui/base/dragdrop/download_file_interface.h"
+
+template <typename T> struct DefaultSingletonTraits;
 
 static const std::string kPropertyPath = "path";
 static const std::string kPropertyTitle = "title";
@@ -36,6 +38,7 @@ static const std::string kImageFileName = "chromeos_image.bin.gz";
 static const std::string kTempImageFolderName = "chromeos_image";
 
 class ImageBurnResourceManager;
+class TabContents;
 
 class ImageBurnUIHTMLSource : public ChromeURLDataManager::DataSource {
  public:
@@ -111,7 +114,7 @@ class ImageBurnHandler : public DOMMessageHandler,
 
   void UpdateBurnProgress(int64 total_burnt, int64 image_size,
                           const std::string& path, chromeos::BurnEventType evt);
-  std::wstring GetBurnProgressText(int64 total_burnt, int64 image_size);
+  string16 GetBurnProgressText(int64 total_burnt, int64 image_size);
 
   // helper functions
   void CreateImageUrl();
@@ -158,8 +161,8 @@ class ImageBurnTaskProxy
 class ImageBurnResourceManager : public DownloadManager::Observer,
                                  public DownloadItem::Observer {
  public:
-  ImageBurnResourceManager();
-  ~ImageBurnResourceManager();
+  // Returns the singleton instance.
+  static ImageBurnResourceManager* GetInstance();
 
   // DownloadItem::Observer interface
   virtual void OnDownloadUpdated(DownloadItem* download);
@@ -190,6 +193,11 @@ class ImageBurnResourceManager : public DownloadManager::Observer,
   net::FileStream* CreateFileStream(FilePath* file_path);
 
  private:
+  friend struct DefaultSingletonTraits<ImageBurnResourceManager>;
+
+  ImageBurnResourceManager();
+  ~ImageBurnResourceManager();
+
   FilePath local_image_dir_file_path_;
   FilePath image_fecher_local_path_;
   bool image_download_started_;
@@ -216,4 +224,3 @@ class ImageBurnUI : public DOMUI {
   DISALLOW_COPY_AND_ASSIGN(ImageBurnUI);
 };
 #endif  // CHROME_BROWSER_CHROMEOS_DOM_UI_IMAGEBURNER_UI_H_
-

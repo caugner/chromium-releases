@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,13 @@
 
 #include "base/command_line.h"
 #include "base/path_service.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/login/client_login_response_handler.h"
 #include "chrome/browser/chromeos/login/issue_response_handler.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/net/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
@@ -35,7 +34,7 @@ void CookieFetcher::AttemptFetch(const std::string& credentials) {
 
 void CookieFetcher::OnURLFetchComplete(const URLFetcher* source,
                                        const GURL& url,
-                                       const URLRequestStatus& status,
+                                       const net::URLRequestStatus& status,
                                        int response_code,
                                        const ResponseCookies& cookies,
                                        const std::string& data) {

@@ -1,23 +1,21 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/constrained_window_win.h"
+#include "chrome/browser/ui/views/constrained_window_win.h"
 
-#include "app/resource_bundle.h"
-#include "app/win_util.h"
+#include <algorithm>
+
+#include "app/win/win_util.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
-#include "chrome/browser/toolbar_model.h"
-#include "chrome/browser/views/frame/browser_view.h"
-#include "chrome/browser/window_sizer.h"
+#include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/pref_names.h"
 #include "gfx/canvas.h"
 #include "gfx/font.h"
 #include "gfx/path.h"
@@ -27,6 +25,8 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/win/hwnd_util.h"
 #include "views/controls/button/image_button.h"
 #include "views/focus/focus_manager.h"
 #include "views/window/client_view.h"
@@ -198,7 +198,7 @@ class ConstrainedWindowFrameView
 
   SkColor GetTitleColor() const {
     return (container_->owner()->profile()->IsOffTheRecord() ||
-        !win_util::ShouldUseVistaFrame()) ? SK_ColorWHITE : SK_ColorBLACK;
+        !ui::ShouldUseVistaFrame()) ? SK_ColorWHITE : SK_ColorBLACK;
   }
 
   // Loads the appropriate set of WindowResources for the frame view.
@@ -535,7 +535,7 @@ gfx::Rect ConstrainedWindowFrameView::CalculateClientAreaBounds(
 }
 
 void ConstrainedWindowFrameView::InitWindowResources() {
-  resources_.reset(win_util::ShouldUseVistaFrame() ?
+  resources_.reset(ui::ShouldUseVistaFrame() ?
     static_cast<views::WindowResources*>(new VistaWindowResources) :
     new XPWindowResources);
 }
@@ -544,7 +544,7 @@ void ConstrainedWindowFrameView::InitWindowResources() {
 void ConstrainedWindowFrameView::InitClass() {
   static bool initialized = false;
   if (!initialized) {
-    title_font_ = new gfx::Font(win_util::GetWindowTitleFont());
+    title_font_ = new gfx::Font(app::win::GetWindowTitleFont());
     initialized = true;
   }
 }
@@ -571,6 +571,9 @@ void ConstrainedWindowWin::FocusConstrainedWindow() {
 }
 
 void ConstrainedWindowWin::ShowConstrainedWindow() {
+  // We marked the view as hidden during construction.  Mark it as
+  // visible now so FocusManager will let us receive focus.
+  GetNonClientView()->SetVisible(true);
   if (owner_->delegate())
     owner_->delegate()->WillShowConstrainedWindow(owner_);
   ActivateConstrainedWindow();
@@ -614,6 +617,10 @@ ConstrainedWindowWin::ConstrainedWindowWin(
   set_window_style(WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION |
                    WS_THICKFRAME | WS_SYSMENU);
   set_focus_on_creation(false);
+  // Views default to visible.  Since we are creating a window that is
+  // not visible (no WS_VISIBLE), mark our View as hidden so that
+  // FocusManager can deal with it properly.
+  GetNonClientView()->SetVisible(false);
 
   WindowWin::Init(owner_->GetNativeView(), gfx::Rect());
 }

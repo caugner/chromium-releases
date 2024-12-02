@@ -14,6 +14,10 @@
 #include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#endif  // defined(OS_CHROMEOS)
+
 class Browser;
 class CommandLine;
 class Profile;
@@ -34,9 +38,27 @@ class RuleBasedHostResolverProc;
 //   is shown, invoke MessageLoop::current()->Quit() to return control back to
 //   your test method.
 // . If you subclass and override SetUp, be sure and invoke
-//   InProcessBrowserTest::SetUp. (But see also
-//   SetUpInProcessBrowserTestFixture and related hook methods for a cleaner
-//   alternative).
+//   InProcessBrowserTest::SetUp. (But see also SetUpOnMainThread,
+//   SetUpInProcessBrowserTestFixture and other related hook methods for a
+//   cleaner alternative).
+//
+// Following three hook methods are called in sequence before calling
+// BrowserMain(), thus no browser has been created yet. They are mainly for
+// setting up the environment for running the browser.
+// . SetUpUserDataDirectory()
+// . SetUpCommandLine()
+// . SetUpInProcessBrowserTestFixture()
+//
+// SetUpOnMainThread() is called just after creating the default browser object
+// and before executing the real test code. It's mainly for setting up things
+// related to the browser object and associated window, like opening a new Tab
+// with a testing page loaded.
+//
+// CleanUpOnMainThread() is called just after executing the real test code to
+// do necessary cleanup before the browser is torn down.
+//
+// TearDownInProcessBrowserTestFixture() is called after BrowserMain() exits to
+// cleanup things setup for running the browser.
 //
 // By default InProcessBrowserTest creates a single Browser (as returned from
 // the CreateBrowser method). You can obviously create more as needed.
@@ -79,6 +101,11 @@ class InProcessBrowserTest : public testing::Test {
   // Adds a selected tab at |index| to |url| with the specified |transition|.
   void AddTabAt(int index, const GURL& url, PageTransition::Type transition);
 
+  // Override this to add any custom setup code that needs to be done on the
+  // main thread after the browser is created and just before calling
+  // RunTestOnMainThread().
+  virtual void SetUpOnMainThread() {}
+
   // Override this rather than TestBody.
   virtual void RunTestOnMainThread() = 0;
 
@@ -117,6 +144,9 @@ class InProcessBrowserTest : public testing::Test {
   //
   // This is invoked from Setup.
   virtual Browser* CreateBrowser(Profile* profile);
+
+  // Similar to |CreateBrowser|, but creates an incognito browser.
+  virtual Browser* CreateIncognitoBrowser();
 
   // Creates a browser for a popup window with a single tab (about:blank), waits
   // for the tab to finish loading, and shows the browser.
@@ -184,6 +214,10 @@ class InProcessBrowserTest : public testing::Test {
   // Temporary user data directory. Used only when a user data directory is not
   // specified in the command line.
   ScopedTempDir temp_user_data_dir_;
+
+#if defined(OS_CHROMEOS)
+  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
+#endif  // defined(OS_CHROMEOS)
 
   DISALLOW_COPY_AND_ASSIGN(InProcessBrowserTest);
 };

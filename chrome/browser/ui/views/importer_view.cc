@@ -1,17 +1,17 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/importer_view.h"
+#include "chrome/browser/ui/views/importer_view.h"
 
-#include "app/l10n_util.h"
-#include "base/string16.h"
+#include "base/compiler_specific.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/label.h"
 #include "views/grid_layout.h"
@@ -42,7 +42,7 @@ ImporterView::ImporterView(Profile* profile, int initial_state)
       passwords_checkbox_(NULL),
       search_engines_checkbox_(NULL),
       profile_(profile),
-      importer_host_(new ImporterHost()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(importer_host_(new ImporterHost(this))),
       initial_state_(initial_state) {
   DCHECK(profile);
   SetupControl();
@@ -53,32 +53,33 @@ ImporterView::~ImporterView() {
 
 void ImporterView::SetupControl() {
   // Adds all controls.
-  import_from_label_ =
-      new views::Label(l10n_util::GetString(IDS_IMPORT_FROM_LABEL));
+  import_from_label_ = new views::Label(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_IMPORT_FROM_LABEL)));
 
   profile_combobox_ = new views::Combobox(this);
   profile_combobox_->set_listener(this);
-  profile_combobox_->SetAccessibleName(import_from_label_->GetText());
+  profile_combobox_->SetAccessibleName(
+      WideToUTF16Hack(import_from_label_->GetText()));
 
-  import_items_label_ =
-      new views::Label(l10n_util::GetString(IDS_IMPORT_ITEMS_LABEL));
+  import_items_label_ = new views::Label(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_IMPORT_ITEMS_LABEL)));
 
-  history_checkbox_ =
-      InitCheckbox(l10n_util::GetString(IDS_IMPORT_HISTORY_CHKBOX),
-                   (initial_state_ & importer::HISTORY) != 0);
-  favorites_checkbox_ =
-      InitCheckbox(l10n_util::GetString(IDS_IMPORT_FAVORITES_CHKBOX),
-                   (initial_state_ & importer::FAVORITES) != 0);
-  passwords_checkbox_ =
-      InitCheckbox(l10n_util::GetString(IDS_IMPORT_PASSWORDS_CHKBOX),
-                   (initial_state_ & importer::PASSWORDS) != 0);
-  search_engines_checkbox_ =
-      InitCheckbox(l10n_util::GetString(IDS_IMPORT_SEARCH_ENGINES_CHKBOX),
-                   (initial_state_ & importer::SEARCH_ENGINES) != 0);
+  history_checkbox_ = InitCheckbox(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_IMPORT_HISTORY_CHKBOX)),
+      (initial_state_ & importer::HISTORY) != 0);
+  favorites_checkbox_ = InitCheckbox(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_IMPORT_FAVORITES_CHKBOX)),
+      (initial_state_ & importer::FAVORITES) != 0);
+  passwords_checkbox_ = InitCheckbox(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_IMPORT_PASSWORDS_CHKBOX)),
+      (initial_state_ & importer::PASSWORDS) != 0);
+  search_engines_checkbox_ = InitCheckbox(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_IMPORT_SEARCH_ENGINES_CHKBOX)),
+      (initial_state_ & importer::SEARCH_ENGINES) != 0);
 
   // Arranges controls by using GridLayout.
   const int column_set_id = 0;
-  GridLayout* layout = CreatePanelGridLayout(this);
+  GridLayout* layout = GridLayout::CreatePanel(this);
   SetLayoutManager(layout);
   ColumnSet* column_set = layout->AddColumnSet(column_set_id);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
@@ -122,7 +123,7 @@ void ImporterView::Layout() {
 std::wstring ImporterView::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
-    return l10n_util::GetString(IDS_IMPORT_COMMIT);
+    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_IMPORT_COMMIT));
   } else {
     return std::wstring();
   }
@@ -145,13 +146,12 @@ bool ImporterView::IsModal() const {
 }
 
 std::wstring ImporterView::GetWindowTitle() const {
-  return l10n_util::GetString(IDS_IMPORT_SETTINGS_TITLE);
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_IMPORT_SETTINGS_TITLE));
 }
 
 bool ImporterView::Accept() {
-  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK)) {
+  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK))
     return false;
-  }
 
   uint16 items = GetCheckedItems();
 
@@ -179,15 +179,16 @@ void ImporterView::ButtonPressed(
 
 int ImporterView::GetItemCount() {
   DCHECK(importer_host_.get());
-  int item_count = importer_host_->GetAvailableProfileCount();
-  if (checkbox_items_.size() < static_cast<size_t>(item_count))
-    checkbox_items_.resize(item_count, initial_state_);
-  return item_count;
+  return checkbox_items_.size();
 }
 
 string16 ImporterView::GetItemAt(int index) {
   DCHECK(importer_host_.get());
-  return WideToUTF16Hack(importer_host_->GetSourceProfileNameAt(index));
+
+  if (!importer_host_->source_profiles_loaded())
+    return l10n_util::GetStringUTF16(IDS_IMPORT_LOADING_PROFILES);
+  else
+    return WideToUTF16Hack(importer_host_->GetSourceProfileNameAt(index));
 }
 
 void ImporterView::ItemChanged(views::Combobox* combobox,
@@ -198,6 +199,11 @@ void ImporterView::ItemChanged(views::Combobox* combobox,
 
   if (prev_index == new_index)
     return;
+
+  if (!importer_host_->source_profiles_loaded()) {
+    SetCheckedItemsState(0);
+    return;
+  }
 
   // Save the current state
   uint16 prev_items = GetCheckedItems();
@@ -211,6 +217,15 @@ void ImporterView::ItemChanged(views::Combobox* combobox,
   // Set the checked items for this Item
   uint16 new_items = checkbox_items_[new_index];
   SetCheckedItems(new_items);
+}
+
+void ImporterView::SourceProfilesLoaded() {
+  DCHECK(importer_host_->source_profiles_loaded());
+  checkbox_items_.resize(
+      importer_host_->GetAvailableProfileCount(), initial_state_);
+
+  // Reload the profile combobox.
+  profile_combobox_->ModelChanged();
 }
 
 void ImporterView::ImportCanceled() {
@@ -282,6 +297,5 @@ void ImporterView::SetCheckedItems(uint16 items) {
     passwords_checkbox_->SetChecked(!!(items & importer::PASSWORDS));
 
   if (search_engines_checkbox_->IsEnabled())
-    search_engines_checkbox_->SetChecked(!!(items &
-                                            importer::SEARCH_ENGINES));
+    search_engines_checkbox_->SetChecked(!!(items & importer::SEARCH_ENGINES));
 }

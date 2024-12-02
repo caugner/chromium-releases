@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/file_path.h"
 #include "base/observer_list.h"
 #include "base/ref_counted.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/policy/device_management_backend.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -43,23 +43,12 @@ class DeviceTokenFetcher
 
   class ObserverRegistrar {
    public:
-    void Init(DeviceTokenFetcher* token_fetcher) {
-      token_fetcher_ = token_fetcher;
-    }
-    ~ObserverRegistrar() {
-      RemoveAll();
-    }
-    void AddObserver(DeviceTokenFetcher::Observer* observer) {
-      observers_.push_back(observer);
-      token_fetcher_->AddObserver(observer);
-    }
-    void RemoveAll() {
-      for (std::vector<DeviceTokenFetcher::Observer*>::iterator it =
-          observers_.begin(); it != observers_.end(); ++it) {
-        token_fetcher_->RemoveObserver(*it);
-      }
-      observers_.clear();
-    }
+    ObserverRegistrar();
+    ~ObserverRegistrar();
+
+    void Init(DeviceTokenFetcher* token_fetcher);
+    void AddObserver(DeviceTokenFetcher::Observer* observer);
+    void RemoveAll();
    private:
     DeviceTokenFetcher* token_fetcher_;
     std::vector<DeviceTokenFetcher::Observer*> observers_;
@@ -71,7 +60,7 @@ class DeviceTokenFetcher
   DeviceTokenFetcher(DeviceManagementBackend* backend,
                      Profile* profile,
                      const FilePath& token_path);
-  virtual ~DeviceTokenFetcher() {}
+  virtual ~DeviceTokenFetcher();
 
   // NotificationObserver method overrides:
   virtual void Observe(NotificationType type,
@@ -89,10 +78,6 @@ class DeviceTokenFetcher
   // Called by subscribers of the device management token to indicate that they
   // will need the token in the future. Must be called on the UI thread.
   void StartFetching();
-
-  // Instructs the fetcher to shut down, before the backend and token service
-  // references become stale.
-  void Shutdown();
 
   // Returns true if there is a pending token request to the device management
   // server.

@@ -30,12 +30,11 @@ class FontDescription_Dev {
   FontDescription_Dev(const FontDescription_Dev& other);
   ~FontDescription_Dev();
 
+  FontDescription_Dev& operator=(const FontDescription_Dev& other);
+
   const PP_FontDescription_Dev& pp_font_description() const {
     return pp_font_description_;
   }
-
-  FontDescription_Dev& operator=(const FontDescription_Dev& other);
-  void swap(FontDescription_Dev& other);
 
   Var face() const { return face_; }
   void set_face(const Var& face) {
@@ -81,13 +80,12 @@ class TextRun_Dev {
  public:
   TextRun_Dev();
   TextRun_Dev(const std::string& text,
-          bool rtl = false,
-          bool override_direction = false);
+              bool rtl = false,
+              bool override_direction = false);
   TextRun_Dev(const TextRun_Dev& other);
   ~TextRun_Dev();
 
   TextRun_Dev& operator=(const TextRun_Dev& other);
-  void swap(TextRun_Dev& other);
 
   const PP_TextRun_Dev& pp_text_run() const {
     return pp_text_run_;
@@ -104,14 +102,13 @@ class TextRun_Dev {
 class Font_Dev : public Resource {
  public:
   // Creates an is_null() Font object.
-  Font_Dev() {}
+  Font_Dev();
 
   explicit Font_Dev(PP_Resource resource);
-  explicit Font_Dev(const FontDescription_Dev& description);
+  explicit Font_Dev(Instance* instance, const FontDescription_Dev& description);
   Font_Dev(const Font_Dev& other);
 
   Font_Dev& operator=(const Font_Dev& other);
-  void swap(Font_Dev& other);
 
   // PPB_Font methods:
   bool Describe(FontDescription_Dev* description,

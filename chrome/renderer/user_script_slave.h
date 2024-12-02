@@ -15,7 +15,9 @@
 #include "base/stl_util-inl.h"
 #include "base/string_piece.h"
 #include "chrome/common/extensions/user_script.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
+
+class ExtensionSet;
 
 namespace WebKit {
 class WebFrame;
@@ -26,7 +28,7 @@ using WebKit::WebScriptSource;
 // Manages installed UserScripts for a render process.
 class UserScriptSlave {
  public:
-  UserScriptSlave();
+  UserScriptSlave(const ExtensionSet* extensions);
   ~UserScriptSlave();
 
   // Returns the unique set of extension IDs this UserScriptSlave knows about.
@@ -54,6 +56,9 @@ class UserScriptSlave {
 
   // Greasemonkey API source that is injected with the scripts.
   base::StringPiece api_js_;
+
+  // Extension metadata.
+  const ExtensionSet* extensions_;
 
   DISALLOW_COPY_AND_ASSIGN(UserScriptSlave);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,11 @@
 #define CHROME_BROWSER_UI_VIEWS_INFO_BUBBLE_H_
 #pragma once
 
-#include "app/animation_delegate.h"
+#include "chrome/browser/ui/views/bubble_border.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/animation/animation_delegate.h"
 #include "views/accelerator.h"
 #include "views/view.h"
-#include "chrome/browser/views/bubble_border.h"
 
 #if defined(OS_WIN)
 #include "views/widget/widget_win.h"
@@ -27,20 +27,22 @@
 // InfoBubble insets the contents for you, so the contents typically shouldn't
 // have any additional margins.
 
+#if defined(OS_WIN)
+class BorderWidget;
+#endif
 class InfoBubble;
-class SlideAnimation;
-
-namespace views {
-class Widget;
-}
 
 namespace gfx {
 class Path;
 }
 
-#if defined(OS_WIN)
-class BorderWidget;
-#endif
+namespace ui {
+class SlideAnimation;
+}
+
+namespace views {
+class Widget;
+}
 
 // This is used to paint the border of the InfoBubble.  Windows uses this via
 // BorderWidget (see below), while others can use it directly in the bubble.
@@ -182,7 +184,7 @@ class InfoBubble
     : public views::WidgetGtk,
 #endif
       public views::AcceleratorTarget,
-      public AnimationDelegate {
+      public ui::AnimationDelegate {
  public:
   // Shows the InfoBubble.  |parent| is set as the parent window, |contents| are
   // the contents shown in the bubble, and |position_relative_to| is a rect in
@@ -201,13 +203,17 @@ class InfoBubble
                           InfoBubbleDelegate* delegate);
 
 #if defined(OS_CHROMEOS)
-  // Shows the InfoBubble not grabbing the focus. Others are the same as above.
-  // TYPE_POPUP widget is used to achieve the focusless effect.
+  // Shows the InfoBubble without grabbing the focus. Others are the same as
+  // above.  TYPE_POPUP widget is used to achieve the focusless effect.
+  // If |show_while_screen_is_locked| is true, a property is set telling the
+  // window manager to continue showing the bubble even while the screen is
+  // locked.
   static InfoBubble* ShowFocusless(views::Widget* parent,
                                    const gfx::Rect& position_relative_to,
                                    BubbleBorder::ArrowLocation arrow_location,
                                    views::View* contents,
-                                   InfoBubbleDelegate* delegate);
+                                   InfoBubbleDelegate* delegate,
+                                   bool show_while_screen_is_locked);
 #endif
 
   // Resizes and potentially moves the InfoBubble to best accommodate the
@@ -225,16 +231,16 @@ class InfoBubble
   // Overridden from WidgetWin:
   virtual void Close();
 
-  // Overridden from AnimationDelegate:
-  virtual void AnimationEnded(const Animation* animation);
-  virtual void AnimationProgressed(const Animation* animation);
+  // Overridden from ui::AnimationDelegate:
+  virtual void AnimationEnded(const ui::Animation* animation);
+  virtual void AnimationProgressed(const ui::Animation* animation);
 
   static const SkColor kBackgroundColor;
 
  protected:
   InfoBubble();
 #if defined(OS_CHROMEOS)
-  explicit InfoBubble(views::WidgetGtk::Type type);
+  InfoBubble(views::WidgetGtk::Type type, bool show_while_screen_is_locked);
 #endif
   virtual ~InfoBubble();
 
@@ -291,13 +297,19 @@ class InfoBubble
   InfoBubbleDelegate* delegate_;
 
   // The animation used to fade the bubble out.
-  scoped_ptr<SlideAnimation> animation_;
+  scoped_ptr<ui::SlideAnimation> animation_;
 
   // The current visibility status of the bubble.
   ShowStatus show_status_;
 
   // Whether to fade away when the bubble closes.
   bool fade_away_on_close_;
+
+#if defined(OS_CHROMEOS)
+  // Should we set a property telling the window manager to show this window
+  // onscreen even when the screen is locked?
+  bool show_while_screen_is_locked_;
+#endif
 
   gfx::Rect position_relative_to_;
   BubbleBorder::ArrowLocation arrow_location_;

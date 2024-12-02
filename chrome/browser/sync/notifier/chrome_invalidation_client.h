@@ -12,9 +12,9 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/non_thread_safe.h"
 #include "base/scoped_callback_factory.h"
 #include "base/scoped_ptr.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/weak_ptr.h"
 #include "chrome/browser/sync/notifier/chrome_system_resources.h"
 #include "chrome/browser/sync/notifier/state_writer.h"
@@ -54,9 +54,9 @@ class ChromeInvalidationClient
   // Does not take ownership of |listener| or |state_writer|.
   // |base_task| must still be non-NULL.
   void Start(
-      const std::string& client_id, const std::string& state,
-      Listener* listener, StateWriter* state_writer,
-      base::WeakPtr<talk_base::Task> base_task);
+      const std::string& client_id, const std::string& client_info,
+      const std::string& state, Listener* listener,
+      StateWriter* state_writer, base::WeakPtr<talk_base::Task> base_task);
 
   void Stop();
 
@@ -99,7 +99,7 @@ class ChromeInvalidationClient
   void HandleOutboundPacket(
       invalidation::NetworkEndpoint* const& network_endpoint);
 
-  NonThreadSafe non_thread_safe_;
+  base::NonThreadSafe non_thread_safe_;
   ChromeSystemResources chrome_system_resources_;
   base::ScopedCallbackFactory<ChromeInvalidationClient>
       scoped_callback_factory_;

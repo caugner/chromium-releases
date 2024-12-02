@@ -10,12 +10,11 @@
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
 
 namespace webdriver {
 
 void CreateSession::ExecutePost(Response* const response) {
-  SessionManager* session_manager = Singleton<SessionManager>::get();
+  SessionManager* session_manager = SessionManager::GetInstance();
   std::string session_id;
 
   if (!session_manager->Create(&session_id)) {
@@ -33,4 +32,3 @@ void CreateSession::ExecutePost(Response* const response) {
 }
 
 }  // namespace webdriver
-

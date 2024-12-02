@@ -1,12 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
+/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 #ifndef PPAPI_C_DEV_PPB_FILE_CHOOSER_DEV_H_
 #define PPAPI_C_DEV_PPB_FILE_CHOOSER_DEV_H_
 
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 
 struct PP_CompletionCallback;
@@ -16,6 +17,7 @@ typedef enum {
   PP_FILECHOOSERMODE_OPENMULTIPLE
   // TODO(darin): Should there be a way to choose a directory?
 } PP_FileChooserMode_Dev;
+PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_FileChooserMode_Dev, 4);
 
 struct PP_FileChooserOptions_Dev {
   PP_FileChooserMode_Dev mode;
@@ -28,7 +30,7 @@ struct PP_FileChooserOptions_Dev {
   const char* accept_mime_types;
 };
 
-#define PPB_FILECHOOSER_DEV_INTERFACE "PPB_FileChooser(Dev);0.2"
+#define PPB_FILECHOOSER_DEV_INTERFACE "PPB_FileChooser(Dev);0.3"
 
 struct PPB_FileChooser_Dev {
   // Creates a file chooser dialog with the specified options.  The chooser is
@@ -62,4 +64,5 @@ struct PPB_FileChooser_Dev {
   PP_Resource (*GetNextChosenFile)(PP_Resource chooser);
 };
 
-#endif  // PPAPI_C_DEV_PPB_FILE_CHOOSER_DEV_H_
+#endif  /* PPAPI_C_DEV_PPB_FILE_CHOOSER_DEV_H_ */
+

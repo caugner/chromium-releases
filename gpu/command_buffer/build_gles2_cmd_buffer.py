@@ -48,8 +48,8 @@ _GL_TYPES = {
   'GLvoid': 'void',
   'GLfixed': 'int',
   'GLclampx': 'int',
-  'GLintptr': 'khronos_intptr_t',
-  'GLsizeiptr': 'khronos_ssize_t',
+  'GLintptr': 'long int',
+  'GLsizeiptr': 'long int',
 }
 _GL_FUNCTIONS = """
 GL_APICALL void         GL_APIENTRY glActiveTexture (GLenum texture);
@@ -65,7 +65,7 @@ GL_APICALL void         GL_APIENTRY glBlendEquationSeparate (GLenumEquation mode
 GL_APICALL void         GL_APIENTRY glBlendFunc (GLenumSrcBlendFactor sfactor, GLenumDstBlendFactor dfactor);
 GL_APICALL void         GL_APIENTRY glBlendFuncSeparate (GLenumSrcBlendFactor srcRGB, GLenumDstBlendFactor dstRGB, GLenumSrcBlendFactor srcAlpha, GLenumDstBlendFactor dstAlpha);
 GL_APICALL void         GL_APIENTRY glBufferData (GLenumBufferTarget target, GLsizeiptr size, const void* data, GLenumBufferUsage usage);
-GL_APICALL void         GL_APIENTRY glBufferSubData (GLenumBufferTarget target, GLintptr offset, GLsizeiptr size, const void* data);
+GL_APICALL void         GL_APIENTRY glBufferSubData (GLenumBufferTarget target, GLintptrNotNegative offset, GLsizeiptr size, const void* data);
 GL_APICALL GLenum       GL_APIENTRY glCheckFramebufferStatus (GLenumFrameBufferTarget target);
 GL_APICALL void         GL_APIENTRY glClear (GLbitfield mask);
 GL_APICALL void         GL_APIENTRY glClearColor (GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
@@ -73,9 +73,9 @@ GL_APICALL void         GL_APIENTRY glClearDepthf (GLclampf depth);
 GL_APICALL void         GL_APIENTRY glClearStencil (GLint s);
 GL_APICALL void         GL_APIENTRY glColorMask (GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
 GL_APICALL void         GL_APIENTRY glCompileShader (GLidShader shader);
-GL_APICALL void         GL_APIENTRY glCompressedTexImage2D (GLenumTextureTarget target, GLint level, GLenumCompressedTextureFormat internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void* data);
+GL_APICALL void         GL_APIENTRY glCompressedTexImage2D (GLenumTextureTarget target, GLint level, GLenumCompressedTextureFormat internalformat, GLsizei width, GLsizei height, GLintTextureBorder border, GLsizei imageSize, const void* data);
 GL_APICALL void         GL_APIENTRY glCompressedTexSubImage2D (GLenumTextureTarget target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenumCompressedTextureFormat format, GLsizei imageSize, const void* data);
-GL_APICALL void         GL_APIENTRY glCopyTexImage2D (GLenumTextureTarget target, GLint level, GLenumTextureInternalFormat internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
+GL_APICALL void         GL_APIENTRY glCopyTexImage2D (GLenumTextureTarget target, GLint level, GLenumTextureInternalFormat internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLintTextureBorder border);
 GL_APICALL void         GL_APIENTRY glCopyTexSubImage2D (GLenumTextureTarget target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height);
 GL_APICALL GLuint       GL_APIENTRY glCreateProgram (void);
 GL_APICALL GLuint       GL_APIENTRY glCreateShader (GLenumShaderType type);
@@ -99,7 +99,7 @@ GL_APICALL void         GL_APIENTRY glEnableVertexAttribArray (GLuint index);
 GL_APICALL void         GL_APIENTRY glFinish (void);
 GL_APICALL void         GL_APIENTRY glFlush (void);
 GL_APICALL void         GL_APIENTRY glFramebufferRenderbuffer (GLenumFrameBufferTarget target, GLenumAttachment attachment, GLenumRenderBufferTarget renderbuffertarget, GLidRenderbuffer renderbuffer);
-GL_APICALL void         GL_APIENTRY glFramebufferTexture2D (GLenumFrameBufferTarget target, GLenumAttachment attachment, GLenumTextureTarget textarget, GLidTexture texture, GLint level);
+GL_APICALL void         GL_APIENTRY glFramebufferTexture2D (GLenumFrameBufferTarget target, GLenumAttachment attachment, GLenumTextureTarget textarget, GLidTexture texture, GLintZeroOnly level);
 GL_APICALL void         GL_APIENTRY glFrontFace (GLenumFaceMode mode);
 GL_APICALL void         GL_APIENTRY glGenBuffers (GLsizeiNotNegative n, GLuint* buffers);
 GL_APICALL void         GL_APIENTRY glGenerateMipmap (GLenumTextureBindTarget target);
@@ -203,12 +203,14 @@ GL_APICALL void         GL_APIENTRY glGenSharedIdsCHROMIUM (GLuint namespace_id,
 GL_APICALL void         GL_APIENTRY glDeleteSharedIdsCHROMIUM (GLuint namespace_id, GLsizeiNotNegative n, const GLuint* ids);
 GL_APICALL void         GL_APIENTRY glRegisterSharedIdsCHROMIUM (GLuint namespace_id, GLsizeiNotNegative n, const GLuint* ids);
 GL_APICALL GLboolean    GL_APIENTRY glCommandBufferEnableCHROMIUM (const char* feature);
-GL_APICALL void*        GL_APIENTRY glMapBufferSubDataCHROMIUM (GLuint target, GLintptr offset, GLsizeiptr size, GLenum access);
+GL_APICALL void*        GL_APIENTRY glMapBufferSubDataCHROMIUM (GLuint target, GLintptrNotNegative offset, GLsizeiptr size, GLenum access);
 GL_APICALL void         GL_APIENTRY glUnmapBufferSubDataCHROMIUM (const void* mem);
 GL_APICALL void*        GL_APIENTRY glMapTexSubImage2DCHROMIUM (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, GLenum access);
 GL_APICALL void         GL_APIENTRY glUnmapTexSubImage2DCHROMIUM (const void* mem);
 GL_APICALL void         GL_APIENTRY glCopyTextureToParentTextureCHROMIUM (GLidBindTexture client_child_id, GLidBindTexture client_parent_id);
 GL_APICALL void         GL_APIENTRY glResizeCHROMIUM (GLuint width, GLuint height);
+GL_APICALL const GLchar* GL_APIENTRY glGetRequestableExtensionsCHROMIUM (void);
+GL_APICALL void         GL_APIENTRY glRequestExtensionCHROMIUM (const char* extension);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -410,6 +412,8 @@ _CMD_ID_TABLE = {
   'BlitFramebufferEXT':                                        446,
   'CopyTextureToParentTextureCHROMIUM':                        447,
   'ResizeCHROMIUM':                                            448,
+  'GetRequestableExtensionsCHROMIUM':                          449,
+  'RequestExtensionCHROMIUM':                                  450,
 }
 
 # This is a list of enum names and their valid values. It is used to map
@@ -999,6 +1003,15 @@ _ENUM_LISTS = {
       '5',
     ],
   },
+  'ZeroOnly': {
+    'type': 'GLint',
+    'valid': [
+      '0',
+    ],
+    'invalid': [
+      '1',
+    ],
+  },
   'FalseOnly': {
     'type': 'GLboolean',
     'valid': [
@@ -1458,6 +1471,7 @@ _FUNCTION_INFO = {
     'type': 'Custom',
     'impl_func': False,
     'unit_test': False,
+    'extension': True,
   },
   'TexImage2D': {'type': 'Manual', 'immediate': True},
   'TexParameterf': {'decoder_func': 'DoTexParameterf'},
@@ -1578,6 +1592,22 @@ _FUNCTION_INFO = {
       'unit_test': False,
       'extension': True,
       'chromium': True,
+  },
+  'GetRequestableExtensionsCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'immediate': False,
+    'cmd_args': 'uint32 bucket_id',
+    'extension': True,
+    'chromium': True,
+  },
+  'RequestExtensionCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'immediate': False,
+    'cmd_args': 'uint32 bucket_id',
+    'extension': True,
+    'chromium': True,
   },
 }
 
@@ -2124,6 +2154,11 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
       file.Write("\n")
     else:
       self.WriteGLES2ImplementationDeclaration(func, file)
+
+  def WriteDestinationInitalizationValidation(self, func, file):
+    """Writes the client side destintion initialization validation."""
+    for arg in func.GetOriginalArgs():
+      arg.WriteDestinationInitalizationValidation(file, func)
 
   def WriteImmediateCmdComputeSize(self, func, file):
     """Writes the size computation code for the immediate version of a cmd."""
@@ -3980,6 +4015,7 @@ class Argument(object):
     'GLfloat': 'float',
     'GLclampf': 'float',
   }
+  need_validation_ = ['GLsizei*', 'GLboolean*', 'GLenum*', 'GLint*']
 
   def __init__(self, name, type):
     self.name = name
@@ -4028,6 +4064,20 @@ class Argument(object):
   def WriteClientSideValidationCode(self, file, func):
     """Writes the validation code for an argument."""
     pass
+
+  def WriteDestinationInitalizationValidation(self, file, func):
+    """Writes the client side destintion initialization validation."""
+    pass
+
+  def WriteDestinationInitalizationValidatationIfNeeded(self, file, func):
+    """Writes the client side destintion initialization validation if needed."""
+    parts = self.type.split(" ")
+    if len(parts) > 1:
+      return
+    if parts[0] in self.need_validation_:
+      file.Write("  GL_CLIENT_VALIDATE_DESTINATION_INITALIZATION(%s, %s);\n" %
+          (self.type[:-1], self.name))
+
 
   def WriteGetAddress(self, file):
     """Writes the code to get the address this argument refers to."""
@@ -4087,8 +4137,8 @@ class SizeArgument(Argument):
 class SizeNotNegativeArgument(SizeArgument):
   """class for GLsizeiNotNegative. It's NEVER allowed to be negative"""
 
-  def __init__(self, name, type):
-    SizeArgument.__init__(self, name, "GLsizei")
+  def __init__(self, name, type, gl_type):
+    SizeArgument.__init__(self, name, gl_type)
 
   def GetInvalidArg(self, offset, index):
     """overridden from SizeArgument."""
@@ -4213,6 +4263,10 @@ class ImmediatePointerArgument(Argument):
     """Overridden from Argument."""
     return None
 
+  def WriteDestinationInitalizationValidation(self, file, func):
+    """Overridden from Argument."""
+    self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
+
 
 class BucketPointerArgument(Argument):
   """A class that represents an bucket argument to a function."""
@@ -4237,6 +4291,10 @@ class BucketPointerArgument(Argument):
   def GetImmediateVersion(self):
     """Overridden from Argument."""
     return None
+
+  def WriteDestinationInitalizationValidation(self, file, func):
+    """Overridden from Argument."""
+    self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
 
 
 class PointerArgument(Argument):
@@ -4307,6 +4365,10 @@ class PointerArgument(Argument):
     if self.type == "const char*":
       return InputStringBucketArgument(self.name, self.type)
     return BucketPointerArgument(self.name, self.type)
+
+  def WriteDestinationInitalizationValidation(self, file, func):
+    """Overridden from Argument."""
+    self.WriteDestinationInitalizationValidatationIfNeeded(file, func)
 
 
 class InputStringBucketArgument(Argument):
@@ -4460,6 +4522,9 @@ class Function(object):
   def AddInfo(self, name, value):
     """Adds an info."""
     setattr(self.info, name, value)
+
+  def IsCoreGLFunction(self):
+    return not self.GetInfo('extension')
 
   def GetGLFunctionName(self):
     """Gets the function to call to execute GL for this command."""
@@ -4628,6 +4693,10 @@ class Function(object):
   def WriteGLES2ImplementationHeader(self, file):
     """Writes the GLES2 Implemention declaration."""
     self.type_handler.WriteGLES2ImplementationHeader(self, file)
+
+  def WriteDestinationInitalizationValidation(self, file):
+    """Writes the client side destintion initialization validation."""
+    self.type_handler.WriteDestinationInitalizationValidation(self, file)
 
   def WriteFormatTest(self, file):
     """Writes the cmd's format test."""
@@ -4802,10 +4871,13 @@ def CreateArg(arg_string):
   elif arg_parts[0].startswith('GLboolean') and len(arg_parts[0]) > 9:
     return BoolArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   elif (arg_parts[0].startswith('GLint') and len(arg_parts[0]) > 5 and
-        arg_parts[0] != "GLintptr"):
+        not arg_parts[0].startswith('GLintptr')):
     return IntArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
-  elif arg_parts[0].startswith('GLsizeiNotNegative'):
-    return SizeNotNegativeArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
+  elif (arg_parts[0].startswith('GLsizeiNotNegative') or
+        arg_parts[0].startswith('GLintptrNotNegative')):
+    return SizeNotNegativeArgument(arg_parts[-1],
+                                   " ".join(arg_parts[0:-1]),
+                                   arg_parts[0][0:-11])
   elif arg_parts[0].startswith('GLsize'):
     return SizeArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   else:
@@ -5078,16 +5150,16 @@ class GLGenerator(object):
   def WriteServiceUnitTests(self, filename):
     """Writes the service decorder unit tests."""
     num_tests = len(self.functions)
-    step = (num_tests + 1) / 2
+    FUNCTIONS_PER_FILE = 98  # hard code this so it doesn't change.
     count = 0
-    for test_num in range(0, num_tests, step):
+    for test_num in range(0, num_tests, FUNCTIONS_PER_FILE):
       count += 1
       name = filename % count
       file = CHeaderWriter(
           name,
           "// It is included by gles2_cmd_decoder_unittest_%d.cc\n" % count)
       file.SetFileNum(count)
-      end = test_num + step
+      end = test_num + FUNCTIONS_PER_FILE
       if end > num_tests:
         end = num_tests
       for idx in range(test_num, end):
@@ -5113,6 +5185,7 @@ class GLGenerator(object):
       file.Write("%s GLES2%s(%s) {\n" %
                  (func.return_type, func.name,
                   func.MakeTypedOriginalArgString("")))
+      func.WriteDestinationInitalizationValidation(file)
       comma = ""
       if len(func.GetOriginalArgs()):
         comma = " << "
@@ -5195,24 +5268,30 @@ class GLGenerator(object):
     """Writes the Pepper OpenGLES interface definition."""
     file = CHeaderWriter(
         filename,
-        "// This interface is used to access common and lite profile OpenGL ES "
-        "2.0\n// functions.\n",
+        "// OpenGL ES interface.\n",
         3)
 
-    file.Write("#include \"ppapi/GLES2/khrplatform.h\"\n\n")
+    file.Write("#include \"ppapi/c/pp_resource.h\"\n\n")
 
-    file.Write("#define PPB_OPENGLES_DEV_INTERFACE \"PPB_OpenGLES(Dev);2.0\"\n\n")
-
+    file.Write("#ifndef __gl2_h_\n")
     for (k, v) in _GL_TYPES.iteritems():
       file.Write("typedef %s %s;\n" % (v, k))
+    file.Write("#endif  // __gl2_h_\n\n")
 
-    file.Write("\nstruct PPB_OpenGLES_Dev {\n")
+    file.Write("#define PPB_OPENGLES2_DEV_INTERFACE \"PPB_OpenGLES(Dev);2.0\"\n")
+
+    file.Write("\nstruct PPB_OpenGLES2_Dev {\n")
     for func in self.original_functions:
-      if func.GetInfo('extension'):
+      if not func.IsCoreGLFunction():
         continue
-      file.Write("  %s (*%s)(%s);\n" %
-                 (func.return_type, func.name,
-                  func.MakeTypedOriginalArgString("")))
+
+      original_arg = func.MakeTypedOriginalArgString("")
+      context_arg = "PP_Resource context"
+      if len(original_arg):
+        arg = context_arg + ", " + original_arg
+      else:
+        arg = context_arg
+      file.Write("  %s (*%s)(%s);\n" % (func.return_type, func.name, arg))
     file.Write("};\n\n")
 
     file.Close()
@@ -5224,47 +5303,86 @@ class GLGenerator(object):
     file.Write(_LICENSE)
     file.Write("// This file is auto-generated. DO NOT EDIT!\n\n")
 
-    file.Write("#include \"webkit/glue/plugins/pepper_graphics_3d.h\"\n\n")
+    file.Write("#include \"webkit/plugins/ppapi/ppb_opengles_impl.h\"\n\n")
 
-    file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"")
-    file.Write("\n#include \"ppapi/c/dev/ppb_opengles_dev.h\"\n\n")
+    file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"\n")
+    file.Write("#include \"ppapi/c/dev/ppb_opengles_dev.h\"\n")
+    file.Write("#include \"webkit/plugins/ppapi/ppb_context_3d_impl.h\"\n\n")
 
-    file.Write("namespace pepper {\n\n")
+    file.Write("namespace webkit {\n")
+    file.Write("namespace ppapi {\n\n")
     file.Write("namespace {\n\n")
 
     for func in self.original_functions:
-      if func.GetInfo('extension'):
+      if not func.IsCoreGLFunction():
         continue
-      file.Write("%s %s(%s) {\n" %
-                 (func.return_type, func.name,
-                  func.MakeTypedOriginalArgString("")))
-      return_string = "return "
-      if func.return_type == "void":
-        return_string = ""
-      file.Write("  %sGraphics3D::GetCurrent()->impl()->%s(%s);\n" %
-                 (return_string, func.original_name,
+
+      original_arg = func.MakeTypedOriginalArgString("")
+      context_arg = "PP_Resource context_id"
+      if len(original_arg):
+        arg = context_arg + ", " + original_arg
+      else:
+        arg = context_arg
+      file.Write("%s %s(%s) {\n" % (func.return_type, func.name, arg))
+      
+      file.Write("""  scoped_refptr<PPB_Context3D_Impl> context =
+      Resource::GetAs<PPB_Context3D_Impl>(context_id);
+""")
+
+      return_str = "" if func.return_type == "void" else "return "
+      file.Write("  %scontext->gles2_impl()->%s(%s);\n" %
+                 (return_str, func.original_name,
                   func.MakeOriginalArgString("")))
-      file.Write("}\n")
+      file.Write("}\n\n")
 
-    file.Write("\nconst struct PPB_OpenGLES_Dev ppb_opengles = {\n")
-
+    file.Write("\nconst struct PPB_OpenGLES2_Dev ppb_opengles2 = {\n")
     file.Write("  &")
     file.Write(",\n  &".join(
-      f.name for f in self.original_functions if not f.GetInfo('extension')))
+      f.name for f in self.original_functions if f.IsCoreGLFunction()))
     file.Write("\n")
-
     file.Write("};\n\n")
+
     file.Write("}  // namespace\n")
 
     file.Write("""
-const PPB_OpenGLES_Dev* Graphics3D::GetOpenGLESInterface() {
-  return &ppb_opengles;
+const PPB_OpenGLES2_Dev* PPB_OpenGLES_Impl::GetInterface() {
+  return &ppb_opengles2;
 }
 
 """)
-    file.Write("}  // namespace pepper\n\n")
+    file.Write("}  // namespace ppapi\n")
+    file.Write("}  // namespace webkit\n\n")
 
     file.Close()
+
+  def WriteGLES2ToPPAPIBridge(self, filename):
+    """Connects GLES2 helper library to PPB_OpenGLES2 interface"""
+
+    file = CWriter(filename)
+    file.Write(_LICENSE)
+    file.Write("// This file is auto-generated. DO NOT EDIT!\n\n")
+
+    file.Write("#include <GLES2/gl2.h>\n")
+    file.Write("#include \"ppapi/lib/gl/gles2/gl2ext_ppapi.h\"\n\n")
+
+    for func in self.original_functions:
+      if not func.IsCoreGLFunction():
+        continue
+
+      file.Write("%s GL_APIENTRY gl%s(%s) {\n" %
+                 (func.return_type, func.name,
+                  func.MakeTypedOriginalArgString("")))
+      return_str = "" if func.return_type == "void" else "return "
+      interface_str = "glGetInterfacePPAPI()"
+      original_arg = func.MakeOriginalArgString("")
+      context_arg = "glGetCurrentContextPPAPI()"
+      if len(original_arg):
+        arg = context_arg + ", " + original_arg
+      else:
+        arg = context_arg
+      file.Write("  %s%s->%s(%s);\n" %
+                 (return_str, interface_str, func.name, arg))
+      file.Write("}\n\n")
 
 def main(argv):
   """This is the main function."""
@@ -5296,10 +5414,11 @@ def main(argv):
 
   if options.alternate_mode == "ppapi":
     gen.WritePepperGLES2Interface("ppapi/c/dev/ppb_opengles_dev.h")
+    gen.WriteGLES2ToPPAPIBridge("ppapi/lib/gl/gles2/gles2.c")
 
   elif options.alternate_mode == "chrome_ppapi":
     gen.WritePepperGLES2Implementation(
-        "webkit/glue/plugins/pepper_graphics_3d_gl.cc")
+        "webkit/plugins/ppapi/ppb_opengles_impl.cc")
 
   else:
     gen.WriteCommandIds("common/gles2_cmd_ids_autogen.h")

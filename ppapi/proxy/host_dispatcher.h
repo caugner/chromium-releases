@@ -9,10 +9,10 @@
 #include <string>
 #include <vector>
 
+#include "base/process.h"
 #include "base/scoped_ptr.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/dispatcher.h"
-#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
 
 struct PPB_Var_Deprecated;
@@ -36,10 +36,14 @@ class HostDispatcher : public Dispatcher {
   // Constructor for the renderer side.
   //
   // You must call Dispatcher::InitWithChannel after the constructor.
-  HostDispatcher(const PPB_Var_Deprecated* var_interface,
+  HostDispatcher(base::ProcessHandle host_process_handle,
                  PP_Module module,
                  GetInterfaceFunc local_get_interface);
   ~HostDispatcher();
+
+  // Calls the plugin's PPP_InitializeModule function and returns true if
+  // the call succeeded.
+  bool InitializeModule();
 
   // The host side maintains a mapping from PP_Instance to Dispatcher so
   // that we can send the messages to the right channel.
@@ -49,7 +53,7 @@ class HostDispatcher : public Dispatcher {
   static void RemoveForInstance(PP_Instance instance);
 
   // Dispatcher overrides.
-  virtual bool IsPlugin() const { return false; }
+  virtual bool IsPlugin() const;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HostDispatcher);

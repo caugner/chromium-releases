@@ -16,7 +16,7 @@
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
 
-namespace installer_util {
+namespace installer {
 
 MasterPreferences::MasterPreferences(const CommandLine& cmd_line)
     : distribution_(NULL), preferences_read_from_file_(false) {
@@ -30,8 +30,7 @@ MasterPreferences::~MasterPreferences() {
 }
 
 bool MasterPreferences::GetBool(const std::string& name, bool* value) const {
-  // This function is called by InstallUtil::IsChromeFrameProcess()
-  // We return false because GetInstallPreferences returns an empty value below.
+  NOTREACHED();
   return false;
 }
 
@@ -51,4 +50,9 @@ std::vector<GURL> MasterPreferences::GetFirstRunTabs() const {
   return std::vector<GURL>();
 }
 
+// static
+const MasterPreferences& MasterPreferences::ForCurrentProcess() {
+  static MasterPreferences prefs(*CommandLine::ForCurrentProcess());
+  return prefs;
+}
 }

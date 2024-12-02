@@ -4,22 +4,21 @@
 
 #include "chrome/browser/dom_ui/new_tab_page_sync_handler.h"
 
-#include "app/l10n_util.h"
+#include <vector>
+
 #include "base/callback.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/pref_names.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
+#include "ui/base/l10n/l10n_util.h"
 
 // Default URL for the sync web interface.
 //
@@ -89,6 +88,8 @@ NewTabPageSyncHandler::MessageType
   switch (type) {
     case sync_ui_util::SYNC_ERROR:
       return SYNC_ERROR;
+    case sync_ui_util::SYNC_PROMO:
+      return SYNC_PROMO;
     case sync_ui_util::PRE_SYNCED:
     case sync_ui_util::SYNCED:
     default:
@@ -143,7 +144,9 @@ void NewTabPageSyncHandler::BuildAndSendSyncStatus() {
   string16 status_msg;
   string16 link_text;
   sync_ui_util::MessageType type =
-      sync_ui_util::GetStatusLabels(sync_service_, &status_msg, &link_text);
+      sync_ui_util::GetStatusLabelsForNewTabPage(sync_service_,
+                                                 &status_msg,
+                                                 &link_text);
   SendSyncMessageToPage(FromSyncStatusMessageType(type),
                         UTF16ToUTF8(status_msg), UTF16ToUTF8(link_text));
 }
@@ -154,20 +157,7 @@ void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
   if (!sync_service_->IsSyncEnabled())
     return;
   if (sync_service_->HasSyncSetupCompleted()) {
-    if (sync_service_->GetAuthError().state() ==
-        GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
-        sync_service_->GetAuthError().state() ==
-        GoogleServiceAuthError::CAPTCHA_REQUIRED ||
-        sync_service_->GetAuthError().state() ==
-        GoogleServiceAuthError::ACCOUNT_DELETED ||
-        sync_service_->GetAuthError().state() ==
-        GoogleServiceAuthError::ACCOUNT_DISABLED ||
-        sync_service_->GetAuthError().state() ==
-        GoogleServiceAuthError::SERVICE_UNAVAILABLE ||
-        sync_service_->observed_passphrase_required()) {
-      sync_service_->ShowLoginDialog(NULL);
-      return;
-    }
+    sync_service_->ShowErrorUI(NULL);
     DictionaryValue value;
     value.SetString("syncEnabledMessage",
                     l10n_util::GetStringFUTF16(IDS_SYNC_NTP_SYNCED_TO,
@@ -195,12 +185,16 @@ void NewTabPageSyncHandler::SendSyncMessageToPage(
   std::string title;
   std::string linkurl;
 
-  // If there is no message to show, we should hide the sync section
-  // altogether.
-  if (type == HIDE || msg.empty()) {
+  // If there is nothing to show, we should hide the sync section altogether.
+  if (type == HIDE || (msg.empty() && linktext.empty())) {
     value.SetBoolean("syncsectionisvisible", false);
-  } else {  // type == SYNC_ERROR
-    title = l10n_util::GetStringUTF8(IDS_SYNC_NTP_SYNC_SECTION_ERROR_TITLE);
+  } else {
+    if (type == SYNC_ERROR)
+      title = l10n_util::GetStringUTF8(IDS_SYNC_NTP_SYNC_SECTION_ERROR_TITLE);
+    else if (type == SYNC_PROMO)
+      title = l10n_util::GetStringUTF8(IDS_SYNC_NTP_SYNC_SECTION_PROMO_TITLE);
+    else
+      NOTREACHED();
 
     value.SetBoolean("syncsectionisvisible", true);
     value.SetString("msg", msg);

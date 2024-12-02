@@ -230,6 +230,13 @@ class FindMatchTests(pyauto.PyUITest):
                      'We have only one occurrence in this page so '
                      'first and back search coordinates must be same')
 
+  def _VerifySearchInPDFURL(self, url, word, expected_count):
+    """Verify that we can find in a pdf file."""
+    self.NavigateToURL(url)
+    search_count = self.FindInPage(word)['match_count']
+    self.assertEqual(expected_count, search_count,
+                     'Failed to find in the %s pdf file' % url)
+
   def testSearchInPDF(self):
     """Verify that we can find in a pdf file.
 
@@ -239,12 +246,15 @@ class FindMatchTests(pyauto.PyUITest):
     properties = self.GetBrowserInfo()['properties']
     if properties['branding'] != 'Google Chrome':
       return
-    url = self.GetFileURLForPath(os.path.join(
+    # Search in pdf file over file://.
+    file_url = self.GetFileURLForPath(os.path.join(
         self.DataDir(), 'plugin', 'Embed.pdf'))
-    self.NavigateToURL(url)
-    search_count = self.FindInPage('adobe')['match_count']
-    self.assertEqual(8, search_count, 'Failed to find in the pdf file')
+    self._VerifySearchInPDFURL(file_url, 'adobe', 8) 
 
+    # Disabling this test crbug.com/70927 
+    # Search in pdf file over http://.
+    # http_url = 'http://www.irs.gov/pub/irs-pdf/fw4.pdf'
+    # self._VerifySearchInPDFURL(http_url, 'Allowances', 16) 
 
 if __name__ == '__main__':
   pyauto_functional.Main()

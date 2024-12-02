@@ -4,12 +4,11 @@
 
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 
-#include "app/resource_bundle.h"
 #include "base/callback.h"
-#include "chrome/browser/browser_thread.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
 #include "grit/app_resources.h"
+#include "ui/base/resource/resource_bundle.h"
 
 DOMUIFavIconSource::DOMUIFavIconSource(Profile* profile)
     : DataSource(chrome::kChromeUIFavIconHost, MessageLoop::current()),

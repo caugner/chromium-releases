@@ -8,11 +8,11 @@
 #define CHROME_INSTALLER_SETUP_SETUP_UTIL_H_
 #pragma once
 
-#include "chrome/installer/util/version.h"
+#include "base/version.h"
 
 class FilePath;
 
-namespace setup_util {
+namespace installer {
   // Apply a diff patch to source file. First tries to apply it using courgette
   // since it checks for courgette header and fails quickly. If that fails
   // tries to apply the patch using regular bsdiff. Returns status code.
@@ -21,9 +21,9 @@ namespace setup_util {
                      const FilePath& dest);
 
   // Find the version of Chrome from an install source directory.
-  // Chrome_path should contain a version folder.
-  // Returns the first version found or NULL if no version is found.
-  installer::Version* GetVersionFromDir(const FilePath& chrome_path);
-}  // namespace setup_util
+  // Chrome_path should contain at least one version folder.
+  // Returns the maximum version found or NULL if no version is found.
+  Version* GetMaxVersionFromArchiveDir(const FilePath& chrome_path);
+}  // namespace installer
 
 #endif  // CHROME_INSTALLER_SETUP_SETUP_UTIL_H_

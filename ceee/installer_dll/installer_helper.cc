@@ -18,6 +18,7 @@
 #include "ceee/ie/common/ceee_module_util.h"
 #include "chrome/common/zip.h"
 #include "chrome/installer/mini_installer/pe_resource.h"
+#include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/google_update_constants.h"
 
 class InstallerHelperModule : public CAtlDllModuleT<InstallerHelperModule> {
@@ -45,7 +46,8 @@ InstallerHelperModule::InstallerHelperModule() {
       logfile_path,
       logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
       logging::LOCK_LOG_FILE,
-      logging::APPEND_TO_OLD_LOG_FILE);
+      logging::APPEND_TO_OLD_LOG_FILE,
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
 }
 
 InstallerHelperModule _AtlModule;
@@ -225,10 +227,11 @@ HRESULT RegisterFirefoxCeee(bool do_register) {
 
     if (file_util::PathExists(path)) {
       base::win::RegKey key(HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_WRITE);
-      if (key.CreateKey(L"Mozilla", KEY_WRITE) &&
-          key.CreateKey(L"Firefox", KEY_WRITE) &&
-          key.CreateKey(L"extensions", KEY_WRITE) &&
-          key.WriteValue(kCeeeFirefoxExtensionName, path.value().c_str())) {
+      if ((key.CreateKey(L"Mozilla", KEY_WRITE) == ERROR_SUCCESS) &&
+          (key.CreateKey(L"Firefox", KEY_WRITE) == ERROR_SUCCESS) &&
+          (key.CreateKey(L"extensions", KEY_WRITE) == ERROR_SUCCESS) &&
+          (key.WriteValue(kCeeeFirefoxExtensionName, path.value().c_str()))
+              == ERROR_SUCCESS) {
         hr = S_OK;
       } else {
         hr = com::AlwaysErrorFromLastError();
@@ -237,85 +240,42 @@ HRESULT RegisterFirefoxCeee(bool do_register) {
   } else {
     hr = S_OK;  // OK if not found, then there's nothing to do
     base::win::RegKey key(HKEY_LOCAL_MACHINE, L"SOFTWARE", KEY_READ);
-    if (key.OpenKey(L"Mozilla", KEY_READ) &&
-        key.OpenKey(L"Firefox", KEY_READ) &&
-        key.OpenKey(L"extensions", KEY_WRITE) &&
+    if ((key.OpenKey(L"Mozilla", KEY_READ) == ERROR_SUCCESS) &&
+        (key.OpenKey(L"Firefox", KEY_READ) == ERROR_SUCCESS) &&
+        (key.OpenKey(L"extensions", KEY_WRITE) == ERROR_SUCCESS) &&
         key.ValueExists(kCeeeFirefoxExtensionName)) {
-      if (!key.DeleteValue(kCeeeFirefoxExtensionName)) {
-        hr = com::AlwaysErrorFromLastError();
-      }
+      LONG result = key.DeleteValue(kCeeeFirefoxExtensionName);
+      hr = HRESULT_FROM_WIN32(result);
     }
   }
 
   return hr;
 }
 
-const wchar_t kCeeeChannelTag[] = L"-CEEE";
-
-const HKEY reg_root = HKEY_LOCAL_MACHINE;
-
-// Registers this install as coming from the CEEE+CF channel if it was
-// installed using Omaha.
-HRESULT RegisterCeeeChannel() {
+// Registers or unregisters this install as coming from the CEEE+CF channel if
+// it was installed using Omaha.
+HRESULT SetCeeeChannelModifier(bool new_value) {
   std::wstring reg_key(ceee_module_util::GetCromeFrameClientStateKey());
 
   base::win::RegKey key;
-  if (!key.Open(reg_root, reg_key.c_str(), KEY_ALL_ACCESS)) {
+  if (key.Open(HKEY_LOCAL_MACHINE, reg_key.c_str(), KEY_ALL_ACCESS) !=
+      ERROR_SUCCESS) {
     // Omaha didn't install the key.  Perhaps no Omaha?  That's ok.
     return S_OK;
   }
 
-  std::wstring ap_key_value;
-  if (!key.ReadValue(google_update::kRegApField, &ap_key_value)) {
-    // Key doesn't exist yet.
-    if (!key.WriteValue(google_update::kRegApField, kCeeeChannelTag)) {
-      return E_FAIL;
-    }
-    return S_OK;
-  }
+  // We create the "ap" value if it doesn't exist.
+  installer::ChannelInfo channel_info;
+  channel_info.Initialize(key);
 
-  if (ap_key_value.find(kCeeeChannelTag) == std::wstring::npos) {
-    // Key doesn't contain -CEEE
-    ap_key_value.append(kCeeeChannelTag);
-    if (!key.WriteValue(google_update::kRegApField, ap_key_value.c_str())) {
-      return E_FAIL;
-    }
-    return S_OK;
+  if (channel_info.SetCeee(new_value) && !channel_info.Write(&key)) {
+    return E_FAIL;
   }
 
   // Everything we need is already done!
   return S_OK;
 }
 
-// Removes any registration information written by RegisterCeeeChannel.
-HRESULT UnregisterCeeeChannel() {
-  std::wstring reg_key(ceee_module_util::GetCromeFrameClientStateKey());
-  base::win::RegKey key;
-  if (!key.Open(reg_root, reg_key.c_str(), KEY_ALL_ACCESS)) {
-    // Omaha didn't install the key.
-    return S_OK;
-  }
-
-  std::wstring ap_key_value;
-  if (!key.ReadValue(google_update::kRegApField, &ap_key_value)) {
-    // Key doesn't exist.  Nothing to do.
-    return S_OK;
-  }
-
-  size_t pos = ap_key_value.find(kCeeeChannelTag);
-
-  if (pos == std::wstring::npos) {
-    // Key doesn't contain -CEEE.  Nothing to do.
-    return S_OK;
-  }
-
-  // Prune -CEEE from ap and write it.
-  ap_key_value.erase(pos, wcslen(kCeeeChannelTag));
-  if (!key.WriteValue(google_update::kRegApField, ap_key_value.c_str())) {
-    return E_FAIL;
-  }
-  return S_OK;
-}
 }  // namespace
 
 
@@ -340,7 +300,7 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) {
 //
 // This is not the actual entrypoint; see the macro right below this
 // function, which keeps us safe from ever forgetting to check for
-// the --enable-ceee flag.
+// the --ceee flag.
 STDAPI DllRegisterServerImpl(void) {
   HRESULT hr = _AtlModule.DllRegisterServer(FALSE);
 
@@ -381,7 +341,7 @@ STDAPI DllRegisterServerImpl(void) {
   }
 
   if (SUCCEEDED(hr)) {
-    hr = RegisterCeeeChannel();
+    hr = SetCeeeChannelModifier(true);
     DCHECK(SUCCEEDED(hr)) << "Could not register with Omaha for CEEE+CF channel"
         << com::LogHr(hr);
   }
@@ -393,7 +353,7 @@ CEEE_DEFINE_DLL_REGISTER_SERVER()
 
 // Removes entries from the system registry.
 STDAPI DllUnregisterServer(void) {
-  // We always allow unregistration, even if no --enable-ceee install flag.
+  // We always allow unregistration, even if no --ceee install flag.
   //
   // We also always unregister Firefox components, regardless of whether the
   // --enable-ff-ceee flag is set; unregistration is idempotent.
@@ -424,7 +384,7 @@ STDAPI DllUnregisterServer(void) {
   DCHECK(SUCCEEDED(hr)) << "Unable to extract CEEE for FF" << com::LogHr(hr);
   AggregateComError(hr, &combined_result);
 
-  hr = UnregisterCeeeChannel();
+  hr = SetCeeeChannelModifier(false);
   DCHECK(SUCCEEDED(hr)) << "Could not unregister with Omaha for corp channel"
     << com::LogHr(hr);
   AggregateComError(hr, &combined_result);

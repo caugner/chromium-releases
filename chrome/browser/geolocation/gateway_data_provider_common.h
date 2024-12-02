@@ -10,7 +10,7 @@
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/task.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "chrome/browser/geolocation/device_data_provider.h"
 
 namespace {
@@ -83,7 +83,7 @@ class GatewayDataProviderCommon
   // Will schedule a scan; i.e. enqueue DoRouterScanTask deferred task.
   void ScheduleNextScan(int interval);
 
-  Lock data_mutex_;
+  base::Lock data_mutex_;
   // Whether we've successfully completed a scan for gateway data (or the
   // polling thread has terminated early).
   bool is_first_scan_complete_;

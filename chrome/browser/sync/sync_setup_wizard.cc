@@ -4,14 +4,13 @@
 
 #include "chrome/browser/sync/sync_setup_wizard.h"
 
-#include "app/resource_bundle.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
 #include "chrome/common/jstemplate_builder.h"
@@ -22,6 +21,7 @@
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/locale_settings.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
@@ -51,6 +51,7 @@ class SyncResourcesSource : public ChromeURLDataManager::DataSource {
   static const char* kInvalidPasswordHelpUrl;
   static const char* kCanNotAccessAccountUrl;
   static const char* kCreateNewAccountUrl;
+  static const char* kEncryptionHelpUrl;
 
  private:
   virtual ~SyncResourcesSource() {}
@@ -64,11 +65,18 @@ class SyncResourcesSource : public ChromeURLDataManager::DataSource {
 };
 
 const char* SyncResourcesSource::kInvalidPasswordHelpUrl =
-  "http://www.google.com/support/accounts/bin/answer.py?ctx=ch&answer=27444";
+    "http://www.google.com/support/accounts/bin/answer.py?ctx=ch&answer=27444";
 const char* SyncResourcesSource::kCanNotAccessAccountUrl =
-  "http://www.google.com/support/accounts/bin/answer.py?answer=48598";
+    "http://www.google.com/support/accounts/bin/answer.py?answer=48598";
+#if defined(OS_CHROMEOS)
+const char* SyncResourcesSource::kEncryptionHelpUrl =
+    "http://www.google.com/support/chromeos/bin/answer.py?answer=1181035";
+#else
+const char* SyncResourcesSource::kEncryptionHelpUrl =
+    "http://www.google.com/support/chrome/bin/answer.py?answer=1181035";
+#endif
 const char* SyncResourcesSource::kCreateNewAccountUrl =
-  "https://www.google.com/accounts/NewAccount?service=chromiumsync";
+    "https://www.google.com/accounts/NewAccount?service=chromiumsync";
 
 void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
     bool is_off_the_record, int request_id) {
@@ -79,6 +87,7 @@ void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
   const char kSyncGaiaLoginPath[] = "gaialogin";
   const char kSyncConfigurePath[] = "configure";
   const char kSyncPassphrasePath[] = "passphrase";
+  const char kSyncFirstPassphrasePath[] = "firstpassphrase";
   const char kSyncSettingUpPath[] = "settingup";
   const char kSyncSetupDonePath[] = "setupdone";
 
@@ -149,23 +158,57 @@ void SyncResourcesSource::StartDataRequest(const std::string& path_raw,
         GetStringFUTF16(IDS_SYNC_ENCRYPTION_INSTRUCTIONS,
                         GetStringUTF16(IDS_PRODUCT_NAME)));
     AddString(dict, "encryptAllLabel", IDS_SYNC_ENCRYPT_ALL_LABEL);
-    AddString(dict, "usePassphraseLabel", IDS_SYNC_PASSPHRASE_CHECKBOX_LABEL);
+
+    AddString(dict, "googleOption", IDS_SYNC_PASSPHRASE_OPT_GOOGLE);
+    AddString(dict, "explicitOption", IDS_SYNC_PASSPHRASE_OPT_EXPLICIT);
+    AddString(dict, "sectionGoogleMessage", IDS_SYNC_PASSPHRASE_MSG_GOOGLE);
+    AddString(dict, "sectionExplicitMessage", IDS_SYNC_PASSPHRASE_MSG_EXPLICIT);
+    AddString(dict, "passphraseLabel", IDS_SYNC_PASSPHRASE_LABEL);
+    AddString(dict, "confirmLabel", IDS_SYNC_CONFIRM_PASSPHRASE_LABEL);
+    AddString(dict, "emptyErrorMessage", IDS_SYNC_EMPTY_PASSPHRASE_ERROR);
+    AddString(dict, "mismatchErrorMessage", IDS_SYNC_PASSPHRASE_MISMATCH_ERROR);
+
     AddString(dict, "passphraseWarning", IDS_SYNC_PASSPHRASE_WARNING);
+    AddString(dict, "cleardata", IDS_SYNC_CLEAR_DATA_FOR_PASSPHRASE);
+    AddString(dict, "cleardatalink", IDS_SYNC_CLEAR_DATA_LINK);
+
+    AddString(dict, "learnmore", IDS_LEARN_MORE);
+    dict->SetString("encryptionhelpurl",
+                    GetLocalizedUrl(kEncryptionHelpUrl));
 
     // Stuff for the footer.
     AddString(dict, "ok", IDS_OK);
     AddString(dict, "cancel", IDS_CANCEL);
   } else if (path_raw == kSyncPassphrasePath) {
     html_resource_id = IDR_SYNC_PASSPHRASE_HTML;
-    AddString(dict, "newPassphraseTitle", IDS_SYNC_NEW_PASSPHRASE_TITLE);
-    AddString(dict, "newPassphraseBody", IDS_SYNC_NEW_PASSPHRASE_BODY);
     AddString(dict, "enterPassphraseTitle", IDS_SYNC_ENTER_PASSPHRASE_TITLE);
     AddString(dict, "enterPassphraseBody", IDS_SYNC_ENTER_PASSPHRASE_BODY);
-    AddString(dict, "gaiaPassphraseTitle", IDS_SYNC_GAIA_PASSPHRASE_TITLE);
-    AddString(dict, "gaiaPassphraseBody", IDS_SYNC_GAIA_PASSPHRASE_BODY);
+    AddString(dict, "enterOtherPassphraseBody",
+              IDS_SYNC_ENTER_OTHER_PASSPHRASE_BODY);
     AddString(dict, "passphraseLabel", IDS_SYNC_PASSPHRASE_LABEL);
+    AddString(dict, "incorrectPassphrase", IDS_SYNC_INCORRECT_PASSPHRASE);
+    AddString(dict, "passphraseRecover", IDS_SYNC_PASSPHRASE_RECOVER);
+    AddString(dict, "passphraseWarning", IDS_SYNC_PASSPHRASE_WARNING);
+    AddString(dict, "cleardatalink", IDS_SYNC_CLEAR_DATA_LINK);
+
     AddString(dict, "ok", IDS_OK);
     AddString(dict, "cancel", IDS_CANCEL);
+  } else if (path_raw == kSyncFirstPassphrasePath) {
+    html_resource_id = IDR_SYNC_FIRST_PASSPHRASE_HTML;
+    AddString(dict, "title", IDS_SYNC_FIRST_PASSPHRASE_TITLE);
+    dict->SetString("instructions",
+                    GetStringFUTF16(IDS_SYNC_FIRST_PASSPHRASE_MESSAGE,
+                                    GetStringUTF16(IDS_PRODUCT_NAME)));
+    AddString(dict, "googleOption", IDS_SYNC_PASSPHRASE_OPT_GOOGLE);
+    AddString(dict, "explicitOption", IDS_SYNC_PASSPHRASE_OPT_EXPLICIT);
+    AddString(dict, "sectionGoogleMessage", IDS_SYNC_PASSPHRASE_MSG_GOOGLE);
+    AddString(dict, "sectionExplicitMessage", IDS_SYNC_PASSPHRASE_MSG_EXPLICIT);
+    AddString(dict, "passphraseLabel", IDS_SYNC_PASSPHRASE_LABEL);
+    AddString(dict, "confirmLabel", IDS_SYNC_CONFIRM_PASSPHRASE_LABEL);
+    AddString(dict, "emptyErrorMessage", IDS_SYNC_EMPTY_PASSPHRASE_ERROR);
+    AddString(dict, "mismatchErrorMessage", IDS_SYNC_PASSPHRASE_MISMATCH_ERROR);
+    AddString(dict, "syncpasswords", IDS_SYNC_FIRST_PASSPHRASE_OK);
+    AddString(dict, "nothanks", IDS_SYNC_FIRST_PASSPHRASE_CANCEL);
   } else if (path_raw == kSyncSettingUpPath) {
     html_resource_id = IDR_SYNC_SETTING_UP_HTML;
 
@@ -215,7 +258,7 @@ SyncSetupWizard::SyncSetupWizard(ProfileSyncService* service)
   SyncResourcesSource* sync_source = new SyncResourcesSource();
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
                         &ChromeURLDataManager::AddDataSource,
                         make_scoped_refptr(sync_source)));
 }
@@ -279,9 +322,9 @@ SyncSetupWizard::State SyncSetupWizard::GetEndStateForDiscreteRun(
   State result = FATAL_ERROR;
   if (start_state == GAIA_LOGIN) {
     result = GAIA_SUCCESS;
-  } else if (start_state == ENTER_PASSPHRASE) {
-    result = DONE;
-  } else if (start_state == CONFIGURE) {
+  } else if (start_state == ENTER_PASSPHRASE ||
+             start_state == CONFIGURE ||
+             start_state == PASSPHRASE_MIGRATION) {
     result = DONE;
   }
   DCHECK_NE(FATAL_ERROR, result) <<

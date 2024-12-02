@@ -1,17 +1,17 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/importer/profile_writer.h"
 
 #include "base/string_util.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/common/notification_service.h"
@@ -181,8 +181,8 @@ static std::string BuildHostPathKey(const TemplateURL* t_url,
     if (t_url->url()->SupportsReplacement()) {
       return HostPathKeyForURL(GURL(
           t_url->url()->ReplaceSearchTerms(
-          *t_url, L"random string",
-          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring())));
+          *t_url, ASCIIToUTF16("random string"),
+          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())));
     }
   }
   return std::string();

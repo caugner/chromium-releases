@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,16 +16,16 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/condition_variable.h"
 #include "base/lazy_instance.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/thread_checker.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/thread_checker.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
@@ -39,14 +39,14 @@ namespace {
 
 // Protects |g_request_context|.
 pthread_mutex_t g_request_context_lock = PTHREAD_MUTEX_INITIALIZER;
-static URLRequestContext* g_request_context = NULL;
+static net::URLRequestContext* g_request_context = NULL;
 
 class OCSPRequestSession;
 
 class OCSPIOLoop {
  public:
   void StartUsing() {
-    AutoLock autolock(lock_);
+    base::AutoLock autolock(lock_);
     used_ = true;
   }
 
@@ -54,7 +54,7 @@ class OCSPIOLoop {
   void Shutdown();
 
   bool used() const {
-    AutoLock autolock(lock_);
+    base::AutoLock autolock(lock_);
     return used_;
   }
 
@@ -74,13 +74,13 @@ class OCSPIOLoop {
 
   void CancelAllRequests();
 
-  mutable Lock lock_;
+  mutable base::Lock lock_;
   bool shutdown_;  // Protected by |lock_|.
   std::set<OCSPRequestSession*> requests_;  // Protected by |lock_|.
   bool used_;  // Protected by |lock_|.
   // This should not be modified after |used_|.
   MessageLoopForIO* io_loop_;  // Protected by |lock_|.
-  ThreadChecker thread_checker_;
+  base::ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(OCSPIOLoop);
 };
@@ -140,13 +140,13 @@ base::LazyInstance<OCSPNSSInitialization> g_ocsp_nss_initialization(
     base::LINKER_INITIALIZED);
 
 // Concrete class for SEC_HTTP_REQUEST_SESSION.
-// Public methods except virtual methods of URLRequest::Delegate (On* methods)
-// run on certificate verifier thread (worker thread).
-// Virtual methods of URLRequest::Delegate and private methods run
+// Public methods except virtual methods of net::URLRequest::Delegate
+// (On* methods) run on certificate verifier thread (worker thread).
+// Virtual methods of net::URLRequest::Delegate and private methods run
 // on IO thread.
 class OCSPRequestSession
     : public base::RefCountedThreadSafe<OCSPRequestSession>,
-      public URLRequest::Delegate {
+      public net::URLRequest::Delegate {
  public:
   OCSPRequestSession(const GURL& url,
                      const char* http_request_method,
@@ -188,18 +188,18 @@ class OCSPRequestSession
 
   void Cancel() {
     // IO thread may set |io_loop_| to NULL, so protect by |lock_|.
-    AutoLock autolock(lock_);
+    base::AutoLock autolock(lock_);
     CancelLocked();
   }
 
   bool Finished() const {
-    AutoLock autolock(lock_);
+    base::AutoLock autolock(lock_);
     return finished_;
   }
 
   bool Wait() {
     base::TimeDelta timeout = timeout_;
-    AutoLock autolock(lock_);
+    base::AutoLock autolock(lock_);
     while (!finished_) {
       base::TimeTicks last_time = base::TimeTicks::Now();
       cv_.TimedWait(timeout);
@@ -248,7 +248,20 @@ class OCSPRequestSession
     return data_;
   }
 
-  virtual void OnResponseStarted(URLRequest* request) {
+  virtual void OnReceivedRedirect(net::URLRequest* request,
+                                  const GURL& new_url,
+                                  bool* defer_redirect) {
+    DCHECK_EQ(request, request_);
+    DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
+
+    if (!new_url.SchemeIs("http")) {
+      // Prevent redirects to non-HTTP schemes, including HTTPS. This matches
+      // the initial check in OCSPServerSession::CreateRequest().
+      CancelURLRequest();
+    }
+  }
+
+  virtual void OnResponseStarted(net::URLRequest* request) {
     DCHECK_EQ(request, request_);
     DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
 
@@ -262,7 +275,7 @@ class OCSPRequestSession
     OnReadCompleted(request_, bytes_read);
   }
 
-  virtual void OnReadCompleted(URLRequest* request, int bytes_read) {
+  virtual void OnReadCompleted(net::URLRequest* request, int bytes_read) {
     DCHECK_EQ(request, request_);
     DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
 
@@ -277,7 +290,7 @@ class OCSPRequestSession
       request_ = NULL;
       g_ocsp_io_loop.Get().RemoveRequest(this);
       {
-        AutoLock autolock(lock_);
+        base::AutoLock autolock(lock_);
         finished_ = true;
         io_loop_ = NULL;
       }
@@ -290,7 +303,7 @@ class OCSPRequestSession
   void CancelURLRequest() {
 #ifndef NDEBUG
     {
-      AutoLock autolock(lock_);
+      base::AutoLock autolock(lock_);
       if (io_loop_)
         DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
     }
@@ -301,7 +314,7 @@ class OCSPRequestSession
       request_ = NULL;
       g_ocsp_io_loop.Get().RemoveRequest(this);
       {
-        AutoLock autolock(lock_);
+        base::AutoLock autolock(lock_);
         finished_ = true;
         io_loop_ = NULL;
       }
@@ -336,20 +349,20 @@ class OCSPRequestSession
     DCHECK(!request_);
 
     pthread_mutex_lock(&g_request_context_lock);
-    URLRequestContext* url_request_context = g_request_context;
+    net::URLRequestContext* url_request_context = g_request_context;
     pthread_mutex_unlock(&g_request_context_lock);
 
     if (url_request_context == NULL)
       return;
 
     {
-      AutoLock autolock(lock_);
+      base::AutoLock autolock(lock_);
       DCHECK(!io_loop_);
       io_loop_ = MessageLoopForIO::current();
       g_ocsp_io_loop.Get().AddRequest(this);
     }
 
-    request_ = new URLRequest(url_, this);
+    request_ = new net::URLRequest(url_, this);
     request_->set_context(url_request_context);
     // To meet the privacy requirements of off-the-record mode.
     request_->set_load_flags(
@@ -376,7 +389,7 @@ class OCSPRequestSession
   GURL url_;                      // The URL we eventually wound up at
   std::string http_request_method_;
   base::TimeDelta timeout_;       // The timeout for OCSP
-  URLRequest* request_;           // The actual request this wraps
+  net::URLRequest* request_;           // The actual request this wraps
   scoped_refptr<net::IOBuffer> buffer_;  // Read buffer
   net::HttpRequestHeaders extra_request_headers_;
   std::string upload_content_;    // HTTP POST payload
@@ -388,8 +401,8 @@ class OCSPRequestSession
   std::string data_;              // Results of the requst
 
   // |lock_| protects |finished_| and |io_loop_|.
-  mutable Lock lock_;
-  ConditionVariable cv_;
+  mutable base::Lock lock_;
+  base::ConditionVariable cv_;
 
   MessageLoop* io_loop_;          // Message loop of the IO thread
   bool finished_;
@@ -449,7 +462,7 @@ OCSPIOLoop::~OCSPIOLoop() {
   // IO thread was already deleted before the singleton is deleted
   // in AtExitManager.
   {
-    AutoLock autolock(lock_);
+    base::AutoLock autolock(lock_);
     DCHECK(!io_loop_);
     DCHECK(!used_);
     DCHECK(shutdown_);
@@ -466,7 +479,7 @@ void OCSPIOLoop::Shutdown() {
 
   // Prevent the worker thread from trying to access |io_loop_|.
   {
-    AutoLock autolock(lock_);
+    base::AutoLock autolock(lock_);
     io_loop_ = NULL;
     used_ = false;
     shutdown_ = true;
@@ -481,13 +494,13 @@ void OCSPIOLoop::Shutdown() {
 
 void OCSPIOLoop::PostTaskToIOLoop(
     const tracked_objects::Location& from_here, Task* task) {
-  AutoLock autolock(lock_);
+  base::AutoLock autolock(lock_);
   if (io_loop_)
     io_loop_->PostTask(from_here, task);
 }
 
 void OCSPIOLoop::EnsureIOLoop() {
-  AutoLock autolock(lock_);
+  base::AutoLock autolock(lock_);
   DCHECK_EQ(MessageLoopForIO::current(), io_loop_);
 }
 
@@ -499,7 +512,7 @@ void OCSPIOLoop::AddRequest(OCSPRequestSession* request) {
 void OCSPIOLoop::RemoveRequest(OCSPRequestSession* request) {
   {
     // Ignore if we've already shutdown.
-    AutoLock auto_lock(lock_);
+    base::AutoLock auto_lock(lock_);
     if (shutdown_)
       return;
   }
@@ -562,12 +575,12 @@ SECStatus OCSPCreateSession(const char* host, PRUint16 portnum,
                             SEC_HTTP_SERVER_SESSION* pSession) {
   VLOG(1) << "OCSP create session: host=" << host << " port=" << portnum;
   pthread_mutex_lock(&g_request_context_lock);
-  URLRequestContext* request_context = g_request_context;
+  net::URLRequestContext* request_context = g_request_context;
   pthread_mutex_unlock(&g_request_context_lock);
   if (request_context == NULL) {
     LOG(ERROR) << "No URLRequestContext for OCSP handler.";
     // The application failed to call SetURLRequestContextForOCSP, so we
-    // can't create and use URLRequest.  PR_NOT_IMPLEMENTED_ERROR is not an
+    // can't create and use net::URLRequest.  PR_NOT_IMPLEMENTED_ERROR is not an
     // accurate error code for this error condition, but is close enough.
     PORT_SetError(PR_NOT_IMPLEMENTED_ERROR);
     return SECFailure;

@@ -6,26 +6,30 @@
 
 #include <vector>
 
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
@@ -35,9 +39,12 @@
 #if defined(TOOLKIT_VIEWS)
 #include "views/focus/accelerator_handler.h"
 #endif
+#include "gfx/size.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace ui_test_utils {
 
@@ -341,12 +348,6 @@ bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
   return true;
 }
 
-void Checkpoint(const char* message, const base::TimeTicks& start_time) {
-  LOG(INFO) << message << " : "
-            << (base::TimeTicks::Now() - start_time).InMilliseconds()
-            << " ms" << std::flush;
-}
-
 }  // namespace
 
 void RunMessageLoop() {
@@ -431,6 +432,17 @@ Browser* WaitForNewBrowser() {
   return Source<Browser>(observer.source()).ptr();
 }
 
+Browser* WaitForBrowserNotInSet(std::set<Browser*> excluded_browsers) {
+  TestNotificationObserver observer;
+  Browser* new_browser = GetBrowserNotInSet(excluded_browsers);
+  if (new_browser == NULL) {
+    new_browser = WaitForNewBrowser();
+    // The new browser should never be in |excluded_browsers|.
+    DCHECK(!ContainsKey(excluded_browsers, new_browser));
+  }
+  return new_browser;
+}
+
 void OpenURLOffTheRecord(Profile* profile, const GURL& url) {
   Browser::OpenURLOffTheRecord(profile, url);
   Browser* browser = BrowserList::FindBrowserWithType(
@@ -439,16 +451,80 @@ void OpenURLOffTheRecord(Profile* profile, const GURL& url) {
 }
 
 void NavigateToURL(Browser* browser, const GURL& url) {
-  NavigateToURLBlockUntilNavigationsComplete(browser, url, 1);
+  NavigateToURLWithDisposition(browser, url, CURRENT_TAB,
+                               BROWSER_TEST_WAIT_FOR_NAVIGATION);
+}
+
+// Navigates the specified tab (via |disposition|) of |browser| to |url|,
+// blocking until the |number_of_navigations| specified complete.
+// |disposition| indicates what tab the download occurs in, and
+// |browser_test_flags| controls what to wait for before continuing.
+static void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+    Browser* browser,
+    const GURL& url,
+    int number_of_navigations,
+    WindowOpenDisposition disposition,
+    int browser_test_flags) {
+  std::set<Browser*> initial_browsers;
+  for (std::vector<Browser*>::const_iterator iter = BrowserList::begin();
+       iter != BrowserList::end();
+       ++iter) {
+    initial_browsers.insert(*iter);
+  }
+  browser->OpenURL(url, GURL(), disposition, PageTransition::TYPED);
+  if (browser_test_flags & BROWSER_TEST_WAIT_FOR_BROWSER)
+    browser = WaitForBrowserNotInSet(initial_browsers);
+  if (browser_test_flags & BROWSER_TEST_WAIT_FOR_TAB)
+    WaitForNotification(NotificationType::TAB_ADDED);
+  if (!(browser_test_flags & BROWSER_TEST_WAIT_FOR_NAVIGATION)) {
+    // Some other flag caused the wait prior to this.
+    return;
+  }
+  TabContents* tab_contents = NULL;
+  if (disposition == NEW_BACKGROUND_TAB) {
+    // We've opened up a new tab, but not selected it.
+    tab_contents = browser->GetTabContentsAt(browser->selected_index() + 1);
+    EXPECT_TRUE(tab_contents != NULL)
+        << " Unable to wait for navigation to \"" << url.spec()
+        << "\" because the new tab is not available yet";
+    return;
+  } else if ((disposition == CURRENT_TAB) ||
+      (disposition == NEW_FOREGROUND_TAB) ||
+      (disposition == SINGLETON_TAB)) {
+    // The currently selected tab is the right one.
+    tab_contents = browser->GetSelectedTabContents();
+  }
+  if (tab_contents) {
+    NavigationController* controller = &tab_contents->controller();
+    WaitForNavigations(controller, number_of_navigations);
+    return;
+  }
+  EXPECT_TRUE(NULL != tab_contents) << " Unable to wait for navigation to \""
+                                    << url.spec() << "\""
+                                    << " because we can't get the tab contents";
+}
+
+void NavigateToURLWithDisposition(Browser* browser,
+                                  const GURL& url,
+                                  WindowOpenDisposition disposition,
+                                  int browser_test_flags) {
+  NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser,
+      url,
+      1,
+      disposition,
+      browser_test_flags);
 }
 
 void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
                                                 const GURL& url,
                                                 int number_of_navigations) {
-  NavigationController* controller =
-      &browser->GetSelectedTabContents()->controller();
-  browser->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
-  WaitForNavigations(controller, number_of_navigations);
+  NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser,
+      url,
+      number_of_navigations,
+      CURRENT_TAB,
+      BROWSER_TEST_WAIT_FOR_NAVIGATION);
 }
 
 DOMElementProxyRef GetActiveDOMDocument(Browser* browser) {
@@ -562,6 +638,12 @@ void WaitForNotification(NotificationType type) {
   RegisterAndWait(&observer, type, NotificationService::AllSources());
 }
 
+void WaitForNotificationFrom(NotificationType type,
+                             const NotificationSource& source) {
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, type, source);
+}
+
 void RegisterAndWait(NotificationObserver* observer,
                      NotificationType type,
                      const NotificationSource& source) {
@@ -605,20 +687,29 @@ bool BringBrowserWindowToFront(const Browser* browser) {
   return true;
 }
 
+Browser* GetBrowserNotInSet(std::set<Browser*> excluded_browsers) {
+  for (BrowserList::const_iterator iter = BrowserList::begin();
+       iter != BrowserList::end();
+       ++iter) {
+    if (excluded_browsers.find(*iter) == excluded_browsers.end())
+      return *iter;
+  }
+
+  return NULL;
+}
+
 bool SendKeyPressSync(const Browser* browser,
-                      app::KeyboardCode key,
+                      ui::KeyboardCode key,
                       bool control,
                       bool shift,
                       bool alt,
                       bool command) {
   base::TimeTicks start_time = base::TimeTicks::Now();
-  Checkpoint("SendKeyPressSync", start_time);
 
   gfx::NativeWindow window = NULL;
   if (!GetNativeWindow(browser, &window))
     return false;
 
-  Checkpoint("SendKeyPressNotifyWhenDone", start_time);
   if (!ui_controls::SendKeyPressNotifyWhenDone(
           window, key, control, shift, alt, command,
           new MessageLoop::QuitTask())) {
@@ -628,14 +719,12 @@ bool SendKeyPressSync(const Browser* browser,
   // Run the message loop. It'll stop running when either the key was received
   // or the test timed out (in which case testing::Test::HasFatalFailure should
   // be set).
-  Checkpoint("Running loop", start_time);
   RunMessageLoop();
-  Checkpoint("Check if HasFatalFailure", start_time);
   return !testing::Test::HasFatalFailure();
 }
 
 bool SendKeyPressAndWait(const Browser* browser,
-                         app::KeyboardCode key,
+                         ui::KeyboardCode key,
                          bool control,
                          bool shift,
                          bool alt,
@@ -710,17 +799,30 @@ void AppendToPythonPath(const FilePath& dir) {
 
 }  // anonymous namespace
 
-TestWebSocketServer::TestWebSocketServer(const FilePath& root_directory) {
+TestWebSocketServer::TestWebSocketServer() : started_(false) {
+}
+
+bool TestWebSocketServer::Start(const FilePath& root_directory) {
+  if (started_)
+    return true;
   scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
   cmd_line->AppendSwitchASCII("server", "start");
   cmd_line->AppendSwitch("chromium");
   cmd_line->AppendSwitch("register_cygwin");
   cmd_line->AppendSwitchPath("root", root_directory);
-  temp_dir_.CreateUniqueTempDir();
+  if (!temp_dir_.CreateUniqueTempDir()) {
+    LOG(ERROR) << "Unable to create a temporary directory.";
+    return false;
+  }
   websocket_pid_file_ = temp_dir_.path().AppendASCII("websocket.pid");
   cmd_line->AppendSwitchPath("pidfile", websocket_pid_file_);
   SetPythonPath();
-  base::LaunchApp(*cmd_line.get(), true, false, NULL);
+  if (!base::LaunchApp(*cmd_line.get(), true, false, NULL)) {
+    LOG(ERROR) << "Unable to launch websocket server.";
+    return false;
+  }
+  started_ = true;
+  return true;
 }
 
 CommandLine* TestWebSocketServer::CreatePythonCommandLine() {
@@ -734,7 +836,7 @@ void TestWebSocketServer::SetPythonPath() {
   scripts_path = scripts_path
       .Append(FILE_PATH_LITERAL("third_party"))
       .Append(FILE_PATH_LITERAL("WebKit"))
-      .Append(FILE_PATH_LITERAL("WebKitTools"))
+      .Append(FILE_PATH_LITERAL("Tools"))
       .Append(FILE_PATH_LITERAL("Scripts"));
   AppendToPythonPath(scripts_path);
 }
@@ -747,7 +849,7 @@ CommandLine* TestWebSocketServer::CreateWebSocketServerCommandLine() {
   FilePath script_path(src_path);
   script_path = script_path.AppendASCII("third_party");
   script_path = script_path.AppendASCII("WebKit");
-  script_path = script_path.AppendASCII("WebKitTools");
+  script_path = script_path.AppendASCII("Tools");
   script_path = script_path.AppendASCII("Scripts");
   script_path = script_path.AppendASCII("new-run-webkit-websocketserver");
 
@@ -757,6 +859,8 @@ CommandLine* TestWebSocketServer::CreateWebSocketServerCommandLine() {
 }
 
 TestWebSocketServer::~TestWebSocketServer() {
+  if (!started_)
+    return;
   scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
   cmd_line->AppendSwitchASCII("server", "stop");
   cmd_line->AppendSwitch("chromium");
@@ -810,6 +914,115 @@ void WindowedNotificationObserver::Observe(NotificationType type,
   } else {
     sources_seen_.insert(source.map_key());
   }
+}
+
+DOMMessageQueue::DOMMessageQueue() {
+  registrar_.Add(this, NotificationType::DOM_OPERATION_RESPONSE,
+                 NotificationService::AllSources());
+}
+
+void DOMMessageQueue::Observe(NotificationType type,
+                              const NotificationSource& source,
+                              const NotificationDetails& details) {
+  Details<DomOperationNotificationDetails> dom_op_details(details);
+  Source<RenderViewHost> sender(source);
+  message_queue_.push(dom_op_details->json());
+  if (waiting_for_message_) {
+    waiting_for_message_ = false;
+    MessageLoopForUI::current()->Quit();
+  }
+}
+
+bool DOMMessageQueue::WaitForMessage(std::string* message) {
+  if (message_queue_.empty()) {
+    waiting_for_message_ = true;
+    // This will be quit when a new message comes in.
+    RunMessageLoop();
+  }
+  // The queue should not be empty, unless we were quit because of a timeout.
+  if (message_queue_.empty())
+    return false;
+  if (message)
+    *message = message_queue_.front();
+  return true;
+}
+
+// Coordinates taking snapshots of a |RenderWidget|.
+class SnapshotTaker {
+ public:
+  SnapshotTaker() : bitmap_(NULL) {}
+
+  bool TakeRenderWidgetSnapshot(RenderWidgetHost* rwh,
+                                const gfx::Size& page_size,
+                                const gfx::Size& desired_size,
+                                SkBitmap* bitmap) WARN_UNUSED_RESULT {
+    bitmap_ = bitmap;
+    ThumbnailGenerator* generator = g_browser_process->GetThumbnailGenerator();
+    generator->MonitorRenderer(rwh, true);
+    snapshot_taken_ = false;
+    generator->AskForSnapshot(
+        rwh,
+        false,  // don't use backing_store
+        NewCallback(this, &SnapshotTaker::OnSnapshotTaken),
+        page_size,
+        desired_size);
+    ui_test_utils::RunMessageLoop();
+    return snapshot_taken_;
+  }
+
+  bool TakeEntirePageSnapshot(RenderViewHost* rvh,
+                              SkBitmap* bitmap) WARN_UNUSED_RESULT {
+    const wchar_t* script =
+        L"window.domAutomationController.send("
+        L"    JSON.stringify([document.width, document.height]))";
+    std::string json;
+    if (!ui_test_utils::ExecuteJavaScriptAndExtractString(
+            rvh, L"", script, &json))
+      return false;
+
+    // Parse the JSON.
+    std::vector<int> dimensions;
+    scoped_ptr<Value> value(base::JSONReader::Read(json, true));
+    if (!value->IsType(Value::TYPE_LIST))
+      return false;
+    ListValue* list = static_cast<ListValue*>(value.get());
+    int width, height;
+    if (!list->GetInteger(0, &width) || !list->GetInteger(1, &height))
+      return false;
+
+    // Take the snapshot.
+    gfx::Size page_size(width, height);
+    return TakeRenderWidgetSnapshot(rvh, page_size, page_size, bitmap);
+  }
+
+ private:
+  // Called when the ThumbnailGenerator has taken the snapshot.
+  void OnSnapshotTaken(const SkBitmap& bitmap) {
+    *bitmap_ = bitmap;
+    snapshot_taken_ = true;
+    MessageLoop::current()->Quit();
+  }
+
+  SkBitmap* bitmap_;
+  // Whether the snapshot was actually taken and received by this SnapshotTaker.
+  // This will be false if the test times out.
+  bool snapshot_taken_;
+
+  DISALLOW_COPY_AND_ASSIGN(SnapshotTaker);
+};
+
+bool TakeRenderWidgetSnapshot(RenderWidgetHost* rwh,
+                              const gfx::Size& page_size,
+                              SkBitmap* bitmap) {
+  DCHECK(bitmap);
+  SnapshotTaker taker;
+  return taker.TakeRenderWidgetSnapshot(rwh, page_size, page_size, bitmap);
+}
+
+bool TakeEntirePageSnapshot(RenderViewHost* rvh, SkBitmap* bitmap) {
+  DCHECK(bitmap);
+  SnapshotTaker taker;
+  return taker.TakeEntirePageSnapshot(rvh, bitmap);
 }
 
 }  // namespace ui_test_utils

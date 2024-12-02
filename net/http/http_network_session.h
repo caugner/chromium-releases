@@ -8,9 +8,9 @@
 
 #include <map>
 #include <set>
-#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
+#include "base/threading/non_thread_safe.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/host_resolver.h"
 #include "net/base/ssl_client_auth_cache.h"
@@ -28,6 +28,7 @@ class Value;
 
 namespace net {
 
+class CertVerifier;
 class ClientSocketFactory;
 class DnsCertProvenanceChecker;
 class DnsRRResolver;
@@ -44,10 +45,11 @@ class TCPClientSocketPool;
 
 // This class holds session objects used by HttpNetworkTransaction objects.
 class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
-                           public NonThreadSafe {
+                           public base::NonThreadSafe {
  public:
   HttpNetworkSession(
       HostResolver* host_resolver,
+      CertVerifier* cert_verifier,
       DnsRRResolver* dnsrr_resolver,
       DnsCertProvenanceChecker* dns_cert_checker,
       SSLHostInfoFactory* ssl_host_info_factory,
@@ -109,6 +111,7 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   // SSL sockets come from the socket_factory().
   ClientSocketFactory* socket_factory() { return socket_factory_; }
   HostResolver* host_resolver() { return host_resolver_; }
+  CertVerifier* cert_verifier() { return cert_verifier_; }
   DnsRRResolver* dnsrr_resolver() { return dnsrr_resolver_; }
   DnsCertProvenanceChecker* dns_cert_checker() {
     return dns_cert_checker_;
@@ -125,6 +128,10 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
 
   HttpStreamFactory* http_stream_factory() {
     return &http_stream_factory_;
+  }
+
+  NetLog* net_log() {
+    return net_log_;
   }
 
   // Creates a Value summary of the state of the socket pools. The caller is
@@ -152,6 +159,7 @@ class HttpNetworkSession : public base::RefCounted<HttpNetworkSession>,
   SSLClientAuthCache ssl_client_auth_cache_;
   HttpAlternateProtocols alternate_protocols_;
   HostResolver* const host_resolver_;
+  CertVerifier* cert_verifier_;
   DnsRRResolver* dnsrr_resolver_;
   DnsCertProvenanceChecker* dns_cert_checker_;
   scoped_refptr<ProxyService> proxy_service_;

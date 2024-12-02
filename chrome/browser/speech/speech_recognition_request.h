@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_SPEECH_SPEECH_RECOGNITION_REQUEST_H_
 #define CHROME_BROWSER_SPEECH_SPEECH_RECOGNITION_REQUEST_H_
+#pragma once
 
 #include <string>
 #include "base/basictypes.h"
@@ -47,18 +48,19 @@ class SpeechRecognitionRequest : public URLFetcher::Delegate {
   bool Send(const std::string& language,
             const std::string& grammar,
             const std::string& hardware_info,
+            const std::string& origin_url,
             const std::string& content_type,
             const std::string& audio_data);
 
   bool HasPendingRequest() { return url_fetcher_ != NULL; }
 
   // URLFetcher::Delegate methods.
-  void OnURLFetchComplete(const URLFetcher* source,
-                          const GURL& url,
-                          const URLRequestStatus& status,
-                          int response_code,
-                          const ResponseCookies& cookies,
-                          const std::string& data);
+  virtual void OnURLFetchComplete(const URLFetcher* source,
+                                  const GURL& url,
+                                  const net::URLRequestStatus& status,
+                                  int response_code,
+                                  const ResponseCookies& cookies,
+                                  const std::string& data);
 
  private:
   scoped_refptr<URLRequestContextGetter> url_context_;

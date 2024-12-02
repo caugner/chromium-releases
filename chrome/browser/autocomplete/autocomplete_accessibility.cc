@@ -4,10 +4,10 @@
 
 #include "chrome/browser/autocomplete/autocomplete_accessibility.h"
 
-#include "app/l10n_util.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/accessibility/view_accessibility.h"
 #include "views/view.h"
 
@@ -91,7 +91,7 @@ STDMETHODIMP AutocompleteAccessibility::get_accName(VARIANT var_id,
     return E_INVALIDARG;
   }
 
-  std::wstring temp_name = l10n_util::GetString(IDS_ACCNAME_LOCATION);
+  string16 temp_name = l10n_util::GetStringUTF16(IDS_ACCNAME_LOCATION);
 
   if (!temp_name.empty()) {
     // Return name retrieved.

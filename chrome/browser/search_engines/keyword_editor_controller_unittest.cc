@@ -1,22 +1,21 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/table_model_observer.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_table_model.h"
 #include "chrome/common/notification_details.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/testing_pref_service.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/models/table_model_observer.h"
 
 static const string16 kA(ASCIIToUTF16("a"));
 static const string16 kA1(ASCIIToUTF16("a1"));
@@ -26,7 +25,7 @@ static const string16 kB1(ASCIIToUTF16("b1"));
 // Base class for keyword editor tests. Creates a profile containing an
 // empty TemplateURLModel.
 class KeywordEditorControllerTest : public testing::Test,
-                                    public TableModelObserver {
+                                    public ui::TableModelObserver {
  public:
   // Initializes all of the state.
   void Init(bool simulate_load_failure);
@@ -68,19 +67,19 @@ class KeywordEditorControllerTest : public testing::Test,
   void SimulateDefaultSearchIsManaged(const std::string& url) {
     ASSERT_FALSE(url.empty());
     TestingPrefService* service = profile_->GetTestingPrefService();
-    service->SetManagedPrefWithoutNotification(
+    service->SetManagedPref(
         prefs::kDefaultSearchProviderEnabled,
         Value::CreateBooleanValue(true));
-    service->SetManagedPrefWithoutNotification(
+    service->SetManagedPref(
         prefs::kDefaultSearchProviderSearchURL,
         Value::CreateStringValue(url));
-    service->SetManagedPrefWithoutNotification(
+    service->SetManagedPref(
         prefs::kDefaultSearchProviderName,
         Value::CreateStringValue("managed"));
     // Clear the IDs that are not specified via policy.
-    service->SetManagedPrefWithoutNotification(
+    service->SetManagedPref(
         prefs::kDefaultSearchProviderID, new StringValue(""));
-    service->SetManagedPrefWithoutNotification(
+    service->SetManagedPref(
         prefs::kDefaultSearchProviderPrepopulateID, new StringValue(""));
     model_->Observe(
         NotificationType::PREF_CHANGED,
@@ -138,8 +137,8 @@ TEST_F(KeywordEditorControllerTest, Add) {
 
   // Verify the entry is what we added.
   const TemplateURL* turl = model_->GetTemplateURLs()[0];
-  EXPECT_EQ(L"a", turl->short_name());
-  EXPECT_EQ(L"b", turl->keyword());
+  EXPECT_EQ(ASCIIToUTF16("a"), turl->short_name());
+  EXPECT_EQ(ASCIIToUTF16("b"), turl->keyword());
   ASSERT_TRUE(turl->url() != NULL);
   EXPECT_EQ("http://c", turl->url()->url());
 }
@@ -155,8 +154,8 @@ TEST_F(KeywordEditorControllerTest, Modify) {
 
   // Make sure it was updated appropriately.
   VerifyChangeCount(0, 1, 0, 0);
-  EXPECT_EQ(L"a1", turl->short_name());
-  EXPECT_EQ(L"b1", turl->keyword());
+  EXPECT_EQ(ASCIIToUTF16("a1"), turl->short_name());
+  EXPECT_EQ(ASCIIToUTF16("b1"), turl->keyword());
   ASSERT_TRUE(turl->url() != NULL);
   EXPECT_EQ("http://c1", turl->url()->url());
 }
@@ -187,9 +186,11 @@ TEST_F(KeywordEditorControllerTest, CannotSetDefaultWhileManaged) {
   controller_->AddTemplateURL(kA1, kB1, "http://d{searchTerms}");
   ClearChangeCount();
 
-  const TemplateURL* turl1 = model_->GetTemplateURLForKeyword(L"b");
+  const TemplateURL* turl1 =
+      model_->GetTemplateURLForKeyword(ASCIIToUTF16("b"));
   ASSERT_TRUE(turl1 != NULL);
-  const TemplateURL* turl2 = model_->GetTemplateURLForKeyword(L"b1");
+  const TemplateURL* turl2 =
+      model_->GetTemplateURLForKeyword(ASCIIToUTF16("b1"));
   ASSERT_TRUE(turl2 != NULL);
 
   EXPECT_TRUE(controller_->CanMakeDefault(turl1));
@@ -209,9 +210,11 @@ TEST_F(KeywordEditorControllerTest, EditManagedDefault) {
   controller_->AddTemplateURL(kA1, kB1, "http://d{searchTerms}");
   ClearChangeCount();
 
-  const TemplateURL* turl1 = model_->GetTemplateURLForKeyword(L"b");
+  const TemplateURL* turl1 =
+      model_->GetTemplateURLForKeyword(ASCIIToUTF16("b"));
   ASSERT_TRUE(turl1 != NULL);
-  const TemplateURL* turl2 = model_->GetTemplateURLForKeyword(L"b1");
+  const TemplateURL* turl2 =
+      model_->GetTemplateURLForKeyword(ASCIIToUTF16("b1"));
   ASSERT_TRUE(turl2 != NULL);
 
   EXPECT_TRUE(controller_->CanEdit(turl1));
@@ -242,8 +245,8 @@ TEST_F(KeywordEditorControllerTest, MakeDefaultNoWebData) {
 // appropriately.
 TEST_F(KeywordEditorControllerTest, MutateTemplateURLModel) {
   TemplateURL* turl = new TemplateURL();
-  turl->set_keyword(L"a");
-  turl->set_short_name(L"b");
+  turl->set_keyword(ASCIIToUTF16("a"));
+  turl->set_short_name(ASCIIToUTF16("b"));
   model_->Add(turl);
 
   // Table model should have updated.

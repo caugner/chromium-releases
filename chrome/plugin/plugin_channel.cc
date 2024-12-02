@@ -5,10 +5,10 @@
 #include "chrome/plugin/plugin_channel.h"
 
 #include "base/command_line.h"
-#include "base/lock.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
 #include "chrome/common/child_process.h"
 #include "chrome/common/plugin_messages.h"
@@ -16,7 +16,7 @@
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_delegate_stub.h"
 #include "chrome/plugin/webplugin_proxy.h"
-#include "webkit/glue/plugins/plugin_instance.h"
+#include "webkit/plugins/npapi/plugin_instance.h"
 
 #if defined(OS_POSIX)
 #include "base/eintr_wrapper.h"
@@ -50,7 +50,7 @@ class PluginChannel::MessageFilter : public IPC::ChannelProxy::MessageFilter {
 
   base::WaitableEvent* GetModalDialogEvent(
       gfx::NativeViewId containing_window) {
-    AutoLock auto_lock(modal_dialog_event_map_lock_);
+    base::AutoLock auto_lock(modal_dialog_event_map_lock_);
     if (!modal_dialog_event_map_.count(containing_window)) {
       NOTREACHED();
       return NULL;
@@ -62,7 +62,7 @@ class PluginChannel::MessageFilter : public IPC::ChannelProxy::MessageFilter {
   // Decrement the ref count associated with the modal dialog event for the
   // given tab.
   void ReleaseModalDialogEvent(gfx::NativeViewId containing_window) {
-    AutoLock auto_lock(modal_dialog_event_map_lock_);
+    base::AutoLock auto_lock(modal_dialog_event_map_lock_);
     if (!modal_dialog_event_map_.count(containing_window)) {
       NOTREACHED();
       return;
@@ -98,7 +98,7 @@ class PluginChannel::MessageFilter : public IPC::ChannelProxy::MessageFilter {
   }
 
   void OnInit(const PluginMsg_Init_Params& params, IPC::Message* reply_msg) {
-    AutoLock auto_lock(modal_dialog_event_map_lock_);
+    base::AutoLock auto_lock(modal_dialog_event_map_lock_);
     if (modal_dialog_event_map_.count(params.containing_window)) {
       modal_dialog_event_map_[params.containing_window].refcount++;
       return;
@@ -111,13 +111,13 @@ class PluginChannel::MessageFilter : public IPC::ChannelProxy::MessageFilter {
   }
 
   void OnSignalModalDialogEvent(gfx::NativeViewId containing_window) {
-    AutoLock auto_lock(modal_dialog_event_map_lock_);
+    base::AutoLock auto_lock(modal_dialog_event_map_lock_);
     if (modal_dialog_event_map_.count(containing_window))
       modal_dialog_event_map_[containing_window].event->Signal();
   }
 
   void OnResetModalDialogEvent(gfx::NativeViewId containing_window) {
-    AutoLock auto_lock(modal_dialog_event_map_lock_);
+    base::AutoLock auto_lock(modal_dialog_event_map_lock_);
     if (modal_dialog_event_map_.count(containing_window))
       modal_dialog_event_map_[containing_window].event->Reset();
   }
@@ -128,7 +128,7 @@ class PluginChannel::MessageFilter : public IPC::ChannelProxy::MessageFilter {
   };
   typedef std::map<gfx::NativeViewId, WaitableEventWrapper> ModalDialogEventMap;
   ModalDialogEventMap modal_dialog_event_map_;
-  Lock modal_dialog_event_map_lock_;
+  base::Lock modal_dialog_event_map_lock_;
 
   IPC::Channel* channel_;
 };
@@ -162,9 +162,6 @@ void PluginChannel::NotifyRenderersOfPendingShutdown() {
 PluginChannel::PluginChannel()
     : renderer_handle_(0),
       renderer_id_(-1),
-#if defined(OS_POSIX)
-      renderer_fd_(-1),
-#endif
       in_send_(0),
       off_the_record_(false),
       filter_(new MessageFilter()) {
@@ -175,11 +172,6 @@ PluginChannel::PluginChannel()
 }
 
 PluginChannel::~PluginChannel() {
-#if defined(OS_POSIX)
-  // Won't be needing this any more.
-  CloseRendererFD();
-#endif
-
   if (renderer_handle_)
     base::CloseProcessHandle(renderer_handle_);
 
@@ -198,23 +190,26 @@ bool PluginChannel::Send(IPC::Message* msg) {
   return result;
 }
 
-void PluginChannel::OnMessageReceived(const IPC::Message& msg) {
+bool PluginChannel::OnMessageReceived(const IPC::Message& msg) {
   if (log_messages_) {
     VLOG(1) << "received message @" << &msg << " on channel @" << this
             << " with type " << msg.type();
   }
-  PluginChannelBase::OnMessageReceived(msg);
+  return PluginChannelBase::OnMessageReceived(msg);
 }
 
-void PluginChannel::OnControlMessageReceived(const IPC::Message& msg) {
+bool PluginChannel::OnControlMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PluginChannel, msg)
     IPC_MESSAGE_HANDLER(PluginMsg_CreateInstance, OnCreateInstance)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(PluginMsg_DestroyInstance,
                                     OnDestroyInstance)
     IPC_MESSAGE_HANDLER(PluginMsg_GenerateRouteID, OnGenerateRouteID)
     IPC_MESSAGE_HANDLER(PluginMsg_ClearSiteData, OnClearSiteData)
-    IPC_MESSAGE_UNHANDLED_ERROR()
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  DCHECK(handled);
+  return handled;
 }
 
 void PluginChannel::OnCreateInstance(const std::string& mime_type,
@@ -258,21 +253,18 @@ int PluginChannel::GenerateRouteID() {
   return ++last_id;
 }
 
-void PluginChannel::OnClearSiteData(uint64 flags,
-                                    const std::string& domain,
+void PluginChannel::OnClearSiteData(const std::string& site,
+                                    uint64 flags,
                                     base::Time begin_time) {
   bool success = false;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   FilePath path = command_line->GetSwitchValuePath(switches::kPluginPath);
-  scoped_refptr<NPAPI::PluginLib> plugin_lib(
-      NPAPI::PluginLib::CreatePluginLib(path));
+  scoped_refptr<webkit::npapi::PluginLib> plugin_lib(
+      webkit::npapi::PluginLib::CreatePluginLib(path));
   if (plugin_lib.get()) {
     NPError err = plugin_lib->NP_Initialize();
     if (err == NPERR_NO_ERROR) {
-      scoped_refptr<NPAPI::PluginInstance> instance(
-          plugin_lib->CreateInstance(std::string()));
-
-      const char* domain_str = domain.empty() ? NULL : domain.c_str();
+      const char* site_str = site.empty() ? NULL : site.c_str();
       uint64 max_age;
       if (begin_time > base::Time()) {
         base::TimeDelta delta = base::Time::Now() - begin_time;
@@ -280,7 +272,7 @@ void PluginChannel::OnClearSiteData(uint64 flags,
       } else {
         max_age = kuint64max;
       }
-      err = instance->NPP_ClearSiteData(flags, domain_str, max_age);
+      err = plugin_lib->NP_ClearSiteData(site_str, flags, max_age);
       success = (err == NPERR_NO_ERROR);
     }
   }
@@ -293,12 +285,6 @@ base::WaitableEvent* PluginChannel::GetModalDialogEvent(
 }
 
 void PluginChannel::OnChannelConnected(int32 peer_pid) {
-#if defined(OS_POSIX)
-  // By this point, the renderer must have its own copy of the plugin channel
-  // FD.
-  CloseRendererFD();
-#endif
-
   base::ProcessHandle handle;
   if (!base::OpenProcessHandle(peer_pid, &handle)) {
     NOTREACHED();
@@ -308,11 +294,6 @@ void PluginChannel::OnChannelConnected(int32 peer_pid) {
 }
 
 void PluginChannel::OnChannelError() {
-#if defined(OS_POSIX)
-  // Won't be needing this any more.
-  CloseRendererFD();
-#endif
-
   base::CloseProcessHandle(renderer_handle_);
   renderer_handle_ = 0;
   PluginChannelBase::OnChannelError();
@@ -336,17 +317,6 @@ void PluginChannel::CleanUp() {
 }
 
 bool PluginChannel::Init(MessageLoop* ipc_message_loop, bool create_pipe_now) {
-#if defined(OS_POSIX)
-  // This gets called when the PluginChannel is initially created. At this
-  // point, create the socketpair and assign the plugin side FD to the channel
-  // name. Keep the renderer side FD as a member variable in the PluginChannel
-  // to be able to transmit it through IPC.
-  int plugin_fd;
-  if (!IPC::SocketPair(&plugin_fd, &renderer_fd_))
-    return false;
-  IPC::AddChannelSocket(channel_name(), plugin_fd);
-#endif
-
   if (!PluginChannelBase::Init(ipc_message_loop, create_pipe_now))
     return false;
 
@@ -354,12 +324,3 @@ bool PluginChannel::Init(MessageLoop* ipc_message_loop, bool create_pipe_now) {
   return true;
 }
 
-#if defined(OS_POSIX)
-void PluginChannel::CloseRendererFD() {
-  if (renderer_fd_ != -1) {
-    if (HANDLE_EINTR(close(renderer_fd_)) < 0)
-      PLOG(ERROR) << "close";
-    renderer_fd_ = -1;
-  }
-}
-#endif

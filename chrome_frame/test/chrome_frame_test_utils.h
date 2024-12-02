@@ -1,18 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_FRAME_TEST_CHROME_FRAME_TEST_UTILS_H_
 #define CHROME_FRAME_TEST_CHROME_FRAME_TEST_UTILS_H_
 
-#include <atlbase.h>
-#include <atlcom.h>
-#include <exdisp.h>
-#include <exdispid.h>
-#include <mshtml.h>
-#include <shlguid.h>
-#include <shobjidl.h>
 #include <windows.h>
+
+#include <atlbase.h>
+#include <atlwin.h>
 
 #include <string>
 
@@ -21,6 +17,8 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/scoped_comptr_win.h"
+#include "base/scoped_ptr.h"
+#include "base/win/registry.h"
 
 #include "chrome_frame/test_utils.h"
 #include "chrome_frame/test/simulate_input.h"
@@ -29,9 +27,13 @@
 // Include without path to make GYP build see it.
 #include "chrome_tab.h"  // NOLINT
 
+#include "gtest/gtest.h"
+
 // Needed for CreateFunctor.
 #define GMOCK_MUTANT_INCLUDE_LATE_OBJECT_BINDING
 #include "testing/gmock_mutant.h"
+
+interface IWebBrowser2;
 
 namespace chrome_frame_test {
 
@@ -72,11 +74,122 @@ class LowIntegrityToken {
   bool impersonated_;
 };
 
+// This class implements the COM IMessageFilter interface and is used to detect
+// hung outgoing COM calls which are typically to IE. If IE is hung for any
+// reason the chrome frame tests should not hang indefinitely. This class
+// basically cancels the outgoing call if the WM_TIMER which is set by the
+// TimedMsgLoop object is posted to the message queue.
+class HungCOMCallDetector
+    : public CComObjectRootEx<CComMultiThreadModel>,
+      public IMessageFilter,
+      public CWindowImpl<HungCOMCallDetector> {
+ public:
+  HungCOMCallDetector()
+      : is_hung_(false) {
+    LOG(INFO) << __FUNCTION__;
+  }
+
+  ~HungCOMCallDetector() {
+    LOG(INFO) << __FUNCTION__;
+  }
+
+  BEGIN_MSG_MAP(HungCOMCallDetector)
+    MESSAGE_HANDLER(WM_TIMER, OnTimer)
+  END_MSG_MAP()
+
+  BEGIN_COM_MAP(HungCOMCallDetector)
+    COM_INTERFACE_ENTRY(IMessageFilter)
+  END_COM_MAP()
+
+  static CComObject<HungCOMCallDetector>* Setup(int timeout_seconds) {
+    CComObject<HungCOMCallDetector>* this_instance  = NULL;
+    CComObject<HungCOMCallDetector>::CreateInstance(&this_instance);
+    EXPECT_TRUE(this_instance != NULL);
+    scoped_refptr<HungCOMCallDetector> ref_instance = this_instance;
+
+    HRESULT hr = ref_instance->Initialize(timeout_seconds);
+    if (FAILED(hr)) {
+      LOG(ERROR) << "Failed to Initialize Hung COM call detector. Error:"
+                 << hr;
+      return NULL;
+    }
+    return this_instance;
+  }
+
+  void TearDown() {
+    ScopedComPtr<IMessageFilter> prev_filter;
+    CoRegisterMessageFilter(prev_filter_.get(), prev_filter.Receive());
+    DestroyWindow();
+    m_hWnd = NULL;
+  }
+
+  STDMETHOD_(DWORD, HandleInComingCall)(DWORD call_type,
+                                        HTASK caller,
+                                        DWORD tick_count,
+                                        LPINTERFACEINFO interface_info) {
+    return SERVERCALL_ISHANDLED;
+  }
+
+  STDMETHOD_(DWORD, RetryRejectedCall)(HTASK callee,
+                                       DWORD tick_count,
+                                       DWORD reject_type) {
+    return -1;
+  }
+
+  STDMETHOD_(DWORD, MessagePending)(HTASK callee,
+                                    DWORD tick_count,
+                                    DWORD pending_type) {
+    MSG msg = {0};
+    if (PeekMessage(&msg, m_hWnd, WM_TIMER, WM_TIMER, PM_NOREMOVE)) {
+      is_hung_ = true;
+      return PENDINGMSG_CANCELCALL;
+    }
+    return PENDINGMSG_WAITDEFPROCESS;
+  }
+
+  bool is_hung() const {
+    return is_hung_;
+  }
+
+  LRESULT OnTimer(UINT msg, WPARAM wp, LPARAM lp, BOOL& handled) {  // NOLINT
+    return 1;
+  }
+
+ private:
+  HRESULT Initialize(int timeout_seconds) {
+    // Create a window for the purpose of setting a windows timer for
+    // detecting whether any outgoing COM call issued in this context
+    // hangs.
+    // We then register a COM message filter which basically looks for the
+    // timer posted to this window and cancels the outgoing call.
+    Create(HWND_MESSAGE);
+    if (!IsWindow()) {
+      LOG(ERROR) << "Failed to create window. Error:" << GetLastError();
+      return E_FAIL;
+    }
+
+    HRESULT hr = CoRegisterMessageFilter(this, prev_filter_.Receive());
+    if (FAILED(hr)) {
+      LOG(ERROR) << "Failed to register message filter. Error:" << hr;
+      return hr;
+    }
+
+    static const int kHungDetectTimerId = 0x0000baba;
+    SetTimer(kHungDetectTimerId, 1000 * (timeout_seconds + 2), NULL);
+    return S_OK;
+  }
+
+  // used to detect if outgoing COM calls hung.
+  bool is_hung_;
+  ScopedComPtr<IMessageFilter> prev_filter_;
+};
+
 // MessageLoopForUI wrapper that runs only for a limited time.
 // We need a UI message loop in the main thread.
 class TimedMsgLoop {
  public:
-  TimedMsgLoop() : quit_loop_invoked_(false) {}
+  TimedMsgLoop() : quit_loop_invoked_(false) {
+  }
 
   void RunFor(int seconds) {
     QuitAfter(seconds);
@@ -151,6 +264,13 @@ std::wstring GetPathAndQueryFromUrl(const std::wstring& url);
 // Adds the CF meta tag to the html page. Returns true if successful.
 bool AddCFMetaTag(std::string* html_data);
 
+// Get text data from the clipboard.
+std::wstring GetClipboardText();
+
+// Puts the given text data on the clipboard. All previous items on the
+// clipboard are removed.
+void SetClipboardText(const std::wstring& text);
+
 // A convenience class to close all open IE windows at the end
 // of a scope.  It's more convenient to do it this way than to
 // explicitly call chrome_frame_test::CloseAllIEWindows at the
@@ -170,6 +290,51 @@ class CloseIeAtEndOfScope {
 // during test runs.
 base::ProcessHandle StartCrashService();
 
+class TempRegKeyOverride {
+ public:
+  static const wchar_t kTempTestKeyPath[];
+
+  TempRegKeyOverride(HKEY override, const wchar_t* temp_name);
+  ~TempRegKeyOverride();
+
+  static void DeleteAllTempKeys();
+
+ protected:
+  HKEY override_;
+  base::win::RegKey temp_key_;
+  std::wstring temp_name_;
+};
+
+// Used in tests where we reference the registry and don't want to run into
+// problems where existing registry settings might conflict with the
+// expectations of the test.
+class ScopedVirtualizeHklmAndHkcu {
+ public:
+  ScopedVirtualizeHklmAndHkcu();
+  ~ScopedVirtualizeHklmAndHkcu();
+
+ protected:
+  scoped_ptr<TempRegKeyOverride> hklm_;
+  scoped_ptr<TempRegKeyOverride> hkcu_;
+};
+
+// Attempts to kill all the processes on the current machine that were launched
+// from the given executable name, ending them with the given exit code.  If
+// filter is non-null, then only processes selected by the filter are killed.
+// Returns true if all processes were able to be killed off, false if at least
+// one couldn't be killed.
+// NOTE: This function is based on the base\process_util.h helper function
+// KillProcesses. Takes in the wait flag as a parameter.
+bool KillProcesses(const std::wstring& executable_name, int exit_code,
+                   bool wait);
+
 }  // namespace chrome_frame_test
+
+// TODO(tommi): This is a temporary workaround while we're getting our
+// Singleton story straight.  Ideally each test should clear up any singletons
+// it might have created, but test cases do not implicitly have their own
+// AtExitManager, so we have this workaround method for tests that depend on
+// "fresh" singletons.  The implementation is in chrome_frame_unittest_main.cc.
+void DeleteAllSingletons();
 
 #endif  // CHROME_FRAME_TEST_CHROME_FRAME_TEST_UTILS_H_

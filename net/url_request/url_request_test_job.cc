@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,12 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 
+namespace net {
+
 // This emulates the global message loop for the test URL request class, since
 // this is only test code, it's probably not too dangerous to have this static
 // object.
-static std::vector< scoped_refptr<URLRequestTestJob> > pending_jobs;
+static std::vector< scoped_refptr<URLRequestTestJob> > g_pending_jobs;
 
 // static getters for known URLs
 GURL URLRequestTestJob::test_url_1() {
@@ -84,7 +86,8 @@ URLRequestTestJob::URLRequestTestJob(URLRequest* request)
       async_buf_size_(0) {
 }
 
-URLRequestTestJob::URLRequestTestJob(URLRequest* request, bool auto_advance)
+URLRequestTestJob::URLRequestTestJob(URLRequest* request,
+                                     bool auto_advance)
     : URLRequestJob(request),
       auto_advance_(auto_advance),
       stage_(WAITING),
@@ -100,7 +103,7 @@ URLRequestTestJob::URLRequestTestJob(URLRequest* request,
     : URLRequestJob(request),
       auto_advance_(auto_advance),
       stage_(WAITING),
-      response_headers_(new net::HttpResponseHeaders(response_headers)),
+      response_headers_(new HttpResponseHeaders(response_headers)),
       response_data_(response_data),
       offset_(0),
       async_buf_(NULL),
@@ -126,7 +129,7 @@ void URLRequestTestJob::Start() {
 
 void URLRequestTestJob::StartAsync() {
   if (!response_headers_) {
-    response_headers_ = new net::HttpResponseHeaders(test_headers());
+    response_headers_ = new HttpResponseHeaders(test_headers());
     if (request_->url().spec() == test_url_1().spec()) {
       response_data_ = test_data_1();
       stage_ = DATA_AVAILABLE;  // Simulate a synchronous response for this one.
@@ -139,7 +142,7 @@ void URLRequestTestJob::StartAsync() {
       // FIXME(brettw) we may want to use WININET errors or have some more types
       // of errors
       NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
-                                  net::ERR_INVALID_URL));
+                                  ERR_INVALID_URL));
       // FIXME(brettw): this should emulate a network error, and not just fail
       // initiating a connection
       return;
@@ -151,7 +154,7 @@ void URLRequestTestJob::StartAsync() {
   this->NotifyHeadersComplete();
 }
 
-bool URLRequestTestJob::ReadRawData(net::IOBuffer* buf, int buf_size,
+bool URLRequestTestJob::ReadRawData(IOBuffer* buf, int buf_size,
                                     int *bytes_read) {
   if (stage_ == WAITING) {
     async_buf_ = buf;
@@ -178,7 +181,7 @@ bool URLRequestTestJob::ReadRawData(net::IOBuffer* buf, int buf_size,
   return true;
 }
 
-void URLRequestTestJob::GetResponseInfo(net::HttpResponseInfo* info) {
+void URLRequestTestJob::GetResponseInfo(HttpResponseInfo* info) {
   if (response_headers_)
     info->headers = response_headers_;
 }
@@ -243,18 +246,20 @@ void URLRequestTestJob::AdvanceJob() {
          this, &URLRequestTestJob::ProcessNextOperation));
     return;
   }
-  pending_jobs.push_back(scoped_refptr<URLRequestTestJob>(this));
+  g_pending_jobs.push_back(scoped_refptr<URLRequestTestJob>(this));
 }
 
 // static
 bool URLRequestTestJob::ProcessOnePendingMessage() {
-  if (pending_jobs.empty())
+  if (g_pending_jobs.empty())
     return false;
 
-  scoped_refptr<URLRequestTestJob> next_job(pending_jobs[0]);
-  pending_jobs.erase(pending_jobs.begin());
+  scoped_refptr<URLRequestTestJob> next_job(g_pending_jobs[0]);
+  g_pending_jobs.erase(g_pending_jobs.begin());
 
   DCHECK(!next_job->auto_advance());  // auto_advance jobs should be in this q
   next_job->ProcessNextOperation();
   return true;
 }
+
+}  // namespace net

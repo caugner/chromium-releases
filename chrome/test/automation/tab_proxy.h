@@ -48,7 +48,9 @@ class TabProxy : public AutomationResourceProxy,
  public:
   class TabProxyDelegate {
    public:
-    virtual void OnMessageReceived(TabProxy* tab, const IPC::Message& msg) {}
+    virtual bool OnMessageReceived(TabProxy* tab, const IPC::Message& msg) {
+      return false;
+    }
     virtual void OnChannelError(TabProxy* tab) {}
 
    protected:
@@ -197,14 +199,6 @@ class TabProxy : public AutomationResourceProxy,
   // the last tab.
   bool Close(bool wait_until_closed) WARN_UNUSED_RESULT;
 
-#if defined(OS_WIN)
-  // TODO(port): Use portable replacement for HWND.
-
-  // Gets the HWND that corresponds to the content area of this tab.
-  // Returns true if the call was successful.
-  bool GetHWND(HWND* hwnd) const WARN_UNUSED_RESULT;
-#endif  // defined(OS_WIN)
-
   // Gets the process ID that corresponds to the content area of this tab.
   // Returns true if the call was successful.  If the specified tab has no
   // separate process for rendering its content, the return value is true but
@@ -351,11 +345,11 @@ class TabProxy : public AutomationResourceProxy,
 
   // Causes a click on the "accept" button of the info-bar at |info_bar_index|.
   // If |wait_for_navigation| is true, this call does not return until a
-  // navigation has occured.
+  // navigation has occurred.
   bool ClickInfoBarAccept(int info_bar_index,
                           bool wait_for_navigation) WARN_UNUSED_RESULT;
 
-  // Retrieves the time at which the last navigation occured.  This is intended
+  // Retrieves the time at which the last navigation occurred.  This is intended
   // to be used with WaitForNavigation (see below).
   bool GetLastNavigationTime(int64* last_navigation_time) WARN_UNUSED_RESULT;
 
@@ -410,10 +404,16 @@ class TabProxy : public AutomationResourceProxy,
   void StopAsync();
   void SaveAsAsync();
 
+  // Notify the JavaScript engine in the render to change its parameters
+  // while performing stress testing. See
+  // |ViewHostMsg_JavaScriptStressTestControl_Commands| in render_messages.h
+  // for information on the arguments.
+  void JavaScriptStressTestControl(int cmd, int param);
+
   // Calls delegates
   void AddObserver(TabProxyDelegate* observer);
   void RemoveObserver(TabProxyDelegate* observer);
-  void OnMessageReceived(const IPC::Message& message);
+  bool OnMessageReceived(const IPC::Message& message);
   void OnChannelError();
  protected:
   virtual ~TabProxy();
@@ -432,7 +432,7 @@ class TabProxy : public AutomationResourceProxy,
   void LastObjectRemoved();
 
  private:
-  Lock list_lock_;  // Protects the observers_list_.
+  base::Lock list_lock_;  // Protects the observers_list_.
   ObserverList<TabProxyDelegate> observers_list_;
   DISALLOW_COPY_AND_ASSIGN(TabProxy);
 };

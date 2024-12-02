@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/defaults.h"
 #include "chrome/browser/renderer_host/test/test_render_view_host.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/session_service.h"
@@ -13,7 +12,7 @@
 #include "chrome/test/render_view_test.h"
 #include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 
 // Create subclass that overrides TimeNow so that we can control the time used
 // for closed tabs and windows.

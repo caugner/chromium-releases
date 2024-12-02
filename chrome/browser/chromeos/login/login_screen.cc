@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/login/login_screen.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/logging.h"
@@ -21,11 +19,12 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/message_bubble.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/profile_manager.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace chromeos {
 
@@ -91,7 +90,8 @@ void LoginScreen::OnLoginFailure(const LoginFailure& failure) {
     ShowError(IDS_LOGIN_ERROR_AUTHENTICATING_NEW, error);
   }
 
-  view()->ClearAndEnablePassword();
+  view()->ClearAndFocusPassword();
+  view()->EnableInputControls(true);
 }
 
 void LoginScreen::OnLoginSuccess(
@@ -102,7 +102,10 @@ void LoginScreen::OnLoginSuccess(
 
   delegate()->GetObserver(this)->OnExit(ScreenObserver::LOGIN_SIGN_IN_SELECTED);
   AppendStartUrlToCmdline();
-  LoginUtils::Get()->CompleteLogin(username, password, credentials);
+  LoginUtils::Get()->CompleteLogin(username,
+                                   password,
+                                   credentials,
+                                   pending_requests);
 }
 
 void LoginScreen::OnOffTheRecordLoginSuccess() {
@@ -121,7 +124,7 @@ void LoginScreen::AppendStartUrlToCmdline() {
 
 void LoginScreen::ShowError(int error_id, const std::string& details) {
   ClearErrors();
-  std::wstring error_text = l10n_util::GetString(error_id);
+  std::wstring error_text = UTF16ToWide(l10n_util::GetStringUTF16(error_id));
   // TODO(dpolukhin): show detailed error info. |details| string contains
   // low level error info that is not localized and even is not user friendly.
   // For now just ignore it because error_text contains all required information
@@ -132,7 +135,7 @@ void LoginScreen::ShowError(int error_id, const std::string& details) {
       BubbleBorder::LEFT_TOP,
       ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING),
       error_text,
-      l10n_util::GetString(IDS_CANT_ACCESS_ACCOUNT_BUTTON),
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CANT_ACCESS_ACCOUNT_BUTTON)),
       this);
 }
 

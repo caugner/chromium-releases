@@ -15,18 +15,20 @@ namespace gfx {
 // A GLContext that does nothing for unit tests.
 class StubGLContext : public gfx::GLContext {
  public:
-  // Implement GLContext.
-  virtual void Destroy() {}
-  virtual bool MakeCurrent() { return true; }
-  virtual bool IsCurrent() { return true; }
-  virtual bool IsOffscreen() { return false; }
-  virtual bool SwapBuffers() { return true; }
-  virtual gfx::Size GetSize() { return size_; }
-  virtual void* GetHandle() { return NULL; }
-  virtual void SetSwapInterval(int interval) {}
-  virtual std::string GetExtensions() { return std::string(); }
+  virtual ~StubGLContext();
 
   void SetSize(const gfx::Size& size) { size_ = size; }
+
+  // Implement GLContext.
+  virtual void Destroy() {}
+  virtual bool MakeCurrent();
+  virtual bool IsCurrent();
+  virtual bool IsOffscreen();
+  virtual bool SwapBuffers();
+  virtual gfx::Size GetSize();
+  virtual void* GetHandle();
+  virtual void SetSwapInterval(int interval) {}
+  virtual std::string GetExtensions();
 
  private:
   gfx::Size size_;

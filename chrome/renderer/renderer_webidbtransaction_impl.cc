@@ -4,13 +4,13 @@
 
 #include "chrome/renderer/renderer_webidbtransaction_impl.h"
 
-#include "chrome/common/render_messages.h"
+#include "chrome/common/indexed_db_messages.h"
 #include "chrome/renderer/indexed_db_dispatcher.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/renderer_webidbobjectstore_impl.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBObjectStore.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBObjectStore.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 
 using WebKit::WebIDBObjectStore;
 using WebKit::WebIDBTransactionCallbacks;
@@ -22,14 +22,18 @@ RendererWebIDBTransactionImpl::RendererWebIDBTransactionImpl(
 }
 
 RendererWebIDBTransactionImpl::~RendererWebIDBTransactionImpl() {
-  RenderThread::current()->Send(new ViewHostMsg_IDBTransactionDestroyed(
+  // It's not possible for there to be pending callbacks that address this
+  // object since inside WebKit, they hold a reference to the object wich owns
+  // this object. But, if that ever changed, then we'd need to invalidate
+  // any such pointers.
+  RenderThread::current()->Send(new IndexedDBHostMsg_TransactionDestroyed(
       idb_transaction_id_));
 }
 
 int RendererWebIDBTransactionImpl::mode() const
 {
   int mode;
-  RenderThread::current()->Send(new ViewHostMsg_IDBTransactionMode(
+  RenderThread::current()->Send(new IndexedDBHostMsg_TransactionMode(
       idb_transaction_id_, &mode));
   return mode;
 }
@@ -40,7 +44,7 @@ WebIDBObjectStore* RendererWebIDBTransactionImpl::objectStore(
 {
   int object_store_id;
   RenderThread::current()->Send(
-      new ViewHostMsg_IDBTransactionObjectStore(
+      new IndexedDBHostMsg_TransactionObjectStore(
           idb_transaction_id_, name, &object_store_id, &ec));
   if (!object_store_id)
     return NULL;
@@ -49,14 +53,14 @@ WebIDBObjectStore* RendererWebIDBTransactionImpl::objectStore(
 
 void RendererWebIDBTransactionImpl::abort()
 {
-  RenderThread::current()->Send(new ViewHostMsg_IDBTransactionAbort(
+  RenderThread::current()->Send(new IndexedDBHostMsg_TransactionAbort(
       idb_transaction_id_));
 }
 
 void RendererWebIDBTransactionImpl::didCompleteTaskEvents()
 {
   RenderThread::current()->Send(
-      new ViewHostMsg_IDBTransactionDidCompleteTaskEvents(
+      new IndexedDBHostMsg_TransactionDidCompleteTaskEvents(
           idb_transaction_id_));
 }
 

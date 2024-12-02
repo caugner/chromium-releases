@@ -1,21 +1,22 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/dom_ui/options/options_ui.h"
 
 #include <algorithm>
+#include <vector>
 
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/dom_ui_theme_source.h"
 #include "chrome/browser/dom_ui/options/about_page_handler.h"
@@ -29,29 +30,27 @@
 #include "chrome/browser/dom_ui/options/core_options_handler.h"
 #include "chrome/browser/dom_ui/options/font_settings_handler.h"
 #include "chrome/browser/dom_ui/options/import_data_handler.h"
-#include "chrome/browser/dom_ui/options/passwords_exceptions_handler.h"
+#include "chrome/browser/dom_ui/options/language_options_handler.h"
+#include "chrome/browser/dom_ui/options/password_manager_handler.h"
 #include "chrome/browser/dom_ui/options/personal_options_handler.h"
 #include "chrome/browser/dom_ui/options/search_engine_manager_handler.h"
 #include "chrome/browser/dom_ui/options/stop_syncing_handler.h"
-#include "chrome/browser/dom_ui/options/sync_options_handler.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/jstemplate_builder.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "net/base/escape.h"
-
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "net/base/escape.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/dom_ui/accounts_options_handler.h"
@@ -62,7 +61,6 @@
 #include "chrome/browser/chromeos/dom_ui/language_customize_modifier_keys_handler.h"
 #include "chrome/browser/chromeos/dom_ui/language_hangul_options_handler.h"
 #include "chrome/browser/chromeos/dom_ui/language_mozc_options_handler.h"
-#include "chrome/browser/chromeos/dom_ui/language_options_handler.h"
 #include "chrome/browser/chromeos/dom_ui/language_pinyin_options_handler.h"
 #include "chrome/browser/chromeos/dom_ui/proxy_handler.h"
 #include "chrome/browser/chromeos/dom_ui/stats_options_handler.h"
@@ -121,6 +119,10 @@ OptionsPageUIHandler::OptionsPageUIHandler() {
 OptionsPageUIHandler::~OptionsPageUIHandler() {
 }
 
+bool OptionsPageUIHandler::IsEnabled() {
+  return true;
+}
+
 void OptionsPageUIHandler::UserMetricsRecordAction(
     const UserMetricsAction& action) {
   UserMetrics::RecordAction(action, dom_ui_->GetProfile());
@@ -132,7 +134,8 @@ void OptionsPageUIHandler::UserMetricsRecordAction(
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-OptionsUI::OptionsUI(TabContents* contents) : DOMUI(contents) {
+OptionsUI::OptionsUI(TabContents* contents)
+    : DOMUI(contents), initialized_handlers_(false) {
   DictionaryValue* localized_strings = new DictionaryValue();
 
 #if defined(OS_CHROMEOS)
@@ -150,12 +153,12 @@ OptionsUI::OptionsUI(TabContents* contents) : DOMUI(contents) {
   AddOptionsPageUIHandler(localized_strings, new ContentSettingsHandler());
   AddOptionsPageUIHandler(localized_strings, new CookiesViewHandler());
   AddOptionsPageUIHandler(localized_strings, new FontSettingsHandler());
-  AddOptionsPageUIHandler(localized_strings, new PasswordsExceptionsHandler());
+  AddOptionsPageUIHandler(localized_strings, new LanguageOptionsHandler());
+  AddOptionsPageUIHandler(localized_strings, new PasswordManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new PersonalOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new SearchEngineManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new ImportDataHandler());
   AddOptionsPageUIHandler(localized_strings, new StopSyncingHandler());
-  AddOptionsPageUIHandler(localized_strings, new SyncOptionsHandler());
 #if defined(OS_CHROMEOS)
   AddOptionsPageUIHandler(localized_strings, new AboutPageHandler());
   AddOptionsPageUIHandler(localized_strings,
@@ -169,8 +172,6 @@ OptionsUI::OptionsUI(TabContents* contents) : DOMUI(contents) {
                           new chromeos::LanguageHangulOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::LanguageMozcOptionsHandler());
-  AddOptionsPageUIHandler(localized_strings,
-                          new chromeos::LanguageOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::LanguagePinyinOptionsHandler());
   AddOptionsPageUIHandler(localized_strings, new chromeos::ProxyHandler());
@@ -192,24 +193,28 @@ OptionsUI::OptionsUI(TabContents* contents) : DOMUI(contents) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(html_source)));
 
-  // Set up chrome://theme/ source.
+  // Set up the chrome://theme/ source.
   DOMUIThemeSource* theme = new DOMUIThemeSource(GetProfile());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(theme)));
+
+  // Initialize the chrome://about/ source in case the user clicks the credits
+  // link.
+  InitializeAboutDataSource();
 }
 
 OptionsUI::~OptionsUI() {
   // Uninitialize all registered handlers. The base class owns them and it will
-  // eventually delete them.
-  for (std::vector<DOMMessageHandler*>::iterator iter = handlers_.begin();
+  // eventually delete them. Skip over the generic handler.
+  for (std::vector<DOMMessageHandler*>::iterator iter = handlers_.begin() + 1;
        iter != handlers_.end();
        ++iter) {
     static_cast<OptionsPageUIHandler*>(*iter)->Uninitialize();
@@ -252,8 +257,17 @@ RefCountedMemory* OptionsUI::GetFaviconResourceBytes() {
 void OptionsUI::InitializeHandlers() {
   DCHECK(!GetProfile()->IsOffTheRecord());
 
+  // The reinitialize call from DidBecomeActiveForReusedRenderView end up being
+  // delivered after a new web page DOM has been brought up in an existing
+  // renderer (due to IPC delays), causing this method to be called twice. If
+  // that happens, ignore the second call.
+  if (initialized_handlers_)
+    return;
+  initialized_handlers_ = true;
+
   std::vector<DOMMessageHandler*>::iterator iter;
-  for (iter = handlers_.begin(); iter != handlers_.end(); ++iter) {
+  // Skip over the generic handler.
+  for (iter = handlers_.begin() + 1; iter != handlers_.end(); ++iter) {
     (static_cast<OptionsPageUIHandler*>(*iter))->Initialize();
   }
 }

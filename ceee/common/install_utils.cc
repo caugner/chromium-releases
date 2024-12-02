@@ -13,13 +13,14 @@
 #include "base/path_service.h"
 #include "chrome/installer/util/util_constants.h"
 
-namespace installer_util {
+namespace installer {
   namespace switches {
-    // TODO(joi@chromium.org) Move to chrome/installer/util_constants.h
+    // TODO(joi): Move to chrome/installer/util_constants.h
     // when we refactor this logic to be in the installer rather than
     // on the registration entrypoints.
-    const wchar_t kEnableCeee[] = L"enable-ceee";
-    const wchar_t kEnableFfCeee[] = L"enable-ff-ceee";
+    const char kEnableCeee[] = "ceee";
+    // TODO(joi): The installer supports only "ceee".
+    const char kEnableFfCeee[] = "enable-ff-ceee";
   }
 }
 
@@ -35,7 +36,7 @@ bool ShouldRegisterImpl(bool check_firefox) {
   }
 
   // Failing that, it's some kind of install scenario, so the
-  // --enable-ceee flag must be provided. It should be ignored
+  // --ceee flag must be provided. It should be ignored
   // unless --chrome-frame is also specified, so we check for
   // both.
   //
@@ -43,10 +44,10 @@ bool ShouldRegisterImpl(bool check_firefox) {
   // also be provided.
   CommandLine current_command_line(CommandLine::NO_PROGRAM);
   current_command_line.ParseFromString(::GetCommandLine());
-  if (current_command_line.HasSwitch(installer_util::switches::kEnableCeee) &&
-      current_command_line.HasSwitch(installer_util::switches::kChromeFrame) &&
+  if (current_command_line.HasSwitch(installer::switches::kEnableCeee) &&
+      current_command_line.HasSwitch(installer::switches::kChromeFrame) &&
       (!check_firefox || current_command_line.HasSwitch(
-          installer_util::switches::kEnableFfCeee))) {
+          installer::switches::kEnableFfCeee))) {
     return true;
   } else {
     return false;

@@ -15,20 +15,22 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/stats_table.h"
-#include "base/nullable_string16.h"
 #include "base/process_util.h"
 #include "base/scoped_callback_factory.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "base/task.h"
-#include "base/thread_local.h"
+#include "base/threading/thread_local.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/appcache/appcache_dispatcher.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/database_messages.h"
 #include "chrome/common/db_message_filter.h"
-#include "chrome/common/dom_storage_common.h"
+#include "chrome/common/dom_storage_messages.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/plugin_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
@@ -48,7 +50,6 @@
 #include "chrome/renderer/devtools_agent_filter.h"
 #include "chrome/renderer/extension_groups.h"
 #include "chrome/renderer/extensions/chrome_app_bindings.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
@@ -78,20 +79,20 @@
 #include "net/base/net_util.h"
 #include "third_party/sqlite/sqlite3.h"
 #include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebColor.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCrossOriginPreflightResultCache.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFontCache.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRuntimeFeatures.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebStorageEventDispatcher.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebColor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCrossOriginPreflightResultCache.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFontCache.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/extensions/v8/benchmarking_extension.h"
 #include "webkit/extensions/v8/gears_extension.h"
 #include "webkit/extensions/v8/playback_extension.h"
@@ -126,9 +127,6 @@ static const unsigned int kCacheStatsDelayMS = 2000 /* milliseconds */;
 static const double kInitialIdleHandlerDelayS = 1.0 /* seconds */;
 static const double kInitialExtensionIdleHandlerDelayS = 5.0 /* seconds */;
 static const int64 kMaxExtensionIdleHandlerDelayS = 5*60 /* seconds */;
-
-static const int kPrelauchGpuPercentage = 5;
-static const int kPrelauchGpuProcessDelayMS = 10000;
 
 // Keep the global RenderThread in a TLS slot so it is impossible to access
 // incorrectly from the wrong thread.
@@ -281,7 +279,7 @@ void RenderThread::Init() {
   callback_factory_.reset(new base::ScopedCallbackFactory<RenderThread>(this));
 
   visited_link_slave_.reset(new VisitedLinkSlave());
-  user_script_slave_.reset(new UserScriptSlave());
+  user_script_slave_.reset(new UserScriptSlave(&extensions_));
   renderer_net_predictor_.reset(new RendererNetPredictor());
   histogram_snapshots_.reset(new RendererHistogramSnapshots());
   appcache_dispatcher_.reset(new AppCacheDispatcher(this));
@@ -301,23 +299,6 @@ void RenderThread::Init() {
   suicide_on_channel_error_filter_ = new SuicideOnChannelErrorFilter;
   AddFilter(suicide_on_channel_error_filter_.get());
 #endif
-
-  // Establish a channel to the GPU process asynchronously if requested. If the
-  // channel is established in time, EstablishGpuChannelSync will not block when
-  // it is later called. Delays by a fixed period of time to avoid loading the
-  // GPU immediately in an attempt to not slow startup time.
-  scoped_refptr<base::FieldTrial> prelaunch_trial(
-      new base::FieldTrial("PrelaunchGpuProcessExperiment", 100));
-  int prelaunch_group = prelaunch_trial->AppendGroup("prelaunch_gpu_process",
-                                                     kPrelauchGpuPercentage);
-  if (prelaunch_group == prelaunch_trial->group() ||
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kPrelaunchGpuProcess)) {
-    message_loop()->PostDelayedTask(FROM_HERE,
-                                    task_factory_->NewRunnableMethod(
-                                        &RenderThread::EstablishGpuChannel),
-                                    kPrelauchGpuProcessDelayMS);
-  }
 
   TRACE_EVENT_END("RenderThread::Init", 0, "");
 }
@@ -370,6 +351,10 @@ int32 RenderThread::RoutingIDForCurrentContext() {
   return routing_id;
 }
 
+const ExtensionSet* RenderThread::GetExtensions() const {
+  return &extensions_;
+}
+
 bool RenderThread::Send(IPC::Message* msg) {
   // Certain synchronous messages cannot always be processed synchronously by
   // the browser, e.g., Chrome frame communicating with the embedding browser.
@@ -390,9 +375,9 @@ bool RenderThread::Send(IPC::Message* msg) {
         case ViewHostMsg_GetCookies::ID:
         case ViewHostMsg_GetRawCookies::ID:
         case ViewHostMsg_CookiesEnabled::ID:
-        case ViewHostMsg_DOMStorageSetItem::ID:
+        case DOMStorageHostMsg_SetItem::ID:
         case ViewHostMsg_SyncLoad::ID:
-        case ViewHostMsg_AllowDatabase::ID:
+        case DatabaseHostMsg_Allow::ID:
           may_show_cookie_prompt = true;
           pumping_events = true;
           break;
@@ -493,6 +478,14 @@ void RenderThread::WidgetRestored() {
     idle_timer_.Stop();
 }
 
+bool RenderThread::IsExtensionProcess() const {
+  return is_extension_process_;
+}
+
+bool RenderThread::IsIncognitoProcess() const {
+  return is_incognito_process_;
+}
+
 void RenderThread::DoNotSuspendWebKitSharedTimer() {
   suspend_webkit_shared_timer_ = false;
 }
@@ -548,9 +541,27 @@ void RenderThread::OnSetExtensionFunctionNames(
   ExtensionProcessBindings::SetFunctionNames(names);
 }
 
-void RenderThread::OnExtensionsUpdated(
-    const ViewMsg_ExtensionsUpdated_Params& params) {
-  ExtensionRendererInfo::UpdateExtensions(params);
+void RenderThread::OnExtensionLoaded(
+    const ViewMsg_ExtensionLoaded_Params& params) {
+  scoped_refptr<const Extension> extension(params.ConvertToExtension());
+  if (!extension) {
+    // This can happen if extension parsing fails for any reason. One reason
+    // this can legitimately happen is if the
+    // --enable-experimental-extension-apis changes at runtime, which happens
+    // during browser tests. Existing renderers won't know about the change.
+    return;
+  }
+
+  extensions_.Insert(extension);
+}
+
+void RenderThread::OnSetExtensionScriptingWhitelist(
+    const Extension::ScriptingWhitelist& extension_ids) {
+  Extension::SetScriptingWhitelist(extension_ids);
+}
+
+void RenderThread::OnExtensionUnloaded(const std::string& id) {
+  extensions_.Remove(id);
 }
 
 void RenderThread::OnPageActionsUpdated(
@@ -577,21 +588,22 @@ void RenderThread::OnExtensionSetHostPermissions(
 }
 
 void RenderThread::OnDOMStorageEvent(
-    const ViewMsg_DOMStorageEvent_Params& params) {
+    const DOMStorageMsg_Event_Params& params) {
   if (!dom_storage_event_dispatcher_.get())
     dom_storage_event_dispatcher_.reset(WebStorageEventDispatcher::create());
-  dom_storage_event_dispatcher_->dispatchStorageEvent(params.key_,
-      params.old_value_, params.new_value_, params.origin_, params.url_,
-      params.storage_type_ == DOM_STORAGE_LOCAL);
+  dom_storage_event_dispatcher_->dispatchStorageEvent(params.key,
+      params.old_value, params.new_value, params.origin, params.url,
+      params.storage_type == DOM_STORAGE_LOCAL);
 }
 
-void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
+bool RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
   // Some messages are handled by delegates.
   if (appcache_dispatcher_->OnMessageReceived(msg))
-    return;
+    return true;
   if (indexed_db_dispatcher_->OnMessageReceived(msg))
-    return;
+    return true;
 
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderThread, msg)
     IPC_MESSAGE_HANDLER(ViewMsg_VisitedLink_NewTable, OnUpdateVisitedLinks)
     IPC_MESSAGE_HANDLER(ViewMsg_VisitedLink_Add, OnAddVisitedLinks)
@@ -625,8 +637,12 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnExtensionMessageInvoke)
     IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetFunctionNames,
                         OnSetExtensionFunctionNames)
-    IPC_MESSAGE_HANDLER(ViewMsg_ExtensionsUpdated,
-                        OnExtensionsUpdated)
+    IPC_MESSAGE_HANDLER(ViewMsg_ExtensionLoaded,
+                        OnExtensionLoaded)
+    IPC_MESSAGE_HANDLER(ViewMsg_ExtensionUnloaded,
+                        OnExtensionUnloaded)
+    IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetScriptingWhitelist,
+                        OnSetExtensionScriptingWhitelist)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgeMemory, OnPurgeMemory)
     IPC_MESSAGE_HANDLER(ViewMsg_PurgePluginListCache,
                         OnPurgePluginListCache)
@@ -636,7 +652,7 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnExtensionSetAPIPermissions)
     IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetHostPermissions,
                         OnExtensionSetHostPermissions)
-    IPC_MESSAGE_HANDLER(ViewMsg_DOMStorageEvent,
+    IPC_MESSAGE_HANDLER(DOMStorageMsg_Event,
                         OnDOMStorageEvent)
 #if defined(IPC_MESSAGE_LOG_ENABLED)
     IPC_MESSAGE_HANDLER(ViewMsg_SetIPCLoggingEnabled,
@@ -652,7 +668,9 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewMsg_SetPhishingModel, OnSetPhishingModel)
     IPC_MESSAGE_HANDLER(ViewMsg_SpeechInput_SetFeatureEnabled,
                         OnSetSpeechInputEnabled)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void RenderThread::OnSetSpeechInputEnabled(bool enabled) {
@@ -867,12 +885,13 @@ void RenderThread::EnsureWebKitInitialized() {
 
   WebScriptController::enableV8SingleThreadMode();
 
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
   // chrome: pages should not be accessible by normal content, and should
   // also be unable to script anything but themselves (to help limit the damage
   // that a corrupt chrome: page could cause).
   WebString chrome_ui_scheme(ASCIIToUTF16(chrome::kChromeUIScheme));
-  WebSecurityPolicy::registerURLSchemeAsLocal(chrome_ui_scheme);
-  WebSecurityPolicy::registerURLSchemeAsNoAccess(chrome_ui_scheme);
+  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_ui_scheme);
 
   // chrome-extension: resources shouldn't trigger insecure content warnings.
   WebString extension_scheme(ASCIIToUTF16(chrome::kExtensionScheme));
@@ -890,8 +909,6 @@ void RenderThread::EnsureWebKitInitialized() {
   // search_extension is null if not enabled.
   if (search_extension)
     RegisterExtension(search_extension, false);
-
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
   if (command_line.HasSwitch(switches::kEnableBenchmarking))
     RegisterExtension(extensions_v8::BenchmarkingExtension::Get(), false);
@@ -941,6 +958,9 @@ void RenderThread::EnsureWebKitInitialized() {
 
   WebRuntimeFeatures::enableGeolocation(
       !command_line.HasSwitch(switches::kDisableGeolocation));
+
+  WebRuntimeFeatures::enableWebAudio(
+      command_line.HasSwitch(switches::kEnableWebAudio));
 
   WebRuntimeFeatures::enableWebGL(
       !command_line.HasSwitch(switches::kDisable3DAPIs) &&
@@ -1081,17 +1101,11 @@ void RenderThread::OnSetIsIncognitoProcess(bool is_incognito_process) {
 
 void RenderThread::OnGpuChannelEstablished(
     const IPC::ChannelHandle& channel_handle, const GPUInfo& gpu_info) {
-#if defined(OS_POSIX)
-  // If we received a ChannelHandle, register it now.
-  if (channel_handle.socket.fd >= 0)
-    IPC::AddChannelSocket(channel_handle.name, channel_handle.socket.fd);
-#endif
-
   gpu_channel_->set_gpu_info(gpu_info);
 
   if (channel_handle.name.size() != 0) {
     // Connect to the GPU process if a channel name was received.
-    gpu_channel_->Connect(channel_handle.name);
+    gpu_channel_->Connect(channel_handle);
   } else {
     // Otherwise cancel the connection.
     gpu_channel_ = NULL;
@@ -1140,7 +1154,7 @@ bool RenderThread::AllowScriptExtension(const std::string& v8_extension_name,
   // Extension-only bindings should be restricted to content scripts and
   // extension-blessed URLs.
   if (extension_group == EXTENSION_GROUP_CONTENT_SCRIPTS ||
-      ExtensionRendererInfo::ExtensionBindingsAllowed(url)) {
+      extensions_.ExtensionBindingsAllowed(url)) {
     return true;
   }
 

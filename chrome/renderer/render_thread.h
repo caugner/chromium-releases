@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/common/child_thread.h"
 #include "chrome/common/css_colors.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/gpu_info.h"
 #include "chrome/renderer/visitedlink_slave.h"
 #include "gfx/native_widget_types.h"
@@ -26,11 +27,11 @@ class AppCacheDispatcher;
 class CookieMessageFilter;
 class DBMessageFilter;
 class DevToolsAgentFilter;
+class ExtensionSet;
 class FilePath;
 class GpuChannelHost;
 class IndexedDBDispatcher;
 class ListValue;
-class NullableString16;
 class RendererHistogram;
 class RendererHistogramSnapshots;
 class RendererNetPredictor;
@@ -43,8 +44,8 @@ class WebDatabaseObserverImpl;
 
 struct ContentSettings;
 struct RendererPreferences;
-struct ViewMsg_DOMStorageEvent_Params;
-struct ViewMsg_ExtensionsUpdated_Params;
+struct DOMStorageMsg_Event_Params;
+struct ViewMsg_ExtensionLoaded_Params;
 struct ViewMsg_New_Params;
 struct WebPreferences;
 
@@ -104,6 +105,11 @@ class RenderThreadBase {
  public:
   virtual ~RenderThreadBase() {}
 
+  // Gets currently loaded extensions. This is essentially the renderer
+  // counterpart to ExtensionService in the browser. It contains information
+  // about all extensions currently loaded by the browser.
+  virtual const ExtensionSet* GetExtensions() const = 0;
+
   virtual bool Send(IPC::Message* msg) = 0;
 
   // Called to add or remove a listener for a particular message routing ID.
@@ -156,6 +162,7 @@ class RenderThread : public RenderThreadBase,
   static int32 RoutingIDForCurrentContext();
 
   // Overridden from RenderThreadBase.
+  virtual const ExtensionSet* GetExtensions() const;
   virtual bool Send(IPC::Message* msg);
   virtual void AddRoute(int32 routing_id, IPC::Channel::Listener* listener);
   virtual void RemoveRoute(int32 routing_id);
@@ -163,8 +170,8 @@ class RenderThread : public RenderThreadBase,
   virtual void RemoveFilter(IPC::ChannelProxy::MessageFilter* filter);
   virtual void WidgetHidden();
   virtual void WidgetRestored();
-  virtual bool IsExtensionProcess() const { return is_extension_process_; }
-  virtual bool IsIncognitoProcess() const { return is_incognito_process_; }
+  virtual bool IsExtensionProcess() const;
+  virtual bool IsIncognitoProcess() const;
 
   // These methods modify how the next message is sent.  Normally, when sending
   // a synchronous message that runs a nested message loop, we need to suspend
@@ -254,8 +261,14 @@ class RenderThread : public RenderThreadBase,
                             const GURL& url,
                             int extension_group);
 
+  // Hack for http://crbug.com/71735.
+  // TODO(jamesr): remove once http://crbug.com/72007 is fixed.
+  RendererWebKitClientImpl* GetWebKitClientImpl() const {
+    return webkit_client_.get();
+  }
+
  private:
-  virtual void OnControlMessageReceived(const IPC::Message& msg);
+  virtual bool OnControlMessageReceived(const IPC::Message& msg);
 
   void Init();
 
@@ -267,11 +280,13 @@ class RenderThread : public RenderThreadBase,
       const GURL& url, const ContentSettings& content_settings);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
   void OnSetExtensionFunctionNames(const std::vector<std::string>& names);
-  void OnExtensionsUpdated(
-      const ViewMsg_ExtensionsUpdated_Params& params);
+  void OnExtensionLoaded(const ViewMsg_ExtensionLoaded_Params& params);
+  void OnExtensionUnloaded(const std::string& id);
+  void OnSetExtensionScriptingWhitelist(
+      const Extension::ScriptingWhitelist& extension_ids);
   void OnPageActionsUpdated(const std::string& extension_id,
       const std::vector<std::string>& page_actions);
-  void OnDOMStorageEvent(const ViewMsg_DOMStorageEvent_Params& params);
+  void OnDOMStorageEvent(const DOMStorageMsg_Event_Params& params);
   void OnExtensionSetAPIPermissions(
       const std::string& extension_id,
       const std::set<std::string>& permissions);
@@ -410,6 +425,9 @@ class RenderThread : public RenderThreadBase,
   // is true if the extension should be restricted to extension-related
   // contexts.
   std::map<std::string, bool> v8_extensions_;
+
+  // Contains all loaded extensions.
+  ExtensionSet extensions_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThread);
 };

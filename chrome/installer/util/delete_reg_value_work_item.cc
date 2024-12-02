@@ -1,10 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/installer/util/delete_reg_value_work_item.h"
 
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "base/win/registry.h"
 #include "chrome/installer/util/logging_installer.h"
 
@@ -12,14 +13,12 @@ using base::win::RegKey;
 
 DeleteRegValueWorkItem::DeleteRegValueWorkItem(HKEY predefined_root,
                                                const std::wstring& key_path,
-                                               const std::wstring& value_name,
-                                               bool is_str_type)
+                                               const std::wstring& value_name)
     : predefined_root_(predefined_root),
       key_path_(key_path),
       value_name_(value_name),
-      is_str_type_(is_str_type),
-      status_(DELETE_VALUE),
-      old_dw_(0) {
+      previous_type_(0),
+      status_(DELETE_VALUE) {
 }
 
 DeleteRegValueWorkItem::~DeleteRegValueWorkItem() {
@@ -32,28 +31,45 @@ bool DeleteRegValueWorkItem::Do() {
     return false;
   }
 
-  RegKey key;
   status_ = VALUE_UNCHANGED;
-  bool result = false;
-  if (!key.Open(predefined_root_, key_path_.c_str(), KEY_READ | KEY_WRITE)) {
-    LOG(ERROR) << "can not open " << key_path_;
-  } else if (!key.ValueExists(value_name_.c_str())) {
+
+  RegKey key;
+  DWORD type = 0;
+  DWORD size = 0;
+  LONG result = key.Open(predefined_root_, key_path_.c_str(),
+                         KEY_READ | KEY_WRITE);
+  if (result == ERROR_SUCCESS)
+    result = key.ReadValue(value_name_.c_str(), NULL, &size, &type);
+
+  if (result == ERROR_FILE_NOT_FOUND) {
+    LOG(INFO) << "(delete value) Key: " << key_path_ << " or Value: "
+              << value_name_ << " does not exist.";
     status_ = VALUE_NOT_FOUND;
-    result = true;
-  // Read previous value for rollback and delete
-  } else if (((is_str_type_ && key.ReadValue(value_name_.c_str(),
-                                             &old_str_)) ||
-              (!is_str_type_ && key.ReadValueDW(value_name_.c_str(),
-                                                &old_dw_))) &&
-             (key.DeleteValue(value_name_.c_str()))) {
-    status_ = VALUE_DELETED;
-    result = true;
-  } else {
-    LOG(ERROR) << "failed to read/delete value " << value_name_;
+    return true;
   }
 
-  key.Close();
-  return result;
+  if (result == ERROR_SUCCESS) {
+    if (!size) {
+      previous_type_ = type;
+    } else {
+      previous_value_.resize(size);
+      result = key.ReadValue(value_name_.c_str(), &previous_value_[0], &size,
+                             &previous_type_);
+      if (result != ERROR_SUCCESS) {
+        previous_value_.erase();
+        VLOG(1) << "Failed to save original value. Error: " << result;
+      }
+    }
+  }
+
+  result = key.DeleteValue(value_name_.c_str());
+  if (result != ERROR_SUCCESS) {
+    VLOG(1) << "Failed to delete value " << value_name_ << " error: " << result;
+    return false;
+  }
+
+  status_ = VALUE_DELETED;
+  return true;
 }
 
 void DeleteRegValueWorkItem::Rollback() {
@@ -67,19 +83,16 @@ void DeleteRegValueWorkItem::Rollback() {
 
   // At this point only possible state is VALUE_DELETED.
   RegKey key;
-  if (!key.Open(predefined_root_, key_path_.c_str(), KEY_READ | KEY_WRITE)) {
-    LOG(ERROR) << "rollback: can not open " << key_path_;
-  // try to restore the previous value
-  } else if ((is_str_type_ && key.WriteValue(value_name_.c_str(),
-                                             old_str_.c_str())) ||
-             (!is_str_type_ && key.WriteValue(value_name_.c_str(),
-                                              old_dw_))) {
-    status_ = VALUE_ROLLED_BACK;
-    VLOG(1) << "rollback: restored " << value_name_;
+  LONG result = key.Open(predefined_root_, key_path_.c_str(),
+                         KEY_READ | KEY_WRITE);
+  if (result == ERROR_SUCCESS) {
+    // try to restore the previous value
+    result = key.WriteValue(value_name_.c_str(), &previous_value_[0],
+                            static_cast<DWORD>(previous_value_.size()),
+                            previous_type_);
+    VLOG_IF(1, result != ERROR_SUCCESS) << "rollback: restoring "
+                                        << value_name_ << " error: " << result;
   } else {
-    LOG(ERROR) << "failed to restore value " << value_name_;
+    VLOG(1) << "can not open " << key_path_ << " error: " << result;
   }
-
-  key.Close();
-  return;
 }

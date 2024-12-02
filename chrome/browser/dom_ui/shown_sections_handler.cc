@@ -4,14 +4,15 @@
 
 #include "chrome/browser/dom_ui/shown_sections_handler.h"
 
+#include <string>
+
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_type.h"
@@ -24,8 +25,8 @@ namespace {
 // TODO(aa): Needs to be updated to match newest NTP - http://crbug.com/57440
 void NotifySectionDisabled(int new_mode, int old_mode, Profile *profile) {
   // If the oldmode HAD either thumbs or lists visible.
-  bool old_had_it = (old_mode & THUMB) && !(old_mode & MINIMIZED_THUMB);
-  bool new_has_it = (new_mode & THUMB) && !(new_mode & MINIMIZED_THUMB);
+  bool old_had_it = (old_mode & THUMB) && !(old_mode & MENU_THUMB);
+  bool new_has_it = (new_mode & THUMB) && !(new_mode & MENU_THUMB);
 
   if (old_had_it && !new_has_it) {
     UserMetrics::RecordAction(
@@ -105,7 +106,7 @@ void ShownSectionsHandler::RegisterUserPrefs(PrefService* pref_service) {
 #if defined(OS_CHROMEOS)
   // Default to have expanded APPS and all other secions are minimized.
   pref_service->RegisterIntegerPref(prefs::kNTPShownSections,
-                                    APPS | MINIMIZED_THUMB | MINIMIZED_RECENT);
+                                    APPS | MENU_THUMB | MENU_RECENT);
 #else
   pref_service->RegisterIntegerPref(prefs::kNTPShownSections, THUMB);
 #endif
@@ -115,6 +116,12 @@ void ShownSectionsHandler::RegisterUserPrefs(PrefService* pref_service) {
 void ShownSectionsHandler::MigrateUserPrefs(PrefService* pref_service,
                                             int old_pref_version,
                                             int new_pref_version) {
+  // Nothing to migrate for default kNTPShownSections value.
+  const PrefService::Preference* shown_sections_pref =
+      pref_service->FindPreference(prefs::kNTPShownSections);
+  if (shown_sections_pref->IsDefaultValue())
+    return;
+
   bool changed = false;
   int shown_sections = pref_service->GetInteger(prefs::kNTPShownSections);
 
@@ -140,8 +147,8 @@ void ShownSectionsHandler::OnExtensionInstalled(PrefService* prefs,
   if (extension->is_app()) {
     int mode = prefs->GetInteger(prefs::kNTPShownSections);
 
-    // De-minimize the apps section.
-    mode &= ~MINIMIZED_APPS;
+    // De-menu-mode the apps section.
+    mode &= ~MENU_APPS;
 
     // Hide any open sections.
     mode &= ~ALL_SECTIONS_MASK;
