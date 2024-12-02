@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_TCMALLOC_INTERNALS_REQUEST_JOB_H_
 #define CONTENT_BROWSER_TCMALLOC_INTERNALS_REQUEST_JOB_H_
-#pragma once
 
 #include <map>
 #include "base/basictypes.h"
@@ -51,9 +50,10 @@ class TcmallocInternalsRequestJob : public net::URLRequestSimpleJob {
  public:
   explicit TcmallocInternalsRequestJob(net::URLRequest* request);
 
-  virtual bool GetData(std::string* mime_type,
-                       std::string* charset,
-                       std::string* data) const OVERRIDE;
+  virtual int GetData(std::string* mime_type,
+                      std::string* charset,
+                      std::string* data,
+                      const net::CompletionCallback& callback) const OVERRIDE;
 
  protected:
   virtual ~TcmallocInternalsRequestJob() {}

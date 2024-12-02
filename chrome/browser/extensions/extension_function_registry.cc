@@ -7,52 +7,51 @@
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/bookmarks/bookmark_extension_api.h"
 #include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
-#include "chrome/browser/download/download_extension_api.h"
 #include "chrome/browser/extensions/api/app/app_api.h"
 #include "chrome/browser/extensions/api/browsing_data/browsing_data_api.h"
+#include "chrome/browser/extensions/api/cloud_print_private/cloud_print_private_api.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
-#include "chrome/browser/extensions/api/cookies/cookies_api.h"
 #include "chrome/browser/extensions/api/context_menu/context_menu_api.h"
+#include "chrome/browser/extensions/api/cookies/cookies_api.h"
+#include "chrome/browser/extensions/api/debugger/debugger_api.h"
 #include "chrome/browser/extensions/api/declarative/declarative_api.h"
 #include "chrome/browser/extensions/api/extension_action/extension_browser_actions_api.h"
 #include "chrome/browser/extensions/api/extension_action/extension_page_actions_api.h"
+#include "chrome/browser/extensions/api/extension_action/extension_script_badge_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
-#include "chrome/browser/extensions/api/media_gallery/media_gallery_api.h"
+#include "chrome/browser/extensions/api/i18n/i18n_api.h"
+#include "chrome/browser/extensions/api/idle/idle_api.h"
+#include "chrome/browser/extensions/api/managed_mode/managed_mode_api.h"
+#include "chrome/browser/extensions/api/management/management_api.h"
+#include "chrome/browser/extensions/api/metrics/metrics.h"
 #include "chrome/browser/extensions/api/offscreen_tabs/offscreen_tabs_api.h"
+#include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
+#include "chrome/browser/extensions/api/page_capture/page_capture_api.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
+#include "chrome/browser/extensions/api/record/record_api.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/api/serial/serial_api.h"
 #include "chrome/browser/extensions/api/socket/socket_api.h"
 #include "chrome/browser/extensions/api/tabs/execute_code_in_tab_function.h"
 #include "chrome/browser/extensions/api/tabs/tabs.h"
+#include "chrome/browser/extensions/api/test/test_api.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/api/web_socket_proxy_private/web_socket_proxy_private_api.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
-#include "chrome/browser/extensions/extension_chrome_auth_private_api.h"
-#include "chrome/browser/extensions/extension_debugger_api.h"
 #include "chrome/browser/extensions/extension_font_settings_api.h"
-#include "chrome/browser/extensions/extension_i18n_api.h"
-#include "chrome/browser/extensions/extension_idle_api.h"
-#include "chrome/browser/extensions/extension_managed_mode_api.h"
-#include "chrome/browser/extensions/extension_management_api.h"
-#include "chrome/browser/extensions/extension_metrics_module.h"
 #include "chrome/browser/extensions/extension_module.h"
-#include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
-#include "chrome/browser/extensions/extension_page_capture_api.h"
 #include "chrome/browser/extensions/extension_preference_api.h"
 #include "chrome/browser/extensions/extension_processes_api.h"
-#include "chrome/browser/extensions/extension_record_api.h"
-#include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/extensions/system/system_api.h"
 #include "chrome/browser/history/history_extension_api.h"
 #include "chrome/browser/history/top_sites_extension_api.h"
 #include "chrome/browser/infobars/infobar_extension_api.h"
 #include "chrome/browser/rlz/rlz_extension_api.h"
-#include "chrome/browser/speech/speech_input_extension_api.h"
-#include "chrome/browser/speech/extension_api/tts_extension_api.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
+#include "chrome/browser/speech/extension_api/tts_extension_api.h"
+#include "chrome/browser/speech/speech_input_extension_api.h"
 #include "chrome/common/extensions/api/generated_api.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -63,10 +62,11 @@
 #include "chrome/browser/chromeos/extensions/echo_private_api.h"
 #include "chrome/browser/chromeos/extensions/file_browser_handler_api.h"
 #include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
+#include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 #include "chrome/browser/chromeos/media/media_player_extension_api.h"
+#include "chrome/browser/extensions/api/input_ime/input_ime_api.h"
 #include "chrome/browser/extensions/api/terminal/terminal_private_api.h"
 #include "chrome/browser/extensions/extension_info_private_api_chromeos.h"
-#include "chrome/browser/extensions/extension_input_ime_api.h"
 #include "chrome/browser/extensions/extension_input_method_api.h"
 #endif
 
@@ -134,6 +134,13 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<BrowserActionGetBadgeTextFunction>();
   RegisterFunction<BrowserActionGetBadgeBackgroundColorFunction>();
   RegisterFunction<BrowserActionGetPopupFunction>();
+  RegisterFunction<BrowserActionEnableFunction>();
+  RegisterFunction<BrowserActionDisableFunction>();
+
+  // Script Badges.
+  RegisterFunction<ScriptBadgeGetAttentionFunction>();
+  RegisterFunction<ScriptBadgeGetPopupFunction>();
+  RegisterFunction<ScriptBadgeSetPopupFunction>();
 
   // Browsing Data.
   RegisterFunction<RemoveBrowsingDataFunction>();
@@ -191,7 +198,7 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<SearchHistoryFunction>();
 
   // Idle
-  RegisterFunction<ExtensionIdleQueryStateFunction>();
+  RegisterFunction<extensions::ExtensionIdleQueryStateFunction>();
 
   // I18N.
   RegisterFunction<GetAcceptLanguagesFunction>();
@@ -202,19 +209,15 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<GetProcessInfoFunction>();
 
   // Metrics.
-  RegisterFunction<MetricsRecordUserActionFunction>();
-  RegisterFunction<MetricsRecordValueFunction>();
-  RegisterFunction<MetricsRecordPercentageFunction>();
-  RegisterFunction<MetricsRecordCountFunction>();
-  RegisterFunction<MetricsRecordSmallCountFunction>();
-  RegisterFunction<MetricsRecordMediumCountFunction>();
-  RegisterFunction<MetricsRecordTimeFunction>();
-  RegisterFunction<MetricsRecordMediumTimeFunction>();
-  RegisterFunction<MetricsRecordLongTimeFunction>();
-
-  // Record.
-  RegisterFunction<CaptureURLsFunction>();
-  RegisterFunction<ReplayURLsFunction>();
+  RegisterFunction<extensions::MetricsRecordUserActionFunction>();
+  RegisterFunction<extensions::MetricsRecordValueFunction>();
+  RegisterFunction<extensions::MetricsRecordPercentageFunction>();
+  RegisterFunction<extensions::MetricsRecordCountFunction>();
+  RegisterFunction<extensions::MetricsRecordSmallCountFunction>();
+  RegisterFunction<extensions::MetricsRecordMediumCountFunction>();
+  RegisterFunction<extensions::MetricsRecordTimeFunction>();
+  RegisterFunction<extensions::MetricsRecordMediumTimeFunction>();
+  RegisterFunction<extensions::MetricsRecordLongTimeFunction>();
 
   // RLZ.
 #if defined(OS_WIN) || defined(OS_MACOSX)
@@ -232,17 +235,17 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<extensions::GetAllCookieStoresFunction>();
 
   // Test.
-  RegisterFunction<ExtensionTestPassFunction>();
-  RegisterFunction<ExtensionTestFailFunction>();
-  RegisterFunction<ExtensionTestLogFunction>();
-  RegisterFunction<ExtensionTestQuotaResetFunction>();
-  RegisterFunction<ExtensionTestCreateIncognitoTabFunction>();
-  RegisterFunction<ExtensionTestSendMessageFunction>();
-  RegisterFunction<ExtensionTestGetConfigFunction>();
+  RegisterFunction<extensions::TestNotifyPassFunction>();
+  RegisterFunction<extensions::TestFailFunction>();
+  RegisterFunction<extensions::TestLogFunction>();
+  RegisterFunction<extensions::TestResetQuotaFunction>();
+  RegisterFunction<extensions::TestCreateIncognitoTabFunction>();
+  RegisterFunction<extensions::TestSendMessageFunction>();
+  RegisterFunction<extensions::TestGetConfigFunction>();
 
   // Record.
-  RegisterFunction<CaptureURLsFunction>();
-  RegisterFunction<ReplayURLsFunction>();
+  RegisterFunction<extensions::CaptureURLsFunction>();
+  RegisterFunction<extensions::ReplayURLsFunction>();
 
   // Accessibility.
   RegisterFunction<GetFocusedControlFunction>();
@@ -280,23 +283,23 @@ void ExtensionFunctionRegistry::ResetFunctions() {
 
 #if defined(OS_CHROMEOS)
   // IME
-  RegisterFunction<SetCompositionFunction>();
-  RegisterFunction<ClearCompositionFunction>();
-  RegisterFunction<CommitTextFunction>();
-  RegisterFunction<SetCandidateWindowPropertiesFunction>();
-  RegisterFunction<SetCandidatesFunction>();
-  RegisterFunction<SetCursorPositionFunction>();
-  RegisterFunction<SetMenuItemsFunction>();
-  RegisterFunction<UpdateMenuItemsFunction>();
+  RegisterFunction<extensions::SetCompositionFunction>();
+  RegisterFunction<extensions::ClearCompositionFunction>();
+  RegisterFunction<extensions::CommitTextFunction>();
+  RegisterFunction<extensions::SetCandidateWindowPropertiesFunction>();
+  RegisterFunction<extensions::SetCandidatesFunction>();
+  RegisterFunction<extensions::SetCursorPositionFunction>();
+  RegisterFunction<extensions::SetMenuItemsFunction>();
+  RegisterFunction<extensions::UpdateMenuItemsFunction>();
 
-  RegisterFunction<InputEventHandled>();
+  RegisterFunction<extensions::InputEventHandled>();
 #endif
 
   // Managed mode.
-  RegisterFunction<GetManagedModeFunction>();
-  RegisterFunction<EnterManagedModeFunction>();
-  RegisterFunction<GetPolicyFunction>();
-  RegisterFunction<SetPolicyFunction>();
+  RegisterFunction<extensions::GetManagedModeFunction>();
+  RegisterFunction<extensions::EnterManagedModeFunction>();
+  RegisterFunction<extensions::GetPolicyFunction>();
+  RegisterFunction<extensions::SetPolicyFunction>();
 
   // Management.
   RegisterFunction<GetAllExtensionsFunction>();
@@ -372,8 +375,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<TransferFileFunction>();
   RegisterFunction<GetGDataPreferencesFunction>();
   RegisterFunction<SetGDataPreferencesFunction>();
-  RegisterFunction<GetPathForDriveSearchResultFunction>();
   RegisterFunction<SearchDriveFunction>();
+  RegisterFunction<ClearDriveCacheFunction>();
   RegisterFunction<GetNetworkConnectionStateFunction>();
   RegisterFunction<RequestDirectoryRefreshFunction>();
 
@@ -385,6 +388,10 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<GetPlaylistMediaplayerFunction>();
   RegisterFunction<SetWindowHeightMediaplayerFunction>();
   RegisterFunction<CloseWindowMediaplayerFunction>();
+
+  // WallpaperManagerPrivate functions.
+  RegisterFunction<WallpaperStringsFunction>();
+  RegisterFunction<WallpaperSetWallpaperFunction>();
 
   // InputMethod
   RegisterFunction<GetInputMethodFunction>();
@@ -437,8 +444,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<GetMinimumFontSizeFunction>();
   RegisterFunction<SetMinimumFontSizeFunction>();
 
-  // ChromeAuth settings.
-  RegisterFunction<SetCloudPrintCredentialsFunction>();
+  // CloudPrint settings.
+  RegisterFunction<extensions::CloudPrintSetCredentialsFunction>();
 
   // Experimental App API.
   RegisterFunction<extensions::AppNotifyFunction>();
@@ -450,21 +457,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<RemovePermissionsFunction>();
   RegisterFunction<RequestPermissionsFunction>();
 
-  // Downloads
-  RegisterFunction<DownloadsDownloadFunction>();
-  RegisterFunction<DownloadsSearchFunction>();
-  RegisterFunction<DownloadsPauseFunction>();
-  RegisterFunction<DownloadsResumeFunction>();
-  RegisterFunction<DownloadsCancelFunction>();
-  RegisterFunction<DownloadsEraseFunction>();
-  RegisterFunction<DownloadsSetDestinationFunction>();
-  RegisterFunction<DownloadsAcceptDangerFunction>();
-  RegisterFunction<DownloadsShowFunction>();
-  RegisterFunction<DownloadsDragFunction>();
-  RegisterFunction<DownloadsGetFileIconFunction>();
-
   // PageCapture
-  RegisterFunction<PageCaptureSaveAsMHTMLFunction>();
+  RegisterFunction<extensions::PageCaptureSaveAsMHTMLFunction>();
 
   // TopSites
   RegisterFunction<GetTopSitesFunction>();
@@ -502,17 +496,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<ToDataUrlOffscreenTabFunction>();
   RegisterFunction<UpdateOffscreenTabFunction>();
 
-  // Identity
-  RegisterFunction<extensions::GetAuthTokenFunction>();
-  RegisterFunction<extensions::LaunchWebAuthFlowFunction>();
-
   // Runtime
   RegisterFunction<extensions::RuntimeGetBackgroundPageFunction>();
-
-  // Media Gallery
-  RegisterFunction<extensions::GetMediaFileSystemsFunction>();
-  RegisterFunction<extensions::OpenMediaGalleryManagerFunction>();
-  RegisterFunction<extensions::AssembleMediaFileFunction>();
 
   // Generated APIs
   extensions::api::GeneratedFunctionRegistry::RegisterAll(this);

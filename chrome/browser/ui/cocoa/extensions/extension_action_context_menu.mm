@@ -11,7 +11,10 @@
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
@@ -45,11 +48,11 @@ using extensions::Extension;
 // Also acts as the extension's UI delegate in order to display the dialog.
 class AsyncUninstaller : public ExtensionUninstallDialog::Delegate {
  public:
-  AsyncUninstaller(const Extension* extension, Profile* profile)
+  AsyncUninstaller(const Extension* extension, Browser* browser)
       : extension_(extension),
-        profile_(profile) {
+        profile_(browser->profile()) {
     extension_uninstall_dialog_.reset(
-        ExtensionUninstallDialog::Create(profile, this));
+        ExtensionUninstallDialog::Create(browser, this));
     extension_uninstall_dialog_->ConfirmUninstall(extension_);
   }
 
@@ -97,7 +100,7 @@ int CurrentTabId() {
   Browser* browser = browser::GetLastActiveBrowser();
   if(!browser)
     return -1;
-  WebContents* contents = browser->GetActiveWebContents();
+  WebContents* contents = chrome::GetActiveWebContents(browser);
   if (!contents)
     return -1;
   return ExtensionTabUtil::GetTabId(contents);
@@ -106,12 +109,12 @@ int CurrentTabId() {
 }  // namespace
 
 - (id)initWithExtension:(const Extension*)extension
-                profile:(Profile*)profile
+                browser:(Browser*)browser
         extensionAction:(ExtensionAction*)action{
   if ((self = [super initWithTitle:@""])) {
     action_ = action;
     extension_ = extension;
-    profile_ = profile;
+    browser_ = browser;
 
     NSArray* menuItems = [NSArray arrayWithObjects:
         base::SysUTF8ToNSString(extension->name()),
@@ -153,10 +156,6 @@ int CurrentTabId() {
 }
 
 - (void)dispatch:(id)menuItem {
-  Browser* browser = browser::FindBrowserWithProfile(profile_);
-  if (!browser)
-    return;
-
   NSMenuItem* item = (NSMenuItem*)menuItem;
   switch ([item tag]) {
     case kExtensionContextName: {
@@ -165,17 +164,18 @@ int CurrentTabId() {
       OpenURLParams params(
           url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
            false);
-      browser->OpenURL(params);
+      browser_->OpenURL(params);
       break;
     }
     case kExtensionContextOptions: {
       DCHECK(!extension_->options_url().is_empty());
-      profile_->GetExtensionProcessManager()->OpenOptionsPage(extension_,
-                                                              browser);
+      browser_->profile()->GetExtensionProcessManager()->OpenOptionsPage(
+          extension_, browser_);
       break;
     }
     case kExtensionContextDisable: {
-      ExtensionService* extensionService = profile_->GetExtensionService();
+      ExtensionService* extensionService =
+          browser_->profile()->GetExtensionService();
       if (!extensionService)
         return; // Incognito mode.
       extensionService->DisableExtension(extension_->id(),
@@ -183,17 +183,18 @@ int CurrentTabId() {
       break;
     }
     case kExtensionContextUninstall: {
-      uninstaller_.reset(new AsyncUninstaller(extension_, profile_));
+      uninstaller_.reset(new AsyncUninstaller(extension_, browser_));
       break;
     }
     case kExtensionContextHide: {
-      ExtensionService* extension_service = profile_->GetExtensionService();
+      ExtensionService* extension_service =
+          browser_->profile()->GetExtensionService();
       extension_service->extension_prefs()->
           SetBrowserActionVisibility(extension_, false);
       break;
     }
     case kExtensionContextManage: {
-      browser->ShowExtensionsTab();
+      chrome::ShowExtensions(browser_);
       break;
     }
     default:

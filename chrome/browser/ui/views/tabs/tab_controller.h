@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_TAB_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_CONTROLLER_H_
-#pragma once
 
 class BaseTab;
 class TabStripSelectionModel;
@@ -52,13 +51,10 @@ class TabController {
   // Returns true if the specified Tab is pinned.
   virtual bool IsTabPinned(const BaseTab* tab) const = 0;
 
-  // Returns true if the specified Tab is closeable.
-  virtual bool IsTabCloseable(const BaseTab* tab) const = 0;
-
   // Potentially starts a drag for the specified Tab.
   virtual void MaybeStartDrag(
       BaseTab* tab,
-      const views::MouseEvent& event,
+      const views::LocatedEvent& event,
       const TabStripSelectionModel& original_selection) = 0;
 
   // Continues dragging a Tab.
@@ -86,6 +82,9 @@ class TabController {
   // not painted. If true is returned the tab should be painted and |clip| is
   // set to the clip (if |clip| is empty means no clip).
   virtual bool ShouldPaintTab(const BaseTab* tab, gfx::Rect* clip) = 0;
+
+  // Returns true if Instant Extended API is enabled.
+  virtual bool IsInstantExtendedAPIEnabled() = 0;
 
  protected:
   virtual ~TabController() {}

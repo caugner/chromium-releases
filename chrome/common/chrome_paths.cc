@@ -13,6 +13,7 @@
 #include "base/version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
+#include "ui/base/ui_base_paths.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -254,10 +255,12 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("script.log"));
       break;
     case chrome::FILE_FLASH_PLUGIN:
+    case chrome::FILE_FLASH_PLUGIN_EXISTING:
       if (!GetInternalPluginsDirectory(&cur))
         return false;
       cur = cur.Append(kInternalFlashPluginFileName);
-      if (!file_util::PathExists(cur))
+      if (key == chrome::FILE_FLASH_PLUGIN_EXISTING &&
+          !file_util::PathExists(cur))
         return false;
       break;
     case chrome::FILE_PEPPER_FLASH_PLUGIN:
@@ -275,9 +278,12 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       cur = cur.Append(kInternalNaClPluginFileName);
       break;
-    case chrome::FILE_PNACL_COMPONENT:
-      // TODO(jvoung): Do we want a default value or just the ability to
-      // override immediately when testing on bots to avoid race conditions?
+    case chrome::DIR_PNACL_BASE:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("Pnacl"));
+      break;
+    case chrome::DIR_PNACL_COMPONENT:
       return false;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     case chrome::FILE_NACL_HELPER:
@@ -309,11 +315,15 @@ bool PathProvider(int key, FilePath* result) {
                  .Append(FILE_PATH_LITERAL("resources.pak"));
         break;
       }
-      // If we're not bundled on mac, resources.pak should be next to the
-      // binary (e.g., for unit tests).
-#endif
+#elif defined(OS_ANDROID)
+      if (!PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &cur))
+        return false;
+#else
+      // If we're not bundled on mac or Android, resources.pak should be next
+      // to the binary (e.g., for unit tests).
       if (!PathService::Get(base::DIR_MODULE, &cur))
         return false;
+#endif
       cur = cur.Append(FILE_PATH_LITERAL("resources.pak"));
       break;
     case chrome::DIR_RESOURCES_EXTENSION:
@@ -323,11 +333,10 @@ bool PathProvider(int key, FilePath* result) {
                .Append(FILE_PATH_LITERAL("extension"));
       break;
 #if defined(OS_CHROMEOS)
-    case chrome::FILE_CHROMEOS_API:
-      if (!PathService::Get(base::DIR_MODULE, &cur))
+    case chrome::DIR_CHROMEOS_WALLPAPERS:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
-      cur = cur.Append(FILE_PATH_LITERAL("chromeos"));
-      cur = cur.Append(FILE_PATH_LITERAL("libcros.so"));
+      cur = cur.Append(FILE_PATH_LITERAL("wallpapers"));
       break;
 #endif
     // The following are only valid in the development environment, and

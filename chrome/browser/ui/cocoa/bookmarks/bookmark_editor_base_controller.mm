@@ -12,6 +12,7 @@
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_all_tabs_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_cell_single_line.h"
@@ -72,6 +73,8 @@ void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
                   initWithParentWindow:parent_hwnd
                                profile:profile
                                 parent:details.parent_node
+                                   url:details.url
+                                 title:details.title
                          configuration:configuration];
   } else {
     controller = [[BookmarkEditorController alloc]
@@ -79,6 +82,8 @@ void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
                                profile:profile
                                 parent:details.parent_node
                                   node:details.existing_node
+                                   url:details.url
+                                 title:details.title
                          configuration:configuration];
   }
   [controller runAsModalSheet];
@@ -169,6 +174,8 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
                    nibName:(NSString*)nibName
                    profile:(Profile*)profile
                     parent:(const BookmarkNode*)parent
+                       url:(const GURL&)url
+                     title:(const string16&)title
              configuration:(BookmarkEditor::Configuration)configuration {
   NSString* nibpath = [base::mac::FrameworkBundle()
                         pathForResource:nibName
@@ -177,6 +184,8 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
     parentWindow_ = parentWindow;
     profile_ = profile;
     parentNode_ = parent;
+    url_ = url;
+    title_ = title;
     configuration_ = configuration;
     initialName_ = [@"" retain];
     observer_.reset(new BookmarkEditorBaseControllerBridge(self));
@@ -289,7 +298,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 #pragma mark Folder Tree Management
 
 - (BookmarkModel*)bookmarkModel {
-  return profile_->GetBookmarkModel();
+  return BookmarkModelFactory::GetForProfile(profile_);
 }
 
 - (Profile*)profile {
@@ -298,6 +307,14 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 
 - (const BookmarkNode*)parentNode {
   return parentNode_;
+}
+
+- (const GURL&)url {
+  return url_;
+}
+
+- (const string16&)title{
+  return title_;
 }
 
 - (BookmarkFolderInfo*)folderForIndexPath:(NSIndexPath*)indexPath {
@@ -420,7 +437,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
   // of ancestor nodes.  Then crawl down the folderTreeArray looking
   // for each ancestor in order while building up the selectionPath.
   std::stack<const BookmarkNode*> nodeStack;
-  BookmarkModel* model = profile_->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile_);
   const BookmarkNode* rootNode = model->root_node();
   const BookmarkNode* node = desiredNode;
   while (node != rootNode) {
@@ -475,7 +492,7 @@ class BookmarkEditorBaseControllerBridge : public BookmarkModelObserver {
 
 - (void)buildFolderTree {
   // Build up a tree of the current folder configuration.
-  BookmarkModel* model = profile_->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile_);
   const BookmarkNode* rootNode = model->root_node();
   NSMutableArray* baseArray = [self addChildFoldersFromNode:rootNode];
   DCHECK(baseArray);

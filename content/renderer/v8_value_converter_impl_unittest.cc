@@ -10,6 +10,16 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "v8/include/v8.h"
 
+namespace {
+
+// A dumb getter for an object's named callback.
+v8::Handle<v8::Value> NamedCallbackGetter(v8::Local<v8::String> name,
+                                          const v8::AccessorInfo& info) {
+  return v8::String::New("bar");
+}
+
+}  // namespace
+
 class V8ValueConverterImplTest : public testing::Test {
  protected:
   virtual void SetUp() {
@@ -113,6 +123,7 @@ class V8ValueConverterImplTest : public testing::Test {
         static_cast<DictionaryValue*>(
             converter.FromV8Value(object, context_)));
     ASSERT_TRUE(dictionary.get());
+
     Value* temp = NULL;
     ASSERT_TRUE(dictionary->Get("test", &temp));
     EXPECT_EQ(expected_type, temp->GetType());
@@ -345,4 +356,95 @@ TEST_F(V8ValueConverterImplTest, StripNullFromObjects) {
       static_cast<DictionaryValue*>(converter.FromV8Value(object, context_)));
   ASSERT_TRUE(result.get());
   EXPECT_EQ(0u, result->size());
+}
+
+TEST_F(V8ValueConverterImplTest, RecursiveObjects) {
+  v8::Context::Scope context_scope(context_);
+  v8::HandleScope handle_scope;
+
+  V8ValueConverterImpl converter;
+
+  v8::Handle<v8::Object> object = v8::Object::New().As<v8::Object>();
+  ASSERT_FALSE(object.IsEmpty());
+  object->Set(v8::String::New("foo"), v8::String::New("bar"));
+  object->Set(v8::String::New("obj"), object);
+
+  scoped_ptr<DictionaryValue> object_result(
+      static_cast<DictionaryValue*>(converter.FromV8Value(object, context_)));
+  ASSERT_TRUE(object_result.get());
+  EXPECT_EQ(2u, object_result->size());
+  EXPECT_TRUE(IsNull(object_result.get(), "obj"));
+
+  v8::Handle<v8::Array> array = v8::Array::New().As<v8::Array>();
+  ASSERT_FALSE(array.IsEmpty());
+  array->Set(0, v8::String::New("1"));
+  array->Set(1, array);
+
+  scoped_ptr<ListValue> list_result(
+      static_cast<ListValue*>(converter.FromV8Value(array, context_)));
+  ASSERT_TRUE(list_result.get());
+  EXPECT_EQ(2u, list_result->GetSize());
+  EXPECT_TRUE(IsNull(list_result.get(), 1));
+}
+
+// Do not try and convert any named callbacks including getters.
+TEST_F(V8ValueConverterImplTest, ObjectGetters) {
+  v8::Context::Scope context_scope(context_);
+  v8::HandleScope handle_scope;
+
+  const char* source = "(function() {"
+      "var a = {};"
+      "a.__defineGetter__('foo', function() { return 'bar'; });"
+      "return a;"
+      "})();";
+
+  v8::Handle<v8::Script> script(v8::Script::New(v8::String::New(source)));
+  v8::Handle<v8::Object> object = script->Run().As<v8::Object>();
+  ASSERT_FALSE(object.IsEmpty());
+
+  V8ValueConverterImpl converter;
+  scoped_ptr<DictionaryValue> result(
+      static_cast<DictionaryValue*>(converter.FromV8Value(object, context_)));
+  ASSERT_TRUE(result.get());
+  EXPECT_EQ(0u, result->size());
+}
+
+// Do not try and convert any named callbacks including getters.
+TEST_F(V8ValueConverterImplTest, ObjectWithInternalFieldsGetters) {
+  v8::Context::Scope context_scope(context_);
+  v8::HandleScope handle_scope;
+
+  v8::Handle<v8::ObjectTemplate> object_template = v8::ObjectTemplate::New();
+  object_template->SetInternalFieldCount(1);
+  object_template->SetAccessor(v8::String::New("foo"), NamedCallbackGetter);
+  v8::Handle<v8::Object> object = object_template->NewInstance();
+  ASSERT_FALSE(object.IsEmpty());
+  object->Set(v8::String::New("a"), v8::String::New("b"));
+
+  V8ValueConverterImpl converter;
+  scoped_ptr<DictionaryValue> result(
+      static_cast<DictionaryValue*>(converter.FromV8Value(object, context_)));
+  ASSERT_TRUE(result.get());
+  EXPECT_EQ(1u, result->size());
+}
+
+TEST_F(V8ValueConverterImplTest, ArrayGetters) {
+  v8::Context::Scope context_scope(context_);
+  v8::HandleScope handle_scope;
+
+  const char* source = "(function() {"
+      "var a = [0];"
+      "a.__defineGetter__(1, function() { return 'bar'; });"
+      "return a;"
+      "})();";
+
+  v8::Handle<v8::Script> script(v8::Script::New(v8::String::New(source)));
+  v8::Handle<v8::Array> array = script->Run().As<v8::Array>();
+  ASSERT_FALSE(array.IsEmpty());
+
+  V8ValueConverterImpl converter;
+  scoped_ptr<ListValue> result(
+      static_cast<ListValue*>(converter.FromV8Value(array, context_)));
+  ASSERT_TRUE(result.get());
+  EXPECT_EQ(2u, result->GetSize());
 }

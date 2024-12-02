@@ -13,14 +13,23 @@ const char kAlsaOutputDevice[] = "alsa-output-device";
 const char kAlsaInputDevice[] = "alsa-input-device";
 #endif
 
-#if defined(OS_LINUX)
+#if defined(USE_CRAS)
 // Use CRAS, the ChromeOS audio server.
 const char kUseCras[] = "use-cras";
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(USE_PULSEAUDIO)
 // Use PulseAudio on platforms that support it.
 const char kUsePulseAudio[] = "use-pulseaudio";
+#endif
+
+#if defined(OS_WIN)
+// Use exclusive mode audio streaming for Windows Vista and higher.
+// Leads to lower latencies for audio streams which uses the
+// AudioParameters::AUDIO_PCM_LOW_LATENCY audio path.
+// See http://msdn.microsoft.com/en-us/library/windows/desktop/dd370844(v=vs.85).aspx
+// for details.
+const char kEnableExclusiveAudio[] = "enable-exclusive-audio";
 #endif
 
 // Set number of threads to use for video decoding.

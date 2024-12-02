@@ -5,18 +5,24 @@
 #include "chromeos/dbus/mock_dbus_thread_manager_without_gmock.h"
 
 #include "chromeos/dbus/ibus/mock_ibus_client.h"
+#include "chromeos/dbus/ibus/mock_ibus_engine_factory_service.h"
+#include "chromeos/dbus/ibus/mock_ibus_engine_service.h"
 #include "chromeos/dbus/ibus/mock_ibus_input_context_client.h"
 
 namespace chromeos {
 
 MockDBusThreadManagerWithoutGMock::MockDBusThreadManagerWithoutGMock()
   : mock_ibus_client_(new MockIBusClient),
-    mock_ibus_input_context_client_(new MockIBusInputContextClient) {
+    mock_ibus_input_context_client_(new MockIBusInputContextClient),
+    ibus_bus_(NULL) {
 }
 
 MockDBusThreadManagerWithoutGMock::~MockDBusThreadManagerWithoutGMock() {}
 
-void InitIBusBus(const std::string& ibus_address) {
+void MockDBusThreadManagerWithoutGMock::InitIBusBus(
+    const std::string& ibus_address) {
+  // Non-null bus address is used to ensure the connection to ibus-daemon.
+  ibus_bus_ = reinterpret_cast<dbus::Bus*>(0xdeadbeef);
 }
 
 dbus::Bus* MockDBusThreadManagerWithoutGMock::GetSystemBus() {
@@ -24,7 +30,7 @@ dbus::Bus* MockDBusThreadManagerWithoutGMock::GetSystemBus() {
 }
 
 dbus::Bus* MockDBusThreadManagerWithoutGMock::GetIBusBus() {
-  return NULL;
+  return ibus_bus_;
 }
 
 BluetoothAdapterClient*
@@ -162,6 +168,12 @@ UpdateEngineClient* MockDBusThreadManagerWithoutGMock::GetUpdateEngineClient() {
   return NULL;
 }
 
+BluetoothOutOfBandClient*
+    MockDBusThreadManagerWithoutGMock::GetBluetoothOutOfBandClient() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 IBusClient* MockDBusThreadManagerWithoutGMock::GetIBusClient() {
   return mock_ibus_client_.get();
 }
@@ -171,5 +183,18 @@ IBusInputContextClient*
   return mock_ibus_input_context_client_.get();
 }
 
+IBusEngineFactoryService*
+    MockDBusThreadManagerWithoutGMock::GetIBusEngineFactoryService() {
+  return mock_ibus_engine_factory_service_.get();
+}
+
+IBusEngineService* MockDBusThreadManagerWithoutGMock::GetIBusEngineService(
+    const dbus::ObjectPath& object_path) {
+  return mock_ibus_engine_service_.get();
+}
+
+void MockDBusThreadManagerWithoutGMock::RemoveIBusEngineService(
+    const dbus::ObjectPath& object_path) {
+}
 
 }  // namespace chromeos

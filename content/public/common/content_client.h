@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_CONTENT_CLIENT_H_
 #define CONTENT_PUBLIC_COMMON_CONTENT_CLIENT_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -140,6 +139,10 @@ class CONTENT_EXPORT ContentClient {
   virtual bool GetSandboxProfileForSandboxType(
       int sandbox_type,
       int* sandbox_profile_resource_id) const;
+
+  // Gets the Carbon interposing path to give to DYLD. Returns an empty string
+  // if the embedder doesn't bundle it.
+  virtual std::string GetCarbonInterposePath() const;
 #endif
 
   void set_browser_for_testing(ContentBrowserClient* c) { browser_ = c; }

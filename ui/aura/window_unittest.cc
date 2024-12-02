@@ -229,51 +229,6 @@ class GestureTrackPositionDelegate : public TestWindowDelegate {
   DISALLOW_COPY_AND_ASSIGN(GestureTrackPositionDelegate);
 };
 
-// Keeps track of mouse events.
-class MouseTrackingDelegate : public TestWindowDelegate {
- public:
-  MouseTrackingDelegate()
-      : mouse_enter_count_(0),
-        mouse_move_count_(0),
-        mouse_leave_count_(0) {
-  }
-
-  virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE {
-    switch (event->type()) {
-      case ui::ET_MOUSE_MOVED:
-        mouse_move_count_++;
-        break;
-      case ui::ET_MOUSE_ENTERED:
-        mouse_enter_count_++;
-        break;
-      case ui::ET_MOUSE_EXITED:
-        mouse_leave_count_++;
-        break;
-      default:
-        break;
-    }
-    return false;
-  }
-
-  std::string GetMouseCountsAndReset() {
-    std::string result = StringPrintf("%d %d %d",
-                                      mouse_enter_count_,
-                                      mouse_move_count_,
-                                      mouse_leave_count_);
-    mouse_enter_count_ = 0;
-    mouse_move_count_ = 0;
-    mouse_leave_count_ = 0;
-    return result;
-  }
-
- private:
-  int mouse_enter_count_;
-  int mouse_move_count_;
-  int mouse_leave_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(MouseTrackingDelegate);
-};
-
 base::TimeDelta getTime() {
   return base::Time::NowFromSystemTime() - base::Time();
 }
@@ -313,6 +268,25 @@ TEST_F(WindowTest, Contains) {
   EXPECT_FALSE(child2.Contains(&child1));
 }
 
+TEST_F(WindowTest, ContainsPointInRoot) {
+  scoped_ptr<Window> w(
+      CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 10, 5, 5), NULL));
+  EXPECT_FALSE(w->ContainsPointInRoot(gfx::Point(9, 9)));
+  EXPECT_TRUE(w->ContainsPointInRoot(gfx::Point(10, 10)));
+  EXPECT_TRUE(w->ContainsPointInRoot(gfx::Point(14, 14)));
+  EXPECT_FALSE(w->ContainsPointInRoot(gfx::Point(15, 15)));
+  EXPECT_FALSE(w->ContainsPointInRoot(gfx::Point(20, 20)));
+}
+
+TEST_F(WindowTest, ContainsPoint) {
+  scoped_ptr<Window> w(
+      CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 10, 5, 5), NULL));
+  EXPECT_TRUE(w->ContainsPoint(gfx::Point(0, 0)));
+  EXPECT_TRUE(w->ContainsPoint(gfx::Point(4, 4)));
+  EXPECT_FALSE(w->ContainsPoint(gfx::Point(5, 5)));
+  EXPECT_FALSE(w->ContainsPoint(gfx::Point(10, 10)));
+}
+
 TEST_F(WindowTest, ConvertPointToWindow) {
   // Window::ConvertPointToWindow is mostly identical to
   // Layer::ConvertPointToLayer, except NULL values for |source| are permitted,
@@ -336,15 +310,27 @@ TEST_F(WindowTest, MoveCursorTo) {
 
   RootWindow* root = root_window();
   root->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("10,10", root->last_mouse_location().ToString());
+  EXPECT_EQ("10,10", gfx::Screen::GetCursorScreenPoint().ToString());
   w1->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("20,20", root->last_mouse_location().ToString());
+  EXPECT_EQ("20,20", gfx::Screen::GetCursorScreenPoint().ToString());
   w11->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("25,25", root->last_mouse_location().ToString());
+  EXPECT_EQ("25,25", gfx::Screen::GetCursorScreenPoint().ToString());
   w111->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("30,30", root->last_mouse_location().ToString());
+  EXPECT_EQ("30,30", gfx::Screen::GetCursorScreenPoint().ToString());
   w1111->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("35,35", root->last_mouse_location().ToString());
+  EXPECT_EQ("35,35", gfx::Screen::GetCursorScreenPoint().ToString());
+}
+
+TEST_F(WindowTest, ContainsMouse) {
+  scoped_ptr<Window> w(
+      CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 10, 500, 500), NULL));
+  w->Show();
+  Window::TestApi w_test_api(w.get());
+  RootWindow* root = root_window();
+  root->MoveCursorTo(gfx::Point(10, 10));
+  EXPECT_TRUE(w_test_api.ContainsMouse());
+  root->MoveCursorTo(gfx::Point(9, 10));
+  EXPECT_FALSE(w_test_api.ContainsMouse());
 }
 
 // Test Window::ConvertPointToWindow() with transform to root_window.
@@ -360,7 +346,7 @@ TEST_F(WindowTest, MoveCursorToWithTransformRootWindow) {
   // TODO(yoshiki): fix this to build on Windows. See crbug.com/133413.OD
   EXPECT_EQ("50,120", root->QueryMouseLocationForTest().ToString());
 #endif
-  EXPECT_EQ("10,10", root->last_mouse_location().ToString());
+  EXPECT_EQ("10,10", gfx::Screen::GetCursorScreenPoint().ToString());
 }
 
 // Tests Window::ConvertPointToWindow() with transform to non-root windows.
@@ -368,24 +354,23 @@ TEST_F(WindowTest, MoveCursorToWithTransformWindow) {
   scoped_ptr<Window> w1(
       CreateTestWindow(SK_ColorWHITE, 1, gfx::Rect(10, 10, 500, 500), NULL));
 
-  RootWindow* root = root_window();
   ui::Transform transform1;
   transform1.ConcatScale(2, 2);
   w1->SetTransform(transform1);
   w1->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("30,30", root->last_mouse_location().ToString());
+  EXPECT_EQ("30,30", gfx::Screen::GetCursorScreenPoint().ToString());
 
   ui::Transform transform2;
   transform2.ConcatTranslate(-10, 20);
   w1->SetTransform(transform2);
   w1->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("10,40", root->last_mouse_location().ToString());
+  EXPECT_EQ("10,40", gfx::Screen::GetCursorScreenPoint().ToString());
 
   ui::Transform transform3;
   transform3.ConcatRotate(90.0f);
   w1->SetTransform(transform3);
   w1->MoveCursorTo(gfx::Point(5, 5));
-  EXPECT_EQ("5,15", root->last_mouse_location().ToString());
+  EXPECT_EQ("5,15", gfx::Screen::GetCursorScreenPoint().ToString());
 
   ui::Transform transform4;
   transform4.ConcatScale(2, 5);
@@ -393,7 +378,7 @@ TEST_F(WindowTest, MoveCursorToWithTransformWindow) {
   transform4.ConcatTranslate(100, 100);
   w1->SetTransform(transform4);
   w1->MoveCursorTo(gfx::Point(10, 10));
-  EXPECT_EQ("60,130", root->last_mouse_location().ToString());
+  EXPECT_EQ("60,130", gfx::Screen::GetCursorScreenPoint().ToString());
 }
 
 // Test Window::ConvertPointToWindow() with complex transforms to both root and
@@ -426,7 +411,7 @@ TEST_F(WindowTest, MoveCursorToWithComplexTransform) {
   // TODO(yoshiki): fix this to build on Windows. See crbug.com/133413.OD
   EXPECT_EQ("11,47", root->QueryMouseLocationForTest().ToString());
 #endif
-  EXPECT_EQ("20,53", root->last_mouse_location().ToString());
+  EXPECT_EQ("20,53", gfx::Screen::GetCursorScreenPoint().ToString());
 }
 
 TEST_F(WindowTest, HitTest) {
@@ -769,7 +754,7 @@ TEST_F(WindowTest, CaptureTests) {
   delegate.ResetCounts();
 
   TouchEvent touchev(ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0, getTime());
-  root_window()->DispatchTouchEvent(&touchev);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&touchev);
   EXPECT_EQ(1, delegate.touch_event_count());
   delegate.ResetCounts();
 
@@ -784,7 +769,7 @@ TEST_F(WindowTest, CaptureTests) {
   EXPECT_EQ(1, delegate.mouse_event_count());
 
   TouchEvent touchev2(ui::ET_TOUCH_PRESSED, gfx::Point(250, 250), 1, getTime());
-  root_window()->DispatchTouchEvent(&touchev2);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&touchev2);
   EXPECT_EQ(1, delegate.touch_event_count());
 
   // Removing the capture window from parent should reset the capture window
@@ -807,7 +792,7 @@ TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
   // Press on w1.
   TouchEvent press(ui::ET_TOUCH_PRESSED,
                    gfx::Point(10, 10), 0, getTime());
-  root_window()->DispatchTouchEvent(&press);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
   EXPECT_EQ(2, delegate1.gesture_event_count());
   delegate1.ResetCounts();
@@ -823,7 +808,7 @@ TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
 
   TouchEvent move(ui::ET_TOUCH_MOVED,
                   gfx::Point(10, 10), 0, getTime());
-  root_window()->DispatchTouchEvent(&move);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&move);
 
   // This touch id is now ignored, no scroll fired.
   EXPECT_EQ(0, delegate1.gesture_event_count());
@@ -831,7 +816,7 @@ TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
 
   TouchEvent release(ui::ET_TOUCH_RELEASED,
                      gfx::Point(10, 10), 0, getTime());
-  root_window()->DispatchTouchEvent(&release);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   EXPECT_EQ(0, delegate1.gesture_event_count());
   EXPECT_EQ(0, delegate2.gesture_event_count());
 
@@ -839,7 +824,7 @@ TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
 
   TouchEvent press2(ui::ET_TOUCH_PRESSED,
                     gfx::Point(10, 10), 0, getTime());
-  root_window()->DispatchTouchEvent(&press2);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press2);
   EXPECT_EQ(0, delegate1.gesture_event_count());
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
   EXPECT_EQ(2, delegate2.gesture_event_count());
@@ -852,7 +837,7 @@ TEST_F(WindowTest, TouchCaptureDoesntCancelCapturedTouches) {
 
   TouchEvent press(ui::ET_TOUCH_PRESSED,
                    gfx::Point(10, 10), 0, getTime());
-  root_window()->DispatchTouchEvent(&press);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
 
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
   EXPECT_EQ(2, delegate.gesture_event_count());
@@ -867,7 +852,7 @@ TEST_F(WindowTest, TouchCaptureDoesntCancelCapturedTouches) {
   TouchEvent release(ui::ET_TOUCH_RELEASED,
                      gfx::Point(10, 10), 0, getTime() +
                      base::TimeDelta::FromMilliseconds(50));
-  root_window()->DispatchTouchEvent(&release);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&release);
   EXPECT_EQ(2, delegate.gesture_event_count());
 }
 
@@ -878,7 +863,7 @@ TEST_F(WindowTest, TransferCaptureTouchEvents) {
   scoped_ptr<Window> w1(CreateTestWindowWithDelegate(
       &d1, 0, gfx::Rect(0, 0, 20, 20), NULL));
   TouchEvent p1(ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 0, getTime());
-  root_window()->DispatchTouchEvent(&p1);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&p1);
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN.
   EXPECT_EQ(2, d1.gesture_event_count());
   d1.ResetCounts();
@@ -888,7 +873,7 @@ TEST_F(WindowTest, TransferCaptureTouchEvents) {
   scoped_ptr<Window> w2(CreateTestWindowWithDelegate(
       &d2, 0, gfx::Rect(40, 0, 40, 20), NULL));
   TouchEvent p2(ui::ET_TOUCH_PRESSED, gfx::Point(41, 10), 1, getTime());
-  root_window()->DispatchTouchEvent(&p2);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&p2);
   EXPECT_EQ(0, d1.gesture_event_count());
   // We will get both GESTURE_BEGIN and GESTURE_TAP_DOWN for new target window.
   EXPECT_EQ(2, d2.gesture_event_count());
@@ -914,7 +899,7 @@ TEST_F(WindowTest, TransferCaptureTouchEvents) {
   // Move touch id originally associated with |w2|. Since capture was transfered
   // from 2 to 3 only |w3| should get the event.
   TouchEvent m3(ui::ET_TOUCH_MOVED, gfx::Point(110, 105), 1, getTime());
-  root_window()->DispatchTouchEvent(&m3);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&m3);
   EXPECT_EQ(0, d1.gesture_event_count());
   EXPECT_EQ(0, d2.gesture_event_count());
   // |w3| gets two events, both scroll related.
@@ -1183,7 +1168,7 @@ class VisibilityWindowDelegate : public TestWindowDelegate {
     hidden_ = 0;
   }
 
-  virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE {
+  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {
     if (visible)
       shown_++;
     else
@@ -1327,7 +1312,7 @@ TEST_F(WindowTest, TransformGesture) {
 
   TouchEvent press(ui::ET_TOUCH_PRESSED,
                    gfx::Point(size.height() - 10, 10), 0, getTime());
-  root_window()->DispatchTouchEvent(&press);
+  root_window()->AsRootWindowHostDelegate()->OnHostTouchEvent(&press);
   EXPECT_EQ(gfx::Point(10, 10).ToString(), delegate->position().ToString());
 }
 
@@ -1783,8 +1768,8 @@ TEST_F(WindowTest, RecreateLayer) {
   scoped_ptr<ui::Layer> old_layer(w.RecreateLayer());
   layer = w.layer();
   EXPECT_EQ(ui::LAYER_SOLID_COLOR, layer->type());
-  EXPECT_EQ(false, layer->scale_content());
-  EXPECT_EQ(false, layer->visible());
+  EXPECT_FALSE(layer->scale_content());
+  EXPECT_FALSE(layer->visible());
   EXPECT_EQ(1u, layer->children().size());
 }
 
@@ -1900,73 +1885,73 @@ TEST_F(WindowTest, MouseEventsOnWindowChange) {
   EventGenerator generator(root_window());
   generator.MoveMouseTo(50, 50);
 
-  MouseTrackingDelegate d1;
+  EventCountDelegate d1;
   scoped_ptr<Window> w1(CreateTestWindowWithDelegate(&d1, 1,
       gfx::Rect(0, 0, 100, 100), root_window()));
   RunAllPendingInMessageLoop();
   // The format of result is "Enter/Mouse/Leave".
-  EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
 
   // Adding new window.
-  MouseTrackingDelegate d11;
+  EventCountDelegate d11;
   scoped_ptr<Window> w11(CreateTestWindowWithDelegate(
       &d11, 1, gfx::Rect(0, 0, 100, 100), w1.get()));
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("0 0 1", d1.GetMouseCountsAndReset());
-  EXPECT_EQ("1 1 0", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
   // Move bounds.
   w11->SetBounds(gfx::Rect(0, 0, 10, 10));
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
-  EXPECT_EQ("0 0 1", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 1", d11.GetMouseMotionCountsAndReset());
 
   w11->SetBounds(gfx::Rect(0, 0, 60, 60));
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("0 0 1", d1.GetMouseCountsAndReset());
-  EXPECT_EQ("1 1 0", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
   // Detach, then re-attach.
   w1->RemoveChild(w11.get());
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
   // Window is detached, so no event is set.
-  EXPECT_EQ("0 0 0", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("0 0 0", d11.GetMouseMotionCountsAndReset());
 
   w1->AddChild(w11.get());
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("0 0 1", d1.GetMouseCountsAndReset());
+  EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
   // Window is detached, so no event is set.
-  EXPECT_EQ("1 1 0", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
   // Visibility Change
   w11->Hide();
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
-  EXPECT_EQ("0 0 0", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 0", d11.GetMouseMotionCountsAndReset());
 
   w11->Show();
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("0 0 1", d1.GetMouseCountsAndReset());
-  EXPECT_EQ("1 1 0", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
   // Transform: move d11 by 100 100.
   ui::Transform transform;
   transform.ConcatTranslate(100, 100);
   w11->SetTransform(transform);
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
-  EXPECT_EQ("0 0 1", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("0 0 1", d11.GetMouseMotionCountsAndReset());
 
   w11->SetTransform(ui::Transform());
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("0 0 1", d1.GetMouseCountsAndReset());
-  EXPECT_EQ("1 1 0", d11.GetMouseCountsAndReset());
+  EXPECT_EQ("0 0 1", d1.GetMouseMotionCountsAndReset());
+  EXPECT_EQ("1 1 0", d11.GetMouseMotionCountsAndReset());
 
   // Closing a window.
   w11.reset();
   RunAllPendingInMessageLoop();
-  EXPECT_EQ("1 1 0", d1.GetMouseCountsAndReset());
+  EXPECT_EQ("1 1 0", d1.GetMouseMotionCountsAndReset());
 }
 #endif
 

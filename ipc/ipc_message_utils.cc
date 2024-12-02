@@ -51,6 +51,7 @@ bool ReadValue(const Message* m, PickleIterator* iter, Value** value,
                int recursion);
 
 void WriteValue(Message* m, const Value* value, int recursion) {
+  bool result;
   if (recursion > kMaxRecursionDepth) {
     LOG(WARNING) << "Max recursion depth hit in WriteValue.";
     return;
@@ -63,25 +64,29 @@ void WriteValue(Message* m, const Value* value, int recursion) {
     break;
     case Value::TYPE_BOOLEAN: {
       bool val;
-      value->GetAsBoolean(&val);
+      result = value->GetAsBoolean(&val);
+      DCHECK(result);
       WriteParam(m, val);
       break;
     }
     case Value::TYPE_INTEGER: {
       int val;
-      value->GetAsInteger(&val);
+      result = value->GetAsInteger(&val);
+      DCHECK(result);
       WriteParam(m, val);
       break;
     }
     case Value::TYPE_DOUBLE: {
       double val;
-      value->GetAsDouble(&val);
+      result = value->GetAsDouble(&val);
+      DCHECK(result);
       WriteParam(m, val);
       break;
     }
     case Value::TYPE_STRING: {
       std::string val;
-      value->GetAsString(&val);
+      result = value->GetAsString(&val);
+      DCHECK(result);
       WriteParam(m, val);
       break;
     }
@@ -98,7 +103,7 @@ void WriteValue(Message* m, const Value* value, int recursion) {
 
       for (DictionaryValue::key_iterator it = dict->begin_keys();
            it != dict->end_keys(); ++it) {
-        Value* subval;
+        const Value* subval;
         if (dict->GetWithoutPathExpansion(*it, &subval)) {
           WriteParam(m, *it);
           WriteValue(m, subval, recursion + 1);
@@ -112,7 +117,7 @@ void WriteValue(Message* m, const Value* value, int recursion) {
       const ListValue* list = static_cast<const ListValue*>(value);
       WriteParam(m, static_cast<int>(list->GetSize()));
       for (size_t i = 0; i < list->GetSize(); ++i) {
-        Value* subval;
+        const Value* subval;
         if (list->Get(i, &subval)) {
           WriteValue(m, subval, recursion + 1);
         } else {
@@ -730,22 +735,43 @@ void ParamTraits<LogData>::Log(const param_type& p, std::string* l) {
 }
 
 void ParamTraits<Message>::Write(Message* m, const Message& p) {
-  DCHECK(p.size() <= INT_MAX);
-  int message_size = static_cast<int>(p.size());
-  m->WriteInt(message_size);
-  m->WriteData(reinterpret_cast<const char*>(p.data()), message_size);
+#if defined(OS_POSIX)
+  // We don't serialize the file descriptors in the nested message, so there
+  // better not be any.
+  DCHECK(!p.HasFileDescriptors());
+#endif
+
+  // Don't just write out the message. This is used to send messages between
+  // NaCl (Posix environment) and the browser (could be on Windows). The message
+  // header formats differ between these systems (so does handle sharing, but
+  // we already asserted we don't have any handles). So just write out the
+  // parts of the header we use.
+  //
+  // Be careful also to use only explicitly-sized types. The NaCl environment
+  // could be 64-bit and the host browser could be 32-bits. The nested message
+  // may or may not be safe to send between 32-bit and 64-bit systems, but we
+  // leave that up to the code sending the message to ensure.
+  m->WriteUInt32(static_cast<uint32>(p.routing_id()));
+  m->WriteUInt32(p.type());
+  m->WriteUInt32(p.flags());
+  m->WriteData(p.payload(), static_cast<uint32>(p.payload_size()));
 }
 
 bool ParamTraits<Message>::Read(const Message* m, PickleIterator* iter,
                                 Message* r) {
-  int size;
-  if (!m->ReadInt(iter, &size))
+  uint32 routing_id, type, flags;
+  if (!m->ReadUInt32(iter, &routing_id) ||
+      !m->ReadUInt32(iter, &type) ||
+      !m->ReadUInt32(iter, &flags))
     return false;
-  const char* data;
-  if (!m->ReadData(iter, &data, &size))
+
+  int payload_size;
+  const char* payload;
+  if (!m->ReadData(iter, &payload, &payload_size))
     return false;
-  *r = Message(data, size);
-  return true;
+
+  r->SetHeaderValues(static_cast<int32>(routing_id), type, flags);
+  return r->WriteBytes(payload, payload_size);
 }
 
 void ParamTraits<Message>::Log(const Message& p, std::string* l) {

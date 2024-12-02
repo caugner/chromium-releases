@@ -4,39 +4,38 @@
 
 #ifndef SYNC_ENGINE_SYNCER_PROTO_UTIL_H_
 #define SYNC_ENGINE_SYNCER_PROTO_UTIL_H_
-#pragma once
 
 #include <string>
 
 #include "base/gtest_prod_util.h"
 #include "base/time.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/util/syncer_error.h"
 #include "sync/sessions/sync_session.h"
 #include "sync/syncable/blob.h"
 
-namespace syncable {
-class Directory;
-class Entry;
-}  // namespace syncable
-
 namespace sync_pb {
+class ClientToServerMessage;
 class ClientToServerResponse;
+class CommitResponse_EntryResponse;
 class EntitySpecifics;
-}  // namespace sync_pb
+class SyncEntity;
+}
 
-namespace browser_sync {
+namespace syncer {
+
+class ThrottledDataTypeTracker;
+class ServerConnectionManager;
 
 namespace sessions {
 class SyncProtocolError;
 class SyncSessionContext;
 }
 
-class ClientToServerMessage;
-class ThrottledDataTypeTracker;
-class ServerConnectionManager;
-class SyncEntity;
-class CommitResponse_EntryResponse;
+namespace syncable {
+class Directory;
+class Entry;
+}
 
 class SyncerProtoUtil {
  public:
@@ -44,7 +43,7 @@ class SyncerProtoUtil {
   // Returns true on success.  Also handles store birthday verification: will
   // produce a SyncError if the birthday is incorrect.
   static SyncerError PostClientToServerMessage(
-      const ClientToServerMessage& msg,
+      const sync_pb::ClientToServerMessage& msg,
       sync_pb::ClientToServerResponse* response,
       sessions::SyncSession* session);
 
@@ -56,7 +55,7 @@ class SyncerProtoUtil {
   // local and server values diverge. However, this almost always indicates a
   // sync bug somewhere earlier in the sync cycle.
   static bool Compare(const syncable::Entry& local_entry,
-                      const SyncEntity& server_entry);
+                      const sync_pb::SyncEntity& server_entry);
 
   // Utility methods for converting between syncable::Blobs and protobuf byte
   // fields.
@@ -73,12 +72,12 @@ class SyncerProtoUtil {
 
   // Extract the name field from a commit entry response.
   static const std::string& NameFromCommitEntryResponse(
-      const CommitResponse_EntryResponse& entry);
+      const sync_pb::CommitResponse_EntryResponse& entry);
 
   // EntitySpecifics is used as a filter for the GetUpdates message to tell
   // the server which datatypes to send back.  This adds a datatype so that
   // it's included in the filter.
-  static void AddToEntitySpecificDatatypesFilter(syncable::ModelType datatype,
+  static void AddToEntitySpecificDatatypesFilter(ModelType datatype,
       sync_pb::EntitySpecifics* filter);
 
   // Get a debug string representation of the client to server response.
@@ -91,7 +90,10 @@ class SyncerProtoUtil {
 
   // Pull the birthday from the dir and put it into the msg.
   static void AddRequestBirthday(syncable::Directory* dir,
-                                 ClientToServerMessage* msg);
+                                 sync_pb::ClientToServerMessage* msg);
+
+  // Set the protocol version field in the outgoing message.
+  static void SetProtocolVersion(sync_pb::ClientToServerMessage* msg);
 
  private:
   SyncerProtoUtil() {}
@@ -111,9 +113,9 @@ class SyncerProtoUtil {
 
   // Post the message using the scm, and do some processing on the returned
   // headers. Decode the server response.
-  static bool PostAndProcessHeaders(browser_sync::ServerConnectionManager* scm,
+  static bool PostAndProcessHeaders(ServerConnectionManager* scm,
                                     sessions::SyncSession* session,
-                                    const ClientToServerMessage& msg,
+                                    const sync_pb::ClientToServerMessage& msg,
                                     sync_pb::ClientToServerResponse* response);
 
   static base::TimeDelta GetThrottleDelay(
@@ -122,7 +124,7 @@ class SyncerProtoUtil {
   static void HandleThrottleError(
       const SyncProtocolError& error,
       const base::TimeTicks& throttled_until,
-      browser_sync::ThrottledDataTypeTracker* tracker,
+      ThrottledDataTypeTracker* tracker,
       sessions::SyncSession::Delegate* delegate);
 
   friend class SyncerProtoUtilTest;
@@ -135,6 +137,6 @@ class SyncerProtoUtil {
   DISALLOW_COPY_AND_ASSIGN(SyncerProtoUtil);
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_ENGINE_SYNCER_PROTO_UTIL_H_

@@ -18,8 +18,8 @@
 #include "chrome/browser/extensions/api/offscreen_tabs/offscreen_tabs_constants.h"
 #include "chrome/browser/extensions/api/tabs/tabs.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/extension_event_names.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_names.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -27,7 +27,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
-#include "chrome/browser/ui/window_sizer.h"
+#include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
@@ -50,7 +50,7 @@ using WebKit::WebInputEvent;
 
 namespace keys = extensions::offscreen_tabs_constants;
 namespace tabs_keys = extensions::tabs_constants;
-namespace events = extension_event_names;
+namespace events = extensions::event_names;
 
 namespace {
 
@@ -276,7 +276,8 @@ void OffscreenTab::Observe(int type,
   // event.
   Profile* profile = parent_tab_->tab_contents()->profile();
   profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-      events::kOnOffscreenTabUpdated, json_args, profile, GURL());
+      events::kOnOffscreenTabUpdated, json_args, profile, GURL(),
+      extensions::EventFilteringInfo());
 }
 
 ParentTab::ParentTab() : tab_contents_(NULL) {}
@@ -512,7 +513,7 @@ bool CreateOffscreenTabFunction::RunImpl() {
   // TODO(alexbost): Maybe the callback is called too soon. It should probably
   // be called once we have navigated to the url.
   if (has_callback()) {
-    result_.reset(offscreen_tab.CreateValue());
+    SetResult(offscreen_tab.CreateValue());
     SendResponse(true);
   }
 
@@ -534,7 +535,7 @@ bool GetOffscreenTabFunction::RunImpl() {
     return false;
   }
 
-  result_.reset(offscreen_tab->CreateValue());
+  SetResult(offscreen_tab->CreateValue());
   return true;
 }
 
@@ -554,7 +555,7 @@ bool GetAllOffscreenTabFunction::RunImpl() {
       tab_list->Append((*i)->CreateValue());
   }
 
-  result_.reset(tab_list);
+  SetResult(tab_list);
   return true;
 }
 

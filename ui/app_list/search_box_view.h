@@ -4,7 +4,6 @@
 
 #ifndef UI_APP_LIST_SEARCH_BOX_VIEW_H_
 #define UI_APP_LIST_SEARCH_BOX_VIEW_H_
-#pragma once
 
 #include <string>
 
@@ -44,6 +43,7 @@ class SearchBoxView : public views::View,
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual bool OnMouseWheel(const views::MouseWheelEvent& event) OVERRIDE;
 
  private:
   // Updates model text and selection model with current Textfield info.
@@ -65,11 +65,11 @@ class SearchBoxView : public views::View,
   virtual void TextChanged() OVERRIDE;
 
   SearchBoxViewDelegate* delegate_;  // Not owned.
-  SearchBoxModel* model_;  // Owned by AppListModel
+  SearchBoxModel* model_;  // Owned by AppListModel.
 
-  views::ImageView* icon_view_;  // Owned by views hierarchy
-  views::Textfield* search_box_;  // Owned by views hierarchy
-  views::View* contents_view_;  // Owned by views hierarchy
+  views::ImageView* icon_view_;  // Owned by views hierarchy.
+  views::Textfield* search_box_;  // Owned by views hierarchy.
+  views::View* contents_view_;  // Owned by views hierarchy.
 
   DISALLOW_COPY_AND_ASSIGN(SearchBoxView);
 };

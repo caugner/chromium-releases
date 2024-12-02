@@ -8,7 +8,9 @@
 
 #include "base/location.h"
 #include "base/logging.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
+
+namespace syncer {
 
 SyncError::SyncError() {
   Clear();
@@ -16,7 +18,7 @@ SyncError::SyncError() {
 
 SyncError::SyncError(const tracked_objects::Location& location,
                      const std::string& message,
-                     syncable::ModelType type) {
+                     ModelType type) {
   Init(location, message, type);
   PrintLogError();
 }
@@ -49,19 +51,19 @@ void SyncError::Copy(const SyncError& other) {
 void SyncError::Clear() {
   location_.reset();
   message_ = std::string();
-  type_ = syncable::UNSPECIFIED;
+  type_ = UNSPECIFIED;
 }
 
 void SyncError::Reset(const tracked_objects::Location& location,
                       const std::string& message,
-                      syncable::ModelType type) {
+                      ModelType type) {
   Init(location, message, type);
   PrintLogError();
 }
 
 void SyncError::Init(const tracked_objects::Location& location,
                      const std::string& message,
-                     syncable::ModelType type) {
+                     ModelType type) {
   location_.reset(new tracked_objects::Location(location));
   message_ = message;
   type_ = type;
@@ -82,7 +84,7 @@ const std::string& SyncError::message() const {
   return message_;
 }
 
-syncable::ModelType SyncError::type() const {
+ModelType SyncError::type() const {
   CHECK(IsSet());
   return type_;
 }
@@ -91,7 +93,7 @@ std::string SyncError::ToString() const {
   if (!IsSet()) {
     return std::string();
   }
-  return location_->ToString() + ", " + syncable::ModelTypeToString(type_) +
+  return location_->ToString() + ", " + ModelTypeToString(type_) +
       ", Sync Error: " + message_;
 }
 
@@ -100,9 +102,11 @@ void SyncError::PrintLogError() const {
                                   location_->line_number(),
                                   logging::LOG_ERROR).stream(),
               LOG_IS_ON(ERROR))
-      << syncable::ModelTypeToString(type_) << ", Sync Error: " << message_;
+      << ModelTypeToString(type_) << ", Sync Error: " << message_;
 }
 
 void PrintTo(const SyncError& sync_error, std::ostream* os) {
   *os << sync_error.ToString();
 }
+
+}  // namespace syncer

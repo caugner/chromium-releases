@@ -4,16 +4,15 @@
 
 #ifndef CHROME_BROWSER_DOWNLOAD_SAVE_PACKAGE_FILE_PICKER_H_
 #define CHROME_BROWSER_DOWNLOAD_SAVE_PACKAGE_FILE_PICKER_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/ui/select_file_dialog.h"
 #include "content/public/browser/download_manager_delegate.h"
+#include "ui/base/dialogs/select_file_dialog.h"
 
 class DownloadPrefs;
 
 // Handles showing a dialog to the user to ask for the filename to save a page.
-class SavePackageFilePicker : public SelectFileDialog::Listener {
+class SavePackageFilePicker : public ui::SelectFileDialog::Listener {
  public:
   SavePackageFilePicker(content::WebContents* web_contents,
                         const FilePath& suggested_path,
@@ -45,7 +44,7 @@ class SavePackageFilePicker : public SelectFileDialog::Listener {
   content::SavePackagePathPickedCallback callback_;
 
   // For managing select file dialogs.
-  scoped_refptr<SelectFileDialog> select_file_dialog_;
+  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(SavePackageFilePicker);
 };

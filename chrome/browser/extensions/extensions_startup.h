@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSIONS_STARTUP_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSIONS_STARTUP_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
@@ -20,8 +19,9 @@ class ExtensionsStartupUtil : public PackExtensionJob::Client {
 
   virtual void OnPackSuccess(const FilePath& crx_path,
                              const FilePath& output_private_key_path) OVERRIDE;
-  virtual void OnPackFailure(const std::string& error_message,
-                             ExtensionCreator::ErrorType type) OVERRIDE;
+  virtual void OnPackFailure(
+      const std::string& error_message,
+      extensions::ExtensionCreator::ErrorType type) OVERRIDE;
 
   // Handle --pack-extension flag from the |cmd_line| by packing the specified
   // extension. Returns false if the pack job failed.

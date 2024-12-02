@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_PANELS_PANEL_H_
 #define CHROME_BROWSER_UI_PANELS_PANEL_H_
-#pragma once
 
 #include <string>
 
@@ -21,9 +20,9 @@
 
 class Browser;
 class BrowserWindow;
-class ExtensionWindowController;
 class GURL;
 class NativePanel;
+class PanelHost;
 class PanelManager;
 class PanelStrip;
 class Profile;
@@ -31,6 +30,11 @@ class SkBitmap;
 
 namespace content {
 class WebContents;
+struct NativeWebKeyboardEvent;
+}
+
+namespace extensions {
+class WindowController;
 }
 
 // A platform independent implementation of BaseWindow for Panels.
@@ -73,7 +77,7 @@ class Panel : public BaseWindow,
 
   const std::string& app_name() const { return app_name_; }
   const SessionID& session_id() const { return session_id_; }
-  const ExtensionWindowController* extension_window_controller() const {
+  extensions::WindowController* extension_window_controller() const {
     return extension_window_controller_.get();
   }
   const std::string extension_id() const;
@@ -83,7 +87,7 @@ class Panel : public BaseWindow,
 
   // Returns web contents of the panel, if any. There may be none if web
   // contents have not been added to the panel yet.
-  virtual content::WebContents* WebContents() const;
+  virtual content::WebContents* GetWebContents() const;
 
   void SetExpansionState(ExpansionState new_expansion_state);
 
@@ -228,7 +232,7 @@ class Panel : public BaseWindow,
 
   // Invoked when the preferred window size of the given panel might need to
   // get changed due to the contents being auto-resized.
-  void OnWindowAutoResized(const gfx::Size& preferred_window_size);
+  void OnContentsAutoResized(const gfx::Size& new_content_size);
 
   // Resizes the panel and sets the origin. Invoked when the panel is resized
   // via the mouse.
@@ -243,6 +247,9 @@ class Panel : public BaseWindow,
   // possible currently to switch the panel back to autosizing from
   // user-resizable, it should not be a problem.
   void IncreaseMaxSize(const gfx::Size& desired_panel_size);
+
+  // Handles keyboard events coming back from the renderer.
+  void HandleKeyboardEvent(const content::NativeWebKeyboardEvent& event);
 
   // Whether the panel window is always on top.
   void SetAlwaysOnTop(bool on_top);
@@ -286,6 +293,15 @@ class Panel : public BaseWindow,
 
   // Gets the Favicon of the web contents.
   virtual SkBitmap GetCurrentPageIcon() const;
+
+  // Updates the title bar to display the current title and icon.
+  void UpdateTitleBar();
+
+  // Updates UI to reflect change in loading state.
+  void LoadingStateChanged(bool is_loading);
+
+  // Updates UI to reflect that the web cotents receives the focus.
+  void WebContentsFocused(content::WebContents* contents);
 
  protected:
   // Panel can only be created using PanelManager::CreatePanel() or subclass.
@@ -365,7 +381,8 @@ class Panel : public BaseWindow,
 
   content::NotificationRegistrar registrar_;
   const SessionID session_id_;
-  scoped_ptr<ExtensionWindowController> extension_window_controller_;
+  scoped_ptr<extensions::WindowController> extension_window_controller_;
+  scoped_ptr<PanelHost> panel_host_;
 
   DISALLOW_COPY_AND_ASSIGN(Panel);
 };

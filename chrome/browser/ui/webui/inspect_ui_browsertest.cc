@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 
 using content::WebContents;
 
@@ -20,9 +22,7 @@ const char kSharedWorkerJs[] =
 
 class InspectUITest : public InProcessBrowserTest {
  public:
-  InspectUITest() {
-    EnableDOMAutomation();
-  }
+  InspectUITest() {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InspectUITest);
@@ -41,12 +41,12 @@ IN_PROC_BROWSER_TEST_F(InspectUITest, DISABLED_SharedWorkersList) {
       NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
-  WebContents* web_contents = browser()->GetActiveWebContents();
+  WebContents* web_contents = chrome::GetActiveWebContents(browser());
   ASSERT_TRUE(web_contents != NULL);
 
   std::string result;
   ASSERT_TRUE(
-      ui_test_utils::ExecuteJavaScriptAndExtractString(
+      content::ExecuteJavaScriptAndExtractString(
           web_contents->GetRenderViewHost(),
           L"",
           L"window.domAutomationController.send("

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/bookmarks/bookmark_editor.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -63,10 +64,14 @@ BookmarkEditor::EditDetails BookmarkEditor::EditDetails::EditNode(
 
 BookmarkEditor::EditDetails BookmarkEditor::EditDetails::AddNodeInFolder(
     const BookmarkNode* parent_node,
-    int index) {
+    int index,
+    const GURL& url,
+    const string16& title) {
   EditDetails details(NEW_URL);
   details.parent_node = parent_node;
   details.index = index;
+  details.url = url;
+  details.title = title;
   return details;
 }
 
@@ -84,7 +89,7 @@ BookmarkEditor::EditDetails::~EditDetails() {
 
 void BookmarkEditor::ShowBookmarkAllTabsDialog(Browser* browser) {
   Profile* profile = browser->profile();
-  BookmarkModel* model = profile->GetBookmarkModel();
+  BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
   DCHECK(model && model->IsLoaded());
 
   BookmarkEditor::EditDetails details =

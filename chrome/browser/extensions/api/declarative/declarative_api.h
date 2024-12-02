@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_DECLARATIVE_DECLARATIVE_API_H__
 #define CHROME_BROWSER_EXTENSIONS_API_DECLARATIVE_DECLARATIVE_API_H__
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -21,6 +20,7 @@ class RulesFunction : public AsyncExtensionFunction {
   virtual ~RulesFunction();
 
   // ExtensionFunction:
+  virtual bool HasPermission() OVERRIDE;
   virtual bool RunImpl() OVERRIDE;
 
   // Concrete implementation of the RulesFunction that is being called

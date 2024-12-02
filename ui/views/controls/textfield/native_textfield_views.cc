@@ -24,6 +24,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/render_text.h"
+#include "ui/gfx/text_constants.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/focusable_border.h"
@@ -149,13 +150,32 @@ void NativeTextfieldViews::OnMouseReleased(const MouseEvent& event) {
 
 ui::GestureStatus NativeTextfieldViews::OnGestureEvent(
     const GestureEvent& event) {
-  if (event.type() == ui::ET_GESTURE_TAP) {
-    OnBeforeUserAction();
-    textfield_->RequestFocus();
-    if (MoveCursorTo(event.location(), false))
-      SchedulePaint();
-    OnAfterUserAction();
-    return ui::GESTURE_STATUS_CONSUMED;
+  ui::GestureStatus status = textfield_->OnGestureEvent(event);
+  if (status != ui::GESTURE_STATUS_UNKNOWN)
+    return status;
+
+  switch (event.type()) {
+    case ui::ET_GESTURE_TAP_DOWN:
+      OnBeforeUserAction();
+      textfield_->RequestFocus();
+      // We don't deselect if the point is in the selection
+      // because TAP_DOWN may turn into a LONG_PRESS.
+      if (!GetRenderText()->IsPointInSelection(event.location()) &&
+          MoveCursorTo(event.location(), false))
+        SchedulePaint();
+      OnAfterUserAction();
+      return ui::GESTURE_STATUS_CONSUMED;
+    case ui::ET_GESTURE_DOUBLE_TAP:
+      SelectAll(false);
+      return ui::GESTURE_STATUS_CONSUMED;
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      OnBeforeUserAction();
+      if (MoveCursorTo(event.location(), true))
+        SchedulePaint();
+      OnAfterUserAction();
+      return ui::GESTURE_STATUS_CONSUMED;
+    default:
+      break;
   }
   return TouchSelectionClientView::OnGestureEvent(event);
 }
@@ -357,9 +377,9 @@ string16 NativeTextfieldViews::GetSelectedText() const {
   return model_->GetSelectedText();
 }
 
-void NativeTextfieldViews::SelectAll() {
+void NativeTextfieldViews::SelectAll(bool reversed) {
   OnBeforeUserAction();
-  model_->SelectAll();
+  model_->SelectAll(reversed);
   OnCaretBoundsChanged();
   SchedulePaint();
   OnAfterUserAction();
@@ -585,6 +605,16 @@ bool NativeTextfieldViews::GetAcceleratorForCommandId(int command_id,
   return false;
 }
 
+bool NativeTextfieldViews::IsItemForCommandIdDynamic(int command_id) const {
+  const TextfieldController* controller = textfield_->GetController();
+  return controller && controller->IsItemForCommandIdDynamic(command_id);
+}
+
+string16 NativeTextfieldViews::GetLabelForCommandId(int command_id) const {
+  const TextfieldController* controller = textfield_->GetController();
+  return controller ? controller->GetLabelForCommandId(command_id) : string16();
+}
+
 void NativeTextfieldViews::ExecuteCommand(int command_id) {
   if (!IsCommandIdEnabled(command_id))
     return;
@@ -605,7 +635,7 @@ void NativeTextfieldViews::ExecuteCommand(int command_id) {
       text_changed = model_->Delete();
       break;
     case IDS_APP_SELECT_ALL:
-      SelectAll();
+      SelectAll(false);
       break;
     default:
       textfield_->GetController()->ExecuteCommand(command_id);
@@ -914,7 +944,7 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
         break;
       case ui::VKEY_A:
         if (control) {
-          model_->SelectAll();
+          model_->SelectAll(false);
           cursor_changed = true;
         }
         break;
@@ -932,6 +962,11 @@ bool NativeTextfieldViews::HandleKeyEvent(const KeyEvent& key_event) {
         break;
       case ui::VKEY_RIGHT:
       case ui::VKEY_LEFT:
+        // We should ignore the alt-left/right keys because alt key doesn't make
+        // any special effects for them and they can be shortcut keys such like
+        // forward/back of the browser history.
+        if (key_event.IsAltDown())
+          break;
         model_->MoveCursor(
             control ? gfx::WORD_BREAK : gfx::CHARACTER_BREAK,
             (key_code == ui::VKEY_RIGHT) ? gfx::CURSOR_RIGHT : gfx::CURSOR_LEFT,
@@ -1164,7 +1199,7 @@ void NativeTextfieldViews::HandleMousePressEvent(const MouseEvent& event) {
         OnCaretBoundsChanged();
         break;
       case 2:
-        model_->SelectAll();
+        model_->SelectAll(false);
         OnCaretBoundsChanged();
         break;
       default:

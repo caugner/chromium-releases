@@ -11,9 +11,11 @@
 #include "content/common/indexed_db/indexed_db_key_range.h"
 #include "content/common/indexed_db/indexed_db_param_traits.h"
 #include "content/public/common/serialized_script_value.h"
+#include "content/public/common/webkit_param_traits.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_param_traits.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebExceptionCode.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBMetadata.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBObjectStore.h"
 
 #define IPC_MESSAGE_START IndexedDBMsgStart
@@ -40,6 +42,8 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryOpen_Params)
   IPC_STRUCT_MEMBER(string16, origin)
   // The name of the database.
   IPC_STRUCT_MEMBER(string16, name)
+  // The requested version of the database.
+  IPC_STRUCT_MEMBER(int64, version)
 IPC_STRUCT_END()
 
 // Used to delete an indexed database.
@@ -108,6 +112,12 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_ObjectStorePut_Params)
   IPC_STRUCT_MEMBER(content::IndexedDBKey, key)
   // Whether this is an add or a put.
   IPC_STRUCT_MEMBER(WebKit::WebIDBObjectStore::PutMode, put_mode)
+  // The names of the indexes used below.
+  IPC_STRUCT_MEMBER(std::vector<string16>, index_names)
+  // The keys for each index, such that each inner vector corresponds
+  // to each index named in index_names, respectively.
+  IPC_STRUCT_MEMBER(std::vector<std::vector<content::IndexedDBKey> >,
+                    index_keys)
   // The transaction it's associated with.
   IPC_STRUCT_MEMBER(int, transaction_id)
 IPC_STRUCT_END()
@@ -219,6 +229,12 @@ IPC_MESSAGE_CONTROL3(IndexedDBMsg_CallbacksSuccessSerializedScriptValue,
                      int32 /* thread_id */,
                      int32 /* response_id */,
                      content::SerializedScriptValue /* value */)
+IPC_MESSAGE_CONTROL5(IndexedDBMsg_CallbacksSuccessSerializedScriptValueWithKey,
+                     int32 /* thread_id */,
+                     int32 /* response_id */,
+                     content::SerializedScriptValue /* value */,
+                     content::IndexedDBKey /* indexed_db_key */,
+                     content::IndexedDBKeyPath /* indexed_db_keypath */)
 IPC_MESSAGE_CONTROL3(IndexedDBMsg_CallbacksSuccessStringList,
                      int32 /* thread_id */,
                      int32 /* response_id */,
@@ -231,6 +247,16 @@ IPC_MESSAGE_CONTROL4(IndexedDBMsg_CallbacksError,
 IPC_MESSAGE_CONTROL2(IndexedDBMsg_CallbacksBlocked,
                      int32 /* thread_id */,
                      int32 /* response_id */)
+IPC_MESSAGE_CONTROL3(IndexedDBMsg_CallbacksIntBlocked,
+                     int32 /* thread_id */,
+                     int32 /* response_id */,
+                     int64 /* existing_version */)
+IPC_MESSAGE_CONTROL5(IndexedDBMsg_CallbacksUpgradeNeeded,
+                     int32, /* thread_id */
+                     int32, /* response_id */
+                     int32, /* transaction_id */
+                     int32, /* database_id */
+                     int64) /* old_version */
 
 // IDBTransactionCallback message handlers.
 IPC_MESSAGE_CONTROL2(IndexedDBMsg_TransactionCallbacksAbort,
@@ -245,20 +271,13 @@ IPC_MESSAGE_CONTROL3(IndexedDBMsg_DatabaseCallbacksVersionChange,
                      int32, /* database_id */
                      string16) /* new_version */
 
-// Indexed DB messages sent from the renderer to the browser.
-
-// WebIDBCursor::direction() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_CursorDirection,
-                            int32, /* idb_cursor_id */
-                            int32 /* direction */)
-
-// WebIDBCursor::update() message.
-IPC_SYNC_MESSAGE_CONTROL4_1(IndexedDBHostMsg_CursorUpdate,
-                     int32, /* idb_cursor_id */
+IPC_MESSAGE_CONTROL4(IndexedDBMsg_DatabaseCallbacksIntVersionChange,
                      int32, /* thread_id */
-                     int32, /* response_id */
-                     content::SerializedScriptValue, /* value */
-                     WebKit::WebExceptionCode /* ec */)
+                     int32, /* database_id */
+                     int64, /* old_version */
+                     int64) /* new_version */
+
+// Indexed DB messages sent from the renderer to the browser.
 
 // WebIDBCursor::advance() message.
 IPC_SYNC_MESSAGE_CONTROL4_1(IndexedDBHostMsg_CursorAdvance,
@@ -309,20 +328,32 @@ IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_FactoryOpen,
 IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_FactoryDeleteDatabase,
                      IndexedDBHostMsg_FactoryDeleteDatabase_Params)
 
-// WebIDBDatabase::name() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_DatabaseName,
-                            int32, /* idb_database_id */
-                            string16 /* name */)
+// WebIDBDatabase::metadata() payload
+IPC_STRUCT_BEGIN(IndexedDBIndexMetadata)
+  IPC_STRUCT_MEMBER(string16, name)
+  IPC_STRUCT_MEMBER(content::IndexedDBKeyPath, keyPath)
+  IPC_STRUCT_MEMBER(bool, unique)
+  IPC_STRUCT_MEMBER(bool, multiEntry)
+IPC_STRUCT_END()
 
-// WebIDBDatabase::version() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_DatabaseVersion,
-                            int32, /* idb_database_id */
-                            string16 /* version */)
+IPC_STRUCT_BEGIN(IndexedDBObjectStoreMetadata)
+  IPC_STRUCT_MEMBER(string16, name)
+  IPC_STRUCT_MEMBER(content::IndexedDBKeyPath, keyPath)
+  IPC_STRUCT_MEMBER(bool, autoIncrement)
+  IPC_STRUCT_MEMBER(std::vector<IndexedDBIndexMetadata>, indexes)
+IPC_STRUCT_END()
 
-// WebIDBDatabase::objectStoreNames() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_DatabaseObjectStoreNames,
+IPC_STRUCT_BEGIN(IndexedDBDatabaseMetadata)
+  IPC_STRUCT_MEMBER(string16, name)
+  IPC_STRUCT_MEMBER(string16, version)
+  IPC_STRUCT_MEMBER(int64_t, intVersion)
+  IPC_STRUCT_MEMBER(std::vector<IndexedDBObjectStoreMetadata>, object_stores)
+IPC_STRUCT_END()
+
+// WebIDBDatabase::metadata() message.
+IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_DatabaseMetadata,
                             int32, /* idb_database_id */
-                            std::vector<string16> /* objectStoreNames */)
+                            IndexedDBDatabaseMetadata /* metadata */)
 
 // WebIDBDatabase::createObjectStore() message.
 IPC_SYNC_MESSAGE_CONTROL1_2(IndexedDBHostMsg_DatabaseCreateObjectStore,
@@ -372,26 +403,6 @@ IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_DatabaseClose,
 IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_DatabaseDestroyed,
                      int32 /* idb_database_id */)
 
-// WebIDBIndex::name() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexName,
-                            int32, /* idb_index_id */
-                            string16 /* name */)
-
-// WebIDBIndex::keyPath() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexKeyPath,
-                            int32, /* idb_index_id */
-                            content::IndexedDBKeyPath /* key_path */)
-
-// WebIDBIndex::unique() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexUnique,
-                            int32, /* idb_index_id */
-                            bool /* unique */)
-
-// WebIDBIndex::multiEntry() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexMultiEntry,
-                            int32, /* idb_index_id */
-                            bool /* multi_entry */)
-
 // WebIDBIndex::openObjectCursor() message.
 IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_IndexOpenObjectCursor,
                             IndexedDBHostMsg_IndexOpenCursor_Params,
@@ -429,26 +440,6 @@ IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_IndexGetKey,
 IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_IndexDestroyed,
                      int32 /* idb_index_id */)
 
-// WebIDBObjectStore::name() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStoreName,
-                            int32, /* idb_object_store_id */
-                            string16 /* name */)
-
-// WebIDBObjectStore::keyPath() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStoreKeyPath,
-                            int32, /* idb_object_store_id */
-                            content::IndexedDBKeyPath /* keyPath */)
-
-// WebIDBObjectStore::indexNames() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStoreIndexNames,
-                            int32, /* idb_object_store_id */
-                            std::vector<string16> /* index_names */)
-
-// WebIDBObjectStore::autoIncrement() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStoreAutoIncrement,
-                            int32, /* idb_object_store_id */
-                            bool /* auto_increment */)
-
 // WebIDBObjectStore::get() message.
 IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_ObjectStoreGet,
                             int32, /* idb_object_store_id */
@@ -458,22 +449,13 @@ IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_ObjectStoreGet,
                             int32, /* transaction_id */
                             WebKit::WebExceptionCode /* ec */)
 
-// WebIDBObjectStore::put() message.
+// WebIDBObjectStore::putWithIndexKeys() message.
 IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_ObjectStorePut,
                             IndexedDBHostMsg_ObjectStorePut_Params,
                             WebKit::WebExceptionCode /* ec */)
 
-// WebIDBObjectStore::delete(key) message.
+// WebIDBObjectStore::delete() message.
 IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_ObjectStoreDelete,
-                            int32, /* idb_object_store_id */
-                            int32, /* thread_id */
-                            int32, /* response_id */
-                            content::IndexedDBKey, /* key */
-                            int32, /* transaction_id */
-                            WebKit::WebExceptionCode /* ec */)
-
-// WebIDBObjectStore::delete(keyRange) message.
-IPC_SYNC_MESSAGE_CONTROL5_1(IndexedDBHostMsg_ObjectStoreDeleteRange,
                             int32, /* idb_object_store_id */
                             int32, /* thread_id */
                             int32, /* response_id */
@@ -534,10 +516,9 @@ IPC_SYNC_MESSAGE_CONTROL2_2(IndexedDBHostMsg_TransactionObjectStore,
                             int32, /* object_store_id */
                             WebKit::WebExceptionCode /* ec */)
 
-// WebIDBTransaction::mode() message.
-IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_TransactionMode,
-                            int32, /* idb_transaction_id */
-                            int /* mode */)
+// WebIDBTransaction::commit() message.
+IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_TransactionCommit,
+                     int32 /* idb_transaction_id */)
 
 // WebIDBTransaction::abort() message.
 IPC_MESSAGE_CONTROL1(IndexedDBHostMsg_TransactionAbort,

@@ -13,11 +13,11 @@
 #include "chrome/common/net/gaia/oauth2_access_token_consumer.h"
 #include "chrome/common/net/gaia/oauth2_access_token_fetcher.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/common/url_fetcher.h"
 #include "content/public/test/test_browser_thread.h"
-#include "content/public/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/test_url_fetcher_factory.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
@@ -27,6 +27,8 @@
 
 using content::BrowserThread;
 using net::ResponseCookies;
+using net::ScopedURLFetcherFactory;
+using net::TestURLFetcher;
 using net::URLFetcher;
 using net::URLFetcherDelegate;
 using net::URLFetcherFactory;
@@ -71,7 +73,8 @@ class MockOAuth2AccessTokenConsumer : public OAuth2AccessTokenConsumer {
   MockOAuth2AccessTokenConsumer() {}
   ~MockOAuth2AccessTokenConsumer() {}
 
-  MOCK_METHOD1(OnGetTokenSuccess, void(const std::string& access_token));
+  MOCK_METHOD2(OnGetTokenSuccess, void(const std::string& access_token,
+                                       const base::Time& expiration_time));
   MOCK_METHOD1(OnGetTokenFailure,
                void(const GoogleServiceAuthError& error));
 };
@@ -135,7 +138,7 @@ TEST_F(OAuth2AccessTokenFetcherTest,
 TEST_F(OAuth2AccessTokenFetcherTest, DISABLED_Success) {
   TestURLFetcher* url_fetcher = SetupGetAccessToken(
       true, net::HTTP_OK, kValidTokenResponse);
-  EXPECT_CALL(consumer_, OnGetTokenSuccess("at1")).Times(1);
+  EXPECT_CALL(consumer_, OnGetTokenSuccess("at1", _)).Times(1);
   fetcher_.Start("client_id", "client_secret", "refresh_token", ScopeList());
   fetcher_.OnURLFetchComplete(url_fetcher);
 }
@@ -193,8 +196,9 @@ TEST_F(OAuth2AccessTokenFetcherTest, MAYBE_ParseGetAccessTokenResponse) {
     TestURLFetcher url_fetcher(0, GURL("www.google.com"), NULL);
 
     std::string at;
+    int expires_in;
     EXPECT_FALSE(OAuth2AccessTokenFetcher::ParseGetAccessTokenResponse(
-        &url_fetcher, &at));
+        &url_fetcher, &at, &expires_in));
     EXPECT_TRUE(at.empty());
   }
   {  // Bad json.
@@ -202,8 +206,9 @@ TEST_F(OAuth2AccessTokenFetcherTest, MAYBE_ParseGetAccessTokenResponse) {
     url_fetcher.SetResponseString("foo");
 
     std::string at;
+    int expires_in;
     EXPECT_FALSE(OAuth2AccessTokenFetcher::ParseGetAccessTokenResponse(
-        &url_fetcher, &at));
+        &url_fetcher, &at, &expires_in));
     EXPECT_TRUE(at.empty());
   }
   {  // Valid json: access token missing.
@@ -211,8 +216,9 @@ TEST_F(OAuth2AccessTokenFetcherTest, MAYBE_ParseGetAccessTokenResponse) {
     url_fetcher.SetResponseString(kTokenResponseNoAccessToken);
 
     std::string at;
+    int expires_in;
     EXPECT_FALSE(OAuth2AccessTokenFetcher::ParseGetAccessTokenResponse(
-        &url_fetcher, &at));
+        &url_fetcher, &at, &expires_in));
     EXPECT_TRUE(at.empty());
   }
   {  // Valid json: all good.
@@ -220,8 +226,10 @@ TEST_F(OAuth2AccessTokenFetcherTest, MAYBE_ParseGetAccessTokenResponse) {
     url_fetcher.SetResponseString(kValidTokenResponse);
 
     std::string at;
+    int expires_in;
     EXPECT_TRUE(OAuth2AccessTokenFetcher::ParseGetAccessTokenResponse(
-        &url_fetcher, &at));
+        &url_fetcher, &at, &expires_in));
     EXPECT_EQ("at1", at);
+    EXPECT_EQ(3600, expires_in);
   }
 }

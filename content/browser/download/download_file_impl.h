@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_FILE_IMPL_H_
 #define CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_FILE_IMPL_H_
-#pragma once
 
 #include "content/browser/download/download_file.h"
 
@@ -40,8 +39,10 @@ class CONTENT_EXPORT DownloadFileImpl : virtual public content::DownloadFile {
   virtual ~DownloadFileImpl();
 
   // DownloadFile functions.
-  virtual net::Error Initialize() OVERRIDE;
-  virtual net::Error Rename(const FilePath& full_path) OVERRIDE;
+  virtual content::DownloadInterruptReason Initialize() OVERRIDE;
+  virtual void Rename(const FilePath& full_path,
+                      bool overwrite_existing_file,
+                      const RenameCompletionCallback& callback) OVERRIDE;
   virtual void Detach() OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual void AnnotateWithSourceInformation() OVERRIDE;
@@ -59,16 +60,16 @@ class CONTENT_EXPORT DownloadFileImpl : virtual public content::DownloadFile {
 
  protected:
   // For test class overrides.
-  virtual net::Error AppendDataToFile(const char* data,
-                                      size_t data_len);
+  virtual content::DownloadInterruptReason AppendDataToFile(
+      const char* data, size_t data_len);
 
  private:
+  // Send an update on our progress.
+  void SendUpdate();
+
   // Called when there's some activity on stream_reader_ that needs to be
   // handled.
   void StreamActive();
-
-  // Send updates on our progress.
-  void SendUpdate();
 
   // The base file instance.
   BaseFile file_;

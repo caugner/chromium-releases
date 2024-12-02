@@ -18,9 +18,11 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -612,13 +614,21 @@ TEST_F(BookmarkModelTest, GetMostRecentlyAddedNodeForURL) {
 // Makes sure GetBookmarks removes duplicates.
 TEST_F(BookmarkModelTest, GetBookmarksWithDups) {
   const GURL url("http://foo.com/0");
-  model_.AddURL(model_.bookmark_bar_node(), 0, ASCIIToUTF16("blah"), url);
-  model_.AddURL(model_.bookmark_bar_node(), 1, ASCIIToUTF16("blah"), url);
+  const string16 title(ASCIIToUTF16("blah"));
+  model_.AddURL(model_.bookmark_bar_node(), 0, title, url);
+  model_.AddURL(model_.bookmark_bar_node(), 1, title, url);
 
-  std::vector<GURL> urls;
-  model_.GetBookmarks(&urls);
-  EXPECT_EQ(1U, urls.size());
-  ASSERT_TRUE(urls[0] == url);
+  std::vector<BookmarkService::URLAndTitle> bookmarks;
+  model_.GetBookmarks(&bookmarks);
+  ASSERT_EQ(1U, bookmarks.size());
+  EXPECT_EQ(url, bookmarks[0].url);
+  EXPECT_EQ(title, bookmarks[0].title);
+
+  model_.AddURL(model_.bookmark_bar_node(), 2, ASCIIToUTF16("Title2"), url);
+  // Only one returned, even titles are different.
+  bookmarks.clear();
+  model_.GetBookmarks(&bookmarks);
+  EXPECT_EQ(1U, bookmarks.size());
 }
 
 TEST_F(BookmarkModelTest, HasBookmarks) {
@@ -823,7 +833,7 @@ class BookmarkModelTestWithProfile : public testing::Test {
   }
 
   void BlockTillBookmarkModelLoaded() {
-    bb_model_ = profile_->GetBookmarkModel();
+    bb_model_ = BookmarkModelFactory::GetForProfile(profile_.get());
     profile_->BlockUntilBookmarkModelLoaded();
   }
 
@@ -1061,13 +1071,15 @@ TEST_F(BookmarkModelTestWithProfile2, RemoveNotification) {
   GURL url("http://www.google.com");
   bookmark_utils::AddIfNotBookmarked(bb_model_, url, string16());
 
-  profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->AddPage(
-      url, NULL, 1, GURL(), content::PAGE_TRANSITION_TYPED,
-      history::RedirectList(), history::SOURCE_BROWSED, false);
+  HistoryServiceFactory::GetForProfile(
+      profile_.get(), Profile::EXPLICIT_ACCESS)->AddPage(
+          url, NULL, 1, GURL(), content::PAGE_TRANSITION_TYPED,
+          history::RedirectList(), history::SOURCE_BROWSED, false);
 
   // This won't actually delete the URL, rather it'll empty out the visits.
   // This triggers blocking on the BookmarkModel.
-  profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->DeleteURL(url);
+  HistoryServiceFactory::GetForProfile(
+      profile_.get(), Profile::EXPLICIT_ACCESS)->DeleteURL(url);
 }
 
 TEST_F(BookmarkModelTest, Sort) {

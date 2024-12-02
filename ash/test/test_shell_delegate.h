@@ -4,7 +4,6 @@
 
 #ifndef ASH_TEST_TEST_SHELL_DELEGATE_H_
 #define ASH_TEST_TEST_SHELL_DELEGATE_H_
-#pragma once
 
 #include "ash/shell_delegate.h"
 #include "base/compiler_specific.h"
@@ -19,6 +18,7 @@ class TestShellDelegate : public ShellDelegate {
 
   // Overridden from ShellDelegate:
   virtual bool IsUserLoggedIn() OVERRIDE;
+  virtual bool IsSessionStarted() OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
@@ -37,13 +37,13 @@ class TestShellDelegate : public ShellDelegate {
   virtual void ToggleSpokenFeedback() OVERRIDE;
   virtual bool IsSpokenFeedbackEnabled() const OVERRIDE;
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
-  virtual void StartPartialScreenshot(
-      ScreenshotDelegate* screenshot_delegate) OVERRIDE;
   virtual LauncherDelegate* CreateLauncherDelegate(
       ash::LauncherModel* model) OVERRIDE;
   virtual SystemTrayDelegate* CreateSystemTrayDelegate(SystemTray* t) OVERRIDE;
   virtual UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
   virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
+  virtual void OpenFeedbackPage() OVERRIDE;
+  virtual void RecordUserMetricsAction(UserMetricsAction action) OVERRIDE;
 
  private:
   bool locked_;

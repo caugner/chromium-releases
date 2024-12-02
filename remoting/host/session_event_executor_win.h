@@ -11,15 +11,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "ipc/ipc_channel.h"
-
 #include "remoting/host/event_executor.h"
-#include "remoting/host/scoped_thread_desktop_win.h"
+#include "remoting/host/win/scoped_thread_desktop.h"
 #include "remoting/protocol/host_event_stub.h"
 
-class MessageLoop;
-
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 } // namespace base
 
 namespace IPC {
@@ -29,11 +26,12 @@ class ChannelProxy;
 namespace remoting {
 
 class SessionEventExecutorWin : public EventExecutor,
-                                public IPC::Channel::Listener {
+                                public IPC::Listener {
  public:
-  SessionEventExecutorWin(MessageLoop* message_loop,
-                          base::MessageLoopProxy* io_message_loop,
-                          scoped_ptr<EventExecutor> nested_executor);
+  SessionEventExecutorWin(
+      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+      scoped_ptr<EventExecutor> nested_executor);
   ~SessionEventExecutorWin();
 
   // EventExecutor implementation.
@@ -47,7 +45,7 @@ class SessionEventExecutorWin : public EventExecutor,
   virtual void InjectKeyEvent(const protocol::KeyEvent& event) OVERRIDE;
   virtual void InjectMouseEvent(const protocol::MouseEvent& event) OVERRIDE;
 
-  // IPC::Channel::Listener implementation.
+  // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
@@ -58,9 +56,9 @@ class SessionEventExecutorWin : public EventExecutor,
   // Pointer to the next event executor.
   scoped_ptr<EventExecutor> nested_executor_;
 
-  MessageLoop* message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  ScopedThreadDesktopWin desktop_;
+  ScopedThreadDesktop desktop_;
 
   // The Chromoting IPC channel connecting the host with the service.
   scoped_ptr<IPC::ChannelProxy> chromoting_channel_;

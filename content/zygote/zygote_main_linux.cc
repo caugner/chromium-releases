@@ -28,14 +28,15 @@
 #include "crypto/nss_util.h"
 #include "content/common/font_config_ipc_linux.h"
 #include "content/common/pepper_plugin_registry.h"
-#include "content/common/sandbox_methods_linux.h"
-#include "content/common/seccomp_sandbox.h"
+#include "content/common/sandbox_linux.h"
 #include "content/common/zygote_commands_linux.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/sandbox_linux.h"
 #include "content/public/common/zygote_fork_delegate_linux.h"
 #include "content/zygote/zygote_linux.h"
+#include "sandbox/linux/services/libc_urandom_override.h"
+#include "sandbox/linux/suid/client/setuid_sandbox_client.h"
 #include "skia/ext/SkFontHost_fontconfig_control.h"
 #include "unicode/timezone.h"
 
@@ -50,13 +51,6 @@
 namespace content {
 
 // See http://code.google.com/p/chromium/wiki/LinuxZygote
-
-static const char kUrandomDevPath[] = "/dev/urandom";
-
-// The SUID sandbox sets this environment variable to a file descriptor
-// over which we can signal that we have completed our startup and can be
-// chrooted.
-static const char kSUIDSandboxVar[] = "SBX_D";
 
 // With SELinux we can carve out a precise sandbox, so we don't have to play
 // with intercepting libc calls.
@@ -141,25 +135,12 @@ static bool g_am_zygote_or_renderer = false;
 typedef struct tm* (*LocaltimeFunction)(const time_t* timep);
 typedef struct tm* (*LocaltimeRFunction)(const time_t* timep,
                                          struct tm* result);
-typedef FILE* (*FopenFunction)(const char* path, const char* mode);
-typedef int (*XstatFunction)(int version, const char *path, struct stat *buf);
-typedef int (*Xstat64Function)(int version, const char *path,
-                               struct stat64 *buf);
 
 static pthread_once_t g_libc_localtime_funcs_guard = PTHREAD_ONCE_INIT;
 static LocaltimeFunction g_libc_localtime;
 static LocaltimeFunction g_libc_localtime64;
 static LocaltimeRFunction g_libc_localtime_r;
 static LocaltimeRFunction g_libc_localtime64_r;
-
-// http://crbug.com/123263, see below.
-#if !defined(ADDRESS_SANITIZER)
-static pthread_once_t g_libc_file_io_funcs_guard = PTHREAD_ONCE_INIT;
-static FopenFunction g_libc_fopen;
-static FopenFunction g_libc_fopen64;
-static XstatFunction g_libc_xstat;
-static Xstat64Function g_libc_xstat64;
-#endif
 
 static void InitLibcLocaltimeFunctions() {
   g_libc_localtime = reinterpret_cast<LocaltimeFunction>(
@@ -265,125 +246,6 @@ struct tm* localtime64_r_override(const time_t* timep, struct tm* result) {
     return g_libc_localtime64_r(timep, result);
   }
 }
-
-// TODO(sergeyu): Currently this code doesn't work properly under ASAN
-// - it crashes content_unittests. Make sure it works properly and
-// enable it here. http://crbug.com/123263
-#if !defined(ADDRESS_SANITIZER)
-
-static void InitLibcFileIOFunctions() {
-  g_libc_fopen = reinterpret_cast<FopenFunction>(
-      dlsym(RTLD_NEXT, "fopen"));
-  g_libc_fopen64 = reinterpret_cast<FopenFunction>(
-      dlsym(RTLD_NEXT, "fopen64"));
-
-  if (!g_libc_fopen) {
-    LOG(FATAL) << "Failed to get fopen() from libc.";
-  } else if (!g_libc_fopen64) {
-#if !defined(OS_OPENBSD) && !defined(OS_FREEBSD)
-    LOG(WARNING) << "Failed to get fopen64() from libc. Using fopen() instead.";
-#endif  // !defined(OS_OPENBSD) && !defined(OS_FREEBSD)
-    g_libc_fopen64 = g_libc_fopen;
-  }
-
-  // TODO(sergeyu): This works only on systems with glibc. Fix it to
-  // work properly on other systems if necessary.
-  g_libc_xstat = reinterpret_cast<XstatFunction>(
-      dlsym(RTLD_NEXT, "__xstat"));
-  g_libc_xstat64 = reinterpret_cast<Xstat64Function>(
-      dlsym(RTLD_NEXT, "__xstat64"));
-
-  if (!g_libc_xstat) {
-    LOG(FATAL) << "Failed to get __xstat() from libc.";
-  }
-  if (!g_libc_xstat64) {
-    LOG(WARNING) << "Failed to get __xstat64() from libc.";
-  }
-}
-
-// fopen() and fopen64() are intercepted here so that NSS can open
-// /dev/urandom to seed its random number generator. NSS is used by
-// remoting in the sendbox.
-
-// fopen() call may be redirected to fopen64() in stdio.h using
-// __REDIRECT(), which sets asm name for fopen() to "fopen64". This
-// means that we cannot override fopen() directly here. Instead the
-// the code below defines fopen_override() function with asm name
-// "fopen", so that all references to fopen() will resolve to this
-// function.
-__attribute__ ((__visibility__("default")))
-FILE* fopen_override(const char* path, const char* mode)  __asm__ ("fopen");
-
-__attribute__ ((__visibility__("default")))
-FILE* fopen_override(const char* path, const char* mode) {
-  if (g_am_zygote_or_renderer && strcmp(path, kUrandomDevPath) == 0) {
-    int fd = HANDLE_EINTR(dup(base::GetUrandomFD()));
-    if (fd < 0) {
-      PLOG(ERROR) << "dup() failed.";
-      return NULL;
-    }
-    return fdopen(fd, mode);
-  } else {
-    CHECK_EQ(0, pthread_once(&g_libc_file_io_funcs_guard,
-                             InitLibcFileIOFunctions));
-    return g_libc_fopen(path, mode);
-  }
-}
-
-__attribute__ ((__visibility__("default")))
-FILE* fopen64(const char* path, const char* mode) {
-  if (g_am_zygote_or_renderer && strcmp(path, kUrandomDevPath) == 0) {
-    int fd = HANDLE_EINTR(dup(base::GetUrandomFD()));
-    if (fd < 0) {
-      PLOG(ERROR) << "dup() failed.";
-      return NULL;
-    }
-    return fdopen(fd, mode);
-  } else {
-    CHECK_EQ(0, pthread_once(&g_libc_file_io_funcs_guard,
-                             InitLibcFileIOFunctions));
-    return g_libc_fopen64(path, mode);
-  }
-}
-
-// stat() is subject to the same problem as fopen(), so we have to use
-// the same trick to override it.
-__attribute__ ((__visibility__("default")))
-int xstat_override(int version,
-                   const char *path,
-                   struct stat *buf)  __asm__ ("__xstat");
-
-__attribute__ ((__visibility__("default")))
-int xstat_override(int version, const char *path, struct stat *buf) {
-  if (g_am_zygote_or_renderer && strcmp(path, kUrandomDevPath) == 0) {
-    int result = __fxstat(version, base::GetUrandomFD(), buf);
-    return result;
-  } else {
-    CHECK_EQ(0, pthread_once(&g_libc_file_io_funcs_guard,
-                             InitLibcFileIOFunctions));
-    return g_libc_xstat(version, path, buf);
-  }
-}
-
-__attribute__ ((__visibility__("default")))
-int xstat64_override(int version,
-                     const char *path,
-                     struct stat64 *buf)  __asm__ ("__xstat64");
-
-__attribute__ ((__visibility__("default")))
-int xstat64_override(int version, const char *path, struct stat64 *buf) {
-  if (g_am_zygote_or_renderer && strcmp(path, kUrandomDevPath) == 0) {
-    int result = __fxstat64(version, base::GetUrandomFD(), buf);
-    return result;
-  } else {
-    CHECK_EQ(0, pthread_once(&g_libc_file_io_funcs_guard,
-                             InitLibcFileIOFunctions));
-    CHECK(g_libc_xstat64);
-    return g_libc_xstat64(version, path, buf);
-  }
-}
-
-#endif  // !ADDRESS_SANITIZER
 
 #endif  // !CHROMIUM_SELINUX
 
@@ -497,71 +359,31 @@ static bool CreateInitProcessReaper() {
 
 // This will set the *using_suid_sandbox variable to true if the SUID sandbox
 // is enabled. This does not necessarily exclude other types of sandboxing.
-static bool EnterSandbox(bool* using_suid_sandbox, bool* has_started_new_init) {
+static bool EnterSandbox(sandbox::SetuidSandboxClient* setuid_sandbox,
+                         bool* using_suid_sandbox, bool* has_started_new_init) {
   *using_suid_sandbox = false;
   *has_started_new_init = false;
+  if (!setuid_sandbox)
+    return false;
 
   PreSandboxInit();
   SkiaFontConfigSetImplementation(
       new FontConfigIPC(Zygote::kMagicSandboxIPCDescriptor));
 
-  const char* const sandbox_fd_string = getenv(kSUIDSandboxVar);
-  if (sandbox_fd_string) {
-    char* endptr;
+  if (setuid_sandbox->IsSuidSandboxChild()) {
     // Use the SUID sandbox.  This still allows the seccomp sandbox to
     // be enabled by the process later.
     *using_suid_sandbox = true;
 
-    // Check if the SUID sandbox provides the correct API version.
-    const char* const sandbox_api_string =
-                        getenv(base::kSandboxEnvironmentApiProvides);
-    // Assume API version 0 if no environment was found
-    long sandbox_api_num = 0;
-    if (sandbox_api_string) {
-      errno = 0;
-      sandbox_api_num = strtol(sandbox_api_string, &endptr, 10);
-      if (errno || *endptr) {
-        return false;
-      }
-    }
-
-    if (sandbox_api_num != base::kSUIDSandboxApiNumber) {
+    if (!setuid_sandbox->IsSuidSandboxUpToDate()) {
       LOG(WARNING) << "You are using a wrong version of the setuid binary!\n"
        "Please read "
        "https://code.google.com/p/chromium/wiki/LinuxSUIDSandboxDevelopment."
        "\n\n";
     }
 
-    // Get the file descriptor to signal the chroot helper.
-    errno = 0;
-    const long fd_long = strtol(sandbox_fd_string, &endptr, 10);
-    if (errno || !*sandbox_fd_string || *endptr || fd_long < 0 ||
-        fd_long > INT_MAX) {
+    if (!setuid_sandbox->ChrootMe())
       return false;
-    }
-    const int fd = fd_long;
-
-    static const char kMsgChrootMe = 'C';
-    static const char kMsgChrootSuccessful = 'O';
-
-    if (HANDLE_EINTR(write(fd, &kMsgChrootMe, 1)) != 1) {
-      LOG(ERROR) << "Failed to write to chroot pipe: " << errno;
-      return false;
-    }
-
-    // We need to reap the chroot helper process in any event:
-    wait(NULL);
-
-    char reply;
-    if (HANDLE_EINTR(read(fd, &reply, 1)) != 1) {
-      LOG(ERROR) << "Failed to read from chroot pipe: " << errno;
-      return false;
-    }
-
-    if (reply != kMsgChrootSuccessful) {
-      LOG(ERROR) << "Error code reply from chroot helper";
-      return false;
-    }
 
     if (getpid() == 1) {
       // The setuid sandbox has created a new PID namespace and we need
@@ -606,9 +428,13 @@ static bool EnterSandbox(bool* using_suid_sandbox, bool* has_started_new_init) {
 }
 #else  // CHROMIUM_SELINUX
 
-static bool EnterSandbox(bool* using_suid_sandbox, bool* has_started_new_init) {
+static bool EnterSandbox(sandbox::SetuidSandboxClient* setuid_sandbox,
+                         bool* using_suid_sandbox, bool* has_started_new_init) {
   *using_suid_sandbox = false;
   *has_started_new_init = false;
+
+  if (!setuid_sandbox)
+    return false;
 
   PreSandboxInit();
   SkiaFontConfigSetImplementation(
@@ -622,25 +448,22 @@ bool ZygoteMain(const MainFunctionParams& params,
                 ZygoteForkDelegate* forkdelegate) {
 #if !defined(CHROMIUM_SELINUX)
   g_am_zygote_or_renderer = true;
+  sandbox::InitLibcUrandomOverrides();
 #endif
 
-  int proc_fd_for_seccomp = -1;
-#if defined(SECCOMP_SANDBOX)
-  if (SeccompSandboxEnabled()) {
-    // The seccomp sandbox needs access to files in /proc, which might be denied
-    // after one of the other sandboxes have been started. So, obtain a suitable
-    // file handle in advance.
-    proc_fd_for_seccomp = open("/proc", O_DIRECTORY | O_RDONLY);
-    if (proc_fd_for_seccomp < 0) {
-      LOG(ERROR) << "WARNING! Cannot access \"/proc\". Disabling seccomp "
-          "sandboxing.";
-    }
-  }
-#endif  // SECCOMP_SANDBOX
+  LinuxSandbox* linux_sandbox = LinuxSandbox::GetInstance();
+  // This will pre-initialize the various sandboxes that need it.
+  // There need to be a corresponding call to PreinitializeSandboxFinish()
+  // for each new process, this will be done in the Zygote child, once we know
+  // our process type.
+  linux_sandbox->PreinitializeSandboxBegin();
+
+  sandbox::SetuidSandboxClient* setuid_sandbox =
+      linux_sandbox->setuid_sandbox_client();
 
   if (forkdelegate != NULL) {
     VLOG(1) << "ZygoteMain: initializing fork delegate";
-    forkdelegate->Init(getenv(kSUIDSandboxVar) != NULL,
+    forkdelegate->Init(setuid_sandbox->IsSuidSandboxChild(),
                        Zygote::kBrowserDescriptor,
                        Zygote::kMagicSandboxIPCDescriptor);
   } else {
@@ -650,50 +473,24 @@ bool ZygoteMain(const MainFunctionParams& params,
   // Turn on the SELinux or SUID sandbox.
   bool using_suid_sandbox = false;
   bool has_started_new_init = false;
-  if (!EnterSandbox(&using_suid_sandbox, &has_started_new_init)) {
+
+  if (!EnterSandbox(setuid_sandbox,
+                    &using_suid_sandbox,
+                    &has_started_new_init)) {
     LOG(FATAL) << "Failed to enter sandbox. Fail safe abort. (errno: "
                << errno << ")";
     return false;
   }
 
-  int sandbox_flags = 0;
-  if (using_suid_sandbox) {
-    sandbox_flags |= kSandboxLinuxSUID;
-    if (getenv("SBX_PID_NS"))
-      sandbox_flags |= kSandboxLinuxPIDNS;
-    if (getenv("SBX_NET_NS"))
-      sandbox_flags |= kSandboxLinuxNetNS;
-  }
-
-  if ((sandbox_flags & kSandboxLinuxPIDNS) && !has_started_new_init) {
+  if (setuid_sandbox->IsInNewPIDNamespace() && !has_started_new_init) {
     LOG(ERROR) << "The SUID sandbox created a new PID namespace but Zygote "
                   "is not the init process. Please, make sure the SUID "
                   "binary is up to date.";
   }
 
-#if defined(SECCOMP_SANDBOX)
-  // The seccomp sandbox will be turned on when the renderers start. But we can
-  // already check if sufficient support is available so that we only need to
-  // print one error message for the entire browser session.
-  if (proc_fd_for_seccomp >= 0 && SeccompSandboxEnabled()) {
-    if (!SupportsSeccompSandbox(proc_fd_for_seccomp)) {
-      // There are a good number of users who cannot use the seccomp sandbox
-      // (e.g. because their distribution does not enable seccomp mode by
-      // default). While we would prefer to deny execution in this case, it
-      // seems more realistic to continue in degraded mode.
-      LOG(ERROR) << "WARNING! This machine lacks support needed for the "
-                    "Seccomp sandbox. Running renderers with Seccomp "
-                    "sandboxing disabled.";
-      close(proc_fd_for_seccomp);
-      proc_fd_for_seccomp = -1;
-    } else {
-      VLOG(1) << "Enabling experimental Seccomp sandbox.";
-      sandbox_flags |= kSandboxLinuxSeccomp;
-    }
-  }
-#endif  // SECCOMP_SANDBOX
+  int sandbox_flags = linux_sandbox->GetStatus();
 
-  Zygote zygote(sandbox_flags, forkdelegate, proc_fd_for_seccomp);
+  Zygote zygote(sandbox_flags, forkdelegate);
   // This function call can return multiple times, once per fork().
   return zygote.ProcessRequests();
 }

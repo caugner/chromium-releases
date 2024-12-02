@@ -25,6 +25,7 @@
 #include "base/tracked_objects.h"
 #include "base/win/wrapped_window_proc.h"
 #include "ui/base/win/hwnd_util.h"
+#include "ui/gfx/rect.h"
 #include "ui/gl/gl_switches.h"
 
 namespace {
@@ -34,8 +35,8 @@ typedef HRESULT (WINAPI *Direct3DCreate9ExFunc)(UINT sdk_version,
 
 const wchar_t kD3D9ModuleName[] = L"d3d9.dll";
 const char kCreate3D9DeviceExName[] = "Direct3DCreate9Ex";
-const char kReverseImageTransportSurfaceRows[] =
-    "reverse-image-transport-surface-rows";
+
+const char kUseOcclusionQuery[] = "use-occlusion-query";
 
 struct Vertex {
   float x, y, z, w;
@@ -119,19 +120,31 @@ UINT GetPresentationInterval() {
     return D3DPRESENT_INTERVAL_ONE;
 }
 
-// Calculate the number necessary to transform |source_size| into |dest_size|
-// by repeating downsampling of the image of |source_size| by a factor no more
+bool UsingOcclusionQuery() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(kUseOcclusionQuery);
+}
+
+// Calculate the number necessary to transform |src_subrect| into |dst_size|
+// by repeating downsampling of the image of |src_subrect| by a factor no more
 // than 2.
-int GetResampleCount(const gfx::Size& source_size, const gfx::Size& dest_size) {
+int GetResampleCount(const gfx::Rect& src_subrect,
+                     const gfx::Size& dst_size,
+                     const gfx::Size& back_buffer_size) {
+  if (src_subrect.size() == dst_size) {
+    // Even when the size of |src_subrect| is equal to |dst_size|, it is
+    // necessary to resample pixels at least once unless |src_subrect| exactly
+    // covers the back buffer.
+    return (src_subrect == gfx::Rect(back_buffer_size)) ? 0 : 1;
+  }
   int width_count = 0;
-  int width = source_size.width();
-  while (width > dest_size.width()) {
+  int width = src_subrect.width();
+  while (width > dst_size.width()) {
     ++width_count;
     width >>= 1;
   }
   int height_count = 0;
-  int height = source_size.height();
-  while (height > dest_size.height()) {
+  int height = src_subrect.height();
+  while (height > dst_size.height()) {
     ++height_count;
     height >>= 1;
   }
@@ -160,7 +173,7 @@ bool CreateTemporarySurface(IDirect3DDevice9* device,
   return SUCCEEDED(hr);
 }
 
-}  // namespace anonymous
+}  // namespace
 
 // A PresentThread is a thread that is dedicated to presenting surfaces to a
 // window. It owns a Direct3D device and a Direct3D query for this purpose.
@@ -288,10 +301,18 @@ void PresentThread::ResetDevice() {
   if (FAILED(hr))
     return;
 
-  hr = device_->CreateQuery(D3DQUERYTYPE_EVENT, query_.Receive());
-  if (FAILED(hr)) {
-    device_ = NULL;
-    return;
+  if (UsingOcclusionQuery()) {
+    hr = device_->CreateQuery(D3DQUERYTYPE_OCCLUSION, query_.Receive());
+    if (FAILED(hr)) {
+      device_ = NULL;
+      return;
+    }
+  } else {
+    hr = device_->CreateQuery(D3DQUERYTYPE_EVENT, query_.Receive());
+    if (FAILED(hr)) {
+      device_ = NULL;
+      return;
+    }
   }
 
   base::win::ScopedComPtr<IDirect3DVertexShader9> vertex_shader;
@@ -400,8 +421,6 @@ AcceleratedPresenter::AcceleratedPresenter(gfx::NativeWindow window)
       window_(window),
       event_(false, false),
       hidden_(true) {
-  reverse_rows_ = CommandLine::ForCurrentProcess()->HasSwitch(
-      kReverseImageTransportSurfaceRows);
 }
 
 scoped_refptr<AcceleratedPresenter> AcceleratedPresenter::GetForWindow(
@@ -414,6 +433,8 @@ void AcceleratedPresenter::AsyncPresentAndAcknowledge(
     int64 surface_handle,
     const base::Callback<void(bool)>& completion_task) {
   if (!surface_handle) {
+    TRACE_EVENT1("gpu", "EarlyOut_ZeroSurfaceHandle",
+                 "surface_handle", surface_handle);
     completion_task.Run(true);
     return;
   }
@@ -499,6 +520,8 @@ bool AcceleratedPresenter::DoRealPresent(HDC dc)
                               window_,
                               NULL,
                               D3DPRESENT_INTERVAL_IMMEDIATE);
+    // For latency_tests.cc:
+    UNSHIPPED_TRACE_EVENT_INSTANT0("test_gpu", "CompositorSwapBuffersComplete");
     if (FAILED(hr))
       return false;
   }
@@ -506,7 +529,9 @@ bool AcceleratedPresenter::DoRealPresent(HDC dc)
   return true;
 }
 
-bool AcceleratedPresenter::CopyTo(const gfx::Size& size, void* buf) {
+bool AcceleratedPresenter::CopyTo(const gfx::Rect& src_subrect,
+                                  const gfx::Size& dst_size,
+                                  void* buf) {
   base::AutoLock locked(lock_);
 
   if (!swap_chain_)
@@ -530,18 +555,19 @@ bool AcceleratedPresenter::CopyTo(const gfx::Size& size, void* buf) {
 
   // Set up intermediate buffers needed for downsampling.
   const int resample_count =
-      GetResampleCount(gfx::Size(desc.Width, desc.Height), size);
+      GetResampleCount(src_subrect, dst_size, back_buffer_size);
   base::win::ScopedComPtr<IDirect3DSurface9> final_surface;
   base::win::ScopedComPtr<IDirect3DSurface9> temp_buffer[2];
   if (resample_count == 0)
     final_surface = back_buffer;
   if (resample_count > 0) {
     if (!CreateTemporarySurface(present_thread_->device(),
-                                size,
+                                dst_size,
                                 final_surface.Receive()))
       return false;
   }
-  const gfx::Size half_size = GetHalfSizeNoLessThan(back_buffer_size, size);
+  const gfx::Size half_size =
+      GetHalfSizeNoLessThan(src_subrect.size(), dst_size);
   if (resample_count > 1) {
     if (!CreateTemporarySurface(present_thread_->device(),
                                 half_size,
@@ -549,17 +575,18 @@ bool AcceleratedPresenter::CopyTo(const gfx::Size& size, void* buf) {
       return false;
   }
   if (resample_count > 2) {
-    const gfx::Size quarter_size = GetHalfSizeNoLessThan(half_size, size);
+    const gfx::Size quarter_size = GetHalfSizeNoLessThan(half_size, dst_size);
     if (!CreateTemporarySurface(present_thread_->device(),
                                 quarter_size,
                                 temp_buffer[1].Receive()))
       return false;
   }
 
+
   // Repeat downsampling the surface until its size becomes identical to
-  // |size|. We keep the factor of each downsampling no more than two because
-  // using a factor more than two can introduce aliasing.
-  gfx::Size read_size = back_buffer_size;
+  // |dst_size|. We keep the factor of each downsampling no more than two
+  // because using a factor more than two can introduce aliasing.
+  RECT read_rect = src_subrect.ToRECT();
   gfx::Size write_size = half_size;
   int read_buffer_index = 1;
   int write_buffer_index = 0;
@@ -569,8 +596,7 @@ bool AcceleratedPresenter::CopyTo(const gfx::Size& size, void* buf) {
     base::win::ScopedComPtr<IDirect3DSurface9> write_buffer =
         (i == resample_count - 1) ? final_surface :
                                     temp_buffer[write_buffer_index];
-    RECT read_rect = {0, 0, read_size.width(), read_size.height()};
-    RECT write_rect = {0, 0, write_size.width(), write_size.height()};
+    RECT write_rect = gfx::Rect(write_size).ToRECT();
     hr = present_thread_->device()->StretchRect(read_buffer,
                                                 &read_rect,
                                                 write_buffer,
@@ -578,18 +604,16 @@ bool AcceleratedPresenter::CopyTo(const gfx::Size& size, void* buf) {
                                                 D3DTEXF_LINEAR);
     if (FAILED(hr))
       return false;
-    read_size = write_size;
-    write_size = GetHalfSizeNoLessThan(write_size, size);
+    read_rect = write_rect;
+    write_size = GetHalfSizeNoLessThan(write_size, dst_size);
     std::swap(read_buffer_index, write_buffer_index);
   }
-
-  DCHECK(size == read_size);
 
   base::win::ScopedComPtr<IDirect3DSurface9> temp_surface;
   HANDLE handle = reinterpret_cast<HANDLE>(buf);
   hr =  present_thread_->device()->CreateOffscreenPlainSurface(
-    size.width(),
-    size.height(),
+    dst_size.width(),
+    dst_size.height(),
     D3DFMT_A8R8G8B8,
     D3DPOOL_SYSTEMMEM,
     temp_surface.Receive(),
@@ -751,61 +775,49 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
   {
     TRACE_EVENT0("gpu", "Copy");
 
-    if (reverse_rows_) {
-      // Use a simple pixel / vertex shader pair to render a quad that flips the
-      // source texture on the vertical axis.
-      IDirect3DSurface9 *default_render_target = NULL;
-      present_thread_->device()->GetRenderTarget(0, &default_render_target);
+    // Use a simple pixel / vertex shader pair to render a quad that flips the
+    // source texture on the vertical axis.
+    IDirect3DSurface9 *default_render_target = NULL;
+    present_thread_->device()->GetRenderTarget(0, &default_render_target);
 
-      present_thread_->device()->SetRenderTarget(0, dest_surface);
-      present_thread_->device()->SetTexture(0, source_texture_);
+    present_thread_->device()->SetRenderTarget(0, dest_surface);
+    present_thread_->device()->SetTexture(0, source_texture_);
 
-      D3DVIEWPORT9 viewport = {
-        0, 0,
-        size.width(), size.height(),
-        0, 1
-      };
-      present_thread_->device()->SetViewport(&viewport);
+    D3DVIEWPORT9 viewport = {
+      0, 0,
+      size.width(), size.height(),
+      0, 1
+    };
+    present_thread_->device()->SetViewport(&viewport);
 
-      float halfPixelX = -1.0f / size.width();
-      float halfPixelY = 1.0f / size.height();
-      Vertex vertices[] = {
-        { halfPixelX - 1, halfPixelY + 1, 0.5f, 1, 0, 1 },
-        { halfPixelX + 1, halfPixelY + 1, 0.5f, 1, 1, 1 },
-        { halfPixelX + 1, halfPixelY - 1, 0.5f, 1, 1, 0 },
-        { halfPixelX - 1, halfPixelY - 1, 0.5f, 1, 0, 0 }
-      };
+    float halfPixelX = -1.0f / size.width();
+    float halfPixelY = 1.0f / size.height();
+    Vertex vertices[] = {
+      { halfPixelX - 1, halfPixelY + 1, 0.5f, 1, 0, 1 },
+      { halfPixelX + 1, halfPixelY + 1, 0.5f, 1, 1, 1 },
+      { halfPixelX + 1, halfPixelY - 1, 0.5f, 1, 1, 0 },
+      { halfPixelX - 1, halfPixelY - 1, 0.5f, 1, 0, 0 }
+    };
 
-      present_thread_->device()->BeginScene();
-      present_thread_->device()->DrawPrimitiveUP(D3DPT_TRIANGLEFAN,
-                                                 arraysize(vertices),
-                                                 vertices,
-                                                 sizeof(vertices[0]));
-      present_thread_->device()->EndScene();
-
-      present_thread_->device()->SetTexture(0, NULL);
-      present_thread_->device()->SetRenderTarget(0, default_render_target);
-      default_render_target->Release();
-    } else {
-      // Copy the source texture directly into the swap chain without reversing
-      // the rows.
-      hr = present_thread_->device()->StretchRect(source_surface,
-                                                  &rect,
-                                                  dest_surface,
-                                                  &rect,
-                                                  D3DTEXF_NONE);
-      if (FAILED(hr))
-        return;
+    if (UsingOcclusionQuery()) {
+      present_thread_->query()->Issue(D3DISSUE_BEGIN);
     }
+
+    present_thread_->device()->BeginScene();
+    present_thread_->device()->DrawPrimitiveUP(D3DPT_TRIANGLEFAN,
+                                               2,
+                                               vertices,
+                                               sizeof(vertices[0]));
+    present_thread_->device()->EndScene();
+
+    present_thread_->device()->SetTexture(0, NULL);
+    present_thread_->device()->SetRenderTarget(0, default_render_target);
+    default_render_target->Release();
   }
 
   hr = present_thread_->query()->Issue(D3DISSUE_END);
   if (FAILED(hr))
     return;
-
-  // Flush so the StretchRect can be processed by the GPU while the window is
-  // being resized.
-  present_thread_->query()->GetData(NULL, 0, D3DGETDATA_FLUSH);
 
   present_size_ = size;
 
@@ -828,6 +840,8 @@ void AcceleratedPresenter::DoPresentAndAcknowledge(
   {
     TRACE_EVENT0("gpu", "Present");
     hr = swap_chain_->Present(&rect, &rect, window_, NULL, 0);
+    // For latency_tests.cc:
+    UNSHIPPED_TRACE_EVENT_INSTANT0("test_gpu", "CompositorSwapBuffersComplete");
     if (FAILED(hr) &&
         FAILED(present_thread_->device()->CheckDeviceState(window_))) {
       present_thread_->ResetDevice();
@@ -861,8 +875,10 @@ bool AcceleratedSurface::Present(HDC dc) {
   return presenter_->Present(dc);
 }
 
-bool AcceleratedSurface::CopyTo(const gfx::Size& size, void* buf) {
-  return presenter_->CopyTo(size, buf);
+bool AcceleratedSurface::CopyTo(const gfx::Rect& src_subrect,
+                                const gfx::Size& dst_size,
+                                void* buf) {
+  return presenter_->CopyTo(src_subrect, dst_size, buf);
 }
 
 void AcceleratedSurface::Suspend() {

@@ -12,6 +12,7 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -41,9 +42,12 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/shell_integration.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabrestore.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/startup/autolaunch_prompt.h"
@@ -193,7 +197,7 @@ bool GetAppLaunchContainer(
   // preference is set, launch as a window.
   extension_misc::LaunchContainer launch_container =
       extensions_service->extension_prefs()->GetLaunchContainer(
-          extension, ExtensionPrefs::LAUNCH_WINDOW);
+          extension, extensions::ExtensionPrefs::LAUNCH_WINDOW);
 
   *out_extension = extension;
   *out_launch_container = launch_container;
@@ -260,24 +264,24 @@ class WebContentsCloseObserver : public content::NotificationObserver {
 StartupBrowserCreatorImpl::StartupBrowserCreatorImpl(
     const FilePath& cur_dir,
     const CommandLine& command_line,
-    browser::startup::IsFirstRun is_first_run)
-        : cur_dir_(cur_dir),
-          command_line_(command_line),
-          profile_(NULL),
-          browser_creator_(NULL),
-          is_first_run_(is_first_run == browser::startup::IS_FIRST_RUN) {
+    chrome::startup::IsFirstRun is_first_run)
+    : cur_dir_(cur_dir),
+      command_line_(command_line),
+      profile_(NULL),
+      browser_creator_(NULL),
+      is_first_run_(is_first_run == chrome::startup::IS_FIRST_RUN) {
 }
 
 StartupBrowserCreatorImpl::StartupBrowserCreatorImpl(
     const FilePath& cur_dir,
     const CommandLine& command_line,
     StartupBrowserCreator* browser_creator,
-    browser::startup::IsFirstRun is_first_run)
-        : cur_dir_(cur_dir),
-          command_line_(command_line),
-          profile_(NULL),
-          browser_creator_(browser_creator),
-          is_first_run_(is_first_run == browser::startup::IS_FIRST_RUN) {
+    chrome::startup::IsFirstRun is_first_run)
+    : cur_dir_(cur_dir),
+      command_line_(command_line),
+      profile_(NULL),
+      browser_creator_(browser_creator),
+      is_first_run_(is_first_run == chrome::startup::IS_FIRST_RUN) {
 }
 
 StartupBrowserCreatorImpl::~StartupBrowserCreatorImpl() {
@@ -331,7 +335,7 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
       !browser_defaults::kAppRestoreSession) {
     RecordLaunchModeHistogram(LM_AS_WEBAPP);
   } else {
-    RecordLaunchModeHistogram(urls_to_open.empty()?
+    RecordLaunchModeHistogram(urls_to_open.empty() ?
                               LM_TO_BE_DECIDED : LM_WITH_URLS);
 
     // Notify user if the Preferences backup is invalid or changes to settings
@@ -358,8 +362,15 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
     if (process_startup) {
       if (browser_defaults::kOSSupportsOtherBrowsers &&
           !command_line_.HasSwitch(switches::kNoDefaultBrowserCheck)) {
-        if (!browser::ShowAutolaunchPrompt(profile))
-          browser::ShowDefaultBrowserPrompt(profile);
+        // Generally, the default browser prompt should not be shown on first
+        // run. However, when the set-as-default dialog has been suppressed, we
+        // need to allow it.
+        if ((!is_first_run_ ||
+             (browser_creator_ &&
+              browser_creator_->is_default_browser_dialog_suppressed())) &&
+            !chrome::ShowAutolaunchPrompt(profile)) {
+          chrome::ShowDefaultBrowserPrompt(profile);
+        }
       }
 #if defined(OS_MACOSX)
       // Check whether the auto-update system needs to be promoted from user
@@ -368,15 +379,6 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
 #endif
     }
   }
-
-#if defined(OS_WIN)
-  // Print the selected page if the command line switch exists. Note that the
-  // current selected tab would be the page which will be printed.
-  if (command_line_.HasSwitch(switches::kPrint)) {
-    Browser* browser = BrowserList::GetLastActive();
-    browser->Print();
-  }
-#endif
 
   // If we're recording or playing back, startup the EventRecorder now
   // unless otherwise specified.
@@ -438,8 +440,9 @@ bool StartupBrowserCreatorImpl::OpenApplicationTab(Profile* profile) {
 
   RecordCmdLineAppHistogram();
 
-  WebContents* app_tab = application_launch::OpenApplicationTab(
-      profile, extension, GURL(), NEW_FOREGROUND_TAB);
+  WebContents* app_tab = application_launch::OpenApplication(
+      application_launch::LaunchParams(profile, extension,
+          extension_misc::LAUNCH_TAB, NEW_FOREGROUND_TAB));
   return (app_tab != NULL);
 }
 
@@ -473,9 +476,12 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
 
     RecordCmdLineAppHistogram();
 
+    application_launch::LaunchParams params(profile, extension,
+                                            launch_container, NEW_WINDOW);
+    params.command_line = &command_line_;
+    params.current_directory = cur_dir_;
     WebContents* tab_in_app_window = application_launch::OpenApplication(
-        profile, extension, launch_container, GURL(), NEW_WINDOW,
-        &command_line_);
+        params);
 
     if (out_app_contents)
       *out_app_contents = tab_in_app_window;
@@ -507,8 +513,7 @@ bool StartupBrowserCreatorImpl::OpenApplicationWindow(
 
       WebContents* app_tab = application_launch::OpenAppShortcutWindow(
           profile,
-          url,
-          true);  // Update app info.
+          url);
 
       if (out_app_contents)
         *out_app_contents = app_tab;
@@ -536,9 +541,9 @@ void StartupBrowserCreatorImpl::ProcessLaunchURLs(
     return;
   }
 
-  browser::startup::IsProcessStartup is_process_startup = process_startup ?
-      browser::startup::IS_PROCESS_STARTUP :
-      browser::startup::IS_NOT_PROCESS_STARTUP;
+  chrome::startup::IsProcessStartup is_process_startup = process_startup ?
+      chrome::startup::IS_PROCESS_STARTUP :
+      chrome::startup::IS_NOT_PROCESS_STARTUP;
   if (!process_startup) {
     // Even if we're not starting a new process, this may conceptually be
     // "startup" for the user and so should be handled in a similar way.  Eg.,
@@ -616,7 +621,7 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
                                                       NULL,
                                                       restore_behavior,
                                                       urls_to_open);
-    AddInfoBarsIfNecessary(browser, browser::startup::IS_PROCESS_STARTUP);
+    AddInfoBarsIfNecessary(browser, chrome::startup::IS_PROCESS_STARTUP);
     return true;
   }
 
@@ -624,7 +629,7 @@ bool StartupBrowserCreatorImpl::ProcessStartupURLs(
   if (!browser)
     return false;
 
-  AddInfoBarsIfNecessary(browser, browser::startup::IS_PROCESS_STARTUP);
+  AddInfoBarsIfNecessary(browser, chrome::startup::IS_PROCESS_STARTUP);
   return true;
 }
 
@@ -714,7 +719,7 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
     profile_ = browser->profile();
 
   if (!browser || !browser->is_type_tabbed()) {
-    browser = Browser::Create(profile_);
+    browser = new Browser(Browser::CreateParams(profile_));
   } else {
 #if defined(TOOLKIT_GTK)
     // Setting the time of the last action on the window here allows us to steal
@@ -724,11 +729,9 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
 #endif
   }
 
-#if !defined(OS_MACOSX)
   // In kiosk mode, we want to always be fullscreen, so switch to that now.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode))
-    browser->ToggleFullscreenMode();
-#endif
+    chrome::ToggleFullscreenMode(browser);
 
   bool first_tab = true;
   for (size_t i = 0; i < tabs.size(); ++i) {
@@ -747,51 +750,56 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(Browser* browser,
     add_types |= TabStripModel::ADD_FORCE_INDEX;
     if (tabs[i].is_pinned)
       add_types |= TabStripModel::ADD_PINNED;
-    int index = browser->GetIndexForInsertionDuringRestore(i);
+    int index = chrome::GetIndexForInsertionDuringRestore(browser, i);
 
-    browser::NavigateParams params(browser, tabs[i].url,
-                                   content::PAGE_TRANSITION_START_PAGE);
-    params.disposition = first_tab ? NEW_FOREGROUND_TAB :
-                                     NEW_BACKGROUND_TAB;
+    chrome::NavigateParams params(browser, tabs[i].url,
+                                  content::PAGE_TRANSITION_START_PAGE);
+    params.disposition = first_tab ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
     params.tabstrip_index = index;
     params.tabstrip_add_types = add_types;
     params.extension_app_id = tabs[i].app_id;
-    browser::Navigate(&params);
+    chrome::Navigate(&params);
 
     first_tab = false;
   }
-  if (!browser->GetActiveWebContents()) {
+  if (!chrome::GetActiveWebContents(browser)) {
     // TODO: this is a work around for 110909. Figure out why it's needed.
     if (!browser->tab_count())
-      browser->AddBlankTab(true);
+      chrome::AddBlankTab(browser, true);
     else
-      browser->ActivateTabAt(0, false);
+      chrome::ActivateTabAt(browser, 0, false);
   }
 
-  browser->window()->Show();
-  // TODO(jcampan): http://crbug.com/8123 we should not need to set the initial
-  //                focus explicitly.
-  browser->GetActiveWebContents()->GetView()->SetInitialFocus();
+  // The default behaviour is to show the window, as expressed by the default
+  // value of StartupBrowserCreated::show_main_browser_window_. If this was set
+  // to true ahead of this place, it means another task must have been spawned
+  // to take care of that.
+  if (!browser_creator_ || browser_creator_->show_main_browser_window()) {
+    browser->window()->Show();
+    // TODO(jcampan): http://crbug.com/8123 we should not need to set the
+    //                initial focus explicitly.
+    chrome::GetActiveWebContents(browser)->GetView()->SetInitialFocus();
+  }
 
   return browser;
 }
 
 void StartupBrowserCreatorImpl::AddInfoBarsIfNecessary(
     Browser* browser,
-    browser::startup::IsProcessStartup is_process_startup) {
+    chrome::startup::IsProcessStartup is_process_startup) {
   if (!browser || !profile_ || browser->tab_count() == 0)
     return;
 
   if (HasPendingUncleanExit(browser->profile()))
-    browser::ShowSessionCrashedPrompt(browser);
+    chrome::ShowSessionCrashedPrompt(browser);
 
   // The bad flags info bar and the obsolete system info bar are only added to
   // the first profile which is launched. Other profiles might be restoring the
   // browsing sessions asynchronously, so we cannot add the info bars to the
   // focused tabs here.
-  if (is_process_startup == browser::startup::IS_PROCESS_STARTUP) {
-    browser::ShowBadFlagsPrompt(browser);
-    browser::ShowObsoleteOSPrompt(browser);
+  if (is_process_startup == chrome::startup::IS_PROCESS_STARTUP) {
+    chrome::ShowBadFlagsPrompt(browser);
+    chrome::ShowObsoleteOSPrompt(browser);
   }
 }
 
@@ -840,7 +848,8 @@ void StartupBrowserCreatorImpl::AddStartupURLs(
     GURL old_url = (*startup_urls)[0];
     (*startup_urls)[0] =
         SyncPromoUI::GetSyncPromoURL(GURL(chrome::kChromeUINewTabURL),
-                                     SyncPromoUI::SOURCE_START_PAGE);
+                                     SyncPromoUI::SOURCE_START_PAGE,
+                                     false);
 
     // An empty URL means to go to the home page.
     if (old_url.is_empty() &&
@@ -896,8 +905,8 @@ void StartupBrowserCreatorImpl::CheckPreferencesBackup(Profile* profile) {
     LOG(WARNING) << "Homepage has changed";
     PrefService* prefs = profile->GetPrefs();
     std::string backup_homepage;
-    bool backup_homepage_is_ntp;
-    bool backup_show_home_button;
+    bool backup_homepage_is_ntp = false;
+    bool backup_show_home_button = false;
     if (!prefs_watcher->GetBackupForPref(prefs::kHomePage)->
             GetAsString(&backup_homepage) ||
         !prefs_watcher->GetBackupForPref(prefs::kHomePageIsNewTabPage)->

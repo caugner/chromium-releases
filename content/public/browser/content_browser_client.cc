@@ -109,6 +109,19 @@ bool ContentBrowserClient::AllowSetCookie(const GURL& url,
   return true;
 }
 
+bool ContentBrowserClient::AllowPluginLocalDataAccess(
+    const GURL& document_url,
+    const GURL& plugin_url,
+    content::ResourceContext* context) {
+  return true;
+}
+
+bool ContentBrowserClient::AllowPluginLocalDataSessionOnly(
+    const GURL& url,
+    content::ResourceContext* context) {
+  return false;
+}
+
 bool ContentBrowserClient::AllowSaveLocalState(ResourceContext* context) {
   return true;
 }
@@ -145,6 +158,12 @@ QuotaPermissionContext* ContentBrowserClient::CreateQuotaPermissionContext() {
 net::URLRequestContext* ContentBrowserClient::OverrideRequestContextForURL(
     const GURL& url, ResourceContext* context) {
   return NULL;
+}
+
+std::string ContentBrowserClient::GetStoragePartitionIdForChildProcess(
+    content::BrowserContext* browser_context,
+    int child_process_id) {
+  return std::string();
 }
 
 MediaObserver* ContentBrowserClient::GetMediaObserver() {
@@ -207,12 +226,6 @@ bool ContentBrowserClient::AllowPepperSocketAPI(
 bool ContentBrowserClient::AllowPepperPrivateFileAPI() {
   return false;
 }
-
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
-int ContentBrowserClient::GetCrashSignalFD(const CommandLine& command_line) {
-  return -1;
-}
-#endif
 
 #if defined(OS_WIN)
 const wchar_t* ContentBrowserClient::GetResourceDllName() {

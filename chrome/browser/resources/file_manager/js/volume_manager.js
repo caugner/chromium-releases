@@ -46,7 +46,6 @@ VolumeManager.Error = {
   UNKNOWN_FILESYSTEM: 'error_unknown_filesystem',
   UNSUPPORTED_FILESYSTEM: 'error_unsupported_filesystem',
   INVALID_ARCHIVE: 'error_invalid_archive',
-  LIBCROS_MISSING: 'error_libcros_missing',
   AUTHENTICATION: 'error_authentication',
   PATH_UNMOUNTED: 'error_path_unmounted'
 };
@@ -116,6 +115,7 @@ VolumeManager.prototype.initMountPoints_ = function() {
   var mountedVolumes = [];
   var self = this;
   var index = 0;
+  this.deferredQueue_ = [];
   function step(mountPoints) {
     if (index < mountPoints.length) {
       var info = mountPoints[index];
@@ -137,6 +137,12 @@ VolumeManager.prototype.initMountPoints_ = function() {
       // Subscribe to the mount completed event when mount points initialized.
       chrome.fileBrowserPrivate.onMountCompleted.addListener(
           self.onMountCompleted_.bind(self));
+
+      var deferredQueue = self.deferredQueue_;
+      self.deferredQueue_ = null;
+      for (var i = 0; i < deferredQueue.length; i++) {
+        deferredQueue[i]();
+      }
 
       if (mountedVolumes.length > 0)
         cr.dispatchSimpleEvent(self, 'change');
@@ -303,6 +309,12 @@ VolumeManager.prototype.unmount = function(mountPath,
                                            successCallback,
                                            errorCallback) {
   this.validateMountPath_(mountPath);
+  if (this.deferredQueue_) {
+    this.deferredQueue_.push(this.unmount.bind(this,
+        mountPath, successCallback, errorCallback));
+    return;
+  }
+
   var volumeInfo = this.mountedVolumes_[mountPath];
   if (!volumeInfo) {
     errorCallback(VolumeManager.Error.NOT_MOUNTED);
@@ -371,6 +383,12 @@ VolumeManager.prototype.getVolumeInfo_ = function(mountPath) {
  */
 VolumeManager.prototype.mount_ = function(url, mountType,
                                           successCallback, errorCallback) {
+  if (this.deferredQueue_) {
+    this.deferredQueue_.push(this.mount_.bind(this,
+        url, mountType, successCallback, errorCallback));
+    return;
+  }
+
   chrome.fileBrowserPrivate.addMount(url, mountType, {},
                                      function(sourcePath) {
     console.log('Mount request: url=' + url + '; mountType=' + mountType +

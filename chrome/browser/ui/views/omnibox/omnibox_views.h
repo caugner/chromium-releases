@@ -4,16 +4,19 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEWS_H_
 #define CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEWS_H_
-#pragma once
 
-class AutocompleteEditController;
 class CommandUpdater;
 class LocationBarView;
+class OmniboxEditController;
 class OmniboxView;
 class OmniboxViewViews;
 class OmniboxViewWin;
 class Profile;
 class ToolbarModel;
+
+namespace views {
+class View;
+}
 
 // Returns true if OmniboxViewViews should be used (instead of OmniboxViewWin).
 bool UseOmniboxViews();
@@ -27,11 +30,12 @@ OmniboxViewWin* GetOmniboxViewWin(OmniboxView* view);
 #endif
 
 // Creates an OmniboxView of the appropriate type; Views or Win.
-OmniboxView* CreateOmniboxView(AutocompleteEditController* controller,
+OmniboxView* CreateOmniboxView(OmniboxEditController* controller,
                                ToolbarModel* toolbar_model,
                                Profile* profile,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
-                               LocationBarView* location_bar);
+                               LocationBarView* location_bar,
+                               views::View* popup_parent_view);
 
 #endif  // CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEWS_H_

@@ -10,16 +10,17 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/string16.h"
-#include "base/stringize_macros.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/timer.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/object_watcher.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_variant.h"
+#include "base/win/windows_version.h"
 #include "google_update/google_update_idl.h"
 #include "remoting/base/dispatch_win.h"
 #include "remoting/host/constants.h"
@@ -30,26 +31,29 @@ using base::win::ScopedVariant;
 
 namespace {
 
-// The COM elevation moniker for Omaha.
-const char16 kOmahaElevationMoniker[] =
-    TO_L_STRING("Elevation:Administrator!new:GoogleUpdate.Update3WebMachine");
+// ProgID of the per-machine Omaha COM server.
+const wchar_t kGoogleUpdate[] = L"GoogleUpdate.Update3WebMachine";
+
+// The COM elevation moniker for the per-machine Omaha COM server.
+const wchar_t kGoogleUpdateElevationMoniker[] =
+    L"Elevation:Administrator!new:GoogleUpdate.Update3WebMachine";
 
 // The registry key where the configuration of Omaha is stored.
-const char16 kOmahaUpdateKeyName[] = TO_L_STRING("Software\\Google\\Update");
+const wchar_t kOmahaUpdateKeyName[] = L"Software\\Google\\Update";
 
 // The name of the value where the full path to GoogleUpdate.exe is stored.
-const char16 kOmahaPathValueName[] = TO_L_STRING("path");
+const wchar_t kOmahaPathValueName[] = L"path";
 
 // The command line format string for GoogleUpdate.exe
-const char16 kGoogleUpdateCommandLineFormat[] =
-    TO_L_STRING("\"%ls\" /install \"bundlename=Chromoting%%20Host&appguid=%ls&")
-    TO_L_STRING("appname=Chromoting%%20Host&needsadmin=True&lang=%ls\"");
+const wchar_t kGoogleUpdateCommandLineFormat[] =
+    L"\"%ls\" /install \"bundlename=Chromoting%%20Host&appguid=%ls&"
+    L"appname=Chromoting%%20Host&needsadmin=True&lang=%ls\"";
 
 // TODO(alexeypa): Get the desired laungage from the web app.
-const char16 kOmahaLanguage[] = TO_L_STRING("en");
+const wchar_t kOmahaLanguage[] = L"en";
 
 // An empty string for optional parameters.
-const char16 kOmahaEmpty[] = TO_L_STRING("");
+const wchar_t kOmahaEmpty[] = L"";
 
 // The installation status polling interval.
 const int kOmahaPollIntervalMs = 500;
@@ -281,20 +285,20 @@ void DaemonCommandLineInstallerWin::Install() {
     return;
   }
 
-  string16 google_update;
-  result = update_key.ReadValue(kOmahaPathValueName,
-                                &google_update);
+  // presubmit: allow wstring
+  std::wstring google_update;
+  result = update_key.ReadValue(kOmahaPathValueName, &google_update);
   if (result != ERROR_SUCCESS) {
     Done(HRESULT_FROM_WIN32(result));
     return;
   }
 
   // Launch the updater process and wait for its termination.
-  string16 command_line =
+  string16 command_line = WideToUTF16(
       StringPrintf(kGoogleUpdateCommandLineFormat,
                    google_update.c_str(),
                    kHostOmahaAppid,
-                   kOmahaLanguage);
+                   kOmahaLanguage));
 
   base::LaunchOptions options;
   if (!base::LaunchProcess(command_line, options, process_.Receive())) {
@@ -335,19 +339,33 @@ void DaemonInstallerWin::Done(HRESULT result) {
 scoped_ptr<DaemonInstallerWin> DaemonInstallerWin::Create(
     HWND window_handle,
     CompletionCallback done) {
-  // Check if the machine instance of Omaha is available.
-  BIND_OPTS3 bind_options;
-  memset(&bind_options, 0, sizeof(bind_options));
-  bind_options.cbStruct = sizeof(bind_options);
-  bind_options.hwnd = GetTopLevelWindow(window_handle);
-  bind_options.dwClassContext = CLSCTX_LOCAL_SERVER;
-
+  HRESULT result = E_FAIL;
   ScopedComPtr<IDispatch> update3;
-  HRESULT result = ::CoGetObject(
-      kOmahaElevationMoniker,
-      &bind_options,
-      IID_IDispatch,
-      update3.ReceiveVoid());
+
+  // Check if the machine instance of Omaha is available. The COM elevation is
+  // supported on Vista+, so on XP/W2K3 we assume that we are running under
+  // a privileged user and get ACCESS_DENIED later if we are not.
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+    CLSID class_id;
+    result = CLSIDFromProgID(kGoogleUpdate, &class_id);
+    if (SUCCEEDED(result)) {
+      result = CoCreateInstance(class_id,
+                                NULL,
+                                CLSCTX_LOCAL_SERVER,
+                                IID_IDispatch,
+                                update3.ReceiveVoid());
+    }
+  } else {
+    BIND_OPTS3 bind_options;
+    memset(&bind_options, 0, sizeof(bind_options));
+    bind_options.cbStruct = sizeof(bind_options);
+    bind_options.hwnd = GetTopLevelWindow(window_handle);
+    bind_options.dwClassContext = CLSCTX_LOCAL_SERVER;
+    result = CoGetObject(kGoogleUpdateElevationMoniker,
+                         &bind_options,
+                         IID_IDispatch,
+                         update3.ReceiveVoid());
+  }
   if (SUCCEEDED(result)) {
     // The machine instance of Omaha is available and we successfully passed
     // the UAC prompt.

@@ -9,15 +9,21 @@ var sendRequest = require('sendRequest').sendRequest;
 var appWindowNatives = requireNative('app_window');
 var GetView = appWindowNatives.GetView;
 
-chromeHidden.registerCustomHook('appWindow', function(bindingsAPI) {
+chromeHidden.registerCustomHook('app.window', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
-  apiFunctions.setCustomCallback('create', function(name, request, view_id) {
+  apiFunctions.setCustomCallback('create', function(name, request, viewId) {
     var view = null;
-    if (view_id)
-      view = GetView(view_id);
+    if (viewId)
+      view = GetView(viewId);
     if (request.callback) {
       request.callback(view);
       delete request.callback;
     }
+  })
+  apiFunctions.setHandleRequest('moveTo', function(x, y) {
+    window.moveTo(x, y);
+  })
+  apiFunctions.setHandleRequest('resizeTo', function(width, height) {
+    window.resizeTo(width, height);
   })
 });

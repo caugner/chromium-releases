@@ -16,12 +16,11 @@
 #include "base/metrics/histogram.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/debugger/devtools_window.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -29,12 +28,13 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
-#import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
+#import "chrome/browser/ui/cocoa/tab_contents/favicon_util_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
@@ -50,6 +50,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -59,9 +60,7 @@
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -396,7 +395,7 @@ private:
         [[CrTrackingArea alloc] initWithRect:[newTabButton_ bounds]
                                      options:(NSTrackingMouseEnteredAndExited |
                                               NSTrackingActiveAlways)
-                                proxiedOwner:self
+                                       owner:self
                                     userInfo:nil]);
     if (browserWindow)  // Nil for Browsers without a tab strip (e.g. popups).
       [newTabTrackingArea_ clearOwnerWhenWindowWillClose:browserWindow];
@@ -430,7 +429,7 @@ private:
                      NSTrackingMouseMoved |
                      NSTrackingActiveAlways |
                      NSTrackingInVisibleRect
-        proxiedOwner:self
+               owner:self
             userInfo:nil]);
     if (browserWindow)  // Nil for Browsers without a tab strip (e.g. popups).
       [trackingArea_ clearOwnerWhenWindowWillClose:browserWindow];
@@ -1220,8 +1219,8 @@ private:
   NSInteger activeIndex = [self indexFromModelIndex:modelIndex];
 
   if (oldContents) {
-    int oldModelIndex = browser_->GetIndexOfController(
-        &(oldContents->web_contents()->GetController()));
+    int oldModelIndex =
+        chrome::GetIndexOfTab(browser_, oldContents->web_contents());
     if (oldModelIndex != -1) {  // When closing a tab, the old tab may be gone.
       NSInteger oldIndex = [self indexFromModelIndex:oldModelIndex];
       TabContentsController* oldController =
@@ -1263,7 +1262,7 @@ private:
   [self swapInTabAtIndex:modelIndex];
 
   if (newContents) {
-    newContents->web_contents()->DidBecomeSelected();
+    newContents->web_contents()->WasShown();
     newContents->web_contents()->GetView()->RestoreFocus();
 
     if (newContents->find_tab_helper()->find_ui_active())
@@ -1913,13 +1912,13 @@ private:
   switch (disposition) {
     case NEW_FOREGROUND_TAB: {
       content::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
-      browser::NavigateParams params(
-          browser_, *url, content::PAGE_TRANSITION_TYPED);
+      chrome::NavigateParams params(browser_, *url,
+                                    content::PAGE_TRANSITION_TYPED);
       params.disposition = disposition;
       params.tabstrip_index = index;
       params.tabstrip_add_types =
           TabStripModel::ADD_ACTIVE | TabStripModel::ADD_FORCE_INDEX;
-      browser::Navigate(&params);
+      chrome::Navigate(&params);
       break;
     }
     case CURRENT_TAB: {

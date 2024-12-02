@@ -4,11 +4,10 @@
 
 #ifndef SYNC_UTIL_EXPERIMENTS_
 #define SYNC_UTIL_EXPERIMENTS_
-#pragma once
 
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 
-namespace browser_sync {
+namespace syncer {
 
 // A structure to hold the enable status of experimental sync features.
 struct Experiments {
@@ -23,6 +22,6 @@ struct Experiments {
   bool sync_tab_favicons;
 };
 
-}
+}  // namespace syncer
 
 #endif  // SYNC_UTIL_EXPERIMENTS_

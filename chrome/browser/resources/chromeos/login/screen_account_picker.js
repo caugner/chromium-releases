@@ -13,7 +13,6 @@ cr.define('login', function() {
    * @const
    */
   var MAX_LOGIN_ATTEMPTS_IN_POD = 3;
-
   /**
    * Whether to preselect the first pod automatically on login screen.
    * @type {boolean}
@@ -63,49 +62,31 @@ cr.define('login', function() {
     },
 
     /**
+     * Event handler that is invoked just after the frame is shown.
+     * @param {string} data Screen init payload.
+     */
+    onAfterShow: function(data) {
+      $('pod-row').handleAfterShow();
+    },
+
+    /**
      * Event handler that is invoked just before the frame is shown.
      * @param {string} data Screen init payload.
      */
     onBeforeShow: function(data) {
       chrome.send('hideCaptivePortal');
       var podRow = $('pod-row');
-      podRow.handleShow();
+      podRow.handleBeforeShow();
 
       // If this is showing for the lock screen display the sign out button,
       // hide the add user button and activate the locked user's pod.
       var lockedPod = podRow.lockedPod;
       $('add-user-header-bar-item').hidden = !!lockedPod;
       $('sign-out-user-item').hidden = !lockedPod;
-      var preselectedPod = PRESELECT_FIRST_POD ?
-          lockedPod || podRow.pods[0] : lockedPod;
-      if (preselectedPod) {
-        // TODO(altimofeev): empirically I investigated that focus isn't
-        // set correctly if following CSS rules are present:
-        //
-        // podrow {
-        //   -webkit-transition: all 200ms ease-in-out;
-        // }
-        // .pod {
-        //  -webkit-transition: all 230ms ease;
-        // }
-        //
-        // Workaround is either delete these rules or delay the focus setting.
-        var self = this;
-        preselectedPod.addEventListener('webkitTransitionEnd', function f(e) {
-          if (e.target == preselectedPod) {
-            podRow.focusPod(preselectedPod);
-            preselectedPod.removeEventListener(f);
-            // Delay the accountPickerReady signal so that if there are any
-            // timeouts waiting to fire we can process these first. This was
-            // causing crbug.com/112218 as the account pod was sometimes focuse
-            // using focusPod (which resets the password) after the test code
-            // set the password.
-            self.onShow();
-          }
-        });
-      } else {
+      // In case of the preselected pod onShow will be called once pod
+      // receives focus.
+      if (!podRow.preselectedPod)
         this.onShow();
-      }
     },
 
     /**
@@ -118,9 +99,8 @@ cr.define('login', function() {
       // is reduced. See http://crosbug.com/11116 http://crosbug.com/18307
       // $('pod-row').startInitAnimation();
 
-      // TODO(altimofeev): Call it after animation has stoped when animation
-      // is enabled.
       chrome.send('accountPickerReady');
+      chrome.send('loginVisible');
     },
 
      /**
@@ -183,6 +163,39 @@ cr.define('login', function() {
    */
   AccountPickerScreen.setCapsLockState = function(enabled) {
     $('pod-row').classList[enabled ? 'add' : 'remove']('capslock-on');
+  };
+
+  /**
+   * Sets wallpaper for lock screen.
+   */
+  AccountPickerScreen.setWallpaper = function() {
+    // TODO(antrim): remove whole method once 136853 is accepted.
+    return;
+    var oobe = Oobe.getInstance();
+    if (!oobe.isNewOobe() || !oobe.isLockScreen())
+      return;
+
+    // Load image before starting animation.
+    var image = new Image();
+    image.onload = function() {
+      var background = $('background');
+
+      // Prepare to report metric.
+      background.addEventListener('webkitTransitionEnd', function f(e) {
+        if (e.target == background) {
+          background.removeEventListener('webkitTransitionEnd', f);
+          chrome.send('wallpaperReady');
+        }
+      });
+
+      background.style.backgroundImage = 'url(' + image.src + ')';
+      // Start animation.
+      background.classList.add('background-final');
+      background.classList.remove('background-initial');
+    };
+    // Start image loading.
+    // Add timestamp for wallpapers that are rotated over time.
+    image.src = 'chrome://wallpaper/' + new Date().getTime();
   };
 
   return {

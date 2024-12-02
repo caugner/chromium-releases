@@ -7,13 +7,22 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "content/public/browser/resource_dispatcher_host.h"
+#include "content/shell/geolocation/shell_access_token_store.h"
 #include "content/shell/layout_test_controller_host.h"
 #include "content/shell/shell.h"
+#include "content/shell/shell_browser_context.h"
 #include "content/shell/shell_browser_main_parts.h"
 #include "content/shell/shell_devtools_delegate.h"
 #include "content/shell/shell_resource_dispatcher_host_delegate.h"
 #include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
+
+#if defined(OS_ANDROID)
+#include "base/android/path_utils.h"
+#include "base/path_service.h"
+#include "base/platform_file.h"
+#include "content/shell/android/shell_descriptors.h"
+#endif
 
 namespace content {
 
@@ -25,7 +34,7 @@ ShellContentBrowserClient::~ShellContentBrowserClient() {
 }
 
 BrowserMainParts* ShellContentBrowserClient::CreateBrowserMainParts(
-    const content::MainFunctionParams& parameters) {
+    const MainFunctionParams& parameters) {
   shell_browser_main_parts_ = new ShellBrowserMainParts(parameters);
   return shell_browser_main_parts_;
 }
@@ -54,8 +63,38 @@ std::string ShellContentBrowserClient::GetDefaultDownloadName() {
   return "download";
 }
 
+#if defined(OS_ANDROID)
+void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
+    const CommandLine& command_line,
+    base::GlobalDescriptors::Mapping* mappings) {
+  int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
+  FilePath pak_file;
+  DCHECK(PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_file));
+  pak_file = pak_file.Append(FILE_PATH_LITERAL("paks"));
+  pak_file = pak_file.Append(FILE_PATH_LITERAL("content_shell.pak"));
+
+  base::PlatformFile f =
+      base::CreatePlatformFile(pak_file, flags, NULL, NULL);
+  if (f == base::kInvalidPlatformFileValue) {
+    NOTREACHED() << "Failed to open file when creating renderer process: "
+                 << "content_shell.pak";
+  }
+  mappings->push_back(std::pair<base::GlobalDescriptors::Key, int>(
+      kShellPakDescriptor, f));
+}
+#endif
+
 ShellBrowserContext* ShellContentBrowserClient::browser_context() {
   return shell_browser_main_parts_->browser_context();
+}
+
+ShellBrowserContext*
+    ShellContentBrowserClient::off_the_record_browser_context() {
+  return shell_browser_main_parts_->off_the_record_browser_context();
+}
+
+AccessTokenStore* ShellContentBrowserClient::CreateAccessTokenStore() {
+  return new ShellAccessTokenStore(browser_context()->GetRequestContext());
 }
 
 }  // namespace content

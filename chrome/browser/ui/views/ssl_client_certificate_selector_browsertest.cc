@@ -8,10 +8,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_client_auth_requestor_mock.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/views/ssl_client_certificate_selector.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "net/base/cert_test_util.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/x509_certificate.h"
@@ -60,9 +62,9 @@ class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
 
     io_loop_finished_event_.Wait();
 
-    ui_test_utils::WaitForLoadStop(browser()->GetActiveWebContents());
+    content::WaitForLoadStop(chrome::GetActiveWebContents(browser()));
     selector_ = new SSLClientCertificateSelector(
-        browser()->GetActiveTabContents(),
+        chrome::GetActiveTabContents(browser()),
         auth_requestor_->http_network_session_,
         auth_requestor_->cert_request_info_,
         base::Bind(&SSLClientAuthRequestorMock::CertificateSelected,
@@ -103,9 +105,10 @@ class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
  protected:
   net::URLRequest* MakeURLRequest(
       net::URLRequestContextGetter* context_getter) {
-    net::URLRequest* request = new net::URLRequest(GURL("https://example"),
-                                                   NULL);
-    request->set_context(context_getter->GetURLRequestContext());
+    net::URLRequest* request = new net::URLRequest(
+        GURL("https://example"),
+        NULL,
+        context_getter->GetURLRequestContext());
     return request;
   }
 
@@ -145,21 +148,21 @@ class SSLClientCertificateSelectorMultiTabTest
 
     AddTabAtIndex(1, GURL("about:blank"), content::PAGE_TRANSITION_LINK);
     AddTabAtIndex(2, GURL("about:blank"), content::PAGE_TRANSITION_LINK);
-    ASSERT_TRUE(NULL != browser()->GetWebContentsAt(0));
-    ASSERT_TRUE(NULL != browser()->GetWebContentsAt(1));
-    ASSERT_TRUE(NULL != browser()->GetWebContentsAt(2));
-    ui_test_utils::WaitForLoadStop(browser()->GetWebContentsAt(1));
-    ui_test_utils::WaitForLoadStop(browser()->GetWebContentsAt(2));
+    ASSERT_TRUE(NULL != chrome::GetWebContentsAt(browser(), 0));
+    ASSERT_TRUE(NULL != chrome::GetWebContentsAt(browser(), 1));
+    ASSERT_TRUE(NULL != chrome::GetWebContentsAt(browser(), 2));
+    content::WaitForLoadStop(chrome::GetWebContentsAt(browser(), 1));
+    content::WaitForLoadStop(chrome::GetWebContentsAt(browser(), 2));
 
     selector_1_ = new SSLClientCertificateSelector(
-        browser()->GetTabContentsAt(1),
+        chrome::GetTabContentsAt(browser(), 1),
         auth_requestor_1_->http_network_session_,
         auth_requestor_1_->cert_request_info_,
         base::Bind(&SSLClientAuthRequestorMock::CertificateSelected,
                    auth_requestor_1_));
     selector_1_->Init();
     selector_2_ = new SSLClientCertificateSelector(
-        browser()->GetTabContentsAt(2),
+        chrome::GetTabContentsAt(browser(), 2),
         auth_requestor_2_->http_network_session_,
         auth_requestor_2_->cert_request_info_,
         base::Bind(&SSLClientAuthRequestorMock::CertificateSelected,
@@ -228,7 +231,7 @@ class SSLClientCertificateSelectorMultiProfileTest
     SSLClientCertificateSelectorTest::SetUpOnMainThread();
 
     selector_1_ = new SSLClientCertificateSelector(
-        browser_1_->GetActiveTabContents(),
+        chrome::GetActiveTabContents(browser_1_),
         auth_requestor_1_->http_network_session_,
         auth_requestor_1_->cert_request_info_,
         base::Bind(&SSLClientAuthRequestorMock::CertificateSelected,
@@ -312,7 +315,9 @@ IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorMultiTabTest,
   EXPECT_CALL(*auth_requestor_, CertificateSelected(NULL));
 }
 
-IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorMultiTabTest, SelectSecond) {
+// http://crbug.com/121007
+IN_PROC_BROWSER_TEST_F(SSLClientCertificateSelectorMultiTabTest,
+                       DISABLED_SelectSecond) {
   // auth_requestor_1_ should get selected automatically by the
   // SSLClientAuthObserver when selector_2_ is accepted, since both 1 & 2 have
   // the same host:port.

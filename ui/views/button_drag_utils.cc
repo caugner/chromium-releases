@@ -6,13 +6,14 @@
 
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/text_button.h"
+#include "ui/views/drag_utils.h"
 
 namespace button_drag_utils {
 
@@ -22,7 +23,8 @@ static const int kLinkDragImageMaxWidth = 200;
 void SetURLAndDragImage(const GURL& url,
                         const string16& title,
                         const gfx::ImageSkia& icon,
-                        ui::OSExchangeData* data) {
+                        ui::OSExchangeData* data,
+                        views::Widget* widget) {
   DCHECK(url.is_valid() && data);
 
   data->SetURL(url, title);
@@ -41,9 +43,10 @@ void SetURLAndDragImage(const GURL& url,
   button.SetBounds(0, 0, prefsize.width(), prefsize.height());
 
   // Render the image.
-  gfx::Canvas canvas(prefsize, false);
-  button.PaintButton(&canvas, views::TextButton::PB_FOR_DRAG);
-  drag_utils::SetDragImageOnDataObject(canvas, prefsize,
+  scoped_ptr<gfx::Canvas> canvas(
+      views::GetCanvasForDragImage(widget, prefsize));
+  button.PaintButton(canvas.get(), views::TextButton::PB_FOR_DRAG);
+  drag_utils::SetDragImageOnDataObject(*canvas, prefsize,
       gfx::Point(prefsize.width() / 2, prefsize.height() / 2), data);
 }
 

@@ -4,7 +4,9 @@
 
 #include "base/message_pump_aurax11.h"
 
+#include <glib.h>
 #include <X11/extensions/XInput2.h>
+#include <X11/XKBlib.h>
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
@@ -83,6 +85,30 @@ bool InitializeXInput2() {
   return xinput2_supported;
 }
 
+bool InitializeXkb() {
+  Display* display = base::MessagePumpAuraX11::GetDefaultXDisplay();
+  if (!display)
+    return false;
+
+  int opcode, event, error;
+  int major = XkbMajorVersion;
+  int minor = XkbMinorVersion;
+  if (!XkbQueryExtension(display, &opcode, &event, &error, &major, &minor)) {
+    DVLOG(1) << "Xkb extension not available.";
+    return false;
+  }
+
+  // Ask the server not to send KeyRelease event when the user holds down a key.
+  // crbug.com/138092
+  Bool supported_return;
+  if (!XkbSetDetectableAutoRepeat(display, True, &supported_return)) {
+    DVLOG(1) << "XKB not supported in the server.";
+    return false;
+  }
+
+  return true;
+}
+
 }  // namespace
 
 namespace base {
@@ -90,6 +116,7 @@ namespace base {
 MessagePumpAuraX11::MessagePumpAuraX11() : MessagePumpGlib(),
     x_source_(NULL) {
   InitializeXInput2();
+  InitializeXkb();
   InitXSource();
 }
 
@@ -112,7 +139,7 @@ void MessagePumpAuraX11::SetDefaultDispatcher(
   g_default_dispatcher = dispatcher;
 }
 
-gboolean MessagePumpAuraX11::DispatchXEvents() {
+bool MessagePumpAuraX11::DispatchXEvents() {
   Display* display = GetDefaultXDisplay();
   DCHECK(display);
   MessagePumpDispatcher* dispatcher =

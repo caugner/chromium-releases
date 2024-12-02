@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/memory/singleton.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -127,24 +128,26 @@ void TouchFactory::SetTouchDeviceListFromCommandLine() {
 
 void TouchFactory::UpdateDeviceList(Display* display) {
   // Detect touch devices.
-  // NOTE: The new API for retrieving the list of devices (XIQueryDevice) does
-  // not provide enough information to detect a touch device. As a result, the
-  // old version of query function (XListInputDevices) is used instead.
-  // If XInput2 is not supported, this will return null (with count of -1) so
-  // we assume there cannot be any touch devices.
   int count = 0;
   bool last_touch_device_available = touch_device_available_;
   touch_device_available_ = false;
   touch_device_lookup_.reset();
   touch_device_list_.clear();
+
 #if !defined(USE_XI2_MT)
+  // NOTE: The new API for retrieving the list of devices (XIQueryDevice) does
+  // not provide enough information to detect a touch device. As a result, the
+  // old version of query function (XListInputDevices) is used instead.
+  // If XInput2 is not supported, this will return null (with count of -1) so
+  // we assume there cannot be any touch devices.
+  // With XI2.1 or older, we allow only single touch devices.
   XDeviceInfo* devlist = XListInputDevices(display, &count);
   for (int i = 0; i < count; i++) {
     if (devlist[i].type) {
       XScopedString devtype(XGetAtomName(display, devlist[i].type));
       if (devtype.string() && !strcmp(devtype.string(), XI_TOUCHSCREEN)) {
         touch_device_lookup_[devlist[i].id] = true;
-        touch_device_list_[devlist[i].id] = true;
+        touch_device_list_[devlist[i].id] = false;
         touch_device_available_ = true;
       }
     }
@@ -169,23 +172,24 @@ void TouchFactory::UpdateDeviceList(Display* display) {
   XIDeviceInfo* devices = XIQueryDevice(display, XIAllDevices, &count);
   for (int i = 0; i < count; i++) {
     XIDeviceInfo* devinfo = devices + i;
+    if (devinfo->use == XIFloatingSlave || devinfo->use == XISlavePointer) {
 #if defined(USE_XI2_MT)
-    for (int k = 0; k < devinfo->num_classes; ++k) {
-      XIAnyClassInfo* xiclassinfo = devinfo->classes[k];
-      if (xiclassinfo->type == XITouchClass) {
-        XITouchClassInfo* tci =
-            reinterpret_cast<XITouchClassInfo *>(xiclassinfo);
-        // Only care direct touch device (such as touch screen) right now
-        if (tci->mode == XIDirectTouch) {
-          touch_device_lookup_[devinfo->deviceid] = true;
-          touch_device_list_[devinfo->deviceid] = true;
-          touch_device_available_ = true;
+      for (int k = 0; k < devinfo->num_classes; ++k) {
+        XIAnyClassInfo* xiclassinfo = devinfo->classes[k];
+        if (xiclassinfo->type == XITouchClass) {
+          XITouchClassInfo* tci =
+              reinterpret_cast<XITouchClassInfo *>(xiclassinfo);
+          // Only care direct touch device (such as touch screen) right now
+          if (tci->mode == XIDirectTouch) {
+            touch_device_lookup_[devinfo->deviceid] = true;
+            touch_device_list_[devinfo->deviceid] = true;
+            touch_device_available_ = true;
+          }
         }
       }
-    }
 #endif
-    if (devinfo->use == XIFloatingSlave || devinfo->use == XISlavePointer)
       pointer_device_lookup_[devinfo->deviceid] = true;
+    }
   }
   if (devices)
     XIFreeDeviceInfo(devices);

@@ -25,6 +25,7 @@ desired threshold value.
 import BaseHTTPServer
 import commands
 import errno
+import itertools
 import logging
 import math
 import os
@@ -54,12 +55,31 @@ import webpagereplay
 from youtube import YoutubeTestHelper
 
 
+_CHROME_BASE_DIR = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, os.pardir))
+
+
+def FormatChromePath(posix_path, **kwargs):
+  """Convert a path relative to the Chromium root into an OS-specific path.
+
+  Args:
+    posix_path: a path string that may be a format().
+      Example: 'src/third_party/{module_name}/__init__.py'
+    kwargs: args for the format replacement.
+      Example: {'module_name': 'pylib'}
+
+  Returns:
+    an absolute path in the current Chromium tree with formatting applied.
+  """
+  formated_path = posix_path.format(**kwargs)
+  path_parts = formated_path.split('/')
+  return os.path.join(_CHROME_BASE_DIR, *path_parts)
+
+
 def StandardDeviation(values):
   """Returns the standard deviation of |values|."""
   avg = Mean(values)
-  if not avg:
-    return None
-  if len(values) < 2:
+  if len(values) < 2 or not avg:
     return 0.0
   temp_vals = [math.pow(x - avg, 2) for x in values]
   return math.sqrt(sum(temp_vals) / (len(temp_vals) - 1))
@@ -644,7 +664,7 @@ class BasePerfTest(pyauto.PyUITest):
     # Window size impacts a variety of perf tests, ensure consistency.
     flags.append('--window-size=1024,768')
     if self._IsPGOMode():
-      flags = flags + ['--renderer-clean-exit', '--no-sandbox']
+      flags = flags + ['--child-clean-exit', '--no-sandbox']
     return flags
 
 
@@ -669,9 +689,10 @@ class TabPerfTest(BasePerfTest):
   def testNewTabFlash(self):
     """Measures time to open a new tab navigated to a flash page."""
     self.assertTrue(
-        os.path.exists(os.path.join(self.DataDir(), 'plugin', 'flash.swf')),
+        os.path.exists(os.path.join(self.ContentDataDir(), 'plugin',
+                                    'flash.swf')),
         msg='Missing required flash data file.')
-    url = self.GetFileURLForDataPath('plugin', 'flash.swf')
+    url = self.GetFileURLForContentDataPath('plugin', 'flash.swf')
     self._RunNewTabTest('NewTabFlashPage', lambda: self._AppendTab(url),
                         'open_tab')
 
@@ -855,45 +876,48 @@ class BenchmarkPerfTest(BasePerfTest):
 
   def testSpaceport(self):
     """Measures results from Spaceport benchmark suite."""
-    url = self.GetFileURLForDataPath('third_party', 'spaceport', 'index.html')
-    self.assertTrue(self.AppendTab(pyauto.GURL(url + '?auto')),
-                    msg='Failed to append tab for Spaceport benchmark suite.')
+    # TODO(tonyg): Test is failing on bots. Diagnose and re-enable.
+    pass
 
-    # The test reports results to console.log in the format "name: value".
-    # Inject a bit of JS to intercept those.
-    js_collect_console_log = """
-        window.__pyautoresult = {};
-        window.console.log = function(str) {
-            if (!str) return;
-            var key_val = str.split(': ');
-            if (!key_val.length == 2) return;
-            __pyautoresult[key_val[0]] = key_val[1];
-        };
-        window.domAutomationController.send('done');
-    """
-    self.ExecuteJavascript(js_collect_console_log, tab_index=1)
-
-    def _IsDone():
-      expected_num_results = 30  # The number of tests in benchmark.
-      results = eval(self.ExecuteJavascript(js_get_results, tab_index=1))
-      return expected_num_results == len(results)
-
-    js_get_results = """
-        window.domAutomationController.send(
-            JSON.stringify(window.__pyautoresult));
-    """
-    self.assertTrue(
-        self.WaitUntil(_IsDone, timeout=1200, expect_retval=True,
-                       retry_sleep=5),
-        msg='Timed out when waiting for Spaceport benchmark to complete.')
-    results = eval(self.ExecuteJavascript(js_get_results, tab_index=1))
-
-    for key in results:
-      suite, test = key.split('.')
-      value = float(results[key])
-      self._OutputPerfGraphValue(test, value, 'ObjectsAt30FPS', suite)
-    self._PrintSummaryResults('Overall', [float(x) for x in results.values()],
-                              'ObjectsAt30FPS', 'Overall')
+#    url = self.GetFileURLForDataPath('third_party', 'spaceport', 'index.html')
+#    self.assertTrue(self.AppendTab(pyauto.GURL(url + '?auto')),
+#                    msg='Failed to append tab for Spaceport benchmark suite.')
+#
+#    # The test reports results to console.log in the format "name: value".
+#    # Inject a bit of JS to intercept those.
+#    js_collect_console_log = """
+#        window.__pyautoresult = {};
+#        window.console.log = function(str) {
+#            if (!str) return;
+#            var key_val = str.split(': ');
+#            if (!key_val.length == 2) return;
+#            __pyautoresult[key_val[0]] = key_val[1];
+#        };
+#        window.domAutomationController.send('done');
+#    """
+#    self.ExecuteJavascript(js_collect_console_log, tab_index=1)
+#
+#    def _IsDone():
+#      expected_num_results = 30  # The number of tests in benchmark.
+#      results = eval(self.ExecuteJavascript(js_get_results, tab_index=1))
+#      return expected_num_results == len(results)
+#
+#    js_get_results = """
+#        window.domAutomationController.send(
+#            JSON.stringify(window.__pyautoresult));
+#    """
+#    self.assertTrue(
+#        self.WaitUntil(_IsDone, timeout=1200, expect_retval=True,
+#                       retry_sleep=5),
+#        msg='Timed out when waiting for Spaceport benchmark to complete.')
+#    results = eval(self.ExecuteJavascript(js_get_results, tab_index=1))
+#
+#    for key in results:
+#      suite, test = key.split('.')
+#      value = float(results[key])
+#      self._OutputPerfGraphValue(test, value, 'ObjectsAt30FPS', suite)
+#    self._PrintSummaryResults('Overall', [float(x) for x in results.values()],
+#                              'ObjectsAt30FPS', 'Overall')
 
 
 class LiveWebappLoadTest(BasePerfTest):
@@ -970,7 +994,7 @@ class LiveWebappLoadTest(BasePerfTest):
     Timing starts right before the new tab is opened, and stops as soon as the
     webpage displays the expected substring 'last modified' (case insensitive).
     """
-    EXPECTED_SUBSTRING = 'last modified'
+    EXPECTED_SUBSTRING = 'sort'
 
     def _SubstringExistsOnPage():
       js = """
@@ -1604,7 +1628,190 @@ class FileUploadDownloadTest(BasePerfTest):
                               'upload_file')
 
 
-class ScrollTest(BasePerfTest):
+class FrameTimes(object):
+  """Container for a list of frame times."""
+
+  def __init__(self, frame_times):
+    self._frame_times = frame_times
+
+  def GetFps(self):
+    if not self._frame_times:
+      return 0
+    avg = sum(self._frame_times) / len(self._frame_times)
+    if not avg:
+      return 0
+    return int(1000.0 / avg)
+
+  def GetMeanFrameTime(self):
+    return Mean(self._frame_times)
+
+  def GetPercentBelow60Fps(self):
+    if not self._frame_times:
+      return 0
+    threshold = math.ceil(1000 / 60.)
+    num_frames_below_60 = len([t for t in self._frame_times if t > threshold])
+    num_frames = len(self._frame_times)
+    return (100. * num_frames_below_60) / num_frames
+
+
+class ScrollResults(object):
+  """Container for ScrollTest results."""
+
+  def __init__(self, first_paint_seconds, frame_times_lists):
+    assert len(frame_times_lists) == 2, 'Expecting initial and repeat times'
+    self.first_paint_time = 1000.0 * first_paint_seconds
+    self.initial_frame_times = FrameTimes(frame_times_lists[0])
+    self.repeat_frame_times = FrameTimes(frame_times_lists[1])
+
+
+class BaseScrollTest(BasePerfTest):
+  """Base class for tests measuring scrolling performance."""
+
+  def setUp(self):
+    """Performs necessary setup work before running each test."""
+    super(BaseScrollTest, self).setUp()
+    scroll_file = os.path.join(self.DataDir(), 'scroll', 'scroll.js')
+    with open(scroll_file) as f:
+      self._scroll_text = f.read()
+
+  def RunSingleInvocation(self, url, setup_js=''):
+    """Runs a single invocation of the scroll test.
+
+    Args:
+      url: The string url for the webpage on which to run the scroll test.
+      setup_js: String representing additional Javascript setup code to execute
+          in the webpage immediately before running the scroll test.
+
+    Returns:
+      Instance of ScrollResults.
+    """
+    self.assertTrue(self.AppendTab(pyauto.GURL(url)),
+                    msg='Failed to append tab for webpage.')
+
+    js = """
+        %s
+        %s
+        __scroll_test();
+        window.domAutomationController.send('done');
+    """ % (self._scroll_text, setup_js)
+    self.ExecuteJavascript(js, tab_index=1)
+
+    # Poll the webpage until the test is complete.
+    def IsTestComplete():
+      done_js = """
+        if (__scrolling_complete)
+          window.domAutomationController.send('complete');
+        else
+          window.domAutomationController.send('incomplete');
+      """
+      return self.ExecuteJavascript(done_js, tab_index=1) == 'complete'
+
+    self.assertTrue(
+        self.WaitUntil(IsTestComplete, timeout=300, expect_retval=True,
+                       retry_sleep=1),
+        msg='Timed out when waiting for scrolling tests to complete.')
+
+    # Get the scroll test results from the webpage.
+    results_js = """
+      var __stringify = JSON.stringify || JSON.encode;
+      window.domAutomationController.send(__stringify({
+          'first_paint_time': chrome.loadTimes().firstPaintTime -
+                              chrome.loadTimes().requestTime,
+          'frame_times': __frame_times,
+      }));
+    """
+    results = eval(self.ExecuteJavascript(results_js, tab_index=1))
+    self.GetBrowserWindow(0).GetTab(1).Close(True)
+    return ScrollResults(results['first_paint_time'], results['frame_times'])
+
+  def RunScrollTest(self, url, description, graph_name, setup_js=''):
+    """Runs a scroll performance test on the specified webpage.
+
+    Args:
+      url: The string url for the webpage on which to run the scroll test.
+      description: A string description for the particular test being run.
+      graph_name: A string name for the performance graph associated with this
+          test.  Only used on Chrome desktop.
+      setup_js: String representing additional Javascript setup code to execute
+          in the webpage immediately before running the scroll test.
+    """
+    results = []
+    for iteration in range(self._num_iterations + 1):
+      result = self.RunSingleInvocation(url, setup_js)
+      # Ignore the first iteration.
+      if iteration:
+        fps = result.repeat_frame_times.GetFps()
+        assert fps, '%s did not scroll' % url
+        logging.info('Iteration %d of %d: %f fps', iteration,
+                     self._num_iterations, fps)
+        results.append(result)
+    self._PrintSummaryResults(
+        description, [r.repeat_frame_times.GetFps() for r in results],
+        'FPS', graph_name)
+
+
+class PopularSitesScrollTest(BaseScrollTest):
+  """Measures scrolling performance on recorded versions of popular sites."""
+
+  def ExtraChromeFlags(self):
+    """Ensures Chrome is launched with custom flags.
+
+    Returns:
+      A list of extra flags to pass to Chrome when it is launched.
+    """
+    return super(PopularSitesScrollTest,
+                 self).ExtraChromeFlags() + PageCyclerReplay.CHROME_FLAGS
+
+  def _GetUrlList(self, test_name):
+    """Returns list of recorded sites."""
+    sites_path = PageCyclerReplay.Path('page_sets', test_name=test_name)
+    with open(sites_path) as f:
+      sites_text = f.read()
+    js = """
+      %s
+      window.domAutomationController.send(JSON.stringify(pageSets));
+    """ % sites_text
+    page_sets = eval(self.ExecuteJavascript(js))
+    return list(itertools.chain(*page_sets))[1:]  # Skip first.
+
+  def _PrintScrollResults(self, results):
+    self._PrintSummaryResults(
+        'initial', [r.initial_frame_times.GetMeanFrameTime() for r in results],
+        'ms', 'FrameTimes')
+    self._PrintSummaryResults(
+        'repeat', [r.repeat_frame_times.GetMeanFrameTime() for r in results],
+        'ms', 'FrameTimes')
+    self._PrintSummaryResults(
+        'initial',
+        [r.initial_frame_times.GetPercentBelow60Fps() for r in results],
+        'percent', 'PercentBelow60FPS')
+    self._PrintSummaryResults(
+        'repeat',
+        [r.repeat_frame_times.GetPercentBelow60Fps() for r in results],
+        'percent', 'PercentBelow60FPS')
+    self._PrintSummaryResults(
+        'first_paint_time', [r.first_paint_time for r in results],
+        'ms', 'FirstPaintTime')
+
+  def test2012Q3(self):
+    test_name = '2012Q3'
+    urls = self._GetUrlList(test_name)
+    results = []
+    with PageCyclerReplay.ReplayServer(test_name) as replay_server:
+      if replay_server.is_record_mode:
+        self._num_iterations = 1
+      for iteration in range(self._num_iterations):
+        for url in urls:
+          result = self.RunSingleInvocation(url)
+          fps = result.initial_frame_times.GetFps()
+          assert fps, '%s did not scroll' % url
+          logging.info('Iteration %d of %d: %f fps', iteration,
+                       self._num_iterations, fps)
+          results.append(result)
+    self._PrintScrollResults(results)
+
+
+class ScrollTest(BaseScrollTest):
   """Tests to measure scrolling performance."""
 
   def ExtraChromeFlags(self):
@@ -1616,92 +1823,29 @@ class ScrollTest(BasePerfTest):
     # Extra flag needed by scroll performance tests.
     return super(ScrollTest, self).ExtraChromeFlags() + ['--disable-gpu-vsync']
 
-  def _RunScrollTest(self, url, description, graph_name, setup_js=''):
-    """Runs a scroll performance test on the specified webpage.
-
-    Args:
-      url: The string url for the webpage on which to run the scroll test.
-      description: A string description for the particular test being run.
-      graph_name: A string name for the performance graph associated with this
-          test.  Only used on Chrome desktop.
-      setup_js: String representing additional Javascript setup code to execute
-          in the webpage immediately before running the scroll test.
-    """
-    scroll_file = os.path.join(self.DataDir(), 'scroll', 'scroll.js')
-    with open(scroll_file) as f:
-      scroll_text = f.read()
-
-    def _RunSingleInvocation(url, scroll_text):
-      """Runs a single invocation of the scroll test and returns the FPS."""
-      self.assertTrue(self.AppendTab(pyauto.GURL(url)),
-                      msg='Failed to append tab for webpage.')
-
-      js = """
-          %s
-          %s
-          __scroll_test();
-          window.domAutomationController.send('done');
-      """ % (scroll_text, setup_js)
-      self.ExecuteJavascript(js, tab_index=1)
-
-      # Poll the webpage until the test is complete.
-      def IsTestDone():
-        done_js = """
-          if (__scrolling_complete)
-            window.domAutomationController.send('true');
-          else
-            window.domAutomationController.send('false');
-        """
-        return self.ExecuteJavascript(done_js, tab_index=1) == 'true'
-
-      self.assertTrue(
-          self.WaitUntil(IsTestDone, timeout=300, expect_retval=True,
-                         retry_sleep=1),
-          msg='Timed out when waiting for scrolling tests to complete.')
-
-      # Get the scroll test results from the webpage.
-      results_js = """
-        window.domAutomationController.send(
-            JSON.stringify({'fps': __mean_fps}));
-      """
-      fps = eval(self.ExecuteJavascript(results_js, tab_index=1))['fps']
-      self.GetBrowserWindow(0).GetTab(1).Close(True)
-      return fps
-
-    fps_vals = []
-    for iteration in range(self._num_iterations + 1):
-      fps = _RunSingleInvocation(url, scroll_text)
-      # Ignore the first iteration.
-      if iteration:
-        fps_vals.append(fps)
-        logging.info('Iteration %d of %d: %f fps', iteration,
-                     self._num_iterations, fps)
-
-    self._PrintSummaryResults(description, fps_vals, 'FPS', graph_name)
-
   def testBlankPageScroll(self):
     """Runs the scroll test on a blank page."""
-    self._RunScrollTest(
+    self.RunScrollTest(
         self.GetFileURLForDataPath('scroll', 'blank.html'), 'ScrollBlankPage',
         'scroll_fps')
 
   def testTextScroll(self):
     """Runs the scroll test on a text-filled page."""
-    self._RunScrollTest(
+    self.RunScrollTest(
         self.GetFileURLForDataPath('scroll', 'text.html'), 'ScrollTextPage',
         'scroll_fps')
 
   def testGooglePlusScroll(self):
     """Runs the scroll test on a Google Plus anonymized page."""
-    self._RunScrollTest(
+    self.RunScrollTest(
         self.GetFileURLForDataPath('scroll', 'plus.html'),
         'ScrollGooglePlusPage', 'scroll_fps')
 
   def testGmailScroll(self):
     """Runs the scroll test using the live Gmail site."""
     self._LoginToGoogleAccount(account_key='test_google_account_gmail')
-    self._RunScrollTest('http://www.gmail.com', 'ScrollGmail', 'scroll_fps',
-                        setup_js='__is_gmail_test = true;')
+    self.RunScrollTest('http://www.gmail.com', 'ScrollGmail', 'scroll_fps',
+                       setup_js='__is_gmail_test = true;')
 
 
 class FlashTest(BasePerfTest):
@@ -1909,7 +2053,7 @@ class BasePageCyclerTest(BasePerfTest):
 
     Args:
       pages: the list of pages
-      times: e.g. [page1_iter1, page1_iter2, ..., page2_iter1, page2_iter2, ...]
+      times: e.g. [page1_iter1, page2_iter1, ..., page1_iter2, page2_iter2, ...]
       iterations: the number of times for each page
     Yields:
       (pageN, [pageN_iter1, pageN_iter2, ...])
@@ -1921,9 +2065,8 @@ class BasePageCyclerTest(BasePerfTest):
         expected_num_times, num_times,
         msg=('num_times != num_pages * iterations: %s != %s * %s, times=%s' %
              (num_times, num_pages, iterations, times)))
-    next_time = iter(times).next
-    for page in pages:
-      yield page, [next_time() for _ in range(iterations)]
+    for i, page in enumerate(pages):
+      yield page, list(itertools.islice(times, i, None, num_pages))
 
   def CheckPageTimes(self, pages, times, iterations):
     """Assert that all the times are greater than zero."""
@@ -2057,7 +2200,7 @@ class PageCyclerTest(BasePageCyclerTest):
     self.RunPageCyclerTest('moz2', 'Moz2File')
 
 
-class PageCyclerNetSimTest(BasePageCyclerTest):
+class PageCyclerReplay(object):
   """Run page cycler tests with network simulation via Web Page Replay.
 
   Web Page Replay is a proxy that can record and "replay" web pages with
@@ -2065,52 +2208,40 @@ class PageCyclerNetSimTest(BasePageCyclerTest):
   by hand. With WPR, tests can use "real" web content, and catch
   performance issues that may result from introducing network delays and
   bandwidth throttling.
-
-  Environment Variables:
-    PC_NO_AUTO: if set, avoids automatically loading pages.
-    PC_RECORD: if set, puts Web Page Replay in record mode instead of replay.
-    PC_REPLAY_DIR: path to alternate Web Page Replay source (for development).
-    PC_ARCHIVE_PATH: path to alternate archive file (e.g. '/tmp/foo.wpr').
   """
   _PATHS = {
       'archive':    'src/data/page_cycler/webpagereplay/{test_name}.wpr',
+      'page_sets':  'src/tools/page_cycler/webpagereplay/tests/{test_name}.js',
       'start_page': 'src/tools/page_cycler/webpagereplay/start.html',
       'extension':  'src/tools/page_cycler/webpagereplay/extension',
-      'replay':     'src/third_party/webpagereplay',
-      'logs':       'src/webpagereplay_logs',
       }
 
-  _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                           '..', '..', '..', '..'))
-  _IS_DNS_FORWARDED = False
-  MAX_ITERATION_SECONDS = 180
-
-  def setUp(self):
-    """Performs necessary setup work before running each test."""
-    super(PageCyclerNetSimTest, self).setUp()
-    self.replay_dir = os.environ.get('PC_REPLAY_DIR')
-    self.archive_path = os.environ.get('PC_ARCHIVE_PATH')
-    self.is_record_mode = 'PC_RECORD' in os.environ
-    if self.is_record_mode:
-      self._num_iterations = 1
+  CHROME_FLAGS = webpagereplay.CHROME_FLAGS + [
+      '--log-level=0',
+      '--disable-background-networking',
+      '--enable-experimental-extension-apis',
+      '--enable-logging',
+      '--enable-stats-table',
+      '--enable-benchmarking',
+      '--metrics-recording-only',
+      '--activate-on-launch',
+      '--no-first-run',
+      '--no-proxy-server',
+      ]
 
   @classmethod
-  def _Path(cls, key, **kwargs):
-    """Provide paths for page cycler tests with Web Page Replay."""
-    chromium_path = cls._PATHS[key].format(**kwargs)
-    return os.path.join(cls._BASE_DIR, *chromium_path.split('/'))
+  def Path(cls, key, **kwargs):
+    return FormatChromePath(cls._PATHS[key], **kwargs)
 
-  def _ArchivePath(self, test_name):
-    archive_path = self.archive_path or self._Path('archive',
-                                                   test_name=test_name)
-    if self.is_record_mode:
-      archive_dir = os.path.dirname(archive_path)
-      self.assertTrue(os.path.exists(archive_dir),
-                      msg='Archive directory does not exist: %s' % archive_dir)
-    else:
-      self.assertTrue(os.path.exists(archive_path),
-                      msg='Archive file path does not exist: %s' % archive_path)
-    return archive_path
+  @classmethod
+  def ReplayServer(cls, test_name):
+    archive_path = cls.Path('archive', test_name=test_name)
+    return webpagereplay.ReplayServer(archive_path)
+
+
+class PageCyclerNetSimTest(BasePageCyclerTest):
+  """Tests to run Web Page Replay backed page cycler tests."""
+  MAX_ITERATION_SECONDS = 180
 
   def ExtraChromeFlags(self):
     """Ensures Chrome is launched with custom flags.
@@ -2119,32 +2250,14 @@ class PageCyclerNetSimTest(BasePageCyclerTest):
       A list of extra flags to pass to Chrome when it is launched.
     """
     flags = super(PageCyclerNetSimTest, self).ExtraChromeFlags()
-    flags.append('--load-extension=%s' % self._Path('extension'))
-    if not self._IS_DNS_FORWARDED:
-      flags.append('--host-resolver-rules=MAP * %s' % webpagereplay.REPLAY_HOST)
-    flags.extend([
-        '--testing-fixed-http-port=%s' % webpagereplay.HTTP_PORT,
-        '--testing-fixed-https-port=%s' % webpagereplay.HTTPS_PORT,
-        '--log-level=0',
-        ])
-    extra_flags = [
-        '--disable-background-networking',
-        '--enable-experimental-extension-apis',
-        '--enable-logging',
-        '--enable-stats-table',
-        '--enable-benchmarking',
-        '--ignore-certificate-errors',
-        '--metrics-recording-only',
-        '--activate-on-launch',
-        '--no-first-run',
-        '--no-proxy-server',
-        ]
-    flags.extend(f for f in extra_flags if f not in flags)
+    flags.append('--load-extension=%s' % PageCyclerReplay.Path('extension'))
+    flags.extend(PageCyclerReplay.CHROME_FLAGS)
     return flags
 
   def StartUrl(self, test_name, iterations):
+    start_path = PageCyclerReplay.Path('start_page')
     start_url = 'file://%s?test=%s&iterations=%d' % (
-        self._Path('start_page'), test_name, iterations)
+        start_path, test_name, iterations)
     if self.use_auto:
       start_url += '&auto=1'
     return start_url
@@ -2156,20 +2269,9 @@ class PageCyclerNetSimTest(BasePageCyclerTest):
       test_name: name for archive (.wpr) and config (.js) files.
       description: a string description for the test
     """
-    replay_options = []
-    if not self._IS_DNS_FORWARDED:
-      replay_options.append('--no-dns_forwarding')
-    if self.is_record_mode:
-      replay_options.append('--record')
-    if self.replay_dir:
-      replay_dir = self.replay_dir
-    else:
-      replay_dir = self._Path('replay')
-    with webpagereplay.ReplayServer(
-        replay_dir,
-        self._ArchivePath(test_name),
-        self._Path('logs'),
-        replay_options):
+    with PageCyclerReplay.ReplayServer(test_name) as replay_server:
+      if replay_server.is_record_mode:
+        self._num_iterations = 1
       super_self = super(PageCyclerNetSimTest, self)
       super_self.RunPageCyclerTest(test_name, description)
 

@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/webui/ntp/suggestions_combiner.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_source.h"
+#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -205,73 +206,32 @@ class SuggestionsSourceStub : public SuggestionsSource {
   DISALLOW_COPY_AND_ASSIGN(SuggestionsSourceStub);
 };
 
-// SuggestionsHandler stub.
-SuggestionsHandler::SuggestionsHandler()
-    : got_first_suggestions_request_(false) {
-}
-
-SuggestionsHandler::~SuggestionsHandler() {
-}
-
-void SuggestionsHandler::RegisterMessages() {
-}
-
-void SuggestionsHandler::HandleGetSuggestions(const ListValue* args) {
-}
-
-void SuggestionsHandler::OnSuggestionsReady() {
-}
-
-void SuggestionsHandler::SendPagesValue() {
-}
-
-void SuggestionsHandler::HandleBlacklistURL(const ListValue* args) {
-}
-
-void SuggestionsHandler::HandleRemoveURLsFromBlacklist(const ListValue* args) {
-}
-
-void SuggestionsHandler::HandleClearBlacklist(const ListValue* args) {
-}
-
-void SuggestionsHandler::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-}
-
-void SuggestionsHandler::BlacklistURL(const GURL& url) {
-}
-
-std::string SuggestionsHandler::GetDictionaryKeyForURL(const std::string& url) {
-  return url;
-}
-
-void SuggestionsHandler::RegisterUserPrefs(PrefService* prefs) {
-}
-
 class SuggestionsCombinerTest : public testing::Test {
  public:
   SuggestionsCombinerTest() {
   }
 
  protected:
+  Profile* profile_;
   SuggestionsHandler* suggestions_handler_;
   SuggestionsCombiner* combiner_;
 
   void Reset() {
     delete combiner_;
-    combiner_ = new SuggestionsCombiner(suggestions_handler_);
+    combiner_ = new SuggestionsCombiner(suggestions_handler_, profile_);
   }
 
  private:
   virtual void SetUp() {
+    profile_ = new TestingProfile();
     suggestions_handler_ = new SuggestionsHandler();
-    combiner_ = new SuggestionsCombiner(suggestions_handler_);
+    combiner_ = new SuggestionsCombiner(suggestions_handler_, profile_);
   }
 
   virtual void TearDown() {
     delete combiner_;
     delete suggestions_handler_;
+    delete profile_;
   }
 
   DISALLOW_COPY_AND_ASSIGN(SuggestionsCombinerTest);

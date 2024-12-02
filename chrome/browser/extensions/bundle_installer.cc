@@ -16,10 +16,12 @@
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
+#include "chrome/common/extensions/permissions/permission_set.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
@@ -255,9 +257,9 @@ void BundleInstaller::ShowPrompt() {
     return;
   }
 
-  scoped_refptr<ExtensionPermissionSet> permissions;
+  scoped_refptr<PermissionSet> permissions;
   for (size_t i = 0; i < dummy_extensions_.size(); ++i) {
-    permissions = ExtensionPermissionSet::CreateUnion(
+    permissions = PermissionSet::CreateUnion(
           permissions, dummy_extensions_[i]->required_permission_set());
   }
 
@@ -272,7 +274,7 @@ void BundleInstaller::ShowPrompt() {
       // thread hopping.
       browser = browser::FindLastActiveWithProfile(profile_);
     }
-    install_ui_.reset(new ExtensionInstallPrompt(browser));
+    install_ui_.reset(chrome::CreateExtensionInstallPromptWithBrowser(browser));
     install_ui_->ConfirmBundleInstall(this, permissions);
   }
 }

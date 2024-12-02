@@ -7,6 +7,16 @@
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/toolkit_extra_parts.h"
 #include "chrome/browser/ui/ash/ash_init.h"
+#include "ui/aura/desktop/desktop_screen.h"
+#include "ui/aura/desktop/desktop_stacking_client.h"
+#include "ui/aura/env.h"
+#include "ui/aura/single_display_manager.h"
+#include "ui/gfx/screen.h"
+
+#if defined(FILE_MANAGER_EXTENSION)
+#include "chrome/browser/ui/views/select_file_dialog_extension.h"
+#include "chrome/browser/ui/views/select_file_dialog_extension_factory.h"
+#endif
 
 ChromeBrowserMainExtraPartsAsh::ChromeBrowserMainExtraPartsAsh() {
 }
@@ -15,21 +25,30 @@ ChromeBrowserMainExtraPartsAsh::~ChromeBrowserMainExtraPartsAsh() {
 }
 
 void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
-  if (browser::ShouldOpenAshOnStartup())
-    browser::OpenAsh();
+  if (chrome::ShouldOpenAshOnStartup()) {
+    chrome::OpenAsh();
+  } else {
+    aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
+    stacking_client_.reset(new aura::DesktopStackingClient);
+    gfx::Screen::SetInstance(aura::CreateDesktopScreen());
+  }
+
+#if defined(FILE_MANAGER_EXTENSION)
+  ui::SelectFileDialog::SetFactory(new SelectFileDialogExtensionFactory);
+#endif
 }
 
 void ChromeBrowserMainExtraPartsAsh::PostProfileInit() {
 }
 
 void ChromeBrowserMainExtraPartsAsh::PostMainMessageLoopRun() {
-  browser::CloseAsh();
+  chrome::CloseAsh();
 }
 
-namespace browser {
+namespace chrome {
 
 void AddAshToolkitExtraParts(ChromeBrowserMainParts* main_parts) {
   main_parts->AddParts(new ChromeBrowserMainExtraPartsAsh());
 }
 
-}  // namespace browser
+}  // namespace chrome

@@ -37,7 +37,7 @@
 #include "crypto/nss_util.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media.h"
-#include "sandbox/src/sandbox_types.h"
+#include "sandbox/win/src/sandbox_types.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/base/win/dpi.h"
@@ -48,6 +48,7 @@
 #endif
 
 #if defined(OS_WIN)
+#include <cstring>
 #include <atlbase.h>
 #include <atlapp.h>
 #include <malloc.h>
@@ -203,8 +204,11 @@ static base::ProcessId GetBrowserPid(const CommandLine& command_line) {
     // for a few files including process_util_linux.cc.
     LOG(ERROR) << "GetBrowserPid() not implemented for Android().";
 #elif defined(OS_POSIX)
-    // On linux, we're in the zygote here; so we need the parent process' id.
-    browser_pid = base::GetParentProcessId(base::GetCurrentProcId());
+    // On linux, we're in a process forked from the zygote here; so we need the
+    // parent's parent process' id.
+    browser_pid =
+        base::GetParentProcessId(
+            base::GetParentProcessId(base::GetCurrentProcId()));
 #endif
   }
   return browser_pid;
@@ -240,7 +244,8 @@ class ContentClientInitializer {
         content_client->browser_ = &g_empty_content_browser_client.Get();
     }
 
-    if (process_type == switches::kPluginProcess) {
+    if (process_type == switches::kPluginProcess ||
+        process_type == switches::kPpapiPluginProcess) {
       if (delegate)
         content_client->plugin_ = delegate->CreateContentPluginClient();
       if (!content_client->plugin_)
@@ -332,7 +337,7 @@ int RunZygote(const MainFunctionParams& main_function_params,
   NOTREACHED() << "Unknown zygote process type: " << process_type;
   return 1;
 }
-#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 
 // Run the FooMain() for a given process type.
 // If |process_type| is empty, runs BrowserMain().
@@ -394,6 +399,9 @@ class ContentMainRunnerImpl : public ContentMainRunner {
         is_shutdown_(false),
         completed_basic_startup_(false),
         delegate_(NULL) {
+#if defined(OS_WIN)
+    memset(&sandbox_info_, 0, sizeof(sandbox_info_));
+#endif
   }
 
   ~ContentMainRunnerImpl() {

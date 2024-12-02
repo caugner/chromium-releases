@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PLUGIN_PLUGIN_CHANNEL_H_
 #define CONTENT_PLUGIN_PLUGIN_CHANNEL_H_
-#pragma once
 
 #include <vector>
 #include "base/memory/ref_counted.h"
@@ -31,7 +30,7 @@ class PluginChannel : public NPChannelBase {
   // Send a message to all renderers that the process is going to shutdown.
   static void NotifyRenderersOfPendingShutdown();
 
-  // IPC::Channel::Listener:
+  // IPC::Listener:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;

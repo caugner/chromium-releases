@@ -1,7 +1,27 @@
 [
   {
     "namespace": "choices",
-    "types": [],
+    "types": [
+      {
+        "id": "ChoiceType",
+        "type": "object",
+        "properties": {
+          "integers": {
+            "choices": [
+               {"type": "array", "items": {"type": "integer", "minimum": 0}},
+               {"type": "integer"}
+            ]
+          },
+          "strings": {
+            "choices": [
+               {"type": "array", "items": {"type": "string", "minimum": 0}},
+               {"type": "string"}
+            ],
+            "optional": true
+          }
+        }
+      }
+    ],
     "functions": [
       {
         "name": "takesIntegers",
@@ -86,6 +106,35 @@
             "parameters": [
               {
                 "name": "result",
+                "choices": [
+                   {"type": "array", "items": {"type": "integer", "minimum": 0}},
+                   {"type": "integer"}
+                 ],
+                "description": "Some integers."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "returnMultipleChoices",
+        "type": "function",
+        "description": "Gives back two values where each is an integer or a list of integers.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "firstResult",
+                "choices": [
+                   {"type": "array", "items": {"type": "integer", "minimum": 0}},
+                   {"type": "integer"}
+                 ],
+                "description": "Some integers."
+              },
+              {
+                "name": "secondResult",
                 "choices": [
                    {"type": "array", "items": {"type": "integer", "minimum": 0}},
                    {"type": "integer"}

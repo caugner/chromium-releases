@@ -4,7 +4,6 @@
 
 #ifndef CHROMEOS_DBUS_CROS_DISKS_CLIENT_H_
 #define CHROMEOS_DBUS_CROS_DISKS_CLIENT_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -46,11 +45,9 @@ enum MountError {
   MOUNT_ERROR_UNKNOWN = 1,
   MOUNT_ERROR_INTERNAL = 2,
   MOUNT_ERROR_UNKNOWN_FILESYSTEM = 101,
-  MOUNT_ERROR_UNSUPORTED_FILESYSTEM = 102,
+  MOUNT_ERROR_UNSUPPORTED_FILESYSTEM = 102,
   MOUNT_ERROR_INVALID_ARCHIVE = 201,
-  MOUNT_ERROR_LIBRARY_NOT_LOADED = 501,
   MOUNT_ERROR_NOT_AUTHENTICATED = 601,
-  MOUNT_ERROR_NETWORK_ERROR = 602,
   MOUNT_ERROR_PATH_UNMOUNTED = 901,
   // TODO(tbarzic): Add more error codes as they get added to cros-disks and
   // consider doing explicit translation from cros-disks error_types.
@@ -113,6 +110,9 @@ class DiskInfo {
   // Returns true if the device should be hidden from the file browser.
   bool is_hidden() const { return is_hidden_; }
 
+  // Returns file system uuid.
+  std::string uuid() const { return uuid_; }
+
  private:
   void InitializeFromResponse(dbus::Response* response);
 
@@ -130,6 +130,7 @@ class DiskInfo {
   uint64 total_size_in_bytes_;
   bool is_read_only_;
   bool is_hidden_;
+  std::string uuid_;
 };
 
 // A class to make the actual DBus calls for cros-disks service.

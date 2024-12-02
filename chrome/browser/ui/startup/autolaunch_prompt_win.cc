@@ -9,12 +9,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/first_run/first_run.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -25,7 +26,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -33,7 +33,7 @@ using content::BrowserThread;
 
 namespace {
 
-static const int kMaxInfobarShown = 5;
+const int kMaxInfobarShown = 5;
 
 // The delegate for the infobar shown when Chrome was auto-launched.
 class AutolaunchInfoBarDelegate : public ConfirmInfoBarDelegate {
@@ -154,7 +154,7 @@ void CheckAutoLaunchCallback(Profile* profile) {
   // We must not use GetLastActive here because this is at Chrome startup and
   // no window might have been made active yet. We'll settle for any window.
   Browser* browser = browser::FindAnyBrowser(profile, true);
-  TabContents* tab = browser->GetActiveTabContents();
+  TabContents* tab = chrome::GetActiveTabContents(browser);
 
   // Don't show the info-bar if there are already info-bars showing.
   InfoBarTabHelper* infobar_helper = tab->infobar_tab_helper();
@@ -168,7 +168,7 @@ void CheckAutoLaunchCallback(Profile* profile) {
 
 }  // namespace
 
-namespace browser {
+namespace chrome {
 
 bool ShowAutolaunchPrompt(Profile* profile) {
   if (!auto_launch_trial::IsInAutoLaunchGroup())
@@ -203,5 +203,4 @@ void RegisterAutolaunchPrefs(PrefService* prefs) {
       prefs::kShownAutoLaunchInfobar, 0, PrefService::UNSYNCABLE_PREF);
 }
 
-}  // namespace browser
-
+}  // namespace chrome

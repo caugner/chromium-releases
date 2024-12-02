@@ -40,7 +40,7 @@ class CONTENT_EXPORT GamepadProvider :
   void Resume();
 
   // base::SystemMonitor::DevicesChangedObserver implementation.
-  virtual void OnDevicesChanged() OVERRIDE;
+  virtual void OnDevicesChanged(base::SystemMonitor::DeviceType type) OVERRIDE;
 
  private:
 
@@ -64,6 +64,11 @@ class CONTENT_EXPORT GamepadProvider :
   // must be guarded by is_paused_lock_.
   base::Lock is_paused_lock_;
   bool is_paused_;
+
+  // Keep track of when a polling task is schedlued, so as to prevent us from
+  // accidentally scheduling more than one at any time, when rapidly toggling
+  // |is_paused_|.
+  bool have_scheduled_do_poll_;
 
   // Updated based on notification from SystemMonitor when the system devices
   // have been updated, and this notification is passed on to the data fetcher

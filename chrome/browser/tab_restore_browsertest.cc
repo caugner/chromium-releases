@@ -9,7 +9,9 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -62,11 +64,11 @@ class TabRestoreTest : public InProcessBrowserTest {
   }
 
   void CloseTab(int index) {
-    content::WebContents* new_tab = browser()->GetWebContentsAt(index);
-    ui_test_utils::WindowedNotificationObserver tab_close_observer(
-          content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-          content::NotificationService::AllSources());
-    browser()->CloseTabContents(new_tab);
+    content::WebContents* new_tab = chrome::GetWebContentsAt(browser(), index);
+    content::WindowedNotificationObserver tab_close_observer(
+        content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+        content::NotificationService::AllSources());
+    chrome::CloseWebContents(browser(), new_tab);
     tab_close_observer.Wait();
   }
 
@@ -93,13 +95,13 @@ class TabRestoreTest : public InProcessBrowserTest {
     ASSERT_GT(tab_count, 0);
 
     // Restore the tab.
-    ui_test_utils::WindowedNotificationObserver tab_added_observer(
-      chrome::NOTIFICATION_TAB_PARENTED,
-      content::NotificationService::AllSources());
-    ui_test_utils::WindowedNotificationObserver tab_loaded_observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::NotificationService::AllSources());
-    browser->RestoreTab();
+    content::WindowedNotificationObserver tab_added_observer(
+        chrome::NOTIFICATION_TAB_PARENTED,
+        content::NotificationService::AllSources());
+    content::WindowedNotificationObserver tab_loaded_observer(
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
+    chrome::RestoreTab(browser);
     tab_added_observer.Wait();
     tab_loaded_observer.Wait();
 
@@ -119,10 +121,10 @@ class TabRestoreTest : public InProcessBrowserTest {
   }
 
   void GoBack(Browser* browser) {
-    ui_test_utils::WindowedNotificationObserver observer(
+    content::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
         content::NotificationService::AllSources());
-    browser->GoBack(CURRENT_TAB);
+    chrome::GoBack(browser, CURRENT_TAB);
     observer.Wait();
   }
 
@@ -132,7 +134,7 @@ class TabRestoreTest : public InProcessBrowserTest {
         !controller->GetWebContents()->IsLoading())
       return;
 
-    ui_test_utils::WindowedNotificationObserver observer(
+    content::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
         content::Source<content::NavigationController>(controller));
     observer.Wait();
@@ -160,7 +162,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, Basic) {
   // And make sure everything looks right.
   EXPECT_EQ(starting_tab_count + 1, browser()->tab_count());
   EXPECT_EQ(closed_tab_index, browser()->active_index());
-  EXPECT_EQ(url1_, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(url1_, chrome::GetActiveWebContents(browser())->GetURL());
 }
 
 // Close a tab not at the end of the current window, then restore it. The tab
@@ -179,7 +181,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, MiddleTab) {
   // And make sure everything looks right.
   EXPECT_EQ(starting_tab_count + 3, browser()->tab_count());
   EXPECT_EQ(closed_tab_index, browser()->active_index());
-  EXPECT_EQ(url1_, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(url1_, chrome::GetActiveWebContents(browser())->GetURL());
 }
 
 // Close a tab, switch windows, then restore the tab. The tab should be in its
@@ -205,7 +207,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreToDifferentWindow) {
   // And make sure everything looks right.
   EXPECT_EQ(starting_tab_count + 3, browser()->tab_count());
   EXPECT_EQ(closed_tab_index, browser()->active_index());
-  EXPECT_EQ(url1_, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(url1_, chrome::GetActiveWebContents(browser())->GetURL());
 }
 
 // Close a tab, open a new window, close the first window, then restore the
@@ -223,7 +225,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, FLAKY_BasicRestoreFromClosedWindow) {
   EXPECT_EQ(2u, BrowserList::size());
 
   // Close the final tab in the first browser.
-  ui_test_utils::WindowedNotificationObserver window_observer(
+  content::WindowedNotificationObserver window_observer(
       chrome::NOTIFICATION_BROWSER_CLOSED,
       content::NotificationService::AllSources());
   CloseTab(0);
@@ -233,7 +235,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, FLAKY_BasicRestoreFromClosedWindow) {
 
   // Tab should be in a new window.
   Browser* browser = GetBrowser(1);
-  content::WebContents* web_contents = browser->GetActiveWebContents();
+  content::WebContents* web_contents = chrome::GetActiveWebContents(browser);
   // And make sure the URLs matches.
   EXPECT_EQ(url2_, web_contents->GetURL());
   GoBack(browser);
@@ -256,7 +258,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, DontLoadRestoredTab) {
   ASSERT_EQ(browser()->tab_count(), starting_tab_count + 2);
 
   // Make sure that there's nothing else to restore.
-  ASSERT_FALSE(browser()->command_updater()->IsCommandEnabled(IDC_RESTORE_TAB));
+  ASSERT_FALSE(chrome::CanRestoreTab(browser()));
 }
 
 // Open a window with multiple tabs, close a tab, then close the window.
@@ -277,10 +279,10 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindowAndTab) {
   EXPECT_EQ(2u, BrowserList::size());
 
   // Close the first browser.
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_BROWSER_CLOSED,
       content::NotificationService::AllSources());
-  browser()->CloseWindow();
+  chrome::CloseWindow(browser());
   observer.Wait();
   EXPECT_EQ(1u, BrowserList::size());
 
@@ -293,7 +295,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindowAndTab) {
   // Restore the closed tab.
   ASSERT_NO_FATAL_FAILURE(RestoreTab(1, closed_tab_index));
   EXPECT_EQ(starting_tab_count + 3, browser->tab_count());
-  EXPECT_EQ(url1_, browser->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(url1_, chrome::GetActiveWebContents(browser)->GetURL());
 }
 
 // Open a window with two tabs, close both (closing the window), then restore
@@ -318,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreIntoSameWindow) {
     CloseTab(0);
 
   // Close the last tab, closing the browser.
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_BROWSER_CLOSED,
       content::NotificationService::AllSources());
   CloseTab(0);
@@ -329,12 +331,12 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreIntoSameWindow) {
   ASSERT_NO_FATAL_FAILURE(RestoreTab(1, 0));
   Browser* browser = GetBrowser(1);
   EXPECT_EQ(1, browser->tab_count());
-  EXPECT_EQ(url2_, browser->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(url2_, chrome::GetActiveWebContents(browser)->GetURL());
 
   // Restore the next-to-last-closed tab into the same window.
   ASSERT_NO_FATAL_FAILURE(RestoreTab(1, 0));
   EXPECT_EQ(2, browser->tab_count());
-  EXPECT_EQ(url1_, browser->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(url1_, chrome::GetActiveWebContents(browser)->GetURL());
 }
 
 // Tests that a duplicate history entry is not created when we restore a page
@@ -353,8 +355,9 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWithExistingSiteInstance) {
   EXPECT_EQ(++tab_count, browser()->tab_count());
 
   // Navigate to another same-site URL.
-  content::WebContents* tab = browser()->GetWebContentsAt(tab_count - 1);
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WebContents* tab =
+      chrome::GetWebContentsAt(browser(), tab_count - 1);
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
   static_cast<content::WebContentsDelegate*>(browser())->OpenURLFromTab(
@@ -377,9 +380,9 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWithExistingSiteInstance) {
   ASSERT_NO_FATAL_FAILURE(RestoreTab(0, tab_count - 1));
 
   // And make sure the URLs match.
-  EXPECT_EQ(http_url2, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(http_url2, chrome::GetActiveWebContents(browser())->GetURL());
   GoBack(browser());
-  EXPECT_EQ(http_url1, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(http_url1, chrome::GetActiveWebContents(browser())->GetURL());
 }
 
 // Tests that the SiteInstances used for entries in a restored tab's history
@@ -425,17 +428,17 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest,
   ASSERT_NO_FATAL_FAILURE(RestoreTab(0, tab_count - 1));
 
   // And make sure the URLs match.
-  EXPECT_EQ(url1_, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(url1_, chrome::GetActiveWebContents(browser())->GetURL());
   GoBack(browser());
-  EXPECT_EQ(http_url1, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_EQ(http_url1, chrome::GetActiveWebContents(browser())->GetURL());
 
   // Navigating to a new URL should clear the forward list, because the max
   // page ID of the renderer should have been updated when we restored the tab.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), http_url2, CURRENT_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
-  EXPECT_FALSE(browser()->CanGoForward());
-  EXPECT_EQ(http_url2, browser()->GetActiveWebContents()->GetURL());
+  EXPECT_FALSE(chrome::CanGoForward(browser()));
+  EXPECT_EQ(http_url2, chrome::GetActiveWebContents(browser())->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindow) {
@@ -456,21 +459,21 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindow) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // Close the window.
-  ui_test_utils::WindowedNotificationObserver close_window_observer(
+  content::WindowedNotificationObserver close_window_observer(
       chrome::NOTIFICATION_BROWSER_CLOSED,
       content::NotificationService::AllSources());
-  browser()->CloseWindow();
+  chrome::CloseWindow(browser());
   close_window_observer.Wait();
   EXPECT_EQ(window_count - 1, BrowserList::size());
 
   // Restore the window.
-  ui_test_utils::WindowedNotificationObserver open_window_observer(
+  content::WindowedNotificationObserver open_window_observer(
       chrome::NOTIFICATION_BROWSER_OPENED,
       content::NotificationService::AllSources());
-  ui_test_utils::WindowedNotificationObserver load_stop_observer(
+  content::WindowedNotificationObserver load_stop_observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
-  (*BrowserList::begin())->RestoreTab();
+  chrome::RestoreTab(*BrowserList::begin());
   open_window_observer.Wait();
   EXPECT_EQ(window_count, BrowserList::size());
 
@@ -479,11 +482,11 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindow) {
   load_stop_observer.Wait();
 
   content::WebContents* restored_tab =
-      browser->GetWebContentsAt(initial_tab_count);
+      chrome::GetWebContentsAt(browser, initial_tab_count);
   EnsureTabFinishedRestoring(restored_tab);
   EXPECT_EQ(url1_, restored_tab->GetURL());
 
-  restored_tab = browser->GetWebContentsAt(initial_tab_count + 1);
+  restored_tab = chrome::GetWebContentsAt(browser, initial_tab_count + 1);
   EnsureTabFinishedRestoring(restored_tab);
   EXPECT_EQ(url2_, restored_tab->GetURL());
 }
@@ -501,7 +504,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreTabWithSpecialURL) {
 
   // Restore the closed tab.
   ASSERT_NO_FATAL_FAILURE(RestoreTab(0, 1));
-  TabContents* tab = browser()->GetTabContentsAt(1);
+  TabContents* tab = chrome::GetTabContentsAt(browser(), 1);
   EnsureTabFinishedRestoring(tab->web_contents());
 
   // See if content is as expected.
@@ -530,7 +533,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreTabWithSpecialURLOnBack) {
 
   // Restore the closed tab.
   ASSERT_NO_FATAL_FAILURE(RestoreTab(0, 1));
-  TabContents* tab = browser()->GetTabContentsAt(1);
+  TabContents* tab = chrome::GetTabContentsAt(browser(), 1);
   EnsureTabFinishedRestoring(tab->web_contents());
   ASSERT_EQ(http_url, tab->web_contents()->GetURL());
 

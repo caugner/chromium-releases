@@ -29,15 +29,6 @@ const char kBrowserAssertTest[]             = "assert-test";
 // Causes the browser process to crash on startup.
 const char kBrowserCrashTest[]              = "crash-test";
 
-// Browser plugin control name
-const char kBrowserPlugin[]                 = "browser-plugin";
-
-// Disable the plugin entirely
-const char kBrowserPluginDisabled[]         = "disabled";
-
-// Enable the plugin in all cases
-const char kBrowserPluginEnabled[]          = "enabled";
-
 // Path to the exe to run for the renderer and plugin subprocesses.
 const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 
@@ -92,8 +83,13 @@ const char kDisableDesktopNotifications[]   = "disable-desktop-notifications";
 // Disables device orientation events.
 const char kDisableDeviceOrientation[]      = "disable-device-orientation";
 
+#if defined(OS_ANDROID)
+// WebGL is disabled by default on Android.
+const char kEnableExperimentalWebGL[]       = "enable-webgl";
+#else
 // Disable experimental WebGL support.
 const char kDisableExperimentalWebGL[]      = "disable-webgl";
+#endif
 
 // Blacklist the GPU for accelerated compositing.
 const char kBlacklistAcceleratedCompositing[] =
@@ -108,6 +104,9 @@ const char kDisableFileSystem[]             = "disable-file-system";
 // Disable 3D inside of flapper.
 const char kDisableFlash3d[]                = "disable-flash-3d";
 
+// Disable using 3D to present fullscreen flash
+const char kDisableFlashFullscreen3d[]      = "disable-flash-fullscreen-3d";
+
 // Disable Stage3D inside of flapper.
 const char kDisableFlashStage3d[]           = "disable-flash-stage3d";
 
@@ -119,7 +118,7 @@ const char kDisableGLMultisampling[]        = "disable-gl-multisampling";
 
 // Do not launch the GPU process shortly after browser process launch. Instead
 // launch it when it is first needed.
-const char kDisableGpuProcessPrelaunch[]    = "diasable-gpu-process-prelaunch";
+const char kDisableGpuProcessPrelaunch[]    = "disable-gpu-process-prelaunch";
 
 // Disable the GPU process sandbox.
 const char kDisableGpuSandbox[]             = "disable-gpu-sandbox";
@@ -138,10 +137,6 @@ const char kDisableHangMonitor[]            = "disable-hang-monitor";
 // Disable the use of an ImageTransportSurface. This means the GPU process
 // will present the rendered page rather than the browser process.
 const char kDisableImageTransportSurface[]  = "disable-image-transport-surface";
-
-// Disables HTML5 Forms interactive validation.
-const char kDisableInteractiveFormValidation[] =
-    "disable-interactive-form-validation";
 
 // Disables GPU hardware acceleration.  If software renderer is not in place,
 // then the GPU process won't launch.
@@ -170,8 +165,8 @@ const char kDisableLogging[]                = "disable-logging";
 // Prevent plugins from running.
 const char kDisablePlugins[]                = "disable-plugins";
 
-// Disable pop-up blocking.
-const char kDisablePopupBlocking[]          = "disable-popup-blocking";
+// Disable the JavaScript Pointer Lock API.
+const char kDisablePointerLock[]            = "disable-pointer-lock";
 
 // Disables remote web font support. SVG font should always work whether this
 // option is specified or not.
@@ -207,11 +202,23 @@ const char kDisableSpeechInput[]            = "disable-speech-input";
 // Enables scripted speech api.
 const char kEnableScriptedSpeech[]          = "enable-scripted-speech";
 
+// TODO(primiano): Remove the two switches below when the URL becomes public.
+// Specifies the webservice URL for continuous speech recognition.
+const char kSpeechRecognitionWebserviceURL[] = "speech-service";
+
+// Specifies the request key for the continuous speech recognition webservice.
+const char kSpeechRecognitionWebserviceKey[] = "speech-service-key";
+
 // Disables animation on the compositor thread.
 const char kDisableThreadedAnimation[]      = "disable-threaded-animation";
 
+#if defined(OS_ANDROID)
+// Enable web audio API.
+const char kEnableWebAudio[]                = "enable-webaudio";
+#else
 // Disable web audio API.
 const char kDisableWebAudio[]               = "disable-webaudio";
+#endif
 
 // Don't enforce the same-origin policy. (Used by people testing their sites.)
 const char kDisableWebSecurity[]            = "disable-web-security";
@@ -235,6 +242,9 @@ const char kDomAutomationController[]       = "dom-automation";
 // Enable hardware accelerated page painting.
 const char kEnableAcceleratedPainting[]     = "enable-accelerated-painting";
 
+// Enables the hardware acceleration of plugins.
+const char kEnableAcceleratedPlugins[]      = "enable-accelerated-plugins";
+
 // Enable gpu-accelerated SVG/W3C filters.
 const char kEnableAcceleratedFilters[]      = "enable-accelerated-filters";
 
@@ -250,6 +260,9 @@ const char kEnableCssRegions[]              = "enable-css-regions";
 
 // Enables CSS3 custom filters
 const char kEnableCssShaders[]              = "enable-css-shaders";
+
+// Enables CSS variables
+const char kEnableCssVariables[]            = "enable-css-variables";
 
 // Enable deferred 2d canvas rendering.
 const char kEnableDeferred2dCanvas[]        = "enable-deferred-2d-canvas";
@@ -275,9 +288,6 @@ const char kDisableFullScreen[]             = "disable-fullscreen";
 // Enable the JavaScript Pointer Lock API.
 const char kEnablePointerLock[]             = "enable-pointer-lock";
 
-// Enable the Gamepad API
-const char kEnableGamepad[]                 = "enable-gamepad";
-
 // Enables the GPU benchmarking extension
 const char kEnableGpuBenchmarking[]         = "enable-gpu-benchmarking";
 
@@ -297,11 +307,12 @@ const char kEnablePeerConnection[]          = "enable-peer-connection";
 // assumed to be sRGB.
 const char kEnableMonitorProfile[]          = "enable-monitor-profile";
 
-// Enables TLS domain bound certificate extension.
-const char kEnableOriginBoundCerts[]  = "enable-origin-bound-certs";
-
 // Enables partial swaps in the WK compositor on platforms that support it.
 const char kEnablePartialSwap[]             = "enable-partial-swap";
+
+// Enables UI releasing handle to front surface for background tabs on platforms
+// that support it.
+const char kEnableUIReleaseFrontSurface[] = "enable-ui-release-front-surface";
 
 // Enables touch-screen pinch gestures.
 const char kEnablePinch[]                   = "enable-pinch";
@@ -317,6 +328,9 @@ const char kEnablePrivilegedWebGLExtensions[] =
 // Aggressively free GPU command buffers belonging to hidden tabs.
 const char kEnablePruneGpuCommandBuffers[] =
     "enable-prune-gpu-command-buffers";
+
+// Enable renderer side mixing and low latency audio path for media elements.
+const char kEnableRendererSideMixing[] = "enable-renderer-side-mixing";
 
 // Enables TLS cached info extension.
 const char kEnableSSLCachedInfo[]  = "enable-ssl-cached-info";
@@ -360,8 +374,9 @@ const char kDisableThreadedCompositing[]     = "disable-threaded-compositing";
 // SYN packet.
 const char kEnableTcpFastOpen[]             = "enable-tcp-fastopen";
 
-// Enables hardware acceleration of video decode, where available.
-const char kEnableAcceleratedVideoDecode[] = "enable-accelerated-video-decode";
+// Disables hardware acceleration of video decode, where available.
+const char kDisableAcceleratedVideoDecode[] =
+    "disable-accelerated-video-decode";
 
 // Enables support for video tracks. Current implementation is
 // incomplete and this flag is used for development and testing.
@@ -408,6 +423,9 @@ const char kForceRendererAccessibility[]    = "force-renderer-accessibility";
 // Passes gpu device_id from browser process to GPU process.
 const char kGpuDeviceID[]                   = "gpu-device-id";
 
+// Passes gpu driver_vendor from browser process to GPU process.
+const char kGpuDriverVendor[]               = "gpu-driver-vendor";
+
 // Passes gpu driver_version from browser process to GPU process.
 const char kGpuDriverVersion[]              = "gpu-driver-version";
 
@@ -423,6 +441,10 @@ const char kGpuStartupDialog[]              = "gpu-startup-dialog";
 
 // Passes gpu vendor_id from browser process to GPU process.
 const char kGpuVendorID[]                   = "gpu-vendor-id";
+
+// Used in conjunction with kRendererProcess. This causes the process
+// to run as a guest renderer instead of a regular renderer.
+const char kGuestRenderer[]                 = "guest-renderer";
 
 // Run the GPU process as a thread in the browser process.
 const char kInProcessGPU[]                  = "in-process-gpu";
@@ -476,14 +498,6 @@ const char kPluginStartupDialog[]           = "plugin-startup-dialog";
 // Argument to the process type that indicates a PPAPI broker process type.
 const char kPpapiBrokerProcess[]            = "ppapi-broker";
 
-// Use the PPAPI (Pepper) Flash found at the given path.
-const char kPpapiFlashPath[]                = "ppapi-flash-path";
-
-// Report the given version for the PPAPI (Pepper) Flash. The version should be
-// numbers separated by '.'s (e.g., "12.3.456.78"). If not specified, it
-// defaults to "10.2.999.999".
-const char kPpapiFlashVersion[]             = "ppapi-flash-version";
-
 // Runs PPAPI (Pepper) plugins out-of-process.
 const char kPpapiOutOfProcess[]             = "ppapi-out-of-process";
 
@@ -521,11 +535,6 @@ const char kRemoteDebuggingPort[]           = "remote-debugging-port";
 // Causes the renderer process to throw an assertion on launch.
 const char kRendererAssertTest[]            = "renderer-assert-test";
 
-#if defined(OS_POSIX)
-// Causes the renderer process to cleanly exit via calling exit().
-const char kRendererCleanExit[]             = "renderer-clean-exit";
-#endif
-
 // On POSIX only: the contents of this flag are prepended to the renderer
 // command line. Useful values might be "valgrind" or "xterm -e gdb --args".
 const char kRendererCmdPrefix[]             = "renderer-cmd-prefix";
@@ -558,6 +567,11 @@ const char kShowFPSCounter[]                = "show-fps-counter";
 // Visibly render a border around paint rects in the web page to help debug
 // and study painting behavior.
 const char kShowPaintRects[]                = "show-paint-rects";
+
+// Map mouse input events into touch gesture events.  Useful for debugging touch
+// gestures without needing a touchscreen.
+const char kSimulateTouchScreenWithMouse[]  =
+    "simulate-touch-screen-with-mouse";
 
 // Runs the renderer and plugins in the same process as the browser
 const char kSingleProcess[]                 = "single-process";
@@ -641,6 +655,22 @@ const char kZygoteProcess[]                 = "zygote";
 // Enables moving cursor by word in visual order.
 const char kEnableVisualWordMovement[]      = "enable-visual-word-movement";
 
+#if defined(OS_ANDROID)
+// Set when Chromium should use a mobile user agent.
+const char kUseMobileUserAgent[] = "use-mobile-user-agent";
+// Omnibus flag setting an Android graphics mode.  May be:
+//   "basic" (untiled software path)
+//   "compositor" (hardware-accelerated compositing),
+const char kGraphicsMode[]                  = "graphics-mode";
+const char kGraphicsModeValueBasic[]        = "basic";
+const char kGraphicsModeValueCompositor[]   = "compositor";
+#endif
+
+#if defined(OS_POSIX)
+// Causes the child processes to cleanly exit via calling exit().
+const char kChildCleanExit[]                = "child-clean-exit";
+#endif
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 // Specify the amount the trackpad should scroll by.
 const char kScrollPixels[]                  = "scroll-pixels";
@@ -677,6 +707,9 @@ const char kDefaultTileHeight[]             = "default-tile-height";
 const char kMaxUntiledLayerWidth[]          = "max-untiled-layer-width";
 const char kMaxUntiledLayerHeight[]         = "max-untiled-layer-height";
 
-const char kFixedPositionCreatesStackingContext[]
-    = "fixed-position-creates-stacking-context";
+const char kEnableFixedPositionCreatesStackingContext[]
+    = "enable-fixed-position-creates-stacking-context";
+const char kDisableFixedPositionCreatesStackingContext[]
+    = "disable-fixed-position-creates-stacking-context";
+
 }  // namespace switches

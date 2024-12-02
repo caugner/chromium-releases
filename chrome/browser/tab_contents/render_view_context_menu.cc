@@ -18,7 +18,6 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
@@ -49,6 +48,7 @@
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
@@ -107,6 +107,8 @@ using content::SSLStatus;
 using content::UserMetricsAction;
 using content::WebContents;
 using extensions::Extension;
+using extensions::MenuItem;
+using extensions::MenuManager;
 
 namespace {
 
@@ -116,7 +118,7 @@ namespace {
 WindowOpenDisposition ForceNewTabDispositionFromEventFlags(
     int event_flags) {
   WindowOpenDisposition disposition =
-      browser::DispositionFromEventFlags(event_flags);
+      chrome::DispositionFromEventFlags(event_flags);
   return disposition == CURRENT_TAB ? NEW_FOREGROUND_TAB : disposition;
 }
 
@@ -281,37 +283,37 @@ static bool ExtensionPatternMatch(const URLPatternSet& patterns,
 // static
 bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
     const content::ContextMenuParams& params,
-    ExtensionMenuItem::ContextList contexts,
+    MenuItem::ContextList contexts,
     const URLPatternSet& target_url_patterns) {
   bool has_link = !params.link_url.is_empty();
   bool has_selection = !params.selection_text.empty();
   bool in_frame = !params.frame_url.is_empty();
 
-  if (contexts.Contains(ExtensionMenuItem::ALL) ||
-      (has_selection && contexts.Contains(ExtensionMenuItem::SELECTION)) ||
-      (params.is_editable && contexts.Contains(ExtensionMenuItem::EDITABLE)) ||
-      (in_frame && contexts.Contains(ExtensionMenuItem::FRAME)))
+  if (contexts.Contains(MenuItem::ALL) ||
+      (has_selection && contexts.Contains(MenuItem::SELECTION)) ||
+      (params.is_editable && contexts.Contains(MenuItem::EDITABLE)) ||
+      (in_frame && contexts.Contains(MenuItem::FRAME)))
     return true;
 
-  if (has_link && contexts.Contains(ExtensionMenuItem::LINK) &&
+  if (has_link && contexts.Contains(MenuItem::LINK) &&
       ExtensionPatternMatch(target_url_patterns, params.link_url))
     return true;
 
   switch (params.media_type) {
     case WebContextMenuData::MediaTypeImage:
-      if (contexts.Contains(ExtensionMenuItem::IMAGE) &&
+      if (contexts.Contains(MenuItem::IMAGE) &&
           ExtensionPatternMatch(target_url_patterns, params.src_url))
         return true;
       break;
 
     case WebContextMenuData::MediaTypeVideo:
-      if (contexts.Contains(ExtensionMenuItem::VIDEO) &&
+      if (contexts.Contains(MenuItem::VIDEO) &&
           ExtensionPatternMatch(target_url_patterns, params.src_url))
         return true;
       break;
 
     case WebContextMenuData::MediaTypeAudio:
-      if (contexts.Contains(ExtensionMenuItem::AUDIO) &&
+      if (contexts.Contains(MenuItem::AUDIO) &&
           ExtensionPatternMatch(target_url_patterns, params.src_url))
         return true;
       break;
@@ -325,7 +327,7 @@ bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
   // backwards compatibility).
   if (!has_link && !has_selection && !params.is_editable &&
       params.media_type == WebContextMenuData::MediaTypeNone &&
-      contexts.Contains(ExtensionMenuItem::PAGE))
+      contexts.Contains(MenuItem::PAGE))
     return true;
 
   return false;
@@ -338,15 +340,15 @@ static const GURL& GetDocumentURL(const content::ContextMenuParams& params) {
 // Given a list of items, returns the ones that match given the contents
 // of |params| and the profile.
 // static
-ExtensionMenuItem::List RenderViewContextMenu::GetRelevantExtensionItems(
-    const ExtensionMenuItem::List& items,
+MenuItem::List RenderViewContextMenu::GetRelevantExtensionItems(
+    const MenuItem::List& items,
     const content::ContextMenuParams& params,
     Profile* profile,
     bool can_cross_incognito) {
-  ExtensionMenuItem::List result;
-  for (ExtensionMenuItem::List::const_iterator i = items.begin();
+  MenuItem::List result;
+  for (MenuItem::List::const_iterator i = items.begin();
        i != items.end(); ++i) {
-    const ExtensionMenuItem* item = *i;
+    const MenuItem* item = *i;
 
     if (!ExtensionContextAndPatternMatch(params, item->contexts(),
         item->target_url_patterns()))
@@ -366,7 +368,7 @@ ExtensionMenuItem::List RenderViewContextMenu::GetRelevantExtensionItems(
 void RenderViewContextMenu::AppendExtensionItems(
     const std::string& extension_id, int* index) {
   ExtensionService* service = profile_->GetExtensionService();
-  ExtensionMenuManager* manager = service->menu_manager();
+  MenuManager* manager = service->menu_manager();
   const Extension* extension = service->GetExtensionById(extension_id, false);
   DCHECK_GE(*index, 0);
   int max_index =
@@ -375,11 +377,11 @@ void RenderViewContextMenu::AppendExtensionItems(
     return;
 
   // Find matching items.
-  const ExtensionMenuItem::List* all_items = manager->MenuItems(extension_id);
+  const MenuItem::List* all_items = manager->MenuItems(extension_id);
   if (!all_items || all_items->empty())
     return;
   bool can_cross_incognito = service->CanCrossIncognito(extension);
-  ExtensionMenuItem::List items =
+  MenuItem::List items =
       GetRelevantExtensionItems(*all_items, params_, profile_,
                                 can_cross_incognito);
   if (items.empty())
@@ -396,12 +398,12 @@ void RenderViewContextMenu::AppendExtensionItems(
   // checkbox item because we are going to put the extension icon next to it).
   // If they have more than that, we automatically push them into a submenu.
   string16 title;
-  ExtensionMenuItem::List submenu_items;
-  if (items.size() > 1 || items[0]->type() != ExtensionMenuItem::NORMAL) {
+  MenuItem::List submenu_items;
+  if (items.size() > 1 || items[0]->type() != MenuItem::NORMAL) {
     title = UTF8ToUTF16(extension->name());
     submenu_items = items;
   } else {
-    ExtensionMenuItem* item = items[0];
+    MenuItem* item = items[0];
     extension_item_map_[menu_id] = item->id();
     title = item->TitleWithReplacement(PrintableSelectionText(),
                                        kMaxExtensionItemTitleLength);
@@ -423,24 +425,24 @@ void RenderViewContextMenu::AppendExtensionItems(
 }
 
 void RenderViewContextMenu::RecursivelyAppendExtensionItems(
-    const ExtensionMenuItem::List& items,
+    const MenuItem::List& items,
     bool can_cross_incognito,
     ui::SimpleMenuModel* menu_model,
     int* index) {
   string16 selection_text = PrintableSelectionText();
-  ExtensionMenuItem::Type last_type = ExtensionMenuItem::NORMAL;
+  MenuItem::Type last_type = MenuItem::NORMAL;
   int radio_group_id = 1;
 
-  for (ExtensionMenuItem::List::const_iterator i = items.begin();
+  for (MenuItem::List::const_iterator i = items.begin();
        i != items.end(); ++i) {
-    ExtensionMenuItem* item = *i;
+    MenuItem* item = *i;
 
     // If last item was of type radio but the current one isn't, auto-insert
     // a separator.  The converse case is handled below.
-    if (last_type == ExtensionMenuItem::RADIO &&
-        item->type() != ExtensionMenuItem::RADIO) {
+    if (last_type == MenuItem::RADIO &&
+        item->type() != MenuItem::RADIO) {
       menu_model->AddSeparator();
-      last_type = ExtensionMenuItem::SEPARATOR;
+      last_type = MenuItem::SEPARATOR;
     }
 
     int menu_id = IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + (*index)++;
@@ -449,8 +451,8 @@ void RenderViewContextMenu::RecursivelyAppendExtensionItems(
     extension_item_map_[menu_id] = item->id();
     string16 title = item->TitleWithReplacement(selection_text,
                                                 kMaxExtensionItemTitleLength);
-    if (item->type() == ExtensionMenuItem::NORMAL) {
-      ExtensionMenuItem::List children =
+    if (item->type() == MenuItem::NORMAL) {
+      MenuItem::List children =
           GetRelevantExtensionItems(item->children(), params_,
                                     profile_, can_cross_incognito);
       if (children.empty()) {
@@ -462,21 +464,21 @@ void RenderViewContextMenu::RecursivelyAppendExtensionItems(
         RecursivelyAppendExtensionItems(children, can_cross_incognito,
                                         submenu, index);
       }
-    } else if (item->type() == ExtensionMenuItem::CHECKBOX) {
+    } else if (item->type() == MenuItem::CHECKBOX) {
       menu_model->AddCheckItem(menu_id, title);
-    } else if (item->type() == ExtensionMenuItem::RADIO) {
+    } else if (item->type() == MenuItem::RADIO) {
       if (i != items.begin() &&
-          last_type != ExtensionMenuItem::RADIO) {
+          last_type != MenuItem::RADIO) {
         radio_group_id++;
 
         // Auto-append a separator if needed.
-        if (last_type != ExtensionMenuItem::SEPARATOR)
+        if (last_type != MenuItem::SEPARATOR)
           menu_model->AddSeparator();
       }
 
       menu_model->AddRadioItem(menu_id, title, radio_group_id);
-    } else if (item->type() == ExtensionMenuItem::SEPARATOR) {
-      if (i != items.begin() && last_type != ExtensionMenuItem::SEPARATOR) {
+    } else if (item->type() == MenuItem::SEPARATOR) {
+      if (i != items.begin() && last_type != MenuItem::SEPARATOR) {
         menu_model->AddSeparator();
       }
     }
@@ -486,7 +488,7 @@ void RenderViewContextMenu::RecursivelyAppendExtensionItems(
 
 void RenderViewContextMenu::SetExtensionIcon(const std::string& extension_id) {
   ExtensionService* service = profile_->GetExtensionService();
-  ExtensionMenuManager* menu_manager = service->menu_manager();
+  MenuManager* menu_manager = service->menu_manager();
 
   int index = menu_model_.GetItemCount() - 1;
   DCHECK_GE(index, 0);
@@ -503,7 +505,7 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
   ExtensionService* service = profile_->GetExtensionService();
   if (!service)
     return;  // In unit-tests, we may not have an ExtensionService.
-  ExtensionMenuManager* menu_manager = service->menu_manager();
+  MenuManager* menu_manager = service->menu_manager();
 
   // Get a list of extension id's that have context menu items, and sort it by
   // the extension's name.
@@ -635,7 +637,8 @@ void RenderViewContextMenu::InitMenu() {
 }
 
 const Extension* RenderViewContextMenu::GetExtension() const {
-  ExtensionSystem* system = ExtensionSystem::Get(profile_);
+  extensions::ExtensionSystem* system =
+      extensions::ExtensionSystem::Get(profile_);
   // There is no process manager in some tests.
   if (!system->process_manager())
     return NULL;
@@ -704,6 +707,10 @@ void RenderViewContextMenu::UpdateMenuItem(int command_id,
 
 RenderViewHost* RenderViewContextMenu::GetRenderViewHost() const {
   return source_web_contents_->GetRenderViewHost();
+}
+
+WebContents* RenderViewContextMenu::GetWebContents() const {
+  return source_web_contents_;
 }
 
 Profile* RenderViewContextMenu::GetProfile() const {
@@ -1054,13 +1061,12 @@ void RenderViewContextMenu::AppendProtocolHandlerSubMenu() {
       &protocol_handler_submenu_model_);
 }
 
-ExtensionMenuItem* RenderViewContextMenu::GetExtensionMenuItem(int id) const {
-  ExtensionMenuManager* manager =
-      profile_->GetExtensionService()->menu_manager();
-  std::map<int, ExtensionMenuItem::Id>::const_iterator i =
+MenuItem* RenderViewContextMenu::GetExtensionMenuItem(int id) const {
+  MenuManager* manager = profile_->GetExtensionService()->menu_manager();
+  std::map<int, MenuItem::Id>::const_iterator i =
       extension_item_map_.find(id);
   if (i != extension_item_map_.end()) {
-    ExtensionMenuItem* item = manager->GetItemById(i->second);
+    MenuItem* item = manager->GetItemById(i->second);
     if (item)
       return item;
   }
@@ -1106,7 +1112,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
   // Extension items.
   if (id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST &&
       id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
-    ExtensionMenuItem* item = GetExtensionMenuItem(id);
+    MenuItem* item = GetExtensionMenuItem(id);
     // If this is the parent menu item, it is always enabled.
     if (!item)
       return true;
@@ -1145,7 +1151,12 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return IsDevCommandEnabled(id);
 
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO:
-      return source_web_contents_->GetController().GetActiveEntry() != NULL;
+      if (source_web_contents_->GetController().GetActiveEntry() == NULL)
+        return false;
+      // Disabled if no browser is associated (e.g. desktop notifications).
+      if (browser::FindBrowserWithWebContents(source_web_contents_) == NULL)
+        return false;
+      return true;
 
     case IDC_CONTENT_CONTEXT_TRANSLATE: {
       TabContents* tab_contents =
@@ -1323,19 +1334,19 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
              incognito_avail != IncognitoModePrefs::DISABLED;
 
     case IDC_PRINT:
-      if (g_browser_process->local_state() &&
-          !g_browser_process->local_state()->GetBoolean(
-              prefs::kPrintingEnabled)) {
-        return false;
-      }
-      return params_.media_type == WebContextMenuData::MediaTypeNone ||
-             params_.media_flags & WebContextMenuData::MediaCanPrint;
+      return profile_->GetPrefs()->GetBoolean(prefs::kPrintingEnabled) &&
+          (params_.media_type == WebContextMenuData::MediaTypeNone ||
+           params_.media_flags & WebContextMenuData::MediaCanPrint);
 
     case IDC_CONTENT_CONTEXT_SEARCHWEBFOR:
     case IDC_CONTENT_CONTEXT_GOTOURL:
     case IDC_SPELLPANEL_TOGGLE:
     case IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS:
+      return true;
     case IDC_CONTENT_CONTEXT_VIEWFRAMEINFO:
+      // Disabled if no browser is associated (e.g. desktop notifications).
+      if (browser::FindBrowserWithWebContents(source_web_contents_) == NULL)
+        return false;
       return true;
 
     case IDC_CHECK_SPELLING_WHILE_TYPING:
@@ -1412,7 +1423,7 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
   // Extension items.
   if (id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST &&
       id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
-    ExtensionMenuItem* item = GetExtensionMenuItem(id);
+    MenuItem* item = GetExtensionMenuItem(id);
     if (item)
       return item->checked();
     else
@@ -1471,9 +1482,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
   // Process extension menu items.
   if (id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST &&
       id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
-    ExtensionMenuManager* manager =
-        profile_->GetExtensionService()->menu_manager();
-    std::map<int, ExtensionMenuItem::Id>::const_iterator i =
+    MenuManager* manager = profile_->GetExtensionService()->menu_manager();
+    std::map<int, MenuItem::Id>::const_iterator i =
         extension_item_map_.find(id);
     if (i != extension_item_map_.end()) {
       manager->ExecuteCommand(profile_, source_web_contents_, params_,
@@ -1689,8 +1699,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
             TabContents::FromWebContents(source_web_contents_);
         if (!tab_contents)
           break;
-        if (g_browser_process->local_state()->GetBoolean(
-                prefs::kPrintPreviewDisabled)) {
+        if (profile_->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled)) {
           tab_contents->print_view_manager()->PrintNow();
         } else {
           tab_contents->print_view_manager()->PrintPreviewNow();
@@ -1711,9 +1720,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO: {
       NavigationController* controller = &source_web_contents_->GetController();
       NavigationEntry* nav_entry = controller->GetActiveEntry();
-      Browser* browser = browser::FindBrowserForController(controller, NULL);
-      browser->ShowPageInfo(source_web_contents_, nav_entry->GetURL(),
-                            nav_entry->GetSSL(), true);
+      Browser* browser =
+          browser::FindBrowserWithWebContents(source_web_contents_);
+      chrome::ShowPageInfo(browser, source_web_contents_, nav_entry->GetURL(),
+                           nav_entry->GetSSL(), true);
       break;
     }
 
@@ -1752,10 +1762,10 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMEINFO: {
-      Browser* browser = browser::FindBrowserForController(
-          &source_web_contents_->GetController(), NULL);
-      browser->ShowPageInfo(source_web_contents_, params_.frame_url,
-                            params_.security_info, false);
+      Browser* browser = browser::FindBrowserWithWebContents(
+          source_web_contents_);
+      chrome::ShowPageInfo(browser, source_web_contents_, params_.frame_url,
+                           params_.security_info, false);
       break;
     }
 

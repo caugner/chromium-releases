@@ -29,7 +29,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "net/base/net_errors.h"
 #include "net/base/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -100,7 +100,9 @@ string16 SSLCertAddedInfoBarDelegate::GetButtonLabel(
 
 bool SSLCertAddedInfoBarDelegate::Accept() {
   ShowCertificateViewer(
-      owner()->web_contents()->GetView()->GetTopLevelNativeWindow(), cert_);
+      owner()->web_contents(),
+      owner()->web_contents()->GetView()->GetTopLevelNativeWindow(),
+      cert_);
   return false;  // Hiding the infobar just as the dialog opens looks weird.
 }
 
@@ -193,7 +195,7 @@ void TabContentsSSLHelper::ShowClientCertificateRequestDialog(
     const net::HttpNetworkSession* network_session,
     net::SSLCertRequestInfo* cert_request_info,
     const base::Callback<void(net::X509Certificate*)>& callback) {
-  browser::ShowSSLClientCertificateSelector(
+  chrome::ShowSSLClientCertificateSelector(
       tab_contents_, network_session, cert_request_info, callback);
 }
 

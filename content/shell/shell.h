@@ -5,11 +5,11 @@
 #ifndef CONTENT_SHELL_SHELL_H_
 #define CONTENT_SHELL_SHELL_H_
 
-#pragma once
 
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_piece.h"
 #include "content/public/browser/notification_registrar.h"
@@ -24,17 +24,26 @@
 
 typedef struct _GtkToolItem GtkToolItem;
 #elif defined(OS_ANDROID)
-#include "content/shell/android/shell_view.h"
+#include "base/android/scoped_java_ref.h"
+#elif defined(USE_AURA)
+namespace views {
+class Widget;
+class ViewsDelegate;
+}
+namespace aura {
+namespace client {
+class StackingClient;
+}
+}
 #endif
 
 class GURL;
-class WebContents;
-
 namespace content {
 
 class BrowserContext;
 class ShellJavaScriptDialogCreator;
 class SiteInstance;
+class WebContents;
 
 // This represents one window of the Content Shell, i.e. all the UI including
 // buttons and url bar, as well as the web content area.
@@ -56,7 +65,7 @@ class Shell : public WebContentsDelegate,
   // This is called indirectly by the modules that need access resources.
   static base::StringPiece PlatformResourceProvider(int key);
 
-  static Shell* CreateNewWindow(content::BrowserContext* browser_context,
+  static Shell* CreateNewWindow(BrowserContext* browser_context,
                                 const GURL& url,
                                 SiteInstance* site_instance,
                                 int routing_id,
@@ -65,19 +74,55 @@ class Shell : public WebContentsDelegate,
   // Returns the Shell object corresponding to the given RenderViewHost.
   static Shell* FromRenderViewHost(RenderViewHost* rvh);
 
+  // Returns the currently open windows.
+  static std::vector<Shell*>& windows() { return windows_; }
+
   // Closes all windows and returns. This runs a message loop.
   static void CloseAllWindows();
 
   // Closes all windows and exits.
   static void PlatformExit();
 
+  // Used for content_browsertests. Called once.
+  static void SetShellCreatedCallback(
+      base::Callback<void(Shell*)> shell_created_callback);
+
   WebContents* web_contents() const { return web_contents_.get(); }
+  gfx::NativeWindow window() { return window_; }
 
 #if defined(OS_MACOSX)
   // Public to be called by an ObjC bridge object.
   void ActionPerformed(int control);
   void URLEntered(std::string url_string);
+#elif defined(OS_ANDROID)
+  // Registers the Android Java to native methods.
+  static bool Register(JNIEnv* env);
 #endif
+
+  // WebContentsDelegate
+  virtual WebContents* OpenURLFromTab(WebContents* source,
+                                      const OpenURLParams& params) OVERRIDE;
+  virtual void LoadingStateChanged(WebContents* source) OVERRIDE;
+#if defined(OS_ANDROID)
+  virtual void LoadProgressChanged(double progress) OVERRIDE;
+#endif
+  virtual void CloseContents(WebContents* source) OVERRIDE;
+  virtual void WebContentsCreated(WebContents* source_contents,
+                                  int64 source_frame_id,
+                                  const GURL& target_url,
+                                  WebContents* new_contents) OVERRIDE;
+  virtual void DidNavigateMainFramePostCommit(
+      WebContents* web_contents) OVERRIDE;
+  virtual JavaScriptDialogCreator* GetJavaScriptDialogCreator() OVERRIDE;
+#if defined(OS_MACOSX)
+  virtual void HandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+#endif
+  virtual bool AddMessageToConsole(WebContents* source,
+                                   int32 level,
+                                   const string16& message,
+                                   int32 line_no,
+                                   const string16& source_id) OVERRIDE;
 
  private:
   enum UIControl {
@@ -117,26 +162,7 @@ class Shell : public WebContentsDelegate,
 
   gfx::NativeView GetContentView();
 
-  // content::WebContentsDelegate
-  virtual void LoadingStateChanged(WebContents* source) OVERRIDE;
-  virtual void WebContentsCreated(WebContents* source_contents,
-                                  int64 source_frame_id,
-                                  const GURL& target_url,
-                                  WebContents* new_contents) OVERRIDE;
-  virtual void DidNavigateMainFramePostCommit(
-      WebContents* web_contents) OVERRIDE;
-  virtual JavaScriptDialogCreator* GetJavaScriptDialogCreator() OVERRIDE;
-#if defined(OS_MACOSX)
-  virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
-#endif
-  virtual bool AddMessageToConsole(WebContents* source,
-                                   int32 level,
-                                   const string16& message,
-                                   int32 line_no,
-                                   const string16& source_id) OVERRIDE;
-
-  // content::NotificationObserver
+  // NotificationObserver
   virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
@@ -186,12 +212,19 @@ class Shell : public WebContentsDelegate,
   int content_width_;
   int content_height_;
 #elif defined(OS_ANDROID)
-  scoped_ptr<ShellView> shell_view_;
+  base::android::ScopedJavaGlobalRef<jobject> java_object_;
+#elif defined(USE_AURA)
+  static aura::client::StackingClient* stacking_client_;
+  static views::ViewsDelegate* views_delegate_;
+
+  views::Widget* window_widget_;
 #endif
 
   // A container of all the open windows. We use a vector so we can keep track
   // of ordering.
   static std::vector<Shell*> windows_;
+
+  static base::Callback<void(Shell*)> shell_created_callback_;
 
   // True if the destructur of Shell should post a quit closure on the current
   // message loop if the destructed Shell object was the last one.

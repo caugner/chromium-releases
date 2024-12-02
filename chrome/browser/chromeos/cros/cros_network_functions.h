@@ -15,7 +15,6 @@
 #include "base/callback.h"
 #include "chrome/browser/chromeos/cros/cellular_data_plan.h"
 #include "chrome/browser/chromeos/cros/network_ip_config.h"
-#include "third_party/cros/chromeos_network.h"
 
 namespace base {
 
@@ -25,6 +24,31 @@ class Value;
 }  // namespace base
 
 namespace chromeos {
+
+// Describes whether there is an error and whether the error came from
+// the local system or from the server implementing the connect
+// method.
+enum NetworkMethodErrorType {
+  NETWORK_METHOD_ERROR_NONE = 0,
+  NETWORK_METHOD_ERROR_LOCAL = 1,
+  NETWORK_METHOD_ERROR_REMOTE = 2,
+};
+
+// Struct to represent a SMS.
+struct SMS {
+  SMS();
+  ~SMS();
+  base::Time timestamp;
+  std::string number;
+  std::string text;
+  std::string smsc;  // optional; empty if not present in message.
+  int32 validity;  // optional; -1 if not present in message.
+  int32 msgclass;  // optional; -1 if not present in message.
+};
+
+// Callback to be called when receiving a SMS.
+typedef base::Callback<void(const std::string& modem_device_path,
+                            const SMS& message)> MonitorSMSCallback;
 
 // Callback for asynchronous getters.
 typedef base::Callback<void(
@@ -69,9 +93,6 @@ struct WifiAccessPoint {
 };
 
 typedef std::vector<WifiAccessPoint> WifiAccessPointVector;
-
-// Enables/Disables Libcros network functions.
-void SetLibcrosNetworkFunctionsEnabled(bool enabled);
 
 // Activates the cellular modem specified by |service_path| with carrier
 // specified by |carrier|.
@@ -138,8 +159,7 @@ CrosNetworkWatcher* CrosMonitorCellularDataPlan(
 
 // Similar to MonitorNetworkManagerProperties for a specified network device.
 CrosNetworkWatcher* CrosMonitorSMS(const std::string& modem_device_path,
-                                   MonitorSMSCallback callback,
-                                   void* object);
+                                   MonitorSMSCallback callback);
 
 // Connects to the service with the |service_path|.
 // Service parameters such as authentication must already be configured.

@@ -33,7 +33,6 @@
         '<(DEPTH)/third_party/angle/include',
         '<(DEPTH)/third_party/angle/src',
         '<(DEPTH)/third_party/wtl/include',
-        '$(DXSDK_DIR)/include',
       ],
       'dependencies': [
         '../third_party/angle/src/build_angle.gyp:libEGL',
@@ -88,6 +87,27 @@
             '<(PRODUCT_DIR)',
           ],
         },
+      ],
+    }],
+    ['OS=="win" and branding=="Chrome"', {
+      'sources': [
+        '../third_party/amd/AmdCfxPxExt.h',
+        '../third_party/amd/amd_videocard_info_win.cc',
+      ],
+    }],
+    ['OS=="linux"', {
+      'dependencies': [
+        '../third_party/libXNVCtrl/libXNVCtrl.gyp:libXNVCtrl',
+      ],
+    }],
+    ['target_arch=="arm" and chromeos == 1', {
+      'include_dirs': [
+        '<(DEPTH)/third_party/openmax/il',
+      ],
+    }],
+    ['target_arch!="arm" and chromeos == 1', {
+      'include_dirs': [
+        '<(DEPTH)/third_party/libva',
       ],
     }],
   ],

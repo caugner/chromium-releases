@@ -4,11 +4,10 @@
 
 #ifndef ASH_SYSTEM_TRAY_SYSTEM_TRAY_ITEM_H_
 #define ASH_SYSTEM_TRAY_SYSTEM_TRAY_ITEM_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "ash/system/user/login_status.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 
@@ -17,6 +16,10 @@ class View;
 }
 
 namespace ash {
+
+namespace internal {
+class TrayItemView;
+}
 
 class ASH_EXPORT SystemTrayItem {
  public:

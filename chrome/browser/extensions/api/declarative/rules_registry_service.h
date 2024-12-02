@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_DECLARATIVE_RULES_REGISTRY_SERVICE_H__
 #define CHROME_BROWSER_EXTENSIONS_API_DECLARATIVE_RULES_REGISTRY_SERVICE_H__
-#pragma once
 
 #include <map>
 #include <string>
@@ -23,6 +22,7 @@ class NotificationSource;
 
 namespace extensions {
 class RulesRegistry;
+class RulesRegistryStorageDelegate;
 }
 
 namespace extensions {
@@ -67,6 +67,10 @@ class RulesRegistryService : public content::NotificationObserver  {
                        const content::NotificationDetails& details) OVERRIDE;
 
   RulesRegistryMap rule_registries_;
+
+  // These are weak pointers to the delegates owned by the RulesRegistry's. We
+  // keep track of them so we can tell them to do cleanup on shutdown.
+  std::vector<RulesRegistryStorageDelegate*> delegates_;
 
   content::NotificationRegistrar registrar_;
 

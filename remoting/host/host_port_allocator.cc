@@ -9,19 +9,23 @@
 #include "base/string_number_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/url_fetcher.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/host/network_settings.h"
-#include "third_party/libjingle/source/talk/base/basicpacketsocketfactory.h"
+#include "remoting/jingle_glue/chromium_socket_factory.h"
 
 namespace remoting {
 
 namespace {
 
 class HostPortAllocatorSession
-    : public cricket::HttpPortAllocatorSessionBase {
+    : public cricket::HttpPortAllocatorSessionBase,
+      public net::URLFetcherDelegate {
  public:
   HostPortAllocatorSession(
       cricket::HttpPortAllocatorBase* allocator,
+      const std::string& content_name,
       int component,
       const std::string& ice_username_fragment,
       const std::string& ice_password,
@@ -35,20 +39,19 @@ class HostPortAllocatorSession
   virtual void ConfigReady(cricket::PortConfiguration* config) OVERRIDE;
   virtual void SendSessionRequest(const std::string& host, int port) OVERRIDE;
 
- private:
-  void OnSessionRequestDone(UrlFetcher* url_fetcher,
-                            const net::URLRequestStatus& status,
-                            int response_code,
-                            const std::string& response);
+  // net::URLFetcherDelegate interface.
+  virtual void OnURLFetchComplete(const net::URLFetcher* url_fetcher) OVERRIDE;
 
+ private:
   scoped_refptr<net::URLRequestContextGetter> url_context_;
-  std::set<UrlFetcher*> url_fetchers_;
+  std::set<const net::URLFetcher*> url_fetchers_;
 
   DISALLOW_COPY_AND_ASSIGN(HostPortAllocatorSession);
 };
 
 HostPortAllocatorSession::HostPortAllocatorSession(
     cricket::HttpPortAllocatorBase* allocator,
+    const std::string& content_name,
     int component,
     const std::string& ice_username_fragment,
     const std::string& ice_password,
@@ -57,7 +60,7 @@ HostPortAllocatorSession::HostPortAllocatorSession(
     const std::string& relay,
     const scoped_refptr<net::URLRequestContextGetter>& url_context)
     : HttpPortAllocatorSessionBase(
-        allocator, component, ice_username_fragment, ice_password,
+        allocator, content_name, component, ice_username_fragment, ice_password,
         stun_hosts, relay_hosts, relay, ""),
       url_context_(url_context) {
 }
@@ -86,23 +89,25 @@ void HostPortAllocatorSession::SendSessionRequest(const std::string& host,
                                                   int port) {
   GURL url("https://" + host + ":" + base::IntToString(port) +
            GetSessionRequestUrl() + "&sn=1");
-  scoped_ptr<UrlFetcher> url_fetcher(new UrlFetcher(url, UrlFetcher::GET));
+  scoped_ptr<net::URLFetcher> url_fetcher(
+      net::URLFetcher::Create(url, net::URLFetcher::GET, this));
   url_fetcher->SetRequestContext(url_context_);
-  url_fetcher->SetHeader("X-Talk-Google-Relay-Auth", relay_token());
-  url_fetcher->SetHeader("X-Google-Relay-Auth", relay_token());
-  url_fetcher->SetHeader("X-Stream-Type", "chromoting");
-  url_fetcher->Start(base::Bind(&HostPortAllocatorSession::OnSessionRequestDone,
-                                base::Unretained(this), url_fetcher.get()));
+  url_fetcher->AddExtraRequestHeader(
+      "X-Talk-Google-Relay-Auth: " + relay_token());
+  url_fetcher->AddExtraRequestHeader("X-Google-Relay-Auth: " + relay_token());
+  url_fetcher->AddExtraRequestHeader("X-Stream-Type: chromoting");
+  url_fetcher->Start();
   url_fetchers_.insert(url_fetcher.release());
 }
 
-void HostPortAllocatorSession::OnSessionRequestDone(
-    UrlFetcher* url_fetcher,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const std::string& response) {
-  url_fetchers_.erase(url_fetcher);
-  delete url_fetcher;
+void HostPortAllocatorSession::OnURLFetchComplete(
+    const net::URLFetcher* source) {
+  int response_code = source->GetResponseCode();
+  std::string response;
+  source->GetResponseAsString(&response);
+
+  url_fetchers_.erase(source);
+  delete source;
 
   if (response_code != net::HTTP_OK) {
     LOG(WARNING) << "Received error when allocating relay session: "
@@ -123,7 +128,7 @@ scoped_ptr<HostPortAllocator> HostPortAllocator::Create(
   scoped_ptr<talk_base::NetworkManager> network_manager(
       new talk_base::BasicNetworkManager());
   scoped_ptr<talk_base::PacketSocketFactory> socket_factory(
-      new talk_base::BasicPacketSocketFactory());
+      new remoting::ChromiumPacketSocketFactory());
   scoped_ptr<HostPortAllocator> result(
       new HostPortAllocator(url_context, network_manager.Pass(),
                             socket_factory.Pass()));
@@ -162,11 +167,12 @@ HostPortAllocator::~HostPortAllocator() {
 }
 
 cricket::PortAllocatorSession* HostPortAllocator::CreateSessionInternal(
+    const std::string& content_name,
     int component,
     const std::string& ice_username_fragment,
     const std::string& ice_password) {
   return new HostPortAllocatorSession(
-      this, component, ice_username_fragment, ice_password,
+      this, content_name, component, ice_username_fragment, ice_password,
       stun_hosts(), relay_hosts(), relay_token(), url_context_);
 }
 

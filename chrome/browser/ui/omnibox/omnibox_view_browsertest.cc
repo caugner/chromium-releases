@@ -10,21 +10,23 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -156,7 +158,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   virtual void SetUpOnMainThread() {
     ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
     ASSERT_NO_FATAL_FAILURE(SetupComponents());
-    browser()->FocusLocationBar();
+    chrome::FocusLocationBar(browser());
     // Use Textfield's view id on pure views. See crbug.com/71144.
 #if defined(USE_AURA)
     location_bar_focus_view_id_ = VIEW_ID_OMNIBOX;
@@ -230,7 +232,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
         content::NotificationService::AllSources());
 
     while (!HasFailure() && browser->tab_count() != expected_tab_count)
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
 
     ASSERT_EQ(expected_tab_count, browser->tab_count());
   }
@@ -256,7 +258,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
                   content::Source<AutocompleteController>(controller));
 
     while (!HasFailure() && !controller->done())
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
 
     ASSERT_TRUE(controller->done());
   }
@@ -272,7 +274,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
       registrar.Add(this, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
                     content::Source<TemplateURLService>(model));
       model->Load();
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
     }
 
     ASSERT_TRUE(model->loaded());
@@ -298,25 +300,26 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
   void AddHistoryEntry(const TestHistoryEntry& entry, const Time& time) {
     Profile* profile = browser()->profile();
-    HistoryService* history_service =
-        profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
+    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
+        profile, Profile::EXPLICIT_ACCESS);
     ASSERT_TRUE(history_service);
 
     if (!history_service->BackendLoaded()) {
       content::NotificationRegistrar registrar;
       registrar.Add(this, chrome::NOTIFICATION_HISTORY_LOADED,
                     content::Source<Profile>(profile));
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
     }
 
-    BookmarkModel* bookmark_model = profile->GetBookmarkModel();
+    BookmarkModel* bookmark_model =
+        BookmarkModelFactory::GetForProfile(profile);
     ASSERT_TRUE(bookmark_model);
 
     if (!bookmark_model->IsLoaded()) {
       content::NotificationRegistrar registrar;
       registrar.Add(this, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
                     content::Source<Profile>(profile));
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
     }
 
     GURL url(entry.url);
@@ -334,13 +337,13 @@ class OmniboxViewTest : public InProcessBrowserTest,
       content::NotificationRegistrar registrar;
       registrar.Add(this, chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
                     content::Source<Profile>(profile));
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
       // We don't want to return until all observers have processed this
       // notification, because some (e.g. the in-memory history database) may do
       // something important.  Since we don't know where in the observer list we
       // stand, just spin the message loop once more to allow the current
       // callstack to complete.
-      ui_test_utils::RunAllPendingInMessageLoop();
+      content::RunAllPendingInMessageLoop();
     }
   }
 
@@ -391,20 +394,20 @@ class OmniboxViewTest : public InProcessBrowserTest,
     int tab_count = browser()->tab_count();
 
     // Create a new Tab.
-    browser()->NewTab();
+    chrome::NewTab(browser());
     ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count + 1));
 
     // Select the first Tab.
     ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_1, kCtrlOrCmdMask));
     ASSERT_EQ(0, browser()->active_index());
 
-    browser()->FocusLocationBar();
+    chrome::FocusLocationBar(browser());
 
     // Select the second Tab.
     ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_2, kCtrlOrCmdMask));
     ASSERT_EQ(1, browser()->active_index());
 
-    browser()->FocusLocationBar();
+    chrome::FocusLocationBar(browser());
 
     // Try ctrl-w to close a Tab.
     ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_W, kCtrlOrCmdMask));
@@ -451,7 +454,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(
         GetOmniboxViewForBrowser(popup, &omnibox_view));
-    popup->FocusLocationBar();
+    chrome::FocusLocationBar(popup);
     EXPECT_TRUE(omnibox_view->IsSelectAll());
 
 #if !defined(OS_MACOSX)
@@ -472,7 +475,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
     // Set the edit text to "Hello world".
     omnibox_view->SetUserText(ASCIIToUTF16("Hello world"));
-    popup->FocusLocationBar();
+    chrome::FocusLocationBar(popup);
     EXPECT_TRUE(omnibox_view->IsSelectAll());
 
     // Try editing the location bar text -- should be disallowed.
@@ -549,7 +552,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
   void EscapeTest() {
     ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIHistoryURL));
-    browser()->FocusLocationBar();
+    chrome::FocusLocationBar(browser());
 
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
@@ -571,7 +574,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   void DesiredTLDTest() {
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
     // Test ctrl-Enter.
@@ -583,9 +586,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(SendKeyAndWait(browser(), ui::VKEY_RETURN, ui::EF_CONTROL_DOWN,
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::Source<content::NavigationController>(
-            &browser()->GetActiveWebContents()->GetController())));
+            &chrome::GetActiveWebContents(browser())->GetController())));
 
-    GURL url = browser()->GetActiveWebContents()->GetURL();
+    GURL url = chrome::GetActiveWebContents(browser())->GetURL();
     EXPECT_STREQ(kDesiredTLDHostname, url.host().c_str());
   }
 
@@ -603,7 +606,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   void EnterToSearchTest() {
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
     // Test Enter to search.
@@ -619,12 +622,12 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(SendKeyAndWait(browser(), ui::VKEY_RETURN, 0,
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::Source<content::NavigationController>(
-            &browser()->GetActiveWebContents()->GetController())));
-    GURL url = browser()->GetActiveWebContents()->GetURL();
+            &chrome::GetActiveWebContents(browser())->GetController())));
+    GURL url = chrome::GetActiveWebContents(browser())->GetURL();
     EXPECT_STREQ(kSearchTextURL, url.spec().c_str());
 
     // Test that entering a single character then Enter performs a search.
-    browser()->FocusLocationBar();
+    chrome::FocusLocationBar(browser());
     EXPECT_TRUE(omnibox_view->IsSelectAll());
     ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchSingleCharKeys));
     ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
@@ -639,15 +642,15 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(SendKeyAndWait(browser(), ui::VKEY_RETURN, 0,
         content::NOTIFICATION_NAV_ENTRY_COMMITTED,
         content::Source<content::NavigationController>(
-            &browser()->GetActiveWebContents()->GetController())));
-    url = browser()->GetActiveWebContents()->GetURL();
+            &chrome::GetActiveWebContents(browser())->GetController())));
+    url = chrome::GetActiveWebContents(browser())->GetURL();
     EXPECT_STREQ(kSearchSingleCharURL, url.spec().c_str());
   }
 
   void EscapeToDefaultMatchTest() {
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
     // Input something to trigger inline autocomplete.
@@ -682,7 +685,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
   void BasicTextOperationsTest() {
     ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
-    browser()->FocusLocationBar();
+    chrome::FocusLocationBar(browser());
 
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
@@ -885,7 +888,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     omnibox_view->SetUserText(string16());
     ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchKeywordKeys));
     ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model->IsOpen());
     ASSERT_EQ(ASCIIToUTF16("foobar.com"), omnibox_view->GetText());
     omnibox_view->model()->OnUpOrDownKeyPressed(1);
@@ -935,7 +938,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   void NonSubstitutingKeywordTest() {
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
     Profile* profile = browser()->profile();
@@ -991,12 +994,12 @@ class OmniboxViewTest : public InProcessBrowserTest,
     model->SetDefaultSearchProvider(NULL);
 
     ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
-    browser()->FocusLocationBar();
+    chrome::FocusLocationBar(browser());
 
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
 
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
     string16 old_text = omnibox_view->GetText();
@@ -1137,7 +1140,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   void TabTraverseResultsTest() {
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
     // Input something to trigger results.
@@ -1237,10 +1240,10 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
 
     // Create a new tab.
-    browser()->NewTab();
+    chrome::NewTab(browser());
 
     // Switch back to the first tab.
-    browser()->ActivateTabAt(0, true);
+    chrome::ActivateTabAt(browser(), 0, true);
 
     // Make sure we're still in keyword mode.
     ASSERT_EQ(kSearchKeyword, UTF16ToUTF8(omnibox_view->model()->keyword()));
@@ -1249,7 +1252,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   void CtrlKeyPressedWithInlineAutocompleteTest() {
     OmniboxView* omnibox_view = NULL;
     ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-    AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+    OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
     ASSERT_TRUE(popup_model);
 
     // Input something to trigger inline autocomplete.
@@ -1281,7 +1284,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   // Move the mouse to the center of the browser window and left-click.
   void ClickBrowserWindowCenter() {
     ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(
-                    GetBrowserView()->GetScreenBounds().CenterPoint()));
+                    GetBrowserView()->GetBoundsInScreen().CenterPoint()));
     ASSERT_TRUE(ui_test_utils::SendMouseEventsSync(
                     ui_controls::LEFT, ui_controls::DOWN));
     ASSERT_TRUE(ui_test_utils::SendMouseEventsSync(
@@ -1294,7 +1297,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
   void ClickFocusViewOrigin(ui_controls::MouseButton button,
                             const gfx::Point& press_offset,
                             const gfx::Point& release_offset) {
-    gfx::Point focus_view_origin = GetFocusView()->GetScreenBounds().origin();
+    gfx::Point focus_view_origin = GetFocusView()->GetBoundsInScreen().origin();
     gfx::Point press_point = focus_view_origin;
     press_point.Offset(press_offset.x(), press_offset.y());
     ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(press_point));
@@ -1346,7 +1349,14 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, Escape) {
   EscapeTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DesiredTLD) {
+// http://crbug.com/131179
+#if defined(OS_LINUX)
+#define MAYBE_DesiredTLD DISABLED_DesiredTLD
+#else
+#define MAYBE_DesiredTLD DesiredTLD
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DesiredTLD) {
   DesiredTLDTest();
 }
 
@@ -1364,7 +1374,13 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_EnterToSearch) {
   EnterToSearchTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, EscapeToDefaultMatch) {
+// http://crbug.com/131179
+#if defined(OS_LINUX)
+#define MAYBE_EscapeToDefaultMatch DISABLED_EscapeToDefaultMatch
+#else
+#define MAYBE_EscapeToDefaultMatch EscapeToDefaultMatch
+#endif
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_EscapeToDefaultMatch) {
   EscapeToDefaultMatchTest();
 }
 
@@ -1389,7 +1405,14 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_AcceptKeywordBySpace) {
   AcceptKeywordBySpaceTest();
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
+// http://crbug.com/131179
+#if defined(OS_LINUX)
+#define MAYBE_NonSubstitutingKeywordTest DISABLED_NonSubstitutingKeywordTest
+#else
+#define MAYBE_NonSubstitutingKeywordTest NonSubstitutingKeywordTest
+#endif
+
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_NonSubstitutingKeywordTest) {
   NonSubstitutingKeywordTest();
 }
 
@@ -1457,7 +1480,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
 #if defined(TOOLKIT_GTK) || defined(USE_AURA)
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest, UndoRedo) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
-  browser()->FocusLocationBar();
+  chrome::FocusLocationBar(browser());
 
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
@@ -1564,11 +1587,18 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PrimarySelection) {
   EXPECT_EQ("Hello world", GetPrimarySelectionText());
 }
 
+// http://crbug.com/131179
+#if defined(OS_LINUX)
+#define MAYBE_PasteReplacingAll DISABLED_PasteReplacingAll
+#else
+#define MAYBE_PasteReplacingAll PasteReplacingAll
+#endif
+
 // http://crbug.com/12316
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PasteReplacingAll) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_PasteReplacingAll) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
-  AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
+  OmniboxPopupModel* popup_model = omnibox_view->model()->popup_model();
   ASSERT_TRUE(popup_model);
 
   SetClipboardText(kSearchText);
@@ -1585,7 +1615,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, PasteReplacingAll) {
 
 // TODO(derat): Enable on Windows: http://crbug.com/128556
 #if defined(USE_AURA)
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, SelectAllOnClick) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, DISABLED_SelectAllOnClick) {
   OmniboxView* omnibox_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxView(&omnibox_view));
   omnibox_view->SetUserText(ASCIIToUTF16("http://www.google.com/"));
@@ -1614,6 +1644,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, SelectAllOnClick) {
   // have the effect of re-selecting the text.
   ASSERT_NO_FATAL_FAILURE(
       ClickFocusViewOrigin(ui_controls::LEFT, kClickOffset, kClickOffset));
+  // The following expect fails starting with one of the cls (148415-148428),
+  // most likely the WebKit roll @148419.
+  // http://crbug.com/139069
   EXPECT_TRUE(omnibox_view->IsSelectAll());
   EXPECT_TRUE(GetFocusView()->HasFocus());
 

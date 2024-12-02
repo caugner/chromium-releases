@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PORT_BROWSER_RENDER_WIDGET_HOST_VIEW_PORT_H_
 #define CONTENT_PORT_BROWSER_RENDER_WIDGET_HOST_VIEW_PORT_H_
-#pragma once
 
 #include "base/callback.h"
 #include "base/process_util.h"
@@ -16,16 +15,11 @@
 #include "ui/base/range/range.h"
 #include "ui/surface/transport_dib.h"
 
-class BackingStore;
 class WebCursor;
 
 struct AccessibilityHostMsg_NotificationParams;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
-
-namespace content {
-struct NativeWebKeyboardEvent;
-}
 
 namespace webkit {
 namespace npapi {
@@ -40,6 +34,9 @@ struct WebScreenInfo;
 #endif
 
 namespace content {
+class BackingStore;
+class SmoothScrollGesture;
+struct NativeWebKeyboardEvent;
 
 // This is the larger RenderWidgetHostView interface exposed only
 // within content/ and to embedders looking to port to new platforms.
@@ -53,7 +50,7 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
 
   // Like RenderWidgetHostView::CreateViewForWidget, with cast.
   static RenderWidgetHostViewPort* CreateViewForWidget(
-      content::RenderWidgetHost* widget);
+      RenderWidgetHost* widget);
 
   // Perform all the initialization steps necessary for this object to represent
   // a popup (such as a <select> dropdown), then shows the popup at |pos|.
@@ -68,7 +65,7 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
       RenderWidgetHostView* reference_host_view) = 0;
 
   // Notifies the View that it has become visible.
-  virtual void DidBecomeSelected() = 0;
+  virtual void WasShown() = 0;
 
   // Notifies the View that it has been hidden.
   virtual void WasHidden() = 0;
@@ -147,14 +144,17 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
 
   // Copies the contents of the compositing surface into the given
   // (uninitialized) PlatformCanvas if any.
+  // The rectangle region specified with |src_subrect| is copied from the
+  // contents, scaled to |dst_size|, and written to |output|.
   // |callback| is invoked with true on success, false otherwise. |output| can
   // be initialized even on failure.
   // NOTE: |callback| is called asynchronously on Aura and synchronously on the
   // other platforms.
   virtual void CopyFromCompositingSurface(
-      const gfx::Size& size,
-      skia::PlatformCanvas* output,
-      base::Callback<void(bool)> callback) = 0;
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      const base::Callback<void(bool)>& callback,
+      skia::PlatformCanvas* output) = 0;
 
   // Called when accelerated compositing state changes.
   virtual void OnAcceleratedCompositingStateChange() = 0;
@@ -196,7 +196,7 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // not enabled, this is a no-op, so it is always safe to call.
   // Returns true if the event was handled by IME.
   virtual bool PostProcessEventForPluginIme(
-      const content::NativeWebKeyboardEvent& event) = 0;
+      const NativeWebKeyboardEvent& event) = 0;
 
   // Methods associated with GPU-accelerated plug-in instances.
   virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(
@@ -215,14 +215,11 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
       TransportDIB::Handle transport_dib) = 0;
 #endif
 
-#if defined(USE_AURA)
   virtual void AcceleratedSurfaceNew(
       int32 width_in_pixel,
       int32 height_in_pixel,
-      uint64* surface_id,
-      TransportDIB::Handle* surface_handle) = 0;
-  virtual void AcceleratedSurfaceRelease(uint64 surface_id) = 0;
-#endif
+      uint64 surface_id) {}
+  virtual void AcceleratedSurfaceRelease(uint64 surface_id) {}
 
 #if defined(TOOLKIT_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) = 0;
@@ -237,7 +234,7 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   static void GetDefaultScreenInfo(
       WebKit::WebScreenInfo* results);
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) = 0;
-  virtual gfx::Rect GetRootWindowBounds() = 0;
+  virtual gfx::Rect GetBoundsInRootWindow() = 0;
 #endif
 
   virtual gfx::GLSurfaceHandle GetCompositingSurface() = 0;
@@ -248,6 +245,11 @@ class CONTENT_EXPORT RenderWidgetHostViewPort : public RenderWidgetHostView {
   // processed (when |processed| is false) or ignored (when |processed| is true)
   virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
                                bool processed) = 0;
+
+  // Asks the view to create a smooth scroll gesture that will be used to
+  // simulate a user-initiated scroll.
+  virtual SmoothScrollGesture* CreateSmoothScrollGesture(
+      bool scroll_down, bool scroll_far) = 0;
 
   virtual void SetHasHorizontalScrollbar(bool has_horizontal_scrollbar) = 0;
   virtual void SetScrollOffsetPinning(

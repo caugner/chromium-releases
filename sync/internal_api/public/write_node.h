@@ -4,25 +4,14 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_WRITE_NODE_H_
 #define SYNC_INTERNAL_API_PUBLIC_WRITE_NODE_H_
-#pragma once
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/base_node.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-
-namespace browser_sync {
-class Cryptographer;
-class TestBookmarkModelAssociator;
-}
-
-namespace syncable {
-class Entry;
-class MutableEntry;
-}
 
 namespace sync_pb {
 class AppSpecifics;
@@ -38,9 +27,16 @@ class ThemeSpecifics;
 class TypedUrlSpecifics;
 }
 
-namespace sync_api {
+namespace syncer {
 
+class Cryptographer;
+class TestBookmarkModelAssociator;
 class WriteTransaction;
+
+namespace syncable {
+class Entry;
+class MutableEntry;
+}
 
 // WriteNode extends BaseNode to add mutation, and wraps
 // syncable::MutableEntry. A WriteTransaction is needed to create a WriteNode.
@@ -68,7 +64,7 @@ class WriteNode : public BaseNode {
   // BaseNode implementation.
   virtual InitByLookupResult InitByIdLookup(int64 id) OVERRIDE;
   virtual InitByLookupResult InitByClientTagLookup(
-      syncable::ModelType model_type,
+      ModelType model_type,
       const std::string& tag) OVERRIDE;
 
   // Create a new node with the specified parent and predecessor.  |model_type|
@@ -77,7 +73,7 @@ class WriteNode : public BaseNode {
   // to indicate that this is to be the first child.
   // |predecessor| must be a child of |new_parent| or NULL. Returns false on
   // failure.
-  bool InitByCreation(syncable::ModelType model_type,
+  bool InitByCreation(ModelType model_type,
                       const BaseNode& parent,
                       const BaseNode* predecessor);
 
@@ -88,7 +84,7 @@ class WriteNode : public BaseNode {
   // actually undelete it
   // Client unique tagged nodes must NOT be folders.
   InitUniqueByCreationResult InitUniqueByCreation(
-      syncable::ModelType model_type,
+      ModelType model_type,
       const BaseNode& parent,
       const std::string& client_tag);
 
@@ -173,14 +169,15 @@ class WriteNode : public BaseNode {
 
   virtual const BaseTransaction* GetTransaction() const OVERRIDE;
 
+  syncable::MutableEntry* GetMutableEntryForTest();
+
  private:
-  friend class browser_sync::TestBookmarkModelAssociator;
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, EncryptBookmarksWithLegacyData);
 
   void* operator new(size_t size);  // Node is meant for stack use only.
 
   // Helper to set model type. This will clear any specifics data.
-  void PutModelType(syncable::ModelType model_type);
+  void PutModelType(ModelType model_type);
 
   // Helper to set the previous node.
   bool PutPredecessor(const BaseNode* predecessor) WARN_UNUSED_RESULT;
@@ -198,6 +195,6 @@ class WriteNode : public BaseNode {
   DISALLOW_COPY_AND_ASSIGN(WriteNode);
 };
 
-}  // namespace sync_api
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_WRITE_NODE_H_

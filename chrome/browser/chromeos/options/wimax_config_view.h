@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_OPTIONS_WIMAX_CONFIG_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_OPTIONS_WIMAX_CONFIG_VIEW_H_
-#pragma once
 
 #include <string>
 
@@ -46,7 +45,6 @@ class WimaxConfigView : public ChildNetworkConfigView,
                              const views::Event& event) OVERRIDE;
 
   // ChildNetworkConfigView:
-  virtual string16 GetTitle() OVERRIDE;
   virtual views::View* GetInitiallyFocusedView() OVERRIDE;
   virtual bool CanLogin() OVERRIDE;
   virtual bool Login() OVERRIDE;

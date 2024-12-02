@@ -5,18 +5,16 @@
 
 import os
 import subprocess
-import time
-import unittest
 
 import pyauto_functional
 import pyauto
-
+import webrtc_test_base
 
 class MissingRequiredBinaryException(Exception):
   pass
 
 
-class WebRTCCallTest(pyauto.PyUITest):
+class WebRTCCallTest(webrtc_test_base.WebrtcTestBase):
   """Test we can set up a WebRTC call and disconnect it.
 
   Prerequisites: This test case must run on a machine with a webcam, either
@@ -58,7 +56,7 @@ class WebRTCCallTest(pyauto.PyUITest):
     self.assertEquals('', self.CheckErrorsAndCrashes())
 
   def _SimpleWebRtcCall(self, test_page):
-    """Tests we can call and hang up with WebRTC using ROAP/JSEP.
+    """Tests we can call and hang up with WebRTC.
 
     This test exercises pretty much the whole happy-case for the WebRTC
     JavaScript API. Currently, it exercises a normal call setup using the API
@@ -66,15 +64,18 @@ class WebRTCCallTest(pyauto.PyUITest):
     still evolving.
 
     The test will load the supplied HTML file, which in turn will load different
-    javascript files depending on if we are running ROAP or JSEP.
+    javascript files depending on which version of the signaling protocol
+    we are running.
     The supplied HTML file will be loaded in two tabs and tell the web
     pages to start up WebRTC, which will acquire video and audio devices on the
     system. This will launch a dialog in Chrome which we click past using the
     automation controller. Then, we will order both tabs to connect the server,
     which will make the two tabs aware of each other. Once that is done we order
-    one tab to call the other. We make sure that the javascript tells us that
-    the call succeeded, let it run for a while and try to hang up the call
-    after that.
+    one tab to call the other.
+
+    We make sure that the javascript tells us that the call succeeded, lets it
+    run for a while and try to hang up the call after that. We verify video is
+    playing by using the video detector.
     """
     url = self.GetFileURLForDataPath('webrtc', test_page)
     self.NavigateToURL(url)
@@ -87,8 +88,9 @@ class WebRTCCallTest(pyauto.PyUITest):
 
     self._EstablishCall(from_tab_with_index=0)
 
-    # Give the call some time to run so video flows through the system.
-    time.sleep(5)
+    self._StartDetectingVideo(tab_index=0, video_element='remote_view')
+
+    self._WaitForVideoToPlay()
 
     # The hang-up will automatically propagate to the second tab.
     self._HangUp(from_tab_with_index=0)
@@ -98,13 +100,27 @@ class WebRTCCallTest(pyauto.PyUITest):
     self._Disconnect(tab_index=1)
 
     # Ensure we didn't miss any errors.
-    self._AssertNoFailuresReceivedInTwoTabs()
-
-  def testSimpleWebRtcRoapCall(self):
-    self._SimpleWebRtcCall('webrtc_roap_test.html')
+    self._AssertNoFailures(tab_index=0)
+    self._AssertNoFailures(tab_index=1)
 
   def testSimpleWebRtcJsepCall(self):
     self._SimpleWebRtcCall('webrtc_jsep_test.html')
+
+  def testLocalPreview(self):
+    """Brings up a local preview and ensures video is playing.
+
+    This test will launch a window with a single tab and run a getUserMedia call
+    which will give us access to the webcam and microphone. Then the javascript
+    code will hook up the webcam data to the local_view video tag. We will
+    detect video in that tag using the video detector, and if we see video
+    moving the test passes.
+    """
+    url = self.GetFileURLForDataPath('webrtc', 'webrtc_jsep_test.html')
+    self.NavigateToURL(url)
+    self.assertEquals('ok-got-stream', self._GetUserMedia(tab_index=0))
+    self._StartDetectingVideo(tab_index=0, video_element='local_view')
+
+    self._WaitForVideoToPlay()
 
   def testHandlesNewGetUserMediaRequestSeparately(self):
     """Ensures WebRTC doesn't allow new requests to piggy-back on old ones."""
@@ -131,22 +147,22 @@ class WebRTCCallTest(pyauto.PyUITest):
 
     self.WaitForInfobarCount(1, tab_index=tab_index)
     self.PerformActionOnInfobar(action, infobar_index=0, tab_index=tab_index)
+    self.WaitForGetUserMediaResult(tab_index=0)
 
-    result = self.ExecuteJavascript(
-        'obtainGetUserMediaResult()', tab_index=tab_index)
-    self._AssertNoFailuresReceivedInTwoTabs()
+    result = self.GetUserMediaResult(tab_index=0)
+    self._AssertNoFailures(tab_index)
     return result
 
   def _Connect(self, user_name, tab_index):
     self.assertEquals('ok-connected', self.ExecuteJavascript(
         'connect("http://localhost:8888", "%s")' % user_name,
         tab_index=tab_index))
-    self._AssertNoFailuresReceivedInTwoTabs()
+    self._AssertNoFailures(tab_index)
 
   def _EstablishCall(self, from_tab_with_index):
     self.assertEquals('ok-call-established', self.ExecuteJavascript(
         'call()', tab_index=from_tab_with_index))
-    self._AssertNoFailuresReceivedInTwoTabs()
+    self._AssertNoFailures(from_tab_with_index)
 
     # Double-check the call reached the other side.
     self.assertEquals('yes', self.ExecuteJavascript(
@@ -156,7 +172,7 @@ class WebRTCCallTest(pyauto.PyUITest):
     self.assertEquals('ok-call-hung-up', self.ExecuteJavascript(
         'hangUp()', tab_index=from_tab_with_index))
     self._VerifyHungUp(from_tab_with_index)
-    self._AssertNoFailuresReceivedInTwoTabs()
+    self._AssertNoFailures(from_tab_with_index)
 
   def _VerifyHungUp(self, tab_index):
     self.assertEquals('no', self.ExecuteJavascript(
@@ -166,14 +182,21 @@ class WebRTCCallTest(pyauto.PyUITest):
     self.assertEquals('ok-disconnected', self.ExecuteJavascript(
         'disconnect()', tab_index=tab_index))
 
-  def _AssertNoFailuresReceivedInTwoTabs(self):
-    # Make sure both tabs' errors get reported if there is a problem.
-    tab_0_errors = self.ExecuteJavascript('getAnyTestFailures()', tab_index=0)
-    tab_1_errors = self.ExecuteJavascript('getAnyTestFailures()', tab_index=1)
+  def _StartDetectingVideo(self, tab_index, video_element):
+    self.assertEquals('ok-started', self.ExecuteJavascript(
+        'startDetection("%s", "frame_buffer", 320, 240)' % video_element,
+        tab_index=tab_index));
 
-    result = 'Tab 0: %s Tab 1: %s' % (tab_0_errors, tab_1_errors)
+  def _WaitForVideoToPlay(self):
+    video_playing = self.WaitUntil(
+        function=lambda: self.ExecuteJavascript('isVideoPlaying()'),
+        expect_retval='video-playing')
+    self.assertTrue(video_playing,
+                    msg='Timed out while trying to detect video.')
 
-    self.assertEquals('Tab 0: ok-no-errors Tab 1: ok-no-errors', result)
+  def _AssertNoFailures(self, tab_index):
+    self.assertEquals('ok-no-errors', self.ExecuteJavascript(
+        'getAnyTestFailures()', tab_index=tab_index))
 
 
 if __name__ == '__main__':

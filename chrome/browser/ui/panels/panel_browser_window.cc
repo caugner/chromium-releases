@@ -6,12 +6,13 @@
 
 #include "base/logging.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/window_sizer.h"
+#include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/gfx/rect.h"
 
@@ -129,10 +130,6 @@ BrowserWindowTesting* PanelBrowserWindow::GetBrowserWindowTesting() {
 StatusBubble* PanelBrowserWindow::GetStatusBubble() {
   // TODO(jennb): Implement. http://crbug.com/102723
   return NULL;
-}
-
-void PanelBrowserWindow::ToolbarSizeChanged(bool is_animating) {
-  NOTIMPLEMENTED();
 }
 
 void PanelBrowserWindow::UpdateTitleBar() {
@@ -292,10 +289,6 @@ void PanelBrowserWindow::ToggleBookmarkBar() {
   NOTIMPLEMENTED();
 }
 
-void PanelBrowserWindow::ShowAboutChromeDialog() {
-  NOTIMPLEMENTED();
-}
-
 void PanelBrowserWindow::ShowUpdateChromeDialog() {
   NOTIMPLEMENTED();
 }
@@ -340,8 +333,8 @@ DownloadShelf* PanelBrowserWindow::GetDownloadShelf() {
                                         browser_, &window_bounds);
     Browser::CreateParams params(Browser::TYPE_TABBED, profile);
     params.initial_bounds = window_bounds;
-    tabbed_browser = Browser::CreateWithParams(params);
-    tabbed_browser->NewTab();
+    tabbed_browser = new Browser(params);
+    chrome::NewTab(tabbed_browser);
   }
 
   tabbed_browser->window()->Show();  // Ensure download shelf is visible.
@@ -367,7 +360,7 @@ void PanelBrowserWindow::WebContentsFocused(WebContents* contents) {
   native_panel_->PanelWebContentsFocused(contents);
 }
 
-void PanelBrowserWindow::ShowPageInfo(Profile* profile,
+void PanelBrowserWindow::ShowPageInfo(WebContents* web_contents,
                                       const GURL& url,
                                       const SSLStatus& ssl,
                                       bool show_history) {
@@ -396,11 +389,6 @@ bool PanelBrowserWindow::PreHandleKeyboardEvent(
 void PanelBrowserWindow::HandleKeyboardEvent(
     const content::NativeWebKeyboardEvent& event) {
   native_panel_->HandlePanelKeyboardEvent(event);
-}
-
-void PanelBrowserWindow::ShowCreateWebAppShortcutsDialog(
-    TabContents* tab_contents) {
-  NOTIMPLEMENTED();
 }
 
 void PanelBrowserWindow::ShowCreateChromeAppShortcutsDialog(
@@ -473,8 +461,7 @@ FindBar* PanelBrowserWindow::CreateFindBar() {
 void PanelBrowserWindow::ResizeDueToAutoResize(WebContents* web_contents,
                                                const gfx::Size& pref_size) {
   DCHECK(panel_->auto_resizable());
-  return panel_->OnWindowAutoResized(
-      native_panel_->WindowSizeFromContentSize(pref_size));
+  return panel_->OnContentsAutoResized(pref_size);
 }
 
 void PanelBrowserWindow::ShowAvatarBubble(WebContents* web_contents,

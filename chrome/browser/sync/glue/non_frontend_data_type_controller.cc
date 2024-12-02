@@ -16,7 +16,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "sync/api/sync_error.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/util/data_type_histogram.h"
 
 using content::BrowserThread;
@@ -48,7 +48,7 @@ void NonFrontendDataTypeController::LoadModels(
   start_association_called_.Reset();
   start_models_failed_ = false;
   if (state_ != NOT_RUNNING) {
-    model_load_callback.Run(type(), SyncError(FROM_HERE,
+    model_load_callback.Run(type(), syncer::SyncError(FROM_HERE,
                                               "Model already loaded",
                                               type()));
     return;
@@ -63,14 +63,14 @@ void NonFrontendDataTypeController::LoadModels(
     // get a false it means they failed.
     DCHECK(state_ == NOT_RUNNING || state_ == MODEL_STARTING
            || state_ == DISABLED);
-    model_load_callback.Run(type(), SyncError(FROM_HERE,
+    model_load_callback.Run(type(), syncer::SyncError(FROM_HERE,
                                               "Failed loading",
                                               type()));
     return;
   }
   state_ = MODEL_LOADED;
 
-  model_load_callback.Run(type(), SyncError());
+  model_load_callback.Run(type(), syncer::SyncError());
 }
 
 void NonFrontendDataTypeController::OnModelLoaded() {
@@ -87,7 +87,8 @@ void NonFrontendDataTypeController::StartAssociating(
   state_ = ASSOCIATING;
   start_callback_ = start_callback;
   if (!StartAssociationAsync()) {
-    SyncError error(FROM_HERE, "Failed to post StartAssociation", type());
+    syncer::SyncError error(
+        FROM_HERE, "Failed to post StartAssociation", type());
     StartDoneImpl(ASSOCIATION_FAILED, DISABLED, error);
   }
 }
@@ -100,7 +101,7 @@ void NonFrontendDataTypeController::StopWhileAssociating() {
     if (model_associator_.get())
       model_associator_->AbortAssociation();
     if (!start_association_called_.IsSignaled()) {
-      StartDoneImpl(ABORTED, NOT_RUNNING, SyncError());
+      StartDoneImpl(ABORTED, NOT_RUNNING, syncer::SyncError());
       return; // There is nothing more for us to do.
     }
   }
@@ -127,7 +128,7 @@ void NonFrontendDataTypeController::StopWhileAssociating() {
 
   }
 
-  StartDoneImpl(ABORTED, STOPPING, SyncError());
+  StartDoneImpl(ABORTED, STOPPING, syncer::SyncError());
 }
 
 namespace {
@@ -153,49 +154,49 @@ void NonFrontendDataTypeController::Stop() {
   // thread to finish the StartImpl() task.
   switch (state_) {
     case ASSOCIATING:
-      if (type() == syncable::PASSWORDS) {
+      if (type() == syncer::PASSWORDS) {
         LOG(INFO) << " Type is Passwords";
         StopWhileAssociating();
-      } else if (type() == syncable::TYPED_URLS) {
+      } else if (type() == syncer::TYPED_URLS) {
         LOG(INFO) << " Type is TypedUrl";
         StopWhileAssociating();
-      } else if (type() == syncable::APPS) {
+      } else if (type() == syncer::APPS) {
         LOG(INFO) << "Type is Apps";
         StopWhileAssociating();
-      } else if (type() == syncable::EXTENSIONS) {
+      } else if (type() == syncer::EXTENSIONS) {
         LOG(INFO) << "Type is Extension";
         StopWhileAssociating();
-      } else if (type() == syncable::PREFERENCES) {
+      } else if (type() == syncer::PREFERENCES) {
         LOG(INFO) << "Type is Preferences(Does not belong to non-frontend)";
         StopWhileAssociating();
-      } else if (type() == syncable::EXTENSION_SETTINGS) {
+      } else if (type() == syncer::EXTENSION_SETTINGS) {
         LOG(INFO) << "Type is Extension Settings";
         StopWhileAssociating();
-      } else if (type() == syncable::APP_SETTINGS) {
+      } else if (type() == syncer::APP_SETTINGS) {
         LOG(INFO) << "Type is App Settings.";
         StopWhileAssociating();
-      } else if (type() == syncable::BOOKMARKS) {
+      } else if (type() == syncer::BOOKMARKS) {
         LOG(INFO) << "Type is BOOKMARKS.";
         StopWhileAssociating();
-      } else if (type() == syncable::AUTOFILL_PROFILE) {
+      } else if (type() == syncer::AUTOFILL_PROFILE) {
         LOG(INFO) << "Type is AUTOFILL_PROFILE.";
         StopWhileAssociating();
-      } else if (type() == syncable::AUTOFILL) {
+      } else if (type() == syncer::AUTOFILL) {
         LOG(INFO) << "Type is AUTOFILL.";
         StopWhileAssociating();
-      } else if (type() == syncable::THEMES) {
+      } else if (type() == syncer::THEMES) {
         LOG(INFO) << "Type is THEMES.";
         StopWhileAssociating();
-      } else if (type() == syncable::NIGORI) {
+      } else if (type() == syncer::NIGORI) {
         LOG(INFO) << "Type is NIGORI.";
         StopWhileAssociating();
-      } else if (type() == syncable::SEARCH_ENGINES) {
+      } else if (type() == syncer::SEARCH_ENGINES) {
         LOG(INFO) << "Type is SEARCH_ENGINES.";
         StopWhileAssociating();
-      } else if (type() == syncable::SESSIONS) {
+      } else if (type() == syncer::SESSIONS) {
         LOG(INFO) << "Type is SESSIONS.";
         StopWhileAssociating();
-      } else if (type() == syncable::APP_NOTIFICATIONS) {
+      } else if (type() == syncer::APP_NOTIFICATIONS) {
         LOG(INFO) << "Type is APP_NOTIFICATIONS.";
         StopWhileAssociating();
       } else {
@@ -242,7 +243,7 @@ void NonFrontendDataTypeController::Stop() {
 
 std::string NonFrontendDataTypeController::name() const {
   // For logging only.
-  return syncable::ModelTypeToString(type());
+  return syncer::ModelTypeToString(type());
 }
 
 DataTypeController::State NonFrontendDataTypeController::state() const {
@@ -283,8 +284,9 @@ bool NonFrontendDataTypeController::StartModels() {
   return true;
 }
 
-void NonFrontendDataTypeController::StartFailed(StartResult result,
-                                                const SyncError& error) {
+void NonFrontendDataTypeController::StartFailed(
+    StartResult result,
+    const syncer::SyncError& error) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (IsUnrecoverableResult(result))
@@ -298,7 +300,7 @@ void NonFrontendDataTypeController::StartFailed(StartResult result,
 void NonFrontendDataTypeController::StartDone(
     DataTypeController::StartResult result,
     DataTypeController::State new_state,
-    const SyncError& error) {
+    const syncer::SyncError& error) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   abort_association_complete_.Signal();
   base::AutoLock lock(abort_association_lock_);
@@ -315,7 +317,7 @@ void NonFrontendDataTypeController::StartDone(
 void NonFrontendDataTypeController::StartDoneImpl(
     DataTypeController::StartResult result,
     DataTypeController::State new_state,
-    const SyncError& error) {
+    const syncer::SyncError& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // It's possible to have StartDoneImpl called first from the UI thread
   // (due to Stop being called) and then posted from the non-UI thread. In
@@ -366,7 +368,7 @@ void NonFrontendDataTypeController::RecordAssociationTime(
 void NonFrontendDataTypeController::RecordStartFailure(StartResult result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeStartFailures", type(),
-                            syncable::MODEL_TYPE_COUNT);
+                            syncer::MODEL_TYPE_COUNT);
 #define PER_DATA_TYPE_MACRO(type_str) \
     UMA_HISTOGRAM_ENUMERATION("Sync." type_str "StartFailure", result, \
                               MAX_START_RESULT);
@@ -439,19 +441,19 @@ void NonFrontendDataTypeController::StartAssociation() {
   DCHECK_EQ(state_, ASSOCIATING);
 
   if (!model_associator_->CryptoReadyIfNecessary()) {
-    StartFailed(NEEDS_CRYPTO, SyncError());
+    StartFailed(NEEDS_CRYPTO, syncer::SyncError());
     return;
   }
 
   bool sync_has_nodes = false;
   if (!model_associator_->SyncModelHasUserCreatedNodes(&sync_has_nodes)) {
-    SyncError error(FROM_HERE, "Failed to load sync nodes", type());
+    syncer::SyncError error(FROM_HERE, "Failed to load sync nodes", type());
     StartFailed(UNRECOVERABLE_ERROR, error);
     return;
   }
 
   base::TimeTicks start_time = base::TimeTicks::Now();
-  SyncError error;
+  syncer::SyncError error;
   error = model_associator_->AssociateModels();
   // TODO(lipalani): crbug.com/122690 - handle abort.
   RecordAssociationTime(base::TimeTicks::Now() - start_time);
@@ -462,7 +464,7 @@ void NonFrontendDataTypeController::StartAssociation() {
 
   profile_sync_service_->ActivateDataType(type(), model_safe_group(),
                                           change_processor());
-  StartDone(!sync_has_nodes ? OK_FIRST_RUN : OK, RUNNING, SyncError());
+  StartDone(!sync_has_nodes ? OK_FIRST_RUN : OK, RUNNING, syncer::SyncError());
 }
 
 bool NonFrontendDataTypeController::StopAssociationAsync() {
@@ -495,7 +497,7 @@ void NonFrontendDataTypeController::StopAssociation() {
   DCHECK(!HasOneRef());
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (model_associator_.get()) {
-    SyncError error;  // Not used.
+    syncer::SyncError error;  // Not used.
     error = model_associator_->DisassociateModels();
   }
   model_associator_.reset();

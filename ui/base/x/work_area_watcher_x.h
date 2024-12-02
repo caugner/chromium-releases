@@ -4,13 +4,13 @@
 
 #ifndef UI_BASE_X_WORK_AREA_WATCHER_X_H_
 #define UI_BASE_X_WORK_AREA_WATCHER_X_H_
-#pragma once
 
 #include "base/basictypes.h"
-#include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "ui/base/ui_export.h"
 #include "ui/base/x/x11_util.h"
+
+template <typename T> struct DefaultSingletonTraits;
 
 namespace ui {
 

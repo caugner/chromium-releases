@@ -5,10 +5,12 @@
 #include "ash/wm/system_gesture_event_filter.h"
 
 #include "ash/accelerators/accelerator_controller.h"
+#include "ash/accelerators/accelerator_table.h"
 #include "ash/launcher/launcher.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/brightness/brightness_control_delegate.h"
 #include "ash/volume_control_delegate.h"
@@ -18,17 +20,15 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/phantom_window_controller.h"
 #include "ash/wm/workspace/snap_sizer.h"
-#include "base/timer.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRect.h"
+#include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
-#include "ui/base/animation/animation.h"
-#include "ui/base/animation/animation_delegate.h"
-#include "ui/base/animation/linear_animation.h"
 #include "ui/base/gestures/gesture_configuration.h"
+#include "ui/base/gestures/gesture_util.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/point.h"
@@ -39,21 +39,44 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
+#if defined(OS_CHROMEOS)
+#include "ui/base/touch/touch_factory.h"
+#endif
+
 namespace {
 using views::Widget;
 
-const int kSystemPinchPoints = 4;
+const int kSystemGesturePoints = 4;
 
-const int kAffordanceRadius = 40;
-const int kAffordanceWidth = 3;
-const SkColor kAffordanceFullColor = SkColorSetARGB(125, 0, 0, 255);
-const SkColor kAffordanceEmptyColor = SkColorSetARGB(50, 0, 0, 255);
+const int kAffordanceOuterRadius = 60;
+const int kAffordanceInnerRadius = 50;
+
+// Angles from x-axis at which the outer and inner circles start.
+const int kAffordanceOuterStartAngle = -109;
+const int kAffordanceInnerStartAngle = -65;
+
+// The following are half widths (half to avoid division by 2)
+const int kAffordanceGlowWidth = 12;
+const int kAffordanceArcWidth = 3;
+
+// Start and end values for various animations.
+const double kAffordanceScaleStartValue = 0.8;
+const double kAffordanceScaleEndValue = 1.0;
+const double kAffordanceOpacityStartValue = 0.1;
+const double kAffordanceOpacityEndValue = 0.6;
+const int kAffordanceAngleStartValue = 0;
+// The end angle is a bit greater than 360 to make sure the circle completes at
+// the end of the animation.
+const int kAffordanceAngleEndValue = 380;
+
+// Visual constants.
+const SkColor kAffordanceGlowStartColor = SkColorSetARGB(64, 255, 255, 255);
+const SkColor kAffordanceGlowEndColor = SkColorSetARGB(0, 255, 255, 255);
+const SkColor kAffordanceArcColor = SkColorSetARGB(128, 64, 64, 64);
 const int kAffordanceFrameRateHz = 60;
-const int kAffordanceStartDelay = 300;
 
 const double kPinchThresholdForMaximize = 1.5;
 const double kPinchThresholdForMinimize = 0.7;
-const double kPinchThresholdForResize = 0.1;
 
 enum SystemGestureStatus {
   SYSTEM_GESTURE_PROCESSED,  // The system gesture has been processed.
@@ -83,164 +106,260 @@ Widget* CreateAffordanceWidget() {
   widget->GetNativeWindow()->SetParent(
       ash::Shell::GetPrimaryRootWindowController()->GetContainer(
           ash::internal::kShellWindowId_OverlayContainer));
-  ash::SetWindowVisibilityAnimationTransition(widget->GetNativeView(),
-      ash::ANIMATE_HIDE);
   return widget;
 }
 
-// View of the LongPressAffordanceAnimation. Draws the actual contents and
-// updates as the animation proceeds. It also maintains the views::Widget that
-// the animation is shown in.
-// Currently the affordance is to simply show an empty circle and fill it up as
-// the animation proceeds.
-// TODO(varunjain): Change the look of this affordance when we get official UX.
-class LongPressAffordanceView : public views::View {
- public:
-  explicit LongPressAffordanceView(const gfx::Point& event_location)
-      : views::View(),
-        widget_(CreateAffordanceWidget()),
-        current_angle_(0) {
-    widget_->SetContentsView(this);
-    widget_->SetAlwaysOnTop(true);
+void PaintAffordanceArc(gfx::Canvas* canvas,
+                        gfx::Point& center,
+                        int radius,
+                        int start_angle,
+                        int end_angle) {
+  SkPaint paint;
+  paint.setStyle(SkPaint::kStroke_Style);
+  paint.setStrokeWidth(2 * kAffordanceArcWidth);
+  paint.setColor(kAffordanceArcColor);
+  paint.setAntiAlias(true);
 
-    // We are owned by the LongPressAffordance.
-    set_owned_by_client();
-    widget_->SetBounds(gfx::Rect(event_location.x() - kAffordanceRadius,
-                                 event_location.y() - kAffordanceRadius,
-                                 GetPreferredSize().width(),
-                                 GetPreferredSize().height()));
-    widget_->Show();
-  }
+  SkPath arc_path;
+  arc_path.addArc(SkRect::MakeXYWH(center.x() - radius + kAffordanceArcWidth,
+                                   center.y() - radius + kAffordanceArcWidth,
+                                   2 * (radius - kAffordanceArcWidth),
+                                   2 * (radius - kAffordanceArcWidth)),
+                  start_angle, end_angle);
+  canvas->DrawPath(arc_path, paint);
+}
 
-  virtual ~LongPressAffordanceView() {
-    widget_->Hide();
-  }
-
-  void UpdateWithAnimation(ui::Animation* animation) {
-    // Update the portion of the circle filled so far and re-draw.
-    current_angle_ = animation->CurrentValueBetween(0, 360);
-    SchedulePaint();
-  }
-
- private:
-  // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() OVERRIDE {
-    return gfx::Size(2 * kAffordanceRadius, 2 * kAffordanceRadius);
-  }
-
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    SkPaint paint;
-    paint.setStyle(SkPaint::kStroke_Style);
-    paint.setStrokeWidth(kAffordanceWidth);
-    paint.setColor(kAffordanceEmptyColor);
-
-    // Draw empty circle.
-    canvas->DrawCircle(gfx::Point(kAffordanceRadius, kAffordanceRadius),
-        kAffordanceRadius - kAffordanceWidth, paint);
-
-    // Then draw the portion filled so far by the animation.
-    SkPath path;
-    path.addArc(
-        SkRect::MakeXYWH(kAffordanceWidth, kAffordanceWidth,
-                         2 * (kAffordanceRadius - kAffordanceWidth),
-                         2 * (kAffordanceRadius - kAffordanceWidth)),
-        -90, current_angle_);
-    paint.setColor(kAffordanceFullColor);
-    canvas->DrawPath(path, paint);
-  }
-
-  scoped_ptr<Widget> widget_;
-  int current_angle_;
-
-  DISALLOW_COPY_AND_ASSIGN(LongPressAffordanceView);
-};
+void PaintAffordanceGlow(gfx::Canvas* canvas,
+                        gfx::Point& center,
+                        int radius,
+                        int start_angle,
+                        int end_angle,
+                        SkColor* colors,
+                        int num_colors,
+                        int glow_width) {
+  SkPoint sk_center;
+  sk_center.iset(center.x(), center.y());
+  SkShader* shader = SkGradientShader::CreateTwoPointRadial(
+      sk_center,
+      SkIntToScalar(radius),
+      sk_center,
+      SkIntToScalar(radius + 2 * glow_width),
+      colors,
+      NULL,
+      num_colors,
+      SkShader::kClamp_TileMode);
+  DCHECK(shader);
+  SkPaint paint;
+  paint.setStyle(SkPaint::kStroke_Style);
+  paint.setStrokeWidth(2 * glow_width);
+  paint.setShader(shader);
+  paint.setAntiAlias(true);
+  shader->unref();
+  SkPath arc_path;
+  arc_path.addArc(SkRect::MakeXYWH(center.x() - radius - glow_width,
+                                   center.y() - radius - glow_width,
+                                   2 * (radius + glow_width),
+                                   2 * (radius + glow_width)),
+                  start_angle, end_angle);
+  canvas->DrawPath(arc_path, paint);
+}
 
 }  // namespace
 
 namespace ash {
 namespace internal {
 
-// LongPressAffordanceAnimation displays an animated affordance that is shown
-// on a TAP_DOWN gesture. The animation completes on a LONG_PRESS gesture, or is
-// canceled and hidden if any other event is received before that.
-class SystemGestureEventFilter::LongPressAffordanceAnimation
-    : public ui::AnimationDelegate,
-      public ui::LinearAnimation {
+// View of the LongPressAffordanceAnimation. Draws the actual contents and
+// updates as the animation proceeds. It also maintains the views::Widget that
+// the animation is shown in.
+class LongPressAffordanceAnimation::LongPressAffordanceView
+    : public views::View {
  public:
-  LongPressAffordanceAnimation()
-      : ui::LinearAnimation(kAffordanceFrameRateHz, this),
-        view_(NULL) {
-    int duration =
-        ui::GestureConfiguration::long_press_time_in_seconds() * 1000 -
-        kAffordanceStartDelay;
-    SetDuration(duration);
+  explicit LongPressAffordanceView(const gfx::Point& event_location)
+      : views::View(),
+        widget_(CreateAffordanceWidget()),
+        current_angle_(kAffordanceAngleStartValue),
+        current_scale_(kAffordanceScaleStartValue) {
+    widget_->SetContentsView(this);
+    widget_->SetAlwaysOnTop(true);
+
+    // We are owned by the LongPressAffordance.
+    set_owned_by_client();
+    widget_->SetBounds(gfx::Rect(
+        event_location.x() - (kAffordanceOuterRadius +
+            2 * kAffordanceGlowWidth),
+        event_location.y() - (kAffordanceOuterRadius +
+            2 * kAffordanceGlowWidth),
+        GetPreferredSize().width(),
+        GetPreferredSize().height()));
+    widget_->Show();
   }
 
-  void ProcessEvent(aura::Window* target, aura::LocatedEvent* event) {
-    gfx::Point event_location;
-    switch (event->type()) {
-      case ui::ET_GESTURE_TAP_DOWN:
-        // Start animation.
-        tap_down_location_ = event->root_location();
-        timer_.Start(FROM_HERE,
-                     base::TimeDelta::FromMilliseconds(kAffordanceStartDelay),
-                     this,
-                     &LongPressAffordanceAnimation::StartAnimation);
-        break;
-      case ui::ET_TOUCH_MOVED:
-        // We do not want to stop the animation on every TOUCH_MOVED. Instead,
-        // we will rely on SCROLL_BEGIN to break the animation when the user
-        // moves their finger.
-        break;
-      case ui::ET_GESTURE_LONG_PRESS:
-        if (is_animating())
-          End();
-        // fall through to default to reset the view.
-      default:
-        // On all other touch and gesture events, we hide the animation.
-        StopAnimation();
-        break;
-    }
+  virtual ~LongPressAffordanceView() {
+  }
+
+  void UpdateWithAnimation(ui::Animation* animation) {
+    // Update the portion of the circle filled so far and re-draw.
+    current_angle_ = animation->CurrentValueBetween(kAffordanceAngleStartValue,
+        kAffordanceAngleEndValue);
+    current_scale_ = animation->CurrentValueBetween(kAffordanceScaleStartValue,
+        kAffordanceScaleEndValue);
+    widget_->GetNativeView()->layer()->SetOpacity(
+        animation->CurrentValueBetween(kAffordanceOpacityStartValue,
+            kAffordanceOpacityEndValue));
+    SchedulePaint();
   }
 
  private:
-  void StartAnimation() {
-    view_.reset(new LongPressAffordanceView(tap_down_location_));
-    Start();
+  // Overridden from views::View.
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
+    return gfx::Size(2 * (kAffordanceOuterRadius + 2 * kAffordanceGlowWidth),
+        2 * (kAffordanceOuterRadius + 2 * kAffordanceGlowWidth));
   }
 
-  void StopAnimation() {
-    if (timer_.IsRunning())
-      timer_.Stop();
-    if (is_animating())
-      Stop();
-    view_.reset();
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+    gfx::Point center(GetPreferredSize().width() / 2,
+                      GetPreferredSize().height() / 2);
+    canvas->Save();
+
+    ui::Transform scale;
+    scale.SetScale(current_scale_, current_scale_);
+    // We want to scale from the center.
+    canvas->Translate(gfx::Point(center.x(), center.y()));
+    canvas->Transform(scale);
+    canvas->Translate(gfx::Point(-center.x(), -center.y()));
+
+    // Paint inner circle.
+    PaintAffordanceArc(canvas, center, kAffordanceInnerRadius,
+        kAffordanceInnerStartAngle, -current_angle_);
+    // Paint outer circle.
+    PaintAffordanceArc(canvas, center, kAffordanceOuterRadius,
+        kAffordanceOuterStartAngle, current_angle_);
+
+    const int num_colors = 2;
+    SkColor colors[num_colors];
+    colors[0] = kAffordanceGlowEndColor;
+    colors[1] = kAffordanceGlowStartColor;
+
+    // Paint inner glow for inner circle.
+    PaintAffordanceGlow(canvas, center,
+        kAffordanceInnerRadius - 2 * (kAffordanceGlowWidth +
+            kAffordanceArcWidth),
+        kAffordanceInnerStartAngle, -current_angle_, colors, num_colors,
+        kAffordanceGlowWidth);
+
+    // Paint inner glow for outer circle.
+    PaintAffordanceGlow(canvas, center, kAffordanceInnerRadius,
+        kAffordanceOuterStartAngle, current_angle_, colors, num_colors,
+        (kAffordanceOuterRadius - 2 * kAffordanceArcWidth -
+            kAffordanceInnerRadius) / 2);
+
+    colors[0] = kAffordanceGlowStartColor;
+    colors[1] = kAffordanceGlowEndColor;
+
+    // Paint outer glow for inner circle.
+    PaintAffordanceGlow(canvas, center, kAffordanceInnerRadius,
+        kAffordanceInnerStartAngle, -current_angle_, colors, num_colors,
+        (kAffordanceOuterRadius - 2 * kAffordanceArcWidth -
+            kAffordanceInnerRadius) / 2);
+
+    // Paint outer glow for outer circle.
+    PaintAffordanceGlow(canvas, center, kAffordanceOuterRadius,
+        kAffordanceOuterStartAngle, current_angle_, colors, num_colors,
+        kAffordanceGlowWidth);
+
+    canvas->Restore();
   }
 
-  // Overridden from ui::LinearAnimation.
-  virtual void AnimateToState(double state) OVERRIDE {
-    DCHECK(view_.get());
-    view_->UpdateWithAnimation(this);
-  }
+  scoped_ptr<views::Widget> widget_;
+  int current_angle_;
+  double current_scale_;
 
-  // Overridden from ui::AnimationDelegate.
-  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE {
-    view_.reset();
-  }
-
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE {
-  }
-
-  virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE {
-    view_.reset();
-  }
-
-  scoped_ptr<LongPressAffordanceView> view_;
-  gfx::Point tap_down_location_;
-  base::OneShotTimer<LongPressAffordanceAnimation> timer_;
-
-  DISALLOW_COPY_AND_ASSIGN(LongPressAffordanceAnimation);
+  DISALLOW_COPY_AND_ASSIGN(LongPressAffordanceView);
 };
+
+LongPressAffordanceAnimation::LongPressAffordanceAnimation()
+    : ui::LinearAnimation(kAffordanceFrameRateHz, this),
+      view_(NULL),
+      tap_down_target_(NULL) {
+  int duration =
+      ui::GestureConfiguration::long_press_time_in_seconds() * 1000 -
+      ui::GestureConfiguration::semi_long_press_time_in_seconds() * 1000;
+  SetDuration(duration);
+}
+
+LongPressAffordanceAnimation::~LongPressAffordanceAnimation() {}
+
+void LongPressAffordanceAnimation::ProcessEvent(aura::Window* target,
+                                                aura::LocatedEvent* event) {
+  // Once we have a target, we are only interested in events on that target.
+  if (tap_down_target_ && tap_down_target_ != target)
+    return;
+  int64 timer_start_time_ms =
+      ui::GestureConfiguration::semi_long_press_time_in_seconds() * 1000;
+  switch (event->type()) {
+    case ui::ET_GESTURE_TAP_DOWN:
+      // Start animation.
+      tap_down_location_ = event->root_location();
+      tap_down_target_ = target;
+      timer_.Start(FROM_HERE,
+                    base::TimeDelta::FromMilliseconds(timer_start_time_ms),
+                    this,
+                    &LongPressAffordanceAnimation::StartAnimation);
+      break;
+    case ui::ET_TOUCH_MOVED:
+      // If animation is running, We want it to be robust to small finger
+      // movements. So we stop the animation only when the finger moves a
+      // certain distance.
+      if (is_animating() && !ui::gestures::IsInsideManhattanSquare(
+          event->root_location(), tap_down_location_))
+        StopAnimation();
+      break;
+    case ui::ET_GESTURE_LONG_PRESS:
+      if (is_animating())
+        End();
+      // fall through to default to reset the view and tap down target.
+    default:
+      // On all other touch and gesture events, we hide the animation.
+      StopAnimation();
+      break;
+  }
+}
+
+void LongPressAffordanceAnimation::StartAnimation() {
+  view_.reset(new LongPressAffordanceView(tap_down_location_));
+  Start();
+}
+
+void LongPressAffordanceAnimation::StopAnimation() {
+  if (timer_.IsRunning())
+    timer_.Stop();
+  if (is_animating())
+    Stop();
+  view_.reset();
+  tap_down_target_ = NULL;
+}
+
+void LongPressAffordanceAnimation::AnimateToState(double state) {
+  DCHECK(view_.get());
+  view_->UpdateWithAnimation(this);
+}
+
+void LongPressAffordanceAnimation::AnimationEnded(
+    const ui::Animation* animation) {
+  view_.reset();
+  tap_down_target_ = NULL;
+}
+
+void LongPressAffordanceAnimation::AnimationProgressed(
+    const ui::Animation* animation) {
+}
+
+void LongPressAffordanceAnimation::AnimationCanceled(
+    const ui::Animation* animation) {
+  view_.reset();
+  tap_down_target_ = NULL;
+}
 
 class SystemPinchHandler {
  public:
@@ -248,8 +367,7 @@ class SystemPinchHandler {
       : target_(target),
         phantom_(target),
         phantom_state_(PHANTOM_WINDOW_NORMAL),
-        pinch_factor_(1.),
-        resize_started_(false) {
+        pinch_factor_(1.) {
     widget_ = views::Widget::GetWidgetForNativeWindow(target_);
   }
 
@@ -263,97 +381,51 @@ class SystemPinchHandler {
 
     switch (event.type()) {
       case ui::ET_GESTURE_END: {
-        if (event.details().touch_points() > kSystemPinchPoints)
+        if (event.details().touch_points() > kSystemGesturePoints)
           break;
 
-        if (resize_started_) {
-          if (phantom_state_ == PHANTOM_WINDOW_MAXIMIZED) {
+        if (phantom_state_ == PHANTOM_WINDOW_MAXIMIZED) {
+          if (!wm::IsWindowMaximized(target_) &&
+              !wm::IsWindowFullscreen(target_))
             wm::MaximizeWindow(target_);
-          } else if (phantom_state_ == PHANTOM_WINDOW_MINIMIZED) {
+        } else if (phantom_state_ == PHANTOM_WINDOW_MINIMIZED) {
+          if (wm::IsWindowMaximized(target_) ||
+              wm::IsWindowFullscreen(target_)) {
+            wm::RestoreWindow(target_);
+          } else {
             wm::MinimizeWindow(target_);
+
             // NOTE: Minimizing the window will cause this handler to be
             // destroyed. So do not access anything from |this| from here.
             return SYSTEM_GESTURE_END;
-          } else {
-            gfx::Rect bounds = phantom_.IsShowing() ?  phantom_.bounds() :
-              target_->bounds();
-            int grid = Shell::GetInstance()->GetGridSize();
-            bounds.set_x(WindowResizer::AlignToGridRoundUp(bounds.x(), grid));
-            bounds.set_y(WindowResizer::AlignToGridRoundUp(bounds.y(), grid));
-            if (wm::IsWindowFullscreen(target_) ||
-                wm::IsWindowMaximized(target_)) {
-              SetRestoreBounds(target_, bounds);
-              wm::RestoreWindow(target_);
-            } else {
-              target_->SetBounds(bounds);
-            }
           }
         }
         return SYSTEM_GESTURE_END;
       }
 
-      case ui::ET_GESTURE_SCROLL_UPDATE: {
-        if (wm::IsWindowFullscreen(target_) || wm::IsWindowMaximized(target_)) {
-          if (!phantom_.IsShowing())
-            break;
-        } else {
-          gfx::Rect bounds = target_->bounds();
-          bounds.set_x(
-              static_cast<int>(bounds.x() + event.details().scroll_x()));
-          bounds.set_y(
-              static_cast<int>(bounds.y() + event.details().scroll_y()));
-          target_->SetBounds(bounds);
-        }
-
-        if (phantom_.IsShowing() && phantom_state_ == PHANTOM_WINDOW_NORMAL) {
-          gfx::Rect bounds = phantom_.bounds();
-          bounds.set_x(
-              static_cast<int>(bounds.x() + event.details().scroll_x()));
-          bounds.set_y(
-              static_cast<int>(bounds.y() + event.details().scroll_y()));
-          phantom_.SetBounds(bounds);
-        }
-        break;
-      }
-
       case ui::ET_GESTURE_PINCH_UPDATE: {
         // The PINCH_UPDATE events contain incremental scaling updates.
         pinch_factor_ *= event.details().scale();
-        if (!resize_started_) {
-          if (fabs(pinch_factor_ - 1.) < kPinchThresholdForResize)
-            break;
-          resize_started_ = true;
-        }
-
-        gfx::Rect bounds = target_->bounds();
-
-        if (wm::IsWindowFullscreen(target_) || wm::IsWindowMaximized(target_)) {
-          // For a fullscreen/maximized window, if you start pinching in, and
-          // you pinch enough, then it shows the phantom window with the
-          // restore-bounds. The subsequent pinch updates then work on the
-          // restore bounds instead of the fullscreen/maximized bounds.
-          const gfx::Rect* restore = NULL;
-          if (phantom_.IsShowing()) {
-            restore = GetRestoreBounds(target_);
-          } else if (pinch_factor_ < 0.8) {
-            restore = GetRestoreBounds(target_);
-            // Reset the pinch factor.
-            pinch_factor_ = 1.0;
-          }
-
-          if (restore)
-            bounds = *restore;
-          else
-            break;
-        }
-
-        phantom_.Show(GetPhantomWindowBounds(bounds, event.location()));
+        gfx::Rect bounds =
+            GetPhantomWindowScreenBounds(target_, event.location());
+        if (phantom_state_ != PHANTOM_WINDOW_NORMAL || phantom_.IsShowing())
+          phantom_.Show(bounds);
         break;
       }
 
       case ui::ET_GESTURE_MULTIFINGER_SWIPE: {
-        // Snap for left/right swipes.
+        phantom_.Hide();
+        pinch_factor_ = 1.0;
+        phantom_state_ = PHANTOM_WINDOW_NORMAL;
+
         if (event.details().swipe_left() || event.details().swipe_right()) {
+          // Snap for left/right swipes. In case the window is
+          // maximized/fullscreen, then restore the window first so that tiling
+          // works correctly.
+          if (wm::IsWindowMaximized(target_) ||
+              wm::IsWindowFullscreen(target_))
+            wm::RestoreWindow(target_);
+
           ui::ScopedLayerAnimationSettings settings(
               target_->layer()->GetAnimator());
           SnapSizer sizer(target_,
@@ -362,8 +434,14 @@ class SystemPinchHandler {
                                              internal::SnapSizer::RIGHT_EDGE,
               Shell::GetInstance()->GetGridSize());
           target_->SetBounds(sizer.GetSnapBounds(target_->bounds()));
-          phantom_.Hide();
-          pinch_factor_ = 1.0;
+        } else if (event.details().swipe_up()) {
+          if (!wm::IsWindowMaximized(target_) &&
+              !wm::IsWindowFullscreen(target_))
+            wm::MaximizeWindow(target_);
+        } else if (event.details().swipe_down()) {
+          wm::MinimizeWindow(target_);
+        } else {
+          NOTREACHED() << "Swipe happened without a direction.";
         }
         break;
       }
@@ -376,37 +454,37 @@ class SystemPinchHandler {
   }
 
  private:
-  gfx::Rect GetPhantomWindowBounds(const gfx::Rect& bounds,
-                                   const gfx::Point& point) {
+  gfx::Rect GetPhantomWindowScreenBounds(aura::Window* window,
+                                         const gfx::Point& point) {
     if (pinch_factor_ > kPinchThresholdForMaximize) {
       phantom_state_ = PHANTOM_WINDOW_MAXIMIZED;
-      return ScreenAsh::GetMaximizedWindowBounds(target_);
+      return ScreenAsh::ConvertRectToScreen(
+          target_->parent(),
+          ScreenAsh::GetMaximizedWindowBoundsInParent(target_));
     }
 
     if (pinch_factor_ < kPinchThresholdForMinimize) {
+      if (wm::IsWindowMaximized(window) || wm::IsWindowFullscreen(window)) {
+        const gfx::Rect* restore = GetRestoreBoundsInScreen(window);
+        if (restore) {
+          phantom_state_ = PHANTOM_WINDOW_MINIMIZED;
+          return *restore;
+        }
+        return window->bounds();
+      }
+
       Launcher* launcher = Shell::GetInstance()->launcher();
       gfx::Rect rect = launcher->GetScreenBoundsOfItemIconForWindow(target_);
       if (rect.IsEmpty())
-        rect = launcher->widget()->GetWindowScreenBounds();
+        rect = launcher->widget()->GetWindowBoundsInScreen();
       else
         rect.Inset(-8, -8);
       phantom_state_ = PHANTOM_WINDOW_MINIMIZED;
       return rect;
     }
 
-    gfx::Rect new_bounds = bounds.Scale(pinch_factor_);
-    new_bounds.set_x(bounds.x() + (point.x() - point.x() * pinch_factor_));
-    new_bounds.set_y(bounds.y() + (point.y() - point.y() * pinch_factor_));
-
-    gfx::Rect maximize_bounds = ScreenAsh::GetMaximizedWindowBounds(target_);
-    if (new_bounds.width() > maximize_bounds.width() ||
-        new_bounds.height() > maximize_bounds.height()) {
-      phantom_state_ = PHANTOM_WINDOW_MAXIMIZED;
-      return maximize_bounds;
-    }
-
     phantom_state_ = PHANTOM_WINDOW_NORMAL;
-    return new_bounds;
+    return window->bounds();
   }
 
   enum PhantomWindowState {
@@ -432,12 +510,6 @@ class SystemPinchHandler {
   // that.
   double pinch_factor_;
 
-  // Pinch-to-resize starts only after the pinch crosses a certain threshold to
-  // make it easier to move window without accidentally resizing the window at
-  // the same time. |resize_started_| keeps track of whether pinch crossed the
-  // threshold to initiate a window-resize.
-  bool resize_started_;
-
   DISALLOW_COPY_AND_ASSIGN(SystemPinchHandler);
 };
 
@@ -460,18 +532,27 @@ bool SystemGestureEventFilter::PreHandleKeyEvent(aura::Window* target,
 
 bool SystemGestureEventFilter::PreHandleMouseEvent(aura::Window* target,
                                                    aura::MouseEvent* event) {
+#if defined(OS_CHROMEOS)
+  if (event->type() == ui::ET_MOUSE_PRESSED && event->native_event() &&
+      ui::TouchFactory::GetInstance()->IsTouchDevicePresent()) {
+    Shell::GetInstance()->delegate()->RecordUserMetricsAction(
+      UMA_MOUSE_DOWN);
+  }
+#endif
   return false;
 }
 
 ui::TouchStatus SystemGestureEventFilter::PreHandleTouchEvent(
     aura::Window* target,
     aura::TouchEvent* event) {
+  touch_uma_.RecordTouchEvent(target, *event);
   long_press_affordance_->ProcessEvent(target, event);
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
 ui::GestureStatus SystemGestureEventFilter::PreHandleGestureEvent(
     aura::Window* target, aura::GestureEvent* event) {
+  touch_uma_.RecordGestureEvent(target, *event);
   long_press_affordance_->ProcessEvent(target, event);
   if (!target || target == target->GetRootWindow()) {
     switch (event->type()) {
@@ -535,6 +616,24 @@ ui::GestureStatus SystemGestureEventFilter::PreHandleGestureEvent(
   if (!system_target)
     return ui::GESTURE_STATUS_UNKNOWN;
 
+  RootWindowController* root_controller =
+      GetRootWindowController(system_target->GetRootWindow());
+  CHECK(root_controller);
+  aura::Window* desktop_container = root_controller->GetContainer(
+      ash::internal::kShellWindowId_DesktopBackgroundContainer);
+  if (desktop_container->Contains(system_target)) {
+    // The gesture was on the desktop window.
+    if (event->type() == ui::ET_GESTURE_MULTIFINGER_SWIPE &&
+        event->details().swipe_up() &&
+        event->details().touch_points() == kSystemGesturePoints) {
+      ash::AcceleratorController* accelerator =
+          ash::Shell::GetInstance()->accelerator_controller();
+      if (accelerator->PerformAction(CYCLE_FORWARD_MRU, ui::Accelerator()))
+        return ui::GESTURE_STATUS_CONSUMED;
+    }
+    return ui::GESTURE_STATUS_UNKNOWN;
+  }
+
   WindowPinchHandlerMap::iterator find = pinch_handlers_.find(system_target);
   if (find != pinch_handlers_.end()) {
     SystemGestureStatus status =
@@ -544,7 +643,7 @@ ui::GestureStatus SystemGestureEventFilter::PreHandleGestureEvent(
     return ui::GESTURE_STATUS_CONSUMED;
   } else {
     if (event->type() == ui::ET_GESTURE_BEGIN &&
-        event->details().touch_points() >= kSystemPinchPoints) {
+        event->details().touch_points() >= kSystemGesturePoints) {
       pinch_handlers_[system_target] = new SystemPinchHandler(system_target);
       system_target->AddObserver(this);
       return ui::GESTURE_STATUS_CONSUMED;
@@ -605,13 +704,12 @@ bool SystemGestureEventFilter::HandleDeviceControl(aura::Window* target,
 
 bool SystemGestureEventFilter::HandleLauncherControl(
     aura::GestureEvent* event) {
-  ash::AcceleratorController* accelerator =
-      ash::Shell::GetInstance()->accelerator_controller();
-  if (start_location_ == BEZEL_START_BOTTOM && event->details().scroll_y() < 0)
-    // We leave the work to switch to the next window to our accelerators.
-    accelerator->AcceleratorPressed(
-        ui::Accelerator(ui::VKEY_LWIN, ui::EF_CONTROL_DOWN));
-  else
+  if (start_location_ == BEZEL_START_BOTTOM &&
+      event->details().scroll_y() < 0) {
+    ash::AcceleratorController* accelerator =
+        ash::Shell::GetInstance()->accelerator_controller();
+    accelerator->PerformAction(FOCUS_LAUNCHER, ui::Accelerator());
+  } else
     return false;
   // No further notifications for this gesture.
   return true;
@@ -621,18 +719,14 @@ bool SystemGestureEventFilter::HandleApplicationControl(
     aura::GestureEvent* event) {
   ash::AcceleratorController* accelerator =
       ash::Shell::GetInstance()->accelerator_controller();
-  if (start_location_ == BEZEL_START_LEFT && event->details().scroll_x() > 0) {
-    // We leave the work to switch to the next window to our accelerators.
-    accelerator->AcceleratorPressed(
-        ui::Accelerator(ui::VKEY_F5, ui::EF_SHIFT_DOWN));
-  } else if (start_location_ == BEZEL_START_RIGHT &&
-             event->details().scroll_x() < 0) {
-    // We leave the work to switch to the previous window to our accelerators.
-    accelerator->AcceleratorPressed(
-        ui::Accelerator(ui::VKEY_F5, ui::EF_NONE));
-  } else {
+  if (start_location_ == BEZEL_START_LEFT && event->details().scroll_x() > 0)
+    accelerator->PerformAction(CYCLE_BACKWARD_LINEAR, ui::Accelerator());
+  else if (start_location_ == BEZEL_START_RIGHT &&
+             event->details().scroll_x() < 0)
+    accelerator->PerformAction(CYCLE_FORWARD_LINEAR, ui::Accelerator());
+  else
     return false;
-  }
+
   // No further notifications for this gesture.
   return true;
 }

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_MANAGEMENT_POLICY_H_
 #define CHROME_BROWSER_EXTENSIONS_MANAGEMENT_POLICY_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -46,7 +45,9 @@ class ManagementPolicy {
     virtual ~Provider() {}
 
     // A human-readable name for this provider, for use in debug messages.
-    virtual std::string GetPolicyProviderName() const = 0;
+    // Implementers should return an empty string in non-debug builds, to save
+    // executable size.
+    virtual std::string GetDebugPolicyProviderName() const = 0;
 
     // Providers should return false if a user may not install the |extension|,
     // or load or run it if it has already been installed.

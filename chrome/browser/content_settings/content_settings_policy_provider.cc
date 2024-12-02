@@ -37,6 +37,8 @@ const char* kPrefToManageType[] = {
   NULL,  // No policy for default value of fullscreen requests
   NULL,  // No policy for default value of mouse lock requests
   NULL,  // No policy for default value of mixed script blocking
+  prefs::kManagedDefaultMediaStreamSetting,
+  NULL,  // No policy for default value of protocol handlers
 };
 COMPILE_ASSERT(arraysize(kPrefToManageType) == CONTENT_SETTINGS_NUM_TYPES,
                managed_content_settings_pref_names_array_size_incorrect);
@@ -161,6 +163,9 @@ void PolicyProvider::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterIntegerPref(prefs::kManagedDefaultNotificationsSetting,
                              CONTENT_SETTING_DEFAULT,
                              PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kManagedDefaultMediaStreamSetting,
+                             CONTENT_SETTING_DEFAULT,
+                             PrefService::UNSYNCABLE_PREF);
 }
 
 PolicyProvider::PolicyProvider(PrefService* prefs) : prefs_(prefs) {
@@ -196,6 +201,7 @@ PolicyProvider::PolicyProvider(PrefService* prefs) : prefs_(prefs) {
   pref_change_registrar_.Add(prefs::kManagedDefaultPopupsSetting, this);
   pref_change_registrar_.Add(prefs::kManagedDefaultGeolocationSetting, this);
   pref_change_registrar_.Add(prefs::kManagedDefaultNotificationsSetting, this);
+  pref_change_registrar_.Add(prefs::kManagedDefaultMediaStreamSetting, this);
 }
 
 PolicyProvider::~PolicyProvider() {
@@ -437,6 +443,8 @@ void PolicyProvider::Observe(int type,
       UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_GEOLOCATION);
     } else if (*name == prefs::kManagedDefaultNotificationsSetting) {
       UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+    } else if (*name == prefs::kManagedDefaultMediaStreamSetting) {
+      UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM);
     } else if (*name == prefs::kManagedAutoSelectCertificateForUrls ||
         *name == prefs::kManagedCookiesAllowedForUrls ||
         *name == prefs::kManagedCookiesBlockedForUrls ||

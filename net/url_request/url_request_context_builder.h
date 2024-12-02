@@ -13,7 +13,6 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_CONTEXT_BUILDER_H_
 #define NET_URL_REQUEST_URL_REQUEST_CONTEXT_BUILDER_H_
-#pragma once
 
 #include <string>
 
@@ -52,7 +51,7 @@ class NET_EXPORT URLRequestContextBuilder {
     HttpCacheParams();
     ~HttpCacheParams();
 
-    // The type of HTTP cache. Default is DISK.
+    // The type of HTTP cache. Default is IN_MEMORY.
     Type type;
 
     // The max size of the cache in bytes. Default is algorithmically determined

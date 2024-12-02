@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_FUNCTION_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_FUNCTION_H_
-#pragma once
 
 #include <list>
 #include <string>
@@ -13,8 +12,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop_helpers.h"
 #include "base/process.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,7 +26,6 @@ class Browser;
 class ChromeRenderMessageFilter;
 class ExtensionFunction;
 class ExtensionFunctionDispatcher;
-class ExtensionWindowController;
 class UIThreadExtensionFunction;
 class IOThreadExtensionFunction;
 class Profile;
@@ -42,12 +40,20 @@ namespace content {
 class RenderViewHost;
 }
 
+namespace extensions {
+class WindowController;
+}
+
+#ifdef NDEBUG
 #define EXTENSION_FUNCTION_VALIDATE(test) do { \
     if (!(test)) { \
       bad_message_ = true; \
       return false; \
     } \
   } while (0)
+#else   // NDEBUG
+#define EXTENSION_FUNCTION_VALIDATE(test) CHECK(test)
+#endif  // NDEBUG
 
 #define EXTENSION_FUNCTION_ERROR(error) do { \
     error_ = error; \
@@ -77,9 +83,18 @@ class ExtensionFunction
   virtual UIThreadExtensionFunction* AsUIThreadExtensionFunction();
   virtual IOThreadExtensionFunction* AsIOThreadExtensionFunction();
 
+  // Returns true if the function has permission to run.
+  //
+  // The default implementation is to check the Extension's permissions against
+  // what this function requires to run, but some APIs may require finer
+  // grained control, such as tabs.executeScript being allowed for active tabs.
+  //
+  // This will be run after the function has been set up but before Run().
+  virtual bool HasPermission();
+
   // Execute the API. Clients should initialize the ExtensionFunction using
   // SetArgs(), set_request_id(), and the other setters before calling this
-  // method. Derived classes should be ready to return GetResultValue() and
+  // method. Derived classes should be ready to return GetResultList() and
   // GetError() before returning from this function.
   // Note that once Run() returns, dispatcher() can be NULL, so be sure to
   // NULL-check.
@@ -108,8 +123,11 @@ class ExtensionFunction
   // Specifies the raw arguments to the function, as a JSON value.
   virtual void SetArgs(const base::ListValue* args);
 
-  // Retrieves the results of the function as a Value.
-  const base::Value* GetResultValue();
+  // Sets a single Value as the results of the function.
+  void SetResult(base::Value* result);
+
+  // Retrieves the results of the function as a ListValue.
+  const base::ListValue* GetResultList();
 
   // Retrieves any error string from the function.
   virtual const std::string GetError();
@@ -207,9 +225,9 @@ class ExtensionFunction
   // The arguments to the API. Only non-null if argument were specified.
   scoped_ptr<base::ListValue> args_;
 
-  // The result of the API. This should be populated by the derived class before
-  // SendResponse() is called.
-  scoped_ptr<base::Value> result_;
+  // The results of the API. This should be populated by the derived class
+  // before SendResponse() is called.
+  scoped_ptr<base::ListValue> results_;
 
   // Any detailed error from the API. This should be populated by the derived
   // class before Run() returns.
@@ -284,13 +302,13 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   // TODO(stevenjb): Replace this with GetExtensionWindowController().
   Browser* GetCurrentBrowser();
 
-  // Same as above but uses ExtensionWindowList instead of BrowserList.
-  ExtensionWindowController* GetExtensionWindowController();
+  // Same as above but uses WindowControllerList instead of BrowserList.
+  extensions::WindowController* GetExtensionWindowController();
 
   // Returns true if this function (and the profile and extension that it was
   // invoked from) can operate on the window wrapped by |window_controller|.
   bool CanOperateOnWindow(
-      const ExtensionWindowController* window_controller) const;
+      const extensions::WindowController* window_controller) const;
 
  protected:
   friend struct content::BrowserThread::DeleteOnThread<

@@ -120,11 +120,7 @@ GLenum CheckFramebufferStatus(GLenum target) {
   return *result;
 }
 
-void Clear(GLbitfield mask) {
-  GPU_CLIENT_SINGLE_THREAD_CHECK();
-  GPU_CLIENT_LOG("[" << this << "] glClear(" << mask << ")");
-  helper_->Clear(mask);
-}
+void Clear(GLbitfield mask);
 
 void ClearColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
@@ -362,6 +358,8 @@ void Enable(GLenum cap);
 void Finish();
 
 void Flush();
+
+void ShallowFlushCHROMIUM();
 
 void FramebufferRenderbuffer(
     GLenum target, GLenum attachment, GLenum renderbuffertarget,
@@ -1559,9 +1557,8 @@ void ConsumeTextureCHROMIUM(GLenum target, const GLbyte* mailbox) {
   helper_->ConsumeTextureCHROMIUMImmediate(target, mailbox);
 }
 
-void GetUniformLocationsCHROMIUM(
-    const GLUniformDefinitionCHROMIUM* uniforms, GLsizei count,
-    GLsizei max_locations, GLint* locations);
+void BindUniformLocationCHROMIUM(
+    GLuint program, GLint location, const char* name);
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_
 

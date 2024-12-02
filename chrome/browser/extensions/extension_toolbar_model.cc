@@ -4,14 +4,15 @@
 
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 
-#include "chrome/browser/extensions/extension_browser_event_router.h"
+#include "chrome/browser/extensions/browser_event_router.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
@@ -37,7 +38,7 @@ ExtensionToolbarModel::ExtensionToolbarModel(ExtensionService* service)
                  content::Source<Profile>(service_->profile()));
   registrar_.Add(
       this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
-      content::Source<ExtensionPrefs>(service_->extension_prefs()));
+      content::Source<extensions::ExtensionPrefs>(service_->extension_prefs()));
 
   visible_icon_count_ = prefs_->GetInteger(prefs::kExtensionToolbarSize);
 }
@@ -88,7 +89,7 @@ ExtensionToolbarModel::Action ExtensionToolbarModel::ExecuteBrowserAction(
     const Extension* extension,
     Browser* browser,
     GURL* popup_url_out) {
-  TabContents* tab_contents = browser->GetActiveTabContents();
+  TabContents* tab_contents = chrome::GetActiveTabContents(browser);
   if (!tab_contents)
     return ACTION_NONE;
 
@@ -96,10 +97,15 @@ ExtensionToolbarModel::Action ExtensionToolbarModel::ExecuteBrowserAction(
   if (tab_id < 0)
     return ACTION_NONE;
 
+  ExtensionAction* browser_action = extension->browser_action();
+
+  // For browser actions, visibility == enabledness.
+  if (!browser_action->GetIsVisible(tab_id))
+    return ACTION_NONE;
+
   tab_contents->extension_tab_helper()->active_tab_permission_manager()->
       GrantIfRequested(extension);
 
-  ExtensionAction* browser_action = extension->browser_action();
   if (browser_action->HasPopup(tab_id)) {
     if (popup_url_out)
       *popup_url_out = browser_action->GetPopupUrl(tab_id);
@@ -107,7 +113,7 @@ ExtensionToolbarModel::Action ExtensionToolbarModel::ExecuteBrowserAction(
   }
 
   service_->browser_event_router()->BrowserActionExecuted(
-      extension->id(), browser);
+      *browser_action, browser);
   return ACTION_NONE;
 }
 

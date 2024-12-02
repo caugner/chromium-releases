@@ -4,7 +4,6 @@
 
 #ifndef NET_COOKIES_COOKIE_STORE_UNITTEST_H_
 #define NET_COOKIES_COOKIE_STORE_UNITTEST_H_
-#pragma once
 
 #include "base/bind.h"
 #include "base/message_loop.h"
@@ -1071,7 +1070,6 @@ TYPED_TEST_P(MultiThreadedCookieStoreTest, ThreadCheckDeleteSessionCookies) {
       "B=C; expires=Mon, 18-Apr-22 22:50:13 GMT", options));
   EXPECT_EQ(1, this->DeleteSessionCookies(cs));
   EXPECT_EQ(0, this->DeleteSessionCookies(cs));
-
   EXPECT_TRUE(this->SetCookieWithOptions(cs, this->url_google_,
                                          "A=B", options));
   DeleteCallback callback(&this->other_thread_);

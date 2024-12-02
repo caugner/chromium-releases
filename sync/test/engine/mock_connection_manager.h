@@ -6,7 +6,6 @@
 
 #ifndef SYNC_TEST_ENGINE_MOCK_CONNECTION_MANAGER_H_
 #define SYNC_TEST_ENGINE_MOCK_CONNECTION_MANAGER_H_
-#pragma once
 
 #include <bitset>
 #include <list>
@@ -17,11 +16,13 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_vector.h"
 #include "sync/engine/net/server_connection_manager.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
 #include "sync/protocol/sync.pb.h"
 
-class MockConnectionManager : public browser_sync::ServerConnectionManager {
+namespace syncer {
+
+class MockConnectionManager : public ServerConnectionManager {
  public:
   class MidCommitObserver {
    public:
@@ -39,7 +40,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
       PostBufferParams*,
       const std::string& path,
       const std::string& auth_token,
-      browser_sync::ScopedServerStatusWatcher* watcher) OVERRIDE;
+      ScopedServerStatusWatcher* watcher) OVERRIDE;
 
   // Control of commit response.
   // NOTE: Commit callback is invoked only once then reset.
@@ -121,7 +122,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   void FailNextPostBufferToPathCall() { countdown_to_postbuffer_fail_ = 1; }
   void FailNthPostBufferToPathCall(int n) { countdown_to_postbuffer_fail_ = n; }
 
-  void SetClearUserDataResponseStatus(sync_pb::SyncEnums::ErrorType errortype);
+  void SetKeystoreKey(const std::string& key);
 
   void FailNonPeriodicGetUpdates() { fail_non_periodic_get_updates_ = true; }
 
@@ -183,13 +184,11 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   // Expect that GetUpdates will request exactly the types indicated in
   // the bitset.
-  void ExpectGetUpdatesRequestTypes(
-      syncable::ModelTypeSet expected_filter) {
+  void ExpectGetUpdatesRequestTypes(ModelTypeSet expected_filter) {
     expected_filter_ = expected_filter;
   }
 
-  void ExpectGetUpdatesRequestPayloads(
-      const syncable::ModelTypePayloadMap& payloads) {
+  void ExpectGetUpdatesRequestPayloads(const ModelTypePayloadMap& payloads) {
     expected_payloads_ = payloads;
   }
 
@@ -260,12 +259,12 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   bool IsModelTypePresentInSpecifics(
       const google::protobuf::RepeatedPtrField<
           sync_pb::DataTypeProgressMarker>& filter,
-      syncable::ModelType value);
+      ModelType value);
 
   sync_pb::DataTypeProgressMarker const* GetProgressMarkerForType(
       const google::protobuf::RepeatedPtrField<
           sync_pb::DataTypeProgressMarker>& filter,
-      syncable::ModelType value);
+      ModelType value);
 
   // When false, we pretend to have network connectivity issues.
   bool server_reachable_;
@@ -305,8 +304,8 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   base::Closure mid_commit_callback_;
   MidCommitObserver* mid_commit_observer_;
 
-  // The clear data response we'll return in the next response
-  sync_pb::SyncEnums::ErrorType clear_user_data_response_errortype_;
+  // The keystore key we return for a GetUpdates with need_encryption_key set.
+  std::string keystore_key_;
 
   // The AUTHENTICATE response we'll return for auth requests.
   sync_pb::AuthenticateResponse auth_response_;
@@ -337,9 +336,9 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   // use the older sync_pb::SyncEntity_BookmarkData-style protocol.
   bool use_legacy_bookmarks_protocol_;
 
-  syncable::ModelTypeSet expected_filter_;
+  ModelTypeSet expected_filter_;
 
-  syncable::ModelTypePayloadMap expected_payloads_;
+  ModelTypePayloadMap expected_payloads_;
 
   int num_get_updates_requests_;
 
@@ -349,5 +348,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   DISALLOW_COPY_AND_ASSIGN(MockConnectionManager);
 };
+
+}  // namespace syncer
 
 #endif  // SYNC_TEST_ENGINE_MOCK_CONNECTION_MANAGER_H_

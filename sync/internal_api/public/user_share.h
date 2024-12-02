@@ -4,17 +4,16 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_USER_SHARE_H_
 #define SYNC_INTERNAL_API_PUBLIC_USER_SHARE_H_
-#pragma once
 
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
 
+namespace syncer {
+
 namespace syncable {
 class Directory;
 }
-
-namespace sync_api {
 
 // A UserShare encapsulates the syncable pieces that represent an authenticated
 // user and their data (share).
@@ -31,6 +30,6 @@ struct UserShare {
   std::string name;
 };
 
-}
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_USER_SHARE_H_

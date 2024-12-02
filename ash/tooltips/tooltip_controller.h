@@ -4,7 +4,6 @@
 
 #ifndef ASH_TOOLTIPS_TOOLTIP_CONTROLLER_H_
 #define ASH_TOOLTIPS_TOOLTIP_CONTROLLER_H_
-#pragma once
 
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
@@ -74,6 +73,7 @@ class ASH_EXPORT TooltipController : public aura::client::TooltipClient,
                                int y);
 
   void TooltipTimerFired();
+  void TooltipShownTimerFired();
 
   // Updates the tooltip if required (if there is any change in the tooltip
   // text or the aura::Window.
@@ -83,6 +83,10 @@ class ASH_EXPORT TooltipController : public aura::client::TooltipClient,
   bool IsTooltipVisible();
 
   bool IsDragDropInProgress();
+
+  // This lazily creates the Tooltip instance so that the tooltip window will
+  // be initialized with appropriate drop shadows.
+  Tooltip* GetTooltip();
 
   aura::client::DragDropClient* drag_drop_client_;
 
@@ -97,6 +101,10 @@ class ASH_EXPORT TooltipController : public aura::client::TooltipClient,
   scoped_ptr<Tooltip> tooltip_;
 
   base::RepeatingTimer<TooltipController> tooltip_timer_;
+
+  // Timer to timeout the life of an on-screen tooltip. We hide the tooltip when
+  // this timer fires.
+  base::OneShotTimer<TooltipController> tooltip_shown_timer_;
 
   gfx::Point curr_mouse_loc_;
 

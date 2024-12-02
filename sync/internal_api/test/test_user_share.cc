@@ -5,10 +5,11 @@
 #include "sync/internal_api/public/test/test_user_share.h"
 
 #include "base/compiler_specific.h"
+#include "sync/syncable/directory.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace syncer {
 
 TestUserShare::TestUserShare() : dir_maker_(new TestDirectorySetterUpper()) {}
 
@@ -18,7 +19,7 @@ TestUserShare::~TestUserShare() {
 }
 
 void TestUserShare::SetUp() {
-  user_share_.reset(new sync_api::UserShare());
+  user_share_.reset(new UserShare());
   dir_maker_->SetUp();
 
   // The pointer is owned by dir_maker_, we should not be storing it in a
@@ -34,8 +35,8 @@ void TestUserShare::TearDown() {
   dir_maker_->TearDown();
 }
 
-sync_api::UserShare* TestUserShare::user_share() {
+UserShare* TestUserShare::user_share() {
   return user_share_.get();
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

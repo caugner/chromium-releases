@@ -11,6 +11,7 @@
 #include "base/location.h"
 #include "base/time.h"
 #include "webkit/dom_storage/dom_storage_area.h"
+#include "webkit/dom_storage/dom_storage_database.h"
 #include "webkit/dom_storage/dom_storage_namespace.h"
 #include "webkit/dom_storage/dom_storage_task_runner.h"
 #include "webkit/dom_storage/dom_storage_types.h"
@@ -189,8 +190,9 @@ void DomStorageContext::CreateSessionNamespace(
 }
 
 void DomStorageContext::DeleteSessionNamespace(
-    int64 namespace_id) {
+    int64 namespace_id, bool should_persist_data) {
   DCHECK_NE(kLocalStorageNamespaceId, namespace_id);
+  // TODO(marja): Protect the sessionStorage data (once it's written on disk).
   namespaces_.erase(namespace_id);
 }
 

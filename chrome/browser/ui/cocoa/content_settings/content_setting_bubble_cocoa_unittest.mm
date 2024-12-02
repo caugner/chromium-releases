@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,7 +61,8 @@ TEST_F(ContentSettingBubbleControllerTest, Init) {
         i == CONTENT_SETTINGS_TYPE_INTENTS ||
         i == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
         i == CONTENT_SETTINGS_TYPE_FULLSCREEN ||
-        i == CONTENT_SETTINGS_TYPE_MOUSELOCK) {
+        i == CONTENT_SETTINGS_TYPE_MOUSELOCK ||
+        i == CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
       // These types have no bubble.
       continue;
     }

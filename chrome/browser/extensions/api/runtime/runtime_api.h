@@ -4,16 +4,14 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_RUNTIME_RUNTIME_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_RUNTIME_RUNTIME_API_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_function.h"
 
-class ExtensionHost;
 class Profile;
 
 namespace extensions {
-
 class Extension;
+class ExtensionHost;
 
 class RuntimeEventRouter {
  public:

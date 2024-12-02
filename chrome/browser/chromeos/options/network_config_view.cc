@@ -19,7 +19,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -187,10 +187,6 @@ views::View* NetworkConfigView::GetContentsView() {
   return this;
 }
 
-string16 NetworkConfigView::GetWindowTitle() const {
-  return child_config_view_->GetTitle();
-}
-
 void NetworkConfigView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->name =
       l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OTHER_WIFI_NETWORKS);
@@ -217,7 +213,7 @@ void NetworkConfigView::ShowAdvancedView() {
       IDS_JOIN_WIFI_NETWORK_DIALOG_ADVANCED_WIDTH_CHARS,
       IDS_JOIN_WIFI_NETWORK_DIALOG_ADVANCED_MINIMUM_HEIGHT_LINES);
   // Get the new bounds with desired size at the same center point.
-  gfx::Rect bounds = GetWidget()->GetWindowScreenBounds();
+  gfx::Rect bounds = GetWidget()->GetWindowBoundsInScreen();
   int horiz_padding = bounds.width() - size.width();
   int vert_padding = bounds.height() - size.height();
   bounds.Inset(horiz_padding / 2, vert_padding / 2,

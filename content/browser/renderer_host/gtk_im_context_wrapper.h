@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_GTK_IM_CONTEXT_WRAPPER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_GTK_IM_CONTEXT_WRAPPER_H_
-#pragma once
 
 #include <gdk/gdk.h>
 #include <pango/pango-attributes.h>
@@ -17,17 +16,16 @@
 #include "ui/base/ime/composition_text.h"
 #include "ui/base/ime/text_input_type.h"
 
-class RenderWidgetHostViewGtk;
 typedef struct _GtkIMContext GtkIMContext;
 typedef struct _GtkWidget GtkWidget;
-
-namespace content {
-struct NativeWebKeyboardEvent;
-}
 
 namespace gfx {
 class Rect;
 }
+
+namespace content {
+class RenderWidgetHostViewGtk;
+struct NativeWebKeyboardEvent;
 
 // This class is a convenience wrapper for GtkIMContext.
 // It creates and manages two GtkIMContext instances, one is GtkIMMulticontext,
@@ -69,8 +67,8 @@ class GtkIMContextWrapper {
   // Check if the input method returned any result, eg. preedit and commit text.
   bool HasInputMethodResult() const;
 
-  void ProcessFilteredKeyPressEvent(content::NativeWebKeyboardEvent* wke);
-  void ProcessUnfilteredKeyPressEvent(content::NativeWebKeyboardEvent* wke);
+  void ProcessFilteredKeyPressEvent(NativeWebKeyboardEvent* wke);
+  void ProcessUnfilteredKeyPressEvent(NativeWebKeyboardEvent* wke);
 
   // Processes result returned from input method after filtering a key event.
   // |filtered| indicates if the key event was filtered by the input method.
@@ -197,5 +195,7 @@ class GtkIMContextWrapper {
 
   DISALLOW_COPY_AND_ASSIGN(GtkIMContextWrapper);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_GTK_IM_CONTEXT_WRAPPER_H_

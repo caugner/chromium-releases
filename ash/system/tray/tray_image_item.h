@@ -4,7 +4,6 @@
 
 #ifndef ASH_SYSTEM_TRAY_TRAY_IMAGE_ITEM_H_
 #define ASH_SYSTEM_TRAY_TRAY_IMAGE_ITEM_H_
-#pragma once
 
 #include "ash/system/tray/system_tray_item.h"
 
@@ -35,6 +34,8 @@ class TrayImageItem : public SystemTrayItem {
   virtual void DestroyDefaultView() OVERRIDE;
   virtual void DestroyDetailedView() OVERRIDE;
   virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
+  virtual void UpdateAfterShelfAlignmentChange(
+      ShelfAlignment alignment) OVERRIDE;
 
  private:
   int resource_id_;

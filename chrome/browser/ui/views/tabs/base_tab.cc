@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "base/command_line.h"
+#include "base/debug/alias.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
@@ -16,9 +17,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/animation_container.h"
 #include "ui/base/animation/slide_animation.h"
@@ -81,6 +80,14 @@ class BaseTab::TabCloseButton : public views::ImageButton {
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE {
     CustomButton::OnMouseExited(event);
     parent()->OnMouseExited(event);
+  }
+
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE {
+    // Consume all gesture events here so that the parent (BaseTab) does not
+    // start consuming gestures.
+    ImageButton::OnGestureEvent(event);
+    return ui::GESTURE_STATUS_CONSUMED;
   }
 
  private:
@@ -282,10 +289,6 @@ void BaseTab::set_animation_container(ui::AnimationContainer* container) {
   hover_controller_.SetAnimationContainer(container);
 }
 
-bool BaseTab::IsCloseable() const {
-  return controller() ? controller()->IsTabCloseable(this) : true;
-}
-
 bool BaseTab::IsActive() const {
   return controller() ? controller()->IsActiveTab(this) : true;
 }
@@ -396,6 +399,39 @@ void BaseTab::OnMouseExited(const views::MouseEvent& event) {
   hover_controller_.Hide();
 }
 
+ui::GestureStatus BaseTab::OnGestureEvent(const views::GestureEvent& event) {
+  if (!controller())
+    return ui::GESTURE_STATUS_CONSUMED;
+
+  switch (event.type()) {
+    case ui::ET_GESTURE_BEGIN: {
+      if (event.details().touch_points() != 1)
+        return ui::GESTURE_STATUS_UNKNOWN;
+
+      TabStripSelectionModel original_selection;
+      original_selection.Copy(controller()->GetSelectionModel());
+      if (!IsSelected())
+        controller()->SelectTab(this);
+      gfx::Point loc(event.location());
+      views::View::ConvertPointToScreen(this, &loc);
+      controller()->MaybeStartDrag(this, event, original_selection);
+      break;
+    }
+
+    case ui::ET_GESTURE_END:
+      controller()->EndDrag(false);
+      break;
+
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      controller()->ContinueDrag(this, event.location());
+      break;
+
+    default:
+      break;
+  }
+  return ui::GESTURE_STATUS_CONSUMED;
+}
+
 bool BaseTab::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
   if (data_.title.empty())
     return false;
@@ -431,6 +467,14 @@ void BaseTab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
         waiting_animation.width() / waiting_animation.height();
     waiting_to_loading_frame_count_ratio =
         waiting_animation_frame_count / loading_animation_frame_count;
+
+    base::debug::Alias(&loading_animation_frame_count);
+    base::debug::Alias(&waiting_animation_frame_count);
+    CHECK_NE(0, waiting_to_loading_frame_count_ratio) <<
+        "Number of frames in IDR_THROBBER must be equal to or greater " <<
+        "than the number of frames in IDR_THROBBER_WAITING. Please " <<
+        "investigate how this happened and update http://crbug.com/132590, " <<
+        "this is causing crashes in the wild.";
   }
 
   // The waiting animation is the reverse of the loading animation, but at a
@@ -506,14 +550,8 @@ void BaseTab::PaintTitle(gfx::Canvas* canvas, SkColor title_color) {
     Browser::FormatTitleForDisplay(&title);
   }
 
-#if defined(OS_WIN)
   canvas->DrawFadeTruncatingString(title, gfx::Canvas::TruncateFadeTail, 0,
                                    *font_, title_color, title_bounds);
-#else
-  canvas->DrawStringInt(title, *font_, title_color,
-                        title_bounds.x(), title_bounds.y(),
-                        title_bounds.width(), title_bounds.height());
-#endif
 }
 
 void BaseTab::AnimationProgressed(const ui::Animation* animation) {

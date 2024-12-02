@@ -13,6 +13,9 @@
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/autofill_messages.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/web_contents.h"
 #include "webkit/forms/password_form_dom_manager.h"
 
 using base::Time;
@@ -21,6 +24,7 @@ using webkit::forms::PasswordFormMap;
 
 PasswordFormManager::PasswordFormManager(Profile* profile,
                                          PasswordManager* password_manager,
+                                         content::WebContents* web_contents,
                                          const PasswordForm& observed_form,
                                          bool ssl_valid)
     : best_matches_deleter_(&best_matches_),
@@ -32,6 +36,7 @@ PasswordFormManager::PasswordFormManager(Profile* profile,
       preferred_match_(NULL),
       state_(PRE_MATCHING_PHASE),
       profile_(profile),
+      web_contents_(web_contents),
       manager_action_(kManagerActionNone),
       user_action_(kUserActionNone),
       submit_result_(kSubmitResultNotSubmitted) {
@@ -306,6 +311,9 @@ void PasswordFormManager::OnRequestDone(int handle,
     return;
   }
 
+  // If not blacklisted, send a message to allow password generation.
+  SendNotBlacklistedToRenderer();
+
   // Proceed to autofill.
   // Note that we provide the choices but don't actually prefill a value if
   // either: (1) we are in Incognito mode, or (2) the ACTION paths don't match.
@@ -329,6 +337,10 @@ void PasswordFormManager::OnPasswordStoreRequestDone(
 
   if (result.empty()) {
     state_ = POST_MATCHING_PHASE;
+    // No result means that we visit this site the first time so we don't need
+    // to check whether this site is blacklisted or not. Just send a message
+    // to allow password generation.
+    SendNotBlacklistedToRenderer();
     return;
   }
 
@@ -493,4 +505,10 @@ void PasswordFormManager::SubmitPassed() {
 
 void PasswordFormManager::SubmitFailed() {
   submit_result_ = kSubmitResultFailed;
+}
+
+void PasswordFormManager::SendNotBlacklistedToRenderer() {
+  content::RenderViewHost* host = web_contents_->GetRenderViewHost();
+  host->Send(new AutofillMsg_FormNotBlacklisted(host->GetRoutingID(),
+                                                 observed_form_));
 }

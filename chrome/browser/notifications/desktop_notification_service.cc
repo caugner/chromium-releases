@@ -22,7 +22,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -38,7 +37,7 @@
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "net/base/escape.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -402,16 +401,6 @@ ContentSetting DesktopNotificationService::GetContentSetting(
 void DesktopNotificationService::RequestPermission(
     const GURL& origin, int process_id, int route_id, int callback_context,
     WebContents* contents) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!contents) {
-    Browser* browser = browser::FindLastActiveWithProfile(profile_);
-    if (browser)
-      contents = browser->GetActiveWebContents();
-  }
-
-  if (!contents)
-    return;
-
   // If |origin| hasn't been seen before and the default content setting for
   // notifications is "ask", show an infobar.
   // The cache can only answer queries on the IO thread once it's initialized,

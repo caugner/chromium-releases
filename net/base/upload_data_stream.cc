@@ -15,6 +15,12 @@ namespace net {
 
 bool UploadDataStream::merge_chunks_ = true;
 
+// static
+void UploadDataStream::ResetMergeChunks() {
+  // WARNING: merge_chunks_ must match the above initializer.
+  merge_chunks_ = true;
+}
+
 UploadDataStream::UploadDataStream(UploadData* upload_data)
     : upload_data_(upload_data),
       element_index_(0),
@@ -64,7 +70,8 @@ int UploadDataStream::Init() {
 }
 
 int UploadDataStream::Read(IOBuffer* buf, int buf_len) {
-  std::vector<UploadData::Element>& elements = *upload_data_->elements();
+  std::vector<UploadData::Element>& elements =
+      *upload_data_->elements_mutable();
 
   int bytes_copied = 0;
   while (bytes_copied < buf_len && element_index_ < elements.size()) {

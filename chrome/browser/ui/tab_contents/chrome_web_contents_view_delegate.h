@@ -4,18 +4,17 @@
 
 #ifndef CHROME_BROWSER_UI_TAB_CONTENTS_CHROME_WEB_CONTENTS_VIEW_DELEGATE_H_
 #define CHROME_BROWSER_UI_TAB_CONTENTS_CHROME_WEB_CONTENTS_VIEW_DELEGATE_H_
-#pragma once
 
 namespace content {
 class WebContents;
-class WebContentsViewMacDelegate;
+class WebContentsViewDelegate;
 }
 
-namespace browser {
+namespace chrome {
 
 content::WebContentsViewDelegate* CreateWebContentsViewDelegate(
     content::WebContents* web_contents);
 
-}  // namespace
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_TAB_CONTENTS_CHROME_WEB_CONTENTS_VIEW_DELEGATE_H_

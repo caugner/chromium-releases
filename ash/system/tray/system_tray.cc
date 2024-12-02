@@ -20,6 +20,7 @@
 #include "ash/system/power/power_supply_status.h"
 #include "ash/system/power/tray_power.h"
 #include "ash/system/settings/tray_settings.h"
+#include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_bubble.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
@@ -30,7 +31,6 @@
 #include "ash/system/user/login_status.h"
 #include "ash/system/user/tray_user.h"
 #include "ash/wm/shelf_layout_manager.h"
-#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
@@ -41,6 +41,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/label.h"
@@ -51,38 +52,6 @@
 namespace ash {
 
 namespace internal {
-
-// Container for all the items in the tray. The container auto-resizes the
-// widget when necessary.
-class SystemTrayContainer : public views::View {
- public:
-  SystemTrayContainer() {}
-  virtual ~SystemTrayContainer() {}
-
-  void SetLayoutManager(views::LayoutManager* layout_manager) {
-    views::View::SetLayoutManager(layout_manager);
-    PreferredSizeChanged();
-  }
-
- private:
-  // Overridden from views::View.
-  virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE {
-    PreferredSizeChanged();
-  }
-
-  virtual void ChildVisibilityChanged(View* child) OVERRIDE {
-    PreferredSizeChanged();
-  }
-
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    View* parent,
-                                    View* child) OVERRIDE {
-    if (parent == this)
-      PreferredSizeChanged();
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(SystemTrayContainer);
-};
 
 // Observe the tray layer animation and update the anchor when it changes.
 // TODO(stevenjb): Observe or mirror the actual animation, not just the start
@@ -115,9 +84,11 @@ class SystemTrayLayerAnimationObserver : public ui::LayerAnimationObserver {
 
 using internal::SystemTrayBubble;
 using internal::SystemTrayLayerAnimationObserver;
+using internal::TrayBubbleView;
 
-SystemTray::SystemTray()
-    : items_(),
+SystemTray::SystemTray(internal::StatusAreaWidget* status_area_widget)
+    : internal::TrayBackgroundView(status_area_widget),
+      items_(),
       accessibility_observer_(NULL),
       audio_observer_(NULL),
       bluetooth_observer_(NULL),
@@ -133,13 +104,6 @@ SystemTray::SystemTray()
       should_show_launcher_(false),
       default_bubble_height_(0),
       hide_notifications_(false) {
-  tray_container_ = new internal::SystemTrayContainer;
-  tray_container_->SetLayoutManager(new views::BoxLayout(
-      views::BoxLayout::kHorizontal, 0, 0, 0));
-  tray_container_->set_border(
-      views::Border::CreateEmptyBorder(1, 1, 1, 1));
-  SetContents(tray_container_);
-  SetBorder();
 }
 
 SystemTray::~SystemTray() {
@@ -215,8 +179,11 @@ void SystemTray::AddTrayItem(SystemTrayItem* item) {
 
   SystemTrayDelegate* delegate = Shell::GetInstance()->tray_delegate();
   views::View* tray_item = item->CreateTrayView(delegate->GetUserLoginStatus());
+  item->UpdateAfterShelfAlignmentChange(
+      ash::Shell::GetInstance()->system_tray()->shelf_alignment());
+
   if (tray_item) {
-    tray_container_->AddChildViewAt(tray_item, 0);
+    tray_container()->AddChildViewAt(tray_item, 0);
     PreferredSizeChanged();
     tray_item_map_[item] = tray_item;
   }
@@ -227,7 +194,8 @@ void SystemTray::RemoveTrayItem(SystemTrayItem* item) {
 }
 
 void SystemTray::ShowDefaultView(BubbleCreationType creation_type) {
-  ShowDefaultViewWithOffset(creation_type, -1);
+  ShowDefaultViewWithOffset(creation_type,
+                            TrayBubbleView::InitParams::kArrowDefaultOffset);
 }
 
 void SystemTray::ShowDetailedView(SystemTrayItem* item,
@@ -299,8 +267,12 @@ void SystemTray::SetHideNotifications(bool hide_notifications) {
   hide_notifications_ = hide_notifications;
 }
 
-bool SystemTray::IsBubbleVisible() const {
-  return bubble_.get() && bubble_->IsVisible();
+bool SystemTray::IsAnyBubbleVisible() const {
+  if (bubble_.get() && bubble_->IsVisible())
+    return true;
+  if (notification_bubble_.get() && notification_bubble_->IsVisible())
+    return true;
+  return false;
 }
 
 bool SystemTray::CloseBubbleForTest() const {
@@ -324,9 +296,8 @@ void SystemTray::RemoveBubble(SystemTrayBubble* bubble) {
     if (should_show_launcher_) {
       // No need to show the launcher if the mouse isn't over the status area
       // anymore.
-      aura::RootWindow* root = GetWidget()->GetNativeView()->GetRootWindow();
-      should_show_launcher_ = GetWidget()->GetWindowScreenBounds().Contains(
-          root->last_mouse_location());
+      should_show_launcher_ = GetWidget()->GetWindowBoundsInScreen().Contains(
+          gfx::Screen::GetCursorScreenPoint());
       if (!should_show_launcher_)
         Shell::GetInstance()->shelf()->UpdateAutoHideState();
     }
@@ -338,35 +309,25 @@ void SystemTray::RemoveBubble(SystemTrayBubble* bubble) {
 }
 
 int SystemTray::GetTrayXOffset(SystemTrayItem* item) const {
+  // Don't attempt to align the arrow if the shelf is on the left or right.
+  if (shelf_alignment() != SHELF_ALIGNMENT_BOTTOM)
+    return TrayBubbleView::InitParams::kArrowDefaultOffset;
+
   std::map<SystemTrayItem*, views::View*>::const_iterator it =
       tray_item_map_.find(item);
   if (it == tray_item_map_.end())
-    return -1;
+    return TrayBubbleView::InitParams::kArrowDefaultOffset;
 
   const views::View* item_view = it->second;
-  gfx::Rect item_bounds = item_view->bounds();
-  if (!item_bounds.IsEmpty()) {
-    int x_offset = item_bounds.x() + item_bounds.width() / 2;
-    return base::i18n::IsRTL() ? x_offset : tray_container_->width() - x_offset;
+  if (item_view->bounds().IsEmpty()) {
+    // The bounds of item could be still empty if it does not have a visible
+    // tray view. In that case, use the default (minimum) offset.
+    return TrayBubbleView::InitParams::kArrowDefaultOffset;
   }
 
-  // The bounds of item could be still empty.  It could happen in the case that
-  // the view appears for the first time in the current session, because the
-  // bounds is not calculated yet. In that case, we want to guess the offset
-  // from the position of its parent.
-  int x_offset = 0;
-  for (int i = 0; i < tray_container_->child_count(); ++i) {
-    const views::View* child = tray_container_->child_at(i);
-    if (child == item_view)
-      return base::i18n::IsRTL() ?
-          x_offset : tray_container_->width() - x_offset;
-
-    if (!child->visible())
-      continue;
-    x_offset = child->bounds().right();
-  }
-
-  return -1;
+  gfx::Point point(item_view->width() / 2, 0);
+  ConvertPointToWidget(item_view, &point);
+  return point.x();
 }
 
 void SystemTray::ShowDefaultViewWithOffset(BubbleCreationType creation_type,
@@ -394,18 +355,18 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
     bubble_.reset(new SystemTrayBubble(this, items, bubble_type));
     ash::SystemTrayDelegate* delegate =
         ash::Shell::GetInstance()->tray_delegate();
-    views::View* anchor = tray_container_;
-    SystemTrayBubble::InitParams init_params(
-        SystemTrayBubble::ANCHOR_TYPE_TRAY,
-        shelf_alignment());
-    init_params.anchor = anchor;
+    views::View* anchor = tray_container();
+    TrayBubbleView::InitParams init_params(TrayBubbleView::ANCHOR_TYPE_TRAY,
+                                           shelf_alignment());
     init_params.can_activate = can_activate;
-    init_params.login_status = delegate->GetUserLoginStatus();
-    if (arrow_offset >= 0)
-      init_params.arrow_offset = arrow_offset;
-    if (detailed)
+    if (detailed) {
+      // This is the case where a volume control or brightness control bubble
+      // is created.
       init_params.max_height = default_bubble_height_;
-    bubble_->InitView(init_params);
+      init_params.arrow_color = kBackgroundColor;
+    }
+    init_params.arrow_offset = arrow_offset;
+    bubble_->InitView(anchor, init_params, delegate->GetUserLoginStatus());
   }
   // Save height of default view for creating detailed views directly.
   if (!detailed)
@@ -422,6 +383,7 @@ void SystemTray::ShowItems(const std::vector<SystemTrayItem*>& items,
     should_show_launcher_ = true;
 
   UpdateNotificationBubble();  // State changed, re-create notifications.
+  status_area_widget()->HideNonSystemNotifications();
 }
 
 void SystemTray::UpdateNotificationBubble() {
@@ -451,51 +413,32 @@ void SystemTray::UpdateNotificationBubble() {
         this, notification_items_, SystemTrayBubble::BUBBLE_TYPE_NOTIFICATION));
   }
   views::View* anchor;
-  SystemTrayBubble::AnchorType anchor_type;
+  TrayBubbleView::AnchorType anchor_type;
   if (bubble_.get()) {
     anchor = bubble_->bubble_view();
-    anchor_type = SystemTrayBubble::ANCHOR_TYPE_BUBBLE;
+    anchor_type = TrayBubbleView::ANCHOR_TYPE_BUBBLE;
   } else {
-    anchor = tray_container_;
-    anchor_type = SystemTrayBubble::ANCHOR_TYPE_TRAY;
+    anchor = tray_container();
+    anchor_type = TrayBubbleView::ANCHOR_TYPE_TRAY;
   }
-  SystemTrayBubble::InitParams init_params(anchor_type, shelf_alignment());
-  init_params.anchor = anchor;
-  init_params.login_status =
-      ash::Shell::GetInstance()->tray_delegate()->GetUserLoginStatus();
-  int arrow_offset = GetTrayXOffset(notification_items_[0]);
-  if (arrow_offset >= 0)
-    init_params.arrow_offset = arrow_offset;
-  notification_bubble_->InitView(init_params);
+  TrayBubbleView::InitParams init_params(anchor_type, shelf_alignment());
+  init_params.arrow_offset = GetTrayXOffset(notification_items_[0]);
+  init_params.arrow_color = kBackgroundColor;
+  user::LoginStatus login_status =
+      Shell::GetInstance()->tray_delegate()->GetUserLoginStatus();
+  notification_bubble_->InitView(anchor, init_params, login_status);
   if (hide_notifications_)
     notification_bubble_->SetVisible(false);
+  else
+    status_area_widget()->HideNonSystemNotifications();
 }
 
 void SystemTray::UpdateNotificationAnchor() {
   if (!notification_bubble_.get())
     return;
-  notification_bubble_->bubble_view()->UpdateAnchor();
+  notification_bubble_->bubble_view()->UpdateBubble();
   // Ensure that the notification buble is above the launcher/status area.
   notification_bubble_->bubble_view()->GetWidget()->StackAtTop();
-}
-
-void SystemTray::SetBorder() {
-  // Change the border padding for different shelf alignment.
-  if (shelf_alignment() == SHELF_ALIGNMENT_BOTTOM) {
-    set_border(views::Border::CreateEmptyBorder(0, 0,
-        kPaddingFromBottomOfScreenBottomAlignment,
-        kPaddingFromRightEdgeOfScreenBottomAlignment));
-  } else if (shelf_alignment() == SHELF_ALIGNMENT_LEFT) {
-    set_border(views::Border::CreateEmptyBorder(0,
-        kPaddingFromEdgeOfScreenVerticalAlignment,
-        kPaddingFromBottomOfScreenVerticalAlignment,
-        kPaddingFromEdgeOfLauncherVerticalAlignment));
-  } else {
-    set_border(views::Border::CreateEmptyBorder(0,
-        kPaddingFromEdgeOfLauncherVerticalAlignment,
-        kPaddingFromBottomOfScreenVerticalAlignment,
-        kPaddingFromEdgeOfScreenVerticalAlignment));
-  }
 }
 
 void SystemTray::SetShelfAlignment(ShelfAlignment alignment) {
@@ -503,11 +446,13 @@ void SystemTray::SetShelfAlignment(ShelfAlignment alignment) {
     return;
   internal::TrayBackgroundView::SetShelfAlignment(alignment);
   UpdateAfterShelfAlignmentChange(alignment);
-  SetBorder();
-  tray_container_->SetLayoutManager(new views::BoxLayout(
-      alignment == SHELF_ALIGNMENT_BOTTOM ?
-          views::BoxLayout::kHorizontal : views::BoxLayout::kVertical,
-      0, 0, 0));
+  // Destroy any existing bubble so that it is rebuilt correctly.
+  bubble_.reset();
+  // Rebuild any notification bubble.
+  if (notification_bubble_.get()) {
+    notification_bubble_.reset();
+    UpdateNotificationBubble();
+  }
 }
 
 bool SystemTray::PerformAction(const views::Event& event) {
@@ -517,13 +462,15 @@ bool SystemTray::PerformAction(const views::Event& event) {
       bubble_->bubble_type() == SystemTrayBubble::BUBBLE_TYPE_DEFAULT) {
     bubble_->Close();
   } else {
-    int arrow_offset = -1;
+    int arrow_offset = TrayBubbleView::InitParams::kArrowDefaultOffset;
     if (event.IsMouseEvent() || event.type() == ui::ET_GESTURE_TAP) {
       const views::LocatedEvent& located_event =
           static_cast<const views::LocatedEvent&>(event);
-      if (shelf_alignment() == SHELF_ALIGNMENT_BOTTOM)
-        arrow_offset = base::i18n::IsRTL() ?
-            located_event.x() : tray_container_->width() - located_event.x();
+      if (shelf_alignment() == SHELF_ALIGNMENT_BOTTOM) {
+        gfx::Point point(located_event.x(), 0);
+        ConvertPointToWidget(this, &point);
+        arrow_offset = point.x();
+      }
     }
     ShowDefaultViewWithOffset(BUBBLE_CREATE_NEW, arrow_offset);
   }
@@ -559,7 +506,7 @@ void SystemTray::OnPaintFocusBorder(gfx::Canvas* canvas) {
   // sure clicking on the edges brings up the popup. However, the focus border
   // should be only around the container.
   if (GetWidget() && GetWidget()->IsActive())
-    canvas->DrawFocusRect(tray_container_->bounds());
+    DrawBorder(canvas, GetContentsBounds());
 }
 
 }  // namespace ash

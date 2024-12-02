@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_URL_CONSTANTS_H_
 #define CONTENT_PUBLIC_COMMON_URL_CONSTANTS_H_
-#pragma once
 
 #include "content/common/content_export.h"
 
@@ -26,6 +25,7 @@ CONTENT_EXPORT extern const char kDataScheme[];
 CONTENT_EXPORT extern const char kFileScheme[];
 CONTENT_EXPORT extern const char kFileSystemScheme[];
 CONTENT_EXPORT extern const char kFtpScheme[];
+CONTENT_EXPORT extern const char kGuestScheme[];
 CONTENT_EXPORT extern const char kHttpScheme[];
 CONTENT_EXPORT extern const char kHttpsScheme[];
 CONTENT_EXPORT extern const char kJavaScriptScheme[];
@@ -41,6 +41,7 @@ CONTENT_EXPORT extern const char kChromeUIBlobInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUIBrowserCrashHost[];
 CONTENT_EXPORT extern const char kChromeUINetworkViewCacheHost[];
 CONTENT_EXPORT extern const char kChromeUITcmallocHost[];
+CONTENT_EXPORT extern const char kChromeUIHistogramHost[];
 
 // Full about URLs (including schemes).
 CONTENT_EXPORT extern const char kChromeUICrashURL[];

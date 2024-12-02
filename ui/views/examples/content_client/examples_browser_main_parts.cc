@@ -7,13 +7,13 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/run_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/shell_browser_context.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/net_module.h"
 #include "ui/views/examples/examples_window.h"
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/test/test_views_delegate.h"
@@ -22,7 +22,7 @@
 #include "ui/aura/desktop/desktop_screen.h"
 #include "ui/aura/desktop/desktop_stacking_client.h"
 #include "ui/aura/env.h"
-#include "ui/aura/single_monitor_manager.h"
+#include "ui/aura/single_display_manager.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/desktop_native_widget_helper_aura.h"
 #include "ui/views/widget/native_widget_aura.h"
@@ -32,15 +32,17 @@ namespace views {
 namespace examples {
 
 namespace {
-class ExamplesViewsDelegate : public views::TestViewsDelegate {
+
+class ExamplesViewsDelegate : public TestViewsDelegate {
  public:
 #if defined(USE_AURA)
-  virtual views::NativeWidgetHelperAura* CreateNativeWidgetHelper(
-      views::NativeWidgetAura* native_widget) OVERRIDE {
-    return new views::DesktopNativeWidgetHelperAura(native_widget);
+  virtual NativeWidgetHelperAura* CreateNativeWidgetHelper(
+      NativeWidgetAura* native_widget) OVERRIDE {
+    return new DesktopNativeWidgetHelperAura(native_widget);
   }
 #endif
 };
+
 }  // namespace
 
 ExamplesBrowserMainParts::ExamplesBrowserMainParts(
@@ -51,17 +53,16 @@ ExamplesBrowserMainParts::~ExamplesBrowserMainParts() {
 }
 
 void ExamplesBrowserMainParts::PreMainMessageLoopRun() {
-  browser_context_.reset(new content::ShellBrowserContext);
+  browser_context_.reset(new content::ShellBrowserContext(false));
 
 #if defined(USE_AURA)
-  aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
+  aura::Env::GetInstance()->SetDisplayManager(new aura::SingleDisplayManager);
   stacking_client_.reset(new aura::DesktopStackingClient);
   gfx::Screen::SetInstance(aura::CreateDesktopScreen());
 #endif
   views_delegate_.reset(new ExamplesViewsDelegate);
 
-  views::examples::ShowExamplesWindow(views::examples::QUIT_ON_CLOSE,
-                                      browser_context_.get());
+  ShowExamplesWindow(QUIT_ON_CLOSE, browser_context_.get());
 }
 
 void ExamplesBrowserMainParts::PostMainMessageLoopRun() {
@@ -76,11 +77,12 @@ void ExamplesBrowserMainParts::PostMainMessageLoopRun() {
 bool ExamplesBrowserMainParts::MainMessageLoopRun(int* result_code) {
   // xxx: Hax here because this kills event handling.
 #if !defined(USE_AURA)
-  views::AcceleratorHandler accelerator_handler;
-  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
+  AcceleratorHandler accelerator_handler;
+  base::RunLoop run_loop(&accelerator_handler);
 #else
-  MessageLoopForUI::current()->Run();
+  base::RunLoop run_loop;
 #endif
+  run_loop.Run();
   return true;
 }
 

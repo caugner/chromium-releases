@@ -111,25 +111,68 @@ TEST(JsonSchemaCompilerChoicesTest, ObjectWithChoicesParamsCreateFail) {
   }
 }
 
+TEST(JsonSchemaCompilerChoicesTest, PopulateChoiceType) {
+  std::vector<std::string> strings;
+  strings.push_back("list");
+  strings.push_back("of");
+  strings.push_back("strings");
+
+  ListValue* strings_value = new ListValue();
+  for (size_t i = 0; i < strings.size(); ++i)
+    strings_value->Append(Value::CreateStringValue(strings[i]));
+
+  DictionaryValue value;
+  value.SetInteger("integers", 4);
+  value.Set("strings", strings_value);
+
+  ChoiceType out;
+  ASSERT_TRUE(ChoiceType::Populate(value, &out));
+  EXPECT_EQ(ChoiceType::INTEGERS_INTEGER, out.integers_type);
+  ASSERT_TRUE(out.integers_integer.get());
+  EXPECT_FALSE(out.integers_array.get());
+  EXPECT_EQ(4, *out.integers_integer);
+
+  EXPECT_EQ(ChoiceType::STRINGS_ARRAY, out.strings_type);
+  EXPECT_FALSE(out.strings_string.get());
+  ASSERT_TRUE(out.strings_array.get());
+  EXPECT_EQ(strings, *out.strings_array);
+}
+
+TEST(JsonSchemaCompilerChoicesTest, ChoiceTypeToValue) {
+  ListValue* strings_value = new ListValue();
+  strings_value->Append(Value::CreateStringValue("list"));
+  strings_value->Append(Value::CreateStringValue("of"));
+  strings_value->Append(Value::CreateStringValue("strings"));
+
+  DictionaryValue value;
+  value.SetInteger("integers", 5);
+  value.Set("strings", strings_value);
+
+  ChoiceType out;
+  ASSERT_TRUE(ChoiceType::Populate(value, &out));
+
+  EXPECT_TRUE(value.Equals(out.ToValue().get()));
+}
+
 TEST(JsonSchemaCompilerChoicesTest, ReturnChoices) {
   {
     std::vector<int> integers;
     integers.push_back(1);
     integers.push_back(2);
-    scoped_ptr<Value> array_result(ReturnChoices::Result::Create(integers));
-    ListValue* list = NULL;
-    EXPECT_TRUE(array_result->GetAsList(&list));
-    EXPECT_EQ((size_t) 2, list->GetSize());
-    int temp;
-    EXPECT_TRUE(list->GetInteger(0, &temp));
-    EXPECT_EQ(1, temp);
-    EXPECT_TRUE(list->GetInteger(1, &temp));
-    EXPECT_EQ(2, temp);
+    scoped_ptr<ListValue> array_results =
+        ReturnChoices::Results::Create(integers);
+
+    ListValue expected;
+    ListValue* expected_argument = new ListValue();
+    expected_argument->Append(Value::CreateIntegerValue(1));
+    expected_argument->Append(Value::CreateIntegerValue(2));
+    expected.Append(expected_argument);
+    EXPECT_TRUE(array_results->Equals(&expected));
   }
   {
-    scoped_ptr<Value> single_result(ReturnChoices::Result::Create(5));
-    int temp;
-    EXPECT_TRUE(single_result->GetAsInteger(&temp));
-    EXPECT_EQ(5, temp);
+    scoped_ptr<ListValue> integer_results = ReturnChoices::Results::Create(5);
+    ListValue expected;
+    expected.Append(Value::CreateIntegerValue(5));
+    EXPECT_TRUE(integer_results->Equals(&expected));
   }
 }

@@ -10,17 +10,16 @@
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/sessions/sync_session_snapshot.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/util/sync_string_conversions.h"
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_event_handler.h"
 #include "sync/sessions/session_state.h"
 
-namespace browser_sync {
-
-using browser_sync::SyncProtocolError;
+namespace syncer {
 
 JsSyncManagerObserver::JsSyncManagerObserver() {}
 
@@ -41,13 +40,12 @@ void JsSyncManagerObserver::OnSyncCycleCompleted(
   HandleJsEvent(FROM_HERE, "onSyncCycleCompleted", JsEventDetails(&details));
 }
 
-void JsSyncManagerObserver::OnConnectionStatusChange(
-    sync_api::ConnectionStatus status) {
+void JsSyncManagerObserver::OnConnectionStatusChange(ConnectionStatus status) {
   if (!event_handler_.IsInitialized()) {
     return;
   }
   DictionaryValue details;
-  details.SetString("status", sync_api::ConnectionStatusToString(status));
+  details.SetString("status", ConnectionStatusToString(status));
   HandleJsEvent(FROM_HERE,
                 "onConnectionStatusChange", JsEventDetails(&details));
 }
@@ -62,14 +60,14 @@ void JsSyncManagerObserver::OnUpdatedToken(const std::string& token) {
 }
 
 void JsSyncManagerObserver::OnPassphraseRequired(
-    sync_api::PassphraseRequiredReason reason,
+    PassphraseRequiredReason reason,
     const sync_pb::EncryptedData& pending_keys) {
   if (!event_handler_.IsInitialized()) {
     return;
   }
   DictionaryValue details;
   details.SetString("reason",
-                     sync_api::PassphraseRequiredReasonToString(reason));
+                     PassphraseRequiredReasonToString(reason));
   HandleJsEvent(FROM_HERE, "onPassphraseRequired", JsEventDetails(&details));
 }
 
@@ -92,14 +90,14 @@ void JsSyncManagerObserver::OnBootstrapTokenUpdated(
 }
 
 void JsSyncManagerObserver::OnEncryptedTypesChanged(
-    syncable::ModelTypeSet encrypted_types,
+    ModelTypeSet encrypted_types,
     bool encrypt_everything) {
   if (!event_handler_.IsInitialized()) {
     return;
   }
   DictionaryValue details;
   details.Set("encryptedTypes",
-               syncable::ModelTypeSetToValue(encrypted_types));
+              ModelTypeSetToValue(encrypted_types));
   details.SetBoolean("encryptEverything", encrypt_everything);
   HandleJsEvent(FROM_HERE,
                 "onEncryptedTypesChanged", JsEventDetails(&details));
@@ -126,13 +124,19 @@ void JsSyncManagerObserver::OnActionableError(
 
 void JsSyncManagerObserver::OnInitializationComplete(
     const WeakHandle<JsBackend>& js_backend,
-    bool success) {
+    bool success, syncer::ModelTypeSet restored_types) {
   if (!event_handler_.IsInitialized()) {
     return;
   }
   // Ignore the |js_backend| argument; it's not really convertible to
   // JSON anyway.
-  HandleJsEvent(FROM_HERE, "onInitializationComplete", JsEventDetails());
+
+  DictionaryValue details;
+  details.Set("restoredTypes", ModelTypeSetToValue(restored_types));
+
+  HandleJsEvent(FROM_HERE,
+                "onInitializationComplete",
+                JsEventDetails(&details));
 }
 
 void JsSyncManagerObserver::OnStopSyncingPermanently() {
@@ -140,20 +144,6 @@ void JsSyncManagerObserver::OnStopSyncingPermanently() {
     return;
   }
   HandleJsEvent(FROM_HERE, "onStopSyncingPermanently", JsEventDetails());
-}
-
-void JsSyncManagerObserver::OnClearServerDataSucceeded() {
-  if (!event_handler_.IsInitialized()) {
-    return;
-  }
-  HandleJsEvent(FROM_HERE, "onClearServerDataSucceeded", JsEventDetails());
-}
-
-void JsSyncManagerObserver::OnClearServerDataFailed() {
-  if (!event_handler_.IsInitialized()) {
-    return;
-  }
-  HandleJsEvent(FROM_HERE, "onClearServerDataFailed", JsEventDetails());
 }
 
 void JsSyncManagerObserver::HandleJsEvent(
@@ -167,4 +157,4 @@ void JsSyncManagerObserver::HandleJsEvent(
                       &JsEventHandler::HandleJsEvent, name, details);
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

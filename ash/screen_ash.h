@@ -4,13 +4,14 @@
 
 #ifndef ASH_SCREEN_ASH_H_
 #define ASH_SCREEN_ASH_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "base/compiler_specific.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/rect.h"
 #include "ui/gfx/screen_impl.h"
+
+namespace gfx {
+class Rect;
+}
 
 namespace ash {
 
@@ -21,12 +22,29 @@ class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
   ScreenAsh();
   virtual ~ScreenAsh();
 
-  // Returns the bounds for maximized windows. Maximized windows trigger
-  // auto-hiding the shelf.
-  static gfx::Rect GetMaximizedWindowBounds(aura::Window* window);
+  // Returns the bounds for maximized windows in parent coordinates.
+  // Maximized windows trigger auto-hiding the shelf.
+  static gfx::Rect GetMaximizedWindowBoundsInParent(aura::Window* window);
 
-  // Returns work area when a maximized window is not present.
-  static gfx::Rect GetUnmaximizedWorkAreaBounds(aura::Window* window);
+  // Returns work area when a maximized window is not present in
+  // parent coordinates.
+  static gfx::Rect GetUnmaximizedWorkAreaBoundsInParent(aura::Window* window);
+
+  // Returns the display bounds in parent coordinates.
+  static gfx::Rect GetDisplayBoundsInParent(aura::Window* window);
+
+  // Returns the display's work area bounds in parent coordinates.
+  static gfx::Rect GetDisplayWorkAreaBoundsInParent(aura::Window* window);
+
+  // Converts |rect| from |window|'s coordinates to the virtual screen
+  // coordinates.
+  static gfx::Rect ConvertRectToScreen(aura::Window* window,
+                                       const gfx::Rect& rect);
+
+  // Converts |rect| from virtual screen coordinates to the |window|'s
+  // coordinates.
+  static gfx::Rect ConvertRectFromScreen(aura::Window* window,
+                                         const gfx::Rect& rect);
 
  protected:
   virtual gfx::Point GetCursorScreenPoint() OVERRIDE;
@@ -37,6 +55,8 @@ class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
       gfx::NativeView view) const OVERRIDE;
   virtual gfx::Display GetDisplayNearestPoint(
       const gfx::Point& point) const OVERRIDE;
+  virtual gfx::Display GetDisplayMatching(
+      const gfx::Rect& match_rect) const OVERRIDE;
   virtual gfx::Display GetPrimaryDisplay() const OVERRIDE;
 
  private:

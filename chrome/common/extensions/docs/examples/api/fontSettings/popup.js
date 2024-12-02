@@ -22,13 +22,13 @@ var sampleTextDivIds = [
 var defaultSampleText = 'Lorem ipsum dolor sit amat.';
 var scriptSpecificSampleText = {
   // "Cyrllic script".
-  'Cyrl': 'Lorem ipsum Кириллица',
-  'Hang': 'Lorem ipsum 雪海泳 정 참판 양반댁 규수 큰 교자 타고 혼례 치른 날.',
-  'Hans': 'Lorem ipsum 雪海泳 简体字。',
-  'Hant': 'Lorem ipsum 雪海泳 繁體字。',
-  'Hrkt': 'Lorem ipsum 雪海泳 バスを待ち大路の春をうたがはず。',
-   // "Khmer language".
-  'Khmr': 'Lorem ipsum \u1797\u17B6\u179F\u17B6\u1781\u17D2\u1798\u17C2\u179A',
+  'Cyrl': 'Кириллица',
+  'Hang': '정 참판 양반댁 규수 큰 교자 타고 혼례 치른 날.',
+  'Hans': '床前明月光，疑是地上霜。举头望明月，低头思故乡。',
+  'Hant': '床前明月光，疑是地上霜。舉頭望明月，低頭思故鄉。',
+  'Jpan': '吾輩は猫である。名前はまだ無い。',
+  // "Khmer language".
+  'Khmr': '\u1797\u17B6\u179F\u17B6\u1781\u17D2\u1798\u17C2\u179A',
 };
 
 function getSelectedScript() {
@@ -55,8 +55,8 @@ function populateLists(fonts) {
 
     for (var j = 0; j < fonts.length; j++) {
       var item = document.createElement('option');
-      item.value = fonts[j].fontName;
-      item.text = fonts[j].localizedName;
+      item.value = fonts[j].fontId;
+      item.text = fonts[j].displayName;
       list.add(item);
     }
   }
@@ -74,34 +74,34 @@ function getFontChangeHandler(fontList, genericFamily) {
 
     var details = {};
     details.genericFamily = genericFamily;
-    details.fontName = font;
+    details.fontId = font;
     details.script = script;
 
-    chrome.experimental.fontSettings.setFont(details);
+    chrome.fontSettings.setFont(details);
   };
 }
 
-// Sets the selected value of |fontList| to |fontName|.
-function setSelectedFont(fontList, fontName) {
+// Sets the selected value of |fontList| to |fontId|.
+function setSelectedFont(fontList, fontId) {
   var script = getSelectedScript();
   var i;
   for (i = 0; i < fontList.length; i++) {
-    if (fontName == fontList.options[i].value) {
+    if (fontId == fontList.options[i].value) {
       fontList.selectedIndex = i;
       break;
     }
   }
   if (i == fontList.length) {
-    console.warn("font '" + fontName + "' for " + fontList.id + ' for ' +
+    console.warn("font '" + fontId + "' for " + fontList.id + ' for ' +
         script + ' is not on the system');
   }
 }
 
 // Returns a callback function that sets the selected value of |list| to the
-// font returned from |chrome.experimental.fontSettings.getFont|.
+// font returned from |chrome.fontSettings.getFont|.
 function getFontHandler(list) {
   return function(details) {
-    setSelectedFont(list, details.fontName);
+    setSelectedFont(list, details.fontId);
     list.disabled = !isControllableLevel(details.levelOfControl);
   };
 }
@@ -123,7 +123,7 @@ function updateFontListsForScript() {
     // just use en for lang.
     document.body.lang = 'en-' + script;
 
-    chrome.experimental.fontSettings.getFont(details, getFontHandler(list));
+    chrome.fontSettings.getFont(details, getFontHandler(list));
   }
 
   if (typeof(scriptSpecificSampleText[script]) != 'undefined')
@@ -182,8 +182,8 @@ function clearAllSettings() {
        "Cari", "Cham", "Cher", "Cirt", "Copt", "Cprt", "Cyrl", "Cyrs", "Deva",
        "Dsrt", "Dupl", "Egyd", "Egyh", "Egyp", "Elba", "Ethi", "Geor", "Geok",
        "Glag", "Goth", "Gran", "Grek", "Gujr", "Guru", "Hang", "Hani", "Hano",
-       "Hans", "Hant", "Hebr", "Hluw", "Hmng", "Hrkt", "Hung", "Inds", "Ital",
-       "Java", "Jurc", "Kali", "Khar", "Khmr", "Khoj", "Knda", "Kpel", "Kthi",
+       "Hans", "Hant", "Hebr", "Hluw", "Hmng", "Hung", "Inds", "Ital", "Java",
+       "Jpan", "Jurc", "Kali", "Khar", "Khmr", "Khoj", "Knda", "Kpel", "Kthi",
        "Lana", "Laoo", "Latf", "Latg", "Latn", "Lepc", "Limb", "Lina", "Linb",
        "Lisu", "Loma", "Lyci", "Lydi", "Mand", "Mani", "Maya", "Mend", "Merc",
        "Mero", "Mlym", "Moon", "Mong", "Mroo", "Mtei", "Mymr", "Narb", "Nbat",
@@ -198,16 +198,16 @@ function clearAllSettings() {
       ["standard", "sansserif", "serif", "fixed", "cursive", "fantasy"];
   for (var i = 0; i < scripts.length; i++) {
     for (var j = 0; j < families.length; j++) {
-      chrome.experimental.fontSettings.clearFont({
+      chrome.fontSettings.clearFont({
         script: scripts[i],
         genericFamily: families[j]
       });
     }
   }
 
-  chrome.experimental.fontSettings.clearDefaultFixedFontSize();
-  chrome.experimental.fontSettings.clearDefaultFontSize();
-  chrome.experimental.fontSettings.clearMinimumFontSize();
+  chrome.fontSettings.clearDefaultFixedFontSize();
+  chrome.fontSettings.clearDefaultFontSize();
+  chrome.fontSettings.clearMinimumFontSize();
 }
 
 function init() {
@@ -216,7 +216,7 @@ function init() {
                               updateFontListsForScript);
 
   // Populate the font lists.
-  chrome.experimental.fontSettings.getFontList(populateLists);
+  chrome.fontSettings.getFontList(populateLists);
 
   // Add change handlers to the font lists.
   for (var i = 0; i < genericFamilies.length; i++) {
@@ -225,22 +225,22 @@ function init() {
     list.addEventListener('change', handler);
   }
 
-  chrome.experimental.fontSettings.onFontChanged.addListener(
+  chrome.fontSettings.onFontChanged.addListener(
       updateFontListsForScript);
 
   initFontSizePref('defaultFontSize',
-                   chrome.experimental.fontSettings.getDefaultFontSize,
-                   chrome.experimental.fontSettings.setDefaultFontSize,
-                   chrome.experimental.fontSettings.onDefaultFontSizeChanged);
+                   chrome.fontSettings.getDefaultFontSize,
+                   chrome.fontSettings.setDefaultFontSize,
+                   chrome.fontSettings.onDefaultFontSizeChanged);
   initFontSizePref(
       'defaultFixedFontSize',
-      chrome.experimental.fontSettings.getDefaultFixedFontSize,
-      chrome.experimental.fontSettings.setDefaultFixedFontSize,
-      chrome.experimental.fontSettings.onDefaultFixedFontSizeChanged);
+      chrome.fontSettings.getDefaultFixedFontSize,
+      chrome.fontSettings.setDefaultFixedFontSize,
+      chrome.fontSettings.onDefaultFixedFontSizeChanged);
   initFontSizePref('minFontSize',
-                   chrome.experimental.fontSettings.getMinimumFontSize,
-                   chrome.experimental.fontSettings.setMinimumFontSize,
-                   chrome.experimental.fontSettings.onMinimumFontSizeChanged);
+                   chrome.fontSettings.getMinimumFontSize,
+                   chrome.fontSettings.setMinimumFontSize,
+                   chrome.fontSettings.onMinimumFontSizeChanged);
 
   var clearButton = document.getElementById('clearButton');
   clearButton.addEventListener('click', clearAllSettings);

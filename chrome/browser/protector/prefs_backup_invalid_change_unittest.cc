@@ -10,6 +10,10 @@
 #include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
+#endif
+
 namespace protector {
 
 namespace {
@@ -20,6 +24,13 @@ const char kStartupUrl[] = "http://example.com/";
 
 class PrefsBackupInvalidChangeTest : public testing::Test {
  protected:
+  virtual void SetUp() OVERRIDE {
+    // Make the tests independent of the Mac startup pref migration (see
+    // SessionStartupPref::MigrateMacDefaultPrefIfNecessary).
+    PrefService* prefs = profile_.GetPrefs();
+    prefs->SetString(prefs::kProfileCreatedByVersion, "22.0.0.0.0");
+  }
+
   TestingProfile profile_;
 };
 

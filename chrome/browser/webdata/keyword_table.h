@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_WEBDATA_KEYWORD_TABLE_H_
 #define CHROME_BROWSER_WEBDATA_KEYWORD_TABLE_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -93,8 +92,7 @@ class KeywordTable : public WebDatabaseTable {
   // Comma-separated list of keyword table column names, in order.
   static const char kKeywordColumns[];
 
-  KeywordTable(sql::Connection* db, sql::MetaTable* meta_table)
-      : WebDatabaseTable(db, meta_table) {}
+  KeywordTable(sql::Connection* db, sql::MetaTable* meta_table);
   virtual ~KeywordTable();
   virtual bool Init() OVERRIDE;
   virtual bool IsSyncable() OVERRIDE;
@@ -198,6 +196,9 @@ class KeywordTable : public WebDatabaseTable {
   // Migrates table |name| (which should be either "keywords" or
   // "keywords_backup" from version 44 to version 45.
   bool MigrateKeywordsTableForVersion45(const std::string& name);
+
+  // Whether the backup was overwritten during migration.
+  bool backup_overwritten_;
 
   DISALLOW_COPY_AND_ASSIGN(KeywordTable);
 };

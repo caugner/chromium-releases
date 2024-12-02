@@ -13,11 +13,33 @@ JOBS="${JOBS:-4}"
 # Clobber build?  Overridden by bots with BUILDBOT_CLOBBER.
 NEED_CLOBBER="${NEED_CLOBBER:-0}"
 
-# Setup environment for Android build.
+
+# Parse named arguments passed into the annotator script
+# and assign them global variable names.
+function bb_parse_args {
+  while [[ $1 ]]; do
+    case "$1" in
+      --factory-properties=*)
+        FACTORY_PROPERTIES="$(echo "$1" | sed 's/^[^=]*=//')"
+        ;;
+      --build-properties=*)
+        BUILD_PROPERTIES="$(echo "$1" | sed 's/^[^=]*=//')"
+        ;;
+      *)
+        echo "@@@STEP_WARNINGS@@@"
+        echo "Warning, unparsed input argument: '$1'"
+        ;;
+    esac
+    shift
+  done
+}
+
+
+# Setup environment for Android build.  Do not set ANDROID_SDK_ROOT so that
+# default version from $ROOT/src/third_party/android_tools/
 # Called from bb_baseline_setup.
 # Moved to top of file so it is easier to find.
 function bb_setup_environment {
-  export ANDROID_SDK_ROOT=/usr/local/google/android-sdk-linux
   export ANDROID_NDK_ROOT=/usr/local/google/android-ndk-r7
 }
 
@@ -30,6 +52,7 @@ function bb_install_build_deps {
   if [[ -f "$script" ]]; then
     "$script"
   else
+    echo "@@@STEP_WARNINGS@@@"
     echo "Cannot find $script; why?"
   fi
 }
@@ -40,11 +63,23 @@ function bb_force_bot_green_and_exit {
   exit 0
 }
 
+function bb_run_gclient_hooks {
+  echo "@@@BUILD_STEP runhooks android@@@"
+  gclient runhooks
+}
+
 # Basic setup for all bots to run after a source tree checkout.
-# $1: source root.
+# Args:
+#   $1: source root.
+#   $2 and beyond: key value pairs which are parsed by bb_parse_args.
 function bb_baseline_setup {
-  echo "@@@BUILD_STEP cd into source root@@@"
+  echo "@@@BUILD_STEP Environment setup@@@"
   SRC_ROOT="$1"
+  # Remove SRC_ROOT param
+  shift
+
+  bb_parse_args "$@"
+
   if [ ! -d "${SRC_ROOT}" ] ; then
     echo "Please specify a valid source root directory as an arg"
     echo '@@@STEP_FAILURE@@@'
@@ -58,7 +93,6 @@ function bb_baseline_setup {
     return 1
   fi
 
-  echo "@@@BUILD_STEP Basic setup@@@"
   bb_setup_environment
 
   for mandatory_directory in $(dirname "${ANDROID_SDK_ROOT}") \
@@ -77,10 +111,9 @@ function bb_baseline_setup {
 
   # Setting up a new bot?  Must do this before envsetup.sh
   if [ ! -d "${ANDROID_NDK_ROOT}" ] ; then
-    bb_install_build_deps $1
+    bb_install_build_deps $SRC_ROOT
   fi
 
-  echo "@@@BUILD_STEP Configure with envsetup.sh@@@"
   . build/android/envsetup.sh
 
   if [ "$NEED_CLOBBER" -eq 1 ]; then
@@ -92,8 +125,8 @@ function bb_baseline_setup {
     fi
   fi
 
-  echo "@@@BUILD_STEP android_gyp@@@"
-  android_gyp
+  # Should be called only after envsetup is done.
+  bb_run_gclient_hooks
 }
 
 
@@ -193,20 +226,6 @@ function bb_compile {
   bb_goma_make
 }
 
-# Re-gyp and compile with unit test bundles configured as shlibs for
-# the native test runner.  Experimental for now.  Once the native test
-# loader is on by default, this entire function becomes obsolete.
-function bb_compile_apk_tests {
-  echo "@@@BUILD_STEP Re-gyp for the native test runner@@@"
-  # Setup goma again. Not doing this breaks the android_gyp step.
-  bb_setup_goma_internal
-
-  GYP_DEFINES="$GYP_DEFINES gtest_target_type=shared_library" android_gyp
-
-  echo "@@@BUILD_STEP Native test runner compile@@@"
-  bb_goma_make
-}
-
 # Experimental compile step; does not turn the tree red if it fails.
 function bb_compile_experimental {
   # Linking DumpRenderTree appears to hang forever?
@@ -230,12 +249,74 @@ function bb_run_tests_emulator {
 
 # Run tests on an actual device.  (Better have one plugged in!)
 function bb_run_tests {
+  python build/android/device_status_check.py
   echo "@@@BUILD_STEP Run Tests on actual hardware@@@"
   build/android/run_tests.py --xvfb --verbose
 }
 
-# Run APK tests on an actual device.
-function bb_run_apk_tests {
-  echo "@@@BUILD_STEP Run APK Tests on actual hardware@@@"
-  build/android/run_tests.py --xvfb --verbose --apk=True
+# Run instrumentation test.
+# Args:
+#   $1: TEST_APK.
+#   $2: EXTRA_FLAGS to be passed to run_instrumentation_tests.py.
+function bb_run_instrumentation_test {
+  local TEST_APK=${1}
+  local EXTRA_FLAGS=${2}
+  local APK_NAME=$(basename ${TEST_APK})
+  echo "@@@BUILD_STEP Android Instrumentation ${APK_NAME} ${EXTRA_FLAGS} "\
+       "on actual hardware@@@"
+  local INSTRUMENTATION_FLAGS="-vvv"
+  INSTRUMENTATION_FLAGS+=" --test-apk ${TEST_APK}"
+  INSTRUMENTATION_FLAGS+=" ${EXTRA_FLAGS}"
+  build/android/run_instrumentation_tests.py ${INSTRUMENTATION_FLAGS}
+}
+
+# Run content shell instrumentation test on device.
+function bb_run_content_shell_instrumentation_test {
+  build/android/adb_install_content_shell
+  local TEST_APK="content_shell_test/ContentShellTest-debug"
+  # Use -I to install the test apk only on the first run.
+  # TODO(bulach): remove the second once we have a Smoke test.
+  bb_run_instrumentation_test ${TEST_APK} "-I -A Smoke"
+  bb_run_instrumentation_test ${TEST_APK} "-I -A SmallTest"
+  bb_run_instrumentation_test ${TEST_APK} "-A MediumTest"
+  bb_run_instrumentation_test ${TEST_APK} "-A LargeTest"
+}
+
+# Zip and archive a build.
+function bb_zip_build {
+  echo "@@@BUILD_STEP Zip build@@@"
+  python ../../../../scripts/slave/zip_build.py \
+    --src-dir "$SRC_ROOT" \
+    --exclude-files "lib.target" \
+    --factory-properties "$FACTORY_PROPERTIES" \
+    --build-properties "$BUILD_PROPERTIES"
+}
+
+# Download and extract a build.
+function bb_extract_build {
+  echo "@@@BUILD_STEP Download and extract build@@@"
+  if [[ -z $FACTORY_PROPERTIES || -z $BUILD_PROPERTIES ]]; then
+    return 1
+  fi
+
+  # When extract_build.py downloads an unversioned build it
+  # issues a warning by exiting with large numbered return code
+  # When it fails to download it build, it exits with return
+  # code 1.  We disable halt on error mode and return normally
+  # unless the python tool returns 1.
+  (
+  set +e
+  python ../../../../scripts/slave/extract_build.py \
+    --build-dir "$SRC_ROOT" \
+    --build-output-dir "out" \
+    --target Release \
+    --factory-properties "$FACTORY_PROPERTIES" \
+    --build-properties "$BUILD_PROPERTIES"
+  extract_exitcode=$?
+  if (( $extract_exitcode > 1 )); then
+    echo "@@@STEP_WARNINGS@@@"
+    return
+  fi
+  return $extract_exitcode
+  )
 }

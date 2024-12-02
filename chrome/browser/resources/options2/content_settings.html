@@ -8,13 +8,13 @@
       <div>
         <div class="radio">
           <label>
-            <input type="radio" name="cookies" value="allow" id="cookies-allow">
+            <input type="radio" name="cookies" value="allow">
             <span i18n-content="cookies_allow"></span>
           </label>
         </div>
         <div class="radio">
           <label>
-            <input type="radio" name="cookies" value="session" id="cookies-session">
+            <input type="radio" name="cookies" value="session">
             <span i18n-content="cookies_session_only"></span>
           </label>
         </div>
@@ -46,6 +46,8 @@
             i18n-content="manage_exceptions"></button>
         <button id="show-cookies-button"
             i18n-content="cookies_show_cookies"></button>
+        <button id="show-app-cookies-button"
+            i18n-content="cookies_show_app_cookies"></button>
      </div>
     </section>
     <!-- Image filter -->
@@ -296,6 +298,33 @@
       </div>
     </section>
 </if>
+    <!-- Media Stream capture device filter -->
+    <section>
+      <h3 i18n-content="mediaStreamTabLabel"></h3>
+      <div>
+        <div class="radio">
+          <label>
+            <input type="radio" name="media-stream" value="ask">
+            <span i18n-content="mediaStreamAsk"></span>
+          </label>
+        </div>
+        <div class="radio">
+          <label>
+            <input type="radio" name="media-stream" value="block">
+            <span i18n-content="mediaStreamBlock"></span>
+          </label>
+        </div>
+        <button class="exceptions-list-button" contentType="media-stream"
+            i18n-content="manage_exceptions"></button>
+      </div>
+    </section>
+    <section id="media-galleries-section" hidden>
+      <h3 i18n-content="mediaGalleriesSectionLabel"></h3>
+      <div>
+        <button id="manage-galleries-button"
+            i18n-content="manageGalleriesButton"></button>
+      </div>
+    </section>
   </div>
   <div class="action-area">
     <div class="button-strip">

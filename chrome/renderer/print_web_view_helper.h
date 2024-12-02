@@ -4,10 +4,10 @@
 
 #ifndef CHROME_RENDERER_PRINT_WEB_VIEW_HELPER_H_
 #define CHROME_RENDERER_PRINT_WEB_VIEW_HELPER_H_
-#pragma once
 
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/time.h"

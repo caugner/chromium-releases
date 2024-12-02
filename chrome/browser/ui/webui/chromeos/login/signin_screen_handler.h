@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_SIGNIN_SCREEN_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_SIGNIN_SCREEN_HANDLER_H_
-#pragma once
 
 #include <string>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
@@ -81,9 +80,12 @@ class SigninScreenHandlerDelegate {
   // Create a new Google account.
   virtual void CreateAccount() = 0;
 
+  // Called user pod selection is canceled.
+  virtual void OnUserDeselected() = 0;
+
   // Called when user pod with |username| is selected at login screen.
   // |username| is the email address of the selected user.
-  virtual void UserSelected(const std::string& username) = 0;
+  virtual void OnUserSelected(const std::string& username) = 0;
 
   // Attempts to remove given user.
   virtual void RemoveUser(const std::string& username) = 0;
@@ -199,6 +201,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   void HandleHideCaptivePortal(const base::ListValue* args);
   void HandleOfflineLogin(const base::ListValue* args);
   void HandleShutdownSystem(const base::ListValue* args);
+  void HandleUserDeselected(const base::ListValue* args);
   void HandleUserSelected(const base::ListValue* args);
   void HandleRemoveUser(const base::ListValue* args);
   void HandleShowAddUser(const base::ListValue* args);
@@ -206,10 +209,12 @@ class SigninScreenHandler : public BaseScreenHandler,
   void HandleLaunchHelpApp(const base::ListValue* args);
   void HandleCreateAccount(const base::ListValue* args);
   void HandleAccountPickerReady(const base::ListValue* args);
+  void HandleWallpaperReady(const base::ListValue* args);
   void HandleLoginWebuiReady(const base::ListValue* args);
   void HandleLoginRequestNetworkState(const base::ListValue* args);
   void HandleLoginAddNetworkStateObserver(const base::ListValue* args);
   void HandleLoginRemoveNetworkStateObserver(const base::ListValue* args);
+  void HandleDemoWebuiReady(const base::ListValue* args);
   void HandleSignOutUser(const base::ListValue* args);
   void HandleUserImagesLoaded(const base::ListValue* args);
   void HandleNetworkErrorShown(const base::ListValue* args);
@@ -281,6 +286,9 @@ class SigninScreenHandler : public BaseScreenHandler,
   BrowsingDataRemover* cookie_remover_;
 
   base::WeakPtrFactory<SigninScreenHandler> weak_factory_;
+
+  // Set to true once |LOGIN_WEBUI_VISIBLE| notification is observed.
+  bool webui_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

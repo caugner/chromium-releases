@@ -20,7 +20,8 @@
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_event_router_forwarder.h"
+#include "chrome/browser/extensions/event_router_forwarder.h"
+#include "chrome/browser/net/cache_stats.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
@@ -34,7 +35,6 @@
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_client.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/default_server_bound_cert_store.h"
 #include "net/base/host_cache.h"
@@ -53,6 +53,7 @@
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_throttler_manager.h"
 
 #if defined(USE_NSS)
@@ -221,6 +222,7 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
   context->set_server_bound_cert_service(
       globals->system_server_bound_cert_service.get());
   context->set_throttler_manager(globals->throttler_manager.get());
+  context->set_network_delegate(globals->system_network_delegate.get());
   return context;
 }
 
@@ -313,7 +315,7 @@ IOThread::Globals::~Globals() {}
 IOThread::IOThread(
     PrefService* local_state,
     ChromeNetLog* net_log,
-    ExtensionEventRouterForwarder* extension_event_router_forwarder)
+    extensions::EventRouterForwarder* extension_event_router_forwarder)
     : net_log_(net_log),
       extension_event_router_forwarder_(extension_event_router_forwarder),
       globals_(NULL),
@@ -401,7 +403,8 @@ void IOThread::Init() {
       NULL,
       NULL,
       NULL,
-      &system_enable_referrers_);
+      &system_enable_referrers_,
+      NULL);
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableExtensionsHttpThrottling)) {
     network_delegate->NeverThrottleRequests();
@@ -425,6 +428,7 @@ void IOThread::Init() {
       new net::ServerBoundCertService(
           new net::DefaultServerBoundCertStore(NULL),
           base::WorkerPool::GetTaskRunner(true)));
+  globals_->cache_stats.reset(new chrome_browser_net::CacheStats());
   net::HttpNetworkSession::Params session_params;
   session_params.host_resolver = globals_->host_resolver.get();
   session_params.cert_verifier = globals_->cert_verifier.get();
@@ -612,7 +616,6 @@ void IOThread::InitSystemRequestContextOnIOThread() {
       globals_->system_server_bound_cert_service.get();
   system_params.transport_security_state =
       globals_->transport_security_state.get();
-  system_params.ssl_host_info_factory = NULL;
   system_params.proxy_service = globals_->system_proxy_service.get();
   system_params.ssl_config_service = globals_->ssl_config_service.get();
   system_params.http_auth_handler_factory =

@@ -225,7 +225,7 @@ class ChromeTests:
     return tool.Run(cmd, None)
 
   def TestAsh(self):
-    return self.SimpleTest("ash", "aura_shell_unittests")
+    return self.SimpleTest("ash", "ash_unittests")
 
   def TestAura(self):
     return self.SimpleTest("aura", "aura_unittests")
@@ -235,6 +235,9 @@ class ChromeTests:
 
   def TestContent(self):
     return self.SimpleTest("content", "content_unittests")
+
+  def TestContentBrowser(self):
+    return self.SimpleTest("content", "content_browsertests")
 
   def TestCourgette(self):
     return self.SimpleTest("courgette", "courgette_unittests")
@@ -247,9 +250,6 @@ class ChromeTests:
 
   def TestFFmpegRegressions(self):
     return self.SimpleTest("chrome", "ffmpeg_regression_tests")
-
-  def TestGfx(self):
-    return self.SimpleTest("chrome", "gfx_unittests")
 
   def TestGPU(self):
     return self.SimpleTest("gpu", "gpu_unittests")
@@ -470,17 +470,19 @@ class ChromeTests:
   # Recognise the original abbreviations as well as full executable names.
   _test_list = {
     "cmdline" : RunCmdLine,
-    "ash": TestAsh,              "aura_shell_unittests": TestAsh,
+    "ash": TestAsh,              "ash_unittests": TestAsh,
     "aura": TestAura,            "aura_unittests": TestAura,
     "automated_ui" : TestAutomatedUI,
     "base": TestBase,            "base_unittests": TestBase,
     "browser": TestBrowser,      "browser_tests": TestBrowser,
+    "content": TestContent,      "content_unittests": TestContent,
+    "content_browsertests": TestContentBrowser,
+    "courgette": TestCourgette,  "courgette_unittests": TestCourgette,
     "crypto": TestCrypto,        "crypto_unittests": TestCrypto,
     "ffmpeg": TestFFmpeg,        "ffmpeg_unittests": TestFFmpeg,
     "ffmpeg_regression_tests": TestFFmpegRegressions,
     "googleurl": TestGURL,       "googleurl_unittests": TestGURL,
-    "content": TestContent,      "content_unittests": TestContent,
-    "courgette": TestCourgette,  "courgette_unittests": TestCourgette,
+    "gpu": TestGPU,              "gpu_unittests": TestGPU,
     "ipc": TestIpc,              "ipc_tests": TestIpc,
     "interactive_ui": TestInteractiveUI,
     "layout": TestLayout,        "layout_tests": TestLayout,
@@ -493,15 +495,13 @@ class ChromeTests:
     "reliability": TestReliability, "reliability_tests": TestReliability,
     "remoting": TestRemoting,    "remoting_unittests": TestRemoting,
     "safe_browsing": TestSafeBrowsing, "safe_browsing_tests": TestSafeBrowsing,
+    "sql": TestSql,              "sql_unittests": TestSql,
     "sync": TestSync,            "sync_unit_tests": TestSync,
     "sync_integration_tests": TestSyncIntegration,
     "sync_integration": TestSyncIntegration,
     "test_shell": TestTestShell, "test_shell_tests": TestTestShell,
-    "unit": TestUnit,            "unit_tests": TestUnit,
-    "sql": TestSql,              "sql_unittests": TestSql,
     "ui_unit": TestUIUnit,       "ui_unittests": TestUIUnit,
-    "gfx": TestGfx,              "gfx_unittests": TestGfx,
-    "gpu": TestGPU,              "gpu_unittests": TestGPU,
+    "unit": TestUnit,            "unit_tests": TestUnit,
     "views": TestViews,          "views_unittests": TestViews,
   }
 

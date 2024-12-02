@@ -9,6 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/event_disposition.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -62,7 +63,7 @@ void BookmarkNodeMenuModel::ActivatedAt(int index) {
 }
 
 void BookmarkNodeMenuModel::ActivatedAt(int index, int event_flags) {
-  NavigateToMenuItem(index, browser::DispositionFromEventFlags(event_flags));
+  NavigateToMenuItem(index, chrome::DispositionFromEventFlags(event_flags));
 }
 
 void BookmarkNodeMenuModel::PopulateMenu() {
@@ -79,9 +80,9 @@ void BookmarkNodeMenuModel::PopulateMenu() {
           bookmark_utils::BuildMenuLabelFor(child)));
       // No command id. We override ActivatedAt below to handle activations.
       AddItem(kBookmarkItemCommandId, label);
-      const SkBitmap& node_icon = model_->GetFavicon(child);
-      if (node_icon.width() > 0)
-        SetIcon(GetItemCount() - 1, node_icon);
+      const gfx::Image& node_icon = model_->GetFavicon(child);
+      if (!node_icon.IsEmpty())
+        SetIcon(GetItemCount() - 1, *node_icon.ToSkBitmap());
       // TODO(mdm): set up an observer to watch for icon load events and set
       // the icons in response.
     }
@@ -157,7 +158,7 @@ void BookmarkSubMenuModel::MenuWillShow() {
   AddItemWithStringId(IDC_IMPORT_SETTINGS, IDS_IMPORT_SETTINGS_MENU_LABEL);
   fixed_items_ = bookmark_end_ = GetItemCount();
   if (!model()) {
-    set_model(browser_->profile()->GetBookmarkModel());
+    set_model(BookmarkModelFactory::GetForProfile(browser_->profile()));
     if (!model())
       return;
     model()->AddObserver(this);

@@ -9,8 +9,9 @@
 #include "base/string_number_conversions.h"
 #include "chrome/browser/extensions/api/extension_action/extension_page_actions_api_constants.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
@@ -94,10 +95,11 @@ bool PageActionsFunction::SetPageActionEnabled(bool enable) {
   }
 
   // Set visibility and broadcast notifications that the UI should be updated.
-  page_action->SetIsVisible(tab_id, enable);
+  page_action->SetAppearance(
+      tab_id, enable ? ExtensionAction::ACTIVE : ExtensionAction::INVISIBLE);
   page_action->SetTitle(tab_id, title);
   page_action->SetIconIndex(tab_id, icon_id);
-  contents->extension_tab_helper()->PageActionStateChanged();
+  contents->extension_tab_helper()->location_bar_controller()->NotifyChange();
 
   return true;
 }

@@ -15,7 +15,6 @@
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -23,21 +22,22 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/tabs/dragged_tab_controller_gtk.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_menu_controller.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
@@ -1789,8 +1789,8 @@ bool TabStripGtk::CompleteDrop(const guchar* data, bool is_plain_text) {
   if (!url.is_valid())
     return false;
 
-  browser::NavigateParams params(window()->browser(), url,
-                                 content::PAGE_TRANSITION_LINK);
+  chrome::NavigateParams params(window()->browser(), url,
+                                content::PAGE_TRANSITION_LINK);
   params.tabstrip_index = drop_index;
 
   if (drop_before) {
@@ -1800,7 +1800,7 @@ bool TabStripGtk::CompleteDrop(const guchar* data, bool is_plain_text) {
     params.source_contents = model_->GetTabContentsAt(drop_index);
   }
 
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
 
   return true;
 }
@@ -2200,7 +2200,7 @@ void TabStripGtk::OnNewTabClicked(GtkWidget* widget) {
 
       Browser* browser = window_->browser();
       DCHECK(browser);
-      browser->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_TYPED);
+      chrome::AddSelectedTabWithURL(browser, url, content::PAGE_TRANSITION_TYPED);
       break;
     }
     default:

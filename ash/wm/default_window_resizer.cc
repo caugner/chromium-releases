@@ -5,8 +5,9 @@
 #include "ash/wm/default_window_resizer.h"
 
 #include "ash/shell.h"
+#include "ash/wm/coordinate_conversion.h"
+#include "ash/wm/cursor_manager.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/cursor_manager.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -20,7 +21,7 @@
 namespace ash {
 
 DefaultWindowResizer::~DefaultWindowResizer() {
-  aura::Env::GetInstance()->cursor_manager()->UnlockCursor();
+  ash::Shell::GetInstance()->cursor_manager()->UnlockCursor();
 }
 
 // static
@@ -33,6 +34,14 @@ DefaultWindowResizer::Create(aura::Window* window,
 }
 
 void DefaultWindowResizer::Drag(const gfx::Point& location, int event_flags) {
+  std::pair<aura::RootWindow*, gfx::Point> actual_location =
+      wm::GetRootWindowRelativeToWindow(details_.window->parent(), location);
+
+  // TODO(mazda|yusukes): Implement dragging an item from one display to another
+  aura::RootWindow* current_root = actual_location.first;
+  if (current_root != details_.window->GetRootWindow())
+    return;
+
   int grid_size = event_flags & ui::EF_CONTROL_DOWN ?
                   0 : ash::Shell::GetInstance()->GetGridSize();
   gfx::Rect bounds(CalculateBoundsForDrag(details_, location, grid_size));
@@ -76,7 +85,7 @@ DefaultWindowResizer::DefaultWindowResizer(const Details& details)
     : details_(details),
       did_move_or_resize_(false) {
   DCHECK(details_.is_resizable);
-  aura::Env::GetInstance()->cursor_manager()->LockCursor();
+  ash::Shell::GetInstance()->cursor_manager()->LockCursor();
 }
 
 }  // namespace aura

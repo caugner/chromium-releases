@@ -15,10 +15,10 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
-#include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/controls/button/button.h"
@@ -32,7 +32,6 @@
 namespace {
 
 const int kUserInfoVerticalPadding = 10;
-
 const int kUserIconSize = 27;
 
 }  // namespace
@@ -60,8 +59,7 @@ class RoundedImageView : public views::View {
     image_size_ = size;
 
     // Try to get the best image quality for the avatar.
-    resized_ = skia::ImageOperations::Resize(image_,
-        skia::ImageOperations::RESIZE_BEST, size.width(), size.height());
+    resized_ = gfx::ImageSkiaOperations::CreateResizedImage(image_, size);
     if (GetWidget() && visible()) {
       PreferredSizeChanged();
       SchedulePaint();
@@ -82,20 +80,10 @@ class RoundedImageView : public views::View {
     const SkScalar kRadius = SkIntToScalar(corner_radius_);
     SkPath path;
     path.addRoundRect(gfx::RectToSkRect(image_bounds), kRadius, kRadius);
-
     SkPaint paint;
-    SkShader* shader = SkShader::CreateBitmapShader(resized_,
-                                                    SkShader::kRepeat_TileMode,
-                                                    SkShader::kRepeat_TileMode);
-    SkMatrix shader_matrix;
-    shader_matrix.setTranslate(SkIntToScalar(image_bounds.x()),
-                               SkIntToScalar(image_bounds.y()));
-    shader->setLocalMatrix(shader_matrix);
-
-    paint.setShader(shader);
     paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
-    shader->unref();
-    canvas->DrawPath(path, paint);
+    canvas->DrawImageInPath(resized_, image_bounds.x(), image_bounds.y(),
+                            path, paint);
   }
 
  private:
@@ -267,7 +255,6 @@ TrayUser::~TrayUser() {
 views::View* TrayUser::CreateTrayView(user::LoginStatus status) {
   CHECK(avatar_ == NULL);
   avatar_ = new tray::RoundedImageView(kTrayRoundedBorderRadius);
-  avatar_->set_border(views::Border::CreateEmptyBorder(0, 6, 0, 0));
   UpdateAfterLoginStatusChange(status);
   return avatar_;
 }
@@ -306,6 +293,10 @@ void TrayUser::UpdateAfterLoginStatusChange(user::LoginStatus status) {
   } else {
     avatar_->SetVisible(false);
   }
+}
+
+void TrayUser::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
+  SetTrayImageItemBorder(avatar_, alignment);
 }
 
 void TrayUser::OnUserUpdate() {

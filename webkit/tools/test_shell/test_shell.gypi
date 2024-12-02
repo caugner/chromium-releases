@@ -67,8 +67,6 @@
         'accessibility_ui_element.h',
         'drop_delegate.cc',
         'drop_delegate.h',
-        'layout_test_controller.cc',
-        'layout_test_controller.h',
         'mock_spellcheck.cc',
         'mock_spellcheck.h',
         'notification_presenter.cc',
@@ -174,9 +172,9 @@
               'action_name': 'test_shell_repack',
               'variables': {
                 'pak_inputs': [
-                  '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/test_shell/test_shell_resources.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_strings_en-US.pak',
@@ -243,9 +241,6 @@
       },
       'conditions': [
         ['OS=="win"', {
-          'dependencies': [
-            'layout_test_helper',
-          ],
           'resource_include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit',
           ],
@@ -288,7 +283,6 @@
         ['OS=="mac"', {
           'product_name': 'TestShell',
           'dependencies': [
-            'layout_test_helper',
             '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
           ],
           'variables': {
@@ -328,8 +322,8 @@
           ],
         }, { # OS != "mac"
           'dependencies': [
-            '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
             '<(DEPTH)/net/net.gyp:net_resources',
+            '<(DEPTH)/ui/ui.gyp:ui_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
           ]
@@ -337,6 +331,8 @@
       ],
     },
     {
+      # TODO(tony): This should be moved to webkit_glue.gypi or
+      # webkit_tests.gypi and named something like test_mock_plugin_list.
       'target_name': 'test_shell_test_support',
       'type': 'static_library',
       'dependencies': [
@@ -356,7 +352,6 @@
       'dependencies': [
         '../build/temp_gyp/googleurl.gyp:googleurl',
         'test_shell_common',
-        'test_shell_test_support',
         '<(DEPTH)/base/base.gyp:test_support_base',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/net/net.gyp:net_test_support',
@@ -374,8 +369,6 @@
         '../../glue/dom_operations_unittest.cc',
         '../../glue/dom_serializer_unittest.cc',
         '../../glue/glue_serialize_unittest.cc',
-        '../../glue/iframe_redirect_unittest.cc',
-        '../../glue/mimetype_unittest.cc',
         '../../glue/multipart_response_delegate_unittest.cc',
         '../../glue/regular_expression_unittest.cc',
         '../../glue/resource_fetcher_unittest.cc',
@@ -387,17 +380,13 @@
         '../../mocks/mock_webframeclient.h',
         '../../mocks/mock_weburlloader.cc',
         '../../mocks/mock_weburlloader.h',
-        '../../plugins/npapi/plugin_group_unittest.cc',
-        '../../plugins/npapi/plugin_lib_unittest.cc',
-        '../../plugins/npapi/plugin_list_unittest.cc',
-        '../../plugins/npapi/webplugin_impl_unittest.cc',
         '../../plugins/ppapi/host_var_tracker_unittest.cc',
         '../../plugins/ppapi/mock_plugin_delegate.cc',
         '../../plugins/ppapi/mock_plugin_delegate.h',
         '../../plugins/ppapi/mock_resource.h',
+        '../../plugins/ppapi/ppb_graphics_2d_impl_unittest.cc',
         '../../plugins/ppapi/ppapi_unittest.cc',
         '../../plugins/ppapi/ppapi_unittest.h',
-        '../../plugins/ppapi/ppb_file_chooser_impl_unittest.cc',
         '../../plugins/ppapi/quota_file_io_unittest.cc',
         '../../plugins/ppapi/time_conversion_unittest.cc',
         '../../plugins/ppapi/url_request_info_unittest.cc',
@@ -644,43 +633,6 @@
             },
           ],
           'includes': [ '../../../build/grit_target.gypi' ],
-        },
-      ],
-    }],
-   ['OS=="win"', {
-      'targets': [
-        {
-          # Helper application that disables ClearType during the
-          # running of the layout tests
-          'target_name': 'layout_test_helper',
-          'type': 'executable',
-          'variables': {
-            'chromium_code': 1,
-          },
-          'sources': [
-            'win/layout_test_helper.cc',
-          ],
-        },
-      ],
-    }],
-   ['OS=="mac"', {
-      'targets': [
-        {
-          # Helper application that manages the color sync profile on mac
-          # for the test shells run by the layout tests.
-          'target_name': 'layout_test_helper',
-          'type': 'executable',
-          'variables': {
-            'chromium_code': 1,
-          },
-          'sources': [
-            'mac/layout_test_helper.mm',
-          ],
-          'link_settings': {
-            'libraries': [
-              '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
-            ],
-          },
         },
       ],
     }],

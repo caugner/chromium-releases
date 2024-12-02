@@ -6,10 +6,9 @@
 #include "base/path_service.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autocomplete/autocomplete.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/autocomplete/autocomplete_popup_model.h"
+#include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
@@ -17,8 +16,11 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
@@ -151,14 +153,14 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
   OmniboxView* location_entry = location_bar->GetLocationEntry();
   EXPECT_EQ(UTF8ToUTF16(chrome::kAboutBlankURL), location_entry->GetText());
   location_entry->SetUserText(string16());
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
-  browser()->AddSelectedTabWithURL(GURL(chrome::kAboutBlankURL),
-                                   content::PAGE_TRANSITION_START_PAGE);
+  chrome::AddSelectedTabWithURL(browser(), GURL(chrome::kAboutBlankURL),
+                                content::PAGE_TRANSITION_START_PAGE);
   observer.Wait();
   EXPECT_EQ(UTF8ToUTF16(chrome::kAboutBlankURL), location_entry->GetText());
-  browser()->CloseTab();
+  chrome::CloseTab(browser());
   EXPECT_EQ(UTF8ToUTF16(chrome::kAboutBlankURL), location_entry->GetText());
   EXPECT_TRUE(location_entry->IsSelectAll());
 }
@@ -288,7 +290,7 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, ExtensionAppProvider) {
     EXPECT_FALSE(match.deletable);
   }
 
-  browser()->NewTab();
+  chrome::NewTab(browser());
 
   // Try out the hosted app.
   {

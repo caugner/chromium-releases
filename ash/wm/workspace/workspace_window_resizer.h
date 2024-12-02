@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_WORKSPACE_WINDOW_RESIZER_H_
 #define ASH_WM_WORKSPACE_WINDOW_RESIZER_H_
-#pragma once
 
 #include <vector>
 
@@ -38,7 +37,7 @@ class ASH_EXPORT WorkspaceWindowResizer : public WindowResizer {
 
   static WorkspaceWindowResizer* Create(
       aura::Window* window,
-      const gfx::Point& location,
+      const gfx::Point& location_in_parent,
       int window_component,
       const std::vector<aura::Window*>& attached_windows);
 
@@ -119,6 +118,9 @@ class ASH_EXPORT WorkspaceWindowResizer : public WindowResizer {
   // Returns the SnapType for the specified point. SNAP_NONE is used if no
   // snapping should be used.
   SnapType GetSnapType(const gfx::Point& location) const;
+
+  // Returns true if we should allow the mouse pointer to warp.
+  bool ShouldAllowMouseWarp() const;
 
   aura::Window* window() const { return details_.window; }
 

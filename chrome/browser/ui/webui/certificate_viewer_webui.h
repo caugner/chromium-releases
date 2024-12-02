@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CERTIFICATE_VIEWER_WEBUI_H_
 #define CHROME_BROWSER_UI_WEBUI_CERTIFICATE_VIEWER_WEBUI_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -17,14 +16,13 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 
+namespace content {
+class WebContents;
+}
+
 namespace ui {
 class WebDialogObserver;
 }
-
-// Displays the native or WebUI certificate viewer dialog for the given
-// certificate.
-void ShowCertificateViewer(gfx::NativeWindow parent,
-                           net::X509Certificate*);
 
 // Dialog for displaying detailed certificate information. This is used in linux
 // and chromeos builds to display detailed information in a floating dialog when
@@ -39,7 +37,7 @@ class CertificateViewerDialog : private ui::WebDialogDelegate {
   virtual ~CertificateViewerDialog();
 
   // Show the dialog using the given parent window.
-  void Show(gfx::NativeWindow parent);
+  void Show(content::WebContents* web_contents, gfx::NativeWindow parent);
 
   // Add WebDialogObserver for this dialog.
   void AddObserver(ui::WebDialogObserver* observer);

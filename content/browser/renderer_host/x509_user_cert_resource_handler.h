@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_X509_USER_CERT_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_X509_USER_CERT_RESOURCE_HANDLER_H_
-#pragma once
 
 #include <string>
 #include <utility>
@@ -63,7 +62,7 @@ class X509UserCertResourceHandler : public ResourceHandler {
 
   // A read was completed, maybe allocate a new buffer for further data.
   virtual bool OnReadCompleted(int request_id,
-                               int* bytes_read,
+                               int bytes_read,
                                bool* defer) OVERRIDE;
 
   // Done downloading the certificate.

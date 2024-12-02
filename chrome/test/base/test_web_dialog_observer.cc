@@ -13,6 +13,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/test/js_injection_ready_observer.h"
+#include "content/public/test/test_utils.h"
 
 using content::NavigationController;
 
@@ -42,7 +43,7 @@ void TestWebDialogObserver::Observe(
       // If the message loop is running stop it.
       if (running_) {
         running_ = false;
-        MessageLoopForUI::current()->Quit();
+        message_loop_runner_->Quit();
       }
       break;
     default:
@@ -73,7 +74,8 @@ content::WebUI* TestWebDialogObserver::GetWebUI() {
   if (!done_) {
     EXPECT_FALSE(running_);
     running_ = true;
-    ui_test_utils::RunMessageLoop();
+    message_loop_runner_ = new content::MessageLoopRunner;
+    message_loop_runner_->Run();
   }
   return web_ui_;
 }

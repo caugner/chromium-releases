@@ -6,7 +6,6 @@
 
 #ifndef CONTENT_PUBLIC_COMMON_CONTENT_CONSTANTS_H_
 #define CONTENT_PUBLIC_COMMON_CONTENT_CONSTANTS_H_
-#pragma once
 
 #include <stddef.h>         // For size_t
 
@@ -46,6 +45,21 @@ CONTENT_EXPORT extern const size_t kMaxURLDisplayChars;
 extern const char kStatsFilename[];
 extern const int kStatsMaxThreads;
 extern const int kStatsMaxCounters;
+
+// Most sequence numbers are used by a renderer when responding to a browser
+// request for histogram data.  This reserved number is used when a renderer
+// sends an unprovoked update, such as after a page has been loaded.  Using
+// this reserved constant avoids any chance of confusion with a response having
+// a browser-supplied sequence number.
+CONTENT_EXPORT extern const int kHistogramSynchronizerReservedSequenceNumber;
+
+CONTENT_EXPORT extern const char kGpuCompositingFieldTrialName[];
+CONTENT_EXPORT extern const char kGpuCompositingFieldTrialEnabledName[];
+CONTENT_EXPORT extern const char kGpuCompositingFieldTrialThreadEnabledName[];
+
+CONTENT_EXPORT extern const char kStage3DFieldTrialName[];
+CONTENT_EXPORT extern const char kStage3DFieldTrialBlacklistedName[];
+CONTENT_EXPORT extern const char kStage3DFieldTrialEnabledName[];
 
 }  // namespace content
 

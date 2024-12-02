@@ -18,10 +18,11 @@
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rule.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_rules_registry.h"
+#include "chrome/browser/extensions/api/web_navigation/web_navigation_api_helpers.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_constants.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 #include "chrome/browser/extensions/api/web_request/web_request_time_tracker.h"
-#include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -30,6 +31,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
+#include "chrome/common/extensions/event_filtering_info.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
@@ -44,7 +46,6 @@
 #include "grit/generated_resources.h"
 #include "net/base/auth.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -53,6 +54,8 @@ using content::BrowserMessageFilter;
 using content::BrowserThread;
 using content::ResourceRequestInfo;
 using extensions::Extension;
+
+using extensions::web_navigation_api_helpers::GetFrameId;
 
 namespace helpers = extension_web_request_api_helpers;
 namespace keys = extension_web_request_api_constants;
@@ -73,15 +76,6 @@ static const char* const kWebRequestEvents[] = {
 };
 
 #define ARRAYEND(array) (array + arraysize(array))
-
-// Returns the frame ID as it will be passed to the extension:
-// 0 if the navigation happens in the main frame, or the frame ID
-// modulo 32 bits otherwise.
-// Keep this in sync with the GetFrameId() function in
-// extension_webnavigation_api.cc.
-int GetFrameId(bool is_main_frame, int64 frame_id) {
-  return is_main_frame ? 0 : static_cast<int>(frame_id);
-}
 
 bool IsWebRequestEvent(const std::string& event_name) {
   return std::find(kWebRequestEvents, ARRAYEND(kWebRequestEvents),
@@ -104,13 +98,6 @@ bool IsRequestFromExtension(const net::URLRequest* request,
     return false;
 
   return extension_info_map->process_map().Contains(info->GetChildID());
-}
-
-bool CanExtensionAccessURL(const Extension* extension, const GURL& url) {
-  // about: URLs are not covered in host permissions, but are allowed anyway.
-  return (url.SchemeIs(chrome::kAboutScheme) ||
-          extension->HasHostPermission(url) ||
-          url.GetOrigin() == extension->url());
 }
 
 void ExtractRequestInfoDetails(net::URLRequest* request,
@@ -188,7 +175,7 @@ bool FromHeaderDictionary(const DictionaryValue* header_value,
       return false;
     }
   } else if (header_value->HasKey(keys::kHeaderBinaryValueKey)) {
-    ListValue* list = NULL;
+    const ListValue* list = NULL;
     if (!header_value->GetList(keys::kHeaderBinaryValueKey, &list) ||
         !helpers::CharListToString(list, value)) {
       return false;
@@ -339,6 +326,10 @@ struct ExtensionWebRequestEventRouter::BlockedRequest {
   // Changes requested by extensions.
   helpers::EventResponseDeltas response_deltas;
 
+  // Provider of meta data about extensions, only used and non-NULL for events
+  // that are delayed until the rules registry is ready.
+  ExtensionInfoMap* extension_info_map;
+
   BlockedRequest()
       : request(NULL),
         event(kInvalidEvent),
@@ -347,7 +338,8 @@ struct ExtensionWebRequestEventRouter::BlockedRequest {
         new_url(NULL),
         request_headers(NULL),
         override_response_headers(NULL),
-        auth_credentials(NULL) {}
+        auth_credentials(NULL),
+        extension_info_map(NULL) {}
 };
 
 bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
@@ -358,7 +350,7 @@ bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
   for (DictionaryValue::key_iterator key = value.begin_keys();
        key != value.end_keys(); ++key) {
     if (*key == "urls") {
-      ListValue* urls_value = NULL;
+      const ListValue* urls_value = NULL;
       if (!value.GetList("urls", &urls_value))
         return false;
       for (size_t i = 0; i < urls_value->GetSize(); ++i) {
@@ -376,7 +368,7 @@ bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
         urls.AddPattern(pattern);
       }
     } else if (*key == "types") {
-      ListValue* types_value = NULL;
+      const ListValue* types_value = NULL;
       if (!value.GetList("types", &types_value))
         return false;
       for (size_t i = 0; i < types_value->GetSize(); ++i) {
@@ -463,8 +455,12 @@ ExtensionWebRequestEventRouter::~ExtensionWebRequestEventRouter() {
 }
 
 void ExtensionWebRequestEventRouter::RegisterRulesRegistry(
+    void* profile,
     scoped_refptr<extensions::WebRequestRulesRegistry> rules_registry) {
-  rules_registry_ = rules_registry;
+  if (rules_registry.get())
+    rules_registries_[profile] = rules_registry;
+  else
+    rules_registries_.erase(profile);
 }
 
 int ExtensionWebRequestEventRouter::OnBeforeRequest(
@@ -474,7 +470,7 @@ int ExtensionWebRequestEventRouter::OnBeforeRequest(
     const net::CompletionCallback& callback,
     GURL* new_url) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return net::OK;
 
   if (IsPageLoad(request))
@@ -489,7 +485,8 @@ int ExtensionWebRequestEventRouter::OnBeforeRequest(
   bool initialize_blocked_requests = false;
 
   initialize_blocked_requests |=
-      ProcessDeclarativeRules(profile, keys::kOnBeforeRequest, request,
+      ProcessDeclarativeRules(profile, extension_info_map,
+                              keys::kOnBeforeRequest, request,
                               extensions::ON_BEFORE_REQUEST, NULL);
 
   int extra_info_spec = 0;
@@ -532,13 +529,14 @@ int ExtensionWebRequestEventRouter::OnBeforeSendHeaders(
     const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return net::OK;
 
   bool initialize_blocked_requests = false;
 
   initialize_blocked_requests |=
-      ProcessDeclarativeRules(profile, keys::kOnBeforeSendHeaders, request,
+      ProcessDeclarativeRules(profile, extension_info_map,
+                              keys::kOnBeforeSendHeaders, request,
                               extensions::ON_BEFORE_SEND_HEADERS, NULL);
 
   int extra_info_spec = 0;
@@ -583,7 +581,7 @@ void ExtensionWebRequestEventRouter::OnSendHeaders(
     net::URLRequest* request,
     const net::HttpRequestHeaders& headers) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return;
 
   if (GetAndSetSignaled(request->identifier(), kOnSendHeaders))
@@ -616,13 +614,14 @@ int ExtensionWebRequestEventRouter::OnHeadersReceived(
     net::HttpResponseHeaders* original_response_headers,
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return net::OK;
 
   bool initialize_blocked_requests = false;
 
   initialize_blocked_requests |=
-      ProcessDeclarativeRules(profile, keys::kOnHeadersReceived, request,
+      ProcessDeclarativeRules(profile, extension_info_map,
+                              keys::kOnHeadersReceived, request,
                               extensions::ON_HEADERS_RECEIVED,
                               original_response_headers);
 
@@ -680,7 +679,7 @@ ExtensionWebRequestEventRouter::OnAuthRequired(
     net::AuthCredentials* credentials) {
   // No profile means that this is for authentication challenges in the
   // system context. Skip in that case. Also skip sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
 
   int extra_info_spec = 0;
@@ -725,7 +724,7 @@ void ExtensionWebRequestEventRouter::OnBeforeRedirect(
     net::URLRequest* request,
     const GURL& new_location) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return;
 
   if (GetAndSetSignaled(request->identifier(), kOnBeforeRedirect))
@@ -770,7 +769,7 @@ void ExtensionWebRequestEventRouter::OnResponseStarted(
     ExtensionInfoMap* extension_info_map,
     net::URLRequest* request) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return;
 
   // OnResponseStarted is even triggered, when the request was cancelled.
@@ -813,7 +812,7 @@ void ExtensionWebRequestEventRouter::OnCompleted(
     ExtensionInfoMap* extension_info_map,
     net::URLRequest* request) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return;
 
   request_time_tracker_->LogRequestEndTime(request->identifier(),
@@ -862,7 +861,7 @@ void ExtensionWebRequestEventRouter::OnErrorOccurred(
     net::URLRequest* request,
     bool started) {
   // We hide events from the system context as well as sensitive requests.
-  if (!profile || helpers::HideRequest(request))
+  if (!profile || WebRequestPermissions::HideRequest(request))
     return;
 
   request_time_tracker_->LogRequestEndTime(request->identifier(),
@@ -936,9 +935,10 @@ bool ExtensionWebRequestEventRouter::DispatchEvent(
 
     base::JSONWriter::Write(args_filtered.get(), &json_args);
 
-    ExtensionEventRouter::DispatchEvent(
+    extensions::EventRouter::DispatchEvent(
         (*it)->ipc_sender.get(), (*it)->extension_id, (*it)->sub_event_name,
-        json_args, GURL(), ExtensionEventRouter::USER_GESTURE_UNKNOWN);
+        json_args, GURL(), extensions::EventRouter::USER_GESTURE_UNKNOWN,
+        extensions::EventFilteringInfo());
     if ((*it)->extra_info_spec &
         (ExtraInfoSpec::BLOCKING | ExtraInfoSpec::ASYNC_BLOCKING)) {
       (*it)->blocked_requests.insert(request->identifier());
@@ -1091,6 +1091,14 @@ void ExtensionWebRequestEventRouter::NotifyPageLoad() {
   callbacks_for_page_load_.clear();
 }
 
+void* ExtensionWebRequestEventRouter::GetCrossProfile(void* profile) const {
+  CrossProfileMap::const_iterator cross_profile =
+      cross_profile_map_.find(profile);
+  if (cross_profile == cross_profile_map_.end())
+    return NULL;
+  return cross_profile->second;
+}
+
 void ExtensionWebRequestEventRouter::GetMatchingListenersImpl(
     void* profile,
     ExtensionInfoMap* extension_info_map,
@@ -1124,36 +1132,26 @@ void ExtensionWebRequestEventRouter::GetMatchingListenersImpl(
                   resource_type) == it->filter.types.end())
       continue;
 
-    // extension_info_map can be NULL if this is a system-level request.
-    if (extension_info_map) {
-      const Extension* extension =
-          extension_info_map->extensions().GetByID(it->extension_id);
+    if (!WebRequestPermissions::CanExtensionAccessURL(
+            extension_info_map, it->extension_id, url, crosses_incognito, true))
+      continue;
 
-      // Check if this event crosses incognito boundaries when it shouldn't.
-      if (!extension ||
-          (crosses_incognito &&
-           !extension_info_map->CanCrossIncognito(extension)))
-        continue;
+    bool blocking_listener =
+        (it->extra_info_spec &
+            (ExtraInfoSpec::BLOCKING | ExtraInfoSpec::ASYNC_BLOCKING)) != 0;
 
-      bool blocking_listener =
-          (it->extra_info_spec &
-              (ExtraInfoSpec::BLOCKING | ExtraInfoSpec::ASYNC_BLOCKING)) != 0;
+    // We do not want to notify extensions about XHR requests that are
+    // triggered by themselves. This is a workaround to prevent deadlocks
+    // in case of synchronous XHR requests that block the extension renderer
+    // and therefore prevent the extension from processing the request
+    // handler. This is only a problem for blocking listeners.
+    // http://crbug.com/105656
+    bool possibly_synchronous_xhr_from_extension =
+        is_request_from_extension && resource_type == ResourceType::XHR;
 
-      // We do not want to notify extensions about XHR requests that are
-      // triggered by themselves. This is a workaround to prevent deadlocks
-      // in case of synchronous XHR requests that block the extension renderer
-      // and therefore prevent the extension from processing the request
-      // handler. This is only a problem for blocking listeners.
-      // http://crbug.com/105656
-      bool possibly_synchronous_xhr_from_extension =
-          is_request_from_extension && resource_type == ResourceType::XHR;
-
-      // Only send webRequest events for URLs the extension has access to.
-      if (!CanExtensionAccessURL(extension, url) ||
-          (blocking_listener && possibly_synchronous_xhr_from_extension)) {
-        continue;
-      }
-    }
+    // Only send webRequest events for URLs the extension has access to.
+    if (blocking_listener && possibly_synchronous_xhr_from_extension)
+      continue;
 
     matching_listeners->push_back(&(*it));
     *extra_info_spec |= it->extra_info_spec;
@@ -1193,13 +1191,12 @@ ExtensionWebRequestEventRouter::GetMatchingListeners(
       profile, extension_info_map, false, event_name, url,
       tab_id, window_id, resource_type, is_request_from_extension,
       extra_info_spec, &matching_listeners);
-  CrossProfileMap::const_iterator cross_profile =
-      cross_profile_map_.find(profile);
-  if (cross_profile != cross_profile_map_.end()) {
+  void* cross_profile = GetCrossProfile(profile);
+  if (cross_profile) {
     GetMatchingListenersImpl(
-        cross_profile->second, extension_info_map, true, event_name, url,
-        tab_id, window_id, resource_type, is_request_from_extension,
-        extra_info_spec, &matching_listeners);
+        cross_profile, extension_info_map, true, event_name, url, tab_id,
+        window_id, resource_type, is_request_from_extension, extra_info_spec,
+        &matching_listeners);
   }
 
   return matching_listeners;
@@ -1312,13 +1309,12 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
 
   deltas.sort(&helpers::InDecreasingExtensionInstallationTimeOrder);
   std::set<std::string> conflicting_extensions;
-  helpers::EventLogEntries event_log_entries;
 
   bool canceled = false;
   helpers::MergeCancelOfResponses(
       blocked_request.response_deltas,
       &canceled,
-      &event_log_entries);
+      blocked_request.net_log);
 
   if (blocked_request.event == kOnBeforeRequest) {
     CHECK(!blocked_request.callback.is_null());
@@ -1326,14 +1322,14 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
         blocked_request.response_deltas,
         blocked_request.new_url,
         &conflicting_extensions,
-        &event_log_entries);
+        blocked_request.net_log);
   } else if (blocked_request.event == kOnBeforeSendHeaders) {
     CHECK(!blocked_request.callback.is_null());
     helpers::MergeOnBeforeSendHeadersResponses(
         blocked_request.response_deltas,
         blocked_request.request_headers,
         &conflicting_extensions,
-        &event_log_entries);
+        blocked_request.net_log);
   } else if (blocked_request.event == kOnHeadersReceived) {
     CHECK(!blocked_request.callback.is_null());
     helpers::MergeOnHeadersReceivedResponses(
@@ -1341,7 +1337,7 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
         blocked_request.original_response_headers.get(),
         blocked_request.override_response_headers,
         &conflicting_extensions,
-        &event_log_entries);
+        blocked_request.net_log);
   } else if (blocked_request.event == kOnAuthRequired) {
     CHECK(blocked_request.callback.is_null());
     CHECK(!blocked_request.auth_callback.is_null());
@@ -1349,16 +1345,11 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
        blocked_request.response_deltas,
        blocked_request.auth_credentials,
        &conflicting_extensions,
-       &event_log_entries);
+       blocked_request.net_log);
   } else {
     NOTREACHED();
   }
 
-  for (helpers::EventLogEntries::const_iterator i =
-           event_log_entries.begin();
-       i != event_log_entries.end(); ++i) {
-    blocked_request.net_log->AddEvent(i->event_type, i->params);
-  }
   if (!conflicting_extensions.empty()) {
     BrowserThread::PostTask(
         BrowserThread::UI,
@@ -1406,56 +1397,107 @@ int ExtensionWebRequestEventRouter::ExecuteDeltas(
 
 bool ExtensionWebRequestEventRouter::ProcessDeclarativeRules(
     void* profile,
+    ExtensionInfoMap* extension_info_map,
     const std::string& event_name,
     net::URLRequest* request,
-    extensions::RequestStages request_stage,
+    extensions::RequestStage request_stage,
     net::HttpResponseHeaders* original_response_headers) {
-  if (!rules_registry_.get())
-    return false;
+  // Rules of the current |profile| may apply but we need to check also whether
+  // there are applicable rules from extensions whose background page
+  // spans from regular to incognito mode.
+
+  // First parameter identifies the registry, the second indicates whether the
+  // registry belongs to the cross profile.
+  typedef std::pair<extensions::WebRequestRulesRegistry*, bool>
+      RelevantRegistry;
+  typedef std::vector<RelevantRegistry> RelevantRegistries;
+  RelevantRegistries relevant_registries;
+
+  if (rules_registries_.find(profile) != rules_registries_.end()) {
+    relevant_registries.push_back(
+        std::make_pair(rules_registries_[profile].get(), false));
+  }
+
+  void* cross_profile = GetCrossProfile(profile);
+  if (cross_profile &&
+      rules_registries_.find(cross_profile) != rules_registries_.end()) {
+    relevant_registries.push_back(
+        std::make_pair(rules_registries_[cross_profile].get(), true));
+  }
 
   // TODO(mpcomplete): Eventually we'll want to turn this on, but for now,
   // we won't block startup for declarative webrequest. I want to measure
   // its effect first.
 #if defined(BLOCK_STARTUP_ON_DECLARATIVE_RULES)
-  if (!rules_registry_->IsReady()) {
-    // The rules registry is still loading. Block this request until it
-    // finishes.
-    EventResponse* response = NULL;
-    rules_registry_->AddReadyCallback(
-        base::Bind(&ExtensionWebRequestEventRouter::DecrementBlockCount,
-                   AsWeakPtr(), profile, std::string(), event_name,
-                   request->identifier(), response));
-    blocked_requests_[request->identifier()].num_handlers_blocking++;
-    blocked_requests_[request->identifier()].request = request;
-    blocked_requests_[request->identifier()].blocking_time = base::Time::Now();
-    return true;
+  for (RelevantRegistries::iterator i = relevant_registries.begin();
+       i != relevant_registries.end(); ++i) {
+    extensions::WebRequestRulesRegistry* rules_registry = i->first;
+    if (!rules_registry->IsReady()) {
+      // The rules registry is still loading. Block this request until it
+      // finishes.
+      rules_registry->AddReadyCallback(
+          base::Bind(&ExtensionWebRequestEventRouter::OnRulesRegistryReady,
+                     AsWeakPtr(), profile, event_name, request->identifier(),
+                     request_stage));
+      blocked_requests_[request->identifier()].num_handlers_blocking++;
+      blocked_requests_[request->identifier()].request = request;
+      blocked_requests_[request->identifier()].blocking_time =
+          base::Time::Now();
+      blocked_requests_[request->identifier()].original_response_headers =
+          original_response_headers;
+      blocked_requests_[request->identifier()].extension_info_map =
+          extension_info_map;
+      return true;
+    }
   }
 #endif
 
   base::Time start = base::Time::Now();
 
-  // TODO(battre): Annotate deltas with extension IDs, so that we can
-  // - Sort deltas by precedence
-  // - Check whether extensions have host permissions.
-  extensions::WebRequestRule::OptionalRequestData optional_request_data;
-  optional_request_data.original_response_headers =
-      original_response_headers;
-  std::list<linked_ptr<helpers::EventResponseDelta> > result =
-      rules_registry_->CreateDeltas(request, request_stage,
-                                    optional_request_data);
+  bool deltas_created = false;
+  for (RelevantRegistries::iterator i = relevant_registries.begin();
+       i != relevant_registries.end(); ++i) {
+    extensions::WebRequestRulesRegistry* rules_registry =
+        i->first;
+    helpers::EventResponseDeltas result =
+        rules_registry->CreateDeltas(
+            extension_info_map,
+            extensions::WebRequestRule::RequestData(
+                request, request_stage, original_response_headers),
+            i->second);
+
+    if (!result.empty()) {
+      helpers::EventResponseDeltas& deltas =
+          blocked_requests_[request->identifier()].response_deltas;
+      deltas.insert(deltas.end(), result.begin(), result.end());
+      deltas_created = true;
+    }
+  }
 
   base::TimeDelta elapsed_time = start - base::Time::Now();
   UMA_HISTOGRAM_TIMES("Extensions.DeclarativeWebRequestNetworkDelay",
                       elapsed_time);
 
-  if (result.empty())
-    return false;
+  return deltas_created;
+}
 
-  helpers::EventResponseDeltas& deltas =
-      blocked_requests_[request->identifier()].response_deltas;
-  CHECK(deltas.empty());
-  deltas.swap(result);
-  return true;
+void ExtensionWebRequestEventRouter::OnRulesRegistryReady(
+    void* profile,
+    const std::string& event_name,
+    uint64 request_id,
+    extensions::RequestStage request_stage) {
+  // It's possible that this request was deleted, or cancelled by a previous
+  // event handler. If so, ignore this response.
+  if (blocked_requests_.find(request_id) == blocked_requests_.end())
+    return;
+
+  BlockedRequest& blocked_request = blocked_requests_[request_id];
+  ProcessDeclarativeRules(profile, blocked_request.extension_info_map,
+                          event_name, blocked_request.request, request_stage,
+                          blocked_request.original_response_headers);
+  // Reset to NULL so that nobody relies on this being set.
+  blocked_request.extension_info_map = NULL;
+  DecrementBlockCount(profile, std::string(), event_name, request_id, NULL);
 }
 
 bool ExtensionWebRequestEventRouter::GetAndSetSignaled(uint64 request_id,
@@ -1584,7 +1626,7 @@ bool WebRequestAddEventListener::RunImpl() {
           (ExtensionWebRequestEventRouter::ExtraInfoSpec::BLOCKING |
            ExtensionWebRequestEventRouter::ExtraInfoSpec::ASYNC_BLOCKING)) &&
        !extension->HasAPIPermission(
-           ExtensionAPIPermission::kWebRequestBlocking)) {
+           extensions::APIPermission::kWebRequestBlocking)) {
     error_ = keys::kBlockingPermissionRequired;
     return false;
   }

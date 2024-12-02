@@ -10,6 +10,7 @@
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/statistics_recorder.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/notification_service_impl.h"
 #include "content/common/child_process.h"
@@ -51,7 +52,7 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
     if (parameters.command_line.HasSwitch(switches::kSingleProcess))
       content::RenderProcessHost::set_run_renderer_in_process(true);
 
-    statistics_.reset(new base::StatisticsRecorder);
+    base::StatisticsRecorder::Initialize();
 
     notification_service_.reset(new NotificationServiceImpl);
 
@@ -115,8 +116,6 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
 
     notification_service_.reset(NULL);
 
-    statistics_.reset(NULL);
-
     is_shutdown_ = true;
   }
 
@@ -135,7 +134,6 @@ class BrowserMainRunnerImpl : public content::BrowserMainRunner {
 #if defined(OS_WIN)
   scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_;
 #endif
-  scoped_ptr<base::StatisticsRecorder> statistics_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserMainRunnerImpl);
 };

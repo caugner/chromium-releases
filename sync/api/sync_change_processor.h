@@ -4,17 +4,18 @@
 
 #ifndef SYNC_API_SYNC_CHANGE_PROCESSOR_H_
 #define SYNC_API_SYNC_CHANGE_PROCESSOR_H_
-#pragma once
 
 #include <vector>
 
 #include "sync/api/sync_error.h"
 
-class SyncChange;
-
 namespace tracked_objects {
 class Location;
 }  // namespace tracked_objects
+
+namespace syncer {
+
+class SyncChange;
 
 typedef std::vector<SyncChange> SyncChangeList;
 
@@ -35,5 +36,7 @@ class SyncChangeProcessor {
       const tracked_objects::Location& from_here,
       const SyncChangeList& change_list) = 0;
 };
+
+}  // namespace syncer
 
 #endif  // SYNC_API_SYNC_CHANGE_PROCESSOR_H_

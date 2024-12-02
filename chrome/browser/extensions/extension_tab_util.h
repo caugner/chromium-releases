@@ -4,9 +4,11 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_TAB_UTIL_H__
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_TAB_UTIL_H__
-#pragma once
 
 #include <string>
+
+#include "base/callback.h"
+#include "webkit/glue/window_open_disposition.h"
 
 class Browser;
 class GURL;
@@ -25,6 +27,11 @@ class WebContents;
 
 namespace extensions {
 class Extension;
+class WindowController;
+}
+
+namespace gfx {
+class Rect;
 }
 
 // Provides various utility functions that help manipulate tabs.
@@ -33,9 +40,6 @@ class ExtensionTabUtil {
   static int GetWindowId(const Browser* browser);
   static int GetWindowIdOfTabStripModel(const TabStripModel* tab_strip_model);
   static int GetTabId(const content::WebContents* web_contents);
-  static bool GetTabIdFromArgument(const base::ListValue &args,
-                                   int argument_index,
-                                   int *tab_id, std::string* error_message);
   static std::string GetTabStatusText(bool is_loading);
   static int GetWindowIdOfTab(const content::WebContents* web_contents);
   static base::ListValue* CreateTabList(const Browser* browser);
@@ -78,6 +82,20 @@ class ExtensionTabUtil {
 
   // Returns true if |url| is used for testing crashes.
   static bool IsCrashURL(const GURL& url);
+
+  // Opens a tab for the specified |web_contents|.
+  static void CreateTab(content::WebContents* web_contents,
+                        const std::string& extension_id,
+                        WindowOpenDisposition disposition,
+                        const gfx::Rect& initial_pos,
+                        bool user_gesture);
+
+  // Executes the specified callback for all tabs in all browser windows.
+  static void ForEachTab(
+      const base::Callback<void(content::WebContents*)>& callback);
+
+  static extensions::WindowController* GetWindowControllerOfTab(
+      const content::WebContents* web_contents);
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_TAB_UTIL_H__

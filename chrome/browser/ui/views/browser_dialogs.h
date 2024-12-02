@@ -4,9 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_BROWSER_DIALOGS_H_
 #define CHROME_BROWSER_UI_VIEWS_BROWSER_DIALOGS_H_
-#pragma once
-
-#include <string>
 
 #include "ui/gfx/native_widget_types.h"
 
@@ -17,6 +14,7 @@
 // TODO: Make as many of these methods as possible cross platform, and move them
 // into chrome/browser/ui/browser_dialogs.h.
 
+class Browser;
 class BrowserView;
 class EditSearchEngineControllerDelegate;
 class FindBar;
@@ -27,6 +25,7 @@ class TemplateURL;
 
 namespace content {
 class PageNavigator;
+class WebContents;
 struct SSLStatus;
 }
 
@@ -34,15 +33,11 @@ namespace extensions {
 class Extension;
 }
 
-namespace gfx {
-class Size;
-}
-
 namespace views {
 class View;
 }
 
-namespace browser {
+namespace chrome {
 
 // Shows or hides the bookmark bubble anchored to the supplied view.
 void ShowBookmarkBubbleView(views::View* anchor_view,
@@ -53,20 +48,17 @@ void HideBookmarkBubbleView();
 bool IsBookmarkBubbleViewShowing();
 
 // Shows or hides the Chrome To Mobile bubble anchored to the supplied view.
-void ShowChromeToMobileBubbleView(views::View* anchor_view, Profile* profile);
+void ShowChromeToMobileBubbleView(views::View* anchor_view, Browser* browser);
 void HideChromeToMobileBubbleView();
 bool IsChromeToMobileBubbleViewShowing();
 
 // Shows the page info bubble anchored to the supplied view.
 void ShowPageInfoBubble(views::View* anchor_view,
-                        Profile* profile,
+                        content::WebContents* web_contents,
                         const GURL& url,
                         const content::SSLStatus& ssl,
                         bool show_history,
                         content::PageNavigator* navigator);
-
-// Shows the about dialog. See AboutChromeView.
-void ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile);
 
 // Creates and returns a find bar for the given browser window. See FindBarWin.
 FindBar* CreateFindBar(BrowserView* browser_view);
@@ -87,15 +79,11 @@ void EditSearchEngine(gfx::NativeWindow parent,
                       EditSearchEngineControllerDelegate* delegate,
                       Profile* profile);
 
-// Shows the create web app shortcut dialog box.
-void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
-                                     TabContents* tab_contents);
-
 // Shows the create chrome app shortcut dialog box.
 void ShowCreateChromeAppShortcutsDialog(gfx::NativeWindow parent_window,
                                         Profile* profile,
                                         const extensions::Extension* app);
 
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_VIEWS_BROWSER_DIALOGS_H_

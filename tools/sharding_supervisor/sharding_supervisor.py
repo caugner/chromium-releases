@@ -123,6 +123,11 @@ def AppendToXML(final_xml, generic_path, shard):
 
   testcases = shard_node.getElementsByTagName('testcase')
   final_testcases = final_node.getElementsByTagName('testcase')
+
+  final_testsuites = final_node.getElementsByTagName('testsuite')
+  final_testsuites_by_name = dict(
+      (suite.getAttribute('name'), suite) for suite in final_testsuites)
+
   for testcase in testcases:
     name = testcase.getAttribute('name')
     classname = testcase.getAttribute('classname')
@@ -136,6 +141,7 @@ def AppendToXML(final_xml, generic_path, shard):
 
     # Look in our final xml to see if it's there.
     # There has to be a better way...
+    merged_into_final_testcase = False
     for final_testcase in final_testcases:
       final_name = final_testcase.getAttribute('name')
       final_classname = final_testcase.getAttribute('classname')
@@ -145,6 +151,14 @@ def AppendToXML(final_xml, generic_path, shard):
         final_testcase.setAttribute('time', elapsed)
         for failure in failures:
           final_testcase.appendChild(failure)
+        merged_into_final_testcase = True
+
+    # We couldn't find an existing testcase to merge the results into, so we
+    # copy the node into the existing test suite.
+    if not merged_into_final_testcase:
+      testsuite = testcase.parentNode
+      final_testsuite = final_testsuites_by_name[testsuite.getAttribute('name')]
+      final_testsuite.appendChild(testcase)
 
   return final_xml
 
@@ -288,7 +302,7 @@ class ShardingSupervisor(object):
   case the number of shards to execute will be the same, but they will be
   smaller, as the total number of shards in the test suite will be multiplied
   by 'total_slaves'.
- 
+
   For example, if you are on a quad core machine, the sharding supervisor by
   default will use 20 shards for the whole suite. However, if you set
   total_slaves to 2, it will split the suite in 40 shards and will only run
@@ -597,6 +611,7 @@ def main():
     parser.error("You must have at least 1 run per core!")
   num_runs = num_cores * options.runs_per_core
 
+  test = args[0]
   gtest_args = ["--gtest_color=%s" % {
       True: "yes", False: "no"}[options.color]] + args[1:]
 
@@ -623,13 +638,27 @@ def main():
     if (options.runshard < 0 or options.runshard >= num_shards_to_run):
       parser.error("Invalid shard number given parameters!")
     shard = RunShard(
-        args[0], num_shards_to_run, options.runshard, gtest_args, None, None)
+        test, num_shards_to_run, options.runshard, gtest_args, None, None)
     shard.communicate()
     return shard.poll()
 
+  # When running browser_tests, load the test binary into memory before running
+  # any tests. This is needed to prevent loading it from disk causing the first
+  # run tests to timeout flakily. See: http://crbug.com/124260
+  if "browser_tests" in test:
+    args = [test]
+    args.extend(gtest_args)
+    args.append("--warmup")
+    result = subprocess.call(args,
+                             bufsize=0,
+                             universal_newlines=True)
+    # If the test fails, don't run anything else.
+    if result != 0:
+      return result
+
   # shard and run the whole test
   ss = ShardingSupervisor(
-      args[0], num_shards_to_run, num_runs, options.color,
+      test, num_shards_to_run, num_runs, options.color,
       options.original_order, options.prefix, options.retry_percent,
       options.timeout, options.total_slaves, options.slave_index, gtest_args)
   return ss.ShardTest()

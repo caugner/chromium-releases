@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_SESSION_STORAGE_NAMESPACE_H_
 #define CONTENT_PUBLIC_BROWSER_SESSION_STORAGE_NAMESPACE_H_
-#pragma once
 
 #include <string>
 
@@ -18,8 +17,6 @@ namespace content {
 class SessionStorageNamespace
     : public base::RefCountedThreadSafe<SessionStorageNamespace> {
  public:
-  SessionStorageNamespace() {}
-
   // Returns the ID of the |SessionStorageNamespace|. The ID is unique among all
   // SessionStorageNamespace objects, but not unique across browser runs.
   virtual int64 id() const = 0;
@@ -28,11 +25,13 @@ class SessionStorageNamespace
   // unique across browser runs.
   virtual const std::string& persistent_id() const = 0;
 
+  // For marking that the sessionStorage will be needed or won't be needed by
+  // session restore.
+  virtual void SetShouldPersist(bool should_persist) = 0;
+
  protected:
   friend class base::RefCountedThreadSafe<SessionStorageNamespace>;
   virtual ~SessionStorageNamespace() {}
-
-  DISALLOW_COPY_AND_ASSIGN(SessionStorageNamespace);
 };
 
 }  // namespace content

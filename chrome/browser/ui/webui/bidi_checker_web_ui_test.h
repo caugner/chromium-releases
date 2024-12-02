@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_BIDI_CHECKER_WEB_UI_TEST_H_
 #define CHROME_BROWSER_UI_WEBUI_BIDI_CHECKER_WEB_UI_TEST_H_
-#pragma once
 
 #include <string>
 
@@ -46,8 +45,6 @@ class WebUIBidiCheckerBrowserTestRTL : public WebUIBidiCheckerBrowserTest {
  protected:
   virtual void SetUpOnMainThread() OVERRIDE;
   virtual void CleanUpOnMainThread() OVERRIDE;
-
-  static void SetUpOnIOThread(base::WaitableEvent* event);
 
   // The app locale before we change it
   std::string app_locale_;

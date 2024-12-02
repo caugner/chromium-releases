@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_PROCESS_MANAGER_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_PROCESS_MANAGER_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -19,7 +18,6 @@
 #include "content/public/browser/notification_registrar.h"
 
 class Browser;
-class ExtensionHost;
 class GURL;
 class Profile;
 
@@ -30,6 +28,7 @@ class SiteInstance;
 
 namespace extensions {
 class Extension;
+class ExtensionHost;
 }
 
 // Manages dynamic state of running Chromium extensions. There is one instance
@@ -37,7 +36,7 @@ class Extension;
 // track of split-mode extensions only.
 class ExtensionProcessManager : public content::NotificationObserver {
  public:
-  typedef std::set<ExtensionHost*> ExtensionHostSet;
+  typedef std::set<extensions::ExtensionHost*> ExtensionHostSet;
   typedef ExtensionHostSet::const_iterator const_iterator;
 
   static ExtensionProcessManager* Create(Profile* profile);
@@ -53,23 +52,26 @@ class ExtensionProcessManager : public content::NotificationObserver {
   // Creates a new ExtensionHost with its associated view, grouping it in the
   // appropriate SiteInstance (and therefore process) based on the URL and
   // profile.
-  virtual ExtensionHost* CreateViewHost(const extensions::Extension* extension,
-                                        const GURL& url,
-                                        Browser* browser,
-                                        chrome::ViewType view_type);
-  ExtensionHost* CreateViewHost(const GURL& url,
+  virtual extensions::ExtensionHost* CreateViewHost(
+      const extensions::Extension* extension,
+      const GURL& url,
+      Browser* browser,
+      chrome::ViewType view_type);
+  extensions::ExtensionHost* CreateViewHost(const GURL& url,
                                 Browser* browser,
                                 chrome::ViewType view_type);
-  ExtensionHost* CreatePopupHost(const extensions::Extension* extension,
-                                 const GURL& url,
-                                 Browser* browser);
-  ExtensionHost* CreatePopupHost(const GURL& url, Browser* browser);
-  ExtensionHost* CreateDialogHost(const GURL& url, Browser* browser);
-  ExtensionHost* CreateInfobarHost(const extensions::Extension* extension,
-                                   const GURL& url,
-                                   Browser* browser);
-  ExtensionHost* CreateInfobarHost(const GURL& url,
-                                   Browser* browser);
+  extensions::ExtensionHost* CreatePopupHost(
+      const extensions::Extension* extension,
+      const GURL& url,
+      Browser* browser);
+  extensions::ExtensionHost* CreatePopupHost(const GURL& url, Browser* browser);
+  extensions::ExtensionHost* CreateDialogHost(const GURL& url);
+  extensions::ExtensionHost* CreateInfobarHost(
+      const extensions::Extension* extension,
+      const GURL& url,
+      Browser* browser);
+  extensions::ExtensionHost* CreateInfobarHost(const GURL& url,
+                                               Browser* browser);
 
   // Open the extension's options page.
   void OpenOptionsPage(const extensions::Extension* extension,
@@ -82,7 +84,8 @@ class ExtensionProcessManager : public content::NotificationObserver {
 
   // Gets the ExtensionHost for the background page for an extension, or NULL if
   // the extension isn't running or doesn't have a background page.
-  ExtensionHost* GetBackgroundHostForExtension(const std::string& extension_id);
+  extensions::ExtensionHost* GetBackgroundHostForExtension(
+      const std::string& extension_id);
 
   // Returns the SiteInstance that the given URL belongs to.
   // TODO(aa): This only returns correct results for extensions and packaged
@@ -133,11 +136,16 @@ class ExtensionProcessManager : public content::NotificationObserver {
   void OnNetworkRequestStarted(content::RenderViewHost* render_view_host);
   void OnNetworkRequestDone(content::RenderViewHost* render_view_host);
 
+  // Prevents |extension|'s background page from being closed and sends the
+  // onSuspendCanceled() event to it.
+  void CancelSuspend(const extensions::Extension* extension);
+
  protected:
   explicit ExtensionProcessManager(Profile* profile);
 
   // Called just after |host| is created so it can be registered in our lists.
-  void OnExtensionHostCreated(ExtensionHost* host, bool is_background);
+  void OnExtensionHostCreated(extensions::ExtensionHost* host,
+                              bool is_background);
 
   // Called on browser shutdown to close our extension hosts.
   void CloseBackgroundHosts();
@@ -175,7 +183,7 @@ class ExtensionProcessManager : public content::NotificationObserver {
   ExtensionRenderViews all_extension_views_;
 
   // Close the given |host| iff it's a background page.
-  void CloseBackgroundHost(ExtensionHost* host);
+  void CloseBackgroundHost(extensions::ExtensionHost* host);
 
   // Ensure browser object is not null except for certain situations.
   void EnsureBrowserWhenRequired(Browser* browser,
@@ -186,7 +194,8 @@ class ExtensionProcessManager : public content::NotificationObserver {
   void OnLazyBackgroundPageIdle(const std::string& extension_id,
                                 int sequence_id);
   void OnLazyBackgroundPageActive(const std::string& extension_id);
-  void CloseLazyBackgroundPageNow(const std::string& extension_id);
+  void CloseLazyBackgroundPageNow(const std::string& extension_id,
+                                  int sequence_id);
 
   // Updates a potentially-registered RenderViewHost once it has been
   // associated with a WebContents. This allows us to gather information that

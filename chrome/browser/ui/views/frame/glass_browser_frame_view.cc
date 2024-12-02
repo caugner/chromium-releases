@@ -10,6 +10,8 @@
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
@@ -20,7 +22,6 @@
 #include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle_win.h"
@@ -112,14 +113,15 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
   int tabstrip_width = minimize_button_offset - tabstrip_x -
       (frame()->IsMaximized() ?
           kNewTabCaptionMaximizedSpacing : kNewTabCaptionRestoredSpacing);
-  return gfx::Rect(tabstrip_x, GetHorizontalTabStripVerticalOffset(false),
+  return gfx::Rect(tabstrip_x, GetTabStripInsets(false).top,
                    std::max(0, tabstrip_width),
                    tabstrip->GetPreferredSize().height());
 }
 
-int GlassBrowserFrameView::GetHorizontalTabStripVerticalOffset(
-    bool restored) const {
-  return NonClientTopBorderHeight(restored);
+BrowserNonClientFrameView::TabStripInsets
+GlassBrowserFrameView::GetTabStripInsets(bool restored) const {
+  // TODO: include OTR and caption.
+  return TabStripInsets(NonClientTopBorderHeight(restored), 0, 0);
 }
 
 void GlassBrowserFrameView::UpdateThrobber(bool running) {
@@ -280,7 +282,11 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
   int w = toolbar_bounds.width();
   int left_x = x - kContentEdgeShadowThickness;
 
-  gfx::ImageSkia* theme_toolbar = tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
+  // TODO(kuan): migrate background animation from cros to win by calling
+  // GetToolbarBackgound* with the correct mode, refer to
+  // BrowserNonClientFrameViewAsh.
+  gfx::ImageSkia* theme_toolbar = browser_view()->GetToolbarBackgroundImage(
+      browser_view()->browser()->search_model()->mode().mode);
   gfx::ImageSkia* toolbar_left = tp->GetImageSkiaNamed(
       IDR_CONTENT_TOP_LEFT_CORNER);
   gfx::ImageSkia* toolbar_center = tp->GetImageSkiaNamed(
@@ -291,7 +297,7 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
   int y = toolbar_bounds.y();
   int dest_y = y + (kFrameShadowThickness * 2);
   canvas->TileImageInt(*theme_toolbar, x,
-                       dest_y - GetHorizontalTabStripVerticalOffset(false), x,
+                       dest_y - GetTabStripInsets(false).top, x,
                        dest_y, w, theme_toolbar->height());
 
   // Draw rounded corners for the tab.
@@ -325,12 +331,22 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
   canvas->DrawImageInt(*tp->GetImageSkiaNamed(IDR_CONTENT_TOP_RIGHT_CORNER),
                        right_x, y);
 
-  // Draw the content/toolbar separator.
-  canvas->FillRect(gfx::Rect(x + kClientEdgeThickness,
-                             toolbar_bounds.bottom() - kClientEdgeThickness,
-                             w - (2 * kClientEdgeThickness),
-                             kClientEdgeThickness),
-      ThemeService::GetDefaultColor(ThemeService::COLOR_TOOLBAR_SEPARATOR));
+  // Only draw the content/toolbar separator if Instant Extended API is disabled
+  // or mode is DEFAULT.
+  Browser* browser = browser_view()->browser();
+  bool extended_instant_enabled = chrome::search::IsInstantExtendedAPIEnabled(
+      browser->profile());
+  if (!extended_instant_enabled ||
+      browser->search_model()->mode().is_default()) {
+    canvas->FillRect(
+        gfx::Rect(x + kClientEdgeThickness,
+                  toolbar_bounds.bottom() - kClientEdgeThickness,
+                  w - (2 * kClientEdgeThickness),
+                  kClientEdgeThickness),
+        ThemeService::GetDefaultColor(extended_instant_enabled ?
+            ThemeService::COLOR_SEARCH_SEPARATOR_LINE :
+                ThemeService::COLOR_TOOLBAR_SEPARATOR));
+  }
 }
 
 void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
@@ -369,7 +385,8 @@ void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
   // where not covered by the toolbar image.  NOTE: We do this after drawing the
   // images because the images are meant to alpha-blend atop the frame whereas
   // these rects are meant to be fully opaque, without anything overlaid.
-  SkColor toolbar_color = tp->GetColor(ThemeService::COLOR_TOOLBAR);
+  SkColor toolbar_color = browser_view()->GetToolbarBackgroundColor(
+      browser_view()->browser()->search_model()->mode().mode);
   canvas->FillRect(gfx::Rect(client_area_bounds.x() - kClientEdgeThickness,
       client_area_top, kClientEdgeThickness,
       client_area_bottom + kClientEdgeThickness - client_area_top),
@@ -397,7 +414,7 @@ void GlassBrowserFrameView::LayoutAvatar() {
   if (base::i18n::IsRTL())
     avatar_x += width() - frame()->GetMinimizeButtonOffset();
 
-  int avatar_bottom = GetHorizontalTabStripVerticalOffset(false) +
+  int avatar_bottom = GetTabStripInsets(false).top +
       browser_view()->GetTabStripHeight() - kAvatarBottomSpacing;
   int avatar_restored_y = avatar_bottom - incognito_icon.height();
   int avatar_y = frame()->IsMaximized() ?

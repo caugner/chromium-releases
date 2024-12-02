@@ -13,6 +13,7 @@ namespace chromeos {
 
 // static
 const char UserManager::kLoggedInUsers[] = "LoggedInUsers";
+const char UserManager::kStubUser[] = "stub-user@example.com";
 const char UserManager::kUserWallpapers[] = "UserWallpapers";
 const char UserManager::kUserWallpapersProperties[] =
     "UserWallpapersProperties";
@@ -64,8 +65,6 @@ class UserManagerImplWrapper {
 
 // static
 UserManager* UserManager::Get() {
-  // UserManager instance should be used only on UI thread.
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   return UserManagerImplWrapper::GetInstance()->get();
 }
 

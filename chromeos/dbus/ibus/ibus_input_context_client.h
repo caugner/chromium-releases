@@ -4,7 +4,8 @@
 
 #ifndef CHROMEOS_DBUS_IBUS_IBUS_INPUT_CONTEXT_CLIENT_H_
 #define CHROMEOS_DBUS_IBUS_IBUS_INPUT_CONTEXT_CLIENT_H_
-#pragma once
+
+#include <string>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -41,6 +42,7 @@ class CHROMEOS_EXPORT IBusInputContextClient {
   typedef base::Callback<void()> ShowPreeditTextHandler;
   typedef base::Callback<void()> HidePreeditTextHandler;
   typedef base::Callback<void(bool is_keyevent_used)> ProcessKeyEventCallback;
+  typedef base::Callback<void()> ErrorCallback;
 
   virtual ~IBusInputContextClient();
 
@@ -52,9 +54,9 @@ class CHROMEOS_EXPORT IBusInputContextClient {
   // Initialize function again.
   virtual void ResetObjectProxy() = 0;
 
-  // Returns true if connected to target input context path, otherwise return
-  // false.
-  virtual bool IsConnected() const = 0;
+  // Returns true if the object proxy is ready to communicate with ibus-daemon,
+  // otherwise return false.
+  virtual bool IsObjectProxyReady() const = 0;
 
   // Signal handler accessors. Setting function can be called multiple times. If
   // you call setting function multiple times, previous callback will be
@@ -100,7 +102,14 @@ class CHROMEOS_EXPORT IBusInputContextClient {
   virtual void ProcessKeyEvent(uint32 keyval,
                                uint32 keycode,
                                uint32 state,
-                               const ProcessKeyEventCallback& callback) = 0;
+                               const ProcessKeyEventCallback& callback,
+                               const ErrorCallback& error_callback) = 0;
+
+  // Invokes SetSurroundingText method call. |start_index| is inclusive and
+  // |end_index| is exclusive.
+  virtual void SetSurroundingText(const std::string& text,
+                                  uint32 start_index,
+                                  uint32 end_index) = 0;
 
   // Factory function, creates a new instance and returns ownership.
   // For normal usage, access the singleton via DBusThreadManager::Get().

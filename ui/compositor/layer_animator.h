@@ -4,7 +4,6 @@
 
 #ifndef UI_COMPOSITOR_LAYER_ANIMATOR_H_
 #define UI_COMPOSITOR_LAYER_ANIMATOR_H_
-#pragma once
 
 #include <deque>
 #include <vector>
@@ -69,6 +68,14 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   // Sets the visibility of the delegate. May cause an implicit animation.
   virtual void SetVisibility(bool visibility);
   bool GetTargetVisibility() const;
+
+  // Sets the brightness on the delegate. May cause an implicit animation.
+  virtual void SetBrightness(float brightness);
+  float GetTargetBrightness() const;
+
+  // Sets the grayscale on the delegate. May cause an implicit animation.
+  virtual void SetGrayscale(float grayscale);
+  float GetTargetGrayscale() const;
 
   // Sets the layer animation delegate the animator is associated with. The
   // animator does not own the delegate.
@@ -141,8 +148,13 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
   }
   static bool slow_animation_mode() { return slow_animation_mode_; }
 
-  // When in slow animation mode, animation durations a scaled by this value.
-  static int slow_animation_scale_factor();
+  // When in slow animation mode, animation durations are scaled by this value.
+  static void set_slow_animation_scale_factor(int factor) {
+    slow_animation_scale_factor_ = factor;
+  }
+  static int slow_animation_scale_factor() {
+    return slow_animation_scale_factor_;
+  }
 
   // When set to true, all animations complete immediately.
   static void set_disable_animations_for_test(bool disable_animations) {
@@ -286,6 +298,9 @@ class COMPOSITOR_EXPORT LayerAnimator : public AnimationContainerElement {
 
   // Slows down all animations for visual debugging.
   static bool slow_animation_mode_;
+
+  // Amount to slow animations for debugging.
+  static int slow_animation_scale_factor_;
 
   // Observers are notified when layer animations end, are scheduled or are
   // aborted.

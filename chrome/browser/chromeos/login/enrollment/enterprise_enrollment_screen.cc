@@ -11,13 +11,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
+#include "chrome/common/net/gaia/gaia_auth_util.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 
@@ -59,7 +59,7 @@ EnterpriseEnrollmentScreen::~EnterpriseEnrollmentScreen() {}
 void EnterpriseEnrollmentScreen::SetParameters(bool is_auto_enrollment,
                                                const std::string& user) {
   is_auto_enrollment_ = is_auto_enrollment;
-  user_ = user.empty() ? user : Authenticator::Canonicalize(user);
+  user_ = user.empty() ? user : gaia::CanonicalizeEmail(user);
 }
 
 void EnterpriseEnrollmentScreen::PrepareToShow() {
@@ -83,7 +83,7 @@ std::string EnterpriseEnrollmentScreen::GetName() const {
 void EnterpriseEnrollmentScreen::OnOAuthTokenAvailable(
     const std::string& user,
     const std::string& token) {
-  user_ = Authenticator::Canonicalize(user);
+  user_ = gaia::CanonicalizeEmail(user);
   RegisterForDevicePolicy(token);
 }
 
@@ -241,12 +241,20 @@ void EnterpriseEnrollmentScreen::RegisterForDevicePolicy(
       g_browser_process->browser_policy_connector();
   if (!connector->device_cloud_policy_subsystem()) {
     LOG(ERROR) << "Cloud policy subsystem not initialized.";
-  } else if (connector->IsEnterpriseManaged()) {
-    LOG(ERROR) << "Device is already enterprise managed!";
   } else if (connector->device_cloud_policy_subsystem()->state() ==
       policy::CloudPolicySubsystem::SUCCESS) {
     LOG(ERROR) << "A previous enrollment already succeeded!";
   } else {
+    if (connector->IsEnterpriseManaged() &&
+        connector->GetEnterpriseDomain() != gaia::ExtractDomainName(user_)) {
+      LOG(ERROR) << "Trying to re-enroll to a different domain than "
+                 << connector->GetEnterpriseDomain();
+      if (is_showing_) {
+        actor_->ShowEnrollmentError(
+            EnterpriseEnrollmentScreenActor::DOMAIN_MISMATCH_ERROR);
+      }
+      return;
+    }
     // Make sure the device policy subsystem is in a clean slate.
     connector->ResetDevicePolicy();
     connector->ScheduleServiceInitialization(0);
@@ -254,7 +262,9 @@ void EnterpriseEnrollmentScreen::RegisterForDevicePolicy(
         connector->device_cloud_policy_subsystem(), this));
     // Push the credentials to the policy infrastructure. It'll start enrollment
     // and notify us of progress through CloudPolicySubsystem::Observer.
-    connector->RegisterForDevicePolicy(user_, token, is_auto_enrollment_);
+    connector->RegisterForDevicePolicy(user_, token,
+                                       is_auto_enrollment_,
+                                       connector->IsEnterpriseManaged());
     return;
   }
   NOTREACHED();

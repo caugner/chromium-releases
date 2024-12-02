@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_CONTROLLER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_WIZARD_CONTROLLER_H_
-#pragma once
 
 #include <string>
 
@@ -88,6 +87,12 @@ class WizardController : public ScreenObserver {
 
   // Returns initial locale from local settings.
   static std::string GetInitialLocale();
+
+  // Sets delays to zero. MUST be used only for tests.
+  static void SetZeroDelays();
+
+  // If true zero delays have been enabled (for browser tests).
+  static bool IsZeroDelayEnabled();
 
   // Sets initial locale in local settings.
   static void SetInitialLocale(const std::string& locale);
@@ -212,10 +217,9 @@ class WizardController : public ScreenObserver {
   // Logs in the specified user via default login screen.
   void Login(const std::string& username, const std::string& password);
 
-  // Sets delays to zero. MUST be used only for browser tests.
-  static void SetZeroDelays();
-
   static bool skip_user_image_selection_;
+
+  static bool zero_delay_enabled_;
 
   // Screens.
   scoped_ptr<NetworkScreen> network_screen_;

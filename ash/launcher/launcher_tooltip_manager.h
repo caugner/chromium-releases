@@ -4,12 +4,13 @@
 
 #ifndef ASH_LAUNCHER_LAUNCHER_TOOLTIP_MANAGER_H_
 #define ASH_LAUNCHER_LAUNCHER_TOOLTIP_MANAGER_H_
-#pragma once
 
 #include "ash/ash_export.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_layout_manager.h"
+#include "ash/wm/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/string16.h"
+#include "ui/aura/event_filter.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/bubble/bubble_delegate.h"
@@ -25,17 +26,22 @@ class Label;
 
 namespace ash {
 namespace test {
+class LauncherTooltipManagerTest;
 class LauncherViewTest;
 }
 
 namespace internal {
+class LauncherView;
 
 // LauncherTooltipManager manages the tooltip balloon poping up on launcher
 // items.
-class ASH_EXPORT LauncherTooltipManager {
+class ASH_EXPORT LauncherTooltipManager : public aura::EventFilter,
+                                          public ShelfLayoutManager::Observer {
  public:
-  LauncherTooltipManager(ShelfAlignment alignment);
-  ~LauncherTooltipManager();
+  LauncherTooltipManager(ShelfAlignment alignment,
+                         ShelfLayoutManager* shelf_layout_manager,
+                         LauncherView* launcher_view);
+  virtual ~LauncherTooltipManager();
 
   // Called when the bubble is closed.
   void OnBubbleClosed(views::BubbleDelegateView* view);
@@ -63,18 +69,44 @@ class ASH_EXPORT LauncherTooltipManager {
   // Returns true if the tooltip is currently visible.
   bool IsVisible();
 
+protected:
+  // aura::EventFilter overrides:
+  virtual bool PreHandleKeyEvent(aura::Window* target,
+                                 aura::KeyEvent* event) OVERRIDE;
+  virtual bool PreHandleMouseEvent(aura::Window* target,
+                                   aura::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus PreHandleTouchEvent(aura::Window* target,
+                                              aura::TouchEvent* event) OVERRIDE;
+  virtual ui::GestureStatus PreHandleGestureEvent(
+      aura::Window* target,
+      aura::GestureEvent* event) OVERRIDE;
+
+  // ShelfLayoutManager::Observer overrides:
+  virtual void WillDeleteShelf() OVERRIDE;
+  virtual void WillChangeVisibilityState(
+      ShelfLayoutManager::VisibilityState new_state) OVERRIDE;
+  virtual void OnAutoHideStateChanged(
+      ShelfLayoutManager::AutoHideState new_state) OVERRIDE;
+
  private:
   class LauncherTooltipBubble;
   friend class test::LauncherViewTest;
+  friend class test::LauncherTooltipManagerTest;
 
+  void CancelHidingAnimation();
+  void CloseSoon();
   void ShowInternal();
   void CreateBubble(views::View* anchor, const string16& text);
 
   LauncherTooltipBubble* view_;
+  views::Widget* widget_;
   views::View* anchor_;
   string16 text_;
   ShelfAlignment alignment_;
   scoped_ptr<base::Timer> timer_;
+
+  ShelfLayoutManager* shelf_layout_manager_;
+  LauncherView* launcher_view_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherTooltipManager);
 };

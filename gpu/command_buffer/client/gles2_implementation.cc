@@ -405,7 +405,8 @@ GLES2Implementation::GLES2Implementation(
       debug_(false),
       use_count_(0),
       current_query_(NULL),
-      error_message_callback_(NULL) {
+      error_message_callback_(NULL),
+      context_lost_(false) {
   GPU_DCHECK(helper);
   GPU_DCHECK(transfer_buffer);
   GPU_CLIENT_LOG_CODE_BLOCK({
@@ -503,6 +504,10 @@ GLES2Implementation::~GLES2Implementation() {
   Finish();
 }
 
+GLES2CmdHelper* GLES2Implementation::helper() const {
+  return helper_;
+}
+
 GLuint GLES2Implementation::MakeTextureId() {
   GLuint id;
   GetIdHandler(id_namespaces::kTextures)->MakeIds(this, 0, 1, &id);
@@ -592,11 +597,28 @@ GLenum GLES2Implementation::GetError() {
   return err;
 }
 
+GLenum GLES2Implementation::GetClientSideGLError() {
+  if (error_bits_ == 0) {
+    return GL_NO_ERROR;
+  }
+
+  GLenum error = GL_NO_ERROR;
+  for (uint32 mask = 1; mask != 0; mask = mask << 1) {
+    if ((error_bits_ & mask) != 0) {
+      error = GLES2Util::GLErrorBitToGLError(mask);
+      break;
+    }
+  }
+  error_bits_ &= ~GLES2Util::GLErrorToErrorBit(error);
+  return error;
+}
+
 GLenum GLES2Implementation::GetGLError() {
   TRACE_EVENT0("gpu", "GLES2::GetGLError");
   // Check the GL error first, then our wrapped error.
   typedef gles2::GetError::Result Result;
   Result* result = GetResultAs<Result*>();
+  // If we couldn't allocate a result the context is lost.
   if (!result) {
     return GL_NO_ERROR;
   }
@@ -604,16 +626,9 @@ GLenum GLES2Implementation::GetGLError() {
   helper_->GetError(GetResultShmId(), GetResultShmOffset());
   WaitForCmd();
   GLenum error = *result;
-  if (error == GL_NO_ERROR && error_bits_ != 0) {
-    for (uint32 mask = 1; mask != 0; mask = mask << 1) {
-      if ((error_bits_ & mask) != 0) {
-        error = GLES2Util::GLErrorBitToGLError(mask);
-        break;
-      }
-    }
-  }
-
-  if (error != GL_NO_ERROR) {
+  if (error == GL_NO_ERROR) {
+    error = GetClientSideGLError();
+  } else {
     // There was an error, clear the corresponding wrapped error.
     error_bits_ &= ~GLES2Util::GLErrorToErrorBit(error);
   }
@@ -971,6 +986,12 @@ GLuint GLES2Implementation::GetMaxValueInBufferCHROMIUM(
   return result;
 }
 
+void GLES2Implementation::Clear(GLbitfield mask) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << this << "] glClear(" << mask << ")");
+  helper_->Clear(mask);
+}
+
 void GLES2Implementation::DrawElements(
     GLenum mode, GLsizei count, GLenum type, const void* indices) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
@@ -1035,9 +1056,26 @@ void GLES2Implementation::Flush() {
   helper_->CommandBufferHelper::Flush();
 }
 
+void GLES2Implementation::ShallowFlushCHROMIUM() {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << this << "] glShallowFlushCHROMIUM()");
+  // Flush our command buffer
+  // (tell the service to execute up to the flush cmd.)
+  helper_->CommandBufferHelper::Flush();
+}
+
 void GLES2Implementation::Finish() {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   FinishHelper();
+}
+
+bool GLES2Implementation::MustBeContextLost() {
+  if (!context_lost_) {
+    FinishHelper();
+    context_lost_ = error::IsError(helper_->command_buffer()->GetLastError());
+  }
+  GPU_CHECK(context_lost_);
+  return context_lost_;
 }
 
 void GLES2Implementation::FinishHelper() {
@@ -1159,6 +1197,17 @@ void GLES2Implementation::BindAttribLocation(
       << index << ", " << name << ")");
   SetBucketAsString(kResultBucketId, name);
   helper_->BindAttribLocationBucket(program, index, kResultBucketId);
+  helper_->SetBucketSize(kResultBucketId, 0);
+}
+
+void GLES2Implementation::BindUniformLocationCHROMIUM(
+  GLuint program, GLint location, const char* name) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << this << "] glBindUniformLocationCHROMIUM("
+      << program << ", " << location << ", " << name << ")");
+  SetBucketAsString(kResultBucketId, name);
+  helper_->BindUniformLocationCHROMIUMBucket(
+      program, location, kResultBucketId);
   helper_->SetBucketSize(kResultBucketId, 0);
 }
 
@@ -2089,9 +2138,9 @@ const GLubyte* GLES2Implementation::GetStringHelper(GLenum name) {
     switch (name) {
       case GL_EXTENSIONS:
         str += std::string(str.empty() ? "" : " ") +
-            "GL_CHROMIUM_map_sub "
             "GL_CHROMIUM_flipy "
-            "GL_CHROMIUM_consistent_uniform_locations "
+            "GL_CHROMIUM_map_sub "
+            "GL_CHROMIUM_shallow_flush "
             "GL_EXT_unpack_subimage";
         break;
       default:
@@ -2687,12 +2736,6 @@ void GLES2Implementation::UnmapBufferSubDataCHROMIUM(const void* mem) {
   helper_->BufferSubData(
       mb.target, mb.offset, mb.size, mb.shm_id, mb.shm_offset);
   mapped_memory_->FreePendingToken(mb.shm_memory, helper_->InsertToken());
-  // Flushing after unmap lets the service side start processing commands
-  // sooner. However, on lowend devices, the thread thrashing causes is
-  // worse than the latency hit.
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
-  helper_->CommandBufferHelper::Flush();
-#endif
   mapped_buffers_.erase(it);
 }
 
@@ -2767,9 +2810,6 @@ void GLES2Implementation::UnmapTexSubImage2DCHROMIUM(const void* mem) {
       mt.target, mt.level, mt.xoffset, mt.yoffset, mt.width, mt.height,
       mt.format, mt.type, mt.shm_id, mt.shm_offset, GL_FALSE);
   mapped_memory_->FreePendingToken(mt.shm_memory, helper_->InsertToken());
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
-  helper_->CommandBufferHelper::Flush();
-#endif
   mapped_textures_.erase(it);
 }
 
@@ -3014,9 +3054,12 @@ void GLES2Implementation::DeleteQueriesEXTHelper(
   for (GLsizei ii = 0; ii < n; ++ii) {
     QueryTracker::Query* query = query_tracker_->GetQuery(queries[ii]);
     if (query && query->Pending()) {
-      GPU_CHECK(query->CheckResultsAvailable(helper_));
+      if (!query->CheckResultsAvailable(helper_)) {
+        // Should only get here on context lost.
+        MustBeContextLost();
+      }
     }
-    query_tracker_->RemoveQuery(queries[ii]);
+    query_tracker_->RemoveQuery(queries[ii], context_lost_);
   }
   helper_->DeleteQueriesEXTImmediate(n, queries);
 }
@@ -3061,6 +3104,10 @@ void GLES2Implementation::BeginQueryEXT(GLenum target, GLuint id) {
   QueryTracker::Query* query = query_tracker_->GetQuery(id);
   if (!query) {
     query = query_tracker_->CreateQuery(id, target);
+    if (!query) {
+      MustBeContextLost();
+      return;
+    }
   } else if (query->target() != target) {
     SetGLError(
         GL_INVALID_OPERATION, "glBeginQueryEXT", "target does not match");
@@ -3069,17 +3116,17 @@ void GLES2Implementation::BeginQueryEXT(GLenum target, GLuint id) {
 
   current_query_ = query;
 
-  // init memory, inc count
-  query->MarkAsActive();
-
-  // tell service about id, shared memory and count
-  helper_->BeginQueryEXT(target, id, query->shm_id(), query->shm_offset());
+  query->Begin(this);
 }
 
 void GLES2Implementation::EndQueryEXT(GLenum target) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG("[" << this << "] EndQueryEXT("
                  << GLES2Util::GetStringQueryTarget(target) << ")");
+  // Don't do anything if the context is lost.
+  if (context_lost_) {
+    return;
+  }
 
   if (!current_query_) {
     SetGLError(GL_INVALID_OPERATION, "glEndQueryEXT", "no active query");
@@ -3092,8 +3139,7 @@ void GLES2Implementation::EndQueryEXT(GLenum target) {
     return;
   }
 
-  helper_->EndQueryEXT(target, current_query_->submit_count());
-  current_query_->MarkAsPending(helper_->InsertToken());
+  current_query_->End(this);
   current_query_ = NULL;
 }
 
@@ -3120,6 +3166,11 @@ void GLES2Implementation::GetQueryObjectuivEXT(
   GPU_CLIENT_LOG("[" << this << "] GetQueryivEXT(" << id << ", "
                  << GLES2Util::GetStringQueryObjectParameter(pname) << ", "
                  << static_cast<const void*>(params) << ")");
+
+  // exit if the context is lost.
+  if (context_lost_) {
+    return;
+  }
 
   QueryTracker::Query* query = query_tracker_->GetQuery(id);
   if (!query) {
@@ -3276,77 +3327,6 @@ void GLES2Implementation::GenMailboxCHROMIUM(
   GetBucketContents(kResultBucketId, &result);
 
   std::copy(result.begin(), result.end(), mailbox);
-}
-
-namespace {
-
-class GLUniformDefinitionComparer {
- public:
-  explicit GLUniformDefinitionComparer(
-      const GLUniformDefinitionCHROMIUM* uniforms)
-      : uniforms_(uniforms) {
-  }
-
-  bool operator()(const GLint lhs, const GLint rhs) const {
-    return strcmp(uniforms_[lhs].name, uniforms_[rhs].name) < 0;
-  }
-
- private:
-  const GLUniformDefinitionCHROMIUM* uniforms_;
-};
-
-}  // anonymous namespace.
-
-void GLES2Implementation::GetUniformLocationsCHROMIUM(
-    const GLUniformDefinitionCHROMIUM* uniforms,
-    GLsizei count,
-    GLsizei max_locations,
-    GLint* locations) {
-  GPU_CLIENT_SINGLE_THREAD_CHECK();
-  GPU_CLIENT_LOG("[" << this << "] glGenUniformLocationsCHROMIUM("
-      << static_cast<const void*>(uniforms) << ", "  << count << ", "
-      << max_locations << ", " << static_cast<const void*>(locations) << ")");
-
-  if (count <= 0) {
-    SetGLError(GL_INVALID_VALUE, "glGetUniformLocationsCHROMIUM", "count <= 0");
-    return;
-  }
-
-  for (GLsizei ii = 0; ii < count; ++ii) {
-    const GLUniformDefinitionCHROMIUM& def = uniforms[ii];
-    if (def.size <= 0) {
-      SetGLError(
-          GL_INVALID_VALUE, "glGetUniformLocationsCHROMIUM", "size <= 0");
-      return;
-    }
-  }
-
-  scoped_array<GLint> indices(new GLint[count]);
-  for (GLint ii = 0; ii < count; ++ii) {
-    indices[ii] = ii;
-  }
-
-  std::sort(&indices[0], &indices[count],
-            GLUniformDefinitionComparer(uniforms));
-
-  scoped_array<GLint> reverse_map(new GLint[count]);
-
-  for (GLint ii = 0; ii < count; ++ii) {
-    reverse_map[indices[ii]] = ii;
-  }
-
-  for (GLsizei ii = 0; ii < count; ++ii) {
-    const GLUniformDefinitionCHROMIUM& def = uniforms[ii];
-    GLint base_location = reverse_map[ii];
-    for (GLsizei jj = 0; jj < def.size; ++jj) {
-      if (max_locations <= 0) {
-        return;
-      }
-      *locations++ = GLES2Util::SwizzleLocation(
-          GLES2Util::MakeFakeLocation(base_location, jj));
-      --max_locations;
-    }
-  }
 }
 
 }  // namespace gles2

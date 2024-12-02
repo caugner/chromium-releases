@@ -4,16 +4,15 @@
 
 #ifndef CHROME_BROWSER_UI_STARTUP_BAD_FLAGS_PROMPT_H_
 #define CHROME_BROWSER_UI_STARTUP_BAD_FLAGS_PROMPT_H_
-#pragma once
 
 class Browser;
 
-namespace browser {
+namespace chrome {
 
 // Shows a warning notification in |browser| that the app was run with dangerous
 // command line flags.
 void ShowBadFlagsPrompt(Browser* browser);
 
-}
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_STARTUP_BAD_FLAGS_PROMPT_H_

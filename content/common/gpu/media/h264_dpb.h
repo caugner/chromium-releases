@@ -37,6 +37,7 @@ struct H264Picture {
   int pic_num;
   int long_term_pic_num;
   int frame_num;  // from slice header
+  int frame_num_offset;
   int frame_num_wrap;
   int long_term_frame_idx;
 
@@ -120,9 +121,6 @@ class H264DPB {
   enum { kDPBMaxSize = 16 };
 
  private:
-  // Remove a picture from DPB, freeing its resources.
-  void RemovePic(const Pictures::iterator iter);
-
   Pictures pics_;
 
   DISALLOW_COPY_AND_ASSIGN(H264DPB);
@@ -131,4 +129,3 @@ class H264DPB {
 }  // namespace content
 
 #endif  // CONTENT_COMMON_GPU_MEDIA_H264_DPB_H_
-

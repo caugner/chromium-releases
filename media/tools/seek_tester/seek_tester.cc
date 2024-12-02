@@ -42,7 +42,9 @@ void QuitMessageLoop(MessageLoop* loop, media::PipelineStatus status) {
 
 void TimestampExtractor(uint64* timestamp_ms,
                         MessageLoop* loop,
+                        media::DemuxerStream::Status status,
                         const scoped_refptr<media::DecoderBuffer>& buffer) {
+  CHECK_EQ(status, media::DemuxerStream::kOk);
   if (buffer->GetTimestamp() == media::kNoTimestamp())
     *timestamp_ms = -1;
   else
@@ -59,7 +61,7 @@ int main(int argc, char** argv) {
   CHECK(base::StringToUint64(argv[2], &seek_target_ms));
   scoped_refptr<media::FileDataSource> file_data_source(
       new media::FileDataSource());
-  CHECK_EQ(file_data_source->Initialize(argv[1]), media::PIPELINE_OK);
+  CHECK(file_data_source->Initialize(argv[1]));
 
   DemuxerHostImpl host;
   MessageLoop loop;

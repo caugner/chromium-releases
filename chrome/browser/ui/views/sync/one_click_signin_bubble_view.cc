@@ -21,12 +21,12 @@
 #include "ui/views/events/event.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 // Minimum width for the mutli-line label.
 const int kMinimumLabelWidth = 240;
 
-
-// BookmarkBubbleView ---------------------------------------------------------
+// OneClickSigninBubbleView ----------------------------------------------------
 
 // static
 OneClickSigninBubbleView* OneClickSigninBubbleView::bubble_view_ = NULL;

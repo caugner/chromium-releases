@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_TABS_FAKE_BASE_TAB_STRIP_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_TABS_FAKE_BASE_TAB_STRIP_CONTROLLER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
@@ -30,7 +29,6 @@ class FakeBaseTabStripController : public TabStripController {
   virtual int GetActiveIndex() const OVERRIDE;
   virtual bool IsTabSelected(int index) const OVERRIDE;
   virtual bool IsTabPinned(int index) const OVERRIDE;
-  virtual bool IsTabCloseable(int index) const OVERRIDE;
   virtual bool IsNewTabPage(int index) const OVERRIDE;
   virtual void SelectTab(int index) OVERRIDE;
   virtual void ExtendSelectionTo(int index) OVERRIDE;

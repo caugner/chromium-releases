@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,17 +14,19 @@
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/views/constrained_window_frame_simple.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "net/base/net_util.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -47,11 +50,11 @@
 #endif
 
 #if defined(USE_ASH)
+#include "ash/ash_constants.h"
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "ash/wm/custom_frame_view_ash.h"
 #include "ash/wm/visibility_controller.h"
-#include "base/command_line.h"
 #include "ui/aura/window.h"
 #endif
 
@@ -585,10 +588,19 @@ ConstrainedWindowViews::ConstrainedWindowViews(
   // Ash window headers can be transparent.
   params.transparent = true;
   ash::SetChildWindowVisibilityChangesAnimated(params.parent);
+  // No animations should get performed on the window since that will re-order
+  // the window stack which will then cause many problems.
+  if (params.parent && params.parent->parent()) {
+    params.parent->parent()->SetProperty(aura::client::kAnimationsDisabledKey,
+                                         true);
+  }
 #endif
   Init(params);
 
   tab_contents_->constrained_window_tab_helper()->AddConstrainedDialog(this);
+#if defined(USE_ASH)
+  GetNativeWindow()->SetProperty(ash::kConstrainedWindowKey, true);
+#endif
 }
 
 ConstrainedWindowViews::~ConstrainedWindowViews() {
@@ -607,6 +619,12 @@ void ConstrainedWindowViews::ShowConstrainedWindow() {
 }
 
 void ConstrainedWindowViews::CloseConstrainedWindow() {
+#if defined(USE_ASH)
+  gfx::NativeView view = tab_contents_->web_contents()->GetNativeView();
+  // Allow the parent to animate again.
+  if (view && view->parent())
+    view->parent()->ClearProperty(aura::client::kAnimationsDisabledKey);
+#endif
   tab_contents_->constrained_window_tab_helper()->WillClose(this);
   Close();
 }
@@ -633,15 +651,19 @@ gfx::NativeWindow ConstrainedWindowViews::GetNativeWindow() {
 // ConstrainedWindowViews, views::Widget overrides:
 
 views::NonClientFrameView* ConstrainedWindowViews::CreateNonClientFrameView() {
-#if defined(USE_ASH)
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(ash::switches::kAuraGoogleDialogFrames))
-    return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(this);
-  ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
-  frame->Init(this);
-  return frame;
+  if (command_line->HasSwitch(switches::kEnableFramelessConstrainedDialogs)) {
+    return new ConstrainedWindowFrameSimple(this);
+  } else {
+#if defined(USE_ASH)
+    if (command_line->HasSwitch(ash::switches::kAuraGoogleDialogFrames))
+      return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(this);
+    ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
+    frame->Init(this);
+    return frame;
 #endif
-  return new ConstrainedWindowFrameView(this);
+    return new ConstrainedWindowFrameView(this);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -658,4 +680,9 @@ void ConstrainedWindowViews::OnNativeConstrainedWindowMouseActivate() {
 views::internal::NativeWidgetDelegate*
     ConstrainedWindowViews::AsNativeWidgetDelegate() {
   return this;
+}
+
+int ConstrainedWindowViews::GetNonClientComponent(const gfx::Point& point) {
+  // Prevent a constrained window to be moved by the user.
+  return HTNOWHERE;
 }

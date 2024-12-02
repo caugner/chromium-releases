@@ -8,11 +8,10 @@
 
 #include "base/logging.h"
 
-namespace browser_sync {
+namespace syncer {
 namespace sessions {
 
-OrderedCommitSet::OrderedCommitSet(
-    const browser_sync::ModelSafeRoutingInfo& routes)
+OrderedCommitSet::OrderedCommitSet(const ModelSafeRoutingInfo& routes)
     : routes_(routes) {
 }
 
@@ -20,7 +19,7 @@ OrderedCommitSet::~OrderedCommitSet() {}
 
 void OrderedCommitSet::AddCommitItem(const int64 metahandle,
                                      const syncable::Id& commit_id,
-                                     syncable::ModelType type) {
+                                     ModelType type) {
   if (!HaveCommitItem(metahandle)) {
     inserted_metahandles_.insert(metahandle);
     metahandle_order_.push_back(metahandle);
@@ -32,7 +31,7 @@ void OrderedCommitSet::AddCommitItem(const int64 metahandle,
 }
 
 const OrderedCommitSet::Projection& OrderedCommitSet::GetCommitIdProjection(
-    browser_sync::ModelSafeGroup group) const {
+    ModelSafeGroup group) const {
   Projections::const_iterator i = projections_.find(group);
   DCHECK(i != projections_.end());
   return i->second;
@@ -99,8 +98,7 @@ OrderedCommitSet::CommitItem OrderedCommitSet::GetCommitItemAt(
 }
 
 bool OrderedCommitSet::HasBookmarkCommitId() const {
-  ModelSafeRoutingInfo::const_iterator group
-      = routes_.find(syncable::BOOKMARKS);
+  ModelSafeRoutingInfo::const_iterator group = routes_.find(BOOKMARKS);
   if (group == routes_.end())
     return false;
   Projections::const_iterator proj = projections_.find(group->second);
@@ -108,7 +106,7 @@ bool OrderedCommitSet::HasBookmarkCommitId() const {
     return false;
   DCHECK_LE(proj->second.size(), types_.size());
   for (size_t i = 0; i < proj->second.size(); i++) {
-    if (types_[proj->second[i]] == syncable::BOOKMARKS)
+    if (types_[proj->second[i]] == BOOKMARKS)
       return true;
   }
   return false;
@@ -124,5 +122,5 @@ void OrderedCommitSet::operator=(const OrderedCommitSet& other) {
 }
 
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer
 

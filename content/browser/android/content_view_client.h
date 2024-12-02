@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_ANDROID_CONTENT_VIEW_CLIENT_H_
 #define CONTENT_BROWSER_ANDROID_CONTENT_VIEW_CLIENT_H_
-#pragma once
 
 #include "base/android/jni_helper.h"
 #include "base/compiler_specific.h"
@@ -83,9 +82,6 @@ class ContentViewClient : public WebContentsDelegate {
   void OnReceivedError(int error_code,
                        const string16& description,
                        const GURL& url);
-  void OnReceivedHttpAuthRequest(jobject auth_handler,
-                                 const string16& host,
-                                 const string16& realm);
   void OnDidCommitMainFrame(const GURL& url,
                             const GURL& base_url);
   void OnInterstitialShown();
@@ -100,6 +96,10 @@ class ContentViewClient : public WebContentsDelegate {
                        const GURL& url,
                        const string16& message,
                        const string16& default_value);
+
+  // Returns the actual load progress, a value between 0 (nothing loaded) and
+  // 1 (page fully loaded).
+  virtual double GetLoadProgress() const;
 
   // Overridden from WebContentsDelegate:
   virtual WebContents* OpenURLFromTab(
@@ -178,6 +178,10 @@ class ContentViewClient : public WebContentsDelegate {
 
   // The object responsible for creating JavaScript dialogs.
   JavaScriptDialogCreator* javascript_dialog_creator_;
+
+  // Indicates the load state of the page. 0.0 means nothing loaded, 1 means
+  // fully loaded.
+  double load_progress_;
 };
 
 bool RegisterContentViewClient(JNIEnv* env);

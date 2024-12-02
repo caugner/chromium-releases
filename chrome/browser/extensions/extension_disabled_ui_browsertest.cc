@@ -10,9 +10,9 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/global_error.h"
-#include "chrome/browser/ui/global_error_service.h"
-#include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/global_error/global_error.h"
+#include "chrome/browser/ui/global_error/global_error_service.h"
+#include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/common/extensions/extension.h"
 
 using extensions::Extension;
@@ -98,7 +98,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, AcceptPermissions) {
   ASSERT_TRUE(GetExtensionDisabledGlobalError());
   const size_t size_before = service_->extensions()->size();
 
-  service_->GrantPermissionsAndEnableExtension(extension);
+  service_->GrantPermissionsAndEnableExtension(extension, false);
   EXPECT_EQ(size_before + 1, service_->extensions()->size());
   EXPECT_EQ(0u, service_->disabled_extensions()->size());
   ASSERT_FALSE(GetExtensionDisabledGlobalError());

@@ -4,34 +4,44 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_PRIVATE_API_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_PRIVATE_API_H_
-#pragma once
 
 #include <map>
 #include <string>
 #include <queue>
 #include <vector>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "chrome/browser/chromeos/extensions/file_browser_event_router.h"
 #include "chrome/browser/chromeos/gdata/gdata_cache.h"
+#include "chrome/browser/chromeos/gdata/gdata_errorcode.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "googleurl/src/url_util.h"
 
 class GURL;
 
-namespace content {
-struct SelectedFileInfo;
+namespace fileapi {
+class FileSystemContext;
 }
 
 namespace gdata {
 struct SearchResultInfo;
 }
 
+namespace ui {
+struct SelectedFileInfo;
+}
+
 // Implements the chrome.fileBrowserPrivate.requestLocalFileSystem method.
 class RequestLocalFileSystemFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.requestLocalFileSystem");
+
  protected:
+  virtual ~RequestLocalFileSystemFunction() {}
+
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
@@ -41,13 +51,17 @@ class RequestLocalFileSystemFunction : public AsyncExtensionFunction {
   void RespondSuccessOnUIThread(const std::string& name,
                                 const GURL& root_path);
   void RespondFailedOnUIThread(base::PlatformFileError error_code);
-  void RequestOnFileThread(const GURL& source_url, int child_id);
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.requestLocalFileSystem");
+  void RequestOnFileThread(
+      scoped_refptr<fileapi::FileSystemContext> file_system_context,
+      const GURL& source_url,
+      int child_id);
 };
 
 // Implements the chrome.fileBrowserPrivate.addFileWatch method.
 class FileWatchBrowserFunctionBase : public AsyncExtensionFunction {
  protected:
+  virtual ~FileWatchBrowserFunctionBase() {}
+
   virtual bool PerformFileWatchOperation(
       scoped_refptr<FileBrowserEventRouter> event_router,
       const FilePath& local_path, const FilePath& virtual_path,
@@ -57,10 +71,12 @@ class FileWatchBrowserFunctionBase : public AsyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  bool GetLocalFilePath(const GURL& file_url, FilePath* local_path,
-                        FilePath* virtual_path);
+  bool GetLocalFilePath(
+      scoped_refptr<fileapi::FileSystemContext> file_system_context,
+      const GURL& file_url, FilePath* local_path, FilePath* virtual_path);
   void RespondOnUIThread(bool success);
   void RunFileWatchOperationOnFileThread(
+      scoped_refptr<fileapi::FileSystemContext> file_system_context,
       scoped_refptr<FileBrowserEventRouter> event_router,
       const GURL& file_url,
       const std::string& extension_id);
@@ -68,68 +84,77 @@ class FileWatchBrowserFunctionBase : public AsyncExtensionFunction {
 
 // Implements the chrome.fileBrowserPrivate.addFileWatch method.
 class AddFileWatchBrowserFunction : public FileWatchBrowserFunctionBase {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.addFileWatch");
+
  protected:
+  virtual ~AddFileWatchBrowserFunction() {}
+
   virtual bool PerformFileWatchOperation(
       scoped_refptr<FileBrowserEventRouter> event_router,
       const FilePath& local_path, const FilePath& virtual_path,
       const std::string& extension_id) OVERRIDE;
-
- private:
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.addFileWatch");
 };
 
 
 // Implements the chrome.fileBrowserPrivate.removeFileWatch method.
 class RemoveFileWatchBrowserFunction : public FileWatchBrowserFunctionBase {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.removeFileWatch");
+
  protected:
+  virtual ~RemoveFileWatchBrowserFunction() {}
+
   virtual bool PerformFileWatchOperation(
       scoped_refptr<FileBrowserEventRouter> event_router,
       const FilePath& local_path, const FilePath& virtual_path,
       const std::string& extension_id) OVERRIDE;
-
- private:
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.removeFileWatch");
 };
 
 // Implements the chrome.fileBrowserPrivate.getFileTasks method.
 class GetFileTasksFileBrowserFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getFileTasks");
+
  protected:
+  virtual ~GetFileTasksFileBrowserFunction() {}
+
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getFileTasks");
+  bool FindDriveAppTasks(const std::vector<GURL>& file_urls,
+                         ListValue* result_list);
 };
 
 // Implements the chrome.fileBrowserPrivate.executeTask method.
 class ExecuteTasksFileBrowserFunction : public AsyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.executeTask");
+
   ExecuteTasksFileBrowserFunction();
-  virtual ~ExecuteTasksFileBrowserFunction();
 
   void OnTaskExecuted(bool success);
 
  protected:
+  virtual ~ExecuteTasksFileBrowserFunction();
+
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
-
- private:
-  class Executor;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.executeTask");
 };
 
 // Implements the chrome.fileBrowserPrivate.setDefaultTask method.
 class SetDefaultTaskFileBrowserFunction : public SyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.setDefaultTask");
+
   SetDefaultTaskFileBrowserFunction();
-  virtual ~SetDefaultTaskFileBrowserFunction();
 
  protected:
+  virtual ~SetDefaultTaskFileBrowserFunction();
+
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.setDefaultTask");
 };
 
 // Parent class for the chromium extension APIs for the file dialog.
@@ -140,7 +165,7 @@ class FileBrowserFunction
 
  protected:
   typedef std::vector<GURL> UrlList;
-  typedef std::vector<content::SelectedFileInfo> SelectedFileInfoList;
+  typedef std::vector<ui::SelectedFileInfo> SelectedFileInfoList;
   typedef base::Callback<void(const SelectedFileInfoList&)>
       GetLocalPathsCallback;
 
@@ -159,14 +184,17 @@ class FileBrowserFunction
   // Converts virtual paths to local paths and call |callback| (on the UI
   // thread) with the results.
   // This method must be called from the file thread.
-  void GetLocalPathsOnFileThread(const UrlList& file_urls,
-                                 GetLocalPathsCallback callback);
+  void GetLocalPathsOnFileThread(
+      scoped_refptr<fileapi::FileSystemContext> file_system_context,
+      const UrlList& file_urls,
+      GetLocalPathsCallback callback);
 };
 
 // Select a single file.  Closes the dialog window.
-class SelectFileFunction
-    : public FileBrowserFunction {
+class SelectFileFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.selectFile");
+
   SelectFileFunction() {}
 
  protected:
@@ -179,14 +207,13 @@ class SelectFileFunction
   // A callback method to handle the result of
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.selectFile");
 };
 
 // View multiple selected files.  Window stays open.
-class ViewFilesFunction
-    : public FileBrowserFunction {
+class ViewFilesFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.viewFiles");
+
   ViewFilesFunction();
 
  protected:
@@ -200,14 +227,13 @@ class ViewFilesFunction
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const std::string& internal_task_id,
                                        const SelectedFileInfoList& files);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.viewFiles");
 };
 
 // Select multiple files.  Closes the dialog window.
-class SelectFilesFunction
-    : public FileBrowserFunction {
+class SelectFilesFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.selectFiles");
+
   SelectFilesFunction();
 
  protected:
@@ -220,14 +246,13 @@ class SelectFilesFunction
   // A callback method to handle the result of
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.selectFiles");
 };
 
 // Cancel file selection Dialog.  Closes the dialog window.
-class CancelFileDialogFunction
-    : public FileBrowserFunction {
+class CancelFileDialogFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.cancelDialog");
+
   CancelFileDialogFunction() {}
 
  protected:
@@ -235,15 +260,13 @@ class CancelFileDialogFunction
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
-
- private:
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.cancelDialog");
 };
 
 // Mount a device or a file.
-class AddMountFunction
-    : public FileBrowserFunction {
+class AddMountFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.addMount");
+
   AddMountFunction();
 
  protected:
@@ -253,11 +276,6 @@ class AddMountFunction
   virtual bool RunImpl() OVERRIDE;
 
  private:
-  // Sends gdata mount event to renderers.
-  void RaiseGDataMountEvent(gdata::GDataErrorCode error);
-  // A callback method to handle the result of GData authentication request.
-  void OnGDataAuthentication(gdata::GDataErrorCode error,
-                             const std::string& token);
   // A callback method to handle the result of
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const std::string& mount_type_str,
@@ -265,16 +283,15 @@ class AddMountFunction
   // A callback method to handle the result of SetMountedState.
   void OnMountedStateSet(const std::string& mount_type,
                          const FilePath::StringType& file_name,
-                         base::PlatformFileError error,
+                         gdata::GDataFileError error,
                          const FilePath& file_path);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.addMount");
 };
 
 // Unmounts selected device. Expects mount point path as an argument.
-class RemoveMountFunction
-    : public FileBrowserFunction {
+class RemoveMountFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.removeMount");
+
   RemoveMountFunction();
 
  protected:
@@ -287,13 +304,12 @@ class RemoveMountFunction
   // A callback method to handle the result of
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.removeMount");
 };
 
-class GetMountPointsFunction
-    : public AsyncExtensionFunction {
+class GetMountPointsFunction : public AsyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getMountPoints");
+
   GetMountPointsFunction();
 
  protected:
@@ -301,15 +317,13 @@ class GetMountPointsFunction
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
-
- private:
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getMountPoints");
 };
 
 // Formats Device given its mount path.
-class FormatDeviceFunction
-    : public FileBrowserFunction {
+class FormatDeviceFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.formatDevice");
+
   FormatDeviceFunction();
 
  protected:
@@ -322,13 +336,12 @@ class FormatDeviceFunction
   // A callback method to handle the result of
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.formatDevice");
 };
 
-class GetSizeStatsFunction
-    : public FileBrowserFunction {
+class GetSizeStatsFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getSizeStats");
+
   GetSizeStatsFunction();
 
  protected:
@@ -342,52 +355,63 @@ class GetSizeStatsFunction
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
 
-  void GetSizeStatsCallbackOnUIThread(const std::string& mount_path,
-                                      size_t total_size_kb,
+  void GetGDataAvailableSpaceCallback(gdata::GDataFileError error,
+                                int64 bytes_total,
+                                int64 bytes_used);
+
+  void GetSizeStatsCallbackOnUIThread(size_t total_size_kb,
                                       size_t remaining_size_kb);
   void CallGetSizeStatsOnFileThread(const std::string& mount_path);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getSizeStats");
 };
 
 // Retrieves devices meta-data. Expects volume's device path as an argument.
-class GetVolumeMetadataFunction
-    : public FileBrowserFunction {
+class GetVolumeMetadataFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getVolumeMetadata");
+
   GetVolumeMetadataFunction();
 
  protected:
   virtual ~GetVolumeMetadataFunction();
 
+  // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
  private:
   // A callback method to handle the result of
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getVolumeMetadata");
 };
 
 // Toggles fullscreen mode for the browser.
 class ToggleFullscreenFunction : public SyncExtensionFunction {
- protected:
-  virtual bool RunImpl() OVERRIDE;
- private:
+ public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.toggleFullscreen");
+
+ protected:
+  virtual ~ToggleFullscreenFunction() {}
+
+  // SyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
 };
 
 // Checks if the browser is in fullscreen mode.
 class IsFullscreenFunction : public SyncExtensionFunction {
- protected:
-  virtual bool RunImpl() OVERRIDE;
- private:
+ public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.isFullscreen");
+
+ protected:
+  virtual ~IsFullscreenFunction() {}
+
+  // SyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
 };
 
 // File Dialog Strings.
 class FileDialogStringsFunction : public SyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getStrings");
+
   FileDialogStringsFunction() {}
 
  protected:
@@ -395,35 +419,34 @@ class FileDialogStringsFunction : public SyncExtensionFunction {
 
   // SyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
-
- private:
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getStrings");
 };
 
 // Retrieve property information for multiple files, returning a list of the
 // same length as the input list of file URLs.  If a particular file has an
 // error, then return a dictionary with the key "error" set to the error number
-// (base::PlatformFileError) for that entry in the returned list.
+// (gdata::GDataFileError) for that entry in the returned list.
 class GetGDataFilePropertiesFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataFileProperties");
+
   GetGDataFilePropertiesFunction();
 
  protected:
+  virtual ~GetGDataFilePropertiesFunction();
+
   void GetNextFileProperties();
   void CompleteGetFileProperties();
-
-  virtual ~GetGDataFilePropertiesFunction();
 
   // Virtual function that can be overridden to do operations on each virtual
   // file path and update its the properties.
   virtual void DoOperation(const FilePath& file_path,
                            base::DictionaryValue* properties,
-                           scoped_ptr<gdata::GDataFileProto> file_proto);
+                           scoped_ptr<gdata::GDataEntryProto> entry_proto);
 
   void OnOperationComplete(const FilePath& file_path,
                            base::DictionaryValue* properties,
-                           base::PlatformFileError error,
-                           scoped_ptr<gdata::GDataFileProto> file_proto);
+                           gdata::GDataFileError error,
+                           scoped_ptr<gdata::GDataEntryProto> entry_proto);
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
@@ -434,28 +457,28 @@ class GetGDataFilePropertiesFunction : public FileBrowserFunction {
  private:
   void OnGetFileInfo(const FilePath& file_path,
                      base::DictionaryValue* property_dict,
-                     base::PlatformFileError error,
-                     scoped_ptr<gdata::GDataFileProto> file_proto);
+                     gdata::GDataFileError error,
+                     scoped_ptr<gdata::GDataEntryProto> entry_proto);
 
   void CacheStateReceived(base::DictionaryValue* property_dict,
                           bool success,
-                          const gdata::GDataCache::CacheEntry& cache_entry);
+                          const gdata::GDataCacheEntry& cache_entry);
 
   size_t current_index_;
   base::ListValue* path_list_;
   scoped_ptr<base::ListValue> file_properties_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataFileProperties");
 };
 
 // Pin/unpin multiple files in the cache, returning a list of file
 // properties with the updated cache state.  The returned array is the
 // same length as the input list of file URLs.  If a particular file
 // has an error, then return a dictionary with the key "error" set to
-// the error number (base::PlatformFileError) for that entry in the
+// the error number (gdata::GDataFileError) for that entry in the
 // returned list.
 class PinGDataFileFunction : public GetGDataFilePropertiesFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.pinGDataFile");
+
   PinGDataFileFunction();
 
  protected:
@@ -469,20 +492,18 @@ class PinGDataFileFunction : public GetGDataFilePropertiesFunction {
   virtual void DoOperation(
       const FilePath& file_path,
       base::DictionaryValue* properties,
-      scoped_ptr<gdata::GDataFileProto> file_proto) OVERRIDE;
+      scoped_ptr<gdata::GDataEntryProto> entry_proto) OVERRIDE;
 
   // Callback for SetPinState. Updates properties with error.
   void OnPinStateSet(const FilePath& path,
                      base::DictionaryValue* properties,
-                     scoped_ptr<gdata::GDataFileProto> file_proto,
-                     base::PlatformFileError error,
+                     scoped_ptr<gdata::GDataEntryProto> entry_proto,
+                     gdata::GDataFileError error,
                      const std::string& resource_id,
                      const std::string& md5);
 
   // True for pin, false for unpin.
   bool set_pin_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.pinGDataFile");
 };
 
 // Get file locations for the given list of file URLs. Returns a list of
@@ -490,6 +511,8 @@ class PinGDataFileFunction : public GetGDataFilePropertiesFunction {
 // file is on gdata, and 'local' means the file is on the local drive.
 class GetFileLocationsFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getFileLocations");
+
   GetFileLocationsFunction();
 
  protected:
@@ -502,8 +525,6 @@ class GetFileLocationsFunction : public FileBrowserFunction {
   // A callback method to handle the result of
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getFileLocations");
 };
 
 // Get gdata files for the given list of file URLs. Initiate downloading of
@@ -516,6 +537,8 @@ class GetFileLocationsFunction : public FileBrowserFunction {
 // TODO(satorux): Should we propagate error types to the JavasScript layer?
 class GetGDataFilesFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataFiles");
+
   GetGDataFilesFunction();
 
  protected:
@@ -535,55 +558,58 @@ class GetGDataFilesFunction : public FileBrowserFunction {
 
   // Called by GDataFileSystem::GetFile(). Pops the file from
   // |remaining_gdata_paths_|, and calls GetFileOrSendResponse().
-  void OnFileReady(base::PlatformFileError error,
+  void OnFileReady(gdata::GDataFileError error,
                    const FilePath& local_path,
                    const std::string& unused_mime_type,
                    gdata::GDataFileType file_type);
 
   std::queue<FilePath> remaining_gdata_paths_;
   ListValue* local_paths_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataFiles");
 };
 
 // Implements the chrome.fileBrowserPrivate.executeTask method.
 class GetFileTransfersFunction : public AsyncExtensionFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getFileTransfers");
+
   GetFileTransfersFunction();
-  virtual ~GetFileTransfersFunction();
 
  protected:
+  virtual ~GetFileTransfersFunction();
+
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
  private:
   ListValue* GetFileTransfersList();
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getFileTransfers");
 };
 
 // Implements the chrome.fileBrowserPrivate.cancelFileTransfers method.
 class CancelFileTransfersFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.cancelFileTransfers");
+
   CancelFileTransfersFunction();
-  virtual ~CancelFileTransfersFunction();
 
  protected:
+  virtual ~CancelFileTransfersFunction();
+
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
- private:
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.cancelFileTransfers");
 };
 
 // Implements the chrome.fileBrowserPrivate.transferFile method.
 class TransferFileFunction : public FileBrowserFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.transferFile");
+
   TransferFileFunction();
-  virtual ~TransferFileFunction();
 
  protected:
+  virtual ~TransferFileFunction();
+
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
 
@@ -593,42 +619,40 @@ class TransferFileFunction : public FileBrowserFunction {
   void GetLocalPathsResponseOnUIThread(const SelectedFileInfoList& files);
 
   // Helper callback for handling response from GDataFileSystem::TransferFile().
-  void OnTransferCompleted(base::PlatformFileError error);
-
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.transferFile");
+  void OnTransferCompleted(gdata::GDataFileError error);
 };
 
 // Read setting value.
 class GetGDataPreferencesFunction : public SyncExtensionFunction {
- protected:
-  virtual bool RunImpl() OVERRIDE;
- private:
+ public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataPreferences");
+
+ protected:
+  virtual ~GetGDataPreferencesFunction() {}
+
+  virtual bool RunImpl() OVERRIDE;
 };
 
 // Write setting value.
 class SetGDataPreferencesFunction : public SyncExtensionFunction {
- protected:
-  virtual bool RunImpl() OVERRIDE;
- private:
+ public:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.setGDataPreferences");
-};
 
-class GetPathForDriveSearchResultFunction : public AsyncExtensionFunction {
  protected:
+  virtual ~SetGDataPreferencesFunction() {}
+
   virtual bool RunImpl() OVERRIDE;
-
-  void OnEntryFound(base::PlatformFileError error,
-                    const FilePath& entry_path,
-                    scoped_ptr<gdata::GDataEntryProto> entry_proto);
-
- private:
-  DECLARE_EXTENSION_FUNCTION_NAME(
-      "fileBrowserPrivate.getPathForDriveSearchResult");
 };
 
 class SearchDriveFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.searchGData");
+
+  SearchDriveFunction();
+
  protected:
+  virtual ~SearchDriveFunction();
+
   virtual bool RunImpl() OVERRIDE;
 
  private:
@@ -637,35 +661,51 @@ class SearchDriveFunction : public AsyncExtensionFunction {
                           const std::string& file_system_name,
                           const GURL& file_system_url);
   // Callback for gdata::SearchAsync called after file system is opened.
-  void OnSearch(base::PlatformFileError error,
+  void OnSearch(gdata::GDataFileError error,
+                const GURL& next_feed,
                 scoped_ptr<std::vector<gdata::SearchResultInfo> > result_paths);
 
   // Query for which the search is being performed.
   std::string query_;
+  std::string next_feed_;
   // Information about remote file system we will need to create file entries
   // to represent search results.
   std::string file_system_name_;
   GURL file_system_url_;
+};
 
-  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.searchGData");
+class ClearDriveCacheFunction : public AsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.clearDriveCache");
+
+ protected:
+  virtual ~ClearDriveCacheFunction() {}
+
+  virtual bool RunImpl() OVERRIDE;
 };
 
 // Implements the chrome.fileBrowserPrivate.getNetworkConnectionState method.
 class GetNetworkConnectionStateFunction : public SyncExtensionFunction {
- protected:
-  virtual bool RunImpl() OVERRIDE;
- private:
+ public:
   DECLARE_EXTENSION_FUNCTION_NAME(
       "fileBrowserPrivate.getNetworkConnectionState");
+
+ protected:
+  virtual ~GetNetworkConnectionStateFunction() {}
+
+  virtual bool RunImpl() OVERRIDE;
 };
 
 // Implements the chrome.fileBrowserPrivate.requestDirectoryRefresh method.
 class RequestDirectoryRefreshFunction : public SyncExtensionFunction {
- protected:
-  virtual bool RunImpl() OVERRIDE;
- private:
+ public:
   DECLARE_EXTENSION_FUNCTION_NAME(
       "fileBrowserPrivate.requestDirectoryRefresh");
+
+ protected:
+  virtual ~RequestDirectoryRefreshFunction() {}
+
+  virtual bool RunImpl() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_PRIVATE_API_H_

@@ -6,12 +6,11 @@
 
 #include "base/bind.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/api/api_resource_controller.h"
 #include "chrome/browser/extensions/api/dns/host_resolver_wrapper.h"
 #include "chrome/browser/extensions/api/socket/socket.h"
 #include "chrome/browser/extensions/api/socket/tcp_socket.h"
 #include "chrome/browser/extensions/api/socket/udp_socket.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/io_thread.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
@@ -34,10 +33,23 @@ const char kSocketNotFoundError[] = "Socket not found";
 const char kSocketTypeInvalidError[] = "Socket type is not supported";
 const char kDnsLookupFailedError[] = "DNS resolution failed";
 
-void SocketExtensionFunction::Work() {
+SocketAsyncApiFunction::SocketAsyncApiFunction()
+    : manager_(NULL) {
 }
 
-bool SocketExtensionFunction::Respond() {
+SocketAsyncApiFunction::~SocketAsyncApiFunction() {
+}
+
+bool SocketAsyncApiFunction::PrePrepare() {
+  manager_ = ExtensionSystem::Get(profile())->socket_manager();
+  DCHECK(manager_) << "There is no socket manager. "
+    "If this assertion is failing during a test, then it is likely that "
+    "TestExtensionSystem is failing to provide an instance of "
+    "ApiResourceManager<Socket>.";
+  return manager_ != NULL;
+}
+
+bool SocketAsyncApiFunction::Respond() {
   return error_.empty();
 }
 
@@ -92,19 +104,22 @@ SocketCreateFunction::SocketCreateFunction()
 SocketCreateFunction::~SocketCreateFunction() {}
 
 bool SocketCreateFunction::Prepare() {
-  std::string socket_type_string;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &socket_type_string));
-  if (socket_type_string == kTCPOption) {
+  params_ = api::socket::Create::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params_.get());
+
+  if (params_->type == kTCPOption) {
     socket_type_ = kSocketTypeTCP;
-  } else if (socket_type_string == kUDPOption) {
+  } else if (params_->type == kUDPOption) {
     socket_type_ = kSocketTypeUDP;
   } else {
     error_ = kSocketTypeInvalidError;
     return false;
   }
-
-  src_id_ = ExtractSrcId(1);
-  event_notifier_ = CreateEventNotifier(src_id_);
+  if (params_->options.get()) {
+    scoped_ptr<DictionaryValue> options = params_->options->ToValue();
+    src_id_ = ExtractSrcId(options.get());
+    event_notifier_ = CreateEventNotifier(src_id_);
+  }
 
   return true;
 }
@@ -119,8 +134,8 @@ void SocketCreateFunction::Work() {
   DCHECK(socket);
 
   DictionaryValue* result = new DictionaryValue();
-  result->SetInteger(kSocketIdKey, controller()->AddAPIResource(socket));
-  result_.reset(result);
+  result->SetInteger(kSocketIdKey, manager_->Add(socket));
+  SetResult(result);
 }
 
 bool SocketDestroyFunction::Prepare() {
@@ -129,11 +144,12 @@ bool SocketDestroyFunction::Prepare() {
 }
 
 void SocketDestroyFunction::Work() {
-  if (!controller()->RemoveSocket(socket_id_))
-    error_ = kSocketNotFoundError;
+  manager_->Remove(socket_id_);
 }
 
-SocketConnectFunction::SocketConnectFunction() {
+SocketConnectFunction::SocketConnectFunction()
+    : socket_id_(0),
+      port_(0) {
 }
 
 SocketConnectFunction::~SocketConnectFunction() {
@@ -154,13 +170,13 @@ void SocketConnectFunction::AfterDnsLookup(int lookup_result) {
   if (lookup_result == net::OK) {
     StartConnect();
   } else {
-    result_.reset(Value::CreateIntegerValue(lookup_result));
+    SetResult(Value::CreateIntegerValue(lookup_result));
     AsyncWorkCompleted();
   }
 }
 
 void SocketConnectFunction::StartConnect() {
-  Socket* socket = controller()->GetSocket(socket_id_);
+  Socket* socket = manager_->Get(socket_id_);
   if (!socket) {
     error_ = kSocketNotFoundError;
     OnConnect(-1);
@@ -172,7 +188,7 @@ void SocketConnectFunction::StartConnect() {
 }
 
 void SocketConnectFunction::OnConnect(int result) {
-  result_.reset(Value::CreateIntegerValue(result));
+  SetResult(Value::CreateIntegerValue(result));
   AsyncWorkCompleted();
 }
 
@@ -182,12 +198,12 @@ bool SocketDisconnectFunction::Prepare() {
 }
 
 void SocketDisconnectFunction::Work() {
-  Socket* socket = controller()->GetSocket(socket_id_);
+  Socket* socket = manager_->Get(socket_id_);
   if (socket)
     socket->Disconnect();
   else
     error_ = kSocketNotFoundError;
-  result_.reset(Value::CreateNullValue());
+  SetResult(Value::CreateNullValue());
 }
 
 bool SocketBindFunction::Prepare() {
@@ -199,13 +215,13 @@ bool SocketBindFunction::Prepare() {
 
 void SocketBindFunction::Work() {
   int result = -1;
-  Socket* socket = controller()->GetSocket(socket_id_);
+  Socket* socket = manager_->Get(socket_id_);
   if (socket)
     result = socket->Bind(address_, port_);
   else
     error_ = kSocketNotFoundError;
 
-  result_.reset(Value::CreateIntegerValue(result));
+  SetResult(Value::CreateIntegerValue(result));
 }
 
 SocketReadFunction::SocketReadFunction()
@@ -215,13 +231,13 @@ SocketReadFunction::SocketReadFunction()
 SocketReadFunction::~SocketReadFunction() {}
 
 bool SocketReadFunction::Prepare() {
-  params_ = api::experimental_socket::Read::Params::Create(*args_);
+  params_ = api::socket::Read::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params_.get());
   return true;
 }
 
 void SocketReadFunction::AsyncWorkStart() {
-  Socket* socket = controller()->GetSocket(params_->socket_id);
+  Socket* socket = manager_->Get(params_->socket_id);
   if (!socket) {
     error_ = kSocketNotFoundError;
     OnCompleted(-1, NULL);
@@ -245,7 +261,7 @@ void SocketReadFunction::OnCompleted(int bytes_read,
     // http://crbug.com/127630
     result->Set(kDataKey, base::BinaryValue::Create(new char[1], 0));
   }
-  result_.reset(result);
+  SetResult(result);
 
   AsyncWorkCompleted();
 }
@@ -269,7 +285,7 @@ bool SocketWriteFunction::Prepare() {
 }
 
 void SocketWriteFunction::AsyncWorkStart() {
-  Socket* socket = controller()->GetSocket(socket_id_);
+  Socket* socket = manager_->Get(socket_id_);
 
   if (!socket) {
     error_ = kSocketNotFoundError;
@@ -284,7 +300,7 @@ void SocketWriteFunction::AsyncWorkStart() {
 void SocketWriteFunction::OnCompleted(int bytes_written) {
   DictionaryValue* result = new DictionaryValue();
   result->SetInteger(kBytesWrittenKey, bytes_written);
-  result_.reset(result);
+  SetResult(result);
 
   AsyncWorkCompleted();
 }
@@ -296,13 +312,13 @@ SocketRecvFromFunction::SocketRecvFromFunction()
 SocketRecvFromFunction::~SocketRecvFromFunction() {}
 
 bool SocketRecvFromFunction::Prepare() {
-  params_ = api::experimental_socket::RecvFrom::Params::Create(*args_);
+  params_ = api::socket::RecvFrom::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params_.get());
   return true;
 }
 
 void SocketRecvFromFunction::AsyncWorkStart() {
-  Socket* socket = controller()->GetSocket(params_->socket_id);
+  Socket* socket = manager_->Get(params_->socket_id);
   if (!socket) {
     error_ = kSocketNotFoundError;
     OnCompleted(-1, NULL, std::string(), 0);
@@ -330,7 +346,7 @@ void SocketRecvFromFunction::OnCompleted(int bytes_read,
   }
   result->SetString(kAddressKey, address);
   result->SetInteger(kPortKey, port);
-  result_.reset(result);
+  SetResult(result);
 
   AsyncWorkCompleted();
 }
@@ -338,7 +354,8 @@ void SocketRecvFromFunction::OnCompleted(int bytes_read,
 SocketSendToFunction::SocketSendToFunction()
     : socket_id_(0),
       io_buffer_(NULL),
-      io_buffer_size_(0) {
+      io_buffer_size_(0),
+      port_(0) {
 }
 
 SocketSendToFunction::~SocketSendToFunction() {}
@@ -363,13 +380,13 @@ void SocketSendToFunction::AfterDnsLookup(int lookup_result) {
   if (lookup_result == net::OK) {
     StartSendTo();
   } else {
-    result_.reset(Value::CreateIntegerValue(lookup_result));
+    SetResult(Value::CreateIntegerValue(lookup_result));
     AsyncWorkCompleted();
   }
 }
 
 void SocketSendToFunction::StartSendTo() {
-  Socket* socket = controller()->GetSocket(socket_id_);
+  Socket* socket = manager_->Get(socket_id_);
   if (!socket) {
     error_ = kSocketNotFoundError;
     OnCompleted(-1);
@@ -383,7 +400,7 @@ void SocketSendToFunction::StartSendTo() {
 void SocketSendToFunction::OnCompleted(int bytes_written) {
   DictionaryValue* result = new DictionaryValue();
   result->SetInteger(kBytesWrittenKey, bytes_written);
-  result_.reset(result);
+  SetResult(result);
 
   AsyncWorkCompleted();
 }
@@ -395,14 +412,14 @@ SocketSetKeepAliveFunction::SocketSetKeepAliveFunction()
 SocketSetKeepAliveFunction::~SocketSetKeepAliveFunction() {}
 
 bool SocketSetKeepAliveFunction::Prepare() {
-  params_ = api::experimental_socket::SetKeepAlive::Params::Create(*args_);
+  params_ = api::socket::SetKeepAlive::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params_.get());
   return true;
 }
 
 void SocketSetKeepAliveFunction::Work() {
   bool result = false;
-  Socket* socket = controller()->GetSocket(params_->socket_id);
+  Socket* socket = manager_->Get(params_->socket_id);
   if (socket) {
     int delay = 0;
     if (params_->delay.get())
@@ -411,7 +428,7 @@ void SocketSetKeepAliveFunction::Work() {
   } else {
     error_ = kSocketNotFoundError;
   }
-  result_.reset(Value::CreateBooleanValue(result));
+  SetResult(Value::CreateBooleanValue(result));
 }
 
 SocketSetNoDelayFunction::SocketSetNoDelayFunction()
@@ -421,19 +438,63 @@ SocketSetNoDelayFunction::SocketSetNoDelayFunction()
 SocketSetNoDelayFunction::~SocketSetNoDelayFunction() {}
 
 bool SocketSetNoDelayFunction::Prepare() {
-  params_ = api::experimental_socket::SetNoDelay::Params::Create(*args_);
+  params_ = api::socket::SetNoDelay::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params_.get());
   return true;
 }
 
 void SocketSetNoDelayFunction::Work() {
   bool result = false;
-  Socket* socket = controller()->GetSocket(params_->socket_id);
+  Socket* socket = manager_->Get(params_->socket_id);
   if (socket)
     result = socket->SetNoDelay(params_->no_delay);
   else
     error_ = kSocketNotFoundError;
-  result_.reset(Value::CreateBooleanValue(result));
+  SetResult(Value::CreateBooleanValue(result));
+}
+
+SocketGetInfoFunction::SocketGetInfoFunction()
+    : params_(NULL) {}
+
+SocketGetInfoFunction::~SocketGetInfoFunction() {}
+
+bool SocketGetInfoFunction::Prepare() {
+  params_ = api::socket::GetInfo::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params_.get());
+  return true;
+}
+
+void SocketGetInfoFunction::Work() {
+  api::socket::SocketInfo info;
+  Socket* socket = manager_->Get(params_->socket_id);
+  if (socket) {
+    // This represents what we know about the socket, and does not call through
+    // to the system.
+    info.socket_type = (socket->IsTCPSocket() ? kTCPOption : kUDPOption);
+    info.connected = socket->IsConnected();
+
+    // Grab the peer address as known by the OS. This and the call below will
+    // always succeed while the socket is connected, even if the socket has
+    // been remotely closed by the peer; only reading the socket will reveal
+    // that it should be closed locally.
+    net::IPEndPoint peerAddress;
+    if (socket->GetPeerAddress(&peerAddress)) {
+      info.peer_address.reset(
+          new std::string(peerAddress.ToStringWithoutPort()));
+      info.peer_port.reset(new int(peerAddress.port()));
+    }
+
+    // Grab the local address as known by the OS.
+    net::IPEndPoint localAddress;
+    if (socket->GetLocalAddress(&localAddress)) {
+      info.local_address.reset(
+          new std::string(localAddress.ToStringWithoutPort()));
+      info.local_port.reset(new int(localAddress.port()));
+    }
+  } else {
+    error_ = kSocketNotFoundError;
+  }
+  SetResult(info.ToValue().release());
 }
 
 }  // namespace extensions

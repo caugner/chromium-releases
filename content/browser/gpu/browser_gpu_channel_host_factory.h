@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_GPU_BROWSER_GPU_CHANNEL_HOST_FACTORY_H_
 #define CONTENT_BROWSER_GPU_BROWSER_GPU_CHANNEL_HOST_FACTORY_H_
-#pragma once
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -40,13 +39,17 @@ class BrowserGpuChannelHostFactory : public GpuChannelHostFactory {
     CreateRequest();
     ~CreateRequest();
     base::WaitableEvent event;
+    int gpu_host_id;
     int32 route_id;
   };
 
   struct EstablishRequest {
-    EstablishRequest();
+    explicit EstablishRequest(CauseForGpuLaunch);
     ~EstablishRequest();
     base::WaitableEvent event;
+    CauseForGpuLaunch cause_for_gpu_launch;
+    int gpu_host_id;
+    bool reused_gpu_process;
     IPC::ChannelHandle channel_handle;
     GPUInfo gpu_info;
   };
@@ -59,9 +62,8 @@ class BrowserGpuChannelHostFactory : public GpuChannelHostFactory {
       int32 surface_id,
       const GPUCreateCommandBufferConfig& init_params);
   static void CommandBufferCreatedOnIO(CreateRequest* request, int32 route_id);
-  void EstablishGpuChannelOnIO(EstablishRequest* request,
-                               CauseForGpuLaunch cause_for_gpu_launch);
-  static void GpuChannelEstablishedOnIO(
+  void EstablishGpuChannelOnIO(EstablishRequest* request);
+  void GpuChannelEstablishedOnIO(
       EstablishRequest* request,
       const IPC::ChannelHandle& channel_handle,
       const GPUInfo& gpu_info);

@@ -24,19 +24,21 @@ using content::GpuFeatureType;
 namespace {
 
 // Encode a date as Version, where [0] is year, [1] is month, and [2] is day.
-Version* GetDateFromString(const std::string& date_string) {
+void GetDateFromString(const std::string& date_string, Version* version) {
   // TODO(zmo): verify if in Windows registry, driver dates are always in the
   // format of "mm-dd-yyyy".
   std::vector<std::string> pieces;
   base::SplitString(date_string, '-', &pieces);
-  if (pieces.size() != 3)
-    return NULL;
+  if (pieces.size() != 3) {
+    *version = Version();
+    return;
+  }
   std::string date_as_version_string = pieces[2];
   for (size_t i = 0; i < 2; ++i) {
     date_as_version_string += ".";
     date_as_version_string += pieces[i];
   }
-  return Version::GetVersionFromString(date_as_version_string);
+  *version = Version(date_as_version_string);
 }
 
 // We assume the input format is major.minor, and we treat major version
@@ -65,8 +67,29 @@ std::string NumericalToLexical(const std::string& numerical) {
   return numerical;
 }
 
+bool GpuUnmatched(uint32 vendor_id, const std::vector<uint32>& device_id_list,
+                  const content::GPUInfo::GPUDevice& gpu) {
+  if (vendor_id == 0)
+    return false;
+  if (vendor_id != gpu.vendor_id)
+    return true;
+  bool device_specified = false;
+  for (size_t i = 0; i < device_id_list.size(); ++i) {
+    if (device_id_list[i] == 0)
+      continue;
+    if (device_id_list[i] == gpu.device_id)
+      return false;
+    device_specified = true;
+  }
+  return device_specified;
+}
+
 const char kMultiGpuStyleStringAMDSwitchable[] = "amd_switchable";
 const char kMultiGpuStyleStringOptimus[] = "optimus";
+
+const char kMultiGpuCategoryStringPrimary[] = "primary";
+const char kMultiGpuCategoryStringSecondary[] = "secondary";
+const char kMultiGpuCategoryStringAny[] = "any";
 
 const char kVersionStyleStringNumerical[] = "numerical";
 const char kVersionStyleStringLexical[] = "lexical";
@@ -91,14 +114,14 @@ GpuBlacklist::VersionInfo::VersionInfo(
     processed_version_string = version_string;
     processed_version_string2 = version_string2;
   }
-  version_.reset(Version::GetVersionFromString(processed_version_string));
-  if (version_.get() == NULL) {
+  version_.reset(new Version(processed_version_string));
+  if (!version_->IsValid()) {
     op_ = kUnknown;
     return;
   }
   if (op_ == kBetween) {
-    version2_.reset(Version::GetVersionFromString(processed_version_string2));
-    if (version2_.get() == NULL)
+    version2_.reset(new Version(processed_version_string2));
+    if (!version2_->IsValid())
       op_ = kUnknown;
   }
 }
@@ -292,7 +315,7 @@ bool GpuBlacklist::FloatInfo::IsValid() const {
 // static
 GpuBlacklist::ScopedGpuBlacklistEntry
 GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
-    DictionaryValue* value, bool top_level) {
+    const DictionaryValue* value, bool top_level) {
   DCHECK(value);
   ScopedGpuBlacklistEntry entry(new GpuBlacklistEntry());
 
@@ -322,7 +345,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     entry->description_ = "The GPU is unavailable for an unexplained reason.";
   }
 
-  ListValue* cr_bugs;
+  const ListValue* cr_bugs;
   if (value->GetList("cr_bugs", &cr_bugs)) {
     for (size_t i = 0; i < cr_bugs->GetSize(); ++i) {
       int bug_id;
@@ -336,7 +359,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  ListValue* webkit_bugs;
+  const ListValue* webkit_bugs;
   if (value->GetList("webkit_bugs", &webkit_bugs)) {
     for (size_t i = 0; i < webkit_bugs->GetSize(); ++i) {
       int bug_id;
@@ -350,14 +373,14 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* os_value = NULL;
+  const DictionaryValue* os_value = NULL;
   if (value->GetDictionary("os", &os_value)) {
     std::string os_type;
     std::string os_version_op = "any";
     std::string os_version_string;
     std::string os_version_string2;
     os_value->GetString("type", &os_type);
-    DictionaryValue* os_version_value = NULL;
+    const DictionaryValue* os_version_value = NULL;
     if (os_value->GetDictionary("version", &os_version_value)) {
       os_version_value->GetString("op", &os_version_op);
       os_version_value->GetString("number", &os_version_string);
@@ -380,7 +403,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  ListValue* device_id_list;
+  const ListValue* device_id_list;
   if (value->GetList("device_id", &device_id_list)) {
     for (size_t i = 0; i < device_id_list->GetSize(); ++i) {
         std::string device_id;
@@ -402,7 +425,16 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* driver_vendor_value = NULL;
+  std::string multi_gpu_category;
+  if (value->GetString("multi_gpu_category", &multi_gpu_category)) {
+    if (!entry->SetMultiGpuCategory(multi_gpu_category)) {
+      LOG(WARNING) << "Malformed multi_gpu_category entry " << entry->id();
+      return NULL;
+    }
+    dictionary_entry_count++;
+  }
+
+  const DictionaryValue* driver_vendor_value = NULL;
   if (value->GetDictionary("driver_vendor", &driver_vendor_value)) {
     std::string vendor_op;
     std::string vendor_value;
@@ -415,7 +447,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* driver_version_value = NULL;
+  const DictionaryValue* driver_version_value = NULL;
   if (value->GetDictionary("driver_version", &driver_version_value)) {
     std::string driver_version_op = "any";
     std::string driver_version_style;
@@ -435,7 +467,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* driver_date_value = NULL;
+  const DictionaryValue* driver_date_value = NULL;
   if (value->GetDictionary("driver_date", &driver_date_value)) {
     std::string driver_date_op = "any";
     std::string driver_date_string;
@@ -451,7 +483,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* gl_vendor_value = NULL;
+  const DictionaryValue* gl_vendor_value = NULL;
   if (value->GetDictionary("gl_vendor", &gl_vendor_value)) {
     std::string vendor_op;
     std::string vendor_value;
@@ -464,7 +496,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* gl_renderer_value = NULL;
+  const DictionaryValue* gl_renderer_value = NULL;
   if (value->GetDictionary("gl_renderer", &gl_renderer_value)) {
     std::string renderer_op;
     std::string renderer_value;
@@ -477,7 +509,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* perf_graphics_value = NULL;
+  const DictionaryValue* perf_graphics_value = NULL;
   if (value->GetDictionary("perf_graphics", &perf_graphics_value)) {
     std::string op;
     std::string float_value;
@@ -492,7 +524,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* perf_gaming_value = NULL;
+  const DictionaryValue* perf_gaming_value = NULL;
   if (value->GetDictionary("perf_gaming", &perf_gaming_value)) {
     std::string op;
     std::string float_value;
@@ -507,7 +539,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
     dictionary_entry_count++;
   }
 
-  DictionaryValue* perf_overall_value = NULL;
+  const DictionaryValue* perf_overall_value = NULL;
   if (value->GetDictionary("perf_overall", &perf_overall_value)) {
     std::string op;
     std::string float_value;
@@ -523,7 +555,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
   }
 
   if (top_level) {
-    ListValue* blacklist_value = NULL;
+    const ListValue* blacklist_value = NULL;
     if (!value->GetList("blacklist", &blacklist_value)) {
       LOG(WARNING) << "Malformed blacklist entry " << entry->id();
       return NULL;
@@ -546,10 +578,10 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
   }
 
   if (top_level) {
-    ListValue* exception_list_value = NULL;
+    const ListValue* exception_list_value = NULL;
     if (value->GetList("exceptions", &exception_list_value)) {
       for (size_t i = 0; i < exception_list_value->GetSize(); ++i) {
-        DictionaryValue* exception_value = NULL;
+        const DictionaryValue* exception_value = NULL;
         if (!exception_list_value->GetDictionary(i, &exception_value)) {
           LOG(WARNING) << "Malformed exceptions entry " << entry->id();
           return NULL;
@@ -570,7 +602,7 @@ GpuBlacklist::GpuBlacklistEntry::GetGpuBlacklistEntryFromValue(
       dictionary_entry_count++;
     }
 
-    DictionaryValue* browser_version_value = NULL;
+    const DictionaryValue* browser_version_value = NULL;
     // browser_version is processed in LoadGpuBlacklist().
     if (value->GetDictionary("browser_version", &browser_version_value))
       dictionary_entry_count++;
@@ -588,6 +620,7 @@ GpuBlacklist::GpuBlacklistEntry::GpuBlacklistEntry()
       disabled_(false),
       vendor_id_(0),
       multi_gpu_style_(kMultiGpuStyleNone),
+      multi_gpu_category_(kMultiGpuCategoryPrimary),
       feature_type_(content::GPU_FEATURE_TYPE_UNKNOWN),
       contains_unknown_fields_(false),
       contains_unknown_features_(false) {
@@ -638,6 +671,16 @@ bool GpuBlacklist::GpuBlacklistEntry::SetMultiGpuStyle(
   if (style == kMultiGpuStyleNone)
     return false;
   multi_gpu_style_ = style;
+  return true;
+}
+
+bool GpuBlacklist::GpuBlacklistEntry::SetMultiGpuCategory(
+    const std::string& multi_gpu_category_string) {
+  MultiGpuCategory category =
+      StringToMultiGpuCategory(multi_gpu_category_string);
+  if (category == kMultiGpuCategoryNone)
+    return false;
+  multi_gpu_category_ = category;
   return true;
 }
 
@@ -727,6 +770,8 @@ bool GpuBlacklist::GpuBlacklistEntry::SetBlacklistedFeatures(
       case content::GPU_FEATURE_TYPE_MULTISAMPLING:
       case content::GPU_FEATURE_TYPE_FLASH3D:
       case content::GPU_FEATURE_TYPE_FLASH_STAGE3D:
+      case content::GPU_FEATURE_TYPE_TEXTURE_SHARING:
+      case content::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE:
       case content::GPU_FEATURE_TYPE_ALL:
         feature_type |= type;
         break;
@@ -755,24 +800,47 @@ GpuBlacklist::GpuBlacklistEntry::StringToMultiGpuStyle(
   return kMultiGpuStyleNone;
 }
 
+// static
+GpuBlacklist::GpuBlacklistEntry::MultiGpuCategory
+GpuBlacklist::GpuBlacklistEntry::StringToMultiGpuCategory(
+    const std::string& category) {
+  if (category == kMultiGpuCategoryStringPrimary)
+    return kMultiGpuCategoryPrimary;
+  if (category == kMultiGpuCategoryStringSecondary)
+    return kMultiGpuCategorySecondary;
+  if (category == kMultiGpuCategoryStringAny)
+    return kMultiGpuCategoryAny;
+  return kMultiGpuCategoryNone;
+}
+
 bool GpuBlacklist::GpuBlacklistEntry::Contains(
     OsType os_type, const Version& os_version,
     const content::GPUInfo& gpu_info) const {
   DCHECK(os_type != kOsAny);
   if (os_info_.get() != NULL && !os_info_->Contains(os_type, os_version))
     return false;
-  if (vendor_id_ != 0 && vendor_id_ != gpu_info.gpu.vendor_id)
-    return false;
-  if (device_id_list_.size() > 0) {
-    bool found = false;
-    for (size_t i = 0; i < device_id_list_.size(); ++i) {
-      if (device_id_list_[i] == gpu_info.gpu.device_id) {
-        found = true;
-        break;
-      }
-    }
-    if (!found)
-      return false;
+  bool is_not_primary_gpu =
+      GpuUnmatched(vendor_id_, device_id_list_, gpu_info.gpu);
+  bool is_not_secondary_gpu = true;
+  for (size_t i = 0; i < gpu_info.secondary_gpus.size(); ++i) {
+    is_not_secondary_gpu = is_not_secondary_gpu &&
+        GpuUnmatched(vendor_id_, device_id_list_, gpu_info.secondary_gpus[i]);
+  }
+  switch (multi_gpu_category_) {
+    case kMultiGpuCategoryPrimary:
+      if (is_not_primary_gpu)
+        return false;
+      break;
+    case kMultiGpuCategorySecondary:
+      if (is_not_secondary_gpu)
+        return false;
+      break;
+    case kMultiGpuCategoryAny:
+      if (is_not_primary_gpu && is_not_secondary_gpu)
+        return false;
+      break;
+    default:
+      break;
   }
   switch (multi_gpu_style_) {
     case kMultiGpuStyleOptimus:
@@ -795,16 +863,15 @@ bool GpuBlacklist::GpuBlacklistEntry::Contains(
       processed_driver_version = NumericalToLexical(gpu_info.driver_version);
     else
       processed_driver_version = gpu_info.driver_version;
-    scoped_ptr<Version> driver_version(
-        Version::GetVersionFromString(processed_driver_version));
-    if (driver_version.get() == NULL ||
-        !driver_version_info_->Contains(*driver_version))
+    Version driver_version(processed_driver_version);
+    if (!driver_version.IsValid() ||
+        !driver_version_info_->Contains(driver_version))
       return false;
   }
   if (driver_date_info_.get() != NULL) {
-    scoped_ptr<Version> driver_date(GetDateFromString(gpu_info.driver_date));
-    if (driver_date.get() == NULL ||
-        !driver_date_info_->Contains(*driver_date))
+    Version driver_date;
+    GetDateFromString(gpu_info.driver_date, &driver_date);
+    if (!driver_date.IsValid() || !driver_date_info_->Contains(driver_date))
       return false;
   }
   if (gl_vendor_info_.get() != NULL &&
@@ -878,8 +945,8 @@ bool GpuBlacklist::LoadGpuBlacklist(
     const std::string& browser_version_string,
     const std::string& json_context,
     GpuBlacklist::OsFilter os_filter) {
-  browser_version_.reset(Version::GetVersionFromString(browser_version_string));
-  DCHECK(browser_version_.get() != NULL);
+  browser_version_.reset(new Version(browser_version_string));
+  DCHECK(browser_version_->IsValid());
 
   scoped_ptr<Value> root;
   root.reset(base::JSONReader::Read(json_context));
@@ -897,18 +964,18 @@ bool GpuBlacklist::LoadGpuBlacklist(
 
   std::string version_string;
   parsed_json.GetString("version", &version_string);
-  version_.reset(Version::GetVersionFromString(version_string));
-  if (version_.get() == NULL)
+  version_.reset(new Version(version_string));
+  if (!version_->IsValid())
     return false;
 
-  ListValue* list = NULL;
+  const ListValue* list = NULL;
   if (!parsed_json.GetList("entries", &list))
     return false;
 
   uint32 max_entry_id = 0;
   bool contains_unknown_fields = false;
   for (size_t i = 0; i < list->GetSize(); ++i) {
-    DictionaryValue* list_item = NULL;
+    const DictionaryValue* list_item = NULL;
     bool valid = list->GetDictionary(i, &list_item);
     if (!valid || list_item == NULL)
       return false;
@@ -966,7 +1033,7 @@ GpuFeatureType GpuBlacklist::DetermineGpuFeatureType(
     size_t pos = version_string.find_first_not_of("0123456789.");
     if (pos != std::string::npos)
       version_string = version_string.substr(0, pos);
-    my_os_version.reset(Version::GetVersionFromString(version_string));
+    my_os_version.reset(new Version(version_string));
     os_version = my_os_version.get();
   }
   DCHECK(os_version != NULL);
@@ -1071,9 +1138,9 @@ void GpuBlacklist::Clear() {
 
 GpuBlacklist::BrowserVersionSupport
 GpuBlacklist::IsEntrySupportedByCurrentBrowserVersion(
-    DictionaryValue* value) {
+    const DictionaryValue* value) {
   DCHECK(value);
-  DictionaryValue* browser_version_value = NULL;
+  const DictionaryValue* browser_version_value = NULL;
   if (value->GetDictionary("browser_version", &browser_version_value)) {
     std::string version_op = "any";
     std::string version_string;
@@ -1116,4 +1183,3 @@ GpuBlacklist::NumericOp GpuBlacklist::StringToNumericOp(
     return kBetween;
   return kUnknown;
 }
-

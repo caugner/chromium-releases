@@ -4,11 +4,11 @@
 
 #ifndef CONTENT_BROWSER_DEBUGGER_RENDER_VIEW_DEVTOOLS_AGENT_HOST_H_
 #define CONTENT_BROWSER_DEBUGGER_RENDER_VIEW_DEVTOOLS_AGENT_HOST_H_
-#pragma once
 
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "content/browser/debugger/devtools_agent_host.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_view_host_observer.h"

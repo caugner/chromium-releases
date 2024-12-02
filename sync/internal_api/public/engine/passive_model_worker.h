@@ -4,21 +4,21 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_ENGINE_PASSIVE_MODEL_WORKER_H_
 #define SYNC_INTERNAL_API_PUBLIC_ENGINE_PASSIVE_MODEL_WORKER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "sync/base/sync_export.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/internal_api/public/util/syncer_error.h"
 
 class MessageLoop;
 
-namespace browser_sync {
+namespace syncer {
 
 // Implementation of ModelSafeWorker for passive types.  All work is
 // done on the same thread DoWorkAndWaitUntilDone (i.e., the sync
 // thread).
-class PassiveModelWorker : public ModelSafeWorker {
+class SYNC_EXPORT PassiveModelWorker : public ModelSafeWorker {
  public:
   explicit PassiveModelWorker(const MessageLoop* sync_loop);
 
@@ -35,6 +35,6 @@ class PassiveModelWorker : public ModelSafeWorker {
   DISALLOW_COPY_AND_ASSIGN(PassiveModelWorker);
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_ENGINE_PASSIVE_MODEL_WORKER_H_

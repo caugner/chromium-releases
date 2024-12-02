@@ -4,11 +4,10 @@
 
 #ifndef SYNC_NOTIFIER_NOTIFICATIONS_DISABLED_REASON_H_
 #define SYNC_NOTIFIER_NOTIFICATIONS_DISABLED_REASON_H_
-#pragma once
 
 #include "jingle/notifier/listener/push_client_observer.h"
 
-namespace sync_notifier {
+namespace syncer {
 
 enum NotificationsDisabledReason {
   // There is an underlying transient problem (e.g., network- or
@@ -28,6 +27,6 @@ const char* NotificationsDisabledReasonToString(
 NotificationsDisabledReason FromNotifierReason(
     notifier::NotificationsDisabledReason reason);
 
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_NOTIFICATIONS_DISABLED_REASON_H_

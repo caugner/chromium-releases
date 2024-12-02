@@ -28,6 +28,9 @@ class FileAccessPermissions;
 class CrosMountPointProvider
     : public fileapi::ExternalFileSystemMountPointProvider {
  public:
+  using fileapi::FileSystemMountPointProvider::ValidateFileSystemCallback;
+  using fileapi::FileSystemMountPointProvider::DeleteFileSystemCallback;
+
   // Mount point file system location enum.
   enum FileSystemLocation {
     // File system that is locally mounted by the underlying OS.
@@ -35,9 +38,6 @@ class CrosMountPointProvider
     // File system that is remotely hosted on the net.
     REMOTE,
   };
-
-  typedef fileapi::FileSystemMountPointProvider::ValidateFileSystemCallback
-      ValidateFileSystemCallback;
 
   CrosMountPointProvider(
       scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy);
@@ -59,23 +59,27 @@ class CrosMountPointProvider
       fileapi::FileSystemType type,
       const FilePath& virtual_path) OVERRIDE;
   virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
-  virtual fileapi::FileSystemFileUtil* GetFileUtil() OVERRIDE;
+  virtual fileapi::FileSystemFileUtil* GetFileUtil(
+      fileapi::FileSystemType type) OVERRIDE;
   virtual FilePath GetPathForPermissionsCheck(const FilePath& virtual_path)
       const OVERRIDE;
   virtual fileapi::FileSystemOperationInterface* CreateFileSystemOperation(
-      const GURL& origin_url,
-      fileapi::FileSystemType file_system_type,
-      const FilePath& virtual_path,
+      const fileapi::FileSystemURL& url,
       fileapi::FileSystemContext* context) const OVERRIDE;
   virtual webkit_blob::FileStreamReader* CreateFileStreamReader(
-    const GURL& path,
-    int64 offset,
-    fileapi::FileSystemContext* context) const OVERRIDE;
+      const fileapi::FileSystemURL& path,
+      int64 offset,
+      fileapi::FileSystemContext* context) const OVERRIDE;
   virtual fileapi::FileStreamWriter* CreateFileStreamWriter(
-    const GURL& url,
-    int64 offset,
-    fileapi::FileSystemContext* context) const OVERRIDE;
+      const fileapi::FileSystemURL& url,
+      int64 offset,
+      fileapi::FileSystemContext* context) const OVERRIDE;
   virtual fileapi::FileSystemQuotaUtil* GetQuotaUtil() OVERRIDE;
+  virtual void DeleteFileSystem(
+      const GURL& origin_url,
+      fileapi::FileSystemType type,
+      fileapi::FileSystemContext* context,
+      const DeleteFileSystemCallback& callback) OVERRIDE;
 
   // fileapi::ExternalFileSystemMountPointProvider overrides.
   virtual std::vector<FilePath> GetRootDirectories() const OVERRIDE;

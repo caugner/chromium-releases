@@ -4,7 +4,6 @@
 
 #ifndef UI_GFX_RENDER_TEXT_WIN_H_
 #define UI_GFX_RENDER_TEXT_WIN_H_
-#pragma once
 
 #include <usp10.h>
 
@@ -67,8 +66,8 @@ class RenderTextWin : public RenderText {
   virtual ~RenderTextWin();
 
   // Overridden from RenderText:
-  virtual base::i18n::TextDirection GetTextDirection() OVERRIDE;
   virtual Size GetStringSize() OVERRIDE;
+  virtual int GetBaseline() OVERRIDE;
   virtual SelectionModel FindCursorPosition(const Point& point) OVERRIDE;
   virtual std::vector<FontSpan> GetFontSpansForTesting() OVERRIDE;
 
@@ -97,8 +96,8 @@ class RenderTextWin : public RenderText {
   // Helper function to update the font on a text run after font substitution.
   void ApplySubstituteFont(internal::TextRun* run, const Font& font);
 
-  // Returns whether |run| contains missing glyphs.
-  bool HasMissingGlyphs(internal::TextRun* run) const;
+  // Returns the number of characters in |run| that have missing glyphs.
+  int CountCharsWithMissingGlyphs(internal::TextRun* run) const;
 
   // Returns a vector of linked fonts corresponding to |font|.
   const std::vector<Font>* GetLinkedFonts(const Font& font) const;

@@ -6,7 +6,6 @@
 
 #ifndef CHROME_INSTALLER_UTIL_BROWSER_DISTRIBUTION_H_
 #define CHROME_INSTALLER_UTIL_BROWSER_DISTRIBUTION_H_
-#pragma once
 
 #include <string>
 
@@ -30,7 +29,16 @@ class BrowserDistribution {
     CHROME_BROWSER,
     CHROME_FRAME,
     CHROME_BINARIES,
+    CHROME_APP_HOST,
     NUM_TYPES
+  };
+
+  // Flags to control what to show in the UserExperiment dialog.
+  enum ToastUIflags {
+    kUninstall          = 1,    // Uninstall radio button.
+    kDontBugMeAsButton  = 2,    // Don't bug me is a button, not a radio button.
+    kWhyLink            = 4,    // Has the 'why I am seeing this' link.
+    kMakeDefault        = 8     // Has the 'make it default' checkbox.
   };
 
   // A struct for communicating what a UserExperiment contains. In these
@@ -41,17 +49,11 @@ class BrowserDistribution {
                           // also known as the 'TV' part in 'TV80'.
     int flavor;           // The flavor index for this experiment.
     int heading;          // The heading resource ID to use for this experiment.
-    bool compact_bubble;  // Whether to show the compact heading or not.
+    int flags;            // See ToastUIFlags above.
     int control_group;    // Size of the control group (in percentages). Control
                           // group is the group that qualifies for the
                           // experiment but does not participate.
   };
-
-  // An array of the Types representing products;
-  static const Type kProductTypes[];
-
-  // The number of elements in the array |kProductTypes|.
-  static const size_t kNumProductTypes;
 
   virtual ~BrowserDistribution() {}
 

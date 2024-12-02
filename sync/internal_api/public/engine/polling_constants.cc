@@ -5,7 +5,7 @@
 #include "base/basictypes.h"
 #include "sync/internal_api/public/engine/polling_constants.h"
 
-namespace browser_sync {
+namespace syncer {
 
 // Server can overwrite these values via client commands.
 // Standard short poll. This is used when XMPP is off.
@@ -22,5 +22,13 @@ const int64 kMaxBackoffSeconds = 60 * 60 * 4;  // 4 hours.
 // Backoff interval randomization factor.
 const int kBackoffRandomizationFactor = 2;
 
-}  // namespace browser_sync
+// After a failure contacting sync servers, specifies how long to wait before
+// reattempting and entering exponential backoff if consecutive failures
+// occur.
+const int kInitialBackoffRetrySeconds = 60 * 5;  // 5 minutes.
 
+// Similar to kInitialBackoffRetrySeconds above, but only to be used in
+// certain exceptional error cases, such as MIGRATION_DONE.
+const int kInitialBackoffShortRetrySeconds = 1;
+
+}  // namespace syncer

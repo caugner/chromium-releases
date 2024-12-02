@@ -4,13 +4,15 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_APP_SYNC_DATA_H_
 #define CHROME_BROWSER_EXTENSIONS_APP_SYNC_DATA_H_
-#pragma once
 
 #include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/common/string_ordinal.h"
 #include "sync/api/sync_change.h"
 
+namespace syncer {
 class SyncData;
+}
+
 namespace sync_pb {
 class AppSpecifics;
 }
@@ -24,8 +26,8 @@ class ExtensionSyncData;
 class AppSyncData {
  public:
   AppSyncData();
-  explicit AppSyncData(const SyncData& sync_data);
-  explicit AppSyncData(const SyncChange& sync_change);
+  explicit AppSyncData(const syncer::SyncData& sync_data);
+  explicit AppSyncData(const syncer::SyncChange& sync_change);
   AppSyncData(const Extension& extension,
               bool enabled,
               bool incognito_enabled,
@@ -36,8 +38,9 @@ class AppSyncData {
   ~AppSyncData();
 
   // Retrive sync data from this class.
-  SyncData GetSyncData() const;
-  SyncChange GetSyncChange(SyncChange::SyncChangeType change_type) const;
+  syncer::SyncData GetSyncData() const;
+  syncer::SyncChange GetSyncChange(
+      syncer::SyncChange::SyncChangeType change_type) const;
 
   const std::string& id() const { return extension_sync_data_.id(); }
 
@@ -69,7 +72,7 @@ class AppSyncData {
   // Populate this class from sync inputs.
   void PopulateFromAppSpecifics(
       const sync_pb::AppSpecifics& specifics);
-  void PopulateFromSyncData(const SyncData& sync_data);
+  void PopulateFromSyncData(const syncer::SyncData& sync_data);
 
   ExtensionSyncData extension_sync_data_;
   std::string notifications_client_id_;

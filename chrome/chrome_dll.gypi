@@ -98,11 +98,8 @@
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/extensions_api_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
-                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
 
@@ -250,6 +247,7 @@
                 'app/nibs/ContentBlockedPlugins.xib',
                 'app/nibs/ContentBlockedPopups.xib',
                 'app/nibs/ContentBlockedGeolocation.xib',
+                'app/nibs/ContentProtocolHandlers.xib',
                 'app/nibs/DownloadItem.xib',
                 'app/nibs/DownloadShelf.xib',
                 'app/nibs/EditSearchEngine.xib',
@@ -272,7 +270,6 @@
                 'app/nibs/MainMenu.xib',
                 'app/nibs/Notification.xib',
                 'app/nibs/OneClickSigninBubble.xib',
-                'app/nibs/OneClickSigninDialog.xib',
                 'app/nibs/Panel.xib',
                 'app/nibs/PreviewableContents.xib',
                 'app/nibs/SaveAccessoryView.xib',
@@ -293,9 +290,9 @@
                 'browser/mac/install.sh',
                 '<(SHARED_INTERMEDIATE_DIR)/repack/chrome.pak',
                 '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak',
-                '<(grit_out_dir)/theme_resources_standard.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
-                '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(locales))',
+                '<(grit_out_dir)/theme_resources_100_percent.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_100_percent.pak',
+                '<!@pymod_do_main(repack_locales -o -p <(OS) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(locales))',
                 # Note: pseudo_locales are generated via the packed_resources
                 # dependency but not copied to the final target.  See
                 # common.gypi for more info.
@@ -524,8 +521,9 @@
                 }],
                 ['enable_hidpi==1', {
                   'mac_bundle_resources': [
-                    '<(grit_out_dir)/theme_resources_2x.pak',
-                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_2x.pak',
+                    '<(grit_out_dir)/theme_resources_200_percent.pak',
+                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources_200_percent.pak',
+                    '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources_200_percent.pak',
                   ],
                 }],
               ],  # conditions

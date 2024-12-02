@@ -13,6 +13,8 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/sha1.h"
 #include "base/string_piece.h"
+#include "base/synchronization/lock.h"
+#include "crypto/mac_security_services_lock.h"
 #include "crypto/nss_util.h"
 #include "crypto/sha2.h"
 #include "net/base/asn1_util.h"
@@ -157,6 +159,7 @@ OSStatus CreateTrustPolicies(const std::string& hostname,
   // revocation preference.
   status = x509_util::CreateRevocationPolicies(
       (flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED),
+      (flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED_EV_ONLY),
       local_policies);
   if (status)
     return status;
@@ -353,11 +356,9 @@ int CertVerifyProcMac::VerifyInternal(X509Certificate* cert,
   // chain building.
   ScopedCFTypeRef<CFArrayRef> cert_array(cert->CreateOSCertChainForCert());
 
-  // From here on, only one thread can be active at a time. We have had a number
-  // of sporadic crashes in the SecTrustEvaluate call below, way down inside
-  // Apple's cert code, which we suspect are caused by a thread-safety issue.
-  // So as a speculative fix allow only one thread to use SecTrust on this cert.
-  base::AutoLock lock(verification_lock_);
+  // Serialize all calls that may use the Keychain, to work around various
+  // issues in OS X 10.6+ with multi-threaded access to Security.framework.
+  base::AutoLock lock(crypto::GetMacSecurityServicesLock());
 
   SecTrustRef trust_ref = NULL;
   status = SecTrustCreateWithCertificates(cert_array, trust_policies,
@@ -380,6 +381,8 @@ int CertVerifyProcMac::VerifyInternal(X509Certificate* cert,
   tp_action_data.ActionFlags = CSSM_TP_ACTION_FETCH_CERT_FROM_NET |
                                CSSM_TP_ACTION_TRUST_SETTINGS;
 
+  // Note: For EV certificates, the Apple TP will handle setting these flags
+  // as part of EV evaluation.
   if (flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED) {
     // Require a positive result from an OCSP responder or a CRL (or both)
     // for every certificate in the chain. The Apple TP automatically
@@ -564,6 +567,8 @@ int CertVerifyProcMac::VerifyInternal(X509Certificate* cert,
           if (CFDictionaryContainsKey(ev_dict,
                                       kSecEVOrganizationName)) {
             verify_result->cert_status |= CERT_STATUS_IS_EV;
+            if (flags & X509Certificate::VERIFY_REV_CHECKING_ENABLED_EV_ONLY)
+              verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
           }
         }
       }

@@ -8,12 +8,14 @@
 #include "base/callback.h"
 #include "chrome/browser/automation/automation_provider_observers.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_events.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
@@ -21,11 +23,9 @@
 
 class AutomationMiscBrowserTest : public InProcessBrowserTest {
  public:
-  AutomationMiscBrowserTest() {
-    EnableDOMAutomation();
-  }
+  AutomationMiscBrowserTest() {}
 
-  virtual ~AutomationMiscBrowserTest() { }
+  virtual ~AutomationMiscBrowserTest() {}
 };
 
 class MockMouseEventCallback {
@@ -72,8 +72,8 @@ IN_PROC_BROWSER_TEST_F(AutomationMiscBrowserTest, ProcessMouseEvent) {
       .Times(2);
 
   content::RenderViewHost* view =
-      browser()->GetActiveWebContents()->GetRenderViewHost();
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
+      chrome::GetActiveWebContents(browser())->GetRenderViewHost();
+  ASSERT_TRUE(content::ExecuteJavaScript(
       view,
       L"",
       L"window.didClick = false;"
@@ -98,7 +98,7 @@ IN_PROC_BROWSER_TEST_F(AutomationMiscBrowserTest, ProcessMouseEvent) {
       mock.error_callback());
 
   bool did_click = false;
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
       view,
       L"",
       L"window.domAutomationController.send(window.didClick);",

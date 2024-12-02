@@ -11,9 +11,10 @@
 
 #include <string>
 
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/notifier/invalidation_util.h"
 
-namespace sync_notifier {
+namespace syncer {
 class SyncNotifierObserver;
 
 class SyncNotifier {
@@ -21,8 +22,45 @@ class SyncNotifier {
   SyncNotifier() {}
   virtual ~SyncNotifier() {}
 
-  virtual void AddObserver(SyncNotifierObserver* observer) = 0;
-  virtual void RemoveObserver(SyncNotifierObserver* observer) = 0;
+  // Clients should follow the pattern below:
+  //
+  // When starting the client:
+  //
+  //   notifier->RegisterHandler(client_handler);
+  //
+  // When the set of IDs to register changes for the client during its lifetime
+  // (i.e., between calls to RegisterHandler(client_handler) and
+  // UnregisterHandler(client_handler):
+  //
+  //   notifier->UpdateRegisteredIds(client_handler, client_ids);
+  //
+  // When shutting down the client for browser shutdown:
+  //
+  //   notifier->UnregisterHandler(client_handler);
+  //
+  // Note that there's no call to UpdateRegisteredIds() -- this is because the
+  // invalidation API persists registrations across browser restarts.
+  //
+  // When permanently shutting down the client, e.g. when disabling the related
+  // feature:
+  //
+  //   notifier->UpdateRegisteredIds(client_handler, ObjectIdSet());
+  //   notifier->UnregisterHandler(client_handler);
+
+  // Starts sending notifications to |handler|.  |handler| must not be NULL,
+  // and it must already be registered.
+  virtual void RegisterHandler(SyncNotifierObserver* handler) = 0;
+
+  // Updates the set of ObjectIds associated with |handler|.  |handler| must
+  // not be NULL, and must already be registered.  An ID must be registered for
+  // at most one handler.
+  virtual void UpdateRegisteredIds(SyncNotifierObserver* handler,
+                                   const ObjectIdSet& ids) = 0;
+
+  // Stops sending notifications to |handler|.  |handler| must not be NULL, and
+  // it must already be registered.  Note that this doesn't unregister the IDs
+  // associated with |handler|.
+  virtual void UnregisterHandler(SyncNotifierObserver* handler) = 0;
 
   // SetUniqueId must be called once, before any call to
   // UpdateCredentials.  |unique_id| should be a non-empty globally
@@ -40,16 +78,12 @@ class SyncNotifier {
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) = 0;
 
-  virtual void UpdateEnabledTypes(
-      syncable::ModelTypeSet enabled_types) = 0;
-
   // This is here only to support the old p2p notification implementation,
   // which is still used by sync integration tests.
   // TODO(akalin): Remove this once we move the integration tests off p2p
   // notifications.
-  virtual void SendNotification(
-      syncable::ModelTypeSet changed_types) = 0;
+  virtual void SendNotification(ModelTypeSet changed_types) = 0;
 };
-}  // namespace sync_notifier
+}  // namespace syncer
 
 #endif  // SYNC_NOTIFIER_SYNC_NOTIFIER_H_

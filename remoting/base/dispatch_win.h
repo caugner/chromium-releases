@@ -23,7 +23,7 @@ namespace internal {
 
 // A helper wrapper for |VARIANTARG| that is used to pass parameters to and from
 // IDispatch::Invoke(). The latter accepts parameters as an array of
-// |VARIANTARG| structures. The calling convention is:
+// |VARIANTARG| structures. The calling convention of IDispatch::Invoke() is:
 //   - [in] parameters are initialized and freed if needed by the caller.
 //   - [out] parameters are initialized by IDispatch::Invoke(). It is up to
 //         the caller to free leakable variants (such as VT_DISPATCH).
@@ -33,11 +33,9 @@ namespace internal {
 //
 // Using |ScopedVariantArg| instead of naked |VARIANTARG| ensures that
 // the resources allocated during the call will be properly freed. It also
-// provides wraping methods that convert between C++ types and VARIANTs.
-// The current convention is:
-//   - constant references are considered input parameters.
-//   - pointers to non-constant objects are considered output parameters.
-//   - [in] [out] parameters are not supported.
+// provides wrapping methods that convert between C++ types and VARIANTs.
+// At the moment the only supported parameter type is |VARIANT| (or
+// |VARIANTARG|).
 //
 // It must be possible to cast a pointer to an array of |ScopedVariantArg| to
 // a pointer to an array of |VARIANTARG| structures.
@@ -55,11 +53,20 @@ class ScopedVariantArg : public VARIANTARG {
   // that they can be passed to IDispatch::Invoke.
 
   HRESULT Wrap(const VARIANT& param) {
+    DCHECK(vt == VT_EMPTY);
     return VariantCopy(this, &param);
   }
 
   HRESULT Wrap(VARIANT* const & param) {
-    // Do nothing for an [out] parameter.
+    DCHECK(vt == VT_EMPTY);
+
+    // Make the input value of an [in] [out] parameter visible to
+    // IDispatch::Invoke().
+    //
+    // N.B. We treat both [out] and [in] [out] parameters as [in] [out]. In
+    // other words the caller is always responsible for initializing and freeing
+    // [out] and [in] [out] parameters.
+    Swap(param);
     return S_OK;
   }
 
@@ -71,11 +78,19 @@ class ScopedVariantArg : public VARIANTARG {
   }
 
   void Unwrap(VARIANT* const & param_out) {
-    *param_out = *this;
-    vt = VT_EMPTY;
+    // Return the output value of an [in] [out] parameter to the caller.
+    Swap(param_out);
   }
 
  private:
+  // Exchanges the value (and ownership) of the passed VARIANT with the one
+  // wrapped by |ScopedVariantArg|.
+  void Swap(VARIANT* other) {
+    VARIANT temp = *other;
+    *other = *this;
+    *static_cast<VARIANTARG*>(this) = temp;
+  }
+
   DISALLOW_COPY_AND_ASSIGN(ScopedVariantArg);
 };
 
@@ -89,8 +104,14 @@ COMPILE_ASSERT(sizeof(ScopedVariantArg) == sizeof(VARIANTARG),
 // calling the desired method by its ID and implements logic for passing
 // a variable number of in/out parameters to the called method.
 //
+// The calling convention is:
+//   - [in] parameters are passsed as a constant reference or by value.
+//   - [out] and [in] [out] parameters are passed by pointer. The pointed value
+//         is overwritten when the function returns. The pointed-to value must
+//         be initialized before the call, and will be replaced when it returns.
+//         [out] parameters may be initialized to VT_EMPTY.
+//
 // Current limitations:
-//   - in_out parameters are not supported.
 //   - more than 7 parameters are not supported.
 //   - the method ID cannot be cached and reused.
 //   - VARIANT is the only supported parameter type at the moment.
@@ -113,8 +134,17 @@ HRESULT Invoke(IDispatch* object,
     disp_result = &result;
 
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { NULL, NULL, 0, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -122,8 +152,9 @@ HRESULT Invoke(IDispatch* object,
 
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }
@@ -153,8 +184,17 @@ HRESULT Invoke(IDispatch* object,
   if (FAILED(hr))
     return hr;
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { disp_args, NULL, 1, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -164,8 +204,9 @@ HRESULT Invoke(IDispatch* object,
   disp_args[1 - 1].Unwrap(p1);
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }
@@ -199,8 +240,17 @@ HRESULT Invoke(IDispatch* object,
   if (FAILED(hr))
     return hr;
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { disp_args, NULL, 2, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -211,8 +261,9 @@ HRESULT Invoke(IDispatch* object,
   disp_args[2 - 2].Unwrap(p2);
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }
@@ -250,8 +301,17 @@ HRESULT Invoke(IDispatch* object,
   if (FAILED(hr))
     return hr;
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { disp_args, NULL, 3, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -263,8 +323,9 @@ HRESULT Invoke(IDispatch* object,
   disp_args[3 - 3].Unwrap(p3);
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }
@@ -306,8 +367,17 @@ HRESULT Invoke(IDispatch* object,
   if (FAILED(hr))
     return hr;
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { disp_args, NULL, 4, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -320,8 +390,9 @@ HRESULT Invoke(IDispatch* object,
   disp_args[4 - 4].Unwrap(p4);
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }
@@ -367,8 +438,17 @@ HRESULT Invoke(IDispatch* object,
   if (FAILED(hr))
     return hr;
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { disp_args, NULL, 5, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -382,8 +462,9 @@ HRESULT Invoke(IDispatch* object,
   disp_args[5 - 5].Unwrap(p5);
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }
@@ -434,8 +515,17 @@ HRESULT Invoke(IDispatch* object,
   if (FAILED(hr))
     return hr;
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { disp_args, NULL, 6, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -450,8 +540,9 @@ HRESULT Invoke(IDispatch* object,
   disp_args[6 - 6].Unwrap(p6);
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }
@@ -506,8 +597,17 @@ HRESULT Invoke(IDispatch* object,
   if (FAILED(hr))
     return hr;
 
-  // Invoke the method.
+  // Invoke the method passing the parameters via the DISPPARAMS structure.
+  // DISPATCH_PROPERTYPUT and DISPATCH_PROPERTYPUTREF require the parameter of
+  // the property setter to be named, so |cNamedArgs| and |rgdispidNamedArgs|
+  // structure members should be initialized.
   DISPPARAMS disp_params = { disp_args, NULL, 7, 0 };
+  DISPID dispid_named = DISPID_PROPERTYPUT;
+  if (flags == DISPATCH_PROPERTYPUT || flags == DISPATCH_PROPERTYPUTREF) {
+    disp_params.cNamedArgs = 1;
+    disp_params.rgdispidNamedArgs = &dispid_named;
+  }
+
   hr = object->Invoke(disp_id, IID_NULL, LOCALE_USER_DEFAULT, flags,
                       &disp_params, disp_result, NULL, NULL);
   if (FAILED(hr))
@@ -523,8 +623,9 @@ HRESULT Invoke(IDispatch* object,
   disp_args[7 - 7].Unwrap(p7);
 
   // Unwrap the return value.
-  if (result_out != NULL)
+  if (result_out != NULL) {
     result.Unwrap(result_out);
+  }
 
   return S_OK;
 }

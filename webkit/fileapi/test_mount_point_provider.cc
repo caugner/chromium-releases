@@ -11,9 +11,9 @@
 #include "base/file_util.h"
 #include "base/sequenced_task_runner.h"
 #include "webkit/fileapi/file_system_file_stream_reader.h"
-#include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/fileapi/local_file_system_operation.h"
 #include "webkit/fileapi/local_file_util.h"
 #include "webkit/fileapi/native_file_util.h"
 #include "webkit/fileapi/sandbox_file_stream_writer.h"
@@ -124,7 +124,7 @@ bool TestMountPointProvider::IsRestrictedFileName(
   return false;
 }
 
-FileSystemFileUtil* TestMountPointProvider::GetFileUtil() {
+FileSystemFileUtil* TestMountPointProvider::GetFileUtil(FileSystemType type) {
   return local_file_util_.get();
 }
 
@@ -135,22 +135,22 @@ FilePath TestMountPointProvider::GetPathForPermissionsCheck(
 
 FileSystemOperationInterface*
 TestMountPointProvider::CreateFileSystemOperation(
-    const GURL& origin_url,
-    FileSystemType file_system_type,
-    const FilePath& virtual_path,
+    const FileSystemURL& url,
     FileSystemContext* context) const {
-  return new FileSystemOperation(context);
+  scoped_ptr<FileSystemOperationContext> operation_context(
+      new FileSystemOperationContext(context));
+  return new LocalFileSystemOperation(context, operation_context.Pass());
 }
 
 webkit_blob::FileStreamReader* TestMountPointProvider::CreateFileStreamReader(
-    const GURL& url,
+    const FileSystemURL& url,
     int64 offset,
     FileSystemContext* context) const {
   return new FileSystemFileStreamReader(context, url, offset);
 }
 
 fileapi::FileStreamWriter* TestMountPointProvider::CreateFileStreamWriter(
-    const GURL& url,
+    const FileSystemURL& url,
     int64 offset,
     FileSystemContext* context) const {
   return new SandboxFileStreamWriter(context, url, offset);
@@ -158,6 +158,17 @@ fileapi::FileStreamWriter* TestMountPointProvider::CreateFileStreamWriter(
 
 FileSystemQuotaUtil* TestMountPointProvider::GetQuotaUtil() {
   return quota_util_.get();
+}
+
+void TestMountPointProvider::DeleteFileSystem(
+    const GURL& origin_url,
+    FileSystemType type,
+    FileSystemContext* context,
+    const DeleteFileSystemCallback& callback) {
+  // This won't be called unless we add test code that opens a test
+  // filesystem by OpenFileSystem.
+  NOTREACHED();
+  callback.Run(base::PLATFORM_FILE_ERROR_INVALID_OPERATION);
 }
 
 }  // namespace fileapi

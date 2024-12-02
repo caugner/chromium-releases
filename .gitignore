@@ -22,6 +22,7 @@
 *.vtg
 *.xcodeproj
 *_proto.xml
+*_proto_cpp.xml
 *~
 .*.sw?
 .DS_Store
@@ -30,7 +31,8 @@
 .gdbinit
 .metadata
 .project
-.settings/ # settings directory for eclipse
+# Settings directory for eclipse
+/.settings
 tags
 Thumbs.db
 v8.log
@@ -49,6 +51,8 @@ v8.log
 /chrome/Hammer
 /chrome/app/policy/cloud_policy_backend_header_compile.xml
 /chrome/app/policy/cloud_policy_proto_compile.xml
+/chrome/app/theme/default_100_percent/google_chrome
+/chrome/app/theme/default_200_percent/google_chrome
 /chrome/app/theme/google_chrome
 /chrome/browser/autofill/internal
 /chrome/browser/extensions/default_extensions/chromeos
@@ -83,13 +87,13 @@ v8.log
 /chrome/test/data/perf/frame_rate/content
 /chrome/test/data/perf/frame_rate/private
 /chrome/test/data/perf/private/
-/chrome/test/data/plugin
 /chrome/test/data/pyauto_private
 /chrome/tools/memory
 /chrome/tools/test/reference_build
 /chrome_frame/chrome_frame_ie.xml
 /chrome_frame/tools/test/reference_build
-/content/test/data/layout_tests/LayoutTests/
+/content/test/data/layout_tests/
+/content/test/data/plugin/
 /data
 /delegate_execute
 /googleurl
@@ -106,6 +110,7 @@ v8.log
 /net/testserver.log
 /out
 /out_*
+/pdf
 /ppapi/native_client/nacl_irt.xml
 /ppapi/native_client/ppapi_lib.xml
 /ppapi/native_client/src/shared/ppapi_proxy/nacl_ppapi_browser.xml
@@ -114,12 +119,13 @@ v8.log
 /remoting/appengine/
 /remoting/proto/chromotocol_proto_lib.xml
 /remoting/proto/trace_proto_lib.xml
+/remoting/remoting_host_event_logger.xml
 /remoting/remoting_host_installation.xml
 /remoting/remoting_host_installation_unittest.xml
 /remoting/remoting_me2me_host.xml
 /remoting/remoting_version_resources.xml
 /remoting/tools/internal/
-/rlz
+/sandbox/linux/seccomp-legacy/
 /sdch/open-vcdiff
 /seccompsandbox
 /testing/gmock
@@ -133,6 +139,7 @@ v8.log
 /third_party/aosp
 /third_party/asan
 /third_party/bidichecker
+/third_party/bison
 /third_party/cacheinvalidation/files
 /third_party/chromeos_login_manager
 /third_party/chromeos_text_input
@@ -148,6 +155,7 @@ v8.log
 /third_party/gnu_binutils/
 /third_party/gold
 /third_party/googlemac
+/third_party/gperf
 /third_party/hunspell
 /third_party/hunspell_dictionaries
 /third_party/icu
@@ -157,6 +165,7 @@ v8.log
 /third_party/libexif/sources
 /third_party/libjingle/source
 /third_party/libjpeg_turbo
+/third_party/libmtp/
 /third_party/libphonenumber/libphonenumber.xml
 /third_party/libphonenumber/libphonenumber_without_metadata.xml
 /third_party/libphonenumber/src
@@ -176,6 +185,7 @@ v8.log
 /third_party/ots
 /third_party/pdfsqueeze
 /third_party/pefile
+/third_party/perl
 /third_party/platformsdk_win7
 /third_party/platformsdk_win8
 /third_party/ppapi
@@ -221,6 +231,7 @@ v8.log
 /tools/json_schema_compiler/test/json_schema_compiler_tests.xml
 /tools/page_cycler/acid3
 /tools/tryserver
+/tools/win/link_limiter/build
 /ui/resources/aura/google_wallpapers
 /v8
 /webkit/Debug

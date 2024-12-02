@@ -16,8 +16,12 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/scoped_native_library.h"
+#include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
+#include "base/utf_string_conversions.h"
+#include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "net/base/network_change_notifier.h"
@@ -25,23 +29,23 @@
 #include "remoting/base/breakpad.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/branding.h"
-#include "remoting/host/constants.h"
-#include "remoting/host/capturer.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/composite_host_config.h"
+#include "remoting/host/constants.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/heartbeat_sender.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/host_user_interface.h"
-#include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
 #include "remoting/host/network_settings.h"
-#include "remoting/host/policy_hack/nat_policy.h"
+#include "remoting/host/policy_hack/policy_watcher.h"
 #include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
 #include "remoting/host/usage_stats_consent.h"
+#include "remoting/host/video_frame_capturer.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/protocol/me2me_host_authenticator_factory.h"
 
@@ -67,8 +71,6 @@ const char kApplicationName[] = "chromoting";
 const char kAuthConfigSwitchName[] = "auth-config";
 const char kHostConfigSwitchName[] = "host-config";
 
-const FilePath::CharType kDefaultAuthConfigFile[] =
-    FILE_PATH_LITERAL("auth.json");
 const FilePath::CharType kDefaultHostConfigFile[] =
     FILE_PATH_LITERAL("host.json");
 
@@ -110,27 +112,23 @@ class HostProcess
         &HostProcess::ConfigUpdatedDelayed));
   }
 
-  void InitWithCommandLine(const CommandLine* cmd_line) {
+  bool InitWithCommandLine(const CommandLine* cmd_line) {
     FilePath default_config_dir = remoting::GetConfigDir();
     if (cmd_line->HasSwitch(kAuthConfigSwitchName)) {
-      auth_config_path_ = cmd_line->GetSwitchValuePath(kAuthConfigSwitchName);
-    } else {
-      auth_config_path_ = default_config_dir.Append(kDefaultAuthConfigFile);
+      FilePath path = cmd_line->GetSwitchValuePath(kAuthConfigSwitchName);
+      config_.AddConfigPath(path);
     }
 
+    host_config_path_ = default_config_dir.Append(kDefaultHostConfigFile);
     if (cmd_line->HasSwitch(kHostConfigSwitchName)) {
       host_config_path_ = cmd_line->GetSwitchValuePath(kHostConfigSwitchName);
-    } else {
-      host_config_path_ = default_config_dir.Append(kDefaultHostConfigFile);
     }
+    config_.AddConfigPath(host_config_path_);
 
-#if defined(OS_LINUX)
-    Capturer::EnableXDamage(true);
-#endif
+    return true;
   }
 
   void ConfigUpdated() {
-    // The timer should be set and cleaned up on the same thread.
     DCHECK(message_loop_.message_loop_proxy()->BelongsToCurrentThread());
 
     // Call ConfigUpdatedDelayed after a short delay, so that this object won't
@@ -142,8 +140,11 @@ class HostProcess
   }
 
   void ConfigUpdatedDelayed() {
+    DCHECK(message_loop_.message_loop_proxy()->BelongsToCurrentThread());
+
     if (LoadConfig()) {
-      context_->network_message_loop()->PostTask(
+      // PostTask to create new authenticator factory in case PIN has changed.
+      context_->network_task_runner()->PostTask(
           FROM_HERE,
           base::Bind(&HostProcess::CreateAuthenticatorFactory,
                      base::Unretained(this)));
@@ -155,21 +156,22 @@ class HostProcess
 #if defined(OS_WIN)
   class ConfigChangedDelegate : public base::files::FilePathWatcher::Delegate {
    public:
-    ConfigChangedDelegate(base::MessageLoopProxy* message_loop,
-                          const base::Closure& callback)
-        : message_loop_(message_loop),
+    ConfigChangedDelegate(
+        scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+        const base::Closure& callback)
+        : task_runner_(task_runner),
           callback_(callback) {
     }
 
     void OnFilePathChanged(const FilePath& path) OVERRIDE {
-      message_loop_->PostTask(FROM_HERE, callback_);
+      task_runner_->PostTask(FROM_HERE, callback_);
     }
 
     void OnFilePathError(const FilePath& path) OVERRIDE {
     }
 
    private:
-    scoped_refptr<base::MessageLoopProxy> message_loop_;
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
     base::Closure callback_;
 
     DISALLOW_COPY_AND_ASSIGN(ConfigChangedDelegate);
@@ -193,6 +195,7 @@ class HostProcess
   }
 
   void CreateAuthenticatorFactory() {
+    DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
     scoped_ptr<protocol::AuthenticatorFactory> factory(
         new protocol::Me2MeHostAuthenticatorFactory(
             key_pair_.GenerateCertificate(),
@@ -206,13 +209,30 @@ class HostProcess
     }
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
-    host_user_interface_.reset(new HostUserInterface(context_.get()));
-#endif
+     bool want_user_interface = true;
 
-    StartWatchingNatPolicy();
+#if defined(OS_MACOSX)
+     // Don't try to display any UI on top of the system's login screen as this
+     // is rejected by the Window Server on OS X 10.7.4, and prevents the
+     // capturer from working (http://crbug.com/140984).
+
+     // TODO(lambroslambrou): Use a better technique of detecting whether we're
+     // running in the LoginWindow context, and refactor this into a separate
+     // function to be used here and in CurtainMode::ActivateCurtain().
+     if (getuid() == 0) {
+       want_user_interface = false;
+     }
+#endif  // OS_MACOSX
+
+     if (want_user_interface) {
+       host_user_interface_.reset(new HostUserInterface(context_.get()));
+     }
+#endif  // OS_MACOSX || OS_WIN
+
+    StartWatchingPolicy();
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
-    context_->file_message_loop()->PostTask(
+    context_->file_task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&HostProcess::ListenForConfigChanges,
                    base::Unretained(this)));
@@ -224,9 +244,9 @@ class HostProcess
 #endif
 
     base::WaitableEvent done_event(true, false);
-    nat_policy_->StopWatching(&done_event);
+    policy_watcher_->StopWatching(&done_event);
     done_event.Wait();
-    nat_policy_.reset();
+    policy_watcher_.reset();
 
     return exit_code_;
   }
@@ -238,41 +258,38 @@ class HostProcess
   }
 
  private:
-  void StartWatchingNatPolicy() {
-    nat_policy_.reset(
-        policy_hack::NatPolicy::Create(context_->file_message_loop()));
-    nat_policy_->StartWatching(
-        base::Bind(&HostProcess::OnNatPolicyUpdate, base::Unretained(this)));
+  void StartWatchingPolicy() {
+    policy_watcher_.reset(
+        policy_hack::PolicyWatcher::Create(context_->file_task_runner()));
+    policy_watcher_->StartWatching(
+        base::Bind(&HostProcess::OnPolicyUpdate, base::Unretained(this)));
   }
 
-  // Read Host config from disk, returning true if successful.
+  // Read host config, returning true if successful.
   bool LoadConfig() {
-    JsonHostConfig host_config(host_config_path_);
-    JsonHostConfig auth_config(auth_config_path_);
+    DCHECK(message_loop_.message_loop_proxy()->BelongsToCurrentThread());
 
-    FilePath failed_path;
-    if (!host_config.Read()) {
-      failed_path = host_config_path_;
-    } else if (!auth_config.Read()) {
-      failed_path = auth_config_path_;
-    }
-    if (!failed_path.empty()) {
-      LOG(ERROR) << "Failed to read configuration file " << failed_path.value();
+    // TODO(sergeyu): There is a potential race condition: this function is
+    // called on the main thread while the class members it mutates are used on
+    // the network thread. Fix it. http://crbug.com/140986 .
+
+    if (!config_.Read()) {
+      LOG(ERROR) << "Failed to read config file.";
       return false;
     }
 
-    if (!host_config.GetString(kHostIdConfigPath, &host_id_)) {
+    if (!config_.GetString(kHostIdConfigPath, &host_id_)) {
       LOG(ERROR) << "host_id is not defined in the config.";
       return false;
     }
 
-    if (!key_pair_.Load(host_config)) {
+    if (!key_pair_.Load(config_)) {
       return false;
     }
 
     std::string host_secret_hash_string;
-    if (!host_config.GetString(kHostSecretHashConfigPath,
-                               &host_secret_hash_string)) {
+    if (!config_.GetString(kHostSecretHashConfigPath,
+                           &host_secret_hash_string)) {
       host_secret_hash_string = "plain:";
     }
 
@@ -282,10 +299,10 @@ class HostProcess
     }
 
     // Use an XMPP connection to the Talk network for session signalling.
-    if (!auth_config.GetString(kXmppLoginConfigPath, &xmpp_login_) ||
-        !(auth_config.GetString(kXmppAuthTokenConfigPath, &xmpp_auth_token_) ||
-          auth_config.GetString(kOAuthRefreshTokenConfigPath,
-                                &oauth_refresh_token_))) {
+    if (!config_.GetString(kXmppLoginConfigPath, &xmpp_login_) ||
+        !(config_.GetString(kXmppAuthTokenConfigPath, &xmpp_auth_token_) ||
+          config_.GetString(kOAuthRefreshTokenConfigPath,
+                            &oauth_refresh_token_))) {
       LOG(ERROR) << "XMPP credentials are not defined in the config.";
       return false;
     }
@@ -294,14 +311,14 @@ class HostProcess
     // depending on whether this is an official build or not.
     // If the client-Id type to use is not specified we default based on
     // the build type.
-    auth_config.GetBoolean(kOAuthUseOfficialClientIdConfigPath,
-                           &oauth_use_official_client_id_);
+    config_.GetBoolean(kOAuthUseOfficialClientIdConfigPath,
+                       &oauth_use_official_client_id_);
 
     if (!oauth_refresh_token_.empty()) {
       xmpp_auth_token_ = "";  // This will be set to the access token later.
       xmpp_auth_service_ = "oauth2";
-    } else if (!auth_config.GetString(kXmppAuthServiceConfigPath,
-                                      &xmpp_auth_service_)) {
+    } else if (!config_.GetString(kXmppAuthServiceConfigPath,
+                                  &xmpp_auth_service_)) {
       // For the me2me host, we default to ClientLogin token for chromiumsync
       // because earlier versions of the host had no HTTP stack with which to
       // request an OAuth2 access token.
@@ -310,9 +327,43 @@ class HostProcess
     return true;
   }
 
+  void OnPolicyUpdate(scoped_ptr<base::DictionaryValue> policies) {
+    if (!context_->network_task_runner()->BelongsToCurrentThread()) {
+      context_->network_task_runner()->PostTask(FROM_HERE, base::Bind(
+          &HostProcess::OnPolicyUpdate, base::Unretained(this),
+          base::Passed(&policies)));
+      return;
+    }
+
+    bool bool_value;
+    std::string string_value;
+    if (policies->GetString(policy_hack::PolicyWatcher::kHostDomainPolicyName,
+                            &string_value)) {
+      OnHostDomainPolicyUpdate(string_value);
+    }
+    if (policies->GetBoolean(policy_hack::PolicyWatcher::kNatPolicyName,
+                             &bool_value)) {
+      OnNatPolicyUpdate(bool_value);
+    }
+  }
+
+  void OnHostDomainPolicyUpdate(const std::string& host_domain) {
+    if (!context_->network_task_runner()->BelongsToCurrentThread()) {
+      context_->network_task_runner()->PostTask(FROM_HERE, base::Bind(
+          &HostProcess::OnHostDomainPolicyUpdate, base::Unretained(this),
+          host_domain));
+      return;
+    }
+
+    if (!host_domain.empty() &&
+        !EndsWith(xmpp_login_, std::string("@") + host_domain, false)) {
+      Shutdown(kInvalidHostDomainExitCode);
+    }
+  }
+
   void OnNatPolicyUpdate(bool nat_traversal_enabled) {
-    if (!context_->network_message_loop()->BelongsToCurrentThread()) {
-      context_->network_message_loop()->PostTask(FROM_HERE, base::Bind(
+    if (!context_->network_task_runner()->BelongsToCurrentThread()) {
+      context_->network_task_runner()->PostTask(FROM_HERE, base::Bind(
           &HostProcess::OnNatPolicyUpdate, base::Unretained(this),
           nat_traversal_enabled));
       return;
@@ -333,13 +384,17 @@ class HostProcess
   }
 
   void StartHost() {
-    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
     DCHECK(!host_);
+
+    if (shutting_down_)
+      return;
 
     if (!signal_strategy_.get()) {
       signal_strategy_.reset(
-          new XmppSignalStrategy(context_->jingle_thread(), xmpp_login_,
-                                 xmpp_auth_token_, xmpp_auth_service_));
+          new XmppSignalStrategy(context_->url_request_context_getter(),
+                                 xmpp_login_, xmpp_auth_token_,
+                                 xmpp_auth_service_));
 
       signaling_connector_.reset(new SignalingConnector(
           signal_strategy_.get(),
@@ -390,6 +445,11 @@ class HostProcess
         CreateHostSessionManager(network_settings,
                                  context_->url_request_context_getter()));
 
+    // TODO(simonmorris): Get the maximum session duration from a policy.
+#if defined(OS_LINUX)
+    host_->SetMaximumSessionDuration(base::TimeDelta::FromHours(20));
+#endif
+
     heartbeat_sender_.reset(new HeartbeatSender(
         this, host_id_, signal_strategy_.get(), &key_pair_));
 
@@ -398,9 +458,11 @@ class HostProcess
     host_event_logger_ = HostEventLogger::Create(host_, kApplicationName);
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
-    host_user_interface_->Start(
-        host_, base::Bind(&HostProcess::OnDisconnectRequested,
-                          base::Unretained(this)));
+    if (host_user_interface_.get()) {
+      host_user_interface_->Start(
+          host_, base::Bind(&HostProcess::OnDisconnectRequested,
+                            base::Unretained(this)));
+    }
 #endif
 
     host_->Start();
@@ -421,7 +483,7 @@ class HostProcess
   }
 
   void RestartHost() {
-    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
     if (restarting_ || shutting_down_)
       return;
@@ -432,7 +494,7 @@ class HostProcess
   }
 
   void RestartOnHostShutdown() {
-    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
     if (shutting_down_)
       return;
@@ -447,19 +509,23 @@ class HostProcess
   }
 
   void Shutdown(int exit_code) {
-    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
     if (shutting_down_)
       return;
 
     shutting_down_ = true;
     exit_code_ = exit_code;
-    host_->Shutdown(base::Bind(
-        &HostProcess::OnShutdownFinished, base::Unretained(this)));
+    if (host_) {
+      host_->Shutdown(base::Bind(
+          &HostProcess::OnShutdownFinished, base::Unretained(this)));
+    } else {
+      OnShutdownFinished();
+    }
   }
 
   void OnShutdownFinished() {
-    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
     // Destroy networking objects while we are on the network thread.
     host_ = NULL;
@@ -476,8 +542,8 @@ class HostProcess
   scoped_ptr<ChromotingHostContext> context_;
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
-  FilePath auth_config_path_;
   FilePath host_config_path_;
+  CompositeHostConfig config_;
 
   std::string host_id_;
   HostKeyPair key_pair_;
@@ -489,7 +555,7 @@ class HostProcess
   std::string oauth_refresh_token_;
   bool oauth_use_official_client_id_;
 
-  scoped_ptr<policy_hack::NatPolicy> nat_policy_;
+  scoped_ptr<policy_hack::PolicyWatcher> policy_watcher_;
   bool allow_nat_traversal_;
   scoped_ptr<base::files::FilePathWatcher> config_watcher_;
   scoped_ptr<base::DelayTimer<HostProcess> > config_updated_timer_;
@@ -554,8 +620,14 @@ int main(int argc, char** argv) {
   // single-threaded.
   net::EnableSSLServerSockets();
 
+#if defined(OS_LINUX)
+    remoting::VideoFrameCapturer::EnableXDamage(true);
+#endif
+
   remoting::HostProcess me2me_host;
-  me2me_host.InitWithCommandLine(cmd_line);
+  if (!me2me_host.InitWithCommandLine(cmd_line)) {
+    return remoting::kInvalidHostConfigurationExitCode;
+  }
 
   return me2me_host.Run();
 }
@@ -567,9 +639,11 @@ int CALLBACK WinMain(HINSTANCE instance,
                      HINSTANCE previous_instance,
                      LPSTR command_line,
                      int show_command) {
-  if (remoting::IsCrashReportingEnabled()) {
+#ifdef OFFICIAL_BUILD
+  if (remoting::IsUsageStatsAllowed()) {
     remoting::InitializeCrashReporting();
   }
+#endif  // OFFICIAL_BUILD
 
   g_hModule = instance;
 
@@ -580,7 +654,18 @@ int CALLBACK WinMain(HINSTANCE instance,
   InitCommonControlsEx(&info);
 
   // Mark the process as DPI-aware, so Windows won't scale coordinates in APIs.
-  SetProcessDPIAware();
+  // N.B. This API exists on Vista and above.
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+    FilePath path(base::GetNativeLibraryName(UTF8ToUTF16("user32")));
+    base::ScopedNativeLibrary user32(path);
+    CHECK(user32.is_valid());
+
+    typedef BOOL (WINAPI * SetProcessDPIAwareFn)();
+    SetProcessDPIAwareFn set_process_dpi_aware =
+        static_cast<SetProcessDPIAwareFn>(
+            user32.GetFunctionPointer("SetProcessDPIAware"));
+    set_process_dpi_aware();
+  }
 
   // CommandLine::Init() ignores the passed |argc| and |argv| on Windows getting
   // the command line from GetCommandLineW(), so we can safely pass NULL here.

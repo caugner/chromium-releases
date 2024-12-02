@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_EXISTING_USER_CONTROLLER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_EXISTING_USER_CONTROLLER_H_
-#pragma once
 
 #include <string>
 
@@ -19,9 +18,9 @@
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/password_changed_view.h"
 #include "chrome/browser/chromeos/login/user.h"
+#include "chrome/browser/chromeos/settings/ownership_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -63,6 +62,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Tells the controller to resume a pending login.
   void ResumeLogin();
+
+  // Returns Getting Started Guide URL with parameters.
+  std::string GetGettingStartedGuideURL() const;
 
   // LoginDisplay::Delegate: implementation
   virtual void CreateAccount() OVERRIDE;
@@ -133,9 +135,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Adds first-time login URLs.
   void InitializeStartUrls() const;
-
-  // Returns Getting Started Guide URL with parameters.
-  std::string GetGettingStartedGuideURL() const;
 
   // Shows "Release Notes"/"What's new"/Getting started guide on update.
   void OptionallyShowReleaseNotes(Profile* profile) const;

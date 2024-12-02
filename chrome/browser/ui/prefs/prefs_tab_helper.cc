@@ -233,8 +233,8 @@ UScriptCode GetScriptForFontPrefMatching(UScriptCode scriptCode) {
   switch (scriptCode) {
   case USCRIPT_HIRAGANA:
   case USCRIPT_KATAKANA:
-  case USCRIPT_JAPANESE:
-    return USCRIPT_KATAKANA_OR_HIRAGANA;
+  case USCRIPT_KATAKANA_OR_HIRAGANA:
+    return USCRIPT_JAPANESE;
   case USCRIPT_KOREAN:
     return USCRIPT_HANGUL;
   default:
@@ -415,6 +415,9 @@ void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
                              false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kWebKitAllowDisplayingInsecureContent,
+                             true,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kEnableReferrers,
                              true,
                              PrefService::UNSYNCABLE_PREF);
 

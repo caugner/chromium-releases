@@ -8,6 +8,7 @@
 
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_condition.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
+#include "chrome/browser/extensions/api/web_request/web_request_permissions.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "net/url_request/url_request.h"
 
@@ -21,13 +22,13 @@ WebRequestRulesRegistry::WebRequestRulesRegistry(Profile* profile,
 }
 
 std::set<WebRequestRule::GlobalRuleId>
-WebRequestRulesRegistry::GetMatches(net::URLRequest* request,
-                                    RequestStages request_stage) {
+WebRequestRulesRegistry::GetMatches(
+    const WebRequestRule::RequestData& request_data) {
   std::set<WebRequestRule::GlobalRuleId> result;
 
   // Figure out for which rules the URL match conditions were fulfilled.
   typedef std::set<URLMatcherConditionSet::ID> URLMatches;
-  URLMatches url_matches = url_matcher_.MatchURL(request->url());
+  URLMatches url_matches = url_matcher_.MatchURL(request_data.request->url());
 
   // Then we need to check for each of these, whether the other
   // WebRequestConditionAttributes are also fulfilled.
@@ -37,18 +38,21 @@ WebRequestRulesRegistry::GetMatches(net::URLRequest* request,
     CHECK(rule_trigger != rule_triggers_.end());
 
     WebRequestRule* rule = rule_trigger->second;
-    if (rule->conditions().IsFulfilled(*url_match, request, request_stage))
+    if (rule->conditions().IsFulfilled(*url_match, request_data))
       result.insert(rule->id());
   }
   return result;
 }
 
 std::list<LinkedPtrEventResponseDelta> WebRequestRulesRegistry::CreateDeltas(
-    net::URLRequest* request,
-    RequestStages request_stage,
-    const WebRequestRule::OptionalRequestData& optional_request_data) {
+    const ExtensionInfoMap* extension_info_map,
+    const WebRequestRule::RequestData& request_data,
+    bool crosses_incognito) {
+  if (webrequest_rules_.empty())
+    return std::list<LinkedPtrEventResponseDelta>();
+
   std::set<WebRequestRule::GlobalRuleId> matches =
-      GetMatches(request, request_stage);
+      GetMatches(request_data);
 
   // Sort all matching rules by their priority so that they can be processed
   // in decreasing order.
@@ -96,7 +100,7 @@ std::list<LinkedPtrEventResponseDelta> WebRequestRulesRegistry::CreateDeltas(
       continue;
 
     std::list<LinkedPtrEventResponseDelta> rule_result =
-        rule->CreateDeltas(request, request_stage, optional_request_data);
+        rule->CreateDeltas(extension_info_map, request_data, crosses_incognito);
     result.splice(result.begin(), rule_result);
 
     min_priorities[extension_id] = std::max(current_min_priority,

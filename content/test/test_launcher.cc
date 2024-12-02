@@ -31,14 +31,18 @@
 #if defined(OS_WIN)
 #include "base/base_switches.h"
 #include "content/common/sandbox_policy.h"
-#include "sandbox/src/dep.h"
-#include "sandbox/src/sandbox_factory.h"
-#include "sandbox/src/sandbox_types.h"
+#include "sandbox/win/src/dep.h"
+#include "sandbox/win/src/sandbox_factory.h"
+#include "sandbox/win/src/sandbox_types.h"
 #elif defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
 namespace test_launcher {
+
+namespace {
+TestLauncherDelegate* g_launcher_delegate;
+}
 
 // The environment variable name for the total number of test shards.
 const char kTestTotalShards[] = "GTEST_TOTAL_SHARDS";
@@ -52,15 +56,7 @@ const FilePath::CharType kDefaultOutputFile[] = FILE_PATH_LITERAL(
 // Quit test execution after this number of tests has timed out.
 const int kMaxTimeouts = 5;  // 45s timeout * (5 + 1) = 270s max run time.
 
-const char kEmptyTestName[] = "InProcessBrowserTest.Empty";
-
 namespace {
-
-// An empty test (it starts up and shuts down the browser as part of its
-// setup and teardown) used to prefetch all of the browser code into memory.
-IN_PROC_BROWSER_TEST_F(InProcessBrowserTest, Empty) {
-
-}  // namespace
 
 // Parses the environment variable var as an Int32.  If it is unset, returns
 // default_val.  If it is set, unsets it then converts it to Int32 before
@@ -290,24 +286,111 @@ bool MatchesFilter(const std::string& name, const std::string& filter) {
 // to implement the SLOW_ test prefix.
 static const int kSlowTestTimeoutMultiplier = 5;
 
-int GetTestTerminationTimeout(const std::string& test_name,
-                              int default_timeout_ms) {
-  int timeout_ms = default_timeout_ms;
+base::TimeDelta GetTestTerminationTimeout(const std::string& test_name,
+                                          base::TimeDelta default_timeout) {
+  base::TimeDelta timeout = default_timeout;
 
   // Make it possible for selected tests to request a longer timeout.
   // Generally tests should really avoid doing too much, and splitting
   // a test instead of using SLOW prefix is strongly preferred.
   if (test_name.find("SLOW_") != std::string::npos)
-    timeout_ms *= kSlowTestTimeoutMultiplier;
+    timeout *= kSlowTestTimeoutMultiplier;
 
-  return timeout_ms;
+  return timeout;
+}
+
+int RunTestInternal(const testing::TestCase* test_case,
+                    const std::string& test_name,
+                    CommandLine* command_line,
+                    base::TimeDelta default_timeout,
+                    bool* was_timeout) {
+  if (test_case) {
+    std::string pre_test_name = test_name;
+    ReplaceFirstSubstringAfterOffset(&pre_test_name, 0, ".", ".PRE_");
+    for (int i = 0; i < test_case->total_test_count(); ++i) {
+      const testing::TestInfo* test_info = test_case->GetTestInfo(i);
+      std::string cur_test_name = test_info->test_case_name();
+      cur_test_name.append(".");
+      cur_test_name.append(test_info->name());
+      if (cur_test_name == pre_test_name) {
+        int exit_code = RunTestInternal(test_case, pre_test_name, command_line,
+                                        default_timeout, was_timeout);
+        if (exit_code != 0)
+          return exit_code;
+      }
+    }
+  }
+
+  CommandLine new_cmd_line(*command_line);
+
+  // Always enable disabled tests.  This method is not called with disabled
+  // tests unless this flag was specified to the browser test executable.
+  new_cmd_line.AppendSwitch("gtest_also_run_disabled_tests");
+  new_cmd_line.AppendSwitchASCII("gtest_filter", test_name);
+  new_cmd_line.AppendSwitch(kSingleProcessTestsFlag);
+
+  const char* browser_wrapper = getenv("BROWSER_WRAPPER");
+  if (browser_wrapper) {
+#if defined(OS_WIN)
+    new_cmd_line.PrependWrapper(ASCIIToWide(browser_wrapper));
+#elif defined(OS_POSIX)
+    new_cmd_line.PrependWrapper(browser_wrapper);
+#endif
+    VLOG(1) << "BROWSER_WRAPPER was set, prefixing command_line with "
+            << browser_wrapper;
+  }
+
+  base::ProcessHandle process_handle;
+  base::LaunchOptions options;
+
+#if defined(OS_POSIX)
+  // On POSIX, we launch the test in a new process group with pgid equal to
+  // its pid. Any child processes that the test may create will inherit the
+  // same pgid. This way, if the test is abruptly terminated, we can clean up
+  // any orphaned child processes it may have left behind.
+  options.new_process_group = true;
+#endif
+
+  if (!base::LaunchProcess(new_cmd_line, options, &process_handle))
+    return -1;
+
+  base::TimeDelta timeout = GetTestTerminationTimeout(
+      test_name, default_timeout);
+
+  int exit_code = 0;
+  if (!base::WaitForExitCodeWithTimeout(process_handle, &exit_code, timeout)) {
+    LOG(ERROR) << "Test timeout (" << timeout.InMilliseconds()
+               << " ms) exceeded for " << test_name;
+
+    if (was_timeout)
+      *was_timeout = true;
+    exit_code = -1;  // Set a non-zero exit code to signal a failure.
+
+    // Ensure that the process terminates.
+    base::KillProcess(process_handle, -1, true);
+  }
+
+#if defined(OS_POSIX)
+  if (exit_code != 0) {
+    // On POSIX, in case the test does not exit cleanly, either due to a crash
+    // or due to it timing out, we need to clean up any child processes that
+    // it might have created. On Windows, child processes are automatically
+    // cleaned up using JobObjects.
+    base::KillProcessGroup(process_handle);
+  }
+#endif
+
+  base::CloseProcessHandle(process_handle);
+
+  return exit_code;
 }
 
 // Runs test specified by |test_name| in a child process,
 // and returns the exit code.
 int RunTest(TestLauncherDelegate* launcher_delegate,
+            const testing::TestCase* test_case,
             const std::string& test_name,
-            int default_timeout_ms,
+            base::TimeDelta default_timeout,
             bool* was_timeout) {
   if (was_timeout)
     *was_timeout = false;
@@ -337,12 +420,6 @@ int RunTest(TestLauncherDelegate* launcher_delegate,
     new_cmd_line.AppendSwitchNative((*iter).first, (*iter).second);
   }
 
-  // Always enable disabled tests.  This method is not called with disabled
-  // tests unless this flag was specified to the browser test executable.
-  new_cmd_line.AppendSwitch("gtest_also_run_disabled_tests");
-  new_cmd_line.AppendSwitchASCII("gtest_filter", test_name);
-  new_cmd_line.AppendSwitch(kSingleProcessTestsFlag);
-
   // Do not let the child ignore failures.  We need to propagate the
   // failure status back to the parent.
   new_cmd_line.AppendSwitch(base::TestSuite::kStrictFailureHandling);
@@ -350,61 +427,8 @@ int RunTest(TestLauncherDelegate* launcher_delegate,
   if (!launcher_delegate->AdjustChildProcessCommandLine(&new_cmd_line))
     return -1;
 
-  const char* browser_wrapper = getenv("BROWSER_WRAPPER");
-  if (browser_wrapper) {
-#if defined(OS_WIN)
-    new_cmd_line.PrependWrapper(ASCIIToWide(browser_wrapper));
-#elif defined(OS_POSIX)
-    new_cmd_line.PrependWrapper(browser_wrapper);
-#endif
-    VLOG(1) << "BROWSER_WRAPPER was set, prefixing command_line with "
-            << browser_wrapper;
-  }
-
-  base::ProcessHandle process_handle;
-  base::LaunchOptions options;
-
-#if defined(OS_POSIX)
-  // On POSIX, we launch the test in a new process group with pgid equal to
-  // its pid. Any child processes that the test may create will inherit the
-  // same pgid. This way, if the test is abruptly terminated, we can clean up
-  // any orphaned child processes it may have left behind.
-  options.new_process_group = true;
-#endif
-
-  if (!base::LaunchProcess(new_cmd_line, options, &process_handle))
-    return -1;
-
-  int timeout_ms = GetTestTerminationTimeout(test_name,
-                                             default_timeout_ms);
-
-  int exit_code = 0;
-  if (!base::WaitForExitCodeWithTimeout(process_handle, &exit_code,
-                                        timeout_ms)) {
-    LOG(ERROR) << "Test timeout (" << timeout_ms
-               << " ms) exceeded for " << test_name;
-
-    if (was_timeout)
-      *was_timeout = true;
-    exit_code = -1;  // Set a non-zero exit code to signal a failure.
-
-    // Ensure that the process terminates.
-    base::KillProcess(process_handle, -1, true);
-  }
-
-#if defined(OS_POSIX)
-  if (exit_code != 0) {
-    // On POSIX, in case the test does not exit cleanly, either due to a crash
-    // or due to it timing out, we need to clean up any child processes that
-    // it might have created. On Windows, child processes are automatically
-    // cleaned up using JobObjects.
-    base::KillProcessGroup(process_handle);
-  }
-#endif
-
-  base::CloseProcessHandle(process_handle);
-
-  return exit_code;
+  return RunTestInternal(
+      test_case, test_name, &new_cmd_line, default_timeout, was_timeout);
 }
 
 bool RunTests(TestLauncherDelegate* launcher_delegate,
@@ -446,9 +470,9 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
       test_name.append(".");
       test_name.append(test_info->name());
 
-      // Skip our special test so it's not run twice. That confuses
-      // the log parser.
-      if (test_name == kEmptyTestName)
+      // Skip our special test so it's not run twice. That confuses the log
+      // parser.
+      if (test_name == launcher_delegate->GetEmptyTestName())
         continue;
 
       // Skip disabled tests.
@@ -458,6 +482,9 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
                           false, false, false, 0);
         continue;
       }
+
+      if (StartsWithASCII(test_info->name(), "PRE_", true))
+        continue;
 
       // Skip the test that doesn't match the filter string (if given).
       if ((!positive_filter.empty() &&
@@ -484,8 +511,9 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
       ++test_run_count;
       bool was_timeout = false;
       int exit_code = RunTest(launcher_delegate,
+                              test_case,
                               test_name,
-                              TestTimeouts::action_max_timeout_ms(),
+                              TestTimeouts::action_max_timeout(),
                               &was_timeout);
       if (exit_code == 0) {
         // Test passed.
@@ -497,9 +525,9 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
 
         bool ignore_failure = false;
 
-        // -1 exit code means a crash or hang. Never ignore those failures,
-        // they are serious and should always be visible.
-        if (exit_code != -1)
+        // Never ignore crashes or hangs/timeouts, they are serious and should
+        // always be visible.
+        if (exit_code != -1 && !was_timeout)
           ignore_failure = base::TestSuite::ShouldIgnoreFailure(*test_info);
 
         printer.OnTestEnd(test_info->name(), test_case->name(), true, true,
@@ -573,13 +601,16 @@ const char kChildProcessFlag[]   = "child";
 
 const char kHelpFlag[]   = "help";
 
+const char kWarmupFlag[] = "warmup";
+
 TestLauncherDelegate::~TestLauncherDelegate() {
 }
 
 int LaunchTests(TestLauncherDelegate* launcher_delegate,
                 int argc,
                 char** argv) {
-  launcher_delegate->EarlyInitialize();
+  DCHECK(!g_launcher_delegate);
+  g_launcher_delegate = launcher_delegate;
 
   CommandLine::Init(argc, argv);
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -630,20 +661,26 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
   TestTimeouts::Initialize();
   int exit_code = 0;
 
-  // Make sure the entire browser code is loaded into memory. Reading it
-  // from disk may be slow on a busy bot, and can easily exceed the default
-  // timeout causing flaky test failures. Use an empty test that only starts
-  // and closes a browser with a long timeout to avoid those problems.
-  // NOTE: we don't do this when specifying a filter because this slows down the
-  // common case of running one test locally, and also on trybots when sharding
-  // as this one test runs ~200 times and wastes a few minutes.
-  if (!should_shard && !command_line->HasSwitch(kGTestFilterFlag)) {
-    exit_code = RunTest(launcher_delegate,
-                        kEmptyTestName,
-                        TestTimeouts::large_test_timeout_ms(),
-                        NULL);
-    if (exit_code != 0)
-      return exit_code;
+  std::string empty_test = launcher_delegate->GetEmptyTestName();
+  if (!empty_test.empty()) {
+    // Make sure the entire browser code is loaded into memory. Reading it
+    // from disk may be slow on a busy bot, and can easily exceed the default
+    // timeout causing flaky test failures. Use an empty test that only starts
+    // and closes a browser with a long timeout to avoid those problems.
+    // NOTE: We don't do this when specifying a filter because this slows down
+    // the common case of running one test locally, and also on trybots when
+    // sharding as this one test runs ~200 times and wastes a few minutes.
+    bool warmup = command_line->HasSwitch(kWarmupFlag);
+    bool has_filter = command_line->HasSwitch(kGTestFilterFlag);
+    if (warmup || (!should_shard && !has_filter)) {
+      exit_code = RunTest(launcher_delegate,
+                          NULL,
+                          empty_test,
+                          TestTimeouts::large_test_timeout(),
+                          NULL);
+      if (exit_code != 0 || warmup)
+        return exit_code;
+    }
   }
 
   int cycles = 1;
@@ -666,6 +703,10 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
       cycles--;
   }
   return exit_code;
+}
+
+TestLauncherDelegate* GetCurrentTestLauncherDelegate() {
+  return g_launcher_delegate;
 }
 
 }  // namespace test_launcher

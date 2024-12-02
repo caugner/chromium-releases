@@ -27,6 +27,8 @@
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/url_request/ftp_protocol_handler.h"
+#include "net/url_request/url_request_job_factory.h"
 #include "webkit/database/database_tracker.h"
 
 using content::BrowserThread;
@@ -246,15 +248,31 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   main_context->set_chrome_url_data_manager_backend(
       chrome_url_data_manager_backend());
 
-  main_context->set_job_factory(job_factory());
-  extensions_context->set_job_factory(job_factory());
+  main_job_factory_.reset(new net::URLRequestJobFactory);
+  extensions_job_factory_.reset(new net::URLRequestJobFactory);
+
+  net::URLRequestJobFactory* job_factories[2];
+  job_factories[0] = main_job_factory_.get();
+  job_factories[1] = extensions_job_factory_.get();
+
+  net::FtpAuthCache* ftp_auth_caches[2];
+  ftp_auth_caches[0] = main_context->ftp_auth_cache();
+  ftp_auth_caches[1] = extensions_context->ftp_auth_cache();
+
+  for (int i = 0; i < 2; i++) {
+    SetUpJobFactoryDefaults(job_factories[i]);
+    CreateFtpProtocolHandler(job_factories[i], ftp_auth_caches[i]);
+  }
+
+  main_context->set_job_factory(main_job_factory_.get());
+  extensions_context->set_job_factory(extensions_job_factory_.get());
 }
 
 ChromeURLRequestContext*
 OffTheRecordProfileIOData::InitializeAppRequestContext(
     ChromeURLRequestContext* main_context,
     const std::string& app_id) const {
-  AppRequestContext* context = new AppRequestContext;
+  AppRequestContext* context = new AppRequestContext(cache_stats());
 
   // Copy most state from the main context.
   context->CopyFrom(main_context);
@@ -291,4 +309,18 @@ OffTheRecordProfileIOData::AcquireIsolatedAppRequestContext(
       InitializeAppRequestContext(main_context, app_id);
   DCHECK(app_request_context);
   return app_request_context;
+}
+
+void OffTheRecordProfileIOData::CreateFtpProtocolHandler(
+    net::URLRequestJobFactory* job_factory,
+    net::FtpAuthCache* ftp_auth_cache) const {
+  job_factory->SetProtocolHandler(
+      chrome::kFtpScheme,
+      new net::FtpProtocolHandler(
+          network_delegate(), ftp_factory_.get(), ftp_auth_cache));
+}
+
+chrome_browser_net::CacheStats* OffTheRecordProfileIOData::GetCacheStats(
+    IOThread::Globals* io_thread_globals) const {
+  return NULL;
 }

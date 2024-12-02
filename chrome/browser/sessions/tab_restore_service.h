@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SESSIONS_TAB_RESTORE_SERVICE_H_
 #define CHROME_BROWSER_SESSIONS_TAB_RESTORE_SERVICE_H_
-#pragma once
 
 #include <list>
 #include <set>
@@ -27,6 +26,7 @@ struct SessionWindow;
 namespace content {
 class NavigationController;
 class SessionStorageNamespace;
+class WebContents;
 }
 
 // TabRestoreService is responsible for maintaining the most recently closed
@@ -138,9 +138,9 @@ class TabRestoreService : public BaseSessionService {
   void AddObserver(TabRestoreServiceObserver* observer);
   void RemoveObserver(TabRestoreServiceObserver* observer);
 
-  // Creates a Tab to represent |tab| and notifies observers the list of
+  // Creates a Tab to represent |contents| and notifies observers the list of
   // entries has changed.
-  void CreateHistoricalTab(content::NavigationController* tab, int index);
+  void CreateHistoricalTab(content::WebContents* contents, int index);
 
   // Invoked when a browser is closing. If |delegate| is a tabbed browser with
   // at least one tab, a Window is created, added to entries and observers are

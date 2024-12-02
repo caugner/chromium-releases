@@ -4,16 +4,18 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_UNINSTALL_DIALOG_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_UNINSTALL_DIALOG_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/image/image_skia.h"
 
+class Browser;
 class MessageLoop;
-class Profile;
 
 namespace extensions {
 class Extension;
@@ -21,6 +23,7 @@ class Extension;
 
 class ExtensionUninstallDialog
     : public ImageLoadingTracker::Observer,
+      public content::NotificationObserver,
       public base::SupportsWeakPtr<ExtensionUninstallDialog> {
  public:
   class Delegate {
@@ -36,8 +39,9 @@ class ExtensionUninstallDialog
   };
 
   // Creates a platform specific implementation of ExtensionUninstallDialog.
-  static ExtensionUninstallDialog* Create(
-      Profile* profile, Delegate* delegate);
+  // |browser| can be NULL only for Ash when this is used with the applist
+  // window.
+  static ExtensionUninstallDialog* Create(Browser* browser, Delegate* delegate);
 
   virtual ~ExtensionUninstallDialog();
 
@@ -49,9 +53,9 @@ class ExtensionUninstallDialog
 
  protected:
   // Constructor used by the derived classes.
-  explicit ExtensionUninstallDialog(Profile* profile, Delegate* delegate);
+  ExtensionUninstallDialog(Browser* browser, Delegate* delegate);
 
-  Profile* profile_;
+  Browser* browser_;
 
   // The delegate we will call Accepted/Canceled on after confirmation dialog.
   Delegate* delegate_;
@@ -72,6 +76,11 @@ class ExtensionUninstallDialog
                              const std::string& extension_id,
                              int index) OVERRIDE;
 
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   // Displays the prompt. This should only be called after loading the icon.
   // The implementations of this method are platform-specific.
   virtual void Show() = 0;
@@ -80,7 +89,9 @@ class ExtensionUninstallDialog
 
   // Keeps track of extension images being loaded on the File thread for the
   // purpose of showing the dialog.
-  ImageLoadingTracker tracker_;
+  scoped_ptr<ImageLoadingTracker> tracker_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionUninstallDialog);
 };

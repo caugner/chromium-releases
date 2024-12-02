@@ -11,6 +11,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/plugin_finder.h"
 #include "chrome/browser/plugin_infobar_delegates.h"
 #include "chrome/browser/profiles/profile.h"
@@ -25,7 +26,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -36,6 +36,10 @@
 #include "chrome/browser/plugin_installer_observer.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+
+#if defined(OS_WIN)
+#include "base/win/metro.h"
+#endif
 
 using content::OpenURLParams;
 using content::PluginService;
@@ -270,10 +274,21 @@ void PluginObserver::FindMissingPlugin(int placeholder_id,
   plugin_placeholders_[placeholder_id] =
       new PluginPlaceholderHost(this, placeholder_id, installer);
   InfoBarTabHelper* infobar_helper = tab_contents_->infobar_tab_helper();
-  InfoBarDelegate* delegate = PluginInstallerInfoBarDelegate::Create(
+  InfoBarDelegate* delegate;
+#if !defined(OS_WIN)
+  delegate = PluginInstallerInfoBarDelegate::Create(
       infobar_helper, installer,
       base::Bind(&PluginObserver::InstallMissingPlugin,
                  weak_ptr_factory_.GetWeakPtr(), installer));
+#else
+  delegate = base::win::IsMetroProcess() ?
+      PluginMetroModeInfoBarDelegate::Create(
+          infobar_helper, installer->name()) :
+      PluginInstallerInfoBarDelegate::Create(
+          infobar_helper, installer,
+          base::Bind(&PluginObserver::InstallMissingPlugin,
+              weak_ptr_factory_.GetWeakPtr(), installer));
+#endif
   infobar_helper->AddInfoBar(delegate);
 }
 
@@ -281,7 +296,7 @@ void PluginObserver::InstallMissingPlugin(PluginInstaller* installer) {
   if (installer->url_for_display()) {
     installer->OpenDownloadURL(web_contents());
   } else {
-    browser::ShowTabModalConfirmDialog(
+    chrome::ShowTabModalConfirmDialog(
         new ConfirmInstallDialogDelegate(tab_contents_, installer),
         tab_contents_);
   }
@@ -308,6 +323,7 @@ void PluginObserver::OnOpenAboutPlugins() {
 }
 
 void PluginObserver::OnCouldNotLoadPlugin(const FilePath& plugin_path) {
+  g_browser_process->metrics_service()->LogPluginLoadingError(plugin_path);
   string16 plugin_name =
       PluginService::GetInstance()->GetPluginDisplayNameByPath(plugin_path);
   InfoBarTabHelper* infobar_helper = tab_contents_->infobar_tab_helper();

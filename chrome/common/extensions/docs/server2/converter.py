@@ -171,7 +171,7 @@ def _FormatFile(contents, path, name, image_dest, replace, is_api):
         os.path.join(path, os.pardir, 'images', image),
         os.path.join(image_dest, image))
   contents = re.sub(r'<!--.*?(BEGIN|END).*?-->', r'', contents)
-  contents = re.sub(r'src="images/', r'src="{{static}}/images/', contents)
+  contents = re.sub(r'\.\./images', r'{{static}}/images', contents)
   exp = re.compile(r'<div[^>.]*?id="pageData-showTOC"[^>.]*?>.*?</div>',
                    flags=re.DOTALL)
   contents = re.sub(exp, r'', contents)

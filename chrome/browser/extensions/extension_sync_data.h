@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_SYNC_DATA_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_SYNC_DATA_H_
-#pragma once
 
 #include <string>
 
@@ -13,7 +12,9 @@
 #include "googleurl/src/gurl.h"
 #include "sync/api/sync_change.h"
 
+namespace syncer {
 class SyncData;
+}
 
 namespace sync_pb {
 class ExtensionSpecifics;
@@ -27,16 +28,17 @@ class Extension;
 class ExtensionSyncData {
  public:
   ExtensionSyncData();
-  explicit ExtensionSyncData(const SyncData& sync_data);
-  explicit ExtensionSyncData(const SyncChange& sync_change);
+  explicit ExtensionSyncData(const syncer::SyncData& sync_data);
+  explicit ExtensionSyncData(const syncer::SyncChange& sync_change);
   ExtensionSyncData(const Extension& extension,
                     bool enabled,
                     bool incognito_enabled);
   ~ExtensionSyncData();
 
   // Retrieve sync data from this class.
-  SyncData GetSyncData() const;
-  SyncChange GetSyncChange(SyncChange::SyncChangeType change_type) const;
+  syncer::SyncData GetSyncData() const;
+  syncer::SyncChange GetSyncChange(
+      syncer::SyncChange::SyncChangeType change_type) const;
 
   // Convert an ExtensionSyncData back out to a sync structure.
   void PopulateExtensionSpecifics(sync_pb::ExtensionSpecifics* specifics) const;
@@ -65,7 +67,7 @@ class ExtensionSyncData {
 
  private:
   // Populate this class from sync inputs.
-  void PopulateFromSyncData(const SyncData& sync_data);
+  void PopulateFromSyncData(const syncer::SyncData& sync_data);
 
   std::string id_;
   bool uninstalled_;

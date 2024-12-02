@@ -3,12 +3,11 @@
 // found in the LICENSE file.
 #ifndef CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_ERROR_HANDLER_MOCK_H__
 #define CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_ERROR_HANDLER_MOCK_H__
-#pragma once
 
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 
 namespace browser_sync {
 
@@ -19,9 +18,9 @@ class DataTypeErrorHandlerMock : public DataTypeErrorHandler {
   MOCK_METHOD2(OnSingleDatatypeUnrecoverableError,
                void(const tracked_objects::Location&, const std::string&));
   MOCK_METHOD3(CreateAndUploadError,
-                   SyncError(const tracked_objects::Location&,
+                   syncer::SyncError(const tracked_objects::Location&,
                              const std::string&,
-                             syncable::ModelType));
+                             syncer::ModelType));
 
 };
 

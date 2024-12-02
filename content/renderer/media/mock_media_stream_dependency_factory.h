@@ -17,12 +17,12 @@ class MockLocalVideoTrack : public LocalVideoTrackInterface {
  public:
   explicit MockLocalVideoTrack(std::string label)
     : enabled_(false),
-      label_(label),
-      renderer_(NULL) {
+      label_(label) {
   }
   virtual cricket::VideoCapturer* GetVideoCapture() OVERRIDE;
-  virtual void SetRenderer(VideoRendererWrapperInterface* renderer) OVERRIDE;
-  virtual VideoRendererWrapperInterface* GetRenderer() OVERRIDE;
+  virtual void AddRenderer(VideoRendererInterface* renderer) OVERRIDE;
+  virtual void RemoveRenderer(VideoRendererInterface* renderer) OVERRIDE;
+  virtual cricket::VideoRenderer* FrameInput() OVERRIDE;
   virtual std::string kind() const OVERRIDE;
   virtual std::string label() const OVERRIDE;
   virtual bool enabled() const OVERRIDE;
@@ -38,7 +38,6 @@ class MockLocalVideoTrack : public LocalVideoTrackInterface {
  private:
   bool enabled_;
   std::string label_;
-  VideoRendererWrapperInterface* renderer_;
 };
 
 class MockLocalAudioTrack : public LocalAudioTrackInterface {
@@ -85,10 +84,6 @@ class MockMediaStreamDependencyFactory : public MediaStreamDependencyFactory {
       CreatePeerConnection(
           const std::string& config,
           webrtc::PeerConnectionObserver* observer) OVERRIDE;
-  virtual talk_base::scoped_refptr<webrtc::PeerConnectionInterface>
-      CreateRoapPeerConnection(
-          const std::string& config,
-          webrtc::PeerConnectionObserver* observer) OVERRIDE;
   virtual talk_base::scoped_refptr<webrtc::LocalMediaStreamInterface>
       CreateLocalMediaStream(const std::string& label) OVERRIDE;
   virtual talk_base::scoped_refptr<webrtc::LocalVideoTrackInterface>
@@ -102,7 +97,8 @@ class MockMediaStreamDependencyFactory : public MediaStreamDependencyFactory {
   virtual webrtc::SessionDescriptionInterface* CreateSessionDescription(
       const std::string& sdp) OVERRIDE;
   virtual webrtc::IceCandidateInterface* CreateIceCandidate(
-      const std::string& label,
+      const std::string& sdp_mid,
+      int sdp_mline_index,
       const std::string& sdp) OVERRIDE;
 
  private:

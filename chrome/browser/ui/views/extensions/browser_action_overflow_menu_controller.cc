@@ -44,7 +44,7 @@ BrowserActionOverflowMenuController::BrowserActionOverflowMenuController(
     menu_->AppendMenuItemWithIcon(
         command_id,
         UTF8ToUTF16(view->button()->extension()->name()),
-        canvas->ExtractBitmap());
+        canvas->ExtractImageRep());
 
     // Set the tooltip for this item.
     string16 tooltip = UTF8ToUTF16(
@@ -85,6 +85,11 @@ bool BrowserActionOverflowMenuController::RunMenu(views::Widget* window,
 
 void BrowserActionOverflowMenuController::CancelMenu() {
   menu_->Cancel();
+}
+
+bool BrowserActionOverflowMenuController::IsCommandEnabled(int id) const {
+  BrowserActionView* view = (*views_)[start_index_ + id - 1];
+  return view->button()->IsEnabled(owner_->GetCurrentTabId());
 }
 
 void BrowserActionOverflowMenuController::ExecuteCommand(int id) {

@@ -8,11 +8,10 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_BROWSING_DATA_BROWSING_DATA_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_BROWSING_DATA_BROWSING_DATA_API_H_
-#pragma once
 
 #include <string>
 
-#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/extensions/extension_function.h"
 
 class PluginPrefs;

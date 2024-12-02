@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_UPLOADER_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_UPLOADER_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -24,7 +23,6 @@ class DownloadItem;
 
 namespace gdata {
 
-class GDataFileSystem;
 class DocumentsServiceInterface;
 
 class GDataUploaderInterface {
@@ -63,15 +61,6 @@ class GDataUploader : public GDataUploaderInterface {
  public:
   explicit GDataUploader(DocumentsServiceInterface* documents_service);
   virtual ~GDataUploader();
-
-  // Sets the file system. This must be called before calling other member
-  // functions.
-  //
-  // TODO(satorux): The dependency to GDataFileSystem should be
-  // eliminated. http://crbug.com/133860
-  void set_file_system(GDataFileSystem* file_system) {
-    file_system_ = file_system;
-  }
 
   // GDataUploaderInterface overrides.
   virtual int UploadNewFile(
@@ -119,12 +108,12 @@ class GDataUploader : public GDataUploaderInterface {
                                       const ResumeUploadResponse& response,
                                       scoped_ptr<DocumentEntry> entry);
 
-  // When upload completes, move the file into the gdata cache.
-  void MoveFileToCache(UploadFileInfo* upload_file_info);
+  // Initiate the upload.
+  void InitiateUpload(UploadFileInfo* uploader_file_info);
 
   // Handle failed uploads.
   void UploadFailed(scoped_ptr<UploadFileInfo> upload_file_info,
-                    base::PlatformFileError error);
+                    GDataFileError error);
 
   // Removes |upload_id| from UploadFileInfoMap |pending_uploads_|.
   // Note that this does not delete the UploadFileInfo object itself,
@@ -135,10 +124,9 @@ class GDataUploader : public GDataUploaderInterface {
   // ID assigned to |upload_file_info|.
   int StartUploadFile(scoped_ptr<UploadFileInfo> upload_file_info);
 
-  // Pointers to GDataFileSystem and DocumentsServiceInterface objects owned by
-  // GDataSystemService. The lifetime of these two objects is guaranteed to
-  // exceed that of the GDataUploader instance.
-  GDataFileSystem* file_system_;
+  // Pointers to DocumentsServiceInterface object owned by GDataSystemService.
+  // The lifetime of this object is guaranteed to exceed that of the
+  // GDataUploader instance.
   DocumentsServiceInterface* documents_service_;
 
   int next_upload_id_;  // id counter.
@@ -146,8 +134,9 @@ class GDataUploader : public GDataUploaderInterface {
   typedef std::map<int, UploadFileInfo*> UploadFileInfoMap;
   UploadFileInfoMap pending_uploads_;
 
-  // Factory for various callbacks.
-  base::WeakPtrFactory<GDataUploader> uploader_factory_;
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<GDataUploader> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GDataUploader);
 };

@@ -10,11 +10,13 @@
 #include "base/message_loop.h"
 #include "base/string_split.h"
 #include "base/time.h"
+#include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/env.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/single_monitor_manager.h"
+#include "ui/aura/single_display_manager.h"
+#include "ui/aura/shared/root_window_capture_client.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -27,7 +29,6 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
-#include "third_party/khronos/GLES2/gl2.h"
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES 1
 #endif
@@ -91,6 +92,11 @@ class BenchCompositorObserver : public ui::CompositorObserver {
         frames_(0),
         max_frames_(max_frames) {
   }
+
+  virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE {}
+
+  virtual void OnCompositingWillStart(Compositor* compositor) OVERRIDE {}
+
   virtual void OnCompositingStarted(Compositor* compositor) OVERRIDE {}
 
   virtual void OnCompositingEnded(Compositor* compositor) OVERRIDE {
@@ -142,11 +148,11 @@ class WebGLTexture : public ui::Texture {
                          GL_RGBA, GL_UNSIGNED_BYTE, NULL);
   }
 
+ private:
   virtual ~WebGLTexture() {
     context_->deleteTexture(texture_id());
   }
 
- private:
   WebGraphicsContext3D* context_;
 
   DISALLOW_COPY_AND_ASSIGN(WebGLTexture);
@@ -269,7 +275,7 @@ class SoftwareScrollBench : public BenchCompositorObserver {
   DISALLOW_COPY_AND_ASSIGN(SoftwareScrollBench);
 };
 
-}  // anonymous namespace
+}  // namespace
 
 int main(int argc, char** argv) {
   CommandLine::Init(argc, argv);
@@ -282,11 +288,14 @@ int main(int argc, char** argv) {
 
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
-  aura::SingleMonitorManager* manager = new aura::SingleMonitorManager;
+  aura::SingleDisplayManager* manager = new aura::SingleDisplayManager;
   manager->set_use_fullscreen_host_window(true);
-  aura::Env::GetInstance()->SetMonitorManager(manager);
+  aura::Env::GetInstance()->SetDisplayManager(manager);
   scoped_ptr<aura::RootWindow> root_window(
-      aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
+      aura::DisplayManager::CreateRootWindowForPrimaryDisplay());
+  aura::client::SetCaptureClient(
+      root_window.get(),
+      new aura::shared::RootWindowCaptureClient(root_window.get()));
 
   // add layers
   ColoredLayer background(SK_ColorRED);

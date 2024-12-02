@@ -187,6 +187,10 @@ class TestShellNetworkDelegate : public net::NetworkDelegate {
       const net::CompletionCallback& callback) OVERRIDE {
     return net::OK;
   }
+
+  virtual void OnCacheWaitStateChange(const net::URLRequest& request,
+                                      CacheWaitState state) OVERRIDE {
+  }
 };
 
 TestShellRequestContextParams* g_request_context_params = NULL;
@@ -417,7 +421,7 @@ class RequestProxy
               params->upload.get());
     }
 
-    request_.reset(new net::URLRequest(params->url, this));
+    request_.reset(new net::URLRequest(params->url, this, g_request_context));
     request_->set_method(params->method);
     request_->set_first_party_for_cookies(params->first_party_for_cookies);
     request_->set_referrer(params->referrer.spec());
@@ -428,7 +432,6 @@ class RequestProxy
     request_->SetExtraRequestHeaders(headers);
     request_->set_load_flags(params->load_flags);
     request_->set_upload(params->upload.get());
-    request_->set_context(g_request_context);
     SimpleAppCacheSystem::SetExtraRequestInfo(
         request_.get(), params->appcache_host_id, params->request_type);
 
@@ -617,7 +620,7 @@ class RequestProxy
 
     // GetContentLengthSync() may perform file IO, but it's ok here, as file
     // IO is not prohibited in IOThread defined in the file.
-    uint64 size = request_->get_upload()->GetContentLengthSync();
+    uint64 size = request_->get_upload_mutable()->GetContentLengthSync();
     uint64 position = request_->GetUploadProgress();
     if (position == last_upload_position_)
       return;  // no progress made since last time

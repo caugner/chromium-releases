@@ -10,6 +10,7 @@
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/ui/browser_finder.h"
 #import "chrome/browser/ui/cocoa/animatable_view.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 #include "chrome/browser/ui/cocoa/infobars/infobar.h"
@@ -19,7 +20,7 @@
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -104,7 +105,7 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
     scoped_ptr<gfx::Canvas> canvas(
         new gfx::Canvas(
             gfx::Size(image_size + kDropArrowLeftMarginPx + drop_image->width(),
-                      image_size), false));
+                      image_size), ui::SCALE_FACTOR_100P, false));
     canvas->DrawImageInt(*icon,
                          0, 0, icon->width(), icon->height(),
                          0, 0, image_size, image_size,
@@ -112,7 +113,8 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
     canvas->DrawImageInt(*drop_image,
                          image_size + kDropArrowLeftMarginPx,
                          image_size / 2);
-    [owner_ setButtonImage:gfx::SkBitmapToNSImage(canvas->ExtractBitmap())];
+    [owner_ setButtonImage:gfx::SkBitmapToNSImage(
+        canvas->ExtractImageRep().sk_bitmap())];
   }
 
   // Overridden from ExtensionInfoBarDelegate::DelegateObserver:
@@ -144,11 +146,13 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
     dropdownButton_.reset([[MenuButton alloc] init]);
     [dropdownButton_ setOpenMenuOnClick:YES];
 
-    ExtensionHost* extensionHost = delegate_->AsExtensionInfoBarDelegate()->
-        extension_host();
+    extensions::ExtensionHost* extensionHost =
+        delegate_->AsExtensionInfoBarDelegate()->extension_host();
+    Browser* browser =
+        browser::FindBrowserWithWebContents(owner->web_contents());
     contextMenu_.reset([[ExtensionActionContextMenu alloc]
         initWithExtension:extensionHost->extension()
-                  profile:extensionHost->profile()
+                  browser:browser
           extensionAction:NULL]);
     // See menu_button.h for documentation on why this is needed.
     NSMenuItem* dummyItem =

@@ -7,9 +7,11 @@
 #include "base/location.h"
 #include "sync/api/sync_error_factory.h"
 
+namespace syncer {
+
 FakeSyncableService::FakeSyncableService()
     : syncing_(false),
-      type_(syncable::UNSPECIFIED) {}
+      type_(UNSPECIFIED) {}
 
 FakeSyncableService::~FakeSyncableService() {}
 
@@ -29,7 +31,7 @@ bool FakeSyncableService::syncing() const {
 
 // SyncableService implementation.
 SyncError FakeSyncableService::MergeDataAndStartSyncing(
-    syncable::ModelType type,
+    ModelType type,
     const SyncDataList& initial_sync_data,
     scoped_ptr<SyncChangeProcessor> sync_processor,
     scoped_ptr<SyncErrorFactory> sync_error_factory) {
@@ -41,13 +43,12 @@ SyncError FakeSyncableService::MergeDataAndStartSyncing(
   return merge_data_and_start_syncing_error_;
 }
 
-void FakeSyncableService::StopSyncing(syncable::ModelType type) {
+void FakeSyncableService::StopSyncing(ModelType type) {
   syncing_ = false;
   sync_processor_.reset();
 }
 
-SyncDataList FakeSyncableService::GetAllSyncData(
-    syncable::ModelType type) const {
+SyncDataList FakeSyncableService::GetAllSyncData(ModelType type) const {
   return SyncDataList();
 }
 
@@ -56,3 +57,5 @@ SyncError FakeSyncableService::ProcessSyncChanges(
     const SyncChangeList& change_list) {
   return process_sync_changes_error_;
 }
+
+}  // namespace syncer

@@ -37,7 +37,7 @@ void ShellWindowRegistry::RemoveObserver(Observer* observer) {
 }
 
 ShellWindowRegistry::ShellWindowSet ShellWindowRegistry::GetShellWindowsForApp(
-    const std::string app_id) const {
+    const std::string& app_id) const {
   ShellWindowSet app_windows;
   for (ShellWindowSet::const_iterator i = shell_windows_.begin();
        i != shell_windows_.end(); ++i) {
@@ -52,6 +52,17 @@ ShellWindow* ShellWindowRegistry::GetShellWindowForRenderViewHost(
   for (ShellWindowSet::const_iterator i = shell_windows_.begin();
        i != shell_windows_.end(); ++i) {
     if ((*i)->web_contents()->GetRenderViewHost() == render_view_host)
+      return *i;
+  }
+
+  return NULL;
+}
+
+ShellWindow* ShellWindowRegistry::GetShellWindowForNativeWindow(
+    gfx::NativeWindow window) const {
+  for (ShellWindowSet::const_iterator i = shell_windows_.begin();
+       i != shell_windows_.end(); ++i) {
+    if ((*i)->GetNativeWindow() == window)
       return *i;
   }
 

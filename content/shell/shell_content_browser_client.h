@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_SHELL_SHELL_CONTENT_BROWSER_CLIENT_H_
 #define CONTENT_SHELL_SHELL_CONTENT_BROWSER_CLIENT_H_
-#pragma once
 
 #include <string>
 
@@ -23,17 +22,28 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   ShellContentBrowserClient();
   virtual ~ShellContentBrowserClient();
 
-  // content::ContentBrowserClient overrides.
+  // ContentBrowserClient overrides.
   virtual BrowserMainParts* CreateBrowserMainParts(
-      const content::MainFunctionParams& parameters) OVERRIDE;
+      const MainFunctionParams& parameters) OVERRIDE;
   virtual void RenderViewHostCreated(
       RenderViewHost* render_view_host) OVERRIDE;
   virtual void AppendExtraCommandLineSwitches(CommandLine* command_line,
                                               int child_process_id) OVERRIDE;
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
+  virtual AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
   virtual std::string GetDefaultDownloadName() OVERRIDE;
 
+#if defined(OS_ANDROID)
+  virtual void GetAdditionalMappedFilesForChildProcess(
+      const CommandLine& command_line,
+      base::GlobalDescriptors::Mapping* mappings) OVERRIDE;
+#endif
+
   ShellBrowserContext* browser_context();
+  ShellBrowserContext* off_the_record_browser_context();
+  ShellResourceDispatcherHostDelegate* resource_dispatcher_host_delegate() {
+    return resource_dispatcher_host_delegate_.get();
+  }
 
  private:
   scoped_ptr<ShellResourceDispatcherHostDelegate>

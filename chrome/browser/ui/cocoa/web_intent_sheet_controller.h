@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_COCOA_WEB_INTENT_SHEET_CONTROLLER_H_
 #define CHROME_BROWSER_UI_COCOA_WEB_INTENT_SHEET_CONTROLLER_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -30,11 +29,15 @@ class WebIntentPickerModel;
   // The intent picker data to be rendered. Weak reference.
   WebIntentPickerModel* model_;
 
+  // Indicator that we have neither suggested nor installed services.
+  BOOL isEmpty_;
+
   scoped_nsobject<NSTextField> actionTextField_;
   scoped_nsobject<SuggestionView> suggestionView_;
   scoped_nsobject<NSButton> closeButton_;
   scoped_nsobject<NSMutableArray> intentButtons_;
   scoped_nsobject<NSView> flipView_;
+  scoped_nsobject<NSTextField> inlineDispositionTitleField_;
 }
 - (IBAction)installExtension:(id)sender;
 
@@ -53,11 +56,17 @@ class WebIntentPickerModel;
 // "Which service should be used for sharing?".
 - (void)setActionString:(NSString*)actionString;
 
+// Sets the service title for inline disposition.
+- (void)setInlineDispositionTitle:(NSString*)title;
+
 // Stop displaying throbber. Called when extension isntallation is complete.
 - (void)stopThrobber;
 
 // Close the current sheet (and by extension, the constrained dialog).
 - (void)closeSheet;
+
+// List of extensions/suggestions has been retrieved.
+- (void)pendingAsyncCompleted;
 
 // Notification handler - called when sheet has been closed.
 - (void)sheetDidEnd:(NSWindow*)sheet

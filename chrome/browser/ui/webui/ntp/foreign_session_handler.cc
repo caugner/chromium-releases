@@ -20,8 +20,8 @@
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/ui/webui/session_favicon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/browser/ui/webui/session_favicon_source.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -30,6 +30,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_ui.h"
+#include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace browser_sync {
 
@@ -125,7 +127,7 @@ bool ForeignSessionHandler::IsTabSyncEnabled() {
   Profile* profile = Profile::FromWebUI(web_ui());
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
-  return service && service->GetPreferredDataTypes().Has(syncable::SESSIONS);
+  return service && service->GetPreferredDataTypes().Has(syncer::SESSIONS);
 }
 
 string16 ForeignSessionHandler::FormatSessionTime(const base::Time& time) {
@@ -159,6 +161,7 @@ void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
       scoped_ptr<DictionaryValue> session_data(new DictionaryValue());
       session_data->SetString("tag", session_tag);
       session_data->SetString("name", session->session_name);
+      session_data->SetString("deviceType", session->DeviceTypeAsString());
       session_data->SetString("modifiedTime",
                               FormatSessionTime(session->modified_time));
 
@@ -228,7 +231,6 @@ void ForeignSessionHandler::HandleOpenForeignSession(const ListValue* args) {
   if (!associator)
     return;
 
-  Profile* profile = Profile::FromWebUI(web_ui());
   if (tab_id != kInvalidId) {
     // We don't actually care about |window_num|, this is just a sanity check.
     DCHECK_LT(kInvalidId, window_num);
@@ -239,7 +241,8 @@ void ForeignSessionHandler::HandleOpenForeignSession(const ListValue* args) {
     }
     WindowOpenDisposition disposition =
         web_ui_util::GetDispositionFromClick(args, 3);
-    SessionRestore::RestoreForeignSessionTab(profile, *tab, disposition);
+    SessionRestore::RestoreForeignSessionTab(
+        web_ui()->GetWebContents(), *tab, disposition);
   } else {
     std::vector<const SessionWindow*> windows;
     // Note: we don't own the ForeignSessions themselves.
@@ -254,7 +257,8 @@ void ForeignSessionHandler::HandleOpenForeignSession(const ListValue* args) {
         ((window_num == kInvalidId) ?
         std::vector<const SessionWindow*>::const_iterator(windows.end()) :
         iter_begin + 1);
-    SessionRestore::RestoreForeignSessionWindows(profile, iter_begin, iter_end);
+    SessionRestore::RestoreForeignSessionWindows(
+        Profile::FromWebUI(web_ui()), iter_begin, iter_end);
   }
 }
 
@@ -320,16 +324,27 @@ bool ForeignSessionHandler::SessionWindowToValue(
     return false;
   }
   scoped_ptr<ListValue> tab_values(new ListValue());
+  // Calculate the last |modification_time| for all entries within a window.
+  base::Time modification_time = window.timestamp;
   for (size_t i = 0; i < window.tabs.size(); ++i) {
     scoped_ptr<DictionaryValue> tab_value(new DictionaryValue());
-    if (SessionTabToValue(*window.tabs[i], tab_value.get()))
+    if (SessionTabToValue(*window.tabs[i], tab_value.get())) {
+      modification_time = std::max(modification_time,
+                                   window.tabs[i]->timestamp);
       tab_values->Append(tab_value.release());
+    }
   }
   if (tab_values->GetSize() == 0)
     return false;
   dictionary->SetString("type", "window");
-  dictionary->SetDouble("timestamp",
-      static_cast<double>(window.timestamp.ToInternalValue()));
+  dictionary->SetDouble("timestamp", modification_time.ToInternalValue());
+  const base::TimeDelta last_synced = base::Time::Now() - modification_time;
+  // If clock skew leads to a future time, or we last synced less than a minute
+  // ago, output "Just now".
+  dictionary->SetString("userVisibleTimestamp",
+      last_synced < base::TimeDelta::FromMinutes(1) ?
+          l10n_util::GetStringUTF16(IDS_SYNC_TIME_JUST_NOW) :
+          TimeFormat::TimeElapsed(last_synced));
   dictionary->SetInteger("sessionId", window.window_id.id());
   dictionary->Set("tabs", tab_values.release());
   return true;

@@ -8,12 +8,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/options2/chromeos/core_chromeos_options_handler2.h"
-#include "chrome/browser/ui/webui/options2/chromeos/proxy_handler2.h"
+#include "chrome/browser/ui/webui/options2/chromeos/core_chromeos_options_handler.h"
+#include "chrome/browser/ui/webui/options2/chromeos/proxy_handler.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
@@ -36,10 +36,13 @@ class ProxySettingsHTMLSource : public ChromeURLDataManager::DataSource {
   // the path we registered.
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
-                                int request_id);
-  virtual std::string GetMimeType(const std::string&) const {
+                                int request_id) OVERRIDE;
+  virtual std::string GetMimeType(const std::string&) const OVERRIDE {
     return "text/html";
   }
+
+ protected:
+  virtual ~ProxySettingsHTMLSource() {}
 
  private:
   scoped_ptr<DictionaryValue> localized_strings_;

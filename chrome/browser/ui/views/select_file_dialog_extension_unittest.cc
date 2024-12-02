@@ -5,15 +5,16 @@
 #include "chrome/browser/ui/views/select_file_dialog_extension.h"
 
 #include "base/file_path.h"
-#include "content/public/common/selected_file_info.h"
+#include "ui/base/dialogs/selected_file_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class SelectFileDialogExtensionTest : public testing::Test {
  public:
   static SelectFileDialogExtension* CreateDialog(
-      SelectFileDialog::Listener* listener,
+      ui::SelectFileDialog::Listener* listener,
       int32 tab_id) {
-    SelectFileDialogExtension* dialog = new SelectFileDialogExtension(listener);
+    SelectFileDialogExtension* dialog = new SelectFileDialogExtension(listener,
+                                                                      NULL);
     // Simulate the dialog opening.
     EXPECT_FALSE(SelectFileDialogExtension::PendingExists(tab_id));
     dialog->AddPending(tab_id);
@@ -24,7 +25,7 @@ class SelectFileDialogExtensionTest : public testing::Test {
 
 // Client of a FileManagerDialog that deletes itself whenever the dialog
 // is closed.
-class SelfDeletingClient : public SelectFileDialog::Listener {
+class SelfDeletingClient : public ui::SelectFileDialog::Listener {
  public:
   explicit SelfDeletingClient(int32 tab_id) {
     dialog_ = SelectFileDialogExtensionTest::CreateDialog(this, tab_id);
@@ -37,7 +38,7 @@ class SelfDeletingClient : public SelectFileDialog::Listener {
 
   SelectFileDialogExtension* dialog() const { return dialog_.get(); }
 
-  // SelectFileDialog::Listener implementation
+  // ui::SelectFileDialog::Listener implementation
   virtual void FileSelected(const FilePath& path,
                             int index, void* params) OVERRIDE {
     delete this;
@@ -52,7 +53,7 @@ TEST_F(SelectFileDialogExtensionTest, SelfDeleting) {
   SelfDeletingClient* client = new SelfDeletingClient(kTabId);
   // Ensure we don't crash or trip an Address Sanitizer warning about
   // use-after-free.
-  content::SelectedFileInfo file_info;
+  ui::SelectedFileInfo file_info;
   SelectFileDialogExtension::OnFileSelected(kTabId, file_info, 0);
   // Simulate closing the dialog so the listener gets invoked.
   client->dialog()->ExtensionDialogClosing(NULL);

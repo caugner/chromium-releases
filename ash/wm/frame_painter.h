@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_FRAME_PAINTER_H_
 #define ASH_WM_FRAME_PAINTER_H_
-#pragma once
 
 #include <set>
 
@@ -80,6 +79,9 @@ class ASH_EXPORT FramePainter : public aura::WindowObserver,
   int NonClientHitTest(views::NonClientFrameView* view,
                        const gfx::Point& point);
   gfx::Size GetMinimumSize(views::NonClientFrameView* view);
+
+  // Returns the inset from the right edge.
+  int GetRightInset() const;
 
   // Paints the frame header.
   void PaintHeader(views::NonClientFrameView* view,

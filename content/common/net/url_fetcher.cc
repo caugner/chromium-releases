@@ -6,37 +6,9 @@
 
 #include "base/bind.h"
 #include "content/common/net/url_request_user_data.h"
-#include "net/url_request/url_fetcher_factory.h"
-#include "net/url_request/url_fetcher_impl.h"
+#include "net/url_request/url_fetcher.h"
 
-// static
-net::URLFetcher* content::URLFetcher::Create(
-    const GURL& url,
-    net::URLFetcher::RequestType request_type,
-    net::URLFetcherDelegate* d) {
-  return new net::URLFetcherImpl(url, request_type, d);
-}
-
-// static
-net::URLFetcher* content::URLFetcher::Create(
-    int id,
-    const GURL& url,
-    net::URLFetcher::RequestType request_type,
-    net::URLFetcherDelegate* d) {
-  net::URLFetcherFactory* factory = net::URLFetcherImpl::factory();
-  return factory ? factory->CreateURLFetcher(id, url, request_type, d) :
-                   new net::URLFetcherImpl(url, request_type, d);
-}
-
-// static
-void content::URLFetcher::CancelAll() {
-  net::URLFetcherImpl::CancelAll();
-}
-
-// static
-void content::URLFetcher::SetEnableInterceptionForTests(bool enabled) {
-  net::URLFetcherImpl::SetEnableInterceptionForTests(enabled);
-}
+namespace content {
 
 namespace {
 
@@ -47,8 +19,6 @@ base::SupportsUserData::Data* CreateURLRequestUserData(
 }
 
 }  // namespace
-
-namespace content {
 
 void AssociateURLFetcherWithRenderView(net::URLFetcher* url_fetcher,
                                        const GURL& first_party_for_cookies,

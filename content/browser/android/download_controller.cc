@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/download/download_item_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -17,7 +18,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
-#include "jni/download_controller_jni.h"
+#include "jni/DownloadController_jni.h"
 #include "net/cookies/cookie_options.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/http_request_headers.h"
@@ -30,17 +31,17 @@ using base::android::ConvertUTF8ToJavaString;
 using base::android::GetClass;
 using base::android::ScopedJavaLocalRef;
 
-// JNI methods
-static void Init(JNIEnv* env, jobject obj) {
-  content::DownloadController::GetInstance()->Init(env, obj);
-}
-
 namespace {
-const char* kDownloadControllerClassPathName =
+const char kDownloadControllerClassPathName[] =
     "org/chromium/content/browser/DownloadController";
 }  // namespace
 
 namespace content {
+
+// JNI methods
+static void Init(JNIEnv* env, jobject obj) {
+  DownloadController::GetInstance()->Init(env, obj);
+}
 
 struct DownloadController::JavaObject {
   ScopedJavaLocalRef<jobject> Controller(JNIEnv* env) {
@@ -185,8 +186,9 @@ void DownloadController::StartAndroidDownload(
   JNIEnv* env = AttachCurrentThread();
 
   // Call newHttpGetDownload
-  jobject view = GetContentView(render_process_id, render_view_id);
-  if (!view) {
+  ScopedJavaLocalRef<jobject> view = GetContentView(render_process_id,
+                                                    render_view_id);
+  if (view.is_null()) {
     // The view went away. Can't proceed.
     LOG(ERROR) << "Download failed on URL:" << info.url.spec();
     return;
@@ -204,7 +206,7 @@ void DownloadController::StartAndroidDownload(
       ConvertUTF8ToJavaString(env, info.cookie);
 
   Java_DownloadController_newHttpGetDownload(
-      env, GetJavaObject()->Controller(env).obj(), view, jurl.obj(),
+      env, GetJavaObject()->Controller(env).obj(), view.obj(), jurl.obj(),
       juser_agent.obj(), jcontent_disposition.obj(), jmime_type.obj(),
       jcookie.obj(), info.total_bytes);
 }
@@ -218,14 +220,15 @@ void DownloadController::OnPostDownloadStarted(
   // Register for updates to the DownloadItem.
   download_item->AddObserver(this);
 
-  jobject view = GetContentViewFromWebContents(web_contents);
-  if(!view) {
+  ScopedJavaLocalRef<jobject> view =
+      GetContentViewCoreFromWebContents(web_contents);
+  if(view.is_null()) {
     // The view went away. Can't proceed.
     return;
   }
 
   Java_DownloadController_onHttpPostDownloadStarted(
-      env, GetJavaObject()->Controller(env).obj(), view);
+      env, GetJavaObject()->Controller(env).obj(), view.obj());
 }
 
 void DownloadController::OnDownloadUpdated(DownloadItem* item) {
@@ -245,14 +248,15 @@ void DownloadController::OnDownloadUpdated(DownloadItem* item) {
   ScopedJavaLocalRef<jstring> jpath =
       ConvertUTF8ToJavaString(env, item->GetFullPath().value());
 
-  jobject view = GetContentViewFromWebContents(item->GetWebContents());
-  if(!view) {
+  ScopedJavaLocalRef<jobject> view_core = GetContentViewCoreFromWebContents(
+      item->GetWebContents());
+  if (view_core.is_null()) {
     // We can get NULL WebContents from the DownloadItem.
     return;
   }
 
   Java_DownloadController_onHttpPostDownloadCompleted(env,
-      GetJavaObject()->Controller(env).obj(), view, jurl.obj(),
+      GetJavaObject()->Controller(env).obj(), view_core.obj(), jurl.obj(),
       jcontent_disposition.obj(), jmime_type.obj(), jpath.obj(),
       item->GetReceivedBytes(), true);
 }
@@ -260,27 +264,31 @@ void DownloadController::OnDownloadUpdated(DownloadItem* item) {
 void DownloadController::OnDownloadOpened(DownloadItem* item) {
 }
 
-jobject DownloadController::GetContentView(int render_process_id,
-                                           int render_view_id) {
+ScopedJavaLocalRef<jobject> DownloadController::GetContentView(
+    int render_process_id, int render_view_id) {
   RenderViewHost* render_view_host =
       RenderViewHost::FromID(render_process_id, render_view_id);
 
   if (!render_view_host)
-    return NULL;
+    return ScopedJavaLocalRef<jobject>();
 
   WebContents* web_contents =
       render_view_host->GetDelegate()->GetAsWebContents();
 
   if (!web_contents)
-    return NULL;
+    return ScopedJavaLocalRef<jobject>();
 
-  return GetContentViewFromWebContents(web_contents);
+  return GetContentViewCoreFromWebContents(web_contents);
 }
 
-jobject DownloadController::GetContentViewFromWebContents(
+ScopedJavaLocalRef<jobject>
+    DownloadController::GetContentViewCoreFromWebContents(
     WebContents* web_contents) {
+  if (!web_contents)
+    return ScopedJavaLocalRef<jobject>();
+
   NOTIMPLEMENTED();
-  return NULL;
+  return ScopedJavaLocalRef<jobject>();
 }
 
 DownloadController::JavaObject* DownloadController::GetJavaObject() {

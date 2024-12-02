@@ -4,21 +4,23 @@
 
 #include "chrome/browser/chrome_browser_main_linux.h"
 
+#if !defined(OS_CHROMEOS)
 #include "chrome/browser/media_gallery/media_device_notifications_linux.h"
+#endif
 
 #if defined(USE_LINUX_BREAKPAD)
 #include <stdlib.h>
 
 #include "base/linux_util.h"
-#include "chrome/app/breakpad_linuxish.h"
+#include "chrome/app/breakpad_linux.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/cros_settings_names.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #endif
@@ -28,9 +30,16 @@
 namespace {
 
 #if defined(USE_LINUX_BREAKPAD)
+#if defined(OS_CHROMEOS)
+void ChromeOSVersionCallback(chromeos::VersionLoader::Handle,
+                             const std::string& version) {
+  base::SetLinuxDistro(std::string("CrOS ") + version);
+}
+#else
 void GetLinuxDistroCallback() {
   base::GetLinuxDistro();  // Initialize base::linux_distro if needed.
 }
+#endif
 
 bool IsCrashReportingEnabled(const PrefService* local_state) {
   // Check whether we should initialize the crash reporter. It may be disabled
@@ -77,20 +86,39 @@ ChromeBrowserMainPartsLinux::~ChromeBrowserMainPartsLinux() {
 
 void ChromeBrowserMainPartsLinux::PreProfileInit() {
 #if defined(USE_LINUX_BREAKPAD)
+#if defined(OS_CHROMEOS)
+  cros_version_loader_.GetVersion(&cros_consumer_,
+                                  base::Bind(&ChromeOSVersionCallback),
+                                  chromeos::VersionLoader::VERSION_FULL);
+#else
   // Needs to be called after we have chrome::DIR_USER_DATA and
   // g_browser_process.  This happens in PreCreateThreads.
   content::BrowserThread::PostTask(content::BrowserThread::FILE,
                                    FROM_HERE,
                                    base::Bind(&GetLinuxDistroCallback));
+#endif
 
   if (IsCrashReportingEnabled(local_state()))
     InitCrashReporter();
 #endif
 
+#if !defined(OS_CHROMEOS)
   const FilePath kDefaultMtabPath("/etc/mtab");
   media_device_notifications_linux_ =
       new chrome::MediaDeviceNotificationsLinux(kDefaultMtabPath);
   media_device_notifications_linux_->Init();
+#endif
 
   ChromeBrowserMainPartsPosix::PreProfileInit();
+}
+
+void ChromeBrowserMainPartsLinux::PostMainMessageLoopRun() {
+#if !defined(OS_CHROMEOS)
+  // Release it now. Otherwise the FILE thread would be gone when we try to
+  // release it in the dtor and Valgrind would report a leak on almost ever
+  // single browser_test.
+  media_device_notifications_linux_ = NULL;
+#endif
+
+  ChromeBrowserMainPartsPosix::PostMainMessageLoopRun();
 }

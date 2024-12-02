@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_MENU_MENU_ITEM_VIEW_H_
 #define UI_VIEWS_CONTROLS_MENU_MENU_ITEM_VIEW_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -239,8 +238,10 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Sets the icon of this menu item.
   void SetIcon(const gfx::ImageSkia& icon);
 
-  // Returns the icon.
-  const gfx::ImageSkia& GetIcon() const { return icon_; }
+  // Sets the view used to render the icon. This clobbers any icon set via
+  // SetIcon(). MenuItemView takes ownership of |icon_view|.
+  void SetIconView(View* icon_view);
+  View* icon_view() { return icon_view_; }
 
   // Sets the command id of this menu item.
   void SetCommand(int command) { command_ = command; }
@@ -287,7 +288,7 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Sizes any child views.
   virtual void Layout() OVERRIDE;
 
-  // Returns the amount of space needed to accomodate the accelerator. The
+  // Returns the amount of space needed to accommodate the accelerator. The
   // space needed for the accelerator is NOT included in the preferred width.
   int GetAcceleratorTextWidth();
 
@@ -321,13 +322,20 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   virtual std::string GetClassName() const OVERRIDE;
 
+  // Returns the preferred size (and padding) of any children.
+  virtual gfx::Size GetChildPreferredSize();
+
+  // Returns the various margins.
+  int GetTopMargin();
+  int GetBottomMargin();
+
  private:
   friend class internal::MenuRunnerImpl;  // For access to ~MenuItemView.
 
   // Calculates all sizes that we can from the OS.
   //
   // This is invoked prior to Running a menu.
-  static void UpdateMenuPartSizes(bool has_icons);
+  void UpdateMenuPartSizes();
 
   // Called by the two constructors to initialize this menu item.
   void Init(MenuItemView* parent,
@@ -382,13 +390,6 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns the accelerator text.
   string16 GetAcceleratorText();
 
-  // Returns the various margins.
-  int GetTopMargin();
-  int GetBottomMargin();
-
-  // Returns the preferred size (and padding) of any children.
-  gfx::Size GetChildPreferredSize();
-
   // Calculates the preferred size.
   gfx::Size CalculatePreferredSize();
 
@@ -404,6 +405,12 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns true if this MenuItemView contains a single child
   // that is responsible for rendering the content.
   bool IsContainer() const;
+
+  // Returns number of child views excluding icon_view.
+  int NonIconChildViewsCount() const;
+
+  // Returns the max icon width; recurses over submenus.
+  int GetMaxIconViewWidth() const;
 
   // The delegate. This is only valid for the root menu item. You shouldn't
   // use this directly, instead use GetDelegate() which walks the tree as
@@ -435,9 +442,6 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Title.
   string16 title_;
 
-  // Icon.
-  gfx::ImageSkia icon_;
-
   // Does the title have a mnemonic? Only useful on the root menu item.
   bool has_mnemonics_;
 
@@ -445,10 +449,17 @@ class VIEWS_EXPORT MenuItemView : public View {
   // MenuConfig says mnemonics should be shown. Only used on the root menu item.
   bool show_mnemonics_;
 
+  // Set if menu has icons or icon_views (applies to root menu item only).
   bool has_icons_;
+
+  // Pointer to a view with a menu icon.
+  View* icon_view_;
 
   // The tooltip to show on hover for this menu item.
   string16 tooltip_;
+
+  // Width of a menu icon area.
+  static int icon_area_width_;
 
   // X-coordinate of where the label starts.
   static int label_start_;

@@ -5,9 +5,17 @@
 #include "content/renderer/media/render_audiosourceprovider.h"
 
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/logging.h"
+#include "content/public/common/content_switches.h"
+#include "content/renderer/media/audio_device_factory.h"
+#include "content/renderer/media/audio_renderer_mixer_manager.h"
+#include "content/renderer/render_thread_impl.h"
+#include "media/base/audio_renderer_mixer_input.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAudioSourceProviderClient.h"
 
+using content::AudioDeviceFactory;
+using content::AudioRendererMixerManager;
 using std::vector;
 using WebKit::WebVector;
 
@@ -16,15 +24,19 @@ RenderAudioSourceProvider::RenderAudioSourceProvider()
       channels_(0),
       sample_rate_(0),
       is_running_(false),
-      volume_(1.0),
       renderer_(NULL),
       client_(NULL) {
-  // We create the AudioDevice here because it must be created in the
-  // main thread.  But we don't yet know the audio format (sample-rate, etc.)
-  // at this point.  Later, when Initialize() is called, we have
-  // the audio format information and call the AudioDevice::Initialize()
-  // method to fully initialize it.
-  default_sink_ = new AudioDevice();
+  // We create an AudioRendererSink here, but we don't yet know the audio format
+  // (sample-rate, etc.) at this point.  Later, when Initialize() is called, we
+  // have the audio format information and call AudioRendererSink::Initialize()
+  // to fully initialize it.
+  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kEnableRendererSideMixing)) {
+    default_sink_ = RenderThreadImpl::current()->
+        GetAudioRendererMixerManager()->CreateInput();
+  } else {
+    default_sink_ = AudioDeviceFactory::NewOutputDevice();
+  }
 }
 
 void RenderAudioSourceProvider::setClient(
@@ -71,7 +83,7 @@ void RenderAudioSourceProvider::provideInput(
   } else {
     // Provide silence if the source is not running.
     for (size_t i = 0; i < audio_data.size(); ++i)
-      memset(audio_data[i], 0, sizeof(float) * number_of_frames);
+      memset(audio_data[i], 0, sizeof(*audio_data[0]) * number_of_frames);
   }
 }
 
@@ -103,25 +115,11 @@ void RenderAudioSourceProvider::Pause(bool flush) {
   is_running_ = false;
 }
 
-void RenderAudioSourceProvider::SetPlaybackRate(float rate) {
-  base::AutoLock auto_lock(sink_lock_);
-  if (!client_)
-    default_sink_->SetPlaybackRate(rate);
-}
-
 bool RenderAudioSourceProvider::SetVolume(double volume) {
   base::AutoLock auto_lock(sink_lock_);
   if (!client_)
     default_sink_->SetVolume(volume);
-  volume_ = volume;
   return true;
-}
-
-void RenderAudioSourceProvider::GetVolume(double* volume) {
-  if (!client_)
-    default_sink_->GetVolume(volume);
-  else if (volume)
-    *volume = volume_;
 }
 
 void RenderAudioSourceProvider::Initialize(

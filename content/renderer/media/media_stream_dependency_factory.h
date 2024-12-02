@@ -58,9 +58,6 @@ class CONTENT_EXPORT MediaStreamDependencyFactory {
   virtual talk_base::scoped_refptr<webrtc::PeerConnectionInterface>
       CreatePeerConnection(const std::string& config,
                            webrtc::PeerConnectionObserver* observer);
-  virtual talk_base::scoped_refptr<webrtc::PeerConnectionInterface>
-      CreateRoapPeerConnection(const std::string& config,
-                               webrtc::PeerConnectionObserver* observer);
 
   // Asks the PeerConnection factory to create a Local MediaStream object.
   virtual talk_base::scoped_refptr<webrtc::LocalMediaStreamInterface>
@@ -71,7 +68,6 @@ class CONTENT_EXPORT MediaStreamDependencyFactory {
       CreateLocalVideoTrack(const std::string& label,
                             int video_session_id);
 
-
   // Asks the PeerConnection factory to create a Local AudioTrack object.
   virtual talk_base::scoped_refptr<webrtc::LocalAudioTrackInterface>
       CreateLocalAudioTrack(const std::string& label,
@@ -80,7 +76,8 @@ class CONTENT_EXPORT MediaStreamDependencyFactory {
   virtual webrtc::SessionDescriptionInterface* CreateSessionDescription(
       const std::string& sdp);
   virtual webrtc::IceCandidateInterface* CreateIceCandidate(
-      const std::string& label,
+      const std::string& sdp_mid,
+      int sdp_mline_index,
       const std::string& sdp);
 
  private:

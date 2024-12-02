@@ -4,14 +4,14 @@
 
 #ifndef CHROME_BROWSER_PAGE_CYCLER_PAGE_CYCLER_H_
 #define CHROME_BROWSER_PAGE_CYCLER_PAGE_CYCLER_H_
-#pragma once
 
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_list_observer.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents_observer.h"
+
+class Browser;
 
 namespace content {
 class RenderViewHost;
@@ -26,18 +26,20 @@ class TimeTicks;
 // does most of its work there. However, some work happens on background threads
 // too; those are named with 'OnBackgroundThread'.
 class PageCycler : public base::RefCountedThreadSafe<PageCycler>,
-                   public BrowserList::Observer,
+                   public chrome::BrowserListObserver,
                    public content::WebContentsObserver {
  public:
   PageCycler(Browser* browser, const FilePath& urls_file);
 
   // Begin running the page cycler.
-  void Run(const int& total_iterations);
+  void Run();
 
   // content::WebContentsObserver
-  virtual void DidFinishLoad(int64 frame_id,
-                             const GURL& validated_url,
-                             bool is_main_frame) OVERRIDE;
+  virtual void DidFinishLoad(
+      int64 frame_id,
+      const GURL& validated_url,
+      bool is_main_frame,
+      content::RenderViewHost* render_view_host) OVERRIDE;
   virtual void DidFailProvisionalLoad(
       int64 frame_id,
       bool is_main_frame,
@@ -102,7 +104,7 @@ class PageCycler : public base::RefCountedThreadSafe<PageCycler>,
   // PageCycler.
   void Abort();
 
-  // BrowserList::Observer
+  // chrome::BrowserListObserver
   virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
 
@@ -124,12 +126,6 @@ class PageCycler : public base::RefCountedThreadSafe<PageCycler>,
 
   // The current index into the |urls_| vector.
   size_t url_index_;
-
-  // The number of total iterations to be run.
-  int total_iterations_;
-
-  // The number of the current iteration.
-  int current_iteration_;
 
   // The generated string of urls which we have visited; this is built one url
   // at a time as we iterate through the |urls_| vector. This is primarily

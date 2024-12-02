@@ -39,11 +39,12 @@
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -198,11 +199,12 @@ AutofillManager::AutofillManager(TabContents* tab_contents)
   RegisterWithSyncService();
   registrar_.Init(tab_contents->profile()->GetPrefs());
   registrar_.Add(prefs::kPasswordGenerationEnabled, this);
+  notification_registrar_.Add(this,
+      chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+      content::Source<TabContents>(tab_contents));
 }
 
 AutofillManager::~AutofillManager() {
-  if (sync_service_ && sync_service_->HasObserver(this))
-    sync_service_->RemoveObserver(this);
 }
 
 // static
@@ -233,10 +235,8 @@ void AutofillManager::RegisterUserPrefs(PrefService* prefs) {
 void AutofillManager::RegisterWithSyncService() {
   ProfileSyncService* temp_sync_service =
       ProfileSyncServiceFactory::GetForProfile(tab_contents_->profile());
-  if (temp_sync_service) {
-    sync_service_ = temp_sync_service->AsWeakPtr();
-    sync_service_->AddObserver(this);
-  }
+  if (temp_sync_service)
+    temp_sync_service->AddObserver(this);
 }
 
 void AutofillManager::SendPasswordGenerationStateToRenderer(
@@ -252,13 +252,15 @@ void AutofillManager::SendPasswordGenerationStateToRenderer(
 void AutofillManager::UpdatePasswordGenerationState(
     content::RenderViewHost* host,
     bool new_renderer) {
-  if (!sync_service_)
-    return;
+  ProfileSyncService* service = ProfileSyncServiceFactory::GetForProfile(
+      tab_contents_->profile());
 
-  syncable::ModelTypeSet sync_set = sync_service_->GetPreferredDataTypes();
-  bool password_sync_enabled =
-      sync_service_->HasSyncSetupCompleted() &&
-      sync_set.Has(syncable::PASSWORDS);
+  bool password_sync_enabled = false;
+  if (service) {
+    syncer::ModelTypeSet sync_set = service->GetPreferredDataTypes();
+    password_sync_enabled =
+      service->HasSyncSetupCompleted() && sync_set.Has(syncer::PASSWORDS);
+  }
 
   bool password_manager_enabled =
       tab_contents_->password_manager()->IsSavingEnabled();
@@ -288,11 +290,22 @@ void AutofillManager::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (type == chrome::NOTIFICATION_PREF_CHANGED) {
   std::string* pref = content::Details<std::string>(details).ptr();
-  DCHECK(*pref == prefs::kPasswordGenerationEnabled);
+    DCHECK(prefs::kPasswordGenerationEnabled == *pref);
   UpdatePasswordGenerationState(web_contents()->GetRenderViewHost(), false);
+  } else if (type == chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED) {
+    if (ProfileSyncServiceFactory::HasProfileSyncService(
+          tab_contents_->profile())) {
+      ProfileSyncService* service = ProfileSyncServiceFactory::GetForProfile(
+          tab_contents_->profile());
+      if (service->HasObserver(this))
+        service->RemoveObserver(this);
+    }
+  } else {
+    NOTREACHED();
+  }
 }
 
 void AutofillManager::OnStateChanged() {
@@ -667,10 +680,9 @@ void AutofillManager::OnShowAutofillDialog() {
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  Browser* browser = browser::FindLastActiveWithProfile(
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents());
   if (browser)
-    browser->ShowOptionsTab(chrome::kAutofillSubPage);
+    chrome::ShowSettingsSubPage(browser, chrome::kAutofillSubPage);
 #endif  // #if defined(OS_ANDROID)
 }
 
@@ -726,8 +738,7 @@ void AutofillManager::OnShowPasswordGenerationPopup(
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  Browser* browser = browser::FindLastActiveWithProfile(
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents());
   password_generator_.reset(new autofill::PasswordGenerator(max_length));
   browser->window()->ShowPasswordGenerationBubble(
       bounds, password_generator_.get(), form);
@@ -883,7 +894,7 @@ void AutofillManager::UploadFormData(const FormStructure& submitted_form) {
 }
 
 void AutofillManager::Reset() {
-  form_structures_.reset();
+  form_structures_.clear();
   has_logged_autofill_enabled_ = false;
   has_logged_address_suggestions_count_ = false;
   did_show_suggestions_ = false;

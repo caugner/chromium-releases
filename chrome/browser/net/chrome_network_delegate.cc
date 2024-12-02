@@ -11,9 +11,10 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/api/proxy/proxy_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
-#include "chrome/browser/extensions/extension_event_router_forwarder.h"
+#include "chrome/browser/extensions/event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/net/cache_stats.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
@@ -25,7 +26,8 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
-#include "net/cookies/cookie_monster.h"
+#include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_options.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/socket_stream/socket_stream.h"
@@ -60,7 +62,7 @@ namespace {
 // If the |request| failed due to problems with a proxy, forward the error to
 // the proxy extension API.
 void ForwardProxyErrors(net::URLRequest* request,
-                        ExtensionEventRouterForwarder* event_router,
+                        extensions::EventRouterForwarder* event_router,
                         void* profile) {
   if (request->status().status() == net::URLRequestStatus::FAILED) {
     switch (request->status().error()) {
@@ -124,18 +126,20 @@ void ForwardRequestStatus(
 }  // namespace
 
 ChromeNetworkDelegate::ChromeNetworkDelegate(
-    ExtensionEventRouterForwarder* event_router,
+    extensions::EventRouterForwarder* event_router,
     ExtensionInfoMap* extension_info_map,
     const policy::URLBlacklistManager* url_blacklist_manager,
     void* profile,
     CookieSettings* cookie_settings,
-    BooleanPrefMember* enable_referrers)
+    BooleanPrefMember* enable_referrers,
+    chrome_browser_net::CacheStats* cache_stats)
     : event_router_(event_router),
       profile_(profile),
       cookie_settings_(cookie_settings),
       extension_info_map_(extension_info_map),
       enable_referrers_(enable_referrers),
-      url_blacklist_manager_(url_blacklist_manager) {
+      url_blacklist_manager_(url_blacklist_manager),
+      cache_stats_(cache_stats) {
   DCHECK(event_router);
   DCHECK(enable_referrers);
   DCHECK(!profile || cookie_settings);
@@ -391,4 +395,11 @@ int ChromeNetworkDelegate::OnBeforeSocketStreamConnect(
   }
 #endif
   return net::OK;
+}
+
+void ChromeNetworkDelegate::OnCacheWaitStateChange(
+    const net::URLRequest& request,
+    CacheWaitState state) {
+  if (cache_stats_)
+    cache_stats_->OnCacheWaitStateChange(request, state);
 }

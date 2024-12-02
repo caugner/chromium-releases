@@ -15,9 +15,9 @@
 #include "chrome/browser/chromeos/gdata/gdata_errorcode.h"
 #include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
-#include "chrome/browser/chromeos/gdata/gdata_parser.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/gdata/gdata_wapi_parser.h"
 #include "chrome/browser/chromeos/gdata/mock_gdata_documents_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
@@ -26,9 +26,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
@@ -84,8 +84,8 @@ class BackgroundObserver {
   }
 
  private:
-  ui_test_utils::WindowedNotificationObserver page_created_;
-  ui_test_utils::WindowedNotificationObserver page_closed_;
+  content::WindowedNotificationObserver page_created_;
+  content::WindowedNotificationObserver page_closed_;
 };
 
 // TODO(tbarzic): We should probably share GetTestFilePath and LoadJSONFile
@@ -193,22 +193,42 @@ class RemoteFileSystemExtensionApiTest : public ExtensionApiTest {
 
   virtual ~RemoteFileSystemExtensionApiTest() {}
 
-  // Sets up GDataFileSystem that will be used in the test.
-  // NOTE: Remote mount point should get added to mount poitn provider when
-  // getLocalFileSystem is called from filebrowser_component extension.
-  virtual void SetupGDataFileSystemForTest() {
-    gdata::GDataSystemService* system_service =
-        gdata::GDataSystemServiceFactory::GetForProfile(browser()->profile());
-    EXPECT_TRUE(system_service && system_service->file_system());
+  virtual void SetUp() OVERRIDE {
+    // Set up cache root and documents service to be used when creating gdata
+    // system service. This has to be done early on (before the browser is
+    // created) because the system service instance is initialized very early
+    // by FileBrowserEventRouter.
+    FilePath tmp_dir_path;
+    PathService::Get(base::DIR_TEMP, &tmp_dir_path);
+    ASSERT_TRUE(test_cache_root_.CreateUniqueTempDirUnderPath(tmp_dir_path));
+    gdata::GDataSystemServiceFactory::set_cache_root_for_test(
+        test_cache_root_.path().value());
 
-    mock_documents_service_.reset(new gdata::MockDocumentsService());
+    mock_documents_service_ = new gdata::MockDocumentsService();
+
     operation_registry_.reset(new gdata::GDataOperationRegistry());
-    system_service->file_system()->SetDocumentsServiceForTesting(
-        mock_documents_service_.get());
+    // FileBrowserEventRouter will add and remove itself from operation registry
+    // observer list.
+    EXPECT_CALL(*mock_documents_service_, operation_registry()).
+        WillRepeatedly(Return(operation_registry_.get()));
+
+    // |mock_documents_service_| will eventually get owned by a system service.
+    gdata::GDataSystemServiceFactory::set_documents_service_for_test(
+        mock_documents_service_);
+
+    ExtensionApiTest::SetUp();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    // Let's make sure we don't leak documents service.
+    gdata::GDataSystemServiceFactory::set_documents_service_for_test(NULL);
+    gdata::GDataSystemServiceFactory::set_cache_root_for_test(std::string());
+    ExtensionApiTest::TearDown();
   }
 
  protected:
-  scoped_ptr<gdata::MockDocumentsService> mock_documents_service_;
+  ScopedTempDir test_cache_root_;
+  gdata::MockDocumentsService* mock_documents_service_;
   scoped_ptr<gdata::GDataOperationRegistry> operation_registry_;
 };
 
@@ -258,8 +278,6 @@ IN_PROC_BROWSER_TEST_F(FileSystemExtensionApiTest,
 
 IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
                        RemoteMountPoint) {
-  SetupGDataFileSystemForTest();
-
   EXPECT_CALL(*mock_documents_service_, GetAccountMetadata(_)).Times(1);
 
   // First, file browser will try to create new directory.
@@ -299,10 +317,6 @@ IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
 
   // On exit, all operations in progress should be cancelled.
   EXPECT_CALL(*mock_documents_service_, CancelAll());
-  // This one is called on exit, but we don't care much about it, as long as it
-  // retunrs something valid (i.e. not NULL).
-  EXPECT_CALL(*mock_documents_service_, operation_registry()).
-      WillRepeatedly(Return(operation_registry_.get()));
 
   // All is set... RUN THE TEST.
   EXPECT_TRUE(RunExtensionTest("filesystem_handler")) << message_;
@@ -310,10 +324,14 @@ IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
       kComponentFlags)) << message_;
 }
 
+// This test fails under AddressSanitizer, see http://crbug.com/136169.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ContentSearch DISABLED_ContentSearch
+#else
+#define MAYBE_ContentSearch ContentSearch
+#endif
 IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
-                       ContentSearch) {
-  SetupGDataFileSystemForTest();
-
+                       MAYBE_ContentSearch) {
   EXPECT_CALL(*mock_documents_service_, GetAccountMetadata(_)).Times(1);
 
   // First, test will get drive root directory, to init file system.
@@ -347,10 +365,6 @@ IN_PROC_BROWSER_TEST_F(RemoteFileSystemExtensionApiTest,
 
   // On exit, all operations in progress should be cancelled.
   EXPECT_CALL(*mock_documents_service_, CancelAll());
-  // This one is called on exit, but we don't care much about it, as long as it
-  // retunrs something valid (i.e. not NULL).
-  EXPECT_CALL(*mock_documents_service_, operation_registry()).
-      WillRepeatedly(Return(operation_registry_.get()));
 
   // All is set... RUN THE TEST.
   EXPECT_TRUE(RunExtensionSubtest("filebrowser_component", "remote_search.html",

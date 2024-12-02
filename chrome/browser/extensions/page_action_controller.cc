@@ -4,24 +4,29 @@
 
 #include "chrome/browser/extensions/page_action_controller.h"
 
-#include "chrome/browser/extensions/extension_browser_event_router.h"
+#include "chrome/browser/extensions/browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "content/public/browser/invalidate_type.h"
+#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 
 namespace extensions {
 
 PageActionController::PageActionController(TabContents* tab_contents)
-    : tab_contents_(tab_contents) {}
+    : content::WebContentsObserver(tab_contents->web_contents()),
+      tab_contents_(tab_contents) {}
 
 PageActionController::~PageActionController() {}
 
-std::vector<ExtensionAction*> PageActionController::GetCurrentActions() {
+std::vector<ExtensionAction*> PageActionController::GetCurrentActions() const {
   ExtensionService* service = GetExtensionService();
   if (!service)
     return std::vector<ExtensionAction*>();
@@ -49,6 +54,9 @@ LocationBarController::Action PageActionController::OnClicked(
   CHECK(page_action);
   int tab_id = ExtensionTabUtil::GetTabId(tab_contents_->web_contents());
 
+  tab_contents_->extension_tab_helper()->active_tab_permission_manager()->
+      GrantIfRequested(extension);
+
   switch (mouse_button) {
     case 1:  // left
     case 2:  // middle
@@ -57,8 +65,7 @@ LocationBarController::Action PageActionController::OnClicked(
 
       GetExtensionService()->browser_event_router()->PageActionExecuted(
           tab_contents_->profile(),
-          extension->id(),
-          page_action->id(),
+          *page_action,
           tab_id,
           tab_contents_->web_contents()->GetURL().spec(),
           mouse_button);
@@ -72,7 +79,31 @@ LocationBarController::Action PageActionController::OnClicked(
   return ACTION_NONE;
 }
 
-ExtensionService* PageActionController::GetExtensionService() {
+void PageActionController::NotifyChange() {
+  tab_contents_->web_contents()->NotifyNavigationStateChanged(
+      content::INVALIDATE_TYPE_PAGE_ACTIONS);
+}
+
+void PageActionController::DidNavigateMainFrame(
+    const content::LoadCommittedDetails& details,
+    const content::FrameNavigateParams& params) {
+  if (details.is_in_page)
+    return;
+
+  const std::vector<ExtensionAction*> current_actions = GetCurrentActions();
+
+  if (current_actions.empty())
+    return;
+
+  for (size_t i = 0; i < current_actions.size(); ++i) {
+    current_actions[i]->ClearAllValuesForTab(
+        SessionID::IdForTab(tab_contents_));
+  }
+
+  NotifyChange();
+}
+
+ExtensionService* PageActionController::GetExtensionService() const {
   return ExtensionSystem::Get(tab_contents_->profile())->extension_service();
 }
 

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_SPEECH_SPEECH_RECOGNITION_ENGINE_H_
 #define CONTENT_BROWSER_SPEECH_SPEECH_RECOGNITION_ENGINE_H_
-#pragma once
 
 #include <string>
 
@@ -56,6 +55,7 @@ class SpeechRecognitionEngine {
     std::string language;
     content::SpeechRecognitionGrammarArray grammars;
     bool filter_profanities;
+    uint32 max_hypotheses;
     std::string hardware_info;
     std::string origin_url;
     int audio_sample_rate;

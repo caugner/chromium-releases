@@ -46,19 +46,23 @@ class MEDIA_EXPORT VideoRendererBase
                     const SetOpaqueCB& set_opaque_cb,
                     bool drop_frames);
 
-  // Filter implementation.
+  // VideoRenderer implementation.
+  virtual void Initialize(const scoped_refptr<VideoDecoder>& decoder,
+                          const PipelineStatusCB& init_cb,
+                          const StatisticsCB& statistics_cb,
+                          const TimeCB& time_cb,
+                          const NaturalSizeChangedCB& size_changed_cb,
+                          const base::Closure& ended_cb,
+                          const PipelineStatusCB& error_cb,
+                          const TimeDeltaCB& get_time_cb,
+                          const TimeDeltaCB& get_duration_cb) OVERRIDE;
   virtual void Play(const base::Closure& callback) OVERRIDE;
   virtual void Pause(const base::Closure& callback) OVERRIDE;
   virtual void Flush(const base::Closure& callback) OVERRIDE;
+  virtual void Preroll(base::TimeDelta time,
+                       const PipelineStatusCB& cb) OVERRIDE;
   virtual void Stop(const base::Closure& callback) OVERRIDE;
   virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
-  virtual void Seek(base::TimeDelta time, const PipelineStatusCB& cb) OVERRIDE;
-
-  // VideoRenderer implementation.
-  virtual void Initialize(const scoped_refptr<VideoDecoder>& decoder,
-                          const PipelineStatusCB& status_cb,
-                          const StatisticsCB& statistics_cb,
-                          const TimeCB& time_cb) OVERRIDE;
   virtual bool HasEnded() OVERRIDE;
 
   // PlatformThread::Delegate implementation.
@@ -69,7 +73,7 @@ class MEDIA_EXPORT VideoRendererBase
   // by use PutCurrentFrame(). Current frame is not guaranteed to be non-NULL.
   // It expects clients to use color-fill the background if current frame
   // is NULL. This could happen before pipeline is pre-rolled or during
-  // pause/flush/seek.
+  // pause/flush/preroll.
   void GetCurrentFrame(scoped_refptr<VideoFrame>* frame_out);
   void PutCurrentFrame(scoped_refptr<VideoFrame> frame);
 
@@ -80,7 +84,10 @@ class MEDIA_EXPORT VideoRendererBase
   // Callback from the video decoder delivering decoded video frames and
   // reporting video decoder status.
   void FrameReady(VideoDecoder::DecoderStatus status,
-                  scoped_refptr<VideoFrame> frame);
+                  const scoped_refptr<VideoFrame>& frame);
+
+  // Helper method for adding a frame to |ready_frames_|
+  void AddReadyFrame(const scoped_refptr<VideoFrame>& frame);
 
   // Helper method that schedules an asynchronous read from the decoder as long
   // as there isn't a pending read and we have capacity.
@@ -100,14 +107,15 @@ class MEDIA_EXPORT VideoRendererBase
       const scoped_refptr<VideoFrame>& next_frame,
       float playback_rate);
 
-  // Safely handles entering to an error state.
-  void EnterErrorState_Locked(PipelineStatus status);
-
   // Helper function that flushes the buffers when a Stop() or error occurs.
   void DoStopOrError_Locked();
 
   // Return the number of frames currently held by this class.
   int NumFrames_Locked() const;
+
+  // Updates |current_frame_| to the next frame on |ready_frames_| and calls
+  // |size_changed_cb_| if the natural size changes.
+  void SetCurrentFrameToNextReadyFrame();
 
   // Used for accessing data members.
   base::Lock lock_;
@@ -142,9 +150,9 @@ class MEDIA_EXPORT VideoRendererBase
   //              | Initialize()
   //              V        All frames returned
   //   +------[kFlushed]<-----[kFlushing]<--- OnDecoderFlushDone()
-  //   |          | Seek() or upon                  ^
+  //   |          | Preroll() or upon                  ^
   //   |          V got first frame           [kFlushingDecoder]
-  //   |      [kSeeking]                            ^
+  //   |      [kPrerolling]                            ^
   //   |          |                                 | Flush()
   //   |          V Got enough frames               |
   //   |      [kPrerolled]---------------------->[kPaused]
@@ -167,7 +175,7 @@ class MEDIA_EXPORT VideoRendererBase
     kFlushingDecoder,
     kFlushing,
     kFlushed,
-    kSeeking,
+    kPrerolling,
     kPlaying,
     kEnded,
     kStopped,
@@ -195,13 +203,24 @@ class MEDIA_EXPORT VideoRendererBase
 
   float playback_rate_;
 
-  // Filter callbacks.
+  // Playback operation callbacks.
   base::Closure flush_cb_;
-  PipelineStatusCB seek_cb_;
+  PipelineStatusCB preroll_cb_;
+
+  // Event callbacks.
   StatisticsCB statistics_cb_;
   TimeCB time_cb_;
+  NaturalSizeChangedCB size_changed_cb_;
+  base::Closure ended_cb_;
+  PipelineStatusCB error_cb_;
+  TimeDeltaCB get_time_cb_;
+  TimeDeltaCB get_duration_cb_;
 
-  base::TimeDelta seek_timestamp_;
+  base::TimeDelta preroll_timestamp_;
+
+  // Delayed frame used during kPrerolling to determine whether
+  // |preroll_timestamp_| is between this frame and the next one.
+  scoped_refptr<VideoFrame> prerolling_delayed_frame_;
 
   // Embedder callback for notifying a new frame is available for painting.
   base::Closure paint_cb_;
@@ -209,6 +228,9 @@ class MEDIA_EXPORT VideoRendererBase
   // Callback to execute to inform the player if the video decoder's output is
   // opaque.
   SetOpaqueCB set_opaque_cb_;
+
+  // The last natural size |size_changed_cb_| was called with.
+  gfx::Size last_natural_size_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoRendererBase);
 };

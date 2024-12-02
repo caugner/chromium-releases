@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_KEYBINDING_REGISTRY_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_KEYBINDING_REGISTRY_H_
-#pragma once
 
 #include <string>
 
@@ -39,11 +38,16 @@ class ExtensionKeybindingRegistry : public content::NotificationObserver {
 
  protected:
   // Add extension keybinding for the events defined by the |extension|.
+  // |command_name| is optional, but if not blank then only the command
+  // specified will be added.
   virtual void AddExtensionKeybinding(
-      const Extension* extension) = 0;
-  // Remove extension bindings for |extension|.
+      const Extension* extension,
+      const std::string& command_name) = 0;
+  // Remove extension bindings for |extension|. |command_name| is optional,
+  // but if not blank then only the command specified will be added.
   virtual void RemoveExtensionKeybinding(
-      const Extension* extension) = 0;
+      const Extension* extension,
+      const std::string& command_name) = 0;
 
   // Make sure all extensions registered have keybindings added.
   void Init();

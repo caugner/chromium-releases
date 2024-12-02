@@ -27,6 +27,7 @@
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -45,10 +46,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/url_fetcher.h"
 #include "grit/browser_resources.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -334,8 +335,11 @@ void TranslateManager::Observe(int type,
           load_details->type != content::NAVIGATION_TYPE_SAME_PAGE) {
         return;
       }
-      // When doing a page reload, we don't get a TAB_LANGUAGE_DETERMINED
-      // notification.  So we need to explictly initiate the translation.
+      // When doing a page reload, TAB_LANGUAGE_DETERMINED is not sent,
+      // so the translation needs to be explicitly initiated, but only when the
+      // page is translatable.
+      if (!helper->language_state().page_translatable())
+        return;
       // Note that we delay it as the TranslateManager gets this notification
       // before the WebContents and the WebContents processing might remove the
       // current infobars.  Since InitTranslation might add an infobar, it must
@@ -674,15 +678,13 @@ void TranslateManager::ReportLanguageDetectionError(WebContents* web_contents) {
   report_error_url +=
       GetLanguageCode(g_browser_process->GetApplicationLocale());
   // Open that URL in a new tab so that the user can tell us more.
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  Browser* browser = browser::FindLastActiveWithProfile(profile);
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents);
   if (!browser) {
     NOTREACHED();
     return;
   }
-  browser->AddSelectedTabWithURL(GURL(report_error_url),
-                                 content::PAGE_TRANSITION_AUTO_BOOKMARK);
+  chrome::AddSelectedTabWithURL(browser, GURL(report_error_url),
+                                content::PAGE_TRANSITION_AUTO_BOOKMARK);
 }
 
 void TranslateManager::DoTranslatePage(WebContents* web_contents,
@@ -812,7 +814,7 @@ void TranslateManager::FetchLanguageListFromTranslateServer(
   std::string language_list_fetch_url = base::StringPrintf(
       kLanguageListFetchURL,
       GetLanguageCode(g_browser_process->GetApplicationLocale()).c_str());
-  language_list_request_pending_.reset(content::URLFetcher::Create(
+  language_list_request_pending_.reset(net::URLFetcher::Create(
       1, GURL(language_list_fetch_url), net::URLFetcher::GET, this));
   language_list_request_pending_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                                                net::LOAD_DO_NOT_SAVE_COOKIES);
@@ -834,7 +836,7 @@ void TranslateManager::RequestTranslateScript() {
   std::string translate_script_url = base::StringPrintf(
       kTranslateScriptURL,
       GetLanguageCode(g_browser_process->GetApplicationLocale()).c_str());
-  translate_script_request_pending_.reset(content::URLFetcher::Create(
+  translate_script_request_pending_.reset(net::URLFetcher::Create(
       0, GURL(translate_script_url), net::URLFetcher::GET, this));
   translate_script_request_pending_->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);

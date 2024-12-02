@@ -4,12 +4,11 @@
 
 #ifndef ASH_LAUNCHER_LAUNCHER_H_
 #define ASH_LAUNCHER_LAUNCHER_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "ash/launcher/background_animator.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_types.h"
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/gfx/size.h"
@@ -32,6 +31,7 @@ namespace ash {
 namespace internal {
 class FocusCycler;
 class LauncherView;
+class ShelfLayoutManager;
 }
 
 class LauncherIconObserver;
@@ -40,7 +40,8 @@ class LauncherModel;
 
 class ASH_EXPORT Launcher : public internal::BackgroundAnimatorDelegate {
  public:
-  explicit Launcher(aura::Window* window_container);
+  Launcher(aura::Window* window_container,
+           internal::ShelfLayoutManager* shelf_layout_manager);
   virtual ~Launcher();
 
   // Sets the focus cycler.  Also adds the launcher to the cycle.
@@ -76,6 +77,10 @@ class ASH_EXPORT Launcher : public internal::BackgroundAnimatorDelegate {
 
   // Returns true if the Launcher is showing a context menu.
   bool IsShowingMenu() const;
+
+  bool IsShowingOverflowBubble() const;
+
+  void SetVisible(bool visible) const;
 
   views::View* GetAppListButtonView() const;
 

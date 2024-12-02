@@ -11,6 +11,7 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -181,6 +182,7 @@ void WebIntentPickerGtk::Close() {
 }
 
 void WebIntentPickerGtk::SetActionString(const string16& action) {
+  header_label_text_ = action;
   gtk_label_set_text(GTK_LABEL(header_label_), UTF16ToUTF8(action).c_str());
 }
 
@@ -219,16 +221,17 @@ void WebIntentPickerGtk::OnExtensionIconChanged(WebIntentPickerModel* model,
   UpdateSuggestedExtensions();
 }
 
-void WebIntentPickerGtk::OnInlineDisposition(WebIntentPickerModel* model,
+void WebIntentPickerGtk::OnInlineDisposition(const string16& title,
                                              const GURL& url) {
   content::WebContents* web_contents = content::WebContents::Create(
       tab_contents_->profile(),
       tab_util::GetSiteInstanceForNewTab(tab_contents_->profile(), url),
       MSG_ROUTING_NONE, NULL, NULL);
   inline_disposition_tab_contents_.reset(new TabContents(web_contents));
+  Browser* browser = browser::FindBrowserWithWebContents(
+      tab_contents_->web_contents());
   inline_disposition_delegate_.reset(
-      new WebIntentInlineDispositionDelegate(this, web_contents,
-                                             tab_contents_->profile()));
+      new WebIntentInlineDispositionDelegate(this, web_contents, browser));
 
   // Must call this immediately after WebContents creation to avoid race
   // with load.
@@ -244,13 +247,45 @@ void WebIntentPickerGtk::OnInlineDisposition(WebIntentPickerModel* model,
   // Replace the picker contents with the inline disposition.
   gtk_util::RemoveAllChildren(contents_);
 
+  GtkWidget* vbox = gtk_vbox_new(FALSE, ui::kContentAreaSpacing);
+  GtkThemeService* theme_service = GetThemeService(tab_contents_);
+
   GtkWidget* service_hbox = gtk_hbox_new(FALSE, ui::kControlSpacing);
   // TODO(gbillock): Eventually get the service icon button here.
-  // Maybe add a title or something too?
 
-  AddCloseButton(contents_);
+  // Intent action label.
+  GtkWidget* action_label = theme_service->BuildLabel(
+      UTF16ToUTF8(title), ui::kGdkBlack);
+  gtk_util::ForceFontSizePixels(action_label, kMainContentPixelSize);
 
-  GtkWidget* vbox = gtk_vbox_new(FALSE, ui::kContentAreaSpacing);
+  GtkWidget* label_alignment = gtk_alignment_new(0, 0.5f, 0, 0);
+  gtk_container_add(GTK_CONTAINER(label_alignment), action_label);
+  GtkWidget* indent_label = gtk_util::IndentWidget(label_alignment);
+
+  gtk_box_pack_start(GTK_BOX(service_hbox), indent_label, FALSE, TRUE, 0);
+
+  // Add link for "choose another service" if other suggestions are available
+  // or if more than one (the current) service is installed.
+  if (model_->GetInstalledServiceCount() > 1 ||
+       model_->GetSuggestedExtensionCount()) {
+    GtkWidget* use_alternate_link = theme_service->BuildChromeLinkButton(
+        l10n_util::GetStringUTF8(
+            IDS_INTENT_PICKER_USE_ALTERNATE_SERVICE).c_str());
+    gtk_chrome_link_button_set_use_gtk_theme(
+        GTK_CHROME_LINK_BUTTON(use_alternate_link),
+        theme_service->UsingNativeTheme());
+    gtk_util::ForceFontSizePixels(
+        GTK_CHROME_LINK_BUTTON(use_alternate_link)->label,
+        kMainContentPixelSize);
+    g_signal_connect(use_alternate_link, "clicked",
+                     G_CALLBACK(OnChooseAnotherServiceClickThunk), this);
+    GtkWidget* link_alignment = gtk_alignment_new(0, 0.5f, 0, 0);
+    gtk_container_add(GTK_CONTAINER(link_alignment), use_alternate_link);
+    gtk_box_pack_start(GTK_BOX(service_hbox), link_alignment, TRUE, TRUE, 0);
+  }
+  AddCloseButton(service_hbox);
+
+  // The header box
   gtk_box_pack_start(GTK_BOX(vbox), service_hbox, TRUE, TRUE, 0);
 
   // The separator between the icon/title/close and the inline renderer.
@@ -406,6 +441,11 @@ void WebIntentPickerGtk::OnMoreSuggestionsLinkClick(GtkWidget* link) {
   delegate_->OnSuggestionsLinkClicked();
 }
 
+void WebIntentPickerGtk::OnChooseAnotherServiceClick(GtkWidget* link) {
+  delegate_->OnChooseAnotherService();
+  ResetContents();
+}
+
 void WebIntentPickerGtk::OnServiceButtonClick(GtkWidget* button) {
   GList* button_list = gtk_container_get_children(GTK_CONTAINER(button_vbox_));
   gint index = g_list_index(button_list, button);
@@ -423,7 +463,11 @@ void WebIntentPickerGtk::InitContents() {
   GtkThemeService* theme_service = GetThemeService(tab_contents_);
 
   // Main contents vbox.
-  contents_ = gtk_vbox_new(FALSE, 0);
+  if (!contents_) {
+    contents_ = gtk_vbox_new(FALSE, 0);
+    g_signal_connect(contents_, "destroy", G_CALLBACK(&OnDestroyThunk), this);
+  }
+
   gtk_widget_set_size_request(contents_, kMainContentWidth, -1);
 
   AddCloseButton(contents_);
@@ -482,8 +526,25 @@ void WebIntentPickerGtk::InitContents() {
 
   // Throbber, which will be added to the hierarchy when necessary.
   throbber_.reset(new ThrobberGtk(theme_service));
+}
 
-  g_signal_connect(contents_, "destroy", G_CALLBACK(&OnDestroyThunk), this);
+void WebIntentPickerGtk::ResetContents() {
+  // Wipe out all currently displayed widgets.
+  gtk_util::RemoveAllChildren(contents_);
+
+  // Reset potential inline disposition data.
+  inline_disposition_delegate_.reset(NULL);
+  tab_contents_container_.reset(NULL);
+  inline_disposition_tab_contents_.reset(NULL);
+
+  // Re-initialize picker widgets and data.
+  InitContents();
+  UpdateInstalledServices();
+  UpdateCWSLabel();
+  UpdateSuggestedExtensions();
+  SetActionString(header_label_text_);
+
+  gtk_widget_show_all(contents_);
 }
 
 GtkWidget* WebIntentPickerGtk::CreateSubContents(GtkWidget* box) {
@@ -560,20 +621,12 @@ void WebIntentPickerGtk::UpdateInstalledServices() {
 }
 
 void WebIntentPickerGtk::UpdateCWSLabel() {
-  if (model_->GetInstalledServiceCount() == 0) {
-    gtk_widget_hide(gtk_widget_get_parent(button_vbox_));
-    gtk_label_set_text(GTK_LABEL(cws_label_), l10n_util::GetStringUTF8(
-        IDS_INTENT_PICKER_GET_MORE_SERVICES_NONE_INSTALLED).c_str());
-  } else {
-    gtk_label_set_text(GTK_LABEL(cws_label_), l10n_util::GetStringUTF8(
-        IDS_INTENT_PICKER_GET_MORE_SERVICES).c_str());
-    gtk_widget_show(gtk_widget_get_parent(button_vbox_));
-  }
+  gtk_widget_set_visible(gtk_widget_get_parent(button_vbox_),
+                         model_->GetInstalledServiceCount() != 0);
 
-  if (model_->GetSuggestedExtensionCount() == 0)
-    gtk_widget_hide(cws_label_);
-  else
-    gtk_widget_show(cws_label_);
+  std::string label_text = UTF16ToUTF8(model_->GetSuggestionsLinkText());
+  gtk_label_set_text(GTK_LABEL(cws_label_), label_text.c_str());
+  gtk_widget_set_visible(cws_label_, !label_text.empty());
 }
 
 void WebIntentPickerGtk::UpdateSuggestedExtensions() {

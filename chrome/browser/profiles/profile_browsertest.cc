@@ -99,7 +99,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, CreateNewProfileAsynchronous) {
   ASSERT_TRUE(profile.get());
 
   // Wait for the profile to be created.
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_PROFILE_CREATED,
       content::Source<Profile>(profile.get()));
   observer.Wait();
@@ -120,7 +120,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, CreateOldProfileAsynchronous) {
   ASSERT_TRUE(profile.get());
 
   // Wait for the profile to be created.
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_PROFILE_CREATED,
       content::Source<Profile>(profile.get()));
   observer.Wait();
@@ -128,7 +128,8 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, CreateOldProfileAsynchronous) {
 }
 
 // Test that a README file is created for profiles that didn't have it.
-IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, ProfileReadmeCreated) {
+// Flaky: http://crbug.com/140882
+IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, DISABLED_ProfileReadmeCreated) {
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
@@ -143,12 +144,12 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, ProfileReadmeCreated) {
   ASSERT_TRUE(profile.get());
 
   // Wait for the profile to be created.
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_PROFILE_CREATED,
       content::Source<Profile>(profile.get()));
   observer.Wait();
 
-  ui_test_utils::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
+  content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
 
   // Verify that README exists.
   EXPECT_TRUE(file_util::PathExists(
@@ -173,6 +174,6 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, ProfileDeletedBeforeReadmeCreated) {
   // Delete the Profile instance and run pending tasks (this includes the task
   // for README creation).
   profile.reset();
-  ui_test_utils::RunAllPendingInMessageLoop();
-  ui_test_utils::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
+  content::RunAllPendingInMessageLoop();
+  content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
 }

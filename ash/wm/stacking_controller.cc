@@ -4,9 +4,11 @@
 
 #include "ash/wm/stacking_controller.h"
 
+#include "ash/display/display_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/always_on_top_controller.h"
+#include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/window_properties.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
@@ -17,8 +19,21 @@ namespace ash {
 namespace internal {
 namespace {
 
-aura::Window* GetContainerById(int id) {
-  return Shell::GetContainer(Shell::GetActiveRootWindow(), id);
+// Find a root window that matches the |bounds|. If the virtual screen
+// coordinates is enabled and the bounds is specified, the root window
+// that matches the window's bound will be used. Otherwise, it'll
+// return the active root window.
+aura::RootWindow* FindContainerRoot(const gfx::Rect& bounds) {
+  if (!DisplayController::IsExtendedDesktopEnabled() ||
+      (bounds.origin().x() == 0 && bounds.origin().y() == 0 &&
+       bounds.IsEmpty())) {
+    return Shell::GetActiveRootWindow();
+  }
+  return wm::GetRootWindowMatching(bounds);
+}
+
+aura::Window* GetContainerById(aura::RootWindow* root, int id) {
+  return Shell::GetContainer(root, id);
 }
 
 aura::Window* GetContainerForWindow(aura::Window* window) {
@@ -52,25 +67,36 @@ StackingController::~StackingController() {
 ////////////////////////////////////////////////////////////////////////////////
 // StackingController, aura::StackingClient implementation:
 
-aura::Window* StackingController::GetDefaultParent(aura::Window* window) {
+aura::Window* StackingController::GetDefaultParent(aura::Window* window,
+                                                   const gfx::Rect& bounds) {
+  aura::RootWindow* target_root = NULL;
+  if (window->transient_parent()) {
+    // Transient window should use the same root as its transient parent.
+    target_root = window->transient_parent()->GetRootWindow();
+  } else {
+    target_root = FindContainerRoot(bounds);
+  }
+
   switch (window->type()) {
     case aura::client::WINDOW_TYPE_NORMAL:
     case aura::client::WINDOW_TYPE_POPUP:
       if (IsSystemModal(window))
-        return GetSystemModalContainer(window);
+        return GetSystemModalContainer(target_root, window);
       else if (IsWindowModal(window))
         return GetContainerForWindow(window->transient_parent());
-      return GetAlwaysOnTopController()->GetContainer(window);
+      return GetAlwaysOnTopController(target_root)->GetContainer(window);
     case aura::client::WINDOW_TYPE_PANEL:
-      return GetContainerById(internal::kShellWindowId_PanelContainer);
+      return GetContainerById(target_root,
+                              internal::kShellWindowId_PanelContainer);
     case aura::client::WINDOW_TYPE_MENU:
-      return GetContainerById(internal::kShellWindowId_MenuContainer);
+      return GetContainerById(
+          target_root, internal::kShellWindowId_MenuContainer);
     case aura::client::WINDOW_TYPE_TOOLTIP:
       return GetContainerById(
-          internal::kShellWindowId_DragImageAndTooltipContainer);
+          target_root, internal::kShellWindowId_DragImageAndTooltipContainer);
     case aura::client::WINDOW_TYPE_CONTROL:
       return GetContainerById(
-          internal::kShellWindowId_UnparentedControlContainer);
+          target_root, internal::kShellWindowId_UnparentedControlContainer);
     default:
       NOTREACHED() << "Window " << window->id()
                    << " has unhandled type " << window->type();
@@ -83,16 +109,18 @@ aura::Window* StackingController::GetDefaultParent(aura::Window* window) {
 // StackingController, private:
 
 aura::Window* StackingController::GetSystemModalContainer(
+    aura::RootWindow* root,
     aura::Window* window) const {
-  if (!IsSystemModal(window))
-    return NULL;
+  DCHECK(IsSystemModal(window));
 
   // If screen lock is not active, all modal windows are placed into the
   // normal modal container.
   aura::Window* lock_container =
-      GetContainerById(internal::kShellWindowId_LockScreenContainer);
-  if (!lock_container->children().size())
-    return GetContainerById(internal::kShellWindowId_SystemModalContainer);
+      GetContainerById(root, internal::kShellWindowId_LockScreenContainer);
+  if (!lock_container->children().size()) {
+    return GetContainerById(root,
+                            internal::kShellWindowId_SystemModalContainer);
+  }
 
   // Otherwise those that originate from LockScreen container and above are
   // placed in the screen lock modal container.
@@ -102,18 +130,19 @@ aura::Window* StackingController::GetSystemModalContainer(
   aura::Window* container = NULL;
   if (window_container_id < lock_container_id) {
     container = GetContainerById(
-        internal::kShellWindowId_SystemModalContainer);
+        root, internal::kShellWindowId_SystemModalContainer);
   } else {
     container = GetContainerById(
-        internal::kShellWindowId_LockSystemModalContainer);
+        root, internal::kShellWindowId_LockSystemModalContainer);
   }
 
   return container;
 }
 
+// TODO(oshima): Remove this once extended desktop is on by default.
 internal::AlwaysOnTopController*
-StackingController::GetAlwaysOnTopController() {
-  aura::RootWindow* root_window = Shell::GetActiveRootWindow();
+StackingController::GetAlwaysOnTopController(
+    aura::RootWindow* root_window) {
   internal::AlwaysOnTopController* controller =
       root_window->GetProperty(internal::kAlwaysOnTopControllerKey);
   if (!controller) {

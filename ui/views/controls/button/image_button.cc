@@ -7,7 +7,8 @@
 #include "base/utf_string_conversions.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/skbitmap_operations.h"
+#include "ui/gfx/image/image_skia_operations.h"
+#include "ui/views/widget/widget.h"
 
 namespace views {
 
@@ -39,13 +40,13 @@ void ImageButton::SetImage(ButtonState state, const gfx::ImageSkia* image) {
 void ImageButton::SetBackground(SkColor color,
                                 const gfx::ImageSkia* image,
                                 const gfx::ImageSkia* mask) {
-  if (!image || !mask) {
+  if (image == NULL || mask == NULL) {
     background_image_ = gfx::ImageSkia();
     return;
   }
 
-  background_image_ =
-      SkBitmapOperations::CreateButtonBackground(color, *image, *mask);
+  background_image_ = gfx::ImageSkiaOperations::CreateButtonBackground(color,
+     *image, *mask);
 }
 
 void ImageButton::SetOverlayImage(const gfx::ImageSkia* image) {
@@ -91,7 +92,7 @@ void ImageButton::OnPaint(gfx::Canvas* canvas) {
     else if (v_alignment_ == ALIGN_BOTTOM)
       y = height() - img.height();
 
-    if (!background_image_.empty())
+    if (!background_image_.isNull())
       canvas->DrawImageInt(background_image_, x, y);
 
     canvas->DrawImageInt(img, x, y);
@@ -109,7 +110,7 @@ gfx::ImageSkia ImageButton::GetImageToPaint() {
   gfx::ImageSkia img;
 
   if (!images_[BS_HOT].isNull() && hover_animation_->is_animating()) {
-    img = SkBitmapOperations::CreateBlendedBitmap(images_[BS_NORMAL],
+    img = gfx::ImageSkiaOperations::CreateBlendedImage(images_[BS_NORMAL],
         images_[BS_HOT], hover_animation_->GetCurrentValue());
   } else {
     img = images_[state_];

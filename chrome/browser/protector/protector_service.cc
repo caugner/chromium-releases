@@ -13,10 +13,11 @@
 #include "chrome/browser/protector/protector_utils.h"
 #include "chrome/browser/protector/settings_change_global_error.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_source.h"
-#include "net/base/registry_controlled_domain.h"
+#include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 namespace protector {
 
@@ -115,7 +116,7 @@ void ProtectorService::DismissChange(BaseSettingChange* change) {
 
 void ProtectorService::OpenTab(const GURL& url, Browser* browser) {
   DCHECK(browser);
-  browser->ShowSingletonTab(url);
+  chrome::ShowSingletonTab(browser, url);
 }
 
 ProtectedPrefsWatcher* ProtectorService::GetPrefsWatcher() {

@@ -4,18 +4,17 @@
 
 #ifndef SYNC_INTERNAL_API_PUBLIC_SESSIONS_SYNC_SOURCE_INFO_H_
 #define SYNC_INTERNAL_API_PUBLIC_SESSIONS_SYNC_SOURCE_INFO_H_
-#pragma once
 
 #include "base/basictypes.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
 #include "sync/protocol/sync.pb.h"
 
 namespace base {
 class DictionaryValue;
 }
 
-namespace browser_sync {
+namespace syncer {
 namespace sessions {
 
 // A container for the source of a sync session. This includes the update
@@ -23,20 +22,20 @@ namespace sessions {
 // specific payloads which should be sent to the server.
 struct SyncSourceInfo {
   SyncSourceInfo();
-  explicit SyncSourceInfo(const syncable::ModelTypePayloadMap& t);
+  explicit SyncSourceInfo(const ModelTypePayloadMap& t);
   SyncSourceInfo(
       const sync_pb::GetUpdatesCallerInfo::GetUpdatesSource& u,
-      const syncable::ModelTypePayloadMap& t);
+      const ModelTypePayloadMap& t);
   ~SyncSourceInfo();
 
   // Caller takes ownership of the returned dictionary.
   base::DictionaryValue* ToValue() const;
 
   sync_pb::GetUpdatesCallerInfo::GetUpdatesSource updates_source;
-  syncable::ModelTypePayloadMap types;
+  ModelTypePayloadMap types;
 };
 
 }  // namespace sessions
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_PUBLIC_SESSIONS_SYNC_SOURCE_INFO_H_

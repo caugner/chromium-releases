@@ -33,6 +33,7 @@
       'type': '<(gtest_target_type)',
       'dependencies': [
         'ipc',
+        'test_support_ipc',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
@@ -47,6 +48,7 @@
         'ipc_channel_posix_unittest.cc',
         'ipc_fuzzing_tests.cc',
         'ipc_message_unittest.cc',
+        'ipc_message_utils_unittest.cc',
         'ipc_send_fds_test.cc',
         'ipc_sync_channel_unittest.cc',
         'ipc_sync_message_unittest.cc',
@@ -83,8 +85,11 @@
       'dependencies': [
         'ipc',
         '../base/base.gyp:base',
+        '../testing/gtest.gyp:gtest',
       ],
       'sources': [
+        'ipc_multiprocess_test.cc',
+        'ipc_multiprocess_test.h',
         'ipc_test_sink.cc',
         'ipc_test_sink.h',
       ],

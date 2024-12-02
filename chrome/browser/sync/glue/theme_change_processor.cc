@@ -41,11 +41,11 @@ void ThemeChangeProcessor::Observe(
   DCHECK(profile_);
   DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
-  sync_api::WriteTransaction trans(FROM_HERE, share_handle());
-  sync_api::WriteNode node(&trans);
-  if (node.InitByClientTagLookup(syncable::THEMES,
+  syncer::WriteTransaction trans(FROM_HERE, share_handle());
+  syncer::WriteNode node(&trans);
+  if (node.InitByClientTagLookup(syncer::THEMES,
                                  kCurrentThemeClientTag) !=
-          sync_api::BaseNode::INIT_OK) {
+          syncer::BaseNode::INIT_OK) {
     std::string err = "Could not create node with client tag: ";
     error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
                                           err + kCurrentThemeClientTag);
@@ -66,8 +66,8 @@ void ThemeChangeProcessor::Observe(
 }
 
 void ThemeChangeProcessor::ApplyChangesFromSyncModel(
-    const sync_api::BaseTransaction* trans,
-    const sync_api::ImmutableChangeRecordList& changes) {
+    const syncer::BaseTransaction* trans,
+    const syncer::ImmutableChangeRecordList& changes) {
   if (!running()) {
     return;
   }
@@ -86,10 +86,10 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
     LOG(WARNING) << change_count << " theme changes detected; "
                  << "only applying the last one";
   }
-  const sync_api::ChangeRecord& change =
+  const syncer::ChangeRecord& change =
       changes.Get()[change_count - 1];
-  if (change.action != sync_api::ChangeRecord::ACTION_UPDATE &&
-      change.action != sync_api::ChangeRecord::ACTION_DELETE) {
+  if (change.action != syncer::ChangeRecord::ACTION_UPDATE &&
+      change.action != syncer::ChangeRecord::ACTION_DELETE) {
     std::string err = "strange theme change.action " +
         base::IntToString(change.action);
     error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE, err);
@@ -98,14 +98,14 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
   sync_pb::ThemeSpecifics theme_specifics;
   // If the action is a delete, simply use the default values for
   // ThemeSpecifics, which would cause the default theme to be set.
-  if (change.action != sync_api::ChangeRecord::ACTION_DELETE) {
-    sync_api::ReadNode node(trans);
-    if (node.InitByIdLookup(change.id) != sync_api::BaseNode::INIT_OK) {
+  if (change.action != syncer::ChangeRecord::ACTION_DELETE) {
+    syncer::ReadNode node(trans);
+    if (node.InitByIdLookup(change.id) != syncer::BaseNode::INIT_OK) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Theme node lookup failed.");
       return;
     }
-    DCHECK_EQ(node.GetModelType(), syncable::THEMES);
+    DCHECK_EQ(node.GetModelType(), syncer::THEMES);
     DCHECK(profile_);
     theme_specifics = node.GetThemeSpecifics();
   }

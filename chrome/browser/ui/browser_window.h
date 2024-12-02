@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
-#pragma once
 
 #include "base/callback_forward.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/ui/base_window.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
-#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
+#include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/content_settings_types.h"
@@ -99,12 +98,6 @@ class BrowserWindow : public BaseWindow {
 
   // Return the status bubble associated with the frame
   virtual StatusBubble* GetStatusBubble() = 0;
-
-  // Inform the receiving frame that an animation has progressed in the
-  // selected tab.
-  // TODO(beng): Remove. Infobars/Boomarks bars should talk directly to
-  //             BrowserView.
-  virtual void ToolbarSizeChanged(bool is_animating) = 0;
 
   // Inform the frame that the selected tab favicon or title has changed. Some
   // frames may need to refresh their title bar.
@@ -224,9 +217,6 @@ class BrowserWindow : public BaseWindow {
   // Shows or hides the bookmark bar depending on its current visibility.
   virtual void ToggleBookmarkBar() = 0;
 
-  // Shows the About Chrome dialog box.
-  virtual void ShowAboutChromeDialog() = 0;
-
   // Shows the Update Recommended dialog box.
   virtual void ShowUpdateChromeDialog() = 0;
 
@@ -285,7 +275,7 @@ class BrowserWindow : public BaseWindow {
   // |url| is the url of the page/frame the info applies to, |ssl| is the SSL
   // information for that page/frame.  If |show_history| is true, a section
   // showing how many times that URL has been visited is added to the page info.
-  virtual void ShowPageInfo(Profile* profile,
+  virtual void ShowPageInfo(content::WebContents* web_contents,
                             const GURL& url,
                             const content::SSLStatus& ssl,
                             bool show_history) = 0;
@@ -316,9 +306,6 @@ class BrowserWindow : public BaseWindow {
   // if the renderer did not process it.
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) = 0;
-
-  // Shows the create web app shortcut dialog box.
-  virtual void ShowCreateWebAppShortcutsDialog(TabContents* tab_contents) = 0;
 
   // Shows the create chrome app shortcut dialog box.
   virtual void ShowCreateChromeAppShortcutsDialog(Profile* profile,

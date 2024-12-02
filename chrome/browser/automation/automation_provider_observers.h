@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_
-#pragma once
 
 #include <deque>
 #include <map>
@@ -16,7 +15,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop_helpers.h"
+#include "base/sequenced_task_runner_helpers.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/values.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
@@ -24,7 +23,7 @@
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/automation/automation_tab_helper.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
-#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen.h"
@@ -275,14 +274,17 @@ class TabAppendedNotificationObserver : public TabStripNotificationObserver {
  public:
   TabAppendedNotificationObserver(Browser* parent,
                                   AutomationProvider* automation,
-                                  IPC::Message* reply_message);
+                                  IPC::Message* reply_message,
+                                  bool use_json_interface);
   virtual ~TabAppendedNotificationObserver();
 
   virtual void ObserveTab(content::NavigationController* controller);
+  IPC::Message* ReleaseReply();
 
  protected:
   Browser* parent_;
   scoped_ptr<IPC::Message> reply_message_;
+  bool use_json_interface_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TabAppendedNotificationObserver);
@@ -292,7 +294,8 @@ class TabClosedNotificationObserver : public TabStripNotificationObserver {
  public:
   TabClosedNotificationObserver(AutomationProvider* automation,
                                 bool wait_until_closed,
-                                IPC::Message* reply_message);
+                                IPC::Message* reply_message,
+                                bool use_json_interface);
   virtual ~TabClosedNotificationObserver();
 
   virtual void ObserveTab(content::NavigationController* controller);
@@ -301,6 +304,7 @@ class TabClosedNotificationObserver : public TabStripNotificationObserver {
 
  protected:
   scoped_ptr<IPC::Message> reply_message_;
+  bool use_json_interface_;
   bool for_browser_command_;
 
  private:
@@ -444,7 +448,8 @@ class ExtensionsUpdatedObserver : public content::NotificationObserver {
 class BrowserOpenedNotificationObserver : public content::NotificationObserver {
  public:
   BrowserOpenedNotificationObserver(AutomationProvider* automation,
-                                    IPC::Message* reply_message);
+                                    IPC::Message* reply_message,
+                                    bool use_json_interface);
   virtual ~BrowserOpenedNotificationObserver();
 
   // Overridden from content::NotificationObserver:
@@ -459,6 +464,7 @@ class BrowserOpenedNotificationObserver : public content::NotificationObserver {
   base::WeakPtr<AutomationProvider> automation_;
   scoped_ptr<IPC::Message> reply_message_;
   int new_window_id_;
+  bool use_json_interface_;
   bool for_browser_command_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserOpenedNotificationObserver);
@@ -468,7 +474,8 @@ class BrowserClosedNotificationObserver : public content::NotificationObserver {
  public:
   BrowserClosedNotificationObserver(Browser* browser,
                                     AutomationProvider* automation,
-                                    IPC::Message* reply_message);
+                                    IPC::Message* reply_message,
+                                    bool use_json_interface);
   virtual ~BrowserClosedNotificationObserver();
 
   // Overridden from content::NotificationObserver:
@@ -482,6 +489,7 @@ class BrowserClosedNotificationObserver : public content::NotificationObserver {
   content::NotificationRegistrar registrar_;
   base::WeakPtr<AutomationProvider> automation_;
   scoped_ptr<IPC::Message> reply_message_;
+  bool use_json_interface_;
   bool for_browser_command_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserClosedNotificationObserver);
@@ -516,7 +524,8 @@ class ExecuteBrowserCommandObserver : public content::NotificationObserver {
   static bool CreateAndRegisterObserver(AutomationProvider* automation,
                                         Browser* browser,
                                         int command,
-                                        IPC::Message* reply_message);
+                                        IPC::Message* reply_message,
+                                        bool use_json_interface);
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -525,16 +534,20 @@ class ExecuteBrowserCommandObserver : public content::NotificationObserver {
 
  private:
   ExecuteBrowserCommandObserver(AutomationProvider* automation,
-                                IPC::Message* reply_message);
+                                IPC::Message* reply_message,
+                                bool use_json_interface);
 
   bool Register(int command);
 
   bool Getint(int command, int* type);
 
+  IPC::Message* ReleaseReply();
+
   content::NotificationRegistrar registrar_;
   base::WeakPtr<AutomationProvider> automation_;
   int notification_type_;
   scoped_ptr<IPC::Message> reply_message_;
+  bool use_json_interface_;
 
   DISALLOW_COPY_AND_ASSIGN(ExecuteBrowserCommandObserver);
 };
@@ -1740,7 +1753,9 @@ class AllViewsStoppedLoadingObserver : public TabEventObserver,
 // Observer used to listen for new tab creation to complete.
 class NewTabObserver : public content::NotificationObserver {
  public:
-  NewTabObserver(AutomationProvider* automation, IPC::Message* reply_message);
+  NewTabObserver(AutomationProvider* automation,
+                 IPC::Message* reply_message,
+                 bool use_json_interface);
 
   // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
@@ -1753,6 +1768,7 @@ class NewTabObserver : public content::NotificationObserver {
   content::NotificationRegistrar registrar_;
   base::WeakPtr<AutomationProvider> automation_;
   scoped_ptr<IPC::Message> reply_message_;
+  bool use_json_interface_;
 
   DISALLOW_COPY_AND_ASSIGN(NewTabObserver);
 };
@@ -1952,6 +1968,29 @@ class WindowMaximizedObserver : public content::NotificationObserver {
 };
 #endif  // defined(OS_LINUX)
 
+// Wait for a new browser window to get created (for an existing profile).
+// Useful when reopening a multi-profile window.
+class BrowserOpenedWithExistingProfileNotificationObserver
+    : public content::NotificationObserver {
+ public:
+  BrowserOpenedWithExistingProfileNotificationObserver(
+      AutomationProvider* automation,
+      IPC::Message* reply_message,
+      int num_loads);
+  virtual ~BrowserOpenedWithExistingProfileNotificationObserver();
 
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
+ private:
+  content::NotificationRegistrar registrar_;
+  base::WeakPtr<AutomationProvider> automation_;
+  scoped_ptr<IPC::Message> reply_message_;
+  int new_window_id_;
+  int num_loads_;
+
+  DISALLOW_COPY_AND_ASSIGN(
+      BrowserOpenedWithExistingProfileNotificationObserver);
+};
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_

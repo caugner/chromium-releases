@@ -3,11 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/gtest_prod_util.h"
 #include "base/stl_util.h"
 #include "media/base/data_buffer.h"
+#include "media/base/mock_audio_renderer_sink.h"
 #include "media/base/mock_callback.h"
-#include "media/base/mock_filter_host.h"
 #include "media/base/mock_filters.h"
 #include "media/filters/audio_renderer_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -18,26 +19,6 @@ using ::testing::Invoke;
 using ::testing::Return;
 using ::testing::NiceMock;
 using ::testing::StrictMock;
-
-namespace {
-
-class MockAudioSink : public media::AudioRendererSink {
- public:
-  MOCK_METHOD2(Initialize, void(const media::AudioParameters& params,
-                                RenderCallback* callback));
-  MOCK_METHOD0(Start, void());
-  MOCK_METHOD0(Stop, void());
-  MOCK_METHOD1(Pause, void(bool flush));
-  MOCK_METHOD0(Play, void());
-  MOCK_METHOD1(SetPlaybackRate, void(float rate));
-  MOCK_METHOD1(SetVolume, bool(double volume));
-  MOCK_METHOD1(GetVolume, void(double* volume));
-
- protected:
-  virtual ~MockAudioSink() {}
-};
-
-}  // namespace
 
 namespace media {
 
@@ -50,9 +31,8 @@ class AudioRendererImplTest : public ::testing::Test {
  public:
   // Give the decoder some non-garbage media properties.
   AudioRendererImplTest()
-      : renderer_(new AudioRendererImpl(new NiceMock<MockAudioSink>())),
+      : renderer_(new AudioRendererImpl(new NiceMock<MockAudioRendererSink>())),
         decoder_(new MockAudioDecoder()) {
-    renderer_->set_host(&host_);
 
     // Queue all reads from the decoder by default.
     ON_CALL(*decoder_, Read(_))
@@ -66,26 +46,10 @@ class AudioRendererImplTest : public ::testing::Test {
         .Times(AnyNumber());
     EXPECT_CALL(*decoder_, samples_per_second())
         .Times(AnyNumber());
-
-    // We'll pretend time never advances.
-    EXPECT_CALL(host_, GetTime())
-        .WillRepeatedly(Return(base::TimeDelta()));
   }
 
   virtual ~AudioRendererImplTest() {
     renderer_->Stop(NewExpectedClosure());
-  }
-
-  MOCK_METHOD1(OnSeekComplete, void(PipelineStatus));
-  PipelineStatusCB NewSeekCB() {
-    return base::Bind(&AudioRendererImplTest::OnSeekComplete,
-                      base::Unretained(this));
-  }
-
-  MOCK_METHOD0(OnUnderflow, void());
-  base::Closure NewUnderflowClosure() {
-    return base::Bind(&AudioRendererImplTest::OnUnderflow,
-                      base::Unretained(this));
   }
 
   void SetSupportedAudioDecoderProperties() {
@@ -106,29 +70,46 @@ class AudioRendererImplTest : public ::testing::Test {
         .WillByDefault(Return(0));
   }
 
+  MOCK_METHOD1(OnPrerollComplete, void(PipelineStatus));
+  PipelineStatusCB NewPrerollCB() {
+    return base::Bind(&AudioRendererImplTest::OnPrerollComplete,
+                      base::Unretained(this));
+  }
+
+  MOCK_METHOD0(OnUnderflow, void());
+  MOCK_METHOD0(OnEnded, void());
+  MOCK_METHOD0(OnDisabled, void());
+  MOCK_METHOD1(OnError, void(PipelineStatus));
+
   void OnAudioTimeCallback(
       base::TimeDelta current_time, base::TimeDelta max_time) {
     CHECK(current_time <= max_time);
   }
 
-  AudioRenderer::TimeCB NewAudioTimeClosure() {
-    return base::Bind(&AudioRendererImplTest::OnAudioTimeCallback,
-                      base::Unretained(this));
+  void Initialize() {
+    InitializeWithStatus(PIPELINE_OK);
   }
 
-  void Initialize() {
+  void InitializeWithStatus(PipelineStatus expected) {
     renderer_->Initialize(
-        decoder_, NewExpectedStatusCB(PIPELINE_OK), NewUnderflowClosure(),
-        NewAudioTimeClosure());
+        decoder_, NewExpectedStatusCB(expected),
+        base::Bind(&AudioRendererImplTest::OnUnderflow,
+                   base::Unretained(this)),
+        base::Bind(&AudioRendererImplTest::OnAudioTimeCallback,
+                   base::Unretained(this)),
+        base::Bind(&AudioRendererImplTest::OnEnded,
+                   base::Unretained(this)),
+        base::Bind(&AudioRendererImplTest::OnDisabled,
+                   base::Unretained(this)),
+        base::Bind(&AudioRendererImplTest::OnError,
+                   base::Unretained(this)));
   }
 
   void Preroll() {
-    // Seek to trigger prerolling.
-    EXPECT_CALL(*decoder_, Read(_));
-    renderer_->Seek(base::TimeDelta(), NewSeekCB());
-
     // Fill entire buffer to complete prerolling.
-    EXPECT_CALL(*this, OnSeekComplete(PIPELINE_OK));
+    EXPECT_CALL(*decoder_, Read(_));
+    renderer_->Preroll(base::TimeDelta(), NewPrerollCB());
+    EXPECT_CALL(*this, OnPrerollComplete(PIPELINE_OK));
     DeliverRemainingAudio();
   }
 
@@ -137,15 +118,13 @@ class AudioRendererImplTest : public ::testing::Test {
     renderer_->SetPlaybackRate(1.0f);
   }
 
-  void Seek(base::TimeDelta seek_time) {
-    next_timestamp_ = seek_time;
-
-    // Seek to trigger prerolling.
-    EXPECT_CALL(*decoder_, Read(_));
-    renderer_->Seek(seek_time, NewSeekCB());
+  void Preroll(base::TimeDelta preroll_time) {
+    next_timestamp_ = preroll_time;
 
     // Fill entire buffer to complete prerolling.
-    EXPECT_CALL(*this, OnSeekComplete(PIPELINE_OK));
+    EXPECT_CALL(*decoder_, Read(_));
+    renderer_->Preroll(preroll_time, NewPrerollCB());
+    EXPECT_CALL(*this, OnPrerollComplete(PIPELINE_OK));
     DeliverRemainingAudio();
   }
 
@@ -163,15 +142,11 @@ class AudioRendererImplTest : public ::testing::Test {
     buffer->SetDuration(base::TimeDelta::FromMilliseconds(8000 * size / bps));
     next_timestamp_ += buffer->GetDuration();
 
-    AudioDecoder::ReadCB read_cb;
-    std::swap(read_cb, read_cb_);
-    read_cb.Run(buffer);
+    base::ResetAndReturn(&read_cb_).Run(AudioDecoder::kOk, buffer);
   }
 
   void AbortPendingRead() {
-    AudioDecoder::ReadCB read_cb;
-    std::swap(read_cb, read_cb_);
-    read_cb.Run(NULL);
+    base::ResetAndReturn(&read_cb_).Run(AudioDecoder::kAborted, NULL);
   }
 
   // Delivers an end of stream buffer to |renderer_|.
@@ -233,7 +208,6 @@ class AudioRendererImplTest : public ::testing::Test {
   // Fixture members.
   scoped_refptr<AudioRendererImpl> renderer_;
   scoped_refptr<MockAudioDecoder> decoder_;
-  StrictMock<MockFilterHost> host_;
   AudioDecoder::ReadCB read_cb_;
   base::TimeDelta next_timestamp_;
 
@@ -248,18 +222,14 @@ class AudioRendererImplTest : public ::testing::Test {
 
 TEST_F(AudioRendererImplTest, Initialize_Failed) {
   SetUnsupportedAudioDecoderProperties();
-  renderer_->Initialize(
-      decoder_,
-      NewExpectedStatusCB(PIPELINE_ERROR_INITIALIZATION_FAILED),
-      NewUnderflowClosure(), NewAudioTimeClosure());
+  InitializeWithStatus(PIPELINE_ERROR_INITIALIZATION_FAILED);
 
   // We should have no reads.
   EXPECT_TRUE(read_cb_.is_null());
 }
 
 TEST_F(AudioRendererImplTest, Initialize_Successful) {
-  renderer_->Initialize(decoder_, NewExpectedStatusCB(PIPELINE_OK),
-                        NewUnderflowClosure(), NewAudioTimeClosure());
+  Initialize();
 
   // We should have no reads.
   EXPECT_TRUE(read_cb_.is_null());
@@ -295,7 +265,7 @@ TEST_F(AudioRendererImplTest, EndOfStream) {
   EXPECT_FALSE(renderer_->HasEnded());
 
   // Drain internal buffer, now we should report ended.
-  EXPECT_CALL(host_, NotifyEnded());
+  EXPECT_CALL(*this, OnEnded());
   EXPECT_TRUE(ConsumeBufferedData(bytes_buffered(), NULL));
   EXPECT_TRUE(renderer_->HasEnded());
 }
@@ -373,9 +343,9 @@ TEST_F(AudioRendererImplTest, Underflow_EndOfStream) {
   //
   // TODO(scherkus): fix AudioRendererImpl and AudioRendererAlgorithmBase to
   // stop reading after receiving an end of stream buffer. It should have also
-  // called NotifyEnded() http://crbug.com/106641
+  // fired the ended callback http://crbug.com/106641
   DeliverEndOfStream();
-  EXPECT_CALL(host_, NotifyEnded());
+  EXPECT_CALL(*this, OnEnded());
 
   EXPECT_FALSE(ConsumeBufferedData(kDataSize, &muted));
   EXPECT_FALSE(muted);
@@ -413,17 +383,16 @@ TEST_F(AudioRendererImplTest, Underflow_ResumeFromCallback) {
 TEST_F(AudioRendererImplTest, AbortPendingRead_Preroll) {
   Initialize();
 
-  // Seek to trigger prerolling.
+  // Start prerolling.
   EXPECT_CALL(*decoder_, Read(_));
-  renderer_->Seek(base::TimeDelta(), NewSeekCB());
+  renderer_->Preroll(base::TimeDelta(), NewPrerollCB());
 
   // Simulate the decoder aborting the pending read.
-  EXPECT_CALL(*this, OnSeekComplete(PIPELINE_OK));
+  EXPECT_CALL(*this, OnPrerollComplete(PIPELINE_OK));
   AbortPendingRead();
 
-  // Seek to trigger another preroll and verify it completes
-  // normally.
-  Seek(base::TimeDelta::FromSeconds(1));
+  // Preroll again to verify it completed normally.
+  Preroll(base::TimeDelta::FromSeconds(1));
 
   ASSERT_TRUE(read_cb_.is_null());
 }
@@ -442,7 +411,7 @@ TEST_F(AudioRendererImplTest, AbortPendingRead_Pause) {
 
   AbortPendingRead();
 
-  Seek(base::TimeDelta::FromSeconds(1));
+  Preroll(base::TimeDelta::FromSeconds(1));
 }
 
 }  // namespace media

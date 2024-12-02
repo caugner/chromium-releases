@@ -36,8 +36,10 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/test/browser_test_utils.h"
 
 using extensions::Extension;
+using extensions::ExtensionCreator;
 
 ExtensionBrowserTest::ExtensionBrowserTest()
     : loaded_(false),
@@ -55,9 +57,6 @@ ExtensionBrowserTest::~ExtensionBrowserTest() {
 }
 
 void ExtensionBrowserTest::SetUpCommandLine(CommandLine* command_line) {
-  // This enables DOM automation for tab contentses.
-  EnableDOMAutomation();
-
   extensions::Feature::SetChannelForTesting(
       chrome::VersionInfo::CHANNEL_UNKNOWN);
 
@@ -86,7 +85,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithOptions(
         extensions::UnpackedInstaller::Create(service));
     installer->set_prompt_for_plugins(false);
     installer->Load(path);
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
 
   // Find the loaded extension by its path. See crbug.com/59531 for why
@@ -117,7 +116,7 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithOptions(
   // incognito disabled and file access enabled, so we don't wait in those
   // cases.
   {
-    ui_test_utils::WindowedNotificationObserver load_signal(
+    content::WindowedNotificationObserver load_signal(
         chrome::NOTIFICATION_EXTENSION_LOADED,
         content::Source<Profile>(browser()->profile()));
     CHECK(!service->IsIncognitoEnabled(extension_id));
@@ -131,11 +130,10 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithOptions(
   }
 
   {
-    ui_test_utils::WindowedNotificationObserver load_signal(
+    content::WindowedNotificationObserver load_signal(
         chrome::NOTIFICATION_EXTENSION_LOADED,
         content::Source<Profile>(browser()->profile()));
     CHECK(service->AllowFileAccess(extension));
-
     if (!fileaccess_enabled) {
       service->SetAllowFileAccess(extension, fileaccess_enabled);
       load_signal.Wait();
@@ -235,7 +233,8 @@ FilePath ExtensionBrowserTest::PackExtensionWithOptions(
 // This class is used to simulate an installation abort by the user.
 class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
  public:
-  MockAbortExtensionInstallPrompt() : ExtensionInstallPrompt(NULL) {}
+  MockAbortExtensionInstallPrompt() : ExtensionInstallPrompt(NULL, NULL, NULL) {
+  }
 
   // Simulate a user abort on an extension installation.
   virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
@@ -245,13 +244,15 @@ class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
 
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
 
-  virtual void OnInstallFailure(const CrxInstallerError& error) {}
+  virtual void OnInstallFailure(const extensions::CrxInstallerError& error) {}
 };
 
 class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
  public:
-  explicit MockAutoConfirmExtensionInstallPrompt(Browser* browser) :
-      ExtensionInstallPrompt(browser) {}
+  explicit MockAutoConfirmExtensionInstallPrompt(
+      gfx::NativeWindow parent,
+      content::PageNavigator* navigator,
+      Profile* profile) : ExtensionInstallPrompt(parent, navigator, profile) {}
 
   // Proceed without confirmation prompt.
   virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
@@ -263,7 +264,8 @@ const Extension* ExtensionBrowserTest::InstallExtensionFromWebstore(
     const FilePath& path,
     int expected_change) {
   return InstallOrUpdateExtension("", path, INSTALL_UI_TYPE_NONE,
-                                  expected_change, browser(), true);
+                                  expected_change, Extension::INTERNAL,
+                                  browser(), true);
 }
 
 const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
@@ -272,7 +274,7 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
     InstallUIType ui_type,
     int expected_change) {
   return InstallOrUpdateExtension(id, path, ui_type, expected_change,
-                                  browser(), false);
+                                  Extension::INTERNAL, browser(), false);
 }
 
 const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
@@ -282,18 +284,46 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
     int expected_change,
     Browser* browser,
     bool from_webstore) {
+  return InstallOrUpdateExtension(id, path, ui_type, expected_change,
+                                  Extension::INTERNAL, browser, from_webstore);
+}
+
+const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
+    const std::string& id,
+    const FilePath& path,
+    InstallUIType ui_type,
+    int expected_change,
+    Extension::Location install_source) {
+  return InstallOrUpdateExtension(id, path, ui_type, expected_change,
+                                  install_source, browser(), false);
+}
+
+const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
+    const std::string& id,
+    const FilePath& path,
+    InstallUIType ui_type,
+    int expected_change,
+    Extension::Location install_source,
+    Browser* browser,
+    bool from_webstore) {
   ExtensionService* service = browser->profile()->GetExtensionService();
   service->set_show_extensions_prompts(false);
   size_t num_before = service->extensions()->size();
 
   {
     ExtensionInstallPrompt* install_ui = NULL;
-    if (ui_type == INSTALL_UI_TYPE_CANCEL)
+    if (ui_type == INSTALL_UI_TYPE_CANCEL) {
       install_ui = new MockAbortExtensionInstallPrompt();
-    else if (ui_type == INSTALL_UI_TYPE_NORMAL)
-      install_ui = new ExtensionInstallPrompt(browser);
-    else if (ui_type == INSTALL_UI_TYPE_AUTO_CONFIRM)
-      install_ui = new MockAutoConfirmExtensionInstallPrompt(browser);
+    } else if (ui_type == INSTALL_UI_TYPE_NORMAL) {
+      install_ui = chrome::CreateExtensionInstallPromptWithBrowser(browser);
+    } else if (ui_type == INSTALL_UI_TYPE_AUTO_CONFIRM) {
+      gfx::NativeWindow parent =
+          browser->window() ? browser->window()->GetNativeWindow() : NULL;
+      install_ui = new MockAutoConfirmExtensionInstallPrompt(
+          parent,
+          browser,
+          browser->profile());
+    }
 
     // TODO(tessamac): Update callers to always pass an unpacked extension
     //                 and then always pack the extension here.
@@ -304,22 +334,23 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
     if (crx_path.empty())
       return NULL;
 
-    scoped_refptr<CrxInstaller> installer(
-        CrxInstaller::Create(service, install_ui));
+    scoped_refptr<extensions::CrxInstaller> installer(
+        extensions::CrxInstaller::Create(service, install_ui));
     installer->set_expected_id(id);
     installer->set_is_gallery_install(from_webstore);
+    installer->set_install_source(install_source);
     if (!from_webstore) {
       installer->set_off_store_install_allow_reason(
-          CrxInstaller::OffStoreInstallAllowedInTest);
+          extensions::CrxInstaller::OffStoreInstallAllowedInTest);
     }
 
     content::NotificationRegistrar registrar;
     registrar.Add(this, chrome::NOTIFICATION_CRX_INSTALLER_DONE,
-                  content::Source<CrxInstaller>(installer.get()));
+                  content::Source<extensions::CrxInstaller>(installer.get()));
 
     installer->InstallCrx(crx_path);
 
-    ui_test_utils::RunMessageLoop();
+    content::RunMessageLoop();
   }
 
   size_t num_after = service->extensions()->size();
@@ -415,7 +446,7 @@ bool ExtensionBrowserTest::WaitForExtensionViewsToLoad() {
     if (!(*iter)->IsLoading()) {
       ++iter;
     } else {
-      ui_test_utils::RunMessageLoop();
+      content::RunMessageLoop();
 
       // Test activity may have modified the set of extension processes during
       // message processing, so re-start the iteration to catch added/removed
@@ -483,10 +514,10 @@ void ExtensionBrowserTest::OpenWindow(content::WebContents* contents,
                                       const GURL& url,
                                       bool newtab_process_should_equal_opener,
                                       content::WebContents** newtab_result) {
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
+  ASSERT_TRUE(content::ExecuteJavaScript(
       contents->GetRenderViewHost(), L"",
       L"window.open('" + UTF8ToWide(url.spec()) + L"');"));
 
@@ -511,10 +542,10 @@ void ExtensionBrowserTest::OpenWindow(content::WebContents* contents,
 void ExtensionBrowserTest::NavigateInRenderer(content::WebContents* contents,
                                               const GURL& url) {
   bool result = false;
-  ui_test_utils::WindowedNotificationObserver observer(
+  content::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::NotificationService::AllSources());
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+  ASSERT_TRUE(content::ExecuteJavaScriptAndExtractBool(
       contents->GetRenderViewHost(), L"",
       L"window.addEventListener('unload', function() {"
       L"    window.domAutomationController.send(true);"
@@ -526,11 +557,11 @@ void ExtensionBrowserTest::NavigateInRenderer(content::WebContents* contents,
   EXPECT_EQ(url, contents->GetController().GetLastCommittedEntry()->GetURL());
 }
 
-ExtensionHost* ExtensionBrowserTest::FindHostWithPath(
+extensions::ExtensionHost* ExtensionBrowserTest::FindHostWithPath(
     ExtensionProcessManager* manager,
     const std::string& path,
     int expected_hosts) {
-  ExtensionHost* host = NULL;
+  extensions::ExtensionHost* host = NULL;
   int num_hosts = 0;
   ExtensionProcessManager::ExtensionHostSet background_hosts =
       manager->background_hosts();

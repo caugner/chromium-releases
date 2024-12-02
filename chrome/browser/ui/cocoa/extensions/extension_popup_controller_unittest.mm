@@ -30,7 +30,7 @@ class ExtensionTestingProfile : public TestingProfile {
     DCHECK(!GetExtensionService());
 
     manager_.reset(ExtensionProcessManager::Create(this));
-    extension_prefs_.reset(new ExtensionPrefs(
+    extension_prefs_.reset(new extensions::ExtensionPrefs(
         GetPrefs(),
         GetExtensionsInstallDir(),
         ExtensionPrefValueMapFactory::GetForProfile(this)));
@@ -63,7 +63,7 @@ class ExtensionTestingProfile : public TestingProfile {
 
  private:
   scoped_ptr<ExtensionProcessManager> manager_;
-  scoped_ptr<ExtensionPrefs> extension_prefs_;
+  scoped_ptr<extensions::ExtensionPrefs> extension_prefs_;
   scoped_ptr<ExtensionService> service_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionTestingProfile);
@@ -75,7 +75,8 @@ class ExtensionPopupControllerTest : public CocoaTest {
     CocoaTest::SetUp();
     profile_.reset(new ExtensionTestingProfile());
     profile_->InitExtensionProfile();
-    browser_.reset(new Browser(Browser::TYPE_TABBED, profile_.get()));
+    browser_.reset(
+        new Browser(Browser::CreateParams(profile_.get())));
     [ExtensionPopupController showURL:GURL("http://google.com")
                             inBrowser:browser_.get()
                            anchoredAt:NSZeroPoint

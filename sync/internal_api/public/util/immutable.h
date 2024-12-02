@@ -25,8 +25,7 @@
 // The last line incurs the cost of copying my_stuff, which is
 // undesirable.  Here's the above code re-written using Immutable<T>:
 //
-//   void ProcessStuff(
-//       const browser_sync::Immutable<LargeObjectList>& stuff) {
+//   void ProcessStuff(const Immutable<LargeObjectList>& stuff) {
 //     for (LargeObjectList::const_iterator it = stuff.Get().begin();
 //          it != stuff.Get().end(); ++it) {
 //       ... process it ...
@@ -64,7 +63,6 @@
 
 #ifndef SYNC_UTIL_IMMUTABLE_H_
 #define SYNC_UTIL_IMMUTABLE_H_
-#pragma once
 
 // For std::swap().
 #include <algorithm>
@@ -72,7 +70,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 
-namespace browser_sync {
+namespace syncer {
 
 namespace internal {
 // This class is part of the Immutable implementation.  DO NOT USE
@@ -257,6 +255,6 @@ Immutable<T> MakeImmutable(T* t) {
   return Immutable<T>(t);
 }
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_UTIL_IMMUTABLE_H_

@@ -1,10 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_BACKING_STORE_WIN_H_
 #define CONTENT_BROWSER_RENDERER_HOST_BACKING_STORE_WIN_H_
-#pragma once
 
 #include <windows.h>
 
@@ -12,9 +11,11 @@
 #include "base/compiler_specific.h"
 #include "content/browser/renderer_host/backing_store.h"
 
+namespace content {
+
 class BackingStoreWin : public BackingStore {
  public:
-  BackingStoreWin(content::RenderWidgetHost* widget, const gfx::Size& size);
+  BackingStoreWin(RenderWidgetHost* widget, const gfx::Size& size);
   virtual ~BackingStoreWin();
 
   HDC hdc() { return hdc_; }
@@ -25,7 +26,7 @@ class BackingStoreWin : public BackingStore {
   // BackingStore implementation.
   virtual size_t MemorySize() OVERRIDE;
   virtual void PaintToBackingStore(
-      content::RenderProcessHost* process,
+      RenderProcessHost* process,
       TransportDIB::Id bitmap,
       const gfx::Rect& bitmap_rect,
       const std::vector<gfx::Rect>& copy_rects,
@@ -53,5 +54,7 @@ class BackingStoreWin : public BackingStore {
 
   DISALLOW_COPY_AND_ASSIGN(BackingStoreWin);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_BACKING_STORE_WIN_H_

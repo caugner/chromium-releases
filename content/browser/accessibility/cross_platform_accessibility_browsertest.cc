@@ -6,14 +6,15 @@
 #include <vector>
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/test_utils.h"
+#include "content/test/content_browser_test.h"
+#include "content/test/content_browser_test_utils.h"
+#include "content/shell/shell.h"
 
 #if defined(OS_WIN)
 #include <atlbase.h>
@@ -21,15 +22,9 @@
 #include "ui/base/win/atl_module.h"
 #endif
 
-using content::AccessibilityNodeData;
-using content::OpenURLParams;
-using content::RenderViewHostImpl;
-using content::RenderWidgetHostImpl;
-using content::Referrer;
+namespace content {
 
-namespace {
-
-class CrossPlatformAccessibilityBrowserTest : public InProcessBrowserTest {
+class CrossPlatformAccessibilityBrowserTest : public ContentBrowserTest {
  public:
   CrossPlatformAccessibilityBrowserTest() {}
 
@@ -37,11 +32,11 @@ class CrossPlatformAccessibilityBrowserTest : public InProcessBrowserTest {
   // notification that it's been received.
   const AccessibilityNodeData& GetAccessibilityNodeDataTree(
       AccessibilityMode accessibility_mode = AccessibilityModeComplete) {
-    ui_test_utils::WindowedNotificationObserver tree_updated_observer(
-        content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
-        content::NotificationService::AllSources());
-    content::RenderWidgetHostView* host_view =
-        browser()->GetActiveWebContents()->GetRenderWidgetHostView();
+    WindowedNotificationObserver tree_updated_observer(
+        NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
+        NotificationService::AllSources());
+    RenderWidgetHostView* host_view =
+        shell()->web_contents()->GetRenderWidgetHostView();
     RenderWidgetHostImpl* host =
         RenderWidgetHostImpl::From(host_view->GetRenderWidgetHost());
     RenderViewHostImpl* view_host = static_cast<RenderViewHostImpl*>(host);
@@ -60,9 +55,9 @@ class CrossPlatformAccessibilityBrowserTest : public InProcessBrowserTest {
       RecursiveAssertUniqueIds(node.children[i], ids);
   }
 
-  // InProcessBrowserTest
-  void SetUpInProcessBrowserTestFixture();
-  void TearDownInProcessBrowserTestFixture();
+  // ContentBrowserTest
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
+  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
 
  protected:
   std::string GetAttr(const AccessibilityNodeData& node,
@@ -137,8 +132,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       "<body><input type='button' value='push' /><input type='checkbox' />"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
 
   // Check properties of the root element of the tree.
@@ -205,8 +199,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       "<input value=\"Hello, world.\"/>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
 
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -235,8 +228,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       "<input value=\"Hello, world.\"/>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
 
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -263,8 +255,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       "<!doctype html>"
       "<table border=1><tr><td>1</td><td>2</td></tr></table>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
 
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -303,8 +294,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       "  }, 1);\n"
       "</script>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
 
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
   base::hash_set<int> ids;
@@ -324,8 +314,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       "<button>Button 3</button>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
 
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -371,8 +360,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       "<!doctype html>"
       "<em><code ><h4 ></em>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
 
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
   base::hash_set<int> ids;
@@ -399,8 +387,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       " </tr>"
       "</table>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
 
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
   const AccessibilityNodeData& table = tree.children[0];
@@ -459,8 +446,7 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       " Some text"
       "</div>";
   GURL url(url_str);
-  browser()->OpenURL(OpenURLParams(
-      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+  NavigateToURL(shell(), url);
   const AccessibilityNodeData& tree = GetAccessibilityNodeDataTree();
 
   ASSERT_EQ(1U, tree.children.size());
@@ -470,4 +456,4 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
       true, GetBoolAttr(textbox, AccessibilityNodeData::ATTR_CAN_SET_VALUE));
 }
 
-}  // namespace
+}  // namespace content

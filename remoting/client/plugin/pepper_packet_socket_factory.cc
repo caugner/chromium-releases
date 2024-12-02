@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
 #include "net/base/io_buffer.h"
 #include "ppapi/cpp/private/net_address_private.h"
 #include "ppapi/cpp/private/udp_socket_private.h"
@@ -31,7 +32,7 @@ class UdpPacketSocket : public talk_base::AsyncPacketSocket {
   virtual ~UdpPacketSocket();
 
   // |min_port| and |max_port| are set to zero if the port number
-  // |should be assigned by the OS.
+  // should be assigned by the OS.
   bool Init(const talk_base::SocketAddress& local_address,
             int min_port,
             int max_port);
@@ -87,6 +88,8 @@ class UdpPacketSocket : public talk_base::AsyncPacketSocket {
   std::list<PendingPacket> send_queue_;
   int send_queue_size_;
 
+  base::WeakPtrFactory<UdpPacketSocket> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(UdpPacketSocket);
 };
 
@@ -106,7 +109,8 @@ UdpPacketSocket::UdpPacketSocket(const pp::InstanceHandle& instance)
       min_port_(0),
       max_port_(0),
       send_pending_(false),
-      send_queue_size_(0) {
+      send_queue_size_(0),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 UdpPacketSocket::~UdpPacketSocket() {
@@ -131,7 +135,8 @@ bool UdpPacketSocket::Init(const talk_base::SocketAddress& local_address,
   }
 
   int result = socket_.Bind(&pp_local_address, PpCompletionCallback(
-      base::Bind(&UdpPacketSocket::OnBindCompleted, base::Unretained(this))));
+      base::Bind(&UdpPacketSocket::OnBindCompleted,
+                 weak_factory_.GetWeakPtr())));
   DCHECK_EQ(result, PP_OK_COMPLETIONPENDING);
   state_ = STATE_BINDING;
 
@@ -169,7 +174,7 @@ void UdpPacketSocket::OnBindCompleted(int result) {
                                          min_port_)) {
       int result = socket_.Bind(&pp_local_address, PpCompletionCallback(
           base::Bind(&UdpPacketSocket::OnBindCompleted,
-                     base::Unretained(this))));
+                     weak_factory_.GetWeakPtr())));
       DCHECK_EQ(result, PP_OK_COMPLETIONPENDING);
     }
   } else {
@@ -258,20 +263,41 @@ void UdpPacketSocket::DoSend() {
       send_queue_.front().data->data(), send_queue_.front().data->size(),
       &send_queue_.front().address,
       PpCompletionCallback(base::Bind(&UdpPacketSocket::OnSendCompleted,
-                                      base::Unretained(this))));
+                                      weak_factory_.GetWeakPtr())));
   DCHECK_EQ(result, PP_OK_COMPLETIONPENDING);
   send_pending_ = true;
 }
 
 void UdpPacketSocket::OnSendCompleted(int result) {
+  if (result == PP_ERROR_ABORTED) {
+    // Send is aborted when the socket is being destroyed.
+    // |send_queue_| may be already destroyed, it's not safe to access
+    // it here.
+    return;
+  }
+
   send_pending_ = false;
 
   if (result < 0) {
-    if (result != PP_ERROR_ABORTED) {
-      LOG(ERROR) << "Send failed on a UDP socket: " << result;
-    }
-    error_ = EINVAL;
-    return;
+    LOG(ERROR) << "Send failed on a UDP socket: " << result;
+
+    // OS (e.g. OSX) may return EHOSTUNREACH when the peer has the
+    // same subnet address as the local host but connected to a
+    // different network. That error must be ingored because the
+    // socket may still be useful for other ICE canidadates (e.g. for
+    // STUN candidates with a different address). Unfortunately pepper
+    // interface currently returns PP_ERROR_FAILED for any error (see
+    // crbug.com/136406). It's not possible to distinguish that case
+    // from other errors and so we have to ingore all of them. This
+    // behavior matchers the libjingle's AsyncUDPSocket used by the
+    // host.
+    //
+    // TODO(sergeyu): Once implementation of the Pepper UDP interface
+    // is fixed, uncomment the code below, but ignore
+    // host-unreacheable error.
+
+    // error_ = EINVAL;
+    // return;
   }
 
   send_queue_size_ -= send_queue_.front().data->size();
@@ -284,7 +310,7 @@ void UdpPacketSocket::DoRead() {
   int result = socket_.RecvFrom(
       &receive_buffer_[0], receive_buffer_.size(),
       PpCompletionCallback(base::Bind(&UdpPacketSocket::OnReadCompleted,
-                                      base::Unretained(this))));
+                                      weak_factory_.GetWeakPtr())));
   DCHECK_EQ(result, PP_OK_COMPLETIONPENDING);
 }
 

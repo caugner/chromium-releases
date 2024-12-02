@@ -92,6 +92,8 @@ SSLServerSocketNSS::SSLServerSocketNSS(
     const SSLConfig& ssl_config)
     : transport_send_busy_(false),
       transport_recv_busy_(false),
+      user_read_buf_len_(0),
+      user_write_buf_len_(0),
       nss_fd_(NULL),
       nss_bufs_(NULL),
       transport_socket_(transport_socket),
@@ -101,7 +103,7 @@ SSLServerSocketNSS::SSLServerSocketNSS(
       completed_handshake_(false) {
   ssl_config_.false_start_enabled = false;
   ssl_config_.version_min = SSL_PROTOCOL_VERSION_SSL3;
-  ssl_config_.version_max = SSL_PROTOCOL_VERSION_TLS1;
+  ssl_config_.version_max = SSL_PROTOCOL_VERSION_TLS1_1;
 
   // TODO(hclam): Need a better way to clone a key.
   std::vector<uint8> key_bytes;
@@ -166,6 +168,22 @@ int SSLServerSocketNSS::ExportKeyingMaterial(const base::StringPiece& label,
     LogFailedNSSFunction(net_log_, "SSL_ExportKeyingMaterial", "");
     return MapNSSError(PORT_GetError());
   }
+  return OK;
+}
+
+int SSLServerSocketNSS::GetTLSUniqueChannelBinding(std::string* out) {
+  if (!IsConnected())
+    return ERR_SOCKET_NOT_CONNECTED;
+  unsigned char buf[64];
+  unsigned int len;
+  SECStatus result = SSL_GetChannelBinding(nss_fd_,
+                                           SSL_CHANNEL_BINDING_TLS_UNIQUE,
+                                           buf, &len, arraysize(buf));
+  if (result != SECSuccess) {
+    LogFailedNSSFunction(net_log_, "SSL_GetChannelBinding", "");
+    return MapNSSError(PORT_GetError());
+  }
+  out->assign(reinterpret_cast<char*>(buf), len);
   return OK;
 }
 
@@ -279,9 +297,18 @@ base::TimeDelta SSLServerSocketNSS::GetConnectTimeMicros() const {
   return transport_socket_->GetConnectTimeMicros();
 }
 
+bool SSLServerSocketNSS::WasNpnNegotiated() const {
+  return false;
+}
+
 NextProto SSLServerSocketNSS::GetNegotiatedProtocol() const {
   // NPN is not supported by this class.
   return kProtoUnknown;
+}
+
+bool SSLServerSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 int SSLServerSocketNSS::InitializeSSLOptions() {

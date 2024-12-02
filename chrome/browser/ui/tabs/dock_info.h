@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_TABS_DOCK_INFO_H_
 #define CHROME_BROWSER_UI_TABS_DOCK_INFO_H_
-#pragma once
 
 #include <set>
 
@@ -82,6 +81,8 @@ class DockInfo {
   static gfx::NativeWindow GetLocalProcessWindowAtPoint(
       const gfx::Point& screen_point,
       const std::set<gfx::NativeView>& ignore);
+
+  static int GetHotSpotDeltaY();
 
   // Returns true if this DockInfo is valid for the specified point. This
   // resets in_enable_area based on the new location.

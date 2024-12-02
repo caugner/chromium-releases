@@ -2,9 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOWNLOAD_OBSERVER_H__
-#define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOWNLOAD_OBSERVER_H__
-#pragma once
+#ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOWNLOAD_OBSERVER_H_
+#define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOWNLOAD_OBSERVER_H_
 
 #include <map>
 
@@ -13,12 +12,15 @@
 #include "base/platform_file.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
+#include "chrome/browser/chromeos/gdata/gdata_errorcode.h"
 
 class Profile;
 
 namespace gdata {
 
 class DocumentEntry;
+class GDataEntryProto;
+class GDataFileSystemInterface;
 class GDataUploader;
 struct UploadFileInfo;
 
@@ -27,12 +29,12 @@ struct UploadFileInfo;
 class GDataDownloadObserver : public content::DownloadManager::Observer,
                               public content::DownloadItem::Observer {
  public:
-  GDataDownloadObserver();
+  GDataDownloadObserver(GDataUploader* uploader,
+                        GDataFileSystemInterface* file_system);
   virtual ~GDataDownloadObserver();
 
   // Become an observer of  DownloadManager.
-  void Initialize(GDataUploader* gdata_uploader,
-                  content::DownloadManager* download_manager,
+  void Initialize(content::DownloadManager* download_manager,
                   const FilePath& gdata_tmp_download_path);
 
   typedef base::Callback<void(const FilePath&)>
@@ -109,20 +111,40 @@ class GDataDownloadObserver : public content::DownloadManager::Observer,
   bool ShouldUpload(content::DownloadItem* download);
 
   // Creates UploadFileInfo and initializes it using DownloadItem*.
-  scoped_ptr<UploadFileInfo> CreateUploadFileInfo(
-      content::DownloadItem* download);
+  void CreateUploadFileInfo(content::DownloadItem* download);
+
+  // Callback for handling results of GDataFileSystem::GetEntryInfoByPath()
+  // initiated by CreateUploadFileInfo(). This callback reads the directory
+  // entry to determine the upload path, then calls StartUpload() to actually
+  // start the upload.
+  void OnGetEntryInfoByPath(
+      int32 download_id,
+      scoped_ptr<UploadFileInfo> upload_file_info,
+      GDataFileError error,
+      scoped_ptr<GDataEntryProto> entry_proto);
+
+  // Starts the upload.
+  void StartUpload(int32 download_id,
+                   scoped_ptr<UploadFileInfo> upload_file_info);
 
   // Callback invoked by GDataUploader when the upload associated with
   // |download_id| has completed. |error| indicated whether the
-  // call was successful. This function invokes the MaybeCompleteDownload()
-  // method on the DownloadItem to allow it to complete.
+  // call was successful. This function takes ownership of DocumentEntry from
+  // |upload_file_info| for use by MoveFileToGDataCache(). It also invokes the
+  // MaybeCompleteDownload() method on the DownloadItem to allow it to complete.
   void OnUploadComplete(int32 download_id,
-                        base::PlatformFileError error,
+                        GDataFileError error,
                         scoped_ptr<UploadFileInfo> upload_file_info);
 
+  // Moves the downloaded file to gdata cache.
+  // Must be called after GDataDownloadObserver receives COMPLETE notification.
+  void MoveFileToGDataCache(content::DownloadItem* download);
+
   // Private data.
-  // Use GDataUploader to trigger file uploads.
+  // The uploader owned by GDataSystemService. Used to trigger file uploads.
   GDataUploader* gdata_uploader_;
+  // The file system owned by GDataSystemService.
+  GDataFileSystemInterface* file_system_;
   // Observe the DownloadManager for new downloads.
   content::DownloadManager* download_manager_;
 
@@ -133,6 +155,8 @@ class GDataDownloadObserver : public content::DownloadManager::Observer,
   typedef std::map<int32, content::DownloadItem*> DownloadMap;
   DownloadMap pending_downloads_;
 
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<GDataDownloadObserver> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GDataDownloadObserver);
@@ -140,4 +164,4 @@ class GDataDownloadObserver : public content::DownloadManager::Observer,
 
 }  // namespace gdata
 
-#endif  // CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOWNLOAD_OBSERVER_H__
+#endif  // CHROME_BROWSER_CHROMEOS_GDATA_GDATA_DOWNLOAD_OBSERVER_H_

@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_WIN_H_
 #define UI_VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_WIN_H_
-#pragma once
 
 #include <atlbase.h>
 #include <atlapp.h>
@@ -70,7 +69,7 @@ class NativeTextfieldWin
   virtual void UpdateText() OVERRIDE;
   virtual void AppendText(const string16& text) OVERRIDE;
   virtual string16 GetSelectedText() const OVERRIDE;
-  virtual void SelectAll() OVERRIDE;
+  virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void ClearSelection() OVERRIDE;
   virtual void UpdateBorder() OVERRIDE;
   virtual void UpdateTextColor() OVERRIDE;

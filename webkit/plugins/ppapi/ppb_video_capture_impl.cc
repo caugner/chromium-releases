@@ -177,13 +177,13 @@ void PPB_VideoCapture_Impl::OnInitialized(media::VideoCapture* capture,
 
 int32_t PPB_VideoCapture_Impl::InternalEnumerateDevices(
     PP_Resource* devices,
-    const PP_CompletionCallback& callback) {
+    scoped_refptr<TrackedCallback> callback) {
   PluginInstance* instance = ResourceHelper::GetPluginInstance(this);
   if (!instance)
     return PP_ERROR_FAILED;
 
   devices_ = devices;
-  enumerate_devices_callback_ = new TrackedCallback(this, callback);
+  enumerate_devices_callback_ = callback;
   instance->delegate()->EnumerateDevices(
       PP_DEVICETYPE_DEV_VIDEOCAPTURE,
       base::Bind(&PPB_VideoCapture_Impl::EnumerateDevicesCallbackFunc,
@@ -195,12 +195,9 @@ int32_t PPB_VideoCapture_Impl::InternalOpen(
     const std::string& device_id,
     const PP_VideoCaptureDeviceInfo_Dev& requested_info,
     uint32_t buffer_count,
-    const PP_CompletionCallback& callback) {
+    scoped_refptr<TrackedCallback> callback) {
   // It is able to complete synchronously if the default device is used.
   bool sync_completion = device_id.empty();
-
-  if (!callback.func && !sync_completion)
-    return PP_ERROR_BLOCKS_MAIN_THREAD;
 
   PluginInstance* instance = ResourceHelper::GetPluginInstance(this);
   if (!instance)
@@ -216,7 +213,7 @@ int32_t PPB_VideoCapture_Impl::InternalOpen(
     OnInitialized(platform_video_capture_.get(), true);
     return PP_OK;
   } else {
-    open_callback_ = new TrackedCallback(this, callback);
+    open_callback_ = callback;
     return PP_OK_COMPLETIONPENDING;
   }
 }

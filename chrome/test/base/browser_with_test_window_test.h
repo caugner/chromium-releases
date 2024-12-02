@@ -4,7 +4,6 @@
 
 #ifndef CHROME_TEST_BASE_BROWSER_WITH_TEST_WINDOW_TEST_H_
 #define CHROME_TEST_BASE_BROWSER_WITH_TEST_WINDOW_TEST_H_
-#pragma once
 
 #include "base/message_loop.h"
 #include "chrome/browser/ui/browser.h"
@@ -41,7 +40,7 @@ class WebContents;
 //   // Add a new tab and navigate it. This will be at index 0.
 //   AddTab(browser(), GURL("http://foo/1"));
 //   NavigationController* controller =
-//       &browser()->GetTabContentsAt(0)->GetController();
+//       &chrome::GetTabContentsAt(browser(), 0)->GetController();
 //
 //   // Navigate somewhere else.
 //   GURL url2("http://foo/2");

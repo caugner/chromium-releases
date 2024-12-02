@@ -9,7 +9,6 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/system/tray/tray_constants.h"
-#include "ash/wm/window_animations.h"
 #include "base/message_loop.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
@@ -18,12 +17,11 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 namespace ash {
 
 namespace {
-
-const int kAnimationDurationForPopupMS = 200;
 
 // Normally a detailed view is the same size as the default view. However,
 // when showing a detailed view directly (e.g. clicking on a notification),
@@ -32,9 +30,14 @@ const int kAnimationDurationForPopupMS = 200;
 // detailed view.
 const int kDetailedBubbleMaxHeight = kTrayPopupItemHeight * 5;
 
+// TODO(stevenjb/jennyz): Remove this when TrayBubbleBorder is integrated with
+// BubbleBorder. See crbug.com/132772, crbug.com/139813.
 class TrayPopupItemBorder : public views::Border {
  public:
-  explicit TrayPopupItemBorder(views::View* owner) : owner_(owner) {}
+  explicit TrayPopupItemBorder(views::View* owner, ShelfAlignment alignment)
+      : owner_(owner),
+        alignment_(alignment) {
+  }
   virtual ~TrayPopupItemBorder() {}
 
  private:
@@ -49,24 +52,36 @@ class TrayPopupItemBorder : public views::Border {
       canvas->FillRect(gfx::Rect(0, 0, view.width(), 1), kBorderDarkColor);
 
     // Bottom border.
-    if (index != parent->child_count() - 1) {
+    if ((index != parent->child_count() - 1) ||
+        (alignment_ != SHELF_ALIGNMENT_BOTTOM)) {
       canvas->FillRect(gfx::Rect(0, view.height() - 1, view.width(), 1),
                        kBorderLightColor);
     }
 
     // Left and right borders.
-    canvas->FillRect(gfx::Rect(0, 0, 1, view.height()), kBorderDarkColor);
-    canvas->FillRect(gfx::Rect(view.width() - 1, 0, 1, view.height()),
-        kBorderDarkColor);
+    if (alignment_ != SHELF_ALIGNMENT_LEFT) {
+      canvas->FillRect(gfx::Rect(0, 0, 1, view.height()),
+                       kBorderDarkColor);
+    }
+    if (alignment_ != SHELF_ALIGNMENT_RIGHT) {
+      canvas->FillRect(gfx::Rect(view.width() - 1, 0, 1, view.height()),
+                       kBorderDarkColor);
+    }
   }
 
   virtual void GetInsets(gfx::Insets* insets) const OVERRIDE {
     const views::View* parent = owner_->parent();
     int index = parent->GetIndexOf(owner_);
-    insets->Set(index == 0, 1, index != parent->child_count() - 1, 1);
+    int left = (alignment_ == SHELF_ALIGNMENT_LEFT) ? 0 : 1;
+    int right = (alignment_ == SHELF_ALIGNMENT_RIGHT) ? 0 : 1;
+    insets->Set(index == 0 ? 1 : 0,
+                left,
+                (index != parent->child_count() - 1) ? 1 : 0,
+                right);
   }
 
   views::View* owner_;
+  ShelfAlignment alignment_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayPopupItemBorder);
 };
@@ -75,11 +90,13 @@ class TrayPopupItemBorder : public views::Border {
 // - optionally changes background color on hover.
 class TrayPopupItemContainer : public views::View {
  public:
-  TrayPopupItemContainer(views::View* view, bool change_background)
+  TrayPopupItemContainer(views::View* view,
+                         ShelfAlignment alignment,
+                         bool change_background)
       : hover_(false),
         change_background_(change_background) {
     set_notify_enter_exit_on_child(true);
-    set_border(new TrayPopupItemBorder(this));
+    set_border(new TrayPopupItemBorder(this, alignment));
     views::BoxLayout* layout = new views::BoxLayout(
         views::BoxLayout::kVertical, 0, 0, 0);
     layout->set_spread_blank_space(true);
@@ -158,18 +175,6 @@ class AnimationObserverDeleteLayer : public ui::ImplicitAnimationObserver {
 
 namespace internal {
 
-// SystemTrayBubble::InitParams
-SystemTrayBubble::InitParams::InitParams(
-    SystemTrayBubble::AnchorType anchor_type,
-    ShelfAlignment shelf_alignment)
-    : anchor(NULL),
-      anchor_type(anchor_type),
-      can_activate(false),
-      login_status(ash::user::LOGGED_IN_NONE),
-      arrow_offset(0),
-      max_height(0) {
-}
-
 // SystemTrayBubble
 
 SystemTrayBubble::SystemTrayBubble(
@@ -181,7 +186,6 @@ SystemTrayBubble::SystemTrayBubble(
       bubble_widget_(NULL),
       items_(items),
       bubble_type_(bubble_type),
-      anchor_type_(ANCHOR_TYPE_TRAY),
       autoclose_delay_(0) {
 }
 
@@ -203,7 +207,7 @@ void SystemTrayBubble::UpdateView(
   DCHECK(bubble_type != BUBBLE_TYPE_NOTIFICATION);
   DCHECK(bubble_type != bubble_type_);
 
-  const int kSwipeDelayMS = 300;
+  const int kSwipeDelayMS = 150;
   base::TimeDelta swipe_duration =
       base::TimeDelta::FromMilliseconds(kSwipeDelayMS);
   ui::Layer* layer = bubble_view_->RecreateLayer();
@@ -219,7 +223,7 @@ void SystemTrayBubble::UpdateView(
     ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
     settings.AddObserver(new AnimationObserverDeleteLayer(layer));
     settings.SetTransitionDuration(swipe_duration);
-    settings.SetTweenType(ui::Tween::EASE_IN);
+    settings.SetTweenType(ui::Tween::EASE_OUT);
     ui::Transform transform;
     transform.SetTranslateX(layer->bounds().width());
     layer->SetTransform(transform);
@@ -280,105 +284,38 @@ void SystemTrayBubble::UpdateView(
       ui::ScopedLayerAnimationSettings settings(new_layer->GetAnimator());
       settings.AddObserver(new AnimationObserverDeleteLayer(layer));
       settings.SetTransitionDuration(swipe_duration);
-      settings.SetTweenType(ui::Tween::EASE_IN);
+      settings.SetTweenType(ui::Tween::EASE_OUT);
       new_layer->SetTransform(ui::Transform());
     }
   }
 }
 
-void SystemTrayBubble::InitView(const InitParams& init_params) {
+void SystemTrayBubble::InitView(views::View* anchor,
+                                TrayBubbleView::InitParams init_params,
+                                user::LoginStatus login_status) {
   DCHECK(bubble_view_ == NULL);
-  anchor_type_ = init_params.anchor_type;
-  views::BubbleBorder::ArrowLocation arrow_location;
-  if (anchor_type_ == ANCHOR_TYPE_TRAY) {
-    if (tray_->shelf_alignment() == SHELF_ALIGNMENT_BOTTOM) {
-      arrow_location = base::i18n::IsRTL() ?
-                            views::BubbleBorder::BOTTOM_LEFT :
-                            views::BubbleBorder::BOTTOM_RIGHT;
-    } else if (tray_->shelf_alignment() == SHELF_ALIGNMENT_LEFT) {
-      arrow_location = views::BubbleBorder::LEFT_BOTTOM;
-    } else {
-      arrow_location = views::BubbleBorder::RIGHT_BOTTOM;
-    }
-  } else {
-    arrow_location = views::BubbleBorder::NONE;
-  }
-  bubble_view_ = new TrayBubbleView(
-      init_params.anchor, arrow_location,
-      this, init_params.can_activate, kTrayPopupWidth);
-  if (bubble_type_ == BUBBLE_TYPE_NOTIFICATION)
-    bubble_view_->set_close_on_deactivate(false);
-  int max_height = init_params.max_height;
-  if (bubble_type_ == BUBBLE_TYPE_DETAILED &&
-      max_height < kDetailedBubbleMaxHeight)
-    max_height = kDetailedBubbleMaxHeight;
-  bubble_view_->SetMaxHeight(max_height);
 
-  CreateItemViews(init_params.login_status);
+  if (bubble_type_ == BUBBLE_TYPE_DETAILED &&
+      init_params.max_height < kDetailedBubbleMaxHeight) {
+    init_params.max_height = kDetailedBubbleMaxHeight;
+  } else if (bubble_type_ == BUBBLE_TYPE_NOTIFICATION) {
+    init_params.close_on_deactivate = false;
+  }
+  bubble_view_ = TrayBubbleView::Create(anchor, this, init_params);
+
+
+  CreateItemViews(login_status);
 
   DCHECK(bubble_widget_ == NULL);
   bubble_widget_ = views::BubbleDelegateView::CreateBubble(bubble_view_);
-
-  // Must occur after call to CreateBubble()
-  bubble_view_->SetAlignment(views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE);
-  bubble_widget_->non_client_view()->frame_view()->set_background(NULL);
-  bubble_view_->SetBubbleBorder(init_params.arrow_offset);
-
   bubble_widget_->AddObserver(this);
 
-  // Setup animation.
-  ash::SetWindowVisibilityAnimationType(
-      bubble_widget_->GetNativeWindow(),
-      ash::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE);
-  ash::SetWindowVisibilityAnimationTransition(
-      bubble_widget_->GetNativeWindow(),
-      ash::ANIMATE_BOTH);
-  ash::SetWindowVisibilityAnimationDuration(
-      bubble_widget_->GetNativeWindow(),
-      base::TimeDelta::FromMilliseconds(kAnimationDurationForPopupMS));
-
-  InitializeHost(bubble_widget_, tray_);
-
-  bubble_view_->Show();
+  InitializeAndShowBubble(bubble_widget_, bubble_view_, tray_);
 }
 
 void SystemTrayBubble::BubbleViewDestroyed() {
   DestroyItemViews();
   bubble_view_ = NULL;
-}
-
-gfx::Rect SystemTrayBubble::GetAnchorRect() const {
-  gfx::Rect rect;
-  views::Widget* widget = bubble_view()->anchor_widget();
-  if (widget->IsVisible()) {
-    rect = widget->GetWindowScreenBounds();
-    if (anchor_type_ == ANCHOR_TYPE_TRAY) {
-      if (tray_->shelf_alignment() == SHELF_ALIGNMENT_BOTTOM) {
-        rect.Inset(
-            base::i18n::IsRTL() ?
-                kPaddingFromRightEdgeOfScreenBottomAlignment : 0,
-            0,
-            base::i18n::IsRTL() ?
-                0 : kPaddingFromRightEdgeOfScreenBottomAlignment,
-            kPaddingFromBottomOfScreenBottomAlignment);
-      } else if (tray_->shelf_alignment() == SHELF_ALIGNMENT_LEFT) {
-        rect.Inset(0, 0, kPaddingFromEdgeOfLauncherVerticalAlignment,
-                   kPaddingFromBottomOfScreenVerticalAlignment);
-      } else {
-        rect.Inset(kPaddingFromEdgeOfLauncherVerticalAlignment + 4,
-                   0, 0, kPaddingFromBottomOfScreenVerticalAlignment);
-      }
-    } else if (anchor_type_ == ANCHOR_TYPE_BUBBLE) {
-      // For notification bubble to be anchored with uber tray bubble,
-      // the anchor can include arrow on left or right, which should
-      // be deducted out from the anchor rect.
-      views::View* anchor_view = bubble_view()->anchor_view();
-      rect = anchor_view->GetScreenBounds();
-      gfx::Insets insets = anchor_view->GetInsets();
-      rect.Inset(insets);
-    }
-  }
-  return rect;
 }
 
 void SystemTrayBubble::OnMouseEnteredView() {
@@ -467,7 +404,7 @@ void SystemTrayBubble::CreateItemViews(user::LoginStatus login_status) {
     }
     if (view) {
       bubble_view_->AddChildView(new TrayPopupItemContainer(
-          view, bubble_type_ == BUBBLE_TYPE_DEFAULT));
+          view, tray_->shelf_alignment(), bubble_type_ == BUBBLE_TYPE_DEFAULT));
     }
   }
 }

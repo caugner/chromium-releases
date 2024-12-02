@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PPAPI_PLUGIN_PPAPI_THREAD_H_
 #define CONTENT_PPAPI_PLUGIN_PPAPI_THREAD_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -64,6 +63,7 @@ class PpapiThread : public ChildThread,
   virtual bool SendToBrowser(IPC::Message* msg) OVERRIDE;
   virtual std::string GetUILanguage() OVERRIDE;
   virtual void PreCacheFont(const void* logfontw) OVERRIDE;
+  virtual void SetActiveURL(const std::string& url) OVERRIDE;
 
   // Message handlers.
   void OnMsgLoadPlugin(const FilePath& path);

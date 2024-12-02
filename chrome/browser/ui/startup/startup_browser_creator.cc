@@ -154,7 +154,10 @@ base::LazyInstance<ProfileLaunchObserver> profile_launch_observer =
 
 }  // namespace
 
-StartupBrowserCreator::StartupBrowserCreator() {}
+StartupBrowserCreator::StartupBrowserCreator()
+    : is_default_browser_dialog_suppressed_(false),
+      show_main_browser_window_(true) {
+}
 
 StartupBrowserCreator::~StartupBrowserCreator() {}
 
@@ -174,11 +177,11 @@ bool StartupBrowserCreator::LaunchBrowser(
     const CommandLine& command_line,
     Profile* profile,
     const FilePath& cur_dir,
-    browser::startup::IsProcessStartup process_startup,
-    browser::startup::IsFirstRun is_first_run,
+    chrome::startup::IsProcessStartup process_startup,
+    chrome::startup::IsFirstRun is_first_run,
     int* return_code) {
   in_synchronous_profile_launch =
-      process_startup == browser::startup::IS_PROCESS_STARTUP;
+      process_startup == chrome::startup::IS_PROCESS_STARTUP;
   DCHECK(profile);
 
   // Continue with the incognito profile from here on if Incognito mode
@@ -276,8 +279,8 @@ std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
         const TemplateURLRef& search_url = default_provider->url_ref();
         DCHECK(search_url.SupportsReplacement());
         string16 search_term = param.LossyDisplayName().substr(2);
-        urls.push_back(GURL(search_url.ReplaceSearchTerms(search_term,
-            TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())));
+        urls.push_back(GURL(search_url.ReplaceSearchTerms(
+            TemplateURLRef::SearchTermsArgs(search_term))));
         continue;
       }
     }
@@ -314,7 +317,7 @@ std::vector<GURL> StartupBrowserCreator::GetURLsFromCommandLine(
     // If we are in Windows 8 metro mode and were launched as a result of the
     // search charm or via a url navigation in metro, then fetch the
     // corresponding url.
-    GURL url = browser::GetURLToOpen(profile);
+    GURL url = chrome::GetURLToOpen(profile);
     if (url.is_valid())
       urls.push_back(GURL(url));
   }
@@ -450,11 +453,11 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
   // If we don't want to launch a new browser window or tab (in the case
   // of an automation request), we are done here.
   if (!silent_launch) {
-    browser::startup::IsProcessStartup is_process_startup = process_startup ?
-        browser::startup::IS_PROCESS_STARTUP :
-        browser::startup::IS_NOT_PROCESS_STARTUP;
-    browser::startup::IsFirstRun is_first_run = first_run::IsChromeFirstRun() ?
-        browser::startup::IS_FIRST_RUN : browser::startup::IS_NOT_FIRST_RUN;
+    chrome::startup::IsProcessStartup is_process_startup = process_startup ?
+        chrome::startup::IS_PROCESS_STARTUP :
+        chrome::startup::IS_NOT_PROCESS_STARTUP;
+    chrome::startup::IsFirstRun is_first_run = first_run::IsChromeFirstRun() ?
+        chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
     // |last_opened_profiles| will be empty in the following circumstances:
     // - This is the first launch. |last_used_profile| is the initial profile.
     // - The user exited the browser by closing all windows for all
@@ -496,7 +499,7 @@ bool StartupBrowserCreator::ProcessCmdLineImpl(
             is_process_startup, is_first_run, return_code))
           return false;
         // We've launched at least one browser.
-        is_process_startup = browser::startup::IS_NOT_PROCESS_STARTUP;
+        is_process_startup = chrome::startup::IS_NOT_PROCESS_STARTUP;
       }
     }
   }
@@ -544,7 +547,7 @@ void StartupBrowserCreator::ProcessCommandLineAlreadyRunning(
     path = profile_manager->user_data_dir().Append(path);
     profile_manager->CreateProfileAsync(path,
         base::Bind(&StartupBrowserCreator::ProcessCommandLineOnProfileCreated,
-                   cmd_line, cur_dir));
+                   cmd_line, cur_dir), string16(), string16());
     return;
   }
 
@@ -562,4 +565,3 @@ bool HasPendingUncleanExit(Profile* profile) {
   return !profile->DidLastSessionExitCleanly() &&
     !profile_launch_observer.Get().HasBeenLaunched(profile);
 }
-

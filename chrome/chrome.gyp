@@ -251,6 +251,8 @@
       'sources': [
         'utility/chrome_content_utility_client.cc',
         'utility/chrome_content_utility_client.h',
+        'utility/profile_import_handler.cc',
+        'utility/profile_import_handler.h',
       ],
       'include_dirs': [
         '..',
@@ -259,6 +261,11 @@
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
+          ],
+        }],
+        ['OS=="android"', {
+          'sources!': [
+            'utility/profile_import_handler.cc',
           ],
         }],
       ],
@@ -412,6 +419,16 @@
             'CHROMIUM_SHORT_NAME': '<(branding)',
             'CHROMIUM_STRIP_SAVE_FILE': 'app/app.saves',
             'INFOPLIST_FILE': 'app/helper-Info.plist',
+          },
+          # Turn off -dead_strip in Release mode for the helper app. There's
+          # little here to strip, and doing so preserves symbols from
+          # crt1.10.6.o, which get removed incorrectly. http://crbug.com/139902
+          'configurations': {
+            'Release': {
+              'xcode_settings': {
+                'DEAD_CODE_STRIPPING': 'NO',
+              },
+            },
           },
           'postbuilds': [
             {
@@ -973,10 +990,6 @@
              'test/automation/automation_proxy.h',
              'test/automation/browser_proxy.cc',
              'test/automation/browser_proxy.h',
-             'test/automation/dom_element_proxy.cc',
-             'test/automation/dom_element_proxy.h',
-             'test/automation/javascript_execution_controller.cc',
-             'test/automation/javascript_execution_controller.h',
              'test/automation/tab_proxy.cc',
              'test/automation/tab_proxy.h',
              'test/automation/value_conversion_traits.cc',
@@ -1060,5 +1073,24 @@
         },
       ]},  # 'targets'
     ],  # OS=="win"
+    ['OS=="android"',
+      {
+      'targets': [
+        {
+          'target_name': 'chrome_java',
+          'type': 'none',
+          'dependencies': [
+            '../base/base.gyp:base_java',
+            '../content/content.gyp:content_java',
+            '../net/net.gyp:net_java',
+          ],
+          'variables': {
+            'package_name': 'chrome',
+            'java_in_dir': '../chrome/android/java',
+          },
+          'includes': [ '../build/java.gypi' ],
+        },
+      ]}, # 'targets'
+    ],  # OS=="android"
   ],  # 'conditions'
 }

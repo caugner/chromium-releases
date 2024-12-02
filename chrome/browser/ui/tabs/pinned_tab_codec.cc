@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
 
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
@@ -152,7 +152,7 @@ StartupTabs PinnedTabCodec::ReadPinnedTabs(const base::Value* value) {
     return results;
 
   for (size_t i = 0, max = tabs_list->GetSize(); i < max; ++i) {
-    base::DictionaryValue* tab_values = NULL;
+    const base::DictionaryValue* tab_values = NULL;
     if (tabs_list->GetDictionary(i, &tab_values)) {
       StartupTab tab;
       if (DecodeTab(*tab_values, &tab))

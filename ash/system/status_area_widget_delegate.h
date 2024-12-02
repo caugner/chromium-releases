@@ -4,10 +4,9 @@
 
 #ifndef ASH_SYSTEM_STATUS_AREA_WIDGET_DELEGATE_H_
 #define ASH_SYSTEM_STATUS_AREA_WIDGET_DELEGATE_H_
-#pragma once
 
 #include "ash/ash_export.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_types.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/accessible_pane_view.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -51,6 +50,8 @@ class ASH_EXPORT StatusAreaWidgetDelegate : public views::AccessiblePaneView,
   virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
 
  private:
+  void UpdateWidgetSize();
+
   const FocusCycler* focus_cycler_for_testing_;
   ShelfAlignment alignment_;
 

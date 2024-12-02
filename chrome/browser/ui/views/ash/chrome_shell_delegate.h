@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_ASH_CHROME_SHELL_DELEGATE_H_
 #define CHROME_BROWSER_UI_VIEWS_ASH_CHROME_SHELL_DELEGATE_H_
-#pragma once
 
 #include "ash/launcher/launcher_types.h"
 #include "ash/shell_delegate.h"
@@ -32,6 +31,7 @@ class ChromeShellDelegate : public ash::ShellDelegate,
 
   // ash::ShellDelegate overrides;
   virtual bool IsUserLoggedIn() OVERRIDE;
+  virtual bool IsSessionStarted() OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
@@ -50,14 +50,14 @@ class ChromeShellDelegate : public ash::ShellDelegate,
   virtual void ToggleSpokenFeedback() OVERRIDE;
   virtual bool IsSpokenFeedbackEnabled() const OVERRIDE;
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
-  virtual void StartPartialScreenshot(
-      ash::ScreenshotDelegate* screenshot_delegate) OVERRIDE;
   virtual ash::LauncherDelegate* CreateLauncherDelegate(
       ash::LauncherModel* model) OVERRIDE;
   virtual ash::SystemTrayDelegate* CreateSystemTrayDelegate(
       ash::SystemTray* tray) OVERRIDE;
   virtual ash::UserWallpaperDelegate* CreateUserWallpaperDelegate() OVERRIDE;
   virtual aura::client::UserActionClient* CreateUserActionClient() OVERRIDE;
+  virtual void OpenFeedbackPage() OVERRIDE;
+  virtual void RecordUserMetricsAction(ash::UserMetricsAction action) OVERRIDE;
 
   // content::NotificationObserver override:
   virtual void Observe(int type,

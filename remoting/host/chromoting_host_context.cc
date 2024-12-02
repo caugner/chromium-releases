@@ -9,18 +9,17 @@
 #include "base/bind.h"
 #include "base/threading/thread.h"
 #include "remoting/host/url_request_context.h"
-#include "remoting/jingle_glue/jingle_thread.h"
 
 namespace remoting {
 
 ChromotingHostContext::ChromotingHostContext(
-    base::MessageLoopProxy* ui_message_loop)
-    : main_thread_("ChromotingMainThread"),
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
+    : network_thread_("ChromotingNetworkThread"),
+      capture_thread_("ChromotingCaptureThread"),
       encode_thread_("ChromotingEncodeThread"),
       desktop_thread_("ChromotingDesktopThread"),
-      io_thread_("ChromotingIOThread"),
       file_thread_("ChromotingFileIOThread"),
-      ui_message_loop_(ui_message_loop) {
+      ui_task_runner_(ui_task_runner) {
 }
 
 ChromotingHostContext::~ChromotingHostContext() {
@@ -28,50 +27,42 @@ ChromotingHostContext::~ChromotingHostContext() {
 
 bool ChromotingHostContext::Start() {
   // Start all the threads.
-  bool started = main_thread_.Start() && encode_thread_.Start() &&
-      jingle_thread_.Start() && desktop_thread_.Start() &&
-      io_thread_.StartWithOptions(
-          base::Thread::Options(MessageLoop::TYPE_IO, 0)) &&
+  bool started = capture_thread_.Start() && encode_thread_.Start() &&
+      network_thread_.StartWithOptions(base::Thread::Options(
+          MessageLoop::TYPE_IO, 0)) &&
+      desktop_thread_.Start() &&
       file_thread_.StartWithOptions(
           base::Thread::Options(MessageLoop::TYPE_IO, 0));
   if (!started)
     return false;
 
   url_request_context_getter_ = new URLRequestContextGetter(
-      ui_message_loop_, io_thread_.message_loop(),
+      ui_task_runner(), network_task_runner(),
       static_cast<MessageLoopForIO*>(file_thread_.message_loop()));
   return true;
 }
 
-JingleThread* ChromotingHostContext::jingle_thread() {
-  return &jingle_thread_;
+base::SingleThreadTaskRunner* ChromotingHostContext::capture_task_runner() {
+  return capture_thread_.message_loop_proxy();
 }
 
-MessageLoop* ChromotingHostContext::main_message_loop() {
-  return main_thread_.message_loop();
+base::SingleThreadTaskRunner* ChromotingHostContext::encode_task_runner() {
+  return encode_thread_.message_loop_proxy();
 }
 
-MessageLoop* ChromotingHostContext::encode_message_loop() {
-  return encode_thread_.message_loop();
+base::SingleThreadTaskRunner* ChromotingHostContext::network_task_runner() {
+  return network_thread_.message_loop_proxy();
 }
 
-base::MessageLoopProxy* ChromotingHostContext::network_message_loop() {
-  return jingle_thread_.message_loop_proxy();
+base::SingleThreadTaskRunner* ChromotingHostContext::desktop_task_runner() {
+  return desktop_thread_.message_loop_proxy();
 }
 
-MessageLoop* ChromotingHostContext::desktop_message_loop() {
-  return desktop_thread_.message_loop();
+base::SingleThreadTaskRunner* ChromotingHostContext::ui_task_runner() {
+  return ui_task_runner_;
 }
 
-base::MessageLoopProxy* ChromotingHostContext::ui_message_loop() {
-  return ui_message_loop_;
-}
-
-base::MessageLoopProxy* ChromotingHostContext::io_message_loop() {
-  return io_thread_.message_loop_proxy();
-}
-
-base::MessageLoopProxy* ChromotingHostContext::file_message_loop() {
+base::SingleThreadTaskRunner* ChromotingHostContext::file_task_runner() {
   return file_thread_.message_loop_proxy();
 }
 

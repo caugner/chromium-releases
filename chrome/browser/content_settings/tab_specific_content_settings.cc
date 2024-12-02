@@ -9,12 +9,12 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browsing_data_appcache_helper.h"
-#include "chrome/browser/browsing_data_cookie_helper.h"
-#include "chrome/browser/browsing_data_database_helper.h"
-#include "chrome/browser/browsing_data_file_system_helper.h"
-#include "chrome/browser/browsing_data_indexed_db_helper.h"
-#include "chrome/browser/browsing_data_local_storage_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_appcache_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -31,6 +31,7 @@
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "net/cookies/canonical_cookie.h"
 #include "webkit/fileapi/file_system_types.h"
 
 using content::BrowserThread;
@@ -74,6 +75,9 @@ TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
       allowed_local_shared_objects_(profile_),
       blocked_local_shared_objects_(profile_),
       geolocation_settings_state_(profile_),
+      pending_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
+      previous_protocol_handler_(ProtocolHandler::EmptyProtocolHandler()),
+      pending_protocol_handler_setting_(CONTENT_SETTING_DEFAULT),
       load_plugins_link_enabled_(true) {
   ClearBlockedContentSettingsExceptForCookies();
   ClearCookieSpecificContentSettings();

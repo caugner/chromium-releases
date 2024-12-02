@@ -10,29 +10,23 @@
 #   'target_name': 'aidl_aidl-file-name',
 #   'type': 'none',
 #   'variables': {
-#     'aidl_interface_file': 'path/to/aidl/interface/file/aidl-file',
+#     'aidl_interface_file': '<interface-path>/<interface-file>.aidl',
 #   },
 #   'sources': {
-#     'path/to/aidl/source/file/1.aidl',
-#     'path/to/aidl/source/file/2.aidl',
+#     '<input-path1>/<input-file1>.aidl',
+#     '<input-path2>/<input-file2>.aidl',
 #     ...
 #   },
-#   'includes': ['path/to/this/gypi/file'],
+#   'includes': ['<path-to-this-file>/java_aidl.gypi'],
 # }
 #
 #
-# Finally, the generated java file will be in the following directory:
-#   <(PRODUCT_DIR)/lib.java/
+# The generated java files will be:
+#   <(PRODUCT_DIR)/lib.java/<input-file1>.java
+#   <(PRODUCT_DIR)/lib.java/<input-file2>.java
+#   ...
 
 {
-  'variables': {
-    'android_sdk%':
-      '<!(if [ -z $ANDROID_BUILD_TOP ]; then \
-            /bin/echo -n $ANDROID_SDK_ROOT/platforms/android-${ANDROID_SDK_VERSION} ; \
-          else /bin/echo -n \
-            $ANDROID_SDK_ROOT ; \
-          fi)',
-  },
   'rules': [
     {
       'rule_name': 'compile_aidl',
@@ -45,11 +39,11 @@
         '<(PRODUCT_DIR)/lib.java/<(RULE_INPUT_ROOT).java',
       ],
       'action': [
-        'aidl',
+        '<(android_sdk_tools)/aidl',
         '-p<(android_sdk)/framework.aidl',
         '-p<(aidl_interface_file)',
-        '-o<(PRODUCT_DIR)/lib.java/',
         '<(RULE_INPUT_PATH)',
+        '<(PRODUCT_DIR)/lib.java/<(RULE_INPUT_ROOT).java',
       ],
     },
   ],

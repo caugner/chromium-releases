@@ -9,7 +9,6 @@
 
 #ifndef CHROME_BROWSER_BROWSER_PROCESS_H_
 #define CHROME_BROWSER_BROWSER_PROCESS_H_
-#pragma once
 
 #include <string>
 
@@ -22,7 +21,6 @@ class CRLSetFetcher;
 class ComponentUpdateService;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
-class ExtensionEventRouterForwarder;
 class IconManager;
 class IntranetRedirectDetector;
 class IOThread;
@@ -33,9 +31,7 @@ class Profile;
 class ProfileManager;
 class SafeBrowsingService;
 class StatusTray;
-class TabCloseableStateWatcher;
 class ThumbnailGenerator;
-class VariationsService;
 class WatchDogThread;
 
 #if defined(OS_CHROMEOS)
@@ -43,6 +39,14 @@ namespace chromeos {
 class OomPriorityManager;
 }
 #endif  // defined(OS_CHROMEOS)
+
+namespace chrome_variations {
+class VariationsService;
+}
+
+namespace extensions {
+class EventRouterForwarder;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -93,14 +97,14 @@ class BrowserProcess {
   virtual PrefService* local_state() = 0;
   virtual ui::Clipboard* clipboard() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
-  virtual VariationsService* variations_service() = 0;
+  virtual chrome_variations::VariationsService* variations_service() = 0;
 
 #if defined(OS_CHROMEOS)
   // Returns the out-of-memory priority manager.
   virtual chromeos::OomPriorityManager* oom_priority_manager() = 0;
 #endif  // defined(OS_CHROMEOS)
 
-  virtual ExtensionEventRouterForwarder*
+  virtual extensions::EventRouterForwarder*
       extension_event_router_forwarder() = 0;
 
   // Returns the manager for desktop notifications.
@@ -157,9 +161,6 @@ class BrowserProcess {
 
   virtual DownloadStatusUpdater* download_status_updater() = 0;
   virtual DownloadRequestLimiter* download_request_limiter() = 0;
-
-  // Returns the object that watches for changes in the closeable state of tab.
-  virtual TabCloseableStateWatcher* tab_closeable_state_watcher() = 0;
 
   // Returns the object that manages background applications.
   virtual BackgroundModeManager* background_mode_manager() = 0;

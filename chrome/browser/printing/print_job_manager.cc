@@ -4,17 +4,12 @@
 
 #include "chrome/browser/printing/print_job_manager.h"
 
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/pref_names.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "printing/printed_document.h"
 #include "printing/printed_page.h"
-
-using content::BrowserThread;
 
 namespace printing {
 
@@ -26,12 +21,6 @@ PrintJobManager::PrintJobManager() {
 PrintJobManager::~PrintJobManager() {
   base::AutoLock lock(lock_);
   queued_queries_.clear();
-}
-
-void PrintJobManager::InitOnUIThread(PrefService* prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  printing_enabled_.Init(prefs::kPrintingEnabled, prefs, NULL);
-  printing_enabled_.MoveToThread(BrowserThread::IO);
 }
 
 void PrintJobManager::OnQuit() {
@@ -59,6 +48,11 @@ void PrintJobManager::StopJobs(bool wait_for_finish) {
   current_jobs_.clear();
 }
 
+void PrintJobManager::SetPrintDestination(
+    PrintDestinationInterface* destination) {
+  destination_ = destination;
+}
+
 void PrintJobManager::QueuePrinterQuery(PrinterQuery* job) {
   base::AutoLock lock(lock_);
   DCHECK(job);
@@ -81,11 +75,6 @@ void PrintJobManager::PopPrinterQuery(int document_cookie,
       return;
     }
   }
-}
-
-// static
-void PrintJobManager::RegisterPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kPrintingEnabled, true);
 }
 
 void PrintJobManager::Observe(int type,
@@ -125,6 +114,7 @@ void PrintJobManager::OnPrintJobEvent(
       DCHECK(current_jobs_.end() == std::find(current_jobs_.begin(),
                                               current_jobs_.end(),
                                               print_job));
+      destination_ = NULL;
       break;
     }
     case JobEventDetails::FAILED: {
@@ -156,10 +146,6 @@ void PrintJobManager::OnPrintJobEvent(
       break;
     }
   }
-}
-
-bool PrintJobManager::printing_enabled() const {
-  return *printing_enabled_;
 }
 
 }  // namespace printing

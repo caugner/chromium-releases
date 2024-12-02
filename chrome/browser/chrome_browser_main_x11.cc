@@ -16,7 +16,7 @@
 #include "ui/base/x/x11_util_internal.h"
 
 #if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_linuxish.h"
+#include "chrome/app/breakpad_linux.h"
 #endif
 
 using content::BrowserThread;
@@ -80,10 +80,6 @@ void RecordBreakpadStatusUMA(MetricsService* metrics) {
 
 void WarnAboutMinimumSystemRequirements() {
   // Nothing to warn about on X11 right now.
-}
-
-void RecordBrowserStartupTime() {
-  // Not implemented on X11 for now.
 }
 
 // From browser_main_win.h, stubs until we figure out the right thing...

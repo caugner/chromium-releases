@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_LOGIN_WEB_DIALOG_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_LOGIN_WEB_DIALOG_H_
-#pragma once
 
 #include <string>
 
@@ -67,6 +66,7 @@ class LoginWebDialog : public ui::WebDialogDelegate,
       std::vector<content::WebUIMessageHandler*>* handlers) const OVERRIDE;
   virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
   virtual std::string GetDialogArgs() const OVERRIDE;
+  // NOTE: This function deletes this object at the end.
   virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
   virtual void OnCloseContents(
       content::WebContents* source, bool* out_close_dialog) OVERRIDE;

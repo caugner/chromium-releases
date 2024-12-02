@@ -12,13 +12,14 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/platform_test.h"
 #include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_operation.h"
-#include "webkit/fileapi/file_system_test_helper.h"
 #include "webkit/fileapi/file_writer_delegate.h"
+#include "webkit/fileapi/local_file_system_operation.h"
+#include "webkit/fileapi/local_file_system_test_helper.h"
 #include "webkit/fileapi/sandbox_file_stream_writer.h"
 
 namespace fileapi {
@@ -85,12 +86,8 @@ class FileWriterDelegateTest : public PlatformTest {
     return test_helper_.ComputeCurrentOriginUsage();
   }
 
-  FileSystemPath GetFileSystemPath(const char* file_name) const {
-    return test_helper_.CreatePathFromUTF8(file_name);
-  }
-
-  GURL GetFileSystemURL(const char* file_name) const {
-    return test_helper_.GetURLForPath(FilePath().AppendASCII(file_name));
+  FileSystemURL GetFileSystemURL(const char* file_name) const {
+    return test_helper_.CreateURLFromUTF8(file_name);
   }
 
   FileWriterDelegate* CreateWriterDelegate(
@@ -116,7 +113,9 @@ class FileWriterDelegateTest : public PlatformTest {
     result_.reset(new Result());
     file_writer_delegate_.reset(
         CreateWriterDelegate("test", offset, allowed_growth, result_.get()));
-    request_.reset(new net::URLRequest(blob_url, file_writer_delegate_.get()));
+    request_.reset(new net::URLRequest(blob_url,
+                                       file_writer_delegate_.get(),
+                                       &empty_context_));
   }
 
   static net::URLRequest::ProtocolFactory Factory;
@@ -124,10 +123,11 @@ class FileWriterDelegateTest : public PlatformTest {
   // This should be alive until the very end of this instance.
   MessageLoop loop_;
 
+  net::URLRequestContext empty_context_;
   scoped_ptr<FileWriterDelegate> file_writer_delegate_;
   scoped_ptr<net::URLRequest> request_;
   scoped_ptr<Result> result_;
-  FileSystemTestOriginHelper test_helper_;
+  LocalFileSystemTestOriginHelper test_helper_;
 
   ScopedTempDir dir_;
 
@@ -144,7 +144,7 @@ class FileWriterDelegateTestJob : public net::URLRequestJob {
  public:
   FileWriterDelegateTestJob(net::URLRequest* request,
                             const std::string& content)
-      : net::URLRequestJob(request),
+      : net::URLRequestJob(request, request->context()->network_delegate()),
         content_(content),
         remaining_bytes_(content.length()),
         cursor_(0) {
@@ -205,7 +205,7 @@ void FileWriterDelegateTest::SetUp() {
   bool created = false;
   base::PlatformFileError error = file_util()->EnsureFileExists(
       context.get(),
-      GetFileSystemPath("test"),
+      GetFileSystemURL("test"),
       &created);
   ASSERT_EQ(base::PLATFORM_FILE_OK, error);
   ASSERT_TRUE(created);
@@ -328,7 +328,7 @@ TEST_F(FileWriterDelegateTest, MAYBE_WriteSuccessWithoutQuotaLimitConcurrent) {
       test_helper_.NewOperationContext());
   bool created = false;
   file_util()->EnsureFileExists(context.get(),
-                                GetFileSystemPath("test2"),
+                                GetFileSystemURL("test2"),
                                 &created);
   ASSERT_TRUE(created);
 
@@ -342,7 +342,9 @@ TEST_F(FileWriterDelegateTest, MAYBE_WriteSuccessWithoutQuotaLimitConcurrent) {
   result2.reset(new Result());
   file_writer_delegate2.reset(CreateWriterDelegate(
       "test2", 0, quota::QuotaManager::kNoLimit, result2.get()));
-  request2.reset(new net::URLRequest(kBlobURL2, file_writer_delegate2.get()));
+  request2.reset(new net::URLRequest(kBlobURL2,
+                                     file_writer_delegate2.get(),
+                                     &empty_context_));
 
   ASSERT_EQ(0, test_helper_.GetCachedOriginUsage());
   file_writer_delegate_->Start(request_.Pass());

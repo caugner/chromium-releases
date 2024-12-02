@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_
 #define CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_
-#pragma once
 
 #include <string>
 
@@ -15,7 +14,7 @@
 #include "base/version.h"
 #include "chrome/browser/extensions/crx_installer_error.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
+#include "chrome/browser/extensions/sandboxed_unpacker.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/string_ordinal.h"
@@ -26,7 +25,6 @@ class SkBitmap;
 
 namespace extensions {
 class ExtensionUpdaterTest;
-}
 
 // This class installs a crx file into a profile.
 //
@@ -52,7 +50,7 @@ class ExtensionUpdaterTest;
 // installer->set_bar();
 // installer->InstallCrx(...);
 class CrxInstaller
-    : public SandboxedExtensionUnpackerClient,
+    : public SandboxedUnpackerClient,
       public ExtensionInstallPrompt::Delegate {
  public:
   // Used in histograms; do not change order.
@@ -100,10 +98,10 @@ class CrxInstaller
 
   const FilePath& source_file() const { return source_file_; }
 
-  extensions::Extension::Location install_source() const {
+  Extension::Location install_source() const {
     return install_source_;
   }
-  void set_install_source(extensions::Extension::Location source) {
+  void set_install_source(Extension::Location source) {
     install_source_ = source;
   }
 
@@ -111,7 +109,7 @@ class CrxInstaller
   void set_expected_id(const std::string& val) { expected_id_ = val; }
 
   void set_expected_version(const Version& val) {
-    expected_version_.reset(val.Clone());
+    expected_version_.reset(new Version(val));
   }
 
   bool delete_source() const { return delete_source_; }
@@ -121,13 +119,13 @@ class CrxInstaller
   void set_allow_silent_install(bool val) { allow_silent_install_ = val; }
 
   bool is_gallery_install() const {
-    return (creation_flags_ & extensions::Extension::FROM_WEBSTORE) > 0;
+    return (creation_flags_ & Extension::FROM_WEBSTORE) > 0;
   }
   void set_is_gallery_install(bool val) {
     if (val)
-      creation_flags_ |= extensions::Extension::FROM_WEBSTORE;
+      creation_flags_ |= Extension::FROM_WEBSTORE;
     else
-      creation_flags_ &= ~extensions::Extension::FROM_WEBSTORE;
+      creation_flags_ &= ~Extension::FROM_WEBSTORE;
   }
 
   // The original download URL should be set when the WebstoreInstaller is
@@ -172,7 +170,8 @@ class CrxInstaller
   Profile* profile() { return profile_; }
 
  private:
-  friend class extensions::ExtensionUpdaterTest;
+  friend class ExtensionUpdaterTest;
+  friend class ExtensionCrxInstallerTest;
 
   CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
                ExtensionInstallPrompt* client,
@@ -187,14 +186,14 @@ class CrxInstaller
 
   // Called after OnUnpackSuccess as a last check to see whether the install
   // should complete.
-  CrxInstallerError AllowInstall(const extensions::Extension* extension);
+  CrxInstallerError AllowInstall(const Extension* extension);
 
-  // SandboxedExtensionUnpackerClient
+  // SandboxedUnpackerClient
   virtual void OnUnpackFailure(const string16& error_message) OVERRIDE;
   virtual void OnUnpackSuccess(const FilePath& temp_dir,
                                const FilePath& extension_dir,
                                const base::DictionaryValue* original_manifest,
-                               const extensions::Extension* extension) OVERRIDE;
+                               const Extension* extension) OVERRIDE;
 
   // Returns true if we can skip confirmation because the install was
   // whitelisted.
@@ -213,7 +212,7 @@ class CrxInstaller
   void ReportFailureFromUIThread(const CrxInstallerError& error);
   void ReportSuccessFromFileThread();
   void ReportSuccessFromUIThread();
-  void NotifyCrxInstallComplete(const extensions::Extension* extension);
+  void NotifyCrxInstallComplete(const Extension* extension);
 
   // The file we're installing.
   FilePath source_file_;
@@ -227,7 +226,7 @@ class CrxInstaller
   // The location the installation came from (bundled with Chromium, registry,
   // manual install, etc). This metadata is saved with the installation if
   // successful. Defaults to INTERNAL.
-  extensions::Extension::Location install_source_;
+  Extension::Location install_source_;
 
   // Indicates whether the user has already approved the extension to be
   // installed. If true, |expected_manifest_| and |expected_id_| must match
@@ -268,7 +267,7 @@ class CrxInstaller
 
   // The extension we're installing. We own this and either pass it off to
   // ExtensionService on success, or delete it on failure.
-  scoped_refptr<const extensions::Extension> extension_;
+  scoped_refptr<const Extension> extension_;
 
   // The ordinal of the NTP apps page |extension_| will be shown on.
   StringOrdinal page_ordinal_;
@@ -337,7 +336,12 @@ class CrxInstaller
   // still consider the installation 'handled'.
   bool did_handle_successfully_;
 
+  // Whether we should record an oauth2 grant upon successful install.
+  bool record_oauth2_grant_;
+
   DISALLOW_COPY_AND_ASSIGN(CrxInstaller);
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_CRX_INSTALLER_H_

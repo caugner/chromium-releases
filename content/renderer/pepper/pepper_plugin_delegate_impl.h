@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_RENDERER_PEPPER_PEPPER_PLUGIN_DELEGATE_IMPL_H_
 #define CONTENT_RENDERER_PEPPER_PEPPER_PLUGIN_DELEGATE_IMPL_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -59,11 +58,9 @@ class PluginModule;
 }
 
 namespace WebKit {
-class WebFileChooserCompletion;
 class WebGamepads;
 class WebMouseEvent;
 struct WebCompositionUnderline;
-struct WebFileChooserParams;
 }
 
 namespace content {
@@ -179,6 +176,9 @@ class PepperPluginDelegateImpl
       webkit::ppapi::PluginInstance* instance) OVERRIDE;
   virtual void InstanceDeleted(
       webkit::ppapi::PluginInstance* instance) OVERRIDE;
+  virtual scoped_ptr< ::ppapi::thunk::ResourceCreationAPI>
+      CreateResourceCreationAPI(
+          webkit::ppapi::PluginInstance* instance) OVERRIDE;
   virtual SkBitmap* GetSadPluginBitmap() OVERRIDE;
   virtual WebKit::WebPlugin* CreatePluginReplacement(
       const FilePath& file_path) OVERRIDE;
@@ -207,18 +207,15 @@ class PepperPluginDelegateImpl
                                           int total,
                                           bool final_result) OVERRIDE;
   virtual void SelectedFindResultChanged(int identifier, int index) OVERRIDE;
-  virtual bool RunFileChooser(
-      const WebKit::WebFileChooserParams& params,
-      WebKit::WebFileChooserCompletion* chooser_completion) OVERRIDE;
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
                              const AsyncOpenFileCallback& callback) OVERRIDE;
   virtual bool AsyncOpenFileSystemURL(
       const GURL& path,
       int flags,
-      const AsyncOpenFileCallback& callback) OVERRIDE;
+      const AsyncOpenFileSystemURLCallback& callback) OVERRIDE;
   virtual bool OpenFileSystem(
-      const GURL& url,
+      const GURL& origin_url,
       fileapi::FileSystemType type,
       long long size,
       fileapi::FileSystemCallbackDispatcher* dispatcher) OVERRIDE;
@@ -382,6 +379,9 @@ class PepperPluginDelegateImpl
       const EnumerateDevicesCallback& callback) OVERRIDE;
   virtual webkit_glue::ClipboardClient* CreateClipboardClient() const OVERRIDE;
   virtual std::string GetDeviceID() OVERRIDE;
+  virtual PP_FlashLSORestrictions GetLocalDataRestrictions(
+      const GURL& document_url,
+      const GURL& plugin_url) OVERRIDE;
 
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;

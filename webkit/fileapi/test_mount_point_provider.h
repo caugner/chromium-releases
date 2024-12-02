@@ -4,7 +4,6 @@
 
 #ifndef WEBKIT_FILEAPI_TEST_MOUNT_POINT_PROVIDER_H_
 #define WEBKIT_FILEAPI_TEST_MOUNT_POINT_PROVIDER_H_
-#pragma once
 
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
@@ -27,8 +26,8 @@ class FileSystemQuotaUtil;
 class FILEAPI_EXPORT_PRIVATE TestMountPointProvider
     : public FileSystemMountPointProvider {
  public:
-  typedef FileSystemMountPointProvider::ValidateFileSystemCallback
-      ValidateFileSystemCallback;
+  using FileSystemMountPointProvider::ValidateFileSystemCallback;
+  using FileSystemMountPointProvider::DeleteFileSystemCallback;
 
   TestMountPointProvider(
       base::SequencedTaskRunner* task_runner,
@@ -50,23 +49,26 @@ class FILEAPI_EXPORT_PRIVATE TestMountPointProvider
                                FileSystemType type,
                                const FilePath& virtual_path) OVERRIDE;
   virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
-  virtual FileSystemFileUtil* GetFileUtil() OVERRIDE;
+  virtual FileSystemFileUtil* GetFileUtil(FileSystemType type) OVERRIDE;
   virtual FilePath GetPathForPermissionsCheck(const FilePath& virtual_path)
       const OVERRIDE;
   virtual FileSystemOperationInterface* CreateFileSystemOperation(
-      const GURL& origin_url,
-      FileSystemType file_system_type,
-      const FilePath& virtual_path,
+      const FileSystemURL& url,
       FileSystemContext* context) const OVERRIDE;
   virtual webkit_blob::FileStreamReader* CreateFileStreamReader(
-    const GURL& url,
-    int64 offset,
-    FileSystemContext* context) const OVERRIDE;
+      const FileSystemURL& url,
+      int64 offset,
+      FileSystemContext* context) const OVERRIDE;
   virtual FileStreamWriter* CreateFileStreamWriter(
-    const GURL& url,
-    int64 offset,
-    FileSystemContext* context) const OVERRIDE;
+      const FileSystemURL& url,
+      int64 offset,
+      FileSystemContext* context) const OVERRIDE;
   virtual FileSystemQuotaUtil* GetQuotaUtil() OVERRIDE;
+  virtual void DeleteFileSystem(
+      const GURL& origin_url,
+      FileSystemType type,
+      FileSystemContext* context,
+      const DeleteFileSystemCallback& callback) OVERRIDE;
 
  private:
   FilePath base_path_;

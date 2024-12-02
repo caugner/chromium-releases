@@ -4,6 +4,9 @@
 
 #include "gpu/command_buffer/service/test_helper.h"
 
+#include <string>
+#include <algorithm>
+
 #include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "gpu/command_buffer/common/gl_mock.h"
@@ -11,9 +14,6 @@
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#include <algorithm>
-#include <string.h>
 
 using ::testing::_;
 using ::testing::DoAll;
@@ -369,28 +369,11 @@ void TestHelper::SetupExpectationsForClearingUniforms(
   }
 }
 
-namespace {
-
-struct UniformInfoComparer {
-  bool operator()(const TestHelper::UniformInfo& lhs,
-                  const TestHelper::UniformInfo& rhs) const {
-    return strcmp(lhs.name, rhs.name) < 0;
-  }
-};
-
-}  // anonymous namespace.
-
-void TestHelper::SetupShader(
+void TestHelper::SetupProgramSuccessExpectations(
     ::gfx::MockGLInterface* gl,
     AttribInfo* attribs, size_t num_attribs,
     UniformInfo* uniforms, size_t num_uniforms,
     GLuint service_id) {
-  InSequence s;
-
-  EXPECT_CALL(*gl,
-      LinkProgram(service_id))
-      .Times(1)
-      .RetiresOnSaturation();
   EXPECT_CALL(*gl,
       GetProgramiv(service_id, GL_LINK_STATUS, _))
       .WillOnce(SetArgumentPointee<2>(1))
@@ -436,9 +419,6 @@ void TestHelper::SetupShader(
       .WillOnce(SetArgumentPointee<2>(num_uniforms))
       .RetiresOnSaturation();
 
-  scoped_array<UniformInfo> sorted_uniforms(new UniformInfo[num_uniforms]);
-  size_t num_valid_uniforms = 0;
-
   size_t max_uniform_len = 0;
   for (size_t ii = 0; ii < num_uniforms; ++ii) {
     size_t len = strlen(uniforms[ii].name) + 1;
@@ -460,35 +440,55 @@ void TestHelper::SetupShader(
             SetArrayArgument<6>(info.name,
                                 info.name + strlen(info.name) + 1)))
         .RetiresOnSaturation();
-    if (!ProgramManager::IsInvalidPrefix(info.name, strlen(info.name))) {
-      sorted_uniforms[num_valid_uniforms++] = uniforms[ii];
-    }
   }
 
-  std::sort(
-      &sorted_uniforms[0], &sorted_uniforms[num_valid_uniforms],
-      UniformInfoComparer());
-
-  for (size_t ii = 0; ii < num_valid_uniforms; ++ii) {
-    const UniformInfo& info = sorted_uniforms[ii];
-    EXPECT_CALL(*gl, GetUniformLocation(service_id, StrEq(info.name)))
-        .WillOnce(Return(info.real_location))
-        .RetiresOnSaturation();
-    if (info.size > 1) {
-      std::string base_name = info.name;
-      size_t array_pos = base_name.rfind("[0]");
-      if (base_name.size() > 3 && array_pos == base_name.size() - 3) {
-        base_name = base_name.substr(0, base_name.size() - 3);
+  for (int pass = 0; pass < 2; ++pass) {
+    for (size_t ii = 0; ii < num_uniforms; ++ii) {
+      const UniformInfo& info = uniforms[ii];
+      if (ProgramManager::IsInvalidPrefix(info.name, strlen(info.name))) {
+        continue;
       }
-      for (GLsizei jj = 1; jj < info.size; ++jj) {
-        std::string element_name(
-            std::string(base_name) + "[" + base::IntToString(jj) + "]");
-        EXPECT_CALL(*gl, GetUniformLocation(service_id, StrEq(element_name)))
-            .WillOnce(Return(info.real_location + jj * 2))
+      if (pass == 0) {
+        EXPECT_CALL(*gl, GetUniformLocation(service_id, StrEq(info.name)))
+            .WillOnce(Return(info.real_location))
             .RetiresOnSaturation();
       }
+      if ((pass == 0 && info.desired_location >= 0) ||
+          (pass == 1 && info.desired_location < 0)) {
+        if (info.size > 1) {
+          std::string base_name = info.name;
+          size_t array_pos = base_name.rfind("[0]");
+          if (base_name.size() > 3 && array_pos == base_name.size() - 3) {
+            base_name = base_name.substr(0, base_name.size() - 3);
+          }
+          for (GLsizei jj = 1; jj < info.size; ++jj) {
+            std::string element_name(
+                std::string(base_name) + "[" + base::IntToString(jj) + "]");
+            EXPECT_CALL(*gl, GetUniformLocation(
+                service_id, StrEq(element_name)))
+                .WillOnce(Return(info.real_location + jj * 2))
+                .RetiresOnSaturation();
+          }
+        }
+      }
     }
   }
+}
+
+void TestHelper::SetupShader(
+    ::gfx::MockGLInterface* gl,
+    AttribInfo* attribs, size_t num_attribs,
+    UniformInfo* uniforms, size_t num_uniforms,
+    GLuint service_id) {
+  InSequence s;
+
+  EXPECT_CALL(*gl,
+      LinkProgram(service_id))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  SetupProgramSuccessExpectations(
+      gl, attribs, num_attribs, uniforms, num_uniforms, service_id);
 }
 
 }  // namespace gles2

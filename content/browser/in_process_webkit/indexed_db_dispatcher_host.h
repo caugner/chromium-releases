@@ -4,9 +4,9 @@
 
 #ifndef CONTENT_BROWSER_IN_PROCESS_WEBKIT_INDEXED_DB_DISPATCHER_HOST_H_
 #define CONTENT_BROWSER_IN_PROCESS_WEBKIT_INDEXED_DB_DISPATCHER_HOST_H_
-#pragma once
 
 #include <map>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/id_map.h"
@@ -15,6 +15,7 @@
 
 class GURL;
 class IndexedDBContextImpl;
+struct IndexedDBDatabaseMetadata;
 struct IndexedDBHostMsg_DatabaseCreateObjectStore_Params;
 struct IndexedDBHostMsg_FactoryDeleteDatabase_Params;
 struct IndexedDBHostMsg_FactoryGetDatabaseNames_Params;
@@ -33,6 +34,7 @@ class WebIDBDatabase;
 class WebIDBIndex;
 class WebIDBObjectStore;
 class WebIDBTransaction;
+struct WebIDBMetadata;
 }
 
 namespace content {
@@ -96,10 +98,6 @@ class IndexedDBDispatcherHost : public content::BrowserMessageFilter {
   ReturnType* GetOrTerminateProcess(
     IDMap<ReturnType, IDMapOwnPointer>* map, int32 return_object_id);
 
-  template <typename ReplyType, typename WebObjectType, typename Method>
-  void SyncGetter(IDMap<WebObjectType, IDMapOwnPointer>* map, int32 object_id,
-                  ReplyType* reply, Method method);
-
   template <typename ObjectType>
   void DestroyObject(IDMap<ObjectType, IDMapOwnPointer>* map, int32 object_id);
 
@@ -115,10 +113,8 @@ class IndexedDBDispatcherHost : public content::BrowserMessageFilter {
     bool OnMessageReceived(const IPC::Message& message, bool *msg_is_ok);
     void Send(IPC::Message* message);
 
-    void OnName(int32 idb_database_id, string16* name);
-    void OnVersion(int32 idb_database_id, string16* version);
-    void OnObjectStoreNames(int32 idb_database_id,
-                            std::vector<string16>* object_stores);
+    void OnMetadata(int32 idb_database_id,
+                    IndexedDBDatabaseMetadata* metadata);
     void OnCreateObjectStore(
         const IndexedDBHostMsg_DatabaseCreateObjectStore_Params& params,
         int32* object_store_id, WebKit::WebExceptionCode* ec);
@@ -154,11 +150,6 @@ class IndexedDBDispatcherHost : public content::BrowserMessageFilter {
     bool OnMessageReceived(const IPC::Message& message, bool *msg_is_ok);
     void Send(IPC::Message* message);
 
-    void OnName(int32 idb_index_id, string16* name);
-    void OnStoreName(int32 idb_index_id, string16* store_name);
-    void OnKeyPath(int32 idb_index_id, content::IndexedDBKeyPath* key_path);
-    void OnUnique(int32 idb_index_id, bool* unique);
-    void OnMultiEntry(int32 idb_index_id, bool* multi_entry);
     void OnOpenObjectCursor(
         const IndexedDBHostMsg_IndexOpenCursor_Params& params,
         WebKit::WebExceptionCode* ec);
@@ -192,12 +183,6 @@ class IndexedDBDispatcherHost : public content::BrowserMessageFilter {
     bool OnMessageReceived(const IPC::Message& message, bool *msg_is_ok);
     void Send(IPC::Message* message);
 
-    void OnName(int32 idb_object_store_id, string16* name);
-    void OnKeyPath(int32 idb_object_store_id,
-                   content::IndexedDBKeyPath* keyPath);
-    void OnIndexNames(int32 idb_object_store_id,
-                      std::vector<string16>* index_names);
-    void OnAutoIncrement(int32 idb_object_store_id, bool* auto_increment);
     void OnGet(int idb_object_store_id,
                int32 thread_id,
                int32 response_id,
@@ -209,15 +194,9 @@ class IndexedDBDispatcherHost : public content::BrowserMessageFilter {
     void OnDelete(int idb_object_store_id,
                   int32 thread_id,
                   int32 response_id,
-                  const content::IndexedDBKey& key,
+                  const content::IndexedDBKeyRange& key_range,
                   int32 transaction_id,
                   WebKit::WebExceptionCode* ec);
-    void OnDeleteRange(int idb_object_store_id,
-                       int32 thread_id,
-                       int32 response_id,
-                       const content::IndexedDBKeyRange& key_range,
-                       int32 transaction_id,
-                       WebKit::WebExceptionCode* ec);
     void OnClear(int idb_object_store_id,
                  int32 thread_id,
                  int32 response_id,
@@ -254,7 +233,6 @@ class IndexedDBDispatcherHost : public content::BrowserMessageFilter {
     bool OnMessageReceived(const IPC::Message& message, bool *msg_is_ok);
     void Send(IPC::Message* message);
 
-    void OnDirection(int32 idb_object_store_id, int32* direction);
     void OnKey(int32 idb_object_store_id, content::IndexedDBKey* key);
     void OnPrimaryKey(int32 idb_object_store_id,
                       content::IndexedDBKey* primary_key);
@@ -300,9 +278,8 @@ class IndexedDBDispatcherHost : public content::BrowserMessageFilter {
     bool OnMessageReceived(const IPC::Message& message, bool *msg_is_ok);
     void Send(IPC::Message* message);
 
-    // TODO: add the rest of the transaction methods.
+    void OnCommit(int32 transaction_id);
     void OnAbort(int32 transaction_id);
-    void OnMode(int32 transaction_id, int* mode);
     void OnObjectStore(int32 transaction_id,
                        const string16& name,
                        int32* object_store_id,

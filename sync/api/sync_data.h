@@ -4,14 +4,13 @@
 
 #ifndef SYNC_API_SYNC_DATA_H_
 #define SYNC_API_SYNC_DATA_H_
-#pragma once
 
 #include <iosfwd>
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
-#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/util/immutable.h"
 
 namespace sync_pb {
@@ -19,7 +18,7 @@ class EntitySpecifics;
 class SyncEntity;
 }  // namespace sync_pb
 
-typedef syncable::ModelType SyncDataType;
+namespace syncer {
 
 // A light-weight container for immutable sync data. Pass-by-value and storage
 // in STL containers are supported and encouraged if helpful.
@@ -42,7 +41,7 @@ class SyncData {
   // overwritten if the datatype is encrypted.
   static SyncData CreateLocalDelete(
       const std::string& sync_tag,
-      syncable::ModelType datatype);
+      ModelType datatype);
   static SyncData CreateLocalData(
       const std::string& sync_tag,
       const std::string& non_unique_title,
@@ -58,7 +57,7 @@ class SyncData {
 
   // Return the datatype we're holding information about. Derived from the sync
   // datatype specifics.
-  SyncDataType GetDataType() const;
+  ModelType GetDataType() const;
 
   // Return the current sync datatype specifics.
   const sync_pb::EntitySpecifics& GetSpecifics() const;
@@ -98,8 +97,7 @@ class SyncData {
     static void Swap(sync_pb::SyncEntity* t1, sync_pb::SyncEntity* t2);
   };
 
-  typedef browser_sync::Immutable<
-    sync_pb::SyncEntity, ImmutableSyncEntityTraits>
+  typedef Immutable<sync_pb::SyncEntity, ImmutableSyncEntityTraits>
       ImmutableSyncEntity;
 
   // Clears |entity|.
@@ -108,7 +106,7 @@ class SyncData {
   // Whether this SyncData holds valid data.
   bool is_valid_;
 
-  // Equal to sync_api::kInvalidId iff this is local.
+  // Equal to kInvalidId iff this is local.
   int64 id_;
 
   // The actual shared sync entity being held.
@@ -117,5 +115,7 @@ class SyncData {
 
 // gmock printer helper.
 void PrintTo(const SyncData& sync_data, std::ostream* os);
+
+}  // namespace syncer
 
 #endif  // SYNC_API_SYNC_DATA_H_

@@ -10,20 +10,29 @@
 #include "content/common/intents_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/test/render_view_test.h"
 #include "content/renderer/render_view_impl.h"
+#include "content/shell/shell_content_client.h"
+#include "content/shell/shell_content_browser_client.h"
+#include "content/shell/shell_main_delegate.h"
 #include "content/test/mock_keyboard.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPBody.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIntentServiceInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/web_io_operators.h"
 
 #if defined(OS_LINUX) && !defined(USE_AURA)
@@ -73,6 +82,57 @@ int ConvertMockKeyboardModifier(MockKeyboard::Modifiers modifiers) {
   return flags;
 }
 #endif
+
+class WebUITestWebUIControllerFactory : public content::WebUIControllerFactory {
+ public:
+  virtual content::WebUIController* CreateWebUIControllerForURL(
+      content::WebUI* web_ui, const GURL& url) const OVERRIDE {
+    return NULL;
+  }
+  virtual content::WebUI::TypeID GetWebUIType(
+      content::BrowserContext* browser_context,
+      const GURL& url) const OVERRIDE {
+    return content::WebUI::kNoWebUI;
+  }
+  virtual bool UseWebUIForURL(content::BrowserContext* browser_context,
+                              const GURL& url) const OVERRIDE {
+    return content::GetContentClient()->HasWebUIScheme(url);
+  }
+  virtual bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
+                                      const GURL& url) const OVERRIDE {
+    return content::GetContentClient()->HasWebUIScheme(url);
+  }
+  virtual bool IsURLAcceptableForWebUI(
+      content::BrowserContext* browser_context,
+      const GURL& url,
+      bool data_urls_allowed) const OVERRIDE {
+    return false;
+  }
+};
+
+class WebUITestClient : public content::ShellContentClient {
+ public:
+  WebUITestClient() {
+  }
+
+  virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE {
+    return url.SchemeIs(chrome::kChromeUIScheme);
+  }
+};
+
+class WebUITestBrowserClient : public content::ShellContentBrowserClient {
+ public:
+  WebUITestBrowserClient() {}
+
+  virtual content::WebUIControllerFactory*
+      GetWebUIControllerFactory() OVERRIDE {
+    return &factory_;
+  }
+
+ private:
+  WebUITestWebUIControllerFactory factory_;
+};
+
 }
 
 class RenderViewImplTest : public content::RenderViewTest {
@@ -80,6 +140,11 @@ class RenderViewImplTest : public content::RenderViewTest {
   RenderViewImplTest() {
     // Attach a pseudo keyboard device to this object.
     mock_keyboard_.reset(new MockKeyboard());
+  }
+
+  virtual void SetUp() OVERRIDE {
+    content::RenderViewTest::SetUp();
+    content::ShellMainDelegate::InitializeResourceBundle();
   }
 
   RenderViewImpl* view() {
@@ -239,7 +304,59 @@ TEST_F(RenderViewImplTest, OnNavStateChanged) {
       ViewHostMsg_UpdateState::ID));
 }
 
+TEST_F(RenderViewImplTest, OnNavigationHttpPost) {
+  ViewMsg_Navigate_Params nav_params;
+
+  // An http url will trigger a resource load so cannot be used here.
+  nav_params.url = GURL("data:text/html,<div>Page</div>");
+  nav_params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+  nav_params.transition = content::PAGE_TRANSITION_TYPED;
+  nav_params.page_id = -1;
+  nav_params.is_post = true;
+
+  // Set up post data.
+  const unsigned char* raw_data = reinterpret_cast<const unsigned char*>(
+      "post \0\ndata");
+  const unsigned int length = 11;
+  const std::vector<unsigned char> post_data(raw_data, raw_data + length);
+  nav_params.browser_initiated_post_data = post_data;
+
+  view()->OnNavigate(nav_params);
+  ProcessPendingMessages();
+
+  const IPC::Message* frame_navigate_msg =
+      render_thread_->sink().GetUniqueMessageMatching(
+          ViewHostMsg_FrameNavigate::ID);
+  EXPECT_TRUE(frame_navigate_msg);
+
+  ViewHostMsg_FrameNavigate::Param host_nav_params;
+  ViewHostMsg_FrameNavigate::Read(frame_navigate_msg, &host_nav_params);
+  EXPECT_TRUE(host_nav_params.a.is_post);
+
+  // Check post data sent to browser matches
+  EXPECT_FALSE(host_nav_params.a.content_state.empty());
+  const WebKit::WebHistoryItem item = webkit_glue::HistoryItemFromString(
+      host_nav_params.a.content_state);
+  WebKit::WebHTTPBody body = item.httpBody();
+  WebKit::WebHTTPBody::Element element;
+  bool successful = body.elementAt(0, element);
+  EXPECT_TRUE(successful);
+  EXPECT_EQ(WebKit::WebHTTPBody::Element::TypeData, element.type);
+  EXPECT_EQ(length, element.data.size());
+  EXPECT_EQ(0, memcmp(raw_data, element.data.data(), length));
+}
+
 TEST_F(RenderViewImplTest, DecideNavigationPolicy) {
+  WebUITestClient client;
+  WebUITestBrowserClient browser_client;
+  content::ContentClient* old_client = content::GetContentClient();
+  content::ContentBrowserClient* old_browser_client =
+      content::GetContentClient()->browser();
+
+  content::SetContentClient(&client);
+  content::GetContentClient()->set_browser_for_testing(&browser_client);
+  client.set_renderer_for_testing(old_client->renderer());
+
   // Navigations to normal HTTP URLs can be handled locally.
   WebKit::WebURLRequest request(GURL("http://foo.com"));
   WebKit::WebNavigationPolicy policy = view()->decidePolicyForNavigation(
@@ -273,6 +390,9 @@ TEST_F(RenderViewImplTest, DecideNavigationPolicy) {
       WebKit::WebNavigationPolicyNewForegroundTab,
       false);
   EXPECT_EQ(WebKit::WebNavigationPolicyIgnore, policy);
+
+  content::GetContentClient()->set_browser_for_testing(old_browser_client);
+  content::SetContentClient(old_client);
 }
 
 TEST_F(RenderViewImplTest, DecideNavigationPolicyForWebUI) {
@@ -1577,4 +1697,34 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
     }
   }
   view()->OnImeConfirmComposition(empty_string, ui::Range::InvalidRange());
+}
+
+TEST_F(RenderViewImplTest, ZoomLimit) {
+  const double kMinZoomLevel =
+      WebKit::WebView::zoomFactorToZoomLevel(content::kMinimumZoomFactor);
+  const double kMaxZoomLevel =
+      WebKit::WebView::zoomFactorToZoomLevel(content::kMaximumZoomFactor);
+
+  ViewMsg_Navigate_Params params;
+  params.page_id = -1;
+  params.navigation_type = ViewMsg_Navigate_Type::NORMAL;
+
+  // Verifies navigation to a URL with preset zoom level indeed sets the level.
+  // Regression test for http://crbug.com/139559, where the level was not
+  // properly set when it is out of the default zoom limits of WebView.
+  params.url = GURL("data:text/html,min_zoomlimit_test");
+  view()->OnSetZoomLevelForLoadingURL(params.url, kMinZoomLevel);
+  view()->OnNavigate(params);
+  ProcessPendingMessages();
+  EXPECT_DOUBLE_EQ(kMinZoomLevel, view()->GetWebView()->zoomLevel());
+
+  // It should work even when the zoom limit is temporarily changed in the page.
+  view()->GetWebView()->zoomLimitsChanged(
+      WebKit::WebView::zoomFactorToZoomLevel(1.0),
+      WebKit::WebView::zoomFactorToZoomLevel(1.0));
+  params.url = GURL("data:text/html,max_zoomlimit_test");
+  view()->OnSetZoomLevelForLoadingURL(params.url, kMaxZoomLevel);
+  view()->OnNavigate(params);
+  ProcessPendingMessages();
+  EXPECT_DOUBLE_EQ(kMaxZoomLevel, view()->GetWebView()->zoomLevel());
 }

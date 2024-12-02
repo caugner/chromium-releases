@@ -7,7 +7,6 @@
 
 #ifndef SYNC_INTERNAL_API_ALL_STATUS_H_
 #define SYNC_INTERNAL_API_ALL_STATUS_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -16,10 +15,10 @@
 #include "base/synchronization/lock.h"
 #include "sync/engine/sync_engine_event.h"
 #include "sync/engine/syncer_types.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/engine/sync_status.h"
-#include "sync/internal_api/public/syncable/model_type.h"
 
-namespace browser_sync {
+namespace syncer {
 
 class ScopedStatusLock;
 struct ServerConnectionEvent;
@@ -41,7 +40,7 @@ class AllStatus : public SyncEngineEventListener {
 
   virtual void OnSyncEngineEvent(const SyncEngineEvent& event) OVERRIDE;
 
-  sync_api::SyncStatus status() const;
+  SyncStatus status() const;
 
   void SetNotificationsEnabled(bool notifications_enabled);
 
@@ -49,9 +48,9 @@ class AllStatus : public SyncEngineEventListener {
 
   void IncrementNotificationsReceived();
 
-  void SetThrottledTypes(const syncable::ModelTypeSet &types);
+  void SetThrottledTypes(const ModelTypeSet &types);
 
-  void SetEncryptedTypes(syncable::ModelTypeSet types);
+  void SetEncryptedTypes(ModelTypeSet types);
   void SetCryptographerReady(bool ready);
   void SetCryptoHasPendingKeys(bool has_pending_keys);
 
@@ -60,10 +59,10 @@ class AllStatus : public SyncEngineEventListener {
  protected:
   // Examines syncer to calculate syncing and the unsynced count,
   // and returns a Status with new values.
-  sync_api::SyncStatus CalcSyncing(const SyncEngineEvent& event) const;
-  sync_api::SyncStatus CreateBlankStatus() const;
+  SyncStatus CalcSyncing(const SyncEngineEvent& event) const;
+  SyncStatus CreateBlankStatus() const;
 
-  sync_api::SyncStatus status_;
+  SyncStatus status_;
 
   mutable base::Lock mutex_;  // Protects all data members.
   DISALLOW_COPY_AND_ASSIGN(AllStatus);
@@ -77,6 +76,6 @@ class ScopedStatusLock {
   AllStatus* allstatus_;
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_INTERNAL_API_ALL_STATUS_H_

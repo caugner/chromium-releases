@@ -24,7 +24,8 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path.h"
+#include "webkit/fileapi/file_system_task_runners.h"
+#include "webkit/fileapi/file_system_url.h"
 #include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/quota/mock_special_storage_policy.h"
@@ -48,13 +49,10 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   virtual void SetUp() OVERRIDE {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    file_thread_proxy_ = base::MessageLoopProxy::current();
-
     special_storage_policy_ = new quota::MockSpecialStoragePolicy;
     file_system_context_ =
         new FileSystemContext(
-            file_thread_proxy_,
-            base::MessageLoopProxy::current(),
+            FileSystemTaskRunners::CreateMockTaskRunners(),
             special_storage_policy_, NULL,
             temp_dir_.path(),
             CreateAllowFileAccessOptions());
@@ -85,7 +83,9 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   void TestRequestHelper(const GURL& url, bool run_to_completion) {
     delegate_.reset(new TestDelegate());
     delegate_->set_quit_on_redirect(true);
-    request_.reset(new net::URLRequest(url, delegate_.get()));
+    request_.reset(new net::URLRequest(url,
+                                       delegate_.get(),
+                                       &empty_context_));
     job_ = new FileSystemDirURLRequestJob(request_.get(),
                                           file_system_context_.get());
 
@@ -103,10 +103,10 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     TestRequestHelper(url, false);
   }
 
-  FileSystemPath CreatePath(const FilePath& file_path) {
-    return FileSystemPath(GURL("http://remote"),
-                          fileapi::kFileSystemTypeTemporary,
-                          file_path);
+  FileSystemURL CreateURL(const FilePath& file_path) {
+    return FileSystemURL(GURL("http://remote"),
+                         fileapi::kFileSystemTypeTemporary,
+                         file_path);
   }
 
   FileSystemOperationContext* NewOperationContext() {
@@ -121,7 +121,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util()->CreateDirectory(
         context.get(),
-        CreatePath(path),
+        CreateURL(path),
         false /* exclusive */,
         false /* recursive */));
   }
@@ -130,14 +130,14 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     FilePath path = FilePath().AppendASCII(file_name);
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util()->EnsureFileExists(
-        context.get(), CreatePath(path), NULL));
+        context.get(), CreateURL(path), NULL));
   }
 
   void TruncateFile(const base::StringPiece file_name, int64 length) {
     FilePath path = FilePath().AppendASCII(file_name);
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     ASSERT_EQ(base::PLATFORM_FILE_OK, file_util()->Truncate(
-        context.get(), CreatePath(path), length));
+        context.get(), CreateURL(path), length));
   }
 
   PlatformFileError GetFileInfo(const FilePath& path,
@@ -145,7 +145,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
                    FilePath* platform_file_path) {
     scoped_ptr<FileSystemOperationContext> context(NewOperationContext());
     return file_util()->GetFileInfo(context.get(),
-                                    CreatePath(path),
+                                    CreateURL(path),
                                     file_info, platform_file_path);
   }
 
@@ -201,18 +201,19 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   }
 
   FileSystemFileUtil* file_util() {
-    return file_system_context_->sandbox_provider()->GetFileUtil();
+    return file_system_context_->sandbox_provider()->GetFileUtil(
+        kFileSystemTypeTemporary);
   }
 
   // Put the message loop at the top, so that it's the last thing deleted.
-  MessageLoop message_loop_;
   // Delete all MessageLoopProxy objects before the MessageLoop, to help prevent
   // leaks caused by tasks posted during shutdown.
-  scoped_refptr<base::MessageLoopProxy> file_thread_proxy_;
+  MessageLoop message_loop_;
 
   ScopedTempDir temp_dir_;
-  scoped_ptr<net::URLRequest> request_;
+  net::URLRequestContext empty_context_;
   scoped_ptr<TestDelegate> delegate_;
+  scoped_ptr<net::URLRequest> request_;
   scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::WeakPtrFactory<FileSystemDirURLRequestJobTest> weak_factory_;

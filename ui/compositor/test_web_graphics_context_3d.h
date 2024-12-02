@@ -4,13 +4,12 @@
 
 #ifndef UI_COMPOSITOR_TEST_WEB_GRAPHICS_CONTEXT_3D_H_
 #define UI_COMPOSITOR_TEST_WEB_GRAPHICS_CONTEXT_3D_H_
-#pragma once
 
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
-#include "ui/gl/gl_bindings.h"
+#include "ui/compositor/compositor_export.h"
 
 namespace gfx {
 class GLContext;
@@ -20,7 +19,8 @@ class GLSurface;
 namespace ui {
 
 // WebGraphicsContext3D that does nothing. Suitable for testing.
-class TestWebGraphicsContext3D : public WebKit::WebGraphicsContext3D {
+class COMPOSITOR_EXPORT TestWebGraphicsContext3D :
+    public NON_EXPORTED_BASE(WebKit::WebGraphicsContext3D) {
  public:
   TestWebGraphicsContext3D();
   virtual ~TestWebGraphicsContext3D();
@@ -448,6 +448,7 @@ class TestWebGraphicsContext3D : public WebKit::WebGraphicsContext3D {
  private:
   scoped_refptr<gfx::GLContext> gl_context_;
   scoped_refptr<gfx::GLSurface> gl_surface_;
+  unsigned next_texture_id_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebGraphicsContext3D);
 };

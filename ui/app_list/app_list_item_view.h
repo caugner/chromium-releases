@@ -4,7 +4,6 @@
 
 #ifndef UI_APP_LIST_APP_LIST_ITEM_VIEW_H_
 #define UI_APP_LIST_APP_LIST_ITEM_VIEW_H_
-#pragma once
 
 #include <string>
 
@@ -77,11 +76,11 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   // views::CustomButton overrides:
   virtual void StateChanged() OVERRIDE;
 
-  AppListItemModel* model_;
+  AppListItemModel* model_;  // Owned by AppListModel::Apps.
 
-  AppsGridView* apps_grid_view_;
-  views::ImageView* icon_;
-  DropShadowLabel* title_;
+  AppsGridView* apps_grid_view_;  // Owned by views hierarchy.
+  views::ImageView* icon_;  // Owned by views hierarchy.
+  DropShadowLabel* title_;  // Owned by views hierarchy.
 
   scoped_ptr<views::MenuRunner> context_menu_runner_;
 

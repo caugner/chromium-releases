@@ -4,19 +4,22 @@
 
 #ifndef CHROME_COMMON_EXTENSIONS_EXTENSION_FILE_UTIL_H_
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_FILE_UTIL_H_
-#pragma once
 
 #include <string>
 #include <map>
 
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_message_bundle.h"
+#include "chrome/common/extensions/message_bundle.h"
 
-class ExtensionMessageBundle;
 class FilePath;
 class GURL;
+
 namespace base {
 class DictionaryValue;
+}
+
+namespace extensions {
+class MessageBundle;
 }
 
 // Utilities for manipulating the on-disk storage of extensions.
@@ -59,6 +62,9 @@ scoped_refptr<extensions::Extension> LoadExtension(
 base::DictionaryValue* LoadManifest(const FilePath& extension_root,
                                     std::string* error);
 
+// Returns true if the given file path exists and is not zero-length.
+bool ValidateFilePath(const FilePath& path);
+
 // Returns true if the given extension object is valid and consistent.
 // May also append a series of warning messages to |warnings|, but they
 // should not prevent the extension from running.
@@ -87,15 +93,14 @@ void GarbageCollectExtensions(
 
 // Loads extension message catalogs and returns message bundle.
 // Returns NULL on error, or if extension is not localized.
-ExtensionMessageBundle* LoadExtensionMessageBundle(
+extensions::MessageBundle* LoadMessageBundle(
     const FilePath& extension_path,
     const std::string& default_locale,
     std::string* error);
 
 // Loads the extension message bundle substitution map. Contains at least
 // extension_id item.
-ExtensionMessageBundle::SubstitutionMap*
-    LoadExtensionMessageBundleSubstitutionMap(
+extensions::MessageBundle::SubstitutionMap* LoadMessageBundleSubstitutionMap(
     const FilePath& extension_path,
     const std::string& extension_id,
     const std::string& default_locale);

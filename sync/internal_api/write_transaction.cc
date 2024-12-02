@@ -4,9 +4,9 @@
 
 #include "sync/internal_api/public/write_transaction.h"
 
-#include "sync/syncable/syncable.h"
+#include "sync/syncable/write_transaction.h"
 
-namespace sync_api {
+namespace syncer {
 
 //////////////////////////////////////////////////////////////////////////
 // WriteTransaction member definitions
@@ -26,4 +26,4 @@ syncable::BaseTransaction* WriteTransaction::GetWrappedTrans() const {
   return transaction_;
 }
 
-} // namespace sync_api
+}  // namespace syncer

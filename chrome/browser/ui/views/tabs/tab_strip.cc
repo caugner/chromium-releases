@@ -30,7 +30,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/animation_container.h"
 #include "ui/base/animation/throb_animation.h"
@@ -39,10 +38,11 @@
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
-#include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/mouse_watcher_view_host.h"
 #include "ui/views/view_model_utils.h"
@@ -296,13 +296,17 @@ class NewTabButton : public views::ImageButton {
 #if defined(OS_WIN) && !defined(USE_AURA)
   void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
 #endif
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE;
   void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
  private:
   bool ShouldUseNativeFrame() const;
-  SkBitmap GetBackgroundBitmap(views::CustomButton::ButtonState state) const;
-  SkBitmap GetBitmapForState(views::CustomButton::ButtonState state) const;
-  SkBitmap GetBitmap() const;
+  gfx::ImageSkia GetBackgroundImage(views::CustomButton::ButtonState state,
+                                    ui::ScaleFactor scale_factor) const;
+  gfx::ImageSkia GetImageForState(views::CustomButton::ButtonState state,
+                                  ui::ScaleFactor scale_factor) const;
+  gfx::ImageSkia GetImage(ui::ScaleFactor scale_factor) const;
 
   // Tab strip that contains this button.
   TabStrip* tab_strip_;
@@ -361,8 +365,16 @@ void NewTabButton::OnMouseReleased(const views::MouseEvent& event) {
 }
 #endif
 
+ui::GestureStatus NewTabButton::OnGestureEvent(
+    const views::GestureEvent& event) {
+  // Consume all gesture events here so that the parent (BaseTab) does not
+  // start consuming gestures.
+  views::ImageButton::OnGestureEvent(event);
+  return ui::GESTURE_STATUS_CONSUMED;
+}
+
 void NewTabButton::OnPaint(gfx::Canvas* canvas) {
-  SkBitmap image = GetBitmap();
+  gfx::ImageSkia image = GetImage(canvas->scale_factor());
   canvas->DrawImageInt(image, 0, height() - image.height());
 }
 
@@ -371,8 +383,9 @@ bool NewTabButton::ShouldUseNativeFrame() const {
     GetWidget()->GetTopLevelWidget()->ShouldUseNativeFrame();
 }
 
-SkBitmap NewTabButton::GetBackgroundBitmap(
-    views::CustomButton::ButtonState state) const {
+gfx::ImageSkia NewTabButton::GetBackgroundImage(
+    views::CustomButton::ButtonState state,
+    ui::ScaleFactor scale_factor) const {
   int background_id = 0;
   if (ShouldUseNativeFrame()) {
     background_id = IDR_THEME_TAB_BACKGROUND_V;
@@ -399,7 +412,7 @@ SkBitmap NewTabButton::GetBackgroundBitmap(
       GetThemeProvider()->GetImageSkiaNamed(IDR_NEWTAB_BUTTON_MASK);
   int height = mask->height();
   int width = mask->width();
-  gfx::Canvas canvas(gfx::Size(width, height), false);
+  gfx::Canvas canvas(gfx::Size(width, height), scale_factor, false);
 
   // For custom images the background starts at the top of the tab strip.
   // Otherwise the background starts at the top of the frame.
@@ -422,11 +435,13 @@ SkBitmap NewTabButton::GetBackgroundBitmap(
   if (state == views::CustomButton::BS_HOT)
     canvas.FillRect(gfx::Rect(size()), SkColorSetARGB(64, 255, 255, 255));
 
-  return SkBitmapOperations::CreateMaskedBitmap(canvas.ExtractBitmap(), *mask);
+  return gfx::ImageSkiaOperations::CreateMaskedImage(
+      gfx::ImageSkia(canvas.ExtractImageRep()), *mask);
 }
 
-SkBitmap NewTabButton::GetBitmapForState(
-    views::CustomButton::ButtonState state) const {
+gfx::ImageSkia NewTabButton::GetImageForState(
+    views::CustomButton::ButtonState state,
+    ui::ScaleFactor scale_factor) const {
   int overlay_id = 0;
   // The new tab button field trial will get created in variations_service.cc
   // through the variations server.
@@ -440,8 +455,9 @@ SkBitmap NewTabButton::GetBitmapForState(
   }
   gfx::ImageSkia* overlay = GetThemeProvider()->GetImageSkiaNamed(overlay_id);
 
-  gfx::Canvas canvas(gfx::Size(overlay->width(), overlay->height()), false);
-  canvas.DrawImageInt(GetBackgroundBitmap(state), 0, 0);
+  gfx::Canvas canvas(
+      gfx::Size(overlay->width(), overlay->height()), scale_factor, false);
+  canvas.DrawImageInt(GetBackgroundImage(state, scale_factor), 0, 0);
 
   // Draw the button border with a slight alpha.
   const int kNativeFrameOverlayAlpha = 178;
@@ -451,15 +467,15 @@ SkBitmap NewTabButton::GetBitmapForState(
   canvas.DrawImageInt(*overlay, 0, 0);
   canvas.Restore();
 
-  return canvas.ExtractBitmap();
+  return gfx::ImageSkia(canvas.ExtractImageRep());
 }
 
-SkBitmap NewTabButton::GetBitmap() const {
+gfx::ImageSkia NewTabButton::GetImage(ui::ScaleFactor scale_factor) const {
   if (!hover_animation_->is_animating())
-    return GetBitmapForState(state());
-  return SkBitmapOperations::CreateBlendedBitmap(
-      GetBitmapForState(views::CustomButton::BS_NORMAL),
-      GetBitmapForState(views::CustomButton::BS_HOT),
+    return GetImageForState(state(), scale_factor);
+  return gfx::ImageSkiaOperations::CreateBlendedImage(
+      GetImageForState(views::CustomButton::BS_NORMAL, scale_factor),
+      GetImageForState(views::CustomButton::BS_HOT, scale_factor),
       hover_animation_->GetCurrentValue());
 }
 
@@ -543,8 +559,10 @@ const char TabStrip::kViewClassName[] = "TabStrip";
 // static
 const int TabStrip::kMiniToNonMiniGap = 3;
 
-TabStrip::TabStrip(TabStripController* controller)
+TabStrip::TabStrip(TabStripController* controller,
+                   bool instant_extended_api_enabled)
     : controller_(controller),
+      instant_extended_api_enabled_(instant_extended_api_enabled),
       newtab_button_(NULL),
       current_unselected_width_(Tab::GetStandardSize().width()),
       current_selected_width_(Tab::GetStandardSize().width()),
@@ -893,7 +911,7 @@ void TabStrip::CloseTab(BaseTab* tab) {
     // If the tab is already closing, close the next tab. We do this so that the
     // user can rapidly close tabs by clicking the close button and not have
     // the animations interfere with that.
-    for (TabsClosingMap::const_iterator i = tabs_closing_map_.begin();
+    for (TabsClosingMap::const_iterator i(tabs_closing_map_.begin());
          i != tabs_closing_map_.end(); ++i) {
       std::vector<BaseTab*>::const_iterator j =
           std::find(i->second.begin(), i->second.end(), tab);
@@ -938,15 +956,9 @@ bool TabStrip::IsTabPinned(const BaseTab* tab) const {
       controller_->IsTabPinned(model_index);
 }
 
-bool TabStrip::IsTabCloseable(const BaseTab* tab) const {
-  int model_index = GetModelIndexOfBaseTab(tab);
-  return !IsValidModelIndex(model_index) ||
-      controller_->IsTabCloseable(model_index);
-}
-
 void TabStrip::MaybeStartDrag(
     BaseTab* tab,
-    const views::MouseEvent& event,
+    const views::LocatedEvent& event,
     const TabStripSelectionModel& original_selection) {
   // Don't accidentally start any drag operations during animations if the
   // mouse is down... during an animation tabs are being resized automatically,
@@ -994,9 +1006,15 @@ void TabStrip::MaybeStartDrag(
   // . Mouse event generated from touch and the left button is down (the right
   //   button corresponds to a long press, which we want to reorder).
   // . Real mouse event and control is down. This is mostly for testing.
+  DCHECK(event.type() == ui::ET_MOUSE_PRESSED ||
+         event.type() == ui::ET_GESTURE_BEGIN);
   if (touch_layout_.get() &&
-      (((event.flags() & ui::EF_FROM_TOUCH) && event.IsLeftMouseButton()) ||
-       (!(event.flags() & ui::EF_FROM_TOUCH) && event.IsControlDown()))) {
+      ((event.type() == ui::ET_MOUSE_PRESSED &&
+        (((event.flags() & ui::EF_FROM_TOUCH) &&
+          static_cast<const views::MouseEvent&>(event).IsLeftMouseButton()) ||
+         (!(event.flags() & ui::EF_FROM_TOUCH) &&
+          static_cast<const views::MouseEvent&>(event).IsControlDown()))) ||
+       (event.type() == ui::ET_GESTURE_BEGIN))) {
     move_behavior = TabDragController::MOVE_VISIBILE_TABS;
   }
 #if defined(OS_WIN)
@@ -1004,6 +1022,10 @@ void TabStrip::MaybeStartDrag(
   if (base::win::IsMetroProcess())
     detach_behavior = TabDragController::NOT_DETACHABLE;
 #endif
+  // Gestures don't automatically do a capture. We don't allow multiple drags at
+  // the same time, so we explicitly capture.
+  if (event.type() == ui::ET_GESTURE_BEGIN)
+    GetWidget()->SetCapture(this);
   drag_controller_.reset(new TabDragController);
   drag_controller_->Init(
       this, tab, tabs, gfx::Point(x, y), tab->GetMirroredXInView(event.x()),
@@ -1093,6 +1115,10 @@ bool TabStrip::ShouldPaintTab(const BaseTab* tab, gfx::Rect* clip) {
     }
   }
   return true;
+}
+
+bool TabStrip::IsInstantExtendedAPIEnabled() {
+  return instant_extended_api_enabled_;
 }
 
 void TabStrip::MouseMovedOutOfHost() {
@@ -1207,12 +1233,19 @@ std::string TabStrip::GetClassName() const {
 }
 
 gfx::Size TabStrip::GetPreferredSize() {
-  // Report the minimum width as the size required for a single selected tab
-  // plus the new tab button. Don't base it on the actual number of tabs because
-  // it's undesirable to have the minimum window size change when a new tab is
-  // opened.
-  int needed_width = Tab::GetMinimumSelectedSize().width() -
-      tab_h_offset() + new_tab_button_width();
+  // For stacked tabs the minimum size is calculated as the size needed to
+  // handle showing any number of tabs. Otherwise report the minimum width as
+  // the size required for a single selected tab plus the new tab button. Don't
+  // base it on the actual number of tabs because it's undesirable to have the
+  // minimum window size change when a new tab is opened.
+  int needed_width;
+  if (touch_layout_.get() || adjust_layout_) {
+    needed_width = Tab::GetTouchWidth() +
+        (2 * kStackedPadding * kMaxStackedCount);
+  } else {
+    needed_width = Tab::GetMinimumSelectedSize().width();
+  }
+  needed_width += new_tab_button_width();
   return gfx::Size(needed_width, Tab::GetMinimumUnselectedSize().height());
 }
 
@@ -1361,6 +1394,36 @@ void TabStrip::OnMouseCaptureLost() {
 
 void TabStrip::OnMouseMoved(const views::MouseEvent& event) {
   UpdateLayoutTypeFromMouseEvent(this, event);
+}
+
+ui::GestureStatus TabStrip::OnGestureEvent(
+    const views::GestureEvent& event) {
+  switch (event.type()) {
+    case ui::ET_GESTURE_END:
+      EndDrag(false);
+      if (adjust_layout_ && ui::GetDisplayLayout() == ui::LAYOUT_TOUCH) {
+        SetLayoutType(TAB_STRIP_LAYOUT_STACKED, true);
+        controller_->LayoutTypeMaybeChanged();
+      }
+      break;
+
+    case ui::ET_GESTURE_LONG_PRESS:
+      if (drag_controller_.get())
+        drag_controller_->SetMoveBehavior(TabDragController::REORDER);
+      break;
+
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      ContinueDrag(this, event.location());
+      break;
+
+    case ui::ET_GESTURE_BEGIN:
+      EndDrag(true);
+      break;
+
+    default:
+      break;
+  }
+  return ui::GESTURE_STATUS_CONSUMED;
 }
 
 void TabStrip::GetCurrentTabWidths(double* unselected_width,
@@ -1598,7 +1661,7 @@ void TabStrip::RemoveTabFromViewModel(int index) {
 
 void TabStrip::RemoveAndDeleteTab(BaseTab* tab) {
   scoped_ptr<BaseTab> deleter(tab);
-  for (TabsClosingMap::iterator i = tabs_closing_map_.begin();
+  for (TabsClosingMap::iterator i(tabs_closing_map_.begin());
        i != tabs_closing_map_.end(); ++i) {
     std::vector<BaseTab*>::iterator j =
         std::find(i->second.begin(), i->second.end(), tab);
@@ -1624,13 +1687,12 @@ void TabStrip::UpdateTabsClosingMap(int index, int delta) {
         tabs_closing_map_[index - 1].end(), tabs.begin(), tabs.end());
   }
   TabsClosingMap updated_map;
-  for (TabsClosingMap::iterator i = tabs_closing_map_.begin();
+  for (TabsClosingMap::iterator i(tabs_closing_map_.begin());
        i != tabs_closing_map_.end(); ++i) {
-    if (i->first > index) {
+    if (i->first > index)
       updated_map[i->first + delta] = i->second;
-    } else if (i->first < index) {
+    else if (i->first < index)
       updated_map[i->first] = i->second;
-    }
   }
   if (delta > 0 && tabs_closing_map_.find(index) != tabs_closing_map_.end())
     updated_map[index + delta] = tabs_closing_map_[index];
@@ -1716,7 +1778,7 @@ void TabStrip::PaintClosingTabs(gfx::Canvas* canvas, int index) {
     return;
 
   const std::vector<BaseTab*>& tabs = tabs_closing_map_[index];
-  for (std::vector<BaseTab*>::const_reverse_iterator i = tabs.rbegin();
+  for (std::vector<BaseTab*>::const_reverse_iterator i(tabs.rbegin());
        i != tabs.rend(); ++i) {
     (*i)->Paint(canvas);
   }
@@ -1748,6 +1810,10 @@ void TabStrip::UpdateLayoutTypeFromMouseEvent(views::View* source,
       break;
 
     case ui::ET_MOUSE_MOVED: {
+#if !defined(OS_WIN)
+      SetLayoutType(TAB_STRIP_LAYOUT_SHRINK, true);
+      break;
+#endif
       // Switch to shrink if the mouse enters and it's not a synthesized event.
       // We ignore synthesized events as EF_FROM_TOUCH is not necessarily set
       // correctly (highlighting the close button doesn't set the flags
@@ -2282,7 +2348,7 @@ bool TabStrip::NeedsTouchLayout() const {
 
   int mini_tab_count = GetMiniTabCount();
   int normal_count = tab_count() - mini_tab_count;
-  if (normal_count == 0 || normal_count == mini_tab_count)
+  if (normal_count <= 1 || normal_count == mini_tab_count)
     return false;
   int x = GetStartXForNormalTabs();
   int available_width = width() - x - new_tab_button_width();

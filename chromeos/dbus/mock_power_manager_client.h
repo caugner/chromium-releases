@@ -25,6 +25,8 @@ class MockPowerManagerClient : public PowerManagerClient {
   MOCK_METHOD2(SetScreenBrightnessPercent, void(double, bool));
   MOCK_METHOD1(GetScreenBrightnessPercent,
                void(const GetScreenBrightnessPercentCallback&));
+  MOCK_METHOD0(DecreaseKeyboardBrightness, void(void));
+  MOCK_METHOD0(IncreaseKeyboardBrightness, void(void));
   MOCK_METHOD1(RequestStatusUpdate, void(UpdateRequestType));
   MOCK_METHOD0(RequestRestart, void(void));
   MOCK_METHOD0(RequestShutdown, void(void));
@@ -38,11 +40,8 @@ class MockPowerManagerClient : public PowerManagerClient {
                     uint32,
                     int,
                     const PowerStateRequestIdCallback&));
-  MOCK_METHOD0(NotifyScreenLockRequested, void(void));
   MOCK_METHOD0(NotifyScreenLockCompleted, void(void));
-  MOCK_METHOD0(NotifyScreenUnlockRequested, void(void));
   MOCK_METHOD0(NotifyScreenUnlockCompleted, void(void));
-  MOCK_METHOD0(GetIsScreenLocked, bool(void));
 };
 
 }  // namespace chromeos

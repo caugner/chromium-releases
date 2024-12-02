@@ -17,9 +17,11 @@
 #include "ash/high_contrast/high_contrast_controller.h"
 #include "ash/launcher/launcher.h"
 #include "ash/magnifier/magnification_controller.h"
-#include "ash/monitor/monitor_controller.h"
-#include "ash/monitor/multi_monitor_manager.h"
-#include "ash/monitor/secondary_monitor_view.h"
+#include "ash/display/display_controller.h"
+#include "ash/display/mouse_cursor_event_filter.h"
+#include "ash/display/multi_display_manager.h"
+#include "ash/display/screen_position_controller.h"
+#include "ash/display/secondary_display_view.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
 #include "ash/shell_context_menu.h"
@@ -31,23 +33,24 @@
 #include "ash/tooltips/tooltip_controller.h"
 #include "ash/touch/touch_observer_hud.h"
 #include "ash/wm/activation_controller.h"
+#include "ash/wm/always_on_top_controller.h"
 #include "ash/wm/app_list_controller.h"
 #include "ash/wm/base_layout_manager.h"
 #include "ash/wm/capture_controller.h"
 #include "ash/wm/custom_frame_view_ash.h"
 #include "ash/wm/dialog_frame_view.h"
 #include "ash/wm/event_client_impl.h"
-#include "ash/wm/key_rewriter_event_filter.h"
+#include "ash/wm/event_rewriter_event_filter.h"
+#include "ash/wm/overlay_event_filter.h"
 #include "ash/wm/panel_layout_manager.h"
 #include "ash/wm/panel_window_event_filter.h"
-#include "ash/wm/partial_screenshot_event_filter.h"
 #include "ash/wm/power_button_controller.h"
+#include "ash/wm/property_util.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/root_window_layout_manager.h"
 #include "ash/wm/screen_dimmer.h"
 #include "ash/wm/shadow_controller.h"
 #include "ash/wm/shelf_layout_manager.h"
-#include "ash/wm/slow_animation_event_filter.h"
 #include "ash/wm/stacking_controller.h"
 #include "ash/wm/status_area_layout_manager.h"
 #include "ash/wm/system_gesture_event_filter.h"
@@ -59,20 +62,19 @@
 #include "ash/wm/window_cycle_controller.h"
 #include "ash/wm/window_modality_controller.h"
 #include "ash/wm/window_util.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/workspace/workspace_event_filter.h"
 #include "ash/wm/workspace/workspace_layout_manager.h"
-#include "ash/wm/workspace/workspace_manager.h"
 #include "ash/wm/workspace_controller.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "grit/ui_resources.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/user_action_client.h"
-#include "ui/aura/cursor_manager.h"
 #include "ui/aura/env.h"
 #include "ui/aura/focus_manager.h"
 #include "ui/aura/layout_manager.h"
-#include "ui/aura/monitor_manager.h"
+#include "ui/aura/display_manager.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/shared/compound_event_filter.h"
 #include "ui/aura/shared/input_method_event_filter.h"
@@ -96,7 +98,8 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chromeos/monitor/output_configurator.h"
+#include "ash/display/output_configurator_animation.h"
+#include "chromeos/display/output_configurator.h"
 #include "ui/aura/dispatcher_linux.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -115,6 +118,10 @@ class DummyUserWallpaperDelegate : public UserWallpaperDelegate {
 
   virtual ~DummyUserWallpaperDelegate() {}
 
+  virtual ash::WindowVisibilityAnimationType GetAnimationType() OVERRIDE {
+    return WINDOW_VISIBILITY_ANIMATION_TYPE_FADE;
+  }
+
   virtual void InitializeWallpaper() OVERRIDE {
     ash::Shell::GetInstance()->desktop_background_controller()->
         CreateEmptyWallpaper();
@@ -125,6 +132,12 @@ class DummyUserWallpaperDelegate : public UserWallpaperDelegate {
 
   virtual bool CanOpenSetWallpaperPage() OVERRIDE {
     return false;
+  }
+
+  virtual void OnWallpaperAnimationFinished() OVERRIDE {
+  }
+
+  virtual void OnWallpaperBootAnimationFinished() OVERRIDE {
   }
 
  private:
@@ -170,7 +183,10 @@ Shell::Shell(ShellDelegate* delegate)
       env_filter_(NULL),
       delegate_(delegate),
 #if defined(OS_CHROMEOS)
-      output_configurator_(new chromeos::OutputConfigurator()),
+      output_configurator_(new chromeos::OutputConfigurator(
+          internal::DisplayController::IsExtendedDesktopEnabled())),
+      output_configurator_animation_(
+          new internal::OutputConfiguratorAnimation()),
 #endif  // defined(OS_CHROMEOS)
       shelf_(NULL),
       panel_layout_manager_(NULL),
@@ -179,7 +195,7 @@ Shell::Shell(ShellDelegate* delegate)
   gfx::Screen::SetInstance(screen_);
   ui_controls::InstallUIControlsAura(internal::CreateUIControls());
 #if defined(OS_CHROMEOS)
-  // OutputConfigurator needs to get events regarding added/removed outputs.
+  output_configurator_->AddObserver(output_configurator_animation_.get());
   static_cast<aura::DispatcherLinux*>(
       aura::Env::GetInstance()->GetDispatcher())->AddDispatcherForRootWindow(
           output_configurator());
@@ -188,16 +204,24 @@ Shell::Shell(ShellDelegate* delegate)
 
 Shell::~Shell() {
   views::FocusManagerFactory::Install(NULL);
-  aura::Env::GetInstance()->cursor_manager()->set_delegate(NULL);
+
+  // Remove the focus from any window. This will prevent overhead and side
+  // effects (e.g. crashes) from changing focus during shutdown.
+  // See bug crbug.com/134502.
+  if (active_root_window_)
+    active_root_window_->GetFocusManager()->SetFocusedWindow(NULL, NULL);
+
+  cursor_manager_.set_delegate(NULL);
 
   // Please keep in same order as in Init() because it's easy to miss one.
   RemoveEnvEventFilter(user_activity_detector_.get());
-  RemoveEnvEventFilter(key_rewriter_filter_.get());
-  RemoveEnvEventFilter(partial_screenshot_filter_.get());
+  RemoveEnvEventFilter(event_rewriter_filter_.get());
+  RemoveEnvEventFilter(overlay_filter_.get());
   RemoveEnvEventFilter(input_method_filter_.get());
   RemoveEnvEventFilter(window_modality_controller_.get());
+  if (mouse_cursor_filter_.get())
+    RemoveEnvEventFilter(mouse_cursor_filter_.get());
   RemoveEnvEventFilter(system_gesture_filter_.get());
-  RemoveEnvEventFilter(slow_animation_filter_.get());
 #if !defined(OS_MACOSX)
   RemoveEnvEventFilter(accelerator_filter_.get());
 #endif
@@ -217,7 +241,7 @@ Shell::~Shell() {
   app_list_controller_.reset();
 
   // Destroy all child windows including widgets.
-  monitor_controller_->CloseChildWindows();
+  display_controller_->CloseChildWindows();
 
   // These need a valid Shell instance to clean up properly, so explicitly
   // delete them before invalidating the instance.
@@ -235,7 +259,8 @@ Shell::~Shell() {
   visibility_controller_.reset();
 
   // This also deletes all RootWindows.
-  monitor_controller_.reset();
+  display_controller_.reset();
+  screen_position_controller_.reset();
 
   // Launcher widget has a InputMethodBridge that references to
   // input_method_filter_'s input_method_. So explicitly release launcher_
@@ -252,6 +277,7 @@ Shell::~Shell() {
   instance_ = NULL;
 
 #if defined(OS_CHROMEOS)
+  output_configurator_->RemoveObserver(output_configurator_animation_.get());
   // Remove OutputConfigurator from Dispatcher.
   static_cast<aura::DispatcherLinux*>(
       aura::Env::GetInstance()->GetDispatcher())->RemoveDispatcherForRootWindow(
@@ -262,8 +288,8 @@ Shell::~Shell() {
 // static
 Shell* Shell::CreateInstance(ShellDelegate* delegate) {
   CHECK(!instance_);
-  aura::Env::GetInstance()->SetMonitorManager(
-      new internal::MultiMonitorManager());
+  aura::Env::GetInstance()->SetDisplayManager(
+      new internal::MultiDisplayManager());
   instance_ = new Shell(delegate);
   instance_->Init();
   return instance_;
@@ -288,18 +314,18 @@ void Shell::DeleteInstance() {
 
 // static
 internal::RootWindowController* Shell::GetPrimaryRootWindowController() {
-  return wm::GetRootWindowController(GetPrimaryRootWindow());
+  return GetRootWindowController(GetPrimaryRootWindow());
 }
 
 // static
 Shell::RootWindowControllerList Shell::GetAllRootWindowControllers() {
-  return Shell::GetInstance()->monitor_controller()->
+  return Shell::GetInstance()->display_controller()->
       GetAllRootWindowControllers();
 }
 
 // static
 aura::RootWindow* Shell::GetPrimaryRootWindow() {
-  return GetInstance()->monitor_controller()->GetPrimaryRootWindow();
+  return GetInstance()->display_controller()->GetPrimaryRootWindow();
 }
 
 // static
@@ -308,14 +334,8 @@ aura::RootWindow* Shell::GetActiveRootWindow() {
 }
 
 // static
-aura::RootWindow* Shell::GetRootWindowAt(const gfx::Point& point) {
-  // TODO(oshima): Support multiple root windows.
-  return GetPrimaryRootWindow();
-}
-
-// static
 Shell::RootWindowList Shell::GetAllRootWindows() {
-  return Shell::GetInstance()->monitor_controller()->
+  return Shell::GetInstance()->display_controller()->
       GetAllRootWindows();
 }
 
@@ -344,16 +364,16 @@ void Shell::Init() {
   // Pass ownership of the filter to the Env.
   aura::Env::GetInstance()->SetEventFilter(env_filter_);
 
-  aura::Env::GetInstance()->cursor_manager()->set_delegate(this);
-
+  cursor_manager_.set_delegate(this);
 
   focus_manager_.reset(new aura::FocusManager);
   activation_controller_.reset(
       new internal::ActivationController(focus_manager_.get()));
 
-  monitor_controller_.reset(new internal::MonitorController);
-  monitor_controller_->InitPrimaryDisplay();
-  aura::RootWindow* root_window = monitor_controller_->GetPrimaryRootWindow();
+  screen_position_controller_.reset(new internal::ScreenPositionController);
+  display_controller_.reset(new internal::DisplayController);
+  display_controller_->InitPrimaryDisplay();
+  aura::RootWindow* root_window = display_controller_->GetPrimaryRootWindow();
   active_root_window_ = root_window;
 
 #if !defined(OS_MACOSX)
@@ -368,13 +388,13 @@ void Shell::Init() {
   AddEnvEventFilter(user_activity_detector_.get());
 
   DCHECK_EQ(1U, GetEnvEventFilterCount());
-  key_rewriter_filter_.reset(new internal::KeyRewriterEventFilter);
-  AddEnvEventFilter(key_rewriter_filter_.get());
+  event_rewriter_filter_.reset(new internal::EventRewriterEventFilter);
+  AddEnvEventFilter(event_rewriter_filter_.get());
 
   DCHECK_EQ(2U, GetEnvEventFilterCount());
-  partial_screenshot_filter_.reset(new internal::PartialScreenshotEventFilter);
-  AddEnvEventFilter(partial_screenshot_filter_.get());
-  AddShellObserver(partial_screenshot_filter_.get());
+  overlay_filter_.reset(new internal::OverlayEventFilter);
+  AddEnvEventFilter(overlay_filter_.get());
+  AddShellObserver(overlay_filter_.get());
 
   DCHECK_EQ(3U, GetEnvEventFilterCount());
   input_method_filter_.reset(new aura::shared::InputMethodEventFilter());
@@ -387,9 +407,6 @@ void Shell::Init() {
 
   system_gesture_filter_.reset(new internal::SystemGestureEventFilter);
   AddEnvEventFilter(system_gesture_filter_.get());
-
-  slow_animation_filter_.reset(new internal::SlowAnimationEventFilter);
-  AddEnvEventFilter(slow_animation_filter_.get());
 
   capture_controller_.reset(new internal::CaptureController);
 
@@ -415,17 +432,32 @@ void Shell::Init() {
   window_modality_controller_.reset(new internal::WindowModalityController);
   AddEnvEventFilter(window_modality_controller_.get());
 
-  magnification_controller_.reset(new internal::MagnificationController);
+  magnification_controller_.reset(
+      internal::MagnificationController::CreateInstance());
+
+  if (internal::DisplayController::IsExtendedDesktopEnabled()) {
+    mouse_cursor_filter_.reset(
+        new internal::MouseCursorEventFilter(display_controller_.get()));
+    AddEnvEventFilter(mouse_cursor_filter_.get());
+  }
+
   high_contrast_controller_.reset(new HighContrastController);
   video_detector_.reset(new VideoDetector);
-  window_cycle_controller_.reset(new WindowCycleController);
+  window_cycle_controller_.reset(
+      new WindowCycleController(activation_controller_.get()));
+
+  tooltip_controller_.reset(new internal::TooltipController(
+      drag_drop_controller_.get()));
+  AddEnvEventFilter(tooltip_controller_.get());
 
   InitRootWindowController(root_window_controller);
 
   // Initialize Primary RootWindow specific items.
   status_area_widget_ = new internal::StatusAreaWidget();
   status_area_widget_->CreateTrayViews(delegate_.get());
-  status_area_widget_->Show();
+  // Login screen manages status area visibility by itself.
+  if (delegate_.get() && delegate_->IsSessionStarted())
+    status_area_widget_->Show();
 
   focus_cycler_.reset(new internal::FocusCycler());
   focus_cycler_->AddWidget(status_area_widget_);
@@ -444,13 +476,6 @@ void Shell::Init() {
     shadow_controller_.reset(new internal::ShadowController());
   }
 
-  // Tooltip controller must be created after shadow controller so that the
-  // tooltip window can be initialized with appropriate shadows.
-  tooltip_controller_.reset(new internal::TooltipController(
-      drag_drop_controller_.get()));
-  AddEnvEventFilter(tooltip_controller_.get());
-  aura::client::SetTooltipClient(root_window, tooltip_controller_.get());
-
   if (!delegate_.get() || delegate_->IsUserLoggedIn())
     CreateLauncher();
 
@@ -464,10 +489,10 @@ void Shell::Init() {
   power_button_controller_.reset(new PowerButtonController);
   AddShellObserver(power_button_controller_.get());
 
-  monitor_controller_->InitSecondaryDisplays();
+  display_controller_->InitSecondaryDisplays();
 
   if (initially_hide_cursor_)
-    aura::Env::GetInstance()->cursor_manager()->ShowCursor(false);
+    cursor_manager_.ShowCursor(false);
 }
 
 void Shell::AddEnvEventFilter(aura::EventFilter* filter) {
@@ -484,6 +509,12 @@ size_t Shell::GetEnvEventFilterCount() const {
 
 void Shell::ShowBackgroundMenu(views::Widget* widget,
                                const gfx::Point& location) {
+  // No context menus if user have not logged in.
+  if (!delegate_.get() || !delegate_->IsUserLoggedIn())
+    return;
+  // No context menus when screen is locked.
+  if (IsScreenLocked())
+    return;
   if (shell_context_menu_.get())
     shell_context_menu_->ShowMenu(widget, location);
 }
@@ -533,15 +564,15 @@ void Shell::RotateFocus(Direction direction) {
                              internal::FocusCycler::BACKWARD);
 }
 
-void Shell::SetMonitorWorkAreaInsets(Window* contains,
+void Shell::SetDisplayWorkAreaInsets(Window* contains,
                                      const gfx::Insets& insets) {
-  internal::MultiMonitorManager* monitor_manager =
-      static_cast<internal::MultiMonitorManager*>(
-          aura::Env::GetInstance()->monitor_manager());
-  if (!monitor_manager->UpdateWorkAreaOfMonitorNearestWindow(contains, insets))
+  internal::MultiDisplayManager* display_manager =
+      static_cast<internal::MultiDisplayManager*>(
+          aura::Env::GetInstance()->display_manager());
+  if (!display_manager->UpdateWorkAreaOfDisplayNearestWindow(contains, insets))
     return;
   FOR_EACH_OBSERVER(ShellObserver, observers_,
-                    OnMonitorWorkAreaInsetsChanged());
+                    OnDisplayWorkAreaInsetsChanged());
 }
 
 void Shell::OnLoginStateChanged(user::LoginStatus status) {
@@ -563,14 +594,22 @@ void Shell::CreateLauncher() {
   aura::Window* default_container =
       GetPrimaryRootWindowController()->
       GetContainer(internal::kShellWindowId_DefaultContainer);
-  launcher_.reset(new Launcher(default_container));
+  launcher_.reset(new Launcher(default_container, shelf_));
 
   launcher_->SetFocusCycler(focus_cycler_.get());
   shelf_->SetLauncher(launcher_.get());
   if (panel_layout_manager_)
     panel_layout_manager_->SetLauncher(launcher_.get());
 
+  if (delegate())
+    launcher_->SetVisible(delegate()->IsSessionStarted());
   launcher_->widget()->Show();
+}
+
+void Shell::ShowLauncher() {
+  if (!launcher_.get())
+    return;
+  launcher_->SetVisible(true);
 }
 
 void Shell::AddShellObserver(ShellObserver* observer) {
@@ -596,8 +635,7 @@ ShelfAutoHideBehavior Shell::GetShelfAutoHideBehavior() const {
 void Shell::SetShelfAlignment(ShelfAlignment alignment) {
   if (!shelf_->SetAlignment(alignment))
     return;
-  FOR_EACH_OBSERVER(ShellObserver, observers_,
-                    OnShelfAlignmentChanged());
+  FOR_EACH_OBSERVER(ShellObserver, observers_, OnShelfAlignmentChanged());
 }
 
 ShelfAlignment Shell::GetShelfAlignment() {
@@ -620,18 +658,19 @@ SystemTray* Shell::system_tray() {
 }
 
 int Shell::GetGridSize() const {
-  return GetPrimaryRootWindowController()->workspace_controller()->
-      workspace_manager()->grid_size();
+  return
+      GetPrimaryRootWindowController()->workspace_controller()->GetGridSize();
 }
 
-void Shell::InitRootWindowForSecondaryMonitor(aura::RootWindow* root) {
+void Shell::InitRootWindowForSecondaryDisplay(aura::RootWindow* root) {
   root->set_focus_manager(focus_manager_.get());
-  if (internal::MonitorController::IsExtendedDesktopEnabled()) {
+  if (internal::DisplayController::IsExtendedDesktopEnabled()) {
     internal::RootWindowController* controller =
         new internal::RootWindowController(root);
     controller->CreateContainers();
     InitRootWindowController(controller);
     controller->root_window_layout()->OnWindowResized();
+    desktop_background_controller_->OnRootWindowAdded(root);
     root->ShowRootWindow();
     // Activate new root for testing.
     active_root_window_ = root;
@@ -639,15 +678,17 @@ void Shell::InitRootWindowForSecondaryMonitor(aura::RootWindow* root) {
     root->SetFocusWhenShown(false);
     root->SetLayoutManager(new internal::RootWindowLayoutManager(root));
     aura::Window* container = new aura::Window(NULL);
-    container->SetName("SecondaryMonitorContainer");
+    container->SetName("SecondaryDisplayContainer");
     container->Init(ui::LAYER_NOT_DRAWN);
     root->AddChild(container);
     container->SetLayoutManager(new internal::BaseLayoutManager(root));
-    CreateSecondaryMonitorWidget(container);
+    CreateSecondaryDisplayWidget(container);
     container->Show();
     root->layout_manager()->OnWindowResized();
     root->ShowRootWindow();
     aura::client::SetCaptureClient(root, capture_controller_.get());
+    aura::client::SetScreenPositionClient(
+        root, screen_position_controller_.get());
   }
 }
 
@@ -658,6 +699,7 @@ void Shell::InitRootWindowController(
   DCHECK(visibility_controller_.get());
   DCHECK(drag_drop_controller_.get());
   DCHECK(capture_controller_.get());
+  DCHECK(window_cycle_controller_.get());
 
   root_window->set_focus_manager(focus_manager_.get());
   input_method_filter_->SetInputMethodPropertyInRootWindow(root_window);
@@ -665,6 +707,10 @@ void Shell::InitRootWindowController(
   aura::client::SetVisibilityClient(root_window, visibility_controller_.get());
   aura::client::SetDragDropClient(root_window, drag_drop_controller_.get());
   aura::client::SetCaptureClient(root_window, capture_controller_.get());
+  aura::client::SetScreenPositionClient(root_window,
+                                        screen_position_controller_.get());
+  aura::client::SetCursorClient(root_window, &cursor_manager_);
+  aura::client::SetTooltipClient(root_window, tooltip_controller_.get());
 
   if (nested_dispatcher_controller_.get()) {
     aura::client::SetDispatcherClient(root_window,
@@ -675,6 +721,18 @@ void Shell::InitRootWindowController(
 
   root_window->SetCursor(ui::kCursorPointer);
   controller->InitLayoutManagers();
+
+  // TODO(oshima): Move the instance to RootWindowController when
+  // the extended desktop is enabled by default.
+  internal::AlwaysOnTopController* always_on_top_controller =
+      new internal::AlwaysOnTopController;
+  always_on_top_controller->SetContainers(
+      root_window->GetChildById(internal::kShellWindowId_DefaultContainer),
+      root_window->GetChildById(internal::kShellWindowId_AlwaysOnTopContainer));
+  root_window->SetProperty(internal::kAlwaysOnTopControllerKey,
+                           always_on_top_controller);
+
+  window_cycle_controller_->OnRootWindowAdded(root_window);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -695,33 +753,30 @@ void Shell::InitLayoutManagersForPrimaryDisplay(
   controller->GetContainer(internal::kShellWindowId_StatusContainer)->
       SetLayoutManager(status_area_layout_manager);
 
-  shelf_layout_manager->set_workspace_manager(
-      controller->workspace_controller()->workspace_manager());
+  shelf_layout_manager->set_workspace_controller(
+      controller->workspace_controller());
 
   // TODO(oshima): Support multiple displays.
-  controller->workspace_controller()->workspace_manager()->
-      set_shelf(shelf());
+  controller->workspace_controller()->SetShelf(shelf());
 
   // Create Panel layout manager
-  if (CommandLine::ForCurrentProcess()->
-      HasSwitch(switches::kAuraPanelManager)) {
-    aura::Window* panel_container = GetContainer(
-        GetPrimaryRootWindow(),
-        internal::kShellWindowId_PanelContainer);
-    panel_layout_manager_ =
-        new internal::PanelLayoutManager(panel_container);
-    panel_container->SetEventFilter(
-        new internal::PanelWindowEventFilter(
-            panel_container, panel_layout_manager_));
-    panel_container->SetLayoutManager(panel_layout_manager_);
-  }
+  aura::Window* panel_container = GetContainer(
+      GetPrimaryRootWindow(),
+      internal::kShellWindowId_PanelContainer);
+  panel_layout_manager_ =
+      new internal::PanelLayoutManager(panel_container);
+  panel_container->SetEventFilter(
+      new internal::PanelWindowEventFilter(
+          panel_container, panel_layout_manager_));
+  panel_container->SetLayoutManager(panel_layout_manager_);
 }
 
+// TODO: this is only used in tests, move with test.
 void Shell::DisableWorkspaceGridLayout() {
   RootWindowControllerList controllers = GetAllRootWindowControllers();
   for (RootWindowControllerList::iterator iter = controllers.begin();
        iter != controllers.end(); ++iter)
-    (*iter)->workspace_controller()->workspace_manager()->set_grid_size(0);
+    (*iter)->workspace_controller()->SetGridSize(0);
 }
 
 void Shell::SetCursor(gfx::NativeCursor cursor) {

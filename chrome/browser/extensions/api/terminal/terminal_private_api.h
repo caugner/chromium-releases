@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_TERMINAL_TERMINAL_PRIVATE_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_TERMINAL_TERMINAL_PRIVATE_API_H_
-#pragma once
 
 #include <string>
 
@@ -53,6 +52,8 @@ class SendInputToTerminalProcessFunction : public TerminalPrivateFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("terminalPrivate.sendInput")
 
  protected:
+  virtual ~SendInputToTerminalProcessFunction();
+
   // TerminalPrivateFunction:
   virtual bool RunTerminalFunction() OVERRIDE;
 
@@ -67,6 +68,8 @@ class CloseTerminalProcessFunction : public TerminalPrivateFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("terminalPrivate.closeTerminalProcess")
 
  protected:
+  virtual ~CloseTerminalProcessFunction();
+
   virtual bool RunTerminalFunction() OVERRIDE;
 
  private:
@@ -80,6 +83,8 @@ class OnTerminalResizeFunction : public TerminalPrivateFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("terminalPrivate.onTerminalResize")
 
  protected:
+  virtual ~OnTerminalResizeFunction();
+
   virtual bool RunTerminalFunction() OVERRIDE;
 
  private:

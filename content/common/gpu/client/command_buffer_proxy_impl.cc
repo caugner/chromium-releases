@@ -46,6 +46,11 @@ CommandBufferProxyImpl::~CommandBufferProxyImpl() {
     delete it->second.shared_memory;
     it->second.shared_memory = NULL;
   }
+  for (Decoders::iterator it = video_decoder_hosts_.begin();
+       it != video_decoder_hosts_.end(); ++it) {
+    if (it->second)
+      it->second->OnChannelError();
+  }
 }
 
 bool CommandBufferProxyImpl::OnMessageReceived(const IPC::Message& message) {
@@ -68,10 +73,6 @@ bool CommandBufferProxyImpl::OnMessageReceived(const IPC::Message& message) {
 }
 
 void CommandBufferProxyImpl::OnChannelError() {
-  for (Decoders::iterator it = video_decoder_hosts_.begin();
-       it != video_decoder_hosts_.end(); ++it) {
-    it->second->OnChannelError();
-  }
   OnDestroyed(gpu::error::kUnknown);
 }
 
@@ -487,7 +488,7 @@ void CommandBufferProxyImpl::SetNotifyRepaintTask(const base::Closure& task) {
   notify_repaint_task_ = task;
 }
 
-scoped_refptr<GpuVideoDecodeAcceleratorHost>
+GpuVideoDecodeAcceleratorHost*
 CommandBufferProxyImpl::CreateVideoDecoder(
     media::VideoCodecProfile profile,
     media::VideoDecodeAccelerator::Client* client) {
@@ -498,13 +499,18 @@ CommandBufferProxyImpl::CreateVideoDecoder(
     return NULL;
   }
 
-  scoped_refptr<GpuVideoDecodeAcceleratorHost> decoder_host =
+  if (decoder_route_id < 0) {
+    DLOG(ERROR) << "Failed to Initialize GPU decoder on profile: " << profile;
+    return NULL;
+  }
+
+  GpuVideoDecodeAcceleratorHost* decoder_host =
       new GpuVideoDecodeAcceleratorHost(channel_, decoder_route_id, client);
   bool inserted = video_decoder_hosts_.insert(std::make_pair(
-      decoder_route_id, decoder_host)).second;
+      decoder_route_id, base::AsWeakPtr(decoder_host))).second;
   DCHECK(inserted);
 
-  channel_->AddRoute(decoder_route_id, decoder_host->AsWeakPtr());
+  channel_->AddRoute(decoder_route_id, base::AsWeakPtr(decoder_host));
 
   return decoder_host;
 }
@@ -530,7 +536,7 @@ bool CommandBufferProxyImpl::Send(IPC::Message* msg) {
   }
 
   // Callee takes ownership of message, regardless of whether Send is
-  // successful. See IPC::Message::Sender.
+  // successful. See IPC::Sender.
   delete msg;
   return false;
 }

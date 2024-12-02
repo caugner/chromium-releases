@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 
+#include <string>
 #include <vector>
 
 #include "base/command_line.h"
@@ -22,13 +23,14 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/ntp_login_handler.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
-#include "chrome/browser/web_resource/promo_resource_service.h"
+#include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -406,14 +408,11 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetString("themegravity",
       (alignment & ThemeService::ALIGN_RIGHT) ? "right" : "");
 
-#if defined(ENABLE_PROMO_RESOURCE_SERVICE)
-  // If the user has preferences for a start and end time for a promo from
-  // the server, and this promo string exists, set the localized string.
-  if (PromoResourceService::CanShowNotificationPromo(profile_)) {
-    load_time_data.SetString("serverpromo",
-        prefs->GetString(prefs::kNtpPromoLine));
-  }
-#endif
+  // Set the promo string for display if there is a valid outstanding promo.
+  NotificationPromo notification_promo(profile_);
+  notification_promo.InitFromPrefs(NotificationPromo::NTP_NOTIFICATION_PROMO);
+  if (notification_promo.CanShow())
+    load_time_data.SetString("serverpromo", notification_promo.promo_text());
 
   // Determine whether to show the menu for accessing tabs on other devices.
   bool show_other_sessions_menu = !CommandLine::ForCurrentProcess()->HasSwitch(
@@ -425,7 +424,8 @@ void NTPResourceCache::CreateNewTabHTML() {
 
   // Load the new tab page appropriate for this build
   base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
-      GetRawDataResource(IDR_NEW_TAB_4_HTML,
+      GetRawDataResource(chrome::search::IsInstantExtendedAPIEnabled(profile_) ?
+                             IDR_NEW_TAB_SEARCH_HTML : IDR_NEW_TAB_4_HTML,
                          ui::SCALE_FACTOR_NONE));
   jstemplate_builder::UseVersion2 version2;
   std::string full_html =
@@ -537,9 +537,9 @@ void NTPResourceCache::CreateNewTabCSS() {
   subst.push_back(SkColorToRGBAString(color_section_link));  // $13
   subst.push_back(SkColorToRGBAString(color_link_underline));  // $14
   subst.push_back(SkColorToRGBAString(color_section_link_underline));  // $15
-  subst.push_back(SkColorToRGBAString(color_section_header_text)); // $16
+  subst.push_back(SkColorToRGBAString(color_section_header_text));  // $16
   subst.push_back(SkColorToRGBAString(
-      color_section_header_text_hover)); // $17
+      color_section_header_text_hover));  // $17
   subst.push_back(SkColorToRGBAString(color_section_header_rule));  // $18
   subst.push_back(SkColorToRGBAString(
       color_section_header_rule_light));  // $19
@@ -552,7 +552,9 @@ void NTPResourceCache::CreateNewTabCSS() {
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_NEW_TAB_4_THEME_CSS, ui::SCALE_FACTOR_NONE));
+          chrome::search::IsInstantExtendedAPIEnabled(profile_) ?
+              IDR_NEW_TAB_SEARCH_THEME_CSS : IDR_NEW_TAB_4_THEME_CSS,
+          ui::SCALE_FACTOR_NONE));
 
   // Create the string from our template and the replacements.
   std::string css_string;

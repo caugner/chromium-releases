@@ -11,7 +11,7 @@
 #include "base/process_util.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_channel_proxy.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/surface/transport_dib.h"
 
@@ -32,8 +32,8 @@ namespace content {
 // Interface that represents the browser side of the browser <-> renderer
 // communication channel. There will generally be one RenderProcessHost per
 // renderer process.
-class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
-                                         public IPC::Channel::Listener {
+class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
+                                         public IPC::Listener {
  public:
   typedef IDMap<RenderProcessHost>::iterator iterator;
   typedef IDMap<RenderWidgetHost>::const_iterator RenderWidgetHostsIterator;
@@ -42,17 +42,14 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   struct RendererClosedDetails {
     RendererClosedDetails(base::ProcessHandle handle,
                           base::TerminationStatus status,
-                          int exit_code,
-                          bool was_alive) {
+                          int exit_code) {
       this->handle = handle;
       this->status = status;
       this->exit_code = exit_code;
-      this->was_alive = was_alive;
     }
     base::ProcessHandle handle;
     base::TerminationStatus status;
     int exit_code;
-    bool was_alive;
   };
 
   virtual ~RenderProcessHost() {}
@@ -92,6 +89,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   virtual void WidgetRestored() = 0;
   virtual void WidgetHidden() = 0;
   virtual int VisibleWidgetCount() const = 0;
+
+  // Indicates whether the current RenderProcessHost associated with a guest
+  // renderer process.
+  virtual bool IsGuest() const = 0;
 
   // Try to shutdown the associated renderer process as fast as possible.
   // If this renderer has any RenderViews with unload handlers, then this
@@ -192,6 +193,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Message::Sender,
   // event, so that we can process requests from the renderer to create contexts
   // with that surface.
   virtual void SurfaceUpdated(int32 surface_id) = 0;
+
+  // Called to resume the requests for a view created through window.open that
+  // were initially blocked.
+  virtual void ResumeRequestsForView(int route_id) = 0;
 
   // Static management functions -----------------------------------------------
 

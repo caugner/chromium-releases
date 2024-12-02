@@ -13,9 +13,9 @@
 #include "content/browser/speech/audio_buffer.h"
 #include "content/public/common/speech_recognition_error.h"
 #include "content/public/common/speech_recognition_result.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -37,9 +37,6 @@ const int kWebServiceStatusNoSpeech = 4;
 const int kWebServiceStatusNoMatch = 5;
 const speech::AudioEncoder::Codec kDefaultAudioCodec =
     speech::AudioEncoder::CODEC_FLAC;
-// TODO(satish): Remove this hardcoded value once the page is allowed to
-// set this via an attribute.
-const int kMaxResults = 6;
 
 bool ParseServerResponse(const std::string& response_body,
                          SpeechRecognitionResult* result,
@@ -65,7 +62,7 @@ bool ParseServerResponse(const std::string& response_body,
     return false;
   }
   const DictionaryValue* response_object =
-      static_cast<DictionaryValue*>(response_value.get());
+      static_cast<const DictionaryValue*>(response_value.get());
 
   // Get the status.
   int status;
@@ -93,7 +90,7 @@ bool ParseServerResponse(const std::string& response_body,
   }
 
   // Get the hypotheses.
-  Value* hypotheses_value = NULL;
+  const Value* hypotheses_value = NULL;
   if (!response_object->Get(kHypothesesString, &hypotheses_value)) {
     VLOG(1) << "ParseServerResponse: Missing hypotheses attribute.";
     return false;
@@ -106,13 +103,14 @@ bool ParseServerResponse(const std::string& response_body,
     return false;
   }
 
-  const ListValue* hypotheses_list = static_cast<ListValue*>(hypotheses_value);
+  const ListValue* hypotheses_list =
+      static_cast<const ListValue*>(hypotheses_value);
 
   // For now we support only single shot recognition, so we are giving only a
   // final result, consisting of one fragment (with one or more hypotheses).
   size_t index = 0;
   for (; index < hypotheses_list->GetSize(); ++index) {
-    Value* hypothesis = NULL;
+    const Value* hypothesis = NULL;
     if (!hypotheses_list->Get(index, &hypothesis)) {
       LOG(WARNING) << "ParseServerResponse: Unable to read hypothesis value.";
       break;
@@ -125,7 +123,7 @@ bool ParseServerResponse(const std::string& response_body,
     }
 
     const DictionaryValue* hypothesis_value =
-        static_cast<DictionaryValue*>(hypothesis);
+        static_cast<const DictionaryValue*>(hypothesis);
     string16 utterance;
 
     if (!hypothesis_value->GetString(kUtteranceString, &utterance)) {
@@ -198,7 +196,7 @@ void GoogleOneShotRemoteEngine::StartRecognition() {
   if (!config_.hardware_info.empty())
     parts.push_back("xhw=" + net::EscapeQueryParamValue(config_.hardware_info,
                                                         true));
-  parts.push_back("maxresults=" + base::IntToString(kMaxResults));
+  parts.push_back("maxresults=" + base::UintToString(config_.max_hypotheses));
   parts.push_back(config_.filter_profanities ? "pfilter=2" : "pfilter=0");
 
   GURL url(std::string(kDefaultSpeechRecognitionUrl) + JoinString(parts, '&'));
@@ -207,10 +205,10 @@ void GoogleOneShotRemoteEngine::StartRecognition() {
                                       config_.audio_sample_rate,
                                       config_.audio_num_bits_per_sample));
   DCHECK(encoder_.get());
-  url_fetcher_.reset(content::URLFetcher::Create(url_fetcher_id_for_tests,
-                                                 url,
-                                                 net::URLFetcher::POST,
-                                                 this));
+  url_fetcher_.reset(net::URLFetcher::Create(url_fetcher_id_for_tests,
+                                             url,
+                                             net::URLFetcher::POST,
+                                             this));
   url_fetcher_->SetChunkedUpload(encoder_->mime_type());
   url_fetcher_->SetRequestContext(url_context_);
   url_fetcher_->SetReferrer(config_.origin_url);

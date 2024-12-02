@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_SETTINGS_SETTINGS_BACKEND_H_
 #define CHROME_BROWSER_EXTENSIONS_SETTINGS_SETTINGS_BACKEND_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
@@ -18,14 +17,16 @@
 #include "chrome/browser/value_store/leveldb_value_store.h"
 #include "sync/api/syncable_service.h"
 
+namespace syncer {
 class SyncErrorFactory;
+}
 
 namespace extensions {
 
 // Manages ValueStore objects for extensions, including routing
 // changes from sync to them.
 // Lives entirely on the FILE thread.
-class SettingsBackend : public SyncableService {
+class SettingsBackend : public syncer::SyncableService {
  public:
   // |storage_factory| is use to create leveldb storage areas.
   // |base_path| is the base of the extension settings directory, so the
@@ -46,17 +47,18 @@ class SettingsBackend : public SyncableService {
   // Deletes all setting data for an extension. Call on the FILE thread.
   void DeleteStorage(const std::string& extension_id);
 
-  // SyncableService implementation.
-  virtual SyncDataList GetAllSyncData(syncable::ModelType type) const OVERRIDE;
-  virtual SyncError MergeDataAndStartSyncing(
-      syncable::ModelType type,
-      const SyncDataList& initial_sync_data,
-      scoped_ptr<SyncChangeProcessor> sync_processor,
-      scoped_ptr<SyncErrorFactory> sync_error_factory) OVERRIDE;
-  virtual SyncError ProcessSyncChanges(
+  // syncer::SyncableService implementation.
+  virtual syncer::SyncDataList GetAllSyncData(
+      syncer::ModelType type) const OVERRIDE;
+  virtual syncer::SyncError MergeDataAndStartSyncing(
+      syncer::ModelType type,
+      const syncer::SyncDataList& initial_sync_data,
+      scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
+      scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) OVERRIDE;
+  virtual syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const SyncChangeList& change_list) OVERRIDE;
-  virtual void StopSyncing(syncable::ModelType type) OVERRIDE;
+      const syncer::SyncChangeList& change_list) OVERRIDE;
+  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
 
  private:
   // Gets a weak reference to the storage area for a given extension,
@@ -93,13 +95,13 @@ class SettingsBackend : public SyncableService {
 
   // Current sync model type.  Will be UNSPECIFIED if sync hasn't been enabled
   // yet, and either SETTINGS or APP_SETTINGS if it has been.
-  syncable::ModelType sync_type_;
+  syncer::ModelType sync_type_;
 
   // Current sync processor, if any.
-  scoped_ptr<SyncChangeProcessor> sync_processor_;
+  scoped_ptr<syncer::SyncChangeProcessor> sync_processor_;
 
   // Current sync error handler if any.
-  scoped_ptr<SyncErrorFactory> sync_error_factory_;
+  scoped_ptr<syncer::SyncErrorFactory> sync_error_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SettingsBackend);
 };

@@ -4,12 +4,11 @@
 
 #ifndef CHROME_BROWSER_SYNC_SYNC_GLOBAL_ERROR_H_
 #define CHROME_BROWSER_SYNC_SYNC_GLOBAL_ERROR_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
-#include "chrome/browser/ui/global_error.h"
+#include "chrome/browser/ui/global_error/global_error.h"
 
 class ProfileSyncService;
 class SigninManager;

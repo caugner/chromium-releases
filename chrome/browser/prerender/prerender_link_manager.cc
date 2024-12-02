@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "chrome/browser/prerender/prerender_contents.h"
+#include "chrome/browser/prerender/prerender_handle.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -16,7 +17,6 @@
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/common/referrer.h"
 #include "googleurl/src/gurl.h"
-#include "googleurl/src/url_canon.h"
 #include "ui/gfx/size.h"
 
 using content::RenderViewHost;
@@ -29,35 +29,44 @@ PrerenderLinkManager::PrerenderLinkManager(PrerenderManager* manager)
 }
 
 PrerenderLinkManager::~PrerenderLinkManager() {
+  for (IdPairToPrerenderHandleMap::iterator it = ids_to_handle_map_.begin();
+       it != ids_to_handle_map_.end();
+       ++it) {
+    PrerenderHandle* prerender_handle = it->second;
+    prerender_handle->OnCancel();
+    delete prerender_handle;
+  }
 }
 
 bool PrerenderLinkManager::OnAddPrerender(int child_id,
                                           int prerender_id,
-                                          const GURL& orig_url,
+                                          const GURL& url,
                                           const content::Referrer& referrer,
                                           const gfx::Size& size,
                                           int render_view_route_id) {
   DVLOG(2) << "OnAddPrerender, child_id = " << child_id
            << ", prerender_id = " << prerender_id
-           << ", url = " << orig_url.spec();
+           << ", url = " << url.spec();
   DVLOG(3) << "... referrer url = " << referrer.url.spec()
            << ", size = (" << size.width() << ", " << size.height() << ")"
            << ", render_view_route_id = " << render_view_route_id;
 
-  // TODO(gavinp): Add tests to ensure fragments work, then remove this fragment
-  // clearing code.
-  url_canon::Replacements<char> replacements;
-  replacements.ClearRef();
-  const GURL url = orig_url.ReplaceComponents(replacements);
-
-  if (!manager_->AddPrerenderFromLinkRelPrerender(
-          child_id, render_view_route_id, url, referrer, size)) {
-    return false;
-  }
   const ChildAndPrerenderIdPair child_and_prerender_id(child_id, prerender_id);
-  DCHECK_EQ(0U, ids_to_url_map_.count(child_and_prerender_id));
-  ids_to_url_map_.insert(std::make_pair(child_and_prerender_id, url));
-  return true;
+  DCHECK_EQ(0U, ids_to_handle_map_.count(child_and_prerender_id));
+
+  scoped_ptr<PrerenderHandle> prerender_handle(
+      manager_->AddPrerenderFromLinkRelPrerender(
+          child_id, render_view_route_id, url, referrer, size));
+  if (prerender_handle.get()) {
+    std::pair<IdPairToPrerenderHandleMap::iterator, bool> insert_result =
+        ids_to_handle_map_.insert(std::make_pair(
+            child_and_prerender_id, static_cast<PrerenderHandle*>(NULL)));
+    DCHECK(insert_result.second);
+    delete insert_result.first->second;
+    insert_result.first->second = prerender_handle.release();
+    return true;
+  }
+  return false;
 }
 
 // TODO(gavinp): Once an observer interface is provided down to the WebKit
@@ -69,24 +78,28 @@ void PrerenderLinkManager::OnCancelPrerender(int child_id, int prerender_id) {
   DVLOG(2) << "OnCancelPrerender, child_id = " << child_id
            << ", prerender_id = " << prerender_id;
   const ChildAndPrerenderIdPair child_and_prerender_id(child_id, prerender_id);
-  IdPairToUrlMap::iterator id_url_iter =
-      ids_to_url_map_.find(child_and_prerender_id);
-  if (id_url_iter == ids_to_url_map_.end()) {
+  IdPairToPrerenderHandleMap::iterator id_to_handle_iter =
+      ids_to_handle_map_.find(child_and_prerender_id);
+  if (id_to_handle_iter == ids_to_handle_map_.end()) {
     DVLOG(5) << "... canceling a prerender that doesn't exist.";
     return;
   }
-  const GURL url = id_url_iter->second;
-  ids_to_url_map_.erase(id_url_iter);
-  manager_->MaybeCancelPrerender(url);
+  PrerenderHandle* prerender_handle = id_to_handle_iter->second;
+  prerender_handle->OnCancel();
+  RemovePrerender(id_to_handle_iter);
 }
 
 void PrerenderLinkManager::OnAbandonPrerender(int child_id, int prerender_id) {
   DVLOG(2) << "OnAbandonPrerender, child_id = " << child_id
            << ", prerender_id = " << prerender_id;
-  // TODO(gavinp,cbentzel): Implement reasonable behaviour for
-  // navigation away from launcher.
   const ChildAndPrerenderIdPair child_and_prerender_id(child_id, prerender_id);
-  ids_to_url_map_.erase(child_and_prerender_id);
+  IdPairToPrerenderHandleMap::iterator id_to_handle_iter =
+      ids_to_handle_map_.find(child_and_prerender_id);
+  if (id_to_handle_iter == ids_to_handle_map_.end())
+    return;
+  PrerenderHandle* prerender_handle = id_to_handle_iter->second;
+  prerender_handle->OnNavigateAway();
+  RemovePrerender(id_to_handle_iter);
 }
 
 void PrerenderLinkManager::OnChannelClosing(int child_id) {
@@ -96,9 +109,9 @@ void PrerenderLinkManager::OnChannelClosing(int child_id) {
   const ChildAndPrerenderIdPair child_and_maximum_prerender_id(
       child_id, std::numeric_limits<int>::max());
   std::queue<int> prerender_ids_to_abandon;
-  for (IdPairToUrlMap::iterator
-           i = ids_to_url_map_.lower_bound(child_and_minimum_prerender_id),
-           e = ids_to_url_map_.upper_bound(child_and_maximum_prerender_id);
+  for (IdPairToPrerenderHandleMap::iterator
+           i = ids_to_handle_map_.lower_bound(child_and_minimum_prerender_id),
+           e = ids_to_handle_map_.upper_bound(child_and_maximum_prerender_id);
        i != e; ++i) {
     prerender_ids_to_abandon.push(i->first.second);
   }
@@ -111,8 +124,14 @@ void PrerenderLinkManager::OnChannelClosing(int child_id) {
 }
 
 bool PrerenderLinkManager::IsEmpty() const {
-  return ids_to_url_map_.empty();
+  return ids_to_handle_map_.empty();
+}
+
+void PrerenderLinkManager::RemovePrerender(
+    const IdPairToPrerenderHandleMap::iterator& id_to_handle_iter) {
+  PrerenderHandle* prerender_handle = id_to_handle_iter->second;
+  delete prerender_handle;
+  ids_to_handle_map_.erase(id_to_handle_iter);
 }
 
 }  // namespace prerender
-

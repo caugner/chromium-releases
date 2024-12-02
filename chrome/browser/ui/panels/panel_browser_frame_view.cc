@@ -13,11 +13,11 @@
 #include "chrome/browser/ui/panels/panel_browser_view.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_strip.h"
+#include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/hit_test.h"
@@ -150,9 +150,9 @@ struct EdgeResources {
 };
 
 gfx::ImageSkia* CreateImageForColor(SkColor color) {
-  gfx::Canvas canvas(gfx::Size(1, 1), true);
+  gfx::Canvas canvas(gfx::Size(1, 1), ui::SCALE_FACTOR_100P, true);
   canvas.DrawColor(color);
-  return new gfx::ImageSkia(canvas.ExtractBitmap());
+  return new gfx::ImageSkia(canvas.ExtractImageRep());
 }
 
 const ButtonResources& GetCloseButtonResources() {
@@ -327,10 +327,11 @@ gfx::Rect PanelBrowserFrameView::GetBoundsForTabStrip(
   return gfx::Rect();
 }
 
-int PanelBrowserFrameView::GetHorizontalTabStripVerticalOffset(
+BrowserNonClientFrameView::TabStripInsets
+PanelBrowserFrameView::GetTabStripInsets(
     bool restored) const {
   // This is not needed since we do not show tab strip for the panel.
-  return 0;
+  return TabStripInsets();
 }
 
 void PanelBrowserFrameView::UpdateThrobber(bool running) {

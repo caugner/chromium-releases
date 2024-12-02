@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_HISTORY_ARCHIVED_DATABASE_H_
 #define CHROME_BROWSER_HISTORY_ARCHIVED_DATABASE_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "chrome/browser/history/url_database.h"
@@ -43,6 +42,8 @@ class ArchivedDatabase : public URLDatabase,
   static int GetCurrentVersion();
 
  private:
+  bool InitTables();
+
   // Implemented for the specialized databases.
   virtual sql::Connection& GetDB() OVERRIDE;
 

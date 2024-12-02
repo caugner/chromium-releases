@@ -4,7 +4,6 @@
 
 #ifndef NET_TEST_BASE_TEST_SERVER_H_
 #define NET_TEST_BASE_TEST_SERVER_H_
-#pragma once
 
 #include <string>
 #include <utility>
@@ -66,6 +65,8 @@ class BaseTestServer {
       OCSP_OK,
       OCSP_REVOKED,
       OCSP_INVALID,
+      OCSP_UNAUTHORIZED,
+      OCSP_UNKNOWN,
     };
 
     // Bitmask of bulk encryption algorithms that the test server supports

@@ -7,7 +7,6 @@
 
 #ifndef CHROME_BROWSER_MEDIA_GALLERY_MEDIA_FILE_SYSTEM_REGISTRY_H_
 #define CHROME_BROWSER_MEDIA_GALLERY_MEDIA_FILE_SYSTEM_REGISTRY_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -26,6 +25,10 @@ namespace content {
 class RenderProcessHost;
 }
 
+namespace extensions {
+class Extension;
+}
+
 namespace fileapi {
 class IsolatedContext;
 }
@@ -36,20 +39,23 @@ class MediaFileSystemRegistry
     : public base::SystemMonitor::DevicesChangedObserver,
       public content::NotificationObserver {
  public:
-  // (Filesystem ID, path)
-  typedef std::pair<std::string, FilePath> MediaFSIDAndPath;
+  struct MediaFSInfo {
+    std::string name;
+    std::string fsid;
+    FilePath path;
+  };
 
   // The instance is lazily created per browser process.
   static MediaFileSystemRegistry* GetInstance();
 
   // Returns the list of media filesystem IDs and paths for a given RPH.
   // Called on the UI thread.
-  std::vector<MediaFSIDAndPath> GetMediaFileSystems(
-      const content::RenderProcessHost* rph);
+  std::vector<MediaFSInfo> GetMediaFileSystemsForExtension(
+      const content::RenderProcessHost* rph,
+      const extensions::Extension& extension);
 
   // base::SystemMonitor::DevicesChangedObserver implementation.
-  virtual void OnMediaDeviceDetached(
-      const base::SystemMonitor::DeviceIdType& id) OVERRIDE;
+  virtual void OnMediaDeviceDetached(const std::string& id) OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -66,9 +72,9 @@ class MediaFileSystemRegistry
   typedef std::map<const content::RenderProcessHost*,
                    MediaPathToFSIDMap> ChildIdToMediaFSMap;
 
-  // Mapping of device id to mount path.
-  typedef std::map<base::SystemMonitor::DeviceIdType, FilePath>
-      DeviceIdToMediaPathMap;
+  // Mapping of device id to media device info.
+  typedef std::map<std::string, base::SystemMonitor::MediaDeviceInfo>
+      DeviceIdToInfoMap;
 
   // Obtain an instance of this class via GetInstance().
   MediaFileSystemRegistry();
@@ -80,16 +86,21 @@ class MediaFileSystemRegistry
   void UnregisterForRPHGoneNotifications(const content::RenderProcessHost* rph);
 
   // Registers a path as a media file system and return the filesystem id.
-  std::string RegisterPathAsFileSystem(const FilePath& path);
+  std::string RegisterPathAsFileSystem(
+      const base::SystemMonitor::MediaDeviceType& device_type,
+      const FilePath& path);
+
 
   // Revoke a media file system with a given |path|.
-  void RevokeMediaFileSystem(const FilePath& path);
+  void RevokeMediaFileSystem(
+      const base::SystemMonitor::MediaDeviceType& device_type,
+      const FilePath& path);
 
   // Only accessed on the UI thread.
   ChildIdToMediaFSMap media_fs_map_;
 
   // Only accessed on the UI thread.
-  DeviceIdToMediaPathMap device_id_map_;
+  DeviceIdToInfoMap device_id_map_;
 
   // Is only used on the UI thread.
   content::NotificationRegistrar registrar_;

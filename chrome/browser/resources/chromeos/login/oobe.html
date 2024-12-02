@@ -47,6 +47,7 @@
 <script src="user_pod_row.js"></script>
 </head>
 <body i18n-values=".style.fontFamily:fontfamily;">
+  <div id="background" class="background-initial"></div>
   <include src="version.html">
   <div id="outer-container">
     <include src="notification_area.html">
@@ -56,7 +57,10 @@
         <div id="header-sections"></div>
       </div>
       <hr class="top shadow">
-      <div id="inner-container">
+      <div id="inner-container" class="down">
+        <div id="step-logo" hidden>
+          <img src="chrome://theme/IDR_PRODUCT_LOGO">
+        </div>
         <include src="oobe_screen_network.html">
         <include src="oobe_screen_eula.html">
         <include src="oobe_screen_update.html">
@@ -71,7 +75,7 @@
         <div id="progress"></div>
         <div id="button-strip" class="button-strip"></div>
       </div>
-      <div id="progress-dots"></div>
+      <div id="progress-dots" class="down"></div>
     </div>
     <div id="security-info">
       <a id="security-link" href="#" i18n-content="eulaSystemSecuritySetting">

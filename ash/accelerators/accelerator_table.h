@@ -4,7 +4,6 @@
 
 #ifndef ASH_ACCELERATORS_ACCELERATOR_TABLE_H_
 #define ASH_ACCELERATORS_ACCELERATOR_TABLE_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "ui/aura/event.h"
@@ -20,17 +19,28 @@ enum AcceleratorAction {
   CYCLE_BACKWARD_MRU,
   CYCLE_FORWARD_LINEAR,
   CYCLE_FORWARD_MRU,
+  DISPLAY_ADD_REMOVE,
+  DISPLAY_CYCLE,
+  DISPLAY_TOGGLE_SCALE,
   EXIT,
   FOCUS_LAUNCHER,
   FOCUS_NEXT_PANE,
   FOCUS_PREVIOUS_PANE,
   FOCUS_SYSTEM_TRAY,
+  KEYBOARD_BRIGHTNESS_DOWN,
+  KEYBOARD_BRIGHTNESS_UP,
+  MAGNIFY_SCREEN_ZOOM_IN,
+  MAGNIFY_SCREEN_ZOOM_OUT,
   NEW_INCOGNITO_WINDOW,
   NEW_TAB,
   NEW_WINDOW,
   NEXT_IME,
+  OPEN_FEEDBACK_PAGE,
   PREVIOUS_IME,
+  POWER_PRESSED,
+  POWER_RELEASED,
   RESTORE_TAB,
+  ROTATE_SCREEN,
   ROTATE_WINDOWS,
   SELECT_LAST_WIN,
   SELECT_WIN_0,
@@ -46,10 +56,14 @@ enum AcceleratorAction {
   SHOW_TASK_MANAGER,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
   TAKE_PARTIAL_SCREENSHOT,
-  TAKE_SCREENSHOT,
+  TAKE_SCREENSHOT,  // Control+F5
+  TAKE_SCREENSHOT_BY_PRTSCN_KEY,  // PrtScn
   TOGGLE_APP_LIST,
   TOGGLE_CAPS_LOCK,
+  TOGGLE_DESKTOP_BACKGROUND_MODE,
+  TOGGLE_ROOT_WINDOW_FULL_SCREEN,
   TOGGLE_SPOKEN_FEEDBACK,
+  TOGGLE_WIFI,
   VOLUME_DOWN,
   VOLUME_MUTE,
   VOLUME_UP,
@@ -66,14 +80,9 @@ enum AcceleratorAction {
   OPEN_FILE_MANAGER_TAB,
 #endif
 #if !defined(NDEBUG)
-  MONITOR_ADD_REMOVE,
-  MONITOR_CYCLE,
-  MONITOR_TOGGLE_SCALE,
   PRINT_LAYER_HIERARCHY,
+  PRINT_VIEW_HIERARCHY,
   PRINT_WINDOW_HIERARCHY,
-  ROTATE_SCREEN,
-  TOGGLE_DESKTOP_BACKGROUND_MODE,
-  TOGGLE_ROOT_WINDOW_FULL_SCREEN,
 #endif
 };
 
@@ -89,6 +98,13 @@ ASH_EXPORT extern const AcceleratorData kAcceleratorData[];
 
 // The number of elements in kAcceleratorData.
 ASH_EXPORT extern const size_t kAcceleratorDataLength;
+
+// Debug accelerators enabled only when "Debugging keyboard shortcuts" flag
+// (--ash-debug-shortcuts) is enabled.
+ASH_EXPORT extern const AcceleratorData kDebugAcceleratorData[];
+
+// The number of elements in kDebugAcceleratorData.
+ASH_EXPORT extern const size_t kDebugAcceleratorDataLength;
 
 // Actions that should be handled very early in Ash unless the current target
 // window is full-screen.

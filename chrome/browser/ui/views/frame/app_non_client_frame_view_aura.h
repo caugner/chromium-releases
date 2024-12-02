@@ -4,13 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_APP_NON_CLIENT_FRAME_VIEW_AURA_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_APP_NON_CLIENT_FRAME_VIEW_AURA_H_
-#pragma once
 
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/mouse_watcher.h"
-#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 
 namespace aura {
 class Window;
@@ -23,7 +22,7 @@ class SlideAnimation;
 // NonClientFrameViewAura implementation for apps.
 class AppNonClientFrameViewAura : public BrowserNonClientFrameView,
                                   public views::MouseWatcherListener,
-                                  public views::Widget::Observer {
+                                  public views::WidgetObserver {
  public:
   AppNonClientFrameViewAura(
       BrowserFrame* frame, BrowserView* browser_view);
@@ -43,8 +42,7 @@ class AppNonClientFrameViewAura : public BrowserNonClientFrameView,
   // BrowserNonClientFrameView:
   virtual gfx::Rect GetBoundsForTabStrip(
       views::View* tabstrip) const OVERRIDE;
-  virtual int GetHorizontalTabStripVerticalOffset(
-      bool restored) const OVERRIDE;
+  virtual TabStripInsets GetTabStripInsets(bool restored) const OVERRIDE;
   virtual void UpdateThrobber(bool running) OVERRIDE;
 
   // View:
@@ -53,7 +51,7 @@ class AppNonClientFrameViewAura : public BrowserNonClientFrameView,
   // views::MouseWatcherListener.
   virtual void MouseMovedOutOfHost() OVERRIDE;
 
-  // views::Widget::Observer.
+  // views::WidgetObserver.
   virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
 
   // Close the app window.

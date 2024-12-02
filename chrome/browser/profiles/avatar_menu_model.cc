@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
@@ -36,8 +37,8 @@ void OnProfileCreated(bool always_create,
   if (status == Profile::CREATE_STATUS_INITIALIZED) {
     ProfileManager::FindOrCreateNewWindowForProfile(
         profile,
-        browser::startup::IS_NOT_PROCESS_STARTUP,
-        browser::startup::IS_NOT_FIRST_RUN,
+        chrome::startup::IS_NOT_PROCESS_STARTUP,
+        chrome::startup::IS_NOT_FIRST_RUN,
         always_create);
   }
 }
@@ -81,7 +82,8 @@ void AvatarMenuModel::SwitchToProfile(size_t index, bool always_create) {
   const Item& item = GetItemAt(index);
   FilePath path = profile_info_->GetPathOfProfileAtIndex(item.model_index);
   g_browser_process->profile_manager()->CreateProfileAsync(
-      path, base::Bind(&OnProfileCreated, always_create));
+      path, base::Bind(&OnProfileCreated, always_create), string16(),
+      string16());
 
   ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::SWITCH_PROFILE_ICON);
 }
@@ -91,16 +93,16 @@ void AvatarMenuModel::EditProfile(size_t index) {
   if (!browser) {
     Profile* profile = g_browser_process->profile_manager()->GetProfileByPath(
         profile_info_->GetPathOfProfileAtIndex(GetItemAt(index).model_index));
-    browser = Browser::Create(profile);
+    browser = new Browser(Browser::CreateParams(profile));
   }
   std::string page = chrome::kManageProfileSubPage;
   page += "#";
   page += base::IntToString(static_cast<int>(index));
-  browser->ShowOptionsTab(page);
+  chrome::ShowSettingsSubPage(browser, page);
 }
 
 void AvatarMenuModel::AddNewProfile() {
-  ProfileManager::CreateMultiProfileAsync();
+  ProfileManager::CreateMultiProfileAsync(string16(), string16());
   ProfileMetrics::LogProfileAddNewUser(ProfileMetrics::ADD_NEW_USER_ICON);
 }
 

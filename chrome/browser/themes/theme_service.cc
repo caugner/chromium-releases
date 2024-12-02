@@ -19,9 +19,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
-#include "grit/ui_resources_standard.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
@@ -124,6 +122,12 @@ const SkColor kDefaultColorNTPSectionText = SK_ColorBLACK;
 const SkColor kDefaultColorNTPSectionLink = SkColorSetRGB(6, 55, 116);
 const SkColor kDefaultColorControlBackground = SkColorSetARGB(0, 0, 0, 0);
 const SkColor kDefaultColorButtonBackground = SkColorSetARGB(0, 0, 0, 0);
+const SkColor kDefaultColorSearchNTPBackground = SkColorSetRGB(245, 245, 245);
+const SkColor kDefaultColorSearchSearchBackground =
+    SkColorSetRGB(245, 245, 245);
+const SkColor kDefaultColorSearchDefaultBackground =
+    SkColorSetRGB(245, 245, 245);
+const SkColor kDefaultColorSearchSeparator = SkColorSetRGB(200, 200, 200);
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorToolbarButtonStroke = SkColorSetARGB(75, 81, 81, 81);
 const SkColor kDefaultColorToolbarButtonStrokeInactive =
@@ -332,7 +336,9 @@ bool ThemeService::HasCustomImage(int id) const {
   return false;
 }
 
-base::RefCountedMemory* ThemeService::GetRawData(int id) const {
+base::RefCountedMemory* ThemeService::GetRawData(
+    int id,
+    ui::ScaleFactor scale_factor) const {
   // Check to see whether we should substitute some images.
   int ntp_alternate;
   GetDisplayProperty(NTP_LOGO_ALTERNATE, &ntp_alternate);
@@ -341,7 +347,7 @@ base::RefCountedMemory* ThemeService::GetRawData(int id) const {
 
   base::RefCountedMemory* data = NULL;
   if (theme_pack_.get())
-    data = theme_pack_->GetRawData(id);
+    data = theme_pack_->GetRawData(id, scale_factor);
   if (!data)
     data = rb_.LoadDataResourceBytes(id, ui::SCALE_FACTOR_100P);
 
@@ -534,6 +540,14 @@ SkColor ThemeService::GetDefaultColor(int id) {
       return kDefaultColorControlBackground;
     case COLOR_BUTTON_BACKGROUND:
       return kDefaultColorButtonBackground;
+    case COLOR_SEARCH_NTP_BACKGROUND:
+      return kDefaultColorSearchNTPBackground;
+    case COLOR_SEARCH_SEARCH_BACKGROUND:
+      return kDefaultColorSearchSearchBackground;
+    case COLOR_SEARCH_DEFAULT_BACKGROUND:
+      return kDefaultColorSearchDefaultBackground;
+    case COLOR_SEARCH_SEPARATOR_LINE:
+      return kDefaultColorSearchSeparator;
 #if defined(OS_MACOSX)
     case COLOR_TOOLBAR_BUTTON_STROKE:
       return kDefaultColorToolbarButtonStroke;

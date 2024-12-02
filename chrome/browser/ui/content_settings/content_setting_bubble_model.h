@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_MODEL_H_
 #define CHROME_BROWSER_UI_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_MODEL_H_
-#pragma once
 
 #include <set>
 #include <string>
@@ -12,6 +11,7 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/common/content_settings.h"
+#include "chrome/common/custom_handlers/protocol_handler.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -19,6 +19,7 @@
 
 class ContentSettingBubbleModelDelegate;
 class Profile;
+class ProtocolHandlerRegistry;
 class TabContents;
 
 // This model provides data for ContentSettingBubble, and also controls
@@ -93,6 +94,10 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   virtual void OnCustomLinkClicked() {}
   virtual void OnManageLinkClicked() {}
 
+  // Called by the view code when the bubble is closed by the user using the
+  // Done button.
+  virtual void OnDoneClicked() {}
+
  protected:
   ContentSettingBubbleModel(TabContents* tab_contents, Profile* profile,
       ContentSettingsType content_type);
@@ -133,6 +138,55 @@ class ContentSettingBubbleModel : public content::NotificationObserver {
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentSettingBubbleModel);
+};
+
+class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
+ public:
+  ContentSettingTitleAndLinkModel(Delegate* delegate,
+                                  TabContents* tab_contents,
+                                  Profile* profile,
+                                  ContentSettingsType content_type);
+  virtual ~ContentSettingTitleAndLinkModel() {}
+  Delegate* delegate() const { return delegate_; }
+
+ private:
+  void SetBlockedResources();
+  void SetTitle();
+  void SetManageLink();
+  virtual void OnManageLinkClicked() OVERRIDE;
+
+  Delegate* delegate_;
+};
+
+class ContentSettingRPHBubbleModel : public ContentSettingTitleAndLinkModel {
+ public:
+  ContentSettingRPHBubbleModel(Delegate* delegate,
+                               TabContents* tab_contents,
+                               Profile* profile,
+                               ProtocolHandlerRegistry* registry,
+                               ContentSettingsType content_type);
+
+  virtual void OnRadioClicked(int radio_index) OVERRIDE;
+  virtual void OnDoneClicked() OVERRIDE;
+
+ private:
+  // These states must match the order of appearance of the radio buttons
+  // in the XIB file for the Mac port.
+  enum RPHState {
+    RPH_ALLOW = 0,
+    RPH_BLOCK,
+    RPH_IGNORE,
+  };
+
+  void RegisterProtocolHandler();
+  void UnregisterProtocolHandler();
+  void IgnoreProtocolHandler();
+  void ClearOrSetPreviousHandler();
+
+  int selected_item_;
+  ProtocolHandlerRegistry* registry_;
+  ProtocolHandler pending_handler_;
+  ProtocolHandler previous_handler_;
 };
 
 #endif  // CHROME_BROWSER_UI_CONTENT_SETTINGS_CONTENT_SETTING_BUBBLE_MODEL_H_

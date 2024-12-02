@@ -14,6 +14,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/version.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
@@ -25,10 +26,12 @@
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/managed_mode.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -189,19 +192,21 @@ DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   }
 
   // Add install warnings (these are not the same as warnings!).
-  const Extension::InstallWarningVector& install_warnings =
-      extension->install_warnings();
-  if (!install_warnings.empty()) {
-    scoped_ptr<ListValue> list(new ListValue());
-    for (Extension::InstallWarningVector::const_iterator it =
-             install_warnings.begin(); it != install_warnings.end(); ++it) {
-      DictionaryValue* item = new DictionaryValue();
-      item->SetBoolean("isHTML",
-                       it->format == Extension::InstallWarning::FORMAT_HTML);
-      item->SetString("message", it->message);
-      list->Append(item);
+  if (extension->location() == Extension::LOAD) {
+    const Extension::InstallWarningVector& install_warnings =
+        extension->install_warnings();
+    if (!install_warnings.empty()) {
+      scoped_ptr<ListValue> list(new ListValue());
+      for (Extension::InstallWarningVector::const_iterator it =
+               install_warnings.begin(); it != install_warnings.end(); ++it) {
+        DictionaryValue* item = new DictionaryValue();
+        item->SetBoolean("isHTML",
+                         it->format == Extension::InstallWarning::FORMAT_HTML);
+        item->SetString("message", it->message);
+        list->Append(item);
+      }
+      extension_data->Set("installWarnings", list.release());
     }
-    extension_data->Set("installWarnings", list.release());
   }
 
   return extension_data;
@@ -267,6 +272,8 @@ void ExtensionSettingsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_VISIT_WEBSTORE));
   localized_strings->SetString("extensionSettingsPolicyControlled",
      l10n_util::GetStringUTF16(IDS_EXTENSIONS_POLICY_CONTROLLED));
+  localized_strings->SetString("extensionSettingsManagedMode",
+     l10n_util::GetStringUTF16(IDS_EXTENSIONS_LOCKED_MANAGED_MODE));
   localized_strings->SetString("extensionSettingsShowButton",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_SHOW_BUTTON));
   localized_strings->SetString("extensionSettingsLoadUnpackedButton",
@@ -308,7 +315,7 @@ void ExtensionSettingsHandler::RegisterMessages() {
         GetExtensionService();
   }
   if (!management_policy_) {
-    management_policy_ = ExtensionSystem::Get(
+    management_policy_ = extensions::ExtensionSystem::Get(
         extension_service_->profile())->management_policy();
   }
 
@@ -501,10 +508,16 @@ void ExtensionSettingsHandler::HandleRequestExtensionsData(
   }
   results.Set("extensions", extensions_list);
 
+  if (ManagedMode::IsInManagedMode()) {
+    results.SetBoolean("managedMode", true);
+    results.SetBoolean("developerMode", false);
+  } else {
+    results.SetBoolean("managedMode", false);
   Profile* profile = Profile::FromWebUI(web_ui());
   bool developer_mode =
       profile->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
   results.SetBoolean("developerMode", developer_mode);
+  }
 
   bool load_unpacked_disabled =
       extension_service_->extension_prefs()->ExtensionsBlacklistedByDefault();
@@ -519,6 +532,9 @@ void ExtensionSettingsHandler::HandleRequestExtensionsData(
 
 void ExtensionSettingsHandler::HandleToggleDeveloperMode(
       const ListValue* args) {
+  if (ManagedMode::IsInManagedMode())
+    return;
+
   Profile* profile = Profile::FromWebUI(web_ui());
   bool developer_mode =
       profile->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode);
@@ -553,9 +569,10 @@ void ExtensionSettingsHandler::HandleInspectMessage(const ListValue* args) {
 
     ExtensionProcessManager* pm = profile->GetExtensionProcessManager();
     extensions::LazyBackgroundTaskQueue* queue =
-        ExtensionSystem::Get(profile)->lazy_background_task_queue();
+        extensions::ExtensionSystem::Get(profile)->lazy_background_task_queue();
 
-    ExtensionHost* host = pm->GetBackgroundHostForExtension(extension->id());
+    extensions::ExtensionHost* host =
+        pm->GetBackgroundHostForExtension(extension->id());
     if (host) {
       InspectExtensionHost(host);
     } else {
@@ -600,7 +617,7 @@ void ExtensionSettingsHandler::HandleEnableMessage(const ListValue* args) {
   }
 
   if (enable_str == "true") {
-    ExtensionPrefs* prefs = extension_service_->extension_prefs();
+    extensions::ExtensionPrefs* prefs = extension_service_->extension_prefs();
     if (prefs->DidExtensionEscalatePermissions(extension_id)) {
       Browser* browser = browser::FindBrowserWithWebContents(
           web_ui()->GetWebContents());
@@ -691,7 +708,8 @@ void ExtensionSettingsHandler::HandleOptionsMessage(const ListValue* args) {
   if (!extension || extension->options_url().is_empty())
     return;
   Profile::FromWebUI(web_ui())->GetExtensionProcessManager()->OpenOptionsPage(
-      extension, NULL);
+      extension,
+      browser::FindBrowserWithWebContents(web_ui()->GetWebContents()));
 }
 
 void ExtensionSettingsHandler::HandleShowButtonMessage(const ListValue* args) {
@@ -716,11 +734,13 @@ void ExtensionSettingsHandler::HandleLoadUnpackedExtensionMessage(
       l10n_util::GetStringUTF16(IDS_EXTENSION_LOAD_FROM_DIRECTORY);
 
   const int kFileTypeIndex = 0;  // No file type information to index.
-  const SelectFileDialog::Type kSelectType = SelectFileDialog::SELECT_FOLDER;
-  load_extension_dialog_ = SelectFileDialog::Create(this);
+  const ui::SelectFileDialog::Type kSelectType =
+      ui::SelectFileDialog::SELECT_FOLDER;
+  load_extension_dialog_ = ui::SelectFileDialog::Create(
+      this, new ChromeSelectFilePolicy(web_ui()->GetWebContents()));
   load_extension_dialog_->SelectFile(
       kSelectType, select_title, last_unpacked_directory_, NULL,
-      kFileTypeIndex, FILE_PATH_LITERAL(""), web_ui()->GetWebContents(),
+      kFileTypeIndex, FILE_PATH_LITERAL(""),
       web_ui()->GetWebContents()->GetView()->GetTopLevelNativeWindow(), NULL);
 }
 
@@ -777,11 +797,13 @@ void ExtensionSettingsHandler::MaybeRegisterForNotifications() {
   registrar_.Add(
       this,
       chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
-      content::Source<ExtensionPrefs>(profile->GetExtensionService()->
-                             extension_prefs()));
+      content::Source<extensions::ExtensionPrefs>(
+          profile->GetExtensionService()->extension_prefs()));
 
   pref_registrar_.Init(profile->GetPrefs());
   pref_registrar_.Add(prefs::kExtensionInstallDenyList, this);
+  local_state_pref_registrar_.Init(g_browser_process->local_state());
+  local_state_pref_registrar_.Add(prefs::kInManagedMode, this);
 }
 
 std::vector<ExtensionPage>
@@ -848,8 +870,10 @@ ExtensionUninstallDialog*
 ExtensionSettingsHandler::GetExtensionUninstallDialog() {
 #if !defined(OS_ANDROID)
   if (!extension_uninstall_dialog_.get()) {
+    Browser* browser = browser::FindBrowserWithWebContents(
+        web_ui()->GetWebContents());
     extension_uninstall_dialog_.reset(
-        ExtensionUninstallDialog::Create(Profile::FromWebUI(web_ui()), this));
+        ExtensionUninstallDialog::Create(browser, this));
   }
   return extension_uninstall_dialog_.get();
 #else
@@ -857,7 +881,8 @@ ExtensionSettingsHandler::GetExtensionUninstallDialog() {
 #endif  // !defined(OS_ANDROID)
 }
 
-void ExtensionSettingsHandler::InspectExtensionHost(ExtensionHost* host) {
+void ExtensionSettingsHandler::InspectExtensionHost(
+    extensions::ExtensionHost* host) {
   if (host)
     DevToolsWindow::OpenDevToolsWindow(host->render_view_host());
 }

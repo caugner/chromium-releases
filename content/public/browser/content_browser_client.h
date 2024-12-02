@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_PUBLIC_BROWSER_CONTENT_BROWSER_CLIENT_H_
 #define CONTENT_PUBLIC_BROWSER_CONTENT_BROWSER_CLIENT_H_
-#pragma once
 
 #include <string>
 #include <utility>
@@ -13,7 +12,13 @@
 #include "base/callback_forward.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/window_container_type.h"
+#include "net/cookies/canonical_cookie.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#include "base/global_descriptors_posix.h"
+#endif
+
 
 class CommandLine;
 class FilePath;
@@ -33,7 +38,6 @@ class ImageSkia;
 }
 
 namespace net {
-class CookieList;
 class CookieOptions;
 class HttpNetworkSession;
 class NetLog;
@@ -203,6 +207,21 @@ class CONTENT_EXPORT ContentBrowserClient {
                               int render_view_id,
                               net::CookieOptions* options);
 
+  // Returns whether plug-ins should access locally stored data or whether all
+  // access should be blocked. The default is to allow local data access.
+  // This is called on the IO thread.
+  virtual bool AllowPluginLocalDataAccess(
+      const GURL& document_url,
+      const GURL& plugin_url,
+      content::ResourceContext* context);
+
+  // Returns whether plug-ins should keep locally stored data for the session
+  // only. The default is to store local data permanently.
+  // This is called on the IO thread.
+  virtual bool AllowPluginLocalDataSessionOnly(
+      const GURL& url,
+      content::ResourceContext* context);
+
   // This is called on the IO thread.
   virtual bool AllowSaveLocalState(ResourceContext* context);
 
@@ -235,12 +254,25 @@ class CONTENT_EXPORT ContentBrowserClient {
       ResourceContext* context,
       const std::vector<std::pair<int, int> >& render_views);
 
-  // Allows the embedder to override the request context based on the URL for
+  // Allow the embedder to override the request context based on the URL for
   // certain operations, like cookie access. Returns NULL to indicate the
   // regular request context should be used.
   // This is called on the IO thread.
   virtual net::URLRequestContext* OverrideRequestContextForURL(
       const GURL& url, ResourceContext* context);
+
+  // Allow the embedder to specify storage parititon id associated with a child
+  // process.
+  //
+  // Child processes that have different storage partition identifiers will
+  // behave as if they belong to different web browsers and not be able to
+  // access each other's cookies, local storage, etc.  IDs must only fit the
+  // pattern [a-z0-9]* (lowercase letters or digits).
+  //
+  // Returns the empty string for the regular storage partition.
+  virtual std::string GetStoragePartitionIdForChildProcess(
+      content::BrowserContext* browser_context,
+      int child_process_id);
 
   // Create and return a new quota permission context.
   virtual QuotaPermissionContext* CreateQuotaPermissionContext();
@@ -397,9 +429,11 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual bool AllowPepperPrivateFileAPI();
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  // Can return an optional fd for crash handling, otherwise returns -1. The
-  // passed |command_line| will be used to start the process in question.
-  virtual int GetCrashSignalFD(const CommandLine& command_line);
+  // Populates |mappings| with all files that need to be mapped before launching
+  // a child process.
+  virtual void GetAdditionalMappedFilesForChildProcess(
+      const CommandLine& command_line,
+      base::GlobalDescriptors::Mapping* mappings) {}
 #endif
 
 #if defined(OS_WIN)

@@ -8,15 +8,13 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
-namespace browser {
+namespace chrome {
 
 void ShowPrintErrorDialog(gfx::NativeWindow parent) {
-  browser::ShowMessageBox(
-      parent,
-      l10n_util::GetStringUTF16(IDS_PRINT_SPOOL_FAILED_TITLE_TEXT),
-      l10n_util::GetStringUTF16(IDS_PRINT_SPOOL_FAILED_ERROR_TEXT),
-      browser::MESSAGE_BOX_TYPE_WARNING);
+  ShowMessageBox(parent,
+                 l10n_util::GetStringUTF16(IDS_PRINT_SPOOL_FAILED_TITLE_TEXT),
+                 l10n_util::GetStringUTF16(IDS_PRINT_SPOOL_FAILED_ERROR_TEXT),
+                 MESSAGE_BOX_TYPE_WARNING);
 }
 
-}  // namespace browser
-
+}  // namespace chrome

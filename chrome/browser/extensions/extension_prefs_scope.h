@@ -4,9 +4,10 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_PREFS_SCOPE_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_PREFS_SCOPE_H_
-#pragma once
 
 #include "base/basictypes.h"
+
+namespace extensions {
 
 // Scope for a preference.
 enum ExtensionPrefsScope {
@@ -21,5 +22,7 @@ enum ExtensionPrefsScope {
   // incognito session is terminated.
   kExtensionPrefsScopeIncognitoSessionOnly
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_PREFS_SCOPE_H_

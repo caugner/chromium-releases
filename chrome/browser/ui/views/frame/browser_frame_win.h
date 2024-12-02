@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_WIN_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_WIN_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -61,6 +60,8 @@ class BrowserFrameWin : public views::NativeWidgetWin,
   virtual void ShowWithWindowState(ui::WindowShowState show_state) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void OnActivate(UINT action, BOOL minimized, HWND window) OVERRIDE;
+  virtual void FrameTypeChanged() OVERRIDE;
+  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
 
   // Overridden from NativeBrowserFrame:
   virtual views::NativeWidget* AsNativeWidget() OVERRIDE;

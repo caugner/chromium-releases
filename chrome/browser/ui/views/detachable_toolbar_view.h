@@ -4,9 +4,12 @@
 
 #ifndef CHROME_BROWSER_UI_VIEWS_DETACHABLE_TOOLBAR_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_DETACHABLE_TOOLBAR_VIEW_H_
-#pragma once
 
 #include "ui/views/accessible_pane_view.h"
+
+namespace gfx {
+class ImageSkia;
+}
 
 struct SkRect;
 
@@ -34,9 +37,12 @@ class DetachableToolbarView : public views::AccessiblePaneView {
   // Paints the background (including the theme image behind content area) when
   // the bar/shelf is attached to the top toolbar.  |background_origin| is the
   // origin to use for painting the theme image.
-  static void PaintBackgroundAttachedMode(gfx::Canvas* canvas,
-                                          views::View* view,
-                                          const gfx::Point& background_origin);
+  static void PaintBackgroundAttachedMode(
+      gfx::Canvas* canvas,
+      views::View* view,
+      const gfx::Point& background_origin,
+      SkColor toolbar_background_color,
+      gfx::ImageSkia* toolbar_background_image);
 
   // Calculate the rect for the content area of the bar/shelf. This is only
   // needed when the bar/shelf is detached from the Chrome frame (otherwise the

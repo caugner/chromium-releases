@@ -10,14 +10,15 @@
 #include "sync/engine/process_commit_response_command.h"
 #include "sync/engine/syncer_proto_util.h"
 #include "sync/sessions/sync_session.h"
+#include "sync/syncable/mutable_entry.h"
+#include "sync/syncable/write_transaction.h"
 
-using syncable::SYNCER;
-using syncable::WriteTransaction;
-
-namespace browser_sync {
+namespace syncer {
 
 using sessions::SyncSession;
 using sessions::StatusController;
+using syncable::SYNCER;
+using syncable::WriteTransaction;
 
 namespace {
 
@@ -62,14 +63,11 @@ void ClearSyncingBits(syncable::Directory* dir,
 // return value of this function is true.
 bool PrepareCommitMessage(sessions::SyncSession* session,
                           sessions::OrderedCommitSet* commit_set,
-                          ClientToServerMessage* commit_message) {
+                          sync_pb::ClientToServerMessage* commit_message) {
   TRACE_EVENT0("sync", "PrepareCommitMessage");
 
   commit_set->Clear();
   commit_message->Clear();
-
-  // TODO(134769): This is a temporary fix for crbug.com/134715.
-  commit_message->set_protocol_version(commit_message->protocol_version());
 
   WriteTransaction trans(FROM_HERE, SYNCER, session->context()->directory());
   sessions::ScopedSetSessionWriteTransaction set_trans(session, &trans);
@@ -95,10 +93,10 @@ bool PrepareCommitMessage(sessions::SyncSession* session,
 SyncerError BuildAndPostCommitsImpl(Syncer* syncer,
                                     sessions::SyncSession* session,
                                     sessions::OrderedCommitSet* commit_set) {
-  ClientToServerMessage commit_message;
+  sync_pb::ClientToServerMessage commit_message;
   while (!syncer->ExitRequested() &&
          PrepareCommitMessage(session, commit_set, &commit_message)) {
-    ClientToServerResponse commit_response;
+    sync_pb::ClientToServerResponse commit_response;
 
     DVLOG(1) << "Sending commit message.";
     TRACE_EVENT_BEGIN0("sync", "PostCommit");
@@ -135,6 +133,7 @@ SyncerError BuildAndPostCommitsImpl(Syncer* syncer,
     if (processing_result != SYNCER_OK) {
       return processing_result;
     }
+    session->SendEventNotification(SyncEngineEvent::STATUS_CHANGED);
   }
 
   return SYNCER_OK;
@@ -153,4 +152,4 @@ SyncerError BuildAndPostCommits(Syncer* syncer,
   return result;
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

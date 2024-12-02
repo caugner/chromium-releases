@@ -4,7 +4,6 @@
 
 #ifndef UI_VIEWS_WIDGET_DEFAULT_THEME_PROVIDER_H_
 #define UI_VIEWS_WIDGET_DEFAULT_THEME_PROVIDER_H_
-#pragma once
 
 #include <vector>
 
@@ -32,7 +31,9 @@ class VIEWS_EXPORT DefaultThemeProvider : public ui::ThemeProvider {
   virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual bool HasCustomImage(int id) const OVERRIDE;
-  virtual base::RefCountedMemory* GetRawData(int id) const OVERRIDE;
+  virtual base::RefCountedMemory* GetRawData(
+      int id,
+      ui::ScaleFactor scale_factor) const OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DefaultThemeProvider);

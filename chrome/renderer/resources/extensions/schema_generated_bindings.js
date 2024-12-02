@@ -192,22 +192,13 @@
         manifestVersion <= schemaNode.maximumManifestVersion;
   }
 
-  // Temporary hack to check if the runtime API is supported.
-  // TODO(aa): Remove when we can restrict non-permission APIs to dev-only.
-  function isRuntimeAPISupported(schemaNode) {
-    if (schemaNode.namespace == "runtime")
-      return isDevChannel();
-    return true;
-  }
-
   function isSchemaNodeSupported(schemaNode, platform, manifestVersion) {
     return isPlatformSupported(schemaNode, platform) &&
-        isManifestVersionSupported(schemaNode, manifestVersion) &&
-        isRuntimeAPISupported(schemaNode);
+        isManifestVersionSupported(schemaNode, manifestVersion);
   }
 
   chromeHidden.onLoad.addListener(function(extensionId,
-                                           isExtensionProcess,
+                                           contextType,
                                            isIncognitoProcess,
                                            manifestVersion) {
     var apiDefinitions = GetExtensionAPIDefinition();
@@ -255,7 +246,7 @@
       // based on the presence of "unprivileged" and whether this is an
       // extension process (versus e.g. a content script).
       function isSchemaAccessAllowed(itemSchema) {
-        return isExtensionProcess ||
+        return (contextType == 'BLESSED_EXTENSION') ||
                apiDef.unprivileged ||
                itemSchema.unprivileged;
       }
@@ -436,7 +427,7 @@
         apiFunctions: new NamespacedAPIFunctions(apiDef.namespace,
                                                  apiFunctions),
         apiDefinitions: apiDefinitions,
-      }, extensionId);
+      }, extensionId, contextType);
     });
 
     // TODO(mihaip): remove this alias once the webstore stops calling

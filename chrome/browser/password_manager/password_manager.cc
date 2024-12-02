@@ -4,6 +4,7 @@
 
 #include "chrome/browser/password_manager/password_manager.h"
 
+#include "base/metrics/histogram.h"
 #include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
@@ -13,6 +14,7 @@
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "grit/generated_resources.h"
 
@@ -89,7 +91,11 @@ void PasswordManager::SetFormHasGeneratedPassword(const PasswordForm& form) {
   bool ssl_valid = (form.origin.SchemeIsSecure() &&
                     !delegate_->DidLastPageLoadEncounterSSLErrors());
   PasswordFormManager* manager =
-      new PasswordFormManager(delegate_->GetProfile(), this, form, ssl_valid);
+      new PasswordFormManager(delegate_->GetProfile(),
+                              this,
+                              web_contents(),
+                              form,
+                              ssl_valid);
   pending_login_managers_.push_back(manager);
   manager->SetHasGeneratedPassword();
   // TODO(gcasto): Add UMA stats to track this.
@@ -166,7 +172,7 @@ void PasswordManager::DidNavigateAnyFrame(
   // There might be password data to provisionally save. Other than that, we're
   // ready to reset and move on.
   ProvisionallySavePassword(params.password_form);
-  pending_login_managers_.reset();
+  pending_login_managers_.clear();
 }
 
 bool PasswordManager::OnMessageReceived(const IPC::Message& message) {
@@ -193,7 +199,10 @@ void PasswordManager::OnPasswordFormsParsed(
        iter != forms.end(); ++iter) {
     bool ssl_valid = iter->origin.SchemeIsSecure() && !had_ssl_error;
     PasswordFormManager* manager =
-        new PasswordFormManager(delegate_->GetProfile(), this, *iter,
+        new PasswordFormManager(delegate_->GetProfile(),
+                                this,
+                                web_contents(),
+                                *iter,
                                 ssl_valid);
     pending_login_managers_.push_back(manager);
     manager->FetchMatchingLoginsFromPasswordStore();
@@ -231,6 +240,8 @@ void PasswordManager::OnPasswordFormsRendered(
   // given consent, either through previously accepting the infobar or by having
   // the browser generate the password.
   provisional_save_manager_->SubmitPassed();
+  if (provisional_save_manager_->HasGeneratedPassword())
+    UMA_HISTOGRAM_COUNTS("PasswordGeneration.Submitted", 1);
   if (provisional_save_manager_->IsNewLogin() &&
       !provisional_save_manager_->HasGeneratedPassword()) {
     delegate_->AddSavePasswordInfoBarIfPermitted(

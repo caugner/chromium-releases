@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_INSTANT_INSTANT_LOADER_DELEGATE_H_
 #define CHROME_BROWSER_INSTANT_INSTANT_LOADER_DELEGATE_H_
-#pragma once
 
 #include "base/string16.h"
 #include "chrome/common/instant_types.h"
@@ -32,8 +31,9 @@ class InstantLoaderDelegate {
   // Returns the bounds of instant.
   virtual gfx::Rect GetInstantBounds() = 0;
 
-  // Returns true if instant should be committed on mouse up.
-  virtual bool ShouldCommitInstantOnMouseUp() = 0;
+  // Returns true if instant should be committed on mouse up or at the end of a
+  // touch-gesture.
+  virtual bool ShouldCommitInstantOnPointerRelease() = 0;
 
   // Invoked when the the loader should be committed.
   virtual void CommitInstantLoader(InstantLoader* loader) = 0;

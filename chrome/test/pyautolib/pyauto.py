@@ -95,9 +95,6 @@ _REMOTE_PROXY = None
 _OPTIONS = None
 _BROWSER_PID = None
 
-# TODO(bartfab): Remove when crosbug.com/20709 is fixed.
-AUTO_CLEAR_LOCAL_STATE_MAGIC_FILE = '/root/.forget_usernames'
-
 
 class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
   """Base class for UI Test Cases in Python.
@@ -192,6 +189,14 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     # on ChromeOS).
     self.SetUp()
 
+    global _BROWSER_PID
+    try:
+      _BROWSER_PID = self.GetBrowserInfo()['browser_pid']
+    except JSONInterfaceError:
+      raise JSONInterfaceError('Unable to get browser_pid over automation '
+                               'channel on first attempt.  Something went very '
+                               'wrong.  Chrome probably did not launch.')
+
     # Forcibly trigger all plugins to get registered.  crbug.com/94123
     # Sometimes flash files loaded too quickly after firing browser
     # ends up getting downloaded, which seems to indicate that the plugin
@@ -203,14 +208,16 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     if self.IsChromeOS():
       self.WaitUntil(lambda: not self.GetNetworkInfo()['offline_mode'])
 
+    if (self.IsChromeOS() and self.ShouldOOBESkipToLogin() and
+        not self.GetLoginInfo()['is_logged_in'] and
+        self.GetOOBEScreenInfo()['screen_name'] != 'login'):
+      self.SkipToLogin()
+
     # If we are connected to any RemoteHosts, create PyAuto
     # instances on the remote sides and set them up too.
     for remote in self.remotes:
       remote.CreateTarget(self)
       remote.setUp()
-
-    global _BROWSER_PID
-    _BROWSER_PID = self.GetBrowserInfo()['browser_pid']
 
   def setUp(self):
     """Override this method to launch browser differently.
@@ -256,6 +263,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     These are flags needed to facilitate testing.  Override this function to
     use a custom set of Chrome flags.
     """
+    auth_ext_path = ('--auth-ext-path=/usr/local/autotest/deps/pyauto_dep/' +
+        'test_src/chrome/browser/resources/gaia_auth')
+    # TODO(nirnimesh): remove when chromeos side changes land.
+    if not os.path.exists(auth_ext_path):
+      auth_ext_path = '/usr/share/chromeos-assets/gaia_auth'
     if self.IsChromeOS():
       return [
         '--homepage=about:blank',
@@ -265,12 +277,29 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         '--dom-automation',
         '--skip-oauth-login',
         # Enables injection of test content script for webui login automation
-        '--auth-ext-path=/usr/share/chromeos-assets/gaia_auth',
+        '--auth-ext-path=%s' % auth_ext_path,
         # Enable automation provider and chromeos net logs
         '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2',
       ]
     else:
       return []
+
+  def ShouldOOBESkipToLogin(self):
+    """Determine if we should skip the OOBE flow on ChromeOS.
+
+    This makes automation skip the OOBE flow during setUp() and land directly
+    to the login screen. Applies only if not logged in already.
+
+    Override and return False if OOBE flow is required, for OOBE tests, for
+    example. Calling this function directly will have no effect.
+
+    Returns:
+      True, if the OOBE should be skipped and automation should
+            go to the 'Add user' login screen directly
+      False, if the OOBE should not be skipped.
+    """
+    assert self.IsChromeOS()
+    return True
 
   def CloseChromeOnChromeOS(self):
     """Gracefully exit chrome on ChromeOS."""
@@ -452,30 +481,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     PyUITest.RunSuperuserActionOnChromeOS('RemoveAllCryptohomeVaults')
 
   @staticmethod
-  def TryToDisableLocalStateAutoClearingOnChromeOS():
-    """Disable clearing of the local state on session manager startup.
-
-    TODO(bartfab): Remove this method when crosbug.com/20709 is fixed.
-    """
-    PyUITest.RunSuperuserActionOnChromeOS('TryToDisableLocalStateAutoClearing')
-
-  @staticmethod
-  def TryToEnableLocalStateAutoClearingOnChromeOS():
-    """Enable clearing of the local state on session manager startup.
-
-    TODO(bartfab): Remove this method when crosbug.com/20709 is fixed.
-    """
-    PyUITest.RunSuperuserActionOnChromeOS('TryToEnableLocalStateAutoClearing')
-
-  @staticmethod
-  def IsLocalStateAutoClearingEnabledOnChromeOS():
-    """Check if the session manager is set to clear the local state on startup.
-
-    TODO(bartfab): Remove this method when crosbug.com/20709 is fixed.
-    """
-    return os.path.exists(AUTO_CLEAR_LOCAL_STATE_MAGIC_FILE)
-
-  @staticmethod
   def _IsInodeNew(path, old_inode):
     """Determine whether an inode has changed. POSIX only.
 
@@ -574,6 +579,23 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     global _HTTP_SERVER
     assert _HTTP_SERVER, 'HTTP Server not yet started'
     return _HTTP_SERVER.GetURL(os.path.join('files', *relative_path)).spec()
+
+  @staticmethod
+  def ContentDataDir():
+    """Get path to content/test/data."""
+    return os.path.join(PyUITest.DataDir(), os.pardir, os.pardir, os.pardir,
+        'content', 'test', 'data')
+
+  @staticmethod
+  def GetFileURLForContentDataPath(*relative_path):
+    """Get file:// url for the given path relative to content test data dir.
+
+    Also quotes the url using urllib.quote().
+
+    Args:
+      relative_path: Variable number of strings that can be joined.
+    """
+    return PyUITest.GetFileURLForPath(PyUITest.ContentDataDir(), *relative_path)
 
   @staticmethod
   def GetFtpURLForDataPath(ftp_server, *relative_path):
@@ -723,16 +745,17 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       '--sync-notification-method=p2p',
     ]
 
-  def GetPrivateInfo(self):
+  @staticmethod
+  def GetPrivateInfo():
     """Fetch info from private_tests_info.txt in private dir.
 
     Returns:
       a dictionary of items from private_tests_info.txt
     """
     private_file = os.path.join(
-        self.DataDir(), 'pyauto_private', 'private_tests_info.txt')
+        PyUITest.DataDir(), 'pyauto_private', 'private_tests_info.txt')
     assert os.path.exists(private_file), '%s missing' % private_file
-    return self.EvalDataFrom(private_file)
+    return PyUITest.EvalDataFrom(private_file)
 
   def WaitUntil(self, function, timeout=-1, retry_sleep=0.25, args=[],
                 expect_retval=None, debug=True):
@@ -1057,14 +1080,355 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       raise JSONInterfaceError(ret_dict['error'])
     return ret_dict
 
-  def GetBookmarkModel(self):
+  def NavigateToURL(self, url, windex=0, tab_index=None, navigation_count=1):
+    """Navigate the given tab to the given URL.
+
+    Note that this method also activates the corresponding tab/window if it's
+    not active already. Blocks until page has loaded.
+
+    Args:
+      url: The URL to which to navigate, can be a string or GURL object.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+      tab_index: The index of the tab to work on. Defaults to the active tab.
+      navigation_count: the number of navigations to wait for. Defaults to 1.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    if isinstance(url, GURL):
+      url = url.spec()
+    if tab_index is None:
+      tab_index = self.GetActiveTabIndex(windex)
+    cmd_dict = {
+        'command': 'NavigateToURL',
+        'url': url,
+        'windex': windex,
+        'tab_index': tab_index,
+        'navigation_count': navigation_count,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def ApplyAccelerator(self, accelerator, windex=0):
+    """Apply the accelerator with the given id.
+
+    Note that this method schedules the accelerator, but does not wait for it to
+    actually finish doing anything.
+
+    Args:
+      accelerator: The accelerator id, IDC_BACK, IDC_NEWTAB, etc. The list of
+          ids can be found at chrome/app/chrome_command_ids.h.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+
+    cmd_dict = {
+        'command': 'ApplyAccelerator',
+        'accelerator': accelerator,
+        'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def RunCommand(self, accelerator, windex=0):
+    """Apply the accelerator with the given id and wait for it to finish.
+
+    This is like ApplyAccelerator except that it waits for the command to finish
+    executing.
+
+    Args:
+      accelerator: The accelerator id. The list of ids can be found at
+          chrome/app/chrome_command_ids.h.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'RunCommand',
+        'accelerator': accelerator,
+        'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def IsMenuCommandEnabled(self, accelerator, windex=0):
+    """Check if a command is enabled for a window.
+
+    Returns true if the command with the given accelerator id is enabled on the
+    given window.
+
+    Args:
+      accelerator: The accelerator id. The list of ids can be found at
+          chrome/app/chrome_command_ids.h.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Returns:
+      True if the command is enabled for the given window.
+    """
+    cmd_dict = {
+        'command': 'IsMenuCommandEnabled',
+        'accelerator': accelerator,
+        'windex': windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None).get('enabled')
+
+  def ReloadTab(self, tab_index=0, windex=0):
+    """Reload the given tab.
+
+    Blocks until the page has reloaded.
+
+    Args:
+      tab_index: The index of the tab to reload. Defaults to 0.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'Reload',
+        'tab_index': tab_index,
+        'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def ReloadActiveTab(self, windex=0):
+    """Reload an active tab.
+
+    Warning: Depending on the concept of an active tab is dangerous as it can
+    change during the test. Use ReloadTab and supply a tab_index explicitly.
+
+    Args:
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    self.ReloadTab(self.GetActiveTabIndex(windex), windex)
+
+  def GetActiveTabIndex(self, windex=0):
+    """Get the index of the currently active tab in the given browser window.
+
+    Warning: Depending on the concept of an active tab is dangerous as it can
+    change during the test. Supply the tab_index explicitly, if possible.
+
+    Args:
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Returns:
+      An integer index for the currently active tab.
+    """
+    cmd_dict = {
+        'command': 'GetActiveTabIndex',
+        'windex': windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict,
+                                          windex=None).get('tab_index')
+
+  def ActivateTab(self, tab_index=0, windex=0):
+    """Activates the given tab in the specified window.
+
+    Warning: Depending on the concept of an active tab is dangerous as it can
+    change during the test. Instead use functions that accept a tab_index
+    explicitly.
+
+    Args:
+      tab_index: Integer index of the tab to activate; defaults to 0.
+      windex: Integer index of the browser window to use; defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'ActivateTab',
+        'tab_index': tab_index,
+        'windex': windex,
+    }
+    self.BringBrowserToFront(windex)
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def BringBrowserToFront(self, windex=0):
+    """Activate the browser's window and bring it to front.
+
+    Args:
+      windex: Integer index of the browser window to use; defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'BringBrowserToFront',
+        'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def GetBrowserWindowCount(self):
+    """Get the browser window count.
+
+    Args:
+      None.
+
+    Returns:
+      Integer count of the number of browser windows. Includes popups.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {'command': 'GetBrowserWindowCount'}
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['count']
+
+  def OpenNewBrowserWindow(self, show):
+    """Create a new browser window.
+
+    Args:
+      show: Boolean indicating whether to show the window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'OpenNewBrowserWindow',
+        'show': show,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def CloseBrowserWindow(self, windex=0):
+    """Create a new browser window.
+
+    Args:
+      windex: Index of the browser window to close; defaults to 0.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'CloseBrowserWindow',
+        'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def AppendTab(self, url, windex=0):
+    """Append a new tab.
+
+    Creates a new tab at the end of given browser window and activates
+    it. Blocks until the specified |url| is loaded.
+
+    Args:
+      url: The url to load, can be string or a GURL object.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Returns:
+      True if the url loads successfully in the new tab. False otherwise.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    if isinstance(url, GURL):
+      url = url.spec()
+    cmd_dict = {
+        'command': 'AppendTab',
+        'url': url,
+        'windex': windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None).get('result')
+
+  def GetTabCount(self, windex=0):
+    """Gets the number of tab in the given browser window.
+
+    Args:
+      windex: Integer index of the browser window to use; defaults to the first
+          window.
+
+    Returns:
+      The tab count.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'GetTabCount',
+        'windex': windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['tab_count']
+
+  def GetTabInfo(self, tab_index=0, windex=0):
+    """Gets information about the specified tab.
+
+    Args:
+      tab_index: Integer index of the tab to activate; defaults to 0.
+      windex: Integer index of the browser window to use; defaults to the first
+          window.
+
+    Returns:
+      A dictionary containing information about the tab.
+      Example:
+        { u'title': "Hello World",
+          u'url': "http://foo.bar", }
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+        'command': 'GetTabInfo',
+        'tab_index': tab_index,
+        'windex': windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def GetActiveTabTitle(self, windex=0):
+    """Gets the title of the active tab.
+
+    Warning: Depending on the concept of an active tab is dangerous as it can
+    change during the test. Use GetTabInfo and supply a tab_index explicitly.
+
+    Args:
+      windex: Integer index of the browser window to use; defaults to the first
+          window.
+
+    Returns:
+      The tab title as a string.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    return self.GetTabInfo(self.GetActiveTabIndex(windex), windex)['title']
+
+  def GetActiveTabURL(self, windex=0):
+    """Gets the URL of the active tab.
+
+    Warning: Depending on the concept of an active tab is dangerous as it can
+    change during the test. Use GetTabInfo and supply a tab_index explicitly.
+
+    Args:
+      windex: Integer index of the browser window to use; defaults to the first
+          window.
+
+    Returns:
+      The tab URL as a GURL object.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    return GURL(str(self.GetTabInfo(self.GetActiveTabIndex(windex),
+                                    windex)['url']))
+
+  def GetBookmarkModel(self, windex=0):
     """Return the bookmark model as a BookmarkModel object.
 
     This is a snapshot of the bookmark model; it is not a proxy and
     does not get updated as the bookmark model changes.
     """
-    bookmarks_as_json = self._GetBookmarksAsJSON()
-    if bookmarks_as_json == None:
+    bookmarks_as_json = self._GetBookmarksAsJSON(windex)
+    if not bookmarks_as_json:
       raise JSONInterfaceError('Could not resolve browser proxy.')
     return bookmark_model.BookmarkModel(bookmarks_as_json)
 
@@ -1184,6 +1548,70 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'command': 'OmniboxAcceptInput',
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+
+  def GetCookie(self, url, windex=0):
+    """Get the value of the cookie at url in context of the specified browser.
+
+    Args:
+      url: Either a GURL object or url string specifing the cookie url.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    if isinstance(url, GURL):
+      url = url.spec()
+    cmd_dict = {
+        'command': 'GetCookiesInBrowserContext',
+        'url': url,
+        'windex': windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['cookies']
+
+  def DeleteCookie(self, url, cookie_name, windex=0):
+    """Delete the cookie at url with name cookie_name.
+
+    Args:
+      url: Either a GURL object or url string specifing the cookie url.
+      cookie_name: The name of the cookie to delete as a string.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    if isinstance(url, GURL):
+      url = url.spec()
+    cmd_dict = {
+        'command': 'DeleteCookieInBrowserContext',
+        'url': url,
+        'cookie_name': cookie_name,
+        'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def SetCookie(self, url, value, windex=0):
+    """Set the value of the cookie at url to value in the context of a browser.
+
+    Args:
+      url: Either a GURL object or url string specifing the cookie url.
+      value: A string to set as the cookie's value.
+      windex: The index of the browser window to work on. Defaults to the first
+          window.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    if isinstance(url, GURL):
+      url = url.spec()
+    cmd_dict = {
+        'command': 'SetCookieInBrowserContext',
+        'url': url,
+        'value': value,
+        'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
   def GetInstantInfo(self):
     """Return info about the instant overlay tab.
@@ -1498,6 +1926,67 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     # Sending request for a char.
     self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def SetDownloadShelfVisible(self, is_visible, windex=0):
+    """Set download shelf visibility for the specified browser window.
+
+    Args:
+      is_visible: A boolean indicating the desired shelf visibility.
+      windex: The window index, defaults to 0 (the first window).
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'SetDownloadShelfVisible',
+      'is_visible': is_visible,
+      'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def IsDownloadShelfVisible(self, windex=0):
+    """Determine whether the download shelf is visible in the given window.
+
+    Args:
+      windex: The window index, defaults to 0 (the first window).
+
+    Returns:
+      A boolean indicating the shelf visibility.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'IsDownloadShelfVisible',
+      'windex': windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['is_visible']
+
+  def GetDownloadDirectory(self, tab_index=None, windex=0):
+    """Get the path to the download directory.
+
+    Warning: Depending on the concept of an active tab is dangerous as it can
+    change during the test. Always supply a tab_index explicitly.
+
+    Args:
+      tab_index: The index of the tab to work on. Defaults to the active tab.
+      windex: The index of the browser window to work on. Defaults to 0.
+
+    Returns:
+      The path to the download directory as a FilePath object.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    if tab_index is None:
+      tab_index = self.GetActiveTabIndex(windex)
+    cmd_dict = {
+      'command': 'GetDownloadDirectory',
+      'tab_index': tab_index,
+      'windex': windex,
+    }
+    return FilePath(str(self._GetResultFromJSONRequest(cmd_dict,
+                                                       windex=None)['path']))
 
   def WaitForAllDownloadsToComplete(self, pre_download_ids=[], windex=0,
                                     timeout=-1):
@@ -2075,6 +2564,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         'with_ui': with_ui,
         'windex': windex,
     }
+
     if from_webstore:
       cmd_dict['from_webstore'] = True
     return self._GetResultFromJSONRequest(cmd_dict, windex=None)['id']
@@ -2608,7 +3098,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     finally:
       shutil.rmtree(tempdir, ignore_errors=True)
 
-  def ImportSettings(self, import_from, first_run, import_items):
+  def ImportSettings(self, import_from, first_run,
+                    import_items, windex=0):
     """Import the specified import items from the specified browser.
 
     Implements the features available in the "Import Settings" part of the
@@ -2629,6 +3120,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                     Strings that can be in the list are:
                     HISTORY, FAVORITES, PASSWORDS, SEARCH_ENGINES, HOME_PAGE,
                     ALL (note: COOKIES is not supported by the browser yet)
+      windex: window index, defaults to 0.
+
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
@@ -2638,7 +3131,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'first_run': first_run,
       'import_items': import_items
     }
-    return self._GetResultFromJSONRequest(cmd_dict)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
   def ClearBrowsingData(self, to_remove, time_period):
     """Clear the specified browsing data. Implements the features available in
@@ -2757,7 +3250,22 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
-  def SetTheme(self, crx_file_path):
+  def ResetToDefaultTheme(self, windex=0):
+    """Reset to default theme.
+
+    Args:
+      windex: Index of the window to reset; defaults to 0.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'ResetToDefaultTheme',
+      'windex': windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def SetTheme(self, crx_file_path, windex=0):
     """Installs the given theme synchronously.
 
     A theme file is a file with a .crx suffix, like an extension.  The theme
@@ -2773,7 +3281,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
-    return self.InstallExtension(crx_file_path, True)
+    return self.InstallExtension(crx_file_path, True, windex)
 
   def WaitUntilDownloadedThemeSet(self, theme_name):
     """Waits until the theme has been set.
@@ -2805,7 +3313,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     self._GetResultFromJSONRequest(cmd_dict)
 
-  def GetThemeInfo(self):
+  def GetThemeInfo(self, windex=0):
     """Get info about theme.
 
     This includes info about the theme name, its colors, images, etc.
@@ -2831,7 +3339,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     cmd_dict = {
       'command': 'GetThemeInfo',
     }
-    return self._GetResultFromJSONRequest(cmd_dict)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
 
   def GetActiveNotifications(self):
     """Gets a list of the currently active/shown HTML5 notifications.
@@ -2957,6 +3465,40 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=windex,
                                           timeout=timeout)
+
+  def OpenFindInPage(self, windex=0):
+    """Opens the "Find in Page" box.
+
+    Args:
+      windex: Index of the window; defaults to 0.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'OpenFindInPage',
+      'windex' : windex,
+    }
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+
+  def IsFindInPageVisible(self, windex=0):
+    """Returns the visibility of the "Find in Page" box.
+
+    Args:
+      windex: Index of the window; defaults to 0.
+
+    Returns:
+      A boolean indicating the visibility state of the "Find in Page" box.
+
+    Raises:
+      pyauto_errors.JSONInterfaceError if the automation call returns an error.
+    """
+    cmd_dict = {
+      'command': 'IsFindInPageVisible',
+      'windex' : windex,
+    }
+    return self._GetResultFromJSONRequest(cmd_dict, windex=None)['is_visible']
+
 
   def AddDomEventObserver(self, event_name='', automation_id=-1,
                           recurring=False):
@@ -3156,25 +3698,6 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'command': 'ClearEventQueue',
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=None)
-
-  def AppendTab(self, url, windex=0):
-    """Create a new tab.
-
-    Create a new tab at the end of given or first browser window
-    and activate it. Blocks until the url is loaded.
-
-    Args:
-      url: The url to load, can be string or a GURL object.
-      windex: Index of the window to open a tab in. Default 0 - first window.
-
-    Returns:
-      True on success.
-    """
-    if type(url) is GURL:
-      gurl = url
-    else:
-      gurl = GURL(url)
-    return pyautolib.PyUITestBase.AppendTab(self, gurl, windex)
 
   def WaitUntilNavigationCompletes(self, tab_index=0, windex=0):
     """Wait until the specified tab is done navigating.
@@ -3937,13 +4460,42 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
 
     This is equivalent to 'Add new user' action with multi-profiles.
 
+    To account for crbug.com/108761 on Win XP, this call polls until the
+    profile count increments by 1.
+
     Raises:
       pyauto_errors.JSONInterfaceError if the automation call returns an error.
     """
+    num_profiles = len(self.GetMultiProfileInfo()['profiles'])
     cmd_dict = {  # Prepare command for the json interface
       'command': 'OpenNewBrowserWindowWithNewProfile'
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    self._GetResultFromJSONRequest(cmd_dict, windex=None)
+    # TODO(nirnimesh): Remove when crbug.com/108761 is fixed
+    self.WaitUntil(
+        lambda: len(self.GetMultiProfileInfo()['profiles']),
+        expect_retval=(num_profiles + 1))
+
+  def OpenProfileWindow(self, path, num_loads=1):
+   """Open browser window for an existing profile.
+
+   This is equivalent to picking a profile from the multi-profile menu.
+
+   Multi-profile should be enabled and the requested profile should already
+   exist. Creates a new window for the given profile. Use
+   OpenNewBrowserWindowWithNewProfile() to create a new profile.
+
+   Args:
+     path: profile path of the profile to be opened.
+     num_loads: the number of loads to wait for, when a new browser window
+                is created.  Useful when restoring a window with many tabs.
+   """
+   cmd_dict = {  # Prepare command for the json interface
+    'command': 'OpenProfileWindow',
+    'path': path,
+    'num_loads': num_loads,
+   }
+   return self._GetResultFromJSONRequest(cmd_dict, windex=None)
 
   def GetMultiProfileInfo(self):
     """Fetch info about all multi-profile users.
@@ -4257,9 +4809,9 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       # GAIA authentication.
       self.GetNextEvent()
     except JSONInterfaceError as e:
-      raise JSONInterfaceError('%s\nLogin failed. Perhaps Chrome crashed, '
+      raise JSONInterfaceError('Login failed. Perhaps Chrome crashed, '
                                'failed to start, or the login flow is '
-                               'broken?' % str(e))
+                               'broken? Error message: %s' % str(e))
 
   def Logout(self):
     """Log out from ChromeOS and wait for session_manager to come up.
@@ -4397,6 +4949,42 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       panel['url'] = tab['url']
 
     return panels
+
+  def RestoreOnline(self):
+    """Returns the device from offline mode if GoOffline was used."""
+
+    assert PyUITest.IsChromeOS()
+
+    # Restores etherent connection
+    stdout, stderr = self.RunSuperuserActionOnChromeOS('TeardownBackchannel')
+
+    if hasattr(self, 'bc_cellular_enabled') and self.bc_cellular_enabled:
+      self.ToggleNetworkDevice('cellular', True)
+    if hasattr(self, 'bc_wifi_enabled') and self.bc_wifi_enabled:
+      self.ToggleNetworkDevice('wifi', True)
+
+    assert 'RuntimeError' not in stderr, stderr
+
+  def GoOffline(self):
+    """Puts device in offline mode.
+
+    The device is put into offline mode by disabling all network interfaces
+    but keeping the the wired ethernet interface up and faking shill/flimflam
+    into thinking there is no ethernet interface by renaming the interface.
+    This is so we can keep ssh connections over the wired connection alive.
+    """
+    assert PyUITest.IsChromeOS()
+    net_info = self.GetNetworkInfo()
+    self.bc_wifi_enabled = net_info.get('wifi_enabled')
+    self.bc_cellular_enabled = net_info.get('cellular_enabled')
+
+    if self.bc_cellular_enabled:
+      self.ToggleNetworkDevice('cellular', False)
+    if self.bc_wifi_enabled:
+      self.ToggleNetworkDevice('wifi', False)
+
+    stdout, stderr = self.RunSuperuserActionOnChromeOS('SetupBackchannel')
+    assert 'RuntimeError' not in stderr, stderr
 
   def GetNetworkInfo(self):
     """Get details about ethernet, wifi, and cellular networks on chromeos.
@@ -5617,7 +6205,9 @@ class _GTestTextTestResult(unittest._TextTestResult):
     if sys.version_info[:2] <= (2, 4):
       return '%s.%s' % (unittest._strclass(test.__class__),
                         test._TestCase__testMethodName)
-    return '%s.%s' % (unittest._strclass(test.__class__), test._testMethodName)
+    return '%s.%s.%s' % (test.__class__.__module__,
+                         test.__class__.__name__,
+                         test._testMethodName)
 
   def getDescription(self, test):
     return '%s: "%s"' % (self._GetTestURI(test), test.shortDescription())
@@ -5688,9 +6278,6 @@ class Main(object):
         default=os.path.join('chrome', 'test', 'data'),
         help='Relative path from which http server should serve files.')
     parser.add_option(
-        '', '--list-missing-tests', action='store_true', default=False,
-        help='Print a list of tests not included in PYAUTO_TESTS, and exit')
-    parser.add_option(
         '-L', '--list-tests', action='store_true', default=False,
         help='List all tests, and exit.')
     parser.add_option(
@@ -5735,10 +6322,6 @@ class Main(object):
 
     logging.basicConfig(level=level, format=format,
                         filename=self._options.log_file)
-
-    if self._options.list_missing_tests:
-      self._ListMissingTests()
-      sys.exit(0)
 
   def TestsDir(self):
     """Returns the path to dir containing tests.
@@ -5806,24 +6389,6 @@ class Main(object):
       logging.warn('No tests in "%s"', name)
       return []
 
-  def _ListMissingTests(self):
-    """Print tests missing from PYAUTO_TESTS."""
-    # Fetch tests from all test scripts
-    all_test_files = filter(lambda x: x.endswith('.py'),
-                            os.listdir(self.TestsDir()))
-    all_tests_modules = [os.path.splitext(x)[0] for x in all_test_files]
-    all_tests = reduce(lambda x, y: x + y,
-                       map(self._ImportTestsFromName, all_tests_modules))
-    # Fetch tests included by PYAUTO_TESTS
-    pyauto_tests_file = os.path.join(self.TestsDir(), self._tests_filename)
-    pyauto_tests = reduce(lambda x, y: x + y,
-                          map(self._ImportTestsFromName,
-                              self._ExpandTestNamesFrom(pyauto_tests_file,
-                                                        self._options.suite)))
-    for a_test in all_tests:
-      if a_test not in pyauto_tests:
-        print a_test
-
   def _HasTestCases(self, module_string):
     """Determines if we have any PyUITest test case classes in the module
        identified by |module_string|."""
@@ -5840,11 +6405,13 @@ class Main(object):
 
     The given args can be either a module (ex: module1) or a testcase
     (ex: module2.MyTestCase) or a test (ex: module1.MyTestCase.testX)
-    If empty, the tests in the already imported modules are loaded.
+    or a suite name (ex: @FULL). If empty, the tests in the already imported
+    modules are loaded.
 
     Args:
       args: [module1, module2, module3.testcase, module4.testcase.testX]
-            These modules or test cases or tests should be importable
+            These modules or test cases or tests should be importable.
+            Suites can be specified by prefixing @. Example: @FULL
 
       Returns:
         a list of expanded test names.  Example:
@@ -5856,18 +6423,34 @@ class Main(object):
             'module4.testcase.testX'
           ]
     """
+
+    def _TestsFromDescriptionFile(suite):
+      pyauto_tests_file = os.path.join(self.TestsDir(), self._tests_filename)
+      if suite:
+        logging.debug("Reading %s (@%s)", pyauto_tests_file, suite)
+      else:
+        logging.debug("Reading %s", pyauto_tests_file)
+      if not os.path.exists(pyauto_tests_file):
+        logging.warn("%s missing. Cannot load tests.", pyauto_tests_file)
+        return []
+      else:
+        return self._ExpandTestNamesFrom(pyauto_tests_file, suite)
+
     if not args:  # Load tests ourselves
       if self._HasTestCases('__main__'):    # we are running a test script
         module_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
         args.append(module_name)   # run the test cases found in it
       else:  # run tests from the test description file
-        pyauto_tests_file = os.path.join(self.TestsDir(), self._tests_filename)
-        logging.debug("Reading %s", pyauto_tests_file)
-        if not os.path.exists(pyauto_tests_file):
-          logging.warn("%s missing. Cannot load tests.", pyauto_tests_file)
+        args = _TestsFromDescriptionFile(self._options.suite)
+    else:  # Check args with @ prefix for suites
+      out_args = []
+      for arg in args:
+        if arg.startswith('@'):
+          suite = arg[1:]
+          out_args += _TestsFromDescriptionFile(suite)
         else:
-          args = self._ExpandTestNamesFrom(pyauto_tests_file,
-                                           self._options.suite)
+          out_args.append(arg)
+      args = out_args
     return args
 
   def _ExpandTestNamesFrom(self, filename, suite):

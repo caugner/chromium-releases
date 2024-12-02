@@ -4,7 +4,6 @@
 
 #ifndef ASH_SYSTEM_AUDIO_TRAY_VOLUME_H_
 #define ASH_SYSTEM_AUDIO_TRAY_VOLUME_H_
-#pragma once
 
 #include "ash/system/audio/audio_observer.h"
 #include "ash/system/tray/tray_image_item.h"
@@ -34,6 +33,7 @@ class TrayVolume : public TrayImageItem,
 
   // Overridden from AudioObserver.
   virtual void OnVolumeChanged(float percent) OVERRIDE;
+  virtual void OnMuteToggled() OVERRIDE;
 
   tray::VolumeView* volume_view_;
 

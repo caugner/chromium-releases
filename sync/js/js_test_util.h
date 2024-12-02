@@ -4,7 +4,6 @@
 
 #ifndef SYNC_JS_JS_TEST_UTIL_H_
 #define SYNC_JS_JS_TEST_UTIL_H_
-#pragma once
 
 #include <ostream>
 #include <string>
@@ -22,7 +21,7 @@ class DictionaryValue;
 class ListValue;
 }
 
-namespace browser_sync {
+namespace syncer {
 
 class JsArgList;
 class JsEventDetails;
@@ -104,6 +103,6 @@ class MockJsReplyHandler
                void(const ::std::string&, const JsArgList&));
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_JS_JS_TEST_UTIL_H_

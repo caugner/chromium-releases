@@ -4,7 +4,6 @@
 
 #ifndef CHROME_RENDERER_EXTENSIONS_USER_SCRIPT_SCHEDULER_H_
 #define CHROME_RENDERER_EXTENSIONS_USER_SCRIPT_SCHEDULER_H_
-#pragma once
 
 #include <map>
 #include <queue>
@@ -20,6 +19,8 @@ struct ExtensionMsg_ExecuteCode_Params;
 namespace WebKit {
 class WebFrame;
 }
+
+namespace extensions {
 
 // Implements support for injecting scripts at different times in the document
 // loading process. The different possible time are described in
@@ -43,7 +44,7 @@ class WebFrame;
 class UserScriptScheduler {
  public:
   UserScriptScheduler(WebKit::WebFrame* frame,
-                          ExtensionDispatcher* extension_dispatcher);
+                      ExtensionDispatcher* extension_dispatcher);
   ~UserScriptScheduler();
 
   void ExecuteCode(const ExtensionMsg_ExecuteCode_Params& params);
@@ -89,5 +90,7 @@ class UserScriptScheduler {
 
   ExtensionDispatcher* extension_dispatcher_;
 };
+
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_USER_SCRIPT_SCHEDULER_H_

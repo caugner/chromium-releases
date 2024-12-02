@@ -11,6 +11,8 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_cycler/page_cycler.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
@@ -33,7 +35,6 @@ namespace {
 const int kFrameID = 1;
 const bool kIsMainFrame = true;
 const GURL kAboutURL = GURL(chrome::kAboutBlankURL);
-const int kSingleIteration = 1;
 }  // namespace
 
 class MockPageCycler : public PageCycler {
@@ -52,9 +53,10 @@ class MockPageCycler : public PageCycler {
     set_errors_file(errors_file);
   }
 
-  MOCK_METHOD3(DidFinishLoad, void(int64 frame_id,
+  MOCK_METHOD4(DidFinishLoad, void(int64 frame_id,
                                    const GURL& validated_url,
-                                   bool is_main_frame));
+                                   bool is_main_frame,
+                                   RenderViewHost* render_view_host));
   MOCK_METHOD6(DidFailProvisionalLoad, void(int64 frame_id,
                                             bool is_main_frame,
                                             const GURL& validated_url,
@@ -78,8 +80,10 @@ class MockPageCycler : public PageCycler {
 
   void PageCyclerDidFinishLoad(int64 frame_id,
                                const GURL& validated_url,
-                               bool is_main_frame) {
-    PageCycler::DidFinishLoad(frame_id, validated_url, is_main_frame);
+                               bool is_main_frame,
+                               RenderViewHost* render_view_host) {
+    PageCycler::DidFinishLoad(
+        frame_id, validated_url, is_main_frame, render_view_host);
   }
 
  private:
@@ -109,7 +113,7 @@ class PageCyclerTest : public BrowserWithTestWindowTest {
 
     BrowserWithTestWindowTest::SetUp();
     AddTab(browser(), kAboutURL);
-    ASSERT_FALSE(browser()->GetActiveWebContents() == NULL);
+    ASSERT_FALSE(chrome::GetActiveWebContents(browser()) == NULL);
   }
 
   void InitFilePaths(const FilePath& temp_path) {
@@ -133,12 +137,12 @@ class PageCyclerTest : public BrowserWithTestWindowTest {
     FOR_EACH_OBSERVER(
         WebContentsObserver,
         observers_,
-        DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame));
+        DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame, NULL));
     PumpLoop();
   }
 
-  void RunPageCycler(int total_iterations) {
-    page_cycler_->Run(total_iterations);
+  void RunPageCycler() {
+    page_cycler_->Run();
     PumpLoop();
   }
 
@@ -204,10 +208,11 @@ TEST_F(PageCyclerTest, FailProvisionalLoads) {
   set_page_cycler(new MockPageCycler(browser(),
                                      urls_file(),
                                      errors_file()));
-  RunPageCycler(kSingleIteration);
+  RunPageCycler();
 
   // Page cycler expects browser to automatically start loading the first page.
-  EXPECT_CALL(*page_cycler(), DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame))
+  EXPECT_CALL(*page_cycler(),
+              DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame, _))
       .WillOnce(Invoke(page_cycler(),
                        &MockPageCycler::PageCyclerDidFinishLoad));
   FinishLoad();
@@ -268,11 +273,11 @@ TEST_F(PageCyclerTest, StatsFile) {
   set_page_cycler(new MockPageCycler(browser(), urls_file(),
                                      errors_file()));
   page_cycler()->set_stats_file(stats_file());
-  RunPageCycler(kSingleIteration);
+  RunPageCycler();
 
   for (int i = 0; i < kNumLoads; ++i) {
     EXPECT_CALL(*page_cycler(), DidFinishLoad(
-        kFrameID, kAboutURL, kIsMainFrame))
+        kFrameID, kAboutURL, kIsMainFrame, _))
         .WillOnce(Invoke(page_cycler(),
                          &MockPageCycler::PageCyclerDidFinishLoad));
     FinishLoad();
@@ -297,9 +302,10 @@ TEST_F(PageCyclerTest, KillBrowserAndAbort) {
   set_page_cycler(new MockPageCycler(browser(),
                                      urls_file(),
                                      errors_file()));
-  RunPageCycler(kSingleIteration);
+  RunPageCycler();
 
-  EXPECT_CALL(*page_cycler(), DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame))
+  EXPECT_CALL(*page_cycler(),
+      DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame, _))
       .WillOnce(Invoke(page_cycler(),
                        &MockPageCycler::PageCyclerDidFinishLoad));
   message_loop()->RunAllPending();
@@ -319,8 +325,7 @@ TEST_F(PageCyclerTest, KillBrowserAndAbort) {
 }
 
 TEST_F(PageCyclerTest, MultipleIterations) {
-  const int kMultipleIterations = 3;
-  const int kNumLoads = 10;
+  const int kNumLoads = 4;
 
   ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
@@ -332,9 +337,10 @@ TEST_F(PageCyclerTest, MultipleIterations) {
                                      urls_file(),
                                      errors_file()));
   page_cycler()->set_stats_file(stats_file());
-  RunPageCycler(kMultipleIterations);
+  RunPageCycler();
 
-  EXPECT_CALL(*page_cycler(), DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame))
+  EXPECT_CALL(*page_cycler(),
+              DidFinishLoad(kFrameID, kAboutURL, kIsMainFrame, _))
       .WillRepeatedly(Invoke(page_cycler(),
                              &MockPageCycler::PageCyclerDidFinishLoad));
 

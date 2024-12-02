@@ -8,6 +8,8 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/wm/property_util.h"
+#include "ash/wm/window_util.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/client/aura_constants.h"
@@ -29,7 +31,7 @@ class BaseLayoutManagerTest : public test::AshTestBase {
 
   virtual void SetUp() OVERRIDE {
     test::AshTestBase::SetUp();
-    Shell::GetInstance()->SetMonitorWorkAreaInsets(
+    Shell::GetInstance()->SetDisplayWorkAreaInsets(
         Shell::GetPrimaryRootWindow(),
         gfx::Insets(1, 2, 3, 4));
     Shell::GetPrimaryRootWindow()->SetHostSize(gfx::Size(800, 600));
@@ -53,9 +55,10 @@ TEST_F(BaseLayoutManagerTest, Maximize) {
   gfx::Rect bounds(100, 100, 200, 200);
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
-  // Maximized window fills the work area, not the whole monitor.
-  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(window.get()).ToString(),
-            window->bounds().ToString());
+  // Maximized window fills the work area, not the whole display.
+  EXPECT_EQ(
+      ScreenAsh::GetMaximizedWindowBoundsInParent(window.get()).ToString(),
+      window->bounds().ToString());
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
   EXPECT_EQ(bounds.ToString(), window->bounds().ToString());
 }
@@ -78,14 +81,16 @@ TEST_F(BaseLayoutManagerTest, MaximizeRootWindowResize) {
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   gfx::Rect initial_work_area_bounds =
-      ScreenAsh::GetMaximizedWindowBounds(window.get());
+      ScreenAsh::GetMaximizedWindowBoundsInParent(window.get());
   EXPECT_EQ(initial_work_area_bounds.ToString(), window->bounds().ToString());
   // Enlarge the root window.  We should still match the work area size.
   Shell::GetPrimaryRootWindow()->SetHostSize(gfx::Size(900, 700));
-  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(window.get()).ToString(),
-            window->bounds().ToString());
-  EXPECT_NE(initial_work_area_bounds.ToString(),
-            ScreenAsh::GetMaximizedWindowBounds(window.get()).ToString());
+  EXPECT_EQ(
+      ScreenAsh::GetMaximizedWindowBoundsInParent(window.get()).ToString(),
+      window->bounds().ToString());
+  EXPECT_NE(
+      initial_work_area_bounds.ToString(),
+      ScreenAsh::GetMaximizedWindowBoundsInParent(window.get()).ToString());
 }
 
 // Tests normal->fullscreen->normal.
@@ -93,7 +98,7 @@ TEST_F(BaseLayoutManagerTest, Fullscreen) {
   gfx::Rect bounds(100, 100, 200, 200);
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_FULLSCREEN);
-  // Fullscreen window fills the whole monitor.
+  // Fullscreen window fills the whole display.
   EXPECT_EQ(
       gfx::Screen::GetDisplayNearestWindow(window.get()).bounds().ToString(),
       window->bounds().ToString());
@@ -105,12 +110,12 @@ TEST_F(BaseLayoutManagerTest, Fullscreen) {
 TEST_F(BaseLayoutManagerTest, FullscreenRootWindowResize) {
   gfx::Rect bounds(100, 100, 200, 200);
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
-  // Fullscreen window fills the whole monitor.
+  // Fullscreen window fills the whole display.
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_FULLSCREEN);
   EXPECT_EQ(
       gfx::Screen::GetDisplayNearestWindow(window.get()).bounds().ToString(),
       window->bounds().ToString());
-  // Enlarge the root window.  We should still match the monitor size.
+  // Enlarge the root window.  We should still match the display size.
   Shell::GetPrimaryRootWindow()->SetHostSize(gfx::Size(800, 600));
   EXPECT_EQ(
       gfx::Screen::GetDisplayNearestWindow(window.get()).bounds().ToString(),
@@ -166,9 +171,54 @@ TEST_F(BaseLayoutManagerTest, BoundsWithScreenEdgeVisible) {
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
   // It should have the default maximized window bounds, inset by the grid size.
   int grid_size = ash::Shell::GetInstance()->GetGridSize();
-  gfx::Rect max_bounds = ash::ScreenAsh::GetMaximizedWindowBounds(window.get());
+  gfx::Rect max_bounds =
+      ash::ScreenAsh::GetMaximizedWindowBoundsInParent(window.get());
   max_bounds.Inset(grid_size, grid_size);
   EXPECT_EQ(max_bounds.ToString(), window->bounds().ToString());
+}
+
+// Verifies maximizing always resets the restore bounds, and similarly restoring
+// resets the restore bounds.
+TEST_F(BaseLayoutManagerTest, MaximizeResetsRestoreBounds) {
+  scoped_ptr<aura::Window> window(CreateTestWindow(gfx::Rect(1, 2, 3, 4)));
+  SetRestoreBoundsInParent(window.get(), gfx::Rect(10, 11, 12, 13));
+
+  // Maximize it, which should reset restore bounds.
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  EXPECT_EQ("1,2 3x4", GetRestoreBoundsInParent(window.get()).ToString());
+
+  // Restore it, which should restore bounds and reset restore bounds.
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+  EXPECT_EQ("1,2 3x4", window->bounds().ToString());
+  EXPECT_TRUE(GetRestoreBoundsInScreen(window.get()) == NULL);
+}
+
+// Verifies that the restore bounds do not get reset when restoring to a
+// maximzied state from a minimized state.
+TEST_F(BaseLayoutManagerTest, BoundsAfterRestoringToMaximizeFromMinimize) {
+  scoped_ptr<aura::Window> window(CreateTestWindow(gfx::Rect(1, 2, 3, 4)));
+  gfx::Rect bounds(10, 15, 25, 35);
+  window->SetBounds(bounds);
+
+  // Maximize it, which should reset restore bounds.
+  wm::MaximizeWindow(window.get());
+  EXPECT_EQ(bounds.ToString(),
+            GetRestoreBoundsInParent(window.get()).ToString());
+
+  // Minimize the window. The restore bounds should not change.
+  wm::MinimizeWindow(window.get());
+  EXPECT_EQ(bounds.ToString(),
+            GetRestoreBoundsInParent(window.get()).ToString());
+
+  // Show the window again. The window should be maximized, and the restore
+  // bounds should not change.
+  window->Show();
+  EXPECT_EQ(bounds.ToString(),
+            GetRestoreBoundsInParent(window.get()).ToString());
+  EXPECT_TRUE(wm::IsWindowMaximized(window.get()));
+
+  wm::RestoreWindow(window.get());
+  EXPECT_EQ(bounds.ToString(), window->bounds().ToString());
 }
 
 }  // namespace

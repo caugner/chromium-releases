@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_LIBGTK2UI_GTK2_UI_H_
 #define CHROME_BROWSER_UI_LIBGTK2UI_GTK2_UI_H_
-#pragma once
 
 #include <map>
 
@@ -38,6 +37,9 @@ class Gtk2UI : public ui::LinuxUI {
   virtual bool UseNativeTheme() const OVERRIDE;
   virtual gfx::Image* GetThemeImageNamed(int id) const OVERRIDE;
   virtual bool GetColor(int id, SkColor* color) const OVERRIDE;
+  virtual ui::SelectFileDialog* CreateSelectFileDialog(
+      ui::SelectFileDialog::Listener* listener,
+      ui::SelectFilePolicy* policy) const OVERRIDE;
 
  private:
   typedef std::map<int, SkColor> ColorMap;

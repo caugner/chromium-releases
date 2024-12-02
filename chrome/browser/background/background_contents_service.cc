@@ -23,6 +23,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -33,6 +34,7 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
+#include "ipc/ipc_message.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::SiteInstance;
@@ -297,8 +299,8 @@ void BackgroundContentsService::Observe(
         extension =
           profile->GetExtensionService()->GetExtensionById(extension_id, false);
       } else {
-        ExtensionHost* extension_host =
-            content::Details<ExtensionHost>(details).ptr();
+        extensions::ExtensionHost* extension_host =
+            content::Details<extensions::ExtensionHost>(details).ptr();
         extension = extension_host->extension();
       }
       if (!extension)
@@ -347,7 +349,8 @@ void BackgroundContentsService::Observe(
 
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED: {
       // Remove any "This extension has crashed" balloons.
-      ScheduleCloseBalloon(*content::Details<const std::string>(details).ptr());
+      ScheduleCloseBalloon(
+          content::Details<const Extension>(details).ptr()->id());
       break;
     }
 
@@ -428,7 +431,7 @@ void BackgroundContentsService::LoadBackgroundContentsFromDictionary(
   ExtensionService* extensions_service = profile->GetExtensionService();
   DCHECK(extensions_service);
 
-  DictionaryValue* dict;
+  const DictionaryValue* dict;
   if (!contents->GetDictionaryWithoutPathExpansion(extension_id, &dict) ||
       dict == NULL)
     return;
@@ -612,7 +615,8 @@ void BackgroundContentsService::AddWebContents(
     bool user_gesture) {
   Browser* browser = browser::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
-  if (!browser)
-    return;
-  browser->AddWebContents(new_contents, disposition, initial_pos, user_gesture);
+  if (browser) {
+    chrome::AddWebContents(browser, NULL, new_contents, disposition,
+                           initial_pos, user_gesture);
+  }
 }

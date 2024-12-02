@@ -147,7 +147,7 @@ void SyncPromoHandler::DisplayConfigureSync(bool show_advanced,
     // everything by default. This makes the first run experience simpler. Note,
     // there's an advanced link in the sync promo that takes users to Settings
     // where the configure pane is not skipped.
-    service->OnUserChoseDatatypes(true, syncable::ModelTypeSet());
+    service->OnUserChoseDatatypes(true, syncer::ModelTypeSet());
     ConfigureSyncDone();
   }
 }
@@ -189,20 +189,30 @@ void SyncPromoHandler::HandleCloseSyncPromo(const base::ListValue* args) {
   if (!username.empty())
     prefs_->SetBoolean(prefs::kSyncPromoShowNTPBubble, true);
 
-  // If the browser window is being closed then don't try to navigate to another
-  // URL. This prevents the browser window from flashing during close.
+  // If the browser window is being closed then don't try to navigate to
+  // another URL. This prevents the browser window from flashing during
+  // close.
   Browser* browser =
       browser::FindBrowserWithWebContents(web_ui()->GetWebContents());
   if (!browser || !browser->IsAttemptingToCloseBrowser()) {
-    GURL url = SyncPromoUI::GetNextPageURLForSyncPromoURL(
-        web_ui()->GetWebContents()->GetURL());
-    OpenURLParams params(
-        url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_LINK, false);
-    web_ui()->GetWebContents()->OpenURL(params);
+    // Close the window if it was opened in auto-close mode.
+    const GURL& sync_url = web_ui()->GetWebContents()->GetURL();
+    if (SyncPromoUI::GetAutoCloseForSyncPromoURL(sync_url)) {
+      web_ui()->GetWebContents()->Close();
+    } else {
+      GURL url = SyncPromoUI::GetNextPageURLForSyncPromoURL(sync_url);
+      OpenURLParams params(
+          url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_LINK, false);
+      web_ui()->GetWebContents()->OpenURL(params);
+    }
   }
 }
 
 void SyncPromoHandler::HandleInitializeSyncPromo(const base::ListValue* args) {
+  // If this is a page reload, then we have to inform the login service
+  // the old UI closed. If this is an initial load, this call will do nothing.
+  GetLoginUIService()->LoginUIClosed(this);
+
   // Open the sync wizard to the login screen.
   OpenSyncSetup(true);
   // We don't need to compute anything for this, just do this every time.

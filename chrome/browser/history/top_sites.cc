@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites_backend.h"
 #include "chrome/browser/history/top_sites_cache.h"
@@ -38,11 +39,14 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/existing_user_controller.h"
+#endif
 
 using base::DictionaryValue;
 using content::BrowserThread;
@@ -69,9 +73,15 @@ static const int64 kMaxUpdateIntervalMinutes = 60;
 static const int kTopSitesImageQuality = 100;
 
 const TopSites::PrepopulatedPage kPrepopulatedPages[] = {
+#if defined(OS_CHROMEOS)
+  { IDS_CHROMEOS_WELCOME_URL, IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE,
+    IDR_PRODUCT_LOGO_16, IDR_NEWTAB_CHROMEOS_WELCOME_PAGE_THUMBNAIL,
+    SkColorSetRGB(0, 147, 60) },
+#else
   { IDS_CHROME_WELCOME_URL, IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE,
     IDR_PRODUCT_LOGO_16, IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL,
     SkColorSetRGB(0, 147, 60) },
+#endif
   { IDS_WEBSTORE_URL, IDS_EXTENSION_WEB_STORE_TITLE,
     IDR_WEBSTORE_ICON_16, IDR_NEWTAB_WEBSTORE_THUMBNAIL,
     SkColorSetRGB(63, 132, 197) }
@@ -138,6 +148,26 @@ class LoadThumbnailsFromHistoryTask : public HistoryDBTask {
   DISALLOW_COPY_AND_ASSIGN(LoadThumbnailsFromHistoryTask);
 };
 
+// Adds overridden URL to the given vector and returns true if the given
+// |url_id| needs to be overridden. Otherwise, does nothing but returns false.
+bool MaybeOverrideUrl(int url_id, std::vector<GURL>* prepopulated_page_urls) {
+#if defined(OS_CHROMEOS)
+  if (url_id == IDS_CHROMEOS_WELCOME_URL) {
+    std::string getting_started_guide_url;
+    if (chromeos::ExistingUserController::current_controller()) {
+      getting_started_guide_url =
+          chromeos::ExistingUserController::current_controller()->
+          GetGettingStartedGuideURL();
+    }
+    if (!getting_started_guide_url.empty()) {
+      prepopulated_page_urls->push_back(GURL(getting_started_guide_url));
+      return true;
+    }
+  }
+#endif
+  return false;
+}
+
 }  // namespace
 
 TopSites::TopSites(Profile* profile)
@@ -160,6 +190,14 @@ TopSites::TopSites(Profile* profile)
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
                    content::NotificationService::AllSources());
   }
+
+  for (size_t i = 0; i < arraysize(kPrepopulatedPages); i++) {
+    int url_id = kPrepopulatedPages[i].url_id;
+    if (!MaybeOverrideUrl(url_id, &prepopulated_page_urls_)) {
+      prepopulated_page_urls_.push_back(
+          GURL(l10n_util::GetStringUTF8(url_id)));
+    }
+  }
 }
 
 void TopSites::Init(const FilePath& db_name) {
@@ -173,7 +211,8 @@ void TopSites::Init(const FilePath& db_name) {
                  base::Unretained(this)));
 
   // History may have already finished loading by the time we're created.
-  HistoryService* history = profile_->GetHistoryServiceWithoutCreating();
+  HistoryService* history =
+      HistoryServiceFactory::GetForProfileWithoutCreating(profile_);
   if (history && history->backend_loaded()) {
     if (history->needs_top_sites_migration())
       MigrateFromHistory();
@@ -254,7 +293,7 @@ bool TopSites::GetPageThumbnail(const GURL& url,
 
   // Resource bundle is thread safe.
   for (size_t i = 0; i < arraysize(kPrepopulatedPages); i++) {
-    if (url.spec() == l10n_util::GetStringUTF8(kPrepopulatedPages[i].url_id)) {
+    if (url == prepopulated_page_urls_[i]) {
       *bytes = ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
           kPrepopulatedPages[i].thumbnail_id,
           ui::SCALE_FACTOR_100P);
@@ -303,11 +342,12 @@ void TopSites::MigrateFromHistory() {
   }
 
   history_state_ = HISTORY_MIGRATING;
-  profile_->GetHistoryService(Profile::EXPLICIT_ACCESS)->ScheduleDBTask(
-      new LoadThumbnailsFromHistoryTask(
-          this,
-          num_results_to_request_from_history()),
-      &history_consumer_);
+  HistoryServiceFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS)->ScheduleDBTask(
+          new LoadThumbnailsFromHistoryTask(
+              this,
+              num_results_to_request_from_history()),
+          &history_consumer_);
 }
 
 void TopSites::FinishHistoryMigration(const ThumbnailMigration& data) {
@@ -481,7 +521,8 @@ CancelableRequestProvider::Handle TopSites::StartQueryForMostVisited() {
   if (!profile_)
     return 0;
 
-  HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS);
   // |hs| may be null during unit tests.
   if (hs) {
     return hs->QueryMostVisitedURLs(
@@ -607,20 +648,18 @@ int TopSites::GetRedirectDistanceForURL(const MostVisitedURL& most_visited,
   return 0;
 }
 
-// static
 MostVisitedURLList TopSites::GetPrepopulatePages() {
   MostVisitedURLList urls;
   urls.resize(arraysize(kPrepopulatedPages));
   for (size_t i = 0; i < urls.size(); ++i) {
     MostVisitedURL& url = urls[i];
-    url.url = GURL(l10n_util::GetStringUTF8(kPrepopulatedPages[i].url_id));
+    url.url = GURL(prepopulated_page_urls_[i]);
     url.redirects.push_back(url.url);
     url.title = l10n_util::GetStringUTF16(kPrepopulatedPages[i].title_id);
   }
   return urls;
 }
 
-// static
 bool TopSites::AddPrepopulatedPages(MostVisitedURLList* urls) {
   bool added = false;
   MostVisitedURLList prepopulate_urls = GetPrepopulatePages();
@@ -848,8 +887,8 @@ void TopSites::OnHistoryMigrationWrittenToDisk(TopSitesBackend::Handle handle) {
   if (!profile_)
     return;
 
-  HistoryService* history =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  HistoryService* history = HistoryServiceFactory::GetForProfile(
+      profile_, Profile::EXPLICIT_ACCESS);
   if (history)
     history->OnTopSitesReady();
 }
@@ -888,7 +927,7 @@ void TopSites::OnGotMostVisitedThumbnails(
       top_sites_state_ = TOP_SITES_LOADED_WAITING_FOR_HISTORY;
       // Ask for history just in case it hasn't been loaded yet. When history
       // finishes loading we'll do migration and/or move to loaded.
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
+      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
     }
   }
 }

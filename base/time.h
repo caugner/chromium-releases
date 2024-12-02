@@ -21,13 +21,18 @@
 
 #ifndef BASE_TIME_H_
 #define BASE_TIME_H_
-#pragma once
 
 #include <time.h>
 
 #include "base/atomicops.h"
 #include "base/base_export.h"
 #include "base/basictypes.h"
+
+#if defined(OS_MACOSX)
+#include <CoreFoundation/CoreFoundation.h>
+// Avoid Mac system header macro leak.
+#undef TYPE_BOOL
+#endif
 
 #if defined(OS_POSIX)
 // For struct timeval.
@@ -59,6 +64,9 @@ class BASE_EXPORT TimeDelta {
   static TimeDelta FromSeconds(int64 secs);
   static TimeDelta FromMilliseconds(int64 ms);
   static TimeDelta FromMicroseconds(int64 us);
+#if defined(OS_WIN)
+  static TimeDelta FromQPCValue(LONGLONG qpc_value);
+#endif
 
   // Converts an integer value representing TimeDelta to a class. This is used
   // when deserializing a |TimeDelta| structure, using a value known to be
@@ -275,6 +283,11 @@ class BASE_EXPORT Time {
 #if defined(OS_POSIX)
   static Time FromTimeVal(struct timeval t);
   struct timeval ToTimeVal() const;
+#endif
+
+#if defined(OS_MACOSX)
+  static Time FromCFAbsoluteTime(CFAbsoluteTime t);
+  CFAbsoluteTime ToCFAbsoluteTime() const;
 #endif
 
 #if defined(OS_WIN)
@@ -499,6 +512,8 @@ class BASE_EXPORT TimeTicks {
 #if defined(OS_WIN)
   // Get the absolute value of QPC time drift. For testing.
   static int64 GetQPCDriftMicroseconds();
+
+  static TimeTicks FromQPCValue(LONGLONG qpc_value);
 
   // Returns true if the high resolution clock is working on this system.
   // This is only for testing.

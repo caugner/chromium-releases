@@ -4,14 +4,12 @@
 
 #ifndef UI_VIEWS_CONTROLS_LABEL_H_
 #define UI_VIEWS_CONTROLS_LABEL_H_
-#pragma once
 
 #include <string>
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/string16.h"
-#include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/font.h"
 #include "ui/views/view.h"
@@ -46,6 +44,12 @@ class VIEWS_EXPORT Label : public View {
     AUTO_DETECT_DIRECTIONALITY
   };
 
+  enum ElideBehavior {
+    NO_ELIDE,
+    ELIDE_IN_MIDDLE,
+    ELIDE_AT_END,
+  };
+
   // The view class name.
   static const char kViewClassName[];
 
@@ -65,9 +69,6 @@ class VIEWS_EXPORT Label : public View {
 
   // Sets the label text to |email|.  Emails have a custom eliding algorithm.
   void SetEmail(const string16& email);
-
-  // Sets URL Value - text_ is set to spec().
-  void SetURL(const GURL& url);
 
   // Returns the font used by this label.
   gfx::Font font() const { return font_; }
@@ -135,10 +136,10 @@ class VIEWS_EXPORT Label : public View {
   // Default is false. This only works when is_multi_line is true.
   void SetAllowCharacterBreak(bool allow_character_break);
 
-  // Sets whether the label text should be elided in the middle (if necessary).
-  // The default is to elide at the end.
-  // NOTE: This is not supported for multi-line strings.
-  void SetElideInMiddle(bool elide_in_middle);
+  // Sets whether the label text should be elided in the middle or end (if
+  // necessary). The default is to not elide at all.
+  // NOTE: Eliding in the middle is not supported for multi-line strings.
+  void SetElideBehavior(ElideBehavior elide_behavior);
 
   // Sets the tooltip text.  Default behavior for a label (single-line) is to
   // show the full text if it is wider than its bounds.  Calling this overrides
@@ -259,7 +260,6 @@ class VIEWS_EXPORT Label : public View {
                                  int* flags) const;
 
   string16 text_;
-  GURL url_;
   gfx::Font font_;
   SkColor requested_enabled_color_;
   SkColor actual_enabled_color_;
@@ -271,7 +271,7 @@ class VIEWS_EXPORT Label : public View {
   mutable bool text_size_valid_;
   bool is_multi_line_;
   bool allow_character_break_;
-  bool elide_in_middle_;
+  ElideBehavior elide_behavior_;
   bool is_email_;
   Alignment horiz_alignment_;
   string16 tooltip_text_;

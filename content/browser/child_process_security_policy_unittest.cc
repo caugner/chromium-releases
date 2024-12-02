@@ -173,14 +173,8 @@ TEST_F(ChildProcessSecurityPolicyTest, AboutTest) {
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("about:crash")));
 
   // These requests for chrome:// pages should be granted.
-  p->GrantRequestURL(kRendererID, GURL(chrome::kTestNewTabURL));
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL(chrome::kTestNewTabURL)));
-
-  p->GrantRequestURL(kRendererID, GURL(chrome::kTestHistoryURL));
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL(chrome::kTestHistoryURL)));
-
-  p->GrantRequestURL(kRendererID, GURL(chrome::kTestBookmarksURL));
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL(chrome::kTestBookmarksURL)));
+  p->GrantRequestURL(kRendererID, GURL(content::kTestNewTabURL));
+  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL(content::kTestNewTabURL)));
 
   p->Remove(kRendererID);
 }

@@ -36,14 +36,13 @@ class ClientSessionTest : public testing::Test {
 
     protocol::MockSession* session = new MockSession();
     EXPECT_CALL(*session, jid()).WillRepeatedly(ReturnRef(client_jid_));
-    EXPECT_CALL(*session, SetStateChangeCallback(_));
-    EXPECT_CALL(*session, SetRouteChangeCallback(_));
+    EXPECT_CALL(*session, SetEventHandler(_));
     EXPECT_CALL(*session, Close());
     scoped_ptr<protocol::ConnectionToClient> connection(
         new protocol::ConnectionToClient(session));
     client_session_.reset(new ClientSession(
         &session_event_handler_, connection.Pass(),
-        &host_event_stub_, &capturer_));
+        &host_event_stub_, &capturer_, base::TimeDelta()));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -66,7 +65,7 @@ class ClientSessionTest : public testing::Test {
   std::string client_jid_;
   MockHostStub host_stub_;
   MockHostEventStub host_event_stub_;
-  MockCapturer capturer_;
+  MockVideoFrameCapturer capturer_;
   MockClientSessionEventHandler session_event_handler_;
   scoped_ptr<ClientSession> client_session_;
 };

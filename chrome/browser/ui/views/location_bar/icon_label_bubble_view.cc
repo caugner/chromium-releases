@@ -6,7 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/image_view.h"
@@ -62,6 +62,10 @@ void IconLabelBubbleView::SetImage(const gfx::ImageSkia& image_skia) {
   image_->SetImage(image_skia);
 }
 
+void IconLabelBubbleView::SetLabelBackgroundColor(SkColor color) {
+  label_->SetBackgroundColor(color);
+}
+
 void IconLabelBubbleView::OnPaint(gfx::Canvas* canvas) {
   background_painter_.Paint(canvas, size());
 }
@@ -82,7 +86,8 @@ void IconLabelBubbleView::Layout() {
 }
 
 void IconLabelBubbleView::SetElideInMiddle(bool elide_in_middle) {
-  label_->SetElideInMiddle(elide_in_middle);
+  label_->SetElideBehavior(
+      elide_in_middle ? views::Label::ELIDE_IN_MIDDLE : views::Label::NO_ELIDE);
 }
 
 gfx::Size IconLabelBubbleView::GetNonLabelSize() const {

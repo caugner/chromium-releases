@@ -23,12 +23,8 @@ class ZygoteForkDelegate;
 // runs it.
 class Zygote {
  public:
-  // The proc_fd_for_seccomp should be a file descriptor to /proc under the
-  // seccomp sandbox. This is not needed when not using seccomp, and should be
-  // -1 in those cases.
   Zygote(int sandbox_flags,
-         ZygoteForkDelegate* helper,
-         int proc_fd_for_seccomp);
+         ZygoteForkDelegate* helper);
   ~Zygote();
 
   bool ProcessRequests();
@@ -96,9 +92,6 @@ class Zygote {
 
   const int sandbox_flags_;
   ZygoteForkDelegate* helper_;
-
-  // File descriptor to proc under seccomp, -1 when not using seccomp.
-  int proc_fd_for_seccomp_;
 
   // These might be set by helper_->InitialUMA. They supply a UMA enumeration
   // sample we should report on the first fork.

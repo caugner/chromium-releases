@@ -428,7 +428,7 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
     return false;
   }
 
-  std::wstring writable_command_line_string(cl.GetCommandLineString());
+  FilePath::StringType writable_command_line_string(cl.GetCommandLineString());
 
   base::win::ScopedProcessInformation proc_info;
   STARTUPINFO start_info = { 0 };
@@ -539,14 +539,15 @@ TerminationStatus GetTerminationStatus(ProcessHandle handle, int* exit_code) {
 }
 
 bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
-  bool success = WaitForExitCodeWithTimeout(handle, exit_code, INFINITE);
+  bool success = WaitForExitCodeWithTimeout(
+      handle, exit_code, base::TimeDelta::FromMilliseconds(INFINITE));
   CloseProcessHandle(handle);
   return success;
 }
 
 bool WaitForExitCodeWithTimeout(ProcessHandle handle, int* exit_code,
-                                int64 timeout_milliseconds) {
-  if (::WaitForSingleObject(handle, timeout_milliseconds) != WAIT_OBJECT_0)
+                                base::TimeDelta timeout) {
+  if (::WaitForSingleObject(handle, timeout.InMilliseconds()) != WAIT_OBJECT_0)
     return false;
   DWORD temp_code;  // Don't clobber out-parameters in case of failure.
   if (!::GetExitCodeProcess(handle, &temp_code))
@@ -588,8 +589,8 @@ bool NamedProcessIterator::IncludeEntry() {
          ProcessIterator::IncludeEntry();
 }
 
-bool WaitForProcessesToExit(const std::wstring& executable_name,
-                            int64 wait_milliseconds,
+bool WaitForProcessesToExit(const FilePath::StringType& executable_name,
+                            base::TimeDelta wait,
                             const ProcessFilter* filter) {
   const ProcessEntry* entry;
   bool result = true;
@@ -597,8 +598,8 @@ bool WaitForProcessesToExit(const std::wstring& executable_name,
 
   NamedProcessIterator iter(executable_name, filter);
   while ((entry = iter.NextProcessEntry())) {
-    DWORD remaining_wait =
-        std::max<int64>(0, wait_milliseconds - (GetTickCount() - start_time));
+    DWORD remaining_wait = std::max<int64>(
+        0, wait.InMilliseconds() - (GetTickCount() - start_time));
     HANDLE process = OpenProcess(SYNCHRONIZE,
                                  FALSE,
                                  entry->th32ProcessID);
@@ -610,20 +611,18 @@ bool WaitForProcessesToExit(const std::wstring& executable_name,
   return result;
 }
 
-bool WaitForSingleProcess(ProcessHandle handle, int64 wait_milliseconds) {
+bool WaitForSingleProcess(ProcessHandle handle, base::TimeDelta wait) {
   int exit_code;
-  if (!WaitForExitCodeWithTimeout(handle, &exit_code, wait_milliseconds))
+  if (!WaitForExitCodeWithTimeout(handle, &exit_code, wait))
     return false;
   return exit_code == 0;
 }
 
-bool CleanupProcesses(const std::wstring& executable_name,
-                      int64 wait_milliseconds,
+bool CleanupProcesses(const FilePath::StringType& executable_name,
+                      base::TimeDelta wait,
                       int exit_code,
                       const ProcessFilter* filter) {
-  bool exited_cleanly = WaitForProcessesToExit(executable_name,
-                                               wait_milliseconds,
-                                               filter);
+  bool exited_cleanly = WaitForProcessesToExit(executable_name, wait, filter);
   if (!exited_cleanly)
     KillProcesses(executable_name, exit_code, filter);
   return exited_cleanly;

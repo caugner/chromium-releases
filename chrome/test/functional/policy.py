@@ -176,7 +176,9 @@ class PolicyTest(policy_base.PolicyTestBase):
     self.assertTrue(self.GetBookmarkBarVisibility())
     self.assertFalse(self.IsBookmarkBarDetached())
     # The accelerator should be disabled by the policy.
-    self.ApplyAccelerator(pyauto.IDC_SHOW_BOOKMARK_BAR)
+    self.assertRaises(
+        pyauto_errors.JSONInterfaceError,
+        lambda: self.ApplyAccelerator(pyauto.IDC_SHOW_BOOKMARK_BAR))
     self.assertTrue(self.WaitForBookmarkBarVisibilityChange(True))
     self.assertTrue(self.GetBookmarkBarVisibility())
     self.assertFalse(self.IsBookmarkBarDetached())
@@ -186,7 +188,9 @@ class PolicyTest(policy_base.PolicyTestBase):
 
     self.assertTrue(self.WaitForBookmarkBarVisibilityChange(False))
     self.assertFalse(self.GetBookmarkBarVisibility())
-    self.ApplyAccelerator(pyauto.IDC_SHOW_BOOKMARK_BAR)
+    self.assertRaises(
+        pyauto_errors.JSONInterfaceError,
+        lambda: self.ApplyAccelerator(pyauto.IDC_SHOW_BOOKMARK_BAR))
     self.assertTrue(self.WaitForBookmarkBarVisibilityChange(False))
     self.assertFalse(self.GetBookmarkBarVisibility())
     # When disabled by policy, it should never be displayed at all,
@@ -341,7 +345,8 @@ class PolicyTest(policy_base.PolicyTestBase):
     policy = {'DeveloperToolsDisabled': True}
     self.SetUserPolicy(policy)
     self.SetPrefs(pyauto.kDevToolsOpenDocked, False)
-    self.ApplyAccelerator(pyauto.IDC_DEV_TOOLS)
+    self.assertRaises(pyauto_errors.JSONInterfaceError,
+                      lambda: self.ApplyAccelerator(pyauto.IDC_DEV_TOOLS))
     self.assertEquals(1, len(self.GetBrowserInfo()['windows']),
                       msg='Devtools window launched.')
     policy = {'DeveloperToolsDisabled': False}
@@ -451,7 +456,9 @@ class PolicyTest(policy_base.PolicyTestBase):
     """Verify that incognito window can be launched."""
     policy = {'IncognitoEnabled': False}
     self.SetUserPolicy(policy)
-    self.RunCommand(pyauto.IDC_NEW_INCOGNITO_WINDOW)
+    self.assertRaises(
+        pyauto_errors.JSONInterfaceError,
+        lambda: self.ApplyAccelerator(pyauto.IDC_NEW_INCOGNITO_WINDOW))
     self.assertEquals(1, self.GetBrowserWindowCount())
     policy = {'IncognitoEnabled': True}
     self.SetUserPolicy(policy)
@@ -661,6 +668,32 @@ class PolicyTest(policy_base.PolicyTestBase):
       self._CheckForExtensionByID(self._SCREEN_CAPTURE_CRX_ID),
       expect_retval=True),
       msg='The force install extension was never installed.')
+
+  def testClearSiteDataOnExit(self):
+    """Verify the ClearSiteDataOnExit policy is taking effect.
+
+    Install a cookie and make sure the cookie gets removed on browser restart
+    when the policy is set.
+    """
+    cookie_url = 'http://example.com'
+    cookie_val = 'ponies=unicorns'
+    self.SetCookie(pyauto.GURL(cookie_url),
+                   cookie_val + ';expires=Wed Jan 01 3000 00:00:00 GMT')
+
+    # Cookie should be kept over restarts.
+    self.RestartBrowser(clear_profile=False)
+    self.assertEqual(
+        cookie_val, self.GetCookie(pyauto.GURL(cookie_url)),
+        msg='Cookie on ' + cookie_url + ' does not match ' + cookie_val + '.');
+
+    # With the policy set, the cookie should be gone after a restart.
+    self.SetUserPolicy({
+      'ClearSiteDataOnExit': True
+    })
+    self.RestartBrowser(clear_profile=False)
+    self.assertFalse(
+        self.GetCookie(pyauto.GURL(cookie_url)),
+        msg='Cookie present on ' + cookie_url + '.');
 
 
 if __name__ == '__main__':

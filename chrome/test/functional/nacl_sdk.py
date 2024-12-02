@@ -57,17 +57,16 @@ class NaClSDKTest(pyauto.PyUITest):
     self._VerifyNaClSDKInstaller()
     self._VerifyInstall()
     self._VerifyUpdate()
-    self._LaunchServerAndVerifyExamples()
+    self._LaunchServerAndVerifyExamplesAllPepperVersions()
 
   def NaClSDKExamples(self):
     """Verify if NaCl SDK examples are working."""
     self._isExamplesTest = True
-    self._extracted_sdk_path = os.environ.get('OUT_DIR',
-        self._extracted_sdk_path)
-    pepper_ver = os.environ.get('pepper_ver', None)
-    if self._extracted_sdk_path and pepper_ver:
-      self._latest_updated_pepper_versions.append("pepper_" + pepper_ver)
-      self._LaunchServerAndVerifyExamples()
+    nacl_sdk_root = os.environ.get('NACL_SDK_ROOT', None)
+    pepper_version = os.environ.get('PEPPER_VER', None)
+    if nacl_sdk_root and pepper_version:
+      self._LaunchServerAndVerifyExamples('pepper_' + pepper_version,
+          nacl_sdk_root)
     else:
       self.fail(msg='Missing pepper version to be checked or SDK path.')
 
@@ -151,50 +150,61 @@ class NaClSDKTest(pyauto.PyUITest):
     self._latest_updated_pepper_versions = filter(
         lambda x: x >= 'pepper_18', self._updated_pepper_versions)
 
-  def _LaunchServerAndVerifyExamples(self):
-    """Start local HTTP server and verify examples."""
+  def _GetURLForExampleName(self, name, toolchain):
+    return 'http://localhost:5103/%s/index_%s.html' % (name, toolchain)
+
+  def _GetExampleNamesAndURLs(self, examples_path):
+    """Get a list of all examples as (name, url) tuples.
+
+    Args:
+      examples_path: The path to the examples directory in the NaCl SDK.
+    """
+    toolchains = ['newlib', 'glibc', 'pnacl']
+
+    examples = []
+    for toolchain in toolchains:
+      for example in os.listdir(examples_path):
+        html_path = os.path.join(examples_path, example,
+            'index_%s.html' % (toolchain,))
+        if os.path.exists(html_path):
+          example_url = self._GetURLForExampleName(example, toolchain)
+          examples.append((example, example_url))
+    return examples
+
+  def _LaunchServerAndVerifyExamplesAllPepperVersions(self):
     for pepper_version in self._latest_updated_pepper_versions:
-      if self._ChromeAndPepperVersion(pepper_version):
-        examples_path = os.path.join(self._extracted_sdk_path, 'nacl_sdk',
-                                     pepper_version, 'examples')
-        # Close server if it's already open.
-        if self._IsURLAlive('http://localhost:5103'):
-          self._CloseHTTPServer()
-        # Launch local http server.
-        proc = subprocess.Popen(['make RUN'], shell=True, cwd=examples_path)
-        self.WaitUntil(
-            lambda: self._IsURLAlive('http://localhost:5103'),
-            timeout=150, retry_sleep=1)
+      pepper_path = os.path.join(self._extracted_sdk_path,
+          'nacl_sdk', 'pepper_' + str(pepper_version))
+      self._LaunchServerAndVerifyExamples(pepper_version, pepper_path)
 
-        examples = {
-            'dynamic_library_open': 'http://localhost:5103/dlopen/dlopen.html',
-            'file_io': 'http://localhost:5103/file_io/file_io.html',
-            'geturl': 'http://localhost:5103/geturl/geturl.html',
-            'input_events': 'http://localhost:5103/input_events'
-                '/input_events.html',
-            'load_progress':
-                'http://localhost:5103/load_progress/load_progress.html',
-            'multithreaded_input_events':
-            'http://localhost:5103/multithreaded_input_events'
-                '/mt_input_events.html',
-            'pi_generator':
-                'http://localhost:5103/pi_generator/pi_generator.html',
-            'sine_synth': 'http://localhost:5103/sine_synth/sine_synth.html',
-            'web_socket':
-                'http://localhost:5103/websocket/websocket.html',
-        }
-        try:
-          self._OpenExamplesAndStartTest(examples)
-        finally:
-          self._CloseHTTPServer(proc)
+  def _LaunchServerAndVerifyExamples(self, pepper_version, pepper_path):
+    """Start local HTTP server and verify examples."""
+    if self._ChromeAndPepperVersionMatch(pepper_version):
+      # Close server if it's already open.
+      if self._IsURLAlive('http://localhost:5103'):
+        self._CloseHTTPServer()
 
-      else:
-        self.pprint('Pepper Version %s does not match the Chrome version %s.'
-            % (pepper_version,
-            self.GetBrowserInfo()['properties']['ChromeVersion']))
+      examples_path = os.path.join(pepper_path, 'examples')
 
-  def _ChromeAndPepperVersion(self, pepper_version='pepper_18'):
-    """Determine if chrome and pepper version matach"""
+      # Launch local http server.
+      proc = subprocess.Popen(['make RUN'], shell=True, cwd=examples_path)
+      self.WaitUntil(
+          lambda: self._IsURLAlive('http://localhost:5103'),
+          timeout=150, retry_sleep=1)
+
+      examples = self._GetExampleNamesAndURLs(examples_path)
+      try:
+        self._OpenExamplesAndStartTest(examples)
+      finally:
+        self._CloseHTTPServer(proc)
+
+    else:
+      self.pprint('Pepper Version %s does not match the Chrome version %s.'
+          % (pepper_version,
+          self.GetBrowserInfo()['properties']['ChromeVersion']))
+
+  def _ChromeAndPepperVersionMatch(self, pepper_version='pepper_18'):
+    """Determine if chrome and pepper version match"""
     version_number = re.findall('pepper_([0-9]{2})', pepper_version)
     browser_info = self.GetBrowserInfo()
     chrome_version = browser_info['properties']['ChromeVersion']
@@ -222,54 +232,50 @@ class NaClSDKTest(pyauto.PyUITest):
     """Open each example and verify that it's working.
 
     Args:
-      examples: A dict of name to url of examples.
+      examples: A list of example (name, url) tuples.
     """
+    example_verify_funcs = {
+        'dlopen': self._VerifyDynamicLibraryOpen,
+        'file_io': self._VerifyFileIoExample,
+        'geturl': self._VerifyGetURLExample,
+        'input_events': self._VerifyInputEventsExample,
+        'load_progress': self._VerifyLoadProgressExample,
+        'mt_input_events': self._VerifyMultithreadedInputEventsExample,
+        'pi_generator': self._VerifyPiGeneratorExample,
+        'sine_synth': self._VerifySineSynthExample,
+        'websocket': self._VerifyWebSocketExample,
+    }
+
+    # Remove examples that we don't yet verify
+    examples = [(name, url) for name, url in examples
+        if name in example_verify_funcs]
+
     # Open all examples.
-    for name, url in examples.items():
+    for name, url in examples:
       self.AppendTab(pyauto.GURL(url))
       self._CheckForCrashes()
 
     # Verify all examples are working.
-    for name, url in examples.items():
-      self._VerifyAnExample(name, url)
+    for name, url in examples:
+      self._VerifyAnExample(name, url, example_verify_funcs[name])
     self._CheckForCrashes()
 
-    # Close each tab, check for crashes and verify all open
-    # examples operate correctly.
+    # Close each tab and check for crashes.
     tab_count = self.GetTabCount()
     for index in xrange(tab_count - 1, 0, -1):
       self.GetBrowserWindow(0).GetTab(index).Close(True)
       self._CheckForCrashes()
 
-      tabs = self.GetBrowserInfo()['windows'][0]['tabs']
-      for tab in tabs:
-        if tab['index'] > 0:
-          for name, url in examples.items():
-            if url == tab['url']:
-              self._VerifyAnExample(name, url)
-              break
-
-  def _VerifyAnExample(self, name, url):
+  def _VerifyAnExample(self, name, url, verify_func):
     """Verify NaCl example is working.
 
     Args:
       name: A string name of the example.
       url: A string url of the example.
+      verify_func: The function to verify the example.
+          Takes (tab_index, name, url) as parameters.
     """
-    available_example_tests = {
-        'dynamic_library_open': self._VerifyDynamicLibraryOpen,
-        'file_io': self._VerifyFileIoExample,
-        'geturl': self._VerifyGetURLExample,
-        'input_events': self._VerifyInputEventsExample,
-        'load_progress': self._VerifyLoadProgressExample,
-        'multithreaded_input_events':
-            self._VerifyMultithreadedInputEventsExample,
-        'pi_generator': self._VerifyPiGeneratorExample,
-        'sine_synth': self._VerifySineSynthExample,
-        'web_socket': self._VerifyWebSocketExample,
-    }
-
-    if not name in available_example_tests:
+    if not verify_func:
       self.fail(msg='No test available for %s.' % name)
 
     info = self.GetBrowserInfo()
@@ -282,7 +288,7 @@ class NaClSDKTest(pyauto.PyUITest):
         break
 
     if tab_index:
-      available_example_tests[name](tab_index, name, url)
+      verify_func(tab_index, name, url)
 
   def _VerifyElementPresent(self, element_id, expected_value, tab_index, msg,
                             attribute='innerHTML', timeout=150):
@@ -318,9 +324,9 @@ class NaClSDKTest(pyauto.PyUITest):
           'mousedown', true, true, document,
           1, 32, 121, 10, 100,
           false, false, false, false,
-          2, document.getElementById('event_module')
+          2, common.naclModule
         );
-        document.getElementById('event_module').dispatchEvent(rightClick);
+        common.naclModule.dispatchEvent(rightClick);
         window.domAutomationController.send('done');
     """
     return js_code
@@ -408,7 +414,7 @@ class NaClSDKTest(pyauto.PyUITest):
       self.assertTrue(
           self.WaitUntil(
             lambda: self.GetDOMValue(
-              'document.getElementById("status_field").innerHTML', tab_index)\
+              'document.getElementById("statusField").innerHTML', tab_index)\
                   .find(substring_expected) != -1, expect_retval=True),
           msg='Example %s failed. URL: %s. Reason: %s' % (name, url, fail_msg))
 
@@ -488,7 +494,7 @@ class NaClSDKTest(pyauto.PyUITest):
 
     # Check if connected
     success = self._VerifyElementPresent('log', 'connected', tab_index,
-        msg='Example %s failed. URL: %s' % (name, url), attribute='value')
+        msg='Example %s failed. URL: %s' % (name, url))
 
     # Simulate clicking on Send button to send text message in log.
     js_code = """
@@ -498,7 +504,7 @@ class NaClSDKTest(pyauto.PyUITest):
     self.ExecuteJavascript(js_code, tab_index)
     success = self.WaitUntil(
         lambda: bool(re.search('send:', self.GetDOMValue(
-            'document.getElementById("log").value', tab_index))))
+            'document.getElementById("log").textContent', tab_index))))
     self.assertTrue(success, msg='Example %s failed. URL: %s' % (name, url))
 
   def _VerifyDynamicLibraryOpen(self, tab_index, name, url):
@@ -510,7 +516,7 @@ class NaClSDKTest(pyauto.PyUITest):
       url: A string url of the example.
     """
     # Check if example is loaded.
-    success = self._VerifyElementPresent('consolec', 'Eightball loaded',
+    success = self._VerifyElementPresent('log', 'Eightball loaded!',
         tab_index, msg='Example %s failed. URL: %s' % (name, url))
 
     # Simulate clicking on ASK button and check answer log for desired answer.
@@ -522,7 +528,7 @@ class NaClSDKTest(pyauto.PyUITest):
     def _CheckAnswerLog():
       return bool(re.search(r'NO|YES|42|MAYBE NOT|DEFINITELY|'
         'ASK ME TOMORROW|MAYBE|PARTLY CLOUDY',
-        self.GetDOMValue('document.getElementById("answerlog").innerHTML',
+        self.GetDOMValue('document.getElementById("log").innerHTML',
         tab_index)))
 
     success = self.WaitUntil(_CheckAnswerLog)
@@ -539,7 +545,7 @@ class NaClSDKTest(pyauto.PyUITest):
     # Check if example loads and displays loading progress.
     success = self.WaitUntil(
         lambda: self.GetDOMValue(
-        'document.getElementById("status_field").innerHTML', tab_index),
+        'document.getElementById("statusField").innerHTML', tab_index),
         timeout=150, expect_retval='SUCCESS')
     self.assertTrue(success, msg='Example %s failed. URL: %s' % (name, url))
 
@@ -547,7 +553,7 @@ class NaClSDKTest(pyauto.PyUITest):
       return re.search(
           r'(loadstart).+(progress:).+(load).+(loadend).+(lastError:)',
           self.GetDOMValue(
-          'document.getElementById("event_log_field").innerHTML', tab_index))
+          'document.getElementById("log").innerHTML', tab_index))
     success = self.WaitUntil(_CheckLoadProgressStatus)
     self.assertTrue(success, msg='Example %s failed. URL: %s' % (name, url))
 
@@ -560,7 +566,8 @@ class NaClSDKTest(pyauto.PyUITest):
       url: A string url of the example.
     """
     success = self.WaitUntil(
-        lambda: self.GetDOMValue('document.form.pi.value', tab_index)[0:3],
+        lambda: self.GetDOMValue('document.getElementById("pi").value',
+            tab_index)[0:3],
         expect_retval='3.1')
     self.assertTrue(success, msg='Example %s failed. URL: %s' % (name, url))
 
@@ -592,11 +599,11 @@ class NaClSDKTest(pyauto.PyUITest):
     """
     success = self.WaitUntil(
         lambda: self.GetDOMValue(
-                    'document.getElementById("status_field").innerHTML',
+                    'document.getElementById("statusField").innerHTML',
                     tab_index), timeout=150, expect_retval='SUCCESS')
     self.assertTrue(success, msg='Example %s failed. URL: %s' % (name, url))
     self.ExecuteJavascript(
-        'document.geturl_form.elements[0].click();'
+        'document.getElementById("button").click();'
         'window.domAutomationController.send("done")',
         tab_index)
     success = self._VerifyElementPresent('general_output', 'test passed',

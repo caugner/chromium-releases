@@ -5,13 +5,16 @@
 #include "content/renderer/browser_plugin/old/browser_plugin_channel_manager.h"
 
 #include "base/process_util.h"
-#include "content/common/browser_plugin_messages.h"
+#include "content/common/old_browser_plugin_messages.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/browser_plugin/old/browser_plugin.h"
 #include "content/renderer/browser_plugin/old/guest_to_embedder_channel.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "ppapi/c/pp_instance.h"
+#include "webkit/glue/webpreferences.h"
+
+using webkit_glue::WebPreferences;
 
 namespace content {
 
@@ -46,12 +49,19 @@ void BrowserPluginChannelManager::CreateRenderView(
     DCHECK(success);
     embedder_channels_[params.embedder_channel_name] = channel;
   }
+
+  // Force compositing on browser tag guests since software rendering path is
+  // not implemented (yet). Short term solution so force compositing is not
+  // required to be set globally.
+  WebPreferences modified_web_preferences = params.web_preferences;
+  modified_web_preferences.force_compositing_mode = true;
+
   RenderViewImpl* render_view =
     RenderViewImpl::Create(
         params.parent_window,
         params.opener_route_id,
         params.renderer_preferences,
-        params.web_preferences,
+        modified_web_preferences,
         new SharedRenderViewCounter(0),
         params.view_id,
         params.surface_id,
@@ -80,7 +90,7 @@ void BrowserPluginChannelManager::ReportChannelToEmbedder(
          pending_guests_.end());
   pending_guests_[pending_guests_key] = render_view->AsWeakPtr();
   RenderThreadImpl::current()->Send(
-      new BrowserPluginHostMsg_ConnectToChannel(render_view->GetRoutingID(),
+      new OldBrowserPluginHostMsg_ConnectToChannel(render_view->GetRoutingID(),
           embedder_channel_handle));
 }
 
@@ -88,8 +98,8 @@ bool BrowserPluginChannelManager::OnControlMessageReceived(
     const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(BrowserPluginChannelManager, message)
-    IPC_MESSAGE_HANDLER(BrowserPluginMsg_LoadGuest, OnLoadGuest)
-    IPC_MESSAGE_HANDLER(BrowserPluginMsg_AdvanceFocus, OnAdvanceFocus)
+    IPC_MESSAGE_HANDLER(OldBrowserPluginMsg_LoadGuest, OnLoadGuest)
+    IPC_MESSAGE_HANDLER(OldBrowserPluginMsg_AdvanceFocus, OnAdvanceFocus)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 

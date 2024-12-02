@@ -10,7 +10,10 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_prefs.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 
@@ -19,12 +22,9 @@
 #include "chrome/common/chrome_switches.h"
 #endif
 
-// A pointer to the request context for the default profile.  See comments on
-// Profile::GetDefaultRequestContext.
-net::URLRequestContextGetter* Profile::default_request_context_;
-
 Profile::Profile()
     : restored_last_session_(false),
+      sent_destroyed_notification_(false),
       accessibility_pause_level_(0) {
 }
 
@@ -58,6 +58,9 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
                              true,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSafeBrowsingReportingEnabled,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kSafeBrowsingProceedAnywayDisabled,
                              false,
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kDisableExtensions,
@@ -94,10 +97,6 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
 #endif
 }
 
-// static
-net::URLRequestContextGetter* Profile::GetDefaultRequestContext() {
-  return default_request_context_;
-}
 
 std::string Profile::GetDebugName() {
   std::string name = GetPath().BaseName().MaybeAsASCII();
@@ -121,4 +120,14 @@ bool Profile::IsGuestSession() {
 bool Profile::IsSyncAccessible() {
   browser_sync::SyncPrefs prefs(GetPrefs());
   return ProfileSyncService::IsSyncEnabled() && !prefs.IsManaged();
+}
+
+void Profile::MaybeSendDestroyedNotification() {
+  if (!sent_destroyed_notification_) {
+    sent_destroyed_notification_ = true;
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_PROFILE_DESTROYED,
+        content::Source<Profile>(this),
+        content::NotificationService::NoDetails());
+  }
 }

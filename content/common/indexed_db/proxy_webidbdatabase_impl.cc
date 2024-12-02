@@ -10,6 +10,7 @@
 #include "content/common/indexed_db/proxy_webidbobjectstore_impl.h"
 #include "content/common/indexed_db/proxy_webidbtransaction_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBMetadata.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/glue/worker_task_runner.h"
@@ -19,6 +20,7 @@ using WebKit::WebExceptionCode;
 using WebKit::WebFrame;
 using WebKit::WebIDBCallbacks;
 using WebKit::WebIDBDatabaseCallbacks;
+using WebKit::WebIDBMetadata;
 using WebKit::WebIDBKeyPath;
 using WebKit::WebIDBTransaction;
 using WebKit::WebString;
@@ -36,32 +38,49 @@ RendererWebIDBDatabaseImpl::~RendererWebIDBDatabaseImpl() {
   // any such pointers.
   IndexedDBDispatcher::Send(new IndexedDBHostMsg_DatabaseDestroyed(
       idb_database_id_));
+  IndexedDBDispatcher* dispatcher =
+      IndexedDBDispatcher::ThreadSpecificInstance();
+  dispatcher->DatabaseDestroyed(idb_database_id_);
 }
 
-WebString RendererWebIDBDatabaseImpl::name() const {
-  string16 result;
+WebIDBMetadata RendererWebIDBDatabaseImpl::metadata() const {
+  IndexedDBDatabaseMetadata idb_metadata;
   IndexedDBDispatcher::Send(
-      new IndexedDBHostMsg_DatabaseName(idb_database_id_, &result));
-  return result;
-}
+      new IndexedDBHostMsg_DatabaseMetadata(idb_database_id_, &idb_metadata));
 
-WebString RendererWebIDBDatabaseImpl::version() const {
-  string16 result;
-  IndexedDBDispatcher::Send(
-      new IndexedDBHostMsg_DatabaseVersion(idb_database_id_, &result));
-  return result;
-}
+  WebIDBMetadata web_metadata;
+  web_metadata.name = idb_metadata.name;
+  web_metadata.version = idb_metadata.version;
+  web_metadata.intVersion = idb_metadata.intVersion;
+  web_metadata.objectStores = WebVector<WebIDBMetadata::ObjectStore>(
+      idb_metadata.object_stores.size());
 
-WebDOMStringList RendererWebIDBDatabaseImpl::objectStoreNames() const {
-  std::vector<string16> result;
-  IndexedDBDispatcher::Send(
-      new IndexedDBHostMsg_DatabaseObjectStoreNames(idb_database_id_, &result));
-  WebDOMStringList webResult;
-  for (std::vector<string16>::const_iterator it = result.begin();
-       it != result.end(); ++it) {
-    webResult.append(*it);
+  for (size_t i = 0; i < idb_metadata.object_stores.size(); ++i) {
+    const IndexedDBObjectStoreMetadata& idb_store_metadata =
+        idb_metadata.object_stores[i];
+    WebIDBMetadata::ObjectStore& web_store_metadata =
+        web_metadata.objectStores[i];
+
+    web_store_metadata.name = idb_store_metadata.name;
+    web_store_metadata.keyPath = idb_store_metadata.keyPath;
+    web_store_metadata.autoIncrement = idb_store_metadata.autoIncrement;
+    web_store_metadata.indexes = WebVector<WebIDBMetadata::Index>(
+        idb_store_metadata.indexes.size());
+
+    for (size_t j = 0; j < idb_store_metadata.indexes.size(); ++j) {
+      const IndexedDBIndexMetadata& idb_index_metadata =
+          idb_store_metadata.indexes[j];
+      WebIDBMetadata::Index& web_index_metadata =
+          web_store_metadata.indexes[j];
+
+      web_index_metadata.name = idb_index_metadata.name;
+      web_index_metadata.keyPath = idb_index_metadata.keyPath;
+      web_index_metadata.unique = idb_index_metadata.unique;
+      web_index_metadata.multiEntry = idb_index_metadata.multiEntry;
+    }
   }
-  return webResult;
+
+  return web_metadata;
 }
 
 WebKit::WebIDBObjectStore* RendererWebIDBDatabaseImpl::createObjectStore(

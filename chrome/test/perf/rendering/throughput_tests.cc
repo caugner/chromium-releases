@@ -8,12 +8,14 @@
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/values.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
@@ -26,6 +28,8 @@
 #include "chrome/test/perf/perf_test.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "content/test/gpu/gpu_test_config.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mock_host_resolver.h"
@@ -51,7 +55,8 @@ enum RunTestFlags {
 
 enum ThroughputTestFlags {
   kSW = 0,
-  kGPU = 1 << 0
+  kGPU = 1 << 0,
+  kCompositorThread = 1 << 1
 };
 
 const int kSpinUpTimeMs = 4 * 1000;
@@ -60,8 +65,9 @@ const int kIgnoreSomeFrames = 3;
 
 class ThroughputTest : public BrowserPerfTest {
  public:
-  explicit ThroughputTest(ThroughputTestFlags flags) :
+  explicit ThroughputTest(int flags) :
       use_gpu_(flags & kGPU),
+      use_compositor_thread_(flags & kCompositorThread),
       spinup_time_ms_(kSpinUpTimeMs),
       run_time_ms_(kRunTimeMs) {}
 
@@ -192,14 +198,20 @@ class ThroughputTest : public BrowserPerfTest {
       command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
       command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
     }
+    if (use_compositor_thread_) {
+      ASSERT_TRUE(use_gpu_);
+      command_line->AppendSwitch(switches::kEnableThreadedCompositing);
+    } else {
+      command_line->AppendSwitch(switches::kDisableThreadedCompositing);
+    }
   }
 
   void Wait(int ms) {
+    base::RunLoop run_loop;
     MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        MessageLoop::QuitClosure(),
+        FROM_HERE, run_loop.QuitClosure(),
         base::TimeDelta::FromMilliseconds(ms));
-    ui_test_utils::RunMessageLoop();
+    content::RunThisRunLoop(&run_loop);
   }
 
   // Take snapshot of the current tab, encode it as PNG, and save to a SkBitmap.
@@ -209,7 +221,7 @@ class ThroughputTest : public BrowserPerfTest {
 
     gfx::Rect root_bounds = browser()->window()->GetBounds();
     gfx::Rect tab_contents_bounds;
-    browser()->GetActiveWebContents()->GetContainerBounds(
+    chrome::GetActiveWebContents(browser())->GetContainerBounds(
         &tab_contents_bounds);
 
     gfx::Rect snapshot_bounds(tab_contents_bounds.x() - root_bounds.x(),
@@ -218,7 +230,8 @@ class ThroughputTest : public BrowserPerfTest {
                               tab_contents_bounds.height());
 
     gfx::NativeWindow native_window = browser()->window()->GetNativeWindow();
-    if (!browser::GrabWindowSnapshot(native_window, &png, snapshot_bounds)) {
+    if (!chrome::GrabWindowSnapshotForUser(native_window, &png,
+                                           snapshot_bounds)) {
       LOG(ERROR) << "browser::GrabWindowSnapShot() failed";
       return false;
     }
@@ -315,7 +328,7 @@ class ThroughputTest : public BrowserPerfTest {
     LOG(INFO) << gurl_.possibly_invalid_spec();
     ui_test_utils::NavigateToURLWithDisposition(
         browser(), gurl_, CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
-    ui_test_utils::WaitForLoadStop(browser()->GetActiveWebContents());
+    content::WaitForLoadStop(chrome::GetActiveWebContents(browser()));
 
     // Let the test spin up.
     LOG(INFO) << "Spinning up test...";
@@ -365,7 +378,8 @@ class ThroughputTest : public BrowserPerfTest {
     // Print perf results.
     double mean_ms = stats.mean_us / 1000.0;
     double std_dev_ms = stats.standard_deviation_us / 1000.0 / 1000.0;
-    std::string trace_name = ran_on_gpu ? "gpu" : "software";
+    std::string trace_name = use_compositor_thread_? "gpu_thread" :
+                             ran_on_gpu ? "gpu" : "software";
     std::string mean_and_error = base::StringPrintf("%f,%f", mean_ms,
                                                     std_dev_ms);
     perf_test::PrintResultMeanAndError(test_name, "", trace_name,
@@ -373,6 +387,10 @@ class ThroughputTest : public BrowserPerfTest {
 
     if (flags & kAllowExternalDNS)
       ResetAllowExternalDNS();
+
+    // Close the tab so that we can quit without timing out during the
+    // wait-for-idle stage in browser_test framework.
+    chrome::GetActiveWebContents(browser())->Close();
   }
 
  private:
@@ -419,6 +437,7 @@ class ThroughputTest : public BrowserPerfTest {
   };
 
   bool use_gpu_;
+  bool use_compositor_thread_;
   int spinup_time_ms_;
   int run_time_ms_;
   FilePath local_cache_path_;
@@ -431,6 +450,12 @@ class ThroughputTest : public BrowserPerfTest {
 class ThroughputTestGPU : public ThroughputTest {
  public:
   ThroughputTestGPU() : ThroughputTest(kGPU) {}
+};
+
+// For running tests on GPU with the compositor thread:
+class ThroughputTestThread : public ThroughputTest {
+ public:
+  ThroughputTestThread() : ThroughputTest(kGPU | kCompositorThread) {}
 };
 
 // For running tests on Software:
@@ -468,13 +493,11 @@ IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, DISABLED_TestURL) {
   RunTestWithURL(kAllowExternalDNS);
 }
 
-// crbug.com/124049
-#if defined(OS_MACOSX)
-#define MAYBE_Particles DISABLED_Particles
-#else
-#define MAYBE_Particles Particles
-#endif
-IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, MAYBE_Particles) {
+IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, Particles) {
+  RunTest("particles", kInternal);
+}
+
+IN_PROC_BROWSER_TEST_F(ThroughputTestThread, Particles) {
   RunTest("particles", kInternal);
 }
 
@@ -483,6 +506,10 @@ IN_PROC_BROWSER_TEST_F(ThroughputTestSW, CanvasDemoSW) {
 }
 
 IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, CanvasDemoGPU) {
+  RunTest("canvas-demo", kInternal | kIsGpuCanvasTest);
+}
+
+IN_PROC_BROWSER_TEST_F(ThroughputTestThread, CanvasDemoGPU) {
   RunTest("canvas-demo", kInternal | kIsGpuCanvasTest);
 }
 
@@ -503,6 +530,10 @@ IN_PROC_BROWSER_TEST_F(ThroughputTestSW, DrawImageShadowSW) {
 }
 
 IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, DrawImageShadowGPU) {
+  RunTest("canvas2d_balls_with_shadow", kNone | kIsGpuCanvasTest);
+}
+
+IN_PROC_BROWSER_TEST_F(ThroughputTestThread, DrawImageShadowGPU) {
   RunTest("canvas2d_balls_with_shadow", kNone | kIsGpuCanvasTest);
 }
 
@@ -527,13 +558,7 @@ IN_PROC_BROWSER_TEST_F(ThroughputTestSW, CanvasTextSW) {
   RunTest("canvas2d_balls_text", kNone);
 }
 
-// crbug.com/124049
-#if defined(OS_MACOSX)
-#define MAYBE_CanvasTextGPU DISABLED_CanvasTextGPU
-#else
-#define MAYBE_CanvasTextGPU CanvasTextGPU
-#endif
-IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, MAYBE_CanvasTextGPU) {
+IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, CanvasTextGPU) {
   RunTest("canvas2d_balls_text", kNone | kIsGpuCanvasTest);
 }
 
@@ -561,6 +586,10 @@ IN_PROC_BROWSER_TEST_F(ThroughputTestSW, CanvasManyImagesSW) {
 }
 
 IN_PROC_BROWSER_TEST_F(ThroughputTestGPU, CanvasManyImagesGPU) {
+  RunCanvasBenchTest("many_images", kNone | kIsGpuCanvasTest);
+}
+
+IN_PROC_BROWSER_TEST_F(ThroughputTestThread, CanvasManyImagesGPU) {
   RunCanvasBenchTest("many_images", kNone | kIsGpuCanvasTest);
 }
 

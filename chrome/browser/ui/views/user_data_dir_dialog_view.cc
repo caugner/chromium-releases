@@ -5,7 +5,9 @@
 #include "chrome/browser/ui/views/user_data_dir_dialog_view.h"
 
 #include "base/logging.h"
+#include "base/run_loop.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/user_data_dir_dialog.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -15,7 +17,8 @@
 
 UserDataDirDialogView::UserDataDirDialogView(const FilePath& user_data_dir)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
-          select_file_dialog_(SelectFileDialog::Create(this))),
+        select_file_dialog_(ui::SelectFileDialog::Create(
+            this, new ChromeSelectFilePolicy(NULL)))),
       is_blocking_(true) {
   const int kDialogWidth = 400;
   views::MessageBoxView::InitParams params(
@@ -58,9 +61,9 @@ bool UserDataDirDialogView::Accept() {
       IDS_CANT_WRITE_USER_DIRECTORY_CHOOSE_DIRECTORY_BUTTON));
   HWND owning_hwnd =
       GetAncestor(message_box_view_->GetWidget()->GetNativeView(), GA_ROOT);
-  select_file_dialog_->SelectFile(SelectFileDialog::SELECT_FOLDER,
+  select_file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_FOLDER,
                                   dialog_title, FilePath(), NULL, 0,
-                                  std::wstring(), NULL, owning_hwnd, NULL);
+                                  FilePath::StringType(), owning_hwnd, NULL);
   return false;
 }
 
@@ -97,14 +100,16 @@ void UserDataDirDialogView::FileSelected(const FilePath& path,
 void UserDataDirDialogView::FileSelectionCanceled(void* params) {
 }
 
-namespace browser {
+namespace chrome {
 
 FilePath ShowUserDataDirDialog(const FilePath& user_data_dir) {
+  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
   // When the window closes, it will delete itself.
   UserDataDirDialogView* dialog = new UserDataDirDialogView(user_data_dir);
   views::Widget::CreateWindow(dialog)->Show();
-  MessageLoopForUI::current()->RunWithDispatcher(dialog);
+  base::RunLoop run_loop(dialog);
+  run_loop.Run();
   return dialog->user_data_dir();
 }
 
-}  // namespace browser
+}  // namespace chrome

@@ -14,15 +14,18 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/spellcheck_messages.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/url_fetcher.h"
+#include "net/url_request/url_fetcher.h"
 
 using content::BrowserThread;
 
 SpellCheckMessageFilter::SpellCheckMessageFilter(int render_process_id)
-    : render_process_id_(render_process_id),
+    : render_process_id_(render_process_id)
+#if !defined(OS_MACOSX)
+      ,
       route_id_(0),
-      identifier_(0),
-      document_tag_(0) {
+      identifier_(0)
+#endif
+      {
 }
 
 void SpellCheckMessageFilter::OverrideThreadForMessage(

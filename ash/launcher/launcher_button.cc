@@ -10,9 +10,11 @@
 #include "ash/launcher/launcher_button_host.h"
 #include "grit/ui_resources.h"
 #include "skia/ext/image_operations.h"
+#include "ui/aura/event.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/throb_animation.h"
+#include "ui/base/events.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_element.h"
@@ -21,8 +23,7 @@
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/shadow_value.h"
-#include "ui/gfx/skbitmap_operations.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/views/controls/image_view.h"
 
@@ -229,25 +230,26 @@ LauncherButton::LauncherButton(views::ButtonListener* listener,
       bar_(new BarView),
       state_(STATE_NORMAL) {
   set_accessibility_focusable(true);
+
+  const gfx::ShadowValue kShadows[] = {
+    gfx::ShadowValue(gfx::Point(0, 2), 0, SkColorSetARGB(0x1A, 0, 0, 0)),
+    gfx::ShadowValue(gfx::Point(0, 3), 1, SkColorSetARGB(0x1A, 0, 0, 0)),
+    gfx::ShadowValue(gfx::Point(0, 0), 1, SkColorSetARGB(0x54, 0, 0, 0)),
+  };
+  icon_shadows_.assign(kShadows, kShadows + arraysize(kShadows));
+
   AddChildView(bar_);
 }
 
 LauncherButton::~LauncherButton() {
 }
 
-void LauncherButton::SetShadowedImage(const SkBitmap& bitmap) {
-  const gfx::ShadowValue kShadows[] = {
-    gfx::ShadowValue(gfx::Point(0, 2), 0, SkColorSetARGB(0x1A, 0, 0, 0)),
-    gfx::ShadowValue(gfx::Point(0, 3), 1, SkColorSetARGB(0x1A, 0, 0, 0)),
-    gfx::ShadowValue(gfx::Point(0, 0), 1, SkColorSetARGB(0x54, 0, 0, 0)),
-  };
-
-  SkBitmap shadowed_bitmap = SkBitmapOperations::CreateDropShadow(
-      bitmap, gfx::ShadowValues(kShadows, kShadows + arraysize(kShadows)));
-  icon_view_->SetImage(shadowed_bitmap);
+void LauncherButton::SetShadowedImage(const gfx::ImageSkia& image) {
+  icon_view_->SetImage(gfx::ImageSkiaOperations::CreateImageWithDropShadow(
+      image, icon_shadows_));
 }
 
-void LauncherButton::SetImage(const SkBitmap& image) {
+void LauncherButton::SetImage(const gfx::ImageSkia& image) {
   if (image.empty()) {
     // TODO: need an empty image.
     icon_view_->SetImage(image);
@@ -275,9 +277,8 @@ void LauncherButton::SetImage(const SkBitmap& image) {
     return;
   }
 
-  SkBitmap resized_image = skia::ImageOperations::Resize(
-      image, skia::ImageOperations::RESIZE_BEST, width, height);
-  SetShadowedImage(resized_image);
+  SetShadowedImage(gfx::ImageSkiaOperations::CreateResizedImage(
+      image, gfx::Size(width, height)));
 }
 
 void LauncherButton::AddState(State state) {
@@ -327,24 +328,24 @@ gfx::Rect LauncherButton::GetIconBounds() const {
 
 bool LauncherButton::OnMousePressed(const views::MouseEvent& event) {
   CustomButton::OnMousePressed(event);
-  host_->MousePressedOnButton(this, event);
+  host_->PointerPressedOnButton(this, LauncherButtonHost::MOUSE, event);
   return true;
 }
 
 void LauncherButton::OnMouseReleased(const views::MouseEvent& event) {
   CustomButton::OnMouseReleased(event);
-  host_->MouseReleasedOnButton(this, false);
+  host_->PointerReleasedOnButton(this, LauncherButtonHost::MOUSE, false);
 }
 
 void LauncherButton::OnMouseCaptureLost() {
   ClearState(STATE_HOVERED);
-  host_->MouseReleasedOnButton(this, true);
+  host_->PointerReleasedOnButton(this, LauncherButtonHost::MOUSE, true);
   CustomButton::OnMouseCaptureLost();
 }
 
 bool LauncherButton::OnMouseDragged(const views::MouseEvent& event) {
   CustomButton::OnMouseDragged(event);
-  host_->MouseDraggedOnButton(this, event);
+  host_->PointerDraggedOnButton(this, LauncherButtonHost::MOUSE, event);
   return true;
 }
 
@@ -363,6 +364,29 @@ void LauncherButton::OnMouseExited(const views::MouseEvent& event) {
   ClearState(STATE_HOVERED);
   CustomButton::OnMouseExited(event);
   host_->MouseExitedButton(this);
+}
+
+ui::GestureStatus LauncherButton::OnGestureEvent(
+    const views::GestureEvent& event) {
+  switch (event.type()) {
+    case ui::ET_GESTURE_TAP_DOWN:
+      AddState(STATE_HOVERED);
+      return CustomButton::OnGestureEvent(event);
+    case ui::ET_GESTURE_END:
+      ClearState(STATE_HOVERED);
+      return CustomButton::OnGestureEvent(event);
+    case ui::ET_GESTURE_SCROLL_BEGIN:
+      host_->PointerPressedOnButton(this, LauncherButtonHost::TOUCH, event);
+      return ui::GESTURE_STATUS_CONSUMED;
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      host_->PointerDraggedOnButton(this, LauncherButtonHost::TOUCH, event);
+      return ui::GESTURE_STATUS_CONSUMED;
+    case ui::ET_GESTURE_SCROLL_END:
+      host_->PointerReleasedOnButton(this, LauncherButtonHost::TOUCH, false);
+      return ui::GESTURE_STATUS_CONSUMED;
+    default:
+      return CustomButton::OnGestureEvent(event);
+  }
 }
 
 void LauncherButton::GetAccessibleState(ui::AccessibleViewState* state) {
@@ -392,6 +416,11 @@ void LauncherButton::Layout() {
     }
   }
 
+  // Offset to compensate for shadows.
+  gfx::Insets icon_shadow_padding = -gfx::ShadowValue::GetMargin(icon_shadows_);
+  image_x -= icon_shadow_padding.left() - icon_shadow_padding.right();
+  image_y -= icon_shadow_padding.top() - icon_shadow_padding.bottom();
+
   icon_view_->SetPosition(gfx::Point(image_x, image_y));
   bar_->SetBoundsRect(rect);
 }
@@ -408,12 +437,21 @@ void LauncherButton::OnBlur() {
 
 void LauncherButton::Init() {
   icon_view_ = CreateIconView();
+
+  gfx::Insets icon_shadow_padding = -gfx::ShadowValue::GetMargin(icon_shadows_);
+  const int horiz_padding = std::max(icon_shadow_padding.left(),
+                                     icon_shadow_padding.right());
+  const int vert_padding = std::max(icon_shadow_padding.top(),
+                                    icon_shadow_padding.bottom());
+
   // TODO: refactor the layers so each button doesn't require 2.
   icon_view_->SetPaintToLayer(true);
   icon_view_->SetFillsBoundsOpaquely(false);
-  icon_view_->SetSize(gfx::Size(kIconSize, kIconSize));
+  icon_view_->SetSize(gfx::Size(kIconSize + horiz_padding,
+                                kIconSize + vert_padding));
   icon_view_->SetHorizontalAlignment(views::ImageView::CENTER);
   icon_view_->SetVerticalAlignment(views::ImageView::CENTER);
+
   AddChildView(icon_view_);
 }
 

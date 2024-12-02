@@ -39,6 +39,72 @@ var LABEL_TO_IDENTIFIER = {
   'disabled': 'DISABLED'
 };
 
+var KEYCODE_TO_LABEL = {
+  8: 'backspace',
+  9: 'tab',
+  13: 'enter',
+  27: 'esc',
+  32: 'space',
+  33: 'pageup',
+  34: 'pagedown',
+  35: 'end',
+  36: 'home',
+  37: 'left',
+  38: 'up',
+  39: 'right',
+  40: 'down',
+  46: 'delete',
+  91: 'search',
+  92: 'search',
+  96: '0',
+  97: '1',
+  98: '2',
+  99: '3',
+  100: '4',
+  101: '5',
+  102: '6',
+  103: '7',
+  104: '8',
+  105: '9',
+  106: '*',
+  107: '+',
+  109: '-',
+  110: '.',
+  111: '/',
+  112: 'back',
+  113: 'forward',
+  114: 'reload',
+  115: 'full screen',
+  116: 'switch window',
+  117: 'bright down',
+  118: 'bright up',
+  119: 'mute',
+  120: 'vol. down',
+  121: 'vol. up',
+  186: ';',
+  187: '+',
+  188: ',',
+  189: '-',
+  190: '.',
+  191: '/',
+  192: '`',
+  219: '[',
+  220: '\\',
+  221: ']',
+  222: '\'',
+};
+
+// The labels that close the keyboard overlay when pressed
+var CLOSE_LABELS = [
+  'delete',
+  'end',
+  'esc',
+  'home',
+  'pagedown',
+  'pageup',
+  'switch window',
+];
+
 var keyboardOverlayId = 'en_US';
 var identifierMap = {};
 
@@ -365,20 +431,13 @@ function update(modifiers) {
  * @param {Event} e Key event.
  */
 function handleKeyEvent(e) {
-  var modifiers = getModifiers(e);
   if (!getKeyboardOverlayId()) {
     return;
   }
-  var shortcutData = getShortcutData();
-  var action = getAction(String.fromCharCode(e.keyCode).toLowerCase(),
-                         modifiers);
-  if (e.keyCode == 27 ||  // Escape
-      shortcutData[action]) {
-    chrome.send('DialogClose');
-    return;
-  }
+  var modifiers = getModifiers(e);
   update(modifiers);
   KeyboardOverlayAccessibilityHelper.maybeSpeakAllShortcuts(modifiers);
+  e.preventDefault();
 }
 
 /**

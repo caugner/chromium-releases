@@ -26,6 +26,8 @@
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_notification_tracker.h"
@@ -443,7 +445,9 @@ TEST_F(NavigationControllerTest, LoadURL_IgnorePreemptsPending) {
 }
 
 // Tests that the pending entry state is correct after an abort.
-TEST_F(NavigationControllerTest, LoadURL_AbortCancelsPending) {
+// We do not want to clear the pending entry, so that the user doesn't
+// lose a typed URL.  (See http://crbug.com/9682.)
+TEST_F(NavigationControllerTest, LoadURL_AbortDoesntCancelPending) {
   NavigationControllerImpl& controller = controller_impl();
   TestNotificationTracker notifications;
   RegisterForAllNavNotifications(&notifications, &controller);
@@ -480,19 +484,19 @@ TEST_F(NavigationControllerTest, LoadURL_AbortCancelsPending) {
           ViewHostMsg_DidFailProvisionalLoadWithError(0,  // routing_id
                                                       params));
 
-  // This should clear the pending entry and notify of a navigation state
-  // change, so that we do not keep displaying kNewURL.
+  // This should not clear the pending entry or notify of a navigation state
+  // change, so that we keep displaying kNewURL (until the user clears it).
   EXPECT_EQ(-1, controller.GetPendingEntryIndex());
-  EXPECT_FALSE(controller.GetPendingEntry());
+  EXPECT_TRUE(controller.GetPendingEntry());
   EXPECT_EQ(-1, controller.GetLastCommittedEntryIndex());
-  EXPECT_EQ(2, delegate->navigation_state_change_count());
+  EXPECT_EQ(1, delegate->navigation_state_change_count());
 
   contents()->SetDelegate(NULL);
 }
 
-// Tests that the pending entry state is correct after a redirect and abort.
-// http://crbug.com/83031.
-TEST_F(NavigationControllerTest, LoadURL_RedirectAbortCancelsPending) {
+// Tests that the pending URL is not visible during a renderer-initiated
+// redirect and abort.  See http://crbug.com/83031.
+TEST_F(NavigationControllerTest, LoadURL_RedirectAbortDoesntShowPendingURL) {
   NavigationControllerImpl& controller = controller_impl();
   TestNotificationTracker notifications;
   RegisterForAllNavNotifications(&notifications, &controller);
@@ -505,9 +509,9 @@ TEST_F(NavigationControllerTest, LoadURL_RedirectAbortCancelsPending) {
   // Without any navigations, the renderer starts at about:blank.
   const GURL kExistingURL("about:blank");
 
-  // Now make a pending new navigation.
+  // Now make a pending new navigation, initiated by the renderer.
   const GURL kNewURL("http://eh");
-  controller.LoadURL(
+  controller.LoadURLFromRenderer(
       kNewURL, content::Referrer(), content::PAGE_TRANSITION_TYPED,
       std::string());
   EXPECT_EQ(0U, notifications.size());
@@ -515,6 +519,11 @@ TEST_F(NavigationControllerTest, LoadURL_RedirectAbortCancelsPending) {
   EXPECT_TRUE(controller.GetPendingEntry());
   EXPECT_EQ(-1, controller.GetLastCommittedEntryIndex());
   EXPECT_EQ(1, delegate->navigation_state_change_count());
+
+  // There should be no visible entry (resulting in about:blank in the
+  // omnibox), because it was renderer-initiated and there's no last committed
+  // entry.
+  EXPECT_FALSE(controller.GetVisibleEntry());
 
   // Now the navigation redirects.
   const GURL kRedirectURL("http://bee");
@@ -542,14 +551,43 @@ TEST_F(NavigationControllerTest, LoadURL_RedirectAbortCancelsPending) {
           ViewHostMsg_DidFailProvisionalLoadWithError(0,  // routing_id
                                                       params));
 
-  // This should clear the pending entry and notify of a navigation state
-  // change, so that we do not keep displaying kNewURL.
+  // This should not clear the pending entry or notify of a navigation state
+  // change.
   EXPECT_EQ(-1, controller.GetPendingEntryIndex());
-  EXPECT_FALSE(controller.GetPendingEntry());
+  EXPECT_TRUE(controller.GetPendingEntry());
   EXPECT_EQ(-1, controller.GetLastCommittedEntryIndex());
-  EXPECT_EQ(2, delegate->navigation_state_change_count());
+  EXPECT_EQ(1, delegate->navigation_state_change_count());
+
+  // There should be no visible entry (resulting in about:blank in the
+  // omnibox), ensuring no spoof is possible.
+  EXPECT_FALSE(controller.GetVisibleEntry());
 
   contents()->SetDelegate(NULL);
+}
+
+// Test NavigationEntry is constructed correctly. No other logic tested.
+TEST_F(NavigationControllerTest, PostURL) {
+  NavigationControllerImpl& controller = controller_impl();
+
+  const GURL url("http://foo1");
+
+  const int length = 5;
+  const unsigned char* raw_data =
+      reinterpret_cast<const unsigned char*>("d\n\0a2");
+  std::vector<unsigned char> post_data_vector(raw_data, raw_data+length);
+  scoped_refptr<base::RefCountedBytes> data =
+      base::RefCountedBytes::TakeVector(&post_data_vector);
+
+  controller.PostURL(url, content::Referrer(), *data.get(), true);
+
+  NavigationEntryImpl* post_entry =
+      NavigationEntryImpl::FromNavigationEntry(
+          controller.GetPendingEntry());
+
+  EXPECT_TRUE(post_entry);
+  EXPECT_TRUE(post_entry->GetHasPostData());
+  EXPECT_EQ(data->front(),
+      post_entry->GetBrowserInitiatedPostData()->front());
 }
 
 TEST_F(NavigationControllerTest, Reload) {
@@ -625,6 +663,82 @@ TEST_F(NavigationControllerTest, Reload_GeneratesNewPage) {
   EXPECT_TRUE(controller.GetLastCommittedEntry());
   EXPECT_FALSE(controller.GetPendingEntry());
   EXPECT_TRUE(controller.CanGoBack());
+  EXPECT_FALSE(controller.CanGoForward());
+}
+
+class TestNavigationObserver : public content::RenderViewHostObserver {
+ public:
+  TestNavigationObserver(content::RenderViewHost* render_view_host)
+      : RenderViewHostObserver(render_view_host) {
+  }
+
+  const GURL& navigated_url() const {
+    return navigated_url_;
+  }
+
+ protected:
+  virtual void Navigate(const GURL& url) OVERRIDE {
+    navigated_url_ = url;
+  }
+
+ private:
+  GURL navigated_url_;
+};
+
+TEST_F(NavigationControllerTest, ReloadOriginalRequestURL) {
+  NavigationControllerImpl& controller = controller_impl();
+  TestNotificationTracker notifications;
+  RegisterForAllNavNotifications(&notifications, &controller);
+  TestNavigationObserver observer(test_rvh());
+
+  const GURL original_url("http://foo1");
+  const GURL final_url("http://foo2");
+
+  // Load up the original URL, but get redirected.
+  controller.LoadURL(original_url, content::Referrer(),
+      content::PAGE_TRANSITION_TYPED, std::string());
+  EXPECT_EQ(0U, notifications.size());
+  test_rvh()->SendNavigateWithOriginalRequestURL(0, final_url, original_url);
+  EXPECT_TRUE(notifications.Check1AndReset(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED));
+
+  // The NavigationEntry should save both the original URL and the final
+  // redirected URL.
+  EXPECT_EQ(original_url, controller.GetActiveEntry()->GetOriginalRequestURL());
+  EXPECT_EQ(final_url, controller.GetActiveEntry()->GetURL());
+
+  // Reload using the original URL.
+  controller.GetActiveEntry()->SetTitle(ASCIIToUTF16("Title"));
+  controller.ReloadOriginalRequestURL(false);
+  EXPECT_EQ(0U, notifications.size());
+
+  // The reload is pending.  The request should point to the original URL.
+  EXPECT_EQ(original_url, observer.navigated_url());
+  EXPECT_EQ(controller.GetEntryCount(), 1);
+  EXPECT_EQ(controller.GetLastCommittedEntryIndex(), 0);
+  EXPECT_EQ(controller.GetPendingEntryIndex(), 0);
+  EXPECT_TRUE(controller.GetLastCommittedEntry());
+  EXPECT_TRUE(controller.GetPendingEntry());
+  EXPECT_FALSE(controller.CanGoBack());
+  EXPECT_FALSE(controller.CanGoForward());
+
+  // Make sure the title has been cleared (will be redrawn just after reload).
+  // Avoids a stale cached title when the new page being reloaded has no title.
+  // See http://crbug.com/96041.
+  EXPECT_TRUE(controller.GetActiveEntry()->GetTitle().empty());
+
+  // Send that the navigation has proceeded; say it got redirected again.
+  test_rvh()->SendNavigate(0, final_url);
+  EXPECT_TRUE(notifications.Check1AndReset(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED));
+
+  // Now the reload is committed.
+  EXPECT_EQ(controller.GetEntryCount(), 1);
+  EXPECT_EQ(controller.GetLastCommittedEntryIndex(), 0);
+  EXPECT_EQ(controller.GetPendingEntryIndex(), -1);
+  EXPECT_TRUE(controller.GetLastCommittedEntry());
+  EXPECT_FALSE(controller.GetPendingEntry());
+  EXPECT_FALSE(controller.CanGoBack());
   EXPECT_FALSE(controller.CanGoForward());
 }
 
@@ -2494,8 +2608,8 @@ class NavigationControllerHistoryTest : public NavigationControllerTest {
 
     // Make sure we wait for history to shut down before continuing. The task
     // we add will cause our message loop to quit once it is destroyed.
-    HistoryService* history =
-        profile()->GetHistoryService(Profile::IMPLICIT_ACCESS);
+    HistoryService* history = HistoryServiceFactory::GetForProfiles(
+        profile(), Profile::IMPLICIT_ACCESS);
     if (history) {
       history->SetOnBackendDestroyTask(MessageLoop::QuitClosure());
       MessageLoop::current()->Run();

@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_SAVE_FILE_RESOURCE_HANDLER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_SAVE_FILE_RESOURCE_HANDLER_H_
-#pragma once
 
 #include <string>
 
@@ -52,7 +51,7 @@ class SaveFileResourceHandler : public content::ResourceHandler {
                           int min_size) OVERRIDE;
 
   // Passes the buffer to the download file writer.
-  virtual bool OnReadCompleted(int request_id, int* bytes_read,
+  virtual bool OnReadCompleted(int request_id, int bytes_read,
                                bool* defer) OVERRIDE;
 
   virtual bool OnResponseCompleted(int request_id,

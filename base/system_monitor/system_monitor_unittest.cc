@@ -7,6 +7,7 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/test/mock_devices_changed_observer.h"
+#include "base/utf_string_conversions.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -17,8 +18,7 @@ namespace {
 class PowerTest : public SystemMonitor::PowerObserver {
  public:
   PowerTest()
-      : battery_(false),
-        power_state_changes_(0),
+      : power_state_changes_(0),
         suspends_(0),
         resumes_(0) {
   }
@@ -37,13 +37,11 @@ class PowerTest : public SystemMonitor::PowerObserver {
   }
 
   // Test status counts.
-  bool battery() { return battery_; }
   int power_state_changes() { return power_state_changes_; }
   int suspends() { return suspends_; }
   int resumes() { return resumes_; }
 
  private:
-  bool battery_;   // Do we currently think we're on battery power.
   int power_state_changes_;  // Count of OnPowerStateChange notifications.
   int suspends_;  // Count of OnSuspend notifications.
   int resumes_;  // Count of OnResume notifications.
@@ -108,37 +106,47 @@ TEST_F(SystemMonitorTest, PowerNotifications) {
 
 TEST_F(SystemMonitorTest, DeviceChangeNotifications) {
   const int kObservers = 5;
+  const string16 kDeviceName = ASCIIToUTF16("media device");
+  const std::string kDeviceId1 = "1";
+  const std::string kDeviceId2 = "2";
 
   testing::Sequence mock_sequencer[kObservers];
   MockDevicesChangedObserver observers[kObservers];
   for (int index = 0; index < kObservers; ++index) {
     system_monitor_->AddDevicesChangedObserver(&observers[index]);
 
-    EXPECT_CALL(observers[index], OnDevicesChanged())
+    EXPECT_CALL(observers[index],
+                OnDevicesChanged(base::SystemMonitor::DEVTYPE_UNKNOWN))
         .Times(3)
         .InSequence(mock_sequencer[index]);
-    EXPECT_CALL(observers[index], OnMediaDeviceAttached(1, "media device",
-                                                        testing::_))
+    EXPECT_CALL(observers[index],
+                OnMediaDeviceAttached(kDeviceId1,
+                                      kDeviceName,
+                                      base::SystemMonitor::TYPE_PATH,
+                                      testing::_))
         .InSequence(mock_sequencer[index]);
-    EXPECT_CALL(observers[index], OnMediaDeviceDetached(1))
+    EXPECT_CALL(observers[index], OnMediaDeviceDetached(kDeviceId1))
         .InSequence(mock_sequencer[index]);
-    EXPECT_CALL(observers[index], OnMediaDeviceDetached(2))
-        .InSequence(mock_sequencer[index]);
+    EXPECT_CALL(observers[index], OnMediaDeviceDetached(kDeviceId2))
+        .Times(0).InSequence(mock_sequencer[index]);
   }
 
-  system_monitor_->ProcessDevicesChanged();
+  system_monitor_->ProcessDevicesChanged(base::SystemMonitor::DEVTYPE_UNKNOWN);
   message_loop_.RunAllPending();
 
-  system_monitor_->ProcessDevicesChanged();
-  system_monitor_->ProcessDevicesChanged();
+  system_monitor_->ProcessDevicesChanged(base::SystemMonitor::DEVTYPE_UNKNOWN);
+  system_monitor_->ProcessDevicesChanged(base::SystemMonitor::DEVTYPE_UNKNOWN);
   message_loop_.RunAllPending();
 
   system_monitor_->ProcessMediaDeviceAttached(
-      1, "media device", FilePath(FILE_PATH_LITERAL("path")));
+      kDeviceId1,
+      kDeviceName,
+      base::SystemMonitor::TYPE_PATH,
+      FILE_PATH_LITERAL("path"));
   message_loop_.RunAllPending();
 
-  system_monitor_->ProcessMediaDeviceDetached(1);
-  system_monitor_->ProcessMediaDeviceDetached(2);
+  system_monitor_->ProcessMediaDeviceDetached(kDeviceId1);
+  system_monitor_->ProcessMediaDeviceDetached(kDeviceId2);
   message_loop_.RunAllPending();
 }
 
@@ -149,43 +157,49 @@ TEST_F(SystemMonitorTest, GetAttachedMediaDevicesEmpty) {
 }
 
 TEST_F(SystemMonitorTest, GetAttachedMediaDevicesAttachDetach) {
-  const SystemMonitor::DeviceIdType kDeviceId1 = 42;
-  const char kDeviceName1[] = "test";
+  const std::string kDeviceId1 = "42";
+  const string16 kDeviceName1 = ASCIIToUTF16("test");
   const FilePath kDevicePath1(FILE_PATH_LITERAL("/testfoo"));
   system_monitor_->ProcessMediaDeviceAttached(kDeviceId1,
-                                             kDeviceName1,
-                                             kDevicePath1);
+                                              kDeviceName1,
+                                              base::SystemMonitor::TYPE_PATH,
+                                              kDevicePath1.value());
   message_loop_.RunAllPending();
   std::vector<SystemMonitor::MediaDeviceInfo> devices =
       system_monitor_->GetAttachedMediaDevices();
   ASSERT_EQ(1U, devices.size());
-  EXPECT_EQ(kDeviceId1, devices[0].a);
-  EXPECT_EQ(kDeviceName1, devices[0].b);
-  EXPECT_EQ(kDevicePath1, devices[0].c);
+  EXPECT_EQ(kDeviceId1, devices[0].unique_id);
+  EXPECT_EQ(kDeviceName1, devices[0].name);
+  EXPECT_EQ(base::SystemMonitor::TYPE_PATH, devices[0].type);
+  EXPECT_EQ(kDevicePath1.value(), devices[0].location);
 
-  const SystemMonitor::DeviceIdType kDeviceId2 = 44;
-  const char kDeviceName2[] = "test2";
+  const std::string kDeviceId2 = "44";
+  const string16 kDeviceName2 = ASCIIToUTF16("test2");
   const FilePath kDevicePath2(FILE_PATH_LITERAL("/testbar"));
   system_monitor_->ProcessMediaDeviceAttached(kDeviceId2,
-                                             kDeviceName2,
-                                             kDevicePath2);
+                                              kDeviceName2,
+                                              base::SystemMonitor::TYPE_PATH,
+                                              kDevicePath2.value());
   message_loop_.RunAllPending();
   devices = system_monitor_->GetAttachedMediaDevices();
   ASSERT_EQ(2U, devices.size());
-  EXPECT_EQ(kDeviceId1, devices[0].a);
-  EXPECT_EQ(kDeviceName1, devices[0].b);
-  EXPECT_EQ(kDevicePath1, devices[0].c);
-  EXPECT_EQ(kDeviceId2, devices[1].a);
-  EXPECT_EQ(kDeviceName2, devices[1].b);
-  EXPECT_EQ(kDevicePath2, devices[1].c);
+  EXPECT_EQ(kDeviceId1, devices[0].unique_id);
+  EXPECT_EQ(kDeviceName1, devices[0].name);
+  EXPECT_EQ(base::SystemMonitor::TYPE_PATH, devices[0].type);
+  EXPECT_EQ(kDevicePath1.value(), devices[0].location);
+  EXPECT_EQ(kDeviceId2, devices[1].unique_id);
+  EXPECT_EQ(kDeviceName2, devices[1].name);
+  EXPECT_EQ(base::SystemMonitor::TYPE_PATH, devices[1].type);
+  EXPECT_EQ(kDevicePath2.value(), devices[1].location);
 
   system_monitor_->ProcessMediaDeviceDetached(kDeviceId1);
   message_loop_.RunAllPending();
   devices = system_monitor_->GetAttachedMediaDevices();
   ASSERT_EQ(1U, devices.size());
-  EXPECT_EQ(kDeviceId2, devices[0].a);
-  EXPECT_EQ(kDeviceName2, devices[0].b);
-  EXPECT_EQ(kDevicePath2, devices[0].c);
+  EXPECT_EQ(kDeviceId2, devices[0].unique_id);
+  EXPECT_EQ(kDeviceName2, devices[0].name);
+  EXPECT_EQ(base::SystemMonitor::TYPE_PATH, devices[0].type);
+  EXPECT_EQ(kDevicePath2.value(), devices[0].location);
 
   system_monitor_->ProcessMediaDeviceDetached(kDeviceId2);
   message_loop_.RunAllPending();

@@ -422,7 +422,8 @@ size_t SpdyFramer::ProcessCommonHeader(const char* data, size_t len) {
       } else {
         // Empty data frame.
         if (current_frame.flags() & DATA_FLAG_FIN) {
-          visitor_->OnStreamFrameData(data_frame.stream_id(), NULL, 0);
+          visitor_->OnStreamFrameData(data_frame.stream_id(),
+                                      NULL, 0, DATA_FLAG_FIN);
         }
         CHANGE_STATE(SPDY_AUTO_RESET);
       }
@@ -546,7 +547,6 @@ void SpdyFramer::ProcessControlFrameHeader() {
   }
 
   if (current_control_frame.type() == CREDENTIAL) {
-    visitor_->OnControl(&current_control_frame);
     CHANGE_STATE(SPDY_CREDENTIAL_FRAME_PAYLOAD);
     return;
   }
@@ -675,16 +675,47 @@ size_t SpdyFramer::ProcessControlFrameBeforeHeaderBlock(const char* data,
 
   if (remaining_control_header_ == 0) {
     SpdyControlFrame control_frame(current_frame_buffer_.get(), false);
-    DCHECK(control_frame.type() == SYN_STREAM ||
-           control_frame.type() == SYN_REPLY ||
-           control_frame.type() == HEADERS ||
-           control_frame.type() == SETTINGS);
-    visitor_->OnControl(&control_frame);
-
-    if (control_frame.type() == SETTINGS) {
-      CHANGE_STATE(SPDY_SETTINGS_FRAME_PAYLOAD);
-    } else {
-      CHANGE_STATE(SPDY_CONTROL_FRAME_HEADER_BLOCK);
+    switch (control_frame.type()) {
+      case SYN_STREAM:
+        {
+          SpdySynStreamControlFrame* syn_stream_frame =
+              reinterpret_cast<SpdySynStreamControlFrame*>(&control_frame);
+          // TODO(hkhalil): Check that invalid flag bits are unset?
+          visitor_->OnSynStream(
+              syn_stream_frame->stream_id(),
+              syn_stream_frame->associated_stream_id(),
+              syn_stream_frame->priority(),
+              syn_stream_frame->credential_slot(),
+              (syn_stream_frame->flags() & CONTROL_FLAG_FIN) != 0,
+              (syn_stream_frame->flags() & CONTROL_FLAG_UNIDIRECTIONAL) != 0);
+        }
+        CHANGE_STATE(SPDY_CONTROL_FRAME_HEADER_BLOCK);
+        break;
+      case SYN_REPLY:
+        {
+          SpdySynReplyControlFrame* syn_reply_frame =
+              reinterpret_cast<SpdySynReplyControlFrame*>(&control_frame);
+          visitor_->OnSynReply(
+              syn_reply_frame->stream_id(),
+              (syn_reply_frame->flags() & CONTROL_FLAG_FIN) != 0);
+        }
+        CHANGE_STATE(SPDY_CONTROL_FRAME_HEADER_BLOCK);
+        break;
+      case HEADERS:
+        {
+          SpdyHeadersControlFrame* headers_frame =
+              reinterpret_cast<SpdyHeadersControlFrame*>(&control_frame);
+          visitor_->OnHeaders(
+              headers_frame->stream_id(),
+              (headers_frame->flags() & CONTROL_FLAG_FIN) != 0);
+        }
+        CHANGE_STATE(SPDY_CONTROL_FRAME_HEADER_BLOCK);
+        break;
+      case SETTINGS:
+        CHANGE_STATE(SPDY_SETTINGS_FRAME_PAYLOAD);
+        break;
+      default:
+        DCHECK(false);
     }
   }
   return original_len - len;
@@ -727,7 +758,7 @@ size_t SpdyFramer::ProcessControlFrameHeaderBlock(const char* data,
     // If this is a FIN, tell the caller.
     if (control_frame.flags() & CONTROL_FLAG_FIN) {
       visitor_->OnStreamFrameData(GetControlFrameStreamId(&control_frame),
-                                  NULL, 0);
+                                  NULL, 0, DATA_FLAG_FIN);
     }
 
     CHANGE_STATE(SPDY_AUTO_RESET);
@@ -855,7 +886,44 @@ size_t SpdyFramer::ProcessControlFramePayload(const char* data, size_t len) {
     if (remaining_control_payload_ == 0) {
       SpdyControlFrame control_frame(current_frame_buffer_.get(), false);
       DCHECK(!control_frame.has_header_block());
-      visitor_->OnControl(&control_frame);
+      // Use frame-specific handlers.
+      switch (control_frame.type()) {
+        case PING: {
+            SpdyPingControlFrame* ping_frame =
+                reinterpret_cast<SpdyPingControlFrame*>(&control_frame);
+            visitor_->OnPing(ping_frame->unique_id());
+          }
+          break;
+        case WINDOW_UPDATE: {
+            SpdyWindowUpdateControlFrame *window_update_frame =
+                reinterpret_cast<SpdyWindowUpdateControlFrame*>(&control_frame);
+            visitor_->OnWindowUpdate(window_update_frame->stream_id(),
+                                     window_update_frame->delta_window_size());
+          }
+          break;
+        case RST_STREAM: {
+            SpdyRstStreamControlFrame* rst_stream_frame =
+                reinterpret_cast<SpdyRstStreamControlFrame*>(&control_frame);
+            visitor_->OnRstStream(rst_stream_frame->stream_id(),
+                                  rst_stream_frame->status());
+          }
+          break;
+        case GOAWAY: {
+            SpdyGoAwayControlFrame* go_away_frame =
+                reinterpret_cast<SpdyGoAwayControlFrame*>(&control_frame);
+            if (spdy_version_ < 3) {
+              visitor_->OnGoAway(go_away_frame->last_accepted_stream_id(),
+                                 GOAWAY_OK);
+            } else {
+              visitor_->OnGoAway(go_away_frame->last_accepted_stream_id(),
+                                 go_away_frame->status());
+            }
+          }
+          break;
+        default:
+          // Unreachable.
+          LOG(FATAL) << "Unhandled control frame " << control_frame.type();
+      }
 
       CHANGE_STATE(SPDY_IGNORE_REMAINING_PAYLOAD);
     }
@@ -890,7 +958,7 @@ size_t SpdyFramer::ProcessDataFramePayload(const char* data, size_t len) {
       // Only inform the visitor if there is data.
       if (amount_to_forward) {
         visitor_->OnStreamFrameData(current_data_frame.stream_id(),
-                                    data, amount_to_forward);
+                                    data, amount_to_forward, SpdyDataFlags());
       }
     }
     data += amount_to_forward;
@@ -901,7 +969,8 @@ size_t SpdyFramer::ProcessDataFramePayload(const char* data, size_t len) {
     // frame, inform the visitor of EOF via a 0-length data frame.
     if (!remaining_data_ &&
         current_data_frame.flags() & DATA_FLAG_FIN) {
-      visitor_->OnStreamFrameData(current_data_frame.stream_id(), NULL, 0);
+      visitor_->OnStreamFrameData(current_data_frame.stream_id(),
+                                  NULL, 0, DATA_FLAG_FIN);
     }
   }
 
@@ -1425,6 +1494,9 @@ SpdyControlFrame* SpdyFramer::CompressControlFrame(
   post_compress_bytes.Add(new_frame->length());
 
   compressed_frames.Increment();
+
+  if (visitor_)
+    visitor_->OnControlFrameCompressed(frame, *new_frame);
 
   return new_frame.release();
 }

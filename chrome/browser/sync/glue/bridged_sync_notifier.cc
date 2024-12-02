@@ -10,7 +10,7 @@ namespace browser_sync {
 
 BridgedSyncNotifier::BridgedSyncNotifier(
     ChromeSyncNotificationBridge* bridge,
-    sync_notifier::SyncNotifier* delegate)
+    syncer::SyncNotifier* delegate)
     : bridge_(bridge), delegate_(delegate) {
   DCHECK(bridge_);
 }
@@ -18,18 +18,26 @@ BridgedSyncNotifier::BridgedSyncNotifier(
 BridgedSyncNotifier::~BridgedSyncNotifier() {
 }
 
-void BridgedSyncNotifier::AddObserver(
-    sync_notifier::SyncNotifierObserver* observer) {
+void BridgedSyncNotifier::RegisterHandler(
+    syncer::SyncNotifierObserver* handler) {
   if (delegate_.get())
-   delegate_->AddObserver(observer);
-  bridge_->AddObserver(observer);
+    delegate_->RegisterHandler(handler);
+  bridge_->RegisterHandler(handler);
 }
 
-void BridgedSyncNotifier::RemoveObserver(
-    sync_notifier::SyncNotifierObserver* observer) {
-  bridge_->RemoveObserver(observer);
+void BridgedSyncNotifier::UpdateRegisteredIds(
+    syncer::SyncNotifierObserver* handler,
+    const syncer::ObjectIdSet& ids) {
   if (delegate_.get())
-    delegate_->RemoveObserver(observer);
+    delegate_->UpdateRegisteredIds(handler, ids);
+  bridge_->UpdateRegisteredIds(handler, ids);
+}
+
+void BridgedSyncNotifier::UnregisterHandler(
+    syncer::SyncNotifierObserver* handler) {
+  if (delegate_.get())
+    delegate_->UnregisterHandler(handler);
+  bridge_->UnregisterHandler(handler);
 }
 
 void BridgedSyncNotifier::SetUniqueId(const std::string& unique_id) {
@@ -48,14 +56,8 @@ void BridgedSyncNotifier::UpdateCredentials(
     delegate_->UpdateCredentials(email, token);
 }
 
-void BridgedSyncNotifier::UpdateEnabledTypes(
-    syncable::ModelTypeSet enabled_types) {
-  if (delegate_.get())
-    delegate_->UpdateEnabledTypes(enabled_types);
-}
-
 void BridgedSyncNotifier::SendNotification(
-    syncable::ModelTypeSet changed_types) {
+    syncer::ModelTypeSet changed_types) {
   if (delegate_.get())
     delegate_->SendNotification(changed_types);
 }

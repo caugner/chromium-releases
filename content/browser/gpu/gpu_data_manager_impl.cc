@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/metrics/field_trial.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
@@ -18,11 +19,16 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager_observer.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 #include "webkit/plugins/plugin_switches.h"
+
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
 
 using content::BrowserThread;
 using content::GpuDataManagerObserver;
@@ -164,8 +170,10 @@ void GpuDataManagerImpl::AppendRendererCommandLine(
 
   uint32 flags = GetGpuFeatureType();
   if ((flags & content::GPU_FEATURE_TYPE_WEBGL)) {
+#if !defined(OS_ANDROID)
     if (!command_line->HasSwitch(switches::kDisableExperimentalWebGL))
       command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
+#endif
     if (!command_line->HasSwitch(switches::kDisablePepper3dForUntrustedUse))
       command_line->AppendSwitch(switches::kDisablePepper3dForUntrustedUse);
   }
@@ -178,6 +186,8 @@ void GpuDataManagerImpl::AppendRendererCommandLine(
   if ((flags & content::GPU_FEATURE_TYPE_ACCELERATED_2D_CANVAS) &&
       !command_line->HasSwitch(switches::kDisableAccelerated2dCanvas))
     command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
+  if (ShouldUseSoftwareRendering())
+    command_line->AppendSwitch(switches::kDisableFlashFullscreen3d);
 }
 
 void GpuDataManagerImpl::AppendGpuCommandLine(
@@ -194,6 +204,8 @@ void GpuDataManagerImpl::AppendGpuCommandLine(
   if ((flags & content::GPU_FEATURE_TYPE_MULTISAMPLING) &&
       !command_line->HasSwitch(switches::kDisableGLMultisampling))
     command_line->AppendSwitch(switches::kDisableGLMultisampling);
+  if (flags & content::GPU_FEATURE_TYPE_TEXTURE_SHARING)
+    command_line->AppendSwitch(switches::kDisableImageTransportSurface);
 
   if (software_rendering_) {
     command_line->AppendSwitchASCII(switches::kUseGL, "swiftshader");
@@ -225,15 +237,36 @@ void GpuDataManagerImpl::AppendGpuCommandLine(
     }
     // Pass GPU and driver information to GPU process. We try to avoid full GPU
     // info collection at GPU process startup, but we need gpu vendor_id,
-    // device_id, driver_version for crash reporting purpose.
+    // device_id, driver_vendor, driver_version for deciding whether we need to
+    // collect full info (on Linux) and for crash reporting purpose.
     command_line->AppendSwitchASCII(switches::kGpuVendorID,
         base::StringPrintf("0x%04x", gpu_info_.gpu.vendor_id));
     command_line->AppendSwitchASCII(switches::kGpuDeviceID,
         base::StringPrintf("0x%04x", gpu_info_.gpu.device_id));
+    command_line->AppendSwitchASCII(switches::kGpuDriverVendor,
+        gpu_info_.driver_vendor);
     command_line->AppendSwitchASCII(switches::kGpuDriverVersion,
         gpu_info_.driver_version);
   }
 }
+
+#if defined(OS_WIN)
+bool GpuDataManagerImpl::IsUsingAcceleratedSurface() {
+  if (base::win::GetVersion() < base::win::VERSION_VISTA)
+    return false;
+
+  base::AutoLock auto_lock(gpu_info_lock_);
+  if (gpu_info_.amd_switchable)
+    return false;
+  if (software_rendering_)
+    return false;
+  uint32 flags = GetGpuFeatureType();
+  if (flags & content::GPU_FEATURE_TYPE_TEXTURE_SHARING)
+    return false;
+
+  return true;
+}
+#endif
 
 void GpuDataManagerImpl::AppendPluginCommandLine(
     CommandLine* command_line) {
@@ -246,8 +279,6 @@ void GpuDataManagerImpl::AppendPluginCommandLine(
   // special-casing this video card won't be necessary. See
   // http://crbug.com/134015
   if ((flags & content::GPU_FEATURE_TYPE_ACCELERATED_COMPOSITING) ||
-      (gpu_info_.gpu.vendor_id == 0x8086 &&
-       gpu_info_.gpu.device_id == 0x0166) ||
       CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableAcceleratedCompositing)) {
     if (!command_line->HasSwitch(
@@ -268,6 +299,12 @@ void GpuDataManagerImpl::NotifyGpuInfoUpdate() {
   observer_list_->Notify(&GpuDataManagerObserver::OnGpuInfoUpdate);
 }
 
+// Experiment to determine whether Stage3D should be blacklisted on XP.
+bool Stage3DBlacklisted() {
+  return base::FieldTrialList::FindFullName(content::kStage3DFieldTrialName) ==
+      content::kStage3DFieldTrialBlacklistedName;
+}
+
 void GpuDataManagerImpl::UpdateGpuFeatureType(
     GpuFeatureType embedder_feature_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -284,6 +321,9 @@ void GpuDataManagerImpl::UpdateGpuFeatureType(
   if (card_blacklisted_ ||
       command_line->HasSwitch(switches::kBlacklistWebGL)) {
     flags |= content::GPU_FEATURE_TYPE_WEBGL;
+  }
+  if (Stage3DBlacklisted()) {
+    flags |= content::GPU_FEATURE_TYPE_FLASH_STAGE3D;
   }
   gpu_feature_type_ = static_cast<GpuFeatureType>(flags);
 

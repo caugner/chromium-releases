@@ -4,16 +4,16 @@
 
 #ifndef ASH_SYSTEM_TRAY_TRAY_BACKGROUND_VIEW_H_
 #define ASH_SYSTEM_TRAY_TRAY_BACKGROUND_VIEW_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "ash/launcher/background_animator.h"
 #include "ash/system/tray/tray_views.h"
-#include "ash/wm/shelf_auto_hide_behavior.h"
+#include "ash/wm/shelf_types.h"
 
 namespace ash {
 namespace internal {
 
+class StatusAreaWidget;
 class TrayBackground;
 
 // Base class for children of StatusAreaWidget: SystemTray, WebNotificationTray.
@@ -24,7 +24,38 @@ class TrayBackground;
 class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
                                       public BackgroundAnimatorDelegate {
  public:
-  TrayBackgroundView();
+  // Base class for tray containers. Sets the border and layout. The container
+  // auto-resizes the widget when necessary.
+  class TrayContainer : public views::View {
+   public:
+    explicit TrayContainer(ShelfAlignment alignment);
+    virtual ~TrayContainer() {}
+
+    void SetAlignment(ShelfAlignment alignment);
+
+    void set_size(const gfx::Size& size) { size_ = size; }
+
+    // Overridden from views::View.
+    virtual gfx::Size GetPreferredSize() OVERRIDE;
+
+   protected:
+    // Overridden from views::View.
+    virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
+    virtual void ChildVisibilityChanged(View* child) OVERRIDE;
+    virtual void ViewHierarchyChanged(bool is_add,
+                                      View* parent,
+                                      View* child) OVERRIDE;
+
+   private:
+    void UpdateLayout();
+
+    ShelfAlignment alignment_;
+    gfx::Size size_;
+
+    DISALLOW_COPY_AND_ASSIGN(TrayContainer);
+  };
+
+  explicit TrayBackgroundView(internal::StatusAreaWidget* status_area_widget);
   virtual ~TrayBackgroundView();
 
   // Overridden from views::View.
@@ -50,9 +81,23 @@ class ASH_EXPORT TrayBackgroundView : public internal::ActionableView,
       bool value,
       internal::BackgroundAnimator::ChangeType change_type);
 
+  // Called after all status area trays have been created. Sets the border
+  // based on the position of the view.
+  void SetBorder();
+
+  StatusAreaWidget* status_area_widget() {
+    return status_area_widget_;
+  }
+  TrayContainer* tray_container() const { return tray_container_; }
   ShelfAlignment shelf_alignment() const { return shelf_alignment_; }
 
  private:
+  // Unowned pointer to parent widget.
+  StatusAreaWidget* status_area_widget_;
+
+  // Convenience pointer to the contents view.
+  TrayContainer* tray_container_;
+
   // Shelf alignment.
   ShelfAlignment shelf_alignment_;
 

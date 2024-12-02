@@ -4,11 +4,13 @@
 
 #import "chrome/browser/ui/cocoa/tabpose_window.h"
 
-#import "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/site_instance.h"
+#include "ipc/ipc_message.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::SiteInstance;
@@ -23,9 +25,8 @@ class TabposeWindowTest : public CocoaProfileTest {
   }
 
   void AppendTabToStrip() {
-    TabContents* tab_contents = Browser::TabContentsFactory(
-        profile(), site_instance_, MSG_ROUTING_NONE,
-        NULL, NULL);
+    TabContents* tab_contents = chrome::TabContentsFactory(
+        profile(), site_instance_, MSG_ROUTING_NONE, NULL, NULL);
     browser()->tab_strip_model()->AppendTabContents(
         tab_contents, /*foreground=*/true);
   }
@@ -35,8 +36,7 @@ class TabposeWindowTest : public CocoaProfileTest {
 
 // Check that this doesn't leak.
 TEST_F(TabposeWindowTest, TestShow) {
-  BrowserWindow* browser_window = CreateBrowserWindow();
-  NSWindow* parent = browser_window->GetNativeWindow();
+  NSWindow* parent = browser()->window()->GetNativeWindow();
 
   [parent orderFront:nil];
   EXPECT_TRUE([parent isVisible]);
@@ -57,8 +57,7 @@ TEST_F(TabposeWindowTest, TestShow) {
 }
 
 TEST_F(TabposeWindowTest, TestModelObserver) {
-  BrowserWindow* browser_window = CreateBrowserWindow();
-  NSWindow* parent = browser_window->GetNativeWindow();
+  NSWindow* parent = browser()->window()->GetNativeWindow();
   [parent orderFront:nil];
 
   // Add a few tabs to the tab strip model.

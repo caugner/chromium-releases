@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_POLICY_ENTERPRISE_METRICS_H_
 #define CHROME_BROWSER_POLICY_ENTERPRISE_METRICS_H_
-#pragma once
 
 namespace policy {
 
@@ -147,6 +146,9 @@ enum MetricEnrollment {
   // The lockbox initialization has taken too long to complete and the
   // enrollment has been canceled because of that.
   kMetricLockboxTimeoutError,
+  // The username used to re-enroll the device does not belong to the domain
+  // that the device was initially enrolled to.
+  kMetricEnrollmentWrongUserError,
   // DM server reported that the licenses for the domain has expired or been
   // exhausted.
   kMetricMissingLicensesError,

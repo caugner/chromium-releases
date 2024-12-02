@@ -12,9 +12,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -23,9 +23,9 @@
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/browser/utility_process_host_client.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
 using content::BrowserThread;
@@ -33,6 +33,8 @@ using content::OpenURLParams;
 using content::UtilityProcessHost;
 using content::UtilityProcessHostClient;
 using content::WebContents;
+
+namespace extensions {
 
 const char kManifestKey[] = "manifest";
 const char kIconUrlKey[] = "icon_url";
@@ -99,11 +101,11 @@ class SafeWebstoreResponseParser : public UtilityProcessHostClient {
 
   void OnJSONParseSucceeded(const ListValue& wrapper) {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    Value* value = NULL;
+    const Value* value = NULL;
     CHECK(wrapper.Get(0, &value));
     if (value->IsType(Value::TYPE_DICTIONARY)) {
       parsed_webstore_data_.reset(
-          static_cast<DictionaryValue*>(value)->DeepCopy());
+          static_cast<const DictionaryValue*>(value)->DeepCopy());
     } else {
       error_ = kInvalidWebstoreResponseError;
     }
@@ -164,14 +166,14 @@ WebstoreInlineInstaller::WebstoreInlineInstaller(WebContents* web_contents,
 void WebstoreInlineInstaller::BeginInstall() {
   AddRef(); // Balanced in CompleteInstall or WebContentsDestroyed.
 
-  if (!extensions::Extension::IdIsValid(id_)) {
+  if (!Extension::IdIsValid(id_)) {
     CompleteInstall(kInvalidWebstoreItemId);
     return;
   }
 
   GURL webstore_data_url(extension_urls::GetWebstoreItemJsonDataURL(id_));
 
-  webstore_data_url_fetcher_.reset(content::URLFetcher::Create(
+  webstore_data_url_fetcher_.reset(net::URLFetcher::Create(
       webstore_data_url, net::URLFetcher::GET, this));
   Profile* profile = Profile::FromBrowserContext(
       web_contents()->GetBrowserContext());
@@ -181,8 +183,7 @@ void WebstoreInlineInstaller::BeginInstall() {
   // (it is the page that caused this request to happen) and so that we can
   // track top sites that trigger inline install requests.
   webstore_data_url_fetcher_->SetReferrer(requestor_url_.spec());
-  webstore_data_url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
-                                           net::LOAD_DO_NOT_SAVE_COOKIES |
+  webstore_data_url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
                                            net::LOAD_DISABLE_CACHE);
   webstore_data_url_fetcher_->Start();
 }
@@ -342,9 +343,6 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
   manifest_.reset(manifest);
   icon_ = icon;
 
-  Browser* browser = browser::FindBrowserWithWebContents(web_contents());
-  CHECK(browser);
-
   ExtensionInstallPrompt::Prompt prompt(
       ExtensionInstallPrompt::INLINE_INSTALL_PROMPT);
   prompt.SetInlineInstallWebstoreData(localized_user_count_,
@@ -352,14 +350,20 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
                                       rating_count_);
   std::string error;
   dummy_extension_ = ExtensionInstallPrompt::GetLocalizedExtensionForDisplay(
-      manifest, id_, localized_name_, localized_description_, &error);
+      manifest,
+      Extension::REQUIRE_KEY | Extension::FROM_WEBSTORE,
+      id_,
+      localized_name_,
+      localized_description_,
+      &error);
   if (!dummy_extension_) {
     OnWebstoreParseFailure(id_, WebstoreInstallHelper::Delegate::MANIFEST_ERROR,
                            kInvalidManifestError);
     return;
   }
 
-  install_ui_.reset(new ExtensionInstallPrompt(browser));
+  install_ui_.reset(
+      ExtensionInstallUI::CreateInstallPromptWithWebContents(web_contents()));
   install_ui_->ConfirmInlineInstall(this, dummy_extension_, &icon_, prompt);
   // Control flow finishes up in InstallUIProceed or InstallUIAbort.
 }
@@ -455,3 +459,5 @@ bool WebstoreInlineInstaller::IsRequestorURLInVerifiedSite(
 
   return verified_site_pattern.MatchesURL(requestor_url);
 }
+
+}  // namespace extensions

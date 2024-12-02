@@ -19,6 +19,7 @@
 
 using content::BrowserThread;
 using content::DownloadItem;
+using extensions::WebstoreInstaller;
 
 namespace download_crx_util {
 
@@ -40,15 +41,15 @@ ExtensionInstallPrompt* CreateExtensionInstallPrompt(Profile* profile) {
     mock_install_prompt_for_testing = NULL;
   } else {
     Browser* browser = browser::FindLastActiveWithProfile(profile);
-    result = new ExtensionInstallPrompt(browser);
+    result = chrome::CreateExtensionInstallPromptWithBrowser(browser);
   }
 
   return result;
 }
 
 bool OffStoreInstallAllowedByPrefs(Profile* profile, const DownloadItem& item) {
-  ExtensionPrefs* prefs =
-      ExtensionSystem::Get(profile)->extension_service()->extension_prefs();
+  extensions::ExtensionPrefs* prefs = extensions::ExtensionSystem::Get(
+      profile)->extension_service()->extension_prefs();
   CHECK(prefs);
 
   URLPatternSet url_patterns = prefs->GetAllowedInstallSites();
@@ -68,7 +69,7 @@ void SetMockInstallPromptForTesting(ExtensionInstallPrompt* mock_prompt) {
   mock_install_prompt_for_testing = mock_prompt;
 }
 
-scoped_refptr<CrxInstaller> OpenChromeExtension(
+scoped_refptr<extensions::CrxInstaller> OpenChromeExtension(
     Profile* profile,
     const DownloadItem& download_item) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -76,8 +77,8 @@ scoped_refptr<CrxInstaller> OpenChromeExtension(
   ExtensionService* service = profile->GetExtensionService();
   CHECK(service);
 
-  scoped_refptr<CrxInstaller> installer(
-      CrxInstaller::Create(
+  scoped_refptr<extensions::CrxInstaller> installer(
+      extensions::CrxInstaller::Create(
           service,
           CreateExtensionInstallPrompt(profile),
           WebstoreInstaller::GetAssociatedApproval(download_item)));
@@ -87,11 +88,11 @@ scoped_refptr<CrxInstaller> OpenChromeExtension(
 
   if (OffStoreInstallAllowedByPrefs(profile, download_item)) {
     installer->set_off_store_install_allow_reason(
-        CrxInstaller::OffStoreInstallAllowedBecausePref);
+        extensions::CrxInstaller::OffStoreInstallAllowedBecausePref);
   }
 
-  if (UserScript::IsURLUserScript(download_item.GetURL(),
-                                  download_item.GetMimeType())) {
+  if (extensions::UserScript::IsURLUserScript(download_item.GetURL(),
+                                              download_item.GetMimeType())) {
     installer->InstallUserScript(download_item.GetFullPath(),
                                  download_item.GetURL());
   } else {
@@ -116,8 +117,8 @@ bool IsExtensionDownload(const DownloadItem& download_item) {
     return false;
 
   if (download_item.GetMimeType() == extensions::Extension::kMimeType ||
-      UserScript::IsURLUserScript(download_item.GetURL(),
-                                  download_item.GetMimeType())) {
+      extensions::UserScript::IsURLUserScript(download_item.GetURL(),
+                                              download_item.GetMimeType())) {
     return true;
   } else {
     return false;

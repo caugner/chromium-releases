@@ -24,8 +24,17 @@
 
 namespace {
 
-void Crash(void) {
-  int* p = NULL;
+void CrashDoubleFree(void) {
+  // Cause ASAN to detect a double-free
+  void *p = malloc(1);
+  LOG(INFO) << "Allocated p=" << p << ".  Double-freeing...";
+  free(p);
+  free(p);
+}
+
+void CrashNullPointerDereference(void) {
+  // Cause the program to segfault with a NULL pointer dereference
+  int *p = NULL;
   *p = 0;
 }
 
@@ -170,7 +179,9 @@ bool ReadAndRunTestCase(const char* filename) {
 
   if (crash_test) {
     LOG(INFO) << "Crashing.";
-    Crash();
+    CrashDoubleFree();
+    // if we're not running under ASAN, that might not have worked
+    CrashNullPointerDereference();
     NOTREACHED();
     return true;
   }

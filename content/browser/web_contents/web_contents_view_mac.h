@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_MAC_H_
 #define CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_MAC_H_
-#pragma once
 
 #import <Cocoa/Cocoa.h>
 
@@ -38,7 +37,10 @@ class Point;
   WebContentsViewMac* webContentsView_;  // WEAK; owns us
   scoped_nsobject<WebDragSource> dragSource_;
   scoped_nsobject<WebDragDest> dragDest_;
+  BOOL mouseDownCanMoveWindow_;
 }
+
+- (void)setMouseDownCanMoveWindow:(BOOL)canMove;
 
 // Expose this, since sometimes one needs both the NSView and the
 // WebContentsImpl.
@@ -95,7 +97,7 @@ class WebContentsViewMac
                              bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_operations,
-                             const SkBitmap& image,
+                             const gfx::ImageSkia& image,
                              const gfx::Point& image_offset) OVERRIDE;
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) OVERRIDE;
   virtual void GotFocus() OVERRIDE;

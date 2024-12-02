@@ -6,14 +6,12 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_MOCK_GDATA_DOCUMENTS_SERVICE_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_MOCK_GDATA_DOCUMENTS_SERVICE_H_
-#pragma once
 
 #include <string>
 
 #include "base/platform_file.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 class FilePath;
@@ -39,6 +37,8 @@ class MockDocumentsService : public DocumentsServiceInterface {
   MOCK_METHOD2(GetDocumentEntry, void(const std::string& resource_id,
                                       const GetDataCallback& callback));
   MOCK_METHOD1(GetAccountMetadata, void(const GetDataCallback& callback));
+  MOCK_METHOD1(GetAboutResource, void(const GetDataCallback& callback));
+  MOCK_METHOD1(GetApplicationList, void(const GetDataCallback& callback));
   MOCK_METHOD2(DeleteDocument, void(const GURL& document_url,
                                     const EntryActionCallback& callback));
   MOCK_METHOD5(DownloadDocument, void(const FilePath& virtual_path,
@@ -76,7 +76,31 @@ class MockDocumentsService : public DocumentsServiceInterface {
                     const InitiateUploadCallback& callback));
   MOCK_METHOD2(ResumeUpload, void(const ResumeUploadParams& upload_file_info,
                                   const ResumeUploadCallback& callback));
+  MOCK_METHOD3(AuthorizeApp, void(const GURL& resource_url,
+                                  const std::string& app_ids,
+                                  const GetDataCallback& callback));
+  MOCK_CONST_METHOD0(HasAccessToken, bool());
+  MOCK_CONST_METHOD0(HasRefreshToken, bool());
 
+  void set_account_metadata(base::Value* account_metadata) {
+    account_metadata_.reset(account_metadata);
+  }
+
+  void set_feed_data(base::Value* feed_data) {
+    feed_data_.reset(feed_data);
+  }
+
+  void set_directory_data(base::Value* directory_data) {
+    directory_data_.reset(directory_data);
+  }
+
+  void set_file_data(std::string* file_data) {
+    file_data_.reset(file_data);
+  }
+
+  void set_search_result(const std::string& search_result_feed);
+
+ private:
   // Helper stub methods for functions which take callbacks, so that
   // the callbacks get called with testable results.
 
@@ -146,23 +170,6 @@ class MockDocumentsService : public DocumentsServiceInterface {
       const DownloadActionCallback& download_action_callback,
       const GetDownloadDataCallback& get_download_data_callback);
 
-  void set_account_metadata(base::Value* account_metadata) {
-    feed_data_.reset(account_metadata);
-  }
-
-  void set_feed_data(base::Value* feed_data) {
-    feed_data_.reset(feed_data);
-  }
-
-  void set_directory_data(base::Value* directory_data) {
-    directory_data_.reset(directory_data);
-  }
-
-  void set_file_data(std::string* file_data) {
-    file_data_.reset(file_data);
-  }
-
- private:
   // Account meta data to be returned from GetAccountMetadata.
   scoped_ptr<base::Value> account_metadata_;
 

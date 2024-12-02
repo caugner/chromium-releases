@@ -19,14 +19,12 @@ using base::ListValue;
 using base::StringValue;
 using base::Value;
 
-
 namespace content {
 
 V8ValueConverter* V8ValueConverter::create() {
   return new V8ValueConverterImpl();
 }
-
-}
+}  // namespace content
 
 V8ValueConverterImpl::V8ValueConverterImpl()
     : undefined_allowed_(false),
@@ -79,7 +77,8 @@ Value* V8ValueConverterImpl::FromV8Value(
     v8::Handle<v8::Context> context) const {
   v8::Context::Scope context_scope(context);
   v8::HandleScope handle_scope;
-  return FromV8ValueImpl(val);
+  std::set<int> unique_set;
+  return FromV8ValueImpl(val, &unique_set);
 }
 
 v8::Handle<v8::Value> V8ValueConverterImpl::ToV8ValueImpl(
@@ -133,7 +132,7 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Array(
   v8::Handle<v8::Array> result(v8::Array::New(val->GetSize()));
 
   for (size_t i = 0; i < val->GetSize(); ++i) {
-    Value* child = NULL;
+    const Value* child = NULL;
     CHECK(val->Get(i, &child));
 
     v8::Handle<v8::Value> child_v8 = ToV8ValueImpl(child);
@@ -154,7 +153,7 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToV8Object(
 
   for (DictionaryValue::key_iterator iter = val->begin_keys();
        iter != val->end_keys(); ++iter) {
-    Value* child = NULL;
+    const Value* child = NULL;
     CHECK(val->GetWithoutPathExpansion(*iter, &child));
 
     const std::string& key = *iter;
@@ -180,7 +179,8 @@ v8::Handle<v8::Value> V8ValueConverterImpl::ToArrayBuffer(
   return buffer.toV8Value();
 }
 
-Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val) const {
+Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val,
+    std::set<int>* unique_set) const {
   CHECK(!val.IsEmpty());
 
   if (val->IsNull())
@@ -215,22 +215,37 @@ Value* V8ValueConverterImpl::FromV8ValueImpl(v8::Handle<v8::Value> val) const {
 
   // v8::Value doesn't have a ToArray() method for some reason.
   if (val->IsArray())
-    return FromV8Array(val.As<v8::Array>());
+    return FromV8Array(val.As<v8::Array>(), unique_set);
 
   if (val->IsObject()) {
     BinaryValue* binary_value = FromV8Buffer(val);
     if (binary_value) {
       return binary_value;
     } else {
-      return FromV8Object(val->ToObject());
+      return FromV8Object(val->ToObject(), unique_set);
     }
   }
   LOG(ERROR) << "Unexpected v8 value type encountered.";
   return Value::CreateNullValue();
 }
 
-ListValue* V8ValueConverterImpl::FromV8Array(v8::Handle<v8::Array> val) const {
+Value* V8ValueConverterImpl::FromV8Array(v8::Handle<v8::Array> val,
+    std::set<int>* unique_set) const {
+  if (unique_set && unique_set->count(val->GetIdentityHash()))
+    return Value::CreateNullValue();
+
+  scoped_ptr<v8::Context::Scope> scope;
+  // If val was created in a different context than our current one, change to
+  // that context, but change back after val is converted.
+  if (!val->CreationContext().IsEmpty() &&
+      val->CreationContext() != v8::Context::GetCurrent())
+    scope.reset(new v8::Context::Scope(val->CreationContext()));
+
   ListValue* result = new ListValue();
+
+  if (unique_set)
+    unique_set->insert(val->GetIdentityHash());
+  // Only fields with integer keys are carried over to the ListValue.
   for (uint32 i = 0; i < val->Length(); ++i) {
     v8::TryCatch try_catch;
     v8::Handle<v8::Value> child_v8 = val->Get(i);
@@ -239,12 +254,10 @@ ListValue* V8ValueConverterImpl::FromV8Array(v8::Handle<v8::Array> val) const {
       child_v8 = v8::Null();
     }
 
-    // TODO(aa): It would be nice to support getters, but we need
-    // http://code.google.com/p/v8/issues/detail?id=1342 to do it properly.
     if (!val->HasRealIndexedProperty(i))
       continue;
 
-    Value* child = FromV8ValueImpl(child_v8);
+    Value* child = FromV8ValueImpl(child_v8, unique_set);
     CHECK(child);
 
     result->Append(child);
@@ -257,15 +270,15 @@ base::BinaryValue* V8ValueConverterImpl::FromV8Buffer(
   char* data = NULL;
   size_t length = 0;
 
-  WebKit::WebArrayBuffer* array_buffer =
-      WebKit::WebArrayBuffer::createFromV8Value(val);
-  if (array_buffer) {
+  scoped_ptr<WebKit::WebArrayBuffer> array_buffer(
+      WebKit::WebArrayBuffer::createFromV8Value(val));
+  scoped_ptr<WebKit::WebArrayBufferView> view;
+  if (array_buffer.get()) {
     data = reinterpret_cast<char*>(array_buffer->data());
     length = array_buffer->byteLength();
   } else {
-    WebKit::WebArrayBufferView* view =
-        WebKit::WebArrayBufferView::createFromV8Value(val);
-    if (view) {
+    view.reset(WebKit::WebArrayBufferView::createFromV8Value(val));
+    if (view.get()) {
       data = reinterpret_cast<char*>(view->baseAddress()) + view->byteOffset();
       length = view->byteLength();
     }
@@ -277,29 +290,51 @@ base::BinaryValue* V8ValueConverterImpl::FromV8Buffer(
     return NULL;
 }
 
-DictionaryValue* V8ValueConverterImpl::FromV8Object(
-    v8::Handle<v8::Object> val) const {
+Value* V8ValueConverterImpl::FromV8Object(
+    v8::Handle<v8::Object> val,
+    std::set<int>* unique_set) const {
+  if (unique_set && unique_set->count(val->GetIdentityHash()))
+    return Value::CreateNullValue();
+  scoped_ptr<v8::Context::Scope> scope;
+  // If val was created in a different context than our current one, change to
+  // that context, but change back after val is converted.
+  if (!val->CreationContext().IsEmpty() &&
+      val->CreationContext() != v8::Context::GetCurrent())
+    scope.reset(new v8::Context::Scope(val->CreationContext()));
+
   scoped_ptr<DictionaryValue> result(new DictionaryValue());
   v8::Handle<v8::Array> property_names(val->GetPropertyNames());
-  for (uint32 i = 0; i < property_names->Length(); ++i) {
-    v8::Handle<v8::String> name(property_names->Get(i).As<v8::String>());
 
-    // TODO(aa): It would be nice to support getters, but we need
-    // http://code.google.com/p/v8/issues/detail?id=1342 to do it properly.
-    if (!val->HasRealNamedProperty(name))
+  if (unique_set)
+    unique_set->insert(val->GetIdentityHash());
+
+  for (uint32 i = 0; i < property_names->Length(); ++i) {
+    v8::Handle<v8::Value> key(property_names->Get(i));
+
+    // base::DictionaryValue can only have string properties.
+    if (!key->IsString())
       continue;
 
-    v8::String::Utf8Value name_utf8(name->ToString());
+    // Ensure that the property actually exists.
+    if (!val->HasRealNamedProperty(key->ToString()))
+      continue;
+
+    // Skip all callbacks: crbug.com/139933
+    if (val->HasRealNamedCallbackProperty(key->ToString()))
+      continue;
+
+    v8::String::Utf8Value name_utf8(key->ToString());
 
     v8::TryCatch try_catch;
-    v8::Handle<v8::Value> child_v8 = val->Get(name);
+    v8::Handle<v8::Value> child_v8 = val->Get(key);
+
     if (try_catch.HasCaught()) {
       LOG(ERROR) << "Getter for property " << *name_utf8
                  << " threw an exception.";
       child_v8 = v8::Null();
     }
 
-    scoped_ptr<Value> child(FromV8ValueImpl(child_v8));
+    scoped_ptr<Value> child(FromV8ValueImpl(child_v8, unique_set));
     CHECK(child.get());
 
     // Strip null if asked (and since undefined is turned into null, undefined
@@ -328,5 +363,6 @@ DictionaryValue* V8ValueConverterImpl::FromV8Object(
     result->SetWithoutPathExpansion(std::string(*name_utf8, name_utf8.length()),
                                     child.release());
   }
+
   return result.release();
 }

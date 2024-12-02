@@ -17,8 +17,10 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -27,6 +29,7 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -49,7 +52,7 @@ class ErrorInfobarDelegate : public ConfirmInfoBarDelegate {
  public:
   ErrorInfobarDelegate(InfoBarTabHelper* infobar_helper,
                        Browser* browser,
-                       const CrxInstallerError& error)
+                       const extensions::CrxInstallerError& error)
       : ConfirmInfoBarDelegate(infobar_helper),
         browser_(browser),
         error_(error) {
@@ -65,34 +68,35 @@ class ErrorInfobarDelegate : public ConfirmInfoBarDelegate {
   }
 
   virtual string16 GetLinkText() const OVERRIDE {
-    return error_.type() == CrxInstallerError::ERROR_OFF_STORE ?
+    return error_.type() == extensions::CrxInstallerError::ERROR_OFF_STORE ?
         l10n_util::GetStringUTF16(IDS_LEARN_MORE) : ASCIIToUTF16("");
   }
 
   virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE {
-    browser::NavigateParams params(
+    chrome::NavigateParams params(
         browser_,
         GURL("http://support.google.com/chrome_webstore/?p=crx_warning"),
         content::PAGE_TRANSITION_LINK);
     params.disposition = NEW_FOREGROUND_TAB;
-    browser::Navigate(&params);
+    chrome::Navigate(&params);
     return false;
   }
 
   Browser* browser_;
-  CrxInstallerError error_;
+  extensions::CrxInstallerError error_;
 };
 
 }  // namespace
 
-ExtensionInstallUIDefault::ExtensionInstallUIDefault(Browser* browser)
-    : browser_(browser),
-      skip_post_install_ui_(false),
+ExtensionInstallUIDefault::ExtensionInstallUIDefault(Profile* profile)
+    : skip_post_install_ui_(false),
       previous_using_native_theme_(false),
       use_app_installed_bubble_(false) {
-  // Remember the current theme in case the user presses undo.
-  if (browser) {
-    Profile* profile = browser->profile();
+  profile_ = profile;
+
+  // |profile_| can be NULL during tests.
+  if (profile_) {
+    // Remember the current theme in case the user presses undo.
     const Extension* previous_theme =
         ThemeServiceFactory::GetThemeForProfile(profile);
     if (previous_theme)
@@ -112,16 +116,16 @@ void ExtensionInstallUIDefault::OnInstallSuccess(const Extension* extension,
 
   if (extension->is_theme()) {
     ShowThemeInfoBar(previous_theme_id_, previous_using_native_theme_,
-                     extension, browser_->profile());
+                     extension, profile_);
     return;
   }
 
   // Extensions aren't enabled by default in incognito so we confirm
   // the install in a normal window.
-  Profile* current_profile = browser_->profile()->GetOriginalProfile();
+  Profile* current_profile = profile_->GetOriginalProfile();
   Browser* browser = browser::FindOrCreateTabbedBrowser(current_profile);
   if (browser->tab_count() == 0)
-    browser->AddBlankTab(true);
+    chrome::AddBlankTab(browser, true);
   browser->window()->Show();
 
   bool use_bubble_for_apps = false;
@@ -137,18 +141,17 @@ void ExtensionInstallUIDefault::OnInstallSuccess(const Extension* extension,
     return;
   }
 
-  browser::ShowExtensionInstalledBubble(extension, browser, *icon,
-                                        current_profile);
+  chrome::ShowExtensionInstalledBubble(extension, browser, *icon);
 }
 
 void ExtensionInstallUIDefault::OnInstallFailure(
-    const CrxInstallerError& error) {
+    const extensions::CrxInstallerError& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (disable_failure_ui_for_tests || skip_post_install_ui_)
     return;
 
-  Browser* browser = browser::FindLastActiveWithProfile(browser_->profile());
-  TabContents* tab_contents = browser->GetActiveTabContents();
+  Browser* browser = browser::FindLastActiveWithProfile(profile_);
+  TabContents* tab_contents = chrome::GetActiveTabContents(browser);
   if (!tab_contents)
     return;
   InfoBarTabHelper* infobar_helper = tab_contents->infobar_tab_helper();
@@ -176,7 +179,7 @@ void ExtensionInstallUIDefault::ShowThemeInfoBar(
   if (!browser)
     return;
 
-  TabContents* tab_contents = browser->GetActiveTabContents();
+  TabContents* tab_contents = chrome::GetActiveTabContents(browser);
   if (!tab_contents)
     return;
   InfoBarTabHelper* infobar_helper = tab_contents->infobar_tab_helper();
@@ -224,17 +227,17 @@ InfoBarDelegate* ExtensionInstallUIDefault::GetNewThemeInstalledInfoBarDelegate(
 }
 
 // static
-ExtensionInstallUI* ExtensionInstallUI::Create(Browser* browser) {
-  return new ExtensionInstallUIDefault(browser);
+ExtensionInstallUI* ExtensionInstallUI::Create(Profile* profile) {
+  return new ExtensionInstallUIDefault(profile);
 }
 
 // static
 void ExtensionInstallUI::OpenAppInstalledUI(Browser* browser,
                                             const std::string& app_id) {
   if (NewTabUI::ShouldShowApps()) {
-    browser::NavigateParams params = browser->GetSingletonTabNavigateParams(
-        GURL(chrome::kChromeUINewTabURL));
-    browser::Navigate(&params);
+    chrome::NavigateParams params(chrome::GetSingletonTabNavigateParams(
+        browser, GURL(chrome::kChromeUINewTabURL)));
+    chrome::Navigate(&params);
 
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_APP_INSTALLED_TO_NTP,
@@ -257,4 +260,18 @@ void ExtensionInstallUI::OpenAppInstalledUI(Browser* browser,
 // static
 void ExtensionInstallUI::DisableFailureUIForTests() {
   disable_failure_ui_for_tests = true;
+}
+
+// static
+ExtensionInstallPrompt* ExtensionInstallUI::CreateInstallPromptWithWebContents(
+    content::WebContents* web_contents) {
+  Browser* browser = browser::FindBrowserWithWebContents(web_contents);
+  return chrome::CreateExtensionInstallPromptWithBrowser(browser);
+}
+
+// static
+ExtensionInstallPrompt* ExtensionInstallUI::CreateInstallPromptWithProfile(
+    Profile* profile) {
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
+  return chrome::CreateExtensionInstallPromptWithBrowser(browser);
 }

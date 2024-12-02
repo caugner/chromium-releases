@@ -6,8 +6,9 @@
 #define CONTENT_PUBLIC_RENDERER_RENDER_VIEW_H_
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 #include "content/common/content_export.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNavigationPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageVisibilityState.h"
 #include "ui/gfx/native_widget_types.h"
@@ -39,7 +40,7 @@ namespace content {
 
 class RenderViewVisitor;
 
-class CONTENT_EXPORT RenderView : public IPC::Message::Sender {
+class CONTENT_EXPORT RenderView : public IPC::Sender {
  public:
   // Returns the RenderView containing the given WebView.
   static RenderView* FromWebView(WebKit::WebView* webview);
@@ -47,8 +48,6 @@ class CONTENT_EXPORT RenderView : public IPC::Message::Sender {
   // Visit all RenderViews with a live WebView (i.e., RenderViews that have
   // been closed but not yet destroyed are excluded).
   static void ForEach(RenderViewVisitor* visitor);
-
-  virtual ~RenderView() {}
 
   // Get the routing ID of the view.
   virtual int GetRoutingID() const = 0;
@@ -127,6 +126,9 @@ class CONTENT_EXPORT RenderView : public IPC::Message::Sender {
       WebKit::WebFrame* frame,
       const WebKit::WebURLRequest& request,
       WebKit::WebNavigationPolicy policy) = 0;
+
+ protected:
+  virtual ~RenderView() {}
 };
 
 }  // namespace content

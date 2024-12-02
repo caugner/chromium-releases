@@ -4,9 +4,9 @@
 
 #ifndef CONTENT_SHELL_SHELL_JAVASCRIPT_DIALOG_CREATOR_H_
 #define CONTENT_SHELL_SHELL_JAVASCRIPT_DIALOG_CREATOR_H_
-#pragma once
 
 #include "base/compiler_specific.h"
+#include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/javascript_dialogs.h"
 
@@ -41,13 +41,21 @@ class ShellJavaScriptDialogCreator : public JavaScriptDialogCreator {
   // Called by the ShellJavaScriptDialog when it closes.
   void DialogClosed(ShellJavaScriptDialog* dialog);
 
+  // Used for content_browsertests.
+  void set_dialog_request_callback(
+      base::Callback<void()> dialog_request_callback) {
+    dialog_request_callback_ = dialog_request_callback;
+  }
+
  private:
-#if defined(OS_MACOSX) || defined(OS_WIN)
+#if defined(OS_MACOSX) || defined(OS_WIN) || defined(TOOLKIT_GTK)
   // The dialog being shown. No queueing.
   scoped_ptr<ShellJavaScriptDialog> dialog_;
 #else
   // TODO: implement ShellJavaScriptDialog for other platforms, drop this #if
 #endif
+
+  base::Callback<void()> dialog_request_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellJavaScriptDialogCreator);
 };

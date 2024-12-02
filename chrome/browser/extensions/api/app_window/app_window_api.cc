@@ -6,14 +6,14 @@
 
 #include "base/time.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_window_controller.h"
-#include "chrome/browser/extensions/extension_window_list.h"
+#include "chrome/browser/extensions/shell_window_registry.h"
+#include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/common/extensions/api/app_window.h"
-#include "content/public/common/url_constants.h"
-#include "content/public/browser/web_contents.h"
-#include "content/public/browser/render_view_host.h"
 #include "chrome/common/extensions/extension_error_utils.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 
@@ -22,7 +22,29 @@ namespace Create = app_window::Create;
 
 namespace extensions {
 
-const char kCustomFrameOption[] = "custom";
+namespace app_window_constants {
+const char kNoAssociatedShellWindow[] =
+    "The context from which the function was called did not have an "
+    "associated shell window.";
+};
+
+bool AppWindowExtensionFunction::RunImpl() {
+  ShellWindowRegistry* registry = ShellWindowRegistry::Get(profile());
+  CHECK(registry);
+  content::RenderViewHost* rvh = render_view_host();
+  if (!rvh)
+    // No need to set an error, since we won't return to the caller anyway if
+    // there's no RVH.
+    return false;
+  ShellWindow* window = registry->GetShellWindowForRenderViewHost(rvh);
+  if (!window) {
+    error_ = app_window_constants::kNoAssociatedShellWindow;
+    return false;
+  }
+  return RunWithWindow(window);
+}
+
+const char kNoneFrameOption[] = "none";
 
 bool AppWindowCreateFunction::RunImpl() {
   scoped_ptr<Create::Params> params(Create::Params::Create(*args_));
@@ -46,8 +68,8 @@ bool AppWindowCreateFunction::RunImpl() {
       create_params.bounds.set_y(*options->top.get());
 
     if (options->frame.get()) {
-      create_params.frame = *options->frame == kCustomFrameOption ?
-          ShellWindow::CreateParams::FRAME_CUSTOM :
+      create_params.frame = *options->frame == kNoneFrameOption ?
+          ShellWindow::CreateParams::FRAME_NONE :
           ShellWindow::CreateParams::FRAME_CHROME;
     }
 
@@ -87,7 +109,27 @@ bool AppWindowCreateFunction::RunImpl() {
   content::WebContents* created_contents = shell_window->web_contents();
   int view_id = created_contents->GetRenderViewHost()->GetRoutingID();
 
-  result_.reset(base::Value::CreateIntegerValue(view_id));
+  SetResult(base::Value::CreateIntegerValue(view_id));
+  return true;
+}
+
+bool AppWindowFocusFunction::RunWithWindow(ShellWindow* window) {
+  window->Activate();
+  return true;
+}
+
+bool AppWindowMaximizeFunction::RunWithWindow(ShellWindow* window) {
+  window->Maximize();
+  return true;
+}
+
+bool AppWindowMinimizeFunction::RunWithWindow(ShellWindow* window) {
+  window->Minimize();
+  return true;
+}
+
+bool AppWindowRestoreFunction::RunWithWindow(ShellWindow* window) {
+  window->Restore();
   return true;
 }
 

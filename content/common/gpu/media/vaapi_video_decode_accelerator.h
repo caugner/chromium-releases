@@ -16,12 +16,14 @@
 
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/shared_memory.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/threading/thread.h"
+#include "content/common/content_export.h"
 #include "content/common/gpu/media/vaapi_h264_decoder.h"
 #include "media/base/bitstream_buffer.h"
 #include "media/video/picture.h"
@@ -30,11 +32,19 @@
 // Class to provide video decode acceleration for Intel systems with hardware
 // support for it, and on which libva is available.
 // Decoding tasks are performed in a separate decoding thread.
-class VaapiVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
+//
+// Threading/life-cycle: this object is created & destroyed on the GPU
+// ChildThread.  A few methods on it are called on the decoder thread which is
+// stopped during |this->Destroy()|, so any tasks posted to the decoder thread
+// can assume |*this| is still alive.  See |weak_this_| below for more details.
+class CONTENT_EXPORT VaapiVideoDecodeAccelerator :
+    public media::VideoDecodeAccelerator {
  public:
   VaapiVideoDecodeAccelerator(
+      Display* x_display, GLXContext glx_context,
       Client* client,
       const base::Callback<bool(void)>& make_context_current);
+  virtual ~VaapiVideoDecodeAccelerator();
 
   // media::VideoDecodeAccelerator implementation.
   virtual bool Initialize(media::VideoCodecProfile profile) OVERRIDE;
@@ -46,27 +56,13 @@ class VaapiVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   virtual void Reset() OVERRIDE;
   virtual void Destroy() OVERRIDE;
 
-  // Used by user of this class to pass X/GLX state.
-  void SetGlxState(Display* x_display, GLXContext glx_context);
+  // Do any necessary initialization before the sandbox is enabled.
+  static void PreSandboxInitialization();
 
- private:
-  virtual ~VaapiVideoDecodeAccelerator();
-
-  void NotifyInitializeDone();
-
-  // Notify the client that the input buffer has been consumed.
-  void NotifyInputBufferRead(int input_buffer_id);
-
+private:
   // Ensure data has been synced with the output texture and notify
   // the client it is ready for displaying.
   void SyncAndNotifyPictureReady(int32 input_id, int32 output_id);
-
-  // Posted by the decoder thread to notify VAVDA that the decoder has
-  // initially parsed the stream and is ready to decode. If the pictures have
-  // not yet been requested, it will request the client to provide |num_pics|
-  // textures of given |size| and wait for them, otherwise will post
-  // a DecodeTask directly.
-  void ReadyToDecode(int num_pics, const gfx::Size& size);
 
   // Notify the client that an error has occurred and decoding cannot continue.
   void NotifyError(Error error);
@@ -84,6 +80,7 @@ class VaapiVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
 
   // Signal the client that the current buffer has been read and can be
   // returned. Will also release the mapping.
+  void ReturnCurrInputBufferLocked();
   void ReturnCurrInputBuffer();
 
   // Get and set up one or more output buffers in the decoder. This will sleep
@@ -125,15 +122,12 @@ class VaapiVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   // finished.
   void FinishReset();
 
-  // Scheduled on the decoder thread after receiving a Destroy() call from the
-  // client, executed after the current decoding task finishes decoding the
-  // current frame, ignoring any remaining inputs. Cleans up the decoder and
-  // frees all resources.
-  void DestroyTask();
+  // Helper for Destroy(), doing all the actual work except for deleting self.
+  void Cleanup();
 
-  // Scheduled by DestroyTask after it's done destroying the decoder, puts
-  // VAVDA into an uninitialized state.
-  void FinishDestroy();
+  // Lazily initialize static data after sandbox is enabled.  Return false on
+  // init failure.
+  static bool PostSandboxInitialization();
 
   // Client-provided X/GLX state.
   Display* x_display_;
@@ -193,9 +187,18 @@ class VaapiVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   // ChildThread's message loop
   MessageLoop* message_loop_;
 
+  // WeakPtr<> pointing to |this| for use in posting tasks from the decoder
+  // thread back to the ChildThread.  Because the decoder thread is a member of
+  // this class, any task running on the decoder thread is guaranteed that this
+  // object is still alive.  As a result, tasks posted from ChildThread to
+  // decoder thread should use base::Unretained(this), and tasks posted from the
+  // decoder thread to the ChildThread should use |weak_this_|.
+  base::WeakPtr<VaapiVideoDecodeAccelerator> weak_this_;
+
   // To expose client callbacks from VideoDecodeAccelerator.
-  // NOTE: all calls to this object *MUST* be executed on message_loop_.
-  Client* client_;
+  // NOTE: all calls to these objects *MUST* be executed on message_loop_.
+  base::WeakPtrFactory<Client> client_ptr_factory_;
+  base::WeakPtr<Client> client_;
 
   base::Thread decoder_thread_;
   content::VaapiH264Decoder decoder_;

@@ -26,7 +26,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/automation/automation_provider_observers.h"
@@ -36,8 +35,8 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browsing_data_helper.h"
-#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -47,7 +46,9 @@
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -76,10 +77,6 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
-
-#if defined(OS_WIN) && !defined(USE_AURA)
-#include "chrome/browser/external_tab/external_tab_container_win.h"
-#endif  // defined(OS_WIN)
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -298,7 +295,7 @@ void AutomationProvider::DisableInitialLoadObservers() {
 int AutomationProvider::GetIndexForNavigationController(
     const NavigationController* controller, const Browser* parent) const {
   DCHECK(parent);
-  return parent->GetIndexOfController(controller);
+  return chrome::GetIndexOfTab(parent, controller->GetWebContents());
 }
 
 // TODO(phajdan.jr): move to TestingAutomationProvider.
@@ -472,12 +469,10 @@ bool AutomationProvider::Send(IPC::Message* msg) {
 
 Browser* AutomationProvider::FindAndActivateTab(
     NavigationController* controller) {
-  int tab_index;
-  Browser* browser = browser::FindBrowserForController(controller, &tab_index);
-  if (browser)
-    browser->ActivateTabAt(tab_index, true);
-
-  return browser;
+  content::WebContentsDelegate* d = controller->GetWebContents()->GetDelegate();
+  if (d)
+    d->ActivateContents(controller->GetWebContents());
+  return browser::FindBrowserWithWebContents(controller->GetWebContents());
 }
 
 void AutomationProvider::HandleFindRequest(
@@ -567,8 +562,7 @@ void AutomationProvider::OverrideEncoding(int tab_handle,
 
     // If the browser has UI, simulate what a user would do.
     // Activate the tab and then click the encoding menu.
-    if (browser &&
-        browser->command_updater()->IsCommandEnabled(IDC_ENCODING_MENU)) {
+    if (browser && chrome::IsCommandEnabled(browser, IDC_ENCODING_MENU)) {
       int selected_encoding_id =
           CharacterEncoding::GetCommandIdByCanonicalEncodingName(encoding_name);
       if (selected_encoding_id) {

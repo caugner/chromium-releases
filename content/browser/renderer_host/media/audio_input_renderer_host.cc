@@ -24,10 +24,10 @@ AudioInputRendererHost::AudioEntry::AudioEntry()
 AudioInputRendererHost::AudioEntry::~AudioEntry() {}
 
 AudioInputRendererHost::AudioInputRendererHost(
-    content::ResourceContext* resource_context,
-    media::AudioManager* audio_manager)
-    : resource_context_(resource_context),
-      audio_manager_(audio_manager) {
+    media::AudioManager* audio_manager,
+    media_stream::MediaStreamManager* media_stream_manager)
+    : audio_manager_(audio_manager),
+      media_stream_manager_(media_stream_manager) {
 }
 
 AudioInputRendererHost::~AudioInputRendererHost() {
@@ -143,13 +143,6 @@ void AudioInputRendererHost::DoSendRecordingMessage(
   // should be implemented.
 }
 
-void AudioInputRendererHost::DoSendPausedMessage(
-    media::AudioInputController* controller) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  // TODO(henrika): TBI?
-  NOTREACHED();
-}
-
 void AudioInputRendererHost::DoHandleError(
     media::AudioInputController* controller,
     int error_code) {
@@ -182,17 +175,12 @@ void AudioInputRendererHost::OnStartDevice(int stream_id, int session_id) {
   VLOG(1) << "AudioInputRendererHost::OnStartDevice(stream_id="
           << stream_id << ", session_id = " << session_id << ")";
 
-  // Get access to the AudioInputDeviceManager to start the device.
-  media_stream::AudioInputDeviceManager* audio_input_man =
-      media_stream::MediaStreamManager::GetForResourceContext(
-          resource_context_, audio_manager_)->audio_input_device_manager();
-
   // Add the session entry to the map.
   session_entries_[session_id] = stream_id;
 
   // Start the device with the session_id. If the device is started
   // successfully, OnDeviceStarted() callback will be triggered.
-  audio_input_man->Start(session_id, this);
+  media_stream_manager_->audio_input_device_manager()->Start(session_id, this);
 }
 
 void AudioInputRendererHost::OnCreateStream(
@@ -296,8 +284,8 @@ void AudioInputRendererHost::OnSetVolume(int stream_id, double volume) {
 }
 
 void AudioInputRendererHost::SendErrorMessage(int stream_id) {
-  Send(new AudioInputMsg_NotifyStreamStateChanged(stream_id,
-                                                  kAudioStreamError));
+  Send(new AudioInputMsg_NotifyStreamStateChanged(
+      stream_id, media::AudioInputIPCDelegate::kError));
 }
 
 void AudioInputRendererHost::DeleteEntries() {
@@ -338,8 +326,8 @@ void AudioInputRendererHost::OnDeviceStopped(int session_id) {
     // Device has been stopped, close the input stream.
     CloseAndDeleteStream(entry);
     // Notify the renderer that the state of the input stream has changed.
-    Send(new AudioInputMsg_NotifyStreamStateChanged(stream_id,
-                                                    kAudioStreamPaused));
+    Send(new AudioInputMsg_NotifyStreamStateChanged(
+        stream_id, media::AudioInputIPCDelegate::kStopped));
   }
 
   // Delete the session entry.
@@ -349,10 +337,7 @@ void AudioInputRendererHost::OnDeviceStopped(int session_id) {
 void AudioInputRendererHost::StopAndDeleteDevice(int session_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  media_stream::AudioInputDeviceManager* audio_input_man =
-      media_stream::MediaStreamManager::GetForResourceContext(
-          resource_context_, audio_manager_)->audio_input_device_manager();
-  audio_input_man->Stop(session_id);
+  media_stream_manager_->audio_input_device_manager()->Stop(session_id);
 
   // Delete the session entry.
   session_entries_.erase(session_id);

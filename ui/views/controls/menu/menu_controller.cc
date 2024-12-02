@@ -6,6 +6,7 @@
 
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/rtl.h"
+#include "base/run_loop.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "ui/base/dragdrop/drag_utils.h"
@@ -20,6 +21,7 @@
 #include "ui/views/controls/menu/menu_controller_delegate.h"
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/drag_utils.h"
 #include "ui/views/view_constants.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/root_view.h"
@@ -342,7 +344,8 @@ MenuItemView* MenuController::Run(Widget* parent,
   {
     MessageLoopForUI* loop = MessageLoopForUI::current();
     MessageLoop::ScopedNestableTaskAllower allow(loop);
-    loop->RunWithDispatcher(this);
+    base::RunLoop run_loop(this);
+    run_loop.Run();
   }
 #endif
   message_loop_depth_--;
@@ -472,7 +475,7 @@ void MenuController::OnMouseReleased(SubmenuView* source,
 
   // We must ignore the first release event when it occured within the original
   // bounds.
-  if (drop_first_release_event_ && event.flags() == ui::EF_LEFT_MOUSE_BUTTON) {
+  if (drop_first_release_event_ && (event.flags() & ui::EF_LEFT_MOUSE_BUTTON)) {
     drop_first_release_event_ = false;
     gfx::Point loc(event.location());
     View::ConvertPointToScreen(source->GetScrollViewContainer(), &loc);
@@ -497,7 +500,7 @@ void MenuController::OnMouseReleased(SubmenuView* source,
   // contents of the folder.
   if (!part.is_scroll() && part.menu &&
       !(part.menu->HasSubmenu() &&
-        (event.flags() == ui::EF_LEFT_MOUSE_BUTTON))) {
+        (event.flags() & ui::EF_LEFT_MOUSE_BUTTON))) {
     if (active_mouse_view_) {
       SendMouseReleaseToActiveView(source, event);
       return;
@@ -797,6 +800,12 @@ void MenuController::SetSelectionOnPointerDown(SubmenuView* source,
   if (part.is_scroll())
     return;  // Ignore presses on scroll buttons.
 
+  // When this menu is opened through a touch event, a simulated right-click
+  // is sent before the menu appears.  Ignore it.
+  if ((event.flags() & ui::EF_RIGHT_MOUSE_BUTTON) &&
+      (event.flags() & ui::EF_FROM_TOUCH))
+    return;
+
   if (part.type == MenuPart::NONE ||
       (part.type == MenuPart::MENU_ITEM && part.menu &&
        part.menu->GetRootMenuItem() != state_.item->GetRootMenuItem())) {
@@ -855,12 +864,13 @@ void MenuController::StartDrag(SubmenuView* source,
   View::ConvertPointToView(NULL, item, &press_loc);
   gfx::Point widget_loc(press_loc);
   View::ConvertPointToWidget(item, &widget_loc);
-  gfx::Canvas canvas(gfx::Size(item->width(), item->height()), false);
-  item->PaintButton(&canvas, MenuItemView::PB_FOR_DRAG);
+  scoped_ptr<gfx::Canvas> canvas(views::GetCanvasForDragImage(
+      source->GetWidget(), gfx::Size(item->width(), item->height())));
+  item->PaintButton(canvas.get(), MenuItemView::PB_FOR_DRAG);
 
   OSExchangeData data;
   item->GetDelegate()->WriteDragData(item, &data);
-  drag_utils::SetDragImageOnDataObject(canvas, item->size(), press_loc,
+  drag_utils::SetDragImageOnDataObject(*canvas, item->size(), press_loc,
                                        &data);
   StopScrolling();
   int drag_ops = item->GetDelegate()->GetDragOperations(item);

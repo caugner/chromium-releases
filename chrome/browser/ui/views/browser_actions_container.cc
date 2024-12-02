@@ -10,6 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_action_view.h"
@@ -19,7 +20,6 @@
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/slide_animation.h"
@@ -30,6 +30,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/controls/resize_area.h"
 #include "ui/views/metrics.h"
+#include "ui/views/widget/widget.h"
 
 using extensions::Extension;
 
@@ -128,16 +129,16 @@ void BrowserActionsContainer::Init() {
 }
 
 int BrowserActionsContainer::GetCurrentTabId() const {
-  TabContents* tab = browser_->GetActiveTabContents();
+  TabContents* tab = chrome::GetActiveTabContents(browser_);
   return tab ? tab->restore_tab_helper()->session_id().id() : -1;
 }
 
 BrowserActionView* BrowserActionsContainer::GetBrowserActionView(
     ExtensionAction* action) {
-  for (BrowserActionViews::iterator iter = browser_action_views_.begin();
-       iter != browser_action_views_.end(); ++iter) {
-    if ((*iter)->button()->browser_action() == action)
-      return *iter;
+  for (BrowserActionViews::iterator i(browser_action_views_.begin());
+       i != browser_action_views_.end(); ++i) {
+    if ((*i)->button()->browser_action() == action)
+      return *i;
   }
   return NULL;
 }
@@ -152,12 +153,12 @@ void BrowserActionsContainer::CreateBrowserActionViews() {
   if (!model_)
     return;
 
-  for (extensions::ExtensionList::iterator iter = model_->begin();
-       iter != model_->end(); ++iter) {
-    if (!ShouldDisplayBrowserAction(*iter))
+  for (extensions::ExtensionList::iterator i(model_->begin());
+       i != model_->end(); ++i) {
+    if (!ShouldDisplayBrowserAction(*i))
       continue;
 
-    BrowserActionView* view = new BrowserActionView(*iter, this);
+    BrowserActionView* view = new BrowserActionView(*i, this);
     browser_action_views_.push_back(view);
     AddChildView(view);
   }
@@ -620,11 +621,11 @@ void BrowserActionsContainer::BrowserActionRemoved(const Extension* extension) {
     HidePopup();
 
   size_t visible_actions = VisibleBrowserActions();
-  for (BrowserActionViews::iterator iter = browser_action_views_.begin();
-       iter != browser_action_views_.end(); ++iter) {
-    if ((*iter)->button()->extension() == extension) {
-      delete *iter;
-      browser_action_views_.erase(iter);
+  for (BrowserActionViews::iterator i(browser_action_views_.begin());
+       i != browser_action_views_.end(); ++i) {
+    if ((*i)->button()->extension() == extension) {
+      delete *i;
+      browser_action_views_.erase(i);
 
       // If the extension is being upgraded we don't want the bar to shrink
       // because the icon is just going to get re-added to the same location.

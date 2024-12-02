@@ -9,7 +9,7 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "base/utf_string_conversions.h"
-#include "grit/ui_resources_standard.h"
+#include "grit/ui_resources.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -20,7 +20,7 @@
 
 namespace {
 
-int kTraySpacing = 1;
+int kTraySpacing = 8;
 
 }  // namespace
 
@@ -110,10 +110,15 @@ void StatusAreaWidgetDelegate::UpdateLayout() {
     }
   }
   Layout();
+  UpdateWidgetSize();
 }
 
 void StatusAreaWidgetDelegate::ChildPreferredSizeChanged(View* child) {
   // Need to resize the window when trays or items are added/removed.
+  UpdateWidgetSize();
+}
+
+void StatusAreaWidgetDelegate::UpdateWidgetSize() {
   if (GetWidget())
     GetWidget()->SetSize(GetPreferredSize());
 }

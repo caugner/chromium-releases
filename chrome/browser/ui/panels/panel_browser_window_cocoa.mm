@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
@@ -248,7 +249,8 @@ bool PanelBrowserWindowCocoa::PreHandlePanelKeyboardEvent(
   if (id == -1)
     return false;
 
-  if (GetPanelBrowser()->IsReservedCommandOrKey(id, event)) {
+  if (GetPanelBrowser()->command_controller()->IsReservedCommandOrKey(id,
+                                                                      event)) {
       return [BrowserWindowUtils handleKeyboardEvent:event.os_event
                                  inWindow:GetNativePanelHandle()];
   }
@@ -327,12 +329,12 @@ int PanelBrowserWindowCocoa::TitleOnlyHeight() const {
 void PanelBrowserWindowCocoa::TabInsertedAt(TabContents* contents,
                                             int index,
                                             bool foreground) {
-  [controller_ tabInserted:contents->web_contents()];
+  [controller_ webContentsInserted:contents->web_contents()];
 }
 
 void PanelBrowserWindowCocoa::TabDetachedAt(TabContents* contents,
                                             int index) {
-  [controller_ tabDetached:contents->web_contents()];
+  [controller_ webContentsDetached:contents->web_contents()];
 }
 
 void PanelBrowserWindowCocoa::Observe(

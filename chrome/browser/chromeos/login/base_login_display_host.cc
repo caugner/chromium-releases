@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -50,7 +51,6 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/widget/widget.h"
-#include "unicode/timezone.h"
 
 namespace {
 
@@ -131,13 +131,14 @@ LoginDisplayHost* BaseLoginDisplayHost::default_host_ = NULL;
 BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
     : background_bounds_(background_bounds),
       ALLOW_THIS_IN_INITIALIZER_LIST(pointer_factory_(this)),
-      shutting_down_(false) {
-  // We need to listen to APP_EXITING but not APP_TERMINATING because
-  // APP_TERMINATING will never be fired as long as this keeps ref-count.
-  // APP_EXITING is safe here because there will be no browser instance that
-  // will block the shutdown.
+      shutting_down_(false),
+      oobe_progress_bar_visible_(false) {
+  // We need to listen to CLOSE_ALL_BROWSERS_REQUEST but not APP_TERMINATIN
+  // because/ APP_TERMINATING will never be fired as long as this keeps
+  // ref-count. CLOSE_ALL_BROWSERS_REQUEST is safe here because there will be no
+  // browser instance that will block the shutdown.
   registrar_.Add(this,
-                 content::NOTIFICATION_APP_EXITING,
+                 chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
                  content::NotificationService::AllSources());
 
   // NOTIFICATION_BROWSER_OPENED is issued after browser is created, but
@@ -195,8 +196,8 @@ void BaseLoginDisplayHost::StartWizard(
   wizard_controller_.reset();
   wizard_controller_.reset(CreateWizardController());
 
-  if (!WizardController::IsDeviceRegistered())
-    SetOobeProgressBarVisible(true);
+  oobe_progress_bar_visible_ = !WizardController::IsDeviceRegistered();
+  SetOobeProgressBarVisible(oobe_progress_bar_visible_);
   wizard_controller_->Init(first_screen_name, screen_parameters);
 }
 
@@ -215,9 +216,9 @@ void BaseLoginDisplayHost::StartSignInScreen() {
 
   sign_in_controller_.reset();  // Only one controller in a time.
   sign_in_controller_.reset(new chromeos::ExistingUserController(this));
-  if (!WizardController::IsDeviceRegistered()) {
-    SetOobeProgressBarVisible(true);
-  }
+  oobe_progress_bar_visible_ = !WizardController::IsDeviceRegistered();
+  SetOobeProgressBarVisible(oobe_progress_bar_visible_);
+  SetStatusAreaVisible(true);
   SetShutdownButtonEnabled(true);
   sign_in_controller_->Init(users);
 
@@ -243,7 +244,8 @@ void BaseLoginDisplayHost::ResumeSignInScreen() {
   // auto-enrollment is complete we resume the normal login flow from here.
   DVLOG(1) << "Resuming sign in screen";
   CHECK(sign_in_controller_.get());
-  SetOobeProgressBarVisible(true);
+  SetOobeProgressBarVisible(oobe_progress_bar_visible_);
+  SetStatusAreaVisible(true);
   SetShutdownButtonEnabled(true);
   sign_in_controller_->ResumeLogin();
 }
@@ -272,16 +274,16 @@ void BaseLoginDisplayHost::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  registrar_.RemoveAll();
-  switch (type) {
-    case content::NOTIFICATION_APP_EXITING:
-      ShutdownDisplayHost(true);
-      break;
-    case chrome::NOTIFICATION_BROWSER_OPENED:
-      OnBrowserCreated();
-      break;
-    default:
-      LOG(FATAL) << "Unknown notification type:" << type;
+  if (type == chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST) {
+    ShutdownDisplayHost(true);
+  } else if (type == chrome::NOTIFICATION_BROWSER_OPENED) {
+    OnBrowserCreated();
+    registrar_.Remove(this,
+                      chrome::NOTIFICATION_CLOSE_ALL_BROWSERS_REQUEST,
+                      content::NotificationService::AllSources());
+    registrar_.Remove(this,
+                      chrome::NOTIFICATION_BROWSER_OPENED,
+                      content::NotificationService::AllSources());
   }
 }
 
@@ -566,10 +568,8 @@ void ShowLoginWizard(const std::string& first_screen_name,
   // Apply locale customizations only once to preserve whatever locale
   // user has changed to during OOBE.
   if (!timezone_name.empty()) {
-    icu::TimeZone* timezone = icu::TimeZone::createTimeZone(
-        icu::UnicodeString::fromUTF8(timezone_name));
-    CHECK(timezone) << "Timezone could not be set for " << timezone_name;
-    chromeos::system::TimezoneSettings::GetInstance()->SetTimezone(*timezone);
+    chromeos::system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
+        UTF8ToUTF16(timezone_name));
   }
 }
 

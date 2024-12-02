@@ -33,7 +33,7 @@ class UrlFetcherTest : public testing::Test  {
         base::Thread::Options(MessageLoop::TYPE_IO, 0)));
     context_getter_ = new URLRequestContextGetter(
         message_loop_.message_loop_proxy(),
-        io_thread_.message_loop(),
+        io_thread_.message_loop_proxy(),
         static_cast<MessageLoopForIO*>(file_thread_.message_loop()));
     ASSERT_TRUE(test_server_.Start());
   }

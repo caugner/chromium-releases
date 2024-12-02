@@ -11,6 +11,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/singleton.h"
 #include "base/message_pump_aurax11.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/touch/touch_factory.h"
@@ -575,16 +576,10 @@ gfx::Point CalibrateTouchCoordinates(
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
            switches::kEnableTouchCalibration))
     return gfx::Point(x, y);
-  // TODO(skuhne): Find a new home for these hardware dependent touch
-  // constants.
-  // Note: These values have been found to be correct for the device I was
-  // testing with. I have the feeling that the DPI resolution of the bezel is
-  // less then the dpi resolution over the visible part - which would explain
-  // why the small value (50) is so wide compared to the entire area.
   gfx::Rect bounds = gfx::Screen::GetPrimaryDisplay().bounds_in_pixel();
-  const int kLeftBorder = 50;
-  const int kRightBorder = 50;
-  const int kBottomBorder = 50;
+  const int kLeftBorder = 49;
+  const int kRightBorder = 49;
+  const int kBottomBorder = 53;
   const int kTopBorder = 0;
   const int resolution_x = bounds.width();
   const int resolution_y = bounds.height();
@@ -725,11 +720,21 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
 
-      const bool touch =
-          TouchFactory::GetInstance()->IsTouchDevice(xievent->sourceid);
       switch (xievent->evtype) {
+#if defined(USE_XI2_MT)
+        case XI_TouchBegin:
+        case XI_TouchUpdate:
+        case XI_TouchEnd:
+          return GetButtonMaskForX2Event(xievent) |
+                 GetEventFlagsFromXState(xievent->mods.effective) |
+                 GetEventFlagsFromXState(
+                     XModifierStateWatcher::GetInstance()->state());
+          break;
+#endif
         case XI_ButtonPress:
         case XI_ButtonRelease: {
+          const bool touch =
+              TouchFactory::GetInstance()->IsTouchDevice(xievent->sourceid);
           int flags = GetButtonMaskForX2Event(xievent) |
               GetEventFlagsFromXState(xievent->mods.effective);
           if (touch) {

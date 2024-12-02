@@ -4,16 +4,16 @@
 
 #ifndef UI_BASE_TOUCH_TOUCH_FACTORY_H_
 #define UI_BASE_TOUCH_TOUCH_FACTORY_H_
-#pragma once
 
 #include <bitset>
 #include <map>
 #include <vector>
 
-#include "base/memory/singleton.h"
 #include "base/hash_tables.h"
 #include "base/timer.h"
 #include "ui/base/ui_export.h"
+
+template <typename T> struct DefaultSingletonTraits;
 
 typedef unsigned long Cursor;
 typedef unsigned long Window;

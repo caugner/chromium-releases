@@ -7,14 +7,19 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_tab_helper.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/ui/search/search_delegate.h"
+#include "chrome/browser/ui/search/search_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
@@ -56,10 +61,6 @@ TabStripLayoutType DetermineTabStripLayout(PrefService* prefs,
   }
   if (ui::GetDisplayLayout() != ui::LAYOUT_TOUCH)
     return TAB_STRIP_LAYOUT_SHRINK;
-#if defined(USE_ASH)
-  // TODO(sky): remove ifdef when event generation on aura is fixed.
-  return TAB_STRIP_LAYOUT_STACKED;
-#else
   *adjust_layout = true;
   switch (prefs->GetInteger(prefs::kTabStripLayoutType)) {
     case TAB_STRIP_LAYOUT_STACKED:
@@ -67,7 +68,6 @@ TabStripLayoutType DetermineTabStripLayout(PrefService* prefs,
     default:
       return TAB_STRIP_LAYOUT_SHRINK;
   }
-#endif
 }
 
 }  // namespace
@@ -171,10 +171,8 @@ BrowserTabStripController::BrowserTabStripController(Browser* browser,
       browser_(browser),
       hover_tab_selector_(model) {
   model_->AddObserver(this);
-
-  notification_registrar_.Add(this,
-      chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED,
-      content::NotificationService::AllSources());
+  browser_->search_model()->AddObserver(this);
+  browser_->search_delegate()->toolbar_search_animator().AddObserver(this);
 
   local_pref_registrar_.Init(g_browser_process->local_state());
   local_pref_registrar_.Add(prefs::kTabStripLayoutType, this);
@@ -188,6 +186,8 @@ BrowserTabStripController::~BrowserTabStripController() {
     context_menu_contents_->Cancel();
 
   model_->RemoveObserver(this);
+  browser_->search_delegate()->toolbar_search_animator().RemoveObserver(this);
+  browser_->search_model()->RemoveObserver(this);
 }
 
 void BrowserTabStripController::InitFromModel(TabStrip* tabstrip) {
@@ -247,11 +247,6 @@ bool BrowserTabStripController::IsTabSelected(int model_index) const {
 
 bool BrowserTabStripController::IsTabPinned(int model_index) const {
   return model_->ContainsIndex(model_index) && model_->IsTabPinned(model_index);
-}
-
-bool BrowserTabStripController::IsTabCloseable(int model_index) const {
-  return !model_->ContainsIndex(model_index) ||
-      model_->delegate()->CanCloseTab();
 }
 
 bool BrowserTabStripController::IsNewTabPage(int model_index) const {
@@ -324,8 +319,7 @@ void BrowserTabStripController::OnDropIndexUpdate(int index,
 void BrowserTabStripController::PerformDrop(bool drop_before,
                                             int index,
                                             const GURL& url) {
-  browser::NavigateParams params(
-      browser_, url, content::PAGE_TRANSITION_LINK);
+  chrome::NavigateParams params(browser_, url, content::PAGE_TRANSITION_LINK);
   params.tabstrip_index = index;
 
   if (drop_before) {
@@ -336,8 +330,8 @@ void BrowserTabStripController::PerformDrop(bool drop_before,
     params.disposition = CURRENT_TAB;
     params.source_contents = model_->GetTabContentsAt(index);
   }
-  params.window_action = browser::NavigateParams::SHOW_WINDOW;
-  browser::Navigate(&params);
+  params.window_action = chrome::NavigateParams::SHOW_WINDOW;
+  chrome::Navigate(&params);
 }
 
 bool BrowserTabStripController::IsCompatibleWith(TabStrip* other) const {
@@ -447,22 +441,54 @@ void BrowserTabStripController::TabBlockedStateChanged(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// BrowserTabStripController, chrome::search::SearchModelObserver:
+
+void BrowserTabStripController::ModeChanged(const chrome::search::Mode& mode) {
+  // Mode has changed, set tab data based on new mode, which will trigger
+  // repainting of tab's background.
+  int active_index = GetActiveIndex();
+  DCHECK_NE(active_index, -1);
+  SetTabDataAt(chrome::GetTabContentsAt(browser_, active_index), active_index);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// BrowserTabStripController, chrome::search::ToolbarSearchAnimator::Observer:
+
+void BrowserTabStripController::OnToolbarBackgroundAnimatorProgressed() {
+  // We're fading in the tab background, set tab data based on new background
+  // state and possibly opacity value, which will trigger repainting of tab's
+  // background.
+  int active_index = GetActiveIndex();
+  DCHECK_NE(active_index, -1);
+  SetTabDataAt(chrome::GetTabContentsAt(browser_, active_index), active_index);
+}
+
+void BrowserTabStripController::OnToolbarBackgroundAnimatorCanceled(
+    TabContents* tab_contents) {
+  // Fade in of tab background has been canceled, which can happen in 2
+  // scenarios:
+  // 1) a deactivated or detached or closing tab, whose |tab_contents| is the
+  //    the formal parameter: make sure |tab_contents| still exist in tab model.
+  // 2) mode change of active tab, as indicated by a NULL |tab_contents|: make
+  //    sure active tab exists, and retrieve its |tab_contents|.
+  // If we proceed, set tab data so that |TabRendererData::background_state| and
+  // |TabRendererData::search_background_opacity| will be reset.
+  // Repainting of tab's background will be triggered in the process.
+  int index = tab_contents ? model_->GetIndexOfTabContents(tab_contents) :
+                             GetActiveIndex();
+  if (index == -1)
+    return;
+  SetTabDataAt(tab_contents ? tab_contents :
+      chrome::GetTabContentsAt(browser_, index), index);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, content::NotificationObserver implementation:
 
 void BrowserTabStripController::Observe(int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED:
-      // Note that this notification may be fired during a model mutation and
-      // possibly before the tabstrip has processed the change.
-      // Here, we just re-layout each existing tab to reflect the change in its
-      // closeable state, and then schedule paint for entire tabstrip.
-      for (int i = 0; i < tabstrip_->tab_count(); ++i)
-        static_cast<BaseTab*>(tabstrip_->tab_at(i))->Layout();
-      tabstrip_->SchedulePaint();
-      break;
-
     case chrome::NOTIFICATION_PREF_CHANGED:
       if (*content::Details<std::string>(details).ptr() ==
           prefs::kTabStripLayoutType) {
@@ -481,18 +507,11 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
     int model_index,
     TabRendererData* data,
     TabStatus tab_status) {
-  SkBitmap* app_icon = NULL;
   TabContents* tab_contents = TabContents::FromWebContents(contents);
 
-  // Extension App icons are slightly larger than favicons, so only allow
-  // them if permitted by the model.
-  if (model_->delegate()->LargeIconsPermitted())
-    app_icon = tab_contents->extension_tab_helper()->GetExtensionAppIcon();
-
-  if (app_icon)
-    data->favicon = *app_icon;
-  else
-    data->favicon = tab_contents->favicon_tab_helper()->GetFavicon();
+  // TODO: Convert data->favicon to gfx::Image.
+  data->favicon =
+      tab_contents->favicon_tab_helper()->GetFavicon().AsBitmap();
   data->network_state = TabContentsNetworkState(contents);
   data->title = contents->GetTitle();
   data->url = contents->GetURL();
@@ -503,6 +522,19 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->mini = model_->IsMiniTab(model_index);
   data->blocked = model_->IsTabBlocked(model_index);
   data->app = tab_contents->extension_tab_helper()->is_app();
+  data->mode = browser_->search_model()->mode().mode;
+  if (data->mode == chrome::search::Mode::MODE_SEARCH) {
+    // Get current state of background animation to paint for SEARCH mode.
+    browser_->search_delegate()->toolbar_search_animator().
+        GetCurrentBackgroundState(&data->background_state,
+                                  &data->search_background_opacity);
+  } else {
+    data->background_state =
+        chrome::search::ToolbarSearchAnimator::BACKGROUND_STATE_DEFAULT;
+    // Valid opacity value of double data type is 0f to 1f, so use -1f to
+    // indicate an invalid value.
+    data->search_background_opacity = -1.0f;
+  }
 }
 
 void BrowserTabStripController::SetTabDataAt(
@@ -523,7 +555,7 @@ void BrowserTabStripController::StartHighlightTabsForCommand(
     if (IsValidIndex(model_index)) {
       std::vector<int> indices =
           model_->GetIndicesClosedByCommand(model_index, command_id);
-      for (std::vector<int>::const_iterator i = indices.begin();
+      for (std::vector<int>::const_iterator i(indices.begin());
            i != indices.end(); ++i) {
         tabstrip_->StartHighlight(*i);
       }

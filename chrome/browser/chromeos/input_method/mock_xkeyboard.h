@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_INPUT_METHOD_MOCK_XKEYBOARD_H_
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_MOCK_XKEYBOARD_H_
-#pragma once
 
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 
@@ -45,7 +44,8 @@ class MockXKeyboard : public XKeyboard {
   DISALLOW_COPY_AND_ASSIGN(MockXKeyboard);
 };
 
-// TODO(yusukes): Use the mock in ui/views/ash/caps_lock_handler_browsertest.cc.
+// TODO(yusukes): Use the mock in
+// chrome/browser/ui/ash/caps_lock_handler_browsertest.cc.
 
 }  // namespace input_method
 }  // namespace chromeos

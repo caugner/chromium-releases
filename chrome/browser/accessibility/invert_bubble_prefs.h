@@ -4,14 +4,13 @@
 
 #ifndef CHROME_BROWSER_ACCESSIBILITY_INVERT_BUBBLE_PREFS_H_
 #define CHROME_BROWSER_ACCESSIBILITY_INVERT_BUBBLE_PREFS_H_
-#pragma once
 
 class PrefService;
 
-namespace browser {
+namespace chrome {
 
 void RegisterInvertBubbleUserPrefs(PrefService* prefs);
 
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_ACCESSIBILITY_INVERT_BUBBLE_PREFS_H_

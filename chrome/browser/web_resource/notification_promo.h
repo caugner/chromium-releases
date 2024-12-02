@@ -4,17 +4,18 @@
 
 #ifndef CHROME_BROWSER_WEB_RESOURCE_NOTIFICATION_PROMO_H_
 #define CHROME_BROWSER_WEB_RESOURCE_NOTIFICATION_PROMO_H_
-#pragma once
 
 #include <string>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "googleurl/src/gurl.h"
 
 namespace base {
 class DictionaryValue;
+class ListValue;
 }
 
 class PrefService;
@@ -26,12 +27,19 @@ class NotificationPromo {
  public:
   static GURL PromoServerURL();
 
+  enum PromoType {
+    NO_PROMO,
+    NTP_NOTIFICATION_PROMO,
+    BUBBLE_PROMO,
+    MOBILE_NTP_SYNC_PROMO,
+  };
+
   explicit NotificationPromo(Profile* profile);
   ~NotificationPromo();
 
   // Initialize from json/prefs.
-  void InitFromJson(const base::DictionaryValue& json);
-  void InitFromPrefs();
+  void InitFromJson(const base::DictionaryValue& json, PromoType promo_type);
+  void InitFromPrefs(PromoType promo_type);
 
   // Can this promo be shown?
   bool CanShow() const;
@@ -42,10 +50,22 @@ class NotificationPromo {
   double EndTime() const;
 
   // Helpers for NewTabPageHandler.
-  void HandleClosed();
-  bool HandleViewed();  // returns true if views exceeds maximum allowed.
+  // Mark the promo as closed when the user dismisses it.
+  static void HandleClosed(Profile* profile, PromoType promo_type);
+  // Mark the promo has having been viewed. This returns true if views
+  // exceeds the maximum allowed.
+  static bool HandleViewed(Profile* profile, PromoType promo_type);
 
   bool new_notification() const { return new_notification_; }
+
+  const std::string& promo_text() const { return promo_text_; }
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  const std::string& promo_text_long() const { return promo_text_long_; }
+  const std::string& promo_action_type() const { return promo_action_type_; }
+  const base::ListValue* promo_action_args() const {
+    return promo_action_args_.get();
+  }
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
   // Register preferences.
   static void RegisterUserPrefs(PrefService* prefs);
@@ -64,6 +84,10 @@ class NotificationPromo {
   // Flush data members to prefs for storage.
   void WritePrefs();
 
+  // Tests group_ against max_group_.
+  // When max_group_ is 0, all groups pass.
+  bool ExceedsMaxGroup() const;
+
   // Tests views_ against max_views_.
   // When max_views_ is 0, we don't cap the number of views.
   bool ExceedsMaxViews() const;
@@ -74,7 +98,13 @@ class NotificationPromo {
   Profile* profile_;
   PrefService* prefs_;
 
+  PromoType promo_type_;
   std::string promo_text_;
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  std::string promo_text_long_;
+  std::string promo_action_type_;
+  scoped_ptr<base::ListValue> promo_action_args_;
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
   double start_;
   double end_;

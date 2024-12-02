@@ -30,7 +30,7 @@
     ]
   },
   "background.persistent": {
-    "channel": "dev",
+    "channel": "stable",
     "extension_types": [
       "extension", "packaged_app"
     ],
@@ -195,9 +195,13 @@
   "sandbox": {
     "channel": "stable",
     "extension_types": [
-      "extension", "platform_app"
+      "extension", "platform_app", "packaged_app"
     ],
     "min_manifest_version": 2
+  },
+  "script_badge": {
+    "channel": "dev",
+    "extension_types": ["extension"]
   },
   "signature": {
     "channel": "stable",

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_UPLOAD_FILE_INFO_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_UPLOAD_FILE_INFO_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -89,7 +88,7 @@ struct UploadFileInfo {
   scoped_ptr<DocumentEntry> entry;
 
   // Callback to be invoked once the upload has completed.
-  typedef base::Callback<void(base::PlatformFileError error,
+  typedef base::Callback<void(GDataFileError error,
       scoped_ptr<UploadFileInfo> upload_file_info)> UploadCompletionCallback;
   UploadCompletionCallback completion_callback;
 };

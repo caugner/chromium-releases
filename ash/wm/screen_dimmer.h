@@ -4,7 +4,6 @@
 
 #ifndef ASH_WM_SCREEN_DIMMER_H_
 #define ASH_WM_SCREEN_DIMMER_H_
-#pragma once
 
 #include "ash/ash_export.h"
 #include "base/basictypes.h"
@@ -24,7 +23,7 @@ namespace ash {
 namespace internal {
 
 // ScreenDimmer displays a partially-opaque layer above everything
-// else in the root window to darken the monitor.  It shouldn't be used
+// else in the root window to darken the display.  It shouldn't be used
 // for long-term brightness adjustments due to performance
 // considerations -- it's only intended for cases where we want to
 // briefly dim the screen (e.g. to indicate to the user that we're

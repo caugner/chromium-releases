@@ -25,12 +25,13 @@
 #include "net/base/net_util.h"
 #include "remoting/host/host_config.h"
 #include "remoting/host/json_host_config.h"
+#include "remoting/host/usage_stats_consent.h"
 
 namespace remoting {
 
 namespace {
 
-const char kDaemonScript[] = "me2me_virtual_host.py";
+const char kDaemonScript[] = "me2me_virtual_host";
 const int64 kDaemonTimeoutMs = 5000;
 
 std::string GetMd5(const std::string& value) {
@@ -59,19 +60,22 @@ class DaemonControllerLinux : public remoting::DaemonController {
   virtual void GetConfig(const GetConfigCallback& callback) OVERRIDE;
   virtual void SetConfigAndStart(
       scoped_ptr<base::DictionaryValue> config,
-      const CompletionCallback& done_callback) OVERRIDE;
+      bool consent,
+      const CompletionCallback& done) OVERRIDE;
   virtual void UpdateConfig(scoped_ptr<base::DictionaryValue> config,
                             const CompletionCallback& done_callback) OVERRIDE;
   virtual void Stop(const CompletionCallback& done_callback) OVERRIDE;
   virtual void SetWindow(void* window_handle) OVERRIDE;
   virtual void GetVersion(const GetVersionCallback& done_callback) OVERRIDE;
+  virtual void GetUsageStatsConsent(
+      const GetUsageStatsConsentCallback& done) OVERRIDE;
 
  private:
   FilePath GetConfigPath();
 
   void DoGetConfig(const GetConfigCallback& callback);
   void DoSetConfigAndStart(scoped_ptr<base::DictionaryValue> config,
-                           const CompletionCallback& done_callback);
+                           const CompletionCallback& done);
   void DoUpdateConfig(scoped_ptr<base::DictionaryValue> config,
                       const CompletionCallback& done_callback);
   void DoStop(const CompletionCallback& done_callback);
@@ -128,9 +132,9 @@ static bool RunScript(const std::vector<std::string>& args, int* exit_code) {
                                     &process_handle);
   if (result) {
     if (exit_code) {
-      result = base::WaitForExitCodeWithTimeout(process_handle,
-                                                exit_code,
-                                                kDaemonTimeoutMs);
+      result = base::WaitForExitCodeWithTimeout(
+          process_handle, exit_code,
+          base::TimeDelta::FromMilliseconds(kDaemonTimeoutMs));
     }
     base::CloseProcessHandle(process_handle);
   }
@@ -159,13 +163,21 @@ void DaemonControllerLinux::GetConfig(const GetConfigCallback& callback) {
       &DaemonControllerLinux::DoGetConfig, base::Unretained(this), callback));
 }
 
+void DaemonControllerLinux::GetUsageStatsConsent(
+    const GetUsageStatsConsentCallback& done) {
+  // Crash dump collection is not implemented on Linux yet.
+  // http://crbug.com/130678.
+  done.Run(false, false, false);
+}
+
 void DaemonControllerLinux::SetConfigAndStart(
     scoped_ptr<base::DictionaryValue> config,
-    const CompletionCallback& done_callback) {
+    bool /* consent */,
+    const CompletionCallback& done) {
   // base::Unretained() is safe because we control lifetime of the thread.
   file_io_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
       &DaemonControllerLinux::DoSetConfigAndStart, base::Unretained(this),
-      base::Passed(&config), done_callback));
+      base::Passed(&config), done));
 }
 
 void DaemonControllerLinux::UpdateConfig(
@@ -222,14 +234,28 @@ void DaemonControllerLinux::DoGetConfig(const GetConfigCallback& callback) {
 void DaemonControllerLinux::DoSetConfigAndStart(
     scoped_ptr<base::DictionaryValue> config,
     const CompletionCallback& done_callback) {
+  JsonHostConfig config_file(GetConfigPath());
+  for (DictionaryValue::key_iterator key(config->begin_keys());
+       key != config->end_keys(); ++key) {
+    std::string value;
+    if (!config->GetString(*key, &value)) {
+      LOG(ERROR) << *key << " is not a string.";
+      done_callback.Run(RESULT_FAILED);
+      return;
+    }
+    config_file.SetString(*key, value);
+  }
+
+  bool success = config_file.Save();
+  if (!success) {
+    done_callback.Run(RESULT_FAILED);
+    return;
+  }
+
   std::vector<std::string> args;
-  args.push_back("--explicit-config");
-  std::string config_json;
-  base::JSONWriter::Write(config.get(), &config_json);
-  args.push_back(config_json);
-  std::vector<std::string> no_args;
-  int exit_code = 0;
+  args.push_back("--silent");
   AsyncResult result;
+  int exit_code;
   if (RunScript(args, &exit_code)) {
     result = (exit_code == 0) ? RESULT_OK : RESULT_FAILED;
   } else {
@@ -252,6 +278,7 @@ void DaemonControllerLinux::DoUpdateConfig(
     if (!config->GetString(*key, &value)) {
       LOG(ERROR) << *key << " is not a string.";
       done_callback.Run(RESULT_FAILED);
+      return;
     }
     config_file.SetString(*key, value);
   }

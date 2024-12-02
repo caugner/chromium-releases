@@ -8,26 +8,24 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
-#include "sync/internal_api/public/syncable/model_type_test_util.h"
+#include "sync/internal_api/public/base/model_type_test_util.h"
 #include "sync/protocol/nigori_specifics.pb.h"
 #include "sync/protocol/password_specifics.pb.h"
 #include "sync/test/fake_encryptor.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace syncer {
 
 namespace {
 
 using ::testing::_;
 using ::testing::Mock;
 using ::testing::StrictMock;
-using syncable::ModelTypeSet;
 
 class MockObserver : public Cryptographer::Observer {
  public:
-  MOCK_METHOD2(OnEncryptedTypesChanged,
-               void(syncable::ModelTypeSet, bool));
+  MOCK_METHOD2(OnEncryptedTypesChanged, void(ModelTypeSet, bool));
 };
 
 }  // namespace
@@ -149,6 +147,19 @@ TEST_F(SyncCryptographerTest, AddKeySetsDefault) {
   EXPECT_EQ(encrypted3.key_name(), encrypted4.key_name());
 }
 
+// Ensure setting the keystore key works and doesn't modify the default nigori.
+TEST_F(SyncCryptographerTest, SetKeystore) {
+  EXPECT_FALSE(cryptographer_.is_initialized());
+  EXPECT_FALSE(cryptographer_.HasKeystoreKey());
+
+  EXPECT_FALSE(cryptographer_.SetKeystoreKey(""));
+  EXPECT_FALSE(cryptographer_.HasKeystoreKey());
+
+  EXPECT_TRUE(cryptographer_.SetKeystoreKey("keystore_key"));
+  EXPECT_TRUE(cryptographer_.HasKeystoreKey());
+  EXPECT_FALSE(cryptographer_.is_initialized());
+}
+
 // Crashes, Bug 55178.
 #if defined(OS_WIN)
 #define MAYBE_EncryptExportDecrypt DISABLED_EncryptExportDecrypt
@@ -222,6 +233,24 @@ TEST_F(SyncCryptographerTest, MAYBE_PackUnpack) {
   EXPECT_EQ(expected_mac, mac_key);
 }
 
+// Test that bootstrapping the keystore key works and doesn't affect the default
+// nigori.
+TEST_F(SyncCryptographerTest, BootstrapKeystore) {
+  std::string token;
+  cryptographer_.GetKeystoreKeyBootstrapToken(&token);
+  EXPECT_TRUE(token.empty());
+
+  cryptographer_.SetKeystoreKey("keystore_key");
+  cryptographer_.GetKeystoreKeyBootstrapToken(&token);
+  EXPECT_FALSE(token.empty());
+
+  Cryptographer cryptographer2(&encryptor_);
+  EXPECT_FALSE(cryptographer2.HasKeystoreKey());
+  cryptographer2.BootstrapKeystoreKey(token);
+  EXPECT_TRUE(cryptographer2.HasKeystoreKey());
+  EXPECT_FALSE(cryptographer2.is_initialized());
+}
+
 TEST_F(SyncCryptographerTest, NigoriEncryptionTypes) {
   Cryptographer cryptographer2(&encryptor_);
   sync_pb::NigoriSpecifics nigori;
@@ -245,15 +274,13 @@ TEST_F(SyncCryptographerTest, NigoriEncryptionTypes) {
 
   EXPECT_CALL(observer,
               OnEncryptedTypesChanged(
-                  HasModelTypes(syncable::ModelTypeSet::All()),
-                  false));
+                  HasModelTypes(ModelTypeSet::All()), false));
   EXPECT_CALL(observer2,
               OnEncryptedTypesChanged(
-                  HasModelTypes(syncable::ModelTypeSet::All()),
-                  false));
+                  HasModelTypes(ModelTypeSet::All()), false));
 
   // Set all encrypted types
-  encrypted_types = syncable::ModelTypeSet::All();
+  encrypted_types = ModelTypeSet::All();
   cryptographer_.MergeEncryptedTypesForTest(encrypted_types);
   cryptographer_.UpdateNigoriFromEncryptedTypes(&nigori);
   cryptographer2.UpdateEncryptedTypesFromNigori(nigori);
@@ -269,7 +296,7 @@ TEST_F(SyncCryptographerTest, NigoriEncryptionTypes) {
 }
 
 TEST_F(SyncCryptographerTest, EncryptEverythingExplicit) {
-  ModelTypeSet real_types = syncable::ModelTypeSet::All();
+  ModelTypeSet real_types = ModelTypeSet::All();
   sync_pb::NigoriSpecifics specifics;
   specifics.set_encrypt_everything(true);
 
@@ -278,13 +305,13 @@ TEST_F(SyncCryptographerTest, EncryptEverythingExplicit) {
 
   EXPECT_CALL(observer,
               OnEncryptedTypesChanged(
-                  HasModelTypes(syncable::ModelTypeSet::All()), true));
+                  HasModelTypes(ModelTypeSet::All()), true));
 
   EXPECT_FALSE(cryptographer_.encrypt_everything());
   ModelTypeSet encrypted_types = cryptographer_.GetEncryptedTypes();
   for (ModelTypeSet::Iterator iter = real_types.First();
        iter.Good(); iter.Inc()) {
-    if (iter.Get() == syncable::PASSWORDS || iter.Get() == syncable::NIGORI)
+    if (iter.Get() == PASSWORDS || iter.Get() == NIGORI)
       EXPECT_TRUE(encrypted_types.Has(iter.Get()));
     else
       EXPECT_FALSE(encrypted_types.Has(iter.Get()));
@@ -306,7 +333,7 @@ TEST_F(SyncCryptographerTest, EncryptEverythingExplicit) {
 }
 
 TEST_F(SyncCryptographerTest, EncryptEverythingImplicit) {
-  ModelTypeSet real_types = syncable::ModelTypeSet::All();
+  ModelTypeSet real_types = ModelTypeSet::All();
   sync_pb::NigoriSpecifics specifics;
   specifics.set_encrypt_bookmarks(true);  // Non-passwords = encrypt everything
 
@@ -315,13 +342,13 @@ TEST_F(SyncCryptographerTest, EncryptEverythingImplicit) {
 
   EXPECT_CALL(observer,
               OnEncryptedTypesChanged(
-                  HasModelTypes(syncable::ModelTypeSet::All()), true));
+                  HasModelTypes(ModelTypeSet::All()), true));
 
   EXPECT_FALSE(cryptographer_.encrypt_everything());
   ModelTypeSet encrypted_types = cryptographer_.GetEncryptedTypes();
   for (ModelTypeSet::Iterator iter = real_types.First();
        iter.Good(); iter.Inc()) {
-    if (iter.Get() == syncable::PASSWORDS || iter.Get() == syncable::NIGORI)
+    if (iter.Get() == PASSWORDS || iter.Get() == NIGORI)
       EXPECT_TRUE(encrypted_types.Has(iter.Get()));
     else
       EXPECT_FALSE(encrypted_types.Has(iter.Get()));
@@ -343,7 +370,7 @@ TEST_F(SyncCryptographerTest, EncryptEverythingImplicit) {
 }
 
 TEST_F(SyncCryptographerTest, UnknownSensitiveTypes) {
-  ModelTypeSet real_types = syncable::ModelTypeSet::All();
+  ModelTypeSet real_types = ModelTypeSet::All();
   sync_pb::NigoriSpecifics specifics;
   // Explicitly setting encrypt everything should override logic for implicit
   // encrypt everything.
@@ -353,9 +380,8 @@ TEST_F(SyncCryptographerTest, UnknownSensitiveTypes) {
   StrictMock<MockObserver> observer;
   cryptographer_.AddObserver(&observer);
 
-  syncable::ModelTypeSet expected_encrypted_types =
-      Cryptographer::SensitiveTypes();
-  expected_encrypted_types.Put(syncable::BOOKMARKS);
+  ModelTypeSet expected_encrypted_types = Cryptographer::SensitiveTypes();
+  expected_encrypted_types.Put(BOOKMARKS);
 
   EXPECT_CALL(observer,
               OnEncryptedTypesChanged(
@@ -365,7 +391,7 @@ TEST_F(SyncCryptographerTest, UnknownSensitiveTypes) {
   ModelTypeSet encrypted_types = cryptographer_.GetEncryptedTypes();
   for (ModelTypeSet::Iterator iter = real_types.First();
        iter.Good(); iter.Inc()) {
-    if (iter.Get() == syncable::PASSWORDS || iter.Get() == syncable::NIGORI)
+    if (iter.Get() == PASSWORDS || iter.Get() == NIGORI)
       EXPECT_TRUE(encrypted_types.Has(iter.Get()));
     else
       EXPECT_FALSE(encrypted_types.Has(iter.Get()));
@@ -377,9 +403,9 @@ TEST_F(SyncCryptographerTest, UnknownSensitiveTypes) {
   encrypted_types = cryptographer_.GetEncryptedTypes();
   for (ModelTypeSet::Iterator iter = real_types.First();
        iter.Good(); iter.Inc()) {
-    if (iter.Get() == syncable::PASSWORDS ||
-        iter.Get() == syncable::NIGORI ||
-        iter.Get() == syncable::BOOKMARKS)
+    if (iter.Get() == PASSWORDS ||
+        iter.Get() == NIGORI ||
+        iter.Get() == BOOKMARKS)
       EXPECT_TRUE(encrypted_types.Has(iter.Get()));
     else
       EXPECT_FALSE(encrypted_types.Has(iter.Get()));
@@ -388,4 +414,4 @@ TEST_F(SyncCryptographerTest, UnknownSensitiveTypes) {
   cryptographer_.RemoveObserver(&observer);
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

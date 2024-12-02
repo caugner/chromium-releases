@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_SESSIONS_SESSION_SERVICE_H_
 #define CHROME_BROWSER_SESSIONS_SESSION_SERVICE_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -254,6 +253,10 @@ class SessionService : public BaseSessionService,
 
   SessionCommand* CreatePinnedStateCommand(const SessionID& tab_id,
                                            bool is_pinned);
+
+  SessionCommand* CreateSessionStorageAssociatedCommand(
+      const SessionID& tab_id,
+      const std::string& session_storage_persistent_id);
 
   // Callback from the backend for getting the commands from the save file.
   // Converts the commands in SessionWindows and notifies the real callback.

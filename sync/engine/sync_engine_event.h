@@ -4,7 +4,6 @@
 
 #ifndef SYNC_ENGINE_SYNC_ENGINE_EVENT_H_
 #define SYNC_ENGINE_SYNC_ENGINE_EVENT_H_
-#pragma once
 
 #include <string>
 
@@ -15,7 +14,7 @@ namespace syncable {
 class Id;
 }
 
-namespace browser_sync {
+namespace syncer {
 
 struct SyncEngineEvent {
   enum EventCause {
@@ -40,11 +39,6 @@ struct SyncEngineEvent {
     // The listener should sever the sync / browser connections and delete sync
     // data (i.e. as if the user clicked 'Stop Syncing' in the browser.
     STOP_SYNCING_PERMANENTLY,
-
-    // These events are sent to indicate when we know the clearing of
-    // server data have failed or succeeded.
-    CLEAR_SERVER_DATA_SUCCEEDED,
-    CLEAR_SERVER_DATA_FAILED,
 
     // This event is sent when we receive an actionable error. It is upto
     // the listeners to figure out the action to take using the snapshot sent.
@@ -72,6 +66,6 @@ class SyncEngineEventListener {
   virtual ~SyncEngineEventListener() {}
 };
 
-}  // namespace browser_sync
+}  // namespace syncer
 
 #endif  // SYNC_ENGINE_SYNC_ENGINE_EVENT_H_

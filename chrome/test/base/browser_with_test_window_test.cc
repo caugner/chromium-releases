@@ -7,6 +7,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/render_messages.h"
@@ -40,9 +41,10 @@ void BrowserWithTestWindowTest::SetUp() {
   testing::Test::SetUp();
 
   set_profile(CreateProfile());
-  browser_.reset(new Browser(Browser::TYPE_TABBED, profile()));
-  window_.reset(new TestBrowserWindow(browser()));
-  browser_->SetWindowForTesting(window_.get());
+  window_.reset(new TestBrowserWindow);
+  Browser::CreateParams params(profile());
+  params.window = window_.get();
+  browser_.reset(new Browser(params));
 #if defined(USE_AURA)
   aura_test_helper_.reset(new aura::test::AuraTestHelper(&ui_loop_));
   aura_test_helper_->SetUp();
@@ -80,10 +82,10 @@ void BrowserWithTestWindowTest::set_profile(TestingProfile* profile) {
 }
 
 void BrowserWithTestWindowTest::AddTab(Browser* browser, const GURL& url) {
-  browser::NavigateParams params(browser, url, content::PAGE_TRANSITION_TYPED);
+  chrome::NavigateParams params(browser, url, content::PAGE_TRANSITION_TYPED);
   params.tabstrip_index = 0;
   params.disposition = NEW_FOREGROUND_TAB;
-  browser::Navigate(&params);
+  chrome::Navigate(&params);
   CommitPendingLoad(&params.target_contents->web_contents()->GetController());
 }
 
@@ -137,14 +139,15 @@ void BrowserWithTestWindowTest::NavigateAndCommit(
 }
 
 void BrowserWithTestWindowTest::NavigateAndCommitActiveTab(const GURL& url) {
-  NavigateAndCommit(&browser()->GetActiveWebContents()->GetController(), url);
+  NavigateAndCommit(&chrome::GetActiveWebContents(browser())->GetController(),
+                    url);
 }
 
 void BrowserWithTestWindowTest::DestroyBrowserAndProfile() {
   if (browser_.get()) {
     // Make sure we close all tabs, otherwise Browser isn't happy in its
     // destructor.
-    browser()->CloseAllTabs();
+    chrome::CloseAllTabs(browser());
     browser_.reset(NULL);
   }
   window_.reset(NULL);

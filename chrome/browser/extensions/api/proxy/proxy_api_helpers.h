@@ -6,7 +6,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_API_PROXY_PROXY_API_HELPERS_H_
 #define CHROME_BROWSER_EXTENSIONS_API_PROXY_PROXY_API_HELPERS_H_
-#pragma once
 
 #include <string>
 
@@ -101,7 +100,7 @@ bool GetProxyServer(const base::DictionaryValue* proxy_server,
 
 // Joins a list of URLs (stored as StringValues) in |list| with |joiner|
 // to |out|. Returns true if successful and sets |error| otherwise.
-bool JoinUrlList(base::ListValue* list,
+bool JoinUrlList(const base::ListValue* list,
                  const std::string& joiner,
                  std::string* out,
                  std::string* error,

@@ -25,6 +25,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -160,7 +161,7 @@ void DataPromoNotification::ShowOptionalMobileDataPromoNotification(
       return;
     }
 
-    gfx::Rect button_bounds = host->GetScreenBounds();
+    gfx::Rect button_bounds = host->GetBoundsInScreen();
     // StatusArea button Y position is usually -1, fix it so that
     // Contains() method for screen bounds works correctly.
     button_bounds.set_y(button_bounds.y() + 1);

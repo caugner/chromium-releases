@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_WEBUI_EXTENSIONS_COMMAND_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_EXTENSIONS_COMMAND_HANDLER_H_
-#pragma once
 
 #include "base/compiler_specific.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -37,6 +36,9 @@ class CommandHandler : public content::WebUIMessageHandler {
   virtual void RegisterMessages() OVERRIDE;
 
  private:
+   // Update the list of extension commands in the config UI.
+  void UpdateCommandDataOnPage();
+
   // Handles requests from javascript to fetch the extensions data, including
   // the commands it contains.
   // Replies back through: ExtensionCommandsOverlay.returnExtensionsData.

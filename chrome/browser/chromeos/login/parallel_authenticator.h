@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_PARALLEL_AUTHENTICATOR_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_PARALLEL_AUTHENTICATOR_H_
-#pragma once
 
 #include <string>
 
@@ -67,7 +66,6 @@ class ParallelAuthenticator : public Authenticator,
   };
 
   explicit ParallelAuthenticator(LoginStatusConsumer* consumer);
-  virtual ~ParallelAuthenticator();
 
   // Authenticator overrides.
   virtual void CompleteLogin(Profile* profile,
@@ -144,6 +142,9 @@ class ParallelAuthenticator : public Authenticator,
 
   void OnOffTheRecordLoginSuccess();
   void OnPasswordChangeDetected();
+
+ protected:
+  virtual ~ParallelAuthenticator();
 
  private:
   friend class ParallelAuthenticatorTest;

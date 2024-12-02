@@ -4,7 +4,6 @@
 
 #ifndef CONTENT_BROWSER_WEB_CONTENTS_RENDER_VIEW_HOST_MANAGER_H_
 #define CONTENT_BROWSER_WEB_CONTENTS_RENDER_VIEW_HOST_MANAGER_H_
-#pragma once
 
 #include "base/basictypes.h"
 #include "base/logging.h"
@@ -61,8 +60,6 @@ class CONTENT_EXPORT RenderViewHostManager
         content::RenderViewHost* render_view_host, int opener_route_id) = 0;
     virtual void BeforeUnloadFiredFromRenderManager(
         bool proceed, bool* proceed_to_fire_unload) = 0;
-    virtual void DidStartLoadingFromRenderManager(
-        content::RenderViewHost* render_view_host) = 0;
     virtual void RenderViewGoneFromRenderManager(
         content::RenderViewHost* render_view_host) = 0;
     virtual void UpdateRenderViewSizeForRenderManager() = 0;

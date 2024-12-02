@@ -193,7 +193,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DisableEnableSync) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   // Disable typed url sync for one client, leave it active for the other.
-  GetClient(0)->DisableSyncForDatatype(syncable::TYPED_URLS);
+  GetClient(0)->DisableSyncForDatatype(syncer::TYPED_URLS);
 
   // Add one URL to non-syncing client, add a different URL to the other,
   // wait for sync cycle to complete. No data should be exchanged.
@@ -201,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DisableEnableSync) {
   GURL url2(kUrl2);
   AddUrlToHistory(0, url1);
   AddUrlToHistory(1, url2);
-  ASSERT_TRUE(AwaitQuiescence());
+  ASSERT_TRUE(GetClient(1)->AwaitFullSyncCompletion("Added a typed url."));
 
   // Make sure that no data was exchanged.
   history::URLRows post_sync_urls = GetTypedUrlsFromClient(0);
@@ -212,7 +212,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientTypedUrlsSyncTest, DisableEnableSync) {
   ASSERT_EQ(url2, post_sync_urls[0].url());
 
   // Enable typed url sync, make both URLs are synced to each client.
-  GetClient(0)->EnableSyncForDatatype(syncable::TYPED_URLS);
+  GetClient(0)->EnableSyncForDatatype(syncer::TYPED_URLS);
   ASSERT_TRUE(AwaitQuiescence());
 
   AssertAllProfilesHaveSameURLsAsVerifier();

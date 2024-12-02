@@ -93,9 +93,6 @@ class FrameRateTest
     // Turn on chrome.Interval to get higher-resolution timestamps on frames.
     launch_arguments_.AppendSwitch(switches::kEnableBenchmarking);
 
-    // Required additional argument to make the kEnableBenchmarking switch work.
-    launch_arguments_.AppendSwitch(switches::kEnableStatsTable);
-
     // UI tests boot up render views starting from about:blank. This causes
     // the renderer to start up thinking it cannot use the GPU. To work
     // around that, and allow the frame rate test to use the GPU, we must
@@ -194,7 +191,7 @@ class FrameRateTest
     // that flag kHasRedirect is enabled for the current test.
     ASSERT_TRUE(WaitUntilJavaScriptCondition(
       tab, L"", L"window.domAutomationController.send(__initialized);",
-      TestTimeouts::large_test_timeout_ms()));
+      TestTimeouts::large_test_timeout()));
 
     if (HasFlag(kForceGpuComposited)) {
       ASSERT_TRUE(tab->NavigateToURLAsync(
@@ -207,7 +204,7 @@ class FrameRateTest
     // Block until the tests completes.
     ASSERT_TRUE(WaitUntilJavaScriptCondition(
         tab, L"", L"window.domAutomationController.send(!__running_all);",
-        TestTimeouts::large_test_timeout_ms()));
+        TestTimeouts::large_test_timeout()));
 
     // TODO(jbates): remove this check when ref builds are updated.
     if (!HasFlag(kUseReferenceBuild)) {
@@ -246,6 +243,10 @@ class FrameRateTest
     std::string mean_and_error = results["mean"] + "," + results["sigma"];
     perf_test::PrintResultMeanAndError(name, "", trace_name, mean_and_error,
                                        "milliseconds-per-frame", true);
+
+    // Navigate back to NTP so that we can quit without timing out during the
+    // wait-for-idle stage in test framework.
+    EXPECT_EQ(tab->GoBack(), AUTOMATION_MSG_NAVIGATION_SUCCESS);
   }
 };
 
@@ -266,11 +267,8 @@ INSTANTIATE_TEST_CASE_P(, FrameRateCompositingTest, ::testing::Values(
                         kUseReferenceBuild,
                         kUseReferenceBuild | kUseGpu | kForceGpuComposited));
 
-// crbug.com/132133
-#if !defined(OS_WIN)
 FRAME_RATE_TEST_WITH_AND_WITHOUT_ACCELERATED_COMPOSITING(blank);
 FRAME_RATE_TEST_WITH_AND_WITHOUT_ACCELERATED_COMPOSITING(googleblog);
-#endif
 
 typedef FrameRateTest FrameRateNoVsyncCanvasInternalTest;
 
@@ -289,10 +287,7 @@ INSTANTIATE_TEST_CASE_P(, FrameRateNoVsyncCanvasInternalTest, ::testing::Values(
     kIsGpuCanvasTest | kUseReferenceBuild | kInternal | kHasRedirect | kUseGpu |
         kDisableVsync));
 
-// crbug.com/132133
-#if !defined(OS_WIN)
 INTERNAL_FRAME_RATE_TEST_CANVAS_WITH_AND_WITHOUT_NOVSYNC(fishbowl)
-#endif
 
 typedef FrameRateTest FrameRateGpuCanvasInternalTest;
 
@@ -311,11 +306,8 @@ INSTANTIATE_TEST_CASE_P(, FrameRateGpuCanvasInternalTest, ::testing::Values(
     kIsGpuCanvasTest | kUseReferenceBuild | kInternal | kHasRedirect | kUseGpu |
         kDisableVsync));
 
-// crbug.com/132133
-#if !defined(OS_WIN)
 INTERNAL_FRAME_RATE_TEST_CANVAS_GPU(fireflies)
 INTERNAL_FRAME_RATE_TEST_CANVAS_GPU(FishIE)
 INTERNAL_FRAME_RATE_TEST_CANVAS_GPU(speedreading)
-#endif
 
 }  // namespace

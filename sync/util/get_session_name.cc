@@ -23,14 +23,14 @@
 #include "sync/util/session_utils_android.h"
 #endif
 
-namespace browser_sync {
+namespace syncer {
 
 namespace {
 
 std::string GetSessionNameSynchronously() {
   std::string session_name;
 #if defined(OS_CHROMEOS)
-  // TODO(kochi): This is very ad hoc and fragile. http://crosbug.com/30619.
+  // TODO(kochi): This is very ad hoc and fragile. http://crbug.com/126732.
   std::string board;
   const char kMachineInfoBoard[] = "CHROMEOS_RELEASE_BOARD";
   chromeos::system::StatisticsProvider* provider =
@@ -38,8 +38,10 @@ std::string GetSessionNameSynchronously() {
   if (!provider->GetMachineStatistic(kMachineInfoBoard, &board))
     LOG(ERROR) << "Failed to get board information";
   // Currently, only "stumpy" type of board is considered Chromebox, and
-  // anything else is Chromebook.
-  session_name = (board == "stumpy") ? "Chromebox" : "Chromebook";
+  // anything else is Chromebook.  On these devices, session_name should look
+  // like "stumpy-signed-mp-v2keys" etc. The information can be checked on
+  // "CHROMEOS_RELEASE_BOARD" line in chrome://system.
+  session_name = board.substr(0, 6) == "stumpy" ? "Chromebox" : "Chromebook";
 #elif defined(OS_LINUX)
   session_name = base::GetLinuxDistro();
 #elif defined(OS_MACOSX)
@@ -85,4 +87,4 @@ std::string GetSessionNameSynchronouslyForTesting() {
   return GetSessionNameSynchronously();
 }
 
-}  // namespace browser_sync
+}  // namespace syncer

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_GTK_BROWSER_ACTIONS_TOOLBAR_GTK_H_
 #define CHROME_BROWSER_UI_GTK_BROWSER_ACTIONS_TOOLBAR_GTK_H_
-#pragma once
 
 #include <map>
 #include <string>
@@ -61,7 +60,7 @@ class BrowserActionsToolbarGtk : public ExtensionToolbarModel::Observer,
   ExtensionToolbarModel* model() { return model_; }
 
   // Returns the currently selected tab ID, or -1 if there is none.
-  int GetCurrentTabId();
+  int GetCurrentTabId() const;
 
   // Update the display of all buttons.
   void Update();

@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_UI_STARTUP_STARTUP_BROWSER_CREATOR_H_
 #define CHROME_BROWSER_UI_STARTUP_STARTUP_BROWSER_CREATOR_H_
-#pragma once
 
 #include <string>
 #include <vector>
@@ -14,8 +13,8 @@
 #include "base/gtest_prod_util.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/startup/startup_types.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
+#include "chrome/browser/ui/startup/startup_types.h"
 #include "googleurl/src/gurl.h"
 
 class Browser;
@@ -71,8 +70,8 @@ class StartupBrowserCreator {
   bool LaunchBrowser(const CommandLine& command_line,
                      Profile* profile,
                      const FilePath& cur_dir,
-                     browser::startup::IsProcessStartup is_process_startup,
-                     browser::startup::IsFirstRun is_first_run,
+                     chrome::startup::IsProcessStartup is_process_startup,
+                     chrome::startup::IsFirstRun is_first_run,
                      int* return_code);
 
   // When called the first time, reads the value of the preference kWasRestarted
@@ -83,6 +82,22 @@ class StartupBrowserCreator {
   static SessionStartupPref GetSessionStartupPref(
       const CommandLine& command_line,
       Profile* profile);
+
+  void set_is_default_browser_dialog_suppressed(bool new_value) {
+    is_default_browser_dialog_suppressed_ = new_value;
+  }
+
+  bool is_default_browser_dialog_suppressed() const {
+    return is_default_browser_dialog_suppressed_;
+  }
+
+  void set_show_main_browser_window(bool show_main_browser_window) {
+    show_main_browser_window_ = show_main_browser_window;
+  }
+
+  bool show_main_browser_window() const {
+    return show_main_browser_window_;
+  }
 
  private:
   friend class CloudPrintProxyPolicyTest;
@@ -118,6 +133,15 @@ class StartupBrowserCreator {
 
   // Additional tabs to open during first run.
   std::vector<GURL> first_run_tabs_;
+
+  // True if the set-as-default dialog has been explicitly supressed.
+  // This information is used to allow the default browser prompt to show on
+  // first-run when the dialog has been suppressed.
+  bool is_default_browser_dialog_suppressed_;
+
+  // Whether the browser window should be shown immediately after it has been
+  // created. Default is true.
+  bool show_main_browser_window_;
 
   // True if we have already read and reset the preference kWasRestarted. (A
   // member variable instead of a static variable inside WasRestarted because

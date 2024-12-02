@@ -4,7 +4,6 @@
 
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_PREF_VALUE_MAP_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_PREF_VALUE_MAP_H_
-#pragma once
 
 #include <map>
 #include <set>
@@ -59,8 +58,6 @@ class ExtensionPrefValueMap : public ProfileKeyedService {
   // Observer interface for monitoring ExtensionPrefValueMap.
   class Observer {
    public:
-    virtual ~Observer() {}
-
     // Called when the value for the given |key| set by one of the extensions
     // changes. This does not necessarily mean that the effective value has
     // changed.
@@ -70,6 +67,9 @@ class ExtensionPrefValueMap : public ProfileKeyedService {
     // Called when the ExtensionPrefValueMap is being destroyed. When called,
     // observers must unsubscribe.
     virtual void OnExtensionPrefValueMapDestruction() = 0;
+
+   protected:
+    virtual ~Observer() {}
   };
 
   ExtensionPrefValueMap();
@@ -85,14 +85,14 @@ class ExtensionPrefValueMap : public ProfileKeyedService {
   // Precondition: the extension must be registered.
   void SetExtensionPref(const std::string& ext_id,
                         const std::string& key,
-                        ExtensionPrefsScope scope,
+                        extensions::ExtensionPrefsScope scope,
                         base::Value* value);
 
   // Remove the extension preference value for |key| of extension |ext_id|.
   // Precondition: the extension must be registered.
   void RemoveExtensionPref(const std::string& ext_id,
                            const std::string& key,
-                           ExtensionPrefsScope scope);
+                           extensions::ExtensionPrefsScope scope);
 
   // Returns true if currently no extension with higher precedence controls the
   // preference.
@@ -108,13 +108,16 @@ class ExtensionPrefValueMap : public ProfileKeyedService {
 
   // Returns true if an extension identified by |extension_id| controls the
   // preference. This means this extension has set a preference value and no
-  // other extension with higher precedence overrides it.
+  // other extension with higher precedence overrides it. If |from_incognito|
+  // is not NULL, looks at incognito preferences first, and |from_incognito| is
+  // set to true if the effective pref value is coming from the incognito
+  // preferences, false if it is coming from the normal ones.
   // Note that the this function does does not consider the existence of
   // policies. An extension is only really able to control a preference if
   // PrefService::Preference::IsExtensionModifiable() returns true as well.
   bool DoesExtensionControlPref(const std::string& extension_id,
                                 const std::string& pref_key,
-                                bool incognito) const;
+                                bool* from_incognito) const;
 
   // Tell the store it's now fully initialized.
   void NotifyInitializationCompleted();
@@ -147,11 +150,11 @@ class ExtensionPrefValueMap : public ProfileKeyedService {
 
   const PrefValueMap* GetExtensionPrefValueMap(
       const std::string& ext_id,
-      ExtensionPrefsScope scope) const;
+      extensions::ExtensionPrefsScope scope) const;
 
   PrefValueMap* GetExtensionPrefValueMap(
       const std::string& ext_id,
-      ExtensionPrefsScope scope);
+      extensions::ExtensionPrefsScope scope);
 
   // Returns all keys of pref values that are set by the extension of |entry|,
   // regardless whether they are set for incognito or regular pref values.

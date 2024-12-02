@@ -4,7 +4,6 @@
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_TEST_UTIL_H_
 #define NET_URL_REQUEST_URL_REQUEST_TEST_UTIL_H_
-#pragma once
 
 #include <stdlib.h>
 
@@ -94,11 +93,9 @@ class TestURLRequestContextGetter : public net::URLRequestContextGetter {
 
 class TestURLRequest : public net::URLRequest {
  public:
-  TestURLRequest(const GURL& url, Delegate* delegate);
+  TestURLRequest(
+      const GURL& url, Delegate* delegate, TestURLRequestContext* context);
   virtual ~TestURLRequest();
-
- private:
-  const scoped_ptr<net::URLRequestContext> context_;
 };
 
 //-----------------------------------------------------------------------------
@@ -190,7 +187,6 @@ class TestNetworkDelegate : public net::NetworkDelegate {
   enum Options {
     NO_GET_COOKIES = 1 << 0,
     NO_SET_COOKIE  = 1 << 1,
-    FORCE_SESSION  = 1 << 2,
   };
 
   TestNetworkDelegate();
@@ -249,6 +245,8 @@ class TestNetworkDelegate : public net::NetworkDelegate {
   virtual int OnBeforeSocketStreamConnect(
       net::SocketStream* stream,
       const net::CompletionCallback& callback) OVERRIDE;
+  virtual void OnCacheWaitStateChange(const net::URLRequest& request,
+                                      CacheWaitState state) OVERRIDE;
 
   void InitRequestStatesIfNew(int request_id);
 

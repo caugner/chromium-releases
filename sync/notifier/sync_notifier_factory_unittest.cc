@@ -14,15 +14,15 @@
 #include "jingle/notifier/base/notification_method.h"
 #include "jingle/notifier/base/notifier_options.h"
 #include "net/url_request/url_request_test_util.h"
-#include "sync/internal_api/public/syncable/model_type.h"
-#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/base/model_type.h"
+#include "sync/internal_api/public/base/model_type_payload_map.h"
 #include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/mock_sync_notifier_observer.h"
 #include "sync/notifier/sync_notifier.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace sync_notifier {
+namespace syncer {
 namespace {
 
 using ::testing::Mock;
@@ -54,14 +54,16 @@ TEST_F(SyncNotifierFactoryTest, Basic) {
   SyncNotifierFactory factory(
       notifier_options_,
       "test client info",
-      base::WeakPtr<sync_notifier::InvalidationStateTracker>());
+      base::WeakPtr<InvalidationStateTracker>());
   scoped_ptr<SyncNotifier> notifier(factory.CreateSyncNotifier());
 #if defined(OS_ANDROID)
   ASSERT_FALSE(notifier.get());
 #else
   ASSERT_TRUE(notifier.get());
-  notifier->AddObserver(&mock_observer_);
-  notifier->RemoveObserver(&mock_observer_);
+  ObjectIdSet ids = ModelTypeSetToObjectIdSet(ModelTypeSet(syncer::BOOKMARKS));
+  notifier->RegisterHandler(&mock_observer_);
+  notifier->UpdateRegisteredIds(&mock_observer_, ids);
+  notifier->UnregisterHandler(&mock_observer_);
 #endif
 }
 
@@ -71,16 +73,18 @@ TEST_F(SyncNotifierFactoryTest, Basic_P2P) {
   SyncNotifierFactory factory(
       notifier_options_,
       "test client info",
-      base::WeakPtr<sync_notifier::InvalidationStateTracker>());
+      base::WeakPtr<InvalidationStateTracker>());
   scoped_ptr<SyncNotifier> notifier(factory.CreateSyncNotifier());
 #if defined(OS_ANDROID)
   ASSERT_FALSE(notifier.get());
 #else
   ASSERT_TRUE(notifier.get());
-  notifier->AddObserver(&mock_observer_);
-  notifier->RemoveObserver(&mock_observer_);
+  ObjectIdSet ids = ModelTypeSetToObjectIdSet(ModelTypeSet(syncer::BOOKMARKS));
+  notifier->RegisterHandler(&mock_observer_);
+  notifier->UpdateRegisteredIds(&mock_observer_, ids);
+  notifier->UnregisterHandler(&mock_observer_);
 #endif
 }
 
 }  // namespace
-}  // namespace sync_notifier
+}  // namespace syncer

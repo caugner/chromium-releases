@@ -6,10 +6,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/test/net/url_request_failed_job.h"
 #include "content/test/net/url_request_mock_http_job.h"
@@ -37,8 +40,8 @@ class ErrorPageTest : public InProcessBrowserTest {
   void NavigateToURLAndWaitForTitle(const GURL& url,
                                     const std::string& expected_title,
                                     int num_navigations) {
-    ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetActiveWebContents(),
+    content::TitleWatcher title_watcher(
+        chrome::GetActiveWebContents(browser()),
         ASCIIToUTF16(expected_title));
 
     ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
@@ -83,24 +86,24 @@ class ErrorPageTest : public InProcessBrowserTest {
   void NavigateHistoryAndWaitForTitle(const std::string& expected_title,
                                       int num_navigations,
                                       HistoryNavigationDirection direction) {
-    ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetActiveWebContents(),
+    content::TitleWatcher title_watcher(
+        chrome::GetActiveWebContents(browser()),
         ASCIIToUTF16(expected_title));
 
     content::TestNavigationObserver test_navigation_observer(
         content::Source<NavigationController>(
-              &browser()->GetActiveWebContents()->GetController()),
+              &chrome::GetActiveWebContents(browser())->GetController()),
         NULL,
         num_navigations);
     if (direction == HISTORY_NAVIGATE_BACK) {
-      browser()->GoBack(CURRENT_TAB);
+      chrome::GoBack(browser(), CURRENT_TAB);
     } else if (direction == HISTORY_NAVIGATE_FORWARD) {
-      browser()->GoForward(CURRENT_TAB);
+      chrome::GoForward(browser(), CURRENT_TAB);
     } else {
       FAIL();
     }
     test_navigation_observer.WaitForObservation(
-        base::Bind(&ui_test_utils::RunMessageLoop),
+        base::Bind(&content::RunMessageLoop),
         base::Bind(&MessageLoop::Quit,
                    base::Unretained(MessageLoopForUI::current())));
 
@@ -137,7 +140,8 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack1) {
 #endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
-IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2) {
+// Disabled:  http://crbug.com/136310
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, DISABLED_DNSError_GoBack2) {
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
 
   NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);
@@ -155,7 +159,8 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2) {
 #endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
-IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2AndForward) {
+// Disabled:  http://crbug.com/136310
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, DISABLED_DNSError_GoBack2AndForward) {
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
 
   NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);
@@ -175,7 +180,8 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2AndForward) {
 #endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
-IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2Forward2) {
+// Disabled:  http://crbug.com/136310
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, DISABLED_DNSError_GoBack2Forward2) {
   NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
 
   NavigateToURLAndWaitForTitle(GetDnsErrorURL(), "Mock Link Doctor", 2);

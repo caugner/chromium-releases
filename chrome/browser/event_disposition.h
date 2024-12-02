@@ -4,17 +4,16 @@
 
 #ifndef CHROME_BROWSER_EVENT_DISPOSITION_H_
 #define CHROME_BROWSER_EVENT_DISPOSITION_H_
-#pragma once
 
 #include "webkit/glue/window_open_disposition.h"
 
-namespace browser {
+namespace chrome {
 
 // Translates event flags into what kind of disposition they represents.
 // For example, a middle click would mean to open a background tab.
 // event_flags are the flags as understood by views::MouseEvent.
 WindowOpenDisposition DispositionFromEventFlags(int event_flags);
 
-}  // namespace browser
+}  // namespace chrome
 
 #endif  // CHROME_BROWSER_EVENT_DISPOSITION_H_
