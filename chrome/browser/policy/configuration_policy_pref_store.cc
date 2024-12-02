@@ -18,9 +18,11 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 #include "chrome/browser/policy/policy_path_parser.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_value_map.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
@@ -56,7 +58,7 @@ class ConfigurationPolicyPrefKeeper
   // by an automated converter. Each one of these policies
   // has an entry in |simple_policy_map_| with the following type.
   struct PolicyToPreferenceMapEntry {
-    Value::ValueType value_type;
+    base::Value::Type value_type;
     ConfigurationPolicyType policy_type;
     const char* preference_path;  // A DictionaryValue path, not a file path.
   };
@@ -106,6 +108,15 @@ class ConfigurationPolicyPrefKeeper
   // ApplyDefaultSearchPolicy takes ownership of |value|.
   bool ApplyDefaultSearchPolicy(ConfigurationPolicyType policy, Value* value);
 
+  // Processes incognito mode availability related policies. Returns true if the
+  // specified policy is pertinent to incognito mode availability. In that case,
+  // the function takes ownership of |value|.
+  bool ApplyIncognitoModePolicy(ConfigurationPolicyType policy, Value* value);
+
+  // Processes a policy that can disable the bookmarks bar. It can also affect
+  // other preferences.
+  bool ApplyBookmarksPolicy(ConfigurationPolicyType policy, Value* value);
+
   // Make sure that the |path| if present in |prefs_|.  If not, set it to
   // a blank string.
   void EnsureStringPrefExists(const std::string& path);
@@ -121,6 +132,11 @@ class ConfigurationPolicyPrefKeeper
   // respective values in |prefs_|.
   void FinalizeProxyPolicySettings();
 
+  // If the required entries for the Incognito mode availability settings
+  // are specified and valid, finalizes the policy-specified configuration
+  // by initializing the respective values in |prefs_|.
+  void FinalizeIncognitoModeSettings();
+
   // Returns true if the policy values stored in proxy_* represent a valid proxy
   // configuration, including the case in which there is no configuration at
   // all.
@@ -135,6 +151,11 @@ class ConfigurationPolicyPrefKeeper
   // Temporary cache that stores values until FinalizeProxyPolicySettings()
   // is called.
   std::map<ConfigurationPolicyType, Value*> proxy_policies_;
+
+  // Saved state of the deprecated kPolicyIncognitoEnabled. It is still used for
+  // backward compatibility to set the new kIncognitoAvailabilityMode pref in
+  // case the corresponding policy for the latter is not specified.
+  scoped_ptr<Value> deprecated_incognito_enabled_;
 
   PrefValueMap prefs_;
 
@@ -191,10 +212,6 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
     prefs::kShowHomeButton },
   { Value::TYPE_BOOLEAN, kPolicyJavascriptEnabled,
     prefs::kWebKitJavascriptEnabled },
-  { Value::TYPE_BOOLEAN, kPolicyIncognitoEnabled,
-    prefs::kIncognitoEnabled },
-  { Value::TYPE_BOOLEAN, kPolicyIncognitoForced,
-    prefs::kIncognitoForced },
   { Value::TYPE_BOOLEAN, kPolicySavingBrowserHistoryDisabled,
     prefs::kSavingBrowserHistoryDisabled },
   { Value::TYPE_BOOLEAN, kPolicyClearSiteDataOnExit,
@@ -213,6 +230,8 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
     prefs::kManagedDefaultPluginsSetting },
   { Value::TYPE_INTEGER, kPolicyDefaultPopupsSetting,
     prefs::kManagedDefaultPopupsSetting },
+  { Value::TYPE_LIST, kPolicyAutoSelectCertificateForUrls,
+    prefs::kManagedAutoSelectCertificateForUrls},
   { Value::TYPE_LIST, kPolicyCookiesAllowedForUrls,
     prefs::kManagedCookiesAllowedForUrls },
   { Value::TYPE_LIST, kPolicyCookiesBlockedForUrls,
@@ -235,8 +254,8 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
     prefs::kManagedPopupsAllowedForUrls },
   { Value::TYPE_LIST, kPolicyPopupsBlockedForUrls,
     prefs::kManagedPopupsBlockedForUrls },
-  { Value::TYPE_INTEGER, kPolicyDefaultNotificationSetting,
-    prefs::kDesktopNotificationDefaultContentSetting },
+  { Value::TYPE_INTEGER, kPolicyDefaultNotificationsSetting,
+    prefs::kManagedDefaultNotificationsSetting },
   { Value::TYPE_INTEGER, kPolicyDefaultGeolocationSetting,
     prefs::kManagedDefaultGeolocationSetting },
   { Value::TYPE_STRING, kPolicyAuthSchemes,
@@ -271,7 +290,6 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
   { Value::TYPE_BOOLEAN, kPolicyCloudPrintProxyEnabled,
     prefs::kCloudPrintProxyEnabled },
   { Value::TYPE_BOOLEAN, kPolicyTranslateEnabled, prefs::kEnableTranslate },
-  { Value::TYPE_BOOLEAN, kPolicyBookmarkBarEnabled, prefs::kEnableBookmarkBar },
   { Value::TYPE_BOOLEAN, kPolicyAllowOutdatedPlugins,
     prefs::kPluginsAllowOutdated },
   { Value::TYPE_BOOLEAN, kPolicyAlwaysAuthorizePlugins,
@@ -280,8 +298,24 @@ const ConfigurationPolicyPrefKeeper::PolicyToPreferenceMapEntry
     prefs::kEditBookmarksEnabled },
   { Value::TYPE_BOOLEAN, kPolicyAllowFileSelectionDialogs,
     prefs::kAllowFileSelectionDialogs },
+  { Value::TYPE_BOOLEAN, kPolicyImportBookmarks,
+    prefs::kImportBookmarks},
+  { Value::TYPE_BOOLEAN, kPolicyImportHistory,
+    prefs::kImportHistory},
+  { Value::TYPE_BOOLEAN, kPolicyImportHomepage,
+    prefs::kImportHomepage},
+  { Value::TYPE_BOOLEAN, kPolicyImportSearchEngine,
+    prefs::kImportSearchEngine },
+  { Value::TYPE_BOOLEAN, kPolicyImportSavedPasswords,
+    prefs::kImportSavedPasswords },
   { Value::TYPE_INTEGER, kPolicyMaxConnectionsPerProxy,
     prefs::kMaxConnectionsPerProxy },
+  { Value::TYPE_BOOLEAN, kPolicyHideWebStorePromo,
+    prefs::kNTPHideWebStorePromo },
+  { Value::TYPE_LIST, kPolicyURLBlacklist,
+    prefs::kUrlBlacklist },
+  { Value::TYPE_LIST, kPolicyURLWhitelist,
+    prefs::kUrlWhitelist },
 
 #if defined(OS_CHROMEOS)
   { Value::TYPE_BOOLEAN, kPolicyChromeOsLockOnIdleSuspend,
@@ -317,6 +351,7 @@ ConfigurationPolicyPrefKeeper::ConfigurationPolicyPrefKeeper(
     LOG(WARNING) << "Failed to get policy from provider.";
   FinalizeProxyPolicySettings();
   FinalizeDefaultSearchPolicySettings();
+  FinalizeIncognitoModeSettings();
 }
 
 ConfigurationPolicyPrefKeeper::~ConfigurationPolicyPrefKeeper() {
@@ -348,28 +383,16 @@ void ConfigurationPolicyPrefKeeper::GetDifferingPrefPaths(
 
 void ConfigurationPolicyPrefKeeper::Apply(ConfigurationPolicyType policy,
                                           Value* value) {
-  if (ApplyProxyPolicy(policy, value))
-    return;
-
-  if (ApplySyncPolicy(policy, value))
-    return;
-
-  if (ApplyAutofillPolicy(policy, value))
-    return;
-
-  if (ApplyDownloadDirPolicy(policy, value))
-    return;
-
-  if (ApplyDiskCacheDirPolicy(policy, value))
-    return;
-
-  if (ApplyFileSelectionDialogsPolicy(policy, value))
-    return;
-
-  if (ApplyDefaultSearchPolicy(policy, value))
-    return;
-
-  if (ApplyPolicyFromMap(policy, value, kSimplePolicyMap,
+  if (ApplyProxyPolicy(policy, value) ||
+      ApplySyncPolicy(policy, value) ||
+      ApplyAutofillPolicy(policy, value) ||
+      ApplyDownloadDirPolicy(policy, value) ||
+      ApplyDiskCacheDirPolicy(policy, value) ||
+      ApplyFileSelectionDialogsPolicy(policy, value) ||
+      ApplyDefaultSearchPolicy(policy, value) ||
+      ApplyIncognitoModePolicy(policy, value) ||
+      ApplyBookmarksPolicy(policy, value) ||
+      ApplyPolicyFromMap(policy, value, kSimplePolicyMap,
                          arraysize(kSimplePolicyMap)))
     return;
 
@@ -461,6 +484,11 @@ bool ConfigurationPolicyPrefKeeper::ApplyDownloadDirPolicy(
     DCHECK(result);
     FilePath::StringType expanded_value =
         policy::path_parser::ExpandPathVariables(string_value);
+    // Leaving the policy empty would revert to the default download location
+    // else we would point in an undefined location. We do this after the
+    // path expansion because it might lead to an empty string(e.g. for "\"\"").
+    if (expanded_value.empty())
+      expanded_value = download_util::GetDefaultDownloadDirectory().value();
     prefs_.SetValue(prefs::kDownloadDefaultDirectory,
                     Value::CreateStringValue(expanded_value));
     prefs_.SetValue(prefs::kPromptForDownload,
@@ -556,6 +584,52 @@ bool ConfigurationPolicyPrefKeeper::ApplyDefaultSearchPolicy(
   return false;
 }
 
+bool ConfigurationPolicyPrefKeeper::ApplyIncognitoModePolicy(
+    ConfigurationPolicyType policy,
+    Value* value) {
+  if (policy == kPolicyIncognitoModeAvailability) {
+    int availability = IncognitoModePrefs::ENABLED;
+    bool result = value->GetAsInteger(&availability);
+    delete value;
+    if (result) {
+      IncognitoModePrefs::Availability availability_enum_value;
+      if (IncognitoModePrefs::IntToAvailability(availability,
+                                                &availability_enum_value)) {
+        prefs_.SetValue(prefs::kIncognitoModeAvailability,
+                        Value::CreateIntegerValue(availability_enum_value));
+      } else {
+        LOG(WARNING) << "IncognitoModeAvailability policy value is "
+                     << "out of range " << availability;
+      }
+    } else {
+      LOG(WARNING) << "IncognitoModeAvailability policy value could not be "
+                   << "parsed";
+    }
+    return true;
+  }
+  if (policy == kPolicyIncognitoEnabled) {
+    deprecated_incognito_enabled_.reset(value);
+    return true;
+  }
+  // The policy is not relevant to incognito.
+  return false;
+}
+
+bool ConfigurationPolicyPrefKeeper::ApplyBookmarksPolicy(
+    ConfigurationPolicyType policy,
+    Value* value) {
+  if (policy != kPolicyBookmarkBarEnabled)
+    return false;
+  DCHECK_EQ(Value::TYPE_BOOLEAN, value->GetType());
+  prefs_.SetValue(prefs::kEnableBookmarkBar, value);
+  // kShowBookmarkBar is not managed directly by a policy, but when
+  // kEnableBookmarkBar is managed, kShowBookmarkBar should be false so that
+  // the bookmarks bar either is completely disabled or only shows on the NTP.
+  // This also disables the checkbox for this preference in the prefs UI.
+  prefs_.SetValue(prefs::kShowBookmarkBar, Value::CreateBooleanValue(false));
+  return true;
+}
+
 void ConfigurationPolicyPrefKeeper::EnsureStringPrefExists(
     const std::string& path) {
   std::string value;
@@ -635,6 +709,25 @@ void ConfigurationPolicyPrefKeeper::FinalizeDefaultSearchPolicySettings() {
   // Required entries are not there.  Remove any related entries.
   RemovePreferencesOfMap(kDefaultSearchPolicyMap,
                          arraysize(kDefaultSearchPolicyMap));
+}
+
+void ConfigurationPolicyPrefKeeper::FinalizeIncognitoModeSettings() {
+  int int_value;
+  if (!prefs_.GetInteger(prefs::kIncognitoModeAvailability, &int_value)) {
+    // If kPolicyIncognitoModeAvailability is not specified, check the obsolete
+    // kPolicyIncognitoEnabled.
+    if (deprecated_incognito_enabled_.get()) {
+      bool enabled = true;
+      if (deprecated_incognito_enabled_->GetAsBoolean(&enabled)) {
+        prefs_.SetInteger(
+            prefs::kIncognitoModeAvailability,
+            enabled ? IncognitoModePrefs::ENABLED :
+                      IncognitoModePrefs::DISABLED);
+      } else {
+        LOG(WARNING) << "IncognitoEnabled policy value could not be parsed";
+      }
+    }
+  }
 }
 
 void ConfigurationPolicyPrefKeeper::FinalizeProxyPolicySettings() {
@@ -999,7 +1092,8 @@ ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList() {
     { kPolicyPrintingEnabled, Value::TYPE_BOOLEAN, key::kPrintingEnabled },
     { kPolicyJavascriptEnabled, Value::TYPE_BOOLEAN, key::kJavascriptEnabled },
     { kPolicyIncognitoEnabled, Value::TYPE_BOOLEAN, key::kIncognitoEnabled },
-    { kPolicyIncognitoForced, Value::TYPE_BOOLEAN, key::kIncognitoForced },
+    { kPolicyIncognitoModeAvailability, Value::TYPE_INTEGER,
+      key::kIncognitoModeAvailability },
     { kPolicySavingBrowserHistoryDisabled, Value::TYPE_BOOLEAN,
       key::kSavingBrowserHistoryDisabled },
     { kPolicyClearSiteDataOnExit, Value::TYPE_BOOLEAN,
@@ -1018,10 +1112,12 @@ ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList() {
       key::kDefaultPluginsSetting },
     { kPolicyDefaultPopupsSetting, Value::TYPE_INTEGER,
       key::kDefaultPopupsSetting },
-    { kPolicyDefaultNotificationSetting, Value::TYPE_INTEGER,
-      key::kDefaultNotificationSetting },
+    { kPolicyDefaultNotificationsSetting, Value::TYPE_INTEGER,
+      key::kDefaultNotificationsSetting },
     { kPolicyDefaultGeolocationSetting, Value::TYPE_INTEGER,
       key::kDefaultGeolocationSetting },
+    { kPolicyAutoSelectCertificateForUrls, Value::TYPE_LIST,
+      key::kAutoSelectCertificateForUrls},
     { kPolicyCookiesAllowedForUrls, Value::TYPE_LIST,
       key::kCookiesAllowedForUrls },
     { kPolicyCookiesBlockedForUrls, Value::TYPE_LIST,
@@ -1089,8 +1185,24 @@ ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList() {
       key::kAllowFileSelectionDialogs },
     { kPolicyDiskCacheDir, Value::TYPE_STRING,
       key::kDiskCacheDir },
+    { kPolicyImportBookmarks, Value::TYPE_BOOLEAN,
+      key::kImportBookmarks },
+    { kPolicyImportHistory, Value::TYPE_BOOLEAN,
+      key::kImportHistory },
+    { kPolicyImportHomepage, Value::TYPE_BOOLEAN,
+      key::kImportHomepage },
+    { kPolicyImportSearchEngine, Value::TYPE_BOOLEAN,
+      key::kImportSearchEngine },
+    { kPolicyImportSavedPasswords, Value::TYPE_BOOLEAN,
+      key::kImportSavedPasswords },
     { kPolicyMaxConnectionsPerProxy, Value::TYPE_INTEGER,
       key::kMaxConnectionsPerProxy },
+    { kPolicyHideWebStorePromo, Value::TYPE_BOOLEAN,
+      key::kHideWebStorePromo },
+    { kPolicyURLBlacklist, Value::TYPE_LIST,
+      key::kURLBlacklist },
+    { kPolicyURLWhitelist, Value::TYPE_LIST,
+      key::kURLWhitelist },
 
 #if defined(OS_CHROMEOS)
     { kPolicyChromeOsLockOnIdleSuspend, Value::TYPE_BOOLEAN,

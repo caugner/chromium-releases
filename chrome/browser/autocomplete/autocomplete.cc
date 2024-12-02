@@ -324,13 +324,9 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   // thus mean this can't be navigated to (e.g. "1.2.3.4:garbage"), and we save
   // handling legal port numbers until after the "IP address" determination
   // below.
-  if (parts->port.is_nonempty()) {
-    int port;
-    if (!base::StringToInt(text.substr(parts->port.begin, parts->port.len),
-                           &port) ||
-        (port < 0) || (port > 65535))
-      return QUERY;
-  }
+  if (url_parse::ParsePort(text.c_str(), parts->port) ==
+      url_parse::PORT_INVALID)
+    return QUERY;
 
   // Now that we've ruled out all schemes other than http or https and done a
   // little more sanity checking, the presence of a scheme means this is likely
@@ -339,23 +335,20 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     return URL;
 
   // See if the host is an IP address.
-  if (host_info.family == url_canon::CanonHostInfo::IPV4) {
-    // If the user originally typed a host that looks like an IP address (a
-    // dotted quad), they probably want to open it.  If the original input was
-    // something else (like a single number), they probably wanted to search for
-    // it, unless they explicitly typed a scheme.  This is true even if the URL
-    // appears to have a path: "1.2/45" is more likely a search (for the answer
-    // to a math problem) than a URL.
-    if (host_info.num_ipv4_components == 4)
-      return URL;
-    return desired_tld.empty() ? UNKNOWN : REQUESTED_URL;
-  }
   if (host_info.family == url_canon::CanonHostInfo::IPV6)
     return URL;
-
-  // Now that we've ruled out invalid ports and queries that look like they have
-  // a port, the presence of a port means this is likely a URL.
-  if (parts->port.is_nonempty())
+  // If the user originally typed a host that looks like an IP address (a
+  // dotted quad), they probably want to open it.  If the original input was
+  // something else (like a single number), they probably wanted to search for
+  // it, unless they explicitly typed a scheme.  This is true even if the URL
+  // appears to have a path: "1.2/45" is more likely a search (for the answer
+  // to a math problem) than a URL.  However, if there are more non-host
+  // components, then maybe this really was intended to be a navigation.  For
+  // this reason we only check the dotted-quad case here, and save the "other
+  // IP addresses" case for after we check the number of non-host components
+  // below.
+  if ((host_info.family == url_canon::CanonHostInfo::IPV4) &&
+      (host_info.num_ipv4_components == 4))
     return URL;
 
   // Presence of a password means this is likely a URL.  Note that unless the
@@ -365,35 +358,40 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   if (parts->password.is_nonempty())
     return URL;
 
-  // The host doesn't look like a number, so see if the user's given us a path.
-  if (parts->path.is_nonempty()) {
-    // Most inputs with paths are URLs, even ones without known registries (e.g.
-    // intranet URLs).  However, if there's no known registry and the path has
-    // a space, this is more likely a query with a slash in the first term
-    // (e.g. "ps/2 games") than a URL.  We can still open URLs with spaces in
-    // the path by escaping the space, and we will still inline autocomplete
-    // them if users have typed them in the past, but we default to searching
-    // since that's the common case.
-    return ((registry_length == 0) &&
-            (text.substr(parts->path.begin, parts->path.len).find(' ') !=
-                string16::npos)) ? UNKNOWN : URL;
-  }
-
-  // If we reach here with a username, our input looks like "user@host".
-  // Because there is no scheme explicitly specified, we think this is more
-  // likely an email address than an HTTP auth attempt.  Hence, we search by
-  // default and let users correct us on a case-by-case basis.
-  if (parts->username.is_nonempty())
-    return UNKNOWN;
-
-  // We have a bare host string.  If it has a known TLD, it's probably a URL.
-  if (registry_length != 0)
+  // Trailing slashes force the input to be treated as a URL.
+  if (parts->path.len == 1)
     return URL;
 
-  // No TLD that we know about.  This could be:
-  // * A string that the user wishes to add a desired_tld to to get a URL.  If
-  //   we reach this point, we know there's no known TLD on the string, so the
-  //   fixup code will be willing to add one; thus this is a URL.
+  // If there is more than one recognized non-host component, this is likely to
+  // be a URL, even if the TLD is unknown (in which case this is likely an
+  // intranet URL).
+  if (NumNonHostComponents(*parts) > 1)
+    return URL;
+
+  // If the host has a known TLD, it's probably a URL, with the following
+  // exceptions:
+  // * Any "IP addresses" that make it here are more likely searches
+  //   (see above).
+  // * If we reach here with a username, our input looks like "user@host[.tld]".
+  //   Because there is no scheme explicitly specified, we think this is more
+  //   likely an email address than an HTTP auth attempt.  Hence, we search by
+  //   default and let users correct us on a case-by-case basis.
+  // Note that we special-case "localhost" as a known hostname.
+  if ((host_info.family != url_canon::CanonHostInfo::IPV4) &&
+      ((registry_length != 0) || (host == ASCIIToUTF16("localhost"))))
+    return parts->username.is_nonempty() ? UNKNOWN : URL;
+
+  // If we reach this point, we know there's no known TLD on the input, so if
+  // the user wishes to add a desired_tld, the fixup code will oblige; thus this
+  // is a URL.
+  if (!desired_tld.empty())
+    return REQUESTED_URL;
+
+  // No scheme, password, port, path, and no known TLD on the host.
+  // This could be:
+  // * An "incomplete IP address"; likely a search (see above).
+  // * An email-like input like "user@host", where "host" has no known TLD.
+  //   It's not clear what the user means here and searching seems reasonable.
   // * A single word "foo"; possibly an intranet site, but more likely a search.
   //   This is ideally an UNKNOWN, and we can let the Alternate Nav URL code
   //   catch our mistakes.
@@ -403,11 +401,10 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   //   distinguish this case from:
   // * A "URL-like" string that's not really a URL (like
   //   "browser.tabs.closeButtons" or "java.awt.event.*").  This is ideally a
-  //   QUERY.  Since the above case and this one are indistinguishable, and this
-  //   case is likely to be much more common, just say these are both UNKNOWN,
-  //   which should default to the right thing and let users correct us on a
-  //   case-by-case basis.
-  return desired_tld.empty() ? UNKNOWN : REQUESTED_URL;
+  //   QUERY.  Since this is indistinguishable from the case above, and this
+  //   case is much more likely, claim these are UNKNOWN, which should default
+  //   to the right thing and let users correct us on a case-by-case basis.
+  return UNKNOWN;
 }
 
 // static
@@ -431,7 +428,8 @@ void AutocompleteInput::ParseForEmphasizeComponents(
     // Obtain the URL prefixed by view-source and parse it.
     string16 real_url(text.substr(after_scheme_and_colon));
     url_parse::Parsed real_parts;
-    AutocompleteInput::Parse(real_url, desired_tld, &real_parts, NULL, NULL);
+    AutocompleteInput::Parse(real_url, desired_tld, &real_parts, NULL,
+                             NULL);
     if (real_parts.scheme.is_nonempty() || real_parts.host.is_nonempty()) {
       if (real_parts.scheme.is_nonempty()) {
         *scheme = url_parse::Component(
@@ -465,6 +463,31 @@ string16 AutocompleteInput::FormattedStringWithEquivalentMeaning(
       formatted_url : url_with_path;
 }
 
+// static
+int AutocompleteInput::NumNonHostComponents(const url_parse::Parsed& parts) {
+  int num_nonhost_components = 0;
+  if (parts.scheme.is_nonempty())
+    ++num_nonhost_components;
+  if (parts.username.is_nonempty())
+    ++num_nonhost_components;
+  if (parts.password.is_nonempty())
+    ++num_nonhost_components;
+  if (parts.port.is_nonempty())
+    ++num_nonhost_components;
+  if (parts.path.is_nonempty())
+    ++num_nonhost_components;
+  if (parts.query.is_nonempty())
+    ++num_nonhost_components;
+  if (parts.ref.is_nonempty())
+    ++num_nonhost_components;
+  return num_nonhost_components;
+}
+
+void AutocompleteInput::UpdateText(const string16& text,
+                                   const url_parse::Parsed& parts) {
+  text_ = text;
+  parts_ = parts;
+}
 
 bool AutocompleteInput::Equals(const AutocompleteInput& other) const {
   return (text_ == other.text_) &&
@@ -501,12 +524,6 @@ AutocompleteProvider::AutocompleteProvider(ACProviderListener* listener,
       listener_(listener),
       done_(true),
       name_(name) {
-}
-
-void AutocompleteProvider::SetProfile(Profile* profile) {
-  DCHECK(profile);
-  DCHECK(done_);  // The controller should have already stopped us.
-  profile_ = profile;
 }
 
 void AutocompleteProvider::Stop() {
@@ -835,15 +852,6 @@ AutocompleteController::~AutocompleteController() {
   providers_.clear();  // Not really necessary.
 }
 
-void AutocompleteController::SetProfile(Profile* profile) {
-  Stop(true);
-  for (ACProviders::iterator i(providers_.begin()); i != providers_.end(); ++i)
-    (*i)->SetProfile(profile);
-  input_.Clear();  // Ensure we don't try to do a "minimal_changes" query on a
-                   // different profile.
-  profile_ = profile;
-}
-
 void AutocompleteController::Start(
     const string16& text,
     const string16& desired_tld,
@@ -1037,6 +1045,7 @@ void AutocompleteController::CheckIfDone() {
 
 void AutocompleteController::StartExpireTimer() {
   if (result_.HasCopiedMatches())
-    expire_timer_.Start(base::TimeDelta::FromMilliseconds(kExpireTimeMS),
+    expire_timer_.Start(FROM_HERE,
+                        base::TimeDelta::FromMilliseconds(kExpireTimeMS),
                         this, &AutocompleteController::ExpireCopiedEntries);
 }

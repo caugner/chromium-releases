@@ -4,6 +4,8 @@
 
 #include "content/common/gpu/media/omx_video_decode_accelerator.h"
 
+#include "base/debug/trace_event.h"
+#include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "content/common/gpu/gpu_channel.h"
@@ -44,6 +46,37 @@ static bool AreOMXFunctionPointersInitialized() {
           omx_free_handle && omx_deinit);
 }
 
+// Maps h264-related Profile enum values to OMX_VIDEO_AVCPROFILETYPE values.
+static OMX_U32 MapH264ProfileToOMXAVCProfile(uint32 profile) {
+  switch (profile) {
+    case media::VideoDecodeAccelerator::H264PROFILE_BASELINE:
+      return OMX_VIDEO_AVCProfileBaseline;
+    case media::VideoDecodeAccelerator::H264PROFILE_MAIN:
+      return OMX_VIDEO_AVCProfileMain;
+    case media::VideoDecodeAccelerator::H264PROFILE_EXTENDED:
+      return OMX_VIDEO_AVCProfileExtended;
+    case media::VideoDecodeAccelerator::H264PROFILE_HIGH:
+      return OMX_VIDEO_AVCProfileHigh;
+    case media::VideoDecodeAccelerator::H264PROFILE_HIGH10PROFILE:
+      return OMX_VIDEO_AVCProfileHigh10;
+    case media::VideoDecodeAccelerator::H264PROFILE_HIGH422PROFILE:
+      return OMX_VIDEO_AVCProfileHigh422;
+    case media::VideoDecodeAccelerator::H264PROFILE_HIGH444PREDICTIVEPROFILE:
+      return OMX_VIDEO_AVCProfileHigh444;
+    // Below enums don't have equivalent enum in Openmax.
+    case media::VideoDecodeAccelerator::H264PROFILE_SCALABLEBASELINE:
+    case media::VideoDecodeAccelerator::H264PROFILE_SCALABLEHIGH:
+    case media::VideoDecodeAccelerator::H264PROFILE_STEREOHIGH:
+    case media::VideoDecodeAccelerator::H264PROFILE_MULTIVIEWHIGH:
+      // Nvidia OMX video decoder requires the same resources (as that of the
+      // High profile) in every profile higher to the Main profile.
+      return OMX_VIDEO_AVCProfileHigh444;
+    default:
+      NOTREACHED();
+      return OMX_VIDEO_AVCProfileMax;
+  }
+}
+
 // Helper macros for dealing with failure.  If |result| evaluates false, emit
 // |log| to ERROR, register |error| with the decoder, and return |ret_val|
 // (which may be omitted for functions that return void).
@@ -69,14 +102,15 @@ OmxVideoDecodeAccelerator::OmxVideoDecodeAccelerator(
       component_handle_(NULL),
       client_state_(OMX_StateMax),
       current_state_change_(NO_TRANSITION),
-      saw_eos_during_flush_(false),
       input_buffer_count_(0),
       input_buffer_size_(0),
       input_port_(0),
       input_buffers_at_component_(0),
       output_port_(0),
       output_buffers_at_component_(0),
-      client_(client) {
+      client_(client),
+      profile_(OMX_VIDEO_AVCProfileMax),
+      component_name_is_nvidia_h264ext_(false) {
   RETURN_ON_FAILURE(AreOMXFunctionPointersInitialized(),
                     "Failed to load openmax library", PLATFORM_FAILURE,);
   RETURN_ON_OMX_FAILURE(omx_init(), "Failed to init OpenMAX core",
@@ -98,41 +132,6 @@ void OmxVideoDecodeAccelerator::SetEglState(
   egl_context_ = egl_context;
 }
 
-bool OmxVideoDecodeAccelerator::VerifyConfigs(
-    const std::vector<uint32>& configs) {
-  size_t cur;
-  for (cur = 0; cur + 1 < configs.size(); cur++) {
-    uint32 n = configs[cur++];
-    uint32 v = configs[cur];
-    if ((n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_FOURCC &&
-         v == media::VIDEOCODECFOURCC_H264) ||
-        (n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_BITRATE &&
-         v < 14000000 /* Baseline supports up to 14Mbps. */) ||
-        (n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_WIDTH &&
-         v <= 1920 /* Baseline supports upto 1080p. */) ||
-        (n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_HEIGHT &&
-         v <= 1080 /* Baseline supports up to 1080p. */) ||
-        (n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_LEVEL ||
-         n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_PAYLOADFORMAT ||
-         n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_FEATURE_FMO ||
-         n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_FEATURE_ASO ||
-         n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_FEATURE_INTERLACE ||
-         n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_FEATURE_CABAC ||
-         /* TODO(fischman) Shorten the enum name. */
-         n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_FEATURE_WEIGHTEDPREDICTION)
-         ||
-        (n == media::VIDEOATTRIBUTEKEY_BITSTREAMFORMAT_H264_PROFILE &&
-        (v == media::H264PROFILE_BASELINE || v == media::H264PROFILE_MAIN ||
-         v == media::H264PROFILE_HIGH)) ||
-        (n == media::VIDEOATTRIBUTEKEY_VIDEOCOLORFORMAT &&
-         v == media::VIDEOCOLORFORMAT_RGBA)) {
-      continue;
-    }
-    return false;
-  }
-  return cur == configs.size();
-}
-
 // This is to initialize the OMX data structures to default values.
 template <typename T>
 static void InitParam(const OmxVideoDecodeAccelerator& dec, T* param) {
@@ -141,10 +140,15 @@ static void InitParam(const OmxVideoDecodeAccelerator& dec, T* param) {
   param->nSize = sizeof(T);
 }
 
-bool OmxVideoDecodeAccelerator::Initialize(const std::vector<uint32>& config) {
+bool OmxVideoDecodeAccelerator::Initialize(Profile profile) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
-  RETURN_ON_FAILURE(VerifyConfigs(config), "Invalid config", INVALID_ARGUMENT,
-                    false);
+
+  RETURN_ON_FAILURE(profile >= H264PROFILE_MIN && profile <= H264PROFILE_MAX,
+                    "Only h264 supported", INVALID_ARGUMENT, false);
+  profile_ = MapH264ProfileToOMXAVCProfile(profile);
+  RETURN_ON_FAILURE(profile_ != OMX_VIDEO_AVCProfileMax,
+                    "Unexpected profile", INVALID_ARGUMENT, false);
+
   if (!CreateComponent())  // Does its own RETURN_ON_FAILURE dances.
     return false;
 
@@ -188,6 +192,10 @@ bool OmxVideoDecodeAccelerator::CreateComponent() {
                         "Failed to OMX_GetHandle on: " << component.get(),
                         PLATFORM_FAILURE, false);
   client_state_ = OMX_StateLoaded;
+
+  component_name_is_nvidia_h264ext_ = !strcmp(
+      reinterpret_cast<char *>(component.get()),
+      "OMX.Nvidia.h264ext.decode");
 
   // Get the port information. This will obtain information about the number of
   // ports and index of the first port.
@@ -271,14 +279,21 @@ bool OmxVideoDecodeAccelerator::CreateComponent() {
     buffer->nOutputPortIndex = output_port_;
     CHECK(fake_output_buffers_.insert(buffer).second);
   }
-
   return true;
 }
 
 void OmxVideoDecodeAccelerator::Decode(
     const media::BitstreamBuffer& bitstream_buffer) {
+  TRACE_EVENT1("Video Decoder", "OVDA::Decode",
+               "Buffer id", bitstream_buffer.id());
   DCHECK_EQ(message_loop_, MessageLoop::current());
-  DCHECK(!free_input_buffers_.empty());
+
+  if (current_state_change_ == RESETTING ||
+      !queued_bitstream_buffers_.empty() ||
+      free_input_buffers_.empty()) {
+    queued_bitstream_buffers_.push_back(bitstream_buffer);
+    return;
+  }
 
   RETURN_ON_FAILURE(current_state_change_ == NO_TRANSITION &&
                     (client_state_ == OMX_StateIdle ||
@@ -315,7 +330,6 @@ void OmxVideoDecodeAccelerator::Decode(
   OMX_ERRORTYPE result = OMX_EmptyThisBuffer(component_handle_, omx_buffer);
   RETURN_ON_OMX_FAILURE(result, "OMX_EmptyThisBuffer() failed",
                         PLATFORM_FAILURE,);
-
   input_buffers_at_component_++;
 }
 
@@ -348,6 +362,8 @@ void OmxVideoDecodeAccelerator::AssignPictureBuffers(
 }
 
 void OmxVideoDecodeAccelerator::ReusePictureBuffer(int32 picture_buffer_id) {
+  TRACE_EVENT1("Video Decoder", "OVDA::ReusePictureBuffer",
+               "Picture id", picture_buffer_id);
   DCHECK_EQ(message_loop_, MessageLoop::current());
   RETURN_ON_FAILURE(CanFillBuffer(), "Can't fill buffer", ILLEGAL_STATE,);
 
@@ -385,7 +401,10 @@ void OmxVideoDecodeAccelerator::Flush() {
 
 void OmxVideoDecodeAccelerator::OnReachedEOSInFlushing() {
   DCHECK_EQ(message_loop_, MessageLoop::current());
-  BeginTransitionToState(OMX_StatePause);
+  DCHECK_EQ(client_state_, OMX_StateExecuting);
+  current_state_change_ = NO_TRANSITION;
+  if (client_)
+    client_->NotifyFlushDone();
 }
 
 void OmxVideoDecodeAccelerator::FlushIOPorts() {
@@ -419,9 +438,15 @@ void OmxVideoDecodeAccelerator::Reset() {
 
 void OmxVideoDecodeAccelerator::Destroy() {
   DCHECK_EQ(message_loop_, MessageLoop::current());
-  if (current_state_change_ == ERRORING)
+  if (current_state_change_ == ERRORING ||
+      current_state_change_ == DESTROYING) {
     return;
-  DCHECK_EQ(current_state_change_, NO_TRANSITION);
+  }
+
+  DCHECK(current_state_change_ == NO_TRANSITION ||
+         current_state_change_ == FLUSHING ||
+         current_state_change_ == RESETTING) << current_state_change_;
+
   // If we were never initializeed there's no teardown to do.
   if (client_state_ == OMX_StateMax)
     return;
@@ -455,6 +480,25 @@ void OmxVideoDecodeAccelerator::BeginTransitionToState(
 void OmxVideoDecodeAccelerator::OnReachedIdleInInitializing() {
   DCHECK_EQ(client_state_, OMX_StateLoaded);
   client_state_ = OMX_StateIdle;
+  // Query the resources with the component.
+  if (component_name_is_nvidia_h264ext_) {
+    OMX_INDEXTYPE extension_index;
+    OMX_ERRORTYPE result = OMX_GetExtensionIndex(
+        component_handle_,
+        const_cast<char*>("OMX.Nvidia.index.config.checkresources"),
+        &extension_index);
+    RETURN_ON_OMX_FAILURE(result,
+                          "Failed to get the extension",
+                          PLATFORM_FAILURE,);
+    OMX_VIDEO_PARAM_PROFILELEVELTYPE video_profile_level;
+    InitParam(*this, &video_profile_level);
+    video_profile_level.eProfile = profile_;
+    result = OMX_SetConfig(component_handle_, extension_index,
+                           &video_profile_level);
+    RETURN_ON_OMX_FAILURE(result,
+                          "Resource Allocation failed",
+                          PLATFORM_FAILURE,);
+  }
   BeginTransitionToState(OMX_StateExecuting);
 }
 
@@ -479,34 +523,33 @@ void OmxVideoDecodeAccelerator::OnReachedExecutingInInitializing() {
     client_->NotifyInitializeDone();
 }
 
-void OmxVideoDecodeAccelerator::OnReachedPauseInFlushing() {
-  DCHECK_EQ(client_state_, OMX_StateExecuting);
-  client_state_ = OMX_StatePause;
-  FlushIOPorts();
-}
-
-void OmxVideoDecodeAccelerator::OnReachedExecutingInFlushing() {
-  DCHECK_EQ(client_state_, OMX_StatePause);
-  client_state_ = OMX_StateExecuting;
-  DCHECK(saw_eos_during_flush_);
-  saw_eos_during_flush_ = false;
-  current_state_change_ = NO_TRANSITION;
-  if (client_)
-    client_->NotifyFlushDone();
-}
-
 void OmxVideoDecodeAccelerator::OnReachedPauseInResetting() {
   DCHECK_EQ(client_state_, OMX_StateExecuting);
   client_state_ = OMX_StatePause;
   FlushIOPorts();
 }
 
+void OmxVideoDecodeAccelerator::DecodeQueuedBitstreamBuffers() {
+  BitstreamBufferList buffers;
+  buffers.swap(queued_bitstream_buffers_);
+  for (size_t i = 0; i < buffers.size(); ++i)
+    Decode(buffers[i]);
+}
+
 void OmxVideoDecodeAccelerator::OnReachedExecutingInResetting() {
   DCHECK_EQ(client_state_, OMX_StatePause);
   client_state_ = OMX_StateExecuting;
   current_state_change_ = NO_TRANSITION;
-  if (client_)
-    client_->NotifyResetDone();
+  if (!client_)
+    return;
+
+  // Drain queues of input & output buffers held during the reset.
+  DecodeQueuedBitstreamBuffers();
+  for (size_t i = 0; i < queued_picture_buffer_ids_.size(); ++i)
+    ReusePictureBuffer(queued_picture_buffer_ids_[i]);
+  queued_picture_buffer_ids_.clear();
+
+  client_->NotifyResetDone();
 }
 
 // Alert: HORROR ahead!  OMX shutdown is an asynchronous dance but our clients
@@ -713,6 +756,12 @@ void OmxVideoDecodeAccelerator::OnOutputPortEnabled() {
 
 void OmxVideoDecodeAccelerator::FillBufferDoneTask(
     OMX_BUFFERHEADERTYPE* buffer) {
+  media::Picture* picture =
+      reinterpret_cast<media::Picture*>(buffer->pAppPrivate);
+  int picture_buffer_id = picture ? picture->picture_buffer_id() : -1;
+  TRACE_EVENT2("Video Decoder", "OVDA::FillBufferDoneTask",
+               "Buffer id", buffer->nTimeStamp,
+               "Picture id", picture_buffer_id);
   DCHECK_EQ(message_loop_, MessageLoop::current());
   DCHECK_GT(output_buffers_at_component_, 0);
   --output_buffers_at_component_;
@@ -726,24 +775,21 @@ void OmxVideoDecodeAccelerator::FillBufferDoneTask(
   }
   CHECK(!fake_output_buffers_.size());
 
-  if (current_state_change_ == FLUSHING &&
-      buffer->nFlags & OMX_BUFFERFLAG_EOS) {
-    DCHECK(!saw_eos_during_flush_);
-    saw_eos_during_flush_ = true;
+  if (buffer->nFlags & OMX_BUFFERFLAG_EOS) {
+    // Avoid sending the (fake) EOS buffer to the client.
+    return;
   }
 
   // During the transition from Executing to Idle, and during port-flushing, all
   // pictures are sent back through here.  Avoid giving them to the client.
-  // Also avoid sending the (fake) EOS buffer to the client.
-  if ((current_state_change_ != NO_TRANSITION &&
-       current_state_change_ != FLUSHING) ||
-      saw_eos_during_flush_) {
+  if (current_state_change_ != NO_TRANSITION &&
+      current_state_change_ != FLUSHING) {
+    if (current_state_change_ == RESETTING)
+      queued_picture_buffer_ids_.push_back(picture_buffer_id);
     return;
   }
 
-  CHECK(buffer->pAppPrivate);
-  media::Picture* picture =
-      reinterpret_cast<media::Picture*>(buffer->pAppPrivate);
+  DCHECK(picture);
   // See Decode() for an explanation of this abuse of nTimeStamp.
   picture->set_bitstream_buffer_id(buffer->nTimeStamp);
   if (client_)
@@ -752,6 +798,8 @@ void OmxVideoDecodeAccelerator::FillBufferDoneTask(
 
 void OmxVideoDecodeAccelerator::EmptyBufferDoneTask(
     OMX_BUFFERHEADERTYPE* buffer) {
+  TRACE_EVENT1("Video Decoder", "OVDA::EmptyBufferDoneTask",
+               "Buffer id", buffer->nTimeStamp);
   DCHECK_EQ(message_loop_, MessageLoop::current());
   DCHECK_GT(input_buffers_at_component_, 0);
   free_input_buffers_.push(buffer);
@@ -768,6 +816,8 @@ void OmxVideoDecodeAccelerator::EmptyBufferDoneTask(
   if (client_)
     client_->NotifyEndOfBitstreamBuffer(input_buffer_details->second);
   delete input_buffer_details;
+
+  DecodeQueuedBitstreamBuffers();
 }
 
 void OmxVideoDecodeAccelerator::DispatchStateReached(OMX_STATETYPE reached) {
@@ -784,17 +834,6 @@ void OmxVideoDecodeAccelerator::DispatchStateReached(OMX_STATETYPE reached) {
         default:
           NOTREACHED() << "Unexpected state in INITIALIZING: " << reached;
       }
-    case FLUSHING:
-      switch (reached) {
-        case OMX_StatePause:
-          OnReachedPauseInFlushing();
-          return;
-        case OMX_StateExecuting:
-          OnReachedExecutingInFlushing();
-          return;
-        default:
-          NOTREACHED() << "Unexpected state in FLUSHING: " << reached;
-      }
     case RESETTING:
       switch (reached) {
         case OMX_StatePause:
@@ -808,6 +847,14 @@ void OmxVideoDecodeAccelerator::DispatchStateReached(OMX_STATETYPE reached) {
       }
     case DESTROYING:
       switch (reached) {
+        case OMX_StatePause:
+        case OMX_StateExecuting:
+          // Because Destroy() can interrupt an in-progress Reset(),
+          // we might arrive at these states after current_state_change_ was
+          // overwritten with DESTROYING.  That's fine though - we already have
+          // the state transition for Destroy() queued up at the component, so
+          // we treat this as a no-op.
+          return;
         case OMX_StateIdle:
           OnReachedIdleInDestroying();
           return;
@@ -850,8 +897,7 @@ void OmxVideoDecodeAccelerator::EventHandlerCompleteTask(OMX_EVENTTYPE event,
           DispatchStateReached(static_cast<OMX_STATETYPE>(data2));
           return;
         case OMX_CommandFlush:
-          DCHECK(current_state_change_ == FLUSHING ||
-                 current_state_change_ == RESETTING ||
+          DCHECK(current_state_change_ == RESETTING ||
                  current_state_change_ == DESTROYING);
           if (data2 == input_port_)
             InputPortFlushDone();
@@ -881,6 +927,9 @@ void OmxVideoDecodeAccelerator::EventHandlerCompleteTask(OMX_EVENTTYPE event,
       } else if (data1 == output_port_ &&
                  data2 == OMX_IndexConfigCommonOutputCrop) {
         // TODO(vjain): Handle video crop rect.
+      } else if (data1 == output_port_ &&
+                 data2 == OMX_IndexConfigCommonScale) {
+        // TODO(ashokm@nvidia.com): Handle video SAR change.
       } else {
         RETURN_ON_FAILURE(false,
                           "Unexpected EventPortSettingsChanged: "
@@ -890,6 +939,9 @@ void OmxVideoDecodeAccelerator::EventHandlerCompleteTask(OMX_EVENTTYPE event,
       return;
     case OMX_EventBufferFlag:
       if (data1 == output_port_) {
+        // In case of Destroy() interrupting Flush().
+        if (current_state_change_ == DESTROYING)
+          return;
         DCHECK_EQ(current_state_change_, FLUSHING);
         OnReachedEOSInFlushing();
       } else {
@@ -928,6 +980,8 @@ OMX_ERRORTYPE OmxVideoDecodeAccelerator::EmptyBufferCallback(
     OMX_HANDLETYPE component,
     OMX_PTR priv_data,
     OMX_BUFFERHEADERTYPE* buffer) {
+  TRACE_EVENT1("Video Decoder", "OVDA::EmptyBufferCallback",
+               "Buffer id", buffer->nTimeStamp);
   // Called on the OMX thread.
   OmxVideoDecodeAccelerator* decoder =
       static_cast<OmxVideoDecodeAccelerator*>(priv_data);
@@ -945,6 +999,12 @@ OMX_ERRORTYPE OmxVideoDecodeAccelerator::FillBufferCallback(
     OMX_HANDLETYPE component,
     OMX_PTR priv_data,
     OMX_BUFFERHEADERTYPE* buffer) {
+  media::Picture* picture =
+      reinterpret_cast<media::Picture*>(buffer->pAppPrivate);
+  int picture_buffer_id = picture ? picture->picture_buffer_id() : -1;
+  TRACE_EVENT2("Video Decoder", "OVDA::FillBufferCallback",
+               "Buffer id", buffer->nTimeStamp,
+               "Picture id", picture_buffer_id);
   // Called on the OMX thread.
   OmxVideoDecodeAccelerator* decoder =
       static_cast<OmxVideoDecodeAccelerator*>(priv_data);

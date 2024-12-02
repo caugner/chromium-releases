@@ -15,7 +15,6 @@ html {
 body {
   background-size: auto 100%;
   margin: 0;
-  text-align: center;
   /* Don't highlight links when they're tapped.  Safari has bugs here that
      show up as flicker when dragging in some situations */
   -webkit-tap-highlight-color: transparent;
@@ -23,8 +22,24 @@ body {
   -webkit-user-select: none;
 }
 
-.hidden {
+/* [hidden] does display:none, but its priority is too low in some cases. */
+[hidden] {
   display: none !important;
+}
+
+#notification-container {
+  display: block;
+  margin-top: 2px;
+  position: relative;
+  text-align: center;
+  z-index: 100;
+  -webkit-transition-duration: 0.1s;
+  -webkit-transition-property: opacity;
+}
+
+#notification-container.inactive {
+  opacity: 0;
+  -webkit-transition-duration: 0.2s;
 }
 
 #notification {
@@ -34,19 +49,7 @@ body {
   color: black;
   display: inline-block;
   font-weight: bold;
-  margin-top: 2px;
-  opacity: 100%;
   padding: 7px 15px;
-  position: relative;
-  z-index: 100;
-  -webkit-transition-duration: 0.1s;
-  -webkit-transition-property: opacity;
-}
-
-#notification.inactive {
-  display: inline-block;
-  opacity: 0;
-  -webkit-transition-duration: 0.2s;
 }
 
 #notification > div > div,
@@ -108,17 +111,28 @@ body {
 
 #attribution {
   bottom: 0;
-  position: absolute;
+  left: auto;
+  margin-left: 8px;
   /* Leave room for the scrollbar. */
-  right: 13px;
+  margin-right: 13px;
+  position: absolute;
+  right: 0;
+  text-align: left;
   z-index: -5;
+}
+
+/* For themes that right-align their images, we flip the attribution to the
+ * left to avoid conflicts.  */
+html[themegravity='right'] #attribution,
+html[dir='rtl'] #attribution {
+  left: 0;
+  right: auto;
+  text-align: right;
 }
 
 #attribution > span {
   display: block;
   font-size: 84%;
-  /* Text should be left aligned regardless of diretionality. */
-  text-align: left;
 }
 
 #footer {
@@ -147,6 +161,14 @@ body {
   margin: 0 9px;
 }
 
+#logo-img {
+  margin-top: 4px;
+}
+
+.starting-up * {
+  -webkit-transition: none !important;
+}
+
 /* Trash. *********************************************************************/
 
 #trash {
@@ -159,7 +181,7 @@ body {
   -webkit-transition-delay: 0, 0.2s;
 }
 
-#footer.dragging-mode #trash {
+#footer.showing-trash-mode #trash {
   opacity: 1;
   top: 0;
   -webkit-transition-delay: 0, 0;
@@ -186,18 +208,29 @@ body {
 .page-switcher {
   background-color: transparent;
   border: none;
+  bottom: 0;
   font-size: 40px;
-  height: 100%;
   padding: 0;
   position: absolute;
-  max-width: 130px;
-  min-width: 26px;
-  opacity: 0.3;
+  margin: 0;
+  max-width: 150px;
+  min-width: 90px;
   top: 0;
   z-index: 5;
   -webkit-transition: width 150ms, right 150ms, background-color 150ms;
 }
 
-.page-switcher:hover {
+.page-switcher:hover,
+.page-switcher.drag-target {
   background-color: rgba(0, 0, 0, 0.2);
+}
+
+html[dir=ltr] #page-switcher-start,
+html[dir=rtl] #page-switcher-end {
+  border-top-right-radius: 10px;
+}
+
+html[dir=rtl] #page-switcher-start,
+html[dir=ltr] #page-switcher-end {
+  border-top-left-radius: 10px;
 }

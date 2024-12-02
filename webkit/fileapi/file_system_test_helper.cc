@@ -14,33 +14,9 @@
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
-#include "webkit/quota/special_storage_policy.h"
+#include "webkit/quota/mock_special_storage_policy.h"
 
 namespace fileapi {
-namespace {
-
-class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
- public:
-  explicit TestSpecialStoragePolicy(bool unlimited_quota)
-      : unlimited_quota_(unlimited_quota) {}
-
-  virtual bool IsStorageProtected(const GURL& origin) {
-    return false;
-  }
-
-  virtual bool IsStorageUnlimited(const GURL& origin) {
-    return unlimited_quota_;
-  }
-
-  virtual bool IsFileHandler(const std::string& extension_id) {
-    return true;
-  }
-
- private:
-  bool unlimited_quota_;
-};
-
-}  // anonymous namespace
 
 FileSystemTestOriginHelper::FileSystemTestOriginHelper(
     const GURL& origin, FileSystemType type)
@@ -62,8 +38,7 @@ void FileSystemTestOriginHelper::SetUp(
 }
 
 void FileSystemTestOriginHelper::SetUp(
-    FileSystemContext* file_system_context,
-    FileSystemFileUtil* file_util) {
+    FileSystemContext* file_system_context, FileSystemFileUtil* file_util) {
   DCHECK(file_system_context->path_manager());
   DCHECK(file_system_context->path_manager()->sandbox_provider());
 
@@ -71,7 +46,7 @@ void FileSystemTestOriginHelper::SetUp(
   file_system_context_ = file_system_context;
   if (!file_util_)
     file_util_ = file_system_context->path_manager()->sandbox_provider()->
-        GetFileSystemFileUtil();
+        GetFileUtil();
   DCHECK(file_util_);
 
   // Prepare the origin's root directory.
@@ -93,10 +68,13 @@ void FileSystemTestOriginHelper::SetUp(
     FileSystemFileUtil* file_util) {
   file_util_ = file_util;
   DCHECK(file_util_);
+  scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+      new quota::MockSpecialStoragePolicy;
+  special_storage_policy->SetAllUnlimited(unlimited_quota);
   file_system_context_ = new FileSystemContext(
-      base::MessageLoopProxy::CreateForCurrentThread(),
-      base::MessageLoopProxy::CreateForCurrentThread(),
-      new TestSpecialStoragePolicy(unlimited_quota),
+      base::MessageLoopProxy::current(),
+      base::MessageLoopProxy::current(),
+      special_storage_policy,
       quota_manager_proxy,
       base_dir,
       incognito_mode,
@@ -112,19 +90,11 @@ void FileSystemTestOriginHelper::SetUp(
       ValidateFileSystemRootAndGetPathOnFileThread(
           origin_, type_, FilePath(), true /* create */);
 
-  // Initialize the usage cache file.
+  // Initialize the usage cache file.  This code assumes that we're either using
+  // OFSFU or we've mocked it out in the sandbox provider.
   FilePath usage_cache_path = file_system_context_->path_manager()
       ->sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
   FileSystemUsageCache::UpdateUsage(usage_cache_path, 0);
-
-  // We expect the origin directory to be always empty, except for possibly
-  // the usage cache file.  We record the initial usage file size here
-  // (it will be either 0 or kUsageFileSize) so that later we can compute
-  // how much the size of the origin directory has grown.
-  initial_usage_size_ = file_util::ComputeDirectorySize(
-      GetOriginRootPath());
-
-  FileSystemUsageCache::UpdateUsage(usage_cache_path, initial_usage_size_);
 }
 
 void FileSystemTestOriginHelper::TearDown() {
@@ -170,11 +140,10 @@ bool FileSystemTestOriginHelper::RevokeUsageCache() const {
 }
 
 int64 FileSystemTestOriginHelper::ComputeCurrentOriginUsage() const {
-  // Depending on the file_util GetOriginRootPath() may include usage
-  // cache file size or may not.  Here we subtract the initial size to
-  // make it work for multiple file_utils.
-  return file_util::ComputeDirectorySize(GetOriginRootPath()) -
-      initial_usage_size_;
+  int64 size = file_util::ComputeDirectorySize(GetOriginRootPath());
+  if (file_util::PathExists(GetUsageCachePath()))
+    size -= FileSystemUsageCache::kUsageFileSize;
+  return size;
 }
 
 FileSystemOperation* FileSystemTestOriginHelper::NewOperation(
@@ -183,7 +152,7 @@ FileSystemOperation* FileSystemTestOriginHelper::NewOperation(
   DCHECK(file_util_);
   FileSystemOperation* operation =
     new FileSystemOperation(callback_dispatcher,
-                            base::MessageLoopProxy::CreateForCurrentThread(),
+                            base::MessageLoopProxy::current(),
                             file_system_context_.get(),
                             file_util_);
   InitializeOperationContext(operation->file_system_operation_context());

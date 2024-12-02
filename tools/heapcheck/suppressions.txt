@@ -371,6 +371,20 @@
    fun:NetTestSuite::Initialize
 }
 {
+   bug_44385
+   Heapcheck:Leak
+   ...
+   fun:net::HostCache::Set
+   fun:net::HostResolverImpl::OnJobComplete
+   fun:net::HostResolverImpl::Job::OnLookupComplete
+   fun:void DispatchToMethod
+   fun:RunnableMethod::Run
+   fun:*::TaskClosureAdapter::Run
+   fun:base::internal::Invoker1::DoInvoke
+   fun:base::Callback::Run
+   fun:MessageLoop::RunTask
+}
+{
    bug_44667
    Heapcheck:Leak
    fun:Callback1::Type* NewCallback
@@ -1157,8 +1171,7 @@
 {
    bug_76354
    Heapcheck:Leak
-   fun:*MessageWithReply
-   fun:*ChildProcessHostMsg_ResolveProxy
+   fun:*ViewHostMsg_ResolveProxy
    fun:ResolveProxyMsgHelperTest::GenerateReply
    fun:ResolveProxyMsgHelperTest_*_Test::TestBody
 }
@@ -1321,14 +1334,6 @@
    fun:sync_notifier::::InvalidationNotifierTest_Basic_Test::TestBody
 }
 {
-   bug_79794
-   Heapcheck:Leak
-   ...
-   fun:FormStructure::LogQualityMetrics
-   fun:AutofillManager::OnFormSubmitted
-   fun:AutofillManagerTest::FormSubmitted
-}
-{
    bug_80196
    Heapcheck:Leak
    fun:CallbackRunner* NewCallback
@@ -1338,10 +1343,10 @@
    fun:browser_sync::DataTypeManagerImpl::Configure
 }
 {
-   bug_80238
-   Heapcheck:Leak
-   ...
-   fun:sync_notifier::::InvalidationNotifierTest::SetUp
+    bug_80238
+    Heapcheck:Leak
+    ...
+    fun:sync_notifier::::InvalidationNotifierTest::SetUp
 }
 {
    bug_80467
@@ -1374,20 +1379,6 @@
    fun:RenderWidgetHost::WasHidden
 }
 {
-   bug_44385
-   Heapcheck:Leak
-   ...
-   fun:net::HostCache::Set
-   fun:net::HostResolverImpl::OnJobComplete
-   fun:net::HostResolverImpl::Job::OnLookupComplete
-   fun:void DispatchToMethod
-   fun:RunnableMethod::Run
-   fun:::TaskClosureAdapter::Run
-   fun:base::internal::Invoker1::DoInvoke
-   fun:base::Callback::Run
-   fun:MessageLoop::RunTask
-}
-{
    bug_79651
    Heapcheck:Leak
    ...
@@ -1407,10 +1398,10 @@
    fun:std::vector::push_back
    fun:ObserverListBase::AddObserver
    fun:net::SSLConfigService::AddObserver
-   fun:net::SSLClientSocketPool::SSLClientSocketPool
-   fun:net::ClientSocketPoolManager::ClientSocketPoolManager
-   fun:net::HttpNetworkSession::HttpNetworkSession
-   fun:notifier::ProxyResolvingClientSocket::ProxyResolvingClientSocket
+   fun:*SSLClientSocketPool
+   fun:*ClientSocketPoolManager
+   fun:*HttpNetworkSession
+   fun:*ProxyResolvingClientSocket
    fun:notifier::XmppClientSocketFactory::CreateTransportClientSocket
    fun:notifier::ChromeAsyncSocket::Connect
    fun:buzz::XmppClient::ProcessStartXmppLogin
@@ -1450,7 +1441,7 @@
 {
    bug_81796_a
    Heapcheck:Leak
-   fun:base::MessageLoopProxy::CreateForCurrentThread
+   fun:base::MessageLoopProxy::current
    fun:*Context
    fun:*ChannelProxy
    fun:IPCChannelTest_ChannelProxyTest_Test::TestBody
@@ -1458,7 +1449,7 @@
 {
    bug_81796_b
    Heapcheck:Leak
-   fun:base::MessageLoopProxy::CreateForCurrentThread
+   fun:base::MessageLoopProxy::current
    ...
    fun:*SyncContext
    fun:*SyncChannel
@@ -1530,6 +1521,7 @@
    fun:net::HostResolverImpl::Job::DoLookup
    fun:void DispatchToMethod
    fun:RunnableMethod::Run
+   ...
    fun:base::::WorkerThread::ThreadMain
 }
 {
@@ -1559,6 +1551,17 @@
    fun:notifier::ProxyResolvingClientSocket::ProcessProxyResolveDone
 }
 {
+   bug_86301
+   Heapcheck:Leak
+   ...
+   fun:*MessageLoopProxyTest_PostTaskAndReply_DeadReplyLoopDoesNotDelete_Test*
+   ...
+   fun:testing::UnitTest::Run
+   fun:base::TestSuite::Run
+   fun:main
+   fun:__libc_start_main
+}
+{
    bug_86468
    Heapcheck:Leak
    ...
@@ -1569,14 +1572,6 @@
    Heapcheck:Leak
    fun:TestingProfile::CreateRequestContext
    fun:ProfileSyncService*Test::SetUp
-}
-{
-   bug_88438
-   Heapcheck:Leak
-   fun:invalidation::NewPermanentCallback
-   fun:invalidation::InvalidationClientImpl::ScheduleStartAfterReadingStateBlob
-   fun:invalidation::InvalidationClientImpl::Start
-   fun:sync_notifier::ChromeInvalidationClient::Start
 }
 {
    bug_88640
@@ -1633,7 +1628,7 @@
    fun:TabContentsWrapper::RegisterUserPrefs
 }
 {
-   bug_90369
+   bug_90369_a
    Heapcheck:Leak
    fun:std::string::_Rep::_S_create
    fun:std::string::_Rep::_M_clone
@@ -1643,10 +1638,14 @@
    fun:ProfileManagerTest_CreateProfilesAsync_Test::TestBody
 }
 {
-   bug_90370
+   bug_90369_b
    Heapcheck:Leak
-   ...
-   fun:gfx::RenderTextTest*
+   fun:std::string::_Rep::_S_create
+   fun:std::string::_Rep::_M_clone
+   fun:std::string::reserve
+   fun:std::string::append
+   fun:FilePath::Append
+   fun:ProfileManagerTest_CreateProfileAsyncMultipleRequests_Test::TestBody
 }
 {
    bug_90381_a
@@ -1668,8 +1667,11 @@
    fun:net::HostResolverImpl::Job::DoLookup
    fun:void DispatchToMethod
 }
-
-
+{
+   bug_91174
+   Heapcheck:Leak
+   fun:DownloadManager::OnPathExistenceAvailable
+}
 
 # These are temporary suppressions for the CrOS bot to be used until the stacks are fixed.
 {
@@ -1703,3 +1705,89 @@
    ...
    fun:??
 }
+{
+   bug_91491
+   Heapcheck:Leak
+   ...
+   fun:CrxUpdateService::ProcessPendingItems
+}
+{
+   bug_91845_a
+   Heapcheck:Leak
+   ...
+   fun:BrowserAccessibilityManager::CreateAccessibilityTree
+   ...
+   fun:BrowserAccessibilityManagerTest_TestCreateEmptyDocument_Test::TestBody
+}
+{
+   bug_91845_b
+   Heapcheck:Leak
+   fun:BrowserAccessibilityManagerTest_TestCreateEmptyDocument_Test::TestBody
+}
+{
+   bug_91845_c
+   Heapcheck:Leak
+   ...
+   fun:BrowserAccessibilityManager::Create
+   fun:BrowserAccessibilityManager::CreateEmptyDocument
+   fun:BrowserAccessibilityManagerTest_TestCreateEmptyDocument_Test::TestBody
+}
+{
+   bug_93006a
+   Heapcheck:Leak
+   fun:DownloadManager::Init
+   fun:DownloadManagerTest*
+   fun:DownloadManagerTest_*
+}
+{
+   bug_93006b
+   Heapcheck:Leak
+   fun:DownloadManagerTest*
+   fun:DownloadManagerTest_*
+}
+{
+   bug_93006c
+   Heapcheck:Leak
+   ...
+   fun:MockDownloadManager*
+   fun:DownloadManagerTest*
+   fun:DownloadManagerTest_*
+}
+{
+   bug_93006d
+   Heapcheck:Leak
+   ...
+   fun:DownloadManager::AddObserver
+   fun:*SelectFileObserver
+   fun:DownloadManagerTest_*
+}
+{
+   bug_93006e
+   Heapcheck:Leak
+   ...
+   fun:DownloadResourceHandler::OnWillRead
+   fun:BufferedResourceHandler::UseAlternateResourceHandler
+   fun:BufferedResourceHandler::CompleteResponseStarted
+   fun:BufferedResourceHandler::OnReadCompleted
+   fun:ResourceDispatcherHost::CompleteRead
+   fun:ResourceDispatcherHost::OnReadCompleted
+   fun:net::URLRequest::NotifyReadCompleted
+   fun:net::URLRequestJob::NotifyReadComplete
+   fun:net::URLRequestTestJob::ProcessNextOperation
+   fun:net::URLRequestTestJob::ProcessOnePendingMessage
+   fun:ResourceDispatcherHostTest_*
+}
+{
+   bug_94195
+   Heapcheck:Leak
+   ...
+   fun:GpuBlacklist::LoadGpuBlacklist
+}
+{
+   bug_94764
+   Heapcheck:Leak
+   fun:remoting::ClientSession::UnpressKeys
+   fun:remoting::ClientSessionTest_UnpressKeys_Test::TestBody
+}
+
+

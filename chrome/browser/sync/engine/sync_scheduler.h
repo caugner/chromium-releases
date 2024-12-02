@@ -10,6 +10,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,15 +18,13 @@
 #include "base/task.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/sync/engine/configure_reason.h"
+#include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/engine/nudge_source.h"
 #include "chrome/browser/sync/engine/polling_constants.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/engine/syncer.h"
-#include "chrome/browser/sync/syncable/model_type_payload_map.h"
-#include "chrome/browser/sync/engine/net/server_connection_manager.h"
-#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/sessions/sync_session_context.h"
+#include "chrome/browser/sync/sessions/sync_session.h"
+#include "chrome/browser/sync/syncable/model_type_payload_map.h"
 
 class MessageLoop;
 
@@ -90,13 +89,24 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
       const base::TimeDelta& delay, NudgeSource source,
       const syncable::ModelTypePayloadMap& types_with_payloads,
       const tracked_objects::Location& nudge_location);
-  void ScheduleConfig(const syncable::ModelTypeBitSet& types,
-      sync_api::ConfigureReason reason);
+
+  // Note: The source argument of this function must come from the subset of
+  // GetUpdatesCallerInfo values related to configurations.
+  void ScheduleConfig(
+      const syncable::ModelTypeBitSet& types,
+      sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source);
+
   void ScheduleClearUserData();
+  // If this is called before Start(), the cleanup is guaranteed to
+  // happen before the Start finishes.
+  //
+  // TODO(akalin): Figure out how to test this.
   void ScheduleCleanupDisabledTypes();
 
   // Change status of notifications in the SyncSessionContext.
   void set_notifications_enabled(bool notifications_enabled);
+
+  base::TimeDelta sessions_commit_delay() const;
 
   // DDOS avoidance function.  Calculates how long we should wait before trying
   // again after a failed sync attempt, where the last delay was |base_delay|.
@@ -104,17 +114,23 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   static base::TimeDelta GetRecommendedDelay(const base::TimeDelta& base_delay);
 
   // SyncSession::Delegate implementation.
-  virtual void OnSilencedUntil(const base::TimeTicks& silenced_until);
-  virtual bool IsSyncingCurrentlySilenced();
+  virtual void OnSilencedUntil(
+      const base::TimeTicks& silenced_until) OVERRIDE;
+  virtual bool IsSyncingCurrentlySilenced() OVERRIDE;
   virtual void OnReceivedShortPollIntervalUpdate(
-      const base::TimeDelta& new_interval);
+      const base::TimeDelta& new_interval) OVERRIDE;
   virtual void OnReceivedLongPollIntervalUpdate(
-      const base::TimeDelta& new_interval);
-  virtual void OnShouldStopSyncingPermanently();
+      const base::TimeDelta& new_interval) OVERRIDE;
+  virtual void OnReceivedSessionsCommitDelay(
+      const base::TimeDelta& new_delay) OVERRIDE;
+  virtual void OnShouldStopSyncingPermanently() OVERRIDE;
+  virtual void OnSyncProtocolError(
+      const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
 
   // ServerConnectionEventListener implementation.
   // TODO(tim): schedule a nudge when valid connection detected? in 1 minute?
-  virtual void OnServerConnectionEvent(const ServerConnectionEvent& event);
+  virtual void OnServerConnectionEvent(
+      const ServerConnectionEvent& event) OVERRIDE;
 
  private:
   enum JobProcessDecision {
@@ -300,7 +316,6 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
       const std::vector<ModelSafeWorker*>& workers,
       const sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source);
   void ScheduleClearUserDataImpl();
-  void ScheduleCleanupDisabledTypesImpl();
 
   // Returns true if the client is currently in exponential backoff.
   bool IsBackingOff() const;
@@ -342,6 +357,9 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   // the client starts up and does not need to perform an initial sync.
   void SendInitialSnapshot();
 
+  virtual void OnActionableError(const sessions::SyncSessionSnapshot& snapshot);
+
+
   ScopedRunnableMethodFactory<SyncScheduler> method_factory_;
 
   // Used for logging.
@@ -358,6 +376,9 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   // updated by the server.
   base::TimeDelta syncer_short_poll_interval_seconds_;
   base::TimeDelta syncer_long_poll_interval_seconds_;
+
+  // Server-tweakable sessions commit delay.
+  base::TimeDelta sessions_commit_delay_;
 
   // Periodic timer for polling.  See AdjustPolling.
   base::RepeatingTimer<SyncScheduler> poll_timer_;

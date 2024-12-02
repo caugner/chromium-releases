@@ -19,11 +19,11 @@
 #include "chrome/browser/ui/gtk/global_menu_bar.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -283,8 +283,7 @@ void GlobalHistoryMenu::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_TOP_SITES_CHANGED) {
-    if (Source<history::TopSites>(source).ptr() == top_sites_)
-      GetTopSitesData();
+    GetTopSitesData();
   } else {
     NOTREACHED();
   }
@@ -423,8 +422,8 @@ void GlobalHistoryMenu::OnRecentlyClosedItemActivated(GtkWidget* sender) {
                               item->session_id, false);
   } else {
     DCHECK(item->url.is_valid());
-    browser_->OpenURL(item->url, GURL(), disposition,
-                      PageTransition::AUTO_BOOKMARK);
+    browser_->OpenURL(OpenURLParams(item->url, GURL(), disposition,
+                      PageTransition::AUTO_BOOKMARK));
   }
 }
 

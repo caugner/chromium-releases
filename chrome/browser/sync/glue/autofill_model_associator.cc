@@ -14,12 +14,17 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/engine/syncapi.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/autofill_change_processor.h"
 #include "chrome/browser/sync/glue/autofill_profile_model_associator.h"
 #include "chrome/browser/sync/glue/do_optimistic_refresh_task.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/read_transaction.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
+#include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/guid.h"
 #include "content/browser/browser_thread.h"
@@ -136,7 +141,7 @@ bool AutofillModelAssociator::LoadAutofillData(
   return true;
 }
 
-bool AutofillModelAssociator::AssociateModels() {
+bool AutofillModelAssociator::AssociateModels(SyncError* error) {
   VLOG(1) << "Associating Autofill Models";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   {
@@ -149,7 +154,9 @@ bool AutofillModelAssociator::AssociateModels() {
   ScopedVector<AutofillProfile> profiles;
 
   if (!LoadAutofillData(&entries, &profiles.get())) {
-    LOG(ERROR) << "Could not get the autofill data from WebDatabase.";
+    error->Reset(FROM_HERE,
+                 "Could not get the autofill data from WebDatabase.",
+                 model_type());
     return false;
   }
 
@@ -159,13 +166,16 @@ bool AutofillModelAssociator::AssociateModels() {
 
     sync_api::ReadNode autofill_root(&trans);
     if (!autofill_root.InitByTagLookup(kAutofillTag)) {
-      LOG(ERROR) << "Server did not create the top-level autofill node. We "
-                 << "might be running against an out-of-date server.";
+      error->Reset(FROM_HERE,
+                   "Server did not create the top-level autofill node. We "
+                   "might be running against an out-of-date server.",
+                   model_type());
       return false;
     }
 
     if (!TraverseAndAssociateChromeAutofillEntries(&trans, autofill_root,
         entries, &bundle.current_entries, &bundle.new_entries)) {
+      error->Reset(FROM_HERE, "Failed to associate entries.", model_type());
       return false;
     }
 
@@ -174,6 +184,7 @@ bool AutofillModelAssociator::AssociateModels() {
         autofill_root,
         &bundle,
         profiles.get())) {
+      error->Reset(FROM_HERE, "Failed to associate sync nodes.", model_type());
       return false;
     }
   }
@@ -184,7 +195,7 @@ bool AutofillModelAssociator::AssociateModels() {
   // to worry about the sync model getting out of sync, because changes are
   // propagated to the ChangeProcessor on this thread.
   if (!SaveChangesToWebData(bundle)) {
-    LOG(ERROR) << "Failed to update autofill entries.";
+    error->Reset(FROM_HERE, "Failed to update webdata.", model_type());
     return false;
   }
 
@@ -345,7 +356,7 @@ void AutofillModelAssociator::AddNativeProfileIfNeeded(
   }
 }
 
-bool AutofillModelAssociator::DisassociateModels() {
+bool AutofillModelAssociator::DisassociateModels(SyncError* error) {
   id_map_.clear();
   id_map_inverse_.clear();
   return true;

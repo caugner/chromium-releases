@@ -87,6 +87,12 @@ class ExistingUserController : public LoginDisplay::Delegate,
     return login_display_;
   }
 
+  // Returns the LoginDisplayHost for this controller.
+  // Used for testing.
+  LoginDisplayHost* login_display_host() {
+    return host_;
+  }
+
  private:
   friend class ExistingUserControllerTest;
   friend class MockLoginPerformerDelegate;
@@ -130,7 +136,8 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Handles result of ownership check and starts enterprise enrollment if
   // applicable.
-  void OnEnrollmentOwnershipCheckCompleted(OwnershipService::Status status);
+  void OnEnrollmentOwnershipCheckCompleted(OwnershipService::Status status,
+                                           bool current_user_is_owner);
 
   void set_login_performer_delegate(LoginPerformer::Delegate* d) {
     login_performer_delegate_.reset(d);
@@ -188,6 +195,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Used to verify ownership before starting enterprise enrollment.
   scoped_ptr<OwnershipStatusChecker> ownership_checker_;
+
+  // Whether it's first login to the device and this user will be owner.
+  bool is_owner_login_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, NewUserLogin);
 

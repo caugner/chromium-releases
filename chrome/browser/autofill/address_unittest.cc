@@ -10,8 +10,10 @@
 #include "chrome/browser/autofill/autofill_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+typedef testing::Test AddressTest;
+
 // Test that the getters and setters for country code are working.
-TEST(AddressTest, CountryCode) {
+TEST_F(AddressTest, CountryCode) {
   Address address;
   EXPECT_EQ(std::string(), address.country_code());
 
@@ -23,7 +25,7 @@ TEST(AddressTest, CountryCode) {
 }
 
 // Test that country codes are properly decoded as country names.
-TEST(AddressTest, GetCountry) {
+TEST_F(AddressTest, GetCountry) {
   Address address;
   EXPECT_EQ(std::string(), address.country_code());
 
@@ -41,7 +43,7 @@ TEST(AddressTest, GetCountry) {
 }
 
 // Test that we properly detect country codes appropriate for each country.
-TEST(AddressTest, SetCountry) {
+TEST_F(AddressTest, SetCountry) {
   Address address;
   EXPECT_EQ(std::string(), address.country_code());
 
@@ -77,7 +79,7 @@ TEST(AddressTest, SetCountry) {
 }
 
 // Test that we properly match typed values to stored country data.
-TEST(AddressTest, IsCountry) {
+TEST_F(AddressTest, IsCountry) {
   Address address;
   address.set_country_code("US");
 

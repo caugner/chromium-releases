@@ -10,7 +10,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_editor_view.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -68,7 +68,8 @@ class BookmarkEditorViewTest : public testing::Test {
   }
 
   void SetURLText(const std::wstring& text) {
-    editor_->url_tf_.SetText(text);
+    if (editor_->details_.type != BookmarkEditor::EditDetails::NEW_FOLDER)
+      editor_->url_tf_->SetText(text);
   }
 
   void ApplyEdits(BookmarkEditorView::EditorNode* node) {
@@ -81,7 +82,9 @@ class BookmarkEditorViewTest : public testing::Test {
   }
 
   bool URLTFHasParent() {
-    return editor_->url_tf_.parent();
+    if (editor_->details_.type == BookmarkEditor::EditDetails::NEW_FOLDER)
+      return false;
+    return editor_->url_tf_->parent();
   }
 
   MessageLoopForUI message_loop_;

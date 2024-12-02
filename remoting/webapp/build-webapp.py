@@ -18,6 +18,7 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 import sys
 import time
 import zipfile
@@ -46,19 +47,22 @@ def createZip(zip_path, directory):
   zip.close()
 
 
-def buildWebApp(mimetype, destination, zip_path, plugin, name_suffix, files):
+def buildWebApp(buildtype, mimetype, destination, zip_path, plugin, files,
+                locales):
   """Does the main work of building the webapp directory and zipfile.
 
   Args:
+    buildtype: the type of build ("Official" or "Dev")
     mimetype: A string with mimetype of plugin.
     destination: A string with path to directory where the webapp will be
                  written.
     zipfile: A string with path to the zipfile to create containing the
              contents of |destination|.
     plugin: A string with path to the binary plugin for this webapp.
-    name_suffix: A string to append to the webapp's title.
     files: An array of strings listing the paths for resources to include
            in this webapp.
+    locales: An array of strings listing locales, which are copied, along
+             with their directory structure from the _locales directory down.
   """
   # Ensure a fresh directory.
   try:
@@ -74,9 +78,9 @@ def buildWebApp(mimetype, destination, zip_path, plugin, name_suffix, files):
   #
   # On Windows Vista platform.system() can return 'Microsoft' with some
   # versions of Python, see http://bugs.python.org/issue1082
-  #should_symlink = platform.system() not in ['Windows', 'Microsoft']
+  # should_symlink = platform.system() not in ['Windows', 'Microsoft']
   #
-  # TODO(ajwong): Pending decision on http://crbug.com/27185, we may not be
+  # TODO(ajwong): Pending decision on http://crbug.com/27185 we may not be
   # able to load symlinked resources.
   should_symlink = False
 
@@ -96,6 +100,48 @@ def buildWebApp(mimetype, destination, zip_path, plugin, name_suffix, files):
     else:
       shutil.copy2(current_file, destination_file)
 
+  # Copy all the locales, preserving directory structure
+  destination_locales = os.path.join(destination, "_locales")
+  os.mkdir(destination_locales , 0775)
+  chromium_locale_dir = "/_locales/"
+  chrome_locale_dir = "/_locales.official/"
+  for current_locale in locales:
+    pos = current_locale.find(chromium_locale_dir)
+    locale_len = len(chromium_locale_dir)
+    if (pos == -1):
+      pos = current_locale.find(chrome_locale_dir)
+      locale_len = len(chrome_locale_dir)
+    if (pos == -1):
+      raise "Missing locales directory in " + current_locale
+    subtree = current_locale[pos+locale_len:]
+    pos = subtree.find("/")
+    if (pos == -1):
+      raise "Malformed locale: " + current_locale
+    locale_id = subtree[:pos]
+    messages = subtree[pos+1:]
+    destination_dir = os.path.join(destination_locales, locale_id)
+    destination_file = os.path.join(destination_dir, messages)
+    os.mkdir(destination_dir, 0775)
+    shutil.copy2(current_locale, destination_file)
+
+  # Create fake plugin files to appease the manifest checker.
+  # It requires that if there is a plugin listed in the manifest that
+  # there be a file in the plugin with that name.
+  names = [
+    'remoting_host_plugin.dll',  # Windows
+    'remoting_host_plugin.plugin',  # Mac
+    'libremoting_host_plugin.ia32.so',  # Linux 32
+    'libremoting_host_plugin.x64.so'  # Linux 64
+  ]
+  pluginName = os.path.basename(plugin)
+
+  for name in names:
+    if name != pluginName:
+      path = os.path.join(destination, name)
+      f = open(path, 'w')
+      f.write("placeholder for %s" % (name))
+      f.close()
+
   # Copy the plugin.
   pluginName = os.path.basename(plugin)
   newPluginPath = os.path.join(destination, pluginName)
@@ -105,15 +151,9 @@ def buildWebApp(mimetype, destination, zip_path, plugin, name_suffix, files):
   else:
     shutil.copy2(plugin, newPluginPath)
 
-  # Now massage the manifest to the right plugin name.
-  findAndReplace(os.path.join(destination, 'manifest.json'),
-                 '"PLUGINS": "PLACEHOLDER"',
-                  '"plugins": [\n    { "path": "' + pluginName +'" }\n  ]')
-
-  # Add the name suffix.
-  findAndReplace(os.path.join(destination, 'manifest.json'),
-                 'NAME_SUFFIX',
-                 name_suffix)
+  # Strip the linux build.
+  if ((platform.system() == 'Linux') and (buildtype == 'Official')):
+    subprocess.call(["strip", newPluginPath])
 
   # Add unique build numbers to manifest version.
   # For now, this is based on the system clock (seconds since 1/1/1970), since
@@ -141,11 +181,23 @@ def buildWebApp(mimetype, destination, zip_path, plugin, name_suffix, files):
 def main():
   if len(sys.argv) < 6:
     print ('Usage: build-webapp.py '
-           '<mime-type> <dst> <zip-path> <plugin> <other files...>')
+           '<build-type> <mime-type> <dst> <zip-path> <plugin> '
+           '<other files...> --locales <locales...>')
     sys.exit(1)
 
-  buildWebApp(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4],
-              sys.argv[5], sys.argv[6:])
+  reading_locales = False
+  files = []
+  locales = []
+  for arg in sys.argv[6:]:
+    if arg == "--locales":
+      reading_locales = True;
+    elif reading_locales:
+      locales.append(arg)
+    else:
+      files.append(arg)
+
+  buildWebApp(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5],
+              files, locales)
 
 
 if __name__ == '__main__':

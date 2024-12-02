@@ -10,6 +10,7 @@
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/time.h"
 #include "base/tuple.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete_history_manager.h"
@@ -25,7 +26,7 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "googleurl/src/gurl.h"
@@ -257,6 +258,18 @@ void ExpectSuggestions(int page_id,
   }
 }
 
+void ExpectFilledField(const char* expected_label,
+                       const char* expected_name,
+                       const char* expected_value,
+                       const char* expected_form_control_type,
+                       const webkit_glue::FormField& field) {
+  SCOPED_TRACE(expected_label);
+  EXPECT_EQ(UTF8ToUTF16(expected_label), field.label);
+  EXPECT_EQ(UTF8ToUTF16(expected_name), field.name);
+  EXPECT_EQ(UTF8ToUTF16(expected_value), field.value);
+  EXPECT_EQ(UTF8ToUTF16(expected_form_control_type), field.form_control_type);
+}
+
 // Verifies that the |filled_form| has been filled with the given data.
 // Verifies address fields if |has_address_fields| is true, and verifies
 // credit card fields if |has_credit_card_fields| is true. Verifies both if both
@@ -306,70 +319,53 @@ void ExpectFilledForm(int page_id,
     form_size += kCreditCardFormSize;
   ASSERT_EQ(form_size, filled_form.fields.size());
 
-  FormField field;
   if (has_address_fields) {
-    autofill_test::CreateTestFormField(
-        "First Name", "firstname", first, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[0]));
-    autofill_test::CreateTestFormField(
-        "Middle Name", "middlename", middle, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[1]));
-    autofill_test::CreateTestFormField(
-        "Last Name", "lastname", last, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[2]));
-    autofill_test::CreateTestFormField(
-        "Address Line 1", "addr1", address1, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[3]));
-    autofill_test::CreateTestFormField(
-        "Address Line 2", "addr2", address2, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[4]));
-    autofill_test::CreateTestFormField(
-        "City", "city", city, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[5]));
-    autofill_test::CreateTestFormField(
-        "State", "state", state, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[6]));
-    autofill_test::CreateTestFormField(
-        "Postal Code", "zipcode", postal_code, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[7]));
-    autofill_test::CreateTestFormField(
-        "Country", "country", country, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[8]));
-    autofill_test::CreateTestFormField(
-        "Phone Number", "phonenumber", phone, "tel", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[9]));
-    autofill_test::CreateTestFormField(
-        "Fax", "fax", fax, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[10]));
-    autofill_test::CreateTestFormField(
-        "Email", "email", email, "email", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[11]));
+    ExpectFilledField("First Name", "firstname", first, "text",
+                      filled_form.fields[0]);
+    ExpectFilledField("Middle Name", "middlename", middle, "text",
+                      filled_form.fields[1]);
+    ExpectFilledField("Last Name", "lastname", last, "text",
+                      filled_form.fields[2]);
+    ExpectFilledField("Address Line 1", "addr1", address1, "text",
+                      filled_form.fields[3]);
+    ExpectFilledField("Address Line 2", "addr2", address2, "text",
+                      filled_form.fields[4]);
+    ExpectFilledField("City", "city", city, "text",
+                      filled_form.fields[5]);
+    ExpectFilledField("State", "state", state, "text",
+                      filled_form.fields[6]);
+    ExpectFilledField("Postal Code", "zipcode", postal_code, "text",
+                      filled_form.fields[7]);
+    ExpectFilledField("Country", "country", country, "text",
+                      filled_form.fields[8]);
+    ExpectFilledField("Phone Number", "phonenumber", phone, "tel",
+                      filled_form.fields[9]);
+    ExpectFilledField("Fax", "fax", fax, "text",
+                      filled_form.fields[10]);
+    ExpectFilledField("Email", "email", email, "email",
+                      filled_form.fields[11]);
   }
 
   if (has_credit_card_fields) {
     size_t offset = has_address_fields? kAddressFormSize : 0;
-    autofill_test::CreateTestFormField(
-        "Name on Card", "nameoncard", name_on_card, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[offset + 0]));
-    autofill_test::CreateTestFormField(
-        "Card Number", "cardnumber", card_number, "text", &field);
-    EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[offset + 1]));
+    ExpectFilledField("Name on Card", "nameoncard", name_on_card, "text",
+                      filled_form.fields[offset + 0]);
+    ExpectFilledField("Card Number", "cardnumber", card_number, "text",
+                      filled_form.fields[offset + 1]);
     if (use_month_type) {
       std::string exp_year = expiration_year;
       std::string exp_month = expiration_month;
       std::string date;
       if (!exp_year.empty() && !exp_month.empty())
         date = exp_year + "-" + exp_month;
-      autofill_test::CreateTestFormField(
-          "Expiration Date", "ccmonth", date.c_str(), "month", &field);
-      EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[offset + 2]));
+
+      ExpectFilledField("Expiration Date", "ccmonth", date.c_str(), "month",
+                        filled_form.fields[offset + 2]);
     } else {
-      autofill_test::CreateTestFormField(
-          "Expiration Date", "ccmonth", expiration_month, "text", &field);
-      EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[offset + 2]));
-      autofill_test::CreateTestFormField(
-          "", "ccyear", expiration_year, "text", &field);
-      EXPECT_TRUE(field.StrictlyEqualsHack(filled_form.fields[offset + 3]));
+      ExpectFilledField("Expiration Date", "ccmonth", expiration_month, "text",
+                        filled_form.fields[offset + 2]);
+      ExpectFilledField("", "ccyear", expiration_year, "text",
+                        filled_form.fields[offset + 3]);
     }
   }
 }
@@ -500,8 +496,6 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
                                                     test_personal_data_.get()));
   }
 
-  Profile* profile() { return contents()->profile(); }
-
   void GetAutofillSuggestions(int query_id,
                               const webkit_glue::FormData& form,
                               const webkit_glue::FormField& field) {
@@ -519,11 +513,11 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   }
 
   void FormsSeen(const std::vector<webkit_glue::FormData>& forms) {
-    autofill_manager_->OnFormsSeen(forms);
+    autofill_manager_->OnFormsSeen(forms, base::TimeTicks());
   }
 
   void FormSubmitted(const FormData& form) {
-    autofill_manager_->OnFormSubmitted(form);
+    autofill_manager_->OnFormSubmitted(form, base::TimeTicks::Now());
   }
 
   void FillAutofillFormData(int query_id,
@@ -1850,6 +1844,166 @@ TEST_F(AutofillManagerTest, FillFormWithMultipleSections) {
   }
 }
 
+// Test that we correctly fill a form that has author-specified sections, which
+// might not match our expected section breakdown.
+TEST_F(AutofillManagerTest, FillFormWithAuthorSpecifiedSections) {
+  // Create a form with a billing section and an unnamed section, interleaved.
+  // The billing section includes both address and credit card fields.
+  FormData form;
+  form.name = ASCIIToUTF16("MyForm");
+  form.method = ASCIIToUTF16("POST");
+  form.origin = GURL("https://myform.com/form.html");
+  form.action = GURL("https://myform.com/submit.html");
+  form.user_submitted = true;
+
+  FormField field;
+
+  autofill_test::CreateTestFormField("", "country", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing country");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "firstname", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("given-name");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "lastname", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("surname");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "address", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing street-address");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "city", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing locality");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "state", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing administrative-area");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "zip", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing postal-code");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "ccname", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing cc-full-name");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "ccnumber", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing cc-number");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "ccexp", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("section-billing cc-exp");
+  form.fields.push_back(field);
+
+  autofill_test::CreateTestFormField("", "email", "", "text", &field);
+  field.autocomplete_type = ASCIIToUTF16("email");
+  form.fields.push_back(field);
+
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+
+  // Fill the unnamed section.
+  GUIDPair guid("00000000-0000-0000-0000-000000000001", 0);
+  GUIDPair empty(std::string(), 0);
+  FillAutofillFormData(kDefaultPageID, form, form.fields[1],
+                       autofill_manager_->PackGUIDs(empty, guid));
+
+  int page_id = 0;
+  FormData results;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
+  {
+    SCOPED_TRACE("Unnamed section");
+    EXPECT_EQ(kDefaultPageID, page_id);
+    EXPECT_EQ(ASCIIToUTF16("MyForm"), results.name);
+    EXPECT_EQ(ASCIIToUTF16("POST"), results.method);
+    EXPECT_EQ(GURL("https://myform.com/form.html"), results.origin);
+    EXPECT_EQ(GURL("https://myform.com/submit.html"), results.action);
+    EXPECT_TRUE(results.user_submitted);
+    ASSERT_EQ(11U, results.fields.size());
+
+    ExpectFilledField("", "country", "", "text", results.fields[0]);
+    ExpectFilledField("", "firstname", "Elvis", "text", results.fields[1]);
+    ExpectFilledField("", "lastname", "Presley", "text", results.fields[2]);
+    ExpectFilledField("", "address", "", "text", results.fields[3]);
+    ExpectFilledField("", "city", "", "text", results.fields[4]);
+    ExpectFilledField("", "state", "", "text", results.fields[5]);
+    ExpectFilledField("", "zip", "", "text", results.fields[6]);
+    ExpectFilledField("", "ccname", "", "text", results.fields[7]);
+    ExpectFilledField("", "ccnumber", "", "text", results.fields[8]);
+    ExpectFilledField("", "ccexp", "", "text", results.fields[9]);
+    ExpectFilledField("", "email", "theking@gmail.com", "text",
+                      results.fields[10]);
+  }
+
+  // Fill the address portion of the billing section.
+  const int kPageID2 = 2;
+  GUIDPair guid2("00000000-0000-0000-0000-000000000001", 0);
+  FillAutofillFormData(kPageID2, form, form.fields[0],
+                       autofill_manager_->PackGUIDs(empty, guid2));
+
+  page_id = 0;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
+  {
+    SCOPED_TRACE("Billing address");
+    EXPECT_EQ(kPageID2, page_id);
+    EXPECT_EQ(ASCIIToUTF16("MyForm"), results.name);
+    EXPECT_EQ(ASCIIToUTF16("POST"), results.method);
+    EXPECT_EQ(GURL("https://myform.com/form.html"), results.origin);
+    EXPECT_EQ(GURL("https://myform.com/submit.html"), results.action);
+    EXPECT_TRUE(results.user_submitted);
+    ASSERT_EQ(11U, results.fields.size());
+
+    ExpectFilledField("", "country", "United States", "text",
+                      results.fields[0]);
+    ExpectFilledField("", "firstname", "", "text", results.fields[1]);
+    ExpectFilledField("", "lastname", "", "text", results.fields[2]);
+    ExpectFilledField("", "address", "3734 Elvis Presley Blvd.", "text",
+                      results.fields[3]);
+    ExpectFilledField("", "city", "Memphis", "text", results.fields[4]);
+    ExpectFilledField("", "state", "Tennessee", "text", results.fields[5]);
+    ExpectFilledField("", "zip", "38116", "text", results.fields[6]);
+    ExpectFilledField("", "ccname", "", "text", results.fields[7]);
+    ExpectFilledField("", "ccnumber", "", "text", results.fields[8]);
+    ExpectFilledField("", "ccexp", "", "text", results.fields[9]);
+    ExpectFilledField("", "email", "", "text", results.fields[10]);
+  }
+
+  // Fill the credit card portion of the billing section.
+  const int kPageID3 = 3;
+  GUIDPair guid3("00000000-0000-0000-0000-000000000004", 0);
+  FillAutofillFormData(kPageID3, form, form.fields[form.fields.size() - 2],
+                       autofill_manager_->PackGUIDs(guid3, empty));
+
+  page_id = 0;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
+  {
+    SCOPED_TRACE("Credit card");
+    EXPECT_EQ(kPageID3, page_id);
+    EXPECT_EQ(ASCIIToUTF16("MyForm"), results.name);
+    EXPECT_EQ(ASCIIToUTF16("POST"), results.method);
+    EXPECT_EQ(GURL("https://myform.com/form.html"), results.origin);
+    EXPECT_EQ(GURL("https://myform.com/submit.html"), results.action);
+    EXPECT_TRUE(results.user_submitted);
+    ASSERT_EQ(11U, results.fields.size());
+
+    ExpectFilledField("", "country", "", "text", results.fields[0]);
+    ExpectFilledField("", "firstname", "", "text", results.fields[1]);
+    ExpectFilledField("", "lastname", "", "text", results.fields[2]);
+    ExpectFilledField("", "address", "", "text", results.fields[3]);
+    ExpectFilledField("", "city", "", "text", results.fields[4]);
+    ExpectFilledField("", "state", "", "text", results.fields[5]);
+    ExpectFilledField("", "zip", "", "text", results.fields[6]);
+    ExpectFilledField("", "ccname", "Elvis Presley", "text", results.fields[7]);
+    ExpectFilledField("", "ccnumber", "4234567890123456", "text",
+                      results.fields[8]);
+    ExpectFilledField("", "ccexp", "04/2012", "text", results.fields[9]);
+    ExpectFilledField("", "email", "", "text", results.fields[10]);
+  }
+}
+
 // Test that we correctly fill a form that has a single logical section with
 // multiple email address fields.
 TEST_F(AutofillManagerTest, FillFormWithMultipleEmails) {
@@ -1949,70 +2103,125 @@ TEST_F(AutofillManagerTest, FillAutofilledForm) {
 
 // Test that we correctly fill a phone number split across multiple fields.
 TEST_F(AutofillManagerTest, FillPhoneNumber) {
-  // Set up our form data.
-  FormData form;
-  form.name = ASCIIToUTF16("MyPhoneForm");
-  form.method = ASCIIToUTF16("POST");
-  form.origin = GURL("http://myform.com/phone_form.html");
-  form.action = GURL("http://myform.com/phone_submit.html");
-  form.user_submitted = true;
+  // In one form, rely on the maxlength attribute to imply phone number parts.
+  // In the other form, rely on the autocompletetype attribute.
+  FormData form_with_maxlength;
+  form_with_maxlength.name = ASCIIToUTF16("MyMaxlengthPhoneForm");
+  form_with_maxlength.method = ASCIIToUTF16("POST");
+  form_with_maxlength.origin = GURL("http://myform.com/phone_form.html");
+  form_with_maxlength.action = GURL("http://myform.com/phone_submit.html");
+  form_with_maxlength.user_submitted = true;
+  FormData form_with_autocompletetype = form_with_maxlength;
+  form_with_autocompletetype.name = ASCIIToUTF16("MyAutocompletetypePhoneForm");
+
+  struct {
+    const char* label;
+    const char* name;
+    size_t max_length;
+    const char* autocomplete_type;
+  } test_fields[] = {
+    { "country code", "country_code", 1, "phone-country-code" },
+    { "area code", "area_code", 3, "phone-area-code" },
+    { "phone", "phone_prefix", 3, "phone-local-prefix" },
+    { "-", "phone_suffix", 4, "phone-local-suffix" },
+    { "Phone Extension", "ext", 3, "phone-extension" }
+  };
 
   FormField field;
-  autofill_test::CreateTestFormField(
-      "country code", "country code", "", "text", &field);
-  field.max_length = 1;
-  form.fields.push_back(field);
-  autofill_test::CreateTestFormField(
-      "area code", "area code", "", "text", &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  autofill_test::CreateTestFormField(
-      "phone", "phone prefix", "1", "text", &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  autofill_test::CreateTestFormField(
-      "-", "phone suffix", "", "text", &field);
-  field.max_length = 4;
-  form.fields.push_back(field);
-  autofill_test::CreateTestFormField(
-      "Phone Extension", "ext", "", "text", &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
+  const size_t default_max_length = field.max_length;
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_fields); ++i) {
+    autofill_test::CreateTestFormField(
+        test_fields[i].label, test_fields[i].name, "", "text", &field);
+    field.max_length = test_fields[i].max_length;
+    field.autocomplete_type = string16();
+    form_with_maxlength.fields.push_back(field);
 
-  std::vector<FormData> forms(1, form);
+    field.max_length = default_max_length;
+    field.autocomplete_type = ASCIIToUTF16(test_fields[i].autocomplete_type);
+    form_with_autocompletetype.fields.push_back(field);
+  }
+
+  std::vector<FormData> forms;
+  forms.push_back(form_with_maxlength);
+  forms.push_back(form_with_autocompletetype);
   FormsSeen(forms);
 
-  AutofillProfile *work_profile = autofill_manager_->GetProfileWithGUID(
+  // We should be able to fill prefix and suffix fields for US numbers.
+  AutofillProfile* work_profile = autofill_manager_->GetProfileWithGUID(
       "00000000-0000-0000-0000-000000000002");
   ASSERT_TRUE(work_profile != NULL);
+  work_profile->SetInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("16505554567"));
 
   GUIDPair guid(work_profile->guid(), 0);
   GUIDPair empty(std::string(), 0);
 
-  char test_data[] = "16505554567890123456";
-  for (int i = arraysize(test_data) - 1; i >= 0; --i) {
-    test_data[i] = 0;
-    SCOPED_TRACE(StringPrintf("Testing phone: %s", test_data));
-    work_profile->SetInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16(test_data));
-    // The page ID sent to the AutofillManager from the RenderView, used to send
-    // an IPC message back to the renderer.
-    int page_id = 100 - i;
-    FillAutofillFormData(
-        page_id, form, *form.fields.begin(),
-        autofill_manager_->PackGUIDs(empty, guid));
-    page_id = 0;
-    FormData results;
-    EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results));
+  int page_id = 1;
+  FillAutofillFormData(page_id, form_with_maxlength,
+                       *form_with_maxlength.fields.begin(),
+                       autofill_manager_->PackGUIDs(empty, guid));
+  page_id = 0;
+  FormData results1;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results1));
+  EXPECT_EQ(1, page_id);
 
-    if (i != 11) {
-      // The only parsable phone is 16505554567.
-      EXPECT_EQ(string16(), results.fields[2].value);
-      EXPECT_EQ(string16(), results.fields[3].value);
-    } else {
-      EXPECT_EQ(ASCIIToUTF16("555"), results.fields[2].value);
-      EXPECT_EQ(ASCIIToUTF16("4567"), results.fields[3].value);
-    }
-  }
+  ASSERT_EQ(5U, results1.fields.size());
+  EXPECT_EQ(ASCIIToUTF16("1"), results1.fields[0].value);
+  EXPECT_EQ(ASCIIToUTF16("650"), results1.fields[1].value);
+  EXPECT_EQ(ASCIIToUTF16("555"), results1.fields[2].value);
+  EXPECT_EQ(ASCIIToUTF16("4567"), results1.fields[3].value);
+  EXPECT_EQ(string16(), results1.fields[4].value);
+
+  page_id = 2;
+  FillAutofillFormData(page_id, form_with_autocompletetype,
+                       *form_with_autocompletetype.fields.begin(),
+                       autofill_manager_->PackGUIDs(empty, guid));
+  page_id = 0;
+  FormData results2;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results2));
+  EXPECT_EQ(2, page_id);
+
+  ASSERT_EQ(5U, results2.fields.size());
+  EXPECT_EQ(ASCIIToUTF16("1"), results2.fields[0].value);
+  EXPECT_EQ(ASCIIToUTF16("650"), results2.fields[1].value);
+  EXPECT_EQ(ASCIIToUTF16("555"), results2.fields[2].value);
+  EXPECT_EQ(ASCIIToUTF16("4567"), results2.fields[3].value);
+  EXPECT_EQ(string16(), results2.fields[4].value);
+
+  // We should not be able to fill prefix and suffix fields for international
+  // numbers.
+  work_profile->SetInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("United Kingdom"));
+  work_profile->SetInfo(PHONE_HOME_WHOLE_NUMBER, ASCIIToUTF16("447700954321"));
+  page_id = 3;
+  FillAutofillFormData(page_id, form_with_maxlength,
+                       *form_with_maxlength.fields.begin(),
+                       autofill_manager_->PackGUIDs(empty, guid));
+  page_id = 0;
+  FormData results3;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results3));
+  EXPECT_EQ(3, page_id);
+
+  ASSERT_EQ(5U, results3.fields.size());
+  EXPECT_EQ(ASCIIToUTF16("44"), results3.fields[0].value);
+  EXPECT_EQ(ASCIIToUTF16("7700"), results3.fields[1].value);
+  EXPECT_EQ(ASCIIToUTF16("954321"), results3.fields[2].value);
+  EXPECT_EQ(ASCIIToUTF16("954321"), results3.fields[3].value);
+  EXPECT_EQ(string16(), results3.fields[4].value);
+
+  page_id = 4;
+  FillAutofillFormData(page_id, form_with_autocompletetype,
+                       *form_with_autocompletetype.fields.begin(),
+                       autofill_manager_->PackGUIDs(empty, guid));
+  page_id = 0;
+  FormData results4;
+  EXPECT_TRUE(GetAutofillFormDataFilledMessage(&page_id, &results4));
+  EXPECT_EQ(4, page_id);
+
+  ASSERT_EQ(5U, results4.fields.size());
+  EXPECT_EQ(ASCIIToUTF16("44"), results4.fields[0].value);
+  EXPECT_EQ(ASCIIToUTF16("7700"), results4.fields[1].value);
+  EXPECT_EQ(ASCIIToUTF16("954321"), results4.fields[2].value);
+  EXPECT_EQ(ASCIIToUTF16("954321"), results4.fields[3].value);
+  EXPECT_EQ(string16(), results4.fields[4].value);
 }
 
 // Test that we can still fill a form when a field has been removed from it.

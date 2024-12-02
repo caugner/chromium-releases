@@ -34,22 +34,27 @@ extern const char kChromeUIDevToolsURL[];
 extern const char kChromeUIDownloadsURL[];
 extern const char kChromeUIExtensionIconURL[];
 extern const char kChromeUIExtensionsURL[];
+extern const char kChromeUIFaviconURL[];
 extern const char kChromeUIFlagsURL[];
 extern const char kChromeUIFlashURL[];
-extern const char kChromeUIFaviconURL[];
+extern const char kChromeUIGpuCleanURL[];
 extern const char kChromeUIGpuCrashURL[];
+extern const char kChromeUIGpuHangURL[];
 extern const char kChromeUIHangURL[];
 extern const char kChromeUIHistory2URL[];
 extern const char kChromeUIHistoryURL[];
+extern const char kChromeUIHungRendererDialogURL[];
 extern const char kChromeUIIPCURL[];
 extern const char kChromeUIKeyboardURL[];
 extern const char kChromeUIKillURL[];
-extern const char kChromeUIMemoryURL[];
 extern const char kChromeUIMemoryRedirectURL[];
+extern const char kChromeUIMemoryURL[];
 extern const char kChromeUINetworkViewCacheURL[];
+extern const char kChromeUINetInternalsURL[];
 extern const char kChromeUINewProfile[];
 extern const char kChromeUINewTabURL[];
 extern const char kChromeUIPluginsURL[];
+extern const char kChromeUIPolicyURL[];
 extern const char kChromeUIPrintURL[];
 extern const char kChromeUISessionsURL[];
 extern const char kChromeUISettingsURL[];
@@ -101,8 +106,8 @@ extern const char kChromeUICloudPrintResourcesHost[];
 extern const char kChromeUICloudPrintSetupHost[];
 extern const char kChromeUIConflictsHost[];
 extern const char kChromeUIConstrainedHTMLTestHost[];
-extern const char kChromeUICrashHost[];
 extern const char kChromeUICrashesHost[];
+extern const char kChromeUICrashHost[];
 extern const char kChromeUICreditsHost[];
 extern const char kChromeUIDefaultHost[];
 extern const char kChromeUIDevToolsHost[];
@@ -114,15 +119,16 @@ extern const char kChromeUIExtensionsHost[];
 extern const char kChromeUIFaviconHost[];
 extern const char kChromeUIFlagsHost[];
 extern const char kChromeUIFlashHost[];
-extern const char kChromeUIGpuHost[];
 extern const char kChromeUIGpuCleanHost[];
 extern const char kChromeUIGpuCrashHost[];
 extern const char kChromeUIGpuHangHost[];
+extern const char kChromeUIGpuHost[];
 extern const char kChromeUIGpuInternalsHost[];
 extern const char kChromeUIHangHost[];
+extern const char kChromeUIHistogramsHost[];
 extern const char kChromeUIHistory2Host[];
 extern const char kChromeUIHistoryHost[];
-extern const char kChromeUIHistogramsHost[];
+extern const char kChromeUIHungRendererDialogHost[];
 extern const char kChromeUIIPCHost[];
 extern const char kChromeUIKeyboardHost[];
 extern const char kChromeUIKillHost[];
@@ -131,9 +137,9 @@ extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryRedirectHost[];
 extern const char kChromeUINetInternalsHost[];
 extern const char kChromeUINetworkViewCacheHost[];
-extern const char kChromeUINewProfileHost[];
 extern const char kChromeUINewTabHost[];
 extern const char kChromeUIPluginsHost[];
+extern const char kChromeUIPolicyHost[];
 extern const char kChromeUIPrintHost[];
 extern const char kChromeUIQuotaInternalsHost[];
 extern const char kChromeUIResourcesHost[];
@@ -146,9 +152,10 @@ extern const char kChromeUISyncInternalsHost[];
 extern const char kChromeUISyncResourcesHost[];
 extern const char kChromeUITaskManagerHost[];
 extern const char kChromeUITCMallocHost[];
-extern const char kChromeUITextfieldsHost[];
 extern const char kChromeUITermsHost[];
+extern const char kChromeUITextfieldsHost[];
 extern const char kChromeUITouchIconHost[];
+extern const char kChromeUITracingHost[];
 extern const char kChromeUIVersionHost[];
 extern const char kChromeUIWorkersHost[];
 
@@ -204,6 +211,7 @@ extern const char kBrowserOptionsSubPage[];
 extern const char kClearBrowserDataSubPage[];
 extern const char kContentSettingsSubPage[];
 extern const char kContentSettingsExceptionsSubPage[];
+extern const char kExtensionsSubPage[];
 extern const char kHandlerSettingsSubPage[];
 extern const char kImportDataSubPage[];
 extern const char kInstantConfirmPage[];
@@ -250,8 +258,15 @@ extern const char kOutdatedPluginLearnMoreURL[];
 // The URL for the "Learn more" page for the blocked plugin infobar.
 extern const char kBlockedPluginLearnMoreURL[];
 
+// The URL for the "About Voice Recognition" menu item.
+extern const char kSpeechInputAboutURL[];
+
 // The URL for the "Learn more" page for register protocol handler infobars.
 extern const char kLearnMoreRegisterProtocolHandlerURL[];
+
+// "Debug" pages which are dangerous and not for general consumption.
+extern const char* const kChromeDebugURLs[];
+extern int kNumberOfChromeDebugURLs;
 
 // Call near the beginning of startup to register Chrome's internal URLs that
 // should be parsed as "standard" with the googleurl library.

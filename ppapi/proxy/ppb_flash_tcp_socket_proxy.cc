@@ -9,21 +9,20 @@
 #include <map>
 
 #include "base/logging.h"
-#include "base/memory/linked_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_flash_tcp_socket_api.h"
 #include "ppapi/thunk/thunk.h"
 
 using ppapi::thunk::PPB_Flash_TCPSocket_API;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 const int32_t kFlashTCPSocketMaxReadSize = 1024 * 1024;
@@ -58,12 +57,12 @@ InterfaceProxy* CreateFlashTCPSocketProxy(Dispatcher* dispatcher,
 }  // namespace
 
 class FlashTCPSocket : public PPB_Flash_TCPSocket_API,
-                       public PluginResource {
+                       public Resource {
  public:
   FlashTCPSocket(const HostResource& resource, uint32 socket_id);
   virtual ~FlashTCPSocket();
 
-  // ResourceObjectBase overrides.
+  // Resource overrides.
   virtual PPB_Flash_TCPSocket_API* AsPPB_Flash_TCPSocket_API() OVERRIDE;
 
   // PPB_Flash_TCPSocket_API implementation.
@@ -75,8 +74,9 @@ class FlashTCPSocket : public PPB_Flash_TCPSocket_API,
       PP_CompletionCallback callback) OVERRIDE;
   virtual PP_Bool GetLocalAddress(PP_Flash_NetAddress* local_addr) OVERRIDE;
   virtual PP_Bool GetRemoteAddress(PP_Flash_NetAddress* remote_addr) OVERRIDE;
-  virtual int32_t InitiateSSL(const char* server_name,
-                              PP_CompletionCallback callback) OVERRIDE;
+  virtual int32_t SSLHandshake(const char* server_name,
+                               uint16_t server_port,
+                               PP_CompletionCallback callback) OVERRIDE;
   virtual int32_t Read(char* buffer,
                        int32_t bytes_to_read,
                        PP_CompletionCallback callback) OVERRIDE;
@@ -89,6 +89,7 @@ class FlashTCPSocket : public PPB_Flash_TCPSocket_API,
   void OnConnectCompleted(bool succeeded,
                           const PP_Flash_NetAddress& local_addr,
                           const PP_Flash_NetAddress& remote_addr);
+  void OnSSLHandshakeCompleted(bool succeeded);
   void OnReadCompleted(bool succeeded, const std::string& data);
   void OnWriteCompleted(bool succeeded, int32_t bytes_written);
 
@@ -97,9 +98,20 @@ class FlashTCPSocket : public PPB_Flash_TCPSocket_API,
     // Before a connection is successfully established (including a connect
     // request is pending or a previous connect request failed).
     BEFORE_CONNECT,
+    // A connection has been successfully established (including a request of
+    // initiating SSL is pending).
     CONNECTED,
+    // An SSL connection has been successfully established.
+    SSL_CONNECTED,
+    // The connection has been ended.
     DISCONNECTED
   };
+
+  bool IsConnected() const;
+
+  PluginDispatcher* GetDispatcher() const {
+    return PluginDispatcher::GetForResource(this);
+  }
 
   // Backend for both Connect() and ConnectWithNetAddress(). To keep things
   // generic, the message is passed in (on error, it's deleted).
@@ -112,6 +124,7 @@ class FlashTCPSocket : public PPB_Flash_TCPSocket_API,
   ConnectionState connection_state_;
 
   PP_CompletionCallback connect_callback_;
+  PP_CompletionCallback ssl_handshake_callback_;
   PP_CompletionCallback read_callback_;
   PP_CompletionCallback write_callback_;
 
@@ -125,10 +138,11 @@ class FlashTCPSocket : public PPB_Flash_TCPSocket_API,
 };
 
 FlashTCPSocket::FlashTCPSocket(const HostResource& resource, uint32 socket_id)
-    : PluginResource(resource),
+    : Resource(resource),
       socket_id_(socket_id),
       connection_state_(BEFORE_CONNECT),
       connect_callback_(PP_BlockUntilComplete()),
+      ssl_handshake_callback_(PP_BlockUntilComplete()),
       read_callback_(PP_BlockUntilComplete()),
       write_callback_(PP_BlockUntilComplete()),
       read_buffer_(NULL),
@@ -178,7 +192,7 @@ int32_t FlashTCPSocket::ConnectWithNetAddress(
 }
 
 PP_Bool FlashTCPSocket::GetLocalAddress(PP_Flash_NetAddress* local_addr) {
-  if (connection_state_ != CONNECTED || !local_addr)
+  if (!IsConnected() || !local_addr)
     return PP_FALSE;
 
   *local_addr = local_addr_;
@@ -186,17 +200,32 @@ PP_Bool FlashTCPSocket::GetLocalAddress(PP_Flash_NetAddress* local_addr) {
 }
 
 PP_Bool FlashTCPSocket::GetRemoteAddress(PP_Flash_NetAddress* remote_addr) {
-  if (connection_state_ != CONNECTED || !remote_addr)
+  if (!IsConnected() || !remote_addr)
     return PP_FALSE;
 
   *remote_addr = remote_addr_;
   return PP_TRUE;
 }
 
-int32_t FlashTCPSocket::InitiateSSL(const char* server_name,
-                                    PP_CompletionCallback callback) {
-  // TODO(yzshen): add it.
-  return PP_ERROR_FAILED;
+int32_t FlashTCPSocket::SSLHandshake(const char* server_name,
+                                     uint16_t server_port,
+                                     PP_CompletionCallback callback) {
+  if (!server_name || !callback.func)
+    return PP_ERROR_BADARGUMENT;
+
+  if (connection_state_ != CONNECTED)
+    return PP_ERROR_FAILED;
+  if (ssl_handshake_callback_.func || read_callback_.func ||
+      write_callback_.func)
+    return PP_ERROR_INPROGRESS;
+
+  ssl_handshake_callback_ = callback;
+
+  // Send the request, the browser will call us back via SSLHandshakeACK.
+  GetDispatcher()->SendToBrowser(
+      new PpapiHostMsg_PPBFlashTCPSocket_SSLHandshake(
+          socket_id_, std::string(server_name), server_port));
+  return PP_OK_COMPLETIONPENDING;
 }
 
 int32_t FlashTCPSocket::Read(char* buffer,
@@ -205,9 +234,9 @@ int32_t FlashTCPSocket::Read(char* buffer,
   if (!buffer || bytes_to_read <= 0 || !callback.func)
     return PP_ERROR_BADARGUMENT;
 
-  if (connection_state_ != CONNECTED)
+  if (!IsConnected())
     return PP_ERROR_FAILED;
-  if (read_callback_.func)
+  if (read_callback_.func || ssl_handshake_callback_.func)
     return PP_ERROR_INPROGRESS;
 
   read_buffer_ = buffer;
@@ -226,9 +255,9 @@ int32_t FlashTCPSocket::Write(const char* buffer,
   if (!buffer || bytes_to_write <= 0 || !callback.func)
     return PP_ERROR_BADARGUMENT;
 
-  if (connection_state_ != CONNECTED)
+  if (!IsConnected())
     return PP_ERROR_FAILED;
-  if (write_callback_.func)
+  if (write_callback_.func || ssl_handshake_callback_.func)
     return PP_ERROR_INPROGRESS;
 
   if (bytes_to_write > kFlashTCPSocketMaxWriteSize)
@@ -248,7 +277,7 @@ void FlashTCPSocket::Disconnect() {
     return;
 
   connection_state_ = DISCONNECTED;
-  // After removed from the mapping, this object won't receive any notfications
+  // After removed from the mapping, this object won't receive any notifications
   // from the proxy.
   DCHECK(g_id_to_socket->find(socket_id_) != g_id_to_socket->end());
   g_id_to_socket->erase(socket_id_);
@@ -258,6 +287,7 @@ void FlashTCPSocket::Disconnect() {
   socket_id_ = 0;
 
   PostAbortAndClearIfNecessary(&connect_callback_);
+  PostAbortAndClearIfNecessary(&ssl_handshake_callback_);
   PostAbortAndClearIfNecessary(&read_callback_);
   PostAbortAndClearIfNecessary(&write_callback_);
   read_buffer_ = NULL;
@@ -280,6 +310,21 @@ void FlashTCPSocket::OnConnectCompleted(
   }
   PP_RunAndClearCompletionCallback(&connect_callback_,
                                    succeeded ? PP_OK : PP_ERROR_FAILED);
+}
+
+void FlashTCPSocket::OnSSLHandshakeCompleted(bool succeeded) {
+  if (connection_state_ != CONNECTED || !ssl_handshake_callback_.func) {
+    NOTREACHED();
+    return;
+  }
+
+  if (succeeded) {
+    connection_state_ = SSL_CONNECTED;
+    PP_RunAndClearCompletionCallback(&ssl_handshake_callback_, PP_OK);
+  } else {
+    PP_RunAndClearCompletionCallback(&ssl_handshake_callback_, PP_ERROR_FAILED);
+    Disconnect();
+  }
 }
 
 void FlashTCPSocket::OnReadCompleted(bool succeeded, const std::string& data) {
@@ -311,6 +356,10 @@ void FlashTCPSocket::OnWriteCompleted(bool succeeded, int32_t bytes_written) {
   PP_RunAndClearCompletionCallback(
       &write_callback_,
       succeeded ? bytes_written : static_cast<int32_t>(PP_ERROR_FAILED));
+}
+
+bool FlashTCPSocket::IsConnected() const {
+  return connection_state_ == CONNECTED || connection_state_ == SSL_CONNECTED;
 }
 
 int32_t FlashTCPSocket::ConnectWithMessage(IPC::Message* msg,
@@ -352,7 +401,7 @@ PPB_Flash_TCPSocket_Proxy::~PPB_Flash_TCPSocket_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_Flash_TCPSocket_Proxy::GetInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_Flash_TCPSocket_Thunk(),
+    thunk::GetPPB_Flash_TCPSocket_Thunk(),
     PPB_FLASH_TCPSOCKET_INTERFACE,
     INTERFACE_ID_PPB_FLASH_TCPSOCKET,
     false,
@@ -374,16 +423,16 @@ PP_Resource PPB_Flash_TCPSocket_Proxy::CreateProxyResource(
       &socket_id));
   if (socket_id == 0)
     return 0;
-
-  linked_ptr<FlashTCPSocket> object(new FlashTCPSocket(
-      HostResource::MakeInstanceOnly(instance), socket_id));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return (new FlashTCPSocket(HostResource::MakeInstanceOnly(instance),
+                             socket_id))->GetReference();
 }
 
 bool PPB_Flash_TCPSocket_Proxy::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Flash_TCPSocket_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBFlashTCPSocket_ConnectACK, OnMsgConnectACK)
+    IPC_MESSAGE_HANDLER(PpapiMsg_PPBFlashTCPSocket_SSLHandshakeACK,
+                        OnMsgSSLHandshakeACK)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBFlashTCPSocket_ReadACK, OnMsgReadACK)
     IPC_MESSAGE_HANDLER(PpapiMsg_PPBFlashTCPSocket_WriteACK, OnMsgWriteACK)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -405,6 +454,20 @@ void PPB_Flash_TCPSocket_Proxy::OnMsgConnectACK(
   if (iter == g_id_to_socket->end())
     return;
   iter->second->OnConnectCompleted(succeeded, local_addr, remote_addr);
+}
+
+void PPB_Flash_TCPSocket_Proxy::OnMsgSSLHandshakeACK(
+    uint32 /* plugin_dispatcher_id */,
+    uint32 socket_id,
+    bool succeeded) {
+  if (!g_id_to_socket) {
+    NOTREACHED();
+    return;
+  }
+  IDToSocketMap::iterator iter = g_id_to_socket->find(socket_id);
+  if (iter == g_id_to_socket->end())
+    return;
+  iter->second->OnSSLHandshakeCompleted(succeeded);
 }
 
 void PPB_Flash_TCPSocket_Proxy::OnMsgReadACK(uint32 /* plugin_dispatcher_id */,
@@ -436,4 +499,4 @@ void PPB_Flash_TCPSocket_Proxy::OnMsgWriteACK(uint32 /* plugin_dispatcher_id */,
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

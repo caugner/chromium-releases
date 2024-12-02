@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/base_paths.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -202,10 +204,15 @@ int PyUITestBase::GetBrowserWindowCount() {
   return num_windows;
 }
 
-std::string PyUITestBase::InstallExtension(const FilePath& crx_file,
+std::string PyUITestBase::InstallExtension(const std::string& extension_path,
                                            bool with_ui) {
+#if defined(OS_WIN)
+  FilePath extension_file_path = FilePath(ASCIIToWide(extension_path));
+#else
+  FilePath extension_file_path = FilePath(extension_path);
+#endif
   scoped_refptr<ExtensionProxy> proxy =
-      automation()->InstallExtension(crx_file, with_ui);
+      automation()->InstallExtension(extension_file_path, with_ui);
   std::string id;
   if (!proxy.get() || !proxy.get()->GetId(&id))
     return "";

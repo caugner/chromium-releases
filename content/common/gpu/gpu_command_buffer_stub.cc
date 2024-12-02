@@ -5,7 +5,6 @@
 #if defined(ENABLE_GPU)
 
 #include "base/bind.h"
-#include "base/callback.h"
 #include "base/debug/trace_event.h"
 #include "base/process_util.h"
 #include "base/shared_memory.h"
@@ -30,6 +29,7 @@ using gpu::Buffer;
 
 GpuCommandBufferStub::GpuCommandBufferStub(
     GpuChannel* channel,
+    GpuCommandBufferStub* share_group,
     gfx::PluginWindowHandle handle,
     const gfx::Size& size,
     const gpu::gles2::DisallowedExtensions& disallowed_extensions,
@@ -55,6 +55,13 @@ GpuCommandBufferStub::GpuCommandBufferStub(
       parent_texture_for_initialization_(0),
       watchdog_(watchdog),
       task_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+  if (share_group) {
+    context_group_ = share_group->context_group_;
+  } else {
+    // TODO(gman): this needs to be false for everything but Pepper.
+    bool bind_generates_resource = true;
+    context_group_ = new gpu::gles2::ContextGroup(bind_generates_resource);
+  }
 }
 
 GpuCommandBufferStub::~GpuCommandBufferStub() {
@@ -88,22 +95,12 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
                                     OnDestroyTransferBuffer);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuCommandBufferMsg_GetTransferBuffer,
                                     OnGetTransferBuffer);
-    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_CreateVideoDecoder,
-                        OnCreateVideoDecoder)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuCommandBufferMsg_CreateVideoDecoder,
+                                    OnCreateVideoDecoder)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_DestroyVideoDecoder,
                         OnDestroyVideoDecoder)
-    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_ResizeOffscreenFrameBuffer,
-                        OnResizeOffscreenFrameBuffer);
-#if defined(OS_MACOSX)
-    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SetWindowSize, OnSetWindowSize);
-#endif  // defined(OS_MACOSX)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
-
-  // If this message isn't intended for the stub, try to route it to the video
-  // decoder.
-  if (!handled && video_decoder_.get())
-    handled = video_decoder_->OnMessageReceived(message);
 
   DCHECK(handled);
   return handled;
@@ -147,8 +144,7 @@ void GpuCommandBufferStub::OnInitialize(
   // Initialize the CommandBufferService and GpuScheduler.
   if (command_buffer_->Initialize(&shared_memory, size)) {
     scheduler_.reset(gpu::GpuScheduler::Create(command_buffer_.get(),
-                                               channel_,
-                                               NULL));
+                                               context_group_.get()));
 #if defined(TOUCH_UI)
     if (software_) {
       OnInitializeFailed(reply_message);
@@ -198,39 +194,26 @@ void GpuCommandBufferStub::OnInitialize(
                       &gpu::GpuScheduler::PutChanged));
       command_buffer_->SetParseErrorCallback(
           NewCallback(this, &GpuCommandBufferStub::OnParseError));
-      scheduler_->SetSwapBuffersCallback(
-          NewCallback(this, &GpuCommandBufferStub::OnSwapBuffers));
       scheduler_->SetScheduledCallback(
           NewCallback(channel_, &GpuChannel::OnScheduled));
-      scheduler_->SetTokenCallback(base::Bind(
-          &GpuCommandBufferStub::OnSetToken, base::Unretained(this)));
+
+#if defined(OS_MACOSX)
+      scheduler_->SetSwapBuffersCallback(
+          NewCallback(this, &GpuCommandBufferStub::OnSwapBuffers));
+#endif
+
+      // On TOUCH_UI, the ImageTransportSurface handles co-ordinating the
+      // resize with the browser process. The ImageTransportSurface sets it's
+      // own resize callback, so we shouldn't do it here.
+#if !defined(TOUCH_UI)
+      if (handle_ != gfx::kNullPluginWindow) {
+        scheduler_->SetResizeCallback(
+            NewCallback(this, &GpuCommandBufferStub::OnResize));
+      }
+#endif
       if (watchdog_)
         scheduler_->SetCommandProcessedCallback(
             NewCallback(this, &GpuCommandBufferStub::OnCommandProcessed));
-
-#if defined(OS_MACOSX)
-      if (handle_) {
-        // This context conceptually puts its output directly on the
-        // screen, rendered by the accelerated plugin layer in
-        // RenderWidgetHostViewMac. Set up a pathway to notify the
-        // browser process when its contents change.
-        scheduler_->SetSwapBuffersCallback(
-            NewCallback(this,
-                        &GpuCommandBufferStub::SwapBuffersCallback));
-      }
-#endif  // defined(OS_MACOSX)
-
-      // Set up a pathway for resizing the output window or framebuffer at the
-      // right time relative to other GL commands.
-#if defined(TOUCH_UI)
-      if (handle_ == gfx::kNullPluginWindow) {
-        scheduler_->SetResizeCallback(
-            NewCallback(this, &GpuCommandBufferStub::ResizeCallback));
-      }
-#else
-      scheduler_->SetResizeCallback(
-          NewCallback(this, &GpuCommandBufferStub::ResizeCallback));
-#endif
 
       if (parent_stub_for_initialization_) {
         scheduler_->SetParent(parent_stub_for_initialization_->scheduler_.get(),
@@ -292,13 +275,6 @@ void GpuCommandBufferStub::OnParseError() {
       route_id_, state.context_lost_reason);
   msg->set_unblock(true);
   Send(msg);
-  // If an error occurs, the remaining commands will not be processed.
-  // Since we may have a pending WaitLatch on a related context, we need to
-  // forcefully unblock all contexts on the same GpuChannel. However, since we
-  // don't know whether the corresponding WaitLatch is in the past or future,
-  // it may cause other side effects to simply pass the next WaitLatch on all
-  // contexts. Instead, just lose all related contexts when there's an error.
-  channel_->DestroySoon();
 }
 
 void GpuCommandBufferStub::OnFlush(int32 put_offset,
@@ -434,15 +410,26 @@ void GpuCommandBufferStub::OnGetTransferBuffer(
   Send(reply_message);
 }
 
-void GpuCommandBufferStub::OnResizeOffscreenFrameBuffer(const gfx::Size& size) {
-  scheduler_->ResizeOffscreenFrameBuffer(size);
-}
-
+#if defined(OS_MACOSX)
 void GpuCommandBufferStub::OnSwapBuffers() {
   TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnSwapBuffers");
-  ReportState();
-  Send(new GpuCommandBufferMsg_SwapBuffers(route_id_));
+  if (handle_) {
+    // To swap on OSX, we have to send a message to the browser to get the
+    // context put onscreen.
+    GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
+    GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
+    params.renderer_id = renderer_id_;
+    params.render_view_id = render_view_id_;
+    params.window = handle_;
+    params.surface_id = scheduler_->GetSurfaceId();
+    params.route_id = route_id();
+    params.swap_buffers_count = scheduler_->swap_buffers_count();
+    gpu_channel_manager->Send(
+        new GpuHostMsg_AcceleratedSurfaceBuffersSwapped(params));
+    scheduler_->SetScheduled(false);
+  }
 }
+#endif
 
 void GpuCommandBufferStub::OnCommandProcessed() {
   if (watchdog_)
@@ -450,9 +437,39 @@ void GpuCommandBufferStub::OnCommandProcessed() {
 }
 
 #if defined(OS_MACOSX)
-void GpuCommandBufferStub::OnSetWindowSize(const gfx::Size& size) {
+void GpuCommandBufferStub::AcceleratedSurfaceBuffersSwapped(
+    uint64 swap_buffers_count) {
+  TRACE_EVENT1("gpu",
+               "GpuCommandBufferStub::AcceleratedSurfaceBuffersSwapped",
+               "frame", swap_buffers_count);
+  DCHECK(handle_ != gfx::kNullPluginWindow);
+
+  // Multiple swapbuffers may get consolidated together into a single
+  // AcceleratedSurfaceBuffersSwapped call. Upstream code listening to the
+  // GpuCommandBufferMsg_SwapBuffers expects to be called one time for every
+  // swap. So, send one SwapBuffers message for every outstanding swap.
+  uint64 delta = swap_buffers_count -
+      scheduler_->acknowledged_swap_buffers_count();
+  scheduler_->set_acknowledged_swap_buffers_count(swap_buffers_count);
+
+  for(uint64 i = 0; i < delta; i++) {
+    // Wake up the GpuScheduler to start doing work again. When the scheduler
+    // wakes up, it will send any deferred echo acknowledgements, triggering
+    // associated swapbuffer callbacks.
+    scheduler_->SetScheduled(true);
+  }
+}
+#endif  // defined(OS_MACOSX)
+
+void GpuCommandBufferStub::OnResize(gfx::Size size) {
+  if (handle_ == gfx::kNullPluginWindow)
+    return;
+
+#if defined(OS_MACOSX)
   GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
-  // Try using the IOSurface version first.
+
+  // On Mac, we need to tell the browser about the new IOSurface handle,
+  // asynchronously.
   uint64 new_backing_store = scheduler_->SetWindowSizeForIOSurface(size);
   if (new_backing_store) {
     GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params params;
@@ -470,72 +487,24 @@ void GpuCommandBufferStub::OnSetWindowSize(const gfx::Size& size) {
     // questionable.
     NOTREACHED();
   }
-}
-
-void GpuCommandBufferStub::SwapBuffersCallback() {
-  TRACE_EVENT0("gpu", "GpuCommandBufferStub::SwapBuffersCallback");
+#elif defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
   GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
-  GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
-  params.renderer_id = renderer_id_;
-  params.render_view_id = render_view_id_;
-  params.window = handle_;
-  params.surface_id = scheduler_->GetSurfaceId();
-  params.route_id = route_id();
-  params.swap_buffers_count = scheduler_->swap_buffers_count();
+
+  // On Windows, Linux, we need to coordinate resizing of onscreen
+  // contexts with the resizing of the actual OS-level window. We do this by
+  // sending a resize message to the browser process and descheduling the
+  // context until the ViewResized message comes back in reply.
+  // Send the resize message if needed
   gpu_channel_manager->Send(
-      new GpuHostMsg_AcceleratedSurfaceBuffersSwapped(params));
+      new GpuHostMsg_ResizeView(renderer_id_,
+                                render_view_id_,
+                                route_id_,
+                                size));
 
   scheduler_->SetScheduled(false);
+#endif // defined(OS_MACOSX)
 }
 
-void GpuCommandBufferStub::AcceleratedSurfaceBuffersSwapped(
-    uint64 swap_buffers_count) {
-  TRACE_EVENT1("gpu",
-               "GpuCommandBufferStub::AcceleratedSurfaceBuffersSwapped",
-               "frame", swap_buffers_count);
-
-  // Multiple swapbuffers may get consolidated together into a single
-  // AcceleratedSurfaceBuffersSwapped call. Since OnSwapBuffers expects to be
-  // called one time for every swap, make up the difference here.
-  uint64 delta = swap_buffers_count -
-      scheduler_->acknowledged_swap_buffers_count();
-  scheduler_->set_acknowledged_swap_buffers_count(swap_buffers_count);
-
-  for(uint64 i = 0; i < delta; i++) {
-    OnSwapBuffers();
-    // Wake up the GpuScheduler to start doing work again.
-    scheduler_->SetScheduled(true);
-  }
-}
-#endif  // defined(OS_MACOSX)
-
-void GpuCommandBufferStub::AddSetTokenCallback(
-    const base::Callback<void(int32)>& callback) {
-  set_token_callbacks_.push_back(callback);
-}
-
-void GpuCommandBufferStub::OnSetToken(int32 token) {
-  for (size_t i = 0; i < set_token_callbacks_.size(); ++i)
-    set_token_callbacks_[i].Run(token);
-}
-
-void GpuCommandBufferStub::ResizeCallback(gfx::Size size) {
-  if (handle_ == gfx::kNullPluginWindow) {
-    scheduler_->decoder()->ResizeOffscreenFrameBuffer(size);
-    scheduler_->decoder()->UpdateOffscreenFrameBufferSize();
-  } else {
-#if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
-    GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
-    gpu_channel_manager->Send(
-        new GpuHostMsg_ResizeView(renderer_id_,
-                                  render_view_id_,
-                                  route_id_,
-                                  size));
-
-    scheduler_->SetScheduled(false);
-#endif
-  }
-}
 
 void GpuCommandBufferStub::ViewResized() {
 #if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
@@ -567,15 +536,21 @@ void GpuCommandBufferStub::ReportState() {
 }
 
 void GpuCommandBufferStub::OnCreateVideoDecoder(
-    const std::vector<uint32>& configs) {
-  video_decoder_.reset(
-      new GpuVideoDecodeAccelerator(this, route_id_, this));
-  video_decoder_->Initialize(configs);
+    media::VideoDecodeAccelerator::Profile profile,
+    IPC::Message* reply_message) {
+  int decoder_route_id = channel_->GenerateRouteID();
+  GpuCommandBufferMsg_CreateVideoDecoder::WriteReplyParams(
+      reply_message, decoder_route_id);
+  GpuVideoDecodeAccelerator* decoder =
+      new GpuVideoDecodeAccelerator(this, decoder_route_id, this);
+  video_decoders_.AddWithID(decoder, decoder_route_id);
+  channel_->AddRoute(decoder_route_id, decoder);
+  decoder->Initialize(profile, reply_message);
 }
 
-void GpuCommandBufferStub::OnDestroyVideoDecoder() {
-  LOG(ERROR) << "GpuCommandBufferStub::OnDestroyVideoDecoder";
-  video_decoder_.reset();
+void GpuCommandBufferStub::OnDestroyVideoDecoder(int decoder_route_id) {
+  channel_->RemoveRoute(decoder_route_id);
+  video_decoders_.Remove(decoder_route_id);
 }
 
 #endif  // defined(ENABLE_GPU)

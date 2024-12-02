@@ -23,6 +23,7 @@ namespace {
 const int kUserScriptIdleTimeoutMs = 200;
 }
 
+using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebString;
 using WebKit::WebView;
@@ -145,14 +146,16 @@ void UserScriptIdleScheduler::ExecuteCodeImpl(
       } else {
         std::vector<WebScriptSource> sources;
         sources.push_back(source);
-        UserScriptSlave::InsertInitExtensionCode(&sources, params.extension_id);
         frame->executeScriptInIsolatedWorld(
-            UserScriptSlave::GetIsolatedWorldId(extension, frame),
+            extension_dispatcher_->user_script_slave()->
+                GetIsolatedWorldIdForExtension(extension, frame),
             &sources.front(), sources.size(), EXTENSION_GROUP_CONTENT_SCRIPTS);
       }
     } else {
-      frame->document().insertStyleText(
-          WebString::fromUTF8(params.code), WebString());
+      frame->document().insertUserStyleSheet(
+          WebString::fromUTF8(params.code),
+          // Author level is consistent with WebView::addUserStyleSheet.
+          WebDocument::UserStyleAuthorLevel);
     }
   }
 

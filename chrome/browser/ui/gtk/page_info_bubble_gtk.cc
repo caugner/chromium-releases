@@ -11,6 +11,7 @@
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/page_info_model.h"
+#include "chrome/browser/page_info_model_observer.h"
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
@@ -24,13 +25,14 @@
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 class Profile;
 
 namespace {
 
-class PageInfoBubbleGtk : public PageInfoModel::PageInfoModelObserver,
+class PageInfoBubbleGtk : public PageInfoModelObserver,
                           public BubbleDelegateGtk {
  public:
   PageInfoBubbleGtk(gfx::NativeWindow parent,
@@ -40,8 +42,8 @@ class PageInfoBubbleGtk : public PageInfoModel::PageInfoModelObserver,
                     bool show_history);
   virtual ~PageInfoBubbleGtk();
 
-  // PageInfoModel::PageInfoModelObserver implementation.
-  virtual void ModelChanged() OVERRIDE;
+  // PageInfoModelObserver implementation.
+  virtual void OnPageInfoModelChanged() OVERRIDE;
 
   // BubbleDelegateGtk implementation.
   virtual void BubbleClosing(BubbleGtk* bubble, bool closed_by_escape) OVERRIDE;
@@ -80,6 +82,8 @@ class PageInfoBubbleGtk : public PageInfoModel::PageInfoModelObserver,
 
   BubbleGtk* bubble_;
 
+  Profile* profile_;
+
   DISALLOW_COPY_AND_ASSIGN(PageInfoBubbleGtk);
 };
 
@@ -94,7 +98,8 @@ PageInfoBubbleGtk::PageInfoBubbleGtk(gfx::NativeWindow parent,
       cert_id_(ssl.cert_id()),
       parent_(parent),
       contents_(NULL),
-      theme_service_(GtkThemeService::GetFrom(profile)) {
+      theme_service_(GtkThemeService::GetFrom(profile)),
+      profile_(profile) {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent);
 
@@ -123,7 +128,7 @@ PageInfoBubbleGtk::PageInfoBubbleGtk(gfx::NativeWindow parent,
 PageInfoBubbleGtk::~PageInfoBubbleGtk() {
 }
 
-void PageInfoBubbleGtk::ModelChanged() {
+void PageInfoBubbleGtk::OnPageInfoModelChanged() {
   InitContents();
 }
 
@@ -134,9 +139,9 @@ void PageInfoBubbleGtk::BubbleClosing(BubbleGtk* bubble,
 
 void PageInfoBubbleGtk::InitContents() {
   if (!contents_) {
-    contents_ = gtk_vbox_new(FALSE, gtk_util::kContentAreaSpacing);
+    contents_ = gtk_vbox_new(FALSE, ui::kContentAreaSpacing);
     gtk_container_set_border_width(GTK_CONTAINER(contents_),
-                                   gtk_util::kContentAreaBorder);
+                                   ui::kContentAreaBorder);
   } else {
     gtk_util::RemoveAllChildren(contents_);
   }
@@ -164,7 +169,7 @@ void PageInfoBubbleGtk::InitContents() {
 
 GtkWidget* PageInfoBubbleGtk::CreateSection(
     const PageInfoModel::SectionInfo& section) {
-  GtkWidget* section_box = gtk_hbox_new(FALSE, gtk_util::kControlSpacing);
+  GtkWidget* section_box = gtk_hbox_new(FALSE, ui::kControlSpacing);
 
   GdkPixbuf* pixbuf = *model_.GetIconImage(section.icon_id);
   if (pixbuf) {
@@ -173,12 +178,12 @@ GtkWidget* PageInfoBubbleGtk::CreateSection(
     gtk_misc_set_alignment(GTK_MISC(image), 0, 0);
   }
 
-  GtkWidget* vbox = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
+  GtkWidget* vbox = gtk_vbox_new(FALSE, ui::kControlSpacing);
   gtk_box_pack_start(GTK_BOX(section_box), vbox, TRUE, TRUE, 0);
 
   if (!section.headline.empty()) {
     GtkWidget* label = theme_service_->BuildLabel(
-        UTF16ToUTF8(section.headline), gtk_util::kGdkBlack);
+        UTF16ToUTF8(section.headline), ui::kGdkBlack);
     gtk_label_set_selectable(GTK_LABEL(label), TRUE);
     PangoAttrList* attributes = pango_attr_list_new();
     pango_attr_list_insert(attributes,
@@ -192,7 +197,7 @@ GtkWidget* PageInfoBubbleGtk::CreateSection(
     gtk_box_pack_start(GTK_BOX(vbox), label, FALSE, FALSE, 0);
   }
   GtkWidget* label = theme_service_->BuildLabel(
-      UTF16ToUTF8(section.description), gtk_util::kGdkBlack);
+      UTF16ToUTF8(section.description), ui::kGdkBlack);
   gtk_label_set_selectable(GTK_LABEL(label), TRUE);
   gtk_util::SetLabelWidth(label, 400);
   // Allow linebreaking in the middle of words if necessary, so that extremely
@@ -223,8 +228,9 @@ void PageInfoBubbleGtk::OnViewCertLinkClicked(GtkWidget* widget) {
 void PageInfoBubbleGtk::OnHelpLinkClicked(GtkWidget* widget) {
   GURL url = google_util::AppendGoogleLocaleParam(
       GURL(chrome::kPageInfoHelpCenterURL));
-  Browser* browser = BrowserList::GetLastActive();
-  browser->OpenURL(url, GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  browser->OpenURL(OpenURLParams(
+      url, GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK));
   bubble_->Close();
 }
 

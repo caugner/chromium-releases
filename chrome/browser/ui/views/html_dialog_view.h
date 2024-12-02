@@ -65,13 +65,12 @@ class HtmlDialogView
 
   // Overridden from HtmlDialogUIDelegate:
   virtual bool IsDialogModal() const OVERRIDE;
-  virtual std::wstring GetDialogTitle() const OVERRIDE;
+  virtual string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
       std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
   virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
   virtual std::string GetDialogArgs() const OVERRIDE;
-  virtual void OnWindowClosed() OVERRIDE;
   virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
   virtual void OnCloseContents(TabContents* source, bool* out_close_dialog)
       OVERRIDE;

@@ -5,14 +5,16 @@
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/media/media_player.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/simple_message_box.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
 #include "grit/generated_resources.h"
@@ -22,8 +24,10 @@
 #include "webkit/fileapi/file_system_mount_point_provider.h"
 #include "webkit/fileapi/file_system_util.h"
 
+#define FILEBROWSER_DOMAIN "hhaomjibdihmijegdhdafkllkbggdgoj"
+const char kFileBrowserDomain[] = FILEBROWSER_DOMAIN;
 #define FILEBROWSER_URL(PATH) \
-    ("chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/" PATH)
+    ("chrome-extension://" FILEBROWSER_DOMAIN "/" PATH)
 // This is the "well known" url for the file manager extension from
 // browser/resources/file_manager.  In the future we may provide a way to swap
 // out this file manager for an aftermarket part, but not yet.
@@ -35,11 +39,12 @@ const char kMediaPlayerPlaylistUrl[] = FILEBROWSER_URL("playlist.html");
 
 // List of file extension we can open in tab.
 const char* kBrowserSupportedExtensions[] = {
-    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".txt", ".html", ".htm"
+    ".bmp", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".txt", ".html",
+    ".htm"
 };
 // List of file extension that can be handled with the media player.
 const char* kAVExtensions[] = {
-#if defined(GOOGLE_CHROME_BUILD)
+#if defined(GOOGLE_CHROME_BUILD) || defined(USE_PROPRIETARY_CODECS)
     ".3gp", ".avi", ".mp3", ".mp4", ".m4v", ".mov", ".m4a",
 #endif
     ".flac", ".ogm", ".ogv", ".ogx", ".ogg", ".oga", ".wav", ".webm",
@@ -47,6 +52,15 @@ const char* kAVExtensions[] = {
     ".mkv", ".divx", ".xvid", ".wmv", ".asf", ".mpeg", ".mpg",
     ".wma", ".aiff",
 */
+};
+
+// List of all extensions we want to be shown in histogram that keep track of
+// files that were unsuccessfully tried to be opened.
+// The list has to be synced with histogram values.
+const char* kUMATrackingExtensions[] = {
+  "other", ".doc", ".docx", ".odt", ".rtf", ".pdf", ".ppt", ".pptx", ".odp",
+  ".xls", ".xlsx", ".ods", ".csv", ".odf", ".rar", ".asf", ".wma", ".wmv",
+  ".mov", ".mpg", ".log"
 };
 
 bool IsSupportedBrowserExtension(const char* ext) {
@@ -70,6 +84,19 @@ bool IsSupportedAVExtension(const char* ext) {
 // static
 GURL FileManagerUtil::GetFileBrowserExtensionUrl() {
   return GURL(kFileBrowserExtensionUrl);
+}
+
+// Returns index |ext| has in the |array|. If there is no |ext| in |array|, last
+// element's index is return (last element should have irrelevant value).
+int UMAExtensionIndex(const char *ext,
+                      const char** array,
+                      size_t array_size) {
+  for (size_t i = 0; i < array_size; i++) {
+    if (base::strcasecmp(ext, array[i]) == 0) {
+      return i;
+    }
+  }
+  return 0;
 }
 
 // static
@@ -124,30 +151,71 @@ bool FileManagerUtil::ConvertFileToRelativeFileSystemPath(
 GURL FileManagerUtil::GetFileBrowserUrlWithParams(
     SelectFileDialog::Type type,
     const string16& title,
-    const FilePath& default_path,
+    const FilePath& default_virtual_path,
     const SelectFileDialog::FileTypeInfo* file_types,
     int file_type_index,
     const FilePath::StringType& default_extension) {
-  std::string json = GetArgumentsJson(type, title, default_path, file_types,
-                                      file_type_index, default_extension);
-  return GURL(FileManagerUtil::GetFileBrowserUrl().spec() + "?" +
-              EscapeUrlEncodedData(json, false));
+  DictionaryValue arg_value;
+  arg_value.SetString("type", GetDialogTypeAsString(type));
+  arg_value.SetString("title", title);
+  arg_value.SetString("defaultPath", default_virtual_path.value());
+  arg_value.SetString("defaultExtension", default_extension);
+
+  if (file_types) {
+    ListValue* types_list = new ListValue();
+    for (size_t i = 0; i < file_types->extensions.size(); ++i) {
+      ListValue* extensions_list = new ListValue();
+      for (size_t j = 0; j < file_types->extensions[i].size(); ++j) {
+        extensions_list->Set(
+            i, Value::CreateStringValue(file_types->extensions[i][j]));
+      }
+
+      DictionaryValue* dict = new DictionaryValue();
+      dict->Set("extensions", extensions_list);
+
+      if (i < file_types->extension_description_overrides.size()) {
+        string16 desc = file_types->extension_description_overrides[i];
+        dict->SetString("description", desc);
+      }
+
+      dict->SetBoolean("selected",
+                       (static_cast<size_t>(file_type_index) == i));
+
+      types_list->Set(i, dict);
+    }
+    arg_value.Set("typeList", types_list);
+  }
+
+  std::string json_args;
+  base::JSONWriter::Write(&arg_value, false, &json_args);
+
+  // kChromeUIFileManagerURL could not be used since query parameters are not
+  // supported for it.
+  std::string url = FileManagerUtil::GetFileBrowserUrl().spec() +
+                    '?' + EscapeUrlEncodedData(json_args, false);
+  return GURL(url);
 
 }
 
 // static
 void FileManagerUtil::ShowFullTabUrl(Profile*,
-                                     const FilePath& default_path) {
-  std::string json = GetArgumentsJson(SelectFileDialog::SELECT_NONE, string16(),
-      default_path, NULL, 0, FilePath::StringType());
-  GURL url(std::string(kBaseFileBrowserUrl) + "?" +
-           EscapeUrlEncodedData(json, false));
+                                     const FilePath& dir) {
   Browser* browser = BrowserList::GetLastActive();
   if (!browser)
     return;
 
+  FilePath virtual_path;
+  if (!FileManagerUtil::ConvertFileToRelativeFileSystemPath(browser->profile(),
+                                                            dir,
+                                                            &virtual_path)) {
+    return;
+  }
+
+  std::string url = chrome::kChromeUIFileManagerURL;
+  url += "#/" + EscapeUrlEncodedData(virtual_path.value(), false);
+
   UserMetrics::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
-  browser->ShowSingletonTab(GURL(url));
+  browser->ShowSingletonTabRespectRef(GURL(url));
 }
 
 void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
@@ -182,63 +250,23 @@ void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
     return;
   }
 
-  // Unknown file type. Show an error message.
+  // Unknown file type. Record UMA and show an error message.
+  size_t extension_index = UMAExtensionIndex(ext.data(),
+                                             kUMATrackingExtensions,
+                                             arraysize(kUMATrackingExtensions));
+  UMA_HISTOGRAM_ENUMERATION("FileBrowser.OpeningFileType",
+                            extension_index,
+                            arraysize(kUMATrackingExtensions) - 1);
+
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       NewRunnableFunction(
-          &platform_util::SimpleErrorBox,
+          &browser::ShowErrorBox,
           static_cast<gfx::NativeWindow>(NULL),
           l10n_util::GetStringUTF16(IDS_FILEBROWSER_ERROR_TITLE),
           l10n_util::GetStringFUTF16(IDS_FILEBROWSER_ERROR_UNKNOWN_FILE_TYPE,
                                      UTF8ToUTF16(full_path.BaseName().value()))
           ));
-}
-
-// static
-std::string FileManagerUtil::GetArgumentsJson(
-    SelectFileDialog::Type type,
-    const string16& title,
-    const FilePath& default_path,
-    const SelectFileDialog::FileTypeInfo* file_types,
-    int file_type_index,
-    const FilePath::StringType& default_extension) {
-  DictionaryValue arg_value;
-  arg_value.SetString("type", GetDialogTypeAsString(type));
-  arg_value.SetString("title", title);
-  // TODO(zelidrag): Convert local system path into virtual path for File API.
-  arg_value.SetString("defaultPath", default_path.value());
-  arg_value.SetString("defaultExtension", default_extension);
-
-
-  if (file_types) {
-    ListValue* types_list = new ListValue();
-    for (size_t i = 0; i < file_types->extensions.size(); ++i) {
-      ListValue* extensions_list = new ListValue();
-      for (size_t j = 0; j < file_types->extensions[i].size(); ++j) {
-        extensions_list->Set(
-            i, Value::CreateStringValue(file_types->extensions[i][j]));
-      }
-
-      DictionaryValue* dict = new DictionaryValue();
-      dict->Set("extensions", extensions_list);
-
-      if (i < file_types->extension_description_overrides.size()) {
-        string16 desc = file_types->extension_description_overrides[i];
-        dict->SetString("description", desc);
-      }
-
-      dict->SetBoolean("selected",
-                       (static_cast<size_t>(file_type_index) == i));
-
-      types_list->Set(i, dict);
-    }
-    arg_value.Set("typeList", types_list);
-  }
-
-  std::string rv;
-  base::JSONWriter::Write(&arg_value, false, &rv);
-
-  return rv;
 }
 
 // static

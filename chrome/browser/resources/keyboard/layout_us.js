@@ -7,12 +7,6 @@
  */
 
 /**
- * The backspace key.
- * @type {BaseKey}
- */
-var backspaceKey;
-
-/**
  * All keys for the rows of the keyboard.
  * NOTE: every row below should have an aspect of 12.6.
  * @type {Array.<Array.<BaseKey>>}
@@ -30,7 +24,7 @@ var KEYS_US = [
     new Key(C('i'), C('I'), C('8'), C('}')),
     new Key(C('o'), C('O'), C('9'), C('\'')),
     new Key(C('p'), C('P'), C('0'), C('|')),
-    backspaceKey = new SvgKey('backspace', 'Backspace')
+    new SvgKey('backspace', 'Backspace', true /* repeat */)
   ],
   [
     new SymbolKey(),
@@ -74,5 +68,8 @@ var KEYS_US = [
   ]
 ];
 
-// Backspace key should repeat.
-backspaceKey.repeat = true;
+// Add layout to KEYBOARDS, which is defined in common.js
+KEYBOARDS['us'] = {
+  "definition": KEYS_US,
+  "aspect": 3.15,
+}

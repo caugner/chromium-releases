@@ -5,8 +5,11 @@
 #include "chrome/browser/chromeos/cros/power_library.h"
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/logging.h"
 #include "base/observer_list.h"
 #include "base/time.h"
+#include "base/timer.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "content/browser/browser_thread.h"
 #include "third_party/cros/chromeos_power.h"
@@ -20,11 +23,9 @@ class PowerLibraryImpl : public PowerLibrary {
       : power_status_connection_(NULL),
         resume_status_connection_(NULL),
         status_(chromeos::PowerStatus()) {
-    if (CrosLibrary::Get()->EnsureLoaded())
-      Init();
   }
 
-  ~PowerLibraryImpl() {
+  virtual ~PowerLibraryImpl() {
     if (power_status_connection_) {
       chromeos::DisconnectPowerStatus(power_status_connection_);
       power_status_connection_ = NULL;
@@ -35,39 +36,49 @@ class PowerLibraryImpl : public PowerLibrary {
     }
   }
 
-  void AddObserver(Observer* observer) {
+  // Begin PowerLibrary implementation.
+  virtual void Init() OVERRIDE {
+    if (CrosLibrary::Get()->EnsureLoaded()) {
+      power_status_connection_ =
+          chromeos::MonitorPowerStatus(&PowerStatusChangedHandler, this);
+      resume_status_connection_ =
+          chromeos::MonitorResume(&SystemResumedHandler, this);
+    }
+  }
+
+  virtual void AddObserver(Observer* observer) OVERRIDE {
     observers_.AddObserver(observer);
   }
 
-  void RemoveObserver(Observer* observer) {
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
     observers_.RemoveObserver(observer);
   }
 
-  bool line_power_on() const {
+  virtual bool line_power_on() const OVERRIDE {
     return status_.line_power_on;
   }
 
-  bool battery_is_present() const {
-    return status_.battery_is_present;
-  }
-
-  bool battery_fully_charged() const {
+  virtual bool battery_fully_charged() const OVERRIDE {
     return status_.battery_state == chromeos::BATTERY_STATE_FULLY_CHARGED;
   }
 
-  double battery_percentage() const {
+  virtual double battery_percentage() const OVERRIDE {
     return status_.battery_percentage;
   }
 
-  base::TimeDelta battery_time_to_empty() const {
+  virtual bool battery_is_present() const OVERRIDE {
+    return status_.battery_is_present;
+  }
+
+  virtual base::TimeDelta battery_time_to_empty() const OVERRIDE {
     return base::TimeDelta::FromSeconds(status_.battery_time_to_empty);
   }
 
-  base::TimeDelta battery_time_to_full() const {
+  virtual base::TimeDelta battery_time_to_full() const OVERRIDE {
     return base::TimeDelta::FromSeconds(status_.battery_time_to_full);
   }
 
-  virtual void EnableScreenLock(bool enable) {
+  virtual void EnableScreenLock(bool enable) OVERRIDE {
     if (!CrosLibrary::Get()->EnsureLoaded())
       return;
 
@@ -83,17 +94,16 @@ class PowerLibraryImpl : public PowerLibrary {
     chromeos::EnableScreenLock(enable);
   }
 
-  virtual void RequestRestart() {
-    if (!CrosLibrary::Get()->EnsureLoaded())
-      return;
-    chromeos::RequestRestart();
+  virtual void RequestRestart() OVERRIDE {
+    if (CrosLibrary::Get()->EnsureLoaded())
+      chromeos::RequestRestart();
   }
 
-  virtual void RequestShutdown() {
-    if (!CrosLibrary::Get()->EnsureLoaded())
-      return;
-    chromeos::RequestShutdown();
+  virtual void RequestShutdown() OVERRIDE {
+    if (CrosLibrary::Get()->EnsureLoaded())
+      chromeos::RequestShutdown();
   }
+  // End PowerLibrary implementation.
 
  private:
   static void PowerStatusChangedHandler(void* object,
@@ -105,13 +115,6 @@ class PowerLibraryImpl : public PowerLibrary {
   static void SystemResumedHandler(void* object) {
     PowerLibraryImpl* power = static_cast<PowerLibraryImpl*>(object);
     power->SystemResumed();
-  }
-
-  void Init() {
-    power_status_connection_ = chromeos::MonitorPowerStatus(
-        &PowerStatusChangedHandler, this);
-    resume_status_connection_ =
-        chromeos::MonitorResume(&SystemResumedHandler, this);
   }
 
   void UpdatePowerStatus(const chromeos::PowerStatus& status) {
@@ -160,33 +163,105 @@ class PowerLibraryImpl : public PowerLibrary {
   DISALLOW_COPY_AND_ASSIGN(PowerLibraryImpl);
 };
 
+// The stub implementation runs the battery up and down, pausing at the
+// fully charged and fully depleted states.
 class PowerLibraryStubImpl : public PowerLibrary {
  public:
-  PowerLibraryStubImpl() {}
-  ~PowerLibraryStubImpl() {}
-  void AddObserver(Observer* observer) {}
-  void RemoveObserver(Observer* observer) {}
-  bool line_power_on() const { return false; }
-  bool battery_is_present() const { return true; }
-  bool battery_fully_charged() const { return false; }
-  double battery_percentage() const { return 50.0; }
-  base::TimeDelta battery_time_to_empty() const {
-    return base::TimeDelta::FromSeconds(10 * 60);
+  PowerLibraryStubImpl()
+      : discharging_(true),
+        battery_percentage_(20),
+        pause_count_(0) {
+    timer_.Start(
+        FROM_HERE,
+        base::TimeDelta::FromMilliseconds(100),
+        this,
+        &PowerLibraryStubImpl::Update);
   }
-  base::TimeDelta battery_time_to_full() const {
-    return base::TimeDelta::FromSeconds(0);
+
+  virtual ~PowerLibraryStubImpl() {}
+
+  // Begin PowerLibrary implementation.
+  virtual void Init() OVERRIDE {}
+  virtual void AddObserver(Observer* observer) OVERRIDE {
+    observers_.AddObserver(observer);
   }
-  virtual void EnableScreenLock(bool enable) {}
-  virtual void RequestRestart() {}
-  virtual void RequestShutdown() {}
+
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
+    observers_.RemoveObserver(observer);
+  }
+
+  virtual bool line_power_on() const OVERRIDE {
+    return !discharging_;
+  }
+
+  virtual bool battery_fully_charged() const OVERRIDE {
+    return battery_percentage_ == 100;
+  }
+
+  virtual double battery_percentage() const OVERRIDE {
+    return battery_percentage_;
+  }
+
+  virtual bool battery_is_present() const OVERRIDE {
+    return true;
+  }
+
+  virtual base::TimeDelta battery_time_to_empty() const OVERRIDE {
+    if (battery_percentage_ == 0)
+      return base::TimeDelta::FromSeconds(1);
+    else
+      return (base::TimeDelta::FromHours(3) * battery_percentage_) / 100;
+  }
+
+  virtual base::TimeDelta battery_time_to_full() const OVERRIDE {
+    if (battery_percentage_ == 100)
+      return base::TimeDelta::FromSeconds(1);
+    else
+      return base::TimeDelta::FromHours(3) - battery_time_to_empty();
+  }
+
+  virtual void EnableScreenLock(bool enable) OVERRIDE {}
+  virtual void RequestRestart() OVERRIDE {}
+  virtual void RequestShutdown() OVERRIDE {}
+  // End PowerLibrary implementation.
+
+ private:
+  void Update() {
+    // We pause at 0 and 100% so that it's easier to check those conditions.
+    if (pause_count_ > 1) {
+      pause_count_--;
+      return;
+    }
+
+    if (battery_percentage_ == 0 || battery_percentage_ == 100) {
+      if (pause_count_) {
+        pause_count_ = 0;
+        discharging_ = !discharging_;
+      } else {
+        pause_count_ = 20;
+        return;
+      }
+    }
+    battery_percentage_ += (discharging_ ? -1 : 1);
+    FOR_EACH_OBSERVER(Observer, observers_, PowerChanged(this));
+  }
+
+  bool discharging_;
+  int battery_percentage_;
+  int pause_count_;
+  ObserverList<Observer> observers_;
+  base::RepeatingTimer<PowerLibraryStubImpl> timer_;
 };
 
 // static
 PowerLibrary* PowerLibrary::GetImpl(bool stub) {
+  PowerLibrary* impl;
   if (stub)
-    return new PowerLibraryStubImpl();
+    impl = new PowerLibraryStubImpl();
   else
-    return new PowerLibraryImpl();
+    impl = new PowerLibraryImpl();
+  impl->Init();
+  return impl;
 }
 
 }  // namespace chromeos

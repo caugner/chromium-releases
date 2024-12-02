@@ -70,7 +70,7 @@ class View;
 
 struct ViewState;
 
-class GridLayout : public LayoutManager {
+class VIEWS_EXPORT GridLayout : public LayoutManager {
  public:
   // An enumeration of the possible alignments supported by GridLayout.
   enum Alignment {
@@ -262,7 +262,7 @@ class GridLayout : public LayoutManager {
 // ColumnSet is used to define a set of columns. GridLayout may have any
 // number of ColumnSets. You don't create a ColumnSet directly, instead
 // use the AddColumnSet method of GridLayout.
-class ColumnSet {
+class VIEWS_EXPORT ColumnSet {
  public:
   ~ColumnSet();
 

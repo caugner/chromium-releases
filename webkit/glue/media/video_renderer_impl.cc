@@ -4,9 +4,12 @@
 
 #include "webkit/glue/media/video_renderer_impl.h"
 
+#include "base/logging.h"
 #include "media/base/video_frame.h"
 #include "media/base/yuv_convert.h"
-#include "webkit/glue/webmediaplayer_impl.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkDevice.h"
+#include "webkit/glue/webmediaplayer_proxy.h"
 
 namespace webkit_glue {
 
@@ -23,6 +26,7 @@ bool VideoRendererImpl::OnInitialize(media::VideoDecoder* decoder) {
                     decoder->width(), decoder->height());
   bitmap_.allocPixels();
   bitmap_.eraseRGB(0x00, 0x00, 0x00);
+  bitmap_.setIsVolatile(true);
   return true;
 }
 
@@ -37,17 +41,14 @@ void VideoRendererImpl::OnFrameAvailable() {
   proxy_->Repaint();
 }
 
-void VideoRendererImpl::SetWebMediaPlayerImplProxy(
-    WebMediaPlayerImpl::Proxy* proxy) {
+void VideoRendererImpl::SetWebMediaPlayerProxy(WebMediaPlayerProxy* proxy) {
   proxy_ = proxy;
 }
 
-void VideoRendererImpl::SetRect(const gfx::Rect& rect) {
-}
+void VideoRendererImpl::SetRect(const gfx::Rect& rect) {}
 
 // This method is always called on the renderer's thread.
-void VideoRendererImpl::Paint(SkCanvas* canvas,
-                              const gfx::Rect& dest_rect) {
+void VideoRendererImpl::Paint(SkCanvas* canvas, const gfx::Rect& dest_rect) {
   scoped_refptr<media::VideoFrame> video_frame;
   GetCurrentFrame(&video_frame);
   if (!video_frame) {
@@ -75,16 +76,6 @@ void VideoRendererImpl::Paint(SkCanvas* canvas,
   }
 
   PutCurrentFrame(video_frame);
-}
-
-void VideoRendererImpl::GetCurrentFrame(
-    scoped_refptr<media::VideoFrame>* frame_out) {
-  VideoRendererBase::GetCurrentFrame(frame_out);
-}
-
-void VideoRendererImpl::PutCurrentFrame(
-    scoped_refptr<media::VideoFrame> frame) {
-  VideoRendererBase::PutCurrentFrame(frame);
 }
 
 // CanFastPaint is a helper method to determine the conditions for fast
@@ -124,23 +115,10 @@ bool VideoRendererImpl::CanFastPaint(SkCanvas* canvas,
       SkScalarNearlyZero(total_matrix.getSkewY()) &&
       total_matrix.getScaleX() > 0 &&
       total_matrix.getScaleY() > 0) {
-    // Get the properties of the SkDevice and the clip rect.
     SkDevice* device = canvas->getDevice();
-
-    // Get the boundary of the device.
-    SkIRect device_rect;
-    device->getBounds(&device_rect);
-
-    // Get the pixel config of the device.
     const SkBitmap::Config config = device->config();
-    // Get the total clip rect associated with the canvas.
-    const SkRegion& total_clip = canvas->getTotalClip();
 
-    SkIRect dest_irect;
-    TransformToSkIRect(canvas->getTotalMatrix(), dest_rect, &dest_irect);
-
-    if (config == SkBitmap::kARGB_8888_Config && device->isOpaque() &&
-        device_rect.contains(total_clip.getBounds())) {
+    if (config == SkBitmap::kARGB_8888_Config && device->isOpaque()) {
       return true;
     }
   }
@@ -297,18 +275,6 @@ void VideoRendererImpl::FastPaint(media::VideoFrame* video_frame,
                            media::FILTER_BILINEAR);
     bitmap.unlockPixels();
   }
-}
-
-void VideoRendererImpl::TransformToSkIRect(const SkMatrix& matrix,
-                                           const gfx::Rect& src_rect,
-                                           SkIRect* dest_rect) {
-    // Transform destination rect to local coordinates.
-    SkRect transformed_rect;
-    SkRect skia_dest_rect;
-    skia_dest_rect.iset(src_rect.x(), src_rect.y(),
-                        src_rect.right(), src_rect.bottom());
-    matrix.mapRect(&transformed_rect, skia_dest_rect);
-    transformed_rect.round(dest_rect);
 }
 
 }  // namespace webkit_glue

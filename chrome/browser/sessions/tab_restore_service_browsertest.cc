@@ -7,8 +7,8 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/render_view_test.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/render_view_test.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
@@ -49,7 +49,7 @@ class TabRestoreServiceTest : public RenderViewHostTestHarness {
     RenderViewHostTestHarness::SetUp();
     time_factory_ = new TabRestoreTimeFactory();
     service_.reset(new TabRestoreService(profile(), time_factory_));
-    WebKit::initialize(&webkitclient_);
+    WebKit::initialize(&webkit_platform_support_);
   }
 
   virtual void TearDown() {
@@ -119,7 +119,8 @@ class TabRestoreServiceTest : public RenderViewHostTestHarness {
   GURL url3_;
   scoped_ptr<TabRestoreService> service_;
   TabRestoreTimeFactory* time_factory_;
-  RenderViewTest::RendererWebKitClientImplNoSandbox webkitclient_;
+  RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox
+        webkit_platform_support_;
 };
 
 TEST_F(TabRestoreServiceTest, Basic) {

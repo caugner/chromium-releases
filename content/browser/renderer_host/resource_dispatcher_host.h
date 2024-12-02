@@ -20,6 +20,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "base/timer.h"
 #include "content/browser/renderer_host/resource_queue.h"
 #include "content/common/child_process_info.h"
@@ -30,7 +31,6 @@
 
 class CrossSiteResourceHandler;
 class DownloadFileManager;
-class DownloadRequestLimiter;
 class LoginHandler;
 class NotificationDetails;
 class PluginService;
@@ -40,6 +40,7 @@ class ResourceHandler;
 class ResourceMessageFilter;
 class SaveFileManager;
 class SSLClientAuthHandler;
+class TabContents;
 class WebKitThread;
 struct DownloadSaveInfo;
 struct GlobalRequestID;
@@ -50,6 +51,7 @@ namespace content {
 class ResourceContext;
 }
 namespace net {
+class CookieList;
 class URLRequestJobFactory;
 }  // namespace net
 
@@ -75,8 +77,8 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
                          ResourceMessageFilter* filter,
                          bool* message_was_ok);
 
-  // Initiates a download from the browser process (as opposed to a resource
-  // request from the renderer or another child process).
+  // Initiates a download by explicit request of the renderer, e.g. due to
+  // alt-clicking a link.
   void BeginDownload(const GURL& url,
                      const GURL& referrer,
                      const DownloadSaveInfo& save_info,
@@ -144,10 +146,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
     return download_file_manager_;
   }
 
-  DownloadRequestLimiter* download_request_limiter() const {
-    return download_request_limiter_.get();
-  }
-
   SaveFileManager* save_file_manager() const {
     return save_file_manager_;
   }
@@ -158,6 +156,12 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
 
   // Called when the unload handler for a cross-site request has finished.
   void OnSwapOutACK(const ViewMsg_SwapOut_Params& params);
+
+  // Called when the renderer loads a resource from its internal cache.
+  void OnDidLoadResourceFromMemoryCache(const GURL& url,
+                                        const std::string& security_info,
+                                        const std::string& http_method,
+                                        ResourceType::Type resource_type);
 
   // Force cancels any pending requests for the given process.
   void CancelRequestsForProcess(int process_unique_id);
@@ -174,22 +178,27 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // net::URLRequest::Delegate
   virtual void OnReceivedRedirect(net::URLRequest* request,
                                   const GURL& new_url,
-                                  bool* defer_redirect);
+                                  bool* defer_redirect) OVERRIDE;
   virtual void OnAuthRequired(net::URLRequest* request,
-                              net::AuthChallengeInfo* auth_info);
+                              net::AuthChallengeInfo* auth_info) OVERRIDE;
   virtual void OnCertificateRequested(
       net::URLRequest* request,
-      net::SSLCertRequestInfo* cert_request_info);
+      net::SSLCertRequestInfo* cert_request_info) OVERRIDE;
   virtual void OnSSLCertificateError(net::URLRequest* request,
                                      int cert_error,
-                                     net::X509Certificate* cert);
-  virtual bool CanGetCookies(net::URLRequest* request);
-  virtual bool CanSetCookie(net::URLRequest* request,
+                                     net::X509Certificate* cert) OVERRIDE;
+  virtual bool CanGetCookies(const net::URLRequest* request,
+                             const net::CookieList& cookie_list) const OVERRIDE;
+  virtual bool CanSetCookie(const net::URLRequest* request,
                             const std::string& cookie_line,
-                            net::CookieOptions* options);
-  virtual void OnResponseStarted(net::URLRequest* request);
-  virtual void OnReadCompleted(net::URLRequest* request, int bytes_read);
+                            net::CookieOptions* options) const OVERRIDE;
+  virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
+  virtual void OnReadCompleted(net::URLRequest* request,
+                               int bytes_read) OVERRIDE;
+
   void OnResponseCompleted(net::URLRequest* request);
+
+  void OnUserGesture(TabContents* tab);
 
   // Helper functions to get the dispatcher's request info for the request.
   // If the dispatcher didn't create the request then NULL is returned.
@@ -364,7 +373,7 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   void UpdateLoadStates();
 
   // Checks the upload state and sends an update if one is necessary.
-  bool MaybeUpdateUploadProgress(ResourceDispatcherHostRequestInfo *info,
+  void MaybeUpdateUploadProgress(ResourceDispatcherHostRequestInfo *info,
                                  net::URLRequest *request);
 
   // Resumes or cancels (if |cancel_requests| is true) any blocked requests.
@@ -386,15 +395,15 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   void OnDataDownloadedACK(int request_id);
   void OnUploadProgressACK(int request_id);
   void OnCancelRequest(int request_id);
+  void OnTransferRequestToNewPage(int new_routing_id, int request_id);
   void OnFollowRedirect(int request_id,
                         bool has_new_first_party_for_cookies,
                         const GURL& new_first_party_for_cookies);
   void OnReleaseDownloadedFile(int request_id);
 
-  // Creates ResourceDispatcherHostRequestInfo for a browser-initiated request
-  // (a download or a page save). |download| should be true if the request
-  // is a file download.
-  ResourceDispatcherHostRequestInfo* CreateRequestInfoForBrowserRequest(
+  // Creates ResourceDispatcherHostRequestInfo for a download or page save.
+  // |download| should be true if the request is a file download.
+  ResourceDispatcherHostRequestInfo* CreateRequestInfo(
       ResourceHandler* handler,
       int child_id,
       int route_id,
@@ -403,11 +412,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
 
   // Returns true if |request| is in |pending_requests_|.
   bool IsValidRequest(net::URLRequest* request);
-
-  // Determine request priority based on how critical this resource typically
-  // is to user-perceived page load performance.
-  static net::RequestPriority DetermineRequestPriority(ResourceType::Type type,
-                                                       int load_flags);
 
   // Sends the given notification on the UI thread.  The RenderViewHost's
   // controller is used as the source.
@@ -449,9 +453,6 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   // We own the download file writing thread and manager
   scoped_refptr<DownloadFileManager> download_file_manager_;
 
-  // Determines whether a download is allowed.
-  scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
-
   // We own the save file manager.
   scoped_refptr<SaveFileManager> save_file_manager_;
 
@@ -491,6 +492,11 @@ class ResourceDispatcherHost : public net::URLRequest::Delegate {
   //   (max_outstanding_requests_cost_per_process_ /
   //       kAvgBytesPerOutstandingRequest)
   int max_outstanding_requests_cost_per_process_;
+
+  // Time of the last user gesture. Stored so that we can add a load
+  // flag to requests occurring soon after a gesture to indicate they
+  // may be because of explicit user action.
+  base::TimeTicks last_user_gesture_time_;
 
   // Used during IPC message dispatching so that the handlers can get a pointer
   // to the source of the message.

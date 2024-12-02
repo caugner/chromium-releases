@@ -347,8 +347,9 @@ void SpeechInputBubbleImpl::Show() {
     gfx::Rect target_rect = GetInfoBubbleTarget(element_rect_);
     if (!container_rect.Contains(target_rect.x(), target_rect.y())) {
       // Target is not in screen view, so point to page icon in omnibox.
-      Browser* browser =
-          Browser::GetOrCreateTabbedBrowser(tab_contents()->profile());
+      Profile* profile =
+          Profile::FromBrowserContext(tab_contents()->browser_context());
+      Browser* browser = Browser::GetOrCreateTabbedBrowser(profile);
       BrowserView* browser_view =
           BrowserView::GetBrowserViewForNativeWindow(
               browser->window()->GetNativeHandle());
@@ -366,7 +367,7 @@ void SpeechInputBubbleImpl::Show() {
     }
     bubble_ = Bubble::Show(toplevel_widget,
                            target_rect,
-                           BubbleBorder::TOP_LEFT, bubble_content_,
+                           views::BubbleBorder::TOP_LEFT, bubble_content_,
                            this);
     // We don't want fade outs when closing because it makes speech recognition
     // appear slower than it is. Also setting it to false allows |Close| to

@@ -48,6 +48,8 @@ cr.define('ntp4', function() {
       this.input_ = this.ownerDocument.createElement('input');
       this.input_.setAttribute('spellcheck', false);
       this.input_.value = title;
+      // Take the input out of the tab-traversal focus order.
+      this.input_.disabled = true;
       this.appendChild(this.input_);
 
       this.addEventListener('click', this.onClick_);
@@ -67,6 +69,14 @@ cr.define('ntp4', function() {
           self.classList.remove('small');
         }, 0);
       }
+    },
+
+    /**
+     * Gets the associated TilePage.
+     * @return {TilePage}
+     */
+    get page() {
+      return this.page_;
     },
 
     /**
@@ -94,6 +104,8 @@ cr.define('ntp4', function() {
       // handling in onInputMouseDown_.
       if (this.ownerDocument.activeElement != this.input_)
         this.focus();
+
+      chrome.send('introMessageDismissed');
       e.stopPropagation();
     },
 
@@ -104,6 +116,7 @@ cr.define('ntp4', function() {
      */
     onDoubleClick_: function(e) {
       if (this.titleIsEditable_) {
+        this.input_.disabled = false;
         this.input_.focus();
         this.input_.select();
       }
@@ -143,6 +156,7 @@ cr.define('ntp4', function() {
       window.getSelection().removeAllRanges();
       this.title_ = this.input_.value;
       ntp4.saveAppPageName(this.page_, this.title_);
+      this.input_.disabled = true;
     },
 
     shouldAcceptDrag: function(e) {
@@ -178,10 +192,8 @@ cr.define('ntp4', function() {
 
       if (!this.dragWrapper_.isCurrentDragTarget)
         e.dataTransfer.dropEffect = 'none';
-      else if (ntp4.getCurrentlyDraggingTile)
-        e.dataTransfer.dropEffect = 'move';
       else
-        e.dataTransfer.dropEffect = 'copy';
+        this.page_.setDropEffect(e.dataTransfer);
     },
 
     /**
@@ -192,7 +204,8 @@ cr.define('ntp4', function() {
      */
     doDrop: function(e) {
       e.stopPropagation();
-      if (ntp4.getCurrentlyDraggingTile)
+      var tile = ntp4.getCurrentlyDraggingTile();
+      if (tile && tile.tilePage != this.page_)
         this.page_.appendDraggingTile();
       // TODO(estade): handle non-tile drags.
 
@@ -225,7 +238,7 @@ cr.define('ntp4', function() {
      * @private
      */
     onTransitionEnd_: function(e) {
-      if (e.propertyName === 'width' && this.classList.contains('small'))
+      if (e.propertyName === 'max-width' && this.classList.contains('small'))
         this.parentNode.removeChild(this);
     },
   };

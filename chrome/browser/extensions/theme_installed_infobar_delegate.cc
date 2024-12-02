@@ -26,7 +26,7 @@ ThemeInstalledInfoBarDelegate::ThemeInstalledInfoBarDelegate(
     const std::string& previous_theme_id,
     bool previous_using_native_theme)
     : ConfirmInfoBarDelegate(tab_contents),
-      profile_(tab_contents->profile()),
+      profile_(Profile::FromBrowserContext(tab_contents->browser_context())),
       theme_service_(ThemeServiceFactory::GetForProfile(profile_)),
       name_(new_theme->name()),
       theme_id_(new_theme->id()),
@@ -74,6 +74,10 @@ gfx::Image* ThemeInstalledInfoBarDelegate::GetIcon() const {
   // asynchronously from disk.
   return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_INFOBAR_THEME);
+}
+
+InfoBarDelegate::Type ThemeInstalledInfoBarDelegate::GetInfoBarType() const {
+  return PAGE_ACTION_TYPE;
 }
 
 ThemeInstalledInfoBarDelegate*

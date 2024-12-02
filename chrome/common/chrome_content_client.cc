@@ -17,55 +17,51 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/render_messages.h"
 #include "content/common/pepper_plugin_registry.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "webkit/glue/user_agent.h"
+#include "webkit/plugins/plugin_constants.h"
 
 #if defined(OS_WIN)
 #include "content/common/sandbox_policy.h"
 #include "sandbox/src/sandbox.h"
 #endif
 
-#include "webkit/glue/user_agent.h"
+#if !defined(NACL_WIN64)  // The code this needs isn't linked on Win64 builds.
+#include "chrome/common/render_messages.h"
+#endif
 
 namespace {
 
-const char* kPDFPluginName = "Chrome PDF Viewer";
-const char* kPDFPluginMimeType = "application/pdf";
-const char* kPDFPluginExtension = "pdf";
-const char* kPDFPluginDescription = "Portable Document Format";
-const char* kPDFPluginPrintPreviewMimeType
-    = "application/x-google-chrome-print-preview-pdf";
+const char kPDFPluginName[] = "Chrome PDF Viewer";
+const char kPDFPluginMimeType[] = "application/pdf";
+const char kPDFPluginExtension[] = "pdf";
+const char kPDFPluginDescription[] = "Portable Document Format";
+const char kPDFPluginPrintPreviewMimeType
+   [] = "application/x-google-chrome-print-preview-pdf";
 
-const char* kNaClPluginName = "Native Client";
-const char* kNaClPluginMimeType = "application/x-nacl";
-const char* kNaClPluginExtension = "nexe";
-const char* kNaClPluginDescription = "Native Client Executable";
+const char kNaClPluginName[] = "Native Client";
+const char kNaClPluginMimeType[] = "application/x-nacl";
+const char kNaClPluginExtension[] = "nexe";
+const char kNaClPluginDescription[] = "Native Client Executable";
+
+const char kNaClOldPluginName[] = "Chrome NaCl";
 
 #if defined(ENABLE_REMOTING)
-const char* kRemotingViewerPluginName = "Remoting Viewer";
+const char kRemotingViewerPluginName[] = "Remoting Viewer";
 const FilePath::CharType kRemotingViewerPluginPath[] =
     FILE_PATH_LITERAL("internal-remoting-viewer");
 // Use a consistent MIME-type regardless of branding.
-const char* kRemotingViewerPluginMimeType =
+const char kRemotingViewerPluginMimeType[] =
     "application/vnd.chromium.remoting-viewer";
 // TODO(wez): Remove the old MIME-type once client code no longer needs it.
-const char* kRemotingViewerPluginOldMimeType =
+const char kRemotingViewerPluginOldMimeType[] =
     "pepper-application/x-chromoting";
 #endif
 
-const char* kFlashPluginName = "Shockwave Flash";
-const char* kFlashPluginSwfMimeType = "application/x-shockwave-flash";
-const char* kFlashPluginSwfExtension = "swf";
-const char* kFlashPluginSwfDescription = "Shockwave Flash";
-const char* kFlashPluginSplMimeType = "application/futuresplash";
-const char* kFlashPluginSplExtension = "spl";
-const char* kFlashPluginSplDescription = "FutureSplash Player";
-
 #if !defined(NACL_WIN64)  // The code this needs isn't linked on Win64 builds.
-
 // Appends the known built-in plugins to the given vector. Some built-in
 // plugins are "internal" which means they are compiled into the Chrome binary,
 // and some are extra shared libraries distributed with the browser (these are
@@ -85,10 +81,10 @@ void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
       PepperPluginInfo pdf;
       pdf.path = path;
       pdf.name = kPDFPluginName;
-      webkit::npapi::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
-                                                     kPDFPluginExtension,
-                                                     kPDFPluginDescription);
-      webkit::npapi::WebPluginMimeType print_preview_pdf_mime_type(
+      webkit::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
+                                              kPDFPluginExtension,
+                                              kPDFPluginDescription);
+      webkit::WebPluginMimeType print_preview_pdf_mime_type(
           kPDFPluginPrintPreviewMimeType,
           kPDFPluginExtension,
           kPDFPluginDescription);
@@ -110,9 +106,9 @@ void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
       PepperPluginInfo nacl;
       nacl.path = path;
       nacl.name = kNaClPluginName;
-      webkit::npapi::WebPluginMimeType nacl_mime_type(kNaClPluginMimeType,
-                                                      kNaClPluginExtension,
-                                                      kNaClPluginDescription);
+      webkit::WebPluginMimeType nacl_mime_type(kNaClPluginMimeType,
+                                               kNaClPluginExtension,
+                                               kNaClPluginDescription);
       nacl.mime_types.push_back(nacl_mime_type);
       plugins->push_back(nacl);
 
@@ -126,12 +122,12 @@ void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
   info.is_internal = true;
   info.name = kRemotingViewerPluginName;
   info.path = FilePath(kRemotingViewerPluginPath);
-  webkit::npapi::WebPluginMimeType remoting_mime_type(
+  webkit::WebPluginMimeType remoting_mime_type(
       kRemotingViewerPluginMimeType,
       std::string(),
       std::string());
   info.mime_types.push_back(remoting_mime_type);
-  webkit::npapi::WebPluginMimeType old_remoting_mime_type(
+  webkit::WebPluginMimeType old_remoting_mime_type(
       kRemotingViewerPluginOldMimeType,
       std::string(),
       std::string());
@@ -183,13 +179,13 @@ void AddOutOfProcessFlash(std::vector<PepperPluginInfo>* plugins) {
   plugin.description = plugin.name + " " + flash_version_numbers[0] + "." +
       flash_version_numbers[1] + " r" + flash_version_numbers[2];
   plugin.version = JoinString(flash_version_numbers, '.');
-  webkit::npapi::WebPluginMimeType swf_mime_type(kFlashPluginSwfMimeType,
-                                                 kFlashPluginSwfExtension,
-                                                 kFlashPluginSwfDescription);
+  webkit::WebPluginMimeType swf_mime_type(kFlashPluginSwfMimeType,
+                                          kFlashPluginSwfExtension,
+                                          kFlashPluginSwfDescription);
   plugin.mime_types.push_back(swf_mime_type);
-  webkit::npapi::WebPluginMimeType spl_mime_type(kFlashPluginSplMimeType,
-                                                 kFlashPluginSplExtension,
-                                                 kFlashPluginSplDescription);
+  webkit::WebPluginMimeType spl_mime_type(kFlashPluginSplMimeType,
+                                          kFlashPluginSplExtension,
+                                          kFlashPluginSplDescription);
   plugin.mime_types.push_back(spl_mime_type);
   plugins->push_back(plugin);
 }
@@ -265,8 +261,10 @@ ChangeWindowMessageFilterFunction g_ChangeWindowMessageFilter;
 
 namespace chrome {
 
-const char* ChromeContentClient::kPDFPluginName = ::kPDFPluginName;
-const char* ChromeContentClient::kNaClPluginName = ::kNaClPluginName;
+const char* const ChromeContentClient::kPDFPluginName = ::kPDFPluginName;
+const char* const ChromeContentClient::kNaClPluginName = ::kNaClPluginName;
+const char* const ChromeContentClient::kNaClOldPluginName =
+    ::kNaClOldPluginName;
 
 void ChromeContentClient::SetActiveURL(const GURL& url) {
   child_process_logging::SetActiveURL(url);
@@ -285,28 +283,32 @@ void ChromeContentClient::AddPepperPlugins(
 }
 
 bool ChromeContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
+#if !defined(NACL_WIN64)  // The code this needs isn't linked on Win64 builds.
   // Any Chrome-specific messages that must be allowed to be sent from swapped
   // out renderers.
   switch (msg->type()) {
-    case ViewHostMsg_DomOperationResponse::ID:
+    case ChromeViewHostMsg_DomOperationResponse::ID:
       return true;
     default:
       break;
   }
+#endif
   return false;
 }
 
 bool ChromeContentClient::CanHandleWhileSwappedOut(
     const IPC::Message& msg) {
+#if !defined(NACL_WIN64)  // The code this needs isn't linked on Win64 builds.
   // Any Chrome-specific messages (apart from those listed in
   // CanSendWhileSwappedOut) that must be handled by the browser when sent from
   // swapped out renderers.
   switch (msg.type()) {
-    case ViewHostMsg_Snapshot::ID:
+    case ChromeViewHostMsg_Snapshot::ID:
       return true;
     default:
       break;
   }
+#endif
   return false;
 }
 

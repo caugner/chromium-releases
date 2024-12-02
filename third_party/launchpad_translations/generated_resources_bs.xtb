@@ -40,7 +40,6 @@
 <translation id="112343676265501403">Izuzeci za plugine</translation>
 <translation id="1125520545229165057">Dvorak (Hsu)</translation>
 <translation id="1128128132059598906">EAP-TTLS</translation>
-<translation id="1134009406053225289">Otvori u privatnom prozoru</translation>
 <translation id="1135328998467923690">Paket je neispravan: '<ph name="ERROR_CODE"/>'.</translation>
 <translation id="1139892513581762545">Bočni tabovi</translation>
 <translation id="1143142264369994168">Potpisnik certifikata</translation>
@@ -56,7 +55,6 @@
 <translation id="1177437665183591855">Nepoznata serverska certifikatska greška</translation>
 <translation id="1177863135347784049">Korisnički</translation>
 <translation id="1178581264944972037">Pauza</translation>
-<translation id="1180549724812639004">Kreiraj novi profil</translation>
 <translation id="1181037720776840403">Ukloni</translation>
 <translation id="1190844492833803334">Kada zatvorim preglednik</translation>
 <translation id="1195447618553298278">Nepoznata greška.</translation>
@@ -75,7 +73,6 @@
 <translation id="1242521815104806351">Detalji konekcije</translation>
 <translation id="1254593899333212300">Direktna internet konekcija</translation>
 <translation id="1272079795634619415">Zaustavi</translation>
-<translation id="1273291576878293349">Otvori sve zabilješke u privatnom prozoru</translation>
 <translation id="1275718070701477396">Označeno</translation>
 <translation id="1285320974508926690">Nemoj prevoditi ovu stranicu</translation>
 <translation id="1291144580684226670">Standardni font</translation>
@@ -84,7 +81,6 @@
 <translation id="1297175357211070620">Odredište</translation>
 <translation id="131364520783682672">Velika slova</translation>
 <translation id="1317130519471511503">Uredi stavke...</translation>
-<translation id="1319824869167805246">Otvori sve zabilješke u novom prozoru</translation>
 <translation id="1325040735987616223">Nadogradnja sistema</translation>
 <translation id="1337036551624197047">Češka tastatura</translation>
 <translation id="1352060938076340443">Prekinuto</translation>
@@ -237,10 +233,8 @@
 <translation id="3819800052061700452">&amp;Cijeli ekran</translation>
 <translation id="3827774300009121996">&amp;Cijeli ekran</translation>
 <translation id="3828029223314399057">Pretraga zabilješki</translation>
-<translation id="38385141699319881">Preuzimam sliku...</translation>
 <translation id="3842552989725514455">Serif font</translation>
 <translation id="385051799172605136">Nazad</translation>
-<translation id="3853566281579215874">Ipak učitaj (nije preporučeno)</translation>
 <translation id="3855676282923585394">Uvozim zabilješke i postavke...</translation>
 <translation id="3866249974567520381">Opis</translation>
 <translation id="480990236307250886">Otvori početnu stranicu</translation>
@@ -253,7 +247,6 @@
 <translation id="4850886885716139402">Pregled</translation>
 <translation id="4856408283021169561">Mikrofon nije pronađen.</translation>
 <translation id="4856478137399998590">Vaša mobilni servis za podatke je aktiviran i spreman za upotrebu</translation>
-<translation id="4857138207355690859">P2P API</translation>
 <translation id="4861833787540810454">&amp;Reprodukcija</translation>
 <translation id="4864369630010738180">Prijavljivanje...</translation>
 <translation id="4865571580044923428">Upravljanje izuzecima...</translation>
@@ -293,7 +286,6 @@
 <translation id="508794495705880051">Dodaj novu kreditnu karticu...</translation>
 <translation id="5089810972385038852">Država</translation>
 <translation id="5098629044894065541">Hebrejsko</translation>
-<translation id="5101042277149003567">Otvori sve zabilješke</translation>
 <translation id="5271549068863921519">Sačuvaj šifru</translation>
 <translation id="5279600392753459966">Blokiraj sve</translation>
 <translation id="5279641203372218761">Upravljanje lokalnim štampačima...</translation>
@@ -320,12 +312,10 @@
 <translation id="5509519625080982753">Lokalni štampači</translation>
 <translation id="5509693895992845810">Sačuvaj k&amp;ao...</translation>
 <translation id="5509914365760201064">Izdavač: <ph name="CERTIFICATE_AUTHORITY"/></translation>
-<translation id="5510072263871409308">Učitavam dodatne štampače</translation>
 <translation id="5515806255487262353">Pogledaj u rječniku</translation>
 <translation id="5516565854418269276">&amp;Uvijek prikazuj traku s zabilješkama</translation>
 <translation id="5518442882456325299">Trenutni pretraživač:</translation>
 <translation id="5530864958284331435">$1 fajlova označeno, $2</translation>
-<translation id="5542132724887566711">Profil</translation>
 <translation id="5546865291508181392">Nađi</translation>
 <translation id="5553784454066145694">Odaberite novi PIN</translation>
 <translation id="7168109975831002660">Najmanja veličina fonta</translation>
@@ -333,7 +323,6 @@
 <translation id="7172053773111046550">Estonska tastatura</translation>
 <translation id="7175353351958621980">Učitano iz:</translation>
 <translation id="7179921470347911571">Ponovo pokreni odmah</translation>
-<translation id="7180865173735832675">Prilagodi</translation>
 <translation id="7186367841673660872">Ova stranica je prevedena sa<ph name="ORIGINAL_LANGUAGE"/>na<ph name="LANGUAGE_LANGUAGE"/></translation>
 <translation id="7190251665563814471">Uvijek dozvoli ove plugine na <ph name="HOST"/></translation>
 <translation id="7191454237977785534">Sačuvaj fajl kao</translation>

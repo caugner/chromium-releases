@@ -6,9 +6,12 @@
 #define REMOTING_BASE_UTIL_H_
 
 #include "media/base/video_frame.h"
+#include "third_party/skia/include/core/SkRect.h"
 #include "ui/gfx/rect.h"
 
 namespace remoting {
+
+std::string GetTimestampString();
 
 // TODO(sergeyu): Move these methods to media.
 int GetBytesPerPixel(media::VideoFrame::Format format);
@@ -55,6 +58,14 @@ gfx::Rect AlignRect(const gfx::Rect& rect);
 gfx::Rect ScaleRect(const gfx::Rect& rect,
                     double horizontal_ratio,
                     double vertical_ratio);
+
+// Copy pixels in the rectangle from source to destination.
+void CopyRect(const uint8* src_plane,
+              int src_plane_stride,
+              uint8* dest_plane,
+              int dest_plane_stride,
+              int bytes_per_pixel,
+              const SkIRect& rect);
 
 }  // namespace remoting
 

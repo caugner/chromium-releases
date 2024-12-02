@@ -9,7 +9,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/tabstrip_origin_provider.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -22,7 +22,7 @@ class EmptyTabstripOriginProvider : public TabstripOriginProvider {
   }
 };
 
-class BookmarkBarGtkUnittest : public ::testing::Test {
+class BookmarkBarGtkUnittest : public testing::Test {
  protected:
   BookmarkBarGtkUnittest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
@@ -36,7 +36,7 @@ class BookmarkBarGtkUnittest : public ::testing::Test {
     browser_.reset(new Browser(Browser::TYPE_TABBED, profile_.get()));
 
     origin_provider_.reset(new EmptyTabstripOriginProvider);
-    bookmark_bar_.reset(new BookmarkBarGtk(NULL, profile_.get(), browser_.get(),
+    bookmark_bar_.reset(new BookmarkBarGtk(NULL, browser_.get(),
                                            origin_provider_.get()));
   }
 

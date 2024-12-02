@@ -36,8 +36,8 @@
 
 namespace {
 
-// The height in pixels of the title bar.
-const int kTitleBarHeight = 24;
+// The height in pixels of the titlebar.
+const int kTitlebarHeight = 24;
 
 // The thickness in pixels of the frame border.
 const int kFrameBorderThickness = 1;
@@ -51,7 +51,10 @@ const int kIconSize = 16;
 // The spacing in pixels between buttons or the button and the adjacent control.
 const int kButtonSpacing = 6;
 
-// Colors used in painting the title bar for drawing attention.
+// The panel can be minimized to 3-pixel lines.
+const int kMinimizedPanelHeight = 3;
+
+// Colors used in painting the titlebar for drawing attention.
 const SkColor kBackgroundColorForAttention = 0xfffa983a;
 const SkColor kTitleTextColorForAttention = SK_ColorWHITE;
 
@@ -100,8 +103,7 @@ ButtonResources settings_button_resources;
 ButtonResources close_button_resources;
 EdgeResources frame_edges;
 EdgeResources client_edges;
-gfx::Font* active_font = NULL;
-gfx::Font* inactive_font = NULL;
+gfx::Font* title_font = NULL;
 SkBitmap* background_bitmap_for_attention = NULL;
 
 void LoadImageResources() {
@@ -131,8 +133,7 @@ void EnsureResourcesInitialized() {
   resources_initialized = true;
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  active_font = new gfx::Font(rb.GetFont(ResourceBundle::BoldFont));
-  inactive_font = new gfx::Font(rb.GetFont(ResourceBundle::BaseFont));
+  title_font = new gfx::Font(rb.GetFont(ResourceBundle::BaseFont));
 
   // Creates a bitmap of the specified color.
   background_bitmap_for_attention = new SkBitmap();
@@ -213,7 +214,8 @@ PanelBrowserFrameView::PanelBrowserFrameView(BrowserFrame* frame,
       title_label_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(settings_menu_contents_(this)),
       settings_menu_adapter_(&settings_menu_contents_),
-      settings_menu_(&settings_menu_adapter_) {
+      settings_menu_(new views::MenuItemView(&settings_menu_adapter_)),
+      settings_menu_runner_(settings_menu_) {
   EnsureResourcesInitialized();
   frame_->set_frame_type(views::Widget::FRAME_TYPE_FORCE_CUSTOM);
 
@@ -355,15 +357,6 @@ gfx::Size PanelBrowserFrameView::GetMinimumSize() {
 }
 
 void PanelBrowserFrameView::Layout() {
-  // If the panel height is smaller than the title-bar height, as in minimized
-  // case, we hide all controls.
-  bool is_control_visible = height() >= kTitleBarHeight;
-  close_button_->SetVisible(is_control_visible);
-  settings_button_->SetVisible(
-      is_control_visible && is_settings_button_visible_);
-  title_icon_->SetVisible(is_control_visible);
-  title_label_->SetVisible(is_control_visible);
-
   // Layout the close button.
   gfx::Size close_button_size = close_button_->GetPreferredSize();
   close_button_->SetBounds(
@@ -413,25 +406,27 @@ void PanelBrowserFrameView::GetAccessibleState(ui::AccessibleViewState* state) {
 }
 
 bool PanelBrowserFrameView::OnMousePressed(const views::MouseEvent& event) {
-  if (browser_view_->OnTitleBarMousePressed(event))
+  if (event.IsOnlyLeftMouseButton() &&
+      browser_view_->OnTitlebarMousePressed(event.location())) {
     return true;
+  }
   return BrowserNonClientFrameView::OnMousePressed(event);
 }
 
 bool PanelBrowserFrameView::OnMouseDragged(const views::MouseEvent& event) {
-  if (browser_view_->OnTitleBarMouseDragged(event))
+  if (browser_view_->OnTitlebarMouseDragged(event.location()))
     return true;
   return BrowserNonClientFrameView::OnMouseDragged(event);
 }
 
 void PanelBrowserFrameView::OnMouseReleased(const views::MouseEvent& event) {
-  if (browser_view_->OnTitleBarMouseReleased(event))
+  if (browser_view_->OnTitlebarMouseReleased())
     return;
   BrowserNonClientFrameView::OnMouseReleased(event);
 }
 
 void PanelBrowserFrameView::OnMouseCaptureLost() {
-  if (browser_view_->OnTitleBarMouseCaptureLost())
+  if (browser_view_->OnTitlebarMouseCaptureLost())
     return;
   BrowserNonClientFrameView::OnMouseCaptureLost();
 }
@@ -448,9 +443,11 @@ void PanelBrowserFrameView::RunMenu(View* source, const gfx::Point& pt) {
   DCHECK_EQ(settings_button_, source);
   gfx::Point screen_point;
   views::View::ConvertPointToScreen(source, &screen_point);
-  settings_menu_.RunMenuAt(source->GetWidget()->GetNativeWindow(),
-      settings_button_, gfx::Rect(screen_point, source->size()),
-      views::MenuItemView::TOPRIGHT, true);
+  if (settings_menu_runner_.RunMenuAt(source->GetWidget(),
+          settings_button_, gfx::Rect(screen_point, source->size()),
+          views::MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED)
+    return;
 }
 
 bool PanelBrowserFrameView::IsCommandIdChecked(int command_id) const {
@@ -517,10 +514,7 @@ void PanelBrowserFrameView::ExecuteCommand(int command_id) {
       extension_uninstall_dialog_->ConfirmUninstall(this, extension);
       break;
     case COMMAND_MANAGE:
-      browser->OpenURL(GURL(chrome::kChromeUIExtensionsURL),
-                            GURL(),
-                            SINGLETON_TAB,
-                            PageTransition::LINK);
+      browser->ShowOptionsTab(chrome::kExtensionsSubPage);
       break;
     default:
       NOTREACHED();
@@ -556,7 +550,16 @@ int PanelBrowserFrameView::NonClientBorderThickness() const {
 }
 
 int PanelBrowserFrameView::NonClientTopBorderHeight() const {
-  return kFrameBorderThickness + kTitleBarHeight + kClientEdgeThickness;
+  return kFrameBorderThickness + kTitlebarHeight + kClientEdgeThickness;
+}
+
+int PanelBrowserFrameView::MinimizedPanelHeight() {
+  return kMinimizedPanelHeight;
+}
+
+gfx::Size PanelBrowserFrameView::NonClientAreaSize() const {
+  return gfx::Size(NonClientBorderThickness() * 2,
+                   NonClientTopBorderHeight() + NonClientBorderThickness());
 }
 
 SkColor PanelBrowserFrameView::GetTitleColor(PaintState paint_state) const {
@@ -574,17 +577,8 @@ SkColor PanelBrowserFrameView::GetTitleColor(PaintState paint_state) const {
   }
 }
 
-gfx::Font* PanelBrowserFrameView::GetTitleFont(PaintState paint_state) const {
-  switch (paint_state) {
-    case PAINT_AS_INACTIVE:
-    case PAINT_FOR_ATTENTION:
-      return inactive_font;
-    case PAINT_AS_ACTIVE:
-      return active_font;
-    default:
-      NOTREACHED();
-      return NULL;
-  }
+gfx::Font* PanelBrowserFrameView::GetTitleFont() const {
+  return title_font;
 }
 
 SkBitmap* PanelBrowserFrameView::GetFrameTheme(PaintState paint_state) const {
@@ -610,7 +604,7 @@ void PanelBrowserFrameView::UpdateControlStyles(PaintState paint_state) {
 
   SkColor title_color = GetTitleColor(paint_state_);
   title_label_->SetColor(title_color);
-  title_label_->SetFont(*GetTitleFont(paint_state_));
+  title_label_->SetFont(*GetTitleFont());
 
   close_button_->SetBackground(title_color,
                                close_button_resources.normal_image,
@@ -622,6 +616,10 @@ void PanelBrowserFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
 
   // Draw the theme frame.
   canvas->TileImageInt(*theme_frame, 0, 0, width(), height());
+
+  // No need to paint other stuff if panel is minimized.
+  if (height() <= kMinimizedPanelHeight)
+    return;
 
   // Draw the top border.
   canvas->DrawBitmapInt(*(frame_edges.top_left), 0, 0);
@@ -664,6 +662,10 @@ void PanelBrowserFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
 
 void PanelBrowserFrameView::PaintClientEdge(gfx::Canvas* canvas) {
   int client_area_top = client_view_bounds_.y();
+
+  // No need to paint other stuff if panel is minimized.
+  if (height() <= kMinimizedPanelHeight)
+    return;
 
   // Draw the top edge.
   int top_edge_y = client_area_top - client_edges.top->height();
@@ -753,5 +755,5 @@ void PanelBrowserFrameView::EnsureSettingsMenuCreated() {
   settings_menu_contents_.AddItem(
       COMMAND_MANAGE, l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSIONS));
 
-  settings_menu_adapter_.BuildMenu(&settings_menu_);
+  settings_menu_adapter_.BuildMenu(settings_menu_);
 }

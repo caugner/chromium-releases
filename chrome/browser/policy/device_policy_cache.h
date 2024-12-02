@@ -25,15 +25,14 @@ namespace em = enterprise_management;
 class DevicePolicyCache : public CloudPolicyCacheBase,
                           public chromeos::SignedSettingsHelper::Callback {
  public:
-  explicit DevicePolicyCache(CloudPolicyDataStore* data_store,
-                             EnterpriseInstallAttributes* install_attributes);
+  DevicePolicyCache(CloudPolicyDataStore* data_store,
+                    EnterpriseInstallAttributes* install_attributes);
   virtual ~DevicePolicyCache();
 
   // CloudPolicyCacheBase implementation:
   virtual void Load() OVERRIDE;
   virtual void SetPolicy(const em::PolicyFetchResponse& policy) OVERRIDE;
   virtual void SetUnmanaged() OVERRIDE;
-  virtual bool IsReady() OVERRIDE;
 
   // SignedSettingsHelper::Callback implementation:
   virtual void OnRetrievePolicyCompleted(
@@ -62,6 +61,12 @@ class DevicePolicyCache : public CloudPolicyCacheBase,
   // read the registration user if this is the case.
   void CheckImmutableAttributes();
 
+  // Tries to install the initial device policy retrieved from signed settings.
+  // Fills in |device_token| if it could be extracted from the loaded protobuf.
+  void InstallInitialPolicy(chromeos::SignedSettings::ReturnCode code,
+                            const em::PolicyFetchResponse& policy,
+                            std::string* device_token);
+
   static void DecodeDevicePolicy(const em::ChromeDeviceSettingsProto& policy,
                                  PolicyMap* mandatory,
                                  PolicyMap* recommended);
@@ -70,8 +75,6 @@ class DevicePolicyCache : public CloudPolicyCacheBase,
   EnterpriseInstallAttributes* install_attributes_;
 
   chromeos::SignedSettingsHelper* signed_settings_helper_;
-
-  bool starting_up_;
 
   base::ScopedCallbackFactory<DevicePolicyCache> callback_factory_;
 

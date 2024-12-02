@@ -24,6 +24,7 @@
 #include "content/common/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -34,6 +35,7 @@
 #include "views/controls/label.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/menu/view_menu_delegate.h"
 #include "views/widget/widget.h"
 
@@ -120,19 +122,16 @@ class NotificationControlView : public views::View,
     CreateOptionsMenu();
 
     views::MenuModelAdapter menu_model_adapter(options_menu_contents_.get());
-    views::MenuItemView menu(&menu_model_adapter);
-    menu_model_adapter.BuildMenu(&menu);
+    menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
 
     gfx::Point screen_location;
-    views::View::ConvertPointToScreen(options_menu_button_,
-                                      &screen_location);
-    gfx::NativeWindow window =
-        source->GetWidget()->GetTopLevelWidget()->GetNativeWindow();
-    menu.RunMenuAt(window,
-                   options_menu_button_,
-                   gfx::Rect(screen_location, options_menu_button_->size()),
-                   views::MenuItemView::TOPRIGHT,
-                   true);
+    views::View::ConvertPointToScreen(options_menu_button_, &screen_location);
+    if (menu_runner_->RunMenuAt(
+            source->GetWidget()->GetTopLevelWidget(), options_menu_button_,
+            gfx::Rect(screen_location, options_menu_button_->size()),
+            views::MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
+        views::MenuRunner::MENU_DELETED)
+      return;
   }
 
   // views::ButtonListener implements.
@@ -190,6 +189,7 @@ class NotificationControlView : public views::View,
 
   // The options menu.
   scoped_ptr<ui::SimpleMenuModel> options_menu_contents_;
+  scoped_ptr<views::MenuRunner> menu_runner_;
   views::MenuButton* options_menu_button_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationControlView);

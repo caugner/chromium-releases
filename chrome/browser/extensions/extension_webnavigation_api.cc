@@ -37,6 +37,8 @@ const char* kValidSchemes[] = {
   chrome::kHttpsScheme,
   chrome::kFileScheme,
   chrome::kFtpScheme,
+  chrome::kJavaScriptScheme,
+  chrome::kDataScheme,
 };
 
 // Returns the frame ID as it will be passed to the extension:
@@ -54,9 +56,10 @@ double MilliSecondsFromTime(const base::Time& time) {
 }
 
 // Dispatches events to the extension message service.
-void DispatchEvent(Profile* profile,
+void DispatchEvent(content::BrowserContext* browser_context,
                    const char* event_name,
                    const std::string& json_args) {
+  Profile* profile = Profile::FromBrowserContext(browser_context);
   if (profile && profile->GetExtensionEventRouter()) {
     profile->GetExtensionEventRouter()->DispatchEventToRenderers(
         event_name, json_args, profile, GURL());
@@ -79,7 +82,9 @@ void DispatchOnBeforeNavigate(TabContents* tab_contents,
 
   std::string json_args;
   base::JSONWriter::Write(&args, false, &json_args);
-  DispatchEvent(tab_contents->profile(), keys::kOnBeforeNavigate, json_args);
+  DispatchEvent(tab_contents->browser_context(),
+                keys::kOnBeforeNavigate,
+                json_args);
 }
 
 // Constructs and dispatches an onCommitted event.
@@ -103,13 +108,15 @@ void DispatchOnCommitted(TabContents* tab_contents,
     qualifiers->Append(Value::CreateStringValue("server_redirect"));
   if (transition_type & PageTransition::FORWARD_BACK)
     qualifiers->Append(Value::CreateStringValue("forward_back"));
+  if (transition_type & PageTransition::FROM_ADDRESS_BAR)
+    qualifiers->Append(Value::CreateStringValue("from_address_bar"));
   dict->Set(keys::kTransitionQualifiersKey, qualifiers);
   dict->SetDouble(keys::kTimeStampKey, MilliSecondsFromTime(base::Time::Now()));
   args.Append(dict);
 
   std::string json_args;
   base::JSONWriter::Write(&args, false, &json_args);
-  DispatchEvent(tab_contents->profile(), keys::kOnCommitted, json_args);
+  DispatchEvent(tab_contents->browser_context(), keys::kOnCommitted, json_args);
 }
 
 // Constructs and dispatches an onDOMContentLoaded event.
@@ -128,7 +135,9 @@ void DispatchOnDOMContentLoaded(TabContents* tab_contents,
 
   std::string json_args;
   base::JSONWriter::Write(&args, false, &json_args);
-  DispatchEvent(tab_contents->profile(), keys::kOnDOMContentLoaded, json_args);
+  DispatchEvent(tab_contents->browser_context(),
+                keys::kOnDOMContentLoaded,
+                json_args);
 }
 
 // Constructs and dispatches an onCompleted event.
@@ -147,12 +156,12 @@ void DispatchOnCompleted(TabContents* tab_contents,
 
   std::string json_args;
   base::JSONWriter::Write(&args, false, &json_args);
-  DispatchEvent(tab_contents->profile(), keys::kOnCompleted, json_args);
+  DispatchEvent(tab_contents->browser_context(), keys::kOnCompleted, json_args);
 }
 
 // Constructs and dispatches an onBeforeRetarget event.
 void DispatchOnBeforeRetarget(TabContents* tab_contents,
-                              Profile* profile,
+                              content::BrowserContext* browser_context,
                               int64 source_frame_id,
                               bool source_frame_is_main_frame,
                               TabContents* target_tab_contents,
@@ -171,7 +180,30 @@ void DispatchOnBeforeRetarget(TabContents* tab_contents,
 
   std::string json_args;
   base::JSONWriter::Write(&args, false, &json_args);
-  DispatchEvent(profile, keys::kOnBeforeRetarget, json_args);
+  DispatchEvent(browser_context, keys::kOnBeforeRetarget, json_args);
+}
+
+// Constructs and dispatches an onErrorOccurred event.
+void DispatchOnErrorOccurred(TabContents* tab_contents,
+                             const GURL& url,
+                             int64 frame_id,
+                             bool is_main_frame,
+                             int error_code) {
+  ListValue args;
+  DictionaryValue* dict = new DictionaryValue();
+  dict->SetInteger(keys::kTabIdKey,
+                   ExtensionTabUtil::GetTabId(tab_contents));
+  dict->SetString(keys::kUrlKey, url.spec());
+  dict->SetInteger(keys::kFrameIdKey, GetFrameId(is_main_frame, frame_id));
+  dict->SetString(keys::kErrorKey, net::ErrorToString(error_code));
+  dict->SetDouble(keys::kTimeStampKey, MilliSecondsFromTime(base::Time::Now()));
+  args.Append(dict);
+
+  std::string json_args;
+  base::JSONWriter::Write(&args, false, &json_args);
+  DispatchEvent(tab_contents->browser_context(),
+                keys::kOnErrorOccurred,
+                json_args);
 }
 
 }  // namespace
@@ -182,7 +214,9 @@ void DispatchOnBeforeRetarget(TabContents* tab_contents,
 // static
 bool FrameNavigationState::allow_extension_scheme_ = false;
 
-FrameNavigationState::FrameNavigationState() {}
+FrameNavigationState::FrameNavigationState()
+    : main_frame_id_(-1) {
+}
 
 FrameNavigationState::~FrameNavigationState() {}
 
@@ -198,6 +232,9 @@ bool FrameNavigationState::CanSendEvents(int64 frame_id) const {
     if (scheme == kValidSchemes[i])
       return true;
   }
+  // Allow about:blank.
+  if (frame_state->second.url.spec() == chrome::kAboutBlankURL)
+    return true;
   if (allow_extension_scheme_ && scheme == chrome::kExtensionScheme)
     return true;
   return false;
@@ -207,12 +244,25 @@ void FrameNavigationState::TrackFrame(int64 frame_id,
                                       const GURL& url,
                                       bool is_main_frame,
                                       bool is_error_page) {
-  if (is_main_frame)
+  if (is_main_frame) {
     frame_state_map_.clear();
+    frame_ids_.clear();
+  }
   FrameState& frame_state = frame_state_map_[frame_id];
   frame_state.error_occurred = is_error_page;
   frame_state.url = url;
   frame_state.is_main_frame = is_main_frame;
+  frame_state.is_navigating = true;
+  if (is_main_frame) {
+    main_frame_id_ = frame_id;
+  }
+  frame_ids_.insert(frame_id);
+}
+
+bool FrameNavigationState::IsValidFrame(int64 frame_id) const {
+  FrameIdToStateMap::const_iterator frame_state =
+      frame_state_map_.find(frame_id);
+  return (frame_state != frame_state_map_.end());
 }
 
 GURL FrameNavigationState::GetUrl(int64 frame_id) const {
@@ -226,28 +276,35 @@ GURL FrameNavigationState::GetUrl(int64 frame_id) const {
 }
 
 bool FrameNavigationState::IsMainFrame(int64 frame_id) const {
-  FrameIdToStateMap::const_iterator frame_state =
-      frame_state_map_.find(frame_id);
-  if (frame_state == frame_state_map_.end()) {
-    NOTREACHED();
-    return false;
-  }
-  return frame_state->second.is_main_frame;
+  return main_frame_id_ != -1 && main_frame_id_ == frame_id;
 }
 
 int64 FrameNavigationState::GetMainFrameID() const {
-  typedef FrameIdToStateMap::const_iterator FrameIterator;
-  for (FrameIterator frame = frame_state_map_.begin();
-       frame != frame_state_map_.end(); ++frame) {
-    if (frame->second.is_main_frame)
-      return frame->first;
-  }
-  return -1;
+  return main_frame_id_;
 }
 
-void FrameNavigationState::ErrorOccurredInFrame(int64 frame_id) {
+void FrameNavigationState::SetErrorOccurredInFrame(int64 frame_id) {
   DCHECK(frame_state_map_.find(frame_id) != frame_state_map_.end());
   frame_state_map_[frame_id].error_occurred = true;
+}
+
+bool FrameNavigationState::GetErrorOccurredInFrame(int64 frame_id) const {
+  FrameIdToStateMap::const_iterator frame_state =
+      frame_state_map_.find(frame_id);
+  return (frame_state == frame_state_map_.end() ||
+          frame_state->second.error_occurred);
+}
+
+void FrameNavigationState::SetNavigationCompleted(int64 frame_id) {
+  DCHECK(frame_state_map_.find(frame_id) != frame_state_map_.end());
+  frame_state_map_[frame_id].is_navigating = false;
+}
+
+bool FrameNavigationState::GetNavigationCompleted(int64 frame_id) const {
+  FrameIdToStateMap::const_iterator frame_state =
+      frame_state_map_.find(frame_id);
+  return (frame_state == frame_state_map_.end() ||
+          !frame_state->second.is_navigating);
 }
 
 
@@ -285,9 +342,12 @@ void ExtensionWebNavigationEventRouter::Init() {
   if (registrar_.IsEmpty()) {
     registrar_.Add(this,
                    content::NOTIFICATION_RETARGETING,
-                   Source<Profile>(profile_));
+                   Source<content::BrowserContext>(profile_));
     registrar_.Add(this,
                    content::NOTIFICATION_TAB_ADDED,
+                   NotificationService::AllSources());
+    registrar_.Add(this,
+                   content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
                    NotificationService::AllSources());
   }
 }
@@ -303,6 +363,10 @@ void ExtensionWebNavigationEventRouter::Observe(
 
     case content::NOTIFICATION_TAB_ADDED:
       TabAdded(Details<TabContents>(details).ptr());
+      break;
+
+    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
+      TabDestroyed(Source<TabContents>(source).ptr());
       break;
 
     default:
@@ -323,6 +387,9 @@ void ExtensionWebNavigationEventRouter::Retargeting(
   const FrameNavigationState& frame_navigation_state =
       tab_observer->frame_navigation_state();
 
+  if (!frame_navigation_state.CanSendEvents(details->source_frame_id))
+    return;
+
   // If the TabContents was created as a response to an IPC from a renderer, it
   // doesn't yet have a wrapper, and we need to delay the extension event until
   // the TabContents is fully initialized.
@@ -338,7 +405,7 @@ void ExtensionWebNavigationEventRouter::Retargeting(
   } else {
     DispatchOnBeforeRetarget(
         details->source_tab_contents,
-        details->target_tab_contents->profile(),
+        details->target_tab_contents->browser_context(),
         details->source_frame_id,
         frame_navigation_state.IsMainFrame(details->source_frame_id),
         details->target_tab_contents,
@@ -353,7 +420,7 @@ void ExtensionWebNavigationEventRouter::TabAdded(TabContents* tab_contents) {
     return;
 
   DispatchOnBeforeRetarget(iter->second.source_tab_contents,
-                           iter->second.target_tab_contents->profile(),
+                           iter->second.target_tab_contents->browser_context(),
                            iter->second.source_frame_id,
                            iter->second.source_frame_is_main_frame,
                            iter->second.target_tab_contents,
@@ -361,6 +428,17 @@ void ExtensionWebNavigationEventRouter::TabAdded(TabContents* tab_contents) {
   pending_tab_contents_.erase(iter);
 }
 
+void ExtensionWebNavigationEventRouter::TabDestroyed(
+    TabContents* tab_contents) {
+  pending_tab_contents_.erase(tab_contents);
+  for (std::map<TabContents*, PendingTabContents>::iterator i =
+           pending_tab_contents_.begin(); i != pending_tab_contents_.end(); ) {
+    if (i->second.source_tab_contents == tab_contents)
+      pending_tab_contents_.erase(i++);
+    else
+      ++i;
+  }
+}
 
 // ExtensionWebNavigationTabObserver ------------------------------------------
 
@@ -430,21 +508,9 @@ void ExtensionWebNavigationTabObserver::DidFailProvisionalLoad(
     int error_code) {
   if (!navigation_state_.CanSendEvents(frame_id))
     return;
-  ListValue args;
-  DictionaryValue* dict = new DictionaryValue();
-  dict->SetInteger(keys::kTabIdKey,
-                   ExtensionTabUtil::GetTabId(tab_contents()));
-  dict->SetString(keys::kUrlKey, validated_url.spec());
-  dict->SetInteger(keys::kFrameIdKey, GetFrameId(is_main_frame, frame_id));
-  dict->SetString(keys::kErrorKey,
-                  std::string(net::ErrorToString(error_code)));
-  dict->SetDouble(keys::kTimeStampKey, MilliSecondsFromTime(base::Time::Now()));
-  args.Append(dict);
-
-  std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
-  navigation_state_.ErrorOccurredInFrame(frame_id);
-  DispatchEvent(tab_contents()->profile(), keys::kOnErrorOccurred, json_args);
+  navigation_state_.SetErrorOccurredInFrame(frame_id);
+  DispatchOnErrorOccurred(
+      tab_contents(), validated_url, frame_id, is_main_frame, error_code);
 }
 
 void ExtensionWebNavigationTabObserver::DocumentLoadedInFrame(
@@ -461,6 +527,7 @@ void ExtensionWebNavigationTabObserver::DidFinishLoad(
     int64 frame_id) {
   if (!navigation_state_.CanSendEvents(frame_id))
     return;
+  navigation_state_.SetNavigationCompleted(frame_id);
   DispatchOnCompleted(tab_contents(),
                       navigation_state_.GetUrl(frame_id),
                       navigation_state_.IsMainFrame(frame_id),
@@ -470,6 +537,18 @@ void ExtensionWebNavigationTabObserver::DidFinishLoad(
 void ExtensionWebNavigationTabObserver::TabContentsDestroyed(
     TabContents* tab) {
   g_tab_observer.Get().erase(tab);
+  for (FrameNavigationState::const_iterator frame = navigation_state_.begin();
+       frame != navigation_state_.end(); ++frame) {
+    if (!navigation_state_.GetNavigationCompleted(*frame) &&
+        navigation_state_.CanSendEvents(*frame)) {
+      DispatchOnErrorOccurred(
+        tab,
+        navigation_state_.GetUrl(*frame),
+        *frame,
+        navigation_state_.IsMainFrame(*frame),
+        net::ERR_ABORTED);
+    }
+  }
 }
 
 // See also NavigationController::IsURLInPageNavigation.
@@ -504,8 +583,53 @@ void ExtensionWebNavigationTabObserver::NavigatedReferenceFragment(
                              url,
                              is_main_frame,
                              frame_id);
+  navigation_state_.SetNavigationCompleted(frame_id);
   DispatchOnCompleted(tab_contents(),
                       url,
                       is_main_frame,
                       frame_id);
+}
+
+bool GetFrameFunction::RunImpl() {
+  DictionaryValue* details;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &details));
+  DCHECK(details);
+
+  int tab_id;
+  int frame_id;
+  EXTENSION_FUNCTION_VALIDATE(details->GetInteger(keys::kTabIdKey, &tab_id));
+  EXTENSION_FUNCTION_VALIDATE(
+      details->GetInteger(keys::kFrameIdKey, &frame_id));
+
+  result_.reset(Value::CreateNullValue());
+
+  TabContentsWrapper* wrapper;
+  if (!ExtensionTabUtil::GetTabById(
+        tab_id, profile(), include_incognito(), NULL, NULL, &wrapper, NULL) ||
+      !wrapper) {
+    return true;
+  }
+
+  TabContents* tab_contents = wrapper->tab_contents();
+  ExtensionWebNavigationTabObserver* observer =
+      ExtensionWebNavigationTabObserver::Get(tab_contents);
+  DCHECK(observer);
+
+  const FrameNavigationState& frame_navigation_state =
+      observer->frame_navigation_state();
+
+  if (frame_id == 0)
+    frame_id = frame_navigation_state.GetMainFrameID();
+  if (!frame_navigation_state.IsValidFrame(frame_id))
+    return true;
+
+  DictionaryValue* resultDict = new DictionaryValue();
+  resultDict->SetString(
+      keys::kUrlKey,
+      frame_navigation_state.GetUrl(frame_id).spec());
+  resultDict->SetBoolean(
+      keys::kErrorOccurredKey,
+      frame_navigation_state.GetErrorOccurredInFrame(frame_id));
+  result_.reset(resultDict);
+  return true;
 }

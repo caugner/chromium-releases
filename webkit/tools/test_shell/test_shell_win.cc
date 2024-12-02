@@ -13,14 +13,13 @@
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/file_util.h"
-#include "base/memory/memory_debug.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/resource_util.h"
 #include "base/stack_container.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/resource_util.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_chromium_resources.h"
@@ -32,7 +31,7 @@
 #include "ui/base/win/hwnd_util.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell_devtools_agent.h"
@@ -132,8 +131,8 @@ FilePath GetResourcesFilePath() {
 static base::StringPiece GetRawDataResource(HMODULE module, int resource_id) {
   void* data_ptr;
   size_t data_size;
-  return base::GetDataResourceFromModule(module, resource_id, &data_ptr,
-                                         &data_size)
+  return base::win::GetDataResourceFromModule(module, resource_id, &data_ptr,
+                                              &data_size)
       ? base::StringPiece(static_cast<char*>(data_ptr), data_size)
       : base::StringPiece();
 }
@@ -170,8 +169,8 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   DWORD num_fonts = 1;
   void* font_ptr;
   size_t font_size;
-  if (base::GetDataResourceFromModule(::GetModuleHandle(NULL), IDR_AHEM_FONT,
-                                      &font_ptr, &font_size)) {
+  if (base::win::GetDataResourceFromModule(::GetModuleHandle(NULL),
+      IDR_AHEM_FONT, &font_ptr, &font_size)) {
     HANDLE rc = AddFontMemResourceEx(font_ptr, font_size, 0, &num_fonts);
     DCHECK(rc != 0);
   }
@@ -567,10 +566,6 @@ LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
       RemoveWindowFromList(hwnd);
 
       if (TestShell::windowList()->empty() || shell->is_modal()) {
-        // Dump all in use memory just before shutdown if in use memory
-        // debugging has been enabled.
-        base::MemoryDebug::DumpAllMemoryInUse();
-
         MessageLoop::current()->PostTask(FROM_HERE,
                                          new MessageLoop::QuitTask());
       }

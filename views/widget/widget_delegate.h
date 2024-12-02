@@ -10,6 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "ui/base/accessibility/accessibility_types.h"
+#include "ui/base/ui_base_types.h"
 #include "views/view.h"
 
 class SkBitmap;
@@ -27,7 +28,7 @@ class Widget;
 
 // WidgetDelegate interface
 // Handles events on Widgets in context-specific ways.
-class WidgetDelegate {
+class VIEWS_EXPORT WidgetDelegate {
  public:
   WidgetDelegate();
 
@@ -97,15 +98,16 @@ class WidgetDelegate {
   // state restoration.
   virtual std::wstring GetWindowName() const;
 
-  // Saves the window's bounds and maximized states. By default this uses the
+  // Saves the window's bounds and "show" state. By default this uses the
   // process' local state keyed by window name (See GetWindowName above). This
   // behavior can be overridden to provide additional functionality.
-  virtual void SaveWindowPlacement(const gfx::Rect& bounds, bool maximized);
+  virtual void SaveWindowPlacement(const gfx::Rect& bounds,
+                                   ui::WindowShowState show_state);
 
-  // Retrieves the window's bounds and maximized states.
+  // Retrieves the window's bounds and "show" states.
   // This behavior can be overridden to provide additional functionality.
-  virtual bool GetSavedWindowBounds(gfx::Rect* bounds) const;
-  virtual bool GetSavedMaximizedState(bool* maximized) const;
+  virtual bool GetSavedWindowPlacement(gfx::Rect* bounds,
+                                       ui::WindowShowState* show_state) const;
 
   // Returns true if the window's size should be restored. If this is false,
   // only the window's origin is restored and the window is given its
@@ -159,8 +161,7 @@ class WidgetDelegate {
 // A WidgetDelegate implementation that is-a View. Used to override GetWidget()
 // to call View's GetWidget() for the common case where a WidgetDelegate
 // implementation is-a View.
-class WidgetDelegateView : public WidgetDelegate,
-                           public View {
+class VIEWS_EXPORT WidgetDelegateView : public WidgetDelegate, public View {
  public:
   WidgetDelegateView();
   virtual ~WidgetDelegateView();

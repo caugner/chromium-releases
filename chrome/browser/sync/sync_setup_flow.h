@@ -31,8 +31,19 @@ struct SyncConfiguration {
   bool encrypt_all;
   bool sync_everything;
   syncable::ModelTypeSet data_types;
-  bool use_secondary_passphrase;
+  // We pass a separate |set_xxxxx_passphrase| flag because sometimes the UI
+  // wants to set an empty gaia/secondary passphrase (for example, when the user
+  // doesn't enter a passphrase, but we still want the ProfileSyncService to
+  // generate a new passphrase error if there are still encrypted types
+  // enabled).
+  // TODO(atwilson): Need to change SyncSetupFlow::OnUserConfigured() to
+  // check for the presence of encrypted types itself, rather than relying on
+  // the hack of passing an empty passphrase/waiting for ProfileSyncService to
+  // receive a new PassphraseRequired (http://crbug.com/95939).
+  bool set_secondary_passphrase;
   std::string secondary_passphrase;
+  bool set_gaia_passphrase;
+  std::string gaia_passphrase;
 };
 
 // The state machine used by SyncSetupWizard, exposed in its own header
@@ -57,9 +68,7 @@ class SyncSetupFlow {
       DictionaryValue* args);
 
   // Fills |args| for the configure screen (Choose Data Types/Encryption)
-  static void GetArgsForConfigure(
-      ProfileSyncService* service,
-      DictionaryValue* args);
+  void GetArgsForConfigure(ProfileSyncService* service, DictionaryValue* args);
 
   // Attaches the |handler| to this flow. Returns true if successful and false
   // if a handler has already been attached.
@@ -109,7 +118,6 @@ class SyncSetupFlow {
   // Use static Run method to get an instance.
   SyncSetupFlow(SyncSetupWizard::State start_state,
                 SyncSetupWizard::State end_state,
-                const std::string& args,
                 SyncSetupFlowContainer* container,
                 ProfileSyncService* service);
 
@@ -121,7 +129,6 @@ class SyncSetupFlow {
   void ActivateState(SyncSetupWizard::State state);
 
   SyncSetupFlowContainer* container_;  // Our container.  Don't own this.
-  std::string dialog_start_args_;  // The args to pass to the initial page.
 
   SyncSetupWizard::State current_state_;
   SyncSetupWizard::State end_state_;  // The goal.
@@ -135,10 +142,17 @@ class SyncSetupFlow {
   // We need this to propagate back all user settings changes. Weak reference.
   ProfileSyncService* service_;
 
-  // Set to true if we've tried creating/setting an explicit passphrase, so we
+  // Set to true if we've tried creating an explicit passphrase, so we
   // can appropriately reflect this in the UI.
   bool tried_creating_explicit_passphrase_;
-  bool tried_setting_explicit_passphrase_;
+
+  // Set to true if the user entered a passphrase, so we can appropriately
+  // reflect this in the UI.
+  bool tried_setting_passphrase_;
+
+  // We track the passphrase the user entered so we can set it when configuring
+  // the ProfileSyncService.
+  std::string cached_passphrase_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSetupFlow);
 };

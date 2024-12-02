@@ -28,7 +28,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/metrics_cros_settings_provider.h"
+#include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #endif
 
 namespace {
@@ -68,11 +68,11 @@ class CrashesDOMHandler : public WebUIMessageHandler,
   virtual ~CrashesDOMHandler();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // CrashUploadList::Delegate implemenation.
-  virtual void OnCrashListAvailable();
+  virtual void OnCrashListAvailable() OVERRIDE;
 
  private:
   // Asynchronously fetches the list of crashes. Called from JS.
@@ -138,10 +138,10 @@ void CrashesDOMHandler::UpdateUI() {
     }
   }
 
-  FundamentalValue enabled(crash_reporting_enabled);
+  base::FundamentalValue enabled(crash_reporting_enabled);
 
   const chrome::VersionInfo version_info;
-  StringValue version(version_info.Version());
+  base::StringValue version(version_info.Version());
 
   web_ui_->CallJavascriptFunction("updateCrashList", enabled, crash_list,
                                   version);
@@ -159,7 +159,8 @@ CrashesUI::CrashesUI(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new CrashesDOMHandler())->Attach(this));
 
   // Set up the chrome://crashes/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(
       CreateCrashesUIHTMLSource());
 }
 
@@ -175,7 +176,7 @@ bool CrashesUI::CrashReportingEnabled() {
   PrefService* prefs = g_browser_process->local_state();
   return prefs->GetBoolean(prefs::kMetricsReportingEnabled);
 #elif defined(GOOGLE_CHROME_BUILD) && defined(OS_CHROMEOS)
-  return chromeos::MetricsCrosSettingsProvider::GetMetricsStatus();
+  return chromeos::UserCrosSettingsProvider::cached_reporting_enabled();
 #else
   return false;
 #endif

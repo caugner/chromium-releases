@@ -29,6 +29,7 @@
 #include "chrome/browser/autofill/phone_number.h"
 #include "chrome/browser/autofill/phone_number_i18n.h"
 #include "chrome/browser/autofill/select_control_handler.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -51,6 +52,7 @@
 #include "webkit/glue/form_data_predictions.h"
 #include "webkit/glue/form_field.h"
 
+using base::TimeTicks;
 using switches::kEnableAutofillFeedback;
 using webkit_glue::FormData;
 using webkit_glue::FormDataPredictions;
@@ -98,124 +100,29 @@ void RemoveDuplicateSuggestions(std::vector<string16>* values,
   unique_ids->swap(unique_ids_copy);
 }
 
-// Precondition: |form| should be the cached version of the form that is to be
-// autofilled, and |field| should be the field in the |form| that corresponds to
-// the initiating field. |is_filling_credit_card| should be true if filling
-// credit card data, false otherwise.
-// Fills |section_start| and |section_end| so that [section_start, section_end)
-// gives the bounds of logical section within |form| that includes |field|.
-// Logical sections are identified by two heuristics:
-//  1. The fields in the section must all be profile or credit card fields,
-//     depending on whether |is_filling_credit_card| is true.
-//  2. A logical section should not include multiple fields of the same autofill
-//     type (except for adjacent repeated fields and phone/fax numbers, as
-//     described below).
-void FindSectionBounds(const FormStructure& form,
-                       const AutofillField& field,
-                       bool is_filling_credit_card,
-                       size_t* section_start,
-                       size_t* section_end) {
-  DCHECK(section_start);
-  DCHECK(section_end);
-
-  // By default, the relevant section is the entire form.
-  *section_start = 0;
-  *section_end = form.field_count();
-
-  std::set<AutofillFieldType> seen_types;
-  bool initiating_field_is_in_current_section = false;
-  AutofillFieldType previous_type = UNKNOWN_TYPE;
-  for (size_t i = 0; i < form.field_count(); ++i) {
-    const AutofillField* current_field = form.field(i);
-    const AutofillFieldType current_type =
-        AutofillType::GetEquivalentFieldType(current_field->type());
-
-    bool already_saw_current_type = seen_types.count(current_type) > 0;
-    // Forms often ask for multiple phone numbers -- e.g. both a daytime and
-    // evening phone number.  Our phone and fax number detection is also
-    // generally a little off.  Hence, ignore both field types as a signal here.
-    AutofillType::FieldTypeGroup current_type_group =
-        AutofillType(current_type).group();
-    if (current_type_group == AutofillType::PHONE_HOME ||
-        current_type_group == AutofillType::PHONE_FAX)
-      already_saw_current_type = false;
-
-    // Some forms have adjacent fields of the same type.  Two common examples:
-    //  * Forms with two email fields, where the second is meant to "confirm"
-    //    the first.
-    //  * Forms with a <select> menu for states in some countries, and a
-    //    freeform <input> field for states in other countries.  (Usually, only
-    //    one of these two will be visible for any given choice of country.)
-    // Generally, adjacent fields of the same type belong in the same logical
-    // section.
-    if (current_type == previous_type)
-      already_saw_current_type = false;
-
-    previous_type = current_type;
-
-    // Fields of unknown type don't help us to distinguish sections.
-    if (current_type == UNKNOWN_TYPE)
-      continue;
-
-    // If we are filling credit card data, the relevant section should include
-    // only credit card fields; and similarly for profile data.
-    bool is_credit_card_field = current_type_group == AutofillType::CREDIT_CARD;
-    bool is_appropriate_type = is_credit_card_field == is_filling_credit_card;
-
-    if (already_saw_current_type || !is_appropriate_type) {
-      if (initiating_field_is_in_current_section) {
-        // We reached the end of the section containing the initiating field.
-        *section_end = i;
-        break;
-      }
-
-      // We reached the end of a section, so start a new section.
-      seen_types.clear();
-
-      // Only include the current field in the new section if it matches the
-      // type of data we are filling.
-      if (is_appropriate_type) {
-        *section_start = i;
-      } else {
-        *section_start = i + 1;
-        continue;
-      }
-    }
-
-    seen_types.insert(current_type);
-
-    if (current_field == &field)
-      initiating_field_is_in_current_section = true;
-  }
-
-  // We should have found the initiating field.
-  DCHECK(initiating_field_is_in_current_section);
-}
-
 // Precondition: |form_structure| and |form| should correspond to the same
-// logical form. Returns true if the relevant portion of |form| is auto-filled.
-// The "relevant" fields in |form| are ones corresponding to fields in
-// |form_structure| with indices in the range [section_start, section_end).
+// logical form.  Returns true if any field in the given |section| within |form|
+// is auto-filled.
 bool SectionIsAutofilled(const FormStructure* form_structure,
                          const webkit_glue::FormData& form,
-                         size_t section_start,
-                         size_t section_end) {
+                         const string16& section) {
   // TODO(isherman): It would be nice to share most of this code with the loop
-  // in |FillAutofillFormData()|, but I don't see a particularly clean way to do
-  // that.
+  // in |OnFillAutofillFormData()|, but I don't see a particularly clean way to
+  // do that.
 
   // The list of fields in |form_structure| and |form.fields| often match
   // directly and we can fill these corresponding fields; however, when the
   // |form_structure| and |form.fields| do not match directly we search
   // ahead in the |form_structure| for the matching field.
-  for (size_t i = section_start, j = 0;
-       i < section_end && j < form.fields.size();
+  for (size_t i = 0, j = 0;
+       i < form_structure->field_count() && j < form.fields.size();
        j++) {
     size_t k = i;
 
     // Search forward in the |form_structure| for a corresponding field.
     while (k < form_structure->field_count() &&
-           *form_structure->field(k) != form.fields[j]) {
+           (form_structure->field(k)->section() != section ||
+            *form_structure->field(k) != form.fields[j])) {
       k++;
     }
 
@@ -223,12 +130,11 @@ bool SectionIsAutofilled(const FormStructure* form_structure,
     if (k >= form_structure->field_count())
       continue;
 
-    AutofillType autofill_type(form_structure->field(k)->type());
     if (form.fields[j].is_autofilled)
       return true;
 
-    // We found a matching field in the |form_structure| so we
-    // proceed to the next |form| field, and the next |form_structure|.
+    // We found a matching field in the |form_structure|, so on the next
+    // iteration we should proceed to the next |form_structure| field.
     ++i;
   }
 
@@ -244,19 +150,15 @@ bool FormIsHTTPS(FormStructure* form) {
 // Feedback identifying these forms.  Only executes if the appropriate flag is
 // set in about:flags.
 const char* kPopularFormSignatures[] = {
-  "1730681123057140977",
   "10135289994685082173",
   "7883844738557049416",
   "14651966297402649464",
   "17177862793067325164",
   "15222964025577790589",
-  "6231789373382218038",
   "14138834153984647462",
   "1522221299769735301",
   "8604254969743383026",
   "1080809576396139601",
-  "10157228556492868550",
-  "7112098130084740023",
   "10591138561307360539",
   "3483444043750493124",
   "3764098888295731941",
@@ -265,8 +167,6 @@ const char* kPopularFormSignatures[] = {
   "2226179674176240706",
   "9886974103926218264",
   "16089161644523512553",
-  "1366685796842051613",
-  "3683416168214161370",
   "17395441333004474813",
   "7131540066857838464",
   "1799736626243038725",
@@ -311,7 +211,7 @@ void CheckForPopularForms(const std::vector<FormStructure*>& forms,
                                     ASCIIToUTF16(form_signature),
                                     UTF8ToUTF16((*it)->source_url().spec()));
 
-      tab_contents_wrapper->AddInfoBar(
+      tab_contents_wrapper->infobar_tab_helper()->AddInfoBar(
           new AutofillFeedbackInfoBarDelegate(tab_contents, text, link,
                                               message));
       break;
@@ -329,7 +229,11 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents)
       disable_download_manager_requests_(false),
       metric_logger_(new AutofillMetrics),
       has_logged_autofill_enabled_(false),
-      has_logged_address_suggestions_count_(false) {
+      has_logged_address_suggestions_count_(false),
+      did_show_suggestions_(false),
+      user_did_type_(false),
+      user_did_autofill_(false),
+      user_did_edit_autofilled_field_(false) {
   DCHECK(tab_contents);
 
   // |personal_data_| is NULL when using TestTabContents.
@@ -340,11 +244,6 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents)
 
 AutofillManager::~AutofillManager() {
   download_manager_.SetObserver(NULL);
-}
-
-// static
-void AutofillManager::RegisterBrowserPrefs(PrefService* prefs) {
-  prefs->RegisterDictionaryPref(prefs::kAutofillDialogPlacement);
 }
 
 // static
@@ -380,12 +279,16 @@ bool AutofillManager::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(AutofillManager, message)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_FormsSeen, OnFormsSeen)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_FormSubmitted, OnFormSubmitted)
+    IPC_MESSAGE_HANDLER(AutofillHostMsg_TextFieldDidChange,
+                        OnTextFieldDidChange)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_QueryFormFieldAutofill,
                         OnQueryFormFieldAutofill)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowAutofillDialog,
                         OnShowAutofillDialog)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_FillAutofillFormData,
                         OnFillAutofillFormData)
+    IPC_MESSAGE_HANDLER(AutofillHostMsg_DidPreviewAutofillFormData,
+                        OnDidPreviewAutofillFormData)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_DidFillAutofillFormData,
                         OnDidFillAutofillFormData)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_DidShowAutofillSuggestions,
@@ -396,14 +299,15 @@ bool AutofillManager::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void AutofillManager::OnFormSubmitted(const FormData& form) {
+void AutofillManager::OnFormSubmitted(const FormData& form,
+                                      const TimeTicks& timestamp) {
   // Let AutoComplete know as well.
   tab_contents_wrapper_->autocomplete_history_manager()->OnFormSubmitted(form);
 
   if (!IsAutofillEnabled())
     return;
 
-  if (tab_contents()->profile()->IsOffTheRecord())
+  if (tab_contents()->browser_context()->IsOffTheRecord())
     return;
 
   // Don't save data that was submitted through JavaScript.
@@ -429,8 +333,13 @@ void AutofillManager::OnFormSubmitted(const FormData& form) {
   if (!personal_data_->profiles().empty() ||
       !personal_data_->credit_cards().empty()) {
     DeterminePossibleFieldTypesForUpload(&submitted_form);
-    UploadFormData(submitted_form);
-    submitted_form.LogQualityMetrics(*metric_logger_);
+    submitted_form.LogQualityMetrics(*metric_logger_,
+                                     forms_loaded_timestamp_,
+                                     initial_interaction_timestamp_,
+                                     timestamp);
+
+    if (submitted_form.ShouldBeCrowdsourced())
+      UploadFormData(submitted_form);
   }
 
   if (!submitted_form.IsAutofillable(true))
@@ -439,7 +348,8 @@ void AutofillManager::OnFormSubmitted(const FormData& form) {
   ImportFormData(submitted_form);
 }
 
-void AutofillManager::OnFormsSeen(const std::vector<FormData>& forms) {
+void AutofillManager::OnFormsSeen(const std::vector<FormData>& forms,
+                                  const TimeTicks& timestamp) {
   bool enabled = IsAutofillEnabled();
   if (!has_logged_autofill_enabled_) {
     metric_logger_->LogIsAutofillEnabledAtPageLoad(enabled);
@@ -449,7 +359,36 @@ void AutofillManager::OnFormsSeen(const std::vector<FormData>& forms) {
   if (!enabled)
     return;
 
+  forms_loaded_timestamp_ = timestamp;
   ParseForms(forms);
+}
+
+void AutofillManager::OnTextFieldDidChange(const FormData& form,
+                                           const FormField& field,
+                                           const TimeTicks& timestamp) {
+  FormStructure* form_structure = NULL;
+  AutofillField* autofill_field = NULL;
+  if (!FindCachedFormAndField(form, field, &form_structure, &autofill_field))
+    return;
+
+  if (!user_did_type_) {
+    user_did_type_ = true;
+    metric_logger_->LogUserHappinessMetric(AutofillMetrics::USER_DID_TYPE);
+  }
+
+  if (autofill_field->is_autofilled) {
+    autofill_field->is_autofilled = false;
+    metric_logger_->LogUserHappinessMetric(
+        AutofillMetrics::USER_DID_EDIT_AUTOFILLED_FIELD);
+
+    if (!user_did_edit_autofilled_field_) {
+      user_did_edit_autofilled_field_ = true;
+      metric_logger_->LogUserHappinessMetric(
+          AutofillMetrics::USER_DID_EDIT_AUTOFILLED_FIELD_ONCE);
+    }
+  }
+
+  UpdateInitialInteractionTimestamp(timestamp);
 }
 
 void AutofillManager::OnQueryFormFieldAutofill(
@@ -499,14 +438,9 @@ void AutofillManager::OnQueryFormFieldAutofill(
         icons.assign(1, string16());
         unique_ids.assign(1, -1);
       } else {
-        size_t section_start, section_end;
-        FindSectionBounds(*form_structure, *autofill_field,
-                          is_filling_credit_card, &section_start, &section_end);
-
-        bool section_is_autofilled = SectionIsAutofilled(form_structure,
-                                                         form,
-                                                         section_start,
-                                                         section_end);
+        bool section_is_autofilled =
+            SectionIsAutofilled(form_structure, form,
+                                autofill_field->section());
         if (section_is_autofilled) {
           // If the relevant section is auto-filled and the renderer is querying
           // for suggestions, then the user is editing the value of a field.
@@ -594,16 +528,11 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
   if (!profile && !credit_card)
     return;
 
-  // Find the section of the form that we are autofilling.
-  size_t section_start, section_end;
-  FindSectionBounds(*form_structure, *autofill_field, (credit_card != NULL),
-                    &section_start, &section_end);
-
   FormData result = form;
 
   // If the relevant section is auto-filled, we should fill |field| but not the
   // rest of the form.
-  if (SectionIsAutofilled(form_structure, form, section_start, section_end)) {
+  if (SectionIsAutofilled(form_structure, form, autofill_field->section())) {
     for (std::vector<FormField>::iterator iter = result.fields.begin();
          iter != result.fields.end(); ++iter) {
       if ((*iter) == field) {
@@ -611,12 +540,17 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
         if (profile) {
           DCHECK_NE(AutofillType::CREDIT_CARD,
                     AutofillType(field_type).group());
-          FillFormField(profile, field_type, profile_guid.second, &(*iter));
+          FillFormField(*profile, *autofill_field, profile_guid.second,
+                        &(*iter));
         } else {
           DCHECK_EQ(AutofillType::CREDIT_CARD,
                     AutofillType(field_type).group());
-          FillCreditCardFormField(credit_card, field_type, &(*iter));
+          FillCreditCardFormField(*credit_card, field_type, &(*iter));
         }
+
+        // Mark the cached field as autofilled, so that we can detect when a
+        // user edits an autofilled field (for metrics).
+        autofill_field->is_autofilled = true;
         break;
       }
     }
@@ -632,22 +566,25 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
   // ahead in the |form_structure| for the matching field.
   // See unit tests: AutofillManagerTest.FormChangesRemoveField and
   // AutofillManagerTest.FormChangesAddField for usage.
-  for (size_t i = section_start, j = 0;
-       i < section_end && j < result.fields.size();
+  for (size_t i = 0, j = 0;
+       i < form_structure->field_count() && j < result.fields.size();
        j++) {
     size_t k = i;
 
     // Search forward in the |form_structure| for a corresponding field.
-    while (k < section_end && *form_structure->field(k) != result.fields[j]) {
+    while (k < form_structure->field_count() &&
+           (form_structure->field(k)->section() != autofill_field->section() ||
+            *form_structure->field(k) != result.fields[j])) {
       k++;
     }
 
     // If we've found a match then fill the |result| field with the found
     // field in the |form_structure|.
-    if (k >= section_end)
+    if (k >= form_structure->field_count())
       continue;
 
-    AutofillFieldType field_type = form_structure->field(k)->type();
+    const AutofillField* cached_field = form_structure->field(k);
+    AutofillFieldType field_type = cached_field->type();
     FieldTypeGroup field_group_type = AutofillType(field_type).group();
     if (field_group_type != AutofillType::NO_GROUP) {
       if (profile) {
@@ -656,19 +593,23 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
         // fill from, then take the multi-profile "variant" into account.
         // Otherwise fill with the default (zeroth) variant.
         if (result.fields[j] == field) {
-          FillFormField(profile, field_type, profile_guid.second,
+          FillFormField(*profile, *cached_field, profile_guid.second,
                         &result.fields[j]);
         } else {
-          FillFormField(profile, field_type, 0, &result.fields[j]);
+          FillFormField(*profile, *cached_field, 0, &result.fields[j]);
         }
       } else {
         DCHECK_EQ(AutofillType::CREDIT_CARD, field_group_type);
-        FillCreditCardFormField(credit_card, field_type, &result.fields[j]);
+        FillCreditCardFormField(*credit_card, field_type, &result.fields[j]);
       }
+
+      // Mark the cached field as autofilled, so that we can detect when a user
+      // edits an autofilled field (for metrics).
+      form_structure->field(k)->is_autofilled = true;
     }
 
-    // We found a matching field in the |form_structure| so we
-    // proceed to the next |result| field, and the next |form_structure|.
+    // We found a matching field in the |form_structure|, so on the next
+    // iteration we should proceed to the next |form_structure| field.
     ++i;
   }
 
@@ -684,23 +625,50 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
 
 void AutofillManager::OnShowAutofillDialog() {
   Browser* browser = BrowserList::GetLastActiveWithProfile(
-      tab_contents()->profile());
+      Profile::FromBrowserContext(tab_contents()->browser_context()));
   if (browser)
     browser->ShowOptionsTab(chrome::kAutofillSubPage);
 }
 
-void AutofillManager::OnDidFillAutofillFormData() {
+void AutofillManager::OnDidPreviewAutofillFormData() {
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA,
       Source<RenderViewHost>(tab_contents()->render_view_host()),
       NotificationService::NoDetails());
 }
 
-void AutofillManager::OnDidShowAutofillSuggestions() {
+
+void AutofillManager::OnDidFillAutofillFormData(const TimeTicks& timestamp) {
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA,
+      Source<RenderViewHost>(tab_contents()->render_view_host()),
+      NotificationService::NoDetails());
+
+  metric_logger_->LogUserHappinessMetric(AutofillMetrics::USER_DID_AUTOFILL);
+  if (!user_did_autofill_) {
+    user_did_autofill_ = true;
+    metric_logger_->LogUserHappinessMetric(
+        AutofillMetrics::USER_DID_AUTOFILL_ONCE);
+  }
+
+  UpdateInitialInteractionTimestamp(timestamp);
+}
+
+void AutofillManager::OnDidShowAutofillSuggestions(bool is_new_popup) {
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_AUTOFILL_DID_SHOW_SUGGESTIONS,
       Source<RenderViewHost>(tab_contents()->render_view_host()),
       NotificationService::NoDetails());
+
+  if (is_new_popup) {
+    metric_logger_->LogUserHappinessMetric(AutofillMetrics::SUGGESTIONS_SHOWN);
+
+    if (!did_show_suggestions_) {
+      did_show_suggestions_ = true;
+      metric_logger_->LogUserHappinessMetric(
+          AutofillMetrics::SUGGESTIONS_SHOWN_ONCE);
+    }
+  }
 }
 
 void AutofillManager::OnLoadedServerPredictions(
@@ -733,8 +701,9 @@ void AutofillManager::OnServerRequestError(
 }
 
 bool AutofillManager::IsAutofillEnabled() const {
-  return const_cast<AutofillManager*>(this)->tab_contents()->profile()->
-      GetPrefs()->GetBoolean(prefs::kAutofillEnabled);
+  Profile* profile = Profile::FromBrowserContext(
+      const_cast<AutofillManager*>(this)->tab_contents()->browser_context());
+  return profile->GetPrefs()->GetBoolean(prefs::kAutofillEnabled);
 }
 
 void AutofillManager::DeterminePossibleFieldTypesForUpload(
@@ -751,7 +720,7 @@ void AutofillManager::DeterminePossibleFieldTypesForUpload(
   // For each field in the |submitted_form|, extract the value.  Then for each
   // profile or credit card, identify any stored types that match the value.
   for (size_t i = 0; i < submitted_form->field_count(); i++) {
-    const AutofillField* field = submitted_form->field(i);
+    AutofillField* field = submitted_form->field(i);
     string16 value = CollapseWhitespace(field->value, false);
     FieldTypeSet matching_types;
     for (std::vector<FormGroup*>::const_iterator it = stored_data.begin();
@@ -762,7 +731,7 @@ void AutofillManager::DeterminePossibleFieldTypesForUpload(
     if (matching_types.empty())
       matching_types.insert(UNKNOWN_TYPE);
 
-    submitted_form->set_possible_types(i, matching_types);
+    field->set_possible_types(matching_types);
   }
 }
 
@@ -775,7 +744,7 @@ void AutofillManager::ImportFormData(const FormStructure& submitted_form) {
   // it.
   scoped_ptr<const CreditCard> scoped_credit_card(imported_credit_card);
   if (imported_credit_card && tab_contents()) {
-    tab_contents_wrapper_->AddInfoBar(
+    tab_contents_wrapper_->infobar_tab_helper()->AddInfoBar(
         new AutofillCCInfoBarDelegate(tab_contents(),
                                       scoped_credit_card.release(),
                                       personal_data_,
@@ -809,6 +778,12 @@ void AutofillManager::Reset() {
   form_structures_.reset();
   has_logged_autofill_enabled_ = false;
   has_logged_address_suggestions_count_ = false;
+  did_show_suggestions_ = false;
+  user_did_type_ = false;
+  user_did_autofill_ = false;
+  user_did_edit_autofilled_field_ = false;
+  forms_loaded_timestamp_ = TimeTicks();
+  initial_interaction_timestamp_ = TimeTicks();
 }
 
 AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
@@ -820,7 +795,11 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
       disable_download_manager_requests_(true),
       metric_logger_(new AutofillMetrics),
       has_logged_autofill_enabled_(false),
-      has_logged_address_suggestions_count_(false) {
+      has_logged_address_suggestions_count_(false),
+      did_show_suggestions_(false),
+      user_did_type_(false),
+      user_did_autofill_(false),
+      user_did_edit_autofilled_field_(false)  {
   DCHECK(tab_contents);
 }
 
@@ -1018,78 +997,76 @@ void AutofillManager::GetCreditCardSuggestions(FormStructure* form,
   }
 }
 
-void AutofillManager::FillCreditCardFormField(const CreditCard* credit_card,
+void AutofillManager::FillCreditCardFormField(const CreditCard& credit_card,
                                               AutofillFieldType type,
                                               webkit_glue::FormField* field) {
-  DCHECK(credit_card);
   DCHECK_EQ(AutofillType::CREDIT_CARD, AutofillType(type).group());
   DCHECK(field);
 
   if (field->form_control_type == ASCIIToUTF16("select-one")) {
-    autofill::FillSelectControl(*credit_card, type, field);
+    autofill::FillSelectControl(credit_card, type, field);
   } else if (field->form_control_type == ASCIIToUTF16("month")) {
     // HTML5 input="month" consists of year-month.
     string16 year =
-        credit_card->GetCanonicalizedInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR);
-    string16 month = credit_card->GetCanonicalizedInfo(CREDIT_CARD_EXP_MONTH);
+        credit_card.GetCanonicalizedInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR);
+    string16 month = credit_card.GetCanonicalizedInfo(CREDIT_CARD_EXP_MONTH);
     if (!year.empty() && !month.empty()) {
       // Fill the value only if |credit_card| includes both year and month
       // information.
       field->value = year + ASCIIToUTF16("-") + month;
     }
   } else {
-    field->value = credit_card->GetCanonicalizedInfo(type);
+    field->value = credit_card.GetCanonicalizedInfo(type);
   }
 }
 
-void AutofillManager::FillFormField(const AutofillProfile* profile,
-                                    AutofillFieldType type,
+void AutofillManager::FillFormField(const AutofillProfile& profile,
+                                    const AutofillField& cached_field,
                                     size_t variant,
                                     webkit_glue::FormField* field) {
-  DCHECK(profile);
+  AutofillFieldType type = cached_field.type();
   DCHECK_NE(AutofillType::CREDIT_CARD, AutofillType(type).group());
   DCHECK(field);
 
   if (AutofillType(type).subgroup() == AutofillType::PHONE_NUMBER) {
-    FillPhoneNumberField(profile, type, variant, field);
+    FillPhoneNumberField(profile, cached_field, variant, field);
   } else {
     if (field->form_control_type == ASCIIToUTF16("select-one")) {
-      autofill::FillSelectControl(*profile, type, field);
+      autofill::FillSelectControl(profile, type, field);
     } else {
       std::vector<string16> values;
-      profile->GetCanonicalizedMultiInfo(type, &values);
+      profile.GetCanonicalizedMultiInfo(type, &values);
       DCHECK(variant < values.size());
       field->value = values[variant];
     }
   }
 }
 
-void AutofillManager::FillPhoneNumberField(const AutofillProfile* profile,
-                                           AutofillFieldType type,
+void AutofillManager::FillPhoneNumberField(const AutofillProfile& profile,
+                                           const AutofillField& cached_field,
                                            size_t variant,
                                            webkit_glue::FormField* field) {
+  std::vector<string16> values;
+  profile.GetCanonicalizedMultiInfo(cached_field.type(), &values);
+  DCHECK(variant < values.size());
+
   // If we are filling a phone number, check to see if the size field
   // matches the "prefix" or "suffix" sizes and fill accordingly.
-  std::vector<string16> values;
-  profile->GetCanonicalizedMultiInfo(type, &values);
-  DCHECK(variant < values.size());
   string16 number = values[variant];
-  bool has_valid_suffix_and_prefix = (number.length() ==
-      static_cast<size_t>(PhoneNumber::kPrefixLength +
-                          PhoneNumber::kSuffixLength));
-  if (has_valid_suffix_and_prefix &&
-      field->max_length == PhoneNumber::kPrefixLength) {
-    number = number.substr(PhoneNumber::kPrefixOffset,
-                           PhoneNumber::kPrefixLength);
-    field->value = number;
-  } else if (has_valid_suffix_and_prefix &&
-             field->max_length == PhoneNumber::kSuffixLength) {
-    number = number.substr(PhoneNumber::kSuffixOffset,
-                           PhoneNumber::kSuffixLength);
-    field->value = number;
-  } else {
-    field->value = number;
+  if (number.length() ==
+          (PhoneNumber::kPrefixLength + PhoneNumber::kSuffixLength)) {
+    if (cached_field.phone_part() == AutofillField::PHONE_PREFIX ||
+        field->max_length == PhoneNumber::kPrefixLength) {
+      number = number.substr(PhoneNumber::kPrefixOffset,
+                             PhoneNumber::kPrefixLength);
+    } else if (cached_field.phone_part() == AutofillField::PHONE_SUFFIX ||
+               field->max_length == PhoneNumber::kSuffixLength) {
+      number = number.substr(PhoneNumber::kSuffixOffset,
+                             PhoneNumber::kSuffixLength);
+    }
   }
+
+  field->value = number;
 }
 
 void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
@@ -1102,9 +1079,9 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
 
     form_structure->DetermineHeuristicTypes();
 
-    // Set aside forms with method GET so that they are not included in the
-    // query to the server.
-    if (form_structure->ShouldBeParsed(true))
+    // Set aside forms with method GET or author-specified types, so that they
+    // are not included in the query to the server.
+    if (form_structure->ShouldBeCrowdsourced())
       form_structures_.push_back(form_structure.release());
     else
       non_queryable_forms.push_back(form_structure.release());
@@ -1119,6 +1096,9 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
        iter != non_queryable_forms.end(); ++iter) {
     form_structures_.push_back(*iter);
   }
+
+  if (!form_structures_.empty())
+    metric_logger_->LogUserHappinessMetric(AutofillMetrics::FORMS_LOADED);
 }
 
 int AutofillManager::GUIDToID(const GUIDPair& guid) {
@@ -1176,4 +1156,12 @@ void AutofillManager::UnpackGUIDs(int id,
 
   *cc_guid = IDToGUID(cc_id);
   *profile_guid = IDToGUID(profile_id);
+}
+
+void AutofillManager::UpdateInitialInteractionTimestamp(
+    const TimeTicks& interaction_timestamp) {
+  if (initial_interaction_timestamp_.is_null() ||
+      interaction_timestamp < initial_interaction_timestamp_) {
+    initial_interaction_timestamp_ = interaction_timestamp;
+  }
 }

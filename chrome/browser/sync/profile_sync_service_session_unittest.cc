@@ -11,15 +11,18 @@
 #include "base/stl_util.h"
 #include "base/task.h"
 #include "base/tracked.h"
-#include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
+#include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/read_transaction.h"
+#include "chrome/browser/sync/internal_api/sync_manager.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/protocol/session_specifics.pb.h"
@@ -28,18 +31,19 @@
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
+#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
-#include "chrome/test/browser_with_test_window_test.h"
-#include "chrome/test/profile_mock.h"
-#include "chrome/test/sync/engine/test_id_factory.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/profile_mock.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/ui_base_types.h"
 
 using browser_sync::SessionChangeProcessor;
 using browser_sync::SessionDataTypeController;
@@ -78,7 +82,9 @@ class ProfileSyncServiceSessionTest
     SessionService* session_service = new SessionService(temp_dir_.path());
     helper_.set_service(session_service);
     service()->SetWindowType(window_id_, Browser::TYPE_TABBED);
-    service()->SetWindowBounds(window_id_, window_bounds_, false);
+    service()->SetWindowBounds(window_id_,
+                               window_bounds_,
+                               ui::SHOW_STATE_NORMAL);
     registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
         NotificationService::AllSources());
   }
@@ -201,6 +207,8 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   ASSERT_EQ(machine_tag, specifics.session_tag());
   ASSERT_TRUE(specifics.has_header());
   const sync_pb::SessionHeader& header_s = specifics.header();
+  ASSERT_TRUE(header_s.has_device_type());
+  ASSERT_EQ("TestSessionName", header_s.client_name());
   ASSERT_EQ(0, header_s.window_size());
 }
 
@@ -244,16 +252,16 @@ TEST_F(ProfileSyncServiceSessionTest, MAYBE_WriteFilledSessionToNode) {
   // Tabs are ordered by sessionid in tab_map, so should be able to traverse
   // the tree based on order of tabs created
   SessionModelAssociator::TabLinksMap::iterator iter = tab_map.begin();
-  ASSERT_EQ(2, iter->second.tab()->controller().entry_count());
-  ASSERT_EQ(GURL("http://foo/1"), iter->second.tab()->controller().
+  ASSERT_EQ(2, iter->second.tab()->GetEntryCount());
+  ASSERT_EQ(GURL("http://foo/1"), iter->second.tab()->
           GetEntryAtIndex(0)->virtual_url());
-  ASSERT_EQ(GURL("http://foo/2"), iter->second.tab()->controller().
+  ASSERT_EQ(GURL("http://foo/2"), iter->second.tab()->
           GetEntryAtIndex(1)->virtual_url());
   iter++;
-  ASSERT_EQ(2, iter->second.tab()->controller().entry_count());
-  ASSERT_EQ(GURL("http://bar/1"), iter->second.tab()->controller().
+  ASSERT_EQ(2, iter->second.tab()->GetEntryCount());
+  ASSERT_EQ(GURL("http://bar/1"), iter->second.tab()->
       GetEntryAtIndex(0)->virtual_url());
-  ASSERT_EQ(GURL("http://bar/2"), iter->second.tab()->controller().
+  ASSERT_EQ(GURL("http://bar/2"), iter->second.tab()->
       GetEntryAtIndex(1)->virtual_url());
 }
 

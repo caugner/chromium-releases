@@ -16,6 +16,7 @@
 
 #include "build/build_config.h"
 #include "base/logging.h"
+#include "ui/gfx/gl/gl_export.h"
 
 // The standard OpenGL native extension headers are also included.
 #if defined(OS_WIN)
@@ -64,6 +65,10 @@ typedef void* GLeglImageOES;
 typedef HDC     EGLNativeDisplayType;
 typedef HBITMAP EGLNativePixmapType;
 typedef HWND    EGLNativeWindowType;
+#elif defined(USE_WAYLAND)
+typedef struct wl_display     *EGLNativeDisplayType;
+typedef struct wl_egl_pixmap  *EGLNativePixmapType;
+typedef struct wl_egl_window  *EGLNativeWindowType;
 #else
 typedef Display *EGLNativeDisplayType;
 typedef Pixmap   EGLNativePixmapType;

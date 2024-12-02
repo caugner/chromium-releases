@@ -17,8 +17,14 @@ package safe_browsing;
 
 message ClientPhishingRequest {
   // URL that the client visited.  The CGI parameters are stripped by the
-  // client.
-  required string url = 1;
+  // client.  This field is ONLY set for UMA-enabled users.
+  optional string url = 1;
+
+  // A 5-byte SHA-256 hash prefix of the URL.  Before hashing the URL is
+  // canonicalized, converted to a suffix-prefix expression and broadened
+  // (www prefix is removed and everything past the last '/' is stripped).
+  // Unlike "url", this is sent for all users.
+  optional bytes hash_prefix = 10;
 
   // Score that was computed on the client.  Value is between 0.0 and 1.0.
   // The larger the value the more likely the url is phishing.
@@ -62,4 +68,14 @@ message ClientPhishingRequest {
 
 message ClientPhishingResponse {
   required bool phishy = 1;
+
+  // A list of SafeBrowsing host-suffix / path-prefix expressions that
+  // are whitelisted.  The client must match the current top-level URL
+  // against these whitelisted expressions and only apply a positive
+  // phishing verdict above if the URL does not match any expression
+  // on this whitelist.  The client must not cache these whitelisted
+  // expressions.  This whitelist will be empty for the vast majority
+  // of the responses but might contain up to 100 entries in emergency
+  // situations.
+  repeated string whitelist_expression = 2;
 }

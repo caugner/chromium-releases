@@ -46,8 +46,8 @@ class BrowsingHistoryHandler2 : public WebUIMessageHandler,
   virtual ~BrowsingHistoryHandler2();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // Callback for the "getHistory" message.
   void HandleGetHistory(const base::ListValue* args);
@@ -64,7 +64,7 @@ class BrowsingHistoryHandler2 : public WebUIMessageHandler,
   // NotificationObserver implementation.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
  private:
   // Callback from the history system when the history list is available.
@@ -92,6 +92,9 @@ class BrowsingHistoryHandler2 : public WebUIMessageHandler,
 
   // Our consumer for delete requests to the history service.
   CancelableRequestConsumerT<int, 0> cancelable_delete_consumer_;
+
+  // The list of URLs that are in the process of being deleted.
+  std::set<GURL> urls_to_be_deleted_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingHistoryHandler2);
 };

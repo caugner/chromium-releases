@@ -32,11 +32,29 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
 
+#if defined(TOOLKIT_VIEWS)
+#include "views/focus/focus_manager.h"
+#include "views/view.h"
+#include "views/widget/widget.h"
+#endif
+
+namespace {
+
 // Number of ms to delay between loading urls.
-static const int kUpdateDelayMS = 200;
+const int kUpdateDelayMS = 200;
 
 // Amount of time we delay before showing pages that have a non-200 status.
-static const int kShowDelayMS = 800;
+const int kShowDelayMS = 800;
+
+bool IsBlacklistedUrl(const GURL& url) {
+  for (int i = 0; i < chrome::kNumberOfChromeDebugURLs; ++i) {
+    if (url == GURL(chrome::kChromeDebugURLs[i]))
+      return true;
+  }
+  return false;
+}
+
+}
 
 // static
 InstantController::HostBlacklist* InstantController::host_blacklist_ = NULL;
@@ -268,8 +286,11 @@ void InstantController::DestroyPreviewContentsAndLeaveActive() {
 }
 
 bool InstantController::IsCurrent() {
+  // TODO(mmenke):  See if we can do something more intelligent in the
+  //                navigation pending case.
   return loader_manager_.get() && loader_manager_->active_loader() &&
       loader_manager_->active_loader()->ready() &&
+      !loader_manager_->active_loader()->IsNavigationPending() &&
       !loader_manager_->active_loader()->needs_reload() &&
       !update_timer_.IsRunning();
 }
@@ -284,18 +305,8 @@ void InstantController::CommitCurrentPreview(InstantCommitType type) {
   }
   DCHECK(loader_manager_.get());
   DCHECK(loader_manager_->current_loader());
-  bool showing_instant =
-      loader_manager_->current_loader()->is_showing_instant();
   TabContentsWrapper* tab = ReleasePreviewContents(type);
-  // If the loader was showing an instant page then it's navigation stack is
-  // something like: search-engine-home-page (eg google.com) search-term1
-  // search-term2 .... Each search-term navigation corresponds to the page
-  // deciding enough time has passed to commit a navigation. We don't want the
-  // searche-engine-home-page navigation in this case so we pass true to
-  // CopyStateFromAndPrune to have the search-engine-home-page navigation
-  // removed.
-  tab->controller().CopyStateFromAndPrune(
-      &tab_contents_->controller(), showing_instant);
+  tab->controller().CopyStateFromAndPrune(&tab_contents_->controller());
   delegate_->CommitInstant(tab);
   CompleteRelease(tab);
 }
@@ -317,7 +328,8 @@ void InstantController::OnAutocompleteLostFocus(
   // not receive a mouseDown event.  Therefore, we should destroy the preview.
   // Otherwise, the RWHV was clicked, so we commit the preview.
   if (!is_displayable() || !GetPreviewContents() ||
-      !IsMouseDownFromActivate()) {
+      !IsMouseDownFromActivate() ||
+      loader_manager_->active_loader()->IsNavigationPending()) {
     DestroyPreviewContents();
   } else if (IsShowingInstant()) {
     SetCommitOnMouseUp();
@@ -328,7 +340,8 @@ void InstantController::OnAutocompleteLostFocus(
 #else
 void InstantController::OnAutocompleteLostFocus(
     gfx::NativeView view_gaining_focus) {
-  if (!is_active() || !GetPreviewContents()) {
+  if (!is_active() || !GetPreviewContents() ||
+      loader_manager_->active_loader()->IsNavigationPending()) {
     DestroyPreviewContents();
     return;
   }
@@ -339,6 +352,25 @@ void InstantController::OnAutocompleteLostFocus(
     DestroyPreviewContents();
     return;
   }
+
+#if defined(TOOLKIT_VIEWS)
+  // For views the top level widget is always focused. If the focus change
+  // originated in views determine the child Widget from the view that is being
+  // focused.
+  if (view_gaining_focus) {
+    views::Widget* widget =
+        views::Widget::GetWidgetForNativeView(view_gaining_focus);
+    if (widget) {
+      views::FocusManager* focus_manager = widget->GetFocusManager();
+      if (focus_manager && focus_manager->is_changing_focus() &&
+          focus_manager->GetFocusedView() &&
+          focus_manager->GetFocusedView()->GetWidget()) {
+        view_gaining_focus =
+            focus_manager->GetFocusedView()->GetWidget()->GetNativeView();
+      }
+    }
+  }
+#endif
 
   gfx::NativeView tab_view =
       GetPreviewContents()->tab_contents()->GetNativeView();
@@ -478,7 +510,7 @@ void InstantController::InstantStatusChanged(InstantLoader* loader) {
     // Status isn't ok, start a timer that when fires shows the result. This
     // delays showing 403 pages and the like.
     show_timer_.Stop();
-    show_timer_.Start(
+    show_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(kShowDelayMS),
         this, &InstantController::ShowTimerFired);
     UpdateDisplayableLoader();
@@ -627,7 +659,8 @@ void InstantController::ScheduleUpdate(const GURL& url) {
   scheduled_url_ = url;
 
   update_timer_.Stop();
-  update_timer_.Start(base::TimeDelta::FromMilliseconds(kUpdateDelayMS),
+  update_timer_.Start(FROM_HERE,
+                      base::TimeDelta::FromMilliseconds(kUpdateDelayMS),
                       this, &InstantController::ProcessScheduledUpdate);
 }
 
@@ -682,7 +715,7 @@ void InstantController::UpdateLoader(const TemplateURL* template_url,
                          user_text, verbatim, suggested_text)) {
     show_timer_.Stop();
     if (!new_loader->http_status_ok()) {
-      show_timer_.Start(
+      show_timer_.Start(FROM_HERE,
           base::TimeDelta::FromMilliseconds(kShowDelayMS),
           this, &InstantController::ShowTimerFired);
     }
@@ -714,7 +747,11 @@ InstantController::PreviewCondition InstantController::GetPreviewConditionFor(
 
   // Was the host blacklisted?
   if (host_blacklist_ && host_blacklist_->count(match.destination_url.host()))
-    return PREVIEW_CONDITION_BLACKLISTED;
+    return PREVIEW_CONDITION_BLACKLISTED_HOST;
+
+  // Was the URL blacklisted?
+  if (IsBlacklistedUrl(match.destination_url))
+    return PREVIEW_CONDITION_BLACKLISTED_URL;
 
   const CommandLine* cl = CommandLine::ForCurrentProcess();
   if ((cl->HasSwitch(switches::kRestrictInstantToSearch) ||

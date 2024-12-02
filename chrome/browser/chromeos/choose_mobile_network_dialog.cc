@@ -36,8 +36,7 @@ void ChooseMobileNetworkDialog::ShowDialog(gfx::NativeWindow owning_window) {
       new HtmlDialogView(profile, new ChooseMobileNetworkDialog);
   html_view->InitDialog();
   chromeos::BubbleWindow::Create(owning_window,
-                                 gfx::Rect(),
-                                 chromeos::BubbleWindow::STYLE_GENERIC,
+                                 chromeos::STYLE_GENERIC,
                                  html_view);
   html_view->GetWidget()->Show();
 }
@@ -49,8 +48,8 @@ bool ChooseMobileNetworkDialog::IsDialogModal() const {
   return true;
 }
 
-std::wstring ChooseMobileNetworkDialog::GetDialogTitle() const {
-  return std::wstring();
+string16 ChooseMobileNetworkDialog::GetDialogTitle() const {
+  return string16();
 }
 
 GURL ChooseMobileNetworkDialog::GetDialogContentURL() const {

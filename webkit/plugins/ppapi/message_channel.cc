@@ -14,10 +14,11 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
+#include "ppapi/shared_impl/var.h"
 #include "webkit/plugins/ppapi/npapi_glue.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
-#include "webkit/plugins/ppapi/var.h"
 
+using ppapi::StringVar;
 using WebKit::WebBindings;
 
 namespace webkit {
@@ -68,7 +69,7 @@ bool PPVarToNPVariantNoCopy(PP_Var var, NPVariant* result) {
       DOUBLE_TO_NPVARIANT(var.value.as_double, *result);
       break;
     case PP_VARTYPE_STRING: {
-      scoped_refptr<StringVar> string(StringVar::FromPPVar(var));
+      StringVar* string = StringVar::FromPPVar(var);
       if (!string) {
         VOID_TO_NPVARIANT(*result);
         return false;
@@ -101,7 +102,7 @@ PP_Var CopyPPVar(const PP_Var& var) {
     NOTIMPLEMENTED();
     return PP_MakeUndefined();
   } else if (var.type == PP_VARTYPE_STRING) {
-    scoped_refptr<StringVar> string(StringVar::FromPPVar(var));
+    StringVar* string = StringVar::FromPPVar(var);
     if (!string)
       return PP_MakeUndefined();
     return StringVar::StringToPPVar(string->pp_module(), string->value());
@@ -150,8 +151,7 @@ bool MessageChannelInvoke(NPObject* np_obj, NPIdentifier name,
   // We only handle a function called postMessage.
   if (IdentifierIsPostMessage(name) && (arg_count == 1)) {
     MessageChannel& message_channel(ToMessageChannel(np_obj));
-    PP_Var argument(Var::NPVariantToPPVar(message_channel.instance(),
-                                          &args[0]));
+    PP_Var argument(NPVariantToPPVar(message_channel.instance(), &args[0]));
     message_channel.PostMessageToNative(argument);
     return true;
   }

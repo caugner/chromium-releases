@@ -5,12 +5,13 @@
 #include "chrome/common/service_process_util.h"
 
 #include "base/basictypes.h"
+#include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/process_util.h"
 
 #if !defined(OS_MACOSX)
 #include "base/at_exit.h"
-#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/test/multiprocess_test.h"
 #include "base/test/test_timeouts.h"
@@ -24,7 +25,7 @@
 #include "base/win/win_util.h"
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX)
 #include "chrome/common/auto_start_linux.h"
 #include <glib.h>
 #endif
@@ -250,7 +251,7 @@ MULTIPROCESS_TEST_MAIN(ServiceProcessStateTestShutdown) {
 #include "base/sys_string_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
-#include "chrome/common/launchd_mac.h"
+#include "chrome/common/mac/launchd.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // TODO(dmaclach): Write this in terms of a real mock.
@@ -495,6 +496,26 @@ void TrashFunc(const FilePath& src) {
                                             &new_path_ref,
                                             kFSFileOperationDefaultOptions);
   EXPECT_EQ(status, noErr)  << "FSMoveObjectToTrashSync " << status;
+}
+
+TEST_F(ServiceProcessStateFileManipulationTest, VerifyLaunchD) {
+  // There have been problems where launchd has gotten into a bad state, usually
+  // because something had deleted all the files in /tmp. launchd depends on
+  // a Unix Domain Socket that it creates at /tmp/launchd*/sock.
+  // The symptom of this problem is that the service process connect fails
+  // on Mac and "launch_msg(): Socket is not connected" appears.
+  // This test is designed to make sure that launchd is working.
+  // http://crbug/75518
+
+  CommandLine cl(FilePath("/bin/launchctl"));
+  cl.AppendArg("list");
+  cl.AppendArg("com.apple.launchctl.Aqua");
+
+  std::string output;
+  int exit_code = -1;
+  ASSERT_TRUE(base::GetAppOutputWithExitCode(cl, &output, &exit_code)
+              && exit_code == 0)
+      << " exit_code:" << exit_code << " " << output;
 }
 
 TEST_F(ServiceProcessStateFileManipulationTest, DeleteFile) {

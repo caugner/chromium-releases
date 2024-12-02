@@ -9,10 +9,11 @@
 #include <vector>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
@@ -214,10 +215,10 @@ bool GeolocationConfirmInfoBarDelegate::LinkClicked(
       "https://www.google.com/support/chrome/bin/answer.py?answer=142065";
 #endif
 
-  // Ignore the click disposition and always open in a new top level tab.
   tab_contents_->OpenURL(
       google_util::AppendGoogleLocaleParam(GURL(kGeolocationLearnMoreUrl)),
-      GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+      GURL(), (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+      PageTransition::LINK);
   return false;  // Do not dismiss the info bar.
 }
 
@@ -386,8 +387,12 @@ void GeolocationInfoBarQueueController::OnPermissionSet(
 
   ContentSetting content_setting =
       allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_BLOCK;
-  profile_->GetGeolocationContentSettingsMap()->SetContentSetting(
-      requesting_frame.GetOrigin(), embedder.GetOrigin(), content_setting);
+  profile_->GetHostContentSettingsMap()->SetContentSetting(
+      ContentSettingsPattern::FromURLNoWildcard(requesting_frame.GetOrigin()),
+      ContentSettingsPattern::FromURLNoWildcard(embedder.GetOrigin()),
+      CONTENT_SETTINGS_TYPE_GEOLOCATION,
+      std::string(),
+      content_setting);
 
   for (PendingInfoBarRequests::iterator i = pending_infobar_requests_.begin();
        i != pending_infobar_requests_.end(); ) {
@@ -461,7 +466,7 @@ void GeolocationInfoBarQueueController::ShowQueuedInfoBar(int render_process_id,
             tab_contents, this, render_process_id, render_view_id, i->bridge_id,
             i->requesting_frame,
             profile_->GetPrefs()->GetString(prefs::kAcceptLanguages));
-        wrapper->AddInfoBar(i->infobar_delegate);
+        wrapper->infobar_tab_helper()->AddInfoBar(i->infobar_delegate);
       }
       break;
     }
@@ -485,7 +490,7 @@ GeolocationInfoBarQueueController::PendingInfoBarRequests::iterator
   // asynchronously.
   TabContentsWrapper* wrapper =
       TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
-  wrapper->RemoveInfoBar(i->infobar_delegate);
+  wrapper->infobar_tab_helper()->RemoveInfoBar(i->infobar_delegate);
   return ++i;
 }
 
@@ -558,8 +563,11 @@ void ChromeGeolocationPermissionContext::RequestGeolocationPermission(
   }
 
   ContentSetting content_setting =
-      profile_->GetGeolocationContentSettingsMap()->GetContentSetting(
-          requesting_frame, embedder);
+     profile_->GetHostContentSettingsMap()->GetContentSetting(
+          requesting_frame,
+          embedder,
+          CONTENT_SETTINGS_TYPE_GEOLOCATION,
+          std::string());
   if (content_setting == CONTENT_SETTING_BLOCK) {
     NotifyPermissionSet(render_process_id, render_view_id, bridge_id,
                         requesting_frame, false);

@@ -14,9 +14,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_pref_service.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -28,13 +27,19 @@ namespace {
 bool SettingsEqual(const ContentSettings& settings1,
                    const ContentSettings& settings2) {
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    if (settings1.settings[i] != settings2.settings[i])
+    if (settings1.settings[i] != settings2.settings[i]) {
+      LOG(ERROR) << "type: " << i
+                 << " [expected: " << settings1.settings[i]
+                 << " actual: " << settings2.settings[i] << "]";
       return false;
+    }
   }
   return true;
 }
 
-class HostContentSettingsMapTest : public TestingBrowserProcessTest {
+}  // namespace
+
+class HostContentSettingsMapTest : public testing::Test {
  public:
   HostContentSettingsMapTest() : ui_thread_(BrowserThread::UI, &message_loop_) {
   }
@@ -149,6 +154,8 @@ TEST_F(HostContentSettingsMapTest, IndividualSettings) {
   desired_settings.settings[CONTENT_SETTINGS_TYPE_GEOLOCATION] =
       CONTENT_SETTING_ASK;
   desired_settings.settings[CONTENT_SETTINGS_TYPE_NOTIFICATIONS] =
+      CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_INTENTS] =
       CONTENT_SETTING_ASK;
   ContentSettings settings =
       host_content_settings_map->GetContentSettings(host, host);
@@ -596,6 +603,8 @@ TEST_F(HostContentSettingsMapTest, NestedSettings) {
       CONTENT_SETTING_ASK;
   desired_settings.settings[CONTENT_SETTINGS_TYPE_NOTIFICATIONS] =
       CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_INTENTS] =
+      CONTENT_SETTING_ASK;
   ContentSettings settings =
       host_content_settings_map->GetContentSettings(host, host);
   EXPECT_TRUE(SettingsEqual(desired_settings, settings));
@@ -611,6 +620,8 @@ TEST_F(HostContentSettingsMapTest, NestedSettings) {
             settings.settings[CONTENT_SETTINGS_TYPE_GEOLOCATION]);
   EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_COOKIES],
             settings.settings[CONTENT_SETTINGS_TYPE_COOKIES]);
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_INTENTS],
+            settings.settings[CONTENT_SETTINGS_TYPE_INTENTS]);
 }
 
 TEST_F(HostContentSettingsMapTest, OffTheRecord) {
@@ -1257,5 +1268,3 @@ TEST_F(HostContentSettingsMapTest, CookiesBlockEverythingExceptAllowed) {
             host_content_settings_map->GetCookieContentSetting(
                 kAllowedSite, kAllowedSite, true));
 }
-
-}  // namespace

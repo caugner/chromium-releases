@@ -8,6 +8,7 @@
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 
 using ppapi::thunk::PPB_Graphics3D_API;
 
@@ -49,11 +50,12 @@ PP_Graphics3DTrustedState PPStateFromGPUState(
 }
 }  // namespace.
 
-PPB_Graphics3D_Impl::PPB_Graphics3D_Impl(PluginInstance* instance)
+PPB_Graphics3D_Impl::PPB_Graphics3D_Impl(PP_Instance instance)
     : Resource(instance),
       bound_to_instance_(false),
       commit_pending_(false),
-      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 PPB_Graphics3D_Impl::~PPB_Graphics3D_Impl() {
@@ -61,29 +63,23 @@ PPB_Graphics3D_Impl::~PPB_Graphics3D_Impl() {
 }
 
 // static
-PP_Resource PPB_Graphics3D_Impl::Create(PluginInstance* instance,
-                                        PP_Config3D_Dev config,
+PP_Resource PPB_Graphics3D_Impl::Create(PP_Instance instance,
                                         PP_Resource share_context,
                                         const int32_t* attrib_list) {
   scoped_refptr<PPB_Graphics3D_Impl> graphics_3d(
       new PPB_Graphics3D_Impl(instance));
-
-  if (!graphics_3d->Init(config, share_context, attrib_list))
+  if (!graphics_3d->Init(share_context, attrib_list))
     return 0;
-
   return graphics_3d->GetReference();
 }
 
-PP_Resource PPB_Graphics3D_Impl::CreateRaw(PluginInstance* instance,
-                                           PP_Config3D_Dev config,
+PP_Resource PPB_Graphics3D_Impl::CreateRaw(PP_Instance instance,
                                            PP_Resource share_context,
                                            const int32_t* attrib_list) {
   scoped_refptr<PPB_Graphics3D_Impl> graphics_3d(
       new PPB_Graphics3D_Impl(instance));
-
-  if (!graphics_3d->InitRaw(config, share_context, attrib_list))
+  if (!graphics_3d->InitRaw(share_context, attrib_list))
     return 0;
-
   return graphics_3d->GetReference();
 }
 
@@ -141,12 +137,6 @@ PP_Graphics3DTrustedState PPB_Graphics3D_Impl::FlushSyncFast(
 
 bool PPB_Graphics3D_Impl::BindToInstance(bool bind) {
   bound_to_instance_ = bind;
-  if (bind && gles2_impl()) {
-    // Resize the backing texture to the size of the instance when it is bound.
-    // TODO(alokp): This should be the responsibility of plugins.
-    const gfx::Size& size = instance()->position().size();
-    gles2_impl()->ResizeCHROMIUM(size.width(), size.height());
-  }
   return true;
 }
 
@@ -175,13 +165,15 @@ int32 PPB_Graphics3D_Impl::DoSwapBuffers() {
   if (gles2_impl())
     gles2_impl()->SwapBuffers();
 
+  platform_context_->Echo(method_factory_.NewRunnableMethod(
+      &PPB_Graphics3D_Impl::OnSwapBuffers));
+
   return PP_OK_COMPLETIONPENDING;
 }
 
-bool PPB_Graphics3D_Impl::Init(PP_Config3D_Dev config,
-                               PP_Resource share_context,
+bool PPB_Graphics3D_Impl::Init(PP_Resource share_context,
                                const int32_t* attrib_list) {
-  if (!InitRaw(config, share_context, attrib_list))
+  if (!InitRaw(share_context, attrib_list))
     return false;
 
   gpu::CommandBuffer* command_buffer = GetCommandBuffer();
@@ -191,25 +183,26 @@ bool PPB_Graphics3D_Impl::Init(PP_Config3D_Dev config,
   return CreateGLES2Impl(kCommandBufferSize, kTransferBufferSize);
 }
 
-bool PPB_Graphics3D_Impl::InitRaw(PP_Config3D_Dev config,
-                                  PP_Resource share_context,
+bool PPB_Graphics3D_Impl::InitRaw(PP_Resource share_context,
                                   const int32_t* attrib_list) {
+  PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
+  if (!plugin_instance)
+    return false;
+
   // TODO(alokp): Support shared context.
   DCHECK_EQ(0, share_context);
   if (share_context != 0)
-    return 0;
+    return false;
 
-  platform_context_.reset(instance()->CreateContext3D());
+  platform_context_.reset(plugin_instance->CreateContext3D());
   if (!platform_context_.get())
     return false;
 
-  if (!platform_context_->Init())
+  if (!platform_context_->Init(attrib_list))
     return false;
 
   platform_context_->SetContextLostCallback(
       callback_factory_.NewCallback(&PPB_Graphics3D_Impl::OnContextLost));
-  platform_context_->SetSwapBuffersCallback(
-      callback_factory_.NewCallback(&PPB_Graphics3D_Impl::OnSwapBuffers));
   return true;
 }
 
@@ -219,7 +212,10 @@ void PPB_Graphics3D_Impl::OnSwapBuffers() {
     // to commit our backing texture so that the graphics appears on the page.
     // When the backing texture will be committed we get notified via
     // ViewFlushedPaint().
-    instance()->CommitBackingTexture();
+    //
+    // Don't need to check for NULL from GetPluginInstance since when we're
+    // bound, we know our instance is valid.
+    ResourceHelper::GetPluginInstance(this)->CommitBackingTexture();
     commit_pending_ = true;
   } else if (HasPendingSwap()) {
     // If we're off-screen, no need to trigger and wait for compositing.
@@ -230,8 +226,10 @@ void PPB_Graphics3D_Impl::OnSwapBuffers() {
 }
 
 void PPB_Graphics3D_Impl::OnContextLost() {
+  // Don't need to check for NULL from GetPluginInstance since when we're
+  // bound, we know our instance is valid.
   if (bound_to_instance_)
-    instance()->BindGraphics(instance()->pp_instance(), 0);
+    ResourceHelper::GetPluginInstance(this)->BindGraphics(pp_instance(), 0);
 
   // Send context lost to plugin. This may have been caused by a PPAPI call, so
   // avoid re-entering.
@@ -243,15 +241,16 @@ void PPB_Graphics3D_Impl::SendContextLost() {
   // By the time we run this, the instance may have been deleted, or in the
   // process of being deleted. Even in the latter case, we don't want to send a
   // callback after DidDestroy.
-  if (!instance() || !instance()->container())
+  PluginInstance* instance = ResourceHelper::GetPluginInstance(this);
+  if (!instance || !instance->container())
     return;
 
-  const PPP_Graphics3D_Dev* ppp_graphics_3d =
-      static_cast<const PPP_Graphics3D_Dev*>(
-          instance()->module()->GetPluginInterface(
-              PPP_GRAPHICS_3D_DEV_INTERFACE));
+  const PPP_Graphics3D* ppp_graphics_3d =
+      static_cast<const PPP_Graphics3D*>(
+          instance->module()->GetPluginInterface(
+              PPP_GRAPHICS_3D_INTERFACE));
   if (ppp_graphics_3d)
-    ppp_graphics_3d->Graphics3DContextLost(instance()->pp_instance());
+    ppp_graphics_3d->Graphics3DContextLost(pp_instance());
 }
 
 }  // namespace ppapi

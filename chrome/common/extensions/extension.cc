@@ -253,22 +253,6 @@ scoped_refptr<Extension> Extension::CreateWithId(const FilePath& path,
   return extension;
 }
 
-namespace {
-const char* kGalleryUpdateHttpUrl =
-    "http://clients2.google.com/service/update2/crx";
-const char* kGalleryUpdateHttpsUrl =
-    "https://clients2.google.com/service/update2/crx";
-}  // namespace
-
-// static
-GURL Extension::GalleryUpdateUrl(bool secure) {
-  CommandLine* cmdline = CommandLine::ForCurrentProcess();
-  if (cmdline->HasSwitch(switches::kAppsGalleryUpdateURL))
-    return GURL(cmdline->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL));
-  else
-    return GURL(secure ? kGalleryUpdateHttpsUrl : kGalleryUpdateHttpUrl);
-}
-
 // static
 Extension::Location Extension::GetHigherPriorityLocation(
     Extension::Location loc1, Extension::Location loc2) {
@@ -282,22 +266,8 @@ Extension::Location Extension::GetHigherPriorityLocation(
   // deterministicly choose a location.
   CHECK(loc1_rank != loc2_rank);
 
-  // Lowest rank has highest priority.
+  // Highest rank has highest priority.
   return (loc1_rank > loc2_rank ? loc1 : loc2 );
-}
-
-ExtensionPermissionMessages Extension::GetPermissionMessages() const {
-  if (IsTrustedId(id_))
-    return ExtensionPermissionMessages();
-  else
-    return permission_set_->GetPermissionMessages();
-}
-
-std::vector<string16> Extension::GetPermissionMessageStrings() const {
-  if (IsTrustedId(id_))
-    return std::vector<string16>();
-  else
-    return permission_set_->GetWarningMessages();
 }
 
 void Extension::OverrideLaunchUrl(const GURL& override_url) {
@@ -1202,8 +1172,12 @@ bool Extension::EnsureNotHybridApp(const DictionaryValue* manifest,
     if (!IsBaseCrxKey(*key) &&
         *key != keys::kApp &&
         *key != keys::kPermissions &&
+        *key != keys::kOptionalPermissions &&
         *key != keys::kOptionsPage &&
-        *key != keys::kBackground) {
+        *key != keys::kBackground &&
+        *key != keys::kOfflineEnabled &&
+        *key != keys::kMinimumChromeVersion &&
+        *key != keys::kRequirements) {
       *error = ExtensionErrorUtils::FormatErrorMessage(
           errors::kHostedAppsCannotIncludeExtensionFeatures, *key);
       return false;
@@ -1221,6 +1195,7 @@ bool Extension::IsTrustedId(const std::string& id) {
 
 Extension::Extension(const FilePath& path, Location location)
     : incognito_split_mode_(false),
+      offline_enabled_(false),
       location_(location),
       converted_from_user_script_(false),
       is_theme_(false),
@@ -1385,13 +1360,16 @@ GURL Extension::GetBaseURLFromExtensionId(const std::string& extension_id) {
 
 bool Extension::InitFromValue(const DictionaryValue& source, int flags,
                               std::string* error) {
+  base::AutoLock auto_lock(runtime_data_lock_);
   // When strict error checks are enabled, make URL pattern parsing strict.
   URLPattern::ParseOption parse_strictness =
       (flags & STRICT_ERROR_CHECKS ? URLPattern::ERROR_ON_PORTS
                                    : URLPattern::IGNORE_PORTS);
 
   // Initialize permissions with an empty, default permission set.
-  permission_set_.reset(new ExtensionPermissionSet());
+  runtime_data_.SetActivePermissions(new ExtensionPermissionSet());
+  optional_permission_set_ = new ExtensionPermissionSet();
+  required_permission_set_ = new ExtensionPermissionSet();
 
   if (source.HasKey(keys::kPublicKey)) {
     std::string public_key_bytes;
@@ -1880,7 +1858,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize options page url (optional).
-  // Funtion LoadIsApp() set is_app_ above.
+  // Function LoadIsApp() set is_app_ above.
   if (source.HasKey(keys::kOptionsPage)) {
     std::string options_str;
     if (!source.GetString(keys::kOptionsPage, &options_str)) {
@@ -1911,104 +1889,30 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
     }
   }
 
+  // Initialize the permissions (optional).
   ExtensionAPIPermissionSet api_permissions;
   URLPatternSet host_permissions;
+  if (!ParsePermissions(&source,
+                        keys::kPermissions,
+                        flags,
+                        error,
+                        &api_permissions,
+                        &host_permissions)) {
+    return false;
+  }
 
-  // Initialize the permissions (optional).
-  if (source.HasKey(keys::kPermissions)) {
-    ListValue* permissions = NULL;
-    if (!source.GetList(keys::kPermissions, &permissions)) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(
-          errors::kInvalidPermissions, "");
-      return false;
-    }
-
-    for (size_t i = 0; i < permissions->GetSize(); ++i) {
-      std::string permission_str;
-      if (!permissions->GetString(i, &permission_str)) {
-        *error = ExtensionErrorUtils::FormatErrorMessage(
-            errors::kInvalidPermission, base::IntToString(i));
-        return false;
-      }
-
-      ExtensionAPIPermission* permission =
-          ExtensionPermissionsInfo::GetInstance()->GetByName(permission_str);
-
-      // Only COMPONENT extensions can use private APIs.
-      // TODO(asargent) - We want a more general purpose mechanism for this,
-      // and better error messages. (http://crbug.com/54013)
-      if (!IsComponentOnlyPermission(permission)
-#ifndef NDEBUG
-           && !CommandLine::ForCurrentProcess()->HasSwitch(
-                 switches::kExposePrivateExtensionApi)
-#endif
-          ) {
-        continue;
-      }
-
-      if (web_extent().is_empty() || location() == Extension::COMPONENT) {
-        // Check if it's a module permission.  If so, enable that permission.
-        if (permission != NULL) {
-          // Only allow the experimental API permission if the command line
-          // flag is present, or if the extension is a component of Chrome.
-          if (IsDisallowedExperimentalPermission(permission->id()) &&
-              location() != Extension::COMPONENT) {
-            *error = errors::kExperimentalFlagRequired;
-            return false;
-          }
-          api_permissions.insert(permission->id());
-          continue;
-        }
-      } else {
-        // Hosted apps only get access to a subset of the valid permissions.
-        if (permission != NULL && permission->is_hosted_app()) {
-          if (IsDisallowedExperimentalPermission(permission->id())) {
-            *error = errors::kExperimentalFlagRequired;
-            return false;
-          }
-          api_permissions.insert(permission->id());
-          continue;
-        }
-      }
-
-      // Check if it's a host pattern permission.
-      URLPattern pattern = URLPattern(CanExecuteScriptEverywhere() ?
-          URLPattern::SCHEME_ALL : kValidHostPermissionSchemes);
-
-      URLPattern::ParseResult parse_result = pattern.Parse(permission_str,
-                                                           parse_strictness);
-      if (parse_result == URLPattern::PARSE_SUCCESS) {
-        if (!CanSpecifyHostPermission(pattern)) {
-          *error = ExtensionErrorUtils::FormatErrorMessage(
-              errors::kInvalidPermissionScheme, base::IntToString(i));
-          return false;
-        }
-
-        // The path component is not used for host permissions, so we force it
-        // to match all paths.
-        pattern.SetPath("/*");
-
-        if (pattern.MatchesScheme(chrome::kFileScheme) &&
-            !CanExecuteScriptEverywhere()) {
-          wants_file_access_ = true;
-          if (!(flags & ALLOW_FILE_ACCESS))
-            pattern.SetValidSchemes(
-                pattern.valid_schemes() & ~URLPattern::SCHEME_FILE);
-        }
-
-        host_permissions.AddPattern(pattern);
-      }
-
-      // If it's not a host permission, then it's probably an unknown API
-      // permission. Do not throw an error so extensions can retain
-      // backwards compatability (http://crbug.com/42742).
-      // TODO(jstritar): We can improve error messages by adding better
-      // validation of API permissions here.
-      // TODO(skerner): Consider showing the reason |permission_str| is not
-      // a valid URL pattern if it is almost valid.  For example, if it has
-      // a valid scheme, and failed to parse because it has a port, show an
-      // error.
-    }
+  // Initialize the optional permissions (optional).
+  ExtensionAPIPermissionSet optional_api_permissions;
+  URLPatternSet optional_host_permissions;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalExtensionApis) &&
+      !ParsePermissions(&source,
+                        keys::kOptionalPermissions,
+                        flags,
+                        error,
+                        &optional_api_permissions,
+                        &optional_host_permissions)) {
+    return false;
   }
 
   // Initialize background url (optional).
@@ -2389,13 +2293,46 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
     }
   }
 
+  // Initialize offline-enabled status. Defaults to false.
+  if (source.HasKey(keys::kOfflineEnabled)) {
+    if (!source.GetBoolean(keys::kOfflineEnabled, &offline_enabled_)) {
+      *error = errors::kInvalidOfflineEnabled;
+      return false;
+    }
+  }
+
+  // Initialize requirements (optional). Not actually persisted (they're only
+  // used by the store), but still validated.
+  if (source.HasKey(keys::kRequirements)) {
+    DictionaryValue* requirements_value = NULL;
+    if (!source.GetDictionary(keys::kRequirements, &requirements_value)) {
+      *error = errors::kInvalidRequirements;
+      return false;
+    }
+
+    for (DictionaryValue::key_iterator it = requirements_value->begin_keys();
+         it != requirements_value->end_keys(); ++it) {
+      DictionaryValue* requirement_value;
+      if (!requirements_value->GetDictionaryWithoutPathExpansion(
+          *it, &requirement_value)) {
+        *error = ExtensionErrorUtils::FormatErrorMessage(
+            errors::kInvalidRequirement, *it);
+        return false;
+      }
+    }
+  }
+
   if (HasMultipleUISurfaces()) {
     *error = errors::kOneUISurfaceOnly;
     return false;
   }
 
-  permission_set_.reset(
-      new ExtensionPermissionSet(this, api_permissions, host_permissions));
+  runtime_data_.SetActivePermissions(new ExtensionPermissionSet(
+      this, api_permissions, host_permissions));
+  required_permission_set_ = new ExtensionPermissionSet(
+      this, api_permissions, host_permissions);
+  optional_permission_set_ = new ExtensionPermissionSet(
+      optional_api_permissions, optional_host_permissions, URLPatternSet());
 
   // Although |source| is passed in as a const, it's still possible to modify
   // it.  This is dangerous since the utility process re-uses |source| after
@@ -2407,17 +2344,6 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   return true;
 }
 
-// static
-std::string Extension::ChromeStoreLaunchURL() {
-  std::string gallery_prefix = extension_urls::kGalleryBrowsePrefix;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAppsGalleryURL))
-    gallery_prefix = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-        switches::kAppsGalleryURL);
-  if (EndsWith(gallery_prefix, "/", true))
-    gallery_prefix = gallery_prefix.substr(0, gallery_prefix.length() - 1);
-  return gallery_prefix;
-}
-
 GURL Extension::GetHomepageURL() const {
   if (homepage_url_.is_valid())
     return homepage_url_;
@@ -2425,10 +2351,7 @@ GURL Extension::GetHomepageURL() const {
   if (!UpdatesFromGallery())
     return GURL();
 
-  // TODO(erikkay): This may not be entirely correct with the webstore.
-  // I think it will have a mixture of /extensions/detail and /webstore/detail
-  // URLs.  Perhaps they'll handle this nicely with redirects?
-  GURL url(ChromeStoreLaunchURL() + std::string("/detail/") + id());
+  GURL url(extension_urls::GetWebstoreItemDetailURLPrefix() + id());
   return url;
 }
 
@@ -2573,6 +2496,118 @@ GURL Extension::GetIconURL(int size,
     return GetResourceURL(path);
 }
 
+bool Extension::ParsePermissions(const DictionaryValue* source,
+                                 const char* key,
+                                 int flags,
+                                 std::string* error,
+                                 ExtensionAPIPermissionSet* api_permissions,
+                                 URLPatternSet* host_permissions) {
+  if (source->HasKey(key)) {
+    // When strict error checks are enabled, make URL pattern parsing strict.
+    URLPattern::ParseOption parse_strictness =
+        (flags & STRICT_ERROR_CHECKS ? URLPattern::ERROR_ON_PORTS
+                                     : URLPattern::IGNORE_PORTS);
+    ListValue* permissions = NULL;
+    if (!source->GetList(key, &permissions)) {
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          errors::kInvalidPermissions, "");
+      return false;
+    }
+
+    for (size_t i = 0; i < permissions->GetSize(); ++i) {
+      std::string permission_str;
+      if (!permissions->GetString(i, &permission_str)) {
+        *error = ExtensionErrorUtils::FormatErrorMessage(
+            errors::kInvalidPermission, base::IntToString(i));
+        return false;
+      }
+
+      ExtensionAPIPermission* permission =
+          ExtensionPermissionsInfo::GetInstance()->GetByName(permission_str);
+
+      // Only COMPONENT extensions can use private APIs.
+      // TODO(asargent) - We want a more general purpose mechanism for this,
+      // and better error messages. (http://crbug.com/54013)
+      if (!IsComponentOnlyPermission(permission)
+#ifndef NDEBUG
+           && !CommandLine::ForCurrentProcess()->HasSwitch(
+                 switches::kExposePrivateExtensionApi)
+#endif
+          ) {
+        continue;
+      }
+
+      if (web_extent().is_empty() || location() == Extension::COMPONENT) {
+        // Check if it's a module permission.  If so, enable that permission.
+        if (permission != NULL) {
+          // Only allow the experimental API permission if the command line
+          // flag is present, or if the extension is a component of Chrome.
+          if (IsDisallowedExperimentalPermission(permission->id()) &&
+              location() != Extension::COMPONENT) {
+            *error = errors::kExperimentalFlagRequired;
+            return false;
+          }
+          api_permissions->insert(permission->id());
+          continue;
+        }
+      } else {
+        // Hosted apps only get access to a subset of the valid permissions.
+        if (permission != NULL && permission->is_hosted_app()) {
+          if (IsDisallowedExperimentalPermission(permission->id())) {
+            *error = errors::kExperimentalFlagRequired;
+            return false;
+          }
+          api_permissions->insert(permission->id());
+          continue;
+        }
+      }
+
+      // Check if it's a host pattern permission.
+      URLPattern pattern = URLPattern(CanExecuteScriptEverywhere() ?
+          URLPattern::SCHEME_ALL : kValidHostPermissionSchemes);
+
+      URLPattern::ParseResult parse_result = pattern.Parse(permission_str,
+                                                           parse_strictness);
+      if (parse_result == URLPattern::PARSE_SUCCESS) {
+        if (!CanSpecifyHostPermission(pattern)) {
+          *error = ExtensionErrorUtils::FormatErrorMessage(
+              errors::kInvalidPermissionScheme, base::IntToString(i));
+          return false;
+        }
+
+        // The path component is not used for host permissions, so we force it
+        // to match all paths.
+        pattern.SetPath("/*");
+
+        if (pattern.MatchesScheme(chrome::kFileScheme) &&
+            !CanExecuteScriptEverywhere()) {
+          wants_file_access_ = true;
+          if (!(flags & ALLOW_FILE_ACCESS))
+            pattern.SetValidSchemes(
+                pattern.valid_schemes() & ~URLPattern::SCHEME_FILE);
+        }
+
+        host_permissions->AddPattern(pattern);
+      }
+
+      // If it's not a host permission, then it's probably an unknown API
+      // permission. Do not throw an error so extensions can retain
+      // backwards compatability (http://crbug.com/42742).
+      // TODO(jstritar): We can improve error messages by adding better
+      // validation of API permissions here.
+      // TODO(skerner): Consider showing the reason |permission_str| is not
+      // a valid URL pattern if it is almost valid.  For example, if it has
+      // a valid scheme, and failed to parse because it has a port, show an
+      // error.
+    }
+  }
+  return true;
+}
+
+bool Extension::CanSilentlyIncreasePermissions() const {
+  return location() != INTERNAL;
+}
+
 bool Extension::CanSpecifyHostPermission(const URLPattern& pattern) const {
   if (!pattern.match_all_urls() &&
       pattern.MatchesScheme(chrome::kChromeUIScheme)) {
@@ -2588,24 +2623,68 @@ bool Extension::CanSpecifyHostPermission(const URLPattern& pattern) const {
 
 bool Extension::HasAPIPermission(
     ExtensionAPIPermission::ID permission) const {
-  return permission_set()->HasAPIPermission(permission);
+  base::AutoLock auto_lock(runtime_data_lock_);
+  return runtime_data_.GetActivePermissions()->HasAPIPermission(permission);
 }
 
 bool Extension::HasAPIPermission(
     const std::string& function_name) const {
-  return permission_set()->HasAccessToFunction(function_name);
+  base::AutoLock auto_lock(runtime_data_lock_);
+  return runtime_data_.GetActivePermissions()->
+      HasAccessToFunction(function_name);
 }
 
 const URLPatternSet& Extension::GetEffectiveHostPermissions() const {
-  return permission_set()->effective_hosts();
+  base::AutoLock auto_lock(runtime_data_lock_);
+  return runtime_data_.GetActivePermissions()->effective_hosts();
 }
 
 bool Extension::HasHostPermission(const GURL& url) const {
+  base::AutoLock auto_lock(runtime_data_lock_);
   if (url.SchemeIs(chrome::kChromeUIScheme) &&
       url.host() != chrome::kChromeUIFaviconHost &&
       location() != Extension::COMPONENT)
     return false;
-  return permission_set()->HasExplicitAccessToOrigin(url);
+  return runtime_data_.GetActivePermissions()->
+      HasExplicitAccessToOrigin(url);
+}
+
+bool Extension::HasEffectiveAccessToAllHosts() const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  return runtime_data_.GetActivePermissions()->HasEffectiveAccessToAllHosts();
+}
+
+bool Extension::HasFullPermissions() const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  return runtime_data_.GetActivePermissions()->HasEffectiveFullAccess();
+}
+
+ExtensionPermissionMessages Extension::GetPermissionMessages() const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  if (IsTrustedId(id_))
+    return ExtensionPermissionMessages();
+  else
+    return runtime_data_.GetActivePermissions()->GetPermissionMessages();
+}
+
+std::vector<string16> Extension::GetPermissionMessageStrings() const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  if (IsTrustedId(id_))
+    return std::vector<string16>();
+  else
+    return runtime_data_.GetActivePermissions()->GetWarningMessages();
+}
+
+void Extension::SetActivePermissions(
+    const ExtensionPermissionSet* permissions) const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  runtime_data_.SetActivePermissions(permissions);
+}
+
+scoped_refptr<const ExtensionPermissionSet>
+    Extension::GetActivePermissions() const {
+  base::AutoLock auto_lock(runtime_data_lock_);
+  return runtime_data_.GetActivePermissions();
 }
 
 bool Extension::IsComponentOnlyPermission(
@@ -2637,12 +2716,14 @@ bool Extension::HasMultipleUISurfaces() const {
 bool Extension::CanExecuteScriptOnPage(const GURL& page_url,
                                        const UserScript* script,
                                        std::string* error) const {
+  base::AutoLock auto_lock(runtime_data_lock_);
   // The gallery is special-cased as a restricted URL for scripting to prevent
   // access to special JS bindings we expose to the gallery (and avoid things
   // like extensions removing the "report abuse" link).
   // TODO(erikkay): This seems like the wrong test.  Shouldn't we we testing
   // against the store app extent?
-  if ((page_url.host() == GURL(Extension::ChromeStoreLaunchURL()).host()) &&
+  GURL store_url(extension_urls::GetWebstoreLaunchURL());
+  if ((page_url.host() == store_url.host()) &&
       !CanExecuteScriptEverywhere() &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAllowScriptingGallery)) {
@@ -2661,7 +2742,8 @@ bool Extension::CanExecuteScriptOnPage(const GURL& page_url,
 
   // Otherwise, see if this extension has permission to execute script
   // programmatically on pages.
-  if (permission_set()->HasExplicitAccessToOrigin(page_url))
+  if (runtime_data_.GetActivePermissions()->HasExplicitAccessToOrigin(
+          page_url))
     return true;
 
   if (error) {
@@ -2670,14 +2752,6 @@ bool Extension::CanExecuteScriptOnPage(const GURL& page_url,
   }
 
   return false;
-}
-
-bool Extension::HasEffectiveAccessToAllHosts() const {
-  return permission_set_->HasEffectiveAccessToAllHosts();
-}
-
-bool Extension::HasFullPermissions() const {
-  return permission_set_->HasEffectiveFullAccess();
 }
 
 bool Extension::ShowConfigureContextMenus() const {
@@ -2730,8 +2804,8 @@ bool Extension::CanCaptureVisiblePage(const GURL& page_url,
 }
 
 bool Extension::UpdatesFromGallery() const {
-  return update_url() == GalleryUpdateUrl(false) ||
-         update_url() == GalleryUpdateUrl(true);
+  return update_url() == extension_urls::GetWebstoreUpdateUrl(false) ||
+         update_url() == extension_urls::GetWebstoreUpdateUrl(true);
 }
 
 bool Extension::OverlapsWithOrigin(const GURL& origin) const {
@@ -2754,6 +2828,52 @@ bool Extension::OverlapsWithOrigin(const GURL& origin) const {
   return web_extent().OverlapsWith(origin_only_pattern_list);
 }
 
+Extension::SyncType Extension::GetSyncType() const {
+  // TODO(akalin): Figure out if we need to allow some other types.
+  if (location() != Extension::INTERNAL) {
+    // We have a non-standard location.
+    return SYNC_TYPE_NONE;
+  }
+
+  // Disallow extensions with non-gallery auto-update URLs for now.
+  //
+  // TODO(akalin): Relax this restriction once we've put in UI to
+  // approve synced extensions.
+  if (!update_url().is_empty() &&
+      (update_url() != extension_urls::GetWebstoreUpdateUrl(false)) &&
+      (update_url() != extension_urls::GetWebstoreUpdateUrl(true))) {
+    return SYNC_TYPE_NONE;
+  }
+
+  // Disallow extensions with native code plugins.
+  //
+  // TODO(akalin): Relax this restriction once we've put in UI to
+  // approve synced extensions.
+  if (!plugins().empty()) {
+    return SYNC_TYPE_NONE;
+  }
+
+  switch (GetType()) {
+    case Extension::TYPE_EXTENSION:
+      return SYNC_TYPE_EXTENSION;
+
+    case Extension::TYPE_USER_SCRIPT:
+      // We only want to sync user scripts with gallery update URLs.
+      if (update_url() == extension_urls::GetWebstoreUpdateUrl(true) ||
+          update_url() == extension_urls::GetWebstoreUpdateUrl(false))
+        return SYNC_TYPE_EXTENSION;
+      else
+        return SYNC_TYPE_NONE;
+
+    case Extension::TYPE_HOSTED_APP:
+    case Extension::TYPE_PACKAGED_APP:
+        return SYNC_TYPE_APP;
+
+    default:
+      return SYNC_TYPE_NONE;
+  }
+}
+
 ExtensionInfo::ExtensionInfo(const DictionaryValue* manifest,
                              const std::string& id,
                              const FilePath& path,
@@ -2767,11 +2887,26 @@ ExtensionInfo::ExtensionInfo(const DictionaryValue* manifest,
 
 ExtensionInfo::~ExtensionInfo() {}
 
+Extension::RuntimeData::RuntimeData() {}
+Extension::RuntimeData::RuntimeData(const ExtensionPermissionSet* active)
+    : active_permissions_(active) {}
+Extension::RuntimeData::~RuntimeData() {}
+
+scoped_refptr<const ExtensionPermissionSet>
+    Extension::RuntimeData::GetActivePermissions() const {
+  return active_permissions_;
+}
+
+void Extension::RuntimeData::SetActivePermissions(
+    const ExtensionPermissionSet* active) {
+  active_permissions_ = active;
+}
+
 UninstalledExtensionInfo::UninstalledExtensionInfo(
     const Extension& extension)
     : extension_id(extension.id()),
       extension_api_permissions(
-          extension.permission_set()->GetAPIsAsStrings()),
+          extension.GetActivePermissions()->GetAPIsAsStrings()),
       extension_type(extension.GetType()),
       update_url(extension.update_url()) {}
 
@@ -2780,7 +2915,15 @@ UninstalledExtensionInfo::~UninstalledExtensionInfo() {}
 
 UnloadedExtensionInfo::UnloadedExtensionInfo(
     const Extension* extension,
-    Reason reason)
+    extension_misc::UnloadedExtensionReason reason)
   : reason(reason),
     already_disabled(false),
     extension(extension) {}
+
+UpdatedExtensionPermissionsInfo::UpdatedExtensionPermissionsInfo(
+    const Extension* extension,
+    const ExtensionPermissionSet* permissions,
+    Reason reason)
+    : reason(reason),
+      extension(extension),
+      permissions(permissions) {}

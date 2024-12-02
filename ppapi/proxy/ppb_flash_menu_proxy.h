@@ -6,14 +6,16 @@
 #define PPAPI_PPB_FLASH_MENU_PROXY_H_
 
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
 
 struct PP_Flash_Menu;
 struct PP_Point;
 struct PPB_Flash_Menu;
 
-namespace pp {
+namespace ppapi {
+
+class HostResource;
+
 namespace proxy {
 
 class SerializedFlashMenu;
@@ -36,19 +38,19 @@ class PPB_Flash_Menu_Proxy : public InterfaceProxy {
 
   void OnMsgCreate(PP_Instance instance_id,
                    const SerializedFlashMenu& menu_data,
-                   HostResource* resource);
-  void OnMsgShow(const HostResource& menu,
+                   ppapi::HostResource* resource);
+  void OnMsgShow(const ppapi::HostResource& menu,
                  const PP_Point& location);
-  void OnMsgShowACK(const HostResource& menu,
+  void OnMsgShowACK(const ppapi::HostResource& menu,
                     int32_t selected_id,
                     int32_t result);
   void SendShowACKToPlugin(int32_t result, ShowRequest* request);
 
-  CompletionCallbackFactory<PPB_Flash_Menu_Proxy,
-                            ProxyNonThreadSafeRefCount> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_Flash_Menu_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PPB_FLASH_MENU_PROXY_H_

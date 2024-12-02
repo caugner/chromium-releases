@@ -5,14 +5,14 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/chromeos/login/enterprise_enrollment_screen.h"
+#include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/common/test_url_fetcher_factory.h"
+#include "content/test/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -35,9 +35,6 @@ class EnterpriseMetricsEnrollmentTest : public WizardInProcessBrowserTest {
     WizardInProcessBrowserTest::SetUpOnMainThread();
 
     ASSERT_TRUE(controller() != NULL);
-
-    // Use mock URLFetchers.
-    URLFetcher::set_factory(&factory_);
 
     screen_ = controller()->GetEnterpriseEnrollmentScreen();
 
@@ -138,6 +135,13 @@ IN_PROC_BROWSER_TEST_F(EnterpriseMetricsEnrollmentTest, OnPolicyUnmanaged) {
   screen_->OnPolicyStateChanged(policy::CloudPolicySubsystem::UNMANAGED,
                                 policy::CloudPolicySubsystem::NO_DETAILS);
   CheckSample(policy::kMetricEnrollmentNotSupported);
+}
+
+IN_PROC_BROWSER_TEST_F(EnterpriseMetricsEnrollmentTest, OnInvalidSN) {
+  screen_->OnPolicyStateChanged(
+      policy::CloudPolicySubsystem::UNENROLLED,
+      policy::CloudPolicySubsystem::BAD_SERIAL_NUMBER);
+  CheckSample(policy::kMetricEnrollmentInvalidSerialNumber);
 }
 
 IN_PROC_BROWSER_TEST_F(EnterpriseMetricsEnrollmentTest, EnrollmentOK) {

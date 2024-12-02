@@ -20,10 +20,8 @@
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/local_file_system_file_util.h"
-#include "webkit/fileapi/obfuscated_file_system_file_util.h"
+#include "webkit/fileapi/obfuscated_file_util.h"
 #include "webkit/fileapi/quota_file_util.h"
-#include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/quota/quota_manager.h"
 
@@ -97,7 +95,7 @@ class ObfuscatedOriginEnumerator
     : public fileapi::SandboxMountPointProvider::OriginEnumerator {
  public:
   explicit ObfuscatedOriginEnumerator(
-      fileapi::ObfuscatedFileSystemFileUtil* file_util) {
+      fileapi::ObfuscatedFileUtil* file_util) {
     enum_.reset(file_util->CreateOriginEnumerator());
   }
   virtual ~ObfuscatedOriginEnumerator() {}
@@ -111,8 +109,7 @@ class ObfuscatedOriginEnumerator
   }
 
  private:
-  scoped_ptr<fileapi::ObfuscatedFileSystemFileUtil::AbstractOriginEnumerator>
-      enum_;
+  scoped_ptr<fileapi::ObfuscatedFileUtil::AbstractOriginEnumerator> enum_;
 };
 
 class OldSandboxOriginEnumerator
@@ -173,7 +170,7 @@ FilePath OldGetBaseDirectoryForOriginAndType(
 }
 
 bool MigrateOneOldFileSystem(
-    fileapi::ObfuscatedFileSystemFileUtil* file_util,
+    fileapi::ObfuscatedFileUtil* file_util,
     const FilePath& old_base_path, const GURL& origin,
     fileapi::FileSystemType type) {
   FilePath base_path = OldGetBaseDirectoryForOriginAndType(
@@ -202,7 +199,7 @@ bool MigrateOneOldFileSystem(
 }
 
 void MigrateAllOldFileSystems(
-    fileapi::ObfuscatedFileSystemFileUtil* file_util,
+    fileapi::ObfuscatedFileUtil* file_util,
     const FilePath& old_base_path) {
   scoped_ptr<OldSandboxOriginEnumerator> old_origins(
       new OldSandboxOriginEnumerator(old_base_path));
@@ -251,7 +248,7 @@ void MigrateAllOldFileSystems(
 // to look up the filesystem's root, so we can take care of most of them by
 // putting a check there.
 void MigrateIfNeeded(
-    fileapi::ObfuscatedFileSystemFileUtil* file_util,
+    fileapi::ObfuscatedFileUtil* file_util,
     const FilePath& old_base_path) {
   if (file_util::DirectoryExists(old_base_path))
     MigrateAllOldFileSystems(file_util, old_base_path);
@@ -279,11 +276,10 @@ SandboxMountPointProvider::SandboxMountPointProvider(
       path_manager_(path_manager),
       file_message_loop_(file_message_loop),
       profile_path_(profile_path),
-      quota_file_util_(QuotaFileUtil::GetInstance()),
       sandbox_file_util_(
-          new ObfuscatedFileSystemFileUtil(
+          new ObfuscatedFileUtil(
               profile_path.Append(kNewFileSystemDirectory),
-              quota_file_util_)) {
+              QuotaFileUtil::CreateDefault())) {
 }
 
 SandboxMountPointProvider::~SandboxMountPointProvider() {
@@ -308,12 +304,12 @@ class SandboxMountPointProvider::GetFileSystemRootPathTask
       scoped_refptr<base::MessageLoopProxy> file_message_loop,
       const GURL& origin_url,
       FileSystemType type,
-      ObfuscatedFileSystemFileUtil* file_util,
+      ObfuscatedFileUtil* file_util,
       const FilePath& old_base_path,
       FileSystemPathManager::GetRootPathCallback* callback)
       : file_message_loop_(file_message_loop),
         origin_message_loop_proxy_(
-            base::MessageLoopProxy::CreateForCurrentThread()),
+            base::MessageLoopProxy::current()),
         origin_url_(origin_url),
         type_(type),
         file_util_(file_util),
@@ -362,7 +358,7 @@ class SandboxMountPointProvider::GetFileSystemRootPathTask
   scoped_refptr<base::MessageLoopProxy> origin_message_loop_proxy_;
   GURL origin_url_;
   FileSystemType type_;
-  scoped_refptr<ObfuscatedFileSystemFileUtil> file_util_;
+  scoped_refptr<ObfuscatedFileUtil> file_util_;
   FilePath old_base_path_;
   scoped_ptr<FileSystemPathManager::GetRootPathCallback> callback_;
 };
@@ -526,10 +522,11 @@ int64 SandboxMountPointProvider::GetOriginUsageOnFileThread(
   FilePath usage_file_path =
       base_path.AppendASCII(FileSystemUsageCache::kUsageFileName);
 
+  bool is_valid = FileSystemUsageCache::IsValid(usage_file_path);
   int32 dirty_status = FileSystemUsageCache::GetDirty(usage_file_path);
   bool visited = (visited_origins_.find(origin_url) != visited_origins_.end());
   visited_origins_.insert(origin_url);
-  if (dirty_status == 0 || (dirty_status > 0 && visited)) {
+  if (is_valid && (dirty_status == 0 || (dirty_status > 0 && visited))) {
     // The usage cache is clean (dirty == 0) or the origin is already
     // initialized and running.  Read the cache file to get the usage.
     return FileSystemUsageCache::GetUsage(usage_file_path);
@@ -547,23 +544,11 @@ int64 SandboxMountPointProvider::GetOriginUsageOnFileThread(
   FilePath file_path_each;
   int64 usage = 0;
 
-  // TODO(ericu): This could be made much more efficient if the
-  // AbstractFileEnumerator also had an interface to tell you the size of the
-  // file.  ObfuscatedFileSystemFileEnumerator has already looked up the data,
-  // and it's a big waste to look it up again.  The other implementers could
-  // easily add it on-demand, so as not to waste time when it's not needed.
   while (!(file_path_each = enumerator->Next()).empty()) {
     base::PlatformFileInfo file_info;
     FilePath platform_file_path;
-    if (!enumerator->IsDirectory()) {
-      base::PlatformFileError error = sandbox_file_util_->GetFileInfo(
-          &context, file_path_each, &file_info, &platform_file_path);
-      if (error != base::PLATFORM_FILE_OK)
-        NOTREACHED();
-      else
-        usage += file_info.size;
-    }
-    usage += quota_file_util_->ComputeFilePathCost(file_path_each);
+    usage += enumerator->Size();
+    usage += ObfuscatedFileUtil::ComputeFilePathCost(file_path_each);
   }
   // This clears the dirty flag too.
   FileSystemUsageCache::UpdateUsage(usage_file_path, usage);
@@ -620,7 +605,16 @@ void SandboxMountPointProvider::EndUpdateOriginOnFileThread(
   FileSystemUsageCache::DecrementDirty(usage_file_path);
 }
 
-FileSystemFileUtil* SandboxMountPointProvider::GetFileSystemFileUtil() {
+void SandboxMountPointProvider::InvalidateUsageCache(
+    const GURL& origin_url, fileapi::FileSystemType type) {
+  DCHECK(type == fileapi::kFileSystemTypeTemporary ||
+         type == fileapi::kFileSystemTypePersistent);
+  FilePath usage_file_path = GetUsageCachePathForOriginAndType(
+      origin_url, type);
+  FileSystemUsageCache::IncrementDirty(usage_file_path);
+}
+
+FileSystemFileUtil* SandboxMountPointProvider::GetFileUtil() {
   return sandbox_file_util_.get();
 }
 

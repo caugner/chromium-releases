@@ -15,6 +15,7 @@
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/image/image.h"
 
+class PageInfoModelObserver;
 class PrefService;
 class Profile;
 
@@ -22,13 +23,6 @@ class Profile;
 // info dialog/bubble.
 class PageInfoModel {
  public:
-  class PageInfoModelObserver {
-   public:
-    virtual ~PageInfoModelObserver() {}
-
-    virtual void ModelChanged() = 0;
-  };
-
   enum SectionInfoType {
     SECTION_INFO_IDENTITY = 0,
     SECTION_INFO_CONNECTION,

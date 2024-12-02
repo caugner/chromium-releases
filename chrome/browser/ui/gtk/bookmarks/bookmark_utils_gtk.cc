@@ -6,7 +6,7 @@
 
 #include "base/pickle.h"
 #include "base/string16.h"
-#include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
@@ -16,7 +16,8 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/font.h"
@@ -66,7 +67,8 @@ void PackButton(GdkPixbuf* pixbuf, const string16& title, bool ellipsize,
   if (!label_string.empty()) {
     GtkWidget* label = gtk_label_new(label_string.c_str());
     // Until we switch to vector graphics, force the font size.
-    gtk_util::ForceFontSizePixels(label, 13.4);  // 13.4px == 10pt @ 96dpi
+    if (!provider->UsingNativeTheme())
+      gtk_util::ForceFontSizePixels(label, 13.4);  // 13.4px == 10pt @ 96dpi
 
     // Ellipsize long bookmark names.
     if (ellipsize) {
@@ -252,10 +254,10 @@ std::string BuildMenuLabelFor(const BookmarkNode* node) {
   // This breaks on word boundaries. Ideally we would break on character
   // boundaries.
   std::string elided_name = UTF16ToUTF8(
-      l10n_util::TruncateString(node->GetTitle(), kMaxCharsOnAMenuLabel));
+      ui::TruncateString(node->GetTitle(), kMaxCharsOnAMenuLabel));
 
   if (elided_name.empty()) {
-    elided_name = UTF16ToUTF8(l10n_util::TruncateString(
+    elided_name = UTF16ToUTF8(ui::TruncateString(
         UTF8ToUTF16(node->url().possibly_invalid_spec()),
         kMaxCharsOnAMenuLabel));
   }
@@ -279,8 +281,8 @@ void SetButtonTextColors(GtkWidget* label, GtkThemeService* provider) {
 
     // Because the prelight state is a white image that doesn't change by the
     // theme, force the text color to black when it would be used.
-    gtk_widget_modify_fg(label, GTK_STATE_ACTIVE, &gtk_util::kGdkBlack);
-    gtk_widget_modify_fg(label, GTK_STATE_PRELIGHT, &gtk_util::kGdkBlack);
+    gtk_widget_modify_fg(label, GTK_STATE_ACTIVE, &ui::kGdkBlack);
+    gtk_widget_modify_fg(label, GTK_STATE_PRELIGHT, &ui::kGdkBlack);
   }
 }
 
@@ -354,9 +356,9 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
     }
     case ui::TEXT_HTML: {
       std::string utf8_title = UTF16ToUTF8(nodes[0]->GetTitle());
-      std::string utf8_html = StringPrintf("<a href=\"%s\">%s</a>",
-                                           nodes[0]->url().spec().c_str(),
-                                           utf8_title.c_str());
+      std::string utf8_html = base::StringPrintf("<a href=\"%s\">%s</a>",
+                                                 nodes[0]->url().spec().c_str(),
+                                                 utf8_title.c_str());
       gtk_selection_data_set(selection_data,
                              GetAtomForTarget(ui::TEXT_HTML),
                              kBitsInAByte,

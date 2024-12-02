@@ -14,12 +14,12 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
 #include "googleurl/src/gurl.h"
@@ -100,7 +100,7 @@ void ExtensionPopupGtk::ShowPopup() {
     DevToolsWindow::OpenDevToolsWindow(host_->render_view_host());
     // Listen for the the devtools window closing.
     registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-        Source<Profile>(host_->profile()));
+        Source<content::BrowserContext>(host_->profile()));
   }
 
   // Only one instance should be showing at a time. Get rid of the old one, if

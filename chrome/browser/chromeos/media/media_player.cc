@@ -17,7 +17,6 @@
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/chromeos/extensions/media_player_event_router.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/file_manager_util.h"
 #include "chrome/browser/history/history_types.h"
@@ -34,6 +33,7 @@
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/download_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/url_fetcher.h"
@@ -118,6 +118,7 @@ void MediaPlayer::ForcePlayMediaURL(const GURL& url, Browser* creator) {
   if (mediaplayer_browser_ == NULL) {
     PopupMediaPlayer(creator);
   }
+  current_playlist_.clear();
   current_playlist_.push_back(MediaUrl(url));
   current_position_ = current_playlist_.size() - 1;
   pending_playback_request_ = true;
@@ -166,9 +167,9 @@ void MediaPlayer::SetPlaybackError(GURL const& url) {
 void MediaPlayer::Observe(int type,
                           const NotificationSource& source,
                           const NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_BROWSER_CLOSING);
+  DCHECK(type == chrome::NOTIFICATION_BROWSER_CLOSED);
   registrar_.Remove(this,
-                    chrome::NOTIFICATION_BROWSER_CLOSING,
+                    chrome::NOTIFICATION_BROWSER_CLOSED,
                     source);
   if (Source<Browser>(source).ptr() == mediaplayer_browser_) {
     mediaplayer_browser_ = NULL;
@@ -204,7 +205,7 @@ void MediaPlayer::PopupPlaylist(Browser* creator) {
                                             gfx::Rect(),
                                             profile);
   registrar_.Add(this,
-                 chrome::NOTIFICATION_BROWSER_CLOSING,
+                 chrome::NOTIFICATION_BROWSER_CLOSED,
                  Source<Browser>(playlist_browser_));
   playlist_browser_->AddSelectedTabWithURL(GetMediaplayerPlaylistUrl(),
                                            PageTransition::LINK);
@@ -229,7 +230,7 @@ void MediaPlayer::PopupMediaPlayer(Browser* creator) {
                                                gfx::Rect(),
                                                profile);
   registrar_.Add(this,
-                 chrome::NOTIFICATION_BROWSER_CLOSING,
+                 chrome::NOTIFICATION_BROWSER_CLOSED,
                  Source<Browser>(mediaplayer_browser_));
 
 #if defined(OS_CHROMEOS)

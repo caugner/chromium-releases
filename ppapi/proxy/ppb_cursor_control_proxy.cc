@@ -7,7 +7,6 @@
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/thunk/enter.h"
@@ -16,7 +15,7 @@
 using ppapi::thunk::EnterFunctionNoLock;
 using ppapi::thunk::PPB_CursorControl_FunctionAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -39,7 +38,7 @@ PPB_CursorControl_Proxy::~PPB_CursorControl_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_CursorControl_Proxy::GetInfo() {
   static const Info info = {
-    ppapi::thunk::GetPPB_CursorControl_Thunk(),
+    thunk::GetPPB_CursorControl_Thunk(),
     PPB_CURSOR_CONTROL_DEV_INTERFACE,
     INTERFACE_ID_PPB_CURSORCONTROL,
     false,
@@ -60,9 +59,9 @@ PP_Bool PPB_CursorControl_Proxy::SetCursor(PP_Instance instance,
   // It's legal for the image ID to be null if the type is not custom.
   HostResource cursor_image_resource;
   if (type == PP_CURSORTYPE_CUSTOM) {
-    PluginResource* cursor_image = PluginResourceTracker::GetInstance()->
-        GetResourceObject(custom_image_id);
-    if (!cursor_image || cursor_image->instance() != instance)
+    Resource* cursor_image = PluginResourceTracker::GetInstance()->
+        GetResource(custom_image_id);
+    if (!cursor_image || cursor_image->pp_instance() != instance)
       return PP_FALSE;
     cursor_image_resource = cursor_image->host_resource();
   } else {
@@ -128,7 +127,7 @@ bool PPB_CursorControl_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
 void PPB_CursorControl_Proxy::OnMsgSetCursor(PP_Instance instance,
                                              int32_t type,
-                                             HostResource custom_image,
+                                             const HostResource& custom_image,
                                              const PP_Point& hot_spot,
                                              PP_Bool* result) {
   EnterFunctionNoLock<PPB_CursorControl_FunctionAPI> enter(instance, true);
@@ -168,4 +167,4 @@ void PPB_CursorControl_Proxy::OnMsgCanLockCursor(PP_Instance instance,
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

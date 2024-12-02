@@ -19,12 +19,13 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/automation_proxy.h"
-#include "chrome/test/chrome_process_util.h"
-#include "chrome/test/test_launcher_utils.h"
-#include "chrome/test/test_switches.h"
+#include "chrome/test/base/chrome_process_util.h"
+#include "chrome/test/base/test_launcher_utils.h"
+#include "chrome/test/base/test_switches.h"
 #include "chrome/test/ui/ui_test.h"
 #include "content/common/child_process_info.h"
 #include "content/common/debug_flags.h"
+#include "ipc/ipc_channel.h"
 #include "sql/connection.h"
 
 namespace {
@@ -62,24 +63,33 @@ void UpdateHistoryDates(const FilePath& user_data_dir) {
 
 // ProxyLauncher functions
 
-const char ProxyLauncher::kDefaultInterfacePath[] =
+#if defined(OS_WIN)
+const char ProxyLauncher::kDefaultInterfaceId[] = "ChromeTestingInterface";
+#elif defined(OS_POSIX)
+const char ProxyLauncher::kDefaultInterfaceId[] =
     "/var/tmp/ChromeTestingInterface";
-
-bool ProxyLauncher::in_process_renderer_ = false;
-bool ProxyLauncher::no_sandbox_ = false;
-bool ProxyLauncher::full_memory_dump_ = false;
-bool ProxyLauncher::show_error_dialogs_ = true;
-bool ProxyLauncher::dump_histograms_on_exit_ = false;
-bool ProxyLauncher::enable_dcheck_ = false;
-bool ProxyLauncher::silent_dump_on_dcheck_ = false;
-bool ProxyLauncher::disable_breakpad_ = false;
-std::string ProxyLauncher::js_flags_ = "";
-std::string ProxyLauncher::log_level_ = "";
+#endif
 
 ProxyLauncher::ProxyLauncher()
     : process_(base::kNullProcessHandle),
       process_id_(-1),
-      shutdown_type_(WINDOW_CLOSE) {
+      shutdown_type_(WINDOW_CLOSE),
+      no_sandbox_(CommandLine::ForCurrentProcess()->HasSwitch(
+                      switches::kNoSandbox)),
+      full_memory_dump_(CommandLine::ForCurrentProcess()->HasSwitch(
+                            switches::kFullMemoryCrashReport)),
+      dump_histograms_on_exit_(CommandLine::ForCurrentProcess()->HasSwitch(
+                                   switches::kDumpHistogramsOnExit)),
+      enable_dcheck_(CommandLine::ForCurrentProcess()->HasSwitch(
+                         switches::kEnableDCHECK)),
+      silent_dump_on_dcheck_(CommandLine::ForCurrentProcess()->HasSwitch(
+                                 switches::kSilentDumpOnDCHECK)),
+      disable_breakpad_(CommandLine::ForCurrentProcess()->HasSwitch(
+                            switches::kDisableBreakpad)),
+      js_flags_(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+                    switches::kJavaScriptFlags)),
+      log_level_(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+                     switches::kLoggingLevel)) {
 }
 
 ProxyLauncher::~ProxyLauncher() {}
@@ -141,10 +151,9 @@ void ProxyLauncher::CloseBrowserAndServer() {
   // Suppress spammy failures that seem to be occurring when running
   // the UI tests in single-process mode.
   // TODO(jhughes): figure out why this is necessary at all, and fix it
-  if (!in_process_renderer_)
-    AssertAppNotRunning(
-        StringPrintf(L"Unable to quit all browser processes. Original PID %d",
-                     &process_id_));
+  AssertAppNotRunning(
+      StringPrintf("Unable to quit all browser processes. Original PID %d",
+                   process_id_));
 
   DisconnectFromRunningBrowser();
 }
@@ -304,17 +313,17 @@ void ProxyLauncher::TerminateBrowser() {
   browser_quit_time_ = base::TimeTicks::Now() - quit_start;
 }
 
-void ProxyLauncher::AssertAppNotRunning(const std::wstring& error_message) {
-  std::wstring final_error_message(error_message);
+void ProxyLauncher::AssertAppNotRunning(const std::string& error_message) {
+  std::string final_error_message(error_message);
 
   ChromeProcessList processes = GetRunningChromeProcesses(process_id_);
   if (!processes.empty()) {
-    final_error_message += L" Leftover PIDs: [";
+    final_error_message += " Leftover PIDs: [";
     for (ChromeProcessList::const_iterator it = processes.begin();
          it != processes.end(); ++it) {
-      final_error_message += StringPrintf(L" %d", *it);
+      final_error_message += StringPrintf(" %d", *it);
     }
-    final_error_message += L" ]";
+    final_error_message += " ]";
   }
   ASSERT_TRUE(processes.empty()) << final_error_message;
 }
@@ -384,8 +393,6 @@ void ProxyLauncher::PrepareTestCommandline(CommandLine* command_line,
           switches::kEnableErrorDialogs)) {
     command_line->AppendSwitch(switches::kNoErrorDialogs);
   }
-  if (in_process_renderer_)
-    command_line->AppendSwitch(switches::kSingleProcess);
   if (no_sandbox_)
     command_line->AppendSwitch(switches::kNoSandbox);
   if (full_memory_dump_)
@@ -437,6 +444,21 @@ bool ProxyLauncher::LaunchBrowserHelper(const LaunchState& state, bool wait,
   DebugFlags::ProcessDebugFlags(
       &command_line, ChildProcessInfo::UNKNOWN_PROCESS, false);
 
+  // Sometimes one needs to run the browser under a special environment
+  // (e.g. valgrind) without also running the test harness (e.g. python)
+  // under the special environment.  Provide a way to wrap the browser
+  // commandline with a special prefix to invoke the special environment.
+  const char* browser_wrapper = getenv("BROWSER_WRAPPER");
+  if (browser_wrapper) {
+#if defined(OS_WIN)
+    command_line.PrependWrapper(ASCIIToWide(browser_wrapper));
+#elif defined(OS_POSIX)
+    command_line.PrependWrapper(browser_wrapper);
+#endif
+    VLOG(1) << "BROWSER_WRAPPER was set, prefixing command_line with "
+            << browser_wrapper;
+  }
+
   // TODO(phajdan.jr): Only run it for "main" browser launch.
   browser_launch_time_ = base::TimeTicks::Now();
 
@@ -446,17 +468,6 @@ bool ProxyLauncher::LaunchBrowserHelper(const LaunchState& state, bool wait,
 #if defined(OS_WIN)
   options.start_hidden = !state.show_window;
 #elif defined(OS_POSIX)
-  // Sometimes one needs to run the browser under a special environment
-  // (e.g. valgrind) without also running the test harness (e.g. python)
-  // under the special environment.  Provide a way to wrap the browser
-  // commandline with a special prefix to invoke the special environment.
-  const char* browser_wrapper = getenv("BROWSER_WRAPPER");
-  if (browser_wrapper) {
-    command_line.PrependWrapper(browser_wrapper);
-    VLOG(1) << "BROWSER_WRAPPER was set, prefixing command_line with "
-            << browser_wrapper;
-  }
-
   base::file_handle_mapping_vector fds;
   if (automation_proxy_.get())
     fds = automation_proxy_->fds_to_map();
@@ -510,37 +521,44 @@ AutomationProxy* NamedProxyLauncher::CreateAutomationProxy(
   return proxy;
 }
 
-void NamedProxyLauncher::InitializeConnection(const LaunchState& state,
+bool NamedProxyLauncher::InitializeConnection(const LaunchState& state,
                                               bool wait_for_initial_loads) {
-  FilePath testing_channel_path;
-#if defined(OS_WIN)
-  testing_channel_path = FilePath(ASCIIToWide(channel_id_));
-#else
-  testing_channel_path = FilePath(channel_id_);
-#endif
-
   if (launch_browser_) {
+#if defined(OS_POSIX)
     // Because we are waiting on the existence of the testing file below,
     // make sure there isn't one already there before browser launch.
-    EXPECT_TRUE(file_util::Delete(testing_channel_path, false));
+    if (!file_util::Delete(FilePath(channel_id_), false)) {
+      LOG(ERROR) << "Failed to delete " << channel_id_;
+      return false;
+    }
+#endif
 
-    // Set up IPC testing interface as a client.
-    ASSERT_TRUE(LaunchBrowser(state));
+    if (!LaunchBrowser(state)) {
+      LOG(ERROR) << "Failed to LaunchBrowser";
+      return false;
+    }
   }
 
   // Wait for browser to be ready for connections.
-  bool testing_channel_exists = false;
+  bool channel_initialized = false;
   for (int wait_time = 0;
        wait_time < TestTimeouts::action_max_timeout_ms();
        wait_time += automation::kSleepTime) {
-    testing_channel_exists = file_util::PathExists(testing_channel_path);
-    if (testing_channel_exists)
+    channel_initialized = IPC::Channel::IsNamedServerInitialized(channel_id_);
+    if (channel_initialized)
       break;
     base::PlatformThread::Sleep(automation::kSleepTime);
   }
-  EXPECT_TRUE(testing_channel_exists);
+  if (!channel_initialized) {
+    LOG(ERROR) << "Failed to wait for testing channel presence.";
+    return false;
+  }
 
-  ASSERT_TRUE(ConnectToRunningBrowser(wait_for_initial_loads));
+  if (!ConnectToRunningBrowser(wait_for_initial_loads)) {
+    LOG(ERROR) << "Failed to ConnectToRunningBrowser";
+    return false;
+  }
+  return true;
 }
 
 void NamedProxyLauncher::TerminateConnection() {
@@ -571,9 +589,9 @@ AutomationProxy* AnonymousProxyLauncher::CreateAutomationProxy(
   return proxy;
 }
 
-void AnonymousProxyLauncher::InitializeConnection(const LaunchState& state,
+bool AnonymousProxyLauncher::InitializeConnection(const LaunchState& state,
                                                   bool wait_for_initial_loads) {
-  ASSERT_TRUE(LaunchBrowserAndServer(state, wait_for_initial_loads));
+  return LaunchBrowserAndServer(state, wait_for_initial_loads);
 }
 
 void AnonymousProxyLauncher::TerminateConnection() {

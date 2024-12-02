@@ -52,7 +52,7 @@ PdfMetafileCg::PdfMetafileCg()
 }
 
 PdfMetafileCg::~PdfMetafileCg() {
-  DCHECK(CalledOnValidThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (pdf_doc_ && thread_pdf_docs.Get()) {
     // Transfer ownership to the pool.
     CFSetAddValue(thread_pdf_docs.Get(), pdf_doc_);
@@ -107,7 +107,7 @@ bool PdfMetafileCg::InitFromData(const void* src_buffer,
 }
 
 SkDevice* PdfMetafileCg::StartPageForVectorCanvas(
-    int page_number, const gfx::Size& page_size, const gfx::Rect& content_area,
+    const gfx::Size& page_size, const gfx::Rect& content_area,
     const float& scale_factor) {
   NOTIMPLEMENTED();
   return NULL;
@@ -127,12 +127,12 @@ bool PdfMetafileCg::StartPage(const gfx::Size& page_size,
   page_is_open_ = true;
   CGContextSaveGState(context_);
 
+  // Move to the context origin.
+  CGContextTranslateCTM(context_, content_area.x(), -content_area.y());
+
   // Flip the context.
   CGContextTranslateCTM(context_, 0, height);
   CGContextScaleCTM(context_, scale_factor, -scale_factor);
-
-  // Move to the context origin.
-  CGContextTranslateCTM(context_, content_area.x(), content_area.y());
 
   return context_.get() != NULL;
 }

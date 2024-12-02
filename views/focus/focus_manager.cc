@@ -12,6 +12,7 @@
 #include <gtk/gtk.h>
 #endif
 
+#include "base/auto_reset.h"
 #include "base/logging.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "views/accelerator.h"
@@ -61,7 +62,8 @@ FocusManager::WidgetFocusManager::GetInstance() {
 FocusManager::FocusManager(Widget* widget)
     : widget_(widget),
       focused_view_(NULL),
-      focus_change_reason_(kReasonDirectFocusChange) {
+      focus_change_reason_(kReasonDirectFocusChange),
+      is_changing_focus_(false) {
   DCHECK(widget_);
   stored_focused_view_storage_id_ =
       ViewStorage::GetInstance()->CreateStorageID();
@@ -88,7 +90,7 @@ bool FocusManager::OnKeyEvent(const KeyEvent& event) {
   // Note that we don't do focus traversal if the root window is not part of the
   // active window hierarchy as this would mean we have no focused view and
   // would focus the first focusable view.
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   HWND top_window = widget_->GetNativeView();
   HWND active_window = ::GetActiveWindow();
   if ((active_window == top_window || ::IsChild(active_window, top_window)) &&
@@ -270,6 +272,7 @@ void FocusManager::SetFocusedViewWithReason(
   if (focused_view_ == view)
     return;
 
+  AutoReset<bool> auto_changing_focus(&is_changing_focus_, true);
   // Update the reason for the focus change (since this is checked by
   // some listeners), then notify all listeners.
   focus_change_reason_ = reason;
@@ -461,25 +464,6 @@ void FocusManager::FocusNativeView(gfx::NativeView native_view) {
 // static
 bool FocusManager::IsTabTraversalKeyEvent(const KeyEvent& key_event) {
   return key_event.key_code() == ui::VKEY_TAB && !key_event.IsControlDown();
-}
-
-// static
-FocusManager* FocusManager::GetFocusManagerForNativeView(
-    gfx::NativeView native_view) {
-  // TODO(beng): This method probably isn't necessary.
-  Widget* widget = Widget::GetTopLevelWidgetForNativeView(native_view);
-  return widget ? widget->GetFocusManager() : NULL;
-}
-
-// static
-FocusManager* FocusManager::GetFocusManagerForNativeWindow(
-    gfx::NativeWindow native_window) {
-  // TODO(beng): This method probably isn't necessary.
-  Widget* widget = Widget::GetWidgetForNativeWindow(native_window);
-  if (!widget)
-    return NULL;
-  widget = widget->GetTopLevelWidget();
-  return widget ? widget->GetFocusManager() : NULL;
 }
 
 void FocusManager::ViewRemoved(View* removed) {

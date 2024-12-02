@@ -9,8 +9,8 @@
 #include <vector>
 
 #include "base/memory/scoped_callback_factory.h"
-#include "chrome/browser/download/download_item.h"
-#include "chrome/browser/download/download_manager.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
 #include "content/browser/webui/web_ui.h"
 
 namespace base {
@@ -29,14 +29,14 @@ class DownloadsDOMHandler : public WebUIMessageHandler,
   void Init();
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
+  virtual void RegisterMessages() OVERRIDE;
 
   // DownloadItem::Observer interface
-  virtual void OnDownloadUpdated(DownloadItem* download);
-  virtual void OnDownloadOpened(DownloadItem* download) { }
+  virtual void OnDownloadUpdated(DownloadItem* download) OVERRIDE;
+  virtual void OnDownloadOpened(DownloadItem* download) OVERRIDE { }
 
   // DownloadManager::Observer interface
-  virtual void ModelChanged();
+  virtual void ModelChanged() OVERRIDE;
 
   // Callback for the "getDownloads" message.
   void HandleGetDownloads(const base::ListValue* args);
@@ -71,7 +71,13 @@ class DownloadsDOMHandler : public WebUIMessageHandler,
   // Callback for the "clearAll" message - clears all the downloads.
   void HandleClearAll(const base::ListValue* args);
 
+  // Callback for the "openDownloadsFolder" message - opens the downloads
+  // folder.
+  void HandleOpenDownloadsFolder(const base::ListValue* args);
+
  private:
+  class OriginalDownloadManagerObserver;
+
   // Send the current list of downloads to the page.
   void SendCurrentDownloads();
 
@@ -89,6 +95,11 @@ class DownloadsDOMHandler : public WebUIMessageHandler,
 
   // Our model
   DownloadManager* download_manager_;
+
+  // The downloads webui for an off-the-record window also shows downloads from
+  // the parent profile.
+  scoped_ptr<OriginalDownloadManagerObserver>
+      original_download_manager_observer_;
 
   // The current set of visible DownloadItems for this view received from the
   // DownloadManager. DownloadManager owns the DownloadItems. The vector is

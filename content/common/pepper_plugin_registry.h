@@ -13,15 +13,15 @@
 
 #include "base/file_path.h"
 #include "ppapi/proxy/proxy_channel.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
+#include "webkit/plugins/webplugininfo.h"
 
 struct PepperPluginInfo {
   PepperPluginInfo();
   ~PepperPluginInfo();
 
-  webkit::npapi::WebPluginInfo ToWebPluginInfo() const;
+  webkit::WebPluginInfo ToWebPluginInfo() const;
 
   // Indicates internal plugins for which there's not actually a library.
   // These plugins are implemented in the Chrome binary using a separate set
@@ -39,12 +39,18 @@ struct PepperPluginInfo {
   std::string name;
   std::string description;
   std::string version;
-  std::vector<webkit::npapi::WebPluginMimeType> mime_types;
+  std::vector<webkit::WebPluginMimeType> mime_types;
 
   // When is_internal is set, this contains the function pointers to the
   // entry points for the internal plugins.
   webkit::ppapi::PluginModule::EntryPoints internal_entry_points;
 };
+
+// Constructs a PepperPluginInfo from a WebPluginInfo. Returns false if
+// the operation is not possible, in particular the WebPluginInfo::type
+// must be one of the pepper types.
+bool MakePepperPluginInfo(const webkit::WebPluginInfo& webplugin_info,
+                          PepperPluginInfo* pepper_info);
 
 // This class holds references to all of the known pepper plugin modules.
 //
@@ -53,7 +59,7 @@ struct PepperPluginInfo {
 // not preloaded).
 class PepperPluginRegistry
     : public webkit::ppapi::PluginDelegate::ModuleLifetime,
-      public pp::proxy::ProxyChannel::Delegate {
+      public ppapi::proxy::ProxyChannel::Delegate {
  public:
   ~PepperPluginRegistry();
 
@@ -72,11 +78,12 @@ class PepperPluginRegistry
   // access to the plugins before entering the sandbox.
   static void PreloadModules();
 
-  // Retrieves the information associated with the given plugin path. The
+  // Retrieves the information associated with the given plugin info. The
   // return value will be NULL if there is no such plugin.
   //
   // The returned pointer is owned by the PluginRegistry.
-  const PepperPluginInfo* GetInfoForPlugin(const FilePath& path) const;
+  const PepperPluginInfo* GetInfoForPlugin(
+      const webkit::WebPluginInfo& info);
 
   // Returns an existing loaded module for the given path. It will search for
   // both preloaded in-process or currently active (non crashed) out-of-process

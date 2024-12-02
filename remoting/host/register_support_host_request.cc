@@ -4,6 +4,7 @@
 
 #include "remoting/host/register_support_host_request.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
@@ -59,11 +60,11 @@ void RegisterSupportHostRequest::OnSignallingConnected(
   message_loop_ = MessageLoop::current();
 
   request_.reset(signal_strategy->CreateIqRequest());
-  request_->set_callback(NewCallback(
-      this, &RegisterSupportHostRequest::ProcessResponse));
+  request_->set_callback(base::Bind(
+      &RegisterSupportHostRequest::ProcessResponse, base::Unretained(this)));
 
-  request_->SendIq(buzz::STR_SET, kChromotingBotJid,
-                   CreateRegistrationRequest(jid));
+  request_->SendIq(IqRequest::MakeIqStanza(
+      buzz::STR_SET, kChromotingBotJid, CreateRegistrationRequest(jid)));
 }
 
 void RegisterSupportHostRequest::OnSignallingDisconnected() {
@@ -82,7 +83,10 @@ void RegisterSupportHostRequest::OnSignallingDisconnected() {
 // Ignore any notifications other than signalling
 // connected/disconnected events.
 void RegisterSupportHostRequest::OnAccessDenied() { }
-void RegisterSupportHostRequest::OnAuthenticatedClientsChanged(int clients) { }
+void RegisterSupportHostRequest::OnClientAuthenticated(
+    remoting::protocol::ConnectionToClient* client) { }
+void RegisterSupportHostRequest::OnClientDisconnected(
+    remoting::protocol::ConnectionToClient* client) { }
 void RegisterSupportHostRequest::OnShutdown() { }
 
 XmlElement* RegisterSupportHostRequest::CreateRegistrationRequest(

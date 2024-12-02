@@ -14,14 +14,12 @@
 #include "ppapi/c/dev/ppb_buffer_dev.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/thunk/enter.h"
-#include "ppapi/thunk/ppb_buffer_api.h"
 #include "ppapi/thunk/ppb_buffer_trusted_api.h"
 #include "ppapi/thunk/thunk.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -33,39 +31,10 @@ InterfaceProxy* CreateBufferProxy(Dispatcher* dispatcher,
 
 }  // namespace
 
-class Buffer : public ppapi::thunk::PPB_Buffer_API,
-               public PluginResource {
- public:
-  Buffer(const HostResource& resource,
-         const base::SharedMemoryHandle& shm_handle,
-         uint32_t size);
-  virtual ~Buffer();
-
-  // Resource overrides.
-  virtual Buffer* AsBuffer() OVERRIDE;
-
-  // ResourceObjectBase overrides.
-  virtual ppapi::thunk::PPB_Buffer_API* AsPPB_Buffer_API() OVERRIDE;
-
-  // PPB_Buffer_API implementation.
-  virtual PP_Bool Describe(uint32_t* size_in_bytes) OVERRIDE;
-  virtual PP_Bool IsMapped() OVERRIDE;
-  virtual void* Map() OVERRIDE;
-  virtual void Unmap() OVERRIDE;
-
- private:
-  base::SharedMemory shm_;
-  uint32_t size_;
-  void* mapped_data_;
-  int map_count_;
-
-  DISALLOW_COPY_AND_ASSIGN(Buffer);
-};
-
 Buffer::Buffer(const HostResource& resource,
                const base::SharedMemoryHandle& shm_handle,
                uint32_t size)
-    : PluginResource(resource),
+    : Resource(resource),
       shm_(shm_handle, false),
       size_(size),
       mapped_data_(NULL),
@@ -76,11 +45,7 @@ Buffer::~Buffer() {
   Unmap();
 }
 
-Buffer* Buffer::AsBuffer() {
-  return this;
-}
-
-ppapi::thunk::PPB_Buffer_API* Buffer::AsPPB_Buffer_API() {
+thunk::PPB_Buffer_API* Buffer::AsPPB_Buffer_API() {
   return this;
 }
 
@@ -115,7 +80,7 @@ PPB_Buffer_Proxy::~PPB_Buffer_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_Buffer_Proxy::GetInfo() {
   static const Info info = {
-    ppapi::thunk::GetPPB_Buffer_Thunk(),
+    thunk::GetPPB_Buffer_Thunk(),
     PPB_BUFFER_DEV_INTERFACE,
     INTERFACE_ID_PPB_BUFFER,
     false,
@@ -139,8 +104,15 @@ PP_Resource PPB_Buffer_Proxy::CreateProxyResource(PP_Instance instance,
   if (result.is_null() || !base::SharedMemory::IsHandleValid(shm_handle))
     return 0;
 
-  linked_ptr<Buffer> object(new Buffer(result, shm_handle, size));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
+  return AddProxyResource(result, shm_handle, size);
+}
+
+// static
+PP_Resource PPB_Buffer_Proxy::AddProxyResource(
+    const HostResource& resource,
+    base::SharedMemoryHandle shm_handle,
+    uint32_t size) {
+  return (new Buffer(resource, shm_handle, size))->GetReference();
 }
 
 bool PPB_Buffer_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -167,8 +139,8 @@ void PPB_Buffer_Proxy::OnMsgCreate(
       ppb_buffer_target()->Create(instance, size);
   if (local_buffer_resource == 0)
     return;
-  ::ppapi::thunk::EnterResourceNoLock< ::ppapi::thunk::PPB_BufferTrusted_API>
-        trusted_buffer(local_buffer_resource, false);
+  thunk::EnterResourceNoLock<thunk::PPB_BufferTrusted_API> trusted_buffer(
+      local_buffer_resource, false);
   if (trusted_buffer.failed())
     return;
   int local_fd;
@@ -191,4 +163,4 @@ void PPB_Buffer_Proxy::OnMsgCreate(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

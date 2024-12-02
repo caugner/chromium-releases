@@ -171,7 +171,7 @@ DirectoryLister::Core::Core(const FilePath& dir,
 DirectoryLister::Core::~Core() {}
 
 bool DirectoryLister::Core::Start() {
-  origin_loop_ = base::MessageLoopProxy::CreateForCurrentThread();
+  origin_loop_ = base::MessageLoopProxy::current();
 
   return base::WorkerPool::PostTask(
       FROM_HERE, NewRunnableMethod(this, &Core::StartInternal), true);
@@ -196,7 +196,7 @@ void DirectoryLister::Core::StartInternal() {
     types |= file_util::FileEnumerator::INCLUDE_DOT_DOT;
 
   file_util::FileEnumerator file_enum(dir_, recursive_,
-      static_cast<file_util::FileEnumerator::FILE_TYPE>(types));
+      static_cast<file_util::FileEnumerator::FileType>(types));
 
   FilePath path;
   while (lister_ && !(path = file_enum.Next()).empty()) {

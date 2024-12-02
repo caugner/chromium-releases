@@ -6,7 +6,6 @@
 #define CHROME_RENDERER_PRINT_WEB_VIEW_HELPER_H_
 #pragma once
 
-#include <utility>
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
@@ -15,6 +14,8 @@
 #include "content/renderer/render_view_observer.h"
 #include "content/renderer/render_view_observer_tracker.h"
 #include "printing/metafile.h"
+#include "printing/metafile_impl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
@@ -27,6 +28,14 @@ struct PrintMsg_PrintPages_Params;
 namespace base {
 class DictionaryValue;
 }
+namespace printing {
+struct PageSizeMargins;
+}
+#if defined(USE_SKIA)
+namespace skia {
+class VectorCanvas;
+}
+#endif
 
 // Class that calls the Begin and End print functions on the frame and changes
 // the size of the view temporarily to support full page printing..
@@ -74,16 +83,6 @@ class PrepareFrameAndViewForPrint {
   DISALLOW_COPY_AND_ASSIGN(PrepareFrameAndViewForPrint);
 };
 
-// Struct that holds margin and content area information of a page.
-typedef struct PageSizeMargins {
-  double content_width;
-  double content_height;
-  double margin_top;
-  double margin_right;
-  double margin_bottom;
-  double margin_left;
-} PageSizeMargins;
-
 // PrintWebViewHelper handles most of the printing grunt work for RenderView.
 // We plan on making print asynchronous and that will require copying the DOM
 // of the document and creating a new WebView with the contents.
@@ -109,6 +108,12 @@ class PrintWebViewHelper : public RenderViewObserver,
                            OnPrintForPrintPreview);
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
                            OnPrintForPrintPreviewFail);
+  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
+                           OnPrintPreviewForSelectedPages);
+  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
+                           OnPrintPreviewUsingInvalidPrinterSettings);
+  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
+                           OnPrintForPrintPreviewUsingInvalidPrinterSettings);
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, PrintLayoutTest);
@@ -135,18 +140,12 @@ class PrintWebViewHelper : public RenderViewObserver,
   // Initialize the print preview document.
   bool CreatePreviewDocument();
 
-  // Continue generating the print preview. |requested_preview_page_index|
-  // specifies the browser requested preview page index. It is 1-based or
-  // |printing::INVALID_PAGE_INDEX| to continue with next page.
-  void OnContinuePreview(int requested_preview_page_index);
   // Renders a print preview page. |page_number| is 0-based.
-  void RenderPreviewPage(int page_number);
-  // Finalize the print preview document.
-  bool FinalizePreviewDocument();
+  // Returns true if print preview should continue, false on failure.
+  bool RenderPreviewPage(int page_number);
 
-  // Abort the preview to put |print_preview_context_| into the 'UNINITIALIZED'
-  // state.
-  void OnAbortPreview();
+  // Finalize the print ready preview document.
+  bool FinalizePrintReadyDocument();
 
   // Print / preview the node under the context menu.
   void OnPrintNodeUnderContextMenu();
@@ -165,7 +164,6 @@ class PrintWebViewHelper : public RenderViewObserver,
     OK,
     FAIL_PRINT,
     FAIL_PREVIEW,
-    ABORT_PREVIEW,
   };
 
   // Notification when printing is done - signal tear-down/free resources.
@@ -174,7 +172,9 @@ class PrintWebViewHelper : public RenderViewObserver,
   // Print Settings -----------------------------------------------------------
 
   // Initialize print page settings with default settings.
-  bool InitPrintSettings(WebKit::WebFrame* frame, WebKit::WebNode* node);
+  bool InitPrintSettings(WebKit::WebFrame* frame,
+                         WebKit::WebNode* node,
+                         bool is_preview);
 
   // Initialize print page settings with default settings and prepare the frame
   // for print. A new PrepareFrameAndViewForPrint is created to fulfill the
@@ -184,15 +184,11 @@ class PrintWebViewHelper : public RenderViewObserver,
       WebKit::WebNode* node,
       scoped_ptr<PrepareFrameAndViewForPrint>* prepare);
 
-  // Parse the request id out of |job_settings| and store it in |params|.
-  // Returns false on failure.
-  bool UpdatePrintSettingsRequestId(const base::DictionaryValue& job_settings,
-                                    PrintMsg_Print_Params* params);
-
   // Update the current print settings with new |job_settings|. |job_settings|
   // dictionary contains print job details such as printer name, number of
   // copies, page range, etc.
-  bool UpdatePrintSettings(const base::DictionaryValue& job_settings);
+  bool UpdatePrintSettings(const base::DictionaryValue& job_settings,
+                           bool generating_preview);
 
   // Get final print settings from the user.
   // Return false if the user cancels or on error.
@@ -227,13 +223,17 @@ class PrintWebViewHelper : public RenderViewObserver,
 
   // Platform specific helper function for rendering page(s) to |metafile|.
 #if defined(OS_WIN)
-  void RenderPage(const PrintMsg_Print_Params& params, float* scale_factor,
-                  int page_number, int page_slot, bool is_preview,
-                  WebKit::WebFrame* frame,
-                  scoped_ptr<printing::Metafile>* metafile);
+  // Because of mixed support for alpha channels on printers, this method may
+  // need to create a new metafile.  The result may be either the passed
+  // |metafile| or a new one.  In either case, the caller owns both |metafile|
+  // and the result.
+  printing::Metafile* RenderPage(const PrintMsg_Print_Params& params,
+                                 float* scale_factor, int page_number,
+                                 bool is_preview, WebKit::WebFrame* frame,
+                                 printing::Metafile* metafile);
 #elif defined(OS_MACOSX)
   void RenderPage(const gfx::Size& page_size, const gfx::Rect& content_area,
-                  const float& scale_factor, int page_number, int page_slot,
+                  const float& scale_factor, int page_number,
                   WebKit::WebFrame* frame, printing::Metafile* metafile);
 #elif defined(OS_POSIX)
   bool RenderPages(const PrintMsg_PrintPages_Params& params,
@@ -253,13 +253,23 @@ class PrintWebViewHelper : public RenderViewObserver,
       WebKit::WebFrame* frame,
       int page_index,
       const PrintMsg_Print_Params& default_params,
-      PageSizeMargins* page_layout_in_points);
+      printing::PageSizeMargins* page_layout_in_points);
 
   static void UpdatePrintableSizeInPrintParameters(
       WebKit::WebFrame* frame,
       WebKit::WebNode* node,
       PrepareFrameAndViewForPrint* prepare,
       PrintMsg_Print_Params* params);
+
+  // Given the |device| and |canvas| to draw on, prints the appropriate headers
+  // and footers using strings from |header_footer_info| on to the canvas.
+  static void PrintHeaderAndFooter(
+      WebKit::WebCanvas* canvas,
+      int page_number,
+      int total_pages,
+      float webkit_scale_factor,
+      const printing::PageSizeMargins& page_layout_in_points,
+      const base::DictionaryValue& header_footer_info);
 
   bool GetPrintFrame(WebKit::WebFrame** frame);
 
@@ -284,15 +294,22 @@ class PrintWebViewHelper : public RenderViewObserver,
 
   void RequestPrintPreview();
 
-  // Notify the browser a print preview page has been rendered.
-  // |page_number| is 0-based or |printing::INVALID_PAGE_INDEX| to check
-  // for pending preview requests.
-  void PreviewPageRendered(int page_number, printing::Metafile* metafile);
+  // Checks whether print preview should continue or not.
+  // Returns true if cancelling, false if continuing.
+  bool CheckForCancel();
+
+  // Notifies the browser a print preview page has been rendered.
+  // |page_number| is 0-based.
+  // For a valid |page_number| with modifiable content,
+  // |metafile| is the rendered page. Otherwise |metafile| is NULL.
+  // Returns true if print preview should continue, false on failure.
+  bool PreviewPageRendered(int page_number, printing::Metafile* metafile);
 
   WebKit::WebView* print_web_view_;
 
   scoped_ptr<PrintMsg_PrintPages_Params> print_pages_params_;
   bool is_preview_;
+  bool is_print_ready_metafile_sent_;
 
   // Used for scripted initiated printing blocking.
   base::Time last_cancelled_script_print_;
@@ -303,6 +320,10 @@ class PrintWebViewHelper : public RenderViewObserver,
   bool notify_browser_of_print_failure_;
 
   scoped_ptr<PrintMsg_PrintPages_Params> old_print_pages_params_;
+
+  // Strings generated by the browser process to be printed as headers and
+  // footers if requested by the user.
+  scoped_ptr<base::DictionaryValue> header_footer_info_;
 
   // Keeps track of the state of print preview between messages.
   class PrintPreviewContext {
@@ -326,8 +347,11 @@ class PrintWebViewHelper : public RenderViewObserver,
     // rendering took.
     void RenderedPreviewPage(const base::TimeDelta& page_time);
 
-    // Finalizes the print preview document.
-    void FinalizePreviewDocument();
+    // Updates the print preview context when the required pages are rendered.
+    void AllPagesRendered();
+
+    // Finalizes the print ready preview document.
+    void FinalizePrintReadyDocument();
 
     // Cleanup after print preview finishes.
     void Finished();
@@ -335,25 +359,22 @@ class PrintWebViewHelper : public RenderViewObserver,
     // Cleanup after print preview fails.
     void Failed();
 
-    // Abort the print preview.
-    void Abort();
-
     // Helper functions
     int GetNextPageNumber();
     bool IsReadyToRender() const;
-    bool IsBusy() const;
     bool IsModifiable() const;
+    bool IsLastPageOfPrintReadyMetafile() const;
+    bool IsFinalPageRendered() const;
 
-    // Return the page slot in the final document for |page_number|. i.e. if
-    // the user selected just page 3, the page slot would be 0, since it is
-    // the first page in the resulting document.
-    int GetPageSlotForPage(int page_number) const;
+    // Setters
+    void set_generate_draft_pages(bool generate_draft_pages);
 
     // Getters
     WebKit::WebFrame* frame() const;
     WebKit::WebNode* node() const;
     int total_page_count() const;
-    printing::Metafile* metafile() const;
+    bool generate_draft_pages();
+    printing::PreviewMetafile* metafile() const;
     const PrintMsg_Print_Params& print_params() const;
     const gfx::Size& GetPrintCanvasSize() const;
 
@@ -373,22 +394,23 @@ class PrintWebViewHelper : public RenderViewObserver,
     scoped_ptr<WebKit::WebNode> node_;
 
     scoped_ptr<PrepareFrameAndViewForPrint> prep_frame_view_;
-    scoped_ptr<printing::Metafile> metafile_;
+    scoped_ptr<printing::PreviewMetafile> metafile_;
     scoped_ptr<PrintMsg_Print_Params> print_params_;
 
     // Total page count in the renderer.
     int total_page_count_;
 
-    // Number of pages to render.
-    int actual_page_count_;
-
     // The current page to render.
-    int current_page_number_;
+    int current_page_index_;
 
-    // |rendered_pages_| tracks which pages need to be printed as well as
-    // the page slot it should be printed in. See GetPageSlotForPage.
-    typedef std::pair<bool, int> PreviewPageInfo;
-    std::vector<PreviewPageInfo> rendered_pages_;
+    // List of page indices that need to be rendered.
+    std::vector<int> pages_to_render_;
+
+    // True, when draft pages needs to be generated.
+    bool generate_draft_pages_;
+
+    // Specifies the total number of pages in the print ready metafile.
+    int print_ready_metafile_page_count_;
 
     base::TimeDelta document_render_time_;
     base::TimeTicks begin_time_;

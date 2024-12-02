@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
@@ -49,8 +50,9 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   virtual ~RequestQuotaInfoBarDelegate() {
-    // Make sure we've dispatched the callback.
-    DCHECK(!callback_.get());
+    if (callback_.get())
+      context_->DispatchCallbackOnIOThread(
+          callback_.release(), QuotaPermissionContext::kResponseCancelled);
   }
 
   virtual bool ShouldExpire(
@@ -142,10 +144,10 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
 
   TabContentsWrapper* wrapper =
       TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
-  wrapper->AddInfoBar(new RequestQuotaInfoBarDelegate(
+  wrapper->infobar_tab_helper()->AddInfoBar(new RequestQuotaInfoBarDelegate(
       tab_contents, this,
       origin_url, requested_quota,
-      tab_contents->profile()->GetPrefs()->GetString(prefs::kAcceptLanguages),
+      wrapper->profile()->GetPrefs()->GetString(prefs::kAcceptLanguages),
       callback.release()));
 }
 

@@ -50,7 +50,7 @@ class CompactNavigationBar;
 class CompactOptionsBar;
 class DownloadShelfView;
 class EncodingMenuModel;
-class FullscreenExitBubble;
+class FullscreenExitBubbleViews;
 class HtmlDialogUIDelegate;
 class InfoBarContainerView;
 class LocationBarView;
@@ -270,6 +270,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
+  virtual bool IsMinimized() const OVERRIDE;
   virtual void SetFullscreen(bool fullscreen) OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual LocationBar* GetLocationBar() const OVERRIDE;
@@ -306,11 +307,12 @@ class BrowserView : public BrowserBubbleHost,
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) OVERRIDE;
-  virtual void ShowCollectedCookiesDialog(TabContents* tab_contents) OVERRIDE;
+  virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) OVERRIDE;
   virtual void ShowThemeInstallBubble() OVERRIDE;
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
-  virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                              gfx::NativeWindow parent_window) OVERRIDE;
+  virtual gfx::NativeWindow ShowHTMLDialog(
+      HtmlDialogUIDelegate* delegate,
+      gfx::NativeWindow parent_window) OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void TabContentsFocused(TabContents* source) OVERRIDE;
@@ -338,6 +340,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
+  virtual FindBar* CreateFindBar() OVERRIDE;
 #if defined(OS_CHROMEOS)
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) OVERRIDE;
 #endif
@@ -391,9 +394,10 @@ class BrowserView : public BrowserBubbleHost,
   virtual bool ExecuteWindowsCommand(int command_id) OVERRIDE;
   virtual std::wstring GetWindowName() const OVERRIDE;
   virtual void SaveWindowPlacement(const gfx::Rect& bounds,
-                                   bool maximized) OVERRIDE;
-  virtual bool GetSavedWindowBounds(gfx::Rect* bounds) const OVERRIDE;
-  virtual bool GetSavedMaximizedState(bool* maximized) const OVERRIDE;
+                                   ui::WindowShowState show_state) OVERRIDE;
+  virtual bool GetSavedWindowPlacement(
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
   virtual views::ClientView* CreateClientView(views::Widget* widget) OVERRIDE;
   virtual void OnWindowBeginUserBoundsChange() OVERRIDE;
@@ -690,9 +694,9 @@ class BrowserView : public BrowserBubbleHost,
   // fullscreen mode on and off to reduce jankiness.
   bool ignore_layout_;
 
-  scoped_ptr<FullscreenExitBubble> fullscreen_bubble_;
+  scoped_ptr<FullscreenExitBubbleViews> fullscreen_bubble_;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // The additional items we insert into the system menu.
   scoped_ptr<views::SystemMenuModel> system_menu_contents_;
   scoped_ptr<ZoomMenuModel> zoom_menu_contents_;
@@ -714,7 +718,7 @@ class BrowserView : public BrowserBubbleHost,
   HungPluginAction hung_plugin_action_;
 
   // The custom JumpList for Windows 7.
-  scoped_ptr<JumpList> jumplist_;
+  scoped_refptr<JumpList> jumplist_;
 
   // The custom AeroPeek manager for Windows 7.
   scoped_ptr<AeroPeekManager> aeropeek_manager_;

@@ -5,6 +5,10 @@
 // NOTE: No header guards are used, since this file is intended to be expanded
 // directly into net_log.h. DO NOT include this file anywhere else.
 
+// In the event of a failure, a many end events will have a |net_error|
+// parameter with the integer error code associated with the failure.  Most
+// of these parameters are not individually documented.
+
 // --------------------------------------------------------------------------
 // General pseudo-events
 // --------------------------------------------------------------------------
@@ -12,6 +16,15 @@
 // Something got cancelled (we determine what is cancelled based on the
 // log context around it.)
 EVENT_TYPE(CANCELLED)
+
+// Something failed (we determine what failed based on the log context
+// around it.)
+// The event has the following parameters:
+//
+//   {
+//     "net_error": <The net error code integer for the failure>,
+//   }
+EVENT_TYPE(FAILED)
 
 // Marks the creation/destruction of a request (net::URLRequest or
 // SocketStream).
@@ -206,6 +219,28 @@ EVENT_TYPE(PROXY_SERVICE_RESOLVED_PROXY_LIST)
 // Note that the "old_config" key will be omitted on the first fetch of the
 // proxy settings (since there wasn't a previous value).
 EVENT_TYPE(PROXY_CONFIG_CHANGED)
+
+// Emitted when a list of bad proxies is reported to the proxy service.
+//
+// Parameters:
+//   {
+//     "bad_proxy_list": <List of bad proxies>,
+//   }
+EVENT_TYPE(BAD_PROXY_LIST_REPORTED)
+
+// ------------------------------------------------------------------------
+// ProxyList
+// ------------------------------------------------------------------------
+
+// Emitted when the first proxy server in a list is being marked as
+// bad and proxy resolution is going to failover to the next one in
+// the list.  The fallback is local to the request.
+//
+// Parameters:
+//   {
+//     "bad_proxy": <URI representation of the failed proxy server>,
+//   }
+EVENT_TYPE(PROXY_LIST_FALLBACK)
 
 // ------------------------------------------------------------------------
 // Proxy Resolver
@@ -1132,3 +1167,52 @@ EVENT_TYPE(ASYNC_HOST_RESOLVER_CREATE_DNS_TRANSACTION)
 
 // This event is logged when a request is handled by a cache entry.
 EVENT_TYPE(ASYNC_HOST_RESOLVER_CACHE_HIT)
+
+// ------------------------------------------------------------------------
+// ChromeExtension
+// ------------------------------------------------------------------------
+
+// TODO(eroman): This is a layering violation. Fix this in the context
+// of http://crbug.com/90674.
+
+// This event is created when a Chrome extension aborts a request.
+//
+//  {
+//    "extension_id": <Extension ID that caused the abortion>
+//  }
+EVENT_TYPE(CHROME_EXTENSION_ABORTED_REQUEST)
+
+// This event is created when a Chrome extension redirects a request.
+//
+//  {
+//    "extension_id": <Extension ID that caused the redirection>
+//  }
+EVENT_TYPE(CHROME_EXTENSION_REDIRECTED_REQUEST)
+
+// This event is created when a Chrome extension modifieds the headers of a
+// request.
+//
+//  {
+//    "extension_id":     <Extension ID that caused the modification>,
+//    "modified_headers": [ "<header>: <value>", ... ],
+//    "deleted_headers":  [ "<header>", ... ]
+//  }
+EVENT_TYPE(CHROME_EXTENSION_MODIFIED_HEADERS)
+
+// This event is created when a Chrome extension tried to modify a request
+// but was ignored due to a conflict.
+//
+//  {
+//    "extension_id": <Extension ID that was ignored>
+//  }
+EVENT_TYPE(CHROME_EXTENSION_IGNORED_DUE_TO_CONFLICT)
+
+// ------------------------------------------------------------------------
+// HostBlacklistManager
+// ------------------------------------------------------------------------
+
+// TODO(joaodasilva): Layering violation, see comment above.
+// http://crbug.com/90674.
+
+// This event is created when a request is blocked by a policy.
+EVENT_TYPE(CHROME_POLICY_ABORTED_REQUEST)

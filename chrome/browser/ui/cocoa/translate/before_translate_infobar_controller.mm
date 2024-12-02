@@ -19,12 +19,22 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
   NSButton* button = [[NSButton alloc] init];
   [button setTitle:base::SysUTF16ToNSString(title)];
   [button setBezelStyle:NSTexturedRoundedBezelStyle];
+  // Round textured buttons have a different font size than the default button.
+  NSFont* font = [NSFont systemFontOfSize:
+      [NSFont systemFontSizeForControlSize:NSRegularControlSize]];
+  [[button cell] setFont:font];
   return button;
 }
 
 } // namespace
 
 @implementation BeforeTranslateInfobarController
+
+- (void)dealloc {
+  [neverTranslateButton_ setTarget:nil];
+  [alwaysTranslateButton_ setTarget:nil];
+  [super dealloc];
+}
 
 - (id) initWithDelegate:(InfoBarDelegate *)delegate
                   owner:(TabContentsWrapper*)owner {
@@ -54,9 +64,9 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
 - (void)layout {
   MoveControl(label1_, fromLanguagePopUp_, spaceBetweenControls_ / 2, true);
   MoveControl(fromLanguagePopUp_, label2_, spaceBetweenControls_, true);
-  MoveControl(label2_, okButton_, spaceBetweenControls_, true);
-  MoveControl(okButton_, cancelButton_, spaceBetweenControls_, true);
-  NSView* lastControl = cancelButton_;
+  MoveControl(label2_, cancelButton_, spaceBetweenControls_, true);
+  MoveControl(cancelButton_, okButton_, spaceBetweenControls_, true);
+  NSView* lastControl = okButton_;
   if (neverTranslateButton_.get()) {
     MoveControl(lastControl, neverTranslateButton_.get(),
                 spaceBetweenControls_, true);
@@ -83,7 +93,7 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
 - (NSArray*)visibleControls {
   NSMutableArray* visibleControls = [NSMutableArray arrayWithObjects:
       label1_.get(), fromLanguagePopUp_.get(), label2_.get(),
-      okButton_, cancelButton_, nil];
+      cancelButton_, okButton_, nil];
 
   if ([self delegate]->ShouldShowNeverTranslateButton())
     [visibleControls addObject:neverTranslateButton_.get()];
@@ -96,12 +106,16 @@ NSButton* CreateNSButtonWithResourceIDAndParameter(
 
 // This is called when the "Never Translate [language]" button is pressed.
 - (void)neverTranslate:(id)sender {
-  [self delegate]->NeverTranslatePageLanguage();
+  TranslateInfoBarDelegate* delegate = [self delegate];
+  if (delegate)
+    [self delegate]->NeverTranslatePageLanguage();
 }
 
 // This is called when the "Always Translate [language]" button is pressed.
 - (void)alwaysTranslate:(id)sender {
-  [self delegate]->AlwaysTranslatePageLanguage();
+  TranslateInfoBarDelegate* delegate = [self delegate];
+  if (delegate)
+    delegate->AlwaysTranslatePageLanguage();
 }
 
 - (bool)verifyLayout {

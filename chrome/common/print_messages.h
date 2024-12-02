@@ -5,52 +5,120 @@
 // IPC messages for printing.
 // Multiply-included message file, hence no include guard.
 
+#include <string>
+#include <vector>
+
 #include "base/values.h"
 #include "base/shared_memory.h"
 #include "ipc/ipc_message_macros.h"
+#include "printing/page_size_margins.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
+
+#ifndef CHROME_COMMON_PRINT_MESSAGES_H_
+#define CHROME_COMMON_PRINT_MESSAGES_H_
+
+struct PrintMsg_Print_Params {
+  PrintMsg_Print_Params();
+  ~PrintMsg_Print_Params();
+
+  // Resets the members of the struct to 0.
+  void Reset();
+
+  gfx::Size page_size;
+  gfx::Size printable_size;
+  int margin_top;
+  int margin_left;
+  double dpi;
+  double min_shrink;
+  double max_shrink;
+  int desired_dpi;
+  int document_cookie;
+  bool selection_only;
+  bool supports_alpha_blend;
+  std::string preview_ui_addr;
+  int preview_request_id;
+  bool is_first_request;
+  bool display_header_footer;
+  string16 date;
+  string16 title;
+  string16 url;
+};
+
+struct PrintMsg_PrintPages_Params {
+  PrintMsg_PrintPages_Params();
+  ~PrintMsg_PrintPages_Params();
+
+  // Resets the members of the struct to 0.
+  void Reset();
+
+  PrintMsg_Print_Params params;
+  std::vector<int> pages;
+};
+
+#endif  // CHROME_COMMON_PRINT_MESSAGES_H_
 
 #define IPC_MESSAGE_START PrintMsgStart
 
 // Parameters for a render request.
-IPC_STRUCT_BEGIN(PrintMsg_Print_Params)
+IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
   // Physical size of the page, including non-printable margins,
   // in pixels according to dpi.
-  IPC_STRUCT_MEMBER(gfx::Size, page_size)
+  IPC_STRUCT_TRAITS_MEMBER(page_size)
 
   // In pixels according to dpi_x and dpi_y.
-  IPC_STRUCT_MEMBER(gfx::Size, printable_size)
+  IPC_STRUCT_TRAITS_MEMBER(printable_size)
 
   // The y-offset of the printable area, in pixels according to dpi.
-  IPC_STRUCT_MEMBER(int, margin_top)
+  IPC_STRUCT_TRAITS_MEMBER(margin_top)
 
   // The x-offset of the printable area, in pixels according to dpi.
-  IPC_STRUCT_MEMBER(int, margin_left)
+  IPC_STRUCT_TRAITS_MEMBER(margin_left)
 
   // Specifies dots per inch.
-  IPC_STRUCT_MEMBER(double, dpi)
+  IPC_STRUCT_TRAITS_MEMBER(dpi)
 
   // Minimum shrink factor. See PrintSettings::min_shrink for more information.
-  IPC_STRUCT_MEMBER(double, min_shrink)
+  IPC_STRUCT_TRAITS_MEMBER(min_shrink)
 
   // Maximum shrink factor. See PrintSettings::max_shrink for more information.
-  IPC_STRUCT_MEMBER(double, max_shrink)
+  IPC_STRUCT_TRAITS_MEMBER(max_shrink)
 
   // Desired apparent dpi on paper.
-  IPC_STRUCT_MEMBER(int, desired_dpi)
+  IPC_STRUCT_TRAITS_MEMBER(desired_dpi)
 
   // Cookie for the document to ensure correctness.
-  IPC_STRUCT_MEMBER(int, document_cookie)
+  IPC_STRUCT_TRAITS_MEMBER(document_cookie)
 
   // Should only print currently selected text.
-  IPC_STRUCT_MEMBER(bool, selection_only)
+  IPC_STRUCT_TRAITS_MEMBER(selection_only)
 
   // Does the printer support alpha blending?
-  IPC_STRUCT_MEMBER(bool, supports_alpha_blend)
+  IPC_STRUCT_TRAITS_MEMBER(supports_alpha_blend)
 
-  IPC_STRUCT_MEMBER(int, preview_request_id)
-IPC_STRUCT_END()
+  // *** Parameters below are used only for print preview. ***
+
+  // The print preview ui associated with this request.
+  IPC_STRUCT_TRAITS_MEMBER(preview_ui_addr)
+
+  // The id of the preview request.
+  IPC_STRUCT_TRAITS_MEMBER(preview_request_id)
+
+  // True if this is the first preview request.
+  IPC_STRUCT_TRAITS_MEMBER(is_first_request)
+
+  // Specifies if the header and footer should be rendered.
+  IPC_STRUCT_TRAITS_MEMBER(display_header_footer)
+
+  // Date string to be printed as header if requested by the user.
+  IPC_STRUCT_TRAITS_MEMBER(date)
+
+  // Title string to be printed as header if requested by the user.
+  IPC_STRUCT_TRAITS_MEMBER(title)
+
+  // URL string to be printed as footer if requested by the user.
+  IPC_STRUCT_TRAITS_MEMBER(url)
+IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_BEGIN(PrintMsg_PrintPage_Params)
   // Parameters to render the page as a printed page. It must always be the same
@@ -60,21 +128,25 @@ IPC_STRUCT_BEGIN(PrintMsg_PrintPage_Params)
   // The page number is the indicator of the square that should be rendered
   // according to the layout specified in PrintMsg_Print_Params.
   IPC_STRUCT_MEMBER(int, page_number)
-
-  // The page number in the resulting document.  If the user is only printing
-  // page 2, |page_number| above will 1, but |page_slot| will be 0, as it's the
-  // first page in the final document.
-  IPC_STRUCT_MEMBER(int, page_slot)
 IPC_STRUCT_END()
 
-IPC_STRUCT_BEGIN(PrintMsg_PrintPages_Params)
+IPC_STRUCT_TRAITS_BEGIN(printing::PageSizeMargins)
+  IPC_STRUCT_TRAITS_MEMBER(content_width)
+  IPC_STRUCT_TRAITS_MEMBER(content_height)
+  IPC_STRUCT_TRAITS_MEMBER(margin_left)
+  IPC_STRUCT_TRAITS_MEMBER(margin_right)
+  IPC_STRUCT_TRAITS_MEMBER(margin_top)
+  IPC_STRUCT_TRAITS_MEMBER(margin_bottom)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(PrintMsg_PrintPages_Params)
   // Parameters to render the page as a printed page. It must always be the same
   // value for all the document.
-  IPC_STRUCT_MEMBER(PrintMsg_Print_Params, params)
+  IPC_STRUCT_TRAITS_MEMBER(params)
 
   // If empty, this means a request to render all the printed pages.
-  IPC_STRUCT_MEMBER(std::vector<int>, pages)
-IPC_STRUCT_END()
+  IPC_STRUCT_TRAITS_MEMBER(pages)
+IPC_STRUCT_TRAITS_END()
 
 // Parameters to describe a rendered document.
 IPC_STRUCT_BEGIN(PrintHostMsg_DidPreviewDocument_Params)
@@ -112,6 +184,27 @@ IPC_STRUCT_BEGIN(PrintHostMsg_DidPreviewPage_Params)
   // |page_number| is zero-based and can be |printing::INVALID_PAGE_INDEX| if it
   // is just a check.
   IPC_STRUCT_MEMBER(int, page_number)
+
+  // The id of the preview request.
+  IPC_STRUCT_MEMBER(int, preview_request_id)
+IPC_STRUCT_END()
+
+// Parameters sent along with the page count.
+IPC_STRUCT_BEGIN(PrintHostMsg_DidGetPreviewPageCount_Params)
+  // Cookie for the document to ensure correctness.
+  IPC_STRUCT_MEMBER(int, document_cookie)
+
+  // Total page count.
+  IPC_STRUCT_MEMBER(int, page_count)
+
+  // Indicates whether the previewed document is modifiable.
+  IPC_STRUCT_MEMBER(bool, is_modifiable)
+
+  // The id of the preview request.
+  IPC_STRUCT_MEMBER(int, preview_request_id)
+
+  // Indicates whether the existing preview data needs to be cleared or not.
+  IPC_STRUCT_MEMBER(bool, clear_preview_data)
 IPC_STRUCT_END()
 
 // Parameters to describe a rendered page.
@@ -191,16 +284,6 @@ IPC_MESSAGE_ROUTED0(PrintMsg_PrintForSystemDialog)
 // Tells a renderer to stop blocking script initiated printing.
 IPC_MESSAGE_ROUTED0(PrintMsg_ResetScriptedPrintCount)
 
-// Tells a renderer to continue generating the print preview.
-// Use |requested_preview_page_index| to request a specific preview page data.
-// |requested_preview_page_index| is 1-based or |printing::INVALID_PAGE_INDEX|
-// to render the next page.
-IPC_MESSAGE_ROUTED1(PrintMsg_ContinuePreview,
-                    int /* requested_preview_page_index */)
-
-// Tells a renderer to abort the print preview and reset all state.
-IPC_MESSAGE_ROUTED0(PrintMsg_AbortPreview)
-
 // Messages sent from the renderer to the browser.
 
 #if defined(OS_WIN)
@@ -264,19 +347,28 @@ IPC_MESSAGE_CONTROL1(PrintHostMsg_TempFileForPrintingWritten,
 IPC_MESSAGE_ROUTED0(PrintHostMsg_RequestPrintPreview)
 
 // Notify the browser the number of pages in the print preview document.
-IPC_MESSAGE_ROUTED3(PrintHostMsg_DidGetPreviewPageCount,
-                    int  /* document cookie */,
-                    int  /* page count */,
-                    bool /* is modifiable */)
+IPC_MESSAGE_ROUTED1(PrintHostMsg_DidGetPreviewPageCount,
+                    PrintHostMsg_DidGetPreviewPageCount_Params /* params */)
+
+// Notify the browser of the default page layout according to the currently
+// selected printer and page size.
+IPC_MESSAGE_ROUTED1(PrintHostMsg_DidGetDefaultPageLayout,
+                    printing::PageSizeMargins /* page layout in points */)
 
 // Notify the browser a print preview page has been rendered.
 IPC_MESSAGE_ROUTED1(PrintHostMsg_DidPreviewPage,
                     PrintHostMsg_DidPreviewPage_Params /* params */)
 
-// Sends back to the browser the complete rendered document for print preview
-// that was requested by a PrintMsg_PrintPreview message. The memory handle in
-// this message is already valid in the browser process.
-IPC_MESSAGE_ROUTED1(PrintHostMsg_PagesReadyForPreview,
+// Asks the browser whether the print preview has been cancelled.
+IPC_SYNC_MESSAGE_ROUTED2_1(PrintHostMsg_CheckForCancel,
+                           std::string /* print preview ui address */,
+                           int /* request id */,
+                           bool /* print preview cancelled */)
+
+// Sends back to the browser the complete rendered document (non-draft mode,
+// used for printing) that was requested by a PrintMsg_PrintPreview message.
+// The memory handle in this message is already valid in the browser process.
+IPC_MESSAGE_ROUTED1(PrintHostMsg_MetafileReadyForPrinting,
                     PrintHostMsg_DidPreviewDocument_Params /* params */)
 
 // Tell the browser printing failed.
@@ -285,4 +377,14 @@ IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintingFailed,
 
 // Tell the browser print preview failed.
 IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewFailed,
+                    int /* document cookie */)
+
+// Tell the browser print preview was cancelled.
+IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewCancelled,
+                    int /* document cookie */)
+
+// Tell the browser print preview found the selected printer has invalid
+// settings (which typically caused by disconnected network printer or printer
+// driver is bogus).
+IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewInvalidPrinterSettings,
                     int /* document cookie */)

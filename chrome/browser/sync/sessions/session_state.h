@@ -23,6 +23,7 @@
 #include "chrome/browser/sync/engine/syncer_types.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/sessions/ordered_commit_set.h"
+#include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/model_type_payload_map.h"
 #include "chrome/browser/sync/syncable/syncable.h"
@@ -70,7 +71,7 @@ struct SyncerStatus {
   bool invalid_store;
   // True iff we're stuck.
   bool syncer_stuck;
-  bool syncing;
+  bool sync_in_progress;
   int num_successful_commits;
   // This is needed for monitoring extensions activity.
   int num_successful_bookmark_commits;
@@ -89,6 +90,7 @@ struct SyncerStatus {
 };
 
 // Counters for various errors that can occur repeatedly during a sync session.
+// TODO(lipalani) : Rename this structure to Error.
 struct ErrorCounters {
   ErrorCounters();
 
@@ -105,6 +107,9 @@ struct ErrorCounters {
   // transient errors. When any of these succeed, this counter is reset.
   // TODO(chron): Reduce number of weird counters we use.
   int consecutive_errors;
+
+  // Any protocol errors that we received during this sync session.
+  SyncProtocolError sync_protocol_error;
 };
 
 // Caller takes ownership of the returned dictionary.
@@ -130,7 +135,8 @@ struct SyncSessionSnapshot {
       int num_conflicting_updates,
       bool did_commit_items,
       const SyncSourceInfo& source,
-      size_t num_entries);
+      size_t num_entries,
+      base::Time sync_start_time);
   ~SyncSessionSnapshot();
 
   // Caller takes ownership of the returned dictionary.
@@ -152,6 +158,7 @@ struct SyncSessionSnapshot {
   const bool did_commit_items;
   const SyncSourceInfo source;
   const size_t num_entries;
+  base::Time sync_start_time;
 };
 
 // Tracks progress of conflicts and their resolution using conflict sets.
@@ -241,6 +248,7 @@ class UpdateProgress {
   int VerifiedUpdatesSize() const { return verified_updates_.size(); }
   bool HasVerifiedUpdates() const { return !verified_updates_.empty(); }
   bool HasAppliedUpdates() const { return !applied_updates_.empty(); }
+  void ClearVerifiedUpdates() { verified_updates_.clear(); }
 
   // Count the number of successful update applications that have happend this
   // cycle. Note that if an item is successfully applied twice, it will be
@@ -317,7 +325,7 @@ struct AllModelTypeState {
   // Used to build the shared commit message.
   DirtyOnWrite<std::vector<int64> > unsynced_handles;
   DirtyOnWrite<SyncerStatus> syncer_status;
-  DirtyOnWrite<ErrorCounters> error_counters;
+  DirtyOnWrite<ErrorCounters> error;
   SyncCycleControlParameters control_params;
   DirtyOnWrite<int64> num_server_changes_remaining;
   OrderedCommitSet commit_set;

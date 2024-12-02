@@ -9,9 +9,12 @@
 #include "base/message_loop.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "views/test/test_views_delegate.h"
+#include "views/test/views_test_base.h"
 #include "views/views_delegate.h"
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+#include "views/widget/native_widget_aura.h"
+#elif defined(OS_WIN)
 #include "views/widget/native_widget_win.h"
 #elif defined(TOOLKIT_USES_GTK)
 #include "views/widget/native_widget_gtk.h"
@@ -32,6 +35,8 @@ class NativeWidgetGtkCapture : public NativeWidgetGtk {
     mouse_capture_ = true;
   }
   virtual void ReleaseMouseCapture() OVERRIDE {
+    if (mouse_capture_)
+      delegate()->OnMouseCaptureLost();
     mouse_capture_ = false;
   }
   virtual bool HasMouseCapture() const OVERRIDE {
@@ -78,41 +83,31 @@ class WidgetTestViewsDelegate : public TestViewsDelegate {
   DISALLOW_COPY_AND_ASSIGN(WidgetTestViewsDelegate);
 };
 
-class WidgetTest : public testing::Test {
+class WidgetTest : public ViewsTestBase {
  public:
   WidgetTest() {
-#if defined(OS_WIN)
-    OleInitialize(NULL);
-#endif
   }
   virtual ~WidgetTest() {
-#if defined(OS_WIN)
-    OleUninitialize();
-#endif
   }
 
-  virtual void TearDown() {
-    // Flush the message loop because we have pending release tasks
-    // and these tasks if un-executed would upset Valgrind.
-    RunPendingMessages();
+  virtual void SetUp() OVERRIDE {
+    set_views_delegate(new WidgetTestViewsDelegate());
+    ViewsTestBase::SetUp();
   }
 
-  void RunPendingMessages() {
-    message_loop_.RunAllPending();
+  WidgetTestViewsDelegate& widget_views_delegate() const {
+    return static_cast<WidgetTestViewsDelegate&>(views_delegate());
   }
-
- protected:
-  WidgetTestViewsDelegate views_delegate;
 
  private:
-  MessageLoopForUI message_loop_;
-
   DISALLOW_COPY_AND_ASSIGN(WidgetTest);
 };
 
 NativeWidget* CreatePlatformNativeWidget(
     internal::NativeWidgetDelegate* delegate) {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  return new NativeWidgetAura(delegate);
+#elif defined(OS_WIN)
   return new NativeWidgetWin(delegate);
 #elif defined(TOOLKIT_USES_GTK)
   return new NativeWidgetGtkCapture(delegate);
@@ -182,7 +177,7 @@ TEST_F(WidgetTest, GetTopLevelWidget_Synthetic) {
   // Create a hierarchy consisting of a top level platform native widget and a
   // child NativeWidgetViews.
   Widget* toplevel = CreateTopLevelPlatformWidget();
-  views_delegate.set_default_parent_view(toplevel->GetRootView());
+  widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
   Widget* child = CreateChildNativeWidgetViews();
 
   EXPECT_EQ(toplevel, toplevel->GetTopLevelWidget());
@@ -196,7 +191,7 @@ TEST_F(WidgetTest, GetTopLevelWidget_Synthetic) {
 // NativeWidgetViews, and a child of that child, another NativeWidgetViews.
 TEST_F(WidgetTest, GetTopLevelWidget_SyntheticParent) {
   Widget* toplevel = CreateTopLevelPlatformWidget();
-  views_delegate.set_default_parent_view(toplevel->GetRootView());
+  widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
 
   Widget* child1 = CreateChildNativeWidgetViews(); // Will be parented
                                                    // automatically to
@@ -211,10 +206,16 @@ TEST_F(WidgetTest, GetTopLevelWidget_SyntheticParent) {
   // |child1| and |child11| should be destroyed with |toplevel|.
 }
 
+// This is flaky on touch build. See crbug.com/94137.
+#if defined(TOUCH_UI)
+#define MAYBE_GrabUngrab DISABLED_GrabUngrab
+#else
+#define MAYBE_GrabUngrab GrabUngrab
+#endif
 // Tests some grab/ungrab events.
-TEST_F(WidgetTest, GrabUngrab) {
+TEST_F(WidgetTest, MAYBE_GrabUngrab) {
   Widget* toplevel = CreateTopLevelPlatformWidget();
-  views_delegate.set_default_parent_view(toplevel->GetRootView());
+  widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
 
   Widget* child1 = CreateChildNativeWidgetViews(); // Will be parented
                                                    // automatically to
@@ -251,7 +252,50 @@ TEST_F(WidgetTest, GrabUngrab) {
   EXPECT_FALSE(WidgetHasMouseCapture(child1));
   EXPECT_FALSE(WidgetHasMouseCapture(child2));
 
+  RunPendingMessages();
+
+  // Click on child2
+  MouseEvent pressed2(ui::ET_MOUSE_PRESSED, 315, 45, ui::EF_LEFT_BUTTON_DOWN);
+  EXPECT_TRUE(toplevel->OnMouseEvent(pressed2));
+  EXPECT_TRUE(WidgetHasMouseCapture(toplevel));
+  EXPECT_TRUE(WidgetHasMouseCapture(child2));
+  EXPECT_FALSE(WidgetHasMouseCapture(child1));
+
+  MouseEvent released2(ui::ET_MOUSE_RELEASED, 315, 45, ui::EF_LEFT_BUTTON_DOWN);
+  toplevel->OnMouseEvent(released2);
+  EXPECT_FALSE(WidgetHasMouseCapture(toplevel));
+  EXPECT_FALSE(WidgetHasMouseCapture(child1));
+  EXPECT_FALSE(WidgetHasMouseCapture(child2));
+
   toplevel->CloseNow();
+}
+
+// Test if a focus manager and an inputmethod work without CHECK failure
+// when window activation changes.
+TEST_F(WidgetTest, ChangeActivation) {
+  Widget* top1 = CreateTopLevelPlatformWidget();
+  // CreateInputMethod before activated
+  top1->GetInputMethod();
+  top1->Show();
+  RunPendingMessages();
+
+  Widget* top2 = CreateTopLevelPlatformWidget();
+  top2->Show();
+  RunPendingMessages();
+
+  top1->Activate();
+  RunPendingMessages();
+
+  // Create InputMethod after deactivated.
+  top2->GetInputMethod();
+  top2->Activate();
+  RunPendingMessages();
+
+  top1->Activate();
+  RunPendingMessages();
+
+  top1->CloseNow();
+  top2->CloseNow();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -268,8 +312,10 @@ class WidgetOwnershipTest : public WidgetTest {
   virtual ~WidgetOwnershipTest() {}
 
   virtual void SetUp() {
+    WidgetTest::SetUp();
     desktop_widget_ = CreateTopLevelPlatformWidget();
-    views_delegate.set_default_parent_view(desktop_widget_->GetRootView());
+    widget_views_delegate().set_default_parent_view(
+        desktop_widget_->GetRootView());
   }
 
   virtual void TearDown() {
@@ -294,7 +340,9 @@ struct OwnershipTestState {
 // A platform NativeWidget subclass that updates a bag of state when it is
 // destroyed.
 class OwnershipTestNativeWidget :
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+    public NativeWidgetAura {
+#elif defined(OS_WIN)
     public NativeWidgetWin {
 #elif defined(TOOLKIT_USES_GTK)
     public NativeWidgetGtk {
@@ -302,7 +350,9 @@ class OwnershipTestNativeWidget :
 public:
   OwnershipTestNativeWidget(internal::NativeWidgetDelegate* delegate,
                             OwnershipTestState* state)
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+    : NativeWidgetAura(delegate),
+#elif defined(OS_WIN)
     : NativeWidgetWin(delegate),
 #elif defined(TOOLKIT_USES_GTK)
     : NativeWidgetGtk(delegate),
@@ -480,7 +530,9 @@ TEST_F(WidgetOwnershipTest,
   widget->Init(params);
 
   // Now simulate a destroy of the platform native widget from the OS:
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   DestroyWindow(widget->GetNativeView());
 #elif defined(TOOLKIT_USES_GTK)
   gtk_widget_destroy(widget->GetNativeView());
@@ -569,10 +621,15 @@ class WidgetObserverTest : public WidgetTest,
   virtual void OnWidgetActivationChanged(Widget* widget,
                                          bool active) OVERRIDE {
     if (active) {
+      if (widget_activated_)
+        widget_activated_->Deactivate();
       widget_activated_ = widget;
       active_ = widget;
-    } else
+    } else {
+      if (widget_activated_ == widget)
+        widget_activated_ = NULL;
       widget_deactivated_ = widget;
+    }
   }
 
   virtual void OnWidgetVisibilityChanged(Widget* widget,
@@ -616,11 +673,9 @@ class WidgetObserverTest : public WidgetTest,
   Widget* widget_hidden_;
 };
 
-// TODO: This test should be enabled when NativeWidgetViews::Activate is
-// implemented.
-TEST_F(WidgetObserverTest, DISABLED_ActivationChange) {
+TEST_F(WidgetObserverTest, ActivationChange) {
   Widget* toplevel = CreateTopLevelPlatformWidget();
-  views_delegate.set_default_parent_view(toplevel->GetRootView());
+  widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
 
   Widget* child1 = NewWidget();
   Widget* child2 = NewWidget();
@@ -638,7 +693,7 @@ TEST_F(WidgetObserverTest, DISABLED_ActivationChange) {
 
 TEST_F(WidgetObserverTest, VisibilityChange) {
   Widget* toplevel = CreateTopLevelPlatformWidget();
-  views_delegate.set_default_parent_view(toplevel->GetRootView());
+  widget_views_delegate().set_default_parent_view(toplevel->GetRootView());
 
   Widget* child1 = NewWidget();
   Widget* child2 = NewWidget();

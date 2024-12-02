@@ -8,13 +8,13 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/shared_impl/function_group_base.h"
+#include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/instance_impl.h"
 #include "ppapi/thunk/ppb_instance_api.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class SerializedVarReceiveInput;
@@ -74,7 +74,7 @@ class PPB_Instance_Proxy : public InterfaceProxy,
   void OnMsgGetOwnerElementObject(PP_Instance instance,
                                   SerializedVarReturnValue result);
   void OnMsgBindGraphics(PP_Instance instance,
-                         HostResource device,
+                         const ppapi::HostResource& device,
                          PP_Bool* result);
   void OnMsgIsFullFrame(PP_Instance instance, PP_Bool* result);
   void OnMsgExecuteScript(PP_Instance instance,
@@ -97,6 +97,6 @@ class PPB_Instance_Proxy : public InterfaceProxy,
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_INSTANCE_PROXY_H_

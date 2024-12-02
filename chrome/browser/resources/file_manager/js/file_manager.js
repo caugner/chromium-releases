@@ -31,13 +31,15 @@ const IMAGE_EDITOR_ENABLED = false;
  *     - defaultPath: The default path for the dialog.  The default path should
  *       end with a trailing slash if it represents a directory.
  */
-function FileManager(dialogDom, rootEntries, params) {
+function FileManager(dialogDom, filesystem, rootEntries) {
   console.log('Init FileManager: ' + dialogDom);
 
   this.dialogDom_ = dialogDom;
   this.rootEntries_ = rootEntries;
-  this.filesystem_ = rootEntries[0].filesystem;
-  this.params_ = params || {};
+  this.filesystem_ = filesystem;
+  this.params_ = location.search ?
+                 JSON.parse(decodeURIComponent(location.search.substr(1))) :
+                 {};
 
   this.listType_ = null;
 
@@ -57,8 +59,6 @@ function FileManager(dialogDom, rootEntries, params) {
 
   this.document_ = dialogDom.ownerDocument;
   this.dialogType_ = this.params_.type || FileManager.DialogType.FULL_PAGE;
-
-  this.defaultPath_ = this.params_.defaultPath || '/';
 
   this.alert = new cr.ui.dialogs.AlertDialog(this.dialogDom_);
   this.confirm = new cr.ui.dialogs.ConfirmDialog(this.dialogDom_);
@@ -98,13 +98,6 @@ function FileManager(dialogDom, rootEntries, params) {
   // Optional list of file types.
   this.fileTypes_ = this.params_.typeList;
 
-  var ary = this.defaultPath_.match(/^\/home\/[^\/]+\/user\/Downloads(\/.*)?$/);
-  if (ary) {
-    // Chrome will probably suggest the full path to Downloads, but
-    // we're working with 'virtual paths', so we have to translate.
-    this.defaultPath_ = '/Downloads' + (ary[1] || '');
-  }
-
   this.showCheckboxes_ =
       (this.dialogType_ == FileManager.DialogType.FULL_PAGE ||
        this.dialogType_ == FileManager.DialogType.SELECT_OPEN_MULTI_FILE);
@@ -141,13 +134,12 @@ function FileManager(dialogDom, rootEntries, params) {
   this.initCommands_();
   this.initDom_();
   this.initDialogType_();
-  this.initDefaultDirectory_();
+  this.setupCurrentDirectory_();
 
   this.summarizeSelection_();
   this.updatePreview_();
 
-  chrome.fileBrowserPrivate.onDiskChanged.addListener(
-      this.onDiskChanged_.bind(this));
+  this.dataModel_.sort('name', 'asc');
 
   this.refocus();
 
@@ -157,6 +149,8 @@ function FileManager(dialogDom, rootEntries, params) {
   this.metadataReader_ = new Worker('js/metadata_dispatcher.js');
   this.metadataReader_.onmessage = this.onMetadataMessage_.bind(this);
   this.metadataReader_.postMessage({verb: 'init'});
+  // Initialization is not complete until the Worker sends back the
+  // 'initialized' message.  See below.
 }
 
 FileManager.prototype = {
@@ -191,6 +185,11 @@ FileManager.prototype = {
   const DOWNLOADS_DIRECTORY = '/Downloads';
 
   /**
+   * Height of the downloads folder warning, in px.
+   */
+  const DOWNLOADS_WARNING_HEIGHT = '57px';
+
+  /**
    * Location of the FAQ about the downloads directory.
    */
   const DOWNLOADS_FAQ_URL = 'http://www.google.com/support/chromeos/bin/' +
@@ -214,10 +213,10 @@ FileManager.prototype = {
   var localStrings;
 
   /**
-   * Map of icon types to regular expressions.
+   * Map of icon types to regular expressions and functions
    *
-   * The first regexp to match the file name determines the icon type
-   * assigned to dom elements for a file.  Order of evaluation is not
+   * The first regexp/function to match the entry name determines the icon type
+   * assigned to dom elements for a file. Order of evaluation is not
    * defined, so don't depend on it.
    */
   const iconTypes = {
@@ -226,15 +225,40 @@ FileManager.prototype = {
     'image': /\.(bmp|gif|jpe?g|ico|png|webp)$/i,
     'pdf' : /\.(pdf)$/i,
     'text': /\.(pod|rst|txt|log)$/i,
-    'video': /\.(3gp|avi|mov|mp4|m4v|mpe?g4?|ogm|ogv|ogx|webm)$/i
+    'video': /\.(3gp|avi|mov|mp4|m4v|mpe?g4?|ogm|ogv|ogx|webm)$/i,
+    'device': function(self, entry) {
+      var deviceNumber = self.getDeviceNumber(entry);
+      if (deviceNumber != undefined)
+        return (self.mountPoints_[deviceNumber].mountCondition == '');
+      return false;
+    },
+    'unreadable': function(self, entry) {
+      var deviceNumber = self.getDeviceNumber(entry);
+      if (deviceNumber != undefined) {
+        return self.mountPoints_[deviceNumber].mountCondition ==
+               'unknown_filesystem' ||
+               self.mountPoints_[deviceNumber].mountCondition ==
+               'unsupported_filesystem';
+      }
+      return false;
+    }
   };
 
   const previewArt = {
     'audio': 'images/filetype_large_audio.png',
+    // TODO(sidor): Find better icon here.
+    'device': 'images/filetype_large_folder.png',
     'folder': 'images/filetype_large_folder.png',
     'unknown': 'images/filetype_large_generic.png',
+    // TODO(sidor): Find better icon here.
+    'unreadable': 'images/filetype_large_folder.png',
     'video': 'images/filetype_large_video.png'
   };
+
+  /**
+   * Regexp for archive files. Used to show mount-archive task.
+   */
+  const ARCHIVES_REGEXP = /.zip$/;
 
   /**
    * Return a translated string.
@@ -295,49 +319,18 @@ FileManager.prototype = {
     return parent;
   }
 
-  /**
-   * Get the icon type for a given Entry.
-   *
-   * @param {Entry} entry An Entry subclass (FileEntry or DirectoryEntry).
-   * @return {string} One of the keys from FileManager.iconTypes, or
-   *     'unknown'.
-   */
-  function getIconType(entry) {
-    if (entry.cachedIconType_)
-      return entry.cachedIconType_;
-
-    var rv = 'unknown';
-
-    if (entry.isDirectory) {
-      rv = 'folder';
-    } else {
-      for (var name in iconTypes) {
-        var value = iconTypes[name];
-
-        if (value instanceof RegExp) {
-          if (value.test(entry.name))  {
-            rv = name;
-            break;
-          }
-        } else if (typeof value == 'function') {
-          try {
-            if (value(entry)) {
-              rv = name;
-              break;
-            }
-          } catch (ex) {
-            console.error('Caught exception while evaluating iconType: ' +
-                          name, ex);
-          }
-        } else {
-          console.log('Unexpected value in iconTypes[' + name + ']: ' + value);
-        }
-      }
-    }
-
-    entry.cachedIconType_ = rv;
-    return rv;
+ /**
+  * Normalizes path not to start with /
+  *
+  * @param {string} path The file path.
+  */
+  function normalizeAbsolutePath(x) {
+    if (x[0] == '/')
+      return x.slice(1);
+    else
+      return x;
   }
+
 
   /**
    * Call an asynchronous method on dirEntry, batching multiple callers.
@@ -480,27 +473,6 @@ FileManager.prototype = {
     }
   }
 
-  /**
-   * Get the icon type of a file, caching the result.
-   *
-   * When this method completes, the fileEntry object will get a
-   * 'cachedIconType_' property (if it doesn't already have one) containing the
-   * icon type of the file as a string.
-   *
-   * The successCallback is always invoked synchronously, since this does not
-   * actually require an async call.  You should not depend on this, as it may
-   * change if we were to start reading magic numbers (for example).
-   *
-   * @param {Entry} entry An HTML5 Entry object.
-   * @param {function(Entry)} successCallback The function to invoke once the
-   *     icon type is known.
-   */
-  function cacheEntryIconType(entry, successCallback) {
-    getIconType(entry);
-    if (successCallback)
-      setTimeout(function() { successCallback(entry) }, 0);
-  }
-
   function isSystemDirEntry(dirEntry) {
     return dirEntry.fullPath == '/' ||
         dirEntry.fullPath == REMOVABLE_DIRECTORY ||
@@ -579,15 +551,20 @@ FileManager.prototype = {
     this.copyButton_ = this.dialogDom_.querySelector('.clipboard-copy');
     this.pasteButton_ = this.dialogDom_.querySelector('.clipboard-paste');
 
+    this.downloadsWarning_ =
+        this.dialogDom_.querySelector('.downloads-warning');
+    var html = util.htmlUnescape(str('DOWNLOADS_DIRECTORY_WARNING'));
+    this.downloadsWarning_.lastElementChild.innerHTML = html;
+    var link = this.downloadsWarning_.querySelector('a');
+    link.addEventListener('click', this.onDownloadsWarningClick_.bind(this));
+
     this.document_.addEventListener('keydown', this.onKeyDown_.bind(this));
+
+    this.descriptionTable_ =
+        this.dialogDom_.querySelector('.preview-metadata-table');
 
     this.renameInput_ = this.document_.createElement('input');
     this.renameInput_.className = 'rename';
-
-    this.imageEditorFrame_ = this.document_.createElement('div');
-    this.imageEditorFrame_.className = 'image-editor';
-    this.imageEditorFrame_.style.display = 'none';
-    this.dialogDom_.appendChild(this.imageEditorFrame_);
 
     this.renameInput_.addEventListener(
         'keydown', this.onRenameInputKeyDown_.bind(this));
@@ -640,7 +617,6 @@ FileManager.prototype = {
                                        this.compareMtime_.bind(this));
     this.dataModel_.setCompareFunction('cachedSize_',
                                        this.compareSize_.bind(this));
-    this.dataModel_.sort('cachedMtime_');
     this.dataModel_.prepareSort = this.prepareSort_.bind(this);
 
     if (this.dialogType_ == FileManager.DialogType.SELECT_OPEN_FILE ||
@@ -663,13 +639,75 @@ FileManager.prototype = {
   };
 
   /**
+   * Get the icon type for a given Entry.
+   *
+   * @param {Entry} entry An Entry subclass (FileEntry or DirectoryEntry).
+   * @return {string} One of the keys from FileManager.iconTypes, or
+   *     'unknown'.
+   */
+  FileManager.prototype.getIconType = function(entry) {
+    if (entry.cachedIconType_)
+      return entry.cachedIconType_;
+
+    var rv = 'unknown';
+   if (entry.isDirectory)
+      rv = 'folder';
+    for (var name in iconTypes) {
+      var value = iconTypes[name];
+
+      if (value instanceof RegExp) {
+        if (value.test(entry.name))  {
+          rv = name;
+          break;
+        }
+      } else if (typeof value == 'function') {
+        try {
+          if (value(this,entry)) {
+            rv = name;
+            break;
+          }
+        } catch (ex) {
+          console.error('Caught exception while evaluating iconType: ' +
+                        name, ex);
+        }
+      } else {
+        console.log('Unexpected value in iconTypes[' + name + ']: ' + value);
+      }
+    }
+    entry.cachedIconType_ = rv;
+    return rv;
+  };
+
+
+  /**
+   * Get the icon type of a file, caching the result.
+   *
+   * When this method completes, the fileEntry object will get a
+   * 'cachedIconType_' property (if it doesn't already have one) containing the
+   * icon type of the file as a string.
+   *
+   * The successCallback is always invoked synchronously, since this does not
+   * actually require an async call.  You should not depend on this, as it may
+   * change if we were to start reading magic numbers (for example).
+   *
+   * @param {Entry} entry An HTML5 Entry object.
+   * @param {function(Entry)} successCallback The function to invoke once the
+   *     icon type is known.
+   */
+  FileManager.prototype.cacheEntryIconType = function(entry, successCallback) {
+    this.getIconType(entry);
+    if (successCallback)
+      setTimeout(function() { successCallback(entry) }, 0);
+  }
+
+  /**
    * Compare by mtime first, then by name.
    */
   FileManager.prototype.compareMtime_ = function(a, b) {
-    if (a.cachedMtime_ > b.cachedMtime)
+    if (a.cachedMtime_ > b.cachedMtime_)
       return 1;
 
-    if (a.cachedMtime_ < b.cachedMtime)
+    if (a.cachedMtime_ < b.cachedMtime_)
       return -1;
 
     return this.collator_.compare(a.name, b.name);
@@ -679,10 +717,10 @@ FileManager.prototype = {
    * Compare by size first, then by name.
    */
   FileManager.prototype.compareSize_ = function(a, b) {
-    if (a.cachedSize_ > b.cachedSize)
+    if (a.cachedSize_ > b.cachedSize_)
       return 1;
 
-    if (a.cachedSize_ < b.cachedSize)
+    if (a.cachedSize_ < b.cachedSize_)
       return -1;
 
     return this.collator_.compare(a.name, b.name);
@@ -830,7 +868,7 @@ FileManager.prototype = {
         event.canExecute =
           (this.clipboard_ &&
            this.clipboard_.sourceDirEntry.fullPath !=
-           this.currentDirEntry_.fullPath_ &&
+           this.currentDirEntry_.fullPath &&
            !isSystemDirEntry(this.currentDirEntry_));
         if (this.pasteButton_)
           this.pasteButton_.disabled = !event.canExecute;
@@ -843,6 +881,7 @@ FileManager.prototype = {
            // Rename not in progress.
            !this.renameInput_.currentEntry &&
            // Only one file selected.
+           this.selection &&
            this.selection.totalCount == 1 &&
            !isSystemDirEntry(this.currentDirEntry_));
          break;
@@ -908,7 +947,8 @@ FileManager.prototype = {
         'dblclick', this.onDetailDoubleClick_.bind(this));
     this.grid_.selectionModel.addEventListener(
         'change', this.onSelectionChanged_.bind(this));
-
+    this.grid_.selectionModel.addEventListener(
+        'leadIndexChange', this.onLeadIndexChanged_.bind(this));
     cr.ui.contextMenuHandler.addContextMenuProperty(this.grid_);
     this.grid_.contextMenu = this.fileContextMenu_;
     this.grid_.addEventListener('mousedown',
@@ -947,6 +987,8 @@ FileManager.prototype = {
         'dblclick', this.onDetailDoubleClick_.bind(this));
     this.table_.selectionModel.addEventListener(
         'change', this.onSelectionChanged_.bind(this));
+    this.table_.selectionModel.addEventListener(
+        'leadIndexChange', this.onLeadIndexChanged_.bind(this));
 
     cr.ui.contextMenuHandler.addContextMenuProperty(this.table_);
     this.table_.contextMenu = this.fileContextMenu_;
@@ -1045,10 +1087,11 @@ FileManager.prototype = {
   };
 
   /**
-   * Respond to the back button.
+   * Respond to the back and forward buttons.
    */
   FileManager.prototype.onPopState_ = function(event) {
-    this.changeDirectory(event.state, CD_NO_HISTORY);
+    // TODO(serya): We should restore selected items here.
+    this.setupCurrentDirectory_();
   };
 
   FileManager.prototype.requestResize_ = function(timeout) {
@@ -1086,9 +1129,52 @@ FileManager.prototype = {
                             errorCallback);
   };
 
-  FileManager.prototype.initDefaultDirectory_ = function() {
+  /**
+   * Restores current directory and may be a selected item after page load (or
+   * reload) or popping a state (after click on back/forward). If location.hash
+   * is present it means that the user has navigated somewhere and that place
+   * will be restored. defaultPath primarily is used with save/open dialogs.
+   * Default path may also contain a file name. Freshly opened file manager
+   * window has neither.
+   */
+  FileManager.prototype.setupCurrentDirectory_ = function() {
+    if (location.hash) {
+      // Location hash has the highest priority.
+      var path = decodeURI(location.hash.substr(1));
+      this.changeDirectory(path, CD_NO_HISTORY);
+      return;
+    } else if (this.params_.defaultPath) {
+      this.setupPath_(this.params_.defaultPath);
+    } else {
+      this.setupDefaultPath_();
+    }
+  };
+
+  FileManager.prototype.setupDefaultPath_ = function() {
+    // No preset given, find a good place to start.
+    // Check for removable devices, if there are none, go to Downloads.
+    var removableDirectoryEntry = this.rootEntries_.filter(function(rootEntry) {
+      return rootEntry.fullPath == REMOVABLE_DIRECTORY;
+    })[0];
+    if (!removableDirectoryEntry) {
+      this.changeDirectory(DOWNLOADS_DIRECTORY, CD_NO_HISTORY);
+      return;
+    }
+
+    var foundRemovable = false;
+    util.forEachDirEntry(removableDirectoryEntry, function(result) {
+      if (result) {
+        foundRemovable = true;
+      } else {  // Done enumerating, and we know the answer.
+        this.changeDirectory(foundRemovable ? '/' : DOWNLOADS_DIRECTORY,
+                             CD_NO_HISTORY);
+      }
+    }.bind(this));
+  };
+
+  FileManager.prototype.setupPath_ = function(path) {
     // Split the dirname from the basename.
-    var ary = this.defaultPath_.match(/^(.*?)(?:\/([^\/]+))?$/);
+    var ary = path.match(/^(.*?)(?:\/([^\/]+))?$/);
     if (!ary) {
       console.warn('Unable to split default path: ' + path);
       self.changeDirectory('/', CD_NO_HISTORY);
@@ -1129,7 +1215,7 @@ FileManager.prototype = {
         }
       }
 
-      self.resolvePath(self.defaultPath_, onLeafFound, onLeafError);
+      self.resolvePath(path, onLeafFound, onLeafError);
     }
 
     function onBaseError(err) {
@@ -1140,8 +1226,12 @@ FileManager.prototype = {
       self.changeDirectory('/', CD_NO_HISTORY);
     }
 
-    this.filesystem_.root.getDirectory(
-        baseName, {create: false}, onBaseFound, onBaseError);
+    if (baseName) {
+      this.filesystem_.root.getDirectory(
+          baseName, {create: false}, onBaseFound, onBaseError);
+    } else {
+      onBaseFound(this.filesystem_.root);
+    }
   };
 
   /**
@@ -1199,7 +1289,7 @@ FileManager.prototype = {
     } else if (field == 'cachedSize_') {
       cacheFunction = cacheEntrySize;
     } else if (field == 'cachedIconType_') {
-      cacheFunction = cacheEntryIconType;
+      cacheFunction = this.cacheEntryIconType.bind(this);
     } else {
       callback();
       return;
@@ -1306,7 +1396,7 @@ FileManager.prototype = {
 
     var icon = this.document_.createElement('div');
     icon.className = 'detail-icon';
-    entry.cachedIconType_ = getIconType(entry);
+    entry.cachedIconType_ = this.getIconType(entry);
     icon.setAttribute('iconType', entry.cachedIconType_);
     div.appendChild(icon);
 
@@ -1411,7 +1501,6 @@ FileManager.prototype = {
     var selection = this.selection = {
       entries: [],
       urls: [],
-      leadEntry: null,
       totalCount: 0,
       fileCount: 0,
       directoryCount: 0,
@@ -1441,9 +1530,9 @@ FileManager.prototype = {
       selection.urls.push(entry.toURL());
 
       if (selection.iconType == null) {
-        selection.iconType = getIconType(entry);
+        selection.iconType = this.getIconType(entry);
       } else if (selection.iconType != 'unknown') {
-        var iconType = getIconType(entry);
+        var iconType = this.getIconType(entry);
         if (selection.iconType != iconType)
           selection.iconType = 'unknown';
       }
@@ -1468,13 +1557,6 @@ FileManager.prototype = {
       }
     }
 
-    var leadIndex = this.currentList_.selectionModel.leadIndex;
-    if (leadIndex > -1) {
-      selection.leadEntry = this.dataModel_.item(leadIndex);
-    } else {
-      selection.leadEntry = selection.entries[0];
-    }
-
     var self = this;
 
     function cacheNextFile(fileEntry) {
@@ -1493,12 +1575,18 @@ FileManager.prototype = {
     };
 
     if (this.dialogType_ == FileManager.DialogType.FULL_PAGE) {
-      // Since unmount task cannot be defined in terms of file patterns,
-      // we manually include it here, if all selected items are mount points.
-      chrome.fileBrowserPrivate.getFileTasks(
-          selection.urls,
-          this.onTasksFound_.bind(this,
-                                  this.shouldShowUnmount_(selection.urls)));
+      this.taskButtons_.innerHTML = '';
+      // Some internal tasks cannot be defined in terms of file patterns,
+      // so we pass selection to check for them manually.
+      if (selection.directoryCount == 0 && selection.fileCount > 0) {
+        // Only files, not directories, are supported for external tasks.
+        chrome.fileBrowserPrivate.getFileTasks(
+            selection.urls,
+            this.onTasksFound_.bind(this, selection));
+      } else {
+        // There may be internal tasks for directories.
+        this.onTasksFound_(selection, []);
+      }
     }
 
     cacheNextFile();
@@ -1525,8 +1613,17 @@ FileManager.prototype = {
     this.onMetadataResult_(fileURL, {});
   };
 
-  FileManager.prototype.onMetadataFilter_ = function(regexp) {
+  /**
+   * Handles the 'initialized' message from the metadata reader Worker.
+   */
+  FileManager.prototype.onMetadataInitialized_ = function(regexp) {
     this.metadataUrlFilter_ = regexp;
+    // We're ready to run.  Tests can monitor for this state with
+    // ExtensionTestMessageListener listener("worker-initialized");
+    // ASSERT_TRUE(listener.WaitUntilSatisfied());
+    // Automated tests need to wait for this, otherwise we crash in browser_test
+    // cleanup because the worker process still has URL requests in-flight.
+    chrome.test.sendMessage('worker-initialized');
   };
 
   FileManager.prototype.onMetadataLog_ = function(arglist) {
@@ -1553,25 +1650,20 @@ FileManager.prototype = {
 
   /**
    * Callback called when tasks for selected files are determined.
-   * @param {boolean} unmount Whether unmount task should be included.
+   * @param {Object} selection Selection is passed here, since this.selection
+   *     can change before tasks were found, and we should be accurate.
    * @param {Array.<Task>} tasksList The tasks list.
    */
-  FileManager.prototype.onTasksFound_ = function(unmount, tasksList) {
-    if (unmount) {
-      tasksList.push({
-          taskId: this.getExtensionId_() + '|unmount-archive',
-          iconUrl: '',
-          title: ''
-      });
-    }
-
+  FileManager.prototype.onTasksFound_ = function(selection, tasksList) {
     this.taskButtons_.innerHTML = '';
+
     for (var i = 0; i < tasksList.length; i++) {
       var task = tasksList[i];
 
       // Tweak images, titles of internal tasks.
       var task_parts = task.taskId.split('|');
       if (task_parts[0] == this.getExtensionId_()) {
+        task.internal = true;
         if (task_parts[1] == 'preview') {
           // TODO(serya): This hack needed until task.iconUrl get working
           //              (see GetFileTasksFileBrowserFunction::RunImpl).
@@ -1595,34 +1687,133 @@ FileManager.prototype = {
           task.iconUrl =
               chrome.extension.getURL('images/icon_mount_archive_16x16.png');
           task.title = str('MOUNT_ARCHIVE');
-        } else if (task_parts[1] == 'unmount-archive') {
-          task.iconUrl =
-              chrome.extension.getURL('images/icon_unmount_archive_16x16.png');
-          task.title = str('UNMOUNT_ARCHIVE');
+          if (str('ENABLE_ARCHIVES') != 'true')
+            continue;
+        }
+      }
+      this.renderTaskButton_(task);
+    }
+
+    // These are done in separate functions, as the checks require
+    // asynchronous function calls.
+    this.maybeRenderUnmountTask_(selection);
+    this.maybeRenderFormattingTask_(selection);
+  };
+
+  FileManager.prototype.renderTaskButton_ = function(task) {
+    var button = this.document_.createElement('button');
+    button.addEventListener('click', this.onTaskButtonClicked_.bind(this));
+    button.className = 'task-button';
+    button.task = task;
+
+    var img = this.document_.createElement('img');
+    img.src = task.iconUrl;
+
+    button.appendChild(img);
+    button.appendChild(this.document_.createTextNode(task.title));
+
+    this.taskButtons_.appendChild(button);
+  };
+
+  /**
+   * Checks whether unmount task should be displayed and if the answer is
+   * affirmative renders it.
+   * @param {Object} selection Selected files object.
+   */
+  FileManager.prototype.maybeRenderUnmountTask_ = function(selection) {
+    for (var index = 0; index < selection.urls.length; ++index) {
+      // Each url should be a mount point.
+      var path = selection.entries[index].fullPath;
+      var found = false;
+      for (var i = 0; i < this.mountPoints_.length; i++) {
+        var mountPath = this.mountPoints_[i].mountPath;
+        if (mountPath[0] != '/') {
+          mountPath = '/' + mountPath;
+        }
+        if (mountPath == path && this.mountPoints_[i].mountType == 'file') {
+          found = true;
+          break;
+        }
+      }
+      if (!found)
+        return;
+    }
+    this.renderTaskButton_({
+        taskId: this.getExtensionId_() + '|unmount-archive',
+        iconUrl:
+            chrome.extension.getURL('images/icon_unmount_archive_16x16.png'),
+        title: str('UNMOUNT_ARCHIVE')
+    });
+   };
+
+  /**
+   * Checks whether formatting task should be displayed and if the answer is
+   * affirmative renders it. Includes asynchronous calls, so it's splitted into
+   * three parts.
+   * @param {Object} selection Selected files object.
+   */
+  FileManager.prototype.maybeRenderFormattingTask_ = function(selection) {
+    // Not to make unnecessary getMountPoints() call we doublecheck if there is
+    // only one selected entry.
+    if (selection.entries.length != 1)
+      return;
+    var self = this;
+    function onMountPointsFound(mountPoints) {
+      self.mountPoints_ = mountPoints;
+      function onVolumeMetadataFound(volumeMetadata) {
+        if (volumeMetadata.deviceType == "flash") {
+          if (self.selection.entries.length != 1 ||
+              normalizeAbsolutePath(self.selection.entries[0].fullPath) !=
+              normalizeAbsolutePath(volumeMetadata.mountPath)) {
+            return;
+          }
+          var task = {
+            taskId: self.getExtensionId_() + '|format-device',
+            iconUrl: chrome.extension.getURL('images/filetype_generic.png'),
+            title: str('FORMAT_DEVICE')
+          };
+          self.renderTaskButton_(task);
         }
       }
 
-      var button = this.document_.createElement('button');
-      button.addEventListener('click', this.onTaskButtonClicked_.bind(this));
-      button.className = 'task-button';
-      button.task = task;
-
-      var img = this.document_.createElement('img');
-      img.src = task.iconUrl;
-
-      button.appendChild(img);
-      button.appendChild(this.document_.createTextNode(task.title));
-
-      this.taskButtons_.appendChild(button);
+      if (selection.entries.length != 1)
+        return;
+      var selectedPath = selection.entries[0].fullPath;
+      for (var i = 0; i < mountPoints.length; i++) {
+        if (mountPoints[i].mountType == "device" &&
+            normalizeAbsolutePath(mountPoints[i].mountPath) ==
+            normalizeAbsolutePath(selectedPath)) {
+          chrome.fileBrowserPrivate.getVolumeMetadata(mountPoints[i].sourceUrl,
+              onVolumeMetadataFound);
+          return;
+        }
+      }
     }
+
+    chrome.fileBrowserPrivate.getMountPoints(onMountPointsFound);
   };
 
   FileManager.prototype.getExtensionId_ = function() {
     return chrome.extension.getURL('').split('/')[2];
   };
 
+  FileManager.prototype.onDownloadsWarningClick_ = function(event) {
+    chrome.tabs.create({url: DOWNLOADS_FAQ_URL});
+    if (this.dialogType_ != FileManager.DialogType.FULL_PAGE) {
+      this.onCancel_();
+    }
+  };
+
   FileManager.prototype.onTaskButtonClicked_ = function(event) {
-    chrome.fileBrowserPrivate.executeTask(event.srcElement.task.taskId,
+    var task = event.srcElement.task;
+    if (task.internal) {
+      // For internal tasks call the handler directly to avoid being handled
+      // multiple times.
+      var taskId = task.taskId.split('|')[1];
+      this.onFileTaskExecute_(taskId, {entries: this.selection.entries});
+      return;
+    }
+    chrome.fileBrowserPrivate.executeTask(task.taskId,
                                           this.selection.urls);
   };
 
@@ -1652,9 +1843,25 @@ FileManager.prototype = {
           }
         }
       }
+
+      if (event.eventType == 'unmount' && event.status == 'success' &&
+          self.currentDirEntry_ &&
+          isParentPath(event.mountPath, self.currentDirEntry_.fullPath)) {
+        self.changeDirectory(getParentPath(event.mountPath));
+        return;
+      }
+
+      var rescanDirectoryNeeded = (event.status == 'success');
+      for (var i = 0; i < mountPoints.length; i++) {
+        if (event.sourceUrl == mountPoints[i].sourceUrl &&
+            mountPoints[i].mountCondition != '') {
+          rescanDirectoryNeeded = true;
+        }
+      }
       // TODO(dgozman): rescan directory, only if it contains mounted points,
       // when mounts location will be decided.
-      this.rescanDirectory_();
+      if (rescanDirectoryNeeded)
+        self.rescanDirectory_(null, 300);
     });
   };
 
@@ -1669,12 +1876,7 @@ FileManager.prototype = {
       g_slideshow_data = urls;
       chrome.tabs.create({url: "slideshow.html"});
     } else if (id == 'edit') {
-      this.imageEditorFrame_.style.display = 'block';
-      this.imageEditor_ = new ImageEditor(
-          this.imageEditorFrame_,
-          this.onImageEditorSave.bind(this),
-          this.onImageEditorClose.bind(this));
-      this.imageEditor_.getBuffer().load(urls[0]);
+      this.openImageEditor_(details.entries[0]);
     } else if (id == 'play' || id == 'enqueue') {
       chrome.fileBrowserPrivate.viewFiles(urls, id);
     } else if (id == 'mount-archive') {
@@ -1686,31 +1888,51 @@ FileManager.prototype = {
       for (var index = 0; index < urls.length; ++index) {
         chrome.fileBrowserPrivate.removeMount(urls[index]);
       }
+    } else if (id == 'format-device') {
+      this.confirm.show(str('FORMATTING_WARNING'), function() {
+        chrome.fileBrowserPrivate.formatDevice(urls[0]);
+      });
     }
   };
 
-  /**
-   * Determines whether unmount task should present for selected files.
-   */
-  FileManager.prototype.shouldShowUnmount_ = function(urls) {
-    for (var index = 0; index < urls.length; ++index) {
-      // Each url should be a mount point.
-      var path = urls[index];
-      if (!this.mountPoints_.hasOwnProperty(path) ||
-          this.mountPoints_[path].type != 'file') {
-        return false;
+  FileManager.prototype.getDeviceNumber = function(entry) {
+    if (!entry.isDirectory) return false;
+    for (var i = 0; i < this.mountPoints_.length; i++) {
+      if (normalizeAbsolutePath(entry.fullPath) ==
+          normalizeAbsolutePath(this.mountPoints_[i].mountPath)) {
+        return i;
       }
     }
-    return true;
+    return undefined;
+  }
+
+  FileManager.prototype.openImageEditor_ = function(entry) {
+    var self = this;
+
+    var editorFrame = this.document_.createElement('iframe');
+    editorFrame.className = 'overlay-pane';
+    editorFrame.scrolling = 'no';
+
+    editorFrame.onload = function() {
+      self.cacheMetadata_(entry, function(metadata) {
+        editorFrame.contentWindow.ImageEditor.open(
+            self.onImageEditorSave_.bind(self, entry),
+            function () { self.dialogDom_.removeChild(editorFrame) },
+            entry.toURL(),
+            metadata);
+      });
+    };
+
+    editorFrame.src = 'js/image_editor/image_editor.html';
+
+    this.dialogDom_.appendChild(editorFrame);
   };
 
-  FileManager.prototype.onImageEditorSave = function(canvas) {
-    console.warn('Saving images not implemented');
-  };
-
-  FileManager.prototype.onImageEditorClose = function() {
-    this.imageEditorFrame_.style.display = 'none';
-    this.imageEditor_ = null;
+  FileManager.prototype.onImageEditorSave_ = function(entry, blob) {
+    // TODO(kaznacheev): Notify user properly about write failures.
+    util.writeBlobToFile(entry, blob, function(){},
+        util.flog('Error writing to ' + entry.fullPath));
+    this.updatePreview_();  // Metadata may have changed.
   };
 
   /**
@@ -1765,6 +1987,9 @@ FileManager.prototype = {
     // instead we use empty 1x1 gif
     this.previewImage_.src = EMPTY_IMAGE_URI;
 
+    // Also clear description in case metadata takes some time to load
+    this.clearDescription_();
+
     // The thumbnail class styles the preview for image thumbnails, which are
     // treated a little differently than the stock icons for non-thumbnail
     // preview images.
@@ -1774,41 +1999,27 @@ FileManager.prototype = {
     // selcted.
     this.previewImage_.classList.remove('multiple-selected');
 
-    if (!this.selection.totalCount) {
+    var leadEntry = this.getLeadEntry();
+    if (!leadEntry) {
       this.previewFilename_.textContent = '';
       return;
     }
-
-    var previewName = this.selection.leadEntry.name;
+    var previewName = leadEntry.name;
     if (this.currentDirEntry_.name == '')
       previewName = this.getLabelForRootPath_(previewName);
 
     this.previewFilename_.textContent = previewName;
 
-    var iconType = getIconType(this.selection.leadEntry);
+    var iconType = this.getIconType(leadEntry);
     if (iconType == 'image') {
       if (fileManager.selection.totalCount > 1)
         this.previewImage_.classList.add('multiple-selected');
     }
 
     var self = this;
-    var leadEntry = this.selection.leadEntry;
-
-    if (this.selection.totalCount == this.selection.fileCount == 1) {
-      this.cacheMetadata_(leadEntry, function (metadata) {
-          if (leadEntry != self.selection.leadEntry) {
-            // Selection has changed since we asked for the metadata, nevermind.
-            return;
-          }
-
-          self.setPreviewMetadata(metadata);
-        });
-    } else {
-      self.setPreviewMetadata(null);
-    }
 
     this.getThumbnailURL(leadEntry, function(iconType, url) {
-      if (self.selection.leadEntry != leadEntry) {
+      if (self.getLeadEntry() != leadEntry) {
         // Selection has changed since we asked, nevermind.
         return;
       }
@@ -1821,6 +2032,77 @@ FileManager.prototype = {
         self.previewImage_.src = previewArt['unknown'];
       }
     });
+
+    this.getDescription(leadEntry, function(desc) {
+      self.clearDescription_();
+
+      if (self.getLeadEntry() != leadEntry) {
+        return;
+      }
+
+      if (desc) {
+
+        var descriptionBody =
+            self.descriptionTable_.ownerDocument.createElement('tbody');
+
+        var doc = self.descriptionTable_.ownerDocument;
+
+        for (var key in desc) {
+          descriptionBody.appendChild(
+            util.createElement(doc, 'tr',
+                util.createElement(doc, 'th', str(desc[key].key)),
+                util.createElement(doc, 'td',
+                                   self.formatMetadataValue_(desc[key]))
+            )
+          );
+        }
+
+        self.descriptionTable_.appendChild(descriptionBody);
+      }
+    });
+  };
+
+  FileManager.prototype.getLeadEntry = function() {
+    var leadIndex = this.currentList_.selectionModel.leadIndex;
+    if (leadIndex < 0)
+      return null;
+
+    return this.dataModel_.item(leadIndex);
+  };
+
+  FileManager.prototype.formatMetadataValue_ = function(obj) {
+    if (typeof obj.type == 'undefined') {
+      return obj.value;
+    } else if (obj.type == 'duration') {
+
+
+      var totalSeconds = Math.floor(obj.value / 1000);
+      var hours = Math.floor(totalSeconds / 60 / 60);
+
+      var fmtSkeleton;
+
+      // Print hours if available
+      //TODO: dzvorygin use better skeletons when documentation become available
+      if (hours > 0) {
+        fmtSkeleton = 'hh:mm:ss';
+      } else {
+        fmtSkeleton = 'mm:ss';
+      }
+
+      // Convert duration to milliseconds since time start
+      var date = new Date(parseInt(obj.value));
+
+      var fmt = this.locale_.createDateTimeFormat({skeleton:fmtSkeleton});
+
+      return fmt.format(date);
+    }
+  };
+
+
+  FileManager.prototype.clearDescription_ = function() {
+    while (this.descriptionTable_.hasChildNodes()) {
+      this.descriptionTable_.removeChild(this.descriptionTable_.firstChild);
+    }
   };
 
   FileManager.prototype.cacheMetadata_ = function(entry, callback) {
@@ -1892,7 +2174,7 @@ FileManager.prototype = {
     if (!entry)
       return;
 
-    var iconType = getIconType(entry);
+    var iconType = this.getIconType(entry);
 
     this.cacheMetadata_(entry, function (metadata) {
       var url = metadata.thumbnailURL;
@@ -1905,6 +2187,15 @@ FileManager.prototype = {
       }
 
       callback(iconType, url);
+    });
+  };
+
+  FileManager.prototype.getDescription = function(entry, callback) {
+    if (!entry)
+      return;
+
+    this.cacheMetadata_(entry, function(metadata) {
+      callback(metadata.description);
     });
   };
 
@@ -1935,18 +2226,29 @@ FileManager.prototype = {
   FileManager.prototype.changeDirectoryEntry = function(dirEntry,
                                                         opt_saveHistory,
                                                         opt_selectedEntry) {
+    if (typeof opt_saveHistory == 'undefined') {
+      opt_saveHistory = true;
+    } else {
+      opt_saveHistory = !!opt_saveHistory;
+    }
+
+    var location = '#' + encodeURI(dirEntry.fullPath);
+    if (opt_saveHistory) {
+      history.pushState(undefined, dirEntry.fullPath, location);
+    } else if (window.location.hash != location) {
+      // If the user typed URL manually that is not canonical it would be fixed
+      // here. However it seems history.replaceState doesn't work properly
+      // with rewritable URLs (while does with history.pushState). It changes
+      // window.location but doesn't change content of the ombibox.
+      history.replaceState(undefined, dirEntry.fullPath, location);
+    }
+
     if (this.currentDirEntry_ &&
         this.currentDirEntry_.fullPath == dirEntry.fullPath) {
       // Directory didn't actually change.
       if (opt_selectedEntry)
         this.selectEntry(opt_selectedEntry);
       return;
-    }
-
-    if (typeof opt_saveHistory == 'undefined') {
-      opt_saveHistory = true;
-    } else {
-      opt_saveHistory = !!opt_saveHistory;
     }
 
     var e = new cr.Event('directory-changed');
@@ -1975,7 +2277,9 @@ FileManager.prototype = {
                                                    opt_saveHistory,
                                                    opt_selectedEntry) {
     if (path == '/')
-      return this.changeDirectoryEntry(this.filesystem_.root);
+      return this.changeDirectoryEntry(this.filesystem_.root,
+                                       opt_saveHistory,
+                                       opt_selectedEntry);
 
     var self = this;
 
@@ -1987,7 +2291,12 @@ FileManager.prototype = {
         },
         function(err) {
           console.error('Error changing directory to: ' + path + ', ' + err);
-          if (!self.currentDirEntry_) {
+          if (self.currentDirEntry_) {
+            var location = '#' + encodeURI(self.currentDirEntry_.fullPath);
+            history.replaceState(undefined,
+                                 self.currentDirEntry_.fullPath,
+                                 location);
+          } else {
             // If we've never successfully changed to a directory, force them
             // to the root.
             self.changeDirectory('/', false);
@@ -2069,6 +2378,16 @@ FileManager.prototype = {
 
     this.updateCommands_();
     this.showButter(str('SELECTION_CUT'));
+  };
+
+  /**
+   * Returns true if the local disk is low on available space.
+   *
+   * TODO(rginda): This is hardcoded to return false now, needs to be hooked
+   * up for real after tbarzac's change to report disk space lands.
+   */
+  FileManager.prototype.isLocalDiskSpaceLow = function() {
+    return false;
   };
 
   /**
@@ -2160,13 +2479,15 @@ FileManager.prototype = {
    */
   FileManager.prototype.onSelectionChanged_ = function(event) {
     this.summarizeSelection_();
-    this.updatePreview_();
 
     if (this.dialogType_ == FileManager.DialogType.SELECT_SAVEAS_FILE) {
       // If this is a save-as dialog, copy the selected file into the filename
       // input text box.
-      if (this.selection.leadEntry && this.selection.leadEntry.isFile)
-        this.filenameInput_.value = this.selection.leadEntry.name;
+
+      if (this.selection &&
+          this.selection.totalCount == 1 &&
+          this.selection.entries[0].isFile)
+        this.filenameInput_.value = this.getLeadEntry().name;
     }
 
     this.updateOkButton_();
@@ -2202,19 +2523,25 @@ FileManager.prototype = {
       }
     }
 
-    if (this.selection.fileCount > 1) {
+    if (this.selection.totalCount > 0) {
       // If more than one file is selected, make sure all checkboxes are lit
       // up.
       for (var i = 0; i < this.selection.entries.length; i++) {
-        if (!this.selection.entries[i].isFile)
-          continue;
-
         var selectedIndex = this.selection.indexes[i];
         var listItem = this.currentList_.getListItemByIndex(selectedIndex);
         if (listItem)
           listItem.querySelector('input[type="checkbox"]').checked = true;
       }
     }
+  };
+
+  /**
+   * Update the UI then the lead item changes.
+   *
+   * @param {cr.Event} event The change event.
+   */
+  FileManager.prototype.onLeadIndexChanged_ = function(event) {
+    this.updatePreview_();
   };
 
   FileManager.prototype.updateOkButton_ = function(event) {
@@ -2259,19 +2586,35 @@ FileManager.prototype = {
       return;
     }
 
-    var entry = this.selection.leadEntry;
-    if (!entry) {
+    if (this.selection.totalCount != 1) {
       console.log('Invalid selection');
       return;
     }
+    var entry = this.selection.entries[0];
 
-    if (entry.isDirectory)
-      return this.changeDirectory(entry.fullPath);
+    if (entry.isDirectory) {
+      return this.onDirectoryAction(entry);
+    }
 
     if (!this.okButton_.disabled)
       this.onOk_();
 
   };
+
+  FileManager.prototype.onDirectoryAction = function(entry) {
+    var deviceNumber = this.getDeviceNumber(entry);
+    if (deviceNumber != undefined &&
+        this.mountPoints_[deviceNumber].mountCondition ==
+        'unknown_filesystem') {
+      return this.showButter(str('UNKNOWN_FILESYSTEM_WARNING'));
+    } else if (deviceNumber != undefined &&
+               this.mountPoints_[deviceNumber].mountCondition ==
+               'unsupported_filesystem') {
+      return this.showButter(str('UNSUPPORTED_FILESYSTEM_WARNING'));
+    } else {
+      return this.changeDirectory(entry.fullPath);
+    }
+  }
 
   /**
    * Update the UI when the current directory changes.
@@ -2279,10 +2622,19 @@ FileManager.prototype = {
    * @param {cr.Event} event The directory-changed event.
    */
   FileManager.prototype.onDirectoryChanged_ = function(event) {
-    if (event.saveHistory) {
-      history.pushState(this.currentDirEntry_.fullPath,
-                        this.currentDirEntry_.fullPath,
-                        location.href);
+    if (this.currentDirEntry_.fullPath.substr(0, DOWNLOADS_DIRECTORY.length) ==
+        DOWNLOADS_DIRECTORY &&
+        this.isLocalDiskSpaceLow()) {
+      if (this.downloadsWarning_.style.height != DOWNLOADS_WARNING_HEIGHT) {
+        // Current path starts with DOWNLOADS_DIRECTORY, show the warning.
+        this.downloadsWarning_.style.height = DOWNLOADS_WARNING_HEIGHT;
+        this.requestResize_(100);
+      }
+    } else {
+      if (this.downloadsWarning_.style.height != '0') {
+        this.downloadsWarning_.style.height = '0';
+        this.requestResize_(100);
+      }
     }
 
     this.updateCommands_();
@@ -2304,29 +2656,63 @@ FileManager.prototype = {
   };
 
   /**
-   * Update the UI when a disk is mounted or unmounted.
+   * Rescans the current directory, refreshing the list. It decreases the
+   * probability that two such calls are pending simultaneously.
    *
-   * @param {string} path The path that has been mounted or unmounted.
+   * @param {function()} opt_callback Optional function to invoke when the
+   *     rescan is complete.
+   * @param {string} delayMS Delay during which next rescanDirectory calls
+   *     can happen.
    */
-  FileManager.prototype.onDiskChanged_ = function(event) {
-    if (event.eventType == 'added') {
-      this.changeDirectory(event.volumeInfo.mountPath);
-    } else if (event.eventType == 'removed') {
-      if (this.currentDirEntry_ &&
-          isParentPath(event.volumeInfo.mountPath,
-                       this.currentDirEntry_.fullPath)) {
-        this.changeDirectory(getParentPath(event.volumeInfo.mountPath));
+
+  FileManager.prototype.rescanDirectory_ = function(opt_callback, delayMS) {
+    var self = this;
+    function done(count) {
+      // Variable count is introduced because we only want to do callbacks, that
+      // were in the queue at the moment of rescanDirectoryNow invocation.
+      while (count--) {
+        var callback = self.rescanDirectory_.callbacks.shift();
+        callback();
       }
     }
+
+    // callbacks is a queue of callbacks that need to be called after rescaning
+    // directory is done. We push callback to the end and pop form the front.
+    // When we get to actually call rescanDirectoryNow_ we need to remember how
+    // many callbacks were in a queue at the time, not to call callbacks that
+    // arrived in the middle of execution (they may depend on rescaning being
+    // done after they called rescanDirectory_).
+    if (!this.rescanDirectory_.callbacks)
+      this.rescanDirectory_.callbacks = [];
+
+    if (opt_callback)
+      this.rescanDirectory_.callbacks.push(opt_callback);
+
+    delayMS = delayMS || 100;
+
+    // Assumes rescanDirectoryNow_ takes less than 100 ms. If not there is
+    // a possible overlap between two calls.
+    if (delayMS < 100)
+      delayMS = 100;
+
+    if (this.rescanDirectory_.handle)
+      clearTimeout(this.rescanDirectory_.handle);
+    var currentQueueLength = self.rescanDirectory_.callbacks.length;
+    this.rescanDirectory_.handle = setTimeout(function () {
+        self.rescanDirectoryNow_(function() {
+            done(currentQueueLength);
+          });
+      }, delayMS);
   };
 
   /**
-   * Rescan the current directory, refreshing the list.
+   * Rescans the current directory immediately, refreshing the list. Should NOT
+   * be used in most cases. Instead use rescanDirectory_.
    *
    * @param {function()} opt_callback Optional function to invoke when the
    *     rescan is complete.
    */
-  FileManager.prototype.rescanDirectory_ = function(opt_callback) {
+  FileManager.prototype.rescanDirectoryNow_ = function(opt_callback) {
     var self = this;
     var reader;
 
@@ -2447,10 +2833,6 @@ FileManager.prototype = {
       return false;
     }
 
-    // Rename already in progress.
-    if (this.renameInput_.currentEntry)
-      return false;
-
     // Didn't click on the label.
     if (!event.srcElement.classList.contains('filename-label'))
       return false;
@@ -2463,14 +2845,21 @@ FileManager.prototype = {
 
     var now = new Date();
     var path = event.srcElement.entry.fullPath;
+    var lastLabelClick = this.lastLabelClick_;
+    this.lastLabelClick_ = {path: path, date: now};
 
-    if (this.lastLabelClick_ && this.lastLabelClick_.path == path) {
-      var delay = now - this.lastLabelClick_.date;
-      if (delay > 500 && delay < 2000)
+    // Rename already in progress.
+    if (this.renameInput_.currentEntry)
+      return false;
+
+    if (lastLabelClick && lastLabelClick.path == path) {
+      var delay = now - lastLabelClick.date;
+      if (delay > 500 && delay < 2000) {
+        this.lastLabelClick_ = null;
         return true;
+      }
     }
 
-    this.lastLabelClick_ = {path: path, date: now};
     return false;
   };
 
@@ -2559,7 +2948,6 @@ FileManager.prototype = {
 
   FileManager.prototype.cancelRename_ = function(event) {
     this.renameInput_.currentEntry = null;
-    this.lastLabelClick_ = null;
 
     if (this.renameInput_.parentNode)
       this.renameInput_.parentNode.removeChild(this.renameInput_);
@@ -2702,10 +3090,10 @@ FileManager.prototype = {
 
       case 13:  // Enter => Change directory or complete dialog.
         if (this.selection.totalCount == 1 &&
-            this.selection.leadEntry.isDirectory &&
+            this.selection.entries[0].isDirectory &&
             this.dialogType_ != FileManager.SELECT_FOLDER) {
           event.preventDefault();
-          this.changeDirectory(this.selection.leadEntry.fullPath);
+          this.onDirectoryAction(this.selection.entries[0]);
         } else if (!this.okButton_.disabled) {
           event.preventDefault();
           this.onOk_();
@@ -2753,7 +3141,7 @@ FileManager.prototype = {
 
       case 46:  // Delete.
         if (this.dialogType_ == FileManager.DialogType.FULL_PAGE &&
-            this.selection.totalCount > 0 &&
+            this.selection && this.selection.totalCount > 0 &&
             !isSystemDirEntry(this.currentDirEntry_)) {
           event.preventDefault();
           this.deleteEntries(this.selection.entries);
@@ -2903,11 +3291,13 @@ FileManager.prototype = {
     if (ary.length > 1)
       throw new Error('Too many files selected!');
 
+    var selectedEntry = this.dataModel_.item(selectedIndexes[0]);
+
     if (this.dialogType_ == FileManager.DialogType.SELECT_FOLDER) {
-      if (!this.selection.leadEntry.isDirectory)
+      if (!selectedEntry.isDirectory)
         throw new Error('Selected entry is not a folder!');
     } else if (this.dialogType_ == FileManager.DialogType.SELECT_OPEN_FILE) {
-      if (!this.selection.leadEntry.isFile)
+      if (!selectedEntry.isFile)
         throw new Error('Selected entry is not a file!');
     }
 

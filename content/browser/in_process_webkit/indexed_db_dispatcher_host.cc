@@ -46,10 +46,6 @@ using WebKit::WebVector;
 
 namespace {
 
-// FIXME: Replace this magic constant once we have a more sophisticated quota
-// system.
-static const uint64 kDefaultQuota = 5 * 1024 * 1024;
-
 template <class T>
 void DeleteOnWebKitThread(T* obj) {
   if (!BrowserThread::DeleteSoon(BrowserThread::WEBKIT, FROM_HERE, obj))
@@ -203,23 +199,13 @@ void IndexedDBDispatcherHost::OnIDBFactoryOpen(
 
   // TODO(jorlow): This doesn't support file:/// urls properly. We probably need
   //               to add some toString method to WebSecurityOrigin that doesn't
-  //               return null for them.
+  //               return null for them.  Look at
+  //               DatabaseUtil::GetOriginFromIdentifier.
   WebSecurityOrigin origin(
       WebSecurityOrigin::createFromDatabaseIdentifier(params.origin));
   GURL origin_url(origin.toString());
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
-  DCHECK(kDefaultQuota == params.maximum_size);
-
-  uint64 quota = kDefaultQuota;
-  if (Context()->IsUnlimitedStorageGranted(origin_url) ||
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kUnlimitedQuotaForIndexedDB)) {
-      // TODO(jorlow): For the IsUnlimitedStorageGranted case, we need some
-      //       way to revoke it.
-      // TODO(jorlow): Use kint64max once we think we can scale over 1GB.
-      quota = 1024 * 1024 * 1024; // 1GB. More or less "unlimited".
-  }
 
   WebKit::WebIDBFactory::BackingStoreType backingStoreType =
       WebKit::WebIDBFactory::LevelDBBackingStore;
@@ -229,14 +215,17 @@ void IndexedDBDispatcherHost::OnIDBFactoryOpen(
     backingStoreType = WebKit::WebIDBFactory::SQLiteBackingStore;
   }
 
+  // TODO(dgrogan): Delete this magic constant once we've removed sqlite.
+  static const uint64 kIncognitoSqliteBackendQuota = 50 * 1024 * 1024;
+
   // TODO(dgrogan): Don't let a non-existing database be opened (and therefore
   // created) if this origin is already over quota.
   Context()->GetIDBFactory()->open(
       params.name,
       new IndexedDBCallbacks<WebIDBDatabase>(this, params.response_id,
                                              origin_url),
-      origin, NULL, webkit_glue::FilePathToWebString(indexed_db_path), quota,
-      backingStoreType);
+      origin, NULL, webkit_glue::FilePathToWebString(indexed_db_path),
+      kIncognitoSqliteBackendQuota, backingStoreType);
 }
 
 void IndexedDBDispatcherHost::OnIDBFactoryDeleteDatabase(
@@ -431,7 +420,6 @@ void IndexedDBDispatcherHost::DatabaseDispatcherHost::OnTransaction(
     int32 idb_database_id,
     const std::vector<string16>& names,
     int32 mode,
-    int32 timeout,
     int32* idb_transaction_id,
     WebKit::WebExceptionCode* ec) {
   WebIDBDatabase* database = parent_->GetOrTerminateProcess(
@@ -447,7 +435,7 @@ void IndexedDBDispatcherHost::DatabaseDispatcherHost::OnTransaction(
 
   *ec = 0;
   WebIDBTransaction* transaction = database->transaction(
-      object_stores, mode, timeout, *ec);
+      object_stores, mode, *ec);
   DCHECK(!transaction != !*ec);
   *idb_transaction_id =
       *ec ? 0 : parent_->Add(transaction, database_url_map_[idb_database_id]);
@@ -917,18 +905,12 @@ void IndexedDBDispatcherHost::CursorDispatcherHost::OnPrimaryKey(
 
 void IndexedDBDispatcherHost::CursorDispatcherHost::OnValue(
     int32 object_id,
-    SerializedScriptValue* script_value,
-    IndexedDBKey* key) {
+    SerializedScriptValue* script_value) {
   WebIDBCursor* idb_cursor = parent_->GetOrTerminateProcess(&map_, object_id);
   if (!idb_cursor)
     return;
 
-  WebSerializedScriptValue temp_script_value;
-  WebIDBKey temp_key;
-  idb_cursor->value(temp_script_value, temp_key);
-
-  *script_value = SerializedScriptValue(temp_script_value);
-  *key = IndexedDBKey(temp_key);
+  *script_value = SerializedScriptValue(idb_cursor->value());
 }
 
 void IndexedDBDispatcherHost::CursorDispatcherHost::OnUpdate(
@@ -971,8 +953,7 @@ void IndexedDBDispatcherHost::CursorDispatcherHost::OnDelete(
     return;
 
   *ec = 0;
-  // TODO(jorlow): This should be delete.
-  idb_cursor->remove(
+  idb_cursor->deleteFunction(
       new IndexedDBCallbacks<WebSerializedScriptValue>(parent_, response_id), *ec);
 }
 

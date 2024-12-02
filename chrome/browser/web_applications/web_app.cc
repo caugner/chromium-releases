@@ -17,11 +17,11 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/download/download_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/download_file.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "base/environment.h"
@@ -100,7 +100,7 @@ bool IconPrecedes(const WebApplicationInfo::IconInfo& left,
 
 #if defined(OS_WIN)
 // Calculates image checksum using MD5.
-void GetImageCheckSum(const SkBitmap& image, MD5Digest* digest) {
+void GetImageCheckSum(const SkBitmap& image, base::MD5Digest* digest) {
   DCHECK(digest);
 
   SkAutoLockPixels image_lock(image);
@@ -112,7 +112,7 @@ bool SaveIconWithCheckSum(const FilePath& icon_file, const SkBitmap& image) {
   if (!IconUtil::CreateIconFileFromSkBitmap(image, icon_file))
     return false;
 
-  MD5Digest digest;
+  base::MD5Digest digest;
   GetImageCheckSum(image, &digest);
 
   FilePath cheksum_file(icon_file.ReplaceExtension(kIconChecksumFileExt));
@@ -130,18 +130,18 @@ bool ShouldUpdateIcon(const FilePath& icon_file, const SkBitmap& image) {
       !file_util::PathExists(checksum_file))
     return true;
 
-  MD5Digest persisted_image_checksum;
+  base::MD5Digest persisted_image_checksum;
   if (sizeof(persisted_image_checksum) != file_util::ReadFile(checksum_file,
                       reinterpret_cast<char*>(&persisted_image_checksum),
                       sizeof(persisted_image_checksum)))
     return true;
 
-  MD5Digest downloaded_image_checksum;
+  base::MD5Digest downloaded_image_checksum;
   GetImageCheckSum(image, &downloaded_image_checksum);
 
   // Update icon if checksums are not equal.
   return memcmp(&persisted_image_checksum, &downloaded_image_checksum,
-                sizeof(MD5Digest)) != 0;
+                sizeof(base::MD5Digest)) != 0;
 }
 
 #endif  // defined(OS_WIN)
@@ -353,12 +353,12 @@ bool CreateShortcutTask::CreateShortcut() {
     FilePath shortcut_file = shortcut_paths[i].Append(file_name).
         ReplaceExtension(FILE_PATH_LITERAL(".lnk"));
 
-    int unique_number = download_util::GetUniquePathNumber(shortcut_file);
+    int unique_number = DownloadFile::GetUniquePathNumber(shortcut_file);
     if (unique_number == -1) {
       success = false;
       continue;
     } else if (unique_number > 0) {
-      download_util::AppendNumberToPath(&shortcut_file, unique_number);
+      DownloadFile::AppendNumberToPath(&shortcut_file, unique_number);
     }
 
     success &= file_util::CreateShortcutLink(chrome_exe.value().c_str(),

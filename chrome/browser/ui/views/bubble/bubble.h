@@ -6,12 +6,14 @@
 #define CHROME_BROWSER_UI_VIEWS_BUBBLE_BUBBLE_H_
 #pragma once
 
-#include "chrome/browser/ui/views/bubble/bubble_border.h"
+#include "views/bubble/bubble_border.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "views/accelerator.h"
 #include "views/view.h"
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+#include "views/widget/native_widget_aura.h"
+#elif defined(OS_WIN)
 #include "views/widget/native_widget_win.h"
 #elif defined(TOOLKIT_USES_GTK)
 #include "views/widget/native_widget_gtk.h"
@@ -27,7 +29,7 @@
 // additional margins.
 
 class BorderContents;
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 class BorderWidgetWin;
 #endif
 class Bubble;
@@ -70,7 +72,9 @@ class BubbleDelegate {
 // WidgetFoo subclass into a separate class that calls into Bubble.
 // That way Bubble has no (or very few) ifdefs.
 class Bubble
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+    : public views::NativeWidgetAura,
+#elif defined(OS_WIN)
     : public views::NativeWidgetWin,
 #elif defined(TOOLKIT_USES_GTK)
     : public views::NativeWidgetGtk,
@@ -93,7 +97,7 @@ class Bubble
   //       pressed (the default behavior).
   static Bubble* Show(views::Widget* parent,
                       const gfx::Rect& position_relative_to,
-                      BubbleBorder::ArrowLocation arrow_location,
+                      views::BubbleBorder::ArrowLocation arrow_location,
                       views::View* contents,
                       BubbleDelegate* delegate);
 
@@ -104,12 +108,13 @@ class Bubble
   // to achieve the focusless effect. If |show_while_screen_is_locked| is true,
   // a property is set telling the window manager to continue showing the bubble
   // even while the screen is locked.
-  static Bubble* ShowFocusless(views::Widget* parent,
-                               const gfx::Rect& position_relative_to,
-                               BubbleBorder::ArrowLocation arrow_location,
-                               views::View* contents,
-                               BubbleDelegate* delegate,
-                               bool show_while_screen_is_locked);
+  static Bubble* ShowFocusless(
+      views::Widget* parent,
+      const gfx::Rect& position_relative_to,
+      views::BubbleBorder::ArrowLocation arrow_location,
+      views::View* contents,
+      BubbleDelegate* delegate,
+      bool show_while_screen_is_locked);
 #endif
 
   // Resizes and potentially moves the Bubble to best accommodate the
@@ -124,7 +129,7 @@ class Bubble
     fade_away_on_close_ = fade_away_on_close;
   }
 
-  // Overridden from NativeWidgetWin:
+  // Overridden from NativeWidget:
   virtual void Close();
 
   // Overridden from ui::AnimationDelegate:
@@ -148,7 +153,7 @@ class Bubble
   // Creates the Bubble.
   virtual void InitBubble(views::Widget* parent,
                           const gfx::Rect& position_relative_to,
-                          BubbleBorder::ArrowLocation arrow_location,
+                          views::BubbleBorder::ArrowLocation arrow_location,
                           views::View* contents,
                           BubbleDelegate* delegate);
 
@@ -156,7 +161,10 @@ class Bubble
   // Subclasses can return their own BorderContents implementation.
   virtual BorderContents* CreateBorderContents();
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // Overridden from NativeWidgetAura:
+  // TODO(beng): OnActivate();
+#elif defined(OS_WIN)
   // Overridden from NativeWidgetWin:
   virtual void OnActivate(UINT action, BOOL minimized, HWND window);
 #elif defined(TOOLKIT_USES_GTK)
@@ -164,7 +172,9 @@ class Bubble
   virtual void OnActiveChanged() OVERRIDE;
 #endif
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+#elif defined(OS_WIN)
   // The window used to render the padding, border and arrow.
   BorderWidgetWin* border_;
 #elif defined(TOOLKIT_USES_GTK)
@@ -220,7 +230,7 @@ class Bubble
 #endif
 
   gfx::Rect position_relative_to_;
-  BubbleBorder::ArrowLocation arrow_location_;
+  views::BubbleBorder::ArrowLocation arrow_location_;
 
   views::View* contents_;
 

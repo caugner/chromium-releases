@@ -5,8 +5,7 @@
 #include "remoting/client/chromoting_client.h"
 
 #include "base/bind.h"
-#include "base/message_loop.h"
-#include "remoting/base/logger.h"
+#include "jingle/glue/thread_wrapper.h"
 #include "remoting/base/tracer.h"
 #include "remoting/client/chromoting_view.h"
 #include "remoting/client/client_context.h"
@@ -23,7 +22,6 @@ ChromotingClient::ChromotingClient(const ClientConfig& config,
                                    ChromotingView* view,
                                    RectangleUpdateDecoder* rectangle_decoder,
                                    InputHandler* input_handler,
-                                   Logger* logger,
                                    Task* client_done)
     : config_(config),
       context_(context),
@@ -31,7 +29,6 @@ ChromotingClient::ChromotingClient(const ClientConfig& config,
       view_(view),
       rectangle_decoder_(rectangle_decoder),
       input_handler_(input_handler),
-      logger_(logger),
       client_done_(client_done),
       state_(CREATED),
       packet_being_processed_(false),
@@ -42,12 +39,14 @@ ChromotingClient::~ChromotingClient() {
 }
 
 void ChromotingClient::Start(scoped_refptr<XmppProxy> xmpp_proxy) {
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE,
         NewRunnableMethod(this, &ChromotingClient::Start, xmpp_proxy));
     return;
   }
+
+  jingle_glue::JingleThreadWrapper::EnsureForCurrentThread();
 
   connection_->Connect(xmpp_proxy, config_.local_jid, config_.host_jid,
                        config_.host_public_key, config_.access_code,
@@ -59,7 +58,7 @@ void ChromotingClient::Start(scoped_refptr<XmppProxy> xmpp_proxy) {
 }
 
 void ChromotingClient::Stop(const base::Closure& shutdown_task) {
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE, base::Bind(&ChromotingClient::Stop,
                               base::Unretained(this), shutdown_task));
@@ -87,7 +86,7 @@ ChromotingStats* ChromotingClient::GetStats() {
 }
 
 void ChromotingClient::Repaint() {
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE,
         NewRunnableMethod(this, &ChromotingClient::Repaint));
@@ -99,7 +98,7 @@ void ChromotingClient::Repaint() {
 
 void ChromotingClient::ProcessVideoPacket(const VideoPacket* packet,
                                           Task* done) {
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE,
         NewRunnableMethod(this, &ChromotingClient::ProcessVideoPacket,
@@ -142,7 +141,7 @@ int ChromotingClient::GetPendingPackets() {
 }
 
 void ChromotingClient::DispatchPacket() {
-  DCHECK_EQ(message_loop(), MessageLoop::current());
+  DCHECK(message_loop()->BelongsToCurrentThread());
   CHECK(!packet_being_processed_);
 
   if (received_packets_.empty()) {
@@ -167,29 +166,29 @@ void ChromotingClient::DispatchPacket() {
 }
 
 void ChromotingClient::OnConnectionOpened(protocol::ConnectionToHost* conn) {
-  logger_->VLog(1, "ChromotingClient::OnConnectionOpened");
+  VLOG(1) << "ChromotingClient::OnConnectionOpened";
   Initialize();
   SetConnectionState(CONNECTED);
 }
 
 void ChromotingClient::OnConnectionClosed(protocol::ConnectionToHost* conn) {
-  logger_->VLog(1, "ChromotingClient::OnConnectionClosed");
+  VLOG(1) << "ChromotingClient::OnConnectionClosed";
   SetConnectionState(DISCONNECTED);
 }
 
 void ChromotingClient::OnConnectionFailed(protocol::ConnectionToHost* conn) {
-  logger_->VLog(1, "ChromotingClient::OnConnectionFailed");
+  VLOG(1) << "ChromotingClient::OnConnectionFailed";
   SetConnectionState(FAILED);
 }
 
-MessageLoop* ChromotingClient::message_loop() {
-  return context_->jingle_thread()->message_loop();
+base::MessageLoopProxy* ChromotingClient::message_loop() {
+  return context_->network_message_loop();
 }
 
 void ChromotingClient::SetConnectionState(ConnectionState s) {
   // TODO(ajwong): We actually may want state to be a shared variable. Think
   // through later.
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE,
         NewRunnableMethod(this, &ChromotingClient::SetConnectionState, s));
@@ -198,13 +197,11 @@ void ChromotingClient::SetConnectionState(ConnectionState s) {
 
   state_ = s;
   view_->SetConnectionState(s);
-
-  Repaint();
 }
 
 void ChromotingClient::OnPacketDone(bool last_packet,
                                     base::Time decode_start) {
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE,
         NewTracedMethod(this, &ChromotingClient::OnPacketDone,
@@ -232,7 +229,7 @@ void ChromotingClient::OnPacketDone(bool last_packet,
 }
 
 void ChromotingClient::Initialize() {
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE,
         NewTracedMethod(this, &ChromotingClient::Initialize));
@@ -254,7 +251,7 @@ void ChromotingClient::Initialize() {
 // ClientStub control channel interface.
 void ChromotingClient::BeginSessionResponse(
     const protocol::LocalLoginStatus* msg, Task* done) {
-  if (message_loop() != MessageLoop::current()) {
+  if (!message_loop()->BelongsToCurrentThread()) {
     message_loop()->PostTask(
         FROM_HERE,
         NewRunnableMethod(this, &ChromotingClient::BeginSessionResponse,
@@ -262,7 +259,7 @@ void ChromotingClient::BeginSessionResponse(
     return;
   }
 
-  logger_->Log(logging::LOG_INFO, "BeginSessionResponse received");
+  LOG(INFO) << "BeginSessionResponse received";
 
   // Inform the connection that the client has been authenticated. This will
   // enable the communication channels.

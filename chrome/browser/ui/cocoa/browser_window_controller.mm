@@ -15,9 +15,11 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #include "chrome/browser/bookmarks/bookmark_editor.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_ui_util_mac.h"
@@ -33,6 +35,7 @@
 #import "chrome/browser/ui/cocoa/browser/avatar_button.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller_private.h"
+#import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/dev_tools_controller.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #import "chrome/browser/ui/cocoa/event_utils.h"
@@ -41,7 +44,6 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
-#import "chrome/browser/ui/cocoa/gesture_utils.h"
 #import "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
@@ -155,35 +157,7 @@
 
 @end
 
-// Forward-declare symbols that are part of the 10.6 SDK.
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-
-enum {
-    NSTouchPhaseBegan           = 1U << 0,
-    NSTouchPhaseMoved           = 1U << 1,
-    NSTouchPhaseStationary      = 1U << 2,
-    NSTouchPhaseEnded           = 1U << 3,
-    NSTouchPhaseCancelled       = 1U << 4,
-    NSTouchPhaseTouching        = NSTouchPhaseBegan | NSTouchPhaseMoved |
-                                  NSTouchPhaseStationary,
-    NSTouchPhaseAny             = NSUIntegerMax
-};
-typedef NSUInteger NSTouchPhase;
-
-@interface NSEvent (SnowLeopardDeclarations)
-- (NSSet*)touchesMatchingPhase:(NSTouchPhase)phase inView:(NSView*)view;
-@end
-
-@interface NSTouch : NSObject
-- (NSPoint)normalizedPosition;
-- (id<NSObject, NSCopying>)identity;
-@end
-
-#endif  // MAC_OS_X_VERSION_10_6
-
-// Provide the forward-declarations of new 10.7 SDK symbols so they can be
-// called when building with the 10.5 SDK.
+// Replicate specific 10.7 SDK declarations for building with prior SDKs.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
     MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
 
@@ -249,7 +223,7 @@ enum {
     browser_.reset(browser);
     ownsBrowser_ = ownIt;
     NSWindow* window = [self window];
-    windowShim_.reset(new BrowserWindowCocoa(browser, self, window));
+    windowShim_.reset(new BrowserWindowCocoa(browser, self));
 
     // Create the bar visibility lock set; 10 is arbitrary, but should hopefully
     // be big enough to hold all locks that'll ever be needed.
@@ -640,6 +614,8 @@ enum {
 
 // Called when we have been minimized.
 - (void)windowDidMiniaturize:(NSNotification *)notification {
+  [self saveWindowPositionIfNeeded];
+
   // Let the selected RenderWidgetHostView know, so that it can tell plugins.
   if (TabContents* contents = browser_->GetSelectedTabContents()) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
@@ -1386,8 +1362,20 @@ enum {
 }
 
 - (BOOL)shouldShowAvatar {
-  return [self hasTabStrip] && (browser_->profile()->IsOffTheRecord() ||
-                                ProfileManager::IsMultipleProfilesEnabled());
+  if (![self hasTabStrip])
+    return NO;
+
+  if (browser_->profile()->IsOffTheRecord())
+    return YES;
+
+  if (ProfileManager::IsMultipleProfilesEnabled()) {
+    // Show the profile avatar after the user has created more than one profile.
+    ProfileInfoCache& cache =
+        g_browser_process->profile_manager()->GetProfileInfoCache();
+    return cache.GetNumberOfProfiles() > 1;
+  }
+
+  return NO;
 }
 
 - (BOOL)isBookmarkBarVisible {
@@ -1600,39 +1588,9 @@ enum {
 }
 
 - (NSPoint)themePatternPhase {
-  // Our patterns want to be drawn from the upper left hand corner of the view.
-  // Cocoa wants to do it from the lower left of the window.
-  //
-  // Rephase our pattern to fit this view. Some other views (Tabs, Toolbar etc.)
-  // will phase their patterns relative to this so all the views look right.
-  //
-  // To line up the background pattern with the pattern in the browser window
-  // the background pattern for the tabs needs to be moved left by 5 pixels.
-  const CGFloat kPatternHorizontalOffset = -5;
-  // To match Windows and CrOS, have to offset vertically by 2 pixels.
-  // Without tab strip, offset an extra pixel (determined by experimentation).
-  const CGFloat kPatternVerticalOffset = 2;
-  const CGFloat kPatternVerticalOffsetNoTabStrip = 3;
-
-  // When we have a tab strip, line up with the top of the tab, otherwise,
-  // line up with the top of the window.
   NSView* windowChromeView = [[[self window] contentView] superview];
-  if ([self hasTabStrip]) {
-    NSView* tabStripView = [self tabStripView];
-    NSRect tabStripViewWindowBounds = [tabStripView bounds];
-    tabStripViewWindowBounds =
-        [tabStripView convertRect:tabStripViewWindowBounds
-                           toView:windowChromeView];
-    return NSMakePoint(NSMinX(tabStripViewWindowBounds)
-                           + kPatternHorizontalOffset,
-                       NSMinY(tabStripViewWindowBounds)
-                           + [TabStripController defaultTabHeight]
-                           + kPatternVerticalOffset);
-  } else {
-    return NSMakePoint(kPatternHorizontalOffset,
-                       NSHeight([windowChromeView bounds])
-                       + kPatternVerticalOffsetNoTabStrip);
-  }
+  return [BrowserWindowUtils themePatternPhaseFor:windowChromeView
+                                     withTabStrip:[self tabStripView]];
 }
 
 - (NSPoint)bookmarkBubblePoint {
@@ -1676,6 +1634,10 @@ enum {
   if (responds) {
     const BookmarkNode* node = [sender node];
     if (node) {
+#if defined(WEBUI_DIALOGS)
+      DCHECK(browser_);
+      browser_->OpenBookmarkManagerEditNode(node->id());
+#else
       // A BookmarkEditorController is a sheet that owns itself, and
       // deallocates itself when closed.
       [[[BookmarkEditorController alloc]
@@ -1685,6 +1647,7 @@ enum {
                          node:node
                 configuration:BookmarkEditor::SHOW_TREE]
         runAsModalSheet];
+#endif
     }
   }
 }
@@ -1770,98 +1733,10 @@ enum {
   }
 }
 
-// Documented in 10.6+, but present starting in 10.5. Called at the beginning
-// of a gesture.
-- (void)beginGestureWithEvent:(NSEvent*)event {
-  totalMagnifyGestureAmount_ = 0;
-  currentZoomStepDelta_ = 0;
-
-  // On Lion, there's support controlled by a System Preference for two- and
-  // three-finger navigational gestures. If set to allow three-finger gestures,
-  // the system gesture recognizer will automatically call |-swipeWithEvent:|
-  // and that will be handled as it would be on Snow Leopard. The two-finger
-  // gesture does not do this, so it must be manually recognized. See the note
-  // inside RecognizeTwoFingerGestures() for detailed information on the
-  // interaction of the different preferences.
-  if (!gesture_utils::RecognizeTwoFingerGestures())
-    return;
-  NSSet* touches = [event touchesMatchingPhase:NSTouchPhaseAny
-                                        inView:nil];
-  if ([touches count] >= 2) {
-    twoFingerGestureTouches_.reset([[NSMutableDictionary alloc] init]);
-    for (NSTouch* touch in touches) {
-      [twoFingerGestureTouches_ setObject:touch forKey:touch.identity];
-    }
-  }
-}
-
-- (void)endGestureWithEvent:(NSEvent*)event {
-  // This method only needs to process gesture events for two-finger navigation.
-  if (!twoFingerGestureTouches_.get())
-    return;
-
-  // When a multi-touch gesture ends, only one touch will be in the "End" phase.
-  // Other touches will be in "Moved" or "Unknown" phases. So long as one is
-  // ended, which it is by virtue of this method being called, the gesture can
-  // be committed so long as the magnitude is great enough.
-  NSSet* touches = [event touchesMatchingPhase:NSTouchPhaseAny
-                                        inView:nil];
-
-  // Store the touch data locally and reset the ivar so that new gestures can
-  // begin.
-  scoped_nsobject<NSDictionary> beginTouches(
-      twoFingerGestureTouches_.release());
-
-  // Construct a vector of magnitudes. Since gesture events do not have the
-  // |-deltaX| property set, this creates the X/Y magnitudes for each finger.
-  std::vector<CGFloat> deltasX;
-  std::vector<CGFloat> deltasY;
-  for (NSTouch* touch in touches) {
-    NSTouch* beginTouch = [beginTouches objectForKey:touch.identity];
-    if (!beginTouch)
-      continue;
-
-    // The |normalizedPosition| is scaled from (0, 1).
-    NSPoint beginPoint = beginTouch.normalizedPosition;
-    NSPoint endPoint = touch.normalizedPosition;
-
-    deltasX.push_back(endPoint.x - beginPoint.x);
-    deltasY.push_back(endPoint.y - beginPoint.y);
-  }
-
-  // Need at least two points to gesture.
-  if (deltasX.size() < 2)
-    return;
-
-  CGFloat sumX = std::accumulate(deltasX.begin(), deltasX.end(), 0.0f);
-  CGFloat sumY = std::accumulate(deltasY.begin(), deltasY.end(), 0.0f);
-
-  // If the Y magnitude is greater than the X, then don't treat this as a
-  // gesture. It was likely a vertical scroll instead.
-  if (std::abs(sumY) > std::abs(sumX))
-    return;
-
-  // On Lion, the user can choose to use a "natural" scroll direction with
-  // inverted axes.
-  if (gesture_utils::IsScrollDirectionInverted())
-    sumX *= -1;
-
-  int command_id = 0;
-  if (sumX > 0.3)
-    command_id = IDC_FORWARD;
-  else if (sumX < -0.3)
-    command_id = IDC_BACK;
-  else
-    return;
-
-  if (browser_->command_updater()->IsCommandEnabled(command_id)) {
-    browser_->ExecuteCommandWithDisposition(command_id,
-        event_utils::WindowOpenDispositionFromNSEvent(event));
-  }
-}
-
 // Delegate method called when window is resized.
 - (void)windowDidResize:(NSNotification*)notification {
+  [self saveWindowPositionIfNeeded];
+
   // Resize (and possibly move) the status bubble. Note that we may get called
   // when the status bubble does not exist.
   if (statusBubble_) {
@@ -1902,6 +1777,8 @@ enum {
 // |-windowWillMove:|, which is called less frequently than |-windowDidMove|
 // instead.)
 - (void)windowDidMove:(NSNotification*)notification {
+  [self saveWindowPositionIfNeeded];
+
   NSWindow* window = [self window];
   NSRect windowFrame = [window frame];
   NSRect workarea = [[window screen] visibleFrame];
@@ -2071,13 +1948,18 @@ willAnimateFromState:(bookmarks::VisualState)oldState
     enteredPresentationModeFromFullscreen_ = YES;
     if ([[self window] isKindOfClass:[FramedBrowserWindow class]])
       [static_cast<FramedBrowserWindow*>([self window]) toggleSystemFullScreen];
-    return;
+  } else {
+    if (fullscreen)
+      [self enterFullscreenForSnowLeopardOrEarlier];
+    else
+      [self exitFullscreenForSnowLeopardOrEarlier];
   }
 
-  if (fullscreen)
-    [self enterFullscreenForSnowLeopardOrEarlier];
-  else
-    [self exitFullscreenForSnowLeopardOrEarlier];
+  if (fullscreen) {
+    [self showFullscreenExitBubbleIfNecessary];
+  } else {
+    [self destroyFullscreenExitBubbleIfNecessary];
+  }
 }
 
 - (BOOL)isFullscreen {
@@ -2108,7 +1990,9 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
   if (presentationMode) {
     BOOL fullscreen = [self isFullscreen];
-    [self setShouldUsePresentationModeWhenEnteringFullscreen:YES];
+    BOOL fullscreen_for_tab = browser_->is_fullscreen_for_tab();
+    if (!fullscreen_for_tab)
+      [self setShouldUsePresentationModeWhenEnteringFullscreen:YES];
     enteredPresentationModeFromFullscreen_ = fullscreen;
 
     if (fullscreen) {
@@ -2130,6 +2014,8 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       if ([window isKindOfClass:[FramedBrowserWindow class]])
         [static_cast<FramedBrowserWindow*>(window) toggleSystemFullScreen];
     }
+
+    [self showFullscreenExitBubbleIfNecessary];
   } else {
     if (enteredPresentationModeFromFullscreen_) {
       // The window is currently in fullscreen mode, but the user is choosing to
@@ -2147,6 +2033,8 @@ willAnimateFromState:(bookmarks::VisualState)oldState
       if ([window isKindOfClass:[FramedBrowserWindow class]])
         [static_cast<FramedBrowserWindow*>(window) toggleSystemFullScreen];
     }
+
+    [self destroyFullscreenExitBubbleIfNecessary];
   }
 }
 
@@ -2230,7 +2118,7 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   // browser chrome.
   activeArea.size.height +=
       NSHeight([[infoBarContainerController_ view] frame]) -
-          [infoBarContainerController_ antiSpoofHeight];
+          [infoBarContainerController_ overlappingTipHeight];
   if ([self isBookmarkBarVisible] && [self placeBookmarkBarBelowInfoBar]) {
     NSView* bookmarkBarView = [bookmarkBarController_ view];
     activeArea.size.height += NSHeight([bookmarkBarView frame]);

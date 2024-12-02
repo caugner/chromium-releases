@@ -3,6 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
 import os
 import re
 import types
@@ -72,6 +73,7 @@ class BrowserTest(pyauto.PyUITest):
     info = self.GetBrowserInfo()
     # Verify valid version string
     version_string = info['properties']['ChromeVersion']
+    logging.info('ChromeVersion: %s' % version_string)
     self.assertTrue(re.match('\d+\.\d+\.\d+.\.\d+', version_string))
     # Verify browser process
     self.assertEqual(types.IntType, type(info['browser_pid']))

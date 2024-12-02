@@ -53,37 +53,22 @@ namespace download_util {
 // Return the default download directory.
 const FilePath& GetDefaultDownloadDirectory();
 
-// Create a temporary file for a download in the user's default download
-// directory and return true if was successful in creating the file.
-bool CreateTemporaryFileForDownload(FilePath* path);
-
 // Return true if the |download_path| is dangerous path.
 bool DownloadPathIsDangerous(const FilePath& download_path);
 
-// Create an extension based on the file name and mime type.
-void GenerateExtension(const FilePath& file_name,
-                       const std::string& mime_type,
-                       FilePath::StringType* generated_extension);
-
-// Create a file name based on the response from the server.
+// Generate a filename based on the response from the server.  Similar
+// in operation to net::GenerateFileName(), but uses a localized
+// default name.
 void GenerateFileNameFromRequest(const DownloadItem& download_item,
                                  FilePath* generated_name);
 
+// Generate a filename based on the URL, a suggested name and a MIME
+// type.  Similar in operation to net::GenerateFileName(), but uses a
+// localized default name.
 void GenerateFileNameFromSuggestedName(const GURL& url,
                                        const std::string& suggested_name,
                                        const std::string& mime_type,
                                        FilePath* generated_name);
-
-void GenerateFileName(const GURL& url,
-                      const std::string& content_disposition,
-                      const std::string& referrer_charset,
-                      const std::string& mime_type,
-                      FilePath* generated_name);
-
-// Used to make sure we have a safe file extension and filename for a
-// download.  |file_name| can either be just the file name or it can be a
-// full path to a file.
-void GenerateSafeFileName(const std::string& mime_type, FilePath* file_name);
 
 // Download progress animations ------------------------------------------------
 
@@ -122,57 +107,6 @@ enum PaintDownloadProgressSize {
   SMALL = 0,
   BIG
 };
-
-// We keep a count of how often various events occur in the
-// histogram "Download.Counts".
-enum DownloadCountTypes {
-  // The download was initiated by navigating to a URL (e.g. by user
-  // click).
-  INITIATED_BY_NAVIGATION_COUNT = 0,
-
-  // The download was initiated by invoking a context menu within a page.
-  INITIATED_BY_CONTEXT_MENU_COUNT,
-
-  // The download was initiated when the SavePackage system rejected
-  // a Save Page As ... by returning false from
-  // SavePackage::IsSaveableContents().
-  INITIATED_BY_SAVE_PACKAGE_FAILURE_COUNT,
-
-  // The download was initiated by a drag and drop from a drag-and-drop
-  // enabled web application.
-  INITIATED_BY_DRAG_N_DROP_COUNT,
-
-  // The download was initiated by explicit RPC from the renderer process
-  // (e.g. by Alt-click).
-  INITIATED_BY_RENDERER_COUNT,
-
-  // Downloads that made it to DownloadResourceHandler -- all of the
-  // above minus those blocked by DownloadThrottlingResourceHandler.
-  UNTHROTTLED_COUNT,
-
-  // Downloads that actually complete.
-  COMPLETED_COUNT,
-
-  // Downloads that are cancelled before completion (user action or error).
-  CANCELLED_COUNT,
-
-  // Downloads that are started. Should be equal to UNTHROTTLED_COUNT.
-  START_COUNT,
-
-  // Downloads that were interrupted by the OS.
-  INTERRUPTED_COUNT,
-
-  DOWNLOAD_COUNT_TYPES_LAST_ENTRY
-};
-
-// Increment one of the above counts.
-void RecordDownloadCount(DownloadCountTypes type);
-
-// Record COMPLETED_COUNT and how long the download took.
-void RecordDownloadCompleted(const base::TimeTicks& start);
-
-// Record INTERRUPTED_COUNT, |error|, |received| and |total| bytes.
-void RecordDownloadInterrupted(int error, int64 received, int64 total);
 
 // Paint the common download animation progress foreground and background,
 // clipping the foreground to 'percent' full. If percent is -1, then we don't
@@ -238,38 +172,11 @@ void UpdateAppIconDownloadProgress(int download_count,
                                    bool progress_known,
                                    float progress);
 
-// Appends the passed the number between parenthesis the path before the
-// extension.
-void AppendNumberToPath(FilePath* path, int number);
-
-// Attempts to find a number that can be appended to that path to make it
-// unique. If |path| does not exist, 0 is returned.  If it fails to find such
-// a number, -1 is returned.
-int GetUniquePathNumber(const FilePath& path);
-
-// Download the URL. Must be called on the IO thread.
-void DownloadUrl(const GURL& url,
-                 const GURL& referrer,
-                 const std::string& referrer_charset,
-                 const DownloadSaveInfo& save_info,
-                 ResourceDispatcherHost* rdh,
-                 int render_process_host_id,
-                 int render_view_id,
-                 const content::ResourceContext* context);
-
-// Sends a notification on downloads being initiated
-// Must be called on the UI thread.
-void NotifyDownloadInitiated(int render_process_id, int render_view_id);
-
 // Same as GetUniquePathNumber, except that it also checks the existence
 // of its .crdownload intermediate path.
 // If |path| does not exist, 0 is returned.  If it fails to find such
 // a number, -1 is returned.
 int GetUniquePathNumberWithCrDownload(const FilePath& path);
-
-// Erases all downloaded files with the specified path and name prefix.
-// Used by download UI tests to clean up the download directory.
-void EraseUniqueDownloadFiles(const FilePath& path_prefix);
 
 // Returns a .crdownload intermediate path for the |suggested_path|.
 FilePath GetCrDownloadPath(const FilePath& suggested_path);

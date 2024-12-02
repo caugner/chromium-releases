@@ -157,10 +157,8 @@ net::Error SpdySessionPool::GetSpdySessionFromSocket(
   // direct connection.
   if (g_enable_ip_pooling  && host_port_proxy_pair.second.is_direct()) {
     AddressList addresses;
-    if (connection->socket()->GetPeerAddress(&addresses) == OK) {
-      const addrinfo* address = addresses.head();
-      AddAlias(address, host_port_proxy_pair);
-    }
+    if (connection->socket()->GetPeerAddress(&addresses) == OK)
+      AddAlias(addresses.head(), host_port_proxy_pair);
   }
 
   // Now we can initialize the session with the SSL socket.
@@ -344,12 +342,9 @@ void SpdySessionPool::RemoveSessionList(
 bool SpdySessionPool::LookupAddresses(const HostPortProxyPair& pair,
                                       AddressList* addresses) const {
   net::HostResolver::RequestInfo resolve_info(pair.first);
-  resolve_info.set_only_use_cached_response(true);
-  int rv = resolver_->Resolve(resolve_info,
-                              addresses,
-                              NULL,
-                              NULL,
-                              net::BoundNetLog());
+  int rv = resolver_->ResolveFromCache(resolve_info,
+                                       addresses,
+                                       net::BoundNetLog());
   DCHECK_NE(ERR_IO_PENDING, rv);
   return rv == OK;
 }

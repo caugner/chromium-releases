@@ -7,8 +7,7 @@
 #include <gtk/gtk.h>
 
 #include "chrome/browser/chromeos/frame/bubble_frame_view.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "chrome/browser/chromeos/frame/bubble_window_views.h"
 #include "ui/gfx/skia_utils_gtk.h"
 #include "views/window/non_client_view.h"
 
@@ -27,10 +26,8 @@ void SetRegionUnionWithPoint(int i, int j, GdkRegion* region) {
 
 namespace chromeos {
 
-// static
-const SkColor BubbleWindow::kBackgroundColor = SK_ColorWHITE;
-
-BubbleWindow::BubbleWindow(views::Widget* window, Style style)
+BubbleWindow::BubbleWindow(views::Widget* window,
+    BubbleWindowStyle style)
     : views::NativeWidgetGtk(window),
       style_(style) {
 }
@@ -42,7 +39,8 @@ void BubbleWindow::InitNativeWidget(const views::Widget::InitParams& params) {
   // flash as in http://crosbug.com/9065.
   EnableDoubleBuffer(true);
 
-  GdkColor background_color = gfx::SkColorToGdkColor(kBackgroundColor);
+  GdkColor background_color =
+      gfx::SkColorToGdkColor(kBubbleWindowBackgroundColor);
   gtk_widget_modify_bg(GetNativeView(), GTK_STATE_NORMAL, &background_color);
 
   // A work-around for http://crosbug.com/8538. All GdkWindow of top-level
@@ -116,16 +114,36 @@ void BubbleWindow::TrimMargins(int margin_left, int margin_right,
 
 views::Widget* BubbleWindow::Create(
     gfx::NativeWindow parent,
-    const gfx::Rect& bounds,
-    Style style,
+    BubbleWindowStyle style,
     views::WidgetDelegate* widget_delegate) {
+  // TODO(saintlou): Ultimately we do not want 2 classes for BubbleWindows.
+  // After discussions with mazda@chromium.org we concluded that we could
+  // punt on an initial implementation of the STYLE_XSHAPE style which is only
+  // used when displaying the keyboard overlay. Once we have implemented
+  // gradient and other missing features of Views we can address this.
+  // Furthermore the 2 other styles (STYLE_XBAR & STYLE_THROBBER) are only used
+  // in LoginHtmlDialog::Show() which will be deprecated soon.
+  if (views::Widget::IsPureViews()) {
+    if (style != STYLE_GENERIC)
+      NOTIMPLEMENTED();
+    BubbleWindowViews* window = new BubbleWindowViews(style);
+    views::Widget::InitParams params;
+    params.delegate = widget_delegate;
+    params.parent = GTK_WIDGET(parent);
+    params.bounds = gfx::Rect();
+    params.transparent = true;
+    window->Init(params);
+    window->SetBackgroundColor();
+    return window;
+  }
+
   views::Widget* window = new views::Widget;
   BubbleWindow* bubble_window = new BubbleWindow(window, style);
   views::Widget::InitParams params;
   params.delegate = widget_delegate;
   params.native_widget = bubble_window;
   params.parent = GTK_WIDGET(parent);
-  params.bounds = bounds;
+  params.bounds = gfx::Rect();
   params.transparent = true;
   window->Init(params);
 

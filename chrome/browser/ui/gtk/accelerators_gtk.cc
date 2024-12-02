@@ -147,10 +147,6 @@ const struct AcceleratorMapping {
   { GDK_x, IDC_CUT, GDK_CONTROL_MASK },
   { GDK_v, IDC_PASTE, GDK_CONTROL_MASK },
 
-  // Autofill.
-  { GDK_a, IDC_AUTOFILL_DEFAULT,
-    GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
-
   // Miscellany.
   { GDK_d, IDC_BOOKMARK_ALL_TABS,
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
@@ -158,6 +154,8 @@ const struct AcceleratorMapping {
   { GDK_o, IDC_OPEN_FILE, GDK_CONTROL_MASK },
   { GDK_f, IDC_FIND, GDK_CONTROL_MASK },
   { GDK_p, IDC_PRINT, GDK_CONTROL_MASK },
+  { GDK_p, IDC_ADVANCED_PRINT,
+    GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
   { GDK_b, IDC_SHOW_BOOKMARK_BAR,
     GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
   { GDK_o, IDC_SHOW_BOOKMARK_MANAGER,
@@ -175,6 +173,8 @@ const struct AcceleratorMapping {
   { GDK_s, IDC_SAVE_PAGE, GDK_CONTROL_MASK },
   { GDK_e, IDC_SHOW_APP_MENU, GDK_MOD1_MASK },
   { GDK_f, IDC_SHOW_APP_MENU, GDK_MOD1_MASK },
+  { GDK_greater, IDC_TOGGLE_SPEECH_INPUT,
+    GdkModifierType(GDK_CONTROL_MASK | GDK_SHIFT_MASK) },
 };
 
 }  // namespace

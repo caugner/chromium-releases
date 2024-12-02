@@ -8,10 +8,12 @@
 
 #include <string>
 
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -21,7 +23,9 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   virtual ~ProfileSyncServiceMock();
 
   MOCK_METHOD0(DisableForUser, void());
-  MOCK_METHOD1(OnBackendInitialized, void(bool));
+  MOCK_METHOD2(OnBackendInitialized,
+               void(const browser_sync::WeakHandle<browser_sync::JsBackend>&,
+                    bool));
   MOCK_METHOD0(OnSyncCycleCompleted, void());
   MOCK_METHOD0(OnAuthError, void());
   MOCK_METHOD4(OnUserSubmittedAuth,
@@ -34,17 +38,15 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_METHOD2(OnUnrecoverableError,
                void(const tracked_objects::Location& location,
                const std::string& message));
-  MOCK_METHOD2(ActivateDataType,
-               void(browser_sync::DataTypeController* data_type_controller,
-                    browser_sync::ChangeProcessor* change_processor));
-  MOCK_METHOD2(DeactivateDataType,
-               void(browser_sync::DataTypeController* data_type_controller,
-                    browser_sync::ChangeProcessor* change_processor));
+  MOCK_METHOD3(ActivateDataType,
+               void(syncable::ModelType, browser_sync::ModelSafeGroup,
+                    browser_sync::ChangeProcessor*));
+  MOCK_METHOD1(DeactivateDataType, void(syncable::ModelType));
 
   MOCK_METHOD0(InitializeBackend, void());
   MOCK_METHOD1(AddObserver, void(Observer*));
   MOCK_METHOD1(RemoveObserver, void(Observer*));
-  MOCK_METHOD0(GetJsFrontend, browser_sync::JsFrontend*());
+  MOCK_METHOD0(GetJsController, base::WeakPtr<browser_sync::JsController>());
   MOCK_CONST_METHOD0(HasSyncSetupCompleted, bool());
 
   MOCK_METHOD1(ChangePreferredDataTypes,
@@ -60,6 +62,8 @@ class ProfileSyncServiceMock : public ProfileSyncService {
                browser_sync::SyncBackendHost::Status());
   MOCK_CONST_METHOD0(GetLastSyncedTimeString, string16());
   MOCK_CONST_METHOD0(unrecoverable_error_detected, bool());
+  MOCK_METHOD1(OnActionableError, void(
+      const browser_sync::SyncProtocolError&));
 };
 
 #endif  // CHROME_BROWSER_SYNC_PROFILE_SYNC_SERVICE_MOCK_H_

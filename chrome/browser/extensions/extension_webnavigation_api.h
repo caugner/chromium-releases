@@ -11,7 +11,9 @@
 #pragma once
 
 #include <map>
+#include <set>
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
@@ -29,8 +31,14 @@ class TabContents;
 // occurred so no further events for this frame are being sent.
 class FrameNavigationState {
  public:
+  typedef std::set<int64>::const_iterator const_iterator;
+
   FrameNavigationState();
   ~FrameNavigationState();
+
+  // Use these to iterate over all frame IDs known by this object.
+  const_iterator begin() const { return frame_ids_.begin(); }
+  const_iterator end() const { return frame_ids_.end(); }
 
   // True if navigation events for the given frame can be sent.
   bool CanSendEvents(int64 frame_id) const;
@@ -40,6 +48,9 @@ class FrameNavigationState {
                   const GURL& url,
                   bool is_main_frame,
                   bool is_error_page);
+
+  // Returns true if |frame_id| is a known frame.
+  bool IsValidFrame(int64 frame_id) const;
 
   // Returns the URL corresponding to a tracked frame given by its |frame_id|.
   GURL GetUrl(int64 frame_id) const;
@@ -51,8 +62,19 @@ class FrameNavigationState {
   // known.
   int64 GetMainFrameID() const;
 
-  // Marks a frame as in an error state.
-  void ErrorOccurredInFrame(int64 frame_id);
+  // Marks a frame as in an error state, i.e. the onErrorOccurred event was
+  // fired for this frame, and no further events should be sent for it.
+  void SetErrorOccurredInFrame(int64 frame_id);
+
+  // True if the frame is marked as being in an error state.
+  bool GetErrorOccurredInFrame(int64 frame_id) const;
+
+  // Marks a frame as having finished its last navigation, i.e. the onCompleted
+  // event was fired for this frame.
+  void SetNavigationCompleted(int64 frame_id);
+
+  // True if the frame is currently not navigating.
+  bool GetNavigationCompleted(int64 frame_id) const;
 
 #ifdef UNIT_TEST
   static void set_allow_extension_scheme(bool allow_extension_scheme) {
@@ -64,12 +86,19 @@ class FrameNavigationState {
   struct FrameState {
     bool error_occurred;  // True if an error has occurred in this frame.
     bool is_main_frame;  // True if this is a main frame.
+    bool is_navigating;  // True if there is a navigation going on.
     GURL url;  // URL of this frame.
   };
   typedef std::map<int64, FrameState> FrameIdToStateMap;
 
   // Tracks the state of known frames.
   FrameIdToStateMap frame_state_map_;
+
+  // Set of all known frames.
+  std::set<int64> frame_ids_;
+
+  // The current main frame.
+  int64 main_frame_id_;
 
   // If true, also allow events from chrome-extension:// URLs.
   static bool allow_extension_scheme_;
@@ -159,7 +188,7 @@ class ExtensionWebNavigationEventRouter : public NotificationObserver {
   // NotificationObserver implementation.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   // Handler for the NOTIFICATION_RETARGETING event. The method takes the
   // details of such an event and stores them for the later
@@ -169,6 +198,10 @@ class ExtensionWebNavigationEventRouter : public NotificationObserver {
   // Handler for the NOTIFICATION_TAB_ADDED event. The method takes the details
   // of such an event and creates a JSON formated extension event from it.
   void TabAdded(TabContents* tab_contents);
+
+  // Handler for NOTIFICATION_TAB_CONTENTS_DESTROYED. If |tab_contents| is
+  // in |pending_tab_contents_|, it is removed.
+  void TabDestroyed(TabContents* tab_contents);
 
   // Mapping pointers to TabContents objects to information about how they got
   // created.
@@ -181,6 +214,13 @@ class ExtensionWebNavigationEventRouter : public NotificationObserver {
   Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionWebNavigationEventRouter);
+};
+
+// API function that returns the state of a given frame.
+class GetFrameFunction : public SyncExtensionFunction {
+  virtual ~GetFrameFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.webNavigation.getFrame")
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_WEBNAVIGATION_API_H_

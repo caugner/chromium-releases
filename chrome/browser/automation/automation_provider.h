@@ -31,10 +31,10 @@
 #include "content/common/notification_observer.h"
 #include "ipc/ipc_channel.h"
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include "ui/gfx/native_widget_types.h"
 #include "views/events/event.h"
-#endif  // defined(OS_WIN)
+#endif  // defined(OS_WIN) && !defined(USE_AURA)
 
 class PopupMenuWaiter;
 class TabContents;
@@ -112,6 +112,9 @@ class AutomationProvider
   // Called when the ChromeOS network library has finished its first update.
   void OnNetworkLibraryInit();
 
+  // Called when the chromeos WebUI login is ready.
+  void OnLoginWebuiReady();
+
   // Get the index of a particular NavigationController object
   // in the given parent window.  This method uses
   // TabStrip::GetIndexForNavigationController to get the index.
@@ -127,11 +130,13 @@ class AutomationProvider
   void AddLoginHandler(NavigationController* tab, LoginHandler* handler);
   void RemoveLoginHandler(NavigationController* tab);
 
-  // IPC implementations
-  virtual bool Send(IPC::Message* msg);
-  virtual void OnChannelConnected(int pid);
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void OnChannelError();
+  // IPC::Channel::Sender implementation.
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
+
+  // IPC::Channel::Listener implementation.
+  virtual void OnChannelConnected(int pid) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
 
   IPC::Message* reply_message_release() {
     IPC::Message* reply_message = reply_message_;
@@ -144,7 +149,7 @@ class AutomationProvider
   // the handle is simply returned.
   int AddExtension(const Extension* extension);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Adds the external tab passed in to the tab tracker.
   bool AddExternalTab(ExternalTabContainer* external_tab);
 #endif
@@ -250,14 +255,11 @@ class AutomationProvider
   // for information on the arguments.
   void JavaScriptStressTestControl(int handle, int cmd, int param);
 
-  void InstallExtension(const FilePath& crx_path,
-                        IPC::Message* reply_message);
-
   void WaitForExtensionTestResult(IPC::Message* reply_message);
 
-  void InstallExtensionAndGetHandle(const FilePath& crx_path,
-                                    bool with_ui,
-                                    IPC::Message* reply_message);
+  void InstallExtension(const FilePath& extension_path,
+                        bool with_ui,
+                        IPC::Message* reply_message);
 
   void UninstallExtension(int extension_handle,
                           bool* success);
@@ -319,7 +321,7 @@ class AutomationProvider
   // Method called by the popup menu tracker when a popup menu is opened.
   void NotifyPopupMenuOpened();
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // The functions in this block are for use with external tabs, so they are
   // Windows only.
 
@@ -369,7 +371,7 @@ class AutomationProvider
   void OnSetZoomLevel(int handle, int zoom_level);
 
   ExternalTabContainer* GetExternalTabForHandle(int handle);
-#endif  // defined(OS_WIN)
+#endif  // defined(OS_WIN) && !defined(USE_AURA)
 
   scoped_ptr<IPC::ChannelProxy> channel_;
   scoped_ptr<NotificationObserver> new_tab_ui_load_observer_;
@@ -386,6 +388,9 @@ class AutomationProvider
 
   // True iff the Chrome OS network library finished initialization.
   bool network_library_initialized_;
+
+  // True iff ChromeOS webui login ui is ready.
+  bool login_webui_ready_;
 
   // ID of automation channel.
   std::string channel_id_;

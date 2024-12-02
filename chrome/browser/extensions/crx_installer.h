@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -61,6 +62,10 @@ class CrxInstaller
 
     scoped_ptr<base::DictionaryValue> parsed_manifest;
     std::string localized_name;
+
+    // Whether to use a bubble notification when an app is installed, instead of
+    // the default behavior of transitioning to the new tab page.
+    bool use_app_installed_bubble;
   };
 
   // Exempt the next extension install with |id| from displaying a confirmation
@@ -103,8 +108,8 @@ class CrxInstaller
   void InstallWebApp(const WebApplicationInfo& web_app);
 
   // Overridden from ExtensionInstallUI::Delegate:
-  virtual void InstallUIProceed();
-  virtual void InstallUIAbort(bool user_initiated);
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
 
   const GURL& original_url() const { return original_url_; }
   void set_original_url(const GURL& val) { original_url_ = val; }
@@ -149,6 +154,10 @@ class CrxInstaller
     install_cause_ = install_cause;
   }
 
+  void set_page_index(int page_index) {
+    page_index_ = page_index;
+  }
+
  private:
   friend class ExtensionUpdaterTest;
 
@@ -165,11 +174,11 @@ class CrxInstaller
   bool AllowInstall(const Extension* extension, std::string* error);
 
   // SandboxedExtensionUnpackerClient
-  virtual void OnUnpackFailure(const std::string& error_message);
+  virtual void OnUnpackFailure(const std::string& error_message) OVERRIDE;
   virtual void OnUnpackSuccess(const FilePath& temp_dir,
                                const FilePath& extension_dir,
                                const base::DictionaryValue* original_manifest,
-                               const Extension* extension);
+                               const Extension* extension) OVERRIDE;
 
   // Returns true if we can skip confirmation because the install was
   // whitelisted.
@@ -234,6 +243,9 @@ class CrxInstaller
   // The extension we're installing. We own this and either pass it off to
   // ExtensionService on success, or delete it on failure.
   scoped_refptr<const Extension> extension_;
+
+  // The index of the NTP apps page |extension_| will be shown on.
+  int page_index_;
 
   // A parsed copy of the unmodified original manifest, before any
   // transformations like localization have taken place.

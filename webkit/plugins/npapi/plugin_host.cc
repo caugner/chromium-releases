@@ -13,7 +13,6 @@
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "net/base/net_util.h"
-#include "third_party/npapi/bindings/npapi_extensions.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
@@ -21,13 +20,12 @@
 #include "ui/gfx/gl/gl_surface.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/default_plugin_shared.h"
-#include "webkit/plugins/npapi/npapi_extension_thunk.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/plugin_stream_url.h"
 #include "webkit/plugins/npapi/webplugin_delegate.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -601,7 +599,7 @@ const char* NPN_UserAgent(NPP id) {
   if (id)
     plugin = FindInstance(id);
   if (plugin.get()) {
-    webkit::npapi::WebPluginInfo plugin_info =
+    webkit::WebPluginInfo plugin_info =
         plugin->plugin_lib()->plugin_info();
     if (plugin_info.name == ASCIIToUTF16("Silverlight Plug-In") &&
         StartsWith(plugin_info.version, ASCIIToUTF16("4."), false)) {
@@ -783,28 +781,6 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       rv = NPERR_NO_ERROR;
       break;
     }
-    case webkit::npapi::default_plugin::kMissingPluginStatusStart +
-         webkit::npapi::default_plugin::MISSING_PLUGIN_AVAILABLE:
-    // fall through
-    case webkit::npapi::default_plugin::kMissingPluginStatusStart +
-         webkit::npapi::default_plugin::MISSING_PLUGIN_USER_STARTED_DOWNLOAD: {
-      // This is a hack for the default plugin to send notification to
-      // renderer.  Even though we check if the plugin is the default plugin,
-      // we still need to worry about future standard change that may conflict
-      // with the variable definition, in order to avoid duplicate case clauses
-      // in this big switch statement.
-      scoped_refptr<PluginInstance> plugin(FindInstance(id));
-      if (!plugin.get()) {
-        NOTREACHED();
-        return NPERR_INVALID_INSTANCE_ERROR;
-      }
-      if (plugin->plugin_lib()->plugin_info().path.value() ==
-            webkit::npapi::kDefaultPluginLibraryName) {
-        plugin->webplugin()->OnMissingPluginStatus(variable -
-            webkit::npapi::default_plugin::kMissingPluginStatusStart);
-      }
-      break;
-    }
   #if defined(OS_MACOSX)
     case NPNVpluginDrawingModel: {
       // return the drawing model that was negotiated when we initialized.
@@ -873,13 +849,6 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       break;
     }
   #endif  // OS_MACOSX
-    case NPNVPepperExtensions:
-      // Available for any plugin that attempts to get it.
-      // If the plugin is not started in a Pepper implementation, it
-      // will likely fail when it tries to use any of the functions
-      // attached to the extension vector.
-      rv = webkit::npapi::GetPepperExtensionsFunctions(value);
-      break;
     default:
       DVLOG(1) << "NPN_GetValue(" << variable << ") is not implemented yet.";
       break;
@@ -1015,9 +984,15 @@ NPError NPN_GetValueForURL(NPP id,
   switch (variable) {
     case NPNURLVProxy: {
       result = "DIRECT";
-      if (!webkit_glue::FindProxyForUrl(GURL((std::string(url))), &result))
+      scoped_refptr<PluginInstance> plugin(FindInstance(id));
+      if (!plugin)
         return NPERR_GENERIC_ERROR;
 
+      WebPlugin* webplugin = plugin->webplugin();
+      if (!webplugin)
+        return NPERR_GENERIC_ERROR;
+
+      result = webplugin->FindProxyForUrl(GURL(std::string(url)), &result);
       break;
     }
     case NPNURLVCookie: {

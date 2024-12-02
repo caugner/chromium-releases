@@ -20,50 +20,81 @@
             'mac_creator': 'Cr24',
           }],  # branding
         ],  # conditions
-        'plugin_extension': 'plugin',
-        'plugin_prefix': '',
-        'name_suffix': '- Mac',
-        'remoting_it2me_os_files': [
-          'resources/mac/chromoting128.png',
-          'resources/mac/chromoting16.png',
-        ],
+        'host_plugin_extension': 'plugin',
+        'host_plugin_prefix': '',
       }],
-      ['os_posix == 1 and OS != "mac"', {
-        'plugin_extension': 'so',
-        'plugin_prefix': 'lib',
+      ['os_posix == 1 and OS != "mac" and target_arch == "ia32"', {
+        # linux 32 bit
+        'host_plugin_extension': 'ia32.so',
+        'host_plugin_prefix': 'lib',
       }],
-      ['OS=="linux" and chromeos==1', {
-        'name_suffix': '- Chromebook',
-        'remoting_it2me_os_files': [
-          'resources/chromeos/chromoting128.png',
-          'resources/chromeos/chromoting16.png',
-        ],
+      ['os_posix == 1 and OS != "mac" and target_arch == "x64"', {
+        # linux 64 bit
+        'host_plugin_extension': 'x64.so',
+        'host_plugin_prefix': 'lib',
       }],
-      ['OS=="linux" and chromeos==0 and target_arch=="x64"', {
-        'name_suffix': '- Linux - 64',
-        'remoting_it2me_os_files': [
-          'resources/linux/chromoting128.png',
-          'resources/linux/chromoting16.png',
-        ],
-      }],
-      ['OS=="linux" and chromeos==0 and target_arch!="x64"', {
-        'name_suffix': '- Linux',
-        'remoting_it2me_os_files': [
-          'resources/linux/chromoting128.png',
-          'resources/linux/chromoting16.png',
-        ],
+      ['os_posix == 1 and OS != "mac" and target_arch == "arm"', {
+        # linux 64 bit
+        'host_plugin_extension': 'arm.so',
+        'host_plugin_prefix': 'lib',
       }],
       ['OS=="win"', {
-        'plugin_extension': 'dll',
-        'plugin_prefix': '',
-        'name_suffix': '- Windows',
-        'remoting_it2me_os_files': [
-          'resources/win/chromoting128.png',
-          'resources/win/chromoting16.png',
+        'host_plugin_extension': 'dll',
+        'host_plugin_prefix': '',
+      }],
+      ['branding=="Chrome"', {
+        'remoting_it2me_locale_files': [
+          'webapp/me2mom/_locales.official/ar/messages.json',
+          'webapp/me2mom/_locales.official/bg/messages.json',
+          'webapp/me2mom/_locales.official/ca/messages.json',
+          'webapp/me2mom/_locales.official/cs/messages.json',
+          'webapp/me2mom/_locales.official/da/messages.json',
+          'webapp/me2mom/_locales.official/de/messages.json',
+          'webapp/me2mom/_locales.official/el/messages.json',
+          'webapp/me2mom/_locales.official/en/messages.json',
+          'webapp/me2mom/_locales.official/en_GB/messages.json',
+          'webapp/me2mom/_locales.official/es/messages.json',
+          'webapp/me2mom/_locales.official/es_419/messages.json',
+          'webapp/me2mom/_locales.official/et/messages.json',
+          'webapp/me2mom/_locales.official/fi/messages.json',
+          'webapp/me2mom/_locales.official/fil/messages.json',
+          'webapp/me2mom/_locales.official/fr/messages.json',
+          'webapp/me2mom/_locales.official/he/messages.json',
+          'webapp/me2mom/_locales.official/hi/messages.json',
+          'webapp/me2mom/_locales.official/hr/messages.json',
+          'webapp/me2mom/_locales.official/hu/messages.json',
+          'webapp/me2mom/_locales.official/id/messages.json',
+          'webapp/me2mom/_locales.official/it/messages.json',
+          'webapp/me2mom/_locales.official/ja/messages.json',
+          'webapp/me2mom/_locales.official/ko/messages.json',
+          'webapp/me2mom/_locales.official/lt/messages.json',
+          'webapp/me2mom/_locales.official/lv/messages.json',
+          'webapp/me2mom/_locales.official/nb/messages.json',
+          'webapp/me2mom/_locales.official/nl/messages.json',
+          'webapp/me2mom/_locales.official/pl/messages.json',
+          'webapp/me2mom/_locales.official/pt_BR/messages.json',
+          'webapp/me2mom/_locales.official/pt_PT/messages.json',
+          'webapp/me2mom/_locales.official/ro/messages.json',
+          'webapp/me2mom/_locales.official/ru/messages.json',
+          'webapp/me2mom/_locales.official/sk/messages.json',
+          'webapp/me2mom/_locales.official/sl/messages.json',
+          'webapp/me2mom/_locales.official/sr/messages.json',
+          'webapp/me2mom/_locales.official/sv/messages.json',
+          'webapp/me2mom/_locales.official/th/messages.json',
+          'webapp/me2mom/_locales.official/tr/messages.json',
+          'webapp/me2mom/_locales.official/uk/messages.json',
+          'webapp/me2mom/_locales.official/vi/messages.json',
+          'webapp/me2mom/_locales.official/zh_CN/messages.json',
+          'webapp/me2mom/_locales.official/zh_TW/messages.json',
+        ],
+      }, {  # else: branding!="Chrome"
+        'remoting_it2me_locale_files': [
+          'webapp/me2mom/_locales/en/messages.json',
         ],
       }],
     ],
     'remoting_it2me_files': [
+      'resources/icon_warning.png',
       'webapp/me2mom/choice.css',
       'webapp/me2mom/choice.html',
       'webapp/me2mom/client_session.js',
@@ -72,16 +103,22 @@
       'webapp/me2mom/debug_log.js',
       'webapp/me2mom/dividerbottom.png',
       'webapp/me2mom/dividertop.png',
+      'webapp/me2mom/l10n.js',
       'webapp/me2mom/main.css',
       'webapp/me2mom/manifest.json',
       'webapp/me2mom/oauth2.js',
       'webapp/me2mom/oauth2_callback.html',
       'webapp/me2mom/plugin_settings.js',
       'webapp/me2mom/remoting.js',
+      'webapp/me2mom/scale-to-fit.png',
       'webapp/me2mom/spinner.gif',
       'webapp/me2mom/toolbar.css',
-      'webapp/me2mom/toolbar-stub.png',
+      'webapp/me2mom/wcs.js',
+      'webapp/me2mom/wcs_loader.js',
       'webapp/me2mom/xhr.js',
+      'resources/chromoting16.png',
+      'resources/chromoting48.png',
+      'resources/chromoting128.png',
     ],
   },
 
@@ -134,14 +171,14 @@
         'client/plugin/chromoting_instance.h',
         'client/plugin/chromoting_scriptable_object.cc',
         'client/plugin/chromoting_scriptable_object.h',
-        'client/plugin/pepper_client_logger.cc',
-        'client/plugin/pepper_client_logger.h',
         'client/plugin/pepper_entrypoints.cc',
         'client/plugin/pepper_entrypoints.h',
         'client/plugin/pepper_input_handler.cc',
         'client/plugin/pepper_input_handler.h',
         'client/plugin/pepper_port_allocator_session.cc',
         'client/plugin/pepper_port_allocator_session.h',
+        'client/plugin/pepper_plugin_thread_delegate.cc',
+        'client/plugin/pepper_plugin_thread_delegate.h',
         'client/plugin/pepper_view.cc',
         'client/plugin/pepper_view.h',
         'client/plugin/pepper_view_proxy.cc',
@@ -155,6 +192,8 @@
     {
       'target_name': 'remoting_host_plugin',
       'type': 'loadable_module',
+      'product_extension': '<(host_plugin_extension)',
+      'product_prefix': '<(host_plugin_prefix)',
       'defines': [
         'HOST_PLUGIN_MIME_TYPE=<(host_plugin_mime_type)',
       ],
@@ -165,16 +204,26 @@
         '../third_party/npapi/npapi.gyp:npapi',
       ],
       'sources': [
+        # Hack for NPAPI policy support. REMOVE ASAP.
+        # Bug: http://crbug.com/92576
+        '../content/common/json_value_serializer.cc',
+        '../content/common/json_value_serializer.h',
+
+        'host/plugin/host_log_handler.cc',
+        'host/plugin/host_log_handler.h',
         'host/plugin/host_plugin.cc',
         'host/plugin/host_plugin.def',
         'host/plugin/host_plugin.rc',
-        'host/plugin/host_plugin_logger.cc',
-        'host/plugin/host_plugin_logger.h',
         'host/plugin/host_plugin_resource.h',
         'host/plugin/host_plugin_utils.cc',
         'host/plugin/host_plugin_utils.h',
         'host/plugin/host_script_object.cc',
         'host/plugin/host_script_object.h',
+        'host/plugin/policy_hack/nat_policy.h',
+        'host/plugin/policy_hack/nat_policy.cc',
+        'host/plugin/policy_hack/nat_policy_linux.cc',
+        'host/plugin/policy_hack/nat_policy_mac.mm',
+        'host/plugin/policy_hack/nat_policy_win.cc',
       ],
       'conditions': [
         ['OS=="mac"', {
@@ -184,33 +233,33 @@
             'INFOPLIST_FILE': 'host/plugin/host_plugin-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
             'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'HOST_PLUGIN_MIME_TYPE=<(host_plugin_mime_type)',
-            'WRAPPER_EXTENSION': '<(plugin_extension)',
           },
           # TODO(mark): Come up with a fancier way to do this.  It should
-          # only be necessary to list framework-Info.plist once, not the
+          # only be necessary to list host_plugin-Info.plist once, not the
           # three times it is listed here.
           'mac_bundle_resources': [
             'host/disconnect_window.xib',
             'host/plugin/host_plugin-Info.plist',
+            'resources/chromoting16.png',
+            'resources/chromoting48.png',
             'resources/chromoting128.png',
           ],
           'mac_bundle_resources!': [
             'host/plugin/host_plugin-Info.plist',
           ],
-        }],
+          'conditions': [
+            ['mac_breakpad==1', {
+              'variables': {
+                # A real .dSYM is needed for dump_syms to operate on.
+                'mac_real_dsym': 1,
+              },
+            }],
+          ],  # conditions
+        }],  # OS=="mac"
         ['OS!="win"', {
           'sources!': [
             'host/plugin/host_plugin.def',
             'host/plugin/host_plugin.rc',
-          ],
-        }],
-        ['target_arch=="arm"', {
-          'dependencies': [
-            '../third_party/libvpx/libvpx.gyp:libvpx_lib',
-          ],
-        }, {
-          'dependencies': [
-            '../third_party/libvpx/libvpx.gyp:libvpx',
           ],
         }],
       ],
@@ -223,8 +272,9 @@
       ],
       'sources': [
         'webapp/build-webapp.py',
+        'webapp/verify-webapp.py',
         '<@(remoting_it2me_files)',
-        '<@(remoting_it2me_os_files)',
+        '<@(remoting_it2me_locale_files)',
       ],
       # Can't use a 'copies' because we need to manipulate
       # the manifest file to get the right plugin name.
@@ -234,15 +284,39 @@
       # when the actual project is generated.
       'actions': [
         {
+          'action_name': 'Verify It2Me WebApp i18n',
+          'inputs': [
+            'webapp/verify-webapp.py',
+            'webapp/me2mom/_locales/en/messages.json',
+            'webapp/me2mom/choice.html',
+            'webapp/me2mom/manifest.json',
+            'webapp/me2mom/remoting.js',
+            'host/plugin/host_script_object.cc',
+          ],
+          'outputs': [
+            '<(PRODUCT_DIR)/remoting/it2me_verified.stamp',
+          ],
+          'action': [
+            'python',
+            'webapp/verify-webapp.py',
+            '<(PRODUCT_DIR)/remoting/it2me_verified.stamp',
+            'webapp/me2mom/_locales/en/messages.json',
+            'webapp/me2mom/choice.html',
+            'webapp/me2mom/manifest.json',
+            'webapp/me2mom/remoting.js',
+            'host/plugin/host_script_object.cc',
+         ],
+        },
+        {
           'action_name': 'Build It2Me WebApp',
           'output_dir': '<(PRODUCT_DIR)/remoting/it2me.webapp',
-          'plugin_path': '<(PRODUCT_DIR)/<(plugin_prefix)remoting_host_plugin.<(plugin_extension)',
+          'plugin_path': '<(PRODUCT_DIR)/<(host_plugin_prefix)remoting_host_plugin.<(host_plugin_extension)',
           'zip_path': '<(PRODUCT_DIR)/remoting-it2me.zip',
           'inputs': [
             'webapp/build-webapp.py',
             '<(_plugin_path)',
             '<@(remoting_it2me_files)',
-            '<@(remoting_it2me_os_files)',
+            '<@(remoting_it2me_locale_files)',
           ],
           'outputs': [
             '<(_output_dir)',
@@ -250,13 +324,14 @@
           ],
           'action': [
             'python', 'webapp/build-webapp.py',
+            '<(buildtype)',
             '<(host_plugin_mime_type)',
             '<(_output_dir)',
             '<(_zip_path)',
             '<(_plugin_path)',
-            '<(name_suffix)',
             '<@(remoting_it2me_files)',
-            '<@(remoting_it2me_os_files)',
+            '--locales',
+            '<@(remoting_it2me_locale_files)',
           ],
         },
       ],
@@ -269,19 +344,19 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../ui/ui.gyp:ui',
         '../net/net.gyp:net',
+        '../skia/skia.gyp:skia',
+        '../third_party/libvpx/libvpx.gyp:libvpx',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
-        '../third_party/libvpx/libvpx.gyp:libvpx_include',
         '../third_party/zlib/zlib.gyp:zlib',
         '../media/media.gyp:yuv_convert',
         'remoting_jingle_glue',
         'proto/chromotocol.gyp:chromotocol_proto_lib',
         'proto/trace.gyp:trace_proto_lib',
-        # TODO(hclam): Enable VP8 in the build.
-        #'third_party/on2/on2.gyp:vp8',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
         '../net/net.gyp:net',
+        '../skia/skia.gyp:skia',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         'proto/chromotocol.gyp:chromotocol_proto_lib',
       ],
@@ -317,27 +392,18 @@
         'base/encoder_vp8.h',
         'base/encoder_row_based.cc',
         'base/encoder_row_based.h',
-        'base/logger.cc',
-        'base/logger.h',
+        'base/plugin_message_loop_proxy.cc',
+        'base/plugin_message_loop_proxy.h',
         'base/rate_counter.cc',
         'base/rate_counter.h',
         'base/running_average.cc',
         'base/running_average.h',
+        'base/task_thread_proxy.cc',
+        'base/task_thread_proxy.h',
         'base/tracer.cc',
         'base/tracer.h',
-        'base/types.h',
         'base/util.cc',
         'base/util.h',
-      ],
-      'conditions': [
-        ['target_arch=="arm"', {
-          'sources!': [
-            'base/decoder_vp8.cc',
-            'base/decoder_vp8.h',
-            'base/encoder_vp8.cc',
-            'base/encoder_vp8.h',
-          ],
-        }],
       ],
     },  # end of target 'remoting_base'
 
@@ -367,7 +433,6 @@
         'host/chromoting_host_context.h',
         'host/client_session.cc',
         'host/client_session.h',
-        'host/continue_window.cc',
         'host/continue_window.h',
         'host/continue_window_mac.mm',
         'host/continue_window_linux.cc',
@@ -380,7 +445,6 @@
         'host/desktop_environment.h',
         'host/differ.h',
         'host/differ.cc',
-        'host/disconnect_window.cc',
         'host/disconnect_window.h',
         'host/disconnect_window_linux.cc',
         'host/disconnect_window_mac.h',
@@ -402,7 +466,7 @@
         'host/json_host_config.cc',
         'host/json_host_config.h',
         'host/local_input_monitor_linux.cc',
-        'host/local_input_monitor_mac.cc',
+        'host/local_input_monitor_mac.mm',
         'host/local_input_monitor_thread_linux.cc',
         'host/local_input_monitor_win.cc',
         'host/register_support_host_request.cc',
@@ -413,6 +477,8 @@
         'host/screen_recorder.h',
         'host/support_access_verifier.cc',
         'host/support_access_verifier.h',
+        'host/ui_strings.cc',
+        'host/ui_strings.h',
         'host/user_authenticator.h',
         'host/user_authenticator_linux.cc',
         'host/user_authenticator_mac.cc',
@@ -438,6 +504,20 @@
           },
         }],
         ['OS=="mac"', {
+          'sources': [
+            '../third_party/GTM/AppKit/GTMCarbonEvent.h',
+            '../third_party/GTM/AppKit/GTMCarbonEvent.m',
+            '../third_party/GTM/DebugUtils/GTMDebugSelectorValidation.h',
+            '../third_party/GTM/DebugUtils/GTMTypeCasting.h',
+            '../third_party/GTM/Foundation/GTMObjectSingleton.h',
+            '../third_party/GTM/GTMDefines.h',
+          ],
+          'include_dirs': [
+            '../third_party/GTM',
+            '../third_party/GTM/AppKit',
+            '../third_party/GTM/DebugUtils',
+            '../third_party/GTM/Foundation',
+          ],
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
@@ -491,7 +571,6 @@
         'host/capturer_fake_ascii.cc',
         'host/capturer_fake_ascii.h',
         'host/continue_window.h',
-        'host/continue_window.cc',
         'host/continue_window_mac.mm',
         'host/continue_window_linux.cc',
         'host/continue_window_win.cc',
@@ -607,6 +686,8 @@
         'protocol/jingle_channel_connector.h',
         'protocol/jingle_datagram_connector.cc',
         'protocol/jingle_datagram_connector.h',
+        'protocol/jingle_messages.cc',
+        'protocol/jingle_messages.h',
         'protocol/jingle_session.cc',
         'protocol/jingle_session.h',
         'protocol/jingle_session_manager.cc',
@@ -617,8 +698,8 @@
         'protocol/message_decoder.h',
         'protocol/message_reader.cc',
         'protocol/message_reader.h',
-        'protocol/pepper_p2p_channel.h',
-        'protocol/pepper_p2p_channel.cc',
+        'protocol/pepper_transport_socket_adapter.cc',
+        'protocol/pepper_transport_socket_adapter.h',
         'protocol/protobuf_video_reader.cc',
         'protocol/protobuf_video_reader.h',
         'protocol/protobuf_video_writer.cc',
@@ -656,9 +737,6 @@
     {
       'target_name': 'differ_block',
       'type': 'static_library',
-      'include_dirs': [
-        '..',
-      ],
       'dependencies': [
         '../media/media.gyp:cpu_features',
       ],
@@ -678,9 +756,6 @@
     {
       'target_name': 'differ_block_sse2',
       'type': 'static_library',
-      'include_dirs': [
-        '..',
-      ],
       'conditions': [
         [ 'os_posix == 1 and OS != "mac"', {
           'cflags': [
@@ -768,6 +843,7 @@
         'protocol/connection_to_client_unittest.cc',
         'protocol/fake_session.cc',
         'protocol/fake_session.h',
+        'protocol/jingle_messages_unittest.cc',
         'protocol/jingle_session_unittest.cc',
         'protocol/message_decoder_unittest.cc',
         'protocol/message_reader_unittest.cc',
@@ -795,12 +871,6 @@
                 ],
               },
             ],
-          ],
-        }],
-        ['target_arch=="arm"', {
-          'sources!': [
-            'base/decoder_vp8_unittest.cc',
-            'base/encoder_vp8_unittest.cc',
           ],
         }],
       ],  # end of 'conditions'

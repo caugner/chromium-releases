@@ -29,7 +29,8 @@ class TypedUrlModelAssociatorTest : public testing::Test {
         base::Time::FromInternalValue(last_visit));
     history_url.set_hidden(hidden);
     visits->push_back(history::VisitRow(
-        history_url.id(), history_url.last_visit(), 0, 0, 0));
+        history_url.id(), history_url.last_visit(), 0,
+        PageTransition::RELOAD, 0));
     history_url.set_visit_count(visits->size());
     return history_url;
   }
@@ -65,9 +66,8 @@ TEST_F(TypedUrlModelAssociatorTest, MergeUrls) {
                                                           3, false));
   history::URLRow new_row1(GURL("http://pie.com/"));
   std::vector<history::VisitInfo> new_visits1;
-  EXPECT_EQ(TypedUrlModelAssociator::DIFF_NONE,
-            TypedUrlModelAssociator::MergeUrls(specs1, row1, &visits1,
-                                               &new_row1, &new_visits1));
+  EXPECT_TRUE(TypedUrlModelAssociator::MergeUrls(specs1, row1, &visits1,
+      &new_row1, &new_visits1) == TypedUrlModelAssociator::DIFF_NONE);
 
   history::VisitVector visits2;
   history::URLRow row2(MakeTypedUrlRow("http://pie.com/", "pie",
@@ -80,9 +80,9 @@ TEST_F(TypedUrlModelAssociatorTest, MergeUrls) {
                                             2, 3, true, &expected_visits2));
   history::URLRow new_row2(GURL("http://pie.com/"));
   std::vector<history::VisitInfo> new_visits2;
-  EXPECT_EQ(TypedUrlModelAssociator::DIFF_LOCAL_ROW_CHANGED,
-            TypedUrlModelAssociator::MergeUrls(specs2, row2, &visits2,
-                                               &new_row2, &new_visits2));
+  EXPECT_TRUE(TypedUrlModelAssociator::MergeUrls(specs2, row2, &visits2,
+                                                 &new_row2, &new_visits2) ==
+      TypedUrlModelAssociator::DIFF_LOCAL_ROW_CHANGED);
   EXPECT_TRUE(URLsEqual(new_row2, expected2));
 
   history::VisitVector visits3;
@@ -233,4 +233,96 @@ TEST_F(TypedUrlModelAssociatorTest, DiffVisitsAdd) {
               visits_added[c]);
     EXPECT_EQ(new_visits[c].second, PageTransition::TYPED);
   }
+}
+
+static history::VisitRow CreateVisit(PageTransition::Type type,
+                                     int64 timestamp) {
+  return history::VisitRow(0, base::Time::FromInternalValue(timestamp), 0,
+                           type, 0);
+}
+
+TEST_F(TypedUrlModelAssociatorTest, WriteTypedUrlSpecifics) {
+  history::VisitVector visits;
+  visits.push_back(CreateVisit(PageTransition::TYPED, 1));
+  visits.push_back(CreateVisit(PageTransition::RELOAD, 2));
+  visits.push_back(CreateVisit(PageTransition::LINK, 3));
+
+  history::URLRow url(MakeTypedUrlRow("http://pie.com/", "pie",
+                                      1, 100, false, &visits));
+  sync_pb::TypedUrlSpecifics typed_url;
+  TypedUrlModelAssociator::WriteToTypedUrlSpecifics(url, visits, &typed_url);
+  // RELOAD visits should be removed.
+  EXPECT_EQ(2, typed_url.visits_size());
+  EXPECT_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
+  EXPECT_EQ(1, typed_url.visits(0));
+  EXPECT_EQ(3, typed_url.visits(1));
+  EXPECT_EQ(PageTransition::TYPED,
+            static_cast<PageTransition::Type>(typed_url.visit_transitions(0)));
+  EXPECT_EQ(PageTransition::LINK,
+            static_cast<PageTransition::Type>(typed_url.visit_transitions(1)));
+}
+
+TEST_F(TypedUrlModelAssociatorTest, TooManyVisits) {
+  history::VisitVector visits;
+  int64 timestamp = 1000;
+  visits.push_back(CreateVisit(PageTransition::TYPED, timestamp++));
+  for (int i = 0 ; i < 100; ++i) {
+    visits.push_back(CreateVisit(PageTransition::LINK, timestamp++));
+  }
+  history::URLRow url(MakeTypedUrlRow("http://pie.com/", "pie",
+                                      1, timestamp++, false, &visits));
+  sync_pb::TypedUrlSpecifics typed_url;
+  TypedUrlModelAssociator::WriteToTypedUrlSpecifics(url, visits, &typed_url);
+  // # visits should be capped at 100.
+  EXPECT_EQ(100, typed_url.visits_size());
+  EXPECT_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
+  EXPECT_EQ(1000, typed_url.visits(0));
+  // Visit with timestamp of 1001 should be omitted since we should have
+  // skipped that visit to stay under the cap.
+  EXPECT_EQ(1002, typed_url.visits(1));
+  EXPECT_EQ(PageTransition::TYPED,
+            static_cast<PageTransition::Type>(typed_url.visit_transitions(0)));
+  EXPECT_EQ(PageTransition::LINK,
+            static_cast<PageTransition::Type>(typed_url.visit_transitions(1)));
+}
+
+TEST_F(TypedUrlModelAssociatorTest, TooManyTypedVisits) {
+  history::VisitVector visits;
+  int64 timestamp = 1000;
+  for (int i = 0 ; i < 102; ++i) {
+    visits.push_back(CreateVisit(PageTransition::TYPED, timestamp++));
+    visits.push_back(CreateVisit(PageTransition::LINK, timestamp++));
+    visits.push_back(CreateVisit(PageTransition::RELOAD, timestamp++));
+  }
+  history::URLRow url(MakeTypedUrlRow("http://pie.com/", "pie",
+                                      1, timestamp++, false, &visits));
+  sync_pb::TypedUrlSpecifics typed_url;
+  TypedUrlModelAssociator::WriteToTypedUrlSpecifics(url, visits, &typed_url);
+  // # visits should be capped at 100.
+  EXPECT_EQ(100, typed_url.visits_size());
+  EXPECT_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
+  // First two typed visits should be skipped.
+  EXPECT_EQ(1006, typed_url.visits(0));
+
+  // Ensure there are no non-typed visits since that's all that should fit.
+  for (int i = 0; i < typed_url.visits_size(); ++i) {
+    EXPECT_EQ(PageTransition::TYPED, static_cast<PageTransition::Type>(
+        typed_url.visit_transitions(i)));
+  }
+}
+
+TEST_F(TypedUrlModelAssociatorTest, NoTypedVisits) {
+  history::VisitVector visits;
+  history::URLRow url(MakeTypedUrlRow("http://pie.com/", "pie",
+                                      1, 1000, false, &visits));
+  sync_pb::TypedUrlSpecifics typed_url;
+  TypedUrlModelAssociator::WriteToTypedUrlSpecifics(url, visits, &typed_url);
+  // URLs with no typed URL visits should be translated to a URL with one
+  // reload visit.
+  EXPECT_EQ(1, typed_url.visits_size());
+  EXPECT_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
+  // First two typed visits should be skipped.
+  EXPECT_EQ(1000, typed_url.visits(0));
+  EXPECT_EQ(PageTransition::RELOAD, static_cast<PageTransition::Type>(
+      typed_url.visit_transitions(0)));
 }

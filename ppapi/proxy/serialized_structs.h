@@ -15,19 +15,19 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_rect.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/host_resource.h"
 
 struct PP_FontDescription_Dev;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class Dispatcher;
 
 // PP_FontDescript_Dev has to be redefined with a SerializedVar in place of
 // the PP_Var used for the face name.
-struct SerializedFontDescription {
+struct PPAPI_PROXY_EXPORT SerializedFontDescription {
   SerializedFontDescription();
   ~SerializedFontDescription();
 
@@ -55,7 +55,7 @@ struct SerializedFontDescription {
                               PP_FontDescription_Dev* desc,
                               bool dest_owns_ref) const;
 
-  pp::proxy::SerializedVar face;
+  SerializedVar face;
   int32_t family;
   uint32_t size;
   int32_t weight;
@@ -70,23 +70,12 @@ struct SerializedDirEntry {
   bool is_dir;
 };
 
-// FileRefs are created in a number of places and they include a number of
-// return values. This struct encapsulates everything in one place.
-struct PPBFileRef_CreateInfo {
-  PPBFileRef_CreateInfo();  // Initializes to 0.
-
-  HostResource resource;
-  int file_system_type;  // One of PP_FileSystemType values.
-  SerializedVar path;
-  SerializedVar name;
-};
-
 struct PPBFlash_DrawGlyphs_Params {
   PPBFlash_DrawGlyphs_Params();
   ~PPBFlash_DrawGlyphs_Params();
 
   PP_Instance instance;
-  HostResource image_data;
+  ppapi::HostResource image_data;
   SerializedFontDescription font_desc;
   uint32_t color;
   PP_Point position;
@@ -97,7 +86,7 @@ struct PPBFlash_DrawGlyphs_Params {
 };
 
 struct PPBAudio_NotifyAudioStreamCreated_Params {
-  pp::proxy::HostResource audio_id;
+  ppapi::HostResource audio_id;
   int32_t result_code;  // Will be != PP_OK on failure
   IPC::PlatformFileForTransit socket_handle;
   base::SharedMemoryHandle handle;
@@ -106,11 +95,17 @@ struct PPBAudio_NotifyAudioStreamCreated_Params {
 
 struct PPBURLLoader_UpdateProgress_Params {
   PP_Instance instance;
-  pp::proxy::HostResource resource;
+  ppapi::HostResource resource;
   int64_t bytes_sent;
   int64_t total_bytes_to_be_sent;
   int64_t bytes_received;
   int64_t total_bytes_to_be_received;
+};
+
+struct PPPVideoCapture_Buffer {
+  ppapi::HostResource resource;
+  uint32_t size;
+  base::SharedMemoryHandle handle;
 };
 
 #if defined(OS_WIN)
@@ -123,6 +118,6 @@ typedef int ImageHandle;
 #endif
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_SERIALIZED_STRUCTS_H_

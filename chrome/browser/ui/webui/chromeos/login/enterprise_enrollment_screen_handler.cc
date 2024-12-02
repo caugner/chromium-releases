@@ -66,8 +66,7 @@ void EnterpriseEnrollmentScreenHandler::RegisterMessages() {
 // EnterpriseEnrollmentScreenHandler
 //      EnterpriseEnrollmentScreenActor implementation -------------------------
 
-void EnterpriseEnrollmentScreenHandler::SetController(
-    EnterpriseEnrollmentUI::Controller* controller) {
+void EnterpriseEnrollmentScreenHandler::SetController(Controller* controller) {
   controller_ = controller;
 }
 
@@ -94,6 +93,7 @@ void EnterpriseEnrollmentScreenHandler::SetEditableUser(bool editable) {
 void EnterpriseEnrollmentScreenHandler::ShowConfirmationScreen() {
   web_ui_->CallJavascriptFunction(
       "oobe.EnrollmentScreen.showConfirmationScreen");
+  NotifyObservers(true);
 }
 
 void EnterpriseEnrollmentScreenHandler::ShowAuthError(
@@ -107,18 +107,27 @@ void EnterpriseEnrollmentScreenHandler::ShowAuthError(
 
 void EnterpriseEnrollmentScreenHandler::ShowAccountError() {
   ShowError(IDS_ENTERPRISE_ENROLLMENT_ACCOUNT_ERROR);
+  NotifyObservers(false);
+}
+
+void EnterpriseEnrollmentScreenHandler::ShowSerialNumberError() {
+  ShowError(IDS_ENTERPRISE_ENROLLMENT_SERIAL_NUMBER_ERROR);
+  NotifyObservers(false);
 }
 
 void EnterpriseEnrollmentScreenHandler::ShowFatalAuthError() {
   ShowError(IDS_ENTERPRISE_ENROLLMENT_FATAL_AUTH_ERROR);
+  NotifyObservers(false);
 }
 
 void EnterpriseEnrollmentScreenHandler::ShowFatalEnrollmentError() {
   ShowError(IDS_ENTERPRISE_ENROLLMENT_FATAL_ENROLLMENT_ERROR);
+  NotifyObservers(false);
 }
 
 void EnterpriseEnrollmentScreenHandler::ShowNetworkEnrollmentError() {
   ShowError(IDS_ENTERPRISE_ENROLLMENT_NETWORK_ENROLLMENT_ERROR);
+  NotifyObservers(false);
 }
 
 // EnterpriseEnrollmentScreenHandler BaseScreenHandler implementation ---------
@@ -295,4 +304,4 @@ void EnterpriseEnrollmentScreenHandler::UpdateGaiaLogin(
       UTF8ToUTF16("showGaiaLogin(" + json + ");"));
 }
 
-}  // namespace chromeos2
+}  // namespace chromeos

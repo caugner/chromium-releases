@@ -26,16 +26,17 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/npapi_test_helper.h"
-#include "chrome/test/ui_test_utils.h"
 #include "content/browser/net/url_request_mock_http_job.h"
+#include "content/common/content_switches.h"
 
 using npapi_test::kTestCompleteCookie;
 using npapi_test::kTestCompleteSuccess;
 
-static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("npapi");
-
 namespace {
+
+const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("npapi");
 
 class NPAPIAutomationEnabledTest : public NPAPIVisiblePluginTester {
  public:
@@ -138,9 +139,6 @@ TEST_F(NPAPITesterBase, NPObjectProxy) {
 // http://crbug.com/44960
 TEST_F(NPAPIVisiblePluginTester,
        FLAKY_SelfDeletePluginInvokeInSynchronousPaint) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   show_window_ = true;
   const FilePath test_case(
       FILE_PATH_LITERAL("execute_script_delete_in_paint.html"));
@@ -153,14 +151,29 @@ TEST_F(NPAPIVisiblePluginTester,
 #endif
 
 TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInNewStream) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   show_window_ = true;
   const FilePath test_case(FILE_PATH_LITERAL("self_delete_plugin_stream.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
   ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
   WaitForFinish("self_delete_plugin_stream", "1", url,
+                kTestCompleteCookie, kTestCompleteSuccess,
+                TestTimeouts::action_max_timeout_ms());
+}
+
+// http://crbug.com/95558
+// This test fails frequently on Mac, so it is disabled for now.
+#if defined(OS_MACOSX)
+#define MAYBE_DeletePluginInDeallocate DISABLED_DeletePluginInDeallocate
+#else
+#define MAYBE_DeletePluginInDeallocate DeletePluginInDeallocate
+#endif
+TEST_F(NPAPIVisiblePluginTester, MAYBE_DeletePluginInDeallocate) {
+  show_window_ = true;
+  const FilePath test_case(
+      FILE_PATH_LITERAL("plugin_delete_in_deallocate.html"));
+  GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
+  ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
+  WaitForFinish("delete_plugin_in_deallocate_test", "signaller", url,
                 kTestCompleteCookie, kTestCompleteSuccess,
                 TestTimeouts::action_max_timeout_ms());
 }
@@ -215,9 +228,6 @@ TEST_F(NPAPIVisiblePluginTester, AlertInWindowMessage) {
 }
 
 TEST_F(NPAPIVisiblePluginTester, VerifyNPObjectLifetimeTest) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   show_window_ = true;
   const FilePath test_case(FILE_PATH_LITERAL("npobject_lifetime_test.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
@@ -237,9 +247,6 @@ TEST_F(NPAPIVisiblePluginTester, NewFails) {
 }
 
 TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInNPNEvaluate) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   const FilePath test_case(
       FILE_PATH_LITERAL("execute_script_delete_in_npn_evaluate.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
@@ -250,9 +257,6 @@ TEST_F(NPAPIVisiblePluginTester, SelfDeletePluginInNPNEvaluate) {
 }
 
 TEST_F(NPAPIVisiblePluginTester, SelfDeleteCreatePluginInNPNEvaluate) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   const FilePath test_case(
       FILE_PATH_LITERAL("npn_plugin_delete_create_in_evaluate.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
@@ -274,9 +278,6 @@ TEST_F(NPAPIVisiblePluginTester, SelfDeleteCreatePluginInNPNEvaluate) {
 #endif
 
 TEST_F(NPAPIVisiblePluginTester, MAYBE_OpenPopupWindowWithPlugin) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   const FilePath test_case(
       FILE_PATH_LITERAL("get_javascript_open_popup_with_plugin.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
@@ -288,9 +289,6 @@ TEST_F(NPAPIVisiblePluginTester, MAYBE_OpenPopupWindowWithPlugin) {
 
 // Test checking the privacy mode is off.
 TEST_F(NPAPITesterBase, PrivateDisabled) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   const FilePath test_case(FILE_PATH_LITERAL("private.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
   ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
@@ -316,9 +314,6 @@ TEST_F(NPAPITesterBase, PluginThreadAsyncCall) {
 
 // Test checking the privacy mode is on.
 TEST_F(NPAPIIncognitoTester, PrivateEnabled) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   const FilePath test_case(FILE_PATH_LITERAL("private.html"));
   GURL url = ui_test_utils::GetFileUrlWithQuery(
       ui_test_utils::GetTestFilePath(FilePath(kTestDir), test_case), "private");
@@ -331,9 +326,6 @@ TEST_F(NPAPIIncognitoTester, PrivateEnabled) {
 // Test a browser hang due to special case of multiple
 // plugin instances indulged in sync calls across renderer.
 TEST_F(NPAPIVisiblePluginTester, MultipleInstancesSyncCalls) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   const FilePath test_case(
       FILE_PATH_LITERAL("multiple_instances_sync_calls.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
@@ -344,9 +336,6 @@ TEST_F(NPAPIVisiblePluginTester, MultipleInstancesSyncCalls) {
 #endif
 
 TEST_F(NPAPIVisiblePluginTester, GetURLRequestFailWrite) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   GURL url(URLRequestMockHTTPJob::GetMockUrl(
                FilePath(FILE_PATH_LITERAL(
                             "npapi/plugin_url_request_fail_write.html"))));
@@ -359,9 +348,6 @@ TEST_F(NPAPIVisiblePluginTester, GetURLRequestFailWrite) {
 
 #if defined(OS_WIN)
 TEST_F(NPAPITesterBase, EnsureScriptingWorksInDestroy) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   const FilePath test_case(
       FILE_PATH_LITERAL("ensure_scripting_works_in_destroy.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
@@ -374,9 +360,6 @@ TEST_F(NPAPITesterBase, EnsureScriptingWorksInDestroy) {
 // This test uses a Windows Event to signal to the plugin that it should crash
 // on NP_Initialize.
 TEST_F(NPAPITesterBase, NoHangIfInitCrashes) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   // Only Windows implements the crash service for now.
 #if defined(OS_WIN)
   expected_crashes_ = 1;
@@ -396,9 +379,6 @@ TEST_F(NPAPITesterBase, NoHangIfInitCrashes) {
 #endif
 
 TEST_F(NPAPIVisiblePluginTester, PluginReferrerTest) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   GURL url(URLRequestMockHTTPJob::GetMockUrl(
                FilePath(FILE_PATH_LITERAL(
                             "npapi/plugin_url_request_referrer_test.html"))));
@@ -411,9 +391,6 @@ TEST_F(NPAPIVisiblePluginTester, PluginReferrerTest) {
 
 #if defined(OS_MACOSX)
 TEST_F(NPAPIVisiblePluginTester, PluginConvertPointTest) {
-  if (ProxyLauncher::in_process_renderer())
-    return;
-
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   scoped_refptr<WindowProxy> window(browser->GetWindow());

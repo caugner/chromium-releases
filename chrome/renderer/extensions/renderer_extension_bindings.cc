@@ -14,13 +14,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/bindings_utils.h"
 #include "chrome/renderer/extensions/event_bindings.h"
+#include "chrome/renderer/extensions/extension_base.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "content/renderer/render_thread.h"
 #include "content/renderer/render_view.h"
 #include "grit/renderer_resources.h"
-
-using bindings_utils::GetStringResource;
-using bindings_utils::ExtensionBase;
+#include "v8/include/v8.h"
 
 // Message passing API example (in a content script):
 // var extension =
@@ -94,7 +93,7 @@ class ExtensionImpl : public ExtensionBase {
       const v8::Arguments& args) {
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
-    RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
+    RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -114,7 +113,7 @@ class ExtensionImpl : public ExtensionBase {
 
   // Sends a message along the given channel.
   static v8::Handle<v8::Value> PostMessage(const v8::Arguments& args) {
-    RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
+    RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -193,7 +192,7 @@ class ExtensionImpl : public ExtensionBase {
     if (!l10n_messages) {
       // Get the current RenderView so that we can send a routed IPC message
       // from the correct source.
-      RenderView* renderview = bindings_utils::GetRenderViewForCurrentContext();
+      RenderView* renderview = GetCurrentRenderView();
       if (!renderview)
         return v8::Undefined();
 
@@ -225,7 +224,7 @@ class ExtensionImpl : public ExtensionBase {
       substitutions.push_back(substitute);
     } else if (args[1]->IsArray()) {
       // chrome.i18n.getMessage("message_name", ["more", "params"]);
-      v8::Array* placeholders = static_cast<v8::Array*>(*args[1]);
+      v8::Local<v8::Array> placeholders = v8::Local<v8::Array>::Cast(args[1]);
       uint32_t count = placeholders->Length();
       if (count <= 0 || count > 9)
         return v8::Undefined();
@@ -253,4 +252,42 @@ const char* RendererExtensionBindings::kName =
 v8::Extension* RendererExtensionBindings::Get(ExtensionDispatcher* dispatcher) {
   static v8::Extension* extension = new ExtensionImpl(dispatcher);
   return extension;
+}
+
+void RendererExtensionBindings::DeliverMessage(
+    int target_port_id,
+    const std::string& message,
+    RenderView* restrict_to_render_view) {
+  v8::HandleScope handle_scope;
+
+  bindings_utils::ContextList contexts = bindings_utils::GetContexts();
+  for (bindings_utils::ContextList::iterator it = contexts.begin();
+       it != contexts.end(); ++it) {
+
+    v8::Handle<v8::Context> context = (*it)->context;
+    if (context.IsEmpty())
+      continue;
+
+    if (restrict_to_render_view &&
+        restrict_to_render_view != (*it)->GetRenderView()) {
+      continue;
+    }
+
+    // Check to see whether the context has this port before bothering to create
+    // the message.
+    v8::Handle<v8::Value> port_id_handle = v8::Integer::New(target_port_id);
+    v8::Handle<v8::Value> has_port =
+        bindings_utils::CallFunctionInContext(
+            context, "Port.hasPort", 1, &port_id_handle);
+    CHECK(!has_port.IsEmpty());
+    if (!has_port->BooleanValue())
+      continue;
+
+    std::vector<v8::Handle<v8::Value> > arguments;
+    arguments.push_back(v8::String::New(message.c_str(), message.size()));
+    arguments.push_back(port_id_handle);
+    bindings_utils::CallFunctionInContext(
+        context, "Port.dispatchOnMessage",
+        arguments.size(), &arguments[0]);
+  }
 }

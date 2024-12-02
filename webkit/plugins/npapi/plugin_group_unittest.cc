@@ -13,7 +13,7 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 
 namespace webkit {
 namespace npapi {
@@ -150,7 +150,7 @@ TEST_F(PluginGroupTest, PluginGroupDescription) {
     {
       // Disable the second plugin.
       plugin3045.enabled =
-          webkit::npapi::WebPluginInfo::USER_DISABLED_POLICY_UNMANAGED;
+          webkit::WebPluginInfo::USER_DISABLED_POLICY_UNMANAGED;
       scoped_ptr<PluginGroup> group(PluginGroupTest::CreatePluginGroup(
           plugindefs[i]));
       EXPECT_TRUE(group->Match(plugin3043));
@@ -170,23 +170,6 @@ TEST_F(PluginGroupTest, PluginGroupDefinition) {
     scoped_ptr<PluginGroup> def_group(
         PluginGroupTest::CreatePluginGroup(kPluginDefinitions[i]));
     ASSERT_TRUE(def_group.get() != NULL);
-  }
-}
-
-TEST_F(PluginGroupTest, DisableOutdated) {
-  PluginGroupDefinition plugindefs[] = { kPluginDef3, kPluginDef34 };
-  for (size_t i = 0; i < 2; ++i) {
-    scoped_ptr<PluginGroup> group(PluginGroupTest::CreatePluginGroup(
-        plugindefs[i]));
-    group->AddPlugin(kPlugin3043);
-    group->AddPlugin(kPlugin3045);
-
-    EXPECT_EQ(ASCIIToUTF16("MyPlugin version 3.0.43"), group->description());
-    EXPECT_TRUE(group->IsVulnerable());
-
-    group->DisableOutdatedPlugins();
-    EXPECT_EQ(ASCIIToUTF16("MyPlugin version 3.0.45"), group->description());
-    EXPECT_FALSE(group->IsVulnerable());
   }
 }
 

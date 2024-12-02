@@ -30,11 +30,12 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "ui/base/ui_base_types.h"
 
 // Forward-declare symbols that are part of the 10.6 SDK.
 #if !defined(MAC_OS_X_VERSION_10_6) || \
@@ -111,18 +112,9 @@ const CGFloat kLocBarBottomInset = 1;
 }
 
 - (void)saveWindowPositionIfNeeded {
-  if (browser_ != BrowserList::GetLastActive())
+  if (!browser_->ShouldSaveWindowPlacement())
     return;
 
-  if (!browser_->profile()->GetPrefs() ||
-      !browser_->ShouldSaveWindowPlacement()) {
-    return;
-  }
-
-  [self saveWindowPositionToPrefs:browser_->profile()->GetPrefs()];
-}
-
-- (void)saveWindowPositionToPrefs:(PrefService*)prefs {
   // If we're in fullscreen mode, save the position of the regular window
   // instead.
   NSWindow* window = [self isFullscreen] ? savedRegularWindow_ : [self window];
@@ -144,13 +136,19 @@ const CGFloat kLocBarBottomInset = 1;
   gfx::Rect bounds(NSRectToCGRect([window frame]));
   bounds.set_y(monitorFrame.size.height - bounds.y() - bounds.height());
 
-  // We also need to save the current work area, in flipped coordinates.
+  // Browser::SaveWindowPlacement saves information for session restore.
+  ui::WindowShowState show_state = [window isMiniaturized] ?
+      ui::SHOW_STATE_MINIMIZED : ui::SHOW_STATE_NORMAL;
+  browser_->SaveWindowPlacement(bounds, show_state);
+
+  // Only save main window information to preferences.
+  PrefService* prefs = browser_->profile()->GetPrefs();
+  if (!prefs || browser_ != BrowserList::GetLastActive())
+    return;
+
+  // Save the current work area, in flipped coordinates.
   gfx::Rect workArea(NSRectToCGRect([windowScreen visibleFrame]));
   workArea.set_y(monitorFrame.size.height - workArea.y() - workArea.height());
-
-  // Browser::SaveWindowPlacement is used for session restore.
-  if (browser_->ShouldSaveWindowPlacement())
-    browser_->SaveWindowPlacement(bounds, /*maximized=*/ false);
 
   DictionaryPrefUpdate update(prefs, browser_->GetWindowPlacementKey().c_str());
   DictionaryValue* windowPreferences = update.Get();
@@ -371,8 +369,8 @@ willPositionSheet:(NSWindow*)sheet
 
   // Now lay out incognito badge together with the tab strip.
   if (avatarButton_.get()) {
-    CGFloat sizeSquare = tabStripHeight - 5.0;
-    [avatarButton_ setFrameSize:NSMakeSize(sizeSquare, sizeSquare)];
+    [avatarButton_ setFrameSize:NSMakeSize(tabStripHeight,
+                                           tabStripHeight - 5.0)];
 
     // Actually place the badge *above* |maxY|, by +2 to miss the divider.  On
     // Lion or later, shift the badge left to move it away from the fullscreen
@@ -494,7 +492,7 @@ willPositionSheet:(NSWindow*)sheet
   NSView* containerView = [infoBarContainerController_ view];
   NSRect containerFrame = [containerView frame];
   maxY -= NSHeight(containerFrame);
-  maxY += [infoBarContainerController_ antiSpoofHeight];
+  maxY += [infoBarContainerController_ overlappingTipHeight];
   containerFrame.origin.x = minX;
   containerFrame.origin.y = maxY;
   containerFrame.size.width = width;
@@ -544,10 +542,6 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (BOOL)shouldShowDetachedBookmarkBar {
-  // NTP4 never detaches the bookmark bar.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4))
-    return NO;
-
   DCHECK(browser_.get());
   TabContentsWrapper* tab = browser_->GetSelectedTabContentsWrapper();
   return (tab && tab->bookmark_tab_helper()->ShouldShowBookmarkBar() &&
@@ -685,7 +679,9 @@ willPositionSheet:(NSWindow*)sheet
     return;
 
   if (presentationMode) {
-    BOOL showDropdown = forceDropdown || [self floatingBarHasFocus];
+    BOOL fullscreen_for_tab = browser_->is_fullscreen_for_tab();
+    BOOL showDropdown = !fullscreen_for_tab &&
+        (forceDropdown || [self floatingBarHasFocus]);
     NSView* contentView = [[self window] contentView];
     presentationModeController_.reset(
         [[PresentationModeController alloc] initWithBrowserController:self]);
@@ -789,7 +785,31 @@ willPositionSheet:(NSWindow*)sheet
   [infoBarDest addSubview:[infoBarContainerController_ view]
                positioned:fullscreen ? NSWindowBelow : NSWindowAbove
                relativeTo:fullscreen ? nil
-                                     : [bookmarkBarController_ view]];
+                                     : [toolbarController_ view]];
+}
+
+- (void)showFullscreenExitBubbleIfNecessary {
+  if (!browser_->is_fullscreen_for_tab()) {
+    return;
+  }
+
+  [presentationModeController_ ensureOverlayHiddenWithAnimation:NO delay:NO];
+
+  fullscreenExitBubbleController_.reset(
+      [[FullscreenExitBubbleController alloc] initWithOwner:self
+                                                    browser:browser_.get()]);
+  NSView* contentView = [[self window] contentView];
+  CGFloat maxWidth = NSWidth([contentView frame]);
+  CGFloat maxY = NSMaxY([[[self window] contentView] frame]);
+  [fullscreenExitBubbleController_
+      positionInWindowAtTop:maxY width:maxWidth];
+  [contentView addSubview:[fullscreenExitBubbleController_ view]
+      positioned:NSWindowAbove relativeTo:[self tabContentArea]];
+}
+
+- (void)destroyFullscreenExitBubbleIfNecessary {
+  [[fullscreenExitBubbleController_ view] removeFromSuperview];
+  fullscreenExitBubbleController_.reset();
 }
 
 - (void)contentViewDidResize:(NSNotification*)notification {
@@ -829,6 +849,7 @@ willPositionSheet:(NSWindow*)sheet
   NSWindow* window = [self window];
   savedRegularWindowFrame_ = [window frame];
   BOOL mode = [self shouldUsePresentationModeWhenEnteringFullscreen];
+  mode = mode || browser_->is_fullscreen_for_tab();
   [self setPresentationModeInternal:mode forceDropdown:NO];
 }
 

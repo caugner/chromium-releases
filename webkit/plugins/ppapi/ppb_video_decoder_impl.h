@@ -13,35 +13,47 @@
 #include "base/memory/scoped_ptr.h"
 #include "ppapi/c/dev/pp_video_dev.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/video_decoder_impl.h"
 #include "ppapi/thunk/ppb_video_decoder_api.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
-#include "webkit/plugins/ppapi/resource.h"
 
 struct PP_PictureBuffer_Dev;
-struct PP_VideoDecoderConfig_Dev;
 struct PP_VideoBitstreamBuffer_Dev;
 struct PPB_VideoDecoder_Dev;
 struct PPP_VideoDecoder_Dev;
 
+namespace gpu {
+namespace gles2 {
+class GLES2Implementation;
+}  // namespace gles2
+}  // namespace gpu
+
+namespace ppapi {
+namespace thunk {
+class PPB_Context3D_API;
+}  // namespace thunk
+}  // namespace ppapi
+
+
 namespace webkit {
 namespace ppapi {
 
-class PluginInstance;
-
-class PPB_VideoDecoder_Impl : public Resource,
-                              public ::ppapi::thunk::PPB_VideoDecoder_API,
+class PPB_VideoDecoder_Impl : public ::ppapi::Resource,
+                              public ::ppapi::VideoDecoderImpl,
                               public media::VideoDecodeAccelerator::Client {
  public:
-  explicit PPB_VideoDecoder_Impl(PluginInstance* instance);
   virtual ~PPB_VideoDecoder_Impl();
+  // See PPB_VideoDecoder_Dev::Create.  Returns 0 on failure to create &
+  // initialize.
+  static PP_Resource Create(PP_Instance instance,
+                            PP_Resource graphics_context,
+                            PP_VideoDecoder_Profile profile);
 
-  // ResourceObjectBase overrides.
+  // Resource overrides.
   virtual PPB_VideoDecoder_API* AsPPB_VideoDecoder_API() OVERRIDE;
 
   // PPB_VideoDecoder_API implementation.
-  virtual int32_t Initialize(PP_Resource context_id,
-                             const PP_VideoConfigElement* dec_config,
-                             PP_CompletionCallback callback) OVERRIDE;
   virtual int32_t Decode(const PP_VideoBitstreamBuffer_Dev* bitstream_buffer,
                          PP_CompletionCallback callback) OVERRIDE;
   virtual void AssignPictureBuffers(
@@ -65,25 +77,15 @@ class PPB_VideoDecoder_Impl : public Resource,
   virtual void NotifyResetDone() OVERRIDE;
 
  private:
-  // Key: bitstream_buffer_id, value: callback to run when bitstream decode is
-  // done.
-  typedef std::map<int32, PP_CompletionCallback> CallbackById;
+  explicit PPB_VideoDecoder_Impl(PP_Instance instance);
+  bool Init(PP_Resource graphics_context,
+            PluginDelegate::PlatformContext3D* context,
+            gpu::gles2::GLES2Implementation* gles2_impl,
+            PP_VideoDecoder_Profile profile);
 
   // This is NULL before initialization, and if this PPB_VideoDecoder_Impl is
   // swapped with another.
   scoped_refptr<PluginDelegate::PlatformVideoDecoder> platform_video_decoder_;
-
-  // Factory to produce our callbacks.
-  base::ScopedCallbackFactory<PPB_VideoDecoder_Impl> callback_factory_;
-
-  // The resource ID of the underlying Context3d object being used.  Used only
-  // for reference counting to keep it alive for the lifetime of |*this|.
-  PP_Resource context3d_id_;
-
-  PP_CompletionCallback initialization_callback_;
-  PP_CompletionCallback flush_callback_;
-  PP_CompletionCallback reset_callback_;
-  CallbackById bitstream_buffer_callbacks_;
 
   // Reference to the plugin requesting this interface.
   const PPP_VideoDecoder_Dev* ppp_videodecoder_;

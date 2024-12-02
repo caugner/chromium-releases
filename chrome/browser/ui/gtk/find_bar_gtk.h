@@ -12,11 +12,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/gtk/focus_store_gtk.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/point.h"
 
 class Browser;
@@ -36,7 +36,7 @@ class FindBarGtk : public FindBar,
                    public FindBarTesting,
                    public NotificationObserver {
  public:
-  explicit FindBarGtk(Browser* browser);
+  explicit FindBarGtk(BrowserWindowGtk* window);
   virtual ~FindBarGtk();
 
   GtkWidget* widget() const { return slide_widget_->widget(); }
@@ -151,7 +151,7 @@ class FindBarGtk : public FindBar,
                            gboolean selection, FindBarGtk* bar);
 
   // Handles Enter key.
-  static void OnActivate(GtkEntry* entry, FindBarGtk* bar);
+  CHROMEGTK_CALLBACK_0(FindBarGtk, void, OnActivate);
 
   static void OnWidgetDirectionChanged(GtkWidget* widget,
                                        GtkTextDirection previous_direction,

@@ -10,8 +10,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "chrome/browser/sync/backend_migrator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
+#include "chrome/browser/sync/retry_verifier.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 
 class Profile;
@@ -27,13 +30,15 @@ namespace browser_sync {
 // profile passed to it on construction and automates certain things like setup
 // and authentication. It provides ways to "wait" adequate periods of time for
 // several clients to get to the same state.
-class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
+class ProfileSyncServiceHarness
+    : public ProfileSyncServiceObserver,
+      public browser_sync::MigrationObserver {
  public:
   ProfileSyncServiceHarness(Profile* profile,
                             const std::string& username,
                             const std::string& password);
 
-  virtual ~ProfileSyncServiceHarness() {}
+  virtual ~ProfileSyncServiceHarness();
 
   // Creates a ProfileSyncServiceHarness object and attaches it to |profile|, a
   // profile that is assumed to have been signed into sync in the past. Caller
@@ -57,7 +62,10 @@ class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
   bool SetupSync(const syncable::ModelTypeSet& synced_datatypes);
 
   // ProfileSyncServiceObserver implementation.
-  virtual void OnStateChanged();
+  virtual void OnStateChanged() OVERRIDE;
+
+  // MigrationObserver implementation.
+  virtual void OnMigrationStateChange() OVERRIDE;
 
   // Blocks the caller until the sync backend host associated with this harness
   // has been initialized.  Returns true if the wait was successful.
@@ -71,6 +79,16 @@ class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
   // Blocks the caller until this harness has completed a single sync cycle
   // since the previous one.  Returns true if a sync cycle has completed.
   bool AwaitSyncCycleCompletion(const std::string& reason);
+
+  // Blocks the caller until the sync has been disabled for this client. Returns
+  // true if sync is disabled.
+  bool AwaitSyncDisabled(const std::string& reason);
+
+  // Blocks the caller until exponential backoff has been verified to happen.
+  bool AwaitExponentialBackoffVerification();
+
+  // Blocks until the given set of data types are migrated.
+  bool AwaitMigration(const syncable::ModelTypeSet& expected_migrated_types);
 
   // Blocks the caller until this harness has observed that the sync engine
   // has downloaded all the changes seen by the |partner| harness's client.
@@ -148,6 +166,12 @@ class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
   // Check if |type| is encrypted.
   bool IsTypeEncrypted(syncable::ModelType type);
 
+  // Check if |type| is registered.
+  bool IsTypeRegistered(syncable::ModelType types);
+
+  // Check if |type| is being synced.
+  bool IsTypePreferred(syncable::ModelType type);
+
  private:
   friend class StateChangeTimeoutEvent;
 
@@ -183,6 +207,23 @@ class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
     // full sync cycle is not expected to occur.
     WAITING_FOR_SYNC_CONFIGURATION,
 
+    // The sync client is waiting for the sync to be disabled for this client.
+    WAITING_FOR_SYNC_DISABLED,
+
+    // The sync client is in the exponential backoff mode. Verify that
+    // backoffs are triggered correctly.
+    WAITING_FOR_EXPONENTIAL_BACKOFF_VERIFICATION,
+
+    // The sync client is waiting for migration to start.
+    WAITING_FOR_MIGRATION_TO_START,
+
+    // The sync client is waiting for migration to finish.
+    WAITING_FOR_MIGRATION_TO_FINISH,
+
+    // The client verification is complete. We don't care about the state of
+    // the syncer any more.
+    WAITING_FOR_NOTHING,
+
     // The sync client needs a passphrase in order to decrypt data.
     SET_PASSPHRASE_FAILED,
 
@@ -197,6 +238,11 @@ class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
 
     NUMBER_OF_STATES,
   };
+
+  // Listen to migration events if the migrator has been initialized
+  // and we're not already listening.  Returns true if we started
+  // listening.
+  bool TryListeningToMigrationEvents();
 
   // Called from the observer when the current wait state has been completed.
   void SignalStateCompleteWithNextState(WaitState next_state);
@@ -214,6 +260,9 @@ class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
 
   // Returns true if the sync client has no unsynced items.
   bool IsSynced();
+
+  // Returns true if there is a backend migration in progress.
+  bool HasPendingBackendMigration();
 
   // Returns true if this client has downloaded all the items that the
   // other client has.
@@ -252,8 +301,20 @@ class ProfileSyncServiceHarness : public ProfileSyncServiceObserver {
   std::string username_;
   std::string password_;
 
+  // The current set of data types pending migration.  Used by
+  // AwaitMigration().
+  syncable::ModelTypeSet pending_migration_types_;
+
+  // The set of data types that have undergone migration.  Used by
+  // AwaitMigration().
+  syncable::ModelTypeSet migrated_types_;
+
   // Used for logging.
   const std::string profile_debug_name_;
+
+  // Keeps track of the number of attempts at exponential backoff and its
+  // related bookkeeping information for verification.
+  browser_sync::RetryVerifier retry_verifier_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceHarness);
 };

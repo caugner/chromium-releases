@@ -6,16 +6,13 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/themes/theme_service_factory.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
-
-namespace {
-
-}  // namespace
 
 class ExtensionInstallUIBrowserTest : public ExtensionBrowserTest {
  public:
@@ -24,12 +21,13 @@ class ExtensionInstallUIBrowserTest : public ExtensionBrowserTest {
   void VerifyThemeInfoBarAndUndoInstall() {
     TabContentsWrapper* tab = browser()->GetSelectedTabContentsWrapper();
     ASSERT_TRUE(tab);
-    ASSERT_EQ(1U, tab->infobar_count());
-    ConfirmInfoBarDelegate* delegate =
-        tab->GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
+    InfoBarTabHelper* infobar_helper = tab->infobar_tab_helper();
+    ASSERT_EQ(1U, infobar_helper->infobar_count());
+    ConfirmInfoBarDelegate* delegate = infobar_helper->
+        GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
     ASSERT_TRUE(delegate);
     delegate->Cancel();
-    ASSERT_EQ(0U, tab->infobar_count());
+    ASSERT_EQ(0U, infobar_helper->infobar_count());
   }
 
   const Extension* GetTheme() const {
@@ -113,8 +111,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
   TabContents* tab_contents = browser()->GetSelectedTabContents();
   ASSERT_TRUE(tab_contents);
   EXPECT_TRUE(StartsWithASCII(tab_contents->GetURL().spec(),
-                              "chrome://newtab/#app-id=",  // id changes
-                              false));
+                              "chrome://newtab/", false));
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
@@ -135,6 +132,5 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
   TabContents* tab_contents = browser()->GetSelectedTabContents();
   ASSERT_TRUE(tab_contents);
   EXPECT_TRUE(StartsWithASCII(tab_contents->GetURL().spec(),
-                              "chrome://newtab/#app-id=",  // id changes
-                              false));
+                              "chrome://newtab/", false));
 }

@@ -10,6 +10,7 @@
 #include <set>
 
 #include "base/file_path.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "base/time.h"
@@ -24,10 +25,10 @@ class SpecialStoragePolicy;
 }
 
 // This is owned by WebKitContext and is all the dom storage information that's
-// shared by all the DOMStorageMessageFilters that share the same profile.  The
-// specifics of responsibilities are fairly well documented here and in
-// StorageNamespace and StorageArea.  Everything is only to be accessed on the
-// WebKit thread unless noted otherwise.
+// shared by all the DOMStorageMessageFilters that share the same browser
+// context.  The specifics of responsibilities are fairly well documented here
+// and in StorageNamespace and StorageArea.  Everything is only to be accessed
+// on the WebKit thread unless noted otherwise.
 //
 // NOTE: Virtual methods facilitate mocking functions for testing.
 class DOMStorageContext {
@@ -80,6 +81,11 @@ class DOMStorageContext {
   // are not deleted by this method.
   void DeleteDataModifiedSince(const base::Time& cutoff);
 
+  // Delete any local storage files which are allowed to be stored only until
+  // the end of the session. Protected origins, per the SpecialStoragePolicy,
+  // are not deleted by this method.
+  void DeleteSessionOnlyData();
+
   // Deletes a single local storage file.
   void DeleteLocalStorageFile(const FilePath& file_path);
 
@@ -108,6 +114,9 @@ class DOMStorageContext {
 #endif
 
  private:
+
+  FRIEND_TEST_ALL_PREFIXES(DOMStorageTest, SessionOnly);
+
   // Get the local storage instance.  The object is owned by this class.
   DOMStorageNamespace* CreateLocalStorage();
 
@@ -136,7 +145,7 @@ class DOMStorageContext {
   // True if the destructor should delete its files.
   bool clear_local_state_on_exit_;
 
-  // Path where the profile data is stored.
+  // Path where the browser context data is stored.
   // TODO(pastarmovj): Keep in mind that unlike indexed db data_path_ variable
   // this one still has to point to the upper level dir because of the
   // MigrateLocalStorageDirectory function. Once this function disappears we can

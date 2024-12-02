@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -230,8 +230,7 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects) {
   std::vector<ViewHostMsg_AccessibilityNotification_Params> params;
   params.push_back(ViewHostMsg_AccessibilityNotification_Params());
   ViewHostMsg_AccessibilityNotification_Params* msg = &params[0];
-  msg->notification_type = ViewHostMsg_AccessibilityNotification_Type::
-      NOTIFICATION_TYPE_CHILDREN_CHANGED;
+  msg->notification_type = ViewHostMsg_AccEvent::CHILDREN_CHANGED;
   msg->acc_obj = tree2_root;
   manager->OnAccessibilityNotifications(params);
 
@@ -435,8 +434,7 @@ TEST(BrowserAccessibilityManagerTest, TestReuseBrowserAccessibilityObjects2) {
   std::vector<ViewHostMsg_AccessibilityNotification_Params> params;
   params.push_back(ViewHostMsg_AccessibilityNotification_Params());
   ViewHostMsg_AccessibilityNotification_Params* msg = &params[0];
-  msg->notification_type = ViewHostMsg_AccessibilityNotification_Type::
-      NOTIFICATION_TYPE_CHILDREN_CHANGED;
+  msg->notification_type = ViewHostMsg_AccEvent::CHILDREN_CHANGED;
   msg->acc_obj = tree2_container;
   manager->OnAccessibilityNotifications(params);
 
@@ -539,8 +537,7 @@ TEST(BrowserAccessibilityManagerTest, TestMoveChildUp) {
   std::vector<ViewHostMsg_AccessibilityNotification_Params> params;
   params.push_back(ViewHostMsg_AccessibilityNotification_Params());
   ViewHostMsg_AccessibilityNotification_Params* msg = &params[0];
-  msg->notification_type = ViewHostMsg_AccessibilityNotification_Type::
-      NOTIFICATION_TYPE_CHILDREN_CHANGED;
+  msg->notification_type = ViewHostMsg_AccEvent::CHILDREN_CHANGED;
   msg->acc_obj = tree2_1;
   manager->OnAccessibilityNotifications(params);
 
@@ -549,5 +546,80 @@ TEST(BrowserAccessibilityManagerTest, TestMoveChildUp) {
 
   // Delete the manager and make sure all memory is cleaned up.
   delete manager;
+  ASSERT_EQ(0, CountedBrowserAccessibility::global_obj_count_);
+}
+
+TEST(BrowserAccessibilityManagerTest, TestCreateEmptyDocument) {
+  // Try creating an empty document with busy state.
+  scoped_ptr<BrowserAccessibilityManager> manager;
+  manager.reset(BrowserAccessibilityManager::CreateEmptyDocument(
+      NULL,
+      WebAccessibility::STATE_BUSY,
+      NULL,
+      new CountedBrowserAccessibilityFactory()));
+
+  // Verify the root is as we expect by default.
+  BrowserAccessibility* root = manager->GetRoot();
+  EXPECT_EQ(1000, root->renderer_id());
+  EXPECT_EQ(WebAccessibility::ROLE_WEB_AREA, root->role());
+  EXPECT_EQ(WebAccessibility::STATE_BUSY, root->state());
+
+  // Tree with a child textfield.
+  WebAccessibility tree1_1;
+  tree1_1.id = 1000;
+  tree1_1.role = WebAccessibility::ROLE_WEB_AREA;
+
+  WebAccessibility tree1_2;
+  tree1_2.id = 1001;
+  tree1_2.role = WebAccessibility::ROLE_TEXT_FIELD;
+
+  tree1_1.children.push_back(tree1_2);
+
+  // Process a load complete.
+  std::vector<ViewHostMsg_AccessibilityNotification_Params> params;
+  params.push_back(ViewHostMsg_AccessibilityNotification_Params());
+  ViewHostMsg_AccessibilityNotification_Params* msg = &params[0];
+  msg->notification_type = ViewHostMsg_AccEvent::LOAD_COMPLETE;
+  msg->acc_obj = tree1_1;
+
+  manager->OnAccessibilityNotifications(params);
+
+  // Save for later comparison.
+  BrowserAccessibility* acc1_2 = manager->GetFromRendererID(1001);
+
+  // Verify the root has not changed.
+  EXPECT_EQ(root, manager->GetRoot());
+
+  // And the proper child remains.
+  EXPECT_EQ(WebAccessibility::ROLE_TEXT_FIELD, acc1_2->role());
+  EXPECT_EQ(1001, acc1_2->renderer_id());
+
+  // Tree with a child button.
+  WebAccessibility tree2_1;
+  tree2_1.id = 1000;
+  tree2_1.role = WebAccessibility::ROLE_WEB_AREA;
+
+  WebAccessibility tree2_2;
+  tree2_2.id = 1002;
+  tree2_2.role = WebAccessibility::ROLE_BUTTON;
+
+  tree2_1.children.push_back(tree2_2);
+
+  msg->acc_obj = tree2_1;
+
+  // Fire another load complete.
+  manager->OnAccessibilityNotifications(params);
+
+  BrowserAccessibility* acc2_2 = manager->GetFromRendererID(1002);
+
+  // Verify the root has not changed.
+  EXPECT_EQ(root, manager->GetRoot());
+
+  // And the new child exists.
+  EXPECT_EQ(WebAccessibility::ROLE_BUTTON, acc2_2->role());
+  EXPECT_EQ(1002, acc2_2->renderer_id());
+
+  // Ensure we properly cleaned up.
+  manager.reset();
   ASSERT_EQ(0, CountedBrowserAccessibility::global_obj_count_);
 }

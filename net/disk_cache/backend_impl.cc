@@ -47,6 +47,9 @@ const int k64kEntriesStore = 240 * 1000 * 1000;
 const int kBaseTableLen = 64 * 1024;
 const int kDefaultCacheSize = 80 * 1024 * 1024;
 
+// Avoid trimming the cache for the first 5 minutes (10 timer ticks).
+const int kTrimDelay = 10;
+
 int DesiredIndexTableLen(int32 storage_size) {
   if (storage_size <= k64kEntriesStore)
     return kBaseTableLen;
@@ -344,7 +347,7 @@ BackendImpl::BackendImpl(const FilePath& path,
       block_files_(path),
       mask_(0),
       max_size_(0),
-      io_delay_(0),
+      up_ticks_(0),
       cache_type_(net::DISK_CACHE),
       uma_report_(0),
       user_flags_(0),
@@ -370,7 +373,7 @@ BackendImpl::BackendImpl(const FilePath& path,
       block_files_(path),
       mask_(mask),
       max_size_(0),
-      io_delay_(0),
+      up_ticks_(0),
       cache_type_(net::DISK_CACHE),
       uma_report_(0),
       user_flags_(kMask),
@@ -447,7 +450,7 @@ int BackendImpl::SyncInit() {
     trace_object_ = TraceObject::GetTraceObject();
     // Create a recurrent timer of 30 secs.
     int timer_delay = unit_test_ ? 1000 : 30000;
-    timer_.Start(TimeDelta::FromMilliseconds(timer_delay), this,
+    timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(timer_delay), this,
                  &BackendImpl::OnStatsTimer);
   }
 
@@ -658,6 +661,21 @@ int BackendImpl::SyncOpenPrevEntry(void** iter, Entry** prev_entry) {
 void BackendImpl::SyncEndEnumeration(void* iter) {
   scoped_ptr<Rankings::Iterator> iterator(
       reinterpret_cast<Rankings::Iterator*>(iter));
+}
+
+void BackendImpl::SyncOnExternalCacheHit(const std::string& key) {
+  if (disabled_)
+    return;
+
+  uint32 hash = Hash(key);
+  bool error;
+  EntryImpl* cache_entry = MatchEntry(key, hash, false, Addr(), &error);
+  if (cache_entry) {
+    if (ENTRY_NORMAL == cache_entry->entry()->Data()->state) {
+      UpdateRank(cache_entry, false);
+    }
+    cache_entry->Release();
+  }
 }
 
 EntryImpl* BackendImpl::OpenEntryImpl(const std::string& key) {
@@ -938,7 +956,8 @@ void BackendImpl::OnEntryDestroyBegin(Addr address) {
 
 void BackendImpl::OnEntryDestroyEnd() {
   DecreaseNumRefs();
-  if (data_->header.num_bytes > max_size_ && !read_only_)
+  if (data_->header.num_bytes > max_size_ && !read_only_ &&
+      (up_ticks_ > kTrimDelay || user_flags_ & disk_cache::kNoRandom))
     eviction_.TrimCache(false);
 }
 
@@ -1153,6 +1172,7 @@ void BackendImpl::OnStatsTimer() {
   CACHE_UMA(COUNTS, "ByteIORate", 0, byte_count_ / 1024);
   entry_count_ = 0;
   byte_count_ = 0;
+  up_ticks_++;
 
   if (!data_)
     first_timer_ = false;
@@ -1334,6 +1354,10 @@ void BackendImpl::GetStats(StatsItems* stats) {
   stats_.GetItems(stats);
 }
 
+void BackendImpl::OnExternalCacheHit(const std::string& key) {
+  background_queue_.OnExternalCacheHit(key);
+}
+
 // ------------------------------------------------------------------------
 
 // We just created a new file so we're going to write the header and set the
@@ -1486,16 +1510,16 @@ int BackendImpl::NewEntry(Addr address, EntryImpl** entry) {
     return 0;
   }
 
-  scoped_refptr<EntryImpl> cache_entry(
-      new EntryImpl(this, address, read_only_));
-  IncreaseNumRefs();
-  *entry = NULL;
-
   if (!address.is_initialized() || address.is_separate_file() ||
       address.file_type() != BLOCK_256) {
     LOG(WARNING) << "Wrong entry address.";
     return ERR_INVALID_ADDRESS;
   }
+
+  scoped_refptr<EntryImpl> cache_entry(
+      new EntryImpl(this, address, read_only_));
+  IncreaseNumRefs();
+  *entry = NULL;
 
   TimeTicks start = TimeTicks::Now();
   if (!cache_entry->entry()->Load())

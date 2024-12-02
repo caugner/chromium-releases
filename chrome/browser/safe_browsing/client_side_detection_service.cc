@@ -5,19 +5,23 @@
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 
 #include "base/command_line.h"
-#include "base/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/time.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/string_util.h"
 #include "base/stl_util.h"
 #include "base/task.h"
 #include "base/time.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/safe_browsing/browser_features.h"
+#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/net/http_return.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
+#include "chrome/renderer/safe_browsing/features.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/common/notification_service.h"
@@ -47,11 +51,8 @@ const base::TimeDelta ClientSideDetectionService::kPositiveCacheInterval =
 
 const char ClientSideDetectionService::kClientReportPhishingUrl[] =
     "https://sb-ssl.google.com/safebrowsing/clientreport/phishing";
-// Note: when updatng the model version, don't forget to change the filename
-// in chrome/common/chrome_constants.cc as well, or else existing users won't
-// download the new model.
 const char ClientSideDetectionService::kClientModelUrl[] =
-    "https://ssl.gstatic.com/safebrowsing/csd/client_model_v3.pb";
+    "https://ssl.gstatic.com/safebrowsing/csd/client_model_v4.pb";
 
 struct ClientSideDetectionService::ClientReportInfo {
   scoped_ptr<ClientReportPhishingRequestCallback> callback;
@@ -64,8 +65,11 @@ ClientSideDetectionService::CacheState::CacheState(bool phish, base::Time time)
 
 ClientSideDetectionService::ClientSideDetectionService(
     net::URLRequestContextGetter* request_context_getter)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+    : enabled_(false),
+      sb_service_(g_browser_process->safe_browsing_service()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
       request_context_getter_(request_context_getter) {
+  InitializeAllowedFeatures();
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CREATED,
                  NotificationService::AllSources());
 }
@@ -79,7 +83,6 @@ ClientSideDetectionService::~ClientSideDetectionService() {
 
 // static
 ClientSideDetectionService* ClientSideDetectionService::Create(
-    const FilePath& model_dir,
     net::URLRequestContextGetter* request_context_getter) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   scoped_ptr<ClientSideDetectionService> service(
@@ -88,29 +91,37 @@ ClientSideDetectionService* ClientSideDetectionService::Create(
     UMA_HISTOGRAM_COUNTS("SBClientPhishing.InitPrivateNetworksFailed", 1);
     return NULL;
   }
-  // We fetch the model at every browser restart.  In a lot of cases the model
-  // will be in the cache so it won't actually be fetched from the network.
-  // We delay the first model fetch to avoid slowing down browser startup.
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      service->method_factory_.NewRunnableMethod(
-          &ClientSideDetectionService::StartFetchModel),
-      kInitialClientModelFetchDelayMs);
-
-  // Delete the previous-version model files.
-  // TODO(bryner): Remove this for M15 (including the model_dir argument to
-  // Create()).
-  base::FileUtilProxy::Delete(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-      model_dir.AppendASCII("Safe Browsing Phishing Model"),
-      false /* not recursive */,
-      NULL /* not interested in result */);
-  base::FileUtilProxy::Delete(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-      model_dir.AppendASCII("Safe Browsing Phishing Model v1"),
-      false /* not recursive */,
-      NULL /* not interested in result */);
   return service.release();
+}
+
+void ClientSideDetectionService::SetEnabled(bool enabled) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (enabled == enabled_)
+    return;
+  enabled_ = enabled;
+  if (enabled_) {
+    // Refresh the model when the service is enabled.  This can happen when the
+    // preference is toggled, or early during startup if the preference is
+    // already enabled. In a lot of cases the model will be in the cache so it
+    // won't actually be fetched from the network.
+    // We delay the first model fetch to avoid slowing down browser startup.
+    ScheduleFetchModel(kInitialClientModelFetchDelayMs);
+  } else {
+    // Cancel pending requests.
+    model_fetcher_.reset();
+    // Invoke pending callbacks with a false verdict.
+    for (std::map<const URLFetcher*, ClientReportInfo*>::iterator it =
+             client_phishing_reports_.begin();
+         it != client_phishing_reports_.end(); ++it) {
+      ClientReportInfo* info = it->second;
+      if (info->callback.get())
+        info->callback->Run(info->phishing_url, false);
+    }
+    STLDeleteContainerPairPointers(client_phishing_reports_.begin(),
+                                   client_phishing_reports_.end());
+    client_phishing_reports_.clear();
+    cache_.clear();
+  }
 }
 
 void ClientSideDetectionService::SendClientReportPhishingRequest(
@@ -128,7 +139,7 @@ bool ClientSideDetectionService::IsPrivateIPAddress(
     const std::string& ip_address) const {
   net::IPAddressNumber ip_number;
   if (!net::ParseIPLiteralToNumber(ip_address, &ip_number)) {
-    DLOG(WARNING) << "Unable to parse IP address: " << ip_address;
+    VLOG(2) << "Unable to parse IP address: '" << ip_address << "'";
     // Err on the side of safety and assume this might be private.
     return true;
   }
@@ -147,14 +158,14 @@ bool ClientSideDetectionService::IsBadIpAddress(
     const std::string& ip_address) const {
   net::IPAddressNumber ip_number;
   if (!net::ParseIPLiteralToNumber(ip_address, &ip_number)) {
-    DLOG(WARNING) << "Unable to parse IP address: " << ip_address;
+    VLOG(2) << "Unable to parse IP address: '" << ip_address << "'";
     return false;
   }
   if (ip_number.size() == net::kIPv4AddressSize) {
     ip_number = net::ConvertIPv4NumberToIPv6Number(ip_number);
   }
   if (ip_number.size() != net::kIPv6AddressSize) {
-    DLOG(WARNING) << "Unable to convert IPv4 address to IPv6: " << ip_address;
+    VLOG(2) << "Unable to convert IPv4 address to IPv6: '" << ip_address << "'";
     return false;  // better safe than sorry.
   }
   for (BadSubnetMap::const_iterator it = bad_subnets_.begin();
@@ -214,15 +225,25 @@ void ClientSideDetectionService::SendModelToRenderers() {
   }
 }
 
+void ClientSideDetectionService::ScheduleFetchModel(int64 delay_ms) {
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(
+          &ClientSideDetectionService::StartFetchModel),
+      delay_ms);
+}
+
 void ClientSideDetectionService::StartFetchModel() {
-  // Start fetching the model either from the cache or possibly from the
-  // network if the model isn't in the cache.
-  model_fetcher_.reset(URLFetcher::Create(0 /* ID is not used */,
-                                          GURL(kClientModelUrl),
-                                          URLFetcher::GET,
-                                          this));
-  model_fetcher_->set_request_context(request_context_getter_.get());
-  model_fetcher_->Start();
+  if (enabled_) {
+    // Start fetching the model either from the cache or possibly from the
+    // network if the model isn't in the cache.
+    model_fetcher_.reset(URLFetcher::Create(0 /* ID is not used */,
+                                            GURL(kClientModelUrl),
+                                            URLFetcher::GET,
+                                            this));
+    model_fetcher_->set_request_context(request_context_getter_.get());
+    model_fetcher_->Start();
+  }
 }
 
 void ClientSideDetectionService::EndFetchModel(ClientModelStatus status) {
@@ -246,11 +267,40 @@ void ClientSideDetectionService::EndFetchModel(ClientModelStatus status) {
   model_max_age_.reset();
 
   // Schedule the next model reload.
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &ClientSideDetectionService::StartFetchModel),
-      delay_ms);
+  ScheduleFetchModel(delay_ms);
+}
+
+void ClientSideDetectionService::SanitizeRequestForPingback(
+    const ClientPhishingRequest& full_request,
+    ClientPhishingRequest* sanitized_request) {
+  DCHECK(full_request.IsInitialized());
+  sanitized_request->Clear();
+  if (full_request.has_hash_prefix()) {
+    sanitized_request->set_hash_prefix(full_request.hash_prefix());
+  }
+  sanitized_request->set_client_score(full_request.client_score());
+  if (full_request.has_is_phishing()) {
+    sanitized_request->set_is_phishing(full_request.is_phishing());
+  }
+
+  for (int i = 0; i < full_request.feature_map_size(); ++i) {
+    const ClientPhishingRequest_Feature& feature = full_request.feature_map(i);
+    if (allowed_features_.find(feature.name()) != allowed_features_.end()) {
+      sanitized_request->add_feature_map()->CopyFrom(feature);
+    }
+  }
+
+  if (full_request.has_model_version()) {
+    sanitized_request->set_model_version(full_request.model_version());
+  }
+
+  for (int i = 0; i < full_request.non_model_feature_map_size(); ++i) {
+    const ClientPhishingRequest_Feature& feature =
+        full_request.non_model_feature_map(i);
+    if (allowed_features_.find(feature.name()) != allowed_features_.end()) {
+      sanitized_request->add_non_model_feature_map()->CopyFrom(feature);
+    }
+  }
 }
 
 void ClientSideDetectionService::StartClientReportPhishingRequest(
@@ -260,8 +310,22 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
   scoped_ptr<ClientPhishingRequest> request(verdict);
   scoped_ptr<ClientReportPhishingRequestCallback> cb(callback);
 
+  if (!enabled_) {
+    if (cb.get())
+      cb->Run(GURL(request->url()), false);
+    return;
+  }
+
+  // Create the version of the request proto that we'll send over the network.
+  ClientPhishingRequest request_to_send;
+  if (sb_service_ && sb_service_->CanReportStats()) {
+    request_to_send.CopyFrom(*request);
+  } else {
+    SanitizeRequestForPingback(*request, &request_to_send);
+  }
+
   std::string request_data;
-  if (!request->SerializeToString(&request_data)) {
+  if (!request_to_send.SerializeToString(&request_data)) {
     UMA_HISTOGRAM_COUNTS("SBClientPhishing.RequestNotSerialized", 1);
     VLOG(1) << "Unable to serialize the CSD request. Proto file changed?";
     if (cb.get()) {
@@ -346,7 +410,8 @@ void ClientSideDetectionService::HandlePhishingVerdict(
     // Cache response, possibly flushing an old one.
     cache_[info->phishing_url] =
         make_linked_ptr(new CacheState(response.phishy(), base::Time::Now()));
-    is_phishing = response.phishy();
+    is_phishing = (response.phishy() &&
+                   !IsFalsePositiveResponse(info->phishing_url, response));
   } else {
     DLOG(ERROR) << "Unable to get the server verdict for URL: "
                 << info->phishing_url << " status: " << status.status() << " "
@@ -451,6 +516,44 @@ bool ClientSideDetectionService::InitializePrivateNetworks() {
   return true;
 }
 
+void ClientSideDetectionService::InitializeAllowedFeatures() {
+  static const char* const kAllowedFeatures[] = {
+    // Renderer (model) features.
+    features::kUrlHostIsIpAddress,
+    features::kUrlNumOtherHostTokensGTOne,
+    features::kUrlNumOtherHostTokensGTThree,
+    features::kPageHasForms,
+    features::kPageActionOtherDomainFreq,
+    features::kPageHasTextInputs,
+    features::kPageHasPswdInputs,
+    features::kPageHasRadioInputs,
+    features::kPageHasCheckInputs,
+    features::kPageExternalLinksFreq,
+    features::kPageSecureLinksFreq,
+    features::kPageNumScriptTagsGTOne,
+    features::kPageNumScriptTagsGTSix,
+    features::kPageImgOtherDomainFreq,
+    // Browser (non-model) features.
+    features::kUrlHistoryVisitCount,
+    features::kUrlHistoryTypedCount,
+    features::kUrlHistoryLinkCount,
+    features::kUrlHistoryVisitCountMoreThan24hAgo,
+    features::kHttpHostVisitCount,
+    features::kHttpsHostVisitCount,
+    features::kFirstHttpHostVisitMoreThan24hAgo,
+    features::kFirstHttpsHostVisitMoreThan24hAgo,
+    features::kHasSSLReferrer,
+    features::kPageTransitionType,
+    features::kIsFirstNavigation,
+    features::kSafeBrowsingIsSubresource,
+    features::kSafeBrowsingThreatType,
+  };
+
+  for (size_t i = 0; i < arraysize(kAllowedFeatures); ++i) {
+    allowed_features_.insert(kAllowedFeatures[i]);
+  }
+}
+
 // static
 void ClientSideDetectionService::SetBadSubnets(const ClientSideModel& model,
                                                BadSubnetMap* bad_subnets) {
@@ -495,11 +598,52 @@ bool ClientSideDetectionService::ModelHasValidHashIds(
       return false;
     }
   }
-  for (int i = 0; i < model.page_word_size(); ++i) {
-    if (model.page_word(i) < 0 || model.page_word(i) > max_index) {
-      return false;
+  return true;
+}
+
+// static
+bool ClientSideDetectionService::IsFalsePositiveResponse(
+    const GURL& url,
+    const ClientPhishingResponse& response) {
+  if (!response.phishy() || response.whitelist_expression_size() == 0) {
+    return false;
+  }
+  // This whitelist is special.  A particular URL gets whitelisted if it
+  // matches any of the expressions on the whitelist or if any of the whitelist
+  // entries matches the URL.
+
+  std::string host, path, query;
+  safe_browsing_util::CanonicalizeUrl(url, &host, &path, &query);
+  std::string canonical_url_as_pattern = host + path + query;
+
+  std::vector<std::string> url_patterns;
+  safe_browsing_util::GeneratePatternsToCheck(url, &url_patterns);
+
+  for (int i = 0; i < response.whitelist_expression_size(); ++i) {
+    GURL whitelisted_url(std::string("http://") +
+                         response.whitelist_expression(i));
+    if (!whitelisted_url.is_valid()) {
+      UMA_HISTOGRAM_COUNTS("SBClientPhishing.InvalidWhitelistExpression", 1);
+      continue;  // Skip invalid whitelist expressions.
+    }
+    // First, we check whether the canonical URL matches any of the whitelisted
+    // expressions.
+    for (size_t j = 0; j < url_patterns.size(); ++j) {
+      if (url_patterns[j] == response.whitelist_expression(i)) {
+        return true;
+      }
+    }
+    // Second, we consider the canonical URL as an expression and we check
+    // whether any of the whitelist entries matches that expression.
+    std::vector<std::string> whitelist_patterns;
+    safe_browsing_util::GeneratePatternsToCheck(whitelisted_url,
+                                                &whitelist_patterns);
+    for (size_t j = 0; j < whitelist_patterns.size(); ++j) {
+      if (whitelist_patterns[j] == canonical_url_as_pattern) {
+        return true;
+      }
     }
   }
-  return true;
+  return false;
 }
 }  // namespace safe_browsing

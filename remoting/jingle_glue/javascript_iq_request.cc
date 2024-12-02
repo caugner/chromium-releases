@@ -57,8 +57,9 @@ void JavascriptIqRegistry::OnIncomingStanza(const buzz::XmlElement* stanza) {
     // JavascriptIqRequest::SendIq(), but remove in
     // JavascriptIqRegistry::OnIq().  We should try to keep the
     // registration/deregistration in one spot.
-    if (it->second->callback_.get()) {
-      it->second->callback_->Run(stanza);
+    if (!it->second->callback_.is_null()) {
+      it->second->callback_.Run(stanza);
+      it->second->callback_.Reset();
     } else {
       VLOG(1) << "No callback, so dropping: " << stanza->Str();
     }
@@ -82,16 +83,15 @@ JavascriptIqRequest::~JavascriptIqRequest() {
   registry_->RemoveAllRequests(this);
 }
 
-void JavascriptIqRequest::SendIq(const std::string& type,
-                                 const std::string& addressee,
-                                 buzz::XmlElement* iq_body) {
+void JavascriptIqRequest::SendIq(buzz::XmlElement* stanza) {
   std::string id = signal_strategy_->GetNextId();
+  stanza->AddAttr(buzz::QN_ID, id);
   registry_->RegisterRequest(this, id);
-  signal_strategy_->SendStanza(MakeIqStanza(type, addressee, iq_body, id));
+  signal_strategy_->SendStanza(stanza);
 }
 
-void JavascriptIqRequest::set_callback(ReplyCallback* callback) {
-  callback_.reset(callback);
+void JavascriptIqRequest::set_callback(const ReplyCallback& callback) {
+  callback_ = callback;
 }
 
 }  // namespace remoting

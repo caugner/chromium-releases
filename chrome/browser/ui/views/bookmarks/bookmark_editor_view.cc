@@ -31,20 +31,20 @@
 #include "views/layout/layout_constants.h"
 #include "views/widget/widget.h"
 
-using views::Button;
-using views::ColumnSet;
 using views::GridLayout;
-using views::Label;
-using views::Textfield;
+
+namespace {
 
 // Background color of text field when URL is invalid.
-static const SkColor kErrorColor = SkColorSetRGB(0xFF, 0xBC, 0xBC);
+const SkColor kErrorColor = SkColorSetRGB(0xFF, 0xBC, 0xBC);
 
 // Preferred width of the tree.
-static const int kTreeWidth = 300;
+const int kTreeWidth = 300;
 
 // ID for various children.
-static const int kNewFolderButtonID = 1002;
+const int kNewFolderButtonID = 1002;
+
+}  // namespace
 
 // static
 void BookmarkEditor::Show(gfx::NativeWindow parent_hwnd,
@@ -67,6 +67,7 @@ BookmarkEditorView::BookmarkEditorView(
       tree_view_(NULL),
       new_folder_button_(NULL),
       url_label_(NULL),
+      url_tf_(NULL),
       title_label_(NULL),
       parent_(parent),
       details_(details),
@@ -105,14 +106,16 @@ bool BookmarkEditorView::CanResize() const {
 }
 
 std::wstring BookmarkEditorView::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOMARK_EDITOR_TITLE));
+  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_TITLE));
 }
 
 bool BookmarkEditorView::Accept() {
   if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK)) {
-    // The url is invalid, focus the url field.
-    url_tf_.SelectAll();
-    url_tf_.RequestFocus();
+    if (details_.type != EditDetails::NEW_FOLDER) {
+      // The url is invalid, focus the url field.
+      url_tf_->SelectAll();
+      url_tf_->RequestFocus();
+    }
     return false;
   }
   // Otherwise save changes and close the dialog box.
@@ -179,13 +182,13 @@ bool BookmarkEditorView::CanEdit(views::TreeView* tree_view,
   return (bb_node->parent() && bb_node->parent()->parent());
 }
 
-void BookmarkEditorView::ContentsChanged(Textfield* sender,
+void BookmarkEditorView::ContentsChanged(views::Textfield* sender,
                                          const std::wstring& new_contents) {
   UserInputChanged();
 }
 
-void BookmarkEditorView::ButtonPressed(
-    Button* sender, const views::Event& event) {
+void BookmarkEditorView::ButtonPressed(views::Button* sender,
+                                       const views::Event& event) {
   DCHECK(sender);
   switch (sender->id()) {
     case kNewFolderButtonID:
@@ -206,7 +209,7 @@ bool BookmarkEditorView::IsCommandIdEnabled(int command_id) const {
     case IDS_EDIT:
     case IDS_DELETE:
       return !running_menu_for_root_;
-    case IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM:
+    case IDS_BOOKMARK_EDITOR_NEW_FOLDER_MENU_ITEM:
       return true;
     default:
       NOTREACHED();
@@ -240,7 +243,7 @@ void BookmarkEditorView::ExecuteCommand(int command_id) {
     }
     tree_model_->Remove(node->parent(), node);
   } else {
-    DCHECK(command_id == IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
+    DCHECK(command_id == IDS_BOOKMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
     NewFolder();
   }
 }
@@ -276,8 +279,8 @@ void BookmarkEditorView::ShowContextMenuForView(View* source,
     context_menu_contents_->AddItemWithStringId(IDS_EDIT, IDS_EDIT);
     context_menu_contents_->AddItemWithStringId(IDS_DELETE, IDS_DELETE);
     context_menu_contents_->AddItemWithStringId(
-        IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM,
-        IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
+        IDS_BOOKMARK_EDITOR_NEW_FOLDER_MENU_ITEM,
+        IDS_BOOKMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
     context_menu_.reset(new views::Menu2(context_menu_contents_.get()));
   }
   context_menu_->RunContextMenuAt(p);
@@ -288,7 +291,6 @@ void BookmarkEditorView::Init() {
   DCHECK(bb_model_);
   bb_model_->AddObserver(this);
 
-  url_tf_.set_parent_owned(false);
   title_tf_.set_parent_owned(false);
 
   std::wstring title;
@@ -298,7 +300,7 @@ void BookmarkEditorView::Init() {
     url = details_.existing_node->url();
   } else if (details_.type == EditDetails::NEW_FOLDER) {
     title = UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME));
+        l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME));
   } else if (details_.type == EditDetails::NEW_URL) {
     string16 title16;
     bookmark_utils::GetURLAndTitleToBookmarkFromCurrentTab(profile_,
@@ -309,34 +311,16 @@ void BookmarkEditorView::Init() {
   title_tf_.SetController(this);
 
   title_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOMARK_EDITOR_NAME_LABEL)));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NAME_LABEL)));
   title_tf_.SetAccessibleName(WideToUTF16Hack(title_label_->GetText()));
-
-  string16 url_text;
-  if (details_.type != EditDetails::NEW_FOLDER) {
-    std::string languages = profile_
-        ? profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)
-        : std::string();
-    // Because this gets parsed by FixupURL(), it's safe to omit the scheme or
-    // trailing slash, and unescape most characters, but we need to not drop any
-    // username/password, or unescape anything that changes the meaning.
-    url_text = net::FormatUrl(url, languages,
-        net::kFormatUrlOmitAll & ~net::kFormatUrlOmitUsernamePassword,
-        UnescapeRule::SPACES, NULL, NULL, NULL);
-  }
-  url_tf_.SetText(UTF16ToWide(url_text));
-  url_tf_.SetController(this);
-
-  url_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOMARK_EDITOR_URL_LABEL)));
-  url_tf_.SetAccessibleName(WideToUTF16Hack(url_label_->GetText()));
 
   if (show_tree_) {
     tree_view_ = new views::TreeView();
+    tree_view_->set_lines_at_root(true);
     new_folder_button_.reset(new views::NativeTextButton(
         this,
         UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_BOOMARK_EDITOR_NEW_FOLDER_BUTTON))));
+            IDS_BOOKMARK_EDITOR_NEW_FOLDER_BUTTON))));
     new_folder_button_->set_parent_owned(false);
     tree_view_->set_context_menu_controller(this);
 
@@ -353,7 +337,7 @@ void BookmarkEditorView::Init() {
   const int single_column_view_set_id = 1;
   const int buttons_column_set_id = 2;
 
-  ColumnSet* column_set = layout->AddColumnSet(labels_column_set_id);
+  views::ColumnSet* column_set = layout->AddColumnSet(labels_column_set_id);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(0, views::kRelatedControlHorizontalSpacing);
@@ -381,11 +365,29 @@ void BookmarkEditorView::Init() {
   layout->AddView(&title_tf_);
 
   if (details_.type != EditDetails::NEW_FOLDER) {
+    url_label_ = new views::Label(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_URL_LABEL)));
+
+    std::string languages =
+        profile_ ? profile_->GetPrefs()->GetString(prefs::kAcceptLanguages)
+                 : std::string();
+    // Because this gets parsed by FixupURL(), it's safe to omit the scheme or
+    // trailing slash, and unescape most characters, but we need to not drop any
+    // username/password, or unescape anything that changes the meaning.
+    string16 url_text = net::FormatUrl(url, languages,
+        net::kFormatUrlOmitAll & ~net::kFormatUrlOmitUsernamePassword,
+        UnescapeRule::SPACES, NULL, NULL, NULL);
+
+    url_tf_ = new views::Textfield;
+    url_tf_->SetText(UTF16ToWide(url_text));
+    url_tf_->SetController(this);
+    url_tf_->SetAccessibleName(WideToUTF16Hack(url_label_->GetText()));
+
     layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
     layout->StartRow(0, labels_column_set_id);
     layout->AddView(url_label_);
-    layout->AddView(&url_tf_);
+    layout->AddView(url_tf_);
   }
 
   if (show_tree_) {
@@ -457,8 +459,11 @@ void BookmarkEditorView::Reset() {
   if (parent())
     ExpandAndSelect();
 }
+
 GURL BookmarkEditorView::GetInputURL() const {
-  return URLFixerUpper::FixupURL(UTF16ToUTF8(url_tf_.text()), std::string());
+  if (details_.type == EditDetails::NEW_FOLDER)
+    return GURL();
+  return URLFixerUpper::FixupURL(UTF16ToUTF8(url_tf_->text()), std::string());
 }
 
 std::wstring BookmarkEditorView::GetInputTitle() const {
@@ -466,11 +471,13 @@ std::wstring BookmarkEditorView::GetInputTitle() const {
 }
 
 void BookmarkEditorView::UserInputChanged() {
-  const GURL url(GetInputURL());
-  if (!url.is_valid())
-    url_tf_.SetBackgroundColor(kErrorColor);
-  else
-    url_tf_.UseDefaultBackgroundColor();
+  if (details_.type != EditDetails::NEW_FOLDER) {
+    const GURL url(GetInputURL());
+    if (!url.is_valid())
+      url_tf_->SetBackgroundColor(kErrorColor);
+    else
+      url_tf_->UseDefaultBackgroundColor();
+  }
   GetDialogClientView()->UpdateDialogButtons();
 }
 
@@ -489,7 +496,7 @@ void BookmarkEditorView::NewFolder() {
 BookmarkEditorView::EditorNode* BookmarkEditorView::AddNewFolder(
     EditorNode* parent) {
   EditorNode* new_node = new EditorNode(
-      l10n_util::GetStringUTF16(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME), 0);
+      l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME), 0);
   // |new_node| is now owned by |parent|.
   tree_model_->Add(parent, new_node, parent->child_count());
   return new_node;

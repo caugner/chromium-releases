@@ -25,14 +25,15 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_operation_notification_details.h"
-#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
@@ -47,6 +48,7 @@
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/translate/page_translated_details.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -68,6 +70,7 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/json_value_serializer.h"
 #include "content/common/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -160,10 +163,11 @@ void InitialLoadObserver::ConditionMet() {
     automation_->OnInitialTabLoadsComplete();
 }
 
-NewTabUILoadObserver::NewTabUILoadObserver(AutomationProvider* automation)
+NewTabUILoadObserver::NewTabUILoadObserver(AutomationProvider* automation,
+                                           Profile* profile)
     : automation_(automation->AsWeakPtr()) {
   registrar_.Add(this, chrome::NOTIFICATION_INITIAL_NEW_TAB_UI_LOAD,
-                 NotificationService::AllSources());
+                 Source<Profile>(profile));
 }
 
 NewTabUILoadObserver::~NewTabUILoadObserver() {
@@ -464,61 +468,6 @@ bool DidExtensionHostsStopLoading(ExtensionProcessManager* manager) {
   return true;
 }
 
-ExtensionInstallNotificationObserver::ExtensionInstallNotificationObserver(
-    AutomationProvider* automation, int id, IPC::Message* reply_message)
-    : automation_(automation->AsWeakPtr()),
-      id_(id),
-      reply_message_(reply_message) {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
-                 NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
-                 NotificationService::AllSources());
-}
-
-ExtensionInstallNotificationObserver::~ExtensionInstallNotificationObserver() {
-}
-
-void ExtensionInstallNotificationObserver::Observe(
-    int type, const NotificationSource& source,
-    const NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
-      SendResponse(AUTOMATION_MSG_EXTENSION_INSTALL_SUCCEEDED);
-      break;
-    case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR:
-    case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED:
-      SendResponse(AUTOMATION_MSG_EXTENSION_INSTALL_FAILED);
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
-
-  delete this;
-}
-
-void ExtensionInstallNotificationObserver::SendResponse(
-    AutomationMsg_ExtensionResponseValues response) {
-  if (!automation_ || !reply_message_.get()) {
-    delete this;
-    return;
-  }
-
-  switch (id_) {
-    case AutomationMsg_InstallExtension::ID:
-      AutomationMsg_InstallExtension::WriteReplyParams(reply_message_.get(),
-                                                       response);
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
-
-  automation_->Send(reply_message_.release());
-}
-
 ExtensionUninstallObserver::ExtensionUninstallObserver(
     AutomationProvider* automation,
     IPC::Message* reply_message,
@@ -578,9 +527,10 @@ void ExtensionUninstallObserver::Observe(
 }
 
 ExtensionReadyNotificationObserver::ExtensionReadyNotificationObserver(
-    ExtensionProcessManager* manager, AutomationProvider* automation, int id,
-    IPC::Message* reply_message)
+    ExtensionProcessManager* manager, ExtensionService* service,
+    AutomationProvider* automation, int id, IPC::Message* reply_message)
     : manager_(manager),
+      service_(service),
       automation_(automation->AsWeakPtr()),
       id_(id),
       reply_message_(reply_message),
@@ -617,6 +567,12 @@ void ExtensionReadyNotificationObserver::Observe(
       extension_ = Details<const Extension>(details).ptr();
       if (!DidExtensionHostsStopLoading(manager_))
         return;
+      // For some reason, the background ExtensionHost is not yet
+      // created at this point so just checking whether all ExtensionHosts
+      // are loaded is not sufficient. If background page is not ready,
+      // we wait for NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING.
+      if (!service_->IsBackgroundPageReady(extension_))
+        return;
       break;
     case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR:
     case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED:
@@ -626,12 +582,12 @@ void ExtensionReadyNotificationObserver::Observe(
       break;
   }
 
-  if (id_ == AutomationMsg_InstallExtensionAndGetHandle::ID) {
+  if (id_ == AutomationMsg_InstallExtension::ID) {
     // A handle of zero indicates an error.
     int extension_handle = 0;
     if (extension_)
       extension_handle = automation_->AddExtension(extension_);
-    AutomationMsg_InstallExtensionAndGetHandle::WriteReplyParams(
+    AutomationMsg_InstallExtension::WriteReplyParams(
         reply_message_.get(), extension_handle);
   } else if (id_ == AutomationMsg_EnableExtension::ID) {
     AutomationMsg_EnableExtension::WriteReplyParams(reply_message_.get(), true);
@@ -818,9 +774,9 @@ BrowserOpenedNotificationObserver::BrowserOpenedNotificationObserver(
       new_window_id_(extension_misc::kUnknownWindowId),
       for_browser_command_(false) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 BrowserOpenedNotificationObserver::~BrowserOpenedNotificationObserver() {
@@ -914,9 +870,9 @@ BrowserCountChangeNotificationObserver::BrowserCountChangeNotificationObserver(
       automation_(automation->AsWeakPtr()),
       reply_message_(reply_message) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 BrowserCountChangeNotificationObserver::
@@ -1372,10 +1328,12 @@ void TabLanguageDeterminedObserver::Observe(
     type_to_string[TranslateInfoBarDelegate::TRANSLATION_ERROR] =
         "TRANSLATION_ERROR";
 
-    bar_info->SetBoolean("always_translate_lang_button_showing",
-                         translate_bar_->ShouldShowAlwaysTranslateButton());
-    bar_info->SetBoolean("never_translate_lang_button_showing",
-                         translate_bar_->ShouldShowNeverTranslateButton());
+    if (translate_bar_->type() == TranslateInfoBarDelegate::BEFORE_TRANSLATE) {
+      bar_info->SetBoolean("always_translate_lang_button_showing",
+                           translate_bar_->ShouldShowAlwaysTranslateButton());
+      bar_info->SetBoolean("never_translate_lang_button_showing",
+                           translate_bar_->ShouldShowNeverTranslateButton());
+    }
     bar_info->SetString("bar_state", type_to_string[translate_bar_->type()]);
     bar_info->SetString("target_lang_code",
                         translate_bar_->GetTargetLanguageCode());
@@ -1415,7 +1373,7 @@ void InfoBarCountObserver::Observe(int type,
 }
 
 void InfoBarCountObserver::CheckCount() {
-  if (tab_contents_->infobar_count() != target_count_)
+  if (tab_contents_->infobar_tab_helper()->infobar_count() != target_count_)
     return;
 
   if (automation_) {
@@ -1459,59 +1417,6 @@ void AutomationProviderBookmarkModelObserver::ReplyAndDelete(bool success) {
     automation_provider_->Send(reply_message_.release());
   }
   delete this;
-}
-
-AutomationProviderDownloadItemObserver::AutomationProviderDownloadItemObserver(
-    AutomationProvider* provider,
-    IPC::Message* reply_message,
-    int downloads)
-    : provider_(provider->AsWeakPtr()),
-      reply_message_(reply_message),
-      downloads_(downloads),
-      interrupted_(false) {
-}
-
-AutomationProviderDownloadItemObserver::
-    ~AutomationProviderDownloadItemObserver() {}
-
-void AutomationProviderDownloadItemObserver::OnDownloadUpdated(
-    DownloadItem* download) {
-  interrupted_ |= download->IsInterrupted();
-  // If any download was interrupted, on the next update each outstanding
-  // download is cancelled.
-  if (interrupted_) {
-    // |Cancel()| does nothing if |download| is already interrupted.
-    download->Cancel(true);
-    RemoveAndCleanupOnLastEntry(download);
-  }
-
-  if (download->IsComplete())
-    RemoveAndCleanupOnLastEntry(download);
-}
-
-// We don't want to send multiple messages, as the behavior is undefined.
-// Set |interrupted_| on error, and on the last download completed/
-// interrupted, send either an error or a success message.
-void AutomationProviderDownloadItemObserver::RemoveAndCleanupOnLastEntry(
-    DownloadItem* download) {
-  // Forget about the download.
-  download->RemoveObserver(this);
-  if (--downloads_ == 0) {
-    if (provider_) {
-      if (interrupted_) {
-        AutomationJSONReply(provider_, reply_message_.release()).SendError(
-            "Download Interrupted");
-      } else {
-        AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(
-            NULL);
-      }
-    }
-    delete this;
-  }
-}
-
-void AutomationProviderDownloadItemObserver::OnDownloadOpened(
-    DownloadItem* download) {
 }
 
 AutomationProviderDownloadUpdatedObserver::
@@ -1574,6 +1479,67 @@ AutomationProviderDownloadModelChangedObserver::
 void AutomationProviderDownloadModelChangedObserver::ModelChanged() {
   download_manager_->RemoveObserver(this);
 
+  if (provider_)
+    AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(NULL);
+  delete this;
+}
+
+AllDownloadsCompleteObserver::AllDownloadsCompleteObserver(
+    AutomationProvider* provider,
+    IPC::Message* reply_message,
+    DownloadManager* download_manager,
+    ListValue* pre_download_ids)
+    : provider_(provider->AsWeakPtr()),
+      reply_message_(reply_message),
+      download_manager_(download_manager) {
+  for (ListValue::iterator it = pre_download_ids->begin();
+       it != pre_download_ids->end(); ++it) {
+    int val = 0;
+    if ((*it)->GetAsInteger(&val)) {
+      pre_download_ids_.insert(val);
+    } else {
+      AutomationJSONReply(provider_, reply_message_.release())
+          .SendError("Cannot convert ID of prior download to integer.");
+      delete this;
+      return;
+    }
+  }
+  download_manager_->AddObserver(this);  // Will call initial ModelChanged().
+}
+
+AllDownloadsCompleteObserver::~AllDownloadsCompleteObserver() {}
+
+void AllDownloadsCompleteObserver::ModelChanged() {
+  // The set of downloads in the download manager has changed.  If there are
+  // any new downloads that are still in progress, add them to the pending list.
+  std::vector<DownloadItem*> downloads;
+  download_manager_->GetAllDownloads(FilePath(), &downloads);
+  for (std::vector<DownloadItem*>::iterator it = downloads.begin();
+       it != downloads.end(); ++it) {
+    if ((*it)->state() == DownloadItem::IN_PROGRESS &&
+        pre_download_ids_.find((*it)->id()) == pre_download_ids_.end()) {
+      (*it)->AddObserver(this);
+      pending_downloads_.insert(*it);
+    }
+  }
+  ReplyIfNecessary();
+}
+
+void AllDownloadsCompleteObserver::OnDownloadUpdated(DownloadItem* download) {
+  // If the current download's status has changed to a final state (not state
+  // "in progress"), remove it from the pending list.
+  if (download->state() != DownloadItem::IN_PROGRESS) {
+    download->RemoveObserver(this);
+    pending_downloads_.erase(download);
+    ReplyIfNecessary();
+  }
+}
+
+void AllDownloadsCompleteObserver::ReplyIfNecessary() {
+  if (!pending_downloads_.empty())
+    return;
+
+  download_manager_->RemoveObserver(this);
   if (provider_)
     AutomationJSONReply(provider_, reply_message_.release()).SendSuccess(NULL);
   delete this;
@@ -1852,12 +1818,12 @@ void OmniboxAcceptNotificationObserver::Observe(
 }
 
 SavePackageNotificationObserver::SavePackageNotificationObserver(
-    SavePackage* save_package,
+    DownloadManager* download_manager,
     AutomationProvider* automation,
     IPC::Message* reply_message)
     : automation_(automation->AsWeakPtr()),
       reply_message_(reply_message) {
-  Source<SavePackage> source(save_package);
+  Source<DownloadManager> source(download_manager);
   registrar_.Add(this, content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
                  source);
 }
@@ -2062,6 +2028,17 @@ NTPInfoObserver::NTPInfoObserver(
     apps_list->Append(*app);
   }
   delete disabled_apps;
+  // Process terminated extensions.
+  const ExtensionList* terminated_extensions =
+      ext_service->terminated_extensions();
+  std::vector<DictionaryValue*>* terminated_apps = GetAppInfoFromExtensions(
+      terminated_extensions, ext_service);
+  for (std::vector<DictionaryValue*>::const_iterator app =
+       terminated_apps->begin(); app != terminated_apps->end(); ++app) {
+    (*app)->SetBoolean("is_disabled", true);
+    apps_list->Append(*app);
+  }
+  delete terminated_apps;
   ntp_info_->Set("apps", apps_list);
 
   // Get the info that would be displayed in the recently closed section.
@@ -2274,7 +2251,7 @@ void AutofillChangedObserver::Observe(
     NOTREACHED();
   }
 
-  if (num_profiles_ == 0 && num_credit_cards_ == 0) {
+  if (num_profiles_ <= 0 && num_credit_cards_ <= 0) {
     registrar_.RemoveAll();  // Must be done from the DB thread.
 
     // Notify the UI thread that we're done listening for all relevant
@@ -2293,6 +2270,81 @@ void AutofillChangedObserver::IndicateDone() {
                         reply_message_.release()).SendSuccess(NULL);
   }
   Release();
+}
+
+AutofillFormSubmittedObserver::AutofillFormSubmittedObserver(
+    AutomationProvider* automation,
+    IPC::Message* reply_message,
+    PersonalDataManager* pdm)
+    : automation_(automation->AsWeakPtr()),
+      reply_message_(reply_message),
+      pdm_(pdm),
+      tab_contents_(NULL) {
+  pdm_->SetObserver(this);
+  registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED,
+                 NotificationService::AllSources());
+}
+
+AutofillFormSubmittedObserver::~AutofillFormSubmittedObserver() {
+  pdm_->RemoveObserver(this);
+
+  if (tab_contents_) {
+    InfoBarTabHelper* infobar_helper = tab_contents_->infobar_tab_helper();
+    InfoBarDelegate* infobar = NULL;
+    if (infobar_helper->infobar_count() > 0 &&
+        (infobar = infobar_helper->GetInfoBarDelegateAt(0))) {
+      infobar_helper->RemoveInfoBar(infobar);
+    }
+  }
+}
+
+void AutofillFormSubmittedObserver::OnPersonalDataChanged() {
+  if (automation_) {
+    AutomationJSONReply(automation_,
+                        reply_message_.release()).SendSuccess(NULL);
+  }
+  delete this;
+}
+
+void AutofillFormSubmittedObserver::OnInsufficientFormData() {
+  if (automation_) {
+    AutomationJSONReply(automation_,
+                        reply_message_.release()).SendSuccess(NULL);
+  }
+  delete this;
+}
+
+void AutofillFormSubmittedObserver::Observe(
+    int type,
+    const NotificationSource& source,
+    const NotificationDetails& details) {
+  DCHECK(type == chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED);
+
+  // Accept in the infobar.
+  tab_contents_ = Source<TabContentsWrapper>(source).ptr();
+  InfoBarDelegate* infobar = NULL;
+  infobar = tab_contents_->infobar_tab_helper()->GetInfoBarDelegateAt(0);
+
+  ConfirmInfoBarDelegate* confirm_infobar = infobar->AsConfirmInfoBarDelegate();
+  if (!confirm_infobar) {
+    if (automation_) {
+      AutomationJSONReply(
+          automation_, reply_message_.release()).SendError(
+              "Infobar is not a confirm infobar.");
+    }
+    delete this;
+    return;
+  }
+
+  if (!confirm_infobar->Accept()) {
+    if (automation_) {
+      AutomationJSONReply(
+          automation_, reply_message_.release()).SendError(
+              "Could not accept in the infobar.");
+    }
+    delete this;
+    return;
+  }
 }
 
 namespace {

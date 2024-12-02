@@ -20,9 +20,12 @@
 #include "chrome/browser/browser_main.h"
 #include "chrome/browser/browser_process_sub_thread.h"
 #include "chrome/browser/browser_trial.h"
-#include "chrome/browser/debugger/browser_list_tabcontents_provider.h"
+#include "chrome/browser/chrome_plugin_service_filter.h"
+#include "chrome/browser/component_updater/component_updater_configurator.h"
+#include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/browser/debugger/devtools_protocol_handler.h"
-#include "chrome/browser/download/download_file_manager.h"
+#include "chrome/browser/debugger/remote_debugging_server.h"
+#include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_tab_id_map.h"
 #include "chrome/browser/extensions/user_script_listener.h"
@@ -46,13 +49,13 @@
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/chrome_resource_dispatcher_host_delegate.h"
-#include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/tab_closeable_state_watcher.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/web_resource/gpu_blacklist_updater.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -68,8 +71,8 @@
 #include "content/browser/browser_child_process_host.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/debugger/devtools_http_protocol_handler.h"
 #include "content/browser/debugger/devtools_manager.h"
+#include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/mhtml_generation_manager.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
@@ -78,6 +81,7 @@
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/common/notification_service.h"
+#include "content/common/url_fetcher.h"
 #include "ipc/ipc_logging.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -102,6 +106,14 @@
 // How often to check if the persistent instance of Chrome needs to restart
 // to install an update.
 static const int kUpdateCheckIntervalHours = 6;
+#endif
+
+#if defined(OS_WIN)
+// Attest to the fact that the call to the file thread to save preferences has
+// run, and it is safe to terminate.  This avoids the potential of some other
+// task prematurely terminating our waiting message loop by posting a
+// QuitTask().
+static bool g_end_session_file_thread_has_completed = false;
 #endif
 
 #if defined(USE_X11)
@@ -131,7 +143,6 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       created_browser_policy_connector_(false),
       created_notification_ui_manager_(false),
       created_safe_browsing_service_(false),
-      created_safe_browsing_detection_service_(false),
       module_ref_count_(0),
       did_start_(false),
       checked_for_new_frames_(false),
@@ -176,37 +187,42 @@ BrowserProcessImpl::~BrowserProcessImpl() {
 
   // We need to destroy the MetricsService, GoogleURLTracker,
   // IntranetRedirectDetector, and SafeBrowsing ClientSideDetectionService
-  // before the io_thread_ gets destroyed, since their destructors can call the
-  // URLFetcher destructor, which does a PostDelayedTask operation on the IO
-  // thread. (The IO thread will handle that URLFetcher operation before going
-  // away.)
+  // (owned by the SafeBrowsingService) before the io_thread_ gets destroyed,
+  // since their destructors can call the URLFetcher destructor, which does a
+  // PostDelayedTask operation on the IO thread.
+  // (The IO thread will handle that URLFetcher operation before going away.)
   metrics_service_.reset();
   google_url_tracker_.reset();
   intranet_redirect_detector_.reset();
-  safe_browsing_detection_service_.reset();
+#if defined(ENABLE_SAFE_BROWSING)
+  if (safe_browsing_service_.get()) {
+    safe_browsing_service()->ShutDown();
+  }
+#endif
 
   // Need to clear the desktop notification balloons before the io_thread_ and
   // before the profiles, since if there are any still showing we will access
   // those things during teardown.
   notification_ui_manager_.reset();
 
+  // FIXME - We shouldn't need this, it's because of DefaultRequestContext! :(
+  // We need to kill off all URLFetchers using profile related
+  // URLRequestContexts. Normally that'd be covered by deleting the Profiles,
+  // but we have some URLFetchers using the DefaultRequestContext, so they need
+  // to be cancelled too. Remove this when DefaultRequestContext goes away.
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          NewRunnableFunction(&URLFetcher::CancelAll));
+
   // Need to clear profiles (download managers) before the io_thread_.
   profile_manager_.reset();
 
   // Debugger must be cleaned up before IO thread and NotificationService.
-  if (devtools_http_handler_.get()) {
-    devtools_http_handler_->Stop();
-    devtools_http_handler_ = NULL;
-  }
+  remote_debugging_server_.reset();
+
   if (devtools_legacy_handler_.get()) {
     devtools_legacy_handler_->Stop();
     devtools_legacy_handler_ = NULL;
   }
-
-#if defined(ENABLE_SAFE_BROWSING)
-  if (safe_browsing_service_.get())
-    safe_browsing_service()->ShutDown();
-#endif
 
   if (resource_dispatcher_host_.get()) {
     // Cancel pending requests and prevent new requests.
@@ -274,8 +290,12 @@ BrowserProcessImpl::~BrowserProcessImpl() {
 }
 
 #if defined(OS_WIN)
-// Send a QuitTask to the given MessageLoop.
+// Send a QuitTask to the given MessageLoop when the (file) thread has processed
+// our (other) recent requests (to save preferences).
+// Change the boolean so that the receiving thread will know that we did indeed
+// send the QuitTask that terminated the message loop.
 static void PostQuit(MessageLoop* message_loop) {
+  g_end_session_file_thread_has_completed = true;
   message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
 }
 #elif defined(USE_X11)
@@ -303,7 +323,7 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
         FROM_HERE,
         NewRunnableFunction(&base::ThreadRestrictions::SetIOAllowed, true));
     MessageLoop::current()->PostTask(
-        FROM_HERE, NewRunnableFunction(DidEndMainMessageLoop));
+        FROM_HERE, NewRunnableFunction(content::DidEndMainMessageLoop));
     MessageLoop::current()->Quit();
   }
   return module_ref_count_;
@@ -338,7 +358,14 @@ void BrowserProcessImpl::EndSession() {
 #elif defined(OS_WIN)
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       NewRunnableFunction(PostQuit, MessageLoop::current()));
-  MessageLoop::current()->Run();
+  int quits_received = 0;
+  do {
+    MessageLoop::current()->Run();
+    ++quits_received;
+  } while (!g_end_session_file_thread_has_completed);
+  // If we did get extra quits, then we should re-post them to the message loop.
+  while (--quits_received > 0)
+    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
 #else
   NOTIMPLEMENTED();
 #endif
@@ -505,15 +532,13 @@ AutomationProviderList* BrowserProcessImpl::InitAutomationProviderList() {
 }
 
 void BrowserProcessImpl::InitDevToolsHttpProtocolHandler(
+    Profile* profile,
     const std::string& ip,
     int port,
     const std::string& frontend_url) {
   DCHECK(CalledOnValidThread());
-  devtools_http_handler_ =
-      DevToolsHttpProtocolHandler::Start(ip,
-                                         port,
-                                         frontend_url,
-                                         new BrowserListTabContentsProvider());
+  remote_debugging_server_.reset(
+      new RemoteDebuggingServer(profile, ip, port, frontend_url));
 }
 
 void BrowserProcessImpl::InitDevToolsLegacyProtocolHandler(int port) {
@@ -579,6 +604,13 @@ DownloadStatusUpdater* BrowserProcessImpl::download_status_updater() {
   return &download_status_updater_;
 }
 
+DownloadRequestLimiter* BrowserProcessImpl::download_request_limiter() {
+  DCHECK(CalledOnValidThread());
+  if (!download_request_limiter_)
+    download_request_limiter_ = new DownloadRequestLimiter();
+  return download_request_limiter_;
+}
+
 TabCloseableStateWatcher* BrowserProcessImpl::tab_closeable_state_watcher() {
   DCHECK(CalledOnValidThread());
   if (!tab_closeable_state_watcher_.get())
@@ -611,9 +643,9 @@ SafeBrowsingService* BrowserProcessImpl::safe_browsing_service() {
 safe_browsing::ClientSideDetectionService*
     BrowserProcessImpl::safe_browsing_detection_service() {
   DCHECK(CalledOnValidThread());
-  if (!created_safe_browsing_detection_service_)
-    CreateSafeBrowsingDetectionService();
-  return safe_browsing_detection_service_.get();
+  if (safe_browsing_service())
+    return safe_browsing_service()->safe_browsing_detection_service();
+  return NULL;
 }
 
 bool BrowserProcessImpl::plugin_finder_disabled() const {
@@ -640,7 +672,7 @@ void BrowserProcessImpl::Observe(int type,
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 void BrowserProcessImpl::StartAutoupdateTimer() {
-  autoupdate_timer_.Start(
+  autoupdate_timer_.Start(FROM_HERE,
       base::TimeDelta::FromHours(kUpdateCheckIntervalHours),
       this,
       &BrowserProcessImpl::OnAutoupdateTimer);
@@ -663,6 +695,30 @@ MHTMLGenerationManager* BrowserProcessImpl::mhtml_generation_manager() {
     mhtml_generation_manager_ = new MHTMLGenerationManager();
 
   return mhtml_generation_manager_.get();
+}
+
+GpuBlacklistUpdater* BrowserProcessImpl::gpu_blacklist_updater() {
+  if (!gpu_blacklist_updater_.get())
+    gpu_blacklist_updater_ = new GpuBlacklistUpdater();
+
+  return gpu_blacklist_updater_.get();
+}
+
+ComponentUpdateService* BrowserProcessImpl::component_updater() {
+#if defined(OS_CHROMEOS)
+  return NULL;
+#else
+  if (!component_updater_.get()) {
+    ComponentUpdateService::Configurator* configurator =
+        MakeChromeComponentUpdaterConfigurator(
+            CommandLine::ForCurrentProcess(),
+            io_thread()->system_url_request_context_getter());
+    // Creating the component updater does not do anything, components
+    // need to be registered and Start() needs to be called.
+    component_updater_.reset(ComponentUpdateServiceFactory(configurator));
+  }
+  return component_updater_.get();
+#endif
 }
 
 void BrowserProcessImpl::CreateResourceDispatcherHost() {
@@ -703,7 +759,9 @@ void BrowserProcessImpl::CreateIOThread() {
   // it is predominantly used from the io thread, but must be created
   // on the main thread. The service ctor is inexpensive and does not
   // invoke the io_thread() accessor.
-  PluginService::GetInstance();
+  PluginService* plugin_service = PluginService::GetInstance();
+  plugin_service->set_filter(ChromePluginServiceFilter::GetInstance());
+  plugin_service->StartWatchingPlugins();
 
   // Add the Chrome specific plugins.
   chrome::RegisterInternalDefaultPlugin();
@@ -819,7 +877,9 @@ void BrowserProcessImpl::CreateProfileManager() {
   DCHECK(!created_profile_manager_ && profile_manager_.get() == NULL);
   created_profile_manager_ = true;
 
-  profile_manager_.reset(new ProfileManager());
+  FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  profile_manager_.reset(new ProfileManager(user_data_dir));
 }
 
 void BrowserProcessImpl::CreateLocalState() {
@@ -883,7 +943,7 @@ void BrowserProcessImpl::CreateIconManager() {
 void BrowserProcessImpl::CreateDevToolsManager() {
   DCHECK(devtools_manager_.get() == NULL);
   created_devtools_manager_ = true;
-  devtools_manager_ = new DevToolsManager();
+  devtools_manager_.reset(new DevToolsManager());
 }
 
 void BrowserProcessImpl::CreateSidebarManager() {
@@ -946,37 +1006,6 @@ void BrowserProcessImpl::CreateSafeBrowsingService() {
 #if defined(ENABLE_SAFE_BROWSING)
   safe_browsing_service_ = SafeBrowsingService::CreateSafeBrowsingService();
   safe_browsing_service_->Initialize();
-#endif
-}
-
-void BrowserProcessImpl::CreateSafeBrowsingDetectionService() {
-  DCHECK(safe_browsing_detection_service_.get() == NULL);
-  // Set this flag to true so that we don't retry indefinitely to
-  // create the service class if there was an error.
-  created_safe_browsing_detection_service_ = true;
-
-#if defined(ENABLE_SAFE_BROWSING)
-  FilePath model_file_dir;
-  if (IsSafeBrowsingDetectionServiceEnabled() &&
-      PathService::Get(chrome::DIR_USER_DATA, &model_file_dir)) {
-    safe_browsing_detection_service_.reset(
-        safe_browsing::ClientSideDetectionService::Create(
-            model_file_dir, g_browser_process->system_request_context()));
-  }
-#endif
-}
-
-bool BrowserProcessImpl::IsSafeBrowsingDetectionServiceEnabled() {
-  // The safe browsing client-side detection is enabled only if the switch is
-  // not disabled and when safe browsing related stats are allowed to be
-  // collected.
-#if defined(ENABLE_SAFE_BROWSING) && !defined(OS_CHROMEOS)
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableClientSidePhishingDetection) &&
-      safe_browsing_service() &&
-      safe_browsing_service()->CanReportStats();
-#else
-  return false;
 #endif
 }
 

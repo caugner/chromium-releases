@@ -10,11 +10,11 @@
 #include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/ui/views/accessibility_event_router_views.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "views/controls/button/native_button.h"
+#include "views/controls/button/text_button.h"
 #include "views/layout/grid_layout.h"
 #include "views/views_delegate.h"
 #include "views/widget/native_widget.h"
@@ -35,14 +35,12 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
   virtual void SaveWindowPlacement(const views::Widget* window,
                                    const std::wstring& window_name,
                                    const gfx::Rect& bounds,
-                                   bool maximized) OVERRIDE {
+                                   ui::WindowShowState show_state) OVERRIDE {
   }
-  virtual bool GetSavedWindowBounds(const std::wstring& window_name,
-                                    gfx::Rect* bounds) const OVERRIDE {
-    return false;
-  }
-  virtual bool GetSavedMaximizedState(const std::wstring& window_name,
-                                      bool* maximized) const OVERRIDE {
+  virtual bool GetSavedWindowPlacement(
+      const std::wstring& window_name,
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE {
     return false;
   }
   virtual void NotifyAccessibilityEvent(
@@ -137,13 +135,13 @@ TEST_F(AccessibilityEventRouterViewsTest, TestFocusNotification) {
 
   // Create a contents view with 3 buttons.
   views::View* contents = new views::View();
-  views::NativeButton* button1 = new views::NativeButton(
+  views::NativeTextButton* button1 = new views::NativeTextButton(
       NULL, ASCIIToWide(kButton1ASCII));
   contents->AddChildView(button1);
-  views::NativeButton* button2 = new views::NativeButton(
+  views::NativeTextButton* button2 = new views::NativeTextButton(
       NULL, ASCIIToWide(kButton2ASCII));
   contents->AddChildView(button2);
-  views::NativeButton* button3 = new views::NativeButton(
+  views::NativeTextButton* button3 = new views::NativeTextButton(
       NULL, ASCIIToWide(kButton3ASCII));
   contents->AddChildView(button3);
 

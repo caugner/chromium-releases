@@ -18,10 +18,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/wm_ipc.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/ui/views/bubble/border_widget_win.h"
 #endif
 
@@ -31,7 +31,7 @@ using std::vector;
 static const int kHideFadeDurationMS = 200;
 
 // Background color of the bubble.
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 const SkColor Bubble::kBackgroundColor =
     color_utils::GetSysSkColor(COLOR_WINDOW);
 #else
@@ -50,7 +50,7 @@ std::wstring BubbleDelegate::accessible_name() {
 // static
 Bubble* Bubble::Show(views::Widget* parent,
                      const gfx::Rect& position_relative_to,
-                     BubbleBorder::ArrowLocation arrow_location,
+                     views::BubbleBorder::ArrowLocation arrow_location,
                      views::View* contents,
                      BubbleDelegate* delegate) {
   Bubble* bubble = new Bubble;
@@ -68,7 +68,7 @@ Bubble* Bubble::Show(views::Widget* parent,
 Bubble* Bubble::ShowFocusless(
     views::Widget* parent,
     const gfx::Rect& position_relative_to,
-    BubbleBorder::ArrowLocation arrow_location,
+    views::BubbleBorder::ArrowLocation arrow_location,
     views::View* contents,
     BubbleDelegate* delegate,
     bool show_while_screen_is_locked) {
@@ -97,7 +97,7 @@ void Bubble::AnimationEnded(const ui::Animation* animation) {
     // When fading out we just need to close the bubble at the end
     DoClose(false);
   } else {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     // When fading in we need to remove the layered window style flag, since
     // that style prevents some bubble content from working properly.
     SetWindowLong(GWL_EXSTYLE, GetWindowLong(GWL_EXSTYLE) & ~WS_EX_LAYERED);
@@ -106,10 +106,13 @@ void Bubble::AnimationEnded(const ui::Animation* animation) {
 }
 
 void Bubble::AnimationProgressed(const ui::Animation* animation) {
-#if defined(OS_WIN)
   // Set the opacity for the main contents window.
   unsigned char opacity = static_cast<unsigned char>(
       animation_->GetCurrentValue() * 255);
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   SetLayeredWindowAttributes(GetNativeView(), 0,
       static_cast<byte>(opacity), LWA_ALPHA);
   contents_->SchedulePaint();
@@ -118,18 +121,22 @@ void Bubble::AnimationProgressed(const ui::Animation* animation) {
   border_->SetOpacity(opacity);
   border_->border_contents()->SchedulePaint();
 #else
-  NOTIMPLEMENTED();
+  SetOpacity(opacity);
+  border_contents_->SchedulePaint();
 #endif
 }
 
 Bubble::Bubble()
     :
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+      views::NativeWidgetAura(new views::Widget),
+#elif defined(OS_WIN)
       views::NativeWidgetWin(new views::Widget),
 #elif defined(TOOLKIT_USES_GTK)
       views::NativeWidgetGtk(new views::Widget),
 #endif
-#if defined(TOOLKIT_USES_GTK)
+#if defined(USE_AURA)
+#elif defined(TOOLKIT_USES_GTK)
       border_contents_(NULL),
 #elif defined(OS_WIN)
       border_(NULL),
@@ -143,7 +150,7 @@ Bubble::Bubble()
 #if defined(OS_CHROMEOS)
       show_while_screen_is_locked_(false),
 #endif
-      arrow_location_(BubbleBorder::NONE),
+      arrow_location_(views::BubbleBorder::NONE),
       contents_(NULL),
       accelerator_registered_(false) {
 }
@@ -158,7 +165,7 @@ Bubble::Bubble(views::Widget::InitParams::Type type,
       fade_away_on_close_(false),
       type_(type),
       show_while_screen_is_locked_(show_while_screen_is_locked),
-      arrow_location_(BubbleBorder::NONE),
+      arrow_location_(views::BubbleBorder::NONE),
       contents_(NULL) {
 }
 #endif
@@ -168,16 +175,20 @@ Bubble::~Bubble() {
 
 void Bubble::InitBubble(views::Widget* parent,
                         const gfx::Rect& position_relative_to,
-                        BubbleBorder::ArrowLocation arrow_location,
+                        views::BubbleBorder::ArrowLocation arrow_location,
                         views::View* contents,
                         BubbleDelegate* delegate) {
   delegate_ = delegate;
   position_relative_to_ = position_relative_to;
   arrow_location_ = arrow_location;
   contents_ = contents;
+  const bool fade_in = delegate_ && delegate_->FadeInOnShow();
 
   // Create the main window.
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   views::Widget* parent_window = parent->GetTopLevelWidget();
   if (parent_window)
     parent_window->DisableInactiveRendering();
@@ -185,7 +196,6 @@ void Bubble::InitBubble(views::Widget* parent,
   int extended_style = WS_EX_TOOLWINDOW;
   // During FadeIn we need to turn on the layered window style to deal with
   // transparency. This flag needs to be reset after fading in is complete.
-  bool fade_in = delegate_ && delegate_->FadeInOnShow();
   if (fade_in)
     extended_style |= WS_EX_LAYERED;
   set_window_ex_style(extended_style);
@@ -214,6 +224,8 @@ void Bubble::InitBubble(views::Widget* parent,
   params.parent_widget = parent;
   params.native_widget = this;
   GetWidget()->Init(params);
+  if (fade_in)
+    SetOpacity(0);
 #if defined(OS_CHROMEOS)
   {
     vector<int> params;
@@ -241,7 +253,10 @@ void Bubble::InitBubble(views::Widget* parent,
   // Calculate and set the bounds for all windows and views.
   gfx::Rect window_bounds;
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   // Initialize and position the border window.
   window_bounds = border_->SizeAndGetBounds(position_relative_to,
                                             arrow_location,
@@ -273,20 +288,19 @@ void Bubble::InitBubble(views::Widget* parent,
 #endif
   GetWidget()->SetBounds(window_bounds);
 
-  // Done creating the bubble.
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_INFO_BUBBLE_CREATED, Source<Bubble>(this),
-      NotificationService::NoDetails());
-
   // Show the window.
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   border_->ShowWindow(SW_SHOW);
   ShowWindow(SW_SHOW);
-  if (fade_in)
-    FadeIn();
 #elif defined(TOOLKIT_USES_GTK)
   GetWidget()->Show();
 #endif
+
+  if (fade_in)
+    FadeIn();
 }
 
 void Bubble::RegisterEscapeAccelerator() {
@@ -309,7 +323,10 @@ BorderContents* Bubble::CreateBorderContents() {
 void Bubble::SizeToContents() {
   gfx::Rect window_bounds;
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   // Initialize and position the border window.
   window_bounds = border_->SizeAndGetBounds(position_relative_to_,
                                             arrow_location_,
@@ -328,7 +345,9 @@ void Bubble::SizeToContents() {
   GetWidget()->SetBounds(window_bounds);
 }
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+// TODO(beng):
+#elif defined(OS_WIN)
 void Bubble::OnActivate(UINT action, BOOL minimized, HWND window) {
   // The popup should close when it is deactivated.
   if (action == WA_INACTIVE) {
@@ -354,10 +373,16 @@ void Bubble::DoClose(bool closed_by_escape) {
   if (delegate_)
     delegate_->BubbleClosing(this, closed_by_escape);
   show_status_ = kClosed;
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   border_->Close();
 #endif
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   NativeWidgetWin::Close();
 #elif defined(TOOLKIT_USES_GTK)
   NativeWidgetGtk::Close();
@@ -369,7 +394,7 @@ void Bubble::FadeIn() {
 }
 
 void Bubble::FadeOut() {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // The contents window cannot have the layered flag on by default, since its
   // content doesn't always work inside a layered window, but when animating it
   // is ok to set that style on the window for the purpose of fading it out.
@@ -377,6 +402,8 @@ void Bubble::FadeOut() {
   // This must be the very next call, otherwise we can get flicker on close.
   SetLayeredWindowAttributes(GetNativeView(), 0,
       static_cast<byte>(255), LWA_ALPHA);
+#elif defined(USE_AURA)
+  NOTIMPLEMENTED();
 #endif
 
   Fade(false);  // |fade_in|.

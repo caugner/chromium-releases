@@ -7,13 +7,14 @@
 
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "gpu/command_buffer/common/command_buffer.h"
-#include "ppapi/c/dev/pp_graphics_3d_dev.h"
+#include "ppapi/c/pp_graphics_3d.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_context_3d_api.h"
 
 struct PPB_Context3D_Dev;
@@ -29,19 +30,18 @@ class GLES2Implementation;
 
 }  // namespace gpu
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class Surface3D;
 
-class Context3D : public PluginResource,
-                  public ppapi::thunk::PPB_Context3D_API {
+class Context3D : public Resource, public thunk::PPB_Context3D_API {
  public:
   explicit Context3D(const HostResource& resource);
   virtual ~Context3D();
 
-  // ResourceObjectBase overrides.
-  virtual ::ppapi::thunk::PPB_Context3D_API* AsPPB_Context3D_API() OVERRIDE;
+  // Resource overrides.
+  virtual thunk::PPB_Context3D_API* AsPPB_Context3D_API() OVERRIDE;
 
   gpu::gles2::GLES2Implementation* gles2_impl() const {
     return gles2_impl_.get();
@@ -140,6 +140,6 @@ class PPB_Context3D_Proxy : public InterfaceProxy {
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_CONTEXT_3D_PROXY_H_

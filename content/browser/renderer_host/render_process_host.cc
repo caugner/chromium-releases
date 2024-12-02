@@ -59,17 +59,19 @@ size_t GetMaxRendererProcessCount() {
 }
 
 // Returns true if the given host is suitable for launching a new view
-// associated with the given profile.
-static bool IsSuitableHost(RenderProcessHost* host, Profile* profile,
+// associated with the given browser context.
+static bool IsSuitableHost(RenderProcessHost* host,
+                           content::BrowserContext* browser_context,
                            RenderProcessHost::Type type) {
-  if (host->profile() != profile)
+  if (host->browser_context() != browser_context)
     return false;
 
   RenderProcessHost::Type host_type = RenderProcessHost::TYPE_NORMAL;
   if (ChildProcessSecurityPolicy::GetInstance()->HasWebUIBindings(host->id()))
     host_type = RenderProcessHost::TYPE_WEBUI;
   if (ChildProcessSecurityPolicy::GetInstance()->
-        HasExtensionBindings(host->id()))
+        HasExtensionBindings(host->id()) ||
+      host->is_extension_process())
     host_type = RenderProcessHost::TYPE_EXTENSION;
 
   return host_type == type;
@@ -90,14 +92,14 @@ void RenderProcessHost::SetMaxRendererProcessCount(size_t count) {
   max_renderer_count_override = count;
 }
 
-RenderProcessHost::RenderProcessHost(Profile* profile)
+RenderProcessHost::RenderProcessHost(content::BrowserContext* browser_context)
     : max_page_id_(-1),
       fast_shutdown_started_(false),
       deleting_soon_(false),
       is_extension_process_(false),
       pending_views_(0),
       id_(ChildProcessInfo::GenerateChildProcessUniqueId()),
-      profile_(profile),
+      browser_context_(browser_context),
       sudden_termination_allowed_(true),
       ignore_input_events_(false) {
   all_hosts.AddWithID(this, id());
@@ -183,17 +185,17 @@ bool RenderProcessHost::ShouldTryToUseExistingProcessHost() {
 
   // NOTE: Sometimes it's necessary to create more render processes than
   //       GetMaxRendererProcessCount(), for instance when we want to create
-  //       a renderer process for a profile that has no existing renderers.
-  //       This is OK in moderation, since the GetMaxRendererProcessCount()
-  //       is conservative.
+  //       a renderer process for a browser context that has no existing
+  //       renderers. This is OK in moderation, since the
+  //       GetMaxRendererProcessCount() is conservative.
 
   return run_renderer_in_process() ||
          (renderer_process_count >= GetMaxRendererProcessCount());
 }
 
 // static
-RenderProcessHost* RenderProcessHost::GetExistingProcessHost(Profile* profile,
-                                                             Type type) {
+RenderProcessHost* RenderProcessHost::GetExistingProcessHost(
+    content::BrowserContext* browser_context, Type type) {
   // First figure out which existing renderers we can use.
   std::vector<RenderProcessHost*> suitable_renderers;
   suitable_renderers.reserve(all_hosts.size());
@@ -201,7 +203,7 @@ RenderProcessHost* RenderProcessHost::GetExistingProcessHost(Profile* profile,
   iterator iter(AllHostsIterator());
   while (!iter.IsAtEnd()) {
     if (run_renderer_in_process() ||
-        IsSuitableHost(iter.GetCurrentValue(), profile, type))
+        IsSuitableHost(iter.GetCurrentValue(), browser_context, type))
       suitable_renderers.push_back(iter.GetCurrentValue());
 
     iter.Advance();

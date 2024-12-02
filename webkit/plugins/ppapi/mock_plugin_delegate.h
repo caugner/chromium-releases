@@ -7,10 +7,6 @@
 
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
-namespace gpu {
-class CommandBufferHelper;
-}
-
 namespace webkit {
 namespace ppapi {
 
@@ -28,8 +24,9 @@ class MockPluginDelegate : public PluginDelegate {
   virtual PlatformContext3D* CreateContext3D();
   virtual PlatformVideoDecoder* CreateVideoDecoder(
       media::VideoDecodeAccelerator::Client* client,
-      int32 command_buffer_route_id,
-      gpu::CommandBufferHelper* cmd_buffer_helper);
+      int32 command_buffer_route_id);
+  virtual PlatformVideoCapture* CreateVideoCapture(
+      media::VideoCapture::EventHandler* handler);
   virtual PlatformAudio* CreateAudio(uint32_t sample_rate,
                                      uint32_t sample_count,
                                      PlatformAudio::Client* client);
@@ -87,6 +84,8 @@ class MockPluginDelegate : public PluginDelegate {
                                             base::PlatformFileInfo* info);
   virtual base::PlatformFileError GetDirContents(const PepperFilePath& path,
                                                  DirContents* contents);
+  virtual void SyncGetFileSystemPlatformPath(const GURL& url,
+                                             FilePath* platform_path);
   virtual void PublishPolicy(const std::string& policy_json);
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy();
@@ -112,9 +111,8 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void DidStartLoading();
   virtual void DidStopLoading();
   virtual void SetContentRestriction(int restrictions);
-  virtual void HasUnsupportedFeature();
   virtual void SaveURLAs(const GURL& url);
-  virtual P2PSocketDispatcher* GetP2PSocketDispatcher();
+  virtual content::P2PSocketDispatcher* GetP2PSocketDispatcher();
   virtual webkit_glue::P2PTransport* CreateP2PTransport();
   virtual double GetLocalTimeZoneOffset(base::Time t);
   virtual std::string GetFlashCommandLineArgs();

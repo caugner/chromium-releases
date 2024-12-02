@@ -46,6 +46,7 @@
 #include "views/controls/button/text_button.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/drag_utils.h"
 #include "views/metrics.h"
 
@@ -255,14 +256,15 @@ void BrowserActionButton::ShowContextMenu(const gfx::Point& p,
   scoped_refptr<ExtensionContextMenuModel> context_menu_contents_(
       new ExtensionContextMenuModel(extension(), panel_->browser(), panel_));
   views::MenuModelAdapter menu_model_adapter(context_menu_contents_.get());
-  views::MenuItemView menu(&menu_model_adapter);
-  menu_model_adapter.BuildMenu(&menu);
+  views::MenuRunner menu_runner(menu_model_adapter.CreateMenu());
 
-  context_menu_ = &menu;
+  context_menu_ = menu_runner.GetMenu();
   gfx::Point screen_loc;
   views::View::ConvertPointToScreen(this, &screen_loc);
-  context_menu_->RunMenuAt(GetWidget()->GetNativeWindow(), NULL,
-      gfx::Rect(screen_loc, size()), views::MenuItemView::TOPLEFT, true);
+  if (menu_runner.RunMenuAt(GetWidget(), NULL, gfx::Rect(screen_loc, size()),
+          views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED)
+    return;
 
   SetButtonNotPushed();
   context_menu_ = NULL;
@@ -510,8 +512,8 @@ void BrowserActionsContainer::OnBrowserActionExecuted(
   gfx::Rect rect = reference_view->bounds();
   rect.set_origin(origin);
 
-  BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
-      BubbleBorder::TOP_LEFT : BubbleBorder::TOP_RIGHT;
+  views::BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
+      views::BubbleBorder::TOP_LEFT : views::BubbleBorder::TOP_RIGHT;
 
   popup_ = ExtensionPopup::Show(button->GetPopupUrl(), browser_, rect,
                                 arrow_location, inspect_with_devtools,
@@ -712,7 +714,7 @@ void BrowserActionsContainer::RunMenu(View* source, const gfx::Point& pt) {
     overflow_menu_ = new BrowserActionOverflowMenuController(
         this, chevron_, browser_action_views_, VisibleBrowserActions());
     overflow_menu_->set_observer(this);
-    overflow_menu_->RunMenu(GetWidget()->GetNativeWindow(), false);
+    overflow_menu_->RunMenu(GetWidget(), false);
   }
 }
 
@@ -1025,7 +1027,7 @@ void BrowserActionsContainer::ShowDropFolder() {
   overflow_menu_ = new BrowserActionOverflowMenuController(
       this, chevron_, browser_action_views_, VisibleBrowserActions());
   overflow_menu_->set_observer(this);
-  overflow_menu_->RunMenu(GetWidget()->GetNativeWindow(), true);
+  overflow_menu_->RunMenu(GetWidget(), true);
 }
 
 void BrowserActionsContainer::SetDropIndicator(int x_pos) {

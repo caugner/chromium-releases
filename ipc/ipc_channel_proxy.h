@@ -47,14 +47,14 @@ class SendTask;
 // The consumer of IPC::ChannelProxy is responsible for allocating the Thread
 // instance where the IPC::Channel will be created and operated.
 //
-class ChannelProxy : public Message::Sender {
+class IPC_EXPORT ChannelProxy : public Message::Sender {
  public:
 
   struct MessageFilterTraits;
 
   // A class that receives messages on the thread where the IPC channel is
   // running.  It can choose to prevent the default action for an IPC message.
-  class MessageFilter
+  class IPC_EXPORT MessageFilter
       : public base::RefCountedThreadSafe<MessageFilter, MessageFilterTraits> {
    public:
     MessageFilter();
@@ -191,9 +191,9 @@ class ChannelProxy : public Message::Sender {
     virtual ~Context();
 
     // IPC::Channel::Listener methods:
-    virtual bool OnMessageReceived(const Message& message);
-    virtual void OnChannelConnected(int32 peer_pid);
-    virtual void OnChannelError();
+    virtual bool OnMessageReceived(const Message& message) OVERRIDE;
+    virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+    virtual void OnChannelError() OVERRIDE;
 
     // Like OnMessageReceived but doesn't try the filters.
     bool OnMessageReceivedNoFilter(const Message& message);

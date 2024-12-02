@@ -9,8 +9,13 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/renderer/render_process_observer.h"
+
+namespace chrome {
+class ChromeContentRendererClient;
+}
 
 class GURL;
 class ResourceDispatcherDelegate;
@@ -22,7 +27,8 @@ struct ContentSettings;
 // observer.
 class ChromeRenderProcessObserver : public RenderProcessObserver {
  public:
-  ChromeRenderProcessObserver();
+  explicit ChromeRenderProcessObserver(
+      chrome::ChromeContentRendererClient* client);
   virtual ~ChromeRenderProcessObserver();
 
   static bool is_incognito_process() { return is_incognito_process_; }
@@ -44,11 +50,14 @@ class ChromeRenderProcessObserver : public RenderProcessObserver {
   void OnSetFieldTrialGroup(const std::string& fiel_trial_name,
                             const std::string& group_name);
   void OnGetRendererTcmalloc();
+  void OnSetTcmallocHeapProfiling(bool profiling, const std::string& prefix);
+  void OnWriteTcmallocHeapProfile(const FilePath::StringType& filename);
   void OnGetV8HeapStats();
   void OnPurgeMemory();
 
   static bool is_incognito_process_;
   scoped_ptr<ResourceDispatcherDelegate> resource_delegate_;
+  chrome::ChromeContentRendererClient* client_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderProcessObserver);
 };

@@ -10,9 +10,8 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "ppapi/shared_impl/ppapi_preferences.cc"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -147,8 +146,9 @@ Dispatcher* PluginProxyTestHarness::GetDispatcher() {
 
 void PluginProxyTestHarness::SetUpHarness() {
   // These must be first since the dispatcher set-up uses them.
+  resource_tracker_.DidCreateInstance(pp_instance());
   PluginResourceTracker::SetInstanceForTest(&resource_tracker_);
-  PluginVarTracker::SetInstanceForTest(&var_tracker_);
+  resource_tracker_.set_var_tracker_test_override(&var_tracker_);
 
   plugin_dispatcher_.reset(new PluginDispatcher(
       base::Process::Current().handle(),
@@ -163,8 +163,9 @@ void PluginProxyTestHarness::SetUpHarnessWithChannel(
     base::WaitableEvent* shutdown_event,
     bool is_client) {
   // These must be first since the dispatcher set-up uses them.
+  resource_tracker_.DidCreateInstance(pp_instance());
   PluginResourceTracker::SetInstanceForTest(&resource_tracker_);
-  PluginVarTracker::SetInstanceForTest(&var_tracker_);
+  resource_tracker_.set_var_tracker_test_override(&var_tracker_);
   plugin_delegate_mock_.Init(ipc_message_loop, shutdown_event);
 
   plugin_dispatcher_.reset(new PluginDispatcher(
@@ -180,7 +181,7 @@ void PluginProxyTestHarness::TearDownHarness() {
   plugin_dispatcher_->DidDestroyInstance(pp_instance());
   plugin_dispatcher_.reset();
 
-  PluginVarTracker::SetInstanceForTest(NULL);
+  resource_tracker_.DidDeleteInstance(pp_instance());
   PluginResourceTracker::SetInstanceForTest(NULL);
 }
 
@@ -373,4 +374,4 @@ void TwoWayTest::TearDown() {
 
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

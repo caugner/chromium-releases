@@ -12,9 +12,11 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/renderer/extensions/chrome_webstore_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
+#include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/extensions/user_script_idle_scheduler.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/common/json_value_serializer.h"
@@ -102,17 +104,33 @@ bool ExtensionHelper::InstallWebApplicationUsingDefinitionFile(
   return true;
 }
 
+void ExtensionHelper::InlineWebstoreInstall(
+    int install_id, std::string webstore_item_id, GURL requestor_url) {
+  Send(new ExtensionHostMsg_InlineWebstoreInstall(
+      routing_id(), install_id, webstore_item_id, requestor_url));
+}
+
+void ExtensionHelper::OnInlineWebstoreInstallResponse(
+    int install_id,
+    bool success,
+    const std::string& error) {
+  ChromeWebstoreExtension::HandleInstallResponse(install_id, success, error);
+}
+
 bool ExtensionHelper::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionHelper, message)
     IPC_MESSAGE_HANDLER(ExtensionMsg_Response, OnExtensionResponse)
     IPC_MESSAGE_HANDLER(ExtensionMsg_MessageInvoke, OnExtensionMessageInvoke)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_DeliverMessage, OnExtensionDeliverMessage)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ExecuteCode, OnExecuteCode)
     IPC_MESSAGE_HANDLER(ExtensionMsg_GetApplicationInfo, OnGetApplicationInfo)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateBrowserWindowId,
                         OnUpdateBrowserWindowId)
     IPC_MESSAGE_HANDLER(ExtensionMsg_NotifyRenderViewType,
                         OnNotifyRendererViewType)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_InlineWebstoreInstallResponse,
+                        OnInlineWebstoreInstallResponse)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -186,6 +204,11 @@ void ExtensionHelper::OnExtensionMessageInvoke(const std::string& extension_id,
                                                const GURL& event_url) {
   EventBindings::CallFunction(
       extension_id, function_name, args, render_view(), event_url);
+}
+
+void ExtensionHelper::OnExtensionDeliverMessage(int target_id,
+                                                const std::string& message) {
+  RendererExtensionBindings::DeliverMessage(target_id, message, render_view());
 }
 
 void ExtensionHelper::OnExecuteCode(

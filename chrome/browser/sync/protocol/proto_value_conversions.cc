@@ -104,6 +104,8 @@ DictionaryValue* SessionHeaderToValue(
     const sync_pb::SessionHeader& proto) {
   DictionaryValue* value = new DictionaryValue();
   SET_REP(window, SessionWindowToValue);
+  SET_STR(client_name);
+  SET_ENUM(device_type, GetDeviceTypeString);
   return value;
 }
 
@@ -175,23 +177,6 @@ DictionaryValue* AutofillSpecificsToValue(
   SET_STR(value);
   SET_INT64_REP(usage_timestamp);
   SET(profile, AutofillProfileSpecificsToValue);
-  SET_BYTES(encrypted_credit_card);
-  SET(credit_card, AutofillCreditCardSpecificsToValue);
-  return value;
-}
-
-DictionaryValue* AutofillCreditCardSpecificsToValue(
-    const sync_pb::AutofillCreditCardSpecifics& proto) {
-  DictionaryValue* value = new DictionaryValue();
-  SET_STR(label);
-  SET_STR(name_on_card);
-  SET_STR(type);
-  SET_STR(card_number);
-  SET_STR(expiration_month);
-  SET_STR(expiration_year);
-  SET_STR(verification_code);
-  SET_STR(billing_address);
-  SET_STR(shipping_address);
   return value;
 }
 
@@ -255,6 +240,8 @@ DictionaryValue* NigoriSpecificsToValue(
   SET_BOOL(encrypt_sessions);
   SET_BOOL(encrypt_apps);
   SET_BOOL(encrypt_search_engines);
+  SET_BOOL(sync_tabs);
+  SET_BOOL(encrypt_everything);
   return value;
 }
 
@@ -288,10 +275,8 @@ DictionaryValue* SearchEngineSpecificsToValue(
   SET_STR(suggestions_url);
   SET_INT32(prepopulate_id);
   SET_BOOL(autogenerate_keyword);
-  SET_INT32(logo_id);
   SET_BOOL(created_by_policy);
   SET_STR(instant_url);
-  SET_INT64(id);
   SET_INT64(last_modified);
   SET_STR(sync_guid);
   return value;

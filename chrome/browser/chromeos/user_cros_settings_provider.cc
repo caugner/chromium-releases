@@ -20,10 +20,14 @@
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
+#include "chrome/browser/chromeos/login/ownership_status_checker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
+#include "chrome/browser/ui/options/options_util.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/installer/util/google_update_settings.h"
 #include "content/browser/browser_thread.h"
 
 namespace chromeos {
@@ -42,6 +46,7 @@ const char* kBooleanSettings[] = {
   kAccountsPrefAllowGuest,
   kAccountsPrefShowUserNamesOnSignIn,
   kSignedDataRoamingEnabled,
+  kStatsReportingPref
 };
 
 const char* kStringSettings[] = {
@@ -53,6 +58,70 @@ const char* kListSettings[] = {
   kAccountsPrefUsers
 };
 
+// This class provides the means to migrate settings to the signed settings
+// store. It does one of three things - store the settings in the policy blob
+// immediately if the current user is the owner. Uses the
+// SignedSettingsTempStorage if there is no owner yet, or waits for an
+// OWNERSHIP_CHECKED notification to delay the storing until the owner has
+// logged in.
+class MigrationHelper : public NotificationObserver {
+ public:
+  explicit MigrationHelper() : callback_(NULL) {
+    registrar_.Add(this, chrome::NOTIFICATION_OWNERSHIP_CHECKED,
+                   NotificationService::AllSources());
+  }
+
+  void set_callback(SignedSettingsHelper::Callback* callback) {
+    callback_ = callback;
+  }
+
+  void AddMigrationValue(const std::string& path, const std::string& value) {
+    migration_values_[path] = value;
+  }
+
+  void MigrateValues(void) {
+    ownership_checker_.reset(new OwnershipStatusChecker(NewCallback(
+        this, &MigrationHelper::DoMigrateValues)));
+  }
+
+  // NotificationObserver overrides:
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE {
+    if (type == chrome::NOTIFICATION_OWNERSHIP_CHECKED)
+      MigrateValues();
+  }
+
+ private:
+  void DoMigrateValues(OwnershipService::Status status,
+                       bool current_user_is_owner) {
+    ownership_checker_.reset(NULL);
+
+    // We can call StartStorePropertyOp in two cases - either if the owner is
+    // currently logged in and the policy can be updated immediately or if there
+    // is no owner yet in which case the value will be temporarily stored in the
+    // SignedSettingsTempStorage until the device is owned. If none of these
+    // cases is met then we will wait for user change notification and retry.
+    if (current_user_is_owner || status != OwnershipService::OWNERSHIP_TAKEN) {
+      std::map<std::string, std::string>::const_iterator i;
+      for (i = migration_values_.begin(); i != migration_values_.end(); ++i) {
+        // Queue all values for storing.
+        SignedSettingsHelper::Get()->StartStorePropertyOp(i->first, i->second,
+                                                          callback_);
+      }
+      migration_values_.clear();
+    }
+  }
+
+  NotificationRegistrar registrar_;
+  scoped_ptr<OwnershipStatusChecker> ownership_checker_;
+  SignedSettingsHelper::Callback* callback_;
+
+  std::map<std::string, std::string> migration_values_;
+
+  DISALLOW_COPY_AND_ASSIGN(MigrationHelper);
+};
+
 bool IsControlledBooleanSetting(const std::string& pref_path) {
   // TODO(nkostylev): Using std::find for 4 value array generates this warning
   // in chroot stl_algo.h:231: error: array subscript is above array bounds.
@@ -60,7 +129,8 @@ bool IsControlledBooleanSetting(const std::string& pref_path) {
   return (pref_path == kAccountsPrefAllowNewUser) ||
          (pref_path == kAccountsPrefAllowGuest) ||
          (pref_path == kAccountsPrefShowUserNamesOnSignIn) ||
-         (pref_path == kSignedDataRoamingEnabled);
+         (pref_path == kSignedDataRoamingEnabled) ||
+         (pref_path == kStatsReportingPref);
 }
 
 bool IsControlledStringSetting(const std::string& pref_path) {
@@ -82,7 +152,8 @@ void RegisterSetting(PrefService* local_state, const std::string& pref_path) {
                                    false,
                                    PrefService::UNSYNCABLE_PREF);
   if (IsControlledBooleanSetting(pref_path)) {
-    if (pref_path == kSignedDataRoamingEnabled)
+    if (pref_path == kSignedDataRoamingEnabled ||
+        pref_path == kStatsReportingPref)
       local_state->RegisterBooleanPref(pref_path.c_str(),
                                        false,
                                        PrefService::UNSYNCABLE_PREF);
@@ -266,6 +337,7 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
   UserCrosSettingsTrust()
       : ownership_service_(OwnershipService::GetSharedInstance()),
         retries_left_(kNumRetriesLimit) {
+    migration_helper_.set_callback(this);
     // Start prefetching Boolean and String preferences.
     Reload();
   }
@@ -285,7 +357,16 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
         return;
 
       NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
+      if (cros->IsCellularAlwaysInRoaming()) {
+        // If operator requires roaming always enabled, ignore supplied value
+        // and set data roaming allowed in true always.
+        new_value = true;
+      }
       cros->SetCellularDataRoamingAllowed(new_value);
+    } else if (path == kStatsReportingPref) {
+      // TODO(pastarmovj): Remove this once we don't need to regenerate the
+      // consent file for the GUID anymore.
+      OptionsUtil::ResolveMetricsReportingEnabled(new_value);
     }
   }
 
@@ -301,10 +382,39 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
       const NetworkDevice* cellular = cros->FindCellularDevice();
       if (cellular) {
         bool device_value = cellular->data_roaming_allowed();
-        bool new_value = (use_value == USE_VALUE_SUPPLIED) ? value : false;
-        if (device_value != new_value)
-          cros->SetCellularDataRoamingAllowed(new_value);
+        if (!device_value && cros->IsCellularAlwaysInRoaming()) {
+          // If operator requires roaming always enabled, ignore supplied value
+          // and set data roaming allowed in true always.
+          cros->SetCellularDataRoamingAllowed(true);
+        } else {
+          bool new_value = (use_value == USE_VALUE_SUPPLIED) ? value : false;
+          if (device_value != new_value)
+            cros->SetCellularDataRoamingAllowed(new_value);
+        }
       }
+    } else if (path == kStatsReportingPref) {
+      bool stats_consent = (use_value == USE_VALUE_SUPPLIED) ? value : false;
+      // TODO(pastarmovj): Remove this once migration is not needed anymore.
+      // If the value is not set we should try to migrate legacy consent file.
+      if (use_value == USE_VALUE_DEFAULT) {
+        // Loading consent file state causes us to do blocking IO on UI thread.
+        // Temporarily allow it until we fix http://crbug.com/62626
+        base::ThreadRestrictions::ScopedAllowIO allow_io;
+        stats_consent = GoogleUpdateSettings::GetCollectStatsConsent();
+        // Make sure the values will get eventually written to the policy file.
+        migration_helper_.AddMigrationValue(
+            path, stats_consent ? "true" : "false");
+        migration_helper_.MigrateValues();
+        UpdateCacheBool(path, stats_consent, USE_VALUE_SUPPLIED);
+        LOG(WARNING) << "No metrics policy set will revert to checking "
+                     << "consent file which is "
+                     << (stats_consent ? "on." : "off.");
+      }
+      // TODO(pastarmovj): Remove this once we don't need to regenerate the
+      // consent file for the GUID anymore.
+      VLOG(1) << "Metrics policy is being set to : " << stats_consent
+              << "(reason : " << use_value << ")";
+      OptionsUtil::ResolveMetricsReportingEnabled(stats_consent);
     }
   }
 
@@ -345,9 +455,9 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
         else
           VLOG(1) << "Retrieved cros setting " << name << "=" << value;
         if (IsControlledBooleanSetting(name)) {
-          OnBooleanPropertyRetrieve(name, (value == kTrueIncantation),
-              fallback_to_default ? USE_VALUE_DEFAULT : USE_VALUE_SUPPLIED);
           UpdateCacheBool(name, (value == kTrueIncantation),
+              fallback_to_default ? USE_VALUE_DEFAULT : USE_VALUE_SUPPLIED);
+          OnBooleanPropertyRetrieve(name, (value == kTrueIncantation),
               fallback_to_default ? USE_VALUE_DEFAULT : USE_VALUE_SUPPLIED);
         } else if (IsControlledStringSetting(name)) {
           UpdateCacheString(name, value,
@@ -426,6 +536,7 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
   base::hash_map< std::string, std::vector< Task* > > callbacks_;
 
   OwnershipService* ownership_service_;
+  MigrationHelper migration_helper_;
 
   // In order to guard against occasional failure to fetch a property
   // we allow for some number of retries.
@@ -488,6 +599,11 @@ bool UserCrosSettingsProvider::RequestTrustedOwner(Task* callback) {
       kDeviceOwner, callback);
 }
 
+bool UserCrosSettingsProvider::RequestTrustedReportingEnabled(Task* callback) {
+  return UserCrosSettingsTrust::GetInstance()->RequestTrustedEntity(
+      kStatsReportingPref, callback);
+}
+
 void UserCrosSettingsProvider::Reload() {
   UserCrosSettingsTrust::GetInstance()->Reload();
 }
@@ -521,6 +637,14 @@ bool UserCrosSettingsProvider::cached_show_users_on_signin() {
   UserCrosSettingsTrust::GetInstance();
   return g_browser_process->local_state()->GetBoolean(
       kAccountsPrefShowUserNamesOnSignIn);
+}
+
+// static
+bool UserCrosSettingsProvider::cached_reporting_enabled() {
+  // Trigger prefetching if singleton object still does not exist.
+  UserCrosSettingsTrust::GetInstance();
+  return g_browser_process->local_state()->GetBoolean(
+      kStatsReportingPref);
 }
 
 // static
@@ -597,6 +721,7 @@ bool UserCrosSettingsProvider::Get(const std::string& path,
 bool UserCrosSettingsProvider::HandlesSetting(const std::string& path) {
   return ::StartsWithASCII(path, "cros.accounts.", true) ||
       ::StartsWithASCII(path, "cros.signed.", true) ||
+      ::StartsWithASCII(path, "cros.metrics.", true) ||
       path == kReleaseChannel;
 }
 
@@ -616,7 +741,7 @@ void UserCrosSettingsProvider::UnwhitelistUser(const std::string& email) {
   PrefService* prefs = g_browser_process->local_state();
   ListPrefUpdate cached_whitelist_update(prefs, kAccountsPrefUsers);
   StringValue email_value(email);
-  if (cached_whitelist_update->Remove(email_value) != -1)
+  if (cached_whitelist_update->Remove(email_value, NULL))
     prefs->ScheduleSavePersistentPrefs();
 }
 

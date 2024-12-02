@@ -20,23 +20,24 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
-#include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/browser_url_util.h"
 #include "chrome/browser/page_info_window.h"
-#include "chrome/browser/platform_util.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/spellcheck_host.h"
-#include "chrome/browser/spellcheck_host_metrics.h"
-#include "chrome/browser/spellchecker_platform_engine.h"
+#include "chrome/browser/spellchecker/spellcheck_host.h"
+#include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
+#include "chrome/browser/spellchecker/spellchecker_platform_engine.h"
+#include "chrome/browser/tab_contents/spelling_menu_observer.h"
 #include "chrome/browser/translate/translate_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
@@ -50,11 +51,13 @@
 #include "chrome/common/spellcheck_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/child_process_security_policy.h"
+#include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_stats.h"
 #include "content/browser/download/save_package.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/navigation_details.h"
+#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/content_restriction.h"
@@ -64,8 +67,13 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/gfx/favicon_size.h"
 #include "webkit/glue/webmenuitem.h"
+
+#ifdef FILE_MANAGER_EXTENSION
+#include "chrome/browser/extensions/file_manager_util.h"
+#endif
 
 using WebKit::WebContextMenuData;
 using WebKit::WebMediaPlayerAction;
@@ -162,6 +170,19 @@ void AddCustomItemsToMenu(const std::vector<WebMenuItem>& items,
   }
 }
 
+bool ShouldShowTranslateItem(const GURL& page_url) {
+  if (page_url.SchemeIs("chrome"))
+    return false;
+
+#ifdef FILE_MANAGER_EXTENSION
+  if (page_url.SchemeIs("chrome-extension") &&
+      page_url.DomainIs(kFileBrowserDomain))
+    return false;
+#endif
+
+  return true;
+}
+
 }  // namespace
 
 // static
@@ -189,14 +210,14 @@ RenderViewContextMenu::RenderViewContextMenu(
     const ContextMenuParams& params)
     : params_(params),
       source_tab_contents_(tab_contents),
-      profile_(tab_contents->profile()),
+      profile_(Profile::FromBrowserContext(tab_contents->browser_context())),
       ALLOW_THIS_IN_INITIALIZER_LIST(menu_model_(this)),
       external_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(spellcheck_submenu_model_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(speech_input_submenu_model_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(bidi_submenu_model_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(protocol_handler_submenu_model_(this)),
-      protocol_handler_registry_(
-          tab_contents->profile()->GetProtocolHandlerRegistry()) {
+      protocol_handler_registry_(profile_->GetProtocolHandlerRegistry()) {
 }
 
 RenderViewContextMenu::~RenderViewContextMenu() {
@@ -483,13 +504,12 @@ void RenderViewContextMenu::InitMenu() {
 
   // When no special node or text is selected and selection has no link,
   // show page items.
-  bool is_devtools = false;
   if (params_.media_type == WebContextMenuData::MediaTypeNone &&
       !has_link &&
       !params_.is_editable &&
       !has_selection) {
     if (!params_.page_url.is_empty()) {
-      is_devtools = IsDevToolsURL(params_.page_url);
+      bool is_devtools = IsDevToolsURL(params_.page_url);
       if (!is_devtools && !IsInternalResourcesURL(params_.page_url)) {
         AppendPageItems();
         // Merge in frame items if we clicked within a frame that needs them.
@@ -533,6 +553,27 @@ void RenderViewContextMenu::InitMenu() {
 #endif
   }
 
+  if (params_.is_editable) {
+    // Add a menu item that shows suggestions from the Spelling service.
+    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+    if (command_line.HasSwitch(switches::kExperimentalSpellcheckerFeatures)) {
+      PrefService* pref = profile_->GetPrefs();
+      bool use_spelling_service =
+          pref && pref->GetBoolean(prefs::kSpellCheckUseSpellingService);
+      if (use_spelling_service) {
+        if (!spelling_menu_observer_.get())
+            spelling_menu_observer_.reset(new SpellingMenuObserver(this));
+
+        if (spelling_menu_observer_.get())
+          observers_.AddObserver(spelling_menu_observer_.get());
+      }
+    }
+  }
+
+  // Ask our observers to add their menu items.
+  FOR_EACH_OBSERVER(RenderViewContextMenuObserver, observers_,
+                    InitMenu(params_));
+
   if (params_.is_editable)
     AppendEditableItems();
   else if (has_selection)
@@ -541,7 +582,7 @@ void RenderViewContextMenu::InitMenu() {
   if (has_selection)
     AppendSearchProvider();
 
-  if (!is_devtools)
+  if (!IsDevToolsURL(params_.page_url))
     AppendAllExtensionItems();
 
   AppendDeveloperItems();
@@ -552,6 +593,27 @@ void RenderViewContextMenu::LookUpInDictionary() {
   NOTREACHED();
 }
 
+void RenderViewContextMenu::AddMenuItem(int command_id,
+                                        const string16& title) {
+  menu_model_.AddItem(command_id, title);
+}
+
+void RenderViewContextMenu::UpdateMenuItem(int command_id,
+                                           bool enabled,
+                                           const string16& label) {
+  // This function needs platform-specific implementation.
+  NOTIMPLEMENTED();
+}
+
+
+RenderViewHost* RenderViewContextMenu::GetRenderViewHost() const {
+  return source_tab_contents_->render_view_host();
+}
+
+Profile* RenderViewContextMenu::GetProfile() const {
+  return profile_;
+}
+
 bool RenderViewContextMenu::AppendCustomItems() {
   size_t total_items = 0;
   AddCustomItemsToMenu(params_.custom_items, 0, &total_items, this,
@@ -560,6 +622,21 @@ bool RenderViewContextMenu::AppendCustomItems() {
 }
 
 void RenderViewContextMenu::AppendDeveloperItems() {
+  // Show Inspect Element in DevTools itself only in case of the debug
+  // devtools build.
+  bool show_developer_items = !IsDevToolsURL(params_.page_url);
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kDebugDevToolsFrontend))
+    show_developer_items = true;
+
+#if defined(DEBUG_DEVTOOLS)
+  show_developer_items = true;
+#endif
+
+  if (!show_developer_items)
+    return;
+
   // In the DevTools popup menu, "developer items" is normally the only
   // section, so omit the separator there.
   if (menu_model_.GetItemCount() > 0)
@@ -665,12 +742,15 @@ void RenderViewContextMenu::AppendPageItems() {
                                   IDS_CONTENT_CONTEXT_SAVEPAGEAS);
   menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
 
-  std::string locale = g_browser_process->GetApplicationLocale();
-  locale = TranslateManager::GetLanguageCode(locale);
-  string16 language = l10n_util::GetDisplayNameForLocale(locale, locale, true);
-  menu_model_.AddItem(
-      IDC_CONTENT_CONTEXT_TRANSLATE,
-      l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_TRANSLATE, language));
+  if (ShouldShowTranslateItem(params_.page_url)) {
+    std::string locale = g_browser_process->GetApplicationLocale();
+    locale = TranslateManager::GetLanguageCode(locale);
+    string16 language = l10n_util::GetDisplayNameForLocale(locale, locale,
+                                                           true);
+    menu_model_.AddItem(
+        IDC_CONTENT_CONTEXT_TRANSLATE,
+        l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_TRANSLATE, language));
+  }
 
   menu_model_.AddItemWithStringId(IDC_VIEW_SOURCE,
                                   IDS_CONTENT_CONTEXT_VIEWPAGESOURCE);
@@ -757,7 +837,7 @@ void RenderViewContextMenu::AppendEditableItems() {
   }
 
   // If word is misspelled, give option for "Add to dictionary"
-  if (!params_.misspelled_word.empty()) {
+  if (!spelling_menu_observer_.get() && !params_.misspelled_word.empty()) {
     if (params_.dictionary_suggestions.empty()) {
       menu_model_.AddItem(IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS,
           l10n_util::GetStringUTF16(
@@ -790,6 +870,7 @@ void RenderViewContextMenu::AppendEditableItems() {
   }
 
   AppendSpellcheckOptionsSubMenu();
+  AppendSpeechInputOptionsSubMenu();
 
 #if defined(OS_MACOSX)
   // OS X provides a contextual menu to set writing direction for BiDi
@@ -850,6 +931,24 @@ void RenderViewContextMenu::AppendSpellcheckOptionsSubMenu() {
       &spellcheck_submenu_model_);
 }
 
+void RenderViewContextMenu::AppendSpeechInputOptionsSubMenu() {
+  if (params_.speech_input_enabled) {
+    speech_input_submenu_model_.AddCheckItem(
+        IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS,
+        l10n_util::GetStringUTF16(
+            IDS_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS));
+
+    speech_input_submenu_model_.AddItemWithStringId(
+        IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT,
+        IDS_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT);
+
+    menu_model_.AddSubMenu(
+        IDC_SPEECH_INPUT_MENU,
+        l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_SPEECH_INPUT_MENU),
+        &speech_input_submenu_model_);
+  }
+}
+
 #if defined(OS_MACOSX)
 void RenderViewContextMenu::AppendBidiSubMenu() {
   bidi_submenu_model_.AddCheckItem(IDC_WRITING_DIRECTION_DEFAULT,
@@ -905,6 +1004,15 @@ ExtensionMenuItem* RenderViewContextMenu::GetExtensionMenuItem(int id) const {
 // Menu delegate functions -----------------------------------------------------
 
 bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
+  // If this command is is added by one of our observers, we dispatch it to the
+  // observer.
+  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
+  RenderViewContextMenuObserver* observer;
+  while ((observer = it.GetNext()) != NULL) {
+    if (observer->IsCommandIdSupported(id))
+      return observer->IsCommandIdEnabled(id);
+  }
+
   if (id == IDC_PRINT &&
       (source_tab_contents_->content_restrictions() &
           CONTENT_RESTRICTION_PRINT)) {
@@ -942,6 +1050,8 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     return true;
   }
 
+  IncognitoModePrefs::Availability incognito_avail =
+      IncognitoModePrefs::GetAvailability(profile_->GetPrefs());
   switch (id) {
     case IDC_BACK:
       return source_tab_contents_->controller().CanGoBack();
@@ -993,8 +1103,10 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     }
 
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
-    case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
       return params_.link_url.is_valid();
+    case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
+      return params_.link_url.is_valid() &&
+             incognito_avail != IncognitoModePrefs::FORCED;
 
     case IDC_CONTENT_CONTEXT_COPYLINKLOCATION:
       return params_.unfiltered_link_url.is_valid();
@@ -1118,7 +1230,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
       return !profile_->IsOffTheRecord() && params_.link_url.is_valid() &&
-             profile_->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled);
+             incognito_avail != IncognitoModePrefs::DISABLED;
 
     case IDC_SPELLCHECK_ADD_TO_DICTIONARY:
       return !params_.misspelled_word.empty();
@@ -1187,6 +1299,11 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_SPELLCHECK_MENU:
       return true;
 
+    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS:
+    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT:
+    case IDC_SPEECH_INPUT_MENU:
+      return true;
+
     case IDC_CONTENT_CONTEXT_OPENLINKWITH:
       return true;
 
@@ -1247,6 +1364,11 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
             profile_->GetPrefs()->GetBoolean(prefs::kEnableSpellCheck));
   }
 
+  // Check box for menu item 'Block offensive words'.
+  if (id == IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS) {
+    return profile_->GetPrefs()->GetBoolean(prefs::kSpeechInputCensorResults);
+  }
+
   // Don't bother getting the display language vector if this isn't a spellcheck
   // language.
   if ((id < IDC_SPELLCHECK_LANGUAGES_FIRST) ||
@@ -1259,6 +1381,15 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id) {
+  // If this command is is added by one of our observers, we dispatch it to the
+  // observer.
+  ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
+  RenderViewContextMenuObserver* observer;
+  while ((observer = it.GetNext()) != NULL) {
+    if (observer->IsCommandIdSupported(id))
+      return observer->ExecuteCommand(id);
+  }
+
   // Check to see if one of the spell check language ids have been clicked.
   if (id >= IDC_SPELLCHECK_LANGUAGES_FIRST &&
       id < IDC_SPELLCHECK_LANGUAGES_LAST) {
@@ -1349,8 +1480,8 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
     case IDC_CONTENT_CONTEXT_SAVEAVAS:
     case IDC_CONTENT_CONTEXT_SAVEIMAGEAS:
     case IDC_CONTENT_CONTEXT_SAVELINKAS: {
-      download_util::RecordDownloadCount(
-          download_util::INITIATED_BY_CONTEXT_MENU_COUNT);
+      download_stats::RecordDownloadCount(
+          download_stats::INITIATED_BY_CONTEXT_MENU_COUNT);
       const GURL& referrer =
           params_.frame_url.is_empty() ? params_.page_url : params_.frame_url;
       const GURL& url =
@@ -1668,6 +1799,22 @@ void RenderViewContextMenu::ExecuteCommand(int id) {
       break;
     }
 
+    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS: {
+      PrefService* prefs = profile_->GetPrefs();
+      const bool censor = !prefs->GetBoolean(prefs::kSpeechInputCensorResults);
+      prefs->SetBoolean(prefs::kSpeechInputCensorResults, censor);
+      break;
+    }
+
+    case IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT: {
+      GURL url(chrome::kSpeechInputAboutURL);
+      GURL localized_url = google_util::AppendGoogleLocaleParam(url);
+      // Open URL with no referrer field (because user clicked on menu item).
+      OpenURL(localized_url, GURL(), 0, NEW_FOREGROUND_TAB,
+              PageTransition::LINK);
+      break;
+    }
+
     default:
       NOTREACHED();
       break;
@@ -1708,20 +1855,8 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
 }
 
 bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kAlwaysEnableDevTools))
-    return true;
-
-  NavigationEntry *active_entry =
-      source_tab_contents_->controller().GetActiveEntry();
-  if (!active_entry)
-    return false;
-
-  // Don't inspect view source.
-  if (active_entry->IsViewSourceMode())
-    return false;
-
   if (id == IDC_CONTENT_CONTEXT_INSPECTELEMENT) {
+    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
     // Don't enable the web inspector if JavaScript is disabled.
     if (!profile_->GetPrefs()->GetBoolean(prefs::kWebKitJavascriptEnabled) ||
         command_line.HasSwitch(switches::kDisableJavaScript))
@@ -1736,8 +1871,8 @@ bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
 }
 
 string16 RenderViewContextMenu::PrintableSelectionText() {
-  return l10n_util::TruncateString(params_.selection_text,
-                                   kMaxSelectionTextLength);
+  return ui::TruncateString(params_.selection_text,
+                            kMaxSelectionTextLength);
 }
 
 // Controller functions --------------------------------------------------------
@@ -1757,7 +1892,8 @@ void RenderViewContextMenu::OpenURL(
     details.target_tab_contents = new_contents;
     NotificationService::current()->Notify(
         content::NOTIFICATION_RETARGETING,
-        Source<Profile>(source_tab_contents_->profile()),
+        Source<content::BrowserContext>(
+            source_tab_contents_->browser_context()),
         Details<content::RetargetingDetails>(&details));
   }
 }

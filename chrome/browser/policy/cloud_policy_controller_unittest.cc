@@ -20,12 +20,12 @@
 
 namespace policy {
 
-using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::AtLeast;
 using ::testing::InSequence;
 using ::testing::Mock;
 using ::testing::Return;
+using ::testing::_;
 
 class MockDeviceTokenFetcher : public DeviceTokenFetcher {
  public:
@@ -35,6 +35,7 @@ class MockDeviceTokenFetcher : public DeviceTokenFetcher {
 
   MOCK_METHOD0(FetchToken, void());
   MOCK_METHOD0(SetUnmanagedState, void());
+  MOCK_METHOD0(SetSerialNumberInvalidState, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDeviceTokenFetcher);
@@ -71,7 +72,7 @@ class CloudPolicyControllerTest : public testing::Test {
   }
 
   void ExpectHasSpdyPolicy() {
-    FundamentalValue expected(true);
+    base::FundamentalValue expected(true);
     const PolicyMap* policy_map = cache_->policy(
         CloudPolicyCacheBase::POLICY_LEVEL_MANDATORY);
     ASSERT_TRUE(Value::Equals(&expected, policy_map->Get(kPolicyDisableSpdy)));
@@ -103,8 +104,8 @@ class CloudPolicyControllerTest : public testing::Test {
 // fetch and apply policy.
 TEST_F(CloudPolicyControllerTest, StartupWithDeviceToken) {
   data_store_->SetupForTesting("fake_device_token", "device_id", "", "",
-                                true);
-  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(DoAll(
+                               true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(DoAll(
       InvokeWithoutArgs(this, &CloudPolicyControllerTest::StopMessageLoop),
       MockDeviceManagementBackendSucceedSpdyCloudPolicy()));
   CreateNewController();
@@ -116,7 +117,7 @@ TEST_F(CloudPolicyControllerTest, StartupWithDeviceToken) {
 // instruct the token_fetcher_ to fetch one.
 TEST_F(CloudPolicyControllerTest, StartupWithoutDeviceToken) {
   data_store_->SetupForTesting("", "device_id", "a@b.com", "auth_token",
-                                true);
+                               true);
   EXPECT_CALL(*token_fetcher_.get(), FetchToken()).Times(1);
   CreateNewController();
   loop_.RunAllPending();
@@ -126,7 +127,7 @@ TEST_F(CloudPolicyControllerTest, StartupWithoutDeviceToken) {
 // should be initiated.
 TEST_F(CloudPolicyControllerTest, StartupUnmanagedUser) {
   data_store_->SetupForTesting("", "device_id", "DannoHelper@gmail.com",
-                                "auth_token", true);
+                               "auth_token", true);
   EXPECT_CALL(*token_fetcher_.get(), FetchToken()).Times(0);
   CreateNewController();
   loop_.RunAllPending();
@@ -136,13 +137,13 @@ TEST_F(CloudPolicyControllerTest, StartupUnmanagedUser) {
 // after the refresh interval has timed out.
 TEST_F(CloudPolicyControllerTest, RefreshAfterSuccessfulPolicy) {
   data_store_->SetupForTesting("device_token", "device_id",
-                                "DannoHelperDelegate@b.com",
-                                "auth_token", true);
+                               "DannoHelperDelegate@b.com",
+                               "auth_token", true);
   {
     InSequence s;
-    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(
+    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(
         MockDeviceManagementBackendSucceedSpdyCloudPolicy());
-    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(DoAll(
+    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(DoAll(
         InvokeWithoutArgs(this, &CloudPolicyControllerTest::StopMessageLoop),
         MockDeviceManagementBackendFailPolicy(
             DeviceManagementBackend::kErrorRequestFailed)));
@@ -155,14 +156,14 @@ TEST_F(CloudPolicyControllerTest, RefreshAfterSuccessfulPolicy) {
 // If policy fetching failed, it should be retried.
 TEST_F(CloudPolicyControllerTest, RefreshAfterError) {
   data_store_->SetupForTesting("device_token", "device_id",
-                                "DannoHelperDelegateImpl@b.com",
-                                "auth_token", true);
+                               "DannoHelperDelegateImpl@b.com",
+                               "auth_token", true);
   {
     InSequence s;
-    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(
+    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(
         MockDeviceManagementBackendFailPolicy(
             DeviceManagementBackend::kErrorRequestFailed));
-    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(DoAll(
+    EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(DoAll(
         InvokeWithoutArgs(this,
                           &CloudPolicyControllerTest::StopMessageLoop),
         MockDeviceManagementBackendSucceedSpdyCloudPolicy()));
@@ -176,8 +177,8 @@ TEST_F(CloudPolicyControllerTest, RefreshAfterError) {
 // should instruct the token fetcher to fetch a new token.
 TEST_F(CloudPolicyControllerTest, InvalidToken) {
   data_store_->SetupForTesting("device_token", "device_id",
-                                "standup@ten.am", "auth", true);
-  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(
+                               "standup@ten.am", "auth", true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(
       MockDeviceManagementBackendFailPolicy(
           DeviceManagementBackend::kErrorServiceManagementTokenInvalid));
   EXPECT_CALL(*token_fetcher_.get(), FetchToken()).Times(1);
@@ -189,10 +190,23 @@ TEST_F(CloudPolicyControllerTest, InvalidToken) {
 // controller should instruct the token fetcher to fetch a new token.
 TEST_F(CloudPolicyControllerTest, DeviceNotFound) {
   data_store_->SetupForTesting("device_token", "device_id",
-                                "me@you.com", "auth", true);
-  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(
+                               "me@you.com", "auth", true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(
       MockDeviceManagementBackendFailPolicy(
           DeviceManagementBackend::kErrorServiceDeviceNotFound));
+  EXPECT_CALL(*token_fetcher_.get(), FetchToken()).Times(1);
+  CreateNewController();
+  loop_.RunAllPending();
+}
+
+// If the backend reports that the device-id is already existing, the
+// controller should instruct the token fetcher to fetch a new token.
+TEST_F(CloudPolicyControllerTest, DeviceIdConflict) {
+  data_store_->SetupForTesting("device_token", "device_id",
+                               "me@you.com", "auth", true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(
+      MockDeviceManagementBackendFailPolicy(
+          DeviceManagementBackend::kErrorServiceDeviceIdConflict));
   EXPECT_CALL(*token_fetcher_.get(), FetchToken()).Times(1);
   CreateNewController();
   loop_.RunAllPending();
@@ -203,8 +217,8 @@ TEST_F(CloudPolicyControllerTest, DeviceNotFound) {
 // set and persist the correct 'unmanaged' state).
 TEST_F(CloudPolicyControllerTest, NoLongerManaged) {
   data_store_->SetupForTesting("device_token", "device_id",
-                                "who@what.com", "auth", true);
-  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _)).WillOnce(
+                               "who@what.com", "auth", true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(
       MockDeviceManagementBackendFailPolicy(
           DeviceManagementBackend::kErrorServiceManagementNotSupported));
   EXPECT_CALL(*token_fetcher_.get(), SetUnmanagedState()).Times(1);
@@ -212,4 +226,17 @@ TEST_F(CloudPolicyControllerTest, NoLongerManaged) {
   loop_.RunAllPending();
 }
 
+// If the backend reports that the device has invalid serial number, the
+// controller should instruct the token fetcher not to fetch a new token
+// (which will in turn set and persist the correct 'sn invalid' state).
+TEST_F(CloudPolicyControllerTest, InvalidSerialNumber) {
+  data_store_->SetupForTesting("device_token", "device_id",
+                               "who@what.com", "auth", true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(
+      MockDeviceManagementBackendFailPolicy(
+          DeviceManagementBackend::kErrorServiceInvalidSerialNumber));
+  EXPECT_CALL(*token_fetcher_.get(), SetSerialNumberInvalidState()).Times(1);
+  CreateNewController();
+  loop_.RunAllPending();
+}
 }  // namespace policy

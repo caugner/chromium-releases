@@ -12,6 +12,7 @@
 #include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/status_icons/status_icon.h"
@@ -135,6 +136,10 @@ BackgroundModeManager::BackgroundModeManager(CommandLine* command_line)
       keep_alive_for_startup_(false),
       keep_alive_for_test_(false),
       current_command_id_(0) {
+  // We should never start up if there is no browser process or if we are
+  // currently quitting.
+  CHECK(g_browser_process != NULL);
+  CHECK(!browser_shutdown::IsTryingToQuit());
   // If background mode is currently disabled, just exit - don't listen for any
   // notifications.
   if (IsBackgroundModePermanentlyDisabled(command_line))
@@ -200,9 +205,12 @@ void BackgroundModeManager::RegisterProfile(Profile* profile) {
                                                 profile, this));
   background_mode_data_[profile] = bmd;
 
-  // Listen for when extensions are loaded so we can display a "background app
-  // installed" notification and enter "launch on login" mode on the Mac.
+  // Listen for when extensions are loaded or add the background permission so
+  // we can display a "background app installed" notification and enter
+  // "launch on login" mode on the Mac.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+                 Source<Profile>(profile));
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PERMISSIONS_UPDATED,
                  Source<Profile>(profile));
 
 
@@ -248,6 +256,17 @@ void BackgroundModeManager::Observe(int type,
           Profile* profile = Source<Profile>(source).ptr();
           if (profile->GetExtensionService()->is_ready())
             OnBackgroundAppInstalled(extension);
+        }
+      }
+      break;
+    case chrome::NOTIFICATION_EXTENSION_PERMISSIONS_UPDATED: {
+        UpdatedExtensionPermissionsInfo* info =
+            Details<UpdatedExtensionPermissionsInfo>(details).ptr();
+        if (info->permissions->HasAPIPermission(
+                ExtensionAPIPermission::kBackground) &&
+            info->reason == UpdatedExtensionPermissionsInfo::ADDED) {
+          // Turned on background permission, so treat this as a new install.
+          OnBackgroundAppInstalled(info->extension);
         }
       }
       break;

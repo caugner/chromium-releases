@@ -204,8 +204,8 @@ bool SignHmacSha1(const std::string& text,
   crypto::HMAC hmac(crypto::HMAC::SHA1);
   DCHECK(hmac.DigestLength() == kHmacDigestLength);
   unsigned char digest[kHmacDigestLength];
-  hmac.Init(key);
-  bool result = hmac.Sign(text, digest, kHmacDigestLength) &&
+  bool result = hmac.Init(key) &&
+      hmac.Sign(text, digest, kHmacDigestLength) &&
       base::Base64Encode(std::string(reinterpret_cast<const char*>(digest),
                                      kHmacDigestLength),
                          signature_return);
@@ -233,6 +233,63 @@ bool SignRsaSha1(const std::string& text,
   NOTIMPLEMENTED();
   return false;
 }
+
+// Adds parameters that are required by OAuth added as needed to |parameters|.
+void PrepareParameters(OAuthRequestSigner::Parameters* parameters,
+                       OAuthRequestSigner::SignatureMethod signature_method,
+                       OAuthRequestSigner::HttpMethod http_method,
+                       const std::string& consumer_key,
+                       const std::string& token_key) {
+  if (parameters->find(kOAuthNonceLabel) == parameters->end())
+    (*parameters)[kOAuthNonceLabel] = GenerateNonce();
+
+  if (parameters->find(kOAuthTimestampLabel) == parameters->end())
+    (*parameters)[kOAuthTimestampLabel] = GenerateTimestamp();
+
+  (*parameters)[kOAuthConsumerKeyLabel] = consumer_key;
+  (*parameters)[kOAuthSignatureMethodLabel] =
+      SignatureMethodName(signature_method);
+  (*parameters)[kOAuthTokenLabel] = token_key;
+  (*parameters)[kOAuthVersionLabel] = kOAuthVersion;
+}
+
+// Implements shared signing logic, generating the signature and storing it in
+// |parameters|. Returns true if the signature has been generated succesfully.
+bool SignParameters(const GURL& request_base_url,
+                    OAuthRequestSigner::SignatureMethod signature_method,
+                    OAuthRequestSigner::HttpMethod http_method,
+                    const std::string& consumer_key,
+                    const std::string& consumer_secret,
+                    const std::string& token_key,
+                    const std::string& token_secret,
+                    OAuthRequestSigner::Parameters* parameters) {
+  DCHECK(request_base_url.is_valid());
+  PrepareParameters(parameters, signature_method, http_method,
+                    consumer_key, token_key);
+  std::string base_parameters = BuildBaseStringParameters(*parameters);
+  std::string base = BuildBaseString(request_base_url, http_method,
+                                     base_parameters);
+  std::string key = consumer_secret + '&' + token_secret;
+  bool is_signed = false;
+  std::string signature;
+  switch (signature_method) {
+    case OAuthRequestSigner::HMAC_SHA1_SIGNATURE:
+      is_signed = SignHmacSha1(base, key, &signature);
+      break;
+    case OAuthRequestSigner::RSA_SHA1_SIGNATURE:
+      is_signed = SignRsaSha1(base, key, &signature);
+      break;
+    case OAuthRequestSigner::PLAINTEXT_SIGNATURE:
+      is_signed = SignPlaintext(base, key, &signature);
+      break;
+    default:
+      NOTREACHED();
+  }
+  if (is_signed)
+    (*parameters)[kOAuthSignatureLabel] = signature;
+  return is_signed;
+}
+
 
 }  // namespace
 
@@ -325,37 +382,13 @@ bool OAuthRequestSigner::ParseAndSign(const GURL& request_url_with_parameters,
   std::string::size_type question = spec.find("?");
   if (question != std::string::npos)
     url_without_parameters = spec.substr(0,question);
-  return Sign (GURL(url_without_parameters), parameters, signature_method,
-               http_method, consumer_key, consumer_secret, token_key,
-               token_secret, result);
-}
-
-// Returns a copy of request_parameters, with parameters that are required by
-// OAuth added as needed.
-OAuthRequestSigner::Parameters
-PrepareParameters(const OAuthRequestSigner::Parameters& request_parameters,
-                  OAuthRequestSigner::SignatureMethod signature_method,
-                  OAuthRequestSigner::HttpMethod http_method,
-                  const std::string& consumer_key,
-                  const std::string& token_key) {
-  OAuthRequestSigner::Parameters result(request_parameters);
-
-  if (result.find(kOAuthNonceLabel) == result.end())
-    result[kOAuthNonceLabel] = GenerateNonce();
-
-  if (result.find(kOAuthTimestampLabel) == result.end())
-    result[kOAuthTimestampLabel] = GenerateTimestamp();
-
-  result[kOAuthConsumerKeyLabel] = consumer_key;
-  result[kOAuthSignatureMethodLabel] = SignatureMethodName(signature_method);
-  result[kOAuthTokenLabel] = token_key;
-  result[kOAuthVersionLabel] = kOAuthVersion;
-
-  return result;
+  return SignURL(GURL(url_without_parameters), parameters, signature_method,
+                 http_method, consumer_key, consumer_secret, token_key,
+                 token_secret, result);
 }
 
 // static
-bool OAuthRequestSigner::Sign(
+bool OAuthRequestSigner::SignURL(
     const GURL& request_base_url,
     const Parameters& request_parameters,
     SignatureMethod signature_method,
@@ -366,31 +399,10 @@ bool OAuthRequestSigner::Sign(
     const std::string& token_secret,
     std::string* signed_text_return) {
   DCHECK(request_base_url.is_valid());
-  Parameters parameters = PrepareParameters(request_parameters,
-                                            signature_method,
-                                            http_method,
-                                            consumer_key,
-                                            token_key);
-  std::string base_parameters = BuildBaseStringParameters(parameters);
-  std::string base = BuildBaseString(request_base_url,
-                                     http_method,
-                                     base_parameters);
-  std::string key = consumer_secret + '&' + token_secret;
-  bool is_signed = false;
-  std::string signature;
-  switch (signature_method) {
-    case HMAC_SHA1_SIGNATURE:
-      is_signed =  SignHmacSha1(base, key, &signature);
-      break;
-    case RSA_SHA1_SIGNATURE:
-      is_signed =  SignRsaSha1(base, key, &signature);
-      break;
-    case PLAINTEXT_SIGNATURE:
-      is_signed =  SignPlaintext(base, key, &signature);
-      break;
-    default:
-      NOTREACHED();
-  }
+  Parameters parameters(request_parameters);
+  bool is_signed = SignParameters(request_base_url, signature_method,
+                                  http_method, consumer_key, consumer_secret,
+                                  token_key, token_secret, &parameters);
   if (is_signed) {
     std::string signed_text;
     switch (http_method) {
@@ -398,11 +410,46 @@ bool OAuthRequestSigner::Sign(
         signed_text = request_base_url.spec() + '?';
         // Intentionally falling through
       case POST_METHOD:
-        signed_text += base_parameters + '&' + kOAuthSignatureLabel + '=' +
-            Encode(signature);
+        signed_text += BuildBaseStringParameters(parameters);
         break;
       default:
         NOTREACHED();
+    }
+    *signed_text_return = signed_text;
+  }
+  return is_signed;
+}
+
+// static
+bool OAuthRequestSigner::SignAuthHeader(
+    const GURL& request_base_url,
+    const Parameters& request_parameters,
+    SignatureMethod signature_method,
+    HttpMethod http_method,
+    const std::string& consumer_key,
+    const std::string& consumer_secret,
+    const std::string& token_key,
+    const std::string& token_secret,
+    std::string* signed_text_return) {
+  DCHECK(request_base_url.is_valid());
+  Parameters parameters(request_parameters);
+  bool is_signed = SignParameters(request_base_url, signature_method,
+                                  http_method, consumer_key, consumer_secret,
+                                  token_key, token_secret, &parameters);
+  if (is_signed) {
+    std::string signed_text = "OAuth ";
+    bool first = true;
+    for (Parameters::const_iterator param = parameters.begin();
+         param != parameters.end();
+         ++param) {
+      if (first)
+        first = false;
+      else
+        signed_text += ", ";
+      signed_text +=
+          StringPrintf("%s=\"%s\"",
+                       OAuthRequestSigner::Encode(param->first).c_str(),
+                       OAuthRequestSigner::Encode(param->second).c_str());
     }
     *signed_text_return = signed_text;
   }

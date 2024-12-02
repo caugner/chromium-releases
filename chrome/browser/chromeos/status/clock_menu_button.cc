@@ -20,13 +20,14 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/widget/widget.h"
 #include "unicode/datefmt.h"
 
 namespace {
 
 // views::MenuItemView item ids
-enum {
+enum ClockMenuItem {
   CLOCK_DISPLAY_ITEM,
   CLOCK_OPEN_OPTIONS_ITEM
 };
@@ -79,7 +80,7 @@ void ClockMenuButton::UpdateTextAndSetNextTimer() {
   // called just a teeny bit early, then it will skip the next minute.
   seconds_left += kTimerSlopSeconds;
 
-  timer_.Start(base::TimeDelta::FromSeconds(seconds_left), this,
+  timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(seconds_left), this,
                &ClockMenuButton::UpdateTextAndSetNextTimer);
 }
 
@@ -152,24 +153,14 @@ void ClockMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
 
   EnsureMenu();
 
-  // TODO(rhashimoto): Remove this workaround when WebUI provides a
-  // top-level widget on the ChromeOS login screen that is a window.
-  // The current BackgroundView class for the ChromeOS login screen
-  // creates a owning Widget that has a native GtkWindow but is not a
-  // Window.  This makes it impossible to get the NativeWindow via
-  // the views API.  This workaround casts the top-level NativeWidget
-  // to a NativeWindow that we can pass to MenuItemView::RunMenuAt().
-  gfx::NativeWindow window = GTK_WINDOW(source->GetWidget()->GetNativeView());
-
   gfx::Point screen_location;
   views::View::ConvertPointToScreen(source, &screen_location);
   gfx::Rect bounds(screen_location, source->size());
-  menu_->RunMenuAt(
-      window,
-      this,
-      bounds,
-      views::MenuItemView::TOPRIGHT,
-      true);
+  if (menu_runner_->RunMenuAt(
+          source->GetWidget()->GetTopLevelWidget(), this, bounds,
+          views::MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
+      views::MenuRunner::MENU_DELETED)
+    return;
 }
 
 // ClockMenuButton, views::View implementation:
@@ -179,23 +170,26 @@ void ClockMenuButton::OnLocaleChanged() {
 }
 
 void ClockMenuButton::EnsureMenu() {
-  if (!menu_.get()) {
-    menu_.reset(new views::MenuItemView(this));
+  if (menu_runner_.get())
+    return;
 
-    // Text for this item will be set by GetLabel().
-    menu_->AppendDelegateMenuItem(CLOCK_DISPLAY_ITEM);
+  views::MenuItemView* menu = new views::MenuItemView(this);
+  // menu_runner_ takes ownership of menu.
+  menu_runner_.reset(new views::MenuRunner(menu));
 
-    // If options dialog is unavailable, don't show a separator and configure
-    // menu item.
-    if (host_->ShouldOpenButtonOptions(this)) {
-      menu_->AppendSeparator();
+  // Text for this item will be set by GetLabel().
+  menu->AppendDelegateMenuItem(CLOCK_DISPLAY_ITEM);
 
-      const string16 clock_open_options_label =
-          l10n_util::GetStringUTF16(IDS_STATUSBAR_CLOCK_OPEN_OPTIONS_DIALOG);
-      menu_->AppendMenuItemWithLabel(
-          CLOCK_OPEN_OPTIONS_ITEM,
-          UTF16ToWide(clock_open_options_label));
-    }
+  // If options dialog is unavailable, don't show a separator and configure
+  // menu item.
+  if (host_->ShouldOpenButtonOptions(this)) {
+    menu->AppendSeparator();
+
+    const string16 clock_open_options_label =
+        l10n_util::GetStringUTF16(IDS_STATUSBAR_CLOCK_OPEN_OPTIONS_DIALOG);
+    menu->AppendMenuItemWithLabel(
+        CLOCK_OPEN_OPTIONS_ITEM,
+        UTF16ToWide(clock_open_options_label));
   }
 }
 

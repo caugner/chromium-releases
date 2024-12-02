@@ -16,17 +16,15 @@ using media::BitstreamBuffer;
 
 PlatformVideoDecoderImpl::PlatformVideoDecoderImpl(
     VideoDecodeAccelerator::Client* client,
-    int32 command_buffer_route_id,
-    gpu::CommandBufferHelper* cmd_buffer_helper)
+    int32 command_buffer_route_id)
     : client_(client),
-      command_buffer_route_id_(command_buffer_route_id),
-      cmd_buffer_helper_(cmd_buffer_helper) {
+      command_buffer_route_id_(command_buffer_route_id) {
   DCHECK(client);
 }
 
 PlatformVideoDecoderImpl::~PlatformVideoDecoderImpl() {}
 
-bool PlatformVideoDecoderImpl::Initialize(const std::vector<uint32>& configs) {
+bool PlatformVideoDecoderImpl::Initialize(Profile profile) {
   // TODO(vrk): Support multiple decoders.
   if (decoder_)
     return true;
@@ -47,8 +45,8 @@ bool PlatformVideoDecoderImpl::Initialize(const std::vector<uint32>& configs) {
 
   // Send IPC message to initialize decoder in GPU process.
   decoder_ = channel->CreateVideoDecoder(
-      command_buffer_route_id_, configs, cmd_buffer_helper_, this);
-  return true;
+      command_buffer_route_id_, profile, this);
+  return decoder_.get() != NULL;
 }
 
 void PlatformVideoDecoderImpl::Decode(const BitstreamBuffer& bitstream_buffer) {
@@ -81,6 +79,8 @@ void PlatformVideoDecoderImpl::Reset() {
 void PlatformVideoDecoderImpl::Destroy() {
   DCHECK(decoder_);
   decoder_->Destroy();
+  client_ = NULL;
+  decoder_ = NULL;
 }
 
 void PlatformVideoDecoderImpl::NotifyEndOfStream() {
@@ -112,8 +112,7 @@ void PlatformVideoDecoderImpl::PictureReady(const media::Picture& picture) {
 }
 
 void PlatformVideoDecoderImpl::NotifyInitializeDone() {
-  DCHECK_EQ(RenderThread::current()->message_loop(), MessageLoop::current());
-  client_->NotifyInitializeDone();
+  NOTREACHED() << "GpuVideoDecodeAcceleratorHost::Initialize is synchronous!";
 }
 
 void PlatformVideoDecoderImpl::NotifyEndOfBitstreamBuffer(

@@ -6,6 +6,7 @@
 // Multiply-included message file, hence no include guard.
 
 #include "base/file_util_proxy.h"
+#include "googleurl/src/gurl.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "webkit/fileapi/file_system_types.h"
@@ -132,6 +133,11 @@ IPC_MESSAGE_CONTROL3(FileSystemHostMsg_OpenFile,
                      int /* request id */,
                      GURL /* file path */,
                      int /* file flags */)
+
+// For Pepper's URL loader.
+IPC_SYNC_MESSAGE_CONTROL1_1(FileSystemHostMsg_SyncGetPlatformPath,
+                            GURL /* file path */,
+                            FilePath /* platform_path */)
 
 // Pre- and post-update notifications for ppapi implementation.
 IPC_MESSAGE_CONTROL1(FileSystemHostMsg_WillUpdate,

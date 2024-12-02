@@ -41,7 +41,6 @@ class InstantController;
 class KeywordHintView;
 class LocationIconView;
 class PageActionWithBadgeView;
-class Profile;
 class SelectedKeywordView;
 class StarView;
 class TabContents;
@@ -118,8 +117,7 @@ class LocationBarView : public LocationBar,
     APP_LAUNCHER
   };
 
-  LocationBarView(Profile* profile,
-                  Browser* browser,
+  LocationBarView(Browser* browser,
                   ToolbarModel* model,
                   Delegate* delegate,
                   Mode mode);
@@ -141,8 +139,6 @@ class LocationBarView : public LocationBar,
   // saved state that the tab holds.
   void Update(const TabContents* tab_for_state_restoring);
 
-  void SetProfile(Profile* profile);
-  Profile* profile() const { return profile_; }
   Browser* browser() const { return browser_; }
 
   // Sets |preview_enabled| for the PageAction View associated with this
@@ -241,7 +237,7 @@ class LocationBarView : public LocationBar,
   virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type) OVERRIDE;
   virtual void SetSuggestedText(const string16& text,
                                 InstantCompleteBehavior behavior) OVERRIDE;
-  virtual std::wstring GetInputString() const OVERRIDE;
+  virtual string16 GetInputString() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
   virtual PageTransition::Type GetPageTransition() const OVERRIDE;
   virtual void AcceptInput() OVERRIDE;
@@ -339,9 +335,6 @@ class LocationBarView : public LocationBar,
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
 
-  // Current profile. Not owned by us.
-  Profile* profile_;
-
   // The Autocomplete Edit field.
   scoped_ptr<OmniboxView> location_entry_;
 
@@ -356,7 +349,7 @@ class LocationBarView : public LocationBar,
 
   // This is the string of text from the autocompletion session that the user
   // entered or selected.
-  std::wstring location_input_;
+  string16 location_input_;
 
   // The user's desired disposition for how their input should be opened
   WindowOpenDisposition disposition_;

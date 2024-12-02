@@ -18,8 +18,8 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/common/notification_service.h"
 #include "ui/base/x/x11_util.h"
 
@@ -174,8 +174,9 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestBasic) {
   ui_test_utils::RunAllPendingInMessageLoop();
 }
 
-// [CLOSED] -add->[STICKY_AND_NEW] -mouse-> [KEEP_SIZE] -remove/add->
-// [KEEP_SIZE] -remove-> [CLOSED] -add-> [STICKY_AND_NEW] -remove-> [CLOSED]
+// [CLOSED] -add->[STICKY_AND_NEW] -mouse-> [STICKY_AND_NEW] -remove/add->
+// [STICKY_AND_NEW] -remove-> [CLOSED] -add-> [STICKY_AND_NEW] -remove->
+// [CLOSED]
 IN_PROC_BROWSER_TEST_F(NotificationTest, TestKeepSizeState) {
   BalloonCollectionImpl* collection = GetBalloonCollectionImpl();
   NotificationPanel* panel = GetNotificationPanel();
@@ -190,25 +191,25 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestKeepSizeState) {
   EXPECT_EQ(NotificationPanel::STICKY_AND_NEW, tester->state());
 
   panel->OnMouseMotion(gfx::Point(10, 10));
-  EXPECT_EQ(NotificationPanel::KEEP_SIZE, tester->state());
+  EXPECT_EQ(NotificationPanel::STICKY_AND_NEW, tester->state());
 
   collection->RemoveById("1");
   ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_EQ(1, tester->GetNewNotificationCount());
   EXPECT_EQ(1, tester->GetNotificationCount());
-  EXPECT_EQ(NotificationPanel::KEEP_SIZE, tester->state());
+  EXPECT_EQ(NotificationPanel::STICKY_AND_NEW, tester->state());
 
   collection->Add(NewMockNotification("1"), browser()->profile());
   ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_EQ(2, tester->GetNewNotificationCount());
   EXPECT_EQ(2, tester->GetNotificationCount());
-  EXPECT_EQ(NotificationPanel::KEEP_SIZE, tester->state());
+  EXPECT_EQ(NotificationPanel::STICKY_AND_NEW, tester->state());
 
   collection->RemoveById("1");
   ui_test_utils::RunAllPendingInMessageLoop();
   EXPECT_EQ(1, tester->GetNewNotificationCount());
   EXPECT_EQ(1, tester->GetNotificationCount());
-  EXPECT_EQ(NotificationPanel::KEEP_SIZE, tester->state());
+  EXPECT_EQ(NotificationPanel::STICKY_AND_NEW, tester->state());
 
   collection->RemoveById("2");
   ui_test_utils::RunAllPendingInMessageLoop();

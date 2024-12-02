@@ -23,7 +23,7 @@ class Size;
 namespace printing {
 
 // Simple wrapper class that manage an EMF data stream and its virtual HDC.
-class Emf : public Metafile {
+class PRINTING_EXPORT Emf : public Metafile {
  public:
   class Record;
   class Enumerator;
@@ -46,8 +46,8 @@ class Emf : public Metafile {
   virtual bool InitFromData(const void* src_buffer, uint32 src_buffer_size);
 
   virtual SkDevice* StartPageForVectorCanvas(
-      int page_number, const gfx::Size& page_size,
-      const gfx::Rect& content_area, const float& scale_factor);
+      const gfx::Size& page_size, const gfx::Rect& content_area,
+      const float& scale_factor);
   // Inserts a custom GDICOMMENT records indicating StartPage/EndPage calls
   // (since StartPage and EndPage do not work in a metafile DC). Only valid
   // when hdc_ is non-NULL. |page_size|, |content_area|, and |scale_factor| are
@@ -118,7 +118,7 @@ struct Emf::EnumerationContext {
 
 // One EMF record. It keeps pointers to the EMF buffer held by Emf::emf_.
 // The entries become invalid once Emf::CloseEmf() is called.
-class Emf::Record {
+class PRINTING_EXPORT Emf::Record {
  public:
   // Plays the record.
   bool Play() const;
@@ -144,7 +144,7 @@ class Emf::Record {
 // Retrieves individual records out of a Emf buffer. The main use is to skip
 // over records that are unsupported on a specific printer or to play back
 // only a part of an EMF buffer.
-class Emf::Enumerator {
+class PRINTING_EXPORT Emf::Enumerator {
  public:
   // Iterator type used for iterating the records.
   typedef std::vector<Record>::const_iterator const_iterator;

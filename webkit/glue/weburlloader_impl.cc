@@ -30,7 +30,6 @@
 #include "webkit/glue/ftp_directory_listing_response_delegate.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/glue/resource_loader_bridge.h"
-#include "webkit/glue/request_extra_data.h"
 #include "webkit/glue/webkit_glue.h"
 
 using base::Time;
@@ -109,42 +108,6 @@ class HeaderFlattener : public WebHTTPHeaderVisitor {
   bool has_accept_header_;
 };
 
-ResourceType::Type FromTargetType(WebURLRequest::TargetType type) {
-  switch (type) {
-    case WebURLRequest::TargetIsMainFrame:
-      return ResourceType::MAIN_FRAME;
-    case WebURLRequest::TargetIsSubframe:
-      return ResourceType::SUB_FRAME;
-    case WebURLRequest::TargetIsSubresource:
-      return ResourceType::SUB_RESOURCE;
-    case WebURLRequest::TargetIsStyleSheet:
-      return ResourceType::STYLESHEET;
-    case WebURLRequest::TargetIsScript:
-      return ResourceType::SCRIPT;
-    case WebURLRequest::TargetIsFontResource:
-      return ResourceType::FONT_RESOURCE;
-    case WebURLRequest::TargetIsImage:
-      return ResourceType::IMAGE;
-    case WebURLRequest::TargetIsObject:
-      return ResourceType::OBJECT;
-    case WebURLRequest::TargetIsMedia:
-      return ResourceType::MEDIA;
-    case WebURLRequest::TargetIsWorker:
-      return ResourceType::WORKER;
-    case WebURLRequest::TargetIsSharedWorker:
-      return ResourceType::SHARED_WORKER;
-    case WebURLRequest::TargetIsPrefetch:
-      return ResourceType::PREFETCH;
-    case WebURLRequest::TargetIsPrerender:
-      return ResourceType::PRERENDER;
-    case WebURLRequest::TargetIsFavicon:
-      return ResourceType::FAVICON;
-    default:
-      NOTREACHED();
-      return ResourceType::SUB_RESOURCE;
-  }
-}
-
 // Extracts the information from a data: url.
 bool GetInfoFromDataURL(const GURL& url,
                         ResourceResponseInfo* info,
@@ -154,15 +117,17 @@ bool GetInfoFromDataURL(const GURL& url,
   std::string charset;
   if (net::DataURL::Parse(url, &mime_type, &charset, data)) {
     *status = net::URLRequestStatus(net::URLRequestStatus::SUCCESS, 0);
-    info->request_time = Time::Now();
-    info->response_time = Time::Now();
+    // Assure same time for all time fields of data: URLs.
+    Time now = Time::Now();
+    info->load_timing.base_time = now;
+    info->request_time = now;
+    info->response_time = now;
     info->headers = NULL;
     info->mime_type.swap(mime_type);
     info->charset.swap(charset);
     info->security_info.clear();
     info->content_length = -1;
     info->encoded_data_length = 0;
-    info->load_timing.base_time = Time::Now();
 
     return true;
   }
@@ -261,7 +226,7 @@ void PopulateURLResponse(
   std::string value;
   if (headers->EnumerateHeader(NULL, "content-disposition", &value)) {
     response->setSuggestedFileName(
-        net::GetSuggestedFilename(url, value, "", "", string16()));
+        net::GetSuggestedFilename(url, value, "", "", "", string16()));
   }
 
   Time time_val;
@@ -297,6 +262,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   void Start(
       const WebURLRequest& request,
       ResourceLoaderBridge::SyncLoadResponse* sync_load_response);
+  void UpdateRoutingId(int new_routing_id);
 
   // ResourceLoaderBridge::Peer methods:
   virtual void OnUploadProgress(uint64 position, uint64 size);
@@ -356,6 +322,11 @@ void WebURLLoaderImpl::Context::Cancel() {
 void WebURLLoaderImpl::Context::SetDefersLoading(bool value) {
   if (bridge_.get())
     bridge_->SetDefersLoading(value);
+}
+
+void WebURLLoaderImpl::Context::UpdateRoutingId(int new_routing_id) {
+  if (bridge_.get())
+    bridge_->UpdateRoutingId(new_routing_id);
 }
 
 void WebURLLoaderImpl::Context::Start(
@@ -434,19 +405,13 @@ void WebURLLoaderImpl::Context::Start(
   // the render process, so we can use requestorProcessID even for requests
   // from in-process plugins.
   request_info.requestor_pid = request.requestorProcessID();
-  request_info.request_type = FromTargetType(request.targetType());
+  request_info.request_type =
+      ResourceType::FromTargetType(request.targetType());
   request_info.appcache_host_id = request.appCacheHostID();
   request_info.routing_id = request.requestorID();
   request_info.download_to_file = request.downloadToFile();
   request_info.has_user_gesture = request.hasUserGesture();
-  request_info.frame_id = -1;
-  request_info.is_main_frame = false;
-  if (request.extraData()) {
-    RequestExtraData* extra_data =
-        static_cast<RequestExtraData*>(request.extraData());
-    request_info.frame_id = extra_data->frame_identifier();
-    request_info.is_main_frame = extra_data->is_main_frame();
-  }
+  request_info.extra_data = request.extraData();
   bridge_.reset(ResourceLoaderBridge::Create(request_info));
 
   if (!request.httpBody().isNull()) {
@@ -760,6 +725,10 @@ void WebURLLoaderImpl::cancel() {
 
 void WebURLLoaderImpl::setDefersLoading(bool value) {
   context_->SetDefersLoading(value);
+}
+
+void WebURLLoaderImpl::UpdateRoutingId(int new_routing_id) {
+  context_->UpdateRoutingId(new_routing_id);
 }
 
 }  // namespace webkit_glue

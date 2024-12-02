@@ -10,7 +10,6 @@
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
-#include "webkit/plugins/ppapi/resource.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
 
 using ppapi::thunk::EnterResource;
@@ -28,10 +27,10 @@ void PluginCrashed(PP_Module module) {
 }
 
 PP_Instance GetInstanceForResource(PP_Resource resource) {
-  scoped_refptr<Resource> obj(ResourceTracker::Get()->GetResource(resource));
+  ::ppapi::Resource* obj = ResourceTracker::Get()->GetResource(resource);
   if (!obj)
     return 0;
-  return obj->instance()->pp_instance();
+  return obj->pp_instance();
 }
 
 void SetReserveInstanceIDCallback(PP_Module module,

@@ -40,9 +40,8 @@ class MemoryTest(pyauto.PyUITest):
   RENDERER_PROCESS_OUTPUT_FILE = 'renderer_process_mem.txt'
 
   # Constants for testExtensionProcessMemoryUsage.
-  EXTENSION_LOCATION = pyauto.FilePath(
-      os.path.abspath(os.path.join(pyauto.PyUITest.DataDir(), 'extensions',
-                                   'google_talk.crx')))
+  EXTENSION_LOCATION = os.path.abspath(os.path.join(
+      pyauto.PyUITest.DataDir(), 'extensions', 'google_talk.crx'))
   EXTENSION_PROCESS_NAME = 'Google Talk'
   EXTENSION_PROCESS_OUTPUT_FILE = 'extension_process_mem.txt'
 
@@ -57,7 +56,7 @@ class MemoryTest(pyauto.PyUITest):
       The integer process identifier (PID) for the specified process, or
       None if the PID cannot be identified.
     """
-    info = self.GetBrowserInfo()['extension_processes']
+    info = self.GetBrowserInfo()['extension_views']
     pid = [x['pid'] for x in info if x['name'] == '%s' % name]
     if pid:
       return pid[0]

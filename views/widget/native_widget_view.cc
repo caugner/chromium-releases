@@ -5,6 +5,10 @@
 #include "views/widget/native_widget_view.h"
 
 #include "ui/gfx/canvas.h"
+#if defined(OS_LINUX)
+#include "views/window/hit_test.h"
+#endif
+#include "views/widget/window_manager.h"
 
 namespace views {
 namespace internal {
@@ -18,10 +22,16 @@ const char NativeWidgetView::kViewClassName[] = "views/NativeWidgetView";
 NativeWidgetView::NativeWidgetView(NativeWidgetViews* native_widget)
     : native_widget_(native_widget),
       sent_create_(false),
-      delete_native_widget_(true) {
+      delete_native_widget_(true),
+      cursor_(NULL) {
 }
 
 NativeWidgetView::~NativeWidgetView() {
+  // Don't let NativeWidgetViews delete this again.  This must be outside
+  // the |delete_native_widget_| clause so it gets invoked for
+  // WIDGET_OWNS_NATIVE_WIDGET.  It is safe because |native_widget_| will
+  // still exist in both ways NativeWidgetView can be destroyed: by view
+  // hierarchy teardown and from the NativeWidgetViews destructor.
   native_widget_->set_delete_native_view(false);
   if (delete_native_widget_)
     delete native_widget_;
@@ -64,8 +74,43 @@ void NativeWidgetView::OnPaint(gfx::Canvas* canvas) {
   delegate()->OnNativeWidgetPaint(canvas);
 }
 
+gfx::NativeCursor NativeWidgetView::GetCursor(const MouseEvent& event) {
+  return cursor_;
+}
+
 bool NativeWidgetView::OnMousePressed(const MouseEvent& event) {
   MouseEvent e(event, this);
+  Widget* hosting_widget = GetAssociatedWidget();
+  if (hosting_widget->non_client_view()) {
+    int hittest_code = hosting_widget->non_client_view()->NonClientHitTest(
+        event.location());
+    switch (hittest_code) {
+      case HTCAPTION: {
+        if (!event.IsOnlyRightMouseButton()) {
+          WindowManager::Get()->StartMoveDrag(hosting_widget, event.location());
+          return true;
+        }
+        break;
+      }
+      case HTBOTTOM:
+      case HTBOTTOMLEFT:
+      case HTBOTTOMRIGHT:
+      case HTGROWBOX:
+      case HTLEFT:
+      case HTRIGHT:
+      case HTTOP:
+      case HTTOPLEFT:
+      case HTTOPRIGHT: {
+        WindowManager::Get()->StartResizeDrag(
+            hosting_widget, event.location(), hittest_code);
+        return true;
+      }
+      default:
+        // Everything else falls into standard client event handling...
+        break;
+    }
+  }
+
   return delegate()->OnMouseEvent(event);
 }
 
@@ -99,7 +144,8 @@ void NativeWidgetView::OnMouseExited(const MouseEvent& event) {
 }
 
 ui::TouchStatus NativeWidgetView::OnTouchEvent(const TouchEvent& event) {
-  return delegate()->OnTouchEvent(event);
+  TouchEvent e(event, this);
+  return delegate()->OnTouchEvent(e);
 }
 
 bool NativeWidgetView::OnKeyPressed(const KeyEvent& event) {

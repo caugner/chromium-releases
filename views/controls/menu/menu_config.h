@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/font.h"
+#include "views/views_export.h"
 
 namespace views {
 
 // Layout type information for menu items. Use the instance() method to obtain
 // the MenuConfig for the current platform.
-struct MenuConfig {
+struct VIEWS_EXPORT MenuConfig {
   MenuConfig();
   ~MenuConfig();
 
@@ -86,6 +87,9 @@ struct MenuConfig {
   // Padding between the label and accelerator. Only used if there is an
   // accelerator.
   int label_to_accelerator_padding;
+
+  // Whether the keyboard accelerators are visible.
+  bool show_accelerators;
 
  private:
   // Creates and configures a new MenuConfig as appropriate for the current

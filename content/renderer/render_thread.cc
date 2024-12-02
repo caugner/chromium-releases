@@ -47,7 +47,7 @@
 #include "content/renderer/render_view.h"
 #include "content/renderer/render_view_visitor.h"
 #include "content/renderer/renderer_webidbfactory_impl.h"
-#include "content/renderer/renderer_webkitclient_impl.h"
+#include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "net/base/net_errors.h"
@@ -59,6 +59,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNetworkStateNotifier.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
@@ -98,6 +99,10 @@ using WebKit::WebView;
 namespace {
 static const double kInitialIdleHandlerDelayS = 1.0 /* seconds */;
 
+#if defined(TOUCH_UI)
+static const int kPopupListBoxMinimumRowHeight = 60;
+#endif
+
 // Keep the global RenderThread in a TLS slot so it is impossible to access
 // incorrectly from the wrong thread.
 static base::LazyInstance<base::ThreadLocalPointer<RenderThread> > lazy_tls(
@@ -132,6 +137,20 @@ class RenderViewZoomer : public RenderViewVisitor {
 };
 
 }  // namespace
+
+static void* CreateHistogram(
+    const char *name, int min, int max, size_t buckets) {
+  if (min <= 0)
+    min = 1;
+  base::Histogram* histogram = base::Histogram::FactoryGet(
+      name, min, max, buckets, base::Histogram::kUmaTargetedHistogramFlag);
+  return histogram;
+}
+
+static void AddHistogramSample(void* hist, int sample) {
+  base::Histogram* histogram = static_cast<base::Histogram*>(hist);
+  histogram->Add(sample);
+}
 
 // When we run plugins in process, we actually run them on the render thread,
 // which means that we need to make the render thread pump UI events.
@@ -219,7 +238,7 @@ RenderThread::~RenderThread() {
   if (file_thread_.get())
     file_thread_->Stop();
 
-  if (webkit_client_.get())
+  if (webkit_platform_support_.get())
     WebKit::shutdown();
 
   lazy_tls.Pointer()->Set(NULL);
@@ -289,7 +308,7 @@ bool RenderThread::Send(IPC::Message* msg) {
 
   if (pumping_events) {
     if (suspend_webkit_shared_timer)
-      webkit_client_->SuspendSharedTimer();
+      webkit_platform_support_->SuspendSharedTimer();
 
     if (notify_webkit_of_modal_loop)
       WebView::willEnterModalLoop();
@@ -315,7 +334,7 @@ bool RenderThread::Send(IPC::Message* msg) {
       WebView::didExitModalLoop();
 
     if (suspend_webkit_shared_timer)
-      webkit_client_->ResumeSharedTimer();
+      webkit_platform_support_->ResumeSharedTimer();
   }
 
   return rv;
@@ -393,6 +412,106 @@ void RenderThread::OnDOMStorageEvent(
   dom_storage_event_dispatcher_->dispatchStorageEvent(params.key,
       params.old_value, params.new_value, params.origin, params.url,
       params.storage_type == DOM_STORAGE_LOCAL);
+}
+
+void RenderThread::EnsureWebKitInitialized() {
+  if (webkit_platform_support_.get())
+    return;
+
+  v8::V8::SetCounterFunction(base::StatsTable::FindLocation);
+  v8::V8::SetCreateHistogramFunction(CreateHistogram);
+  v8::V8::SetAddHistogramSampleFunction(AddHistogramSample);
+
+  webkit_platform_support_.reset(new RendererWebKitPlatformSupportImpl);
+  WebKit::initialize(webkit_platform_support_.get());
+
+  WebScriptController::enableV8SingleThreadMode();
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
+  webkit_glue::EnableWebCoreLogChannels(
+      command_line.GetSwitchValueASCII(switches::kWebCoreLogChannels));
+
+  if (command_line.HasSwitch(switches::kEnableBenchmarking))
+    RegisterExtension(extensions_v8::BenchmarkingExtension::Get());
+
+  if (command_line.HasSwitch(switches::kPlaybackMode) ||
+      command_line.HasSwitch(switches::kRecordMode) ||
+      command_line.HasSwitch(switches::kNoJsRandomness)) {
+    RegisterExtension(extensions_v8::PlaybackExtension::Get());
+  }
+
+  web_database_observer_impl_.reset(new WebDatabaseObserverImpl(this));
+  WebKit::WebDatabase::setObserver(web_database_observer_impl_.get());
+
+  WebRuntimeFeatures::enableSockets(
+      !command_line.HasSwitch(switches::kDisableWebSockets));
+
+  WebRuntimeFeatures::enableDatabase(
+      !command_line.HasSwitch(switches::kDisableDatabases));
+
+  WebRuntimeFeatures::enableDataTransferItems(
+      !command_line.HasSwitch(switches::kDisableDataTransferItems));
+
+  WebRuntimeFeatures::enableApplicationCache(
+      !command_line.HasSwitch(switches::kDisableApplicationCache));
+
+  WebRuntimeFeatures::enableNotifications(
+      !command_line.HasSwitch(switches::kDisableDesktopNotifications));
+
+  WebRuntimeFeatures::enableLocalStorage(
+      !command_line.HasSwitch(switches::kDisableLocalStorage));
+  WebRuntimeFeatures::enableSessionStorage(
+      !command_line.HasSwitch(switches::kDisableSessionStorage));
+
+  WebRuntimeFeatures::enableIndexedDatabase(
+      !command_line.HasSwitch(switches::kDisableIndexedDatabase));
+
+  WebRuntimeFeatures::enableGeolocation(
+      !command_line.HasSwitch(switches::kDisableGeolocation));
+
+  WebKit::WebRuntimeFeatures::enableMediaStream(
+      command_line.HasSwitch(switches::kEnableMediaStream));
+
+  WebKit::WebRuntimeFeatures::enableFullScreenAPI(
+      !command_line.HasSwitch(switches::kDisableFullScreen));
+
+#if defined(OS_CHROMEOS)
+  // TODO(crogers): enable once Web Audio has been tested and optimized.
+  WebRuntimeFeatures::enableWebAudio(false);
+#else
+  WebRuntimeFeatures::enableWebAudio(
+      !command_line.HasSwitch(switches::kDisableWebAudio));
+#endif
+
+  WebRuntimeFeatures::enablePushState(true);
+
+#ifdef TOUCH_UI
+  WebRuntimeFeatures::enableTouch(true);
+  WebKit::WebPopupMenu::setMinimumRowHeight(kPopupListBoxMinimumRowHeight);
+#else
+  // TODO(saintlou): in the future touch should always be enabled
+  WebRuntimeFeatures::enableTouch(false);
+#endif
+
+  WebRuntimeFeatures::enableDeviceMotion(
+      command_line.HasSwitch(switches::kEnableDeviceMotion));
+
+  WebRuntimeFeatures::enableDeviceOrientation(
+      !command_line.HasSwitch(switches::kDisableDeviceOrientation));
+
+  WebRuntimeFeatures::enableSpeechInput(
+      !command_line.HasSwitch(switches::kDisableSpeechInput));
+
+  WebRuntimeFeatures::enableFileSystem(
+      !command_line.HasSwitch(switches::kDisableFileSystem));
+
+  WebRuntimeFeatures::enableJavaScriptI18NAPI(
+      !command_line.HasSwitch(switches::kDisableJavaScriptI18NAPI));
+
+  WebRuntimeFeatures::enableQuota(true);
+
+  FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
 }
 
 bool RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
@@ -546,116 +665,6 @@ GpuChannelHost* RenderThread::GetGpuChannel() {
   return gpu_channel_.get();
 }
 
-static void* CreateHistogram(
-    const char *name, int min, int max, size_t buckets) {
-  if (min <= 0)
-    min = 1;
-  base::Histogram* histogram = base::Histogram::FactoryGet(
-      name, min, max, buckets, base::Histogram::kUmaTargetedHistogramFlag);
-  return histogram;
-}
-
-static void AddHistogramSample(void* hist, int sample) {
-  base::Histogram* histogram = static_cast<base::Histogram*>(hist);
-  histogram->Add(sample);
-}
-
-void RenderThread::EnsureWebKitInitialized() {
-  if (webkit_client_.get())
-    return;
-
-  v8::V8::SetCounterFunction(base::StatsTable::FindLocation);
-  v8::V8::SetCreateHistogramFunction(CreateHistogram);
-  v8::V8::SetAddHistogramSampleFunction(AddHistogramSample);
-
-  webkit_client_.reset(new RendererWebKitClientImpl);
-  WebKit::initialize(webkit_client_.get());
-
-  WebScriptController::enableV8SingleThreadMode();
-
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-
-  webkit_glue::EnableWebCoreLogChannels(
-      command_line.GetSwitchValueASCII(switches::kWebCoreLogChannels));
-
-  if (command_line.HasSwitch(switches::kEnableBenchmarking))
-    RegisterExtension(extensions_v8::BenchmarkingExtension::Get());
-
-  if (command_line.HasSwitch(switches::kPlaybackMode) ||
-      command_line.HasSwitch(switches::kRecordMode) ||
-      command_line.HasSwitch(switches::kNoJsRandomness)) {
-    RegisterExtension(extensions_v8::PlaybackExtension::Get());
-  }
-
-  web_database_observer_impl_.reset(new WebDatabaseObserverImpl(this));
-  WebKit::WebDatabase::setObserver(web_database_observer_impl_.get());
-
-  WebRuntimeFeatures::enableSockets(
-      !command_line.HasSwitch(switches::kDisableWebSockets));
-
-  WebRuntimeFeatures::enableDatabase(
-      !command_line.HasSwitch(switches::kDisableDatabases));
-
-  WebRuntimeFeatures::enableDataTransferItems(
-      !command_line.HasSwitch(switches::kDisableDataTransferItems));
-
-  WebRuntimeFeatures::enableApplicationCache(
-      !command_line.HasSwitch(switches::kDisableApplicationCache));
-
-  WebRuntimeFeatures::enableNotifications(
-      !command_line.HasSwitch(switches::kDisableDesktopNotifications));
-
-  WebRuntimeFeatures::enableLocalStorage(
-      !command_line.HasSwitch(switches::kDisableLocalStorage));
-  WebRuntimeFeatures::enableSessionStorage(
-      !command_line.HasSwitch(switches::kDisableSessionStorage));
-
-  WebRuntimeFeatures::enableIndexedDatabase(
-      !command_line.HasSwitch(switches::kDisableIndexedDatabase));
-
-  WebRuntimeFeatures::enableGeolocation(
-      !command_line.HasSwitch(switches::kDisableGeolocation));
-
-  WebKit::WebRuntimeFeatures::enableMediaStream(
-      command_line.HasSwitch(switches::kEnableMediaStream));
-
-#if defined(OS_CHROMEOS)
-  // TODO(crogers): enable once Web Audio has been tested and optimized.
-  WebRuntimeFeatures::enableWebAudio(false);
-#else
-  WebRuntimeFeatures::enableWebAudio(
-      !command_line.HasSwitch(switches::kDisableWebAudio));
-#endif
-
-  WebRuntimeFeatures::enablePushState(true);
-
-#ifdef TOUCH_UI
-  WebRuntimeFeatures::enableTouch(true);
-#else
-  // TODO(saintlou): in the future touch should always be enabled
-  WebRuntimeFeatures::enableTouch(false);
-#endif
-
-  WebRuntimeFeatures::enableDeviceMotion(
-      command_line.HasSwitch(switches::kEnableDeviceMotion));
-
-  WebRuntimeFeatures::enableDeviceOrientation(
-      !command_line.HasSwitch(switches::kDisableDeviceOrientation));
-
-  WebRuntimeFeatures::enableSpeechInput(
-      !command_line.HasSwitch(switches::kDisableSpeechInput));
-
-  WebRuntimeFeatures::enableFileSystem(
-      !command_line.HasSwitch(switches::kDisableFileSystem));
-
-  WebRuntimeFeatures::enableJavaScriptI18NAPI(
-      !command_line.HasSwitch(switches::kDisableJavaScriptI18NAPI));
-
-  WebRuntimeFeatures::enableQuota(true);
-
-  FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
-}
-
 void RenderThread::IdleHandler() {
 #if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
   MallocExtension::instance()->ReleaseFreeMemory();
@@ -679,7 +688,7 @@ void RenderThread::IdleHandler() {
 void RenderThread::ScheduleIdleHandler(double initial_delay_s) {
   idle_notification_delay_in_s_ = initial_delay_s;
   idle_timer_.Stop();
-  idle_timer_.Start(
+  idle_timer_.Start(FROM_HERE,
       base::TimeDelta::FromSeconds(static_cast<int64>(initial_delay_s)),
       this, &RenderThread::IdleHandler);
 }

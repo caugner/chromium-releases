@@ -29,7 +29,7 @@ class FileSystem : public Resource {
 
   /// This constructor creates a file system object of the given type.
   ///
-  /// @param[in] instance A <code>Instance</code> indentifying the instance
+  /// @param[in] instance A <code>Instance</code> identifying the instance
   /// with the file.
   /// @param[in] type A file system type as defined by
   /// <code>PP_FileSystemType</code> enum.
@@ -39,7 +39,7 @@ class FileSystem : public Resource {
   /// any other operation on it.
   ///
   /// @param[in] expected_size The expected size of the file system.
-  /// @param[in] callback A <code>PP_CompletionCallback</code> to be called upon
+  /// @param[in] cc A <code>PP_CompletionCallback</code> to be called upon
   /// completion of Open().
   ///
   /// @return An int32_t containing an error code from <code>pp_errors.h</code>.

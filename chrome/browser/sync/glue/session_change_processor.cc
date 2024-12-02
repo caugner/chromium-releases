@@ -12,8 +12,9 @@
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -24,6 +25,18 @@
 #include "content/common/notification_source.h"
 
 namespace browser_sync {
+
+namespace {
+// Extract the source SyncedTabDelegate from a NotificationSource originating
+// from a NavigationController, if it exists. Returns |NULL| otherwise.
+SyncedTabDelegate* ExtractSyncedTabDelegate(const NotificationSource& source) {
+  TabContentsWrapper* tab =  TabContentsWrapper::GetCurrentWrapperForContents(
+      Source<NavigationController>(source).ptr()->tab_contents());
+  if (!tab)
+    return NULL;
+  return tab->synced_tab_delegate();
+}
+}
 
 SessionChangeProcessor::SessionChangeProcessor(
     UnrecoverableErrorHandler* error_handler,
@@ -62,35 +75,36 @@ void SessionChangeProcessor::Observe(int type,
   DCHECK(profile_);
 
   // Track which windows and/or tabs are modified.
-  std::vector<TabContentsWrapper*> modified_tabs;
-  bool windows_changed = false;
+  std::vector<SyncedTabDelegate*> modified_tabs;
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_OPENED: {
       Browser* browser = Source<Browser>(source).ptr();
-      if (browser->profile() != profile_) {
+      if (!browser || browser->profile() != profile_) {
         return;
       }
-      windows_changed = true;
       VLOG(1) << "Received BROWSER_OPENED for profile " << profile_;
       break;
     }
 
     case content::NOTIFICATION_TAB_PARENTED: {
-      TabContentsWrapper* tab = Source<TabContentsWrapper>(source).ptr();
-      if (tab->profile() != profile_) {
+      SyncedTabDelegate* tab = Source<SyncedTabDelegate>(source).ptr();
+      if (!tab || tab->profile() != profile_) {
         return;
       }
-      windows_changed = true;
       modified_tabs.push_back(tab);
       VLOG(1) << "Received TAB_PARENTED for profile " << profile_;
       break;
     }
 
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
-      TabContentsWrapper* tab =
+      TabContentsWrapper* tab_contents_wrapper =
           TabContentsWrapper::GetCurrentWrapperForContents(
               Source<TabContents>(source).ptr());
-      if (tab->profile() != profile_) {
+      if (!tab_contents_wrapper) {
+        return;
+      }
+      SyncedTabDelegate* tab = tab_contents_wrapper->synced_tab_delegate();
+      if (!tab || tab->profile() != profile_) {
         return;
       }
       modified_tabs.push_back(tab);
@@ -99,22 +113,17 @@ void SessionChangeProcessor::Observe(int type,
     }
 
     case content::NOTIFICATION_TAB_CLOSED: {
-      TabContentsWrapper* tab =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              Source<NavigationController>(source).ptr()->tab_contents());
+      SyncedTabDelegate* tab = ExtractSyncedTabDelegate(source);
       if (!tab || tab->profile() != profile_) {
         return;
       }
-      windows_changed = true;
       modified_tabs.push_back(tab);
       VLOG(1) << "Received TAB_CLOSED for profile " << profile_;
       break;
     }
 
     case content::NOTIFICATION_NAV_LIST_PRUNED: {
-      TabContentsWrapper* tab =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              Source<NavigationController>(source).ptr()->tab_contents());
+      SyncedTabDelegate* tab = ExtractSyncedTabDelegate(source);
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -124,9 +133,7 @@ void SessionChangeProcessor::Observe(int type,
     }
 
     case content::NOTIFICATION_NAV_ENTRY_CHANGED: {
-      TabContentsWrapper* tab =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              Source<NavigationController>(source).ptr()->tab_contents());
+      SyncedTabDelegate* tab = ExtractSyncedTabDelegate(source);
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -136,9 +143,7 @@ void SessionChangeProcessor::Observe(int type,
     }
 
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED: {
-      TabContentsWrapper* tab =
-          TabContentsWrapper::GetCurrentWrapperForContents(
-              Source<NavigationController>(source).ptr()->tab_contents());
+      SyncedTabDelegate* tab = ExtractSyncedTabDelegate(source);
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -150,11 +155,13 @@ void SessionChangeProcessor::Observe(int type,
     case chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED: {
       ExtensionTabHelper* extension_tab_helper =
           Source<ExtensionTabHelper>(source).ptr();
-      if (extension_tab_helper->tab_contents()->profile() != profile_) {
+      if (!extension_tab_helper ||
+          extension_tab_helper->tab_contents()->browser_context() != profile_) {
         return;
       }
       if (extension_tab_helper->extension_app()) {
-        modified_tabs.push_back(extension_tab_helper->tab_contents_wrapper());
+        modified_tabs.push_back(extension_tab_helper->tab_contents_wrapper()->
+            synced_tab_delegate());
       }
       VLOG(1) << "Received TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED "
               << "for profile " << profile_;
@@ -279,13 +286,13 @@ void SessionChangeProcessor::StartObserving() {
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       NotificationService::AllSources());
   notification_registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-      NotificationService::AllSources());
+      NotificationService::AllBrowserContextsAndSources());
   notification_registrar_.Add(this,
       chrome::NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
       NotificationService::AllSources());
   notification_registrar_.Add(this,
       content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-      NotificationService::AllSources());
+      NotificationService::AllBrowserContextsAndSources());
 }
 
 void SessionChangeProcessor::StopObserving() {

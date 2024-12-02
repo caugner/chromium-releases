@@ -16,6 +16,7 @@
 #include "base/process_util.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
@@ -74,6 +75,7 @@ class InputMethodManagerImpl : public InputMethodManager,
 #if !defined(TOUCH_UI)
         candidate_window_controller_(NULL),
 #endif
+        shutting_down_(false),
         ibus_daemon_process_handle_(base::kNullProcessHandle) {
     // Observe APP_TERMINATING to stop input method daemon gracefully.
     // We should not use APP_EXITING here since logout might be canceled by
@@ -261,6 +263,19 @@ class InputMethodManagerImpl : public InputMethodManager,
     extra_input_method_ids_.erase(id);
   }
 
+  virtual bool GetExtraDescriptor(
+      const std::string& id,
+      input_method::InputMethodDescriptor* descriptor) {
+    std::map<std::string, input_method::InputMethodDescriptor>::
+        const_iterator ix = extra_input_method_ids_.find(id);
+    if (ix != extra_input_method_ids_.end()) {
+      *descriptor = ix->second;
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   virtual input_method::InputMethodDescriptor previous_input_method() const {
     if (previous_input_method_.id().empty()) {
       return input_method::GetFallbackInputMethodDescriptor();
@@ -290,11 +305,36 @@ class InputMethodManagerImpl : public InputMethodManager,
   }
 
   virtual void RegisterVirtualKeyboard(const GURL& launch_url,
+                                       const std::string& name,
                                        const std::set<std::string>& layouts,
                                        bool is_system) {
     virtual_keyboard_selector_.AddVirtualKeyboard(launch_url,
+                                                  name,
                                                   layouts,
                                                   is_system);
+  }
+
+  virtual const std::map<GURL, const VirtualKeyboard*>&
+  GetUrlToKeyboardMapping() const {
+    return virtual_keyboard_selector_.url_to_keyboard();
+  }
+
+  virtual const std::multimap<std::string, const VirtualKeyboard*>&
+  GetLayoutNameToKeyboardMapping() const {
+    return virtual_keyboard_selector_.layout_to_keyboard();
+  }
+
+  virtual bool SetVirtualKeyboardPreference(const std::string& input_method_id,
+                                            const GURL& extention_url) {
+    const bool result = virtual_keyboard_selector_.SetUserPreference(
+        input_method_id, extention_url);
+    UpdateVirtualKeyboardUI();
+    return result;
+  }
+
+  virtual void ClearAllVirtualKeyboardPreferences() {
+    virtual_keyboard_selector_.ClearAllUserPreferences();
+    UpdateVirtualKeyboardUI();
   }
 
   static InputMethodManagerImpl* GetInstance() {
@@ -634,7 +674,10 @@ class InputMethodManagerImpl : public InputMethodManager,
                                          current_input_method_,
                                          num_active_input_methods));
 
-    // Update virtual keyboard.
+    UpdateVirtualKeyboardUI();
+  }
+
+  void UpdateVirtualKeyboardUI() {
 #if defined(TOUCH_UI)
     const input_method::VirtualKeyboard* virtual_keyboard = NULL;
     std::string virtual_keyboard_layout = "";
@@ -790,6 +833,11 @@ class InputMethodManagerImpl : public InputMethodManager,
       return false;
     }
 
+    if (shutting_down_) {
+      NOTREACHED() << "Trying to launch input method while shutting down";
+      return false;
+    }
+
 #if !defined(TOUCH_UI)
     if (!candidate_window_controller_.get()) {
       candidate_window_controller_.reset(
@@ -806,8 +854,9 @@ class InputMethodManagerImpl : public InputMethodManager,
 
     // TODO(zork): Send output to /var/log/ibus.log
     const std::string ibus_daemon_command_line =
-        StringPrintf("%s --panel=disable --cache=none --restart --replace",
-                     kIBusDaemonPath);
+        base::StringPrintf(
+            "%s --panel=disable --cache=none --restart --replace",
+            kIBusDaemonPath);
     if (!LaunchInputMethodProcess(
             ibus_daemon_command_line, &ibus_daemon_process_handle_)) {
       LOG(ERROR) << "Failed to launch " << ibus_daemon_command_line;
@@ -861,6 +910,7 @@ class InputMethodManagerImpl : public InputMethodManager,
                const NotificationDetails& details) {
     // Stop the input method daemon on browser shutdown.
     if (type == content::NOTIFICATION_APP_TERMINATING) {
+      shutting_down_ = true;
       notification_registrar_.RemoveAll();
       StopInputMethodDaemon();
 #if !defined(TOUCH_UI)
@@ -922,6 +972,9 @@ class InputMethodManagerImpl : public InputMethodManager,
   scoped_ptr<input_method::CandidateWindowController>
       candidate_window_controller_;
 #endif
+
+  // True if we've received the APP_TERMINATING notification.
+  bool shutting_down_;
 
   // The process handle of the IBus daemon. kNullProcessHandle if it's not
   // running.

@@ -135,15 +135,14 @@ void BookmarkMenuController::NavigateToMenuItem(
   const BookmarkNode* node = GetNodeFromMenuItem(menu_item);
   DCHECK(node);
   DCHECK(page_navigator_);
-  page_navigator_->OpenURL(
-      node->url(), GURL(), disposition, PageTransition::AUTO_BOOKMARK);
+  page_navigator_->OpenURL(OpenURLParams(
+      node->url(), GURL(), disposition, PageTransition::AUTO_BOOKMARK));
 }
 
 void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
                                        int start_child_index,
                                        GtkWidget* menu) {
-  DCHECK(!parent->child_count() ||
-         start_child_index < parent->child_count());
+  DCHECK(parent->empty() || start_child_index < parent->child_count());
 
   signals_.Connect(menu, "button-press-event",
                    G_CALLBACK(OnMenuButtonPressedOrReleasedThunk), this);
@@ -293,7 +292,8 @@ gboolean BookmarkMenuController::OnButtonReleased(
     // The menu item is a link node.
     if (event->button == 1 || event->button == 2) {
       WindowOpenDisposition disposition =
-          event_utils::DispositionFromEventFlags(event->state);
+        event_utils::DispositionFromGdkState(event->state);
+
       NavigateToMenuItem(sender, disposition);
 
       // We need to manually dismiss the popup menu because we're overriding

@@ -8,10 +8,12 @@
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/shared_memory.h"
+#include "base/stl_util.h"
 #include "base/task.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
+#include "content/renderer/gpu/gpu_channel_host.h"
 #include "content/renderer/plugin_channel_host.h"
 #include "content/renderer/render_thread.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
@@ -20,7 +22,7 @@
 using gpu::Buffer;
 
 CommandBufferProxy::CommandBufferProxy(
-    IPC::Channel::Sender* channel,
+    GpuChannelHost* channel,
     int route_id)
     : num_entries_(0),
       channel_(channel),
@@ -44,22 +46,21 @@ bool CommandBufferProxy::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(CommandBufferProxy, message)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_UpdateState, OnUpdateState);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_Destroyed, OnDestroyed);
-    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SwapBuffers, OnSwapBuffers);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_NotifyRepaint,
                         OnNotifyRepaint);
+    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_EchoAck, OnEchoAck);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
-
-  if (!handled && video_decoder_host_)
-    handled = video_decoder_host_->OnMessageReceived(message);
 
   DCHECK(handled);
   return handled;
 }
 
 void CommandBufferProxy::OnChannelError() {
-  if (video_decoder_host_)
-    video_decoder_host_->OnChannelError();
+  for (Decoders::iterator it = video_decoder_hosts_.begin();
+       it != video_decoder_hosts_.end(); ++it) {
+    it->second->OnChannelError();
+  }
   OnDestroyed(gpu::error::kUnknown);
 }
 
@@ -77,6 +78,13 @@ void CommandBufferProxy::OnDestroyed(gpu::error::ContextLostReason reason) {
     // Avoid calling the error callback more than once.
     channel_error_callback_.reset();
   }
+}
+
+void CommandBufferProxy::OnEchoAck() {
+  DCHECK(!echo_tasks_.empty());
+  Task* task = echo_tasks_.front().release();
+  echo_tasks_.pop();
+  task->Run();
 }
 
 void CommandBufferProxy::SetChannelErrorCallback(Callback0::Type* callback) {
@@ -344,9 +352,20 @@ void CommandBufferProxy::SetContextLostReason(
   NOTREACHED();
 }
 
-void CommandBufferProxy::OnSwapBuffers() {
-  if (swap_buffers_callback_.get())
-    swap_buffers_callback_->Run();
+bool CommandBufferProxy::Echo(Task* task) {
+  if (last_state_.error != gpu::error::kNoError) {
+    delete task;
+    return false;
+  }
+
+  if (!Send(new GpuChannelMsg_Echo(GpuCommandBufferMsg_EchoAck(route_id_)))) {
+    delete task;
+    return false;
+  }
+
+  echo_tasks_.push(linked_ptr<Task>(task));
+
+  return true;
 }
 
 bool CommandBufferProxy::SetParent(CommandBufferProxy* parent_command_buffer,
@@ -376,45 +395,31 @@ bool CommandBufferProxy::SetParent(CommandBufferProxy* parent_command_buffer,
   return result;
 }
 
-void CommandBufferProxy::SetSwapBuffersCallback(Callback0::Type* callback) {
-  swap_buffers_callback_.reset(callback);
-}
-
-void CommandBufferProxy::ResizeOffscreenFrameBuffer(const gfx::Size& size) {
-  if (last_state_.error != gpu::error::kNoError)
-    return;
-
-  Send(new GpuCommandBufferMsg_ResizeOffscreenFrameBuffer(route_id_, size));
-}
-
 void CommandBufferProxy::SetNotifyRepaintTask(Task* task) {
   notify_repaint_task_.reset(task);
 }
 
 scoped_refptr<GpuVideoDecodeAcceleratorHost>
 CommandBufferProxy::CreateVideoDecoder(
-    const std::vector<uint32>& configs,
-    gpu::CommandBufferHelper* cmd_buffer_helper,
+    media::VideoDecodeAccelerator::Profile profile,
     media::VideoDecodeAccelerator::Client* client) {
-  video_decoder_host_ = new GpuVideoDecodeAcceleratorHost(
-      channel_, route_id_, cmd_buffer_helper, client);
-
-  if (!Send(new GpuCommandBufferMsg_CreateVideoDecoder(route_id_, configs))) {
+  int decoder_route_id;
+  if (!Send(new GpuCommandBufferMsg_CreateVideoDecoder(route_id_, profile,
+                                                       &decoder_route_id))) {
     LOG(ERROR) << "Send(GpuChannelMsg_CreateVideoDecoder) failed";
-    video_decoder_host_ = NULL;
+    return NULL;
   }
 
-  return video_decoder_host_;
-}
+  scoped_refptr<GpuVideoDecodeAcceleratorHost> decoder_host =
+      new GpuVideoDecodeAcceleratorHost(channel_, decoder_route_id, client);
+  bool inserted = video_decoder_hosts_.insert(std::make_pair(
+      decoder_route_id, decoder_host)).second;
+  DCHECK(inserted);
 
-#if defined(OS_MACOSX)
-void CommandBufferProxy::SetWindowSize(const gfx::Size& size) {
-  if (last_state_.error != gpu::error::kNoError)
-    return;
+  channel_->AddRoute(decoder_route_id, decoder_host->AsWeakPtr());
 
-  Send(new GpuCommandBufferMsg_SetWindowSize(route_id_, size));
+  return decoder_host;
 }
-#endif
 
 bool CommandBufferProxy::Send(IPC::Message* msg) {
   // Caller should not intentionally send a message if the context is lost.

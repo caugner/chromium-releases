@@ -17,7 +17,9 @@
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_manager.h"
 
-class MessageLoop;
+namespace base {
+class MessageLoopProxy;
+}  // namespace base
 
 namespace talk_base {
 class NetworkManager;
@@ -74,7 +76,7 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   // |network_manager| and |socket_factory| may be set to NULL.
   //
   // TODO(sergeyu): Constructor shouldn't need thread here.
-  ConnectionToHost(MessageLoop* network_message_loop,
+  ConnectionToHost(base::MessageLoopProxy* network_message_loop,
                    talk_base::NetworkManager* network_manager,
                    talk_base::PacketSocketFactory* socket_factory,
                    HostResolverFactory* host_resolver_factory,
@@ -124,57 +126,56 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   // Callback for |session_|.
   void OnSessionStateChange(Session::State state);
 
+  // Callback for VideoReader::Init().
+  void OnVideoChannelInitialized(bool successful);
+
+  void NotifyIfChannelsReady();
+
   // Callback for |video_reader_|.
   void OnVideoPacket(VideoPacket* packet);
+
+  void CloseOnError();
 
   // Stops writing in the channels.
   void CloseChannels();
 
-  MessageLoop* message_loop_;
+  scoped_refptr<base::MessageLoopProxy> message_loop_;
   scoped_ptr<talk_base::NetworkManager> network_manager_;
   scoped_ptr<talk_base::PacketSocketFactory> socket_factory_;
   scoped_ptr<HostResolverFactory> host_resolver_factory_;
   scoped_ptr<PortAllocatorSessionFactory> port_allocator_session_factory_;
   bool allow_nat_traversal_;
 
-  // Internal state of the connection.
-  State state_;
+  std::string host_jid_;
+  std::string host_public_key_;
+  std::string access_code_;
+
+  HostEventCallback* event_callback_;
+
+  // Stub for incoming messages.
+  ClientStub* client_stub_;
+  VideoStub* video_stub_;
 
   scoped_ptr<SignalStrategy> signal_strategy_;
   std::string local_jid_;
   scoped_ptr<SessionManager> session_manager_;
   scoped_ptr<Session> session_;
 
+  // Handlers for incoming messages.
   scoped_ptr<VideoReader> video_reader_;
-
-  HostEventCallback* event_callback_;
-
-  std::string host_jid_;
-  std::string host_public_key_;
-  std::string access_code_;
-
   scoped_ptr<ClientMessageDispatcher> dispatcher_;
 
-  ////////////////////////////////////////////////////////////////////////////
-  // User input event channel interface
-
-  // Stub for sending input event messages to the host.
+  // Senders for outgoing messages.
   scoped_ptr<InputSender> input_sender_;
-
-  ////////////////////////////////////////////////////////////////////////////
-  // Protocol control channel interface
-
-  // Stub for sending control messages to the host.
   scoped_ptr<HostControlSender> host_control_sender_;
 
-  // Stub for receiving control messages from the host.
-  ClientStub* client_stub_;
+  // Internal state of the connection.
+  State state_;
 
-  ////////////////////////////////////////////////////////////////////////////
-  // Video channel interface
-
-  // Stub for receiving video packets from the host.
-  VideoStub* video_stub_;
+  // State of the channels.
+  bool control_connected_;
+  bool input_connected_;
+  bool video_connected_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ConnectionToHost);

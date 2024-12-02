@@ -12,7 +12,7 @@ cr.define('gpu', function() {
   /**
    * Provides information on the GPU process and underlying graphics hardware.
    * @constructor
-   * @extends {Tab}
+   * @extends {cr.ui.TabPanel}
    */
   var InfoView = cr.ui.define(cr.ui.TabPanel);
 
@@ -62,7 +62,7 @@ cr.define('gpu', function() {
       var featureLabelMap = {
         '2d_canvas': 'Canvas',
         '3d_css': '3D CSS',
-        'compositing': 'Compositing',
+        'compositing': 'HTML Rendering',
         'webgl': 'WebGL',
         'multisampling': 'WebGL multisampling'
       };
@@ -73,6 +73,7 @@ cr.define('gpu', function() {
         'unavailable_off': 'Unavailable. Hardware acceleration unavailable',
         'unavailable_software':
             'Software only, hardware acceleration unavailable',
+        'enabled_readback': 'Hardware accelerated, but at reduced performance',
         'enabled': 'Hardware accelerated'
       };
       var statusClassMap = {

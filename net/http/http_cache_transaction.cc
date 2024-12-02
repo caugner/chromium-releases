@@ -365,6 +365,15 @@ int HttpCache::Transaction::Read(IOBuffer* buf, int buf_len,
 void HttpCache::Transaction::StopCaching() {
 }
 
+void HttpCache::Transaction::DoneReading() {
+  if (cache_ && entry_) {
+    DCHECK(reading_);
+    DCHECK_NE(mode_, UPDATE);
+    if (mode_ & WRITE)
+      DoneWritingToEntry(true);
+  }
+}
+
 const HttpResponseInfo* HttpCache::Transaction::GetResponseInfo() const {
   // Null headers means we encountered an error or haven't a response yet
   if (auth_response_.headers)
@@ -1360,7 +1369,8 @@ int HttpCache::Transaction::DoCacheWriteDataComplete(int result) {
     result = write_len_;
   } else if (!done_reading_ && entry_) {
     int current_size = entry_->disk_entry->GetDataSize(kResponseContentIndex);
-    if (response_.headers->GetContentLength() == current_size)
+    int64 body_size = response_.headers->GetContentLength();
+    if (body_size >= 0 && body_size <= current_size)
       done_reading_ = true;
   }
 
@@ -1371,8 +1381,13 @@ int HttpCache::Transaction::DoCacheWriteDataComplete(int result) {
       return DoPartialNetworkReadCompleted(result);
   }
 
-  if (result == 0)  // End of file.
-    DoneWritingToEntry(true);
+  if (result == 0) {
+    // End of file. This may be the result of a connection problem so see if we
+    // have to keep the entry around to be flagged as truncated later on.
+    if (done_reading_ || !entry_ || partial_.get() ||
+        response_.headers->GetContentLength() <= 0)
+      DoneWritingToEntry(true);
+  }
 
   return result;
 }

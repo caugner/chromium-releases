@@ -10,15 +10,19 @@
   'targets': [
     {
       'target_name': 'gl',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/ui/ui.gyp:ui',
       ],
       'variables': {
         'gl_binding_output_dir': '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gl',
       },
+      'defines': [
+        'GL_IMPLEMENTATION',
+      ],
       'include_dirs': [
         '<(DEPTH)/third_party/swiftshader/include',
         '<(DEPTH)/third_party/mesa/MesaLib/include',
@@ -43,6 +47,7 @@
         'gl_context_stub.cc',
         'gl_context_stub.h',
         'gl_context_win.cc',
+        'gl_export.h',
         'gl_implementation.cc',
         'gl_implementation.h',
         'gl_implementation_linux.cc',
@@ -58,6 +63,7 @@
         'gl_surface_mac.cc',
         'gl_surface_stub.cc',
         'gl_surface_stub.h',
+        'gl_surface_wayland.cc',
         'gl_surface_win.cc',
         'gl_surface_osmesa.cc',
         'gl_surface_osmesa.h',
@@ -116,7 +122,12 @@
             '<(DEPTH)/third_party/angle/include',
           ],
         }],
-        ['use_x11 == 1', {
+        ['use_wayland == 1', {
+          'sources!': [
+            'gl_surface_linux.cc',
+          ],
+        }],
+        ['use_x11 == 1 and use_wayland != 1', {
           'sources': [
             'gl_context_glx.cc',
             'gl_context_glx.h',

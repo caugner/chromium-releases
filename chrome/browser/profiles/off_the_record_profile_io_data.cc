@@ -19,6 +19,8 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/resource_context.h"
+#include "net/base/default_origin_bound_cert_store.h"
+#include "net/base/origin_bound_cert_service.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_cache.h"
 #include "webkit/database/database_tracker.h"
@@ -46,8 +48,7 @@ OffTheRecordProfileIOData::Handle::~Handle() {
     iter->second->CleanupOnUIThread();
   }
 
-  io_data_->AddRef();
-  io_data_.release()->ShutdownOnUIThread();
+  io_data_->ShutdownOnUIThread();
 }
 
 base::Callback<ChromeURLDataManagerBackend*(void)>
@@ -56,7 +57,7 @@ GetChromeURLDataManagerBackendGetter() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   LazyInitialize();
   return base::Bind(&ProfileIOData::GetChromeURLDataManagerBackend,
-                    base::Unretained(io_data_.get()));
+                    base::Unretained(io_data_));
 }
 
 const content::ResourceContext&
@@ -118,7 +119,7 @@ OffTheRecordProfileIOData::Handle::GetIsolatedAppRequestContextGetter(
 
 void OffTheRecordProfileIOData::Handle::LazyInitialize() const {
   if (!initialized_) {
-    io_data_->InitializeProfileParams(profile_);
+    io_data_->InitializeOnUIThread(profile_);
     ChromeNetworkDelegate::InitializeReferrersEnabled(
         io_data_->enable_referrers(), profile_->GetPrefs());
 #if defined(ENABLE_SAFE_BROWSING)
@@ -161,6 +162,13 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   main_context->set_dns_cert_checker(dns_cert_checker());
   main_context->set_proxy_service(proxy_service());
 
+  // For incognito, we use a non-persistent origin bound cert store.
+  net::OriginBoundCertService* origin_bound_cert_service =
+      new net::OriginBoundCertService(
+          new net::DefaultOriginBoundCertStore(NULL));
+  set_origin_bound_cert_service(origin_bound_cert_service);
+  main_context->set_origin_bound_cert_service(origin_bound_cert_service);
+
   main_context->set_cookie_store(
       new net::CookieMonster(NULL, profile_params->cookie_monster_delegate));
   // All we care about for extensions is the cookie store. For incognito, we
@@ -179,6 +187,7 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   net::HttpCache* cache =
       new net::HttpCache(main_context->host_resolver(),
                          main_context->cert_verifier(),
+                         main_context->origin_bound_cert_service(),
                          main_context->dnsrr_resolver(),
                          main_context->dns_cert_checker(),
                          main_context->proxy_service(),
@@ -200,11 +209,11 @@ void OffTheRecordProfileIOData::LazyInitializeInternal(
   extensions_context->set_job_factory(job_factory());
 }
 
-scoped_refptr<ProfileIOData::RequestContext>
+scoped_refptr<ChromeURLRequestContext>
 OffTheRecordProfileIOData::InitializeAppRequestContext(
     scoped_refptr<ChromeURLRequestContext> main_context,
     const std::string& app_id) const {
-  AppRequestContext* context = new AppRequestContext(app_id);
+  AppRequestContext* context = new AppRequestContext;
 
   // Copy most state from the main context.
   context->CopyFrom(main_context);
@@ -232,12 +241,12 @@ OffTheRecordProfileIOData::AcquireMediaRequestContext() const {
   return NULL;
 }
 
-scoped_refptr<ProfileIOData::RequestContext>
+scoped_refptr<ChromeURLRequestContext>
 OffTheRecordProfileIOData::AcquireIsolatedAppRequestContext(
     scoped_refptr<ChromeURLRequestContext> main_context,
     const std::string& app_id) const {
   // We create per-app contexts on demand, unlike the others above.
-  scoped_refptr<RequestContext> app_request_context =
+  scoped_refptr<ChromeURLRequestContext> app_request_context =
       InitializeAppRequestContext(main_context, app_id);
   DCHECK(app_request_context);
   return app_request_context;

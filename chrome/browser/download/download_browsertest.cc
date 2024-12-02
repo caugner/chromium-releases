@@ -12,16 +12,12 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
-#include "chrome/browser/download/download_file_manager.h"
 #include "chrome/browser/download/download_history.h"
-#include "chrome/browser/download/download_item.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/history/download_history_info.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,9 +29,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/cancelable_request.h"
+#include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_persistent_store_info.h"
 #include "content/browser/net/url_request_mock_http_job.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -334,7 +334,7 @@ class DownloadsFlushObserver
  public:
   explicit DownloadsFlushObserver(DownloadManager* download_manager)
       : download_manager_(download_manager),
-        waiting_for_zero_inprogress_(true) { }
+        waiting_for_zero_inprogress_(true) {}
 
   void WaitForFlush() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -525,7 +525,7 @@ class DownloadTest : public InProcessBrowserTest {
                                                  prompt_for_download);
 
     DownloadManager* manager = browser()->profile()->GetDownloadManager();
-    manager->download_prefs()->ResetAutoOpen();
+    DownloadPrefs::FromDownloadManager(manager)->ResetAutoOpen();
     manager->RemoveAllDownloads();
 
     return true;
@@ -567,13 +567,12 @@ class DownloadTest : public InProcessBrowserTest {
   }
 
   DownloadPrefs* GetDownloadPrefs(Browser* browser) {
-    return browser->profile()->GetDownloadManager()->download_prefs();
+    return DownloadPrefs::FromDownloadManager(
+        browser->profile()->GetDownloadManager());
   }
 
   FilePath GetDownloadDirectory(Browser* browser) {
-    DownloadManager* download_mananger =
-        browser->profile()->GetDownloadManager();
-    return download_mananger->download_prefs()->download_path();
+    return GetDownloadPrefs(browser)->download_path();
   }
 
   // Create a DownloadsObserver that will wait for the
@@ -584,7 +583,7 @@ class DownloadTest : public InProcessBrowserTest {
     return new DownloadsObserver(
         download_manager, num_downloads,
         DownloadItem::COMPLETE,  // Really done
-        false,                   // Bail on select file
+        true,                    // Bail on select file
         ON_DANGEROUS_DOWNLOAD_FAIL);
   }
 
@@ -826,12 +825,13 @@ class DownloadTest : public InProcessBrowserTest {
 // Get History Information.
 class DownloadsHistoryDataCollector {
  public:
-  explicit DownloadsHistoryDataCollector(int64 download_db_handle,
-                                         DownloadManager* manager)
+  DownloadsHistoryDataCollector(int64 download_db_handle,
+                                DownloadManager* manager)
       : result_valid_(false),
         download_db_handle_(download_db_handle) {
     HistoryService* hs =
-        manager->profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
+        Profile::FromBrowserContext(manager->browser_context())->
+            GetHistoryService(Profile::EXPLICIT_ACCESS);
     DCHECK(hs);
     hs->QueryDownloads(
         &callback_consumer_,
@@ -844,7 +844,7 @@ class DownloadsHistoryDataCollector {
     ui_test_utils::RunMessageLoop();
   }
 
-  bool GetDownloadsHistoryEntry(DownloadHistoryInfo* result) {
+  bool GetDownloadsHistoryEntry(DownloadPersistentStoreInfo* result) {
     DCHECK(result);
     *result = result_;
     return result_valid_;
@@ -852,9 +852,10 @@ class DownloadsHistoryDataCollector {
 
  private:
   void OnQueryDownloadsComplete(
-      std::vector<DownloadHistoryInfo>* entries) {
+      std::vector<DownloadPersistentStoreInfo>* entries) {
     result_valid_ = false;
-    for (std::vector<DownloadHistoryInfo>::const_iterator it = entries->begin();
+    for (std::vector<DownloadPersistentStoreInfo>::const_iterator it =
+             entries->begin();
          it != entries->end(); ++it) {
       if (it->db_handle == download_db_handle_) {
         result_ = *it;
@@ -864,7 +865,7 @@ class DownloadsHistoryDataCollector {
     MessageLoopForUI::current()->Quit();
   }
 
-  DownloadHistoryInfo result_;
+  DownloadPersistentStoreInfo result_;
   bool result_valid_;
   int64 download_db_handle_;
   CancelableRequestConsumer callback_consumer_;
@@ -893,8 +894,8 @@ class MockAbortExtensionInstallUI : public ExtensionInstallUI {
 // installation.
 class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
  public:
-  explicit MockAutoConfirmExtensionInstallUI(Profile* profile) :
-      ExtensionInstallUI(profile) {}
+  explicit MockAutoConfirmExtensionInstallUI(Profile* profile)
+      : ExtensionInstallUI(profile) {}
 
   // Proceed without confirmation prompt.
   virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
@@ -1482,7 +1483,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
   DownloadsHistoryDataCollector history_collector(
       db_handle,
       browser()->profile()->GetDownloadManager());
-  DownloadHistoryInfo info;
+  DownloadPersistentStoreInfo info;
   EXPECT_TRUE(history_collector.GetDownloadsHistoryEntry(&info)) << db_handle;
   EXPECT_EQ(file, info.path.BaseName());
   EXPECT_EQ(url, info.url);
@@ -1499,7 +1500,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, ChromeURLAfterDownload) {
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   GURL download_url(URLRequestMockHTTPJob::GetMockUrl(file));
   GURL flags_url(chrome::kChromeUIFlagsURL);
-  GURL extensions_url(chrome::kChromeUIExtensionsURL);
+  GURL extensions_url(GURL(std::string(chrome::kChromeUISettingsURL) +
+                           chrome::kExtensionsSubPage));
 
   ui_test_utils::NavigateToURL(browser(), flags_url);
   DownloadAndWait(browser(), download_url, EXPECT_NO_SELECT_DIALOG);

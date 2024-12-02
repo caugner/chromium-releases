@@ -14,6 +14,7 @@
 #include "ui/base/ime/composition_text.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/range/range.h"
+#include "views/views_export.h"
 
 namespace gfx {
 class Rect;
@@ -24,7 +25,7 @@ namespace views {
 class View;
 
 // An interface implemented by a View that needs text input support.
-class TextInputClient {
+class VIEWS_EXPORT TextInputClient {
  public:
   virtual ~TextInputClient() {}
 

@@ -10,13 +10,19 @@
 #include "base/test/thread_test_helper.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/testing_profile.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/in_process_webkit/indexed_db_context.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/content_switches.h"
+#include "webkit/database/database_util.h"
+#include "webkit/quota/quota_manager.h"
+#include "webkit/quota/special_storage_policy.h"
+
+using quota::QuotaManager;
+using webkit_database::DatabaseUtil;
 
 // This browser test is aimed towards exercising the IndexedDB bindings and
 // the actual implementation that lives in the browser side (in_process_webkit).
@@ -24,10 +30,6 @@ class IndexedDBBrowserTest : public InProcessBrowserTest {
  public:
   IndexedDBBrowserTest() {
     EnableDOMAutomation();
-  }
-
-  virtual void SetUpCommandLine(CommandLine* command_line) {
-    command_line->AppendSwitch(switches::kUnlimitedQuotaForIndexedDB);
   }
 
   GURL testUrl(const FilePath& file_path) {
@@ -121,41 +123,92 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, Bug84933Test) {
 // In proc browser test is needed here because ClearLocalState indirectly calls
 // WebKit's isMainThread through WebSecurityOrigin->SecurityOrigin.
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ClearLocalState) {
-  // Create test files.
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  FilePath indexeddb_dir = temp_dir.path().Append(
-      IndexedDBContext::kIndexedDBDirectory);
-  ASSERT_TRUE(file_util::CreateDirectory(indexeddb_dir));
 
-  FilePath::StringType file_name_1(FILE_PATH_LITERAL("http_foo_0"));
-  file_name_1.append(IndexedDBContext::kIndexedDBExtension);
-  FilePath::StringType file_name_2(FILE_PATH_LITERAL("chrome-extension_foo_0"));
-  file_name_2.append(IndexedDBContext::kIndexedDBExtension);
-  FilePath temp_file_path_1 = indexeddb_dir.Append(file_name_1);
-  FilePath temp_file_path_2 = indexeddb_dir.Append(file_name_2);
-
-  ASSERT_EQ(1, file_util::WriteFile(temp_file_path_1, ".", 1));
-  ASSERT_EQ(1, file_util::WriteFile(temp_file_path_2, "o", 1));
+  FilePath protected_path;
+  FilePath unprotected_path;
 
   // Create the scope which will ensure we run the destructor of the webkit
   // context which should trigger the clean up.
   {
     TestingProfile profile;
+
+    // Test our assumptions about what is protected and what is not.
+    const GURL kProtectedOrigin("chrome-extension://foo/");
+    const GURL kUnprotectedOrigin("http://foo/");
+    quota::SpecialStoragePolicy* policy = profile.GetSpecialStoragePolicy();
+    ASSERT_TRUE(policy->IsStorageProtected(kProtectedOrigin));
+    ASSERT_FALSE(policy->IsStorageProtected(kUnprotectedOrigin));
+
+    // Create some indexedDB paths.
+    // With the levelDB backend, these are directories.
     WebKitContext *webkit_context = profile.GetWebKitContext();
-    webkit_context->indexed_db_context()->set_data_path(indexeddb_dir);
+    IndexedDBContext* idb_context = webkit_context->indexed_db_context();
+    idb_context->set_data_path(temp_dir.path());
+    protected_path = idb_context->GetIndexedDBFilePath(
+        DatabaseUtil::GetOriginIdentifier(kProtectedOrigin));
+    unprotected_path = idb_context->GetIndexedDBFilePath(
+        DatabaseUtil::GetOriginIdentifier(kUnprotectedOrigin));
+    ASSERT_TRUE(file_util::CreateDirectory(protected_path));
+    ASSERT_TRUE(file_util::CreateDirectory(unprotected_path));
+
+    // Setup to clear all unprotected origins on exit.
     webkit_context->set_clear_local_state_on_exit(true);
   }
+
   // Make sure we wait until the destructor has run.
   scoped_refptr<base::ThreadTestHelper> helper(
       new base::ThreadTestHelper(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::WEBKIT)));
   ASSERT_TRUE(helper->Run());
 
-  // Because we specified https for scheme to be skipped the second file
-  // should survive and the first go into vanity.
-  ASSERT_FALSE(file_util::PathExists(temp_file_path_1));
-  ASSERT_TRUE(file_util::PathExists(temp_file_path_2));
+  ASSERT_TRUE(file_util::DirectoryExists(protected_path));
+  ASSERT_FALSE(file_util::DirectoryExists(unprotected_path));
+}
+
+class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
+ public:
+  virtual void SetUpOnMainThread() {
+    const int kInitialQuotaKilobytes = 5000;
+    const int kTemporaryStorageQuotaMaxSize = kInitialQuotaKilobytes
+        * 1024 * QuotaManager::kPerHostTemporaryPortion;
+    SetTempQuota(
+        kTemporaryStorageQuotaMaxSize, browser()->profile()->GetQuotaManager());
+  }
+
+  class SetTempQuotaCallback : public quota::QuotaCallback {
+   public:
+    void Run(quota::QuotaStatusCode, quota::StorageType, int64) {
+      DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    }
+
+    void RunWithParams(const Tuple3<quota::QuotaStatusCode,
+                       quota::StorageType, int64>& params) {
+      Run(params.a, params.b, params.c);
+    }
+  };
+
+  static void SetTempQuota(int64 bytes, scoped_refptr<QuotaManager> qm) {
+    if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
+      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+          NewRunnableFunction(&IndexedDBBrowserTestWithLowQuota::SetTempQuota,
+                              bytes, qm));
+      return;
+    }
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    qm->SetTemporaryGlobalQuota(bytes, new SetTempQuotaCallback);
+    // Don't return until the quota has been set.
+    scoped_refptr<base::ThreadTestHelper> helper(
+        new base::ThreadTestHelper(
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB)));
+    ASSERT_TRUE(helper->Run());
+  }
+
+};
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithLowQuota, QuotaTest) {
+  SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("quota_test.html"))));
 }
 
 class IndexedDBBrowserTestWithGCExposed : public IndexedDBBrowserTest {

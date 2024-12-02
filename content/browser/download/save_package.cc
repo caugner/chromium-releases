@@ -18,16 +18,13 @@
 #include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/download/download_item.h"
-#include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/download/download_manager.h"
-#include "chrome/browser/download/download_util.h"
-#include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
+#include "content/browser/browser_context.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/content_browser_client.h"
+#include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_manager_delegate.h"
 #include "content/browser/download/save_file.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/download/save_item.h"
@@ -36,8 +33,6 @@
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
-#include "content/common/notification_service.h"
 #include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
 #include "net/base/io_buffer.h"
@@ -120,6 +115,7 @@ SavePackage::SavePackage(TabContents* tab_contents,
                          const FilePath& directory_full_path)
     : TabContentsObserver(tab_contents),
       file_manager_(NULL),
+      download_manager_(NULL),
       download_(NULL),
       page_url_(GetUrlToBeSaved()),
       saved_main_file_path_(file_full_path),
@@ -147,6 +143,7 @@ SavePackage::SavePackage(TabContents* tab_contents,
 SavePackage::SavePackage(TabContents* tab_contents)
     : TabContentsObserver(tab_contents),
       file_manager_(NULL),
+      download_manager_(NULL),
       download_(NULL),
       page_url_(GetUrlToBeSaved()),
       title_(tab_contents->GetTitle()),
@@ -171,6 +168,7 @@ SavePackage::SavePackage(TabContents* tab_contents,
                          const FilePath& directory_full_path)
     : TabContentsObserver(tab_contents),
       file_manager_(NULL),
+      download_manager_(NULL),
       download_(NULL),
       saved_main_file_path_(file_full_path),
       saved_main_directory_path_(directory_full_path),
@@ -192,6 +190,9 @@ SavePackage::~SavePackage() {
     Cancel(true);
   }
 
+  // We should no longer be observing the DownloadItem at this point.
+  CHECK(!download_);
+
   DCHECK(all_save_items_count_ == (waiting_item_queue_.size() +
                                    completed_count() +
                                    in_process_count()));
@@ -206,9 +207,6 @@ SavePackage::~SavePackage() {
   STLDeleteValues(&saved_success_items_);
   STLDeleteValues(&in_progress_items_);
   STLDeleteValues(&saved_failed_items_);
-
-  // The DownloadItem is owned by DownloadManager.
-  download_ = NULL;
 
   file_manager_ = NULL;
 }
@@ -245,10 +243,10 @@ void SavePackage::InternalInit() {
   }
 
   file_manager_ = rdh->save_file_manager();
-  if (!file_manager_) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK(file_manager_);
+
+  download_manager_ = tab_contents()->browser_context()->GetDownloadManager();
+  DCHECK(download_manager_);
 }
 
 bool SavePackage::Init() {
@@ -259,25 +257,25 @@ bool SavePackage::Init() {
   wait_state_ = START_PROCESS;
 
   // Initialize the request context and resource dispatcher.
-  Profile* profile = tab_contents()->profile();
-  if (!profile) {
+  content::BrowserContext* browser_context = tab_contents()->browser_context();
+  if (!browser_context) {
     NOTREACHED();
     return false;
   }
 
-  // Create the fake DownloadItem and display the view.
-  DownloadManager* download_manager =
-      tab_contents()->profile()->GetDownloadManager();
-  download_ = new DownloadItem(download_manager,
+  ResourceDispatcherHost* rdh =
+      content::GetContentClient()->browser()->GetResourceDispatcherHost();
+
+  // Create the download item, and add ourself as an observer.
+  download_ = new DownloadItem(download_manager_,
                                saved_main_file_path_,
                                page_url_,
-                               profile->IsOffTheRecord());
+                               browser_context->IsOffTheRecord(),
+                               rdh->download_file_manager()->GetNextId());
+  download_->AddObserver(this);
 
-  // Transfer the ownership to the download manager. We need the DownloadItem
-  // to be alive as long as the Profile is alive.
-  download_manager->SavePageAsDownloadStarted(download_);
-
-  tab_contents()->OnStartDownload(download_);
+  // Transfer ownership to the download manager.
+  download_manager_->SavePageDownloadStarted(download_);
 
   // Check save type and process the save page job.
   if (save_type_ == SAVE_AS_COMPLETE_HTML) {
@@ -367,21 +365,9 @@ bool SavePackage::GenerateFileName(const std::string& disposition,
                                    bool need_html_ext,
                                    FilePath::StringType* generated_name) {
   // TODO(jungshik): Figure out the referrer charset when having one
-  // makes sense and pass it to GetSuggestedFilename.
-  string16 suggested_name =
-      net::GetSuggestedFilename(url, disposition, "", "",
-                                ASCIIToUTF16(kDefaultSaveName));
-
-  // TODO(evan): this code is totally wrong -- we should just generate
-  // Unicode filenames and do all this encoding switching at the end.
-  // However, I'm just shuffling wrong code around, at least not adding
-  // to it.
-#if defined(OS_WIN)
-  FilePath file_path = FilePath(suggested_name);
-#else
-  FilePath file_path = FilePath(
-      base::SysWideToNativeMB(UTF16ToWide(suggested_name)));
-#endif
+  // makes sense and pass it to GenerateFileName.
+  FilePath file_path = net::GenerateFileName(url, disposition, "", "", "",
+                                             ASCIIToUTF16(kDefaultSaveName));
 
   DCHECK(!file_path.empty());
   FilePath::StringType pure_file_name =
@@ -639,7 +625,10 @@ void SavePackage::Stop() {
   wait_state_ = FAILED;
 
   // Inform the DownloadItem we have canceled whole save page job.
-  download_->Cancel(false);
+  if (download_) {
+    download_->Cancel(false);
+    FinalizeDownloadEntry();
+  }
 }
 
 void SavePackage::CheckFinish() {
@@ -692,13 +681,11 @@ void SavePackage::Finish() {
                         &SaveFileManager::RemoveSavedFileFromFileMap,
                         save_ids));
 
-  download_->OnAllDataSaved(all_save_items_count_);
-  download_->MarkAsComplete();
-
-  NotificationService::current()->Notify(
-      content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-      Source<SavePackage>(this),
-      Details<GURL>(&page_url_));
+  if (download_) {
+    download_->OnAllDataSaved(all_save_items_count_);
+    download_->MarkAsComplete();
+    FinalizeDownloadEntry();
+  }
 }
 
 // Called for updating end state.
@@ -718,7 +705,8 @@ void SavePackage::SaveFinished(int32 save_id, int64 size, bool is_success) {
 
   // Inform the DownloadItem to update UI.
   // We use the received bytes as number of saved files.
-  download_->Update(completed_count());
+  if (download_)
+    download_->Update(completed_count());
 
   if (save_item->save_source() == SaveFileCreateInfo::SAVE_FILE_FROM_DOM &&
       save_item->url() == page_url_ && !save_item->received_bytes()) {
@@ -759,7 +747,8 @@ void SavePackage::SaveFailed(const GURL& save_url) {
 
   // Inform the DownloadItem to update UI.
   // We use the received bytes as number of saved files.
-  download_->Update(completed_count());
+  if (download_)
+    download_->Update(completed_count());
 
   if (save_type_ == SAVE_AS_ONLY_HTML ||
       save_item->save_source() == SaveFileCreateInfo::SAVE_FILE_FROM_DOM) {
@@ -816,7 +805,8 @@ void SavePackage::SaveNextFile(bool process_all_remaining_items) {
                            routing_id(),
                            save_item->save_source(),
                            save_item->full_path(),
-                           tab_contents()->profile()->GetResourceContext(),
+                           tab_contents()->
+                               browser_context()->GetResourceContext(),
                            this);
   } while (process_all_remaining_items && waiting_item_queue_.size());
 }
@@ -1023,7 +1013,8 @@ void SavePackage::OnReceivedSavableResourceLinksForCurrentPage(
                            static_cast<int>(frames_list.size());
 
   // We use total bytes as the total number of files we want to save.
-  download_->set_total_bytes(all_save_items_count_);
+  if (download_)
+    download_->set_total_bytes(all_save_items_count_);
 
   if (all_save_items_count_) {
     // Put all sub-resources to wait list.
@@ -1154,38 +1145,13 @@ const FilePath::CharType* SavePackage::ExtensionForMimeType(
   return FILE_PATH_LITERAL("");
 }
 
-
-
-// static.
-// Check whether the preference has the preferred directory for saving file. If
-// not, initialize it with default directory.
-FilePath SavePackage::GetSaveDirPreference(PrefService* prefs) {
-  DCHECK(prefs);
-
-  if (!prefs->FindPreference(prefs::kSaveFileDefaultDirectory)) {
-    DCHECK(prefs->FindPreference(prefs::kDownloadDefaultDirectory));
-    FilePath default_save_path = prefs->GetFilePath(
-        prefs::kDownloadDefaultDirectory);
-    prefs->RegisterFilePathPref(prefs::kSaveFileDefaultDirectory,
-                                default_save_path,
-                                PrefService::UNSYNCABLE_PREF);
-  }
-
-  // Get the directory from preference.
-  FilePath save_file_path = prefs->GetFilePath(
-      prefs::kSaveFileDefaultDirectory);
-  DCHECK(!save_file_path.empty());
-
-  return save_file_path;
-}
-
 void SavePackage::GetSaveInfo() {
   // Can't use tab_contents_ in the file thread, so get the data that we need
   // before calling to it.
-  PrefService* prefs = tab_contents()->profile()->GetPrefs();
-  FilePath website_save_dir = GetSaveDirPreference(prefs);
-  FilePath download_save_dir = prefs->GetFilePath(
-      prefs::kDownloadDefaultDirectory);
+  FilePath website_save_dir, download_save_dir;
+  DCHECK(download_manager_);
+  download_manager_->delegate()->GetSaveDir(
+      tab_contents(), &website_save_dir, &download_save_dir);
   std::string mime_type = tab_contents()->contents_mime_type();
   std::string accept_languages =
       content::GetContentClient()->browser()->GetAcceptLangs(tab_contents());
@@ -1247,7 +1213,7 @@ void SavePackage::ContinueGetSaveInfo(const FilePath& suggested_path,
   if (!tab_contents())
     return;
 
-  content::GetContentClient()->browser()->ChooseSavePath(
+  download_manager_->delegate()->ChooseSavePath(
       AsWeakPtr(), suggested_path, can_save_as_complete);
 }
 
@@ -1256,30 +1222,13 @@ void SavePackage::OnPathPicked(const FilePath& final_name,
                                SavePackageType type) {
   // Ensure the filename is safe.
   saved_main_file_path_ = final_name;
-  download_util::GenerateSafeFileName(tab_contents()->contents_mime_type(),
-                                      &saved_main_file_path_);
+  // TODO(asanka): This call may block on IO and shouldn't be made
+  // from the UI thread.  See http://crbug.com/61827.
+  net::GenerateSafeFileName(tab_contents()->contents_mime_type(),
+                            &saved_main_file_path_);
 
   saved_main_directory_path_ = saved_main_file_path_.DirName();
-
-  PrefService* prefs = tab_contents()->profile()->GetPrefs();
-  StringPrefMember save_file_path;
-  save_file_path.Init(prefs::kSaveFileDefaultDirectory, prefs, NULL);
-#if defined(OS_POSIX)
-  std::string path_string = saved_main_directory_path_.value();
-#elif defined(OS_WIN)
-  std::string path_string = WideToUTF8(saved_main_directory_path_.value());
-#endif
-  // If user change the default saving directory, we will remember it just
-  // like IE and FireFox.
-  if (!tab_contents()->profile()->IsOffTheRecord() &&
-      save_file_path.GetValue() != path_string) {
-    save_file_path.SetValue(path_string);
-  }
-
   save_type_ = type;
-
-  prefs->SetInteger(prefs::kSaveFileType, save_type_);
-
   if (save_type_ == SavePackage::SAVE_AS_COMPLETE_HTML) {
     // Make new directory for saving complete file.
     saved_main_directory_path_ = saved_main_directory_path_.Append(
@@ -1310,4 +1259,31 @@ bool SavePackage::IsSavableContents(const std::string& contents_mime_type) {
          contents_mime_type == "text/plain" ||
          contents_mime_type == "text/css" ||
          net::IsSupportedJavascriptMimeType(contents_mime_type.c_str());
+}
+
+void SavePackage::StopObservation() {
+  DCHECK(download_);
+  DCHECK(download_manager_);
+
+  download_->RemoveObserver(this);
+  download_ = NULL;
+  download_manager_ = NULL;
+}
+
+void SavePackage::OnDownloadUpdated(DownloadItem* download) {
+  DCHECK(download_);
+  DCHECK(download_ == download);
+  DCHECK(download_manager_);
+
+  // Check for removal.
+  if (download->state() == DownloadItem::REMOVING)
+    StopObservation();
+}
+
+void SavePackage::FinalizeDownloadEntry() {
+  DCHECK(download_);
+  DCHECK(download_manager_);
+
+  download_manager_->SavePageDownloadFinished(download_);
+  StopObservation();
 }

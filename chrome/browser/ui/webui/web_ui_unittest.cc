@@ -7,7 +7,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_controller.h"
@@ -37,7 +37,6 @@ class WebUITest : public TabContentsWrapperTestHarness {
     // Check the things the pending Web UI should have set.
     EXPECT_FALSE(contents->ShouldDisplayURL());
     EXPECT_FALSE(wrapper->favicon_tab_helper()->ShouldDisplayFavicon());
-    EXPECT_TRUE(wrapper->bookmark_tab_helper()->ShouldShowBookmarkBar());
     EXPECT_TRUE(contents->FocusLocationBarByDefault());
 
     // Now commit the load.
@@ -47,7 +46,6 @@ class WebUITest : public TabContentsWrapperTestHarness {
     // The same flags should be set as before now that the load has committed.
     EXPECT_FALSE(contents->ShouldDisplayURL());
     EXPECT_FALSE(wrapper->favicon_tab_helper()->ShouldDisplayFavicon());
-    EXPECT_TRUE(wrapper->bookmark_tab_helper()->ShouldShowBookmarkBar());
     EXPECT_TRUE(contents->FocusLocationBarByDefault());
 
     // Start a pending navigation to a regular page.
@@ -58,7 +56,6 @@ class WebUITest : public TabContentsWrapperTestHarness {
     // should reflect the old one (bookmark bar) until it has committed.
     EXPECT_TRUE(contents->ShouldDisplayURL());
     EXPECT_TRUE(wrapper->favicon_tab_helper()->ShouldDisplayFavicon());
-    EXPECT_TRUE(wrapper->bookmark_tab_helper()->ShouldShowBookmarkBar());
     EXPECT_FALSE(contents->FocusLocationBarByDefault());
 
     // Commit the regular page load. Note that we must send it to the "pending"
@@ -78,7 +75,6 @@ class WebUITest : public TabContentsWrapperTestHarness {
     // The state should now reflect a regular page.
     EXPECT_TRUE(contents->ShouldDisplayURL());
     EXPECT_TRUE(wrapper->favicon_tab_helper()->ShouldDisplayFavicon());
-    EXPECT_FALSE(wrapper->bookmark_tab_helper()->ShouldShowBookmarkBar());
     EXPECT_FALSE(contents->FocusLocationBarByDefault());
   }
 
@@ -118,8 +114,6 @@ TEST_F(WebUITest, WebUIToWebUI) {
   EXPECT_FALSE(contents()->ShouldDisplayURL());
   EXPECT_FALSE(
       contents_wrapper()->favicon_tab_helper()->ShouldDisplayFavicon());
-  EXPECT_TRUE(
-      contents_wrapper()->bookmark_tab_helper()->ShouldShowBookmarkBar());
   EXPECT_TRUE(contents()->FocusLocationBarByDefault());
 }
 
@@ -132,16 +126,12 @@ TEST_F(WebUITest, StandardToWebUI) {
   // The state should now reflect the default.
   EXPECT_TRUE(contents()->ShouldDisplayURL());
   EXPECT_TRUE(contents_wrapper()->favicon_tab_helper()->ShouldDisplayFavicon());
-  EXPECT_FALSE(
-      contents_wrapper()->bookmark_tab_helper()->ShouldShowBookmarkBar());
   EXPECT_FALSE(contents()->FocusLocationBarByDefault());
 
   // Commit the load, the state should be the same.
   rvh()->SendNavigate(1, std_url);
   EXPECT_TRUE(contents()->ShouldDisplayURL());
   EXPECT_TRUE(contents_wrapper()->favicon_tab_helper()->ShouldDisplayFavicon());
-  EXPECT_FALSE(
-      contents_wrapper()->bookmark_tab_helper()->ShouldShowBookmarkBar());
   EXPECT_FALSE(contents()->FocusLocationBarByDefault());
 
   // Start a pending load for a WebUI.
@@ -149,8 +139,6 @@ TEST_F(WebUITest, StandardToWebUI) {
   controller().LoadURL(new_tab_url, GURL(), PageTransition::LINK);
   EXPECT_FALSE(contents()->ShouldDisplayURL());
   EXPECT_TRUE(contents_wrapper()->favicon_tab_helper()->ShouldDisplayFavicon());
-  EXPECT_FALSE(
-      contents_wrapper()->bookmark_tab_helper()->ShouldShowBookmarkBar());
   EXPECT_TRUE(contents()->FocusLocationBarByDefault());
 
   // Committing Web UI is tested above.
@@ -158,8 +146,9 @@ TEST_F(WebUITest, StandardToWebUI) {
 
 class TabContentsForFocusTest : public TestTabContents {
  public:
-  TabContentsForFocusTest(Profile* profile, SiteInstance* instance)
-      : TestTabContents(profile, instance), focus_called_(0) {
+  TabContentsForFocusTest(content::BrowserContext* browser_context,
+                          SiteInstance* instance)
+      : TestTabContents(browser_context, instance), focus_called_(0) {
   }
 
   virtual void SetFocusToLocationBar(bool select_all) { ++focus_called_; }
@@ -172,8 +161,8 @@ class TabContentsForFocusTest : public TestTabContents {
 TEST_F(WebUITest, FocusOnNavigate) {
   // Setup.  |tc| will be used to track when we try to focus the location bar.
   TabContentsForFocusTest* tc = new TabContentsForFocusTest(
-      contents()->profile(),
-      SiteInstance::CreateSiteInstance(contents()->profile()));
+      contents()->browser_context(),
+      SiteInstance::CreateSiteInstance(contents()->browser_context()));
   tc->controller().CopyStateFrom(controller());
   SetContents(tc);
   int page_id = 200;

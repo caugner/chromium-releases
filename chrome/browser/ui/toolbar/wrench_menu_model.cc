@@ -199,7 +199,7 @@ void BookmarkSubMenuModel::Build(Browser* browser) {
   AddCheckItemWithStringId(IDC_SHOW_BOOKMARK_BAR, IDS_SHOW_BOOKMARK_BAR);
   AddItemWithStringId(IDC_SHOW_BOOKMARK_MANAGER, IDS_BOOKMARK_MANAGER);
 #if !defined(OS_CHROMEOS)
-  AddItemWithStringId(IDC_IMPORT_SETTINGS, IDS_IMPORT_SETTINGS_TITLE);
+  AddItemWithStringId(IDC_IMPORT_SETTINGS, IDS_IMPORT_SETTINGS_MENU_LABEL);
 #endif
 #if defined(OS_MACOSX)
   AddSeparator();
@@ -245,7 +245,8 @@ bool WrenchMenuModel::IsItemForCommandIdDynamic(int command_id) const {
 #endif
          command_id == IDC_SYNC_BOOKMARKS ||
          command_id == IDC_VIEW_BACKGROUND_PAGES ||
-         command_id == IDC_UPGRADE_DIALOG;
+         command_id == IDC_UPGRADE_DIALOG ||
+         command_id == IDC_SHOW_SYNC_SETUP;
 }
 
 string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
@@ -278,6 +279,20 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
 #endif
 
       return l10n_util::GetStringFUTF16(IDS_UPDATE_NOW, product_name);
+    }
+    case IDC_SHOW_SYNC_SETUP: {
+      ProfileSyncService* service =
+          browser_->GetProfile()->GetOriginalProfile()->GetProfileSyncService();
+      if (service->HasSyncSetupCompleted()) {
+        std::string username = browser_->GetProfile()->GetPrefs()->GetString(
+            prefs::kGoogleServicesUsername);
+        if (!username.empty()) {
+          return l10n_util::GetStringFUTF16(IDS_SHOW_SYNC_SETUP_USERNAME,
+                                            UTF8ToUTF16(username));
+        }
+      }
+      return l10n_util::GetStringFUTF16(IDS_SHOW_SYNC_SETUP,
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
     }
     default:
       NOTREACHED();
@@ -318,13 +333,7 @@ bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
 }
 
 bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
-  switch (command_id) {
-    case IDC_SHOW_BOOKMARK_BAR:
-      return !browser_->profile()->GetPrefs()->IsManagedPreference(
-          prefs::kEnableBookmarkBar);
-    default:
-      return browser_->command_updater()->IsCommandEnabled(command_id);
-  }
+  return browser_->command_updater()->IsCommandEnabled(command_id);
 }
 
 bool WrenchMenuModel::IsCommandIdVisible(int command_id) const {
@@ -397,15 +406,15 @@ WrenchMenuModel::WrenchMenuModel()
       tabstrip_model_(NULL) {
 }
 
+#if !defined(OS_CHROMEOS)
 void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
   AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
-#if defined(OS_CHROMEOS)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession))
-    AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
-#else
   AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
-#endif
+
+  bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
+  AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
+                         bookmark_sub_menu_model_.get());
 
   AddSeparator();
 #if defined(OS_POSIX) && !defined(TOOLKIT_VIEWS)
@@ -453,26 +462,19 @@ void WrenchMenuModel::Build() {
 
   AddSeparator();
 
-  bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
-  AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
-                         bookmark_sub_menu_model_.get());
   AddItemWithStringId(IDC_SHOW_HISTORY, IDS_SHOW_HISTORY);
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
   AddSeparator();
 
-#if !defined(OS_CHROMEOS)
-  if (ProfileManager::IsMultipleProfilesEnabled()) {
+  if (browser_->profile()->GetOriginalProfile()->IsSyncAccessible()) {
     const string16 short_product_name =
-          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
+        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
     AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
         IDS_SHOW_SYNC_SETUP, short_product_name));
     AddSeparator();
   }
-#endif
 
-#if defined(OS_CHROMEOS)
-  AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
-#elif defined(OS_MACOSX)
+#if defined(OS_MACOSX)
   AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
 #elif defined(TOOLKIT_USES_GTK)
   string16 preferences = gtk_util::GetStockPreferencesMenuLabel();
@@ -484,11 +486,7 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
 #endif
 
-#if defined(OS_CHROMEOS)
-  const string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME);
-#else
   const string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-#endif
   AddItem(IDC_ABOUT, l10n_util::GetStringFUTF16(IDS_ABOUT, product_name));
   string16 num_background_pages = base::FormatNumber(
       TaskManager::GetBackgroundPageCount());
@@ -506,29 +504,13 @@ void WrenchMenuModel::Build() {
 #endif
 
   AddItemWithStringId(IDC_HELP_PAGE, IDS_HELP_PAGE);
-#if defined(OS_CHROMEOS)
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  // Use an icon for IDC_HELP_PAGE menu item.
-  SetIcon(GetIndexOfCommandId(IDC_HELP_PAGE),
-          *rb.GetBitmapNamed(IDR_HELP_MENU));
-
-  // Show IDC_FEEDBACK in top-tier wrench menu for ChromeOS.
-  AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
-#endif
 
   if (browser_defaults::kShowExitMenuItem) {
     AddSeparator();
-#if defined(OS_CHROMEOS)
-    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession)) {
-      AddItemWithStringId(IDC_EXIT, IDS_EXIT_GUEST_MODE);
-    } else {
-      AddItemWithStringId(IDC_EXIT, IDS_SIGN_OUT);
-    }
-#else
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
-#endif
   }
 }
+#endif // !OS_CHROMEOS
 
 void WrenchMenuModel::CreateCutCopyPaste() {
   // WARNING: views/wrench_menu assumes these items are added in this order. If

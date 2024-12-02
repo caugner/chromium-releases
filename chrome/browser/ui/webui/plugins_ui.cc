@@ -13,7 +13,7 @@
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/plugin_updater.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_content_client.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -101,8 +102,8 @@ class PluginsDOMHandler : public WebUIMessageHandler,
   virtual ~PluginsDOMHandler() {}
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // Callback for the "requestPluginsData" message.
   void HandleRequestPluginsData(const ListValue* args);
@@ -117,28 +118,24 @@ class PluginsDOMHandler : public WebUIMessageHandler,
   void HandleGetShowDetails(const ListValue* args);
 
   // NotificationObserver method overrides
-  void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details);
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
  private:
-  // This extra wrapper is used to ensure we don't leak the ListValue* pointer
-  // if the PluginsDOMHandler object goes away before the task on the UI thread
-  // to give it the plugin list runs.
-  struct ListWrapper {
-    ListValue* list;
-  };
   // Loads the plugins on the FILE thread.
-  static void LoadPluginsOnFileThread(ListWrapper* wrapper, Task* task);
+  static void LoadPluginsOnFileThread(
+      std::vector<webkit::npapi::PluginGroup>* groups, Task* task);
 
   // Used in conjunction with ListWrapper to avoid any memory leaks.
-  static void EnsureListDeleted(ListWrapper* wrapper);
+  static void EnsurePluginGroupsDeleted(
+      std::vector<webkit::npapi::PluginGroup>* groups);
 
   // Call this to start getting the plugins on the UI thread.
   void LoadPlugins();
 
   // Called on the UI thread when the plugin information is ready.
-  void PluginsLoaded(ListWrapper* wrapper);
+  void PluginsLoaded(const std::vector<webkit::npapi::PluginGroup>* groups);
 
   NotificationRegistrar registrar_;
 
@@ -154,14 +151,14 @@ class PluginsDOMHandler : public WebUIMessageHandler,
 PluginsDOMHandler::PluginsDOMHandler()
     : ALLOW_THIS_IN_INITIALIZER_LIST(get_plugins_factory_(this)) {
   registrar_.Add(this,
-                 content::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
+                 chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
                  NotificationService::AllSources());
 }
 
 WebUIMessageHandler* PluginsDOMHandler::Attach(WebUI* web_ui) {
-  PrefService* prefs = web_ui->GetProfile()->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui)->GetPrefs();
 
-  show_details_.Init(prefs::kPluginsShowDetails, prefs, this);
+  show_details_.Init(prefs::kPluginsShowDetails, prefs, NULL);
 
   return WebUIMessageHandler::Attach(web_ui);
 }
@@ -182,10 +179,12 @@ void PluginsDOMHandler::HandleRequestPluginsData(const ListValue* args) {
 }
 
 void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
+  Profile* profile = Profile::FromWebUI(web_ui_);
+
   // If a non-first-profile user tries to trigger these methods sneakily,
   // forbid it.
 #if !defined(OS_CHROMEOS)
-  if (!web_ui_->GetProfile()->first_launched())
+  if (!profile->GetOriginalProfile()->first_launched())
     return;
 #endif
 
@@ -200,13 +199,13 @@ void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
     return;
   bool enable = enable_str == "true";
 
-  PluginUpdater* plugin_updater = PluginUpdater::GetInstance();
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
   if (is_group_str == "true") {
     string16 group_name;
     if (!args->GetString(0, &group_name))
       return;
 
-    plugin_updater->EnablePluginGroup(enable, group_name);
+    plugin_prefs->EnablePluginGroup(enable, group_name);
     if (enable) {
       // See http://crbug.com/50105 for background.
       string16 adobereader = ASCIIToUTF16(
@@ -214,9 +213,9 @@ void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
       string16 internalpdf =
           ASCIIToUTF16(chrome::ChromeContentClient::kPDFPluginName);
       if (group_name == adobereader) {
-        plugin_updater->EnablePluginGroup(false, internalpdf);
+        plugin_prefs->EnablePluginGroup(false, internalpdf);
       } else if (group_name == internalpdf) {
-        plugin_updater->EnablePluginGroup(false, adobereader);
+        plugin_prefs->EnablePluginGroup(false, adobereader);
       }
     }
   } else {
@@ -224,13 +223,13 @@ void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
     if (!args->GetString(0, &file_path))
       return;
 
-    plugin_updater->EnablePlugin(enable, file_path);
+    plugin_prefs->EnablePlugin(enable, FilePath(file_path));
   }
 
   // TODO(viettrungluu): We might also want to ensure that the plugins
   // list is always written to prefs even when the user hasn't disabled a
   // plugin. <http://crbug.com/39101>
-  plugin_updater->UpdatePreferences(web_ui_->GetProfile(), 0);
+  plugin_prefs->UpdatePreferences(0);
 }
 
 void PluginsDOMHandler::HandleSaveShowDetailsToPrefs(const ListValue* args) {
@@ -243,52 +242,61 @@ void PluginsDOMHandler::HandleSaveShowDetailsToPrefs(const ListValue* args) {
 }
 
 void PluginsDOMHandler::HandleGetShowDetails(const ListValue* args) {
-  FundamentalValue show_details(show_details_.GetValue());
+  base::FundamentalValue show_details(show_details_.GetValue());
   web_ui_->CallJavascriptFunction("loadShowDetailsFromPrefs", show_details);
 }
 
 void PluginsDOMHandler::Observe(int type,
                                 const NotificationSource& source,
                                 const NotificationDetails& details) {
-  DCHECK_EQ(content::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED, type);
+  DCHECK_EQ(chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED, type);
   LoadPlugins();
 }
 
-void PluginsDOMHandler::LoadPluginsOnFileThread(ListWrapper* wrapper,
-                                                Task* task) {
-  wrapper->list = PluginUpdater::GetInstance()->GetPluginGroupsData();
+void PluginsDOMHandler::LoadPluginsOnFileThread(
+    std::vector<webkit::npapi::PluginGroup>* groups,
+    Task* task) {
+  webkit::npapi::PluginList::Singleton()->GetPluginGroups(true, groups);
+
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, task);
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
-      NewRunnableFunction(&PluginsDOMHandler::EnsureListDeleted, wrapper));
+      NewRunnableFunction(&PluginsDOMHandler::EnsurePluginGroupsDeleted,
+                          groups));
 }
 
-void PluginsDOMHandler::EnsureListDeleted(ListWrapper* wrapper) {
-  delete wrapper->list;
-  delete wrapper;
+void PluginsDOMHandler::EnsurePluginGroupsDeleted(
+    std::vector<webkit::npapi::PluginGroup>* groups) {
+  delete groups;
 }
 
 void PluginsDOMHandler::LoadPlugins() {
   if (!get_plugins_factory_.empty())
     return;
 
-  ListWrapper* wrapper = new ListWrapper;
-  wrapper->list = NULL;
+  std::vector<webkit::npapi::PluginGroup>* groups =
+      new std::vector<webkit::npapi::PluginGroup>;
   Task* task = get_plugins_factory_.NewRunnableMethod(
-          &PluginsDOMHandler::PluginsLoaded, wrapper);
+          &PluginsDOMHandler::PluginsLoaded, groups);
 
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
       NewRunnableFunction(
-          &PluginsDOMHandler::LoadPluginsOnFileThread, wrapper, task));
+          &PluginsDOMHandler::LoadPluginsOnFileThread, groups, task));
 }
 
-void PluginsDOMHandler::PluginsLoaded(ListWrapper* wrapper) {
+void PluginsDOMHandler::PluginsLoaded(
+    const std::vector<webkit::npapi::PluginGroup>* groups) {
+  // Construct DictionaryValues to return to the UI
+  ListValue* plugin_groups_data = new ListValue();
+  for (size_t i = 0; i < groups->size(); ++i) {
+    plugin_groups_data->Append((*groups)[i].GetDataForUI());
+    // TODO(bauerb): Fetch plugin enabled state from PluginPrefs.
+  }
   DictionaryValue results;
-  results.Set("plugins", wrapper->list);
-  wrapper->list = NULL;  // So it doesn't get deleted.
+  results.Set("plugins", plugin_groups_data);
   web_ui_->CallJavascriptFunction("returnPluginsData", results);
 }
 
@@ -305,11 +313,11 @@ PluginsUI::PluginsUI(TabContents* contents) : ChromeWebUI(contents) {
 
   // Set up the chrome://plugins/ source.
   bool enable_controls = true;
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
 #if !defined(OS_CHROMEOS)
-  enable_controls = contents->profile()->GetOriginalProfile()->
-      first_launched();
+  enable_controls = profile->GetOriginalProfile()->first_launched();
 #endif
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
+  profile->GetChromeURLDataManager()->AddDataSource(
       CreatePluginsUIHTMLSource(enable_controls));
 }
 
@@ -322,11 +330,6 @@ RefCountedMemory* PluginsUI::GetFaviconResourceBytes() {
 
 // static
 void PluginsUI::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterListPref(prefs::kPluginsPluginsList,
-                          PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kPluginsEnabledInternalPDF,
-                             false,
-                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kPluginsShowDetails,
                              false,
                              PrefService::UNSYNCABLE_PREF);

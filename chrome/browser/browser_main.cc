@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/allocator/allocator_shim.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
@@ -24,7 +23,6 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "base/system_monitor/system_monitor.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
@@ -36,7 +34,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -44,6 +41,7 @@
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/first_run_browser_process.h"
 #include "chrome/browser/first_run/upgrade_util.h"
+#include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/jankometer.h"
 #include "chrome/browser/language_usage_metrics.h"
@@ -57,12 +55,13 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
-#include "chrome/browser/plugin_updater.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -94,7 +93,6 @@
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/common/child_process.h"
 #include "content/common/content_client.h"
-#include "content/common/hi_res_timer_manager.h"
 #include "content/common/main_function_params.h"
 #include "grit/app_locale_settings.h"
 #include "grit/chromium_strings.h"
@@ -102,13 +100,11 @@
 #include "grit/platform_locale_settings.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
-#include "net/base/network_change_notifier.h"
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_stream_factory.h"
 #include "net/socket/client_socket_pool_base.h"
 #include "net/socket/client_socket_pool_manager.h"
-#include "net/socket/tcp_client_socket.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
 #include "net/url_request/url_request.h"
@@ -116,8 +112,6 @@
 #include "net/websockets/websocket_job.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/gl/gl_implementation.h"
-#include "ui/gfx/gl/gl_switches.h"
 
 #if defined(USE_LINUX_BREAKPAD)
 #include "base/linux_util.h"
@@ -125,8 +119,6 @@
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include <dbus/dbus-glib.h>
-
 #include "chrome/browser/browser_main_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #endif
@@ -138,6 +130,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/brightness_observer.h"
+#include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
@@ -147,9 +140,8 @@
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/metrics_cros_settings_provider.h"
-#include "chrome/browser/chromeos/net/cros_network_change_notifier_factory.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
+#include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/chromeos/xinput_hierarchy_changed_event_listener.h"
 #include "chrome/browser/oom_priority_manager.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
@@ -161,9 +153,6 @@
 // progress and should not be taken as an indication of a real refactoring.
 
 #if defined(OS_WIN)
-#include <windows.h>
-#include <commctrl.h>
-#include <shellapi.h>
 
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/windows_version.h"
@@ -178,11 +167,9 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/sandbox_policy.h"
 #include "net/base/net_util.h"
 #include "net/base/sdch_manager.h"
 #include "printing/printed_document.h"
-#include "sandbox/src/sandbox.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/gfx/platform_font_win.h"
 #endif  // defined(OS_WIN)
@@ -211,459 +198,9 @@
 #include "views/touchui/touch_factory.h"
 #endif
 
-namespace {
-void SetSocketReusePolicy(int warmest_socket_trial_group,
-                          const int socket_policy[],
-                          int num_groups) {
-  const int* result = std::find(socket_policy, socket_policy + num_groups,
-                                warmest_socket_trial_group);
-  DCHECK_NE(result, socket_policy + num_groups)
-      << "Not a valid socket reuse policy group";
-  net::SetSocketReusePolicy(result - socket_policy);
-}
-}
-
 namespace net {
 class NetLog;
 }  // namespace net
-
-// BrowserMainParts ------------------------------------------------------------
-
-BrowserMainParts::BrowserMainParts(const MainFunctionParams& parameters)
-    : parameters_(parameters),
-      parsed_command_line_(parameters.command_line_) {
-}
-
-BrowserMainParts::~BrowserMainParts() {
-}
-
-// BrowserMainParts: |EarlyInitialization()| and related -----------------------
-
-void BrowserMainParts::EarlyInitialization() {
-  PreEarlyInitialization();
-
-  if (parsed_command_line().HasSwitch(switches::kEnableBenchmarking))
-    base::FieldTrial::EnableBenchmarking();
-
-  InitializeSSL();
-
-  if (parsed_command_line().HasSwitch(switches::kDisableSSLFalseStart))
-    net::SSLConfigService::DisableFalseStart();
-  if (parsed_command_line().HasSwitch(switches::kEnableSSLCachedInfo))
-    net::SSLConfigService::EnableCachedInfo();
-  if (parsed_command_line().HasSwitch(switches::kEnableOriginBoundCerts))
-    net::SSLConfigService::EnableOriginBoundCerts();
-  if (parsed_command_line().HasSwitch(
-          switches::kEnableDNSCertProvenanceChecking)) {
-    net::SSLConfigService::EnableDNSCertProvenanceChecking();
-  }
-
-  // TODO(abarth): Should this move to InitializeNetworkOptions?  This doesn't
-  // seem dependent on InitializeSSL().
-  if (parsed_command_line().HasSwitch(switches::kEnableTcpFastOpen))
-    net::set_tcp_fastopen_enabled(true);
-
-  PostEarlyInitialization();
-}
-
-// This will be called after the command-line has been mutated by about:flags
-MetricsService* BrowserMainParts::SetupMetricsAndFieldTrials(
-    const CommandLine& parsed_command_line,
-    PrefService* local_state) {
-  // Must initialize metrics after labs have been converted into switches,
-  // but before field trials are set up (so that client ID is available for
-  // one-time randomized field trials).
-  MetricsService* metrics = InitializeMetrics(parsed_command_line, local_state);
-
-  // Initialize FieldTrialList to support FieldTrials that use one-time
-  // randomization. The client ID will be empty if the user has not opted
-  // to send metrics.
-  field_trial_list_.reset(new base::FieldTrialList(metrics->GetClientId()));
-
-  SetupFieldTrials(metrics->recording_active(),
-                   local_state->IsManagedPreference(
-                       prefs::kMaxConnectionsPerProxy));
-
-  // Initialize FieldTrialSynchronizer system. This is a singleton and is used
-  // for posting tasks via NewRunnableMethod. Its deleted when it goes out of
-  // scope. Even though NewRunnableMethod does AddRef and Release, the object
-  // will not be deleted after the Task is executed.
-  field_trial_synchronizer_ = new FieldTrialSynchronizer();
-
-  return metrics;
-}
-
-// This is an A/B test for the maximum number of persistent connections per
-// host. Currently Chrome, Firefox, and IE8 have this value set at 6. Safari
-// uses 4, and Fasterfox (a plugin for Firefox that supposedly configures it to
-// run faster) uses 8. We would like to see how much of an effect this value has
-// on browsing. Too large a value might cause us to run into SYN flood detection
-// mechanisms.
-void BrowserMainParts::ConnectionFieldTrial() {
-  const base::FieldTrial::Probability kConnectDivisor = 100;
-  const base::FieldTrial::Probability kConnectProbability = 1;  // 1% prob.
-
-  // After June 30, 2011 builds, it will always be in default group.
-  scoped_refptr<base::FieldTrial> connect_trial(
-      new base::FieldTrial(
-          "ConnCountImpact", kConnectDivisor, "conn_count_6", 2011, 6, 30));
-
-  // This (6) is the current default value. Having this group declared here
-  // makes it straightforward to modify |kConnectProbability| such that the same
-  // probability value will be assigned to all the other groups, while
-  // preserving the remainder of the of probability space to the default value.
-  const int connect_6 = connect_trial->kDefaultGroupNumber;
-
-  const int connect_5 = connect_trial->AppendGroup("conn_count_5",
-                                                   kConnectProbability);
-  const int connect_7 = connect_trial->AppendGroup("conn_count_7",
-                                                   kConnectProbability);
-  const int connect_8 = connect_trial->AppendGroup("conn_count_8",
-                                                   kConnectProbability);
-  const int connect_9 = connect_trial->AppendGroup("conn_count_9",
-                                                   kConnectProbability);
-
-  const int connect_trial_group = connect_trial->group();
-
-  if (connect_trial_group == connect_5) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(5);
-  } else if (connect_trial_group == connect_6) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(6);
-  } else if (connect_trial_group == connect_7) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(7);
-  } else if (connect_trial_group == connect_8) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(8);
-  } else if (connect_trial_group == connect_9) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(9);
-  } else {
-    NOTREACHED();
-  }
-}
-
-// A/B test for determining a value for unused socket timeout. Currently the
-// timeout defaults to 10 seconds. Having this value set too low won't allow us
-// to take advantage of idle sockets. Setting it to too high could possibly
-// result in more ERR_CONNECTION_RESETs, since some servers will kill a socket
-// before we time it out. Since these are "unused" sockets, we won't retry the
-// connection and instead show an error to the user. So we need to be
-// conservative here. We've seen that some servers will close the socket after
-// as short as 10 seconds. See http://crbug.com/84313 for more details.
-void BrowserMainParts::SocketTimeoutFieldTrial() {
-  const base::FieldTrial::Probability kIdleSocketTimeoutDivisor = 100;
-  // 1% probability for all experimental settings.
-  const base::FieldTrial::Probability kSocketTimeoutProbability = 1;
-
-  // After June 30, 2011 builds, it will always be in default group.
-  scoped_refptr<base::FieldTrial> socket_timeout_trial(
-      new base::FieldTrial("IdleSktToImpact", kIdleSocketTimeoutDivisor,
-          "idle_timeout_10", 2011, 6, 30));
-  const int socket_timeout_10 = socket_timeout_trial->kDefaultGroupNumber;
-
-  const int socket_timeout_5 =
-      socket_timeout_trial->AppendGroup("idle_timeout_5",
-                                        kSocketTimeoutProbability);
-  const int socket_timeout_20 =
-      socket_timeout_trial->AppendGroup("idle_timeout_20",
-                                        kSocketTimeoutProbability);
-
-  const int idle_to_trial_group = socket_timeout_trial->group();
-
-  if (idle_to_trial_group == socket_timeout_5) {
-    net::ClientSocketPool::set_unused_idle_socket_timeout(5);
-  } else if (idle_to_trial_group == socket_timeout_10) {
-    net::ClientSocketPool::set_unused_idle_socket_timeout(10);
-  } else if (idle_to_trial_group == socket_timeout_20) {
-    net::ClientSocketPool::set_unused_idle_socket_timeout(20);
-  } else {
-    NOTREACHED();
-  }
-}
-
-void BrowserMainParts::ProxyConnectionsFieldTrial() {
-  const base::FieldTrial::Probability kProxyConnectionsDivisor = 100;
-  // 25% probability
-  const base::FieldTrial::Probability kProxyConnectionProbability = 1;
-
-  // After June 30, 2011 builds, it will always be in default group.
-  scoped_refptr<base::FieldTrial> proxy_connection_trial(
-      new base::FieldTrial("ProxyConnectionImpact", kProxyConnectionsDivisor,
-          "proxy_connections_32", 2011, 6, 30));
-
-  // This (32 connections per proxy server) is the current default value.
-  // Declaring it here allows us to easily re-assign the probability space while
-  // maintaining that the default group always has the remainder of the "share",
-  // which allows for cleaner and quicker changes down the line if needed.
-  const int proxy_connections_32 = proxy_connection_trial->kDefaultGroupNumber;
-
-  // The number of max sockets per group cannot be greater than the max number
-  // of sockets per proxy server.  We tried using 8, and it can easily
-  // lead to total browser stalls.
-  const int proxy_connections_16 =
-      proxy_connection_trial->AppendGroup("proxy_connections_16",
-                                          kProxyConnectionProbability);
-  const int proxy_connections_64 =
-      proxy_connection_trial->AppendGroup("proxy_connections_64",
-                                          kProxyConnectionProbability);
-
-  const int proxy_connections_trial_group = proxy_connection_trial->group();
-
-  if (proxy_connections_trial_group == proxy_connections_16) {
-    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(16);
-  } else if (proxy_connections_trial_group == proxy_connections_32) {
-    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(32);
-  } else if (proxy_connections_trial_group == proxy_connections_64) {
-    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(64);
-  } else {
-    NOTREACHED();
-  }
-}
-
-// When --use-spdy not set, users will be in A/B test for spdy.
-// group A (npn_with_spdy): this means npn and spdy are enabled. In case server
-//                          supports spdy, browser will use spdy.
-// group B (npn_with_http): this means npn is enabled but spdy won't be used.
-//                          Http is still used for all requests.
-//           default group: no npn or spdy is involved. The "old" non-spdy
-//                          chrome behavior.
-void BrowserMainParts::SpdyFieldTrial() {
-  if (parsed_command_line().HasSwitch(switches::kUseSpdy)) {
-    std::string spdy_mode =
-        parsed_command_line().GetSwitchValueASCII(switches::kUseSpdy);
-    net::HttpNetworkLayer::EnableSpdy(spdy_mode);
-  } else {
-#if !defined(OS_CHROMEOS)
-    bool is_spdy_trial = false;
-    const base::FieldTrial::Probability kSpdyDivisor = 100;
-    base::FieldTrial::Probability npnhttp_probability = 5;
-
-    // After June 30, 2011 builds, it will always be in default group.
-    scoped_refptr<base::FieldTrial> trial(
-        new base::FieldTrial(
-            "SpdyImpact", kSpdyDivisor, "npn_with_spdy", 2011, 6, 30));
-
-    // npn with spdy support is the default.
-    int npn_spdy_grp = trial->kDefaultGroupNumber;
-
-    // npn with only http support, no spdy.
-    int npn_http_grp = trial->AppendGroup("npn_with_http", npnhttp_probability);
-
-    int trial_grp = trial->group();
-    if (trial_grp == npn_http_grp) {
-      is_spdy_trial = true;
-      net::HttpNetworkLayer::EnableSpdy("npn-http");
-    } else if (trial_grp == npn_spdy_grp) {
-      is_spdy_trial = true;
-      net::HttpNetworkLayer::EnableSpdy("npn");
-    } else {
-      CHECK(!is_spdy_trial);
-    }
-#else
-    // Always enable SPDY on Chrome OS
-    net::HttpNetworkLayer::EnableSpdy("npn");
-#endif  // !defined(OS_CHROMEOS)
-  }
-
-  // Setup SPDY CWND Field trial.
-  const base::FieldTrial::Probability kSpdyCwndDivisor = 100;
-  const base::FieldTrial::Probability kSpdyCwnd16 = 20;     // fixed at 16
-  const base::FieldTrial::Probability kSpdyCwnd10 = 20;     // fixed at 10
-  const base::FieldTrial::Probability kSpdyCwndMin16 = 20;  // no less than 16
-  const base::FieldTrial::Probability kSpdyCwndMin10 = 20;  // no less than 10
-
-  // After June 30, 2011 builds, it will always be in default group
-  // (cwndDynamic).
-  scoped_refptr<base::FieldTrial> trial(
-      new base::FieldTrial(
-          "SpdyCwnd", kSpdyCwndDivisor, "cwndDynamic", 2011, 6, 30));
-
-  trial->AppendGroup("cwnd10", kSpdyCwnd10);
-  trial->AppendGroup("cwnd16", kSpdyCwnd16);
-  trial->AppendGroup("cwndMin16", kSpdyCwndMin16);
-  trial->AppendGroup("cwndMin10", kSpdyCwndMin10);
-
-  if (parsed_command_line().HasSwitch(switches::kMaxSpdyConcurrentStreams)) {
-    int value = 0;
-    base::StringToInt(parsed_command_line().GetSwitchValueASCII(
-            switches::kMaxSpdyConcurrentStreams),
-        &value);
-    if (value > 0)
-      net::SpdySession::set_max_concurrent_streams(value);
-  }
-}
-
-// If --socket-reuse-policy is not specified, run an A/B test for choosing the
-// warmest socket.
-void BrowserMainParts::WarmConnectionFieldTrial() {
-  const CommandLine& command_line = parsed_command_line();
-  if (command_line.HasSwitch(switches::kSocketReusePolicy)) {
-    std::string socket_reuse_policy_str = command_line.GetSwitchValueASCII(
-        switches::kSocketReusePolicy);
-    int policy = -1;
-    base::StringToInt(socket_reuse_policy_str, &policy);
-
-    const int policy_list[] = { 0, 1, 2 };
-    VLOG(1) << "Setting socket_reuse_policy = " << policy;
-    SetSocketReusePolicy(policy, policy_list, arraysize(policy_list));
-    return;
-  }
-
-  const base::FieldTrial::Probability kWarmSocketDivisor = 100;
-  const base::FieldTrial::Probability kWarmSocketProbability = 33;
-
-  // After January 30, 2013 builds, it will always be in default group.
-  scoped_refptr<base::FieldTrial> warmest_socket_trial(
-      new base::FieldTrial(
-          "WarmSocketImpact", kWarmSocketDivisor, "last_accessed_socket",
-          2013, 1, 30));
-
-  // Default value is USE_LAST_ACCESSED_SOCKET.
-  const int last_accessed_socket = warmest_socket_trial->kDefaultGroupNumber;
-  const int warmest_socket = warmest_socket_trial->AppendGroup(
-      "warmest_socket", kWarmSocketProbability);
-  const int warm_socket = warmest_socket_trial->AppendGroup(
-      "warm_socket", kWarmSocketProbability);
-
-  const int warmest_socket_trial_group = warmest_socket_trial->group();
-
-  const int policy_list[] = { warmest_socket, warm_socket,
-                              last_accessed_socket };
-  SetSocketReusePolicy(warmest_socket_trial_group, policy_list,
-                       arraysize(policy_list));
-}
-
-// If neither --enable-connect-backup-jobs or --disable-connect-backup-jobs is
-// specified, run an A/B test for automatically establishing backup TCP
-// connections when a certain timeout value is exceeded.
-void BrowserMainParts::ConnectBackupJobsFieldTrial() {
-  if (parsed_command_line().HasSwitch(switches::kEnableConnectBackupJobs)) {
-    net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
-        true);
-  } else if (parsed_command_line().HasSwitch(
-        switches::kDisableConnectBackupJobs)) {
-    net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
-        false);
-  } else {
-    const base::FieldTrial::Probability kConnectBackupJobsDivisor = 100;
-    // 1% probability.
-    const base::FieldTrial::Probability kConnectBackupJobsProbability = 1;
-    // After June 30, 2011 builds, it will always be in default group.
-    scoped_refptr<base::FieldTrial> trial(
-        new base::FieldTrial("ConnnectBackupJobs",
-            kConnectBackupJobsDivisor, "ConnectBackupJobsEnabled", 2011, 6,
-                30));
-    const int connect_backup_jobs_enabled = trial->kDefaultGroupNumber;
-    trial->AppendGroup("ConnectBackupJobsDisabled",
-                       kConnectBackupJobsProbability);
-    const int trial_group = trial->group();
-    net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
-        trial_group == connect_backup_jobs_enabled);
-  }
-}
-
-// Test the impact on subsequent Google searches of getting suggestions from
-// www.google.TLD instead of clients1.google.TLD.
-void BrowserMainParts::SuggestPrefixFieldTrial() {
-  const base::FieldTrial::Probability kSuggestPrefixDivisor = 100;
-  // 50% probability.
-  const base::FieldTrial::Probability kSuggestPrefixProbability = 50;
-  // After Jan 1, 2012, it will always be in default group.
-  scoped_refptr<base::FieldTrial> trial(
-      new base::FieldTrial("SuggestHostPrefix",
-          kSuggestPrefixDivisor, "Default_Prefix", 2012, 1, 1));
-  trial->AppendGroup("Www_Prefix", kSuggestPrefixProbability);
-  // The field trial is detected directly, so we don't need to call anything.
-}
-
-// BrowserMainParts: |MainMessageLoopStart()| and related ----------------------
-
-void BrowserMainParts::MainMessageLoopStart() {
-  PreMainMessageLoopStart();
-
-  main_message_loop_.reset(new MessageLoop(MessageLoop::TYPE_UI));
-
-  // TODO(viettrungluu): should these really go before setting the thread name?
-  system_monitor_.reset(new base::SystemMonitor);
-  hi_res_timer_manager_.reset(new HighResolutionTimerManager);
-
-  InitializeMainThread();
-
-  network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
-
-  PostMainMessageLoopStart();
-  Profiling::MainMessageLoopStarted();
-}
-
-void BrowserMainParts::InitializeMainThread() {
-  const char* kThreadName = "CrBrowserMain";
-  base::PlatformThread::SetName(kThreadName);
-  main_message_loop().set_thread_name(kThreadName);
-
-  // Register the main thread by instantiating it, but don't call any methods.
-  main_thread_.reset(new BrowserThread(BrowserThread::UI,
-                                       MessageLoop::current()));
-}
-
-// BrowserMainParts: |SetupMetricsAndFieldTrials()| related --------------------
-
-// Initializes the metrics service with the configuration for this process,
-// returning the created service (guaranteed non-NULL).
-MetricsService* BrowserMainParts::InitializeMetrics(
-    const CommandLine& parsed_command_line,
-    const PrefService* local_state) {
-#if defined(OS_WIN)
-  if (parsed_command_line.HasSwitch(switches::kChromeFrame))
-    MetricsLog::set_version_extension("-F");
-#elif defined(ARCH_CPU_64_BITS)
-  MetricsLog::set_version_extension("-64");
-#endif  // defined(OS_WIN)
-
-  MetricsService* metrics = g_browser_process->metrics_service();
-
-  if (parsed_command_line.HasSwitch(switches::kMetricsRecordingOnly) ||
-      parsed_command_line.HasSwitch(switches::kEnableBenchmarking)) {
-    // If we're testing then we don't care what the user preference is, we turn
-    // on recording, but not reporting, otherwise tests fail.
-    metrics->StartRecordingOnly();
-    return metrics;
-  }
-
-  // If the user permits metrics reporting with the checkbox in the
-  // prefs, we turn on recording.  We disable metrics completely for
-  // non-official builds.
-#if defined(GOOGLE_CHROME_BUILD)
-#if defined(OS_CHROMEOS)
-  bool enabled = chromeos::MetricsCrosSettingsProvider::GetMetricsStatus();
-#else
-  bool enabled = local_state->GetBoolean(prefs::kMetricsReportingEnabled);
-#endif  // #if defined(OS_CHROMEOS)
-  if (enabled) {
-    metrics->Start();
-  }
-#endif  // defined(GOOGLE_CHROME_BUILD)
-
-  return metrics;
-}
-
-void BrowserMainParts::SetupFieldTrials(bool metrics_recording_enabled,
-                                        bool proxy_policy_is_set) {
-  // Note: make sure to call ConnectionFieldTrial() before
-  // ProxyConnectionsFieldTrial().
-  ConnectionFieldTrial();
-  SocketTimeoutFieldTrial();
-  // If a policy is defining the number of active connections this field test
-  // shoud not be performed.
-  if (!proxy_policy_is_set)
-    ProxyConnectionsFieldTrial();
-  prerender::ConfigurePrefetchAndPrerender(parsed_command_line());
-  InstantFieldTrial::Activate();
-  SpdyFieldTrial();
-  ConnectBackupJobsFieldTrial();
-  SuggestPrefixFieldTrial();
-  WarmConnectionFieldTrial();
-}
-
-// -----------------------------------------------------------------------------
-// TODO(viettrungluu): move more/rest of BrowserMain() into above structure
 
 namespace {
 
@@ -887,28 +424,6 @@ PrefService* InitializeLocalState(const CommandLine& parsed_command_line,
   return local_state;
 }
 
-// Windows-specific initialization code for the sandbox broker services. This
-// is just a NOP on non-Windows platforms to reduce ifdefs later on.
-void InitializeBrokerServices(const MainFunctionParams& parameters,
-                              const CommandLine& parsed_command_line) {
-#if defined(OS_WIN)
-  sandbox::BrokerServices* broker_services =
-      parameters.sandbox_info_.BrokerServices();
-  if (broker_services) {
-    sandbox::InitBrokerServices(broker_services);
-    if (!parsed_command_line.HasSwitch(switches::kNoSandbox)) {
-      bool use_winsta = !parsed_command_line.HasSwitch(
-                            switches::kDisableAltWinstation);
-      // Precreate the desktop and window station used by the renderers.
-      sandbox::TargetPolicy* policy = broker_services->CreatePolicy();
-      sandbox::ResultCode result = policy->CreateAlternateDesktop(use_winsta);
-      CHECK(sandbox::SBOX_ERROR_FAILED_TO_SWITCH_BACK_WINSTATION != result);
-      policy->Release();
-    }
-  }
-#endif
-}
-
 // Initializes the profile, possibly doing some user prompting to pick a
 // fallback profile. Returns the newly created profile, or NULL if startup
 // should not continue.
@@ -982,122 +497,6 @@ int GetMinimumFontSize() {
 
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
-static void GLibLogHandler(const gchar* log_domain,
-                           GLogLevelFlags log_level,
-                           const gchar* message,
-                           gpointer userdata) {
-  if (!log_domain)
-    log_domain = "<unknown>";
-  if (!message)
-    message = "<no message>";
-
-  if (strstr(message, "Loading IM context type") ||
-      strstr(message, "wrong ELF class: ELFCLASS64")) {
-    // http://crbug.com/9643
-    // Until we have a real 64-bit build or all of these 32-bit package issues
-    // are sorted out, don't fatal on ELF 32/64-bit mismatch warnings and don't
-    // spam the user with more than one of them.
-    static bool alerted = false;
-    if (!alerted) {
-      LOG(ERROR) << "Bug 9643: " << log_domain << ": " << message;
-      alerted = true;
-    }
-  } else if (strstr(message, "gtk_widget_size_allocate(): attempt to "
-                             "allocate widget with width") &&
-             !GTK_CHECK_VERSION(2, 16, 1)) {
-    // This warning only occurs in obsolete versions of GTK and is harmless.
-    // http://crbug.com/11133
-  } else if (strstr(message, "Theme file for default has no") ||
-             strstr(message, "Theme directory") ||
-             strstr(message, "theme pixmap")) {
-    LOG(ERROR) << "GTK theme error: " << message;
-  } else if (strstr(message, "gtk_drag_dest_leave: assertion")) {
-    LOG(ERROR) << "Drag destination deleted: http://crbug.com/18557";
-  } else if (strstr(message, "Out of memory") &&
-             strstr(log_domain, "<unknown>")) {
-    LOG(ERROR) << "DBus call timeout or out of memory: "
-               << "http://crosbug.com/15496";
-  } else {
-    LOG(DFATAL) << log_domain << ": " << message;
-  }
-}
-
-static void SetUpGLibLogHandler() {
-  // Register GLib-handled assertions to go through our logging system.
-  const char* kLogDomains[] = { NULL, "Gtk", "Gdk", "GLib", "GLib-GObject" };
-  for (size_t i = 0; i < arraysize(kLogDomains); i++) {
-    g_log_set_handler(kLogDomains[i],
-                      static_cast<GLogLevelFlags>(G_LOG_FLAG_RECURSION |
-                                                  G_LOG_FLAG_FATAL |
-                                                  G_LOG_LEVEL_ERROR |
-                                                  G_LOG_LEVEL_CRITICAL |
-                                                  G_LOG_LEVEL_WARNING),
-                      GLibLogHandler,
-                      NULL);
-  }
-}
-#endif
-
-void InitializeToolkit(const MainFunctionParams& parameters) {
-  // TODO(evan): this function is rather subtle, due to the variety
-  // of intersecting ifdefs we have.  To keep it easy to follow, there
-  // are no #else branches on any #ifs.
-
-#if defined(TOOLKIT_USES_GTK)
-  // We want to call g_thread_init(), but in some codepaths (tests) it
-  // is possible it has already been called.  In older versions of
-  // GTK, it is an error to call g_thread_init twice; unfortunately,
-  // the API to tell whether it has been called already was also only
-  // added in a newer version of GTK!  Thankfully, this non-intuitive
-  // check is actually equivalent and sufficient to work around the
-  // error.
-  if (!g_thread_supported())
-    g_thread_init(NULL);
-  // Glib type system initialization. Needed at least for gconf,
-  // used in net/proxy/proxy_config_service_linux.cc. Most likely
-  // this is superfluous as gtk_init() ought to do this. It's
-  // definitely harmless, so retained as a reminder of this
-  // requirement for gconf.
-  g_type_init();
-  // We use glib-dbus for geolocation and it's possible other libraries
-  // (e.g. gnome-keyring) will use it, so initialize its threading here
-  // as well.
-  dbus_g_thread_init();
-  gfx::GtkInitFromCommandLine(parameters.command_line_);
-  SetUpGLibLogHandler();
-#endif
-
-#if defined(TOOLKIT_GTK)
-  // It is important for this to happen before the first run dialog, as it
-  // styles the dialog as well.
-  gtk_util::InitRCStyles();
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-  // The delegate needs to be set before any UI is created so that windows
-  // display the correct icon.
-  if (!views::ViewsDelegate::views_delegate)
-    views::ViewsDelegate::views_delegate = new ChromeViewsDelegate;
-
-  // TODO(beng): Move to WidgetImpl and implement on Windows too!
-  if (parameters.command_line_.HasSwitch(switches::kDebugViewsPaint))
-    views::Widget::SetDebugPaintEnabled(true);
-#endif
-
-#if defined(OS_WIN)
-  gfx::PlatformFontWin::adjust_font_callback = &AdjustUIFont;
-  gfx::PlatformFontWin::get_minimum_font_size_callback = &GetMinimumFontSize;
-
-  // Init common control sex.
-  INITCOMMONCONTROLSEX config;
-  config.dwSize = sizeof(config);
-  config.dwICC = ICC_WIN95_CLASSES;
-  if (!InitCommonControlsEx(&config))
-    LOG_GETLASTERROR(FATAL);
-#endif
-}
-
 #if defined(OS_CHROMEOS)
 
 // Class is used to login using passed username and password.
@@ -1105,7 +504,7 @@ void InitializeToolkit(const MainFunctionParams& parameters) {
 class StubLogin : public chromeos::LoginStatusConsumer,
                   public chromeos::LoginUtils::Delegate {
  public:
-  explicit StubLogin(std::string username, std::string password) {
+  StubLogin(std::string username, std::string password) {
     authenticator_ = chromeos::LoginUtils::Get()->CreateAuthenticator(this);
     authenticator_.get()->AuthenticateToLogin(
         g_browser_process->profile_manager()->GetDefaultProfile(),
@@ -1113,6 +512,10 @@ class StubLogin : public chromeos::LoginStatusConsumer,
         password,
         std::string(),
         std::string());
+  }
+
+  ~StubLogin() {
+    chromeos::LoginUtils::Get()->DelegateDeleted(this);
   }
 
   void OnLoginFailure(const chromeos::LoginFailure& error) {
@@ -1223,7 +626,444 @@ void RegisterTranslateableItems(void) {
 }
 #endif  // defined(OS_CHROMEOS)
 
+void SetSocketReusePolicy(int warmest_socket_trial_group,
+                          const int socket_policy[],
+                          int num_groups) {
+  const int* result = std::find(socket_policy, socket_policy + num_groups,
+                                warmest_socket_trial_group);
+  DCHECK_NE(result, socket_policy + num_groups)
+      << "Not a valid socket reuse policy group";
+  net::SetSocketReusePolicy(result - socket_policy);
+}
+
+#if defined(USE_LINUX_BREAKPAD)
+bool IsCrashReportingEnabled(const PrefService* local_state) {
+  // Check whether we should initialize the crash reporter. It may be disabled
+  // through configuration policy or user preference. It must be disabled for
+  // Guest mode on Chrome OS in Stable channel.
+  // The kHeadless environment variable overrides the decision, but only if the
+  // crash service is under control of the user. It is used by QA testing
+  // infrastructure to switch on generation of crash reports.
+#if defined(OS_CHROMEOS)
+  bool is_guest_session =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession);
+  bool is_stable_channel =
+      chrome::VersionInfo::GetChannel() == chrome::VersionInfo::CHANNEL_STABLE;
+  bool breakpad_enabled =
+      !(is_guest_session && is_stable_channel) &&
+      chromeos::UserCrosSettingsProvider::cached_reporting_enabled();
+  if (!breakpad_enabled)
+    breakpad_enabled = getenv(env_vars::kHeadless) != NULL;
+#else
+  const PrefService::Preference* metrics_reporting_enabled =
+      local_state->FindPreference(prefs::kMetricsReportingEnabled);
+  CHECK(metrics_reporting_enabled);
+  bool breakpad_enabled =
+      local_state->GetBoolean(prefs::kMetricsReportingEnabled);
+  if (!breakpad_enabled && metrics_reporting_enabled->IsUserModifiable())
+    breakpad_enabled = getenv(env_vars::kHeadless) != NULL;
+#endif  // #if defined(OS_CHROMEOS)
+  return breakpad_enabled;
+}
+#endif  // #if defined(USE_LINUX_BREAKPAD)
+
 }  // namespace
+
+namespace chrome_browser {
+// This error message is not localized because we failed to load the
+// localization data files.
+const char kMissingLocaleDataTitle[] = "Missing File Error";
+const char kMissingLocaleDataMessage[] =
+    "Unable to find locale data files. Please reinstall.";
+}  // namespace chrome_browser
+
+// BrowserMainParts ------------------------------------------------------------
+
+ChromeBrowserMainParts::ChromeBrowserMainParts(
+    const MainFunctionParams& parameters)
+    : BrowserMainParts(parameters),
+      shutdown_watcher_(new ShutdownWatcherHelper()) {
+  // If we're running tests (ui_task is non-null).
+  if (parameters.ui_task)
+    browser_defaults::enable_help_app = false;
+}
+
+ChromeBrowserMainParts::~ChromeBrowserMainParts() {
+}
+
+void ChromeBrowserMainParts::SetupHistogramSynchronizer() {
+  histogram_synchronizer_ = new HistogramSynchronizer();
+}
+
+// This will be called after the command-line has been mutated by about:flags
+MetricsService* ChromeBrowserMainParts::SetupMetricsAndFieldTrials(
+    const CommandLine& parsed_command_line,
+    PrefService* local_state) {
+  // Must initialize metrics after labs have been converted into switches,
+  // but before field trials are set up (so that client ID is available for
+  // one-time randomized field trials).
+  MetricsService* metrics = InitializeMetrics(parsed_command_line, local_state);
+
+  // Initialize FieldTrialList to support FieldTrials that use one-time
+  // randomization. The client ID will be empty if the user has not opted
+  // to send metrics.
+  field_trial_list_.reset(new base::FieldTrialList(metrics->GetClientId()));
+
+  SetupFieldTrials(metrics->recording_active(),
+                   local_state->IsManagedPreference(
+                       prefs::kMaxConnectionsPerProxy));
+
+  // Initialize FieldTrialSynchronizer system. This is a singleton and is used
+  // for posting tasks via NewRunnableMethod. Its deleted when it goes out of
+  // scope. Even though NewRunnableMethod does AddRef and Release, the object
+  // will not be deleted after the Task is executed.
+  field_trial_synchronizer_ = new FieldTrialSynchronizer();
+
+  return metrics;
+}
+
+// This is an A/B test for the maximum number of persistent connections per
+// host. Currently Chrome, Firefox, and IE8 have this value set at 6. Safari
+// uses 4, and Fasterfox (a plugin for Firefox that supposedly configures it to
+// run faster) uses 8. We would like to see how much of an effect this value has
+// on browsing. Too large a value might cause us to run into SYN flood detection
+// mechanisms.
+void ChromeBrowserMainParts::ConnectionFieldTrial() {
+  const base::FieldTrial::Probability kConnectDivisor = 100;
+  const base::FieldTrial::Probability kConnectProbability = 1;  // 1% prob.
+
+  // After June 30, 2011 builds, it will always be in default group.
+  scoped_refptr<base::FieldTrial> connect_trial(
+      new base::FieldTrial(
+          "ConnCountImpact", kConnectDivisor, "conn_count_6", 2011, 6, 30));
+
+  // This (6) is the current default value. Having this group declared here
+  // makes it straightforward to modify |kConnectProbability| such that the same
+  // probability value will be assigned to all the other groups, while
+  // preserving the remainder of the of probability space to the default value.
+  const int connect_6 = connect_trial->kDefaultGroupNumber;
+
+  const int connect_5 = connect_trial->AppendGroup("conn_count_5",
+                                                   kConnectProbability);
+  const int connect_7 = connect_trial->AppendGroup("conn_count_7",
+                                                   kConnectProbability);
+  const int connect_8 = connect_trial->AppendGroup("conn_count_8",
+                                                   kConnectProbability);
+  const int connect_9 = connect_trial->AppendGroup("conn_count_9",
+                                                   kConnectProbability);
+
+  const int connect_trial_group = connect_trial->group();
+
+  if (connect_trial_group == connect_5) {
+    net::ClientSocketPoolManager::set_max_sockets_per_group(5);
+  } else if (connect_trial_group == connect_6) {
+    net::ClientSocketPoolManager::set_max_sockets_per_group(6);
+  } else if (connect_trial_group == connect_7) {
+    net::ClientSocketPoolManager::set_max_sockets_per_group(7);
+  } else if (connect_trial_group == connect_8) {
+    net::ClientSocketPoolManager::set_max_sockets_per_group(8);
+  } else if (connect_trial_group == connect_9) {
+    net::ClientSocketPoolManager::set_max_sockets_per_group(9);
+  } else {
+    NOTREACHED();
+  }
+}
+
+// A/B test for determining a value for unused socket timeout. Currently the
+// timeout defaults to 10 seconds. Having this value set too low won't allow us
+// to take advantage of idle sockets. Setting it to too high could possibly
+// result in more ERR_CONNECTION_RESETs, since some servers will kill a socket
+// before we time it out. Since these are "unused" sockets, we won't retry the
+// connection and instead show an error to the user. So we need to be
+// conservative here. We've seen that some servers will close the socket after
+// as short as 10 seconds. See http://crbug.com/84313 for more details.
+void ChromeBrowserMainParts::SocketTimeoutFieldTrial() {
+  const base::FieldTrial::Probability kIdleSocketTimeoutDivisor = 100;
+  // 1% probability for all experimental settings.
+  const base::FieldTrial::Probability kSocketTimeoutProbability = 1;
+
+  // After June 30, 2011 builds, it will always be in default group.
+  scoped_refptr<base::FieldTrial> socket_timeout_trial(
+      new base::FieldTrial("IdleSktToImpact", kIdleSocketTimeoutDivisor,
+          "idle_timeout_10", 2011, 6, 30));
+  const int socket_timeout_10 = socket_timeout_trial->kDefaultGroupNumber;
+
+  const int socket_timeout_5 =
+      socket_timeout_trial->AppendGroup("idle_timeout_5",
+                                        kSocketTimeoutProbability);
+  const int socket_timeout_20 =
+      socket_timeout_trial->AppendGroup("idle_timeout_20",
+                                        kSocketTimeoutProbability);
+
+  const int idle_to_trial_group = socket_timeout_trial->group();
+
+  if (idle_to_trial_group == socket_timeout_5) {
+    net::ClientSocketPool::set_unused_idle_socket_timeout(5);
+  } else if (idle_to_trial_group == socket_timeout_10) {
+    net::ClientSocketPool::set_unused_idle_socket_timeout(10);
+  } else if (idle_to_trial_group == socket_timeout_20) {
+    net::ClientSocketPool::set_unused_idle_socket_timeout(20);
+  } else {
+    NOTREACHED();
+  }
+}
+
+void ChromeBrowserMainParts::ProxyConnectionsFieldTrial() {
+  const base::FieldTrial::Probability kProxyConnectionsDivisor = 100;
+  // 25% probability
+  const base::FieldTrial::Probability kProxyConnectionProbability = 1;
+
+  // After June 30, 2011 builds, it will always be in default group.
+  scoped_refptr<base::FieldTrial> proxy_connection_trial(
+      new base::FieldTrial("ProxyConnectionImpact", kProxyConnectionsDivisor,
+          "proxy_connections_32", 2011, 6, 30));
+
+  // This (32 connections per proxy server) is the current default value.
+  // Declaring it here allows us to easily re-assign the probability space while
+  // maintaining that the default group always has the remainder of the "share",
+  // which allows for cleaner and quicker changes down the line if needed.
+  const int proxy_connections_32 = proxy_connection_trial->kDefaultGroupNumber;
+
+  // The number of max sockets per group cannot be greater than the max number
+  // of sockets per proxy server.  We tried using 8, and it can easily
+  // lead to total browser stalls.
+  const int proxy_connections_16 =
+      proxy_connection_trial->AppendGroup("proxy_connections_16",
+                                          kProxyConnectionProbability);
+  const int proxy_connections_64 =
+      proxy_connection_trial->AppendGroup("proxy_connections_64",
+                                          kProxyConnectionProbability);
+
+  const int proxy_connections_trial_group = proxy_connection_trial->group();
+
+  if (proxy_connections_trial_group == proxy_connections_16) {
+    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(16);
+  } else if (proxy_connections_trial_group == proxy_connections_32) {
+    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(32);
+  } else if (proxy_connections_trial_group == proxy_connections_64) {
+    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(64);
+  } else {
+    NOTREACHED();
+  }
+}
+
+// When --use-spdy not set, users will be in A/B test for spdy.
+// group A (npn_with_spdy): this means npn and spdy are enabled. In case server
+//                          supports spdy, browser will use spdy.
+// group B (npn_with_http): this means npn is enabled but spdy won't be used.
+//                          Http is still used for all requests.
+//           default group: no npn or spdy is involved. The "old" non-spdy
+//                          chrome behavior.
+void ChromeBrowserMainParts::SpdyFieldTrial() {
+  if (parsed_command_line().HasSwitch(switches::kUseSpdy)) {
+    std::string spdy_mode =
+        parsed_command_line().GetSwitchValueASCII(switches::kUseSpdy);
+    net::HttpNetworkLayer::EnableSpdy(spdy_mode);
+  } else {
+#if !defined(OS_CHROMEOS)
+    bool is_spdy_trial = false;
+    const base::FieldTrial::Probability kSpdyDivisor = 100;
+    base::FieldTrial::Probability npnhttp_probability = 5;
+
+    // After June 30, 2013 builds, it will always be in default group.
+    scoped_refptr<base::FieldTrial> trial(
+        new base::FieldTrial(
+            "SpdyImpact", kSpdyDivisor, "npn_with_spdy", 2013, 6, 30));
+
+    // npn with spdy support is the default.
+    int npn_spdy_grp = trial->kDefaultGroupNumber;
+
+    // npn with only http support, no spdy.
+    int npn_http_grp = trial->AppendGroup("npn_with_http", npnhttp_probability);
+
+    int trial_grp = trial->group();
+    if (trial_grp == npn_http_grp) {
+      is_spdy_trial = true;
+      net::HttpNetworkLayer::EnableSpdy("npn-http");
+    } else if (trial_grp == npn_spdy_grp) {
+      is_spdy_trial = true;
+      net::HttpNetworkLayer::EnableSpdy("npn");
+    } else {
+      CHECK(!is_spdy_trial);
+    }
+#else
+    // Always enable SPDY on Chrome OS
+    net::HttpNetworkLayer::EnableSpdy("npn");
+#endif  // !defined(OS_CHROMEOS)
+  }
+
+  // Setup SPDY CWND Field trial.
+  const base::FieldTrial::Probability kSpdyCwndDivisor = 100;
+  const base::FieldTrial::Probability kSpdyCwnd16 = 20;     // fixed at 16
+  const base::FieldTrial::Probability kSpdyCwnd10 = 20;     // fixed at 10
+  const base::FieldTrial::Probability kSpdyCwndMin16 = 20;  // no less than 16
+  const base::FieldTrial::Probability kSpdyCwndMin10 = 20;  // no less than 10
+
+  // After June 30, 2013 builds, it will always be in default group
+  // (cwndDynamic).
+  scoped_refptr<base::FieldTrial> trial(
+      new base::FieldTrial(
+          "SpdyCwnd", kSpdyCwndDivisor, "cwndDynamic", 2013, 6, 30));
+
+  trial->AppendGroup("cwnd10", kSpdyCwnd10);
+  trial->AppendGroup("cwnd16", kSpdyCwnd16);
+  trial->AppendGroup("cwndMin16", kSpdyCwndMin16);
+  trial->AppendGroup("cwndMin10", kSpdyCwndMin10);
+
+  if (parsed_command_line().HasSwitch(switches::kMaxSpdyConcurrentStreams)) {
+    int value = 0;
+    base::StringToInt(parsed_command_line().GetSwitchValueASCII(
+            switches::kMaxSpdyConcurrentStreams),
+        &value);
+    if (value > 0)
+      net::SpdySession::set_max_concurrent_streams(value);
+  }
+}
+
+// If --socket-reuse-policy is not specified, run an A/B test for choosing the
+// warmest socket.
+void ChromeBrowserMainParts::WarmConnectionFieldTrial() {
+  const CommandLine& command_line = parsed_command_line();
+  if (command_line.HasSwitch(switches::kSocketReusePolicy)) {
+    std::string socket_reuse_policy_str = command_line.GetSwitchValueASCII(
+        switches::kSocketReusePolicy);
+    int policy = -1;
+    base::StringToInt(socket_reuse_policy_str, &policy);
+
+    const int policy_list[] = { 0, 1, 2 };
+    VLOG(1) << "Setting socket_reuse_policy = " << policy;
+    SetSocketReusePolicy(policy, policy_list, arraysize(policy_list));
+    return;
+  }
+
+  const base::FieldTrial::Probability kWarmSocketDivisor = 100;
+  const base::FieldTrial::Probability kWarmSocketProbability = 33;
+
+  // After January 30, 2013 builds, it will always be in default group.
+  scoped_refptr<base::FieldTrial> warmest_socket_trial(
+      new base::FieldTrial(
+          "WarmSocketImpact", kWarmSocketDivisor, "last_accessed_socket",
+          2013, 1, 30));
+
+  // Default value is USE_LAST_ACCESSED_SOCKET.
+  const int last_accessed_socket = warmest_socket_trial->kDefaultGroupNumber;
+  const int warmest_socket = warmest_socket_trial->AppendGroup(
+      "warmest_socket", kWarmSocketProbability);
+  const int warm_socket = warmest_socket_trial->AppendGroup(
+      "warm_socket", kWarmSocketProbability);
+
+  const int warmest_socket_trial_group = warmest_socket_trial->group();
+
+  const int policy_list[] = { warmest_socket, warm_socket,
+                              last_accessed_socket };
+  SetSocketReusePolicy(warmest_socket_trial_group, policy_list,
+                       arraysize(policy_list));
+}
+
+// If neither --enable-connect-backup-jobs or --disable-connect-backup-jobs is
+// specified, run an A/B test for automatically establishing backup TCP
+// connections when a certain timeout value is exceeded.
+void ChromeBrowserMainParts::ConnectBackupJobsFieldTrial() {
+  if (parsed_command_line().HasSwitch(switches::kEnableConnectBackupJobs)) {
+    net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
+        true);
+  } else if (parsed_command_line().HasSwitch(
+        switches::kDisableConnectBackupJobs)) {
+    net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
+        false);
+  } else {
+    const base::FieldTrial::Probability kConnectBackupJobsDivisor = 100;
+    // 1% probability.
+    const base::FieldTrial::Probability kConnectBackupJobsProbability = 1;
+    // After June 30, 2011 builds, it will always be in default group.
+    scoped_refptr<base::FieldTrial> trial(
+        new base::FieldTrial("ConnnectBackupJobs",
+            kConnectBackupJobsDivisor, "ConnectBackupJobsEnabled", 2011, 6,
+                30));
+    const int connect_backup_jobs_enabled = trial->kDefaultGroupNumber;
+    trial->AppendGroup("ConnectBackupJobsDisabled",
+                       kConnectBackupJobsProbability);
+    const int trial_group = trial->group();
+    net::internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
+        trial_group == connect_backup_jobs_enabled);
+  }
+}
+
+// Test the impact on subsequent Google searches of getting suggestions from
+// www.google.TLD instead of clients1.google.TLD.
+void ChromeBrowserMainParts::SuggestPrefixFieldTrial() {
+  const base::FieldTrial::Probability kSuggestPrefixDivisor = 100;
+  // 50% probability.
+  const base::FieldTrial::Probability kSuggestPrefixProbability = 50;
+  // After Jan 1, 2012, it will always be in default group.
+  scoped_refptr<base::FieldTrial> trial(
+      new base::FieldTrial("SuggestHostPrefix",
+          kSuggestPrefixDivisor, "Default_Prefix", 2012, 1, 1));
+  trial->AppendGroup("Www_Prefix", kSuggestPrefixProbability);
+  // The field trial is detected directly, so we don't need to call anything.
+}
+
+// ChromeBrowserMainParts: |SetupMetricsAndFieldTrials()| related --------------
+
+// Initializes the metrics service with the configuration for this process,
+// returning the created service (guaranteed non-NULL).
+MetricsService* ChromeBrowserMainParts::InitializeMetrics(
+    const CommandLine& parsed_command_line,
+    const PrefService* local_state) {
+#if defined(OS_WIN)
+  if (parsed_command_line.HasSwitch(switches::kChromeFrame))
+    MetricsLog::set_version_extension("-F");
+#elif defined(ARCH_CPU_64_BITS)
+  MetricsLog::set_version_extension("-64");
+#endif  // defined(OS_WIN)
+
+  MetricsService* metrics = g_browser_process->metrics_service();
+
+  if (parsed_command_line.HasSwitch(switches::kMetricsRecordingOnly) ||
+      parsed_command_line.HasSwitch(switches::kEnableBenchmarking)) {
+    // If we're testing then we don't care what the user preference is, we turn
+    // on recording, but not reporting, otherwise tests fail.
+    metrics->StartRecordingOnly();
+    return metrics;
+  }
+
+  // If the user permits metrics reporting with the checkbox in the
+  // prefs, we turn on recording.  We disable metrics completely for
+  // non-official builds.
+#if defined(GOOGLE_CHROME_BUILD)
+#if defined(OS_CHROMEOS)
+  bool enabled = chromeos::UserCrosSettingsProvider::cached_reporting_enabled();
+#else
+  bool enabled = local_state->GetBoolean(prefs::kMetricsReportingEnabled);
+#endif  // #if defined(OS_CHROMEOS)
+  if (enabled) {
+    metrics->Start();
+  }
+#endif  // defined(GOOGLE_CHROME_BUILD)
+
+  return metrics;
+}
+
+void ChromeBrowserMainParts::SetupFieldTrials(bool metrics_recording_enabled,
+                                              bool proxy_policy_is_set) {
+  // Note: make sure to call ConnectionFieldTrial() before
+  // ProxyConnectionsFieldTrial().
+  ConnectionFieldTrial();
+  SocketTimeoutFieldTrial();
+  // If a policy is defining the number of active connections this field test
+  // shoud not be performed.
+  if (!proxy_policy_is_set)
+    ProxyConnectionsFieldTrial();
+  prerender::ConfigurePrefetchAndPrerender(parsed_command_line());
+  InstantFieldTrial::Activate();
+  SpdyFieldTrial();
+  ConnectBackupJobsFieldTrial();
+  SuggestPrefixFieldTrial();
+  WarmConnectionFieldTrial();
+}
+
+// -----------------------------------------------------------------------------
+// TODO(viettrungluu): move more/rest of BrowserMain() into BrowserMainParts.
 
 #if defined(OS_CHROMEOS)
 // Allows authenticator to be invoked without adding refcounting. The instances
@@ -1248,108 +1088,29 @@ DLLEXPORT void __cdecl RelaunchChromeBrowserWithNewCommandLineIfNeeded() {
 }
 #endif
 
-#if defined(USE_LINUX_BREAKPAD)
-bool IsCrashReportingEnabled(const PrefService* local_state) {
-  // Check whether we should initialize the crash reporter. It may be disabled
-  // through configuration policy or user preference. It must be disabled for
-  // Guest mode on Chrome OS in Stable channel.
-  // The kHeadless environment variable overrides the decision, but only if the
-  // crash service is under control of the user. It is used by QA testing
-  // infrastructure to switch on generation of crash reports.
-#if defined(OS_CHROMEOS)
-  bool is_guest_session =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession);
-  bool is_stable_channel =
-      chrome::VersionInfo::GetChannel() == chrome::VersionInfo::CHANNEL_STABLE;
-  bool breakpad_enabled =
-      !(is_guest_session && is_stable_channel) &&
-      chromeos::MetricsCrosSettingsProvider::GetMetricsStatus();
-  if (!breakpad_enabled)
-    breakpad_enabled = getenv(env_vars::kHeadless) != NULL;
-#else
-  const PrefService::Preference* metrics_reporting_enabled =
-      local_state->FindPreference(prefs::kMetricsReportingEnabled);
-  CHECK(metrics_reporting_enabled);
-  bool breakpad_enabled =
-      local_state->GetBoolean(prefs::kMetricsReportingEnabled);
-  if (!breakpad_enabled && metrics_reporting_enabled->IsUserModifiable())
-    breakpad_enabled = getenv(env_vars::kHeadless) != NULL;
-#endif  // #if defined(OS_CHROMEOS)
-  return breakpad_enabled;
+void ChromeBrowserMainParts::PostMainMessageLoopStart() {
+  Profiling::MainMessageLoopStarted();
 }
-#endif  // #if defined(USE_LINUX_BREAKPAD)
 
-// Main routine for running as the Browser process.
-int BrowserMain(const MainFunctionParams& parameters) {
-  TRACE_EVENT_BEGIN_ETW("BrowserMain", 0, "");
+void ChromeBrowserMainParts::ToolkitInitialized() {
+#if defined(TOOLKIT_VIEWS)
+  // The delegate needs to be set before any UI is created so that windows
+  // display the correct icon.
+  if (!views::ViewsDelegate::views_delegate)
+    views::ViewsDelegate::views_delegate = new ChromeViewsDelegate;
 
-  // Override the default ContentBrowserClient to let Chrome participate in
-  // content logic.
-  chrome::ChromeContentBrowserClient browser_client;
-  content::GetContentClient()->set_browser(&browser_client);
-
-  // If we're running tests (ui_task is non-null).
-  if (parameters.ui_task)
-    browser_defaults::enable_help_app = false;
-
-  scoped_ptr<BrowserMainParts>
-      parts(BrowserMainParts::CreateBrowserMainParts(parameters));
-
-  parts->EarlyInitialization();
-
-  // Must happen before we try to use a message loop or display any UI.
-  InitializeToolkit(parameters);
-
-#if defined(OS_CHROMEOS)
-  // Stub out chromeos implementations. We need to do as early as possible
-  // because it is initialized on first use when it is initialized
-  // SetUseStubImpl doesn't do anything.
-  if (parameters.command_line_.HasSwitch(switches::kStubCros))
-    chromeos::CrosLibrary::Get()->GetTestApi()->SetUseStubImpl();
-
-  // Replace the default NetworkChangeNotifierFactory with ChromeOS specific
-  // implementation.
-  net::NetworkChangeNotifier::SetFactory(
-      new chromeos::CrosNetworkChangeNotifierFactory());
+  // TODO(beng): Move to WidgetImpl and implement on Windows too!
+  if (parameters().command_line_.HasSwitch(switches::kDebugViewsPaint))
+    views::Widget::SetDebugPaintEnabled(true);
 #endif
 
-  parts->MainMessageLoopStart();
+#if defined(OS_WIN)
+  gfx::PlatformFontWin::adjust_font_callback = &AdjustUIFont;
+  gfx::PlatformFontWin::get_minimum_font_size_callback = &GetMinimumFontSize;
+#endif
+}
 
-  // WARNING: If we get a WM_ENDSESSION, objects created on the stack here
-  // are NOT deleted. If you need something to run during WM_ENDSESSION add it
-  // to browser_shutdown::Shutdown or BrowserProcess::EndSession.
-
-  // !!!!!!!!!! READ ME !!!!!!!!!!
-  // I (viettrungluu) am in the process of refactoring |BrowserMain()|. If you
-  // need to add something above this comment, read the documentation in
-  // browser_main.h. If you need to add something below, please do the
-  // following:
-  //  - Figure out where you should add your code. Do NOT just pick a random
-  //    location "which works".
-  //  - Document the dependencies apart from compile-time-checkable ones. What
-  //    must happen before your new code is executed? Does your new code need to
-  //    run before something else? Are there performance reasons for executing
-  //    your code at that point?
-  //  - If you need to create a (persistent) object, heap allocate it and keep a
-  //    |scoped_ptr| to it rather than allocating it on the stack. Otherwise
-  //    I'll have to convert your code when I refactor.
-  //  - Unless your new code is just a couple of lines, factor it out into a
-  //    function with a well-defined purpose. Do NOT just add it inline in
-  //    |BrowserMain()|.
-  // Thanks!
-
-  // TODO(viettrungluu): put the remainder into BrowserMainParts
-  const CommandLine& parsed_command_line = parameters.command_line_;
-  base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
-
-#if defined(OS_WIN) && !defined(NO_TCMALLOC)
-  // When linking shared libraries, NO_TCMALLOC is defined, and dynamic
-  // allocator selection is not supported.
-
-  // Make this call before going multithreaded, or spawning any subprocesses.
-  base::allocator::SetupSubprocessAllocator();
-#endif  // OS_WIN
-
+int ChromeBrowserMainParts::TemporaryContinue() {
   FilePath user_data_dir;
 #if defined(OS_WIN)
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
@@ -1366,38 +1127,26 @@ int BrowserMain(const MainFunctionParams& parameters) {
   ProcessSingleton process_singleton(user_data_dir);
 
   bool is_first_run = FirstRun::IsChromeFirstRun() ||
-      parsed_command_line.HasSwitch(switches::kFirstRun);
+      parsed_command_line().HasSwitch(switches::kFirstRun);
 
   scoped_ptr<BrowserProcessImpl> browser_process;
-  if (parsed_command_line.HasSwitch(switches::kImport) ||
-      parsed_command_line.HasSwitch(switches::kImportFromFile)) {
+  if (parsed_command_line().HasSwitch(switches::kImport) ||
+      parsed_command_line().HasSwitch(switches::kImportFromFile)) {
     // We use different BrowserProcess when importing so no GoogleURLTracker is
     // instantiated (as it makes a net::URLRequest and we don't have an IO
     // thread, see bug #1292702).
-    browser_process.reset(new FirstRunBrowserProcess(parsed_command_line));
+    browser_process.reset(new FirstRunBrowserProcess(parsed_command_line()));
     is_first_run = false;
   } else {
-    browser_process.reset(new BrowserProcessImpl(parsed_command_line));
+    browser_process.reset(new BrowserProcessImpl(parsed_command_line()));
   }
-
-  // BrowserProcessImpl's constructor should set g_browser_process.
-  DCHECK(g_browser_process);
 
   // This forces the TabCloseableStateWatcher to be created and, on chromeos,
   // register for the notifications it needs to track the closeable state of
   // tabs.
   g_browser_process->tab_closeable_state_watcher();
 
-  // The broker service initialization needs to run early because it will
-  // initialize the sandbox broker, which requires the process to swap its
-  // window station. During this time all the UI will be broken. This has to
-  // run before threads and windows are created.
-  InitializeBrokerServices(parameters, parsed_command_line);
-
-  // Initialize histogram statistics gathering system.
-  base::StatisticsRecorder statistics;
-
-  PrefService* local_state = InitializeLocalState(parsed_command_line,
+  PrefService* local_state = InitializeLocalState(parsed_command_line(),
                                                   is_first_run);
 
 #if defined(USE_LINUX_BREAKPAD)
@@ -1412,7 +1161,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // If we're running tests (ui_task is non-null), then the ResourceBundle
   // has already been initialized.
-  if (parameters.ui_task) {
+  if (parameters().ui_task) {
     g_browser_process->SetApplicationLocale("en-US");
   } else {
     // Mac starts it earlier in |PreMainMessageLoopStart()| (because it is
@@ -1427,6 +1176,11 @@ int BrowserMain(const MainFunctionParams& parameters) {
     // method InitSharedInstance is ignored.
     const std::string loaded_locale =
         ResourceBundle::InitSharedInstance(locale);
+    if (loaded_locale.empty() &&
+        !parsed_command_line().HasSwitch(switches::kNoErrorDialogs)) {
+      ShowMissingLocaleMessageBox();
+      return chrome::RESULT_CODE_MISSING_DATA;
+    }
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " << locale;
     g_browser_process->SetApplicationLocale(loaded_locale);
 
@@ -1441,7 +1195,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
 #endif
 
   std::string try_chrome =
-      parsed_command_line.GetSwitchValueASCII(switches::kTryChromeAgain);
+      parsed_command_line().GetSwitchValueASCII(switches::kTryChromeAgain);
   if (!try_chrome.empty()) {
 #if defined(OS_WIN)
     // Setup.exe has determined that we need to run a retention experiment
@@ -1476,9 +1230,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kUsePureViews));
   // Launch the views desktop shell window and register it as the default parent
   // for all unparented views widgets.
-  if (parsed_command_line.HasSwitch(switches::kViewsDesktop)) {
+  if (parsed_command_line().HasSwitch(switches::kViewsDesktop)) {
     std::string desktop_type_cmd =
-        parsed_command_line.GetSwitchValueASCII(switches::kViewsDesktop);
+        parsed_command_line().GetSwitchValueASCII(switches::kViewsDesktop);
     views::desktop::DesktopWindowView::DesktopType desktop_type;
     if (desktop_type_cmd == "netbook")
       desktop_type = views::desktop::DesktopWindowView::DESKTOP_NETBOOK;
@@ -1509,34 +1263,44 @@ int BrowserMain(const MainFunctionParams& parameters) {
     // If we are running in App mode, we do not want to show the importer
     // (first run) UI.
     if (!first_run_ui_bypass &&
-        (parsed_command_line.HasSwitch(switches::kApp) ||
-         parsed_command_line.HasSwitch(switches::kAppId) ||
-         parsed_command_line.HasSwitch(switches::kNoFirstRun)))
+        (parsed_command_line().HasSwitch(switches::kApp) ||
+         parsed_command_line().HasSwitch(switches::kAppId) ||
+         parsed_command_line().HasSwitch(switches::kNoFirstRun)))
       first_run_ui_bypass = true;
   }
 
   // TODO(viettrungluu): why don't we run this earlier?
-  if (!parsed_command_line.HasSwitch(switches::kNoErrorDialogs))
+  if (!parsed_command_line().HasSwitch(switches::kNoErrorDialogs))
     WarnAboutMinimumSystemRequirements();
+
+  // Enable print preview once for supported platforms.
+#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
+  local_state->RegisterBooleanPref(prefs::kPrintingPrintPreviewEnabledOnce,
+                                   false,
+                                   PrefService::UNSYNCABLE_PREF);
+  if (!local_state->GetBoolean(prefs::kPrintingPrintPreviewEnabledOnce)) {
+    local_state->SetBoolean(prefs::kPrintingPrintPreviewEnabledOnce, true);
+    about_flags::SetExperimentEnabled(local_state, "print-preview", true);
+  }
+#endif
 
   // Convert active labs into switches. Modifies the current command line.
   about_flags::ConvertFlagsToSwitches(local_state,
                                       CommandLine::ForCurrentProcess());
 
-  InitializeNetworkOptions(parsed_command_line);
+  InitializeNetworkOptions(parsed_command_line());
   InitializeURLRequestThrottlerManager(browser_process->net_log());
 
   // Initialize histogram synchronizer system. This is a singleton and is used
   // for posting tasks via NewRunnableMethod. Its deleted when it goes out of
   // scope. Even though NewRunnableMethod does AddRef and Release, the object
   // will not be deleted after the Task is executed.
-  scoped_refptr<HistogramSynchronizer> histogram_synchronizer(
-      new HistogramSynchronizer());
+  SetupHistogramSynchronizer();
 
   // Now the command line has been mutated based on about:flags, we can
   // set up metrics and initialize field trials.
-  MetricsService* metrics = parts->SetupMetricsAndFieldTrials(
-      parsed_command_line, local_state);
+  MetricsService* metrics = SetupMetricsAndFieldTrials(
+      parsed_command_line(), local_state);
 
   // Now that all preferences have been registered, set the install date
   // for the uninstall metrics if this is our first run. This only actually
@@ -1584,14 +1348,14 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // If the command line specifies 'uninstall' then we need to work here
   // unless we detect another chrome browser running.
-  if (parsed_command_line.HasSwitch(switches::kUninstall))
+  if (parsed_command_line().HasSwitch(switches::kUninstall))
     return DoUninstallTasks(already_running);
 #endif
 
-  if (parsed_command_line.HasSwitch(switches::kHideIcons) ||
-      parsed_command_line.HasSwitch(switches::kShowIcons))
-    return HandleIconsCommands(parsed_command_line);
-  if (parsed_command_line.HasSwitch(switches::kMakeDefaultBrowser)) {
+  if (parsed_command_line().HasSwitch(switches::kHideIcons) ||
+      parsed_command_line().HasSwitch(switches::kShowIcons))
+    return HandleIconsCommands(parsed_command_line());
+  if (parsed_command_line().HasSwitch(switches::kMakeDefaultBrowser)) {
     return ShellIntegration::SetAsDefaultBrowser() ?
         static_cast<int>(content::RESULT_CODE_NORMAL_EXIT) :
         static_cast<int>(chrome::RESULT_CODE_SHELL_INTEGRATION_FAILED);
@@ -1599,9 +1363,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // If the command line specifies --pack-extension, attempt the pack extension
   // startup action and exit.
-  if (parsed_command_line.HasSwitch(switches::kPackExtension)) {
+  if (parsed_command_line().HasSwitch(switches::kPackExtension)) {
     ExtensionsStartupUtil extension_startup_util;
-    if (extension_startup_util.PackExtension(parsed_command_line)) {
+    if (extension_startup_util.PackExtension(parsed_command_line())) {
       return content::RESULT_CODE_NORMAL_EXIT;
     } else {
       return chrome::RESULT_CODE_PACK_EXTENSION_ERROR;
@@ -1613,8 +1377,8 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // from other browsers. In case this process is a short-lived "import"
   // process that another browser runs just to import the settings, we
   // don't want to be checking for another browser process, by design.
-  if (!(parsed_command_line.HasSwitch(switches::kImport) ||
-        parsed_command_line.HasSwitch(switches::kImportFromFile))) {
+  if (!(parsed_command_line().HasSwitch(switches::kImport) ||
+        parsed_command_line().HasSwitch(switches::kImportFromFile))) {
 #endif
     // When another process is running, use that process instead of starting a
     // new one. NotifyOtherProcess will currently give the other process up to
@@ -1667,7 +1431,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // TODO(abarth): Should this move to InitializeNetworkOptions()?
   // Allow access to file:// on ChromeOS for tests.
-  if (parsed_command_line.HasSwitch(switches::kAllowFileAccess))
+  if (parsed_command_line().HasSwitch(switches::kAllowFileAccess))
     net::URLRequest::AllowFileAccess();
 
   // There are two use cases for kLoginUser:
@@ -1675,37 +1439,44 @@ int BrowserMain(const MainFunctionParams& parameters) {
   //   2) if passed alone, to signal that the indicated user has already
   //      logged in and we should behave accordingly.
   // This handles case 2.
-  if (parsed_command_line.HasSwitch(switches::kLoginUser) &&
-      !parsed_command_line.HasSwitch(switches::kLoginPassword)) {
+  if (parsed_command_line().HasSwitch(switches::kLoginUser) &&
+      !parsed_command_line().HasSwitch(switches::kLoginPassword)) {
     std::string username =
-        parsed_command_line.GetSwitchValueASCII(switches::kLoginUser);
+        parsed_command_line().GetSwitchValueASCII(switches::kLoginUser);
     VLOG(1) << "Relaunching browser for user: " << username;
     chromeos::UserManager::Get()->UserLoggedIn(username);
 
     // Redirects Chrome logging to the user data dir.
-    logging::RedirectChromeLogging(parsed_command_line);
+    logging::RedirectChromeLogging(parsed_command_line());
+
+    // Initialize user policy before creating the profile so the profile
+    // initialization code sees policy settings.
+    g_browser_process->browser_policy_connector()->InitializeUserPolicy(
+        username);
   }
 #endif
 
-  Profile* profile = CreateProfile(parameters, user_data_dir,
-                                   parsed_command_line);
+  if (is_first_run) {
+    // Warn the ProfileManager that an import process will run, possibly
+    // locking the WebDataService directory of the next Profile created.
+    g_browser_process->profile_manager()->SetWillImport();
+  }
+
+  Profile* profile = CreateProfile(parameters(), user_data_dir,
+                                   parsed_command_line());
   if (!profile)
     return content::RESULT_CODE_NORMAL_EXIT;
 
   // Post-profile init ---------------------------------------------------------
 
 #if defined(OS_CHROMEOS)
-  // Handling the user cloud policy initialization for case 2 mentioned above.
-  // We do this after the profile creation since we need the TokenService.
-  if (parsed_command_line.HasSwitch(switches::kLoginUser) &&
-      !parsed_command_line.HasSwitch(switches::kLoginPassword)) {
-    std::string username =
-        parsed_command_line.GetSwitchValueASCII(switches::kLoginUser);
-    policy::BrowserPolicyConnector* browser_policy_connector =
-        g_browser_process->browser_policy_connector();
-    browser_policy_connector->InitializeUserPolicy(username,
-                                                   profile->GetPath(),
-                                                   profile->GetTokenService());
+  // Pass the TokenService pointer to the policy connector so user policy can
+  // grab a token and register with the policy server.
+  // TODO(mnissler): Remove once OAuth is the only authentication mechanism.
+  if (parsed_command_line().HasSwitch(switches::kLoginUser) &&
+      !parsed_command_line().HasSwitch(switches::kLoginPassword)) {
+    g_browser_process->browser_policy_connector()->SetUserPolicyTokenService(
+        profile->GetTokenService());
   }
 #endif
 
@@ -1714,8 +1485,8 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // Tests should be able to tune login manager before showing it.
   // Thus only show login manager in normal (non-testing) mode.
-  if (!parameters.ui_task) {
-    OptionallyRunChromeOSLoginManager(parsed_command_line, profile);
+  if (!parameters().ui_task) {
+    OptionallyRunChromeOSLoginManager(parsed_command_line(), profile);
   }
 
 #if !defined(OS_MACOSX)
@@ -1723,15 +1494,15 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // that exits when this task has finished.
   // TODO(port): Port the Mac's IPC-based implementation to other platforms to
   //             replace this implementation. http://crbug.com/22142
-  if (parsed_command_line.HasSwitch(switches::kImport) ||
-      parsed_command_line.HasSwitch(switches::kImportFromFile)) {
-    return FirstRun::ImportNow(profile, parsed_command_line);
+  if (parsed_command_line().HasSwitch(switches::kImport) ||
+      parsed_command_line().HasSwitch(switches::kImportFromFile)) {
+    return FirstRun::ImportNow(profile, parsed_command_line());
   }
 #endif
 
 #if defined(OS_WIN)
   // Do the tasks if chrome has been upgraded while it was last running.
-  if (!already_running && upgrade_util::DoUpgradeTasks(parsed_command_line))
+  if (!already_running && upgrade_util::DoUpgradeTasks(parsed_command_line()))
     return content::RESULT_CODE_NORMAL_EXIT;
 #endif
 
@@ -1743,7 +1514,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // (uninstall, resource bundle initialization, other chrome browser
   // processes etc).
   // Do not allow this to occur for Chrome Frame user-to-system handoffs.
-  if (!parsed_command_line.HasSwitch(switches::kChromeFrame) &&
+  if (!parsed_command_line().HasSwitch(switches::kChromeFrame) &&
       CheckMachineLevelInstall())
     return chrome::RESULT_CODE_MACHINE_LEVEL_INSTALL_EXISTS;
 
@@ -1752,7 +1523,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   DCHECK(translate_manager != NULL);
 
 #if defined(OS_MACOSX)
-  if (!parsed_command_line.HasSwitch(switches::kNoFirstRun)) {
+  if (!parsed_command_line().HasSwitch(switches::kNoFirstRun)) {
     // Disk image installation is sort of a first-run task, so it shares the
     // kNoFirstRun switch.
     if (MaybeInstallFromDiskImage()) {
@@ -1790,12 +1561,13 @@ int BrowserMain(const MainFunctionParams& parameters) {
     }  // if (!first_run_ui_bypass)
 
     Browser::SetNewHomePagePrefs(user_prefs);
-  }
+    g_browser_process->profile_manager()->OnImportFinished(profile);
+  }  // if (is_first_run)
 
   // Sets things up so that if we crash from this point on, a dialog will
   // popup asking the user to restart chrome. It is done this late to avoid
   // testing against a bunch of special cases that are taken care early on.
-  PrepareRestartOnCrashEnviroment(parsed_command_line);
+  PrepareRestartOnCrashEnviroment(parsed_command_line());
 
 #if defined(OS_WIN)
   // Registers Chrome with the Windows Restart Manager, which will restore the
@@ -1804,7 +1576,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // but should run on startup if extended to handle crashes/hangs/patches.
   // Also, better to run once here than once for each HWND's WM_QUERYENDSESSION.
   if (base::win::GetVersion() >= base::win::VERSION_VISTA)
-    RegisterApplicationRestart(parsed_command_line);
+    RegisterApplicationRestart(parsed_command_line());
 #endif  // OS_WIN
 
   // Initialize and maintain network predictor module, which handles DNS
@@ -1812,9 +1584,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // This also registers an observer to discard data when closing incognito
   // mode.
   bool preconnect_enabled = true;  // Default status (easy to change!).
-  if (parsed_command_line.HasSwitch(switches::kDisablePreconnect))
+  if (parsed_command_line().HasSwitch(switches::kDisablePreconnect))
     preconnect_enabled = false;
-  else if (parsed_command_line.HasSwitch(switches::kEnablePreconnect))
+  else if (parsed_command_line().HasSwitch(switches::kEnablePreconnect))
     preconnect_enabled = true;
   chrome_browser_net::PredictorInit dns_prefetch(
       user_prefs,
@@ -1841,8 +1613,23 @@ int BrowserMain(const MainFunctionParams& parameters) {
       }
     }
   }
+
+  bool google_search_homepage = false;
+  PrefService* pref_service = profile->GetPrefs();
+  if (pref_service) {
+    std::string homepage = pref_service->GetString(prefs::kHomePage);
+    google_search_homepage =
+        homepage == GoogleURLTracker::kDefaultGoogleHomepage;
+  }
+
   RLZTracker::InitRlzDelayed(is_first_run, master_prefs.ping_delay,
-                             google_search_default);
+                             google_search_default, google_search_homepage);
+
+  // Prime the RLZ cache for the home page access point so that its avaiable
+  // for the startup page if needed (i.e., when the startup page is set to
+  // the home page).
+  RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, NULL);
+
 #endif  // GOOGLE_CHROME_BUILD
 #endif  // OS_WIN
 
@@ -1864,9 +1651,6 @@ int BrowserMain(const MainFunctionParams& parameters) {
   browser_process->google_url_tracker();
   browser_process->intranet_redirect_detector();
 
-  // Do initialize the plug-in service (and related preferences).
-  PluginUpdater::GetInstance()->SetProfile(profile);
-
   // Prepare for memory caching of SDCH dictionaries.
   // Perform A/B test to measure global impact of SDCH support.
   // Set up a field trial to see what disabling SDCH does to latency of page
@@ -1881,9 +1665,9 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
   // Use default of "" so that all domains are supported.
   std::string sdch_supported_domain("");
-  if (parsed_command_line.HasSwitch(switches::kSdchFilter)) {
+  if (parsed_command_line().HasSwitch(switches::kSdchFilter)) {
     sdch_supported_domain =
-        parsed_command_line.GetSwitchValueASCII(switches::kSdchFilter);
+        parsed_command_line().GetSwitchValueASCII(switches::kSdchFilter);
   } else {
     sdch_trial->AppendGroup("global_disable_sdch",
                             kSDCH_DISABLE_PROBABILITY);
@@ -1895,12 +1679,12 @@ int BrowserMain(const MainFunctionParams& parameters) {
   sdch_manager.set_sdch_fetcher(new SdchDictionaryFetcher);
   sdch_manager.EnableSdchSupport(sdch_supported_domain);
 
-  InstallJankometer(parsed_command_line);
+  InstallJankometer(parsed_command_line());
 
 #if defined(OS_WIN) && !defined(GOOGLE_CHROME_BUILD)
-  if (parsed_command_line.HasSwitch(switches::kDebugPrint)) {
+  if (parsed_command_line().HasSwitch(switches::kDebugPrint)) {
     FilePath path =
-        parsed_command_line.GetSwitchValuePath(switches::kDebugPrint);
+        parsed_command_line().GetSwitchValuePath(switches::kDebugPrint);
     printing::PrintedDocument::set_debug_dump_path(path);
   }
 #endif
@@ -1910,7 +1694,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kKeepMouseCursor));
 #endif
 
-  HandleTestParameters(parsed_command_line);
+  HandleTestParameters(parsed_command_line());
   RecordBreakpadStatusUMA(metrics);
   about_flags::RecordUMAStatistics(local_state);
   LanguageUsageMetrics::RecordAcceptLanguages(
@@ -1939,14 +1723,17 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // The extension service may be available at this point. If the command line
   // specifies --uninstall-extension, attempt the uninstall extension startup
   // action.
-  if (parsed_command_line.HasSwitch(switches::kUninstallExtension)) {
+  if (parsed_command_line().HasSwitch(switches::kUninstallExtension)) {
     ExtensionsStartupUtil ext_startup_util;
-    if (ext_startup_util.UninstallExtension(parsed_command_line, profile)) {
+    if (ext_startup_util.UninstallExtension(parsed_command_line(), profile)) {
       return content::RESULT_CODE_NORMAL_EXIT;
     } else {
       return chrome::RESULT_CODE_UNINSTALL_EXTENSION_ERROR;
     }
   }
+
+  // Start watching for a hang.
+  MetricsService::LogNeedForCleanShutdown();
 
 #if defined(OS_WIN)
   // We check this here because if the profile is OTR (chromeos possibility)
@@ -1957,7 +1744,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // ChildProcess:: is a misnomer unless you consider context.  Use
   // of --wait-for-debugger only makes sense when Chrome itself is a
   // child process (e.g. when launched by PyAuto).
-  if (parsed_command_line.HasSwitch(switches::kWaitForDebugger)) {
+  if (parsed_command_line().HasSwitch(switches::kWaitForDebugger)) {
     ChildProcess::WaitForDebugger("Browser");
   }
 
@@ -1975,27 +1762,27 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Create the instance of the cloud print proxy service so that it can launch
   // the service process if needed. This is needed because the service process
   // might have shutdown because an update was available.
-  profile->GetCloudPrintProxyService();
+  // TODO(torne): this should maybe be done with
+  // ProfileKeyedServiceFactory::ServiceIsCreatedWithProfile() instead?
+  CloudPrintProxyServiceFactory::GetForProfile(profile);
 
-  // Schedule a GPU blacklist auto update.  This also loads the current one.
-  scoped_refptr<GpuBlacklistUpdater> gpu_blacklist_updater =
-      new GpuBlacklistUpdater();
-  // Don't start auto update in tests.
-  if (parsed_command_line.GetSwitchValueASCII(switches::kUseGL) !=
-          gfx::kGLImplementationOSMesaName) {
-    gpu_blacklist_updater->StartAfterDelay();
-  }
+  // Initialize GpuDataManager and collect preliminary gpu info on FILE thread.
+  // Upon completion, it posts GpuBlacklist auto update task on UI thread.
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      NewRunnableFunction(&GpuBlacklistUpdater::SetupOnFileThread));
 
   // Start watching all browser threads for responsiveness.
-  ThreadWatcherList::StartWatchingAll(parsed_command_line);
+  ThreadWatcherList::StartWatchingAll(parsed_command_line());
 
   int result_code = content::RESULT_CODE_NORMAL_EXIT;
-  if (parameters.ui_task) {
+  base::mac::ScopedNSAutoreleasePool* pool = parameters().autorelease_pool_;
+  if (parameters().ui_task) {
     // We are in test mode. Run one task and enter the main message loop.
     if (pool)
       pool->Recycle();
-    parameters.ui_task->Run();
-    delete parameters.ui_task;
+    parameters().ui_task->Run();
+    delete parameters().ui_task;
   } else {
     // Most general initialization is behind us, but opening a
     // tab and/or session restore and such is still to be done.
@@ -2003,7 +1790,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
 
     // We are in regular browser boot sequence. Open initial tabs and enter the
     // main message loop.
-    if (browser_init.Start(parsed_command_line, FilePath(), profile,
+    if (browser_init.Start(parsed_command_line(), FilePath(), profile,
                            &result_code)) {
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
       // Initialize autoupdate timer. Timer callback costs basically nothing
@@ -2028,15 +1815,19 @@ int BrowserMain(const MainFunctionParams& parameters) {
       if (pool)
         pool->Recycle();
 
-      UMA_HISTOGRAM_MEDIUM_TIMES("Startup.BrowserOpenTabs",
-                                 base::TimeTicks::Now() - browser_open_start);
+      UMA_HISTOGRAM_CUSTOM_TIMES(
+          "Startup.BrowserOpenTabs",
+          base::TimeTicks::Now() - browser_open_start,
+          base::TimeDelta::FromMilliseconds(1),
+          base::TimeDelta::FromHours(1),
+          100);
 
       // TODO(mad): Move this call in a proper place on CrOS.
       // http://crosbug.com/17687
 #if !defined(OS_CHROMEOS)
       // If we're running tests (ui_task is non-null), then we don't want to
       // call FetchLanguageListFromTranslateServer
-      if (parameters.ui_task == NULL && translate_manager != NULL) {
+      if (parameters().ui_task == NULL && translate_manager != NULL) {
         // TODO(willchan): Get rid of this after TranslateManager doesn't use
         // the default request context. http://crbug.com/89396.
         // This is necessary to force |default_request_context_| to be
@@ -2049,6 +1840,10 @@ int BrowserMain(const MainFunctionParams& parameters) {
       RunUIMessageLoop(browser_process.get());
     }
   }
+
+  // Start watching for jank during shutdown. It gets disarmed when
+  // |shutdown_watcher_| object is destructed.
+  shutdown_watcher_->Arm(base::TimeDelta::FromSeconds(90));
 
 #if defined(OS_WIN)
   // If it's the first run, log the search engine chosen.  We wait until
@@ -2098,7 +1893,7 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Some tests don't set parameters.ui_task, so they started translate
   // language fetch that was never completed so we need to cleanup here
   // otherwise it will be done by the destructor in a wrong thread.
-  if (parameters.ui_task == NULL && translate_manager != NULL)
+  if (parameters().ui_task == NULL && translate_manager != NULL)
     translate_manager->CleanupPendingUlrFetcher();
 
 
@@ -2114,13 +1909,5 @@ int BrowserMain(const MainFunctionParams& parameters) {
   ignore_result(browser_process.release());
   browser_shutdown::Shutdown();
 
-#if defined(OS_CHROMEOS)
-  // To be precise, logout (browser shutdown) is not yet done, but the
-  // remaining work is negligible, hence we say LogoutDone here.
-  chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker("LogoutDone",
-                                                        false);
-  chromeos::BootTimesLoader::Get()->WriteLogoutTimes();
-#endif
-  TRACE_EVENT_END_ETW("BrowserMain", 0, 0);
   return result_code;
 }

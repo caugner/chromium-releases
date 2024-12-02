@@ -50,7 +50,7 @@ class DrMemoryAnalyze:
         "chromium\\src\\",
         "crt_bld\\self_x86\\",
     ]
-    CUT_STACK_BELOW = ".*testing.*Test.*Run.*"
+    CUT_STACK_BELOW = ".*testing.*Test.*Run.*|testing::internal.*"
 
     result = [self.line_]
     self.ReadLine()
@@ -70,25 +70,25 @@ class DrMemoryAnalyze:
       # access address in the UNADDRESSABLE ACCESS reports like this:
       # Note: next higher malloc: <address range>
       # Note: prev lower malloc:  <address range>
-      match_malloc_info = re.search("Note: .* malloc: +0x.*", tmp_line)
-      if match_malloc_info:
+      # Note: 0x1234-0x5678 overlaps freed memory 0x1000-0x6000
+      if tmp_line.startswith("Note: "):
         result.append(tmp_line)
         self.ReadLine()
         continue
 
       match_binary_fname = re.search("0x[0-9a-fA-F]+ <(.*)> .*!([^+]*)"
                                      "(?:\+0x[0-9a-fA-F]+)?\n", tmp_line)
-      self.ReadLine()
-      match_src_line = re.search("\s*(.*):([0-9]+)(?:\+0x[0-9a-fA-F]+)?",
-                                 self.line_)
-      if match_src_line:
+      if match_binary_fname:
         self.ReadLine()
-        if match_binary_fname:
+        match_src_line = re.search("\s*(.*):([0-9]+)(?:\+0x[0-9a-fA-F]+)?",
+                                 self.line_)
+        if match_src_line:
           binary, fname = match_binary_fname.groups()
           if re.search(CUT_STACK_BELOW, fname):
             break
           report_line = (" #%2i %-50s" % (cnt, fname))
-          if not re.search("\.exe\+0x", binary):
+          if (not re.search("\.exe\+0x", binary) and
+              not re.search("chrome\.dll", binary)):
             # Print the DLL name
             report_line += " " + binary
           src, lineno = match_src_line.groups()
@@ -102,6 +102,13 @@ class DrMemoryAnalyze:
               report_line += ":%i" % int(lineno)
           result.append(report_line + "\n")
           cnt = cnt + 1
+      else:
+        match_other = re.search("0x[0-9a-fA-F]+ (<.*>)(.*)\n", tmp_line)
+        if match_other:
+          module, other = match_other.groups()
+          result.append(" #%2i %-50s %s\n" % (cnt, module, other))
+          cnt = cnt + 1
+      self.ReadLine()
     return result
 
   def ParseReportFile(self, filename):

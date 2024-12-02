@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/language_combobox_model.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "views/controls/menu/menu_delegate.h"
 #include "views/controls/menu/view_menu_delegate.h"
@@ -19,10 +18,12 @@ class WizardControllerTest_SwitchLanguage_Test;
 
 namespace views {
 class MenuItemView;
+class MenuRunner;
 }  // namespace views
 
 namespace chromeos {
 
+class LanguageList;
 class ScreenObserver;
 
 class LanguageSwitchMenu : public views::ViewMenuDelegate,
@@ -58,8 +59,11 @@ class LanguageSwitchMenu : public views::ViewMenuDelegate,
   // views::MenuDelegate implementation.
   virtual void ExecuteCommand(int command_id) OVERRIDE;
 
-  // Dialog controls that we own ourselves.
-  scoped_ptr<views::MenuItemView> menu_;
+  // The menu.
+  views::MenuItemView* menu_;
+
+  // Runs and owns |menu_|.
+  scoped_ptr<views::MenuRunner> menu_runner_;
 
   // Language locale name storage.
   scoped_ptr<LanguageList> language_list_;

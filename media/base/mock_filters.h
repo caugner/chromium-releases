@@ -81,6 +81,7 @@ class MockDataSource : public DataSource {
                           DataSource::ReadCallback* callback));
   MOCK_METHOD1(GetSize, bool(int64* size_out));
   MOCK_METHOD1(SetPreload, void(Preload preload));
+  MOCK_METHOD1(SetBitrate, void(int bitrate));
   MOCK_METHOD0(IsStreaming, bool());
 
   // Sets the TotalBytes & BufferedBytes values to be sent to host() when
@@ -312,8 +313,7 @@ class MockFilterCollection {
 // the Initialize() and Seek() methods.
 void RunFilterCallback(::testing::Unused, FilterCallback* callback);
 void RunFilterStatusCB(::testing::Unused, const FilterStatusCB& cb);
-void RunPipelineStatusCallback(PipelineStatus status,
-                               PipelineStatusCallback* callback);
+void RunPipelineStatusCB(PipelineStatus status, const PipelineStatusCB& cb);
 void RunFilterCallback3(::testing::Unused, FilterCallback* callback,
                         ::testing::Unused);
 

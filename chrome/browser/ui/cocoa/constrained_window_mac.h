@@ -109,6 +109,8 @@ class ConstrainedWindowMacDelegateCustomSheet
 //    deleted.
 class ConstrainedWindowMac : public ConstrainedWindow {
  public:
+  ConstrainedWindowMac(TabContents* owner,
+                       ConstrainedWindowMacDelegate* delegate);
   virtual ~ConstrainedWindowMac();
 
   // Overridden from ConstrainedWindow:
@@ -127,9 +129,6 @@ class ConstrainedWindowMac : public ConstrainedWindow {
  private:
   friend class ConstrainedWindow;
 
-  ConstrainedWindowMac(TabContents* owner,
-                       ConstrainedWindowMacDelegate* delegate);
-
   // The TabContents that owns and constrains this ConstrainedWindow.
   TabContents* owner_;
 
@@ -141,6 +140,9 @@ class ConstrainedWindowMac : public ConstrainedWindow {
 
   // Stores if |ShowConstrainedWindow()| was called.
   bool should_be_visible_;
+
+  // True when CloseConstrainedWindow has been called.
+  bool closing_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowMac);
 };

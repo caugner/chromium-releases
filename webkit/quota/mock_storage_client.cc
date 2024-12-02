@@ -84,6 +84,15 @@ void MockStorageClient::ModifyOriginAndNotify(
       id(), origin_url, type, delta, IncrementMockTime());
 }
 
+void MockStorageClient::TouchAllOriginsAndNotify() {
+  for (OriginDataMap::const_iterator itr = origin_data_.begin();
+       itr != origin_data_.end();
+       ++itr) {
+    quota_manager_proxy_->quota_manager()->NotifyStorageModifiedInternal(
+        id(), itr->first.first, itr->first.second, 0, IncrementMockTime());
+  }
+}
+
 void MockStorageClient::AddOriginToErrorSet(
     const GURL& origin_url, StorageType type) {
   error_origins_.insert(make_pair(origin_url, type));
@@ -106,7 +115,7 @@ void MockStorageClient::GetOriginUsage(const GURL& origin_url,
                                        StorageType type,
                                        GetUsageCallback* callback) {
   usage_callbacks_.insert(callback);
-  base::MessageLoopProxy::CreateForCurrentThread()->PostTask(
+  base::MessageLoopProxy::current()->PostTask(
       FROM_HERE, runnable_factory_.NewRunnableMethod(
           &MockStorageClient::RunGetOriginUsage,
           origin_url, type, callback));
@@ -115,7 +124,7 @@ void MockStorageClient::GetOriginUsage(const GURL& origin_url,
 void MockStorageClient::GetOriginsForType(
     StorageType type, GetOriginsCallback* callback) {
   origins_callbacks_.insert(callback);
-  base::MessageLoopProxy::CreateForCurrentThread()->PostTask(
+  base::MessageLoopProxy::current()->PostTask(
       FROM_HERE, runnable_factory_.NewRunnableMethod(
           &MockStorageClient::RunGetOriginsForType,
           type, callback));
@@ -125,7 +134,7 @@ void MockStorageClient::GetOriginsForHost(
     StorageType type, const std::string& host,
     GetOriginsCallback* callback) {
   origins_callbacks_.insert(callback);
-  base::MessageLoopProxy::CreateForCurrentThread()->PostTask(
+  base::MessageLoopProxy::current()->PostTask(
       FROM_HERE, runnable_factory_.NewRunnableMethod(
           &MockStorageClient::RunGetOriginsForHost,
           type, host, callback));
@@ -135,7 +144,7 @@ void MockStorageClient::DeleteOriginData(
     const GURL& origin, StorageType type,
     DeletionCallback* callback) {
   deletion_callbacks_.insert(callback);
-  base::MessageLoopProxy::CreateForCurrentThread()->PostTask(
+  base::MessageLoopProxy::current()->PostTask(
       FROM_HERE, runnable_factory_.NewRunnableMethod(
           &MockStorageClient::RunDeleteOriginData,
           origin, type, callback));
@@ -163,7 +172,7 @@ void MockStorageClient::RunGetOriginsForType(
     if (type == iter->first.second)
       origins.insert(iter->first.first);
   }
-  callback->Run(origins);
+  callback->Run(origins, type);
 }
 
 void MockStorageClient::RunGetOriginsForHost(
@@ -178,7 +187,7 @@ void MockStorageClient::RunGetOriginsForHost(
     if (type == iter->first.second && host == host_or_spec)
       origins.insert(iter->first.first);
   }
-  callback->Run(origins);
+  callback->Run(origins, type);
 }
 
 void MockStorageClient::RunDeleteOriginData(

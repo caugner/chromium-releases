@@ -7,15 +7,19 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/transform.h"
 #include "views/desktop/desktop_background.h"
-#include "views/desktop/desktop_window_root_view.h"
+#include "views/desktop/desktop_window_manager.h"
 #include "views/layer_property_setter.h"
 #include "views/widget/native_widget_view.h"
 #include "views/widget/native_widget_views.h"
 #include "views/widget/widget.h"
 #include "views/window/native_frame_view.h"
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+#include "views/widget/native_widget_aura.h"
+#elif defined(OS_WIN)
 #include "views/widget/native_widget_win.h"
+#elif defined(USE_WAYLAND)
+#include "views/widget/native_widget_wayland.h"
 #elif defined(TOOLKIT_USES_GTK)
 #include "views/widget/native_widget_gtk.h"
 #endif
@@ -34,14 +38,13 @@ class DesktopWindow : public Widget {
 
  private:
   // Overridden from Widget:
-  virtual internal::RootView* CreateRootView() OVERRIDE {
-    return new DesktopWindowRootView(desktop_window_view_, this);
+  virtual bool OnKeyEvent(const KeyEvent& event) OVERRIDE {
+    return WindowManager::Get()->HandleKeyEvent(this, event);
   }
 
-  virtual bool OnKeyEvent(const KeyEvent& event) OVERRIDE {
-    NativeWidgetViews* native_widget =
-        desktop_window_view_->active_native_widget();
-    return native_widget ? native_widget->OnKeyEvent(event) : false;
+  virtual bool OnMouseEvent(const MouseEvent& event) {
+    return WindowManager::Get()->HandleMouseEvent(this, event) ||
+        Widget::OnMouseEvent(event);
   }
 
   DesktopWindowView* desktop_window_view_;
@@ -95,8 +98,7 @@ class TestWindowContentView : public WidgetDelegateView {
 DesktopWindowView* DesktopWindowView::desktop_window_view = NULL;
 
 DesktopWindowView::DesktopWindowView(DesktopType type)
-    : active_native_widget_(NULL),
-      type_(type) {
+    : type_(type) {
   switch (type_) {
     case DESKTOP_DEFAULT:
     case DESKTOP_NETBOOK:
@@ -118,38 +120,27 @@ void DesktopWindowView::CreateDesktopWindow(DesktopType type) {
   views::Widget* window = new DesktopWindow(desktop_window_view);
   desktop_window_view->widget_ = window;
 
+  WindowManager::Install(new DesktopWindowManager(window));
+
   views::Widget::InitParams params;
   params.delegate = desktop_window_view;
   // In this environment, CreateChromeWindow will default to creating a views-
   // window, so we need to construct a NativeWidgetWin by hand.
   // TODO(beng): Replace this with NativeWindow::CreateNativeRootWindow().
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  params.native_widget = new views::NativeWidgetAura(window);
+#elif defined(OS_WIN)
   params.native_widget = new views::NativeWidgetWin(window);
-  params.bounds = gfx::Rect(20, 20, 1920, 1200);
+#elif defined(USE_WAYLAND)
+  params.native_widget = new views::NativeWidgetWayland(window);
 #elif defined(TOOLKIT_USES_GTK)
   params.native_widget = new views::NativeWidgetGtk(window);
+  params.show_state = ui::SHOW_STATE_MAXIMIZED;
 #endif
+  params.bounds = gfx::Rect(20, 20, 1920, 1200);
   window->Init(params);
   window->Show();
-  window->Maximize();
 }
-
-void DesktopWindowView::ActivateWidget(Widget* widget) {
-  if (widget && widget->IsActive())
-    return;
-
-  if (active_native_widget_)
-    active_native_widget_->OnActivate(false);
-  if (widget) {
-    widget->MoveToTop();
-    active_native_widget_ =
-        static_cast<NativeWidgetViews*>(widget->native_widget());
-    active_native_widget_->OnActivate(true);
-    if (!widget->HasObserver(this))
-      widget->AddObserver(this);
-  }
-}
-
 
 void DesktopWindowView::CreateTestWindow(const std::wstring& title,
                                          SkColor color,
@@ -179,10 +170,12 @@ void DesktopWindowView::Layout() {
 
 void DesktopWindowView::ViewHierarchyChanged(
     bool is_add, View* parent, View* child) {
-  if (!is_add &&
-      active_native_widget_ &&
-      active_native_widget_->GetView() == child)
-    active_native_widget_ = NULL;
+  if (child->GetClassName() == internal::NativeWidgetView::kViewClassName) {
+    Widget* widget =
+        static_cast<internal::NativeWidgetView*>(child)->GetAssociatedWidget();
+    if (is_add)
+      WindowManager::Get()->Register(widget);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -238,20 +231,6 @@ NonClientFrameView* DesktopWindowView::CreateNonClientFrameView() {
       return new NativeFrameView(widget_);
   }
   return NULL;
-}
-
-void DesktopWindowView::OnWidgetClosing(Widget* widget) {
-  if (active_native_widget_ && static_cast<internal::NativeWidgetPrivate*>
-      (active_native_widget_)->GetWidget() == widget)
-    active_native_widget_ = NULL;
-}
-
-void DesktopWindowView::OnWidgetVisibilityChanged(Widget* widget,
-                                                  bool visible) {
-}
-
-void DesktopWindowView::OnWidgetActivationChanged(Widget* widget,
-                                                  bool active) {
 }
 
 }  // namespace desktop

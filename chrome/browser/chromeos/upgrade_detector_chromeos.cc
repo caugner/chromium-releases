@@ -16,11 +16,13 @@ const int kNotifyCycleTimeMs = 20 * 60 * 1000;  // 20 minutes.
 }  // namespace
 
 UpgradeDetectorChromeos::UpgradeDetectorChromeos() {
-  chromeos::CrosLibrary::Get()->GetUpdateLibrary()->AddObserver(this);
+  if (chromeos::CrosLibrary::Get())
+    chromeos::CrosLibrary::Get()->GetUpdateLibrary()->AddObserver(this);
 }
 
 UpgradeDetectorChromeos::~UpgradeDetectorChromeos() {
-  chromeos::CrosLibrary::Get()->GetUpdateLibrary()->RemoveObserver(this);
+  if (chromeos::CrosLibrary::Get())
+    chromeos::CrosLibrary::Get()->GetUpdateLibrary()->RemoveObserver(this);
 }
 
 void UpgradeDetectorChromeos::UpdateStatusChanged(
@@ -35,7 +37,7 @@ void UpgradeDetectorChromeos::UpdateStatusChanged(
 
   // Setup timer to to move along the upgrade advisory system.
   upgrade_notification_timer_.Start(
-      base::TimeDelta::FromMilliseconds(kNotifyCycleTimeMs),
+      FROM_HERE, base::TimeDelta::FromMilliseconds(kNotifyCycleTimeMs),
       this, &UpgradeDetectorChromeos::NotifyOnUpgrade);
 }
 

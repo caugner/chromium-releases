@@ -27,12 +27,12 @@ class DOMStorageMessageFilter : public BrowserMessageFilter {
   DOMStorageMessageFilter(int process_id, WebKitContext* webkit_context);
 
   // BrowserMessageFilter implementation
-  virtual void OnChannelConnected(int32 peer_pid);
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
+                                        BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
-  virtual void OnDestruct() const;
+                                 bool* message_was_ok) OVERRIDE;
+  virtual void OnDestruct() const OVERRIDE;
 
   // Only call on the WebKit thread.
   static void DispatchStorageEvent(const NullableString16& key,
@@ -80,7 +80,7 @@ class DOMStorageMessageFilter : public BrowserMessageFilter {
   static DOMStorageMessageFilter* storage_event_message_filter;
   static const GURL* storage_event_url_;
 
-  // Data shared between renderer processes with the same profile.
+  // Data shared between renderer processes with the same browser context.
   scoped_refptr<WebKitContext> webkit_context_;
 
   // Used to dispatch messages to the correct view host.

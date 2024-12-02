@@ -29,7 +29,7 @@ namespace media {
 
 // TODO(scherkus): to avoid subclasses, consider using a peer/delegate interface
 // and pass in a reference to the constructor.
-class VideoRendererBase
+class MEDIA_EXPORT VideoRendererBase
     : public VideoRenderer,
       public base::PlatformThread::Delegate {
  public:
@@ -57,7 +57,7 @@ class VideoRendererBase
   // obtain ownership of VideoFrame, it should always relinquish the ownership
   // by use PutCurrentFrame(). Current frame is not guaranteed to be non-NULL.
   // It expects clients to use color-fill the background if current frame
-  // is NULL. This could happen when before pipeline is pre-rolled or during
+  // is NULL. This could happen before pipeline is pre-rolled or during
   // pause/flush/seek.
   void GetCurrentFrame(scoped_refptr<VideoFrame>* frame_out);
   void PutCurrentFrame(scoped_refptr<VideoFrame> frame);
@@ -102,11 +102,11 @@ class VideoRendererBase
   void ScheduleRead_Locked();
 
   // Helper function to finished "flush" operation
-  void OnFlushDone();
+  void OnFlushDone_Locked();
 
   // Helper method that flushes all video frame in "ready queue" including
   // current frame into "done queue".
-  void FlushBuffers();
+  void FlushBuffers_Locked();
 
   // Calculates the duration to sleep for based on |current_frame_|'s timestamp,
   // the next frame timestamp (may be NULL), and the provided playback rate.

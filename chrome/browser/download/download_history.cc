@@ -5,21 +5,15 @@
 #include "chrome/browser/download/download_history.h"
 
 #include "base/logging.h"
-#include "chrome/browser/history/download_history_info.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/history/history_marshaling.h"
-#include "chrome/browser/download/download_item.h"
 #include "chrome/browser/profiles/profile.h"
-
-// Our download table ID starts at 1, so we use 0 to represent a download that
-// has started, but has not yet had its data persisted in the table. We use fake
-// database handles in incognito mode starting at -1 and progressively getting
-// more negative.
-// static
-const int DownloadHistory::kUninitializedHandle = 0;
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_persistent_store_info.h"
 
 DownloadHistory::DownloadHistory(Profile* profile)
     : profile_(profile),
-      next_fake_db_handle_(kUninitializedHandle - 1) {
+      next_fake_db_handle_(DownloadItem::kUninitializedHandle - 1) {
   DCHECK(profile);
 }
 
@@ -80,7 +74,8 @@ void DownloadHistory::AddEntry(
   // you'd have to do enough downloading that your ISP would likely stab you in
   // the neck first. YMMV.
   HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  if (download_item->is_otr() || download_item->is_extension_install() ||
+  if (download_item->is_otr() ||
+      ChromeDownloadManagerDelegate::IsExtensionDownload(download_item) ||
       download_item->is_temporary() || !hs) {
     callback->RunWithParams(
         history::DownloadCreateRequest::TupleType(download_item->id(),
@@ -90,14 +85,15 @@ void DownloadHistory::AddEntry(
   }
 
   int32 id = download_item->id();
-  DownloadHistoryInfo history_info = download_item->GetHistoryInfo();
+  DownloadPersistentStoreInfo history_info =
+      download_item->GetPersistentStoreInfo();
   hs->CreateDownload(id, history_info, &history_consumer_, callback);
 }
 
 void DownloadHistory::UpdateEntry(DownloadItem* download_item) {
   // Don't store info in the database if the download was initiated while in
   // incognito mode or if it hasn't been initialized in our database table.
-  if (download_item->db_handle() <= kUninitializedHandle)
+  if (download_item->db_handle() <= DownloadItem::kUninitializedHandle)
     return;
 
   HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
@@ -112,7 +108,7 @@ void DownloadHistory::UpdateEntry(DownloadItem* download_item) {
 void DownloadHistory::UpdateDownloadPath(DownloadItem* download_item,
                                          const FilePath& new_path) {
   // No update necessary if the download was initiated while in incognito mode.
-  if (download_item->db_handle() <= kUninitializedHandle)
+  if (download_item->db_handle() <= DownloadItem::kUninitializedHandle)
     return;
 
   HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
@@ -122,7 +118,7 @@ void DownloadHistory::UpdateDownloadPath(DownloadItem* download_item,
 
 void DownloadHistory::RemoveEntry(DownloadItem* download_item) {
   // No update necessary if the download was initiated while in incognito mode.
-  if (download_item->db_handle() <= kUninitializedHandle)
+  if (download_item->db_handle() <= DownloadItem::kUninitializedHandle)
     return;
 
   HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);

@@ -12,9 +12,10 @@
   'targets': [
     {
       'target_name': 'base_i18n',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         'base',
+        'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
       ],
@@ -29,7 +30,11 @@
       'export_dependent_settings': [
         'base',
       ],
+      'defines': [
+        'BASE_I18N_IMPLEMENTATION',
+      ],
       'sources': [
+        'i18n/base_i18n_export.h',
         'i18n/bidi_line_iterator.cc',
         'i18n/bidi_line_iterator.h',
         'i18n/break_iterator.cc',
@@ -151,6 +156,7 @@
         'memory/singleton_unittest.cc',
         'memory/weak_ptr_unittest.cc',
         'message_loop_proxy_impl_unittest.cc',
+        'message_loop_proxy_unittest.cc',
         'message_loop_unittest.cc',
         'message_pump_glib_unittest.cc',
         'message_pump_libevent_unittest.cc',
@@ -283,6 +289,9 @@
             'message_pump_libevent_unittest.cc',
           ],
         }, {  # OS != "win"
+          'dependencies': [
+            '../third_party/libevent/libevent.gyp:libevent'
+          ],
           'sources/': [
             ['exclude', '^win/'],
           ],
@@ -338,6 +347,8 @@
         'test/test_file_util_mac.cc',
         'test/test_file_util_posix.cc',
         'test/test_file_util_win.cc',
+        'test/test_reg_util_win.cc',
+        'test/test_reg_util_win.h',
         'test/test_suite.cc',
         'test/test_suite.h',
         'test/test_switches.cc',

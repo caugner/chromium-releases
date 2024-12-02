@@ -43,6 +43,8 @@ VideoCodec CodecIDToVideoCodec(CodecID codec_id) {
 
 CodecID VideoCodecToCodecID(VideoCodec video_codec) {
   switch (video_codec) {
+    case kUnknown:
+      return CODEC_ID_NONE;
     case kCodecVC1:
       return CODEC_ID_VC1;
     case kCodecH264:
@@ -186,10 +188,13 @@ bool GetStreamByteCountOverRange(AVStream* stream,
 }
 
 int GetSurfaceHeight(AVStream* stream) {
-  return stream->codec->coded_height;
+  return stream->codec->height;
 }
 
 int GetSurfaceWidth(AVStream* stream) {
+  // Disabling aspect ratio code for 874 branch. Proper fix will be in M16.
+  // http://crbug.com/94861
+#if 0
   double aspect_ratio;
 
   if (stream->sample_aspect_ratio.num)
@@ -199,11 +204,14 @@ int GetSurfaceWidth(AVStream* stream) {
   else
     aspect_ratio = 1.0;
 
-  int width = floor(stream->codec->coded_width * aspect_ratio + 0.5);
+  int width = floor(stream->codec->width * aspect_ratio + 0.5);
 
   // An even width makes things easier for YV12 and appears to be the behavior
   // expected by WebKit layout tests.
   return width & ~1;
+#else
+  return stream->codec->width;
+#endif
 }
 
 void DestroyAVFormatContext(AVFormatContext* format_context) {

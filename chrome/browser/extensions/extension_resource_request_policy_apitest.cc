@@ -5,7 +5,7 @@
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mock_host_resolver.h"
@@ -104,7 +104,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Audio) {
       "audio.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Video) {
+#if defined(OS_MACOSX)
+// http://crbug.com/95274 - Video is flaky on Mac.
+#define MAYBE_Video FLAKY_Video
+#else
+#define MAYBE_Video Video
+#endif
+
+IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, MAYBE_Video) {
   EXPECT_TRUE(RunExtensionSubtest(
       "extension_resource_request_policy/extension2",
       "video.html"));

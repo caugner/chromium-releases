@@ -177,7 +177,7 @@ int MetricsLogBase::GetElapsedSeconds() {
 std::string MetricsLogBase::CreateHash(const std::string& value) {
   base::MD5Context ctx;
   base::MD5Init(&ctx);
-  base::MD5Update(&ctx, value.data(), value.length());
+  base::MD5Update(&ctx, value);
 
   base::MD5Digest digest;
   base::MD5Final(&digest, &ctx);
@@ -372,7 +372,7 @@ int64 MetricsLogBase::GetBuildTime() {
   if (!integral_build_time) {
     Time time;
     const char* kDateTime = __DATE__ " " __TIME__ " GMT";
-    bool result = Time::FromString(ASCIIToWide(kDateTime).c_str(), &time);
+    bool result = Time::FromString(kDateTime, &time);
     DCHECK(result);
     integral_build_time = static_cast<int64>(time.ToTimeT());
   }

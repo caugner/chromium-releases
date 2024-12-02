@@ -6,16 +6,8 @@ function WebUIAssertionsTest() {}
 
 WebUIAssertionsTest.prototype = {
   __proto__: testing.Test.prototype,
-  browsePreload: 'chrome://DummyURL',
-  typedefCppFixture: null,
+  browsePreload: DUMMY_URL,
 };
-
-GEN('#include "chrome/test/data//webui/assertions-inl.h"');
-GEN('');
-GEN('WebUIAssertionsTest::WebUIAssertionsTest() {}');
-GEN('WebUIAssertionsTest::~WebUIAssertionsTest() {}');
-GEN('MockWebUIProvider::MockWebUIProvider() {}');
-GEN('MockWebUIProvider::~MockWebUIProvider() {}');
 
 function testTwoExpects() {
   expectTrue(false);
@@ -23,7 +15,8 @@ function testTwoExpects() {
 }
 
 TEST_F('WebUIAssertionsTest', 'testTwoExpects', function() {
-  var result = runTest(testTwoExpects, []);
+  var result = runTestFunction('testTwoExpects', testTwoExpects, []);
+  resetTestState();
 
   expectFalse(result[0]);
   expectTrue(!!result[1].match(/expectTrue\(false\): false/));
@@ -41,7 +34,9 @@ function testCallTestTwice() {
 }
 
 TEST_F('WebUIAssertionsTest', 'testCallTestTwice', function() {
-  var result = runTest(testCallTestTwice, []);
+  var result = runTestFunction('testCallTestTwice', testCallTestTwice, []);
+  resetTestState();
+
   expectFalse(result[0]);
   expectEquals(2, result[1].match(
       /expectTrue\(false, 'message1'\): message1: false/g).length);
@@ -55,7 +50,10 @@ function testConstructMessage() {
 }
 
 TEST_F('WebUIAssertionsTest', 'testConstructedMessage', function() {
-  var result = runTest(testConstructMessage, []);
+  var result = runTestFunction(
+      'testConstructMessage', testConstructMessage, []);
+  resetTestState();
+
   expectEquals(
       1, result[1].match(/assertTrue\(false, message\): 1 2: false/g).length);
 });

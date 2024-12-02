@@ -7,7 +7,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
 
 // Disabled, http://crbug.com/64899.
@@ -170,4 +170,8 @@ class WindowOpenPanelTest : public ExtensionApiTest {
 
 IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenPanel) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpener) {
+  ASSERT_TRUE(RunExtensionTest("window_open/opener")) << message_;
 }

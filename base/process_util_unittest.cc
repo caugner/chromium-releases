@@ -136,7 +136,14 @@ TEST_F(ProcessUtilTest, KillSlowChild) {
   remove(kSignalFileSlow);
 }
 
-TEST_F(ProcessUtilTest, GetTerminationStatusExit) {
+// Times out on Linux.  http://crbug.com/95058
+#if defined(OS_LINUX)
+#define MAYBE_GetTerminationStatusExit DISABLED_GetTerminationStatusExit
+#else
+#define MAYBE_GetTerminationStatusExit GetTerminationStatusExit
+#endif
+
+TEST_F(ProcessUtilTest, MAYBE_GetTerminationStatusExit) {
   remove(kSignalFileSlow);
   base::ProcessHandle handle = this->SpawnChild("SlowChildProcess", false);
   ASSERT_NE(base::kNullProcessHandle, handle);
@@ -397,6 +404,21 @@ TEST_F(ProcessUtilTest, LaunchAsUser) {
 
 #endif  // defined(OS_WIN)
 
+#if defined(OS_MACOSX)
+
+TEST_F(ProcessUtilTest, MacTerminateOnHeapCorruption) {
+  // Note that base::EnableTerminationOnHeapCorruption() is called as part of
+  // test suite setup and does not need to be done again, else mach_override
+  // will fail.
+
+  char buf[3];
+  ASSERT_DEATH(free(buf), "being freed.*"
+      "\\*\\*\\* set a breakpoint in malloc_error_break to debug.*"
+      "Terminating process due to a potential for future heap corruption");
+}
+
+#endif  // defined(OS_MACOSX)
+
 #if defined(OS_POSIX)
 
 namespace {
@@ -516,7 +538,11 @@ std::string TestLaunchProcess(const base::environment_vector& env_changes,
   options.wait = true;
   options.environ = &env_changes;
   options.fds_to_remap = &fds_to_remap;
+#if defined(OS_LINUX)
   options.clone_flags = clone_flags;
+#else
+  CHECK_EQ(0, clone_flags);
+#endif  // OS_LINUX
   EXPECT_TRUE(base::LaunchProcess(args, options, NULL));
   PCHECK(HANDLE_EINTR(close(fds[1])) == 0);
 

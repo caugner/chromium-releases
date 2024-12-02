@@ -10,11 +10,8 @@
 #include "chrome/browser/media/media_internals_observer.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/webui/web_ui.h"
-
-// The names of the javascript functions to call with updates.
-static const char kDeleteItemFunction[] = "media.onItemDeleted";
-static const char kAudioUpdateFunction[] = "media.addAudioStream";
-static const char kSendEverythingFunction[] = "media.onReceiveEverything";
+#include "media/base/media_log.h"
+#include "media/base/media_log_event.h"
 
 MediaInternals::~MediaInternals() {}
 
@@ -46,6 +43,20 @@ void MediaInternals::OnSetAudioStreamVolume(
                     "volume", Value::CreateDoubleValue(volume));
 }
 
+void MediaInternals::OnMediaEvent(
+    int render_process_id, const media::MediaLogEvent& event) {
+  DCHECK(CalledOnValidThread());
+
+  // Notify observers that |event| has occured.
+  DictionaryValue dict;
+  dict.SetInteger("renderer", render_process_id);
+  dict.SetInteger("player", event.id);
+  dict.SetString("type", media::MediaLog::EventTypeToString(event.type));
+  dict.SetDouble("time", event.time.ToDoubleT());
+  dict.Set("params", event.params.DeepCopy());
+  SendUpdate("media.onMediaEvent", &dict);
+}
+
 void MediaInternals::AddObserver(MediaInternalsObserver* observer) {
   DCHECK(CalledOnValidThread());
   observers_.AddObserver(observer);
@@ -58,7 +69,7 @@ void MediaInternals::RemoveObserver(MediaInternalsObserver* observer) {
 
 void MediaInternals::SendEverything() {
   DCHECK(CalledOnValidThread());
-  SendUpdate(kSendEverythingFunction, &data_);
+  SendUpdate("media.onReceiveEverything", &data_);
 }
 
 MediaInternals::MediaInternals() {}
@@ -67,13 +78,13 @@ void MediaInternals::UpdateAudioStream(
     void* host, int stream_id, const std::string& property, Value* value) {
   std::string stream = base::StringPrintf("audio_streams.%p:%d",
                                           host, stream_id);
-  UpdateItem(kAudioUpdateFunction, stream, property, value);
+  UpdateItem("media.addAudioStream", stream, property, value);
 }
 
 void MediaInternals::DeleteItem(const std::string& item) {
   data_.Remove(item, NULL);
   scoped_ptr<Value> value(Value::CreateStringValue(item));
-  SendUpdate(kDeleteItemFunction, value.get());
+  SendUpdate("media.onItemDeleted", value.get());
 }
 
 void MediaInternals::UpdateItem(

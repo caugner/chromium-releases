@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_instance.idl modified Wed Jul 20 11:13:48 2011. */
+/* From ppb_instance.idl modified Tue Aug 23 11:25:50 2011. */
 
 #ifndef PPAPI_C_PPB_INSTANCE_H_
 #define PPAPI_C_PPB_INSTANCE_H_
@@ -15,9 +15,13 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_var.h"
 
+#define PPB_INSTANCE_INTERFACE_0_5 "PPB_Instance;0.5"
+#define PPB_INSTANCE_INTERFACE_1_0 "PPB_Instance;1.0"
+#define PPB_INSTANCE_INTERFACE PPB_INSTANCE_INTERFACE_1_0
+
 /**
  * @file
- * This file defines the PPB_Instance interface implemented by the
+ * This file defines the <code>PPB_Instance</code> interface implemented by the
  * browser and containing pointers to functions related to
  * the module instance on a web page.
  */
@@ -31,10 +35,6 @@
  * The PPB_Instance interface contains pointers to functions
  * related to the module instance on a web page.
  */
-#define PPB_INSTANCE_INTERFACE_0_5 "PPB_Instance;0.5"
-#define PPB_INSTANCE_INTERFACE_1_0 "PPB_Instance;1.0"
-#define PPB_INSTANCE_INTERFACE PPB_INSTANCE_INTERFACE_1_0
-
 struct PPB_Instance {
   /**
    * BindGraphics() binds the given graphics as the current display surface.
@@ -54,8 +54,8 @@ struct PPB_Instance {
    * Binding a device will invalidate that portion of the web page to flush the
    * contents of the new device to the screen.
    *
-   * @param[in] instance A PP_Instance indentifying one instance of a module.
-   * @param[in] device A PP_Resource representing the graphics device.
+   * @param[in] instance A PP_Instance identifying one instance of a module.
+   * @param[in] device A PP_Resource corresponding to a graphics device.
    *
    * @return <code>PP_Bool</code> containing <code>PP_TRUE</code> if bind was
    * successful or <code>PP_FALSE</code> if the device was not the correct
@@ -70,12 +70,19 @@ struct PPB_Instance {
    * page specifies an iframe to a resource with a MIME type registered by the
    * module.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    *
-   * @return A <code>PP_Bool</code> containing <code>PP_TRUE<code> if the
+   * @return A <code>PP_Bool</code> containing <code>PP_TRUE</code> if the
    * instance is full-frame.
    */
+  PP_Bool (*IsFullFrame)(PP_Instance instance);
+};
+
+struct PPB_Instance_0_5 {
+  struct PP_Var (*GetWindowObject)(PP_Instance instance);
+  struct PP_Var (*GetOwnerElementObject)(PP_Instance instance);
+  PP_Bool (*BindGraphics)(PP_Instance instance, PP_Resource device);
   PP_Bool (*IsFullFrame)(PP_Instance instance);
 };
 /**

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,9 @@ HttpAuthHandlerMock::HttpAuthHandlerMock()
     generate_async_(false), generate_rv_(OK),
     auth_token_(NULL),
     first_round_(true),
-    connection_based_(false) {
+    connection_based_(false),
+    allows_default_credentials_(false),
+    allows_explicit_credentials_(true) {
 }
 
 HttpAuthHandlerMock::~HttpAuthHandlerMock() {
@@ -73,7 +75,9 @@ void HttpAuthHandlerMock::SetGenerateExpectation(bool async, int rv) {
 
 HttpAuth::AuthorizationResult HttpAuthHandlerMock::HandleAnotherChallenge(
     HttpAuth::ChallengeTokenizer* challenge) {
-  if (!is_connection_based())
+  // If we receive an empty challenge for a connection based scheme, or a second
+  // challenge for a non connection based scheme, assume it's a rejection.
+  if (!is_connection_based() || challenge->base64_param().empty())
     return HttpAuth::AUTHORIZATION_RESULT_REJECT;
   if (!LowerCaseEqualsASCII(challenge->scheme(), "mock"))
     return HttpAuth::AUTHORIZATION_RESULT_INVALID;
@@ -82,6 +86,14 @@ HttpAuth::AuthorizationResult HttpAuthHandlerMock::HandleAnotherChallenge(
 
 bool HttpAuthHandlerMock::NeedsIdentity() {
   return first_round_;
+}
+
+bool HttpAuthHandlerMock::AllowsDefaultCredentials() {
+  return allows_default_credentials_;
+}
+
+bool HttpAuthHandlerMock::AllowsExplicitCredentials() {
+  return allows_explicit_credentials_;
 }
 
 bool HttpAuthHandlerMock::Init(HttpAuth::ChallengeTokenizer* challenge) {
@@ -142,10 +154,9 @@ HttpAuthHandlerMock::Factory::Factory()
 HttpAuthHandlerMock::Factory::~Factory() {
 }
 
-void HttpAuthHandlerMock::Factory::set_mock_handler(
+void HttpAuthHandlerMock::Factory::AddMockHandler(
     HttpAuthHandler* handler, HttpAuth::Target target) {
-  EXPECT_TRUE(handlers_[target].get() == NULL);
-  handlers_[target].reset(handler);
+  handlers_[target].push_back(handler);
 }
 
 int HttpAuthHandlerMock::Factory::CreateAuthHandler(
@@ -156,9 +167,11 @@ int HttpAuthHandlerMock::Factory::CreateAuthHandler(
     int nonce_count,
     const BoundNetLog& net_log,
     scoped_ptr<HttpAuthHandler>* handler) {
-  if (!handlers_[target].get())
+  if (handlers_[target].empty())
     return ERR_UNEXPECTED;
-  scoped_ptr<HttpAuthHandler> tmp_handler(handlers_[target].release());
+  scoped_ptr<HttpAuthHandler> tmp_handler(handlers_[target][0]);
+  std::vector<HttpAuthHandler*>& handlers = handlers_[target].get();
+  handlers.erase(handlers.begin());
   if (do_init_from_challenge_ &&
       !tmp_handler->InitFromChallenge(challenge, target, origin, net_log))
     return ERR_INVALID_RESPONSE;

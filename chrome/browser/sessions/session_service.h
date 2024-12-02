@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "ui/base/ui_base_types.h"
 
 class NavigationEntry;
 class Profile;
@@ -58,6 +59,12 @@ class SessionService : public BaseSessionService,
 
   virtual ~SessionService();
 
+  // Returns true if a new window opening should really be treated like the
+  // start of a session (with potential session restore, startup URLs, etc.).
+  // In particular, this is true if there are no tabbed browsers running
+  // currently (eg. because only background or other app pages are running).
+  bool ShouldNewWindowStartSession();
+
   // Invoke at a point when you think session restore might occur. For example,
   // during startup and window creation this is invoked to see if a session
   // needs to be restored. If a session needs to be restored it is done so
@@ -81,7 +88,7 @@ class SessionService : public BaseSessionService,
   // Sets the bounds of a window.
   void SetWindowBounds(const SessionID& window_id,
                        const gfx::Rect& bounds,
-                       bool is_maximized);
+                       ui::WindowShowState show_state);
 
   // Sets the visual index of the tab in its parent window.
   void SetTabIndexInWindow(const SessionID& window_id,
@@ -218,7 +225,7 @@ class SessionService : public BaseSessionService,
 
   SessionCommand* CreateSetWindowBoundsCommand(const SessionID& window_id,
                                                const gfx::Rect& bounds,
-                                               bool is_maximized);
+                                               ui::WindowShowState show_state);
 
   SessionCommand* CreateSetTabIndexInWindowCommand(const SessionID& tab_id,
                                                    int new_index);

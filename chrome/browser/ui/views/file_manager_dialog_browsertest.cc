@@ -16,10 +16,11 @@
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/shell_dialogs.h"  // SelectFileDialog
 #include "chrome/common/chrome_paths.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/common/content_notification_types.h"
 #include "webkit/fileapi/file_system_context.h"
@@ -108,17 +109,17 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, FileManagerDestroyListener) {
   listener_.reset();
 }
 
-// Flaky: http://crbug.com/89733
-IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, FLAKY_SelectFileAndCancel) {
+IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, SelectFileAndCancel) {
   // Add tmp mount point even though this test won't use it directly.
   // We need this to make sure that at least one top-level directory exists
   // in the file browser.
   FilePath tmp_dir("/tmp");
   AddMountPoint(tmp_dir);
 
-  // Spawn a dialog to open a file.  The dialog will signal that it is done
-  // loading via chrome.test.sendMessage('ready') in the extension JavaScript.
-  ExtensionTestMessageListener msg_listener("ready", false /* will_reply */);
+  // Spawn a dialog to open a file.  The dialog will signal that it is ready
+  // via chrome.test.sendMessage() in the extension JavaScript.
+  ExtensionTestMessageListener init_listener("worker-initialized",
+                                             false /* will_reply */);
   gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
   dialog_->SelectFile(SelectFileDialog::SELECT_OPEN_FILE,
                       string16() /* title */,
@@ -130,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, FLAKY_SelectFileAndCancel) {
                       owning_window,
                       this /* params */);
   LOG(INFO) << "Waiting for JavaScript ready message.";
-  ASSERT_TRUE(msg_listener.WaitUntilSatisfied());
+  ASSERT_TRUE(init_listener.WaitUntilSatisfied());
 
   // Dialog should be running now.
   ASSERT_TRUE(dialog_->IsRunning(owning_window));
@@ -181,8 +182,12 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, SelectFileAndOpen) {
   // Spawn a dialog to open a file.  Provide the path to the file so the dialog
   // will automatically select it.  Ensure that the OK button is enabled by
   // waiting for chrome.test.sendMessage('selection-change-complete').
-  ExtensionTestMessageListener msg_listener("selection-change-complete",
-                                            false /* will_reply */);
+  // The extension starts a Web Worker to read file metadata, so it may send
+  // 'selection-change-complete' before 'worker-initialized'.  This is OK.
+  ExtensionTestMessageListener init_listener("worker-initialized",
+                                             false /* will_reply */);
+  ExtensionTestMessageListener selection_listener("selection-change-complete",
+                                                  false /* will_reply */);
   gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
   dialog_->SelectFile(SelectFileDialog::SELECT_OPEN_FILE,
                       string16() /* title */,
@@ -193,8 +198,10 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, SelectFileAndOpen) {
                       NULL /* source_contents */,
                       owning_window,
                       this /* params */);
+  LOG(INFO) << "Waiting for JavaScript initialized message.";
+  ASSERT_TRUE(init_listener.WaitUntilSatisfied());
   LOG(INFO) << "Waiting for JavaScript selection-change-complete message.";
-  ASSERT_TRUE(msg_listener.WaitUntilSatisfied());
+  ASSERT_TRUE(selection_listener.WaitUntilSatisfied());
 
   // Dialog should be running now.
   ASSERT_TRUE(dialog_->IsRunning(owning_window));
@@ -241,8 +248,12 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, SelectFileAndSave) {
   // Spawn a dialog to save a file, providing a suggested path.
   // Ensure "Save" button is enabled by waiting for notification from
   // chrome.test.sendMessage().
-  ExtensionTestMessageListener msg_listener("directory-change-complete",
-                                            false /* will_reply */);
+  // The extension starts a Web Worker to read file metadata, so it may send
+  // 'directory-change-complete' before 'worker-initialized'.  This is OK.
+  ExtensionTestMessageListener init_listener("worker-initialized",
+                                             false /* will_reply */);
+  ExtensionTestMessageListener dir_change_listener("directory-change-complete",
+                                                   false /* will_reply */);
   gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
   dialog_->SelectFile(SelectFileDialog::SELECT_SAVEAS_FILE,
                       string16() /* title */,
@@ -253,8 +264,10 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, SelectFileAndSave) {
                       NULL /* source_contents */,
                       owning_window,
                       this /* params */);
-  LOG(INFO) << "Waiting for JavaScript message.";
-  ASSERT_TRUE(msg_listener.WaitUntilSatisfied());
+  LOG(INFO) << "Waiting for JavaScript initialized message.";
+  ASSERT_TRUE(init_listener.WaitUntilSatisfied());
+  LOG(INFO) << "Waiting for JavaScript directory-change-complete message.";
+  ASSERT_TRUE(dir_change_listener.WaitUntilSatisfied());
 
   // Dialog should be running now.
   ASSERT_TRUE(dialog_->IsRunning(owning_window));
@@ -282,5 +295,64 @@ IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, SelectFileAndSave) {
   ASSERT_TRUE(listener_->file_selected());
   ASSERT_FALSE(listener_->canceled());
   ASSERT_EQ(test_file, listener_->path());
+  ASSERT_EQ(this, listener_->params());
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerDialogTest, OpenSingletonTabAndCancel) {
+  // Add tmp mount point even though this test won't use it directly.
+  // We need this to make sure that at least one top-level directory exists
+  // in the file browser.
+  FilePath tmp_dir("/tmp");
+  AddMountPoint(tmp_dir);
+
+  // Spawn a dialog to open a file.  The dialog will signal that it is ready
+  // via chrome.test.sendMessage() in the extension JavaScript.
+  ExtensionTestMessageListener init_listener("worker-initialized",
+                                             false /* will_reply */);
+  gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
+  dialog_->SelectFile(SelectFileDialog::SELECT_OPEN_FILE,
+                      string16() /* title */,
+                      FilePath() /* default_path */,
+                      NULL /* file_types */,
+                       0 /* file_type_index */,
+                      FILE_PATH_LITERAL("") /* default_extension */,
+                      NULL /* source_contents */,
+                      owning_window,
+                      this /* params */);
+  LOG(INFO) << "Waiting for JavaScript ready message.";
+  ASSERT_TRUE(init_listener.WaitUntilSatisfied());
+
+  // Dialog should be running now.
+  ASSERT_TRUE(dialog_->IsRunning(owning_window));
+
+  // Open a singleton tab in background.
+  browser::NavigateParams p(browser(), GURL("www.google.com"),
+                            PageTransition::LINK);
+  p.window_action = browser::NavigateParams::SHOW_WINDOW;
+  p.disposition = SINGLETON_TAB;
+  browser::Navigate(&p);
+
+  // Inject JavaScript to click the cancel button and wait for notification
+  // that the window has closed.
+  ui_test_utils::WindowedNotificationObserver host_destroyed(
+      content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
+      NotificationService::AllSources());
+  RenderViewHost* host = dialog_->GetRenderViewHost();
+  string16 main_frame;
+  string16 script = ASCIIToUTF16(
+      "console.log(\'Test JavaScript injected.\');"
+      "document.querySelector(\'.cancel\').click();");
+  // The file selection handler closes the dialog and does not return control
+  // to JavaScript, so do not wait for return values.
+  host->ExecuteJavascriptInWebFrame(main_frame, script);
+  LOG(INFO) << "Waiting for window close notification.";
+  host_destroyed.Wait();
+
+  // Dialog no longer believes it is running.
+  ASSERT_FALSE(dialog_->IsRunning(owning_window));
+
+  // Listener should have been informed of the cancellation.
+  ASSERT_FALSE(listener_->file_selected());
+  ASSERT_TRUE(listener_->canceled());
   ASSERT_EQ(this, listener_->params());
 }

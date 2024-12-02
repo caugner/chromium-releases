@@ -16,7 +16,7 @@ class PluginProcessHost;
 class ChromePluginMessageFilter : public IPC::ChannelProxy::MessageFilter,
                                   public IPC::Message::Sender {
  public:
-  explicit ChromePluginMessageFilter(PluginProcessHost* process);
+  ChromePluginMessageFilter(PluginProcessHost* process);
 
   // BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message);
@@ -30,8 +30,21 @@ class ChromePluginMessageFilter : public IPC::ChannelProxy::MessageFilter,
 #if defined(OS_WIN)
   void OnDownloadUrl(const std::string& url,
                      gfx::NativeWindow caller_window);
+  // Helper function to issue the download request on the file thread.
+  static void OnDownloadUrlOnFileThread(const std::string& url,
+                                        gfx::NativeWindow caller_window);
 #endif
   void OnGetPluginFinderUrl(std::string* plugin_finder_url);
+  void OnMissingPluginStatus(int status,
+                             int render_process_id,
+                             int render_view_id,
+                             gfx::NativeWindow window);
+
+  // static
+  static void HandleMissingPluginStatus(int status,
+                                        int render_process_id,
+                                        int render_view_id,
+                                        gfx::NativeWindow window);
 
   PluginProcessHost* process_;
 

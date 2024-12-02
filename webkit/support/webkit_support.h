@@ -21,7 +21,7 @@ class WebApplicationCacheHostClient;
 class WebCString;
 class WebFileSystemCallbacks;
 class WebFrame;
-class WebKitClient;
+class WebKitPlatformSupport;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebPlugin;
@@ -55,10 +55,10 @@ void SetUpTestEnvironment();
 void SetUpTestEnvironmentForUnitTests();
 void TearDownTestEnvironment();
 
-// Returns a pointer to a WebKitClient implementation for DumpRenderTree.
-// Needs to call SetUpTestEnvironment() before this.
+// Returns a pointer to a WebKitPlatformSupport implementation for
+// DumpRenderTree.  Needs to call SetUpTestEnvironment() before this.
 // This returns a pointer to a static instance.  Don't delete it.
-WebKit::WebKitClient* GetWebKitClient();
+WebKit::WebKitPlatformSupport* GetWebKitPlatformSupport();
 
 // This is used by WebFrameClient::createPlugin().
 WebKit::WebPlugin* CreateWebPlugin(WebKit::WebFrame* frame,
@@ -211,6 +211,10 @@ enum {
     VKEY_SNAPSHOT = ui::VKEY_SNAPSHOT,
     VKEY_F1 = ui::VKEY_F1,
 };
+
+#if defined(OS_LINUX)
+int NativeKeyCodeForWindowsKeyCode(int keycode, bool shift);
+#endif
 
 // - Timers
 

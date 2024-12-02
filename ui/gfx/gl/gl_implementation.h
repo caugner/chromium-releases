@@ -10,6 +10,8 @@
 
 #include "base/native_library.h"
 #include "build/build_config.h"
+#include "ui/gfx/gl/gl_export.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 namespace gfx {
 
@@ -22,12 +24,6 @@ enum GLImplementation {
   kGLImplementationMockGL
 };
 
-// The GL implementation names that can be passed to --use-gl.
-extern const char kGLImplementationDesktopName[];
-extern const char kGLImplementationOSMesaName[];
-extern const char kGLImplementationEGLName[];
-extern const char kGLImplementationMockName[];
-
 #if defined(OS_WIN)
 typedef void* (WINAPI *GLGetProcAddressProc)(const char* name);
 #else
@@ -35,7 +31,7 @@ typedef void* (*GLGetProcAddressProc)(const char* name);
 #endif
 
 // Initialize a particular GL implementation.
-bool InitializeGLBindings(GLImplementation implementation);
+GL_EXPORT bool InitializeGLBindings(GLImplementation implementation);
 
 // Initialize Debug logging wrappers for GL bindings.
 void InitializeDebugGLBindings();
@@ -44,7 +40,7 @@ void InitializeDebugGLBindings();
 void SetGLImplementation(GLImplementation implementation);
 
 // Get the current GL implementation.
-GLImplementation GetGLImplementation();
+GL_EXPORT GLImplementation GetGLImplementation();
 
 // Get the GL implementation with a given name.
 GLImplementation GetNamedGLImplementation(const std::wstring& name);

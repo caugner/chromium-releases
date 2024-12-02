@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "chrome/test/testing_profile.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/test/test_browser_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -15,52 +16,64 @@ class MockTabContentsDelegate : public TabContentsDelegate {
  public:
   virtual ~MockTabContentsDelegate() {}
 
+  // TODO(adriansc): Remove this method when refactoring changed all call sites.
+  virtual TabContents* OpenURLFromTab(
+      TabContents* source,
+      const GURL& url,
+      const GURL& referrer,
+      WindowOpenDisposition disposition,
+      PageTransition::Type transition) OVERRIDE {
+    return NULL;
+  }
+
   virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const GURL& url,
-                                      const GURL& referrer,
-                                      WindowOpenDisposition disposition,
-                                      PageTransition::Type transition) {
+                              const OpenURLParams& params) OVERRIDE {
     return NULL;
   }
 
   virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags) {}
+                                      unsigned changed_flags) OVERRIDE {}
 
-  virtual std::string GetNavigationHeaders(const GURL& url) {
-    return "";
+  virtual void AddNavigationHeaders(
+      const GURL& url, std::string* headers) OVERRIDE {
   }
 
   virtual void AddNewContents(TabContents* source,
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture) {}
+                              bool user_gesture) OVERRIDE {}
 
-  virtual void ActivateContents(TabContents* contents) {}
+  virtual void ActivateContents(TabContents* contents) OVERRIDE {}
 
-  virtual void DeactivateContents(TabContents* contents) {}
+  virtual void DeactivateContents(TabContents* contents) OVERRIDE {}
 
-  virtual void LoadingStateChanged(TabContents* source) {}
+  virtual void LoadingStateChanged(TabContents* source) OVERRIDE {}
 
-  virtual void LoadProgressChanged(double progress) {}
+  virtual void LoadProgressChanged(double progress) OVERRIDE {}
 
-  virtual void CloseContents(TabContents* source) {}
+  virtual void CloseContents(TabContents* source) OVERRIDE {}
 
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) {}
+  virtual void MoveContents(TabContents* source,
+                            const gfx::Rect& pos) OVERRIDE {
+  }
 
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {}
+  virtual void UpdateTargetURL(TabContents* source, int32 page_id,
+                               const GURL& url) {}
 };
 
 TEST(TabContentsDelegateTest, UnregisterInDestructor) {
   MessageLoop loop(MessageLoop::TYPE_UI);
-  scoped_ptr<MockTabContentsDelegate> delegate(new MockTabContentsDelegate());
-  scoped_ptr<Profile> profile(new TestingProfile());
+  TestBrowserContext browser_context;
+
   scoped_ptr<TabContents> contents_a(
-      new TabContents(profile.get(), NULL, 0, NULL, NULL));
+      new TabContents(&browser_context, NULL, 0, NULL, NULL));
   scoped_ptr<TabContents> contents_b(
-      new TabContents(profile.get(), NULL, 0, NULL, NULL));
+      new TabContents(&browser_context, NULL, 0, NULL, NULL));
   EXPECT_TRUE(contents_a->delegate() == NULL);
   EXPECT_TRUE(contents_b->delegate() == NULL);
+
+  scoped_ptr<MockTabContentsDelegate> delegate(new MockTabContentsDelegate());
 
   // Setting a delegate should work correctly.
   contents_a->set_delegate(delegate.get());

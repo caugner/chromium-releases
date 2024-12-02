@@ -15,6 +15,7 @@
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_regexes.h"
 #include "chrome/browser/autofill/form_structure.h"
+#include "chrome/browser/autofill/personal_data_manager_observer.h"
 #include "chrome/browser/autofill/phone_number.h"
 #include "chrome/browser/autofill/phone_number_i18n.h"
 #include "chrome/browser/autofill/select_control_handler.h"
@@ -158,14 +159,12 @@ void PersonalDataManager::OnWebDataServiceRequestDone(
     std::copy(web_profiles_.begin(), web_profiles_.end(),
               profile_pointers.begin());
     AutofillProfile::AdjustInferredLabels(&profile_pointers);
-    FOR_EACH_OBSERVER(Observer, observers_, OnPersonalDataChanged());
+    FOR_EACH_OBSERVER(PersonalDataManagerObserver, observers_,
+                      OnPersonalDataChanged());
   }
 }
 
-/////////////////////////////////////////////////////////////////////////////
-// PersonalDataManager,
-// views::ButtonListener implementations
-void PersonalDataManager::SetObserver(PersonalDataManager::Observer* observer) {
+void PersonalDataManager::SetObserver(PersonalDataManagerObserver* observer) {
   // TODO(dhollowa): RemoveObserver is for compatibility with old code, it
   // should be nuked.
   observers_.RemoveObserver(observer);
@@ -173,7 +172,7 @@ void PersonalDataManager::SetObserver(PersonalDataManager::Observer* observer) {
 }
 
 void PersonalDataManager::RemoveObserver(
-    PersonalDataManager::Observer* observer) {
+    PersonalDataManagerObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
@@ -319,7 +318,13 @@ bool PersonalDataManager::ImportFormData(
   }
   *imported_credit_card = local_imported_credit_card.release();
 
-  return imported_profile.get() || *imported_credit_card;
+  if (imported_profile.get() || *imported_credit_card) {
+    return true;
+  } else {
+    FOR_EACH_OBSERVER(PersonalDataManagerObserver, observers_,
+                      OnInsufficientFormData());
+    return false;
+  }
 }
 
 void PersonalDataManager::AddProfile(const AutofillProfile& profile) {

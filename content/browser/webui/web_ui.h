@@ -18,7 +18,6 @@
 
 class WebUIMessageHandler;
 class GURL;
-class Profile;
 class RenderViewHost;
 class TabContents;
 
@@ -139,14 +138,6 @@ class WebUI : public IPC::Channel::Listener {
   void CallJavascriptFunction(const std::string& function_name,
                               const std::vector<const base::Value*>& args);
 
-  // May be overridden by WebUI's which do not have a tab contents.
-  // TODO(estade): removing this Profile dependency is predicated on reworking
-  // TabContents's Profile ownership.
-  virtual Profile* GetProfile() const;
-
-  // May be overridden by WebUI's which do not have a tab contents.
-  virtual RenderViewHost* GetRenderViewHost() const;
-
   TabContents* tab_contents() const { return tab_contents_; }
 
   // Returns true to indicate that the WebUI is performing a long running
@@ -168,6 +159,7 @@ class WebUI : public IPC::Channel::Listener {
       const std::vector<const base::Value*>& arg_list);
 
  protected:
+  // Takes ownership of |handler|, which will be destroyed when the WebUI is.
   void AddMessageHandler(WebUIMessageHandler* handler);
 
   // Execute a string of raw Javascript on the page.  Overridable for
@@ -234,7 +226,10 @@ class WebUIMessageHandler {
   // Extract a string value from a list Value.
   string16 ExtractStringValue(const base::ListValue* value);
 
-  WebUI* web_ui_;
+  // Returns the attached WebUI for this handler.
+  WebUI* web_ui() const { return web_ui_; }
+
+  WebUI* web_ui_;  // TODO(wyck): Make private after merge conflicts go away.
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebUIMessageHandler);

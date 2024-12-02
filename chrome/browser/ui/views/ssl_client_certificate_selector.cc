@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
@@ -74,7 +75,8 @@ string16 CertificateSelectorTableModel::GetText(int index, int column_id) {
   return items_[index];
 }
 
-void CertificateSelectorTableModel::SetObserver(TableModelObserver* observer) {
+void CertificateSelectorTableModel::SetObserver(
+    ui::TableModelObserver* observer) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -129,7 +131,7 @@ void SSLClientCertificateSelector::Init() {
 
   StartObserving();
 
-  window_ = tab_contents_->CreateConstrainedDialog(this);
+  window_ = new ConstrainedWindowViews(tab_contents_, this);
 
   // Select the first row automatically.  This must be done after the dialog has
   // been created.
@@ -242,17 +244,15 @@ void SSLClientCertificateSelector::OnDoubleClick() {
 // SSLClientCertificateSelector private methods:
 
 void SSLClientCertificateSelector::CreateCertTable() {
-  std::vector<TableColumn> columns;
-  columns.push_back(TableColumn());
-  table_ = new views::TableView(
-      model_.get(),
-      columns,
-      views::TEXT_ONLY,
-      true,  // single_selection
-      true,  // resizable_columns
-      true);  // autosize_columns
-  table_->SetPreferredSize(
-    gfx::Size(kTableViewWidth, kTableViewHeight));
+  std::vector<ui::TableColumn> columns;
+  columns.push_back(ui::TableColumn());
+  table_ = new views::TableView(model_.get(),
+                                columns,
+                                views::TEXT_ONLY,
+                                true,  // single_selection
+                                true,  // resizable_columns
+                                true);  // autosize_columns
+  table_->SetPreferredSize(gfx::Size(kTableViewWidth, kTableViewHeight));
   table_->SetObserver(this);
 }
 

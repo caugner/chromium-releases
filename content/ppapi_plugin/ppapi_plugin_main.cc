@@ -17,6 +17,10 @@
 #include "sandbox/src/sandbox.h"
 #endif
 
+#if defined(OS_MACOSX)
+#include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
+#endif
+
 #if defined(OS_WIN)
 sandbox::TargetServices* g_target_services = NULL;
 #else
@@ -41,13 +45,19 @@ int PpapiPluginMain(const MainFunctionParams& parameters) {
       ChildProcess::WaitForDebugger("Ppapi");
   }
 
-  MessageLoop main_message_loop(MessageLoop::TYPE_IO);
+#if defined(OS_MACOSX)
+  // TODO(viettrungluu): This is called in different places in processes that
+  // will run WebKit. This is stupid and error-prone.
+  InitWebCoreSystemInterface();
+#endif
+
+  MessageLoop main_message_loop;
   base::PlatformThread::SetName("CrPPAPIMain");
 
   ChildProcess ppapi_process;
   ppapi_process.set_main_thread(new PpapiThread(false));  // Not a broker.
 
-  pp::proxy::ProxyModule::GetInstance()->SetFlashCommandLineArgs(
+  ppapi::proxy::ProxyModule::GetInstance()->SetFlashCommandLineArgs(
       command_line.GetSwitchValueASCII(switches::kPpapiFlashArgs));
 
   main_message_loop.Run();

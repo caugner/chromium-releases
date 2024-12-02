@@ -4,7 +4,7 @@
 
 #include "content/browser/plugin_process_host.h"
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include <windows.h>
 #elif defined(OS_POSIX)
 #include <utility>  // for pair<>
@@ -12,6 +12,7 @@
 
 #include <vector>
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -21,7 +22,6 @@
 #include "base/utf_string_conversions.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/content_browser_client.h"
-#include "content/browser/resolve_proxy_msg_helper.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
@@ -43,7 +43,7 @@
 #include "ui/gfx/rect.h"
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include "base/win/windows_version.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
@@ -115,7 +115,7 @@ PluginProcessHost::PluginProcessHost()
 }
 
 PluginProcessHost::~PluginProcessHost() {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // We erase HWNDs from the plugin_parent_windows_set_ when we receive a
   // notification that the window is being destroyed. If we don't receive this
   // notification and the PluginProcessHost instance is being destroyed, it
@@ -160,11 +160,11 @@ PluginProcessHost::~PluginProcessHost() {
   CancelRequests();
 }
 
-bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
+bool PluginProcessHost::Init(const webkit::WebPluginInfo& info,
                              const std::string& locale) {
   info_ = info;
-  set_name(UTF16ToWideHack(info_.name));
-  set_version(UTF16ToWideHack(info_.version));
+  set_name(info_.name);
+  set_version(info_.version);
 
   if (!CreateChannel())
     return false;
@@ -174,7 +174,19 @@ bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   CommandLine::StringType plugin_launcher =
       browser_command_line.GetSwitchValueNative(switches::kPluginLauncher);
-  FilePath exe_path = GetChildPath(plugin_launcher.empty());
+
+#if defined(OS_MACOSX)
+  // Run the plug-in process in a mode tolerant of heap execution without
+  // explicit mprotect calls. Some plug-ins still rely on this quaint and
+  // archaic "feature." See http://crbug.com/93551.
+  int flags = CHILD_ALLOW_HEAP_EXECUTION;
+#elif defined(OS_LINUX)
+  int flags = plugin_launcher.empty() ? CHILD_ALLOW_SELF : CHILD_NORMAL;
+#else
+  int flags = CHILD_NORMAL;
+#endif
+
+  FilePath exe_path = GetChildPath(flags);
   if (exe_path.empty())
     return false;
 
@@ -252,7 +264,6 @@ bool PluginProcessHost::Init(const webkit::npapi::WebPluginInfo& info,
   SetTerminateChildOnShutdown(false);
 
   content::GetContentClient()->browser()->PluginProcessHostCreated(this);
-  AddFilter(new ResolveProxyMsgHelper(NULL));
 
   return true;
 }
@@ -267,7 +278,7 @@ bool PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PluginProcessHost, msg)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_ChannelCreated, OnChannelCreated)
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_PluginWindowDestroyed,
                         OnPluginWindowDestroyed)
     IPC_MESSAGE_HANDLER(PluginProcessHostMsg_ReparentPluginWindow,
@@ -318,6 +329,23 @@ void PluginProcessHost::CancelRequests() {
   while (!sent_requests_.empty()) {
     sent_requests_.front()->OnError();
     sent_requests_.pop();
+  }
+}
+
+// static
+void PluginProcessHost::CancelPendingRequestsForResourceContext(
+    const content::ResourceContext* context) {
+  for (BrowserChildProcessHost::Iterator host_it(
+           ChildProcessInfo::PLUGIN_PROCESS);
+       !host_it.Done(); ++host_it) {
+    PluginProcessHost* host = static_cast<PluginProcessHost*>(*host_it);
+    for (size_t i = 0; i < host->pending_requests_.size(); ++i) {
+      if (&host->pending_requests_[i]->GetResourceContext() == context) {
+        host->pending_requests_[i]->OnError();
+        host->pending_requests_.erase(host->pending_requests_.begin() + i);
+        --i;
+      }
+    }
   }
 }
 

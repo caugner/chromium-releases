@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_audio_config.idl modified Sat Jul 16 16:50:26 2011. */
+/* From ppb_audio_config.idl modified Mon Aug 29 10:11:34 2011. */
 
 #ifndef PPAPI_C_PPB_AUDIO_CONFIG_H_
 #define PPAPI_C_PPB_AUDIO_CONFIG_H_
@@ -13,6 +13,9 @@
 #include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
+
+#define PPB_AUDIO_CONFIG_INTERFACE_1_0 "PPB_AudioConfig;1.0"
+#define PPB_AUDIO_CONFIG_INTERFACE PPB_AUDIO_CONFIG_INTERFACE_1_0
 
 /**
  * @file
@@ -63,12 +66,8 @@ PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_AudioSampleRate, 4);
  *
  * Refer to the
  * <a href="/chrome/nativeclient/docs/audio.html">Pepper
- * Audio API Code Walkthrough</a> for information on using this interface.
+ * Audio API</a> for information on using this interface.
  */
-#define PPB_AUDIO_CONFIG_INTERFACE_0_5 "PPB_AudioConfig;0.5"
-#define PPB_AUDIO_CONFIG_INTERFACE_1_0 "PPB_AudioConfig;1.0"
-#define PPB_AUDIO_CONFIG_INTERFACE PPB_AUDIO_CONFIG_INTERFACE_1_0
-
 struct PPB_AudioConfig {
   /**
    * CreateStereo16bit() creates a 16 bit audio configuration resource. The
@@ -92,13 +91,14 @@ struct PPB_AudioConfig {
    * right channel sample.
    * Data will always be in the native endian format of the platform.
    *
-   * @param[in] instance A <code>PP_Instance indentifying</code> one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    * @param[in] sample_rate A P<code>P_AudioSampleRate</code> which is either
    * <code>PP_AUDIOSAMPLERATE_44100</code> or
    * <code>PP_AUDIOSAMPLERATE_48000</code>.
    * @param[in] sample_frame_count A <code>uint32_t</code> frame count returned
    * from the <code>RecommendSampleFrameCount</code> function.
+   *
    * @return A <code>PP_Resource</code> containing the
    * <code>PPB_Audio_Config</code> if successful or a null resource if the
    * sample frame count or bit rate are not supported.
@@ -120,11 +120,12 @@ struct PPB_AudioConfig {
    * system, but values in between aren't necessarily valid. This function
    * will return a supported count closest to the requested value.
    *
-   * @param[in] sample_rate A <code>PP_AudioSampleRate which is either
+   * @param[in] sample_rate A <code>PP_AudioSampleRate</code> which is either
    * <code>PP_AUDIOSAMPLERATE_44100</code> or
    * <code>PP_AUDIOSAMPLERATE_48000.</code>
    * @param[in] requested_sample_frame_count A <code>uint_32t</code> requested
    * frame count.
+   *
    * @return A <code>uint32_t</code> containing the recommended sample frame
    * count if successful.
    */
@@ -135,9 +136,10 @@ struct PPB_AudioConfig {
    * IsAudioConfig() determines if the given resource is a
    * <code>PPB_Audio_Config</code>.
    *
-   * @param[in] resource A <code>PP_Resource</code> containing the audio config
-   * resource.
-   * @return A <code>PP_BOOL</code> containing <code>PP_TRUE</code> if the given
+   * @param[in] resource A <code>PP_Resource</code> corresponding to an audio
+   * config resource.
+   *
+   * @return A <code>PP_Bool</code> containing <code>PP_TRUE</code> if the given
    * resource is an <code>AudioConfig</code> resource, otherwise
    * <code>PP_FALSE</code>.
    */
@@ -146,8 +148,9 @@ struct PPB_AudioConfig {
    * GetSampleRate() returns the sample rate for the given
    * <code>PPB_Audio_Config</code>.
    *
-   * @param[in] config A <code>PP_Resource</code> containing the
+   * @param[in] config A <code>PP_Resource</code> corresponding to a
    * <code>PPB_Audio_Config</code>.
+   *
    * @return A <code>PP_AudioSampleRate</code> containing sample rate or
    * <code>PP_AUDIOSAMPLERATE_NONE</code> if the resource is invalid.
    */
@@ -156,11 +159,12 @@ struct PPB_AudioConfig {
    * GetSampleFrameCount() returns the sample frame count for the given
    * <code>PPB_Audio_Config</code>.
    *
-   * @param[in] config A <code>PP_Resource</code> containing the audio config
-   * resource.
+   * @param[in] config A <code>PP_Resource</code> corresponding to an audio
+   * config resource.
+   *
    * @return A <code>uint32_t</code> containing sample frame count or
-   * 0 if the resource is invalid. See <code>RecommendSampleFrameCount</code>
-   * for more on sample frame counts.
+   * 0 if the resource is invalid. Refer to
+   * RecommendSampleFrameCount() for more on sample frame counts.
    */
   uint32_t (*GetSampleFrameCount)(PP_Resource config);
 };

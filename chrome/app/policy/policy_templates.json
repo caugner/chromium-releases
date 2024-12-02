@@ -94,7 +94,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 95
+#   For your editing convenience: highest ID currently used: 104
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -271,28 +271,49 @@
       'type': 'main',
       'supported_on': ['chrome.*:11-', 'chrome_os:0.11-'],
       'features': {'dynamic_refresh': 1},
+      'deprecated': True,
       'example_value': False,
       'id': 10,
       'caption': '''Enable Incognito mode''',
-      'desc': '''Enables Incognito mode in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+      'desc': '''This policy is deprecated. Please, use IncognitoModeAvailability instead.
+      Enables Incognito mode in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
       If this setting is enabled or not configured, users can open web pages in incognito mode.
 
       If this setting is disabled, users cannot open web pages in incognito mode.''',
     },
     {
-      'name': 'IncognitoForced',
-      'type': 'main',
+      'name': 'IncognitoModeAvailability',
+      'type': 'int-enum',
+      'items': [
+        {
+          'name': 'Enabled',
+          'value': 0,
+          'caption': '''Incognito mode available.'''
+        },
+        {
+          'name': 'Disabled',
+          'value': 1,
+          'caption': '''Incognito mode disabled.'''
+        },
+        {
+          'name': 'Forced',
+          'value': 2,
+          'caption': '''Incognito mode forced.'''
+        },
+      ],
       'supported_on': ['chrome.*:14-', 'chrome_os:0.14-'],
       'features': {'dynamic_refresh': 1},
-      'example_value': False,
+      'example_value': 1,
       'id': 93,
-      'caption': '''Force Incognito mode''',
-      'desc': '''Forces every session into Incognito mode in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+      'caption': '''Incognito mode availability.''',
+      'desc': '''Specifies whether the user may open pages in Incognito mode in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-      If this setting is enabled, users can open pages only in incognito mode.
+      If 'Enabled' is selected, pages may be opened in Incognito mode.
 
-      If this setting is disabled or not configured, users can use the browser in normal mode as well.''',
+      If 'Disabled' is selected, pages may not be opened in Incognito mode.
+
+      If 'Forced' is selected, pages may be opened ONLY in Incognito mode.''',
     },
     {
       'name': 'SavingBrowserHistoryDisabled',
@@ -1197,7 +1218,7 @@
           'desc': '''Allows you to set whether websites are allowed to show pop-ups. Showing popups can be either allowed for all websites or denied for all websites.''',
         },
         {
-          'name': 'DefaultNotificationSetting',
+          'name': 'DefaultNotificationsSetting',
           'type': 'int-enum',
           'items': [
             {
@@ -1249,6 +1270,16 @@
           'id': 54,
           'caption': '''Default geolocation setting''',
           'desc': '''Allows you to set whether websites are allowed to track the users' physical location. Tracking the users' physical location can be allowed by default, denied by default or the user can be asked everytime a website requests the pysical location.''',
+        },
+        {
+          'name': 'AutoSelectCertificateForUrls',
+          'type': 'list',
+          'supported_on': ['chrome.*:15-', 'chrome_os:0.15-'],
+          'features': {'dynamic_refresh': 1},
+          'example_value': ["{\\\"pattern\\\":\\\"https://www.example.com\\\",\\\"filter\\\":{\\\"ISSUER\\\":{\\\"CN\\\":\\\"certificate issuer name\\\"}}}"],
+          'id': 102,
+          'caption': '''Automatically select client certificates for these sites''',
+          'desc': '''Allows you to specify a list of url patterns that specify sites for which <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> should automatically select a client certificates, if the site requests a certificate.''',
         },
         {
           'name': 'CookiesAllowedForUrls',
@@ -1646,6 +1677,61 @@
       'desc': '''Specifies the release channel that this device should be locked to. This policy is a work in progress; currently, the user can still change the release channel even if it's specified by the policy.'''
     },
     {
+      'name': 'ImportBookmarks',
+      'type': 'main',
+      'supported_on': ['chrome.*:15-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 97,
+      'caption': '''Import bookmarks from default browser on first run''',
+      'desc': '''This policy forces bookmarks to be imported from the current default browser if enabled. If disabled, no bookmarks are imported. If it is not configured, the default behaviour is used. If enabled, this policy also affects the import dialog.''',
+      'label': '''Import bookmarks from default browser on first run''',
+    },
+    {
+      'name': 'ImportHistory',
+      'type': 'main',
+      'supported_on': ['chrome.*:15-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 98,
+      'caption': '''Import browsing history from default browser on first run''',
+      'desc': '''This policy forces the browsing history to be imported from the current default browser if enabled. If disabled, no browsing history is imported. If it is not configured, the default behaviour is used. If enabled, this policy also affects the import dialog.''',
+      'label': '''Import browsing history from default browser on first run''',
+    },
+    {
+      'name': 'ImportHomepage',
+      'type': 'main',
+      'supported_on': ['chrome.*:15-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 99,
+      'caption': '''Import of homepage from default browser on first run''',
+      'desc': '''This policy forces the home page to be imported from the current default browser if enabled. If disabled, the home page is not imported. If it is not configured, the default behaviour is used.''',
+      'label': '''Import of homepage from default browser on first run''',
+    },
+    {
+      'name': 'ImportSearchEngine',
+      'type': 'main',
+      'supported_on': ['chrome.*:15-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 100,
+      'caption': '''Import search engines from default browser on first run''',
+      'desc': '''This policy forces search engines to be imported from the current default browser if enabled. If disabled, the default search engine is not imported. If it is not configured, the default behaviour is used. If enabled, this policy also affects the import dialog.''',
+      'label': '''Import search engines from default browser on first run''',
+    },
+    {
+      'name': 'ImportSavedPasswords',
+      'type': 'main',
+      'supported_on': ['chrome.*:15-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': True,
+      'id': 101,
+      'caption': '''Import saved passwords from default browser on first run''',
+      'desc': '''This policy forces the saved passwords to be imported from the previous default browser if enabled. If disabled, the saved passwords are not imported. If it is not configured, the default behaviour is used. If enabled, this policy also affects the import dialog.''',
+      'label': '''Import saved passwords from default browser on first run''',
+    },
+    {
       'name': 'MaxConnectionsPerProxy',
       'type': 'int',
       'supported_on': ['chrome_os:1.0-','chrome.*:14-'],
@@ -1660,6 +1746,54 @@
       The value of this policy should be lower than 100 and higher than 6 and the default value is 32.
 
       Some web apps are known to consume many connections with hanging GETs, so lowering below 32 may lead to browser networking hangs if too many such web apps are open. Lower below the default at your own risk.''',
+    },
+    {
+      'name': 'HideWebStorePromo',
+      'type': 'main',
+      'supported_on': ['chrome.*:15-', 'chrome_os:0.15-'],
+      'features': {'dynamic_refresh': 0},
+      'example_value': False,
+      'id': 96,
+      'caption': '''Prevent app promotions from appearing on the new tab page''',
+      'desc': '''When set to True, promotions for Chrome Web Store apps will not appear on the new tab page.''',
+    },
+    {
+      'name': 'URLBlacklist',
+      'type': 'list',
+      'supported_on': ['chrome.*:15-', 'chrome_os:0.15-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': ['example.com', 'https://ssl.server.com', 'hosting.com/bad_path', 'http://server:8080/path', '.exact.hostname.com', '*'],
+      'id': 103,
+      'caption': '''Block access to a list of URLs''',
+      'desc': '''Blocks access to the listed URLs.
+
+      This policy prevents the user from loading web pages from blacklisted URLs.
+
+      A URL has the format 'scheme://host:port/path'.
+      The optional scheme can be http, https or ftp. Only this scheme will be blocked; if none is specified, all schemes are blocked.
+      The host can be a hostname or an IP address. Subdomains of a hostname will also be blocked. To prevent blocking subdomains, include a '.' before the hostname. The special hostname '*' will block all domains.
+      The optional port is a valid port number from 1 to 65535. If none is specified, all ports are blocked.
+      If the optional path is specified, only paths with that prefix will be blocked.
+
+      Exceptions can be defined in the URL whitelist policy. These policies are limited to 100 entries; subsequent entries will be ignored.''',
+    },
+    {
+      'name': 'URLWhitelist',
+      'type': 'list',
+      'supported_on': ['chrome.*:15-', 'chrome_os:0.15-'],
+      'features': {'dynamic_refresh': 1},
+      'example_value': ['example.com', 'https://ssl.server.com', 'hosting.com/bad_path', 'http://server:8080/path', '.exact.hostname.com'],
+      'id': 104,
+      'caption': '''Allows access to a list of URLs''',
+      'desc': '''Allows access to the listed URLs, as exceptions to the URL blacklist.
+
+      See the description of the URL blacklist policy for the format of entries of this list.
+
+      This policy can be used to open exceptions to restrictive blacklists. For example, '*' can be blacklisted to block all requests, and this policy can be used to allow access to a limited list of URLs. It can be used to open exceptions to certain schemes, subdomains of other domains, ports, or specific paths.
+
+      The most specific filter will determine if a URL is blocked or allowed. The whitelist takes precedence over the blacklist.
+
+      This policy is limited to 100 entries; subsequent entries will be ignored.''',
     },
 
   ],

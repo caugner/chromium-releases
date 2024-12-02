@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include <deque>
+#include <limits>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_callback_factory.h"
@@ -11,6 +13,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/task.h"
 #include "webkit/plugins/ppapi/mock_plugin_delegate.h"
+#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppapi_unittest.h"
 #include "webkit/plugins/ppapi/quota_file_io.h"
 
@@ -29,7 +32,7 @@ class QuotaMockPluginDelegate : public MockPluginDelegate {
   QuotaMockPluginDelegate()
       : available_space_(0),
         will_update_count_(0),
-        file_thread_(MessageLoopProxy::CreateForCurrentThread()),
+        file_thread_(MessageLoopProxy::current()),
         runnable_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   }
   virtual ~QuotaMockPluginDelegate() {}
@@ -43,7 +46,7 @@ class QuotaMockPluginDelegate : public MockPluginDelegate {
       quota::StorageType type,
       Callback* callback) OVERRIDE {
     DCHECK(callback);
-    MessageLoopProxy::CreateForCurrentThread()->PostTask(
+    MessageLoopProxy::current()->PostTask(
         FROM_HERE, runnable_factory_.NewRunnableMethod(
             &QuotaMockPluginDelegate::RunAvailableSpaceCallback, callback));
   }
@@ -99,7 +102,8 @@ class QuotaFileIOTest : public PpapiUnittest {
     ASSERT_NE(base::kInvalidPlatformFileValue, file_);
     ASSERT_FALSE(created);
     quota_file_io_.reset(new QuotaFileIO(
-        instance(), file_, GURL(), PP_FILESYSTEMTYPE_LOCALTEMPORARY));
+        instance()->pp_instance(), file_, GURL(),
+        PP_FILESYSTEMTYPE_LOCALTEMPORARY));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -115,6 +119,16 @@ class QuotaFileIOTest : public PpapiUnittest {
   }
 
   void WriteTestBody(bool will_operation) {
+    // Attempt to write zero bytes.
+    EXPECT_FALSE(quota_file_io_->Write(0, "data", 0,
+                                       callback_factory_.NewCallback(
+                                           &QuotaFileIOTest::DidWrite)));
+    // Attempt to write negative number of bytes.
+    EXPECT_FALSE(quota_file_io_->Write(0, "data",
+                                       std::numeric_limits<int32_t>::min(),
+                                       callback_factory_.NewCallback(
+                                           &QuotaFileIOTest::DidWrite)));
+
     quota_plugin_delegate()->set_available_space(100);
     std::string read_buffer;
 

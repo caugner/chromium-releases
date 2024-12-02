@@ -21,10 +21,12 @@
 class AutomationProviderList;
 class BackgroundModeManager;
 class ChromeNetLog;
+class ComponentUpdateService;
 class DevToolsManager;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class ExtensionEventRouterForwarder;
+class GpuBlacklistUpdater;
 class GoogleURLTracker;
 class IconManager;
 class IntranetRedirectDetector;
@@ -33,6 +35,7 @@ class MetricsService;
 class MHTMLGenerationManager;
 class NotificationUIManager;
 class PrefService;
+class Profile;
 class ProfileManager;
 class ResourceDispatcherHost;
 class SafeBrowsingService;
@@ -155,6 +158,7 @@ class BrowserProcess {
   virtual AutomationProviderList* InitAutomationProviderList() = 0;
 
   virtual void InitDevToolsHttpProtocolHandler(
+      Profile* profile,
       const std::string& ip,
       int port,
       const std::string& frontend_url) = 0;
@@ -180,11 +184,7 @@ class BrowserProcess {
   virtual void SetApplicationLocale(const std::string& locale) = 0;
 
   virtual DownloadStatusUpdater* download_status_updater() = 0;
-
-  // Returns a reference to the user-data-dir based profiles vector.
-  std::vector<std::wstring>& user_data_dir_profiles() {
-    return user_data_dir_profiles_;
-  }
+  virtual DownloadRequestLimiter* download_request_limiter() = 0;
 
   // Returns the object that watches for changes in the closeable state of tab.
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher() = 0;
@@ -231,23 +231,13 @@ class BrowserProcess {
   virtual void SetIPCLoggingEnabled(bool enable) = 0;
 #endif
 
-  const std::string& plugin_data_remover_mime_type() const {
-    return plugin_data_remover_mime_type_;
-  }
-
-  void set_plugin_data_remover_mime_type(const std::string& mime_type) {
-    plugin_data_remover_mime_type_ = mime_type;
-  }
-
   virtual MHTMLGenerationManager* mhtml_generation_manager() = 0;
 
+  virtual GpuBlacklistUpdater* gpu_blacklist_updater() = 0;
+
+  virtual ComponentUpdateService* component_updater() = 0;
+
  private:
-  // User-data-dir based profiles.
-  std::vector<std::wstring> user_data_dir_profiles_;
-
-  // Used for testing plugin data removal at shutdown.
-  std::string plugin_data_remover_mime_type_;
-
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);
 };
 

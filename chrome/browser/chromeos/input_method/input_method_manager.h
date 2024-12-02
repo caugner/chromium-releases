@@ -9,6 +9,7 @@
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_INPUT_METHOD_MANAGER_H_
 #pragma once
 
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -25,7 +26,6 @@ namespace chromeos {
 namespace input_method {
 
 class VirtualKeyboard;
-
 
 // This class manages input methodshandles.  Classes can add themselves as
 // observers. Clients can get an instance of this library class by:
@@ -132,6 +132,10 @@ class InputMethodManager {
   // Remove an input method from the language menu.
   virtual void RemoveActiveIme(const std::string& id) = 0;
 
+  virtual bool GetExtraDescriptor(
+      const std::string& id,
+      input_method::InputMethodDescriptor* descriptor) = 0;
+
   // Sets the IME state to enabled, and launches input method daemon if needed.
   // Returns true if the daemon is started. Otherwise, e.g. the daemon is
   // already started, returns false.
@@ -163,8 +167,26 @@ class InputMethodManager {
   // for details.
   // TODO(yusukes): Add UnregisterVirtualKeyboard function as well.
   virtual void RegisterVirtualKeyboard(const GURL& launch_url,
+                                       const std::string& name,
                                        const std::set<std::string>& layouts,
                                        bool is_system) = 0;
+
+  // Sets user preference on virtual keyboard selection.
+  // See virtual_keyboard_selector.h for details.
+  virtual bool SetVirtualKeyboardPreference(const std::string& input_method_id,
+                                            const GURL& extention_url) = 0;
+
+  // Clears all preferences on virtual keyboard selection.
+  // See virtual_keyboard_selector.h for details.
+  virtual void ClearAllVirtualKeyboardPreferences() = 0;
+
+  // Returns a map from extension URL to virtual keyboard extension.
+  virtual const std::map<GURL, const VirtualKeyboard*>&
+  GetUrlToKeyboardMapping() const = 0;
+
+  // Returns a multi map from layout name to virtual keyboard extension.
+  virtual const std::multimap<std::string, const VirtualKeyboard*>&
+  GetLayoutNameToKeyboardMapping() const = 0;
 
   virtual input_method::InputMethodDescriptor previous_input_method() const = 0;
   virtual input_method::InputMethodDescriptor current_input_method() const = 0;

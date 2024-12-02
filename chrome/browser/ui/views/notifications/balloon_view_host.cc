@@ -8,13 +8,13 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #if defined(OS_WIN)
-#include "chrome/browser/renderer_host/render_widget_host_view_win.h"
+#include "content/browser/renderer_host/render_widget_host_view_win.h"
 #endif
 #if defined(TOOLKIT_USES_GTK)
 #if defined(TOUCH_UI)
 #include "chrome/browser/renderer_host/render_widget_host_view_views.h"
 #else
-#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
+#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #endif
 #endif
 #include "views/widget/widget.h"
@@ -64,7 +64,10 @@ void BalloonViewHost::InitRenderWidgetHostView() {
       RenderWidgetHostView::CreateViewForWidget(render_view_host_);
 
   // TODO(johnnyg): http://crbug.com/23954.  Need a cross-platform solution.
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng): (same as touch_ui probably).
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   RenderWidgetHostViewWin* view_win =
       static_cast<RenderWidgetHostViewWin*>(render_widget_host_view_);
 

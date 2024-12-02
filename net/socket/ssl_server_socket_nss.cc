@@ -132,9 +132,8 @@ int SSLServerSocketNSS::ExportKeyingMaterial(const base::StringPiece& label,
                                              unsigned int outlen) {
   if (!IsConnected())
     return ERR_SOCKET_NOT_CONNECTED;
-  std::string label_string(label.data(), label.length());
   SECStatus result = SSL_ExportKeyingMaterial(
-      nss_fd_, label_string.c_str(),
+      nss_fd_, label.data(), label.size(),
       reinterpret_cast<const unsigned char*>(context.data()),
       context.length(), out, outlen);
   if (result != SECSuccess) {
@@ -763,12 +762,6 @@ int SSLServerSocketNSS::Init() {
   EnsureNSSSSLInit();
   if (!NSS_IsInitialized())
     return ERR_UNEXPECTED;
-#if !defined(OS_MACOSX) && !defined(OS_WIN)
-  // We must call EnsureOCSPInit() here, on the IO thread, to get the IO loop
-  // by MessageLoopForIO::current().
-  // X509Certificate::Verify() runs on a worker thread of CertVerifier.
-  EnsureOCSPInit();
-#endif
 
   return OK;
 }

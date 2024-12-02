@@ -8,7 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/login/enterprise_enrollment_screen_actor.h"
+#include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen_actor.h"
 #include "chrome/browser/ui/webui/chromeos/enterprise_enrollment_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -30,7 +30,7 @@ class EnterpriseEnrollmentScreenHandler
   virtual void RegisterMessages() OVERRIDE;
 
   // Implements EnterpriseEnrollmentScreenActor:
-  virtual void SetController(EnterpriseEnrollmentUI::Controller* controller);
+  virtual void SetController(Controller* controller);
   virtual void PrepareToShow() OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
@@ -38,6 +38,7 @@ class EnterpriseEnrollmentScreenHandler
   virtual void ShowConfirmationScreen() OVERRIDE;
   virtual void ShowAuthError(const GoogleServiceAuthError& error) OVERRIDE;
   virtual void ShowAccountError() OVERRIDE;
+  virtual void ShowSerialNumberError() OVERRIDE;
   virtual void ShowFatalAuthError() OVERRIDE;
   virtual void ShowFatalEnrollmentError() OVERRIDE;
   virtual void ShowNetworkEnrollmentError() OVERRIDE;
@@ -51,7 +52,7 @@ class EnterpriseEnrollmentScreenHandler
   virtual void Initialize() OVERRIDE;
 
   // Keeps the controller for this actor.
-  EnterpriseEnrollmentUI::Controller* controller_;
+  Controller* controller_;
 
  private:
   // Handlers for WebUI messages.

@@ -4,14 +4,17 @@
 
 #include "content/renderer/p2p/host_address_request.h"
 
+#include "base/bind.h"
 #include "base/message_loop_proxy.h"
 #include "content/common/p2p_messages.h"
 #include "content/renderer/p2p/socket_dispatcher.h"
 
+namespace content {
+
 P2PHostAddressRequest::P2PHostAddressRequest(P2PSocketDispatcher* dispatcher)
     : dispatcher_(dispatcher),
       ipc_message_loop_(dispatcher->message_loop()),
-      delegate_message_loop_(base::MessageLoopProxy::CreateForCurrentThread()),
+      delegate_message_loop_(base::MessageLoopProxy::current()),
       state_(STATE_CREATED),
       request_id_(0),
       registered_(false) {
@@ -19,6 +22,7 @@ P2PHostAddressRequest::P2PHostAddressRequest(P2PSocketDispatcher* dispatcher)
 
 P2PHostAddressRequest::~P2PHostAddressRequest() {
   DCHECK(state_ == STATE_CREATED || state_ == STATE_FINISHED);
+  DCHECK(!registered_);
 }
 
 void P2PHostAddressRequest::Request(const std::string& host_name,
@@ -26,8 +30,8 @@ void P2PHostAddressRequest::Request(const std::string& host_name,
   DCHECK(delegate_message_loop_->BelongsToCurrentThread());
 
   state_ = STATE_SENT;
-  ipc_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &P2PHostAddressRequest::DoSendRequest, host_name, done_callback));
+  ipc_message_loop_->PostTask(FROM_HERE, base::Bind(
+      &P2PHostAddressRequest::DoSendRequest, this, host_name, done_callback));
 }
 
 void P2PHostAddressRequest::Cancel() {
@@ -35,8 +39,8 @@ void P2PHostAddressRequest::Cancel() {
 
   if (state_ != STATE_FINISHED) {
     state_ = STATE_FINISHED;
-    ipc_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &P2PHostAddressRequest::DoUnregister));
+    ipc_message_loop_->PostTask(FROM_HERE, base::Bind(
+        &P2PHostAddressRequest::DoUnregister, this));
   }
 }
 
@@ -61,10 +65,13 @@ void P2PHostAddressRequest::DoUnregister() {
 
 void P2PHostAddressRequest::OnResponse(const net::IPAddressNumber& address) {
   DCHECK(ipc_message_loop_->BelongsToCurrentThread());
-  delegate_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &P2PHostAddressRequest::DeliverResponse, address));
+  DCHECK(registered_);
+
   dispatcher_->UnregisterHostAddressRequest(request_id_);
   registered_ = false;
+
+  delegate_message_loop_->PostTask(FROM_HERE, base::Bind(
+      &P2PHostAddressRequest::DeliverResponse, this, address));
 }
 
 void P2PHostAddressRequest::DeliverResponse(
@@ -75,3 +82,5 @@ void P2PHostAddressRequest::DeliverResponse(
     state_ = STATE_FINISHED;
   }
 }
+
+}  // namespace content

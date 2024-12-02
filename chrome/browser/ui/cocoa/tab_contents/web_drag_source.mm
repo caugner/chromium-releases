@@ -15,11 +15,11 @@
 #include "base/utf_string_conversions.h"
 #import "chrome/app/breakpad_mac.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/download/drag_download_file.h"
-#include "chrome/browser/download/drag_download_util.h"
 #include "chrome/browser/tab_contents/tab_contents_view_mac.h"
+#include "content/browser/download/download_manager.h"
+#include "content/browser/download/drag_download_file.h"
+#include "content/browser/download/drag_download_util.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/url_constants.h"
@@ -70,7 +70,7 @@ FilePath GetFileNameFromDragData(const WebDropData& drop_data) {
   if (file_name.empty()) {
     // Retrieve the name from the URL.
     string16 suggested_filename =
-        net::GetSuggestedFilename(drop_data.url, "", "", "", string16());
+        net::GetSuggestedFilename(drop_data.url, "", "", "", "", string16());
     file_name = FilePathFromFilename(suggested_filename);
   }
 
@@ -189,10 +189,13 @@ void PromiseWriterTask::Run() {
     DCHECK(dropData_->url.is_valid());
     NSString* urlStr = SysUTF8ToNSString(dropData_->url.spec());
     NSURL* url = [NSURL URLWithString:urlStr];
-    // If NSURL creation failed, check for a badly-escaped javascript URL.
+    // If NSURL creation failed, check for a badly-escaped JavaScript URL.
+    // Strip out any existing escapes and then re-escape uniformly.
     if (!url && urlStr && dropData_->url.SchemeIs(chrome::kJavaScriptScheme)) {
-      NSString *escapedStr =
-        [urlStr stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+      NSString* unEscapedStr = [urlStr
+          stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+      NSString* escapedStr = [unEscapedStr
+          stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
       url = [NSURL URLWithString:escapedStr];
     }
     [url writeToPasteboard:pboard];

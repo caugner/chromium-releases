@@ -17,6 +17,7 @@
 #include "content/plugin/npobject_util.h"
 #include "content/plugin/plugin_channel.h"
 #include "content/plugin/plugin_thread.h"
+#include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "ui/gfx/blit.h"
@@ -237,6 +238,12 @@ NPObject* WebPluginProxy::GetPluginElement() {
   return plugin_element_;
 }
 
+bool WebPluginProxy::FindProxyForUrl(const GURL& url, std::string* proxy_list) {
+  bool result = false;
+  Send(new PluginHostMsg_ResolveProxy(route_id_, url, &result, proxy_list));
+  return result;
+}
+
 void WebPluginProxy::SetCookie(const GURL& url,
                                const GURL& first_party_for_cookies,
                                const std::string& cookie) {
@@ -251,10 +258,6 @@ std::string WebPluginProxy::GetCookies(const GURL& url,
                                     first_party_for_cookies, &cookies));
 
   return cookies;
-}
-
-void WebPluginProxy::OnMissingPluginStatus(int status) {
-  Send(new PluginHostMsg_MissingPluginStatus(route_id_, status));
 }
 
 WebPluginResourceClient* WebPluginProxy::GetResourceClient(int id) {

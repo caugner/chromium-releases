@@ -75,7 +75,8 @@ class BackgroundContents : public RenderViewHostDelegate,
                                     IPC::Message* reply_msg,
                                     bool* did_suppress_message) OVERRIDE;
   virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const OVERRIDE;
+  virtual RendererPreferences GetRendererPrefs(
+      content::BrowserContext* browser_context) const OVERRIDE;
   virtual void RenderViewGone(RenderViewHost* rvh,
                               base::TerminationStatus status,
                               int error_code) OVERRIDE;
@@ -107,7 +108,6 @@ class BackgroundContents : public RenderViewHostDelegate,
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation) {}
   virtual void GotFocus() {}
   virtual void TakeFocus(bool reverse) {}
-  virtual void UpdatePreferredSize(const gfx::Size& new_size) {}
 
   // NotificationObserver
   virtual void Observe(int type,

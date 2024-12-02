@@ -533,7 +533,7 @@ URLFetcher::Core::Core(URLFetcher* fetcher,
       request_type_(request_type),
       delegate_(d),
       delegate_loop_proxy_(
-          base::MessageLoopProxy::CreateForCurrentThread()),
+          base::MessageLoopProxy::current()),
       request_(NULL),
       load_flags_(net::LOAD_NORMAL),
       response_code_(URLFetcher::kInvalidHttpResponseCode),
@@ -745,7 +745,7 @@ void URLFetcher::Core::RetryOrCompleteUrlFetch() {
   } else {
     backoff_delay = base::TimeDelta();
   }
-
+  request_context_getter_ = NULL;
   bool posted = delegate_loop_proxy_->PostTask(
       FROM_HERE,
       NewRunnableMethod(this,
@@ -755,7 +755,6 @@ void URLFetcher::Core::RetryOrCompleteUrlFetch() {
   // If the delegate message loop does not exist any more, then the delegate
   // should be gone too.
   DCHECK(posted || !delegate_);
-  request_context_getter_ = NULL;
 }
 
 void URLFetcher::Core::ReadResponse() {
@@ -1027,6 +1026,10 @@ void URLFetcher::StartWithRequestContextGetter(
     net::URLRequestContextGetter* request_context_getter) {
   set_request_context(request_context_getter);
   core_->Start();
+}
+
+const GURL& URLFetcher::original_url() const {
+  return core_->original_url_;
 }
 
 const GURL& URLFetcher::url() const {

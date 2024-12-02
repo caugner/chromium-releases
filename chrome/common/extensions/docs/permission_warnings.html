@@ -285,6 +285,13 @@
                   <a>h3Name</a>
                 </li>
               </ol>
+            </li><li>
+              <a href="#api">API</a>
+              <ol>
+                <li style="display: none; ">
+                  <a>h3Name</a>
+                </li>
+              </ol>
             </li>
               <li style="display: none; ">
                 <a href="#apiReference">API reference</a>
@@ -702,6 +709,13 @@ Finally, update the extension
 by clicking the <b>chrome://extensions</b> page's
 <b>Update extensions now</b> button.
 </p>
+
+<h2 id="api">API</h2>
+
+<p>
+You can get a list of permission warnings for any manifest with
+<a href="management.html#method-getPermissionWarnings">chrome.management.getPermissionWarnings()</a>.
+</p>
 </div>
 
         <!-- API PAGE -->
@@ -814,7 +828,7 @@ by clicking the <b>chrome://extensions</b> page's
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.bookmarks</span><span>onEvent</span><span class="subdued">.addListener</span>(function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span><span>, Type opt_param1, Type opt_param2</span>));
+                <span class="subdued">chrome.bookmarks</span><span>onEvent</span><span class="subdued">.addListener</span>(function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span><span>, Type opt_param1, Type opt_param2</span>);
               </div>
 
               <div class="description">

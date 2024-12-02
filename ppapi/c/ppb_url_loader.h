@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_url_loader.idl modified Sat Jul 16 16:50:26 2011. */
+/* From ppb_url_loader.idl modified Mon Aug 29 10:11:34 2011. */
 
 #ifndef PPAPI_C_PPB_URL_LOADER_H_
 #define PPAPI_C_PPB_URL_LOADER_H_
@@ -14,6 +14,9 @@
 #include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
+
+#define PPB_URLLOADER_INTERFACE_1_0 "PPB_URLLoader;1.0"
+#define PPB_URLLOADER_INTERFACE PPB_URLLOADER_INTERFACE_1_0
 
 /**
  * @file
@@ -45,10 +48,6 @@
  * - Then, access the downloaded file using the GetBodyAsFileRef() function of
  * the <code>URLResponseInfo</code> returned in step #4.
  */
-#define PPB_URLLOADER_INTERFACE_0_2 "PPB_URLLoader;0.2"
-#define PPB_URLLOADER_INTERFACE_1_0 "PPB_URLLoader;1.0"
-#define PPB_URLLOADER_INTERFACE PPB_URLLOADER_INTERFACE_1_0
-
 struct PPB_URLLoader {
   /**
    * Create() creates a new <code>URLLoader</code> object. The
@@ -56,7 +55,7 @@ struct PPB_URLLoader {
    * any UI dialogs that need to be shown to the user can be positioned
    * relative to the window containing the instance.
    *
-   * @param[in] instance A <code>PP_Instance</code> indentifying one instance
+   * @param[in] instance A <code>PP_Instance</code> identifying one instance
    * of a module.
    *
    * @return A <code>PP_Resource</code> corresponding to a URLLoader if
@@ -94,14 +93,14 @@ struct PPB_URLLoader {
                   PP_Resource request_info,
                   struct PP_CompletionCallback callback);
   /**
-   * FollowRedirect()can be invoked to follow a redirect after Open() completed
-   * on receiving redirect headers.
+   * FollowRedirect() can be invoked to follow a redirect after Open()
+   * completed on receiving redirect headers.
    *
    * @param[in] loader A <code>PP_Resource</code> corresponding to a
    * <code>URLLoader</code>.
    * @param[in] callback A <code>PP_CompletionCallback</code> to run on
    * asynchronous completion of FollowRedirect(). This callback will run when
-   * response headers for the redirect url are received or error occured. This
+   * response headers for the redirect url are received or error occurred. This
    * callback will only run if FollowRedirect() returns
    * <code>PP_OK_COMPLETIONPENDING</code>.
    *

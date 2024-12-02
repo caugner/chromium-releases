@@ -7,12 +7,13 @@
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/gaia/token_service_unittest.h"
 #include "chrome/browser/password_manager/encryptor.h"
+#include "chrome/browser/sync/util/oauth.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
-#include "chrome/test/signaling_task.h"
-#include "chrome/test/testing_profile.h"
-#include "content/common/test_url_fetcher_factory.h"
+#include "chrome/test/base/signaling_task.h"
+#include "chrome/test/base/testing_profile.h"
+#include "content/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
 
@@ -28,11 +29,10 @@ class SigninManagerTest : public TokenServiceTestHarness {
         Source<Profile>(profile_.get()));
     google_login_failure_.ListenFor(chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
                                     Source<Profile>(profile_.get()));
-
-    URLFetcher::set_factory(&factory_);
   }
 
-  void SimulateValidResponse() {
+  void SimulateValidResponseClientLogin() {
+    DCHECK(!browser_sync::IsUsingOAuth());
     // Simulate the correct ClientLogin response.
     TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
     DCHECK(fetcher);
@@ -53,6 +53,26 @@ class SigninManagerTest : public TokenServiceTestHarness {
         "email=user@gmail.com");
   }
 
+  void SimulateSigninStartOAuth() {
+    DCHECK(browser_sync::IsUsingOAuth());
+    // Simulate a valid OAuth-based signin
+    manager_->OnGetOAuthTokenSuccess("oauth_token-Ev1Vu1hv");
+    manager_->OnOAuthGetAccessTokenSuccess("oauth1_access_token-qOAmlrSM",
+                                           "secret-NKKn1DuR");
+    manager_->OnOAuthWrapBridgeSuccess(browser_sync::SyncServiceName(),
+                                       "oauth2_wrap_access_token-R0Z3nRtw",
+                                       "3600");
+  }
+
+  void SimulateOAuthUserInfoSuccess() {
+    manager_->OnUserInfoSuccess("user-xZIuqTKu@gmail.com");
+  }
+
+  void SimulateValidSigninOAuth() {
+    SimulateSigninStartOAuth();
+    SimulateOAuthUserInfoSuccess();
+  }
+
 
   TestURLFetcherFactory factory_;
   scoped_ptr<SigninManager> manager_;
@@ -60,14 +80,17 @@ class SigninManagerTest : public TokenServiceTestHarness {
   TestNotificationTracker google_login_failure_;
 };
 
-TEST_F(SigninManagerTest, SignIn) {
+// NOTE: ClientLogin's "StartSignin" is called after collecting credentials
+//       from the user.  See also SigninManagerTest::SignInOAuth.
+TEST_F(SigninManagerTest, SignInClientLogin) {
+  browser_sync::SetIsUsingOAuthForTest(false);
   manager_->Initialize(profile_.get());
   EXPECT_TRUE(manager_->GetUsername().empty());
 
   manager_->StartSignIn("username", "password", "", "");
   EXPECT_FALSE(manager_->GetUsername().empty());
 
-  SimulateValidResponse();
+  SimulateValidResponseClientLogin();
 
   // Should go into token service and stop.
   EXPECT_EQ(1U, google_login_success_.size());
@@ -77,12 +100,35 @@ TEST_F(SigninManagerTest, SignIn) {
   manager_.reset(new SigninManager());
   manager_->Initialize(profile_.get());
   EXPECT_EQ("user@gmail.com", manager_->GetUsername());
+  browser_sync::SetIsUsingOAuthForTest(false);
 }
 
-TEST_F(SigninManagerTest, SignOut) {
+// NOTE: OAuth's "StartOAuthSignIn" is called before collecting credentials
+//       from the user.  See also SigninManagerTest::SignInClientLogin.
+TEST_F(SigninManagerTest, SignInOAuth) {
+  browser_sync::SetIsUsingOAuthForTest(true);
+  manager_->Initialize(profile_.get());
+  EXPECT_TRUE(manager_->GetUsername().empty());
+
+  SimulateValidSigninOAuth();
+  EXPECT_FALSE(manager_->GetUsername().empty());
+
+  // Should go into token service and stop.
+  EXPECT_EQ(1U, google_login_success_.size());
+  EXPECT_EQ(0U, google_login_failure_.size());
+
+  // Should persist across resets.
+  manager_.reset(new SigninManager());
+  manager_->Initialize(profile_.get());
+  EXPECT_EQ("user-xZIuqTKu@gmail.com", manager_->GetUsername());
+  browser_sync::SetIsUsingOAuthForTest(false);
+}
+
+TEST_F(SigninManagerTest, SignOutClientLogin) {
+  browser_sync::SetIsUsingOAuthForTest(false);
   manager_->Initialize(profile_.get());
   manager_->StartSignIn("username", "password", "", "");
-  SimulateValidResponse();
+  SimulateValidResponseClientLogin();
   manager_->OnClientLoginSuccess(credentials_);
 
   EXPECT_EQ("user@gmail.com", manager_->GetUsername());
@@ -94,7 +140,26 @@ TEST_F(SigninManagerTest, SignOut) {
   EXPECT_TRUE(manager_->GetUsername().empty());
 }
 
-TEST_F(SigninManagerTest, SignInFailure) {
+TEST_F(SigninManagerTest, SignOutOAuth) {
+  browser_sync::SetIsUsingOAuthForTest(true);
+  manager_->Initialize(profile_.get());
+
+  SimulateValidSigninOAuth();
+  EXPECT_FALSE(manager_->GetUsername().empty());
+
+  EXPECT_EQ("user-xZIuqTKu@gmail.com", manager_->GetUsername());
+  manager_->SignOut();
+  EXPECT_TRUE(manager_->GetUsername().empty());
+
+  // Should not be persisted anymore
+  manager_.reset(new SigninManager());
+  manager_->Initialize(profile_.get());
+  EXPECT_TRUE(manager_->GetUsername().empty());
+  browser_sync::SetIsUsingOAuthForTest(false);
+}
+
+TEST_F(SigninManagerTest, SignInFailureClientLogin) {
+  browser_sync::SetIsUsingOAuthForTest(false);
   manager_->Initialize(profile_.get());
   manager_->StartSignIn("username", "password", "", "");
   GoogleServiceAuthError error(GoogleServiceAuthError::REQUEST_CANCELED);
@@ -111,7 +176,26 @@ TEST_F(SigninManagerTest, SignInFailure) {
   EXPECT_TRUE(manager_->GetUsername().empty());
 }
 
+TEST_F(SigninManagerTest, SignInFailureOAuth) {
+  browser_sync::SetIsUsingOAuthForTest(true);
+  manager_->Initialize(profile_.get());
+
+  GoogleServiceAuthError error(GoogleServiceAuthError::REQUEST_CANCELED);
+  manager_->OnGetOAuthTokenFailure(error);
+
+  EXPECT_EQ(0U, google_login_success_.size());
+  EXPECT_EQ(1U, google_login_failure_.size());
+
+  EXPECT_TRUE(manager_->GetUsername().empty());
+
+  // Should not be persisted
+  manager_.reset(new SigninManager());
+  manager_->Initialize(profile_.get());
+  EXPECT_TRUE(manager_->GetUsername().empty());
+}
+
 TEST_F(SigninManagerTest, ProvideSecondFactorSuccess) {
+  browser_sync::SetIsUsingOAuthForTest(false);
   manager_->Initialize(profile_.get());
   manager_->StartSignIn("username", "password", "", "");
   GoogleServiceAuthError error(GoogleServiceAuthError::TWO_FACTOR);
@@ -123,13 +207,14 @@ TEST_F(SigninManagerTest, ProvideSecondFactorSuccess) {
   EXPECT_FALSE(manager_->GetUsername().empty());
 
   manager_->ProvideSecondFactorAccessCode("access");
-  SimulateValidResponse();
+  SimulateValidResponseClientLogin();
 
   EXPECT_EQ(1U, google_login_success_.size());
   EXPECT_EQ(1U, google_login_failure_.size());
 }
 
 TEST_F(SigninManagerTest, ProvideSecondFactorFailure) {
+  browser_sync::SetIsUsingOAuthForTest(false);
   manager_->Initialize(profile_.get());
   manager_->StartSignIn("username", "password", "", "");
   GoogleServiceAuthError error1(GoogleServiceAuthError::TWO_FACTOR);
@@ -159,6 +244,7 @@ TEST_F(SigninManagerTest, ProvideSecondFactorFailure) {
 }
 
 TEST_F(SigninManagerTest, SignOutMidConnect) {
+  browser_sync::SetIsUsingOAuthForTest(false);
   manager_->Initialize(profile_.get());
   manager_->StartSignIn("username", "password", "", "");
   manager_->SignOut();
@@ -166,4 +252,16 @@ TEST_F(SigninManagerTest, SignOutMidConnect) {
   EXPECT_EQ(0U, google_login_failure_.size());
 
   EXPECT_TRUE(manager_->GetUsername().empty());
+}
+
+TEST_F(SigninManagerTest, SignOutOnUserInfoSucessRaceTest) {
+  browser_sync::SetIsUsingOAuthForTest(true);
+  manager_->Initialize(profile_.get());
+  EXPECT_TRUE(manager_->GetUsername().empty());
+
+  SimulateSigninStartOAuth();
+  manager_->SignOut();
+  SimulateOAuthUserInfoSuccess();
+  EXPECT_TRUE(manager_->GetUsername().empty());
+  browser_sync::SetIsUsingOAuthForTest(false);
 }

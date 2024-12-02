@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_core.idl modified Tue Jul 19 13:37:04 2011. */
+/* From ppb_core.idl modified Tue Aug 23 11:13:37 2011. */
 
 #ifndef PPAPI_C_PPB_CORE_H_
 #define PPAPI_C_PPB_CORE_H_
@@ -14,6 +14,9 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_time.h"
+
+#define PPB_CORE_INTERFACE_1_0 "PPB_Core;1.0"
+#define PPB_CORE_INTERFACE PPB_CORE_INTERFACE_1_0
 
 /**
  * @file
@@ -32,21 +35,20 @@
  * to memory management, time, and threads on the browser.
  *
  */
-#define PPB_CORE_INTERFACE_1_0 "PPB_Core;1.0"
-#define PPB_CORE_INTERFACE PPB_CORE_INTERFACE_1_0
-
 struct PPB_Core {
   /**
    *
    * AddRefResource() adds a reference to a resource.
    *
-   * @param[in] config A <code>PP_Resource</code> containing the resource.
+   * @param[in] config A <code>PP_Resource</code> corresponding to a
+   * resource.
    */
   void (*AddRefResource)(PP_Resource resource);
   /**
    * ReleaseResource() removes a reference from a resource.
    *
-   * @param[in] config A <code>PP_Resource</code> containing the resource.
+   * @param[in] config A <code>PP_Resource</code> corresponding to a
+   * resource.
    */
   void (*ReleaseResource)(PP_Resource resource);
   /**

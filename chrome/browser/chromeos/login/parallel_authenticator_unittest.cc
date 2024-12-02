@@ -23,7 +23,7 @@
 #include "chrome/browser/chromeos/login/test_attempt_state.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher_unittest.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
@@ -78,7 +78,7 @@ class TestOnlineAttempt : public OnlineAttempt {
   }
 };
 
-class ParallelAuthenticatorTest : public ::testing::Test {
+class ParallelAuthenticatorTest : public testing::Test {
  public:
   ParallelAuthenticatorTest()
       : message_loop_(MessageLoop::TYPE_UI),
@@ -235,6 +235,9 @@ class ParallelAuthenticatorTest : public ::testing::Test {
   std::string password_;
   std::string hash_ascii_;
   GaiaAuthConsumer::ClientLoginResult result_;
+
+  // Initializes / shuts down a stub CrosLibrary.
+  chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
 
   // Mocks, destroyed by CrosLibrary class.
   MockCryptohomeLibrary* mock_library_;
@@ -638,7 +641,6 @@ TEST_F(ParallelAuthenticatorTest, DriveOfflineLoginGetNewPassword) {
   ExpectLoginSuccess(username_, password_, result_, false);
 
   MockFactory<SuccessFetcher> factory;
-  URLFetcher::set_factory(&factory);
   TestingProfile profile;
 
   auth_->RetryAuth(&profile,
@@ -681,7 +683,6 @@ TEST_F(ParallelAuthenticatorTest, DriveOfflineLoginGetCaptchad) {
   ExpectLoginFailure(failure);
 
   MockFactory<CaptchaFetcher> factory;
-  URLFetcher::set_factory(&factory);
   TestingProfile profile;
 
   auth_->RetryAuth(&profile,

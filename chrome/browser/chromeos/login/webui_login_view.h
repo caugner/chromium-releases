@@ -91,6 +91,7 @@ class WebUILoginView : public views::View,
   virtual void OnLocaleChanged() OVERRIDE;
 
   // TabFirstRenderWatcher::Delegate implementation.
+  virtual void OnRenderHostCreated(RenderViewHost* host) OVERRIDE;
   virtual void OnTabMainFrameLoaded() OVERRIDE;
   virtual void OnTabMainFrameFirstRender() OVERRIDE;
 
@@ -98,8 +99,6 @@ class WebUILoginView : public views::View,
   virtual void InitStatusArea();
 
   StatusAreaView* status_area_;
-
-  Profile* profile_;
 
   // DOMView for rendering a webpage as a webui login.
   DOMView* webui_login_;
@@ -110,8 +109,14 @@ class WebUILoginView : public views::View,
 
   // Overridden from TabContentsDelegate.
   virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual bool IsPopupOrPanel(const TabContents* source) const OVERRIDE;
   virtual bool TakeFocus(bool reverse) OVERRIDE;
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+
+  // Called when focus is returned from status area.
+  // |reverse| is true when focus is traversed backwards (using Shift-Tab).
+  void ReturnFocus(bool reverse);
 
   // Window that contains status area.
   // TODO(nkostylev): Temporary solution till we have
@@ -132,6 +137,9 @@ class WebUILoginView : public views::View,
 
   // Whether the host window is frozen.
   bool host_window_frozen_;
+
+  // Caches StatusArea visibility setting before it has been initialized.
+  bool status_area_visibility_on_init_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUILoginView);
 };

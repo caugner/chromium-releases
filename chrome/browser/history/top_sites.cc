@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <set>
 
-#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/md5.h"
 #include "base/string_util.h"
@@ -22,8 +21,8 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/thumbnail_score.h"
 #include "content/browser/browser_thread.h"
@@ -33,9 +32,8 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/image/image_util.h"
 
 namespace history {
 
@@ -56,7 +54,7 @@ static const int64 kMaxUpdateIntervalMinutes = 60;
 
 // IDs of the sites we force into top sites.
 static const int kPrepopulatePageIDs[] =
-    { IDS_CHROME_WELCOME_URL, IDS_THEMES_GALLERY_URL };
+    { IDS_CHROME_WELCOME_URL, IDS_WEBSTORE_URL };
 
 // Favicons of the sites we force into top sites.
 static const char kPrepopulateFaviconURLs[][100] =
@@ -69,7 +67,7 @@ static const char kNewPrepopulateFaviconURLs[][100] =
 
 static const int kPrepopulateTitleIDs[] =
     { IDS_NEW_TAB_CHROME_WELCOME_PAGE_TITLE,
-      IDS_NEW_TAB_THEMES_GALLERY_PAGE_TITLE };
+      IDS_NEW_TAB_WEBSTORE_PAGE_TITLE };
 
 namespace {
 
@@ -85,7 +83,7 @@ class LoadThumbnailsFromHistoryTask : public HistoryDBTask {
         result_count_(result_count) {
     // l10n_util isn't thread safe, so cache for use on the db thread.
     ignore_urls_.insert(l10n_util::GetStringUTF8(IDS_CHROME_WELCOME_URL));
-    ignore_urls_.insert(l10n_util::GetStringUTF8(IDS_THEMES_GALLERY_URL));
+    ignore_urls_.insert(l10n_util::GetStringUTF8(IDS_WEBSTORE_URL));
   }
 
   virtual bool RunOnDBThread(history::HistoryBackend* backend,
@@ -166,6 +164,8 @@ TopSites::TopSites(Profile* profile)
       profile_->GetPrefs()->GetDictionary(prefs::kNTPMostVisitedURLsBlacklist);
   pinned_urls_ =
       profile_->GetPrefs()->GetDictionary(prefs::kNTPMostVisitedPinnedURLs);
+  DCHECK(blacklist_ != NULL);
+  DCHECK(pinned_urls_ != NULL);
 }
 
 void TopSites::Init(const FilePath& db_name) {
@@ -188,7 +188,7 @@ void TopSites::Init(const FilePath& db_name) {
 }
 
 bool TopSites::SetPageThumbnail(const GURL& url,
-                                const SkBitmap& thumbnail,
+                                gfx::Image* thumbnail,
                                 const ThumbnailScore& score) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -591,19 +591,15 @@ bool TopSites::SetPageThumbnailEncoded(const GURL& url,
 }
 
 // static
-bool TopSites::EncodeBitmap(const SkBitmap& bitmap,
+bool TopSites::EncodeBitmap(gfx::Image* bitmap,
                             scoped_refptr<RefCountedBytes>* bytes) {
-  *bytes = new RefCountedBytes();
-  SkAutoLockPixels bitmap_lock(bitmap);
-  std::vector<unsigned char> data;
-  if (!gfx::JPEGCodec::Encode(
-          reinterpret_cast<unsigned char*>(bitmap.getAddr32(0, 0)),
-          gfx::JPEGCodec::FORMAT_BGRA, bitmap.width(),
-          bitmap.height(),
-          static_cast<int>(bitmap.rowBytes()), 90,
-          &data)) {
+  if (!bitmap)
     return false;
-  }
+  *bytes = new RefCountedBytes();
+  std::vector<unsigned char> data;
+  if (!gfx::JPEGEncodedDataFromImage(*bitmap, &data))
+    return false;
+
   // As we're going to cache this data, make sure the vector is only as big as
   // it needs to be, as JPEGCodec::Encode() over-allocates data.capacity().
   // (In a C++0x future, we can just call shrink_to_fit() in Encode())
@@ -657,8 +653,7 @@ MostVisitedURLList TopSites::GetPrepopulatePages() {
     MostVisitedURL& url = urls[i];
     url.url = GURL(l10n_util::GetStringUTF8(kPrepopulatePageIDs[i]));
     url.redirects.push_back(url.url);
-    url.favicon_url =
-        CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4) ?
+    url.favicon_url = NewTabUI::NTP4Enabled() ?
         GURL(kNewPrepopulateFaviconURLs[i]) :
         GURL(kPrepopulateFaviconURLs[i]);
     url.title = l10n_util::GetStringUTF16(kPrepopulateTitleIDs[i]);
@@ -953,7 +948,7 @@ void TopSites::RestartQueryForTopSitesTimer(base::TimeDelta delta) {
 
   timer_start_time_ = base::TimeTicks::Now();
   timer_.Stop();
-  timer_.Start(delta, this, &TopSites::TimerFired);
+  timer_.Start(FROM_HERE, delta, this, &TopSites::TimerFired);
 }
 
 void TopSites::OnHistoryMigrationWrittenToDisk(TopSitesBackend::Handle handle) {

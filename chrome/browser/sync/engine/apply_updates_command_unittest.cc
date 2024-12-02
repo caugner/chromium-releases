@@ -8,17 +8,17 @@
 #include "base/stringprintf.h"
 #include "base/tracked.h"
 #include "chrome/browser/sync/engine/apply_updates_command.h"
+#include "chrome/browser/sync/engine/nigori_util.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/syncable/nigori_util.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
-#include "chrome/test/sync/engine/syncer_command_test.h"
-#include "chrome/test/sync/engine/test_id_factory.h"
+#include "chrome/browser/sync/test/engine/syncer_command_test.h"
+#include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
@@ -26,12 +26,21 @@ namespace browser_sync {
 using sessions::SyncSession;
 using std::string;
 using syncable::Entry;
+using syncable::GetAllRealModelTypes;
 using syncable::Id;
 using syncable::MutableEntry;
 using syncable::ReadTransaction;
 using syncable::ScopedDirLookup;
 using syncable::UNITTEST;
 using syncable::WriteTransaction;
+
+namespace {
+sync_pb::EntitySpecifics DefaultBookmarkSpecifics() {
+  sync_pb::EntitySpecifics result;
+  AddDefaultExtensionValue(syncable::BOOKMARKS, &result);
+  return result;
+}
+} // namespace
 
 // A test fixture for tests exercising ApplyUpdatesCommand.
 class ApplyUpdatesCommandTest : public SyncerCommandTest {
@@ -51,9 +60,11 @@ class ApplyUpdatesCommandTest : public SyncerCommandTest {
     SyncerCommandTest::SetUp();
   }
 
-  // Create a new unapplied bookmark node with a parent.
-  void CreateUnappliedNewItemWithParent(const string& item_id,
-                                        const string& parent_id) {
+  // Create a new unapplied folder node with a parent.
+  void CreateUnappliedNewItemWithParent(
+      const string& item_id,
+      const sync_pb::EntitySpecifics& specifics,
+      const string& parent_id) {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
     WriteTransaction trans(FROM_HERE, UNITTEST, dir);
@@ -66,9 +77,7 @@ class ApplyUpdatesCommandTest : public SyncerCommandTest {
     entry.Put(syncable::SERVER_NON_UNIQUE_NAME, item_id);
     entry.Put(syncable::SERVER_PARENT_ID, Id::CreateFromServerId(parent_id));
     entry.Put(syncable::SERVER_IS_DIR, true);
-    sync_pb::EntitySpecifics default_bookmark_specifics;
-    default_bookmark_specifics.MutableExtension(sync_pb::bookmark);
-    entry.Put(syncable::SERVER_SPECIFICS, default_bookmark_specifics);
+    entry.Put(syncable::SERVER_SPECIFICS, specifics);
   }
 
   // Create a new unapplied update without a parent.
@@ -84,7 +93,7 @@ class ApplyUpdatesCommandTest : public SyncerCommandTest {
     entry.Put(syncable::SERVER_VERSION, next_revision_++);
     entry.Put(syncable::IS_UNAPPLIED_UPDATE, true);
     entry.Put(syncable::SERVER_NON_UNIQUE_NAME, item_id);
-    entry.Put(syncable::SERVER_PARENT_ID, syncable::kNullId);
+    entry.Put(syncable::SERVER_PARENT_ID, syncable::GetNullId());
     entry.Put(syncable::SERVER_IS_DIR, false);
     entry.Put(syncable::SERVER_SPECIFICS, specifics);
     if (is_unique)  // For top-level nodes.
@@ -136,9 +145,13 @@ class ApplyUpdatesCommandTest : public SyncerCommandTest {
 };
 
 TEST_F(ApplyUpdatesCommandTest, Simple) {
-  string root_server_id = syncable::kNullId.GetServerId();
-  CreateUnappliedNewItemWithParent("parent", root_server_id);
-  CreateUnappliedNewItemWithParent("child", "parent");
+  string root_server_id = syncable::GetNullId().GetServerId();
+  CreateUnappliedNewItemWithParent("parent",
+                                   DefaultBookmarkSpecifics(),
+                                   root_server_id);
+  CreateUnappliedNewItemWithParent("child",
+                                   DefaultBookmarkSpecifics(),
+                                   "parent");
 
   apply_updates_command_.ExecuteImpl(session());
 
@@ -156,12 +169,22 @@ TEST_F(ApplyUpdatesCommandTest, Simple) {
 TEST_F(ApplyUpdatesCommandTest, UpdateWithChildrenBeforeParents) {
   // Set a bunch of updates which are difficult to apply in the order
   // they're received due to dependencies on other unseen items.
-  string root_server_id = syncable::kNullId.GetServerId();
-  CreateUnappliedNewItemWithParent("a_child_created_first", "parent");
-  CreateUnappliedNewItemWithParent("x_child_created_first", "parent");
-  CreateUnappliedNewItemWithParent("parent", root_server_id);
-  CreateUnappliedNewItemWithParent("a_child_created_second", "parent");
-  CreateUnappliedNewItemWithParent("x_child_created_second", "parent");
+  string root_server_id = syncable::GetNullId().GetServerId();
+  CreateUnappliedNewItemWithParent("a_child_created_first",
+                                   DefaultBookmarkSpecifics(),
+                                   "parent");
+  CreateUnappliedNewItemWithParent("x_child_created_first",
+                                   DefaultBookmarkSpecifics(),
+                                   "parent");
+  CreateUnappliedNewItemWithParent("parent",
+                                   DefaultBookmarkSpecifics(),
+                                   root_server_id);
+  CreateUnappliedNewItemWithParent("a_child_created_second",
+                                   DefaultBookmarkSpecifics(),
+                                   "parent");
+  CreateUnappliedNewItemWithParent("x_child_created_second",
+                                   DefaultBookmarkSpecifics(),
+                                   "parent");
 
   apply_updates_command_.ExecuteImpl(session());
 
@@ -177,8 +200,12 @@ TEST_F(ApplyUpdatesCommandTest, UpdateWithChildrenBeforeParents) {
 
 TEST_F(ApplyUpdatesCommandTest, NestedItemsWithUnknownParent) {
   // We shouldn't be able to do anything with either of these items.
-  CreateUnappliedNewItemWithParent("some_item", "unknown_parent");
-  CreateUnappliedNewItemWithParent("some_other_item", "some_item");
+  CreateUnappliedNewItemWithParent("some_item",
+                                   DefaultBookmarkSpecifics(),
+                                   "unknown_parent");
+  CreateUnappliedNewItemWithParent("some_other_item",
+                                   DefaultBookmarkSpecifics(),
+                                   "some_item");
 
   apply_updates_command_.ExecuteImpl(session());
 
@@ -194,13 +221,25 @@ TEST_F(ApplyUpdatesCommandTest, NestedItemsWithUnknownParent) {
 
 TEST_F(ApplyUpdatesCommandTest, ItemsBothKnownAndUnknown) {
   // See what happens when there's a mixture of good and bad updates.
-  string root_server_id = syncable::kNullId.GetServerId();
-  CreateUnappliedNewItemWithParent("first_unknown_item", "unknown_parent");
-  CreateUnappliedNewItemWithParent("first_known_item", root_server_id);
-  CreateUnappliedNewItemWithParent("second_unknown_item", "unknown_parent");
-  CreateUnappliedNewItemWithParent("second_known_item", "first_known_item");
-  CreateUnappliedNewItemWithParent("third_known_item", "fourth_known_item");
-  CreateUnappliedNewItemWithParent("fourth_known_item", root_server_id);
+  string root_server_id = syncable::GetNullId().GetServerId();
+  CreateUnappliedNewItemWithParent("first_unknown_item",
+                                   DefaultBookmarkSpecifics(),
+                                   "unknown_parent");
+  CreateUnappliedNewItemWithParent("first_known_item",
+                                   DefaultBookmarkSpecifics(),
+                                   root_server_id);
+  CreateUnappliedNewItemWithParent("second_unknown_item",
+                                   DefaultBookmarkSpecifics(),
+                                   "unknown_parent");
+  CreateUnappliedNewItemWithParent("second_known_item",
+                                   DefaultBookmarkSpecifics(),
+                                   "first_known_item");
+  CreateUnappliedNewItemWithParent("third_known_item",
+                                   DefaultBookmarkSpecifics(),
+                                   "fourth_known_item");
+  CreateUnappliedNewItemWithParent("fourth_known_item",
+                                   DefaultBookmarkSpecifics(),
+                                   root_server_id);
 
   apply_updates_command_.ExecuteImpl(session());
 
@@ -250,11 +289,19 @@ TEST_F(ApplyUpdatesCommandTest, DecryptablePassword) {
       << "The updates that can be decrypted should be applied";
 }
 
-TEST_F(ApplyUpdatesCommandTest, UndecryptablePassword) {
-  // Undecryptable password updates should not be applied.
-  sync_pb::EntitySpecifics specifics;
-  specifics.MutableExtension(sync_pb::password);
-  CreateUnappliedNewItem("item", specifics, false);
+TEST_F(ApplyUpdatesCommandTest, UndecryptableData) {
+  // Undecryptable updates should not be applied.
+  sync_pb::EntitySpecifics encrypted_bookmark;
+  encrypted_bookmark.mutable_encrypted();
+  AddDefaultExtensionValue(syncable::BOOKMARKS, &encrypted_bookmark);
+  string root_server_id = syncable::GetNullId().GetServerId();
+  CreateUnappliedNewItemWithParent("folder",
+                                   encrypted_bookmark,
+                                   root_server_id);
+  CreateUnappliedNewItem("item2", encrypted_bookmark, false);
+  sync_pb::EntitySpecifics encrypted_password;
+  encrypted_password.MutableExtension(sync_pb::password);
+  CreateUnappliedNewItem("item3", encrypted_password, false);
 
   apply_updates_command_.ExecuteImpl(session());
 
@@ -264,12 +311,12 @@ TEST_F(ApplyUpdatesCommandTest, UndecryptablePassword) {
     << "conflicting updates.";
   {
     sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-    EXPECT_EQ(1, status->update_progress().AppliedUpdatesSize())
+    EXPECT_EQ(3, status->update_progress().AppliedUpdatesSize())
         << "All updates should have been attempted";
     EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
         << "The updates that can't be decrypted should not be in regular "
         << "conflict";
-    EXPECT_EQ(1, status->conflict_progress().NonblockingConflictingItemsSize())
+    EXPECT_EQ(3, status->conflict_progress().NonblockingConflictingItemsSize())
         << "The updates that can't be decrypted should be in nonblocking "
         << "conflict";
     EXPECT_EQ(0, status->update_progress().SuccessfullyAppliedUpdateCount())
@@ -340,6 +387,7 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdate) {
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
   encrypted_types.insert(syncable::PASSWORDS);
+  encrypted_types.insert(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
@@ -377,7 +425,7 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdate) {
 
   EXPECT_FALSE(cryptographer->is_ready());
   EXPECT_TRUE(cryptographer->has_pending_keys());
-  EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
+  EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
 }
 
 TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
@@ -386,6 +434,7 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
   encrypted_types.insert(syncable::PASSWORDS);
+  encrypted_types.insert(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
@@ -425,7 +474,7 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
 
   EXPECT_FALSE(cryptographer->is_ready());
   EXPECT_TRUE(cryptographer->has_pending_keys());
-  EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
+  EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
 }
 
 TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
@@ -434,6 +483,7 @@ TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
   encrypted_types.insert(syncable::PASSWORDS);
+  encrypted_types.insert(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
@@ -517,7 +567,7 @@ TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
 
     // If ProcessUnsyncedChangesForEncryption worked, all our unsynced changes
     // should be encrypted now.
-    EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
+    EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
     EXPECT_TRUE(VerifyUnsyncedChangesAreEncrypted(&trans, encrypted_types));
 
     Syncer::UnsyncedMetaHandles handles;
@@ -532,6 +582,7 @@ TEST_F(ApplyUpdatesCommandTest, CannotEncryptUnsyncedChanges) {
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
   encrypted_types.insert(syncable::PASSWORDS);
+  encrypted_types.insert(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
@@ -623,7 +674,7 @@ TEST_F(ApplyUpdatesCommandTest, CannotEncryptUnsyncedChanges) {
     encrypted_types.clear();
     encrypted_types.insert(syncable::PASSWORDS);
     encrypted_types.insert(syncable::BOOKMARKS);
-    EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
+    EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
 
     Syncer::UnsyncedMetaHandles handles;
     SyncerUtil::GetUnsyncedEntries(&trans, &handles);

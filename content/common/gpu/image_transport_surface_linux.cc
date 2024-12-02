@@ -20,6 +20,7 @@
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "third_party/angle/include/EGL/egl.h"
 #include "third_party/angle/include/EGL/eglext.h"
+#include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface_egl.h"
@@ -41,7 +42,7 @@ class EGLImageTransportSurface : public ImageTransportSurface,
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
-  virtual void OnMakeCurrent() OVERRIDE;
+  virtual void OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
 
  protected:
@@ -55,8 +56,6 @@ class EGLImageTransportSurface : public ImageTransportSurface,
   void ReleaseSurface(scoped_refptr<AcceleratedSurface>& surface);
 
   uint32 fbo_id_;
-  uint32 depth_id_;
-  gfx::Size depth_buffer_size_;
 
   scoped_refptr<AcceleratedSurface> back_surface_;
   scoped_refptr<AcceleratedSurface> front_surface_;
@@ -98,10 +97,10 @@ class GLXImageTransportSurface : public ImageTransportSurface,
   DISALLOW_COPY_AND_ASSIGN(GLXImageTransportSurface);
 };
 
-EGLImageTransportSurface::EGLImageTransportSurface(GpuCommandBufferStub* stub) :
-    ImageTransportSurface(stub),
-    gfx::PbufferGLSurfaceEGL(false, gfx::Size(1,1)),
-    fbo_id_(0) {
+EGLImageTransportSurface::EGLImageTransportSurface(GpuCommandBufferStub* stub)
+    : ImageTransportSurface(stub),
+      gfx::PbufferGLSurfaceEGL(false, gfx::Size(1, 1)),
+      fbo_id_(0) {
 }
 
 EGLImageTransportSurface::~EGLImageTransportSurface() {
@@ -114,11 +113,6 @@ bool EGLImageTransportSurface::Initialize() {
 }
 
 void EGLImageTransportSurface::Destroy() {
-  if (depth_id_) {
-    glDeleteRenderbuffersEXT(1, &depth_id_);
-    depth_id_ = 0;
-  }
-
   if (back_surface_.get())
     ReleaseSurface(back_surface_);
   if (front_surface_.get())
@@ -132,13 +126,13 @@ bool EGLImageTransportSurface::IsOffscreen() {
   return false;
 }
 
-void EGLImageTransportSurface::OnMakeCurrent() {
+void EGLImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
   if (fbo_id_)
     return;
 
   glGenFramebuffersEXT(1, &fbo_id_);
   glBindFramebufferEXT(GL_FRAMEBUFFER, fbo_id_);
-  Resize(gfx::Size(1,1));
+  Resize(gfx::Size(1, 1));
 
   GLenum status = glCheckFramebufferStatusEXT(GL_FRAMEBUFFER);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -166,26 +160,6 @@ void EGLImageTransportSurface::ReleaseSurface(
 void EGLImageTransportSurface::Resize(gfx::Size size) {
   if (back_surface_.get())
     ReleaseSurface(back_surface_);
-
-  if (depth_id_ && depth_buffer_size_ != size) {
-    glDeleteRenderbuffersEXT(1, &depth_id_);
-    depth_id_ = 0;
-  }
-
-  if (!depth_id_) {
-    glGenRenderbuffersEXT(1, &depth_id_);
-    glBindRenderbufferEXT(GL_RENDERBUFFER, depth_id_);
-    glRenderbufferStorageEXT(GL_RENDERBUFFER,
-                             GL_DEPTH24_STENCIL8,
-                             size.width(),
-                             size.height());
-    glBindRenderbufferEXT(GL_RENDERBUFFER, 0);
-    glFramebufferRenderbufferEXT(GL_FRAMEBUFFER,
-                                 GL_DEPTH_ATTACHMENT,
-                                 GL_RENDERBUFFER,
-                                 depth_id_);
-    depth_buffer_size_ = size;
-  }
 
   back_surface_ = new AcceleratedSurface(size);
   glFramebufferTexture2DEXT(GL_FRAMEBUFFER,
@@ -247,12 +221,12 @@ void EGLImageTransportSurface::OnBuffersSwappedACK() {
   scheduler()->SetScheduled(true);
 }
 
-GLXImageTransportSurface::GLXImageTransportSurface(GpuCommandBufferStub* stub) :
-    ImageTransportSurface(stub),
-    gfx::NativeViewGLSurfaceGLX(),
-    dummy_parent_(0),
-    size_(1, 1),
-    bound_(false) {
+GLXImageTransportSurface::GLXImageTransportSurface(GpuCommandBufferStub* stub)
+     : ImageTransportSurface(stub),
+       gfx::NativeViewGLSurfaceGLX(),
+       dummy_parent_(0),
+       size_(1, 1),
+       bound_(false) {
 }
 
 GLXImageTransportSurface::~GLXImageTransportSurface() {
@@ -266,12 +240,12 @@ bool GLXImageTransportSurface::Initialize() {
   swa.override_redirect = True;
   dummy_parent_ = XCreateWindow(
       dpy,
-      RootWindow(dpy, DefaultScreen(dpy)), // parent
+      RootWindow(dpy, DefaultScreen(dpy)),  // parent
       -100, -100, 1, 1,
-      0, // border width
-      CopyFromParent, // depth
+      0,  // border width
+      CopyFromParent,  // depth
       InputOutput,
-      CopyFromParent, // visual
+      CopyFromParent,  // visual
       CWEventMask | CWOverrideRedirect, &swa);
   XMapWindow(dpy, dummy_parent_);
 
@@ -280,13 +254,13 @@ bool GLXImageTransportSurface::Initialize() {
   window_ = XCreateWindow(dpy,
                           dummy_parent_,
                           0, 0, size_.width(), size_.height(),
-                          0, // border width
-                          CopyFromParent, // depth
+                          0,  // border width
+                          CopyFromParent,  // depth
                           InputOutput,
-                          CopyFromParent, // visual
+                          CopyFromParent,  // visual
                           CWEventMask, &swa);
   XMapWindow(dpy, window_);
-  while(1) {
+  while (1) {
     XEvent event;
     XNextEvent(dpy, &event);
     if (event.type == MapNotify && event.xmap.window == window_)
@@ -378,8 +352,8 @@ void GLXImageTransportSurface::OnBuffersSwappedACK() {
 
 }  // namespace
 
-ImageTransportSurface::ImageTransportSurface(GpuCommandBufferStub* stub) :
-    stub_(stub) {
+ImageTransportSurface::ImageTransportSurface(GpuCommandBufferStub* stub)
+    : stub_(stub) {
   GpuChannelManager* gpu_channel_manager
       = stub_->channel()->gpu_channel_manager();
   route_id_ = gpu_channel_manager->GenerateRouteID();

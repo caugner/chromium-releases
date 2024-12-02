@@ -52,6 +52,7 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/skia_util.h"
+#include "views/bubble/bubble_border.h"
 #include "views/controls/label.h"
 #include "views/controls/textfield/native_textfield_views.h"
 #include "views/drag_utils.h"
@@ -75,7 +76,11 @@ TabContents* GetTabContentsFromDelegate(LocationBarView::Delegate* delegate) {
 // static
 const int LocationBarView::kNormalHorizontalEdgeThickness = 1;
 const int LocationBarView::kVerticalEdgeThickness = 2;
+#if defined(TOUCH_UI)
+const int LocationBarView::kItemPadding = 10;
+#else
 const int LocationBarView::kItemPadding = 3;
+#endif
 const int LocationBarView::kIconInternalPadding = 2;
 const int LocationBarView::kEdgeItemPadding = kItemPadding;
 const int LocationBarView::kBubbleHorizontalPadding = 1;
@@ -102,17 +107,15 @@ static const int kNormalModeBackgroundImages[] = {
 
 // LocationBarView -----------------------------------------------------------
 
-LocationBarView::LocationBarView(Profile* profile,
-                                 Browser* browser,
+LocationBarView::LocationBarView(Browser* browser,
                                  ToolbarModel* model,
                                  Delegate* delegate,
                                  Mode mode)
-    : profile_(profile),
-      browser_(browser),
+    : browser_(browser),
       model_(model),
       delegate_(delegate),
       disposition_(CURRENT_TAB),
-      transition_(PageTransition::LINK),
+      transition_(PageTransition::TYPED | PageTransition::FROM_ADDRESS_BAR),
       location_icon_view_(NULL),
       ev_bubble_view_(NULL),
       location_entry_view_(NULL),
@@ -127,7 +130,6 @@ LocationBarView::LocationBarView(Profile* profile,
       bubble_type_(FirstRun::MINIMAL_BUBBLE),
       template_url_service_(NULL),
       animation_offset_(0) {
-  DCHECK(profile_);
   set_id(VIEW_ID_LOCATION_BAR);
   set_focusable(true);
 
@@ -135,7 +137,7 @@ LocationBarView::LocationBarView(Profile* profile,
     painter_.reset(new views::HorizontalPainter(kNormalModeBackgroundImages));
 
   edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
-                               profile_->GetPrefs(), this);
+                               browser_->profile()->GetPrefs(), this);
 }
 
 LocationBarView::~LocationBarView() {
@@ -173,20 +175,25 @@ void LocationBarView::Init() {
 
   // URL edit field.
   // View container for URL edit field.
-#if defined(OS_WIN)
+  Profile* profile = browser_->profile();
+#if defined(USE_AURA)
+  OmniboxViewViews* omnibox_view = new OmniboxViewViews(this, model_, profile,
+      browser_->command_updater(), mode_ == POPUP, this);
+  omnibox_view->Init();
+  location_entry_.reset(omnibox_view);
+#elif defined(OS_WIN)
   if (views::Widget::IsPureViews()) {
-    OmniboxViewViews* omnibox_view =
-        new OmniboxViewViews(this, model_, profile_,
-                             browser_->command_updater(), mode_ == POPUP, this);
+    OmniboxViewViews* omnibox_view = new OmniboxViewViews(this, model_, profile,
+        browser_->command_updater(), mode_ == POPUP, this);
     omnibox_view->Init();
     location_entry_.reset(omnibox_view);
   } else {
     location_entry_.reset(new OmniboxViewWin(font_, this, model_, this,
-        GetWidget()->GetNativeView(), profile_, browser_->command_updater(),
+        GetWidget()->GetNativeView(), browser_->command_updater(),
         mode_ == POPUP, this));
   }
 #else
-  location_entry_.reset(OmniboxViewGtk::Create(this, model_, profile_,
+  location_entry_.reset(OmniboxViewGtk::Create(this, model_, profile,
       browser_->command_updater(), mode_ == POPUP, this));
 #endif
 
@@ -195,22 +202,22 @@ void LocationBarView::Init() {
 
   selected_keyword_view_ = new SelectedKeywordView(
       kSelectedKeywordBackgroundImages, IDR_KEYWORD_SEARCH_MAGNIFIER,
-      GetColor(ToolbarModel::NONE, TEXT), profile_),
+      GetColor(ToolbarModel::NONE, TEXT), profile);
   AddChildView(selected_keyword_view_);
   selected_keyword_view_->SetFont(font_);
   selected_keyword_view_->SetVisible(false);
 
   SkColor dimmed_text = GetColor(ToolbarModel::NONE, DEEMPHASIZED_TEXT);
 
-  keyword_hint_view_ = new KeywordHintView(profile_);
+  keyword_hint_view_ = new KeywordHintView(profile);
   AddChildView(keyword_hint_view_);
   keyword_hint_view_->SetVisible(false);
   keyword_hint_view_->SetFont(font_);
   keyword_hint_view_->SetColor(dimmed_text);
 
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    ContentSettingImageView* content_blocked_view = new ContentSettingImageView(
-        static_cast<ContentSettingsType>(i), this, profile_);
+    ContentSettingImageView* content_blocked_view =
+        new ContentSettingImageView(static_cast<ContentSettingsType>(i), this);
     content_setting_views_.push_back(content_blocked_view);
     AddChildView(content_blocked_view);
     content_blocked_view->SetVisible(false);
@@ -347,19 +354,6 @@ void LocationBarView::OnFocus() {
       this, ui::AccessibilityTypes::EVENT_FOCUS, true);
 }
 
-void LocationBarView::SetProfile(Profile* profile) {
-  DCHECK(profile);
-  if (profile_ != profile) {
-    profile_ = profile;
-    location_entry_->model()->SetProfile(profile);
-    selected_keyword_view_->set_profile(profile);
-    keyword_hint_view_->set_profile(profile);
-    for (ContentSettingViews::const_iterator i(content_setting_views_.begin());
-         i != content_setting_views_.end(); ++i)
-      (*i)->set_profile(profile);
-  }
-}
-
 void LocationBarView::SetPreviewEnabledPageAction(ExtensionAction* page_action,
                                                   bool preview_enabled) {
   if (mode_ != NORMAL)
@@ -377,7 +371,7 @@ void LocationBarView::SetPreviewEnabledPageAction(ExtensionAction* page_action,
 
   page_action_view->image_view()->set_preview_enabled(preview_enabled);
   page_action_view->UpdateVisibility(contents,
-      GURL(WideToUTF8(model_->GetText())));
+      GURL(model_->GetText()));
   Layout();
   SchedulePaint();
 }
@@ -406,7 +400,7 @@ void LocationBarView::ShowStarBubble(const GURL& url, bool newly_bookmarked) {
   views::View::ConvertPointToScreen(star_view_, &origin);
   screen_bounds.set_origin(origin);
   browser::ShowBookmarkBubbleView(GetWidget(), screen_bounds, star_view_,
-                                  profile_, url, newly_bookmarked);
+                                  browser_->profile(), url, newly_bookmarked);
 }
 
 gfx::Point LocationBarView::GetLocationEntryOrigin() const {
@@ -507,7 +501,7 @@ void LocationBarView::Layout() {
     entry_width -= (kEdgeThickness + kEdgeEditPadding);
   } else if (model_->GetSecurityLevel() == ToolbarModel::EV_SECURE) {
     ev_bubble_view_->SetVisible(true);
-    ev_bubble_view_->SetLabel(model_->GetEVCertName());
+    ev_bubble_view_->SetLabel(UTF16ToWideHack(model_->GetEVCertName()));
     ev_bubble_width = ev_bubble_view_->GetPreferredSize().width();
     // We'll adjust this width and take it out of |entry_width| below.
   } else {
@@ -572,12 +566,13 @@ void LocationBarView::Layout() {
   if (show_selected_keyword) {
     if (selected_keyword_view_->keyword() != keyword) {
       selected_keyword_view_->SetKeyword(keyword);
+      Profile* profile = browser_->profile();
       const TemplateURL* template_url =
-          TemplateURLServiceFactory::GetForProfile(profile_)->
+          TemplateURLServiceFactory::GetForProfile(profile)->
           GetTemplateURLForKeyword(keyword);
       if (template_url && template_url->IsExtensionKeyword()) {
-        const SkBitmap& bitmap = profile_->GetExtensionService()->
-            GetOmniboxIcon(template_url->GetExtensionId());
+        const SkBitmap& bitmap = profile->GetExtensionService()->GetOmniboxIcon(
+            template_url->GetExtensionId());
         selected_keyword_view_->SetImage(bitmap);
         selected_keyword_view_->set_is_extension_icon(true);
       } else {
@@ -733,7 +728,8 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
     paint.setAntiAlias(true);
     // The round corners of the omnibox match the round corners of the dropdown
     // below, and all our other bubbles.
-    const SkScalar radius(SkIntToScalar(BubbleBorder::GetCornerRadius()));
+    const SkScalar radius(SkIntToScalar(
+        views::BubbleBorder::GetCornerRadius()));
     bounds.Inset(kNormalHorizontalEdgeThickness, 0);
     canvas->AsCanvasSkia()->drawRoundRect(gfx::RectToSkRect(bounds), radius,
                                           radius, paint);
@@ -817,9 +813,9 @@ void LocationBarView::OnAutocompleteAccept(
   // WARNING: don't add an early return here. The calls after the if must
   // happen.
   if (url.is_valid()) {
-    location_input_ = UTF8ToWide(url.spec());
+    location_input_ = UTF8ToUTF16(url.spec());
     disposition_ = disposition;
-    transition_ = transition;
+    transition_ = transition | PageTransition::FROM_ADDRESS_BAR;
 
     if (browser_->command_updater()) {
       if (!alternate_nav_url.is_valid()) {
@@ -937,7 +933,7 @@ void LocationBarView::RefreshPageActionViews() {
   if (mode_ != NORMAL)
     return;
 
-  ExtensionService* service = profile_->GetExtensionService();
+  ExtensionService* service = browser_->profile()->GetExtensionService();
   if (!service)
     return;
 
@@ -965,7 +961,7 @@ void LocationBarView::RefreshPageActionViews() {
     // inserted in left-to-right order for accessibility.
     for (int i = page_actions.size() - 1; i >= 0; --i) {
       page_action_views_[i] = new PageActionWithBadgeView(
-          new PageActionImageView(this, profile_, page_actions[i]));
+          new PageActionImageView(this, page_actions[i]));
       page_action_views_[i]->SetVisible(false);
       AddChildViewAt(page_action_views_[i], GetIndexOf(star_view_));
     }
@@ -973,7 +969,7 @@ void LocationBarView::RefreshPageActionViews() {
 
   TabContents* contents = GetTabContentsFromDelegate(delegate_);
   if (!page_action_views_.empty() && contents) {
-    GURL url = GURL(WideToUTF8(model_->GetText()));
+    GURL url = GURL(model_->GetText());
 
     for (PageActionViews::const_iterator i(page_action_views_.begin());
          i != page_action_views_.end(); ++i) {
@@ -1021,8 +1017,9 @@ void LocationBarView::ShowFirstRunBubbleInternal(
   if (base::i18n::IsRTL())
     origin.set_x(width() - origin.x());
   views::View::ConvertPointToScreen(this, &origin);
-  FirstRunBubble::Show(profile_, GetWidget(), gfx::Rect(origin, gfx::Size()),
-                       BubbleBorder::TOP_LEFT, bubble_type);
+  FirstRunBubble::Show(browser_->profile(), GetWidget(),
+                       gfx::Rect(origin, gfx::Size()),
+                       views::BubbleBorder::TOP_LEFT, bubble_type);
 #endif
 }
 
@@ -1115,7 +1112,7 @@ bool LocationBarView::CanStartDragForView(View* sender,
 void LocationBarView::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
   // Wait until search engines have loaded to show the first run bubble.
   TemplateURLService* url_service =
-      TemplateURLServiceFactory::GetForProfile(profile_);
+      TemplateURLServiceFactory::GetForProfile(browser_->profile());
   if (!url_service->loaded()) {
     bubble_type_ = bubble_type;
     template_url_service_ = url_service;
@@ -1131,7 +1128,7 @@ void LocationBarView::SetSuggestedText(const string16& text,
   location_entry_->model()->SetSuggestedText(text, behavior);
 }
 
-std::wstring LocationBarView::GetInputString() const {
+string16 LocationBarView::GetInputString() const {
   return location_input_;
 }
 

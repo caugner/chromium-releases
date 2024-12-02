@@ -131,7 +131,10 @@ bool NativeViewGLSurfaceGLX::SwapBuffers() {
 
 gfx::Size NativeViewGLSurfaceGLX::GetSize() {
   XWindowAttributes attributes;
-  XGetWindowAttributes(g_display, window_, &attributes);
+  if (!XGetWindowAttributes(g_display, window_, &attributes)) {
+    LOG(ERROR) << "XGetWindowAttributes failed for window " << window_ << ".";
+    return gfx::Size();
+  }
   return gfx::Size(attributes.width, attributes.height);
 }
 
@@ -154,10 +157,15 @@ void* NativeViewGLSurfaceGLX::GetConfig() {
     // it.
 
     XWindowAttributes attributes;
-    XGetWindowAttributes(
+    if (!XGetWindowAttributes(
         g_display,
         reinterpret_cast<GLXDrawable>(GetHandle()),
-        &attributes);
+        &attributes)) {
+      LOG(ERROR) << "XGetWindowAttributes failed for window " <<
+          reinterpret_cast<GLXDrawable>(GetHandle()) << ".";
+      return NULL;
+    }
+
     int visual_id = XVisualIDFromVisual(attributes.visual);
 
     int num_elements = 0;
@@ -214,8 +222,6 @@ bool PbufferGLSurfaceGLX::Initialize() {
     GLX_BLUE_SIZE, 8,
     GLX_GREEN_SIZE, 8,
     GLX_RED_SIZE, 8,
-    GLX_DEPTH_SIZE, 16,  // TODO(apatrick): support optional depth buffer
-    GLX_STENCIL_SIZE, 8,
     GLX_RENDER_TYPE, GLX_RGBA_BIT,
     GLX_DRAWABLE_TYPE, GLX_PBUFFER_BIT,
     GLX_DOUBLEBUFFER, False,

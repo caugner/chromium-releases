@@ -20,9 +20,7 @@ class PrintPreviewUITest : public UITest {
  public:
   PrintPreviewUITest() {
     dom_automation_enabled_ = true;
-#if !defined(GOOGLE_CHROME_BUILD) || defined(OS_CHROMEOS)
     launch_arguments_.AppendSwitch(switches::kEnablePrintPreview);
-#endif
   }
 
   void AssertIsPrintPage(TabProxy* tab) {
@@ -72,6 +70,43 @@ TEST_F(PrintPreviewUITest, PrintCommandDisabled) {
   AssertIsPrintPage(tab);
   ASSERT_TRUE(browser->IsMenuCommandEnabled(IDC_PRINT, &enabled));
   ASSERT_FALSE(enabled);
+}
+
+TEST_F(PrintPreviewUITest, AdvancedPrintCommandEnabled) {
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+
+  // Go to the about:blank page.
+  NavigateToURL(GURL(chrome::kAboutBlankURL));
+
+  // Make sure there is 1 tab and print is enabled. Create print preview tab.
+  int tab_count;
+  ASSERT_TRUE(browser->GetTabCount(&tab_count));
+  ASSERT_EQ(1, tab_count);
+  bool enabled;
+  ASSERT_TRUE(browser->IsMenuCommandEnabled(IDC_PRINT, &enabled));
+  ASSERT_TRUE(enabled);
+
+  // Make sure advanced print command (Ctrl+Shift+p) is enabled.
+  enabled = false;
+  ASSERT_TRUE(browser->IsMenuCommandEnabled(IDC_ADVANCED_PRINT, &enabled));
+  ASSERT_TRUE(enabled);
+
+  ASSERT_TRUE(browser->RunCommand(IDC_PRINT));
+
+  // Make sure there are 2 tabs and print is disabled.
+  ASSERT_TRUE(browser->GetTabCount(&tab_count));
+  ASSERT_EQ(2, tab_count);
+  scoped_refptr<TabProxy> tab = browser->GetActiveTab();
+  ASSERT_TRUE(tab.get());
+  AssertIsPrintPage(tab);
+  ASSERT_TRUE(browser->IsMenuCommandEnabled(IDC_PRINT, &enabled));
+  ASSERT_FALSE(enabled);
+
+  // Make sure advanced print command (Ctrl+Shift+p) is enabled on preview tab.
+  enabled = false;
+  ASSERT_TRUE(browser->IsMenuCommandEnabled(IDC_ADVANCED_PRINT, &enabled));
+  ASSERT_TRUE(enabled);
 }
 
 }  // namespace

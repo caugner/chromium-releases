@@ -224,6 +224,13 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_LEARNMORE,
   },
+  {net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_PINNING_FAILURE,
+   IDS_ERRORPAGES_SUMMARY_PINNING_FAILURE,
+   IDS_ERRORPAGES_DETAILS_PINNING_FAILURE,
+   SUGGEST_NONE,
+  },
   {net::ERR_TEMPORARILY_THROTTLED,
    IDS_ERRORPAGES_TITLE_ACCESS_DENIED,
    IDS_ERRORPAGES_HEADING_ACCESS_DENIED,
@@ -535,13 +542,31 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
   }
 
   if (options.suggestions & SUGGEST_PROXY_CONFIG) {
+#if defined(OS_CHROMEOS)
+    DictionaryValue* suggest_proxy_config = new DictionaryValue();
+#else
     DictionaryValue* suggest_proxy_config = GetStandardMenuItemsText();
+#endif  // defined(OS_CHROMEOS)
     suggest_proxy_config->SetString("msg",
         l10n_util::GetStringFUTF16(IDS_ERRORPAGES_SUGGESTION_PROXY_CONFIG,
             l10n_util::GetStringUTF16(
                 IDS_ERRORPAGES_SUGGESTION_PROXY_DISABLE_PLATFORM)));
+#if defined(OS_CHROMEOS)
+    suggest_proxy_config->SetString("settingsTitle",
+        l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
+    suggest_proxy_config->SetString("internetTitle",
+        l10n_util::GetStringUTF16(IDS_OPTIONS_INTERNET_TAB_LABEL));
+    suggest_proxy_config->SetString("optionsButton",
+        l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_OPTIONS));
+    suggest_proxy_config->SetString("networkTab",
+        l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_INTERNET_TAB_NETWORK));
+    suggest_proxy_config->SetString("proxyButton",
+        l10n_util::GetStringUTF16(
+            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CHANGE_PROXY_BUTTON));
+#else
     suggest_proxy_config->SetString("proxyTitle",
         l10n_util::GetStringUTF16(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON));
+#endif  // defined(OS_CHROMEOS)
     error_strings->Set("suggestionsProxyConfig", suggest_proxy_config);
   }
 

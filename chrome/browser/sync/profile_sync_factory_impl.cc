@@ -5,10 +5,10 @@
 #include "base/command_line.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sync/api/syncable_service.h"
-#include "chrome/browser/sync/glue/app_change_processor.h"
 #include "chrome/browser/sync/glue/app_data_type_controller.h"
-#include "chrome/browser/sync/glue/app_model_associator.h"
 #include "chrome/browser/sync/glue/autofill_change_processor.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/autofill_model_associator.h"
@@ -19,15 +19,13 @@
 #include "chrome/browser/sync/glue/bookmark_data_type_controller.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
 #include "chrome/browser/sync/glue/data_type_manager_impl.h"
-#include "chrome/browser/sync/glue/extension_change_processor.h"
 #include "chrome/browser/sync/glue/extension_data_type_controller.h"
-#include "chrome/browser/sync/glue/extension_model_associator.h"
-#include "chrome/browser/sync/glue/extension_sync_traits.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
 #include "chrome/browser/sync/glue/password_change_processor.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
 #include "chrome/browser/sync/glue/password_model_associator.h"
 #include "chrome/browser/sync/glue/preference_data_type_controller.h"
+#include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
@@ -44,10 +42,9 @@
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 
-using browser_sync::AppChangeProcessor;
 using browser_sync::AppDataTypeController;
-using browser_sync::AppModelAssociator;
 using browser_sync::AutofillChangeProcessor;
 using browser_sync::AutofillProfileChangeProcessor;
 using browser_sync::AutofillDataTypeController;
@@ -60,17 +57,17 @@ using browser_sync::BookmarkModelAssociator;
 using browser_sync::DataTypeController;
 using browser_sync::DataTypeManager;
 using browser_sync::DataTypeManagerImpl;
-using browser_sync::ExtensionChangeProcessor;
 using browser_sync::ExtensionDataTypeController;
-using browser_sync::ExtensionModelAssociator;
 using browser_sync::GenericChangeProcessor;
 using browser_sync::PasswordChangeProcessor;
 using browser_sync::PasswordDataTypeController;
 using browser_sync::PasswordModelAssociator;
 using browser_sync::PreferenceDataTypeController;
+using browser_sync::SearchEngineDataTypeController;
 using browser_sync::SessionChangeProcessor;
 using browser_sync::SessionDataTypeController;
 using browser_sync::SessionModelAssociator;
+using browser_sync::SyncableServiceAdapter;
 using browser_sync::SyncBackendHost;
 using browser_sync::ThemeChangeProcessor;
 using browser_sync::ThemeDataTypeController;
@@ -143,9 +140,10 @@ void ProfileSyncFactoryImpl::RegisterDataTypes(ProfileSyncService* pss) {
         new ThemeDataTypeController(this, profile_, pss));
   }
 
-  // TypedUrl sync is disabled by default.  Register only if
-  // explicitly enabled.
-  if (command_line_->HasSwitch(switches::kEnableSyncTypedUrls)) {
+  // TypedUrl sync is enabled by default.  Register unless explicitly disabled,
+  // or if saving history is disabled.
+  if (!profile_->GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled) &&
+      !command_line_->HasSwitch(switches::kDisableSyncTypedUrls)) {
     pss->RegisterDataTypeController(
         new TypedUrlDataTypeController(this, profile_));
   }
@@ -161,11 +159,18 @@ void ProfileSyncFactoryImpl::RegisterDataTypes(ProfileSyncService* pss) {
     pss->RegisterDataTypeController(
         new AutofillProfileDataTypeController(this, profile_));
   }
+
+  // Search Engine sync is disabled by default.  Register only if explicitly
+  // enabled.
+  if (command_line_->HasSwitch(switches::kEnableSyncSearchEngines)) {
+    pss->RegisterDataTypeController(
+        new SearchEngineDataTypeController(this, profile_, pss));
+  }
 }
 
 DataTypeManager* ProfileSyncFactoryImpl::CreateDataTypeManager(
     SyncBackendHost* backend,
-    const DataTypeController::TypeMap& controllers) {
+    const DataTypeController::TypeMap* controllers) {
   return new DataTypeManagerImpl(backend, controllers);
 }
 
@@ -173,17 +178,16 @@ ProfileSyncFactory::SyncComponents
 ProfileSyncFactoryImpl::CreateAppSyncComponents(
     ProfileSyncService* profile_sync_service,
     UnrecoverableErrorHandler* error_handler) {
-  // For now we simply use extensions sync objects with the app sync
-  // traits.  If apps become more than simply extensions, we may have
-  // to write our own apps model associator and/or change processor.
-  ExtensionServiceInterface* extension_service =
+  SyncableService* app_sync_service =
       profile_sync_service->profile()->GetExtensionService();
   sync_api::UserShare* user_share = profile_sync_service->GetUserShare();
-  AppModelAssociator* model_associator =
-      new AppModelAssociator(extension_service, user_share);
-  AppChangeProcessor* change_processor =
-      new AppChangeProcessor(error_handler);
-  return SyncComponents(model_associator, change_processor);
+  GenericChangeProcessor* change_processor =
+      new GenericChangeProcessor(app_sync_service, error_handler, user_share);
+  browser_sync::SyncableServiceAdapter* sync_service_adapter =
+      new browser_sync::SyncableServiceAdapter(syncable::APPS,
+                                               app_sync_service,
+                                               change_processor);
+  return SyncComponents(sync_service_adapter, change_processor);
 }
 
 ProfileSyncFactory::SyncComponents
@@ -245,14 +249,17 @@ ProfileSyncFactory::SyncComponents
 ProfileSyncFactoryImpl::CreateExtensionSyncComponents(
     ProfileSyncService* profile_sync_service,
     UnrecoverableErrorHandler* error_handler) {
-  ExtensionServiceInterface* extension_service =
+  SyncableService* extension_sync_service =
       profile_sync_service->profile()->GetExtensionService();
   sync_api::UserShare* user_share = profile_sync_service->GetUserShare();
-  ExtensionModelAssociator* model_associator =
-      new ExtensionModelAssociator(extension_service, user_share);
-  ExtensionChangeProcessor* change_processor =
-      new ExtensionChangeProcessor(error_handler);
-  return SyncComponents(model_associator, change_processor);
+  GenericChangeProcessor* change_processor =
+      new GenericChangeProcessor(extension_sync_service, error_handler,
+          user_share);
+  browser_sync::SyncableServiceAdapter* sync_service_adapter =
+      new browser_sync::SyncableServiceAdapter(syncable::EXTENSIONS,
+                                               extension_sync_service,
+                                               change_processor);
+  return SyncComponents(sync_service_adapter, change_processor);
 }
 
 ProfileSyncFactory::SyncComponents
@@ -279,10 +286,10 @@ ProfileSyncFactoryImpl::CreatePreferenceSyncComponents(
   sync_api::UserShare* user_share = profile_sync_service->GetUserShare();
   GenericChangeProcessor* change_processor =
       new GenericChangeProcessor(pref_sync_service, error_handler, user_share);
-  browser_sync::SyncableServiceAdapter* sync_service_adapter =
-      new browser_sync::SyncableServiceAdapter(syncable::PREFERENCES,
-                                               pref_sync_service,
-                                               change_processor);
+  SyncableServiceAdapter* sync_service_adapter =
+      new SyncableServiceAdapter(syncable::PREFERENCES,
+                                 pref_sync_service,
+                                 change_processor);
   return SyncComponents(sync_service_adapter, change_processor);
 }
 
@@ -321,4 +328,21 @@ ProfileSyncFactoryImpl::CreateSessionSyncComponents(
   SessionChangeProcessor* change_processor =
       new SessionChangeProcessor(error_handler, model_associator);
   return SyncComponents(model_associator, change_processor);
+}
+
+ProfileSyncFactory::SyncComponents
+ProfileSyncFactoryImpl::CreateSearchEngineSyncComponents(
+    ProfileSyncService* profile_sync_service,
+    UnrecoverableErrorHandler* error_handler) {
+  SyncableService* se_sync_service =
+      TemplateURLServiceFactory::GetForProfile(profile_);
+  DCHECK(se_sync_service);
+  sync_api::UserShare* user_share = profile_sync_service->GetUserShare();
+  GenericChangeProcessor* change_processor =
+      new GenericChangeProcessor(se_sync_service, error_handler, user_share);
+  SyncableServiceAdapter* sync_service_adapter =
+      new SyncableServiceAdapter(syncable::SEARCH_ENGINES,
+                                 se_sync_service,
+                                 change_processor);
+  return SyncComponents(sync_service_adapter, change_processor);
 }

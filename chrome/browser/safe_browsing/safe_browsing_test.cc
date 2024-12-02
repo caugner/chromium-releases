@@ -34,8 +34,8 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "net/base/host_resolver.h"
@@ -302,6 +302,11 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
     // TODO(lzheng): The test server does not understand download related
     // requests. We need to fix the server.
     command_line->AppendSwitch(switches::kSbDisableDownloadProtection);
+
+    // TODO(gcasto): Generate new testing data that includes the
+    // client-side phishing whitelist.
+    command_line->AppendSwitch(
+        switches::kDisableSanitizedClientSidePhishingDetection);
 
     // In this test, we fetch SafeBrowsing data and Mac key from the same
     // server. Although in real production, they are served from different

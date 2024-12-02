@@ -192,19 +192,21 @@ void LoginHandler::OnRequestCancelled() {
 void LoginHandler::AddObservers() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+  // This is probably OK; we need to listen to everything and we break out of
+  // the Observe() if we aren't handling the same auth_info().
   registrar_.Add(this, chrome::NOTIFICATION_AUTH_SUPPLIED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_AUTH_CANCELLED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 void LoginHandler::RemoveObservers() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   registrar_.Remove(this, chrome::NOTIFICATION_AUTH_SUPPLIED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(this, chrome::NOTIFICATION_AUTH_CANCELLED,
-                    NotificationService::AllSources());
+                    NotificationService::AllBrowserContextsAndSources());
 
   DCHECK(registrar_.IsEmpty());
 }
@@ -407,8 +409,10 @@ class LoginDialogTask : public Task {
     // Tell the password manager to look for saved passwords.
     TabContentsWrapper* wrapper =
         TabContentsWrapper::GetCurrentWrapperForContents(parent_contents);
-    if (!wrapper)
+    if (!wrapper) {
+      NOTREACHED() << "Login dialog created for TabContents with no wrapper";
       return;
+    }
     PasswordManager* password_manager = wrapper->password_manager();
     std::vector<PasswordForm> v;
     MakeInputForPasswordManager(&v);

@@ -33,6 +33,7 @@ struct NativeWebKeyboardEvent;
 
 namespace gfx {
 class Rect;
+class Size;
 }
 
 class Extension;
@@ -129,6 +130,9 @@ class BrowserWindow {
   // TODO(beng): REMOVE?
   // Returns true if the frame is maximized (aka zoomed).
   virtual bool IsMaximized() const = 0;
+
+  // Returns true if the frame is minimized.
+  virtual bool IsMinimized() const = 0;
 
   // Accessors for fullscreen mode state.
   virtual void SetFullscreen(bool fullscreen) = 0;
@@ -231,7 +235,7 @@ class BrowserWindow {
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) = 0;
 
   // Shows the collected cookies dialog box.
-  virtual void ShowCollectedCookiesDialog(TabContents* tab_contents) = 0;
+  virtual void ShowCollectedCookiesDialog(TabContentsWrapper* tab_contents) = 0;
 
   // Show the bubble that indicates to the user that a theme is being installed.
   virtual void ShowThemeInstallBubble() = 0;
@@ -244,8 +248,8 @@ class BrowserWindow {
 
   // Shows a dialog box with HTML content. |parent_window| is the window the
   // dialog should be opened modal to and is a native window handle.
-  virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                              gfx::NativeWindow parent_window) = 0;
+  virtual gfx::NativeWindow ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
+                                           gfx::NativeWindow parent_window) = 0;
 
   // ThemeService calls this when a user has changed his or her theme,
   // indicating that it's time to redraw everything.
@@ -333,16 +337,23 @@ class BrowserWindow {
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) = 0;
 
+  // Construct a FindBar implementation for the |browser|.
+  virtual FindBar* CreateFindBar() = 0;
+
 #if defined(OS_CHROMEOS)
   // Shows the keyboard overlay dialog box.
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) = 0;
 #endif
 
+  // Invoked when the preferred size of the contents in current tab has been
+  // changed. We might choose to update the window size to accomodate this
+  // change.
+  // Note that this won't be fired if we change tabs.
+  virtual void UpdatePreferredSize(TabContents* tab_contents,
+                                   const gfx::Size& pref_size) {}
+
   // Construct a BrowserWindow implementation for the specified |browser|.
   static BrowserWindow* CreateBrowserWindow(Browser* browser);
-
-  // Construct a FindBar implementation for the specified |browser|.
-  static FindBar* CreateFindBar(Browser* browser_window);
 
  protected:
   friend class BrowserList;

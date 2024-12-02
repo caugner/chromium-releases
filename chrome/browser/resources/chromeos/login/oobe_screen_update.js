@@ -47,6 +47,22 @@ cr.define('oobe', function() {
     }
   };
 
+  /**
+   * Registers Escape accelerator to cancel update and
+   * makes 'press Escape to cancel update' hint visible.
+   */
+  UpdateScreen.enableUpdateCancel = function() {
+    $('update-cancel-hint').hidden = false;
+    document.addEventListener('keydown', function(e) {
+      if (e.keyCode == 27) {  // Escape
+        var updateCancelHint = $('update-cancel-hint').children[0];
+        updateCancelHint.textContent =
+            localStrings.getString('cancelledUpdateMessage');
+        chrome.send('cancelUpdate');
+      }
+    });
+  };
+
   return {
     UpdateScreen: UpdateScreen
   };

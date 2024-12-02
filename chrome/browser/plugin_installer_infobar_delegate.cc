@@ -4,6 +4,7 @@
 
 #include "chrome/browser/plugin_installer_infobar_delegate.h"
 
+#include "chrome/browser/google/google_util.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/view_messages.h"
@@ -12,11 +13,13 @@
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "webkit/plugins/npapi/default_plugin_shared.h"
 
 PluginInstallerInfoBarDelegate::PluginInstallerInfoBarDelegate(
-    TabContents* tab_contents)
+    TabContents* tab_contents, gfx::NativeWindow window)
     : ConfirmInfoBarDelegate(tab_contents),
-      tab_contents_(tab_contents) {
+      tab_contents_(tab_contents),
+      window_(window) {
 }
 
 PluginInstallerInfoBarDelegate::~PluginInstallerInfoBarDelegate() {
@@ -47,8 +50,16 @@ string16 PluginInstallerInfoBarDelegate::GetButtonLabel(
 }
 
 bool PluginInstallerInfoBarDelegate::Accept() {
-  RenderViewHost* host = tab_contents_->render_view_host();
-  host->Send(new ViewMsg_InstallMissingPlugin(host->routing_id()));
+  // TODO(PORT) for other platforms.
+#if defined(OS_WIN) && !defined(USE_AURA)
+  ::PostMessage(window_,
+                webkit::npapi::default_plugin::kInstallMissingPluginMessage,
+                0,
+                0);
+#elif defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+#endif
   return true;
 }
 
@@ -58,10 +69,10 @@ string16 PluginInstallerInfoBarDelegate::GetLinkText() const {
 
 bool PluginInstallerInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  // Ignore the click dispostion and always open in a new top level tab.
-  static const char kLearnMorePluginInstallerUrl[] = "http://www.google.com/"
-      "support/chrome/bin/answer.py?answer=95697&amp;topic=14687";
-  tab_contents_->OpenURL(GURL(kLearnMorePluginInstallerUrl), GURL(),
-                         NEW_FOREGROUND_TAB, PageTransition::LINK);
+  tab_contents_->OpenURL(google_util::AppendGoogleLocaleParam(GURL(
+      "http://www.google.com/support/chrome/bin/answer.py?answer=95697&topic="
+      "14687")), GURL(),
+      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+      PageTransition::LINK);
   return false;
 }

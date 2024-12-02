@@ -43,21 +43,6 @@ class TestTimeouts {
     return large_test_timeout_ms_;
   }
 
-  // Timeout for a huge test (like running a layout test inside the browser).
-  // Do not use unless absolutely necessary - try to make the test smaller.
-  // Do not use multiple times in a single test.
-  static int huge_test_timeout_ms() {
-    DCHECK(initialized_);
-    return huge_test_timeout_ms_;
-  }
-
-  // Timeout to wait for a live operation to complete. Used by tests that access
-  // external services.
-  static int live_operation_timeout_ms() {
-    DCHECK(initialized_);
-    return live_operation_timeout_ms_;
-  }
-
  private:
   static bool initialized_;
 
@@ -65,8 +50,6 @@ class TestTimeouts {
   static int action_timeout_ms_;
   static int action_max_timeout_ms_;
   static int large_test_timeout_ms_;
-  static int huge_test_timeout_ms_;
-  static int live_operation_timeout_ms_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(TestTimeouts);
 };

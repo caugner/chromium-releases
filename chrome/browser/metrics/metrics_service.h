@@ -40,11 +40,8 @@ class ListValue;
 }
 
 namespace webkit {
-namespace npapi {
 struct WebPluginInfo;
 }
-}
-
 
 class MetricsService : public NotificationObserver,
                        public URLFetcher::Delegate,
@@ -137,6 +134,13 @@ class MetricsService : public NotificationObserver,
   bool recording_active() const;
   bool reporting_active() const;
 
+  // Redundant test to ensure that we are notified of a clean exit.
+  // This value should be true when process has completed shutdown.
+  static bool UmaMetricsProperlyShutdown();
+
+  // Set the dirty flag, which will require a later call to LogCleanShutdown().
+  static void LogNeedForCleanShutdown();
+
  private:
   // The MetricsService has a lifecycle that is stored as a state.
   // See metrics_service.cc for description of this lifecycle.
@@ -150,13 +154,18 @@ class MetricsService : public NotificationObserver,
     SENDING_CURRENT_LOGS,   // Sending standard current logs as they acrue.
   };
 
+  enum ShutdownCleanliness {
+    CLEANLY_SHUTDOWN = 0xdeadbeef,
+    NEED_TO_SHUTDOWN = ~CLEANLY_SHUTDOWN
+  };
+
   class InitTask;
   class InitTaskComplete;
 
   // Callback to let us know that the init task is done.
   void OnInitTaskComplete(
       const std::string& hardware_class,
-      const std::vector<webkit::npapi::WebPluginInfo>& plugins);
+      const std::vector<webkit::WebPluginInfo>& plugins);
 
   // When we start a new version of Chromium (different from our last run), we
   // need to discard the old crash stats so that we don't attribute crashes etc.
@@ -356,7 +365,7 @@ class MetricsService : public NotificationObserver,
   std::string hardware_class_;
 
   // The list of plugins which was retrieved on the file thread.
-  std::vector<webkit::npapi::WebPluginInfo> plugins_;
+  std::vector<webkit::WebPluginInfo> plugins_;
 
   // The outstanding transmission appears as a URL Fetch operation.
   scoped_ptr<URLFetcher> current_fetch_;
@@ -402,7 +411,7 @@ class MetricsService : public NotificationObserver,
   // Buffer of child process notifications for quick access.  See
   // ChildProcessStats documentation above for more details.
   struct ChildProcessStats;
-  std::map<std::wstring, ChildProcessStats> child_process_stats_buffer_;
+  std::map<string16, ChildProcessStats> child_process_stats_buffer_;
 
   ScopedRunnableMethodFactory<MetricsService> log_sender_factory_;
   ScopedRunnableMethodFactory<MetricsService> state_saver_factory_;
@@ -423,6 +432,10 @@ class MetricsService : public NotificationObserver,
   scoped_refptr<chromeos::ExternalMetrics> external_metrics_;
 #endif
 
+  // Reduntant marker to check that we completed our shutdown, and set the
+  // exited-cleanly bit in the prefs.
+  static ShutdownCleanliness clean_shutdown_status_;
+
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, EmptyLogList);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, SingleElementLogList);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, OverLimitLogList);
@@ -435,6 +448,19 @@ class MetricsService : public NotificationObserver,
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdCorrectlyFormatted);
 
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
+};
+
+// This class limits and documents access to the IsMetricsReportingEnabled()
+// method. Since the method is private, each user has to be explicitly declared
+// as a 'friend' below.
+class MetricsServiceHelper {
+ private:
+  friend class InstantFieldTrial;
+
+  // Returns true if prefs::kMetricsReportingEnabled is set.
+  static bool IsMetricsReportingEnabled();
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(MetricsServiceHelper);
 };
 
 #endif  // CHROME_BROWSER_METRICS_METRICS_SERVICE_H_

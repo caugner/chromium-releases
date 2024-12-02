@@ -32,16 +32,18 @@ class MouseEvent;
 class SubmenuView;
 class View;
 
+namespace internal {
+class MenuControllerDelegate;
+class MenuRunnerImpl;
+}
+
 // MenuController -------------------------------------------------------------
 
 // MenuController is used internally by the various menu classes to manage
 // showing, selecting and drag/drop for menus. All relevant events are
 // forwarded to the MenuController from SubmenuView and MenuHost.
-class MenuController : public MessageLoopForUI::Dispatcher {
+class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
  public:
-  friend class MenuHostRootView;
-  friend class MenuItemView;
-
   // Enumeration of how the menu should exit.
   enum ExitType {
     // Don't exit.
@@ -64,7 +66,7 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // Runs the menu at the specified location. If the menu was configured to
   // block, the selected item is returned. If the menu does not block this
   // returns NULL immediately.
-  MenuItemView* Run(gfx::NativeWindow parent,
+  MenuItemView* Run(Widget* parent,
                     MenuButton* button,
                     MenuItemView* root,
                     const gfx::Rect& bounds,
@@ -116,7 +118,16 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   void OnDragEnteredScrollButton(SubmenuView* source, bool is_up);
   void OnDragExitedScrollButton(SubmenuView* source);
 
+  // Invoked once for any Widget activation change.  This allows the menu
+  // to be canceled if the window manager changes the active window.
+  void OnWidgetActivationChanged();
+
  private:
+  friend class internal::MenuRunnerImpl;
+  friend class MenuHostRootView;
+  friend class MenuItemView;
+  friend class SubmenuView;
+
   class MenuScrollTask;
 
   struct SelectByCharDetails;
@@ -204,13 +215,13 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // to show/hide submenus and update state_.
   void SetSelection(MenuItemView* menu_item, int types);
 
-  // Sets the active MenuController.
-  static void SetActiveInstance(MenuController* controller);
-
 #if defined(OS_WIN)
   // Dispatcher method. This returns true if the menu was canceled, or
   // if the message is such that the menu should be closed.
   virtual bool Dispatch(const MSG& msg);
+#elif defined(USE_WAYLAND)
+  virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
+      ui::WaylandEvent* event);
 #elif defined(TOUCH_UI)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(XEvent* xevent);
 #else
@@ -226,8 +237,9 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   bool OnKeyDown(int key_code);
 #endif
 
-  // Creates a MenuController. If blocking is true, Run blocks the caller
-  explicit MenuController(bool blocking);
+  // Creates a MenuController. If |blocking| is true a nested message loop is
+  // started in |Run|.
+  MenuController(bool blocking, internal::MenuControllerDelegate* delegate);
 
   virtual ~MenuController();
 
@@ -459,7 +471,7 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   MenuDelegate::DropPosition drop_position_;
 
   // Owner of child windows.
-  gfx::NativeWindow owner_;
+  Widget* owner_;
 
   // Indicates a possible drag operation.
   bool possible_drag_;
@@ -488,6 +500,8 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // If non-null mouse drag events are forwarded to this view. See
   // UpdateActiveMouseView for details.
   View* active_mouse_view_;
+
+  internal::MenuControllerDelegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuController);
 };

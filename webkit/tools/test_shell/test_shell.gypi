@@ -316,7 +316,7 @@
             {
               'destination': '<(PRODUCT_DIR)/TestShell.app/Contents/MacOS/',
               'files': [
-                '<(PRODUCT_DIR)/libffmpegsumo.dylib',
+                '<(PRODUCT_DIR)/ffmpegsumo.so',
               ],
             },
           ],
@@ -357,7 +357,7 @@
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
-        '<(DEPTH)/third_party/leveldb/leveldb.gyp:leveldb',
+        '<(DEPTH)/third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
         '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
       ],
       'sources': [
@@ -402,8 +402,8 @@
         '../../fileapi/file_system_quota_unittest.cc',
         '../../fileapi/file_system_usage_cache_unittest.cc',
         '../../fileapi/file_system_util_unittest.cc',
-        '../../fileapi/local_file_system_file_util_unittest.cc',
-        '../../fileapi/obfuscated_file_system_file_util_unittest.cc',
+        '../../fileapi/local_file_util_unittest.cc',
+        '../../fileapi/obfuscated_file_util_unittest.cc',
         '../../fileapi/quota_file_util_unittest.cc',
         '../../fileapi/sandbox_mount_point_provider_unittest.cc',
         '../../fileapi/file_system_test_helper.cc',
@@ -583,6 +583,8 @@
             '../../plugins/npapi/test/plugin_arguments_test.h',
             '../../plugins/npapi/test/plugin_create_instance_in_paint.cc',
             '../../plugins/npapi/test/plugin_create_instance_in_paint.h',
+            '../../plugins/npapi/test/plugin_delete_plugin_in_deallocate_test.cc',
+            '../../plugins/npapi/test/plugin_delete_plugin_in_deallocate_test.h',
             '../../plugins/npapi/test/plugin_delete_plugin_in_stream_test.cc',
             '../../plugins/npapi/test/plugin_delete_plugin_in_stream_test.h',
             '../../plugins/npapi/test/plugin_get_javascript_url_test.cc',
@@ -702,33 +704,17 @@
         {
           'target_name': 'test_shell_resources',
           'type': 'none',
+          'variables': {
+            'grit_grd_file': './test_shell_resources.grd',
+            'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/test_shell',
+          },
           'actions': [
             {
               'action_name': 'test_shell_resources',
-              'variables': {
-                'grit_path': '../../../tools/grit/grit.py',
-                'input_path': './test_shell_resources.grd',
-                'out_dir': '<(SHARED_INTERMEDIATE_DIR)/test_shell',
-              },
-              'inputs': [
-                '<(input_path)',
-              ],
-              'outputs': [
-                '<(out_dir)/grit/test_shell_resources.h',
-                '<(out_dir)/test_shell_resources.pak',
-              ],
-              'action': ['python', '<(grit_path)',
-                  '-i', '<(input_path)',
-                  'build', '-o', '<(out_dir)',
-                  '<@(grit_defines)'],
-              'message': 'Generating resources from <(input_path)',
+              'includes': [ '../../../build/grit_action.gypi' ],
             },
           ],
-          'direct_dependent_settings': {
-            'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)/test_shell',
-            ],
-          },
+          'includes': [ '../../../build/grit_target.gypi' ],
         },
       ],
     }],

@@ -37,14 +37,9 @@ class BookmarkFolderTargetTest : public CocoaTest {
     BookmarkModel* model = helper_.profile()->GetBookmarkModel();
     bmbNode_ = model->bookmark_bar_node();
   }
-  virtual void TearDown() {
-    pool_.Recycle();
-    CocoaTest::TearDown();
-  }
 
   BrowserTestHelper helper_;
   const BookmarkNode* bmbNode_;
-  base::mac::ScopedNSAutoreleasePool pool_;
 };
 
 TEST_F(BookmarkFolderTargetTest, StartWithNothing) {

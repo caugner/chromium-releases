@@ -40,29 +40,37 @@
     "chrome.experimental.app.notify": "experimental.app.html#method-notify",
     "chrome.experimental.app.resetLaunchIcon": "experimental.app.html#method-resetLaunchIcon",
     "chrome.experimental.app.setLaunchIcon": "experimental.app.html#method-setLaunchIcon",
+    "chrome.experimental.clear.browsingData": "experimental.clear.html#method-browsingData",
+    "chrome.experimental.clear.cache": "experimental.clear.html#method-cache",
+    "chrome.experimental.clear.cookies": "experimental.clear.html#method-cookies",
+    "chrome.experimental.clear.downloads": "experimental.clear.html#method-downloads",
+    "chrome.experimental.clear.formData": "experimental.clear.html#method-formData",
+    "chrome.experimental.clear.history": "experimental.clear.html#method-history",
+    "chrome.experimental.clear.passwords": "experimental.clear.html#method-passwords",
     "chrome.experimental.debugger.attach": "experimental.debugger.html#method-attach",
     "chrome.experimental.debugger.detach": "experimental.debugger.html#method-detach",
     "chrome.experimental.debugger.onDetach": "experimental.debugger.html#event-onDetach",
     "chrome.experimental.debugger.onEvent": "experimental.debugger.html#event-onEvent",
     "chrome.experimental.debugger.sendRequest": "experimental.debugger.html#method-sendRequest",
     "chrome.experimental.devtools.audits.addCategory": "experimental.devtools.audits.html#method-addCategory",
+    "chrome.experimental.devtools.inspectedWindow.eval": "experimental.devtools.inspectedWindow.html#method-eval",
+    "chrome.experimental.devtools.inspectedWindow.reload": "experimental.devtools.inspectedWindow.html#method-reload",
     "chrome.experimental.devtools.panels.create": "experimental.devtools.panels.html#method-create",
     "chrome.experimental.devtools.resources.getHAR": "experimental.devtools.resources.html#method-getHAR",
     "chrome.experimental.devtools.resources.onFinished": "experimental.devtools.resources.html#event-onFinished",
-    "chrome.experimental.devtools.resources.onNavigation": "experimental.devtools.resources.html#event-onNavigation",
+    "chrome.experimental.devtools.resources.onNavigated": "experimental.devtools.resources.html#event-onNavigated",
     "chrome.experimental.infobars.show": "experimental.infobars.html#method-show",
-    "chrome.experimental.processes.getProcessIdForTab": "experimental.processes.html#method-getProcessIdForTab",
-    "chrome.experimental.processes.onUpdated": "experimental.processes.html#event-onUpdated",
-    "chrome.experimental.sidebar.collapse": "experimental.sidebar.html#method-collapse",
-    "chrome.experimental.sidebar.expand": "experimental.sidebar.html#method-expand",
-    "chrome.experimental.sidebar.getState": "experimental.sidebar.html#method-getState",
-    "chrome.experimental.sidebar.hide": "experimental.sidebar.html#method-hide",
-    "chrome.experimental.sidebar.navigate": "experimental.sidebar.html#method-navigate",
-    "chrome.experimental.sidebar.onStateChanged": "experimental.sidebar.html#event-onStateChanged",
-    "chrome.experimental.sidebar.setBadgeText": "experimental.sidebar.html#method-setBadgeText",
-    "chrome.experimental.sidebar.setIcon": "experimental.sidebar.html#method-setIcon",
-    "chrome.experimental.sidebar.setTitle": "experimental.sidebar.html#method-setTitle",
-    "chrome.experimental.sidebar.show": "experimental.sidebar.html#method-show",
+    "chrome.experimental.permissions.contains": "experimental.permissions.html#method-contains",
+    "chrome.experimental.permissions.getAll": "experimental.permissions.html#method-getAll",
+    "chrome.experimental.permissions.onAdded": "experimental.permissions.html#event-onAdded",
+    "chrome.experimental.permissions.onRemoved": "experimental.permissions.html#event-onRemoved",
+    "chrome.experimental.permissions.remove": "experimental.permissions.html#method-remove",
+    "chrome.experimental.permissions.request": "experimental.permissions.html#method-request",
+    "chrome.experimental.settings.clear": "experimental.settings.html#method-clear",
+    "chrome.experimental.settings.get": "experimental.settings.html#method-get",
+    "chrome.experimental.settings.remove": "experimental.settings.html#method-remove",
+    "chrome.experimental.settings.set": "experimental.settings.html#method-set",
+    "chrome.experimental.webNavigation.getFrame": "experimental.webNavigation.html#method-getFrame",
     "chrome.experimental.webNavigation.onBeforeNavigate": "experimental.webNavigation.html#event-onBeforeNavigate",
     "chrome.experimental.webNavigation.onBeforeRetarget": "experimental.webNavigation.html#event-onBeforeRetarget",
     "chrome.experimental.webNavigation.onCommitted": "experimental.webNavigation.html#event-onCommitted",
@@ -71,6 +79,7 @@
     "chrome.experimental.webNavigation.onErrorOccurred": "experimental.webNavigation.html#event-onErrorOccurred",
     "chrome.experimental.webRequest.addEventListener": "experimental.webRequest.html#method-addEventListener",
     "chrome.experimental.webRequest.eventHandled": "experimental.webRequest.html#method-eventHandled",
+    "chrome.experimental.webRequest.onAuthRequired": "experimental.webRequest.html#event-onAuthRequired",
     "chrome.experimental.webRequest.onBeforeRedirect": "experimental.webRequest.html#event-onBeforeRedirect",
     "chrome.experimental.webRequest.onBeforeRequest": "experimental.webRequest.html#event-onBeforeRequest",
     "chrome.experimental.webRequest.onBeforeSendHeaders": "experimental.webRequest.html#event-onBeforeSendHeaders",
@@ -107,6 +116,8 @@
     "chrome.idle.queryState": "idle.html#method-queryState",
     "chrome.management.get": "management.html#method-get",
     "chrome.management.getAll": "management.html#method-getAll",
+    "chrome.management.getPermissionWarningsById": "management.html#method-getPermissionWarningsById",
+    "chrome.management.getPermissionWarningsByManifest": "management.html#method-getPermissionWarningsByManifest",
     "chrome.management.launchApp": "management.html#method-launchApp",
     "chrome.management.onDisabled": "management.html#event-onDisabled",
     "chrome.management.onEnabled": "management.html#event-onEnabled",
@@ -407,6 +418,29 @@
       ],
       "source_hash": "1fa553e390df62a4a1cefcd900eb03764cf88dd0",
       "zip_path": "examples\/api\/devtools\/audits\/broken-links.zip"
+    },
+    {
+      "api_calls": [
+        "chrome.experimental.webRequest.onBeforeRequest"
+      ],
+      "description": "I can't has cheezburger!",
+      "features": [
+        "background_page",
+        "experimental"
+      ],
+      "icon": null,
+      "id": "7f4d3fac7ae1ad4d514a15cd0b2c48c57a58c55e",
+      "name": "CatBlock",
+      "path": "examples\/extensions\/catblock\/",
+      "protocols": [],
+      "search_string": "CATBLOCK I CANT HAS CHEEZBURGER! BACKGROUND_PAGE EXPERIMENTAL CHROME.EXPERIMENTAL.WEBREQUEST.ONBEFOREREQUEST",
+      "source_files": [
+        "background.html",
+        "loldogs.js",
+        "manifest.json"
+      ],
+      "source_hash": "8d164e0de05f62e751308b546d39ef9eb4587239",
+      "zip_path": "examples\/extensions\/catblock.zip"
     },
     {
       "api_calls": [],
@@ -848,7 +882,48 @@
       ],
       "search_string": "GOOGLE CALENDAR CHECKER (BY GOOGLE) QUICKLY SEE THE TIME UNTIL YOUR NEXT MEETING FROM ANY OF YOUR CALENDARS. CLICK ON THE BUTTON TO BE TAKEN TO YOUR CALENDAR. BACKGROUND_PAGE BROWSER_ACTION OPTIONS_PAGE TABS CHROME.BROWSERACTION.ONCLICKED CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETICON CHROME.BROWSERACTION.SETTITLE CHROME.EXTENSION.GETBACKGROUNDPAGE CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.I18N.GETMESSAGE CHROME.TABS.CREATE CHROME.TABS.GET CHROME.TABS.GETALLINWINDOW CHROME.TABS.ONUPDATED CHROME.TABS.UPDATE",
       "source_files": [
+        "_locales\/ar\/messages.json",
+        "_locales\/bg\/messages.json",
+        "_locales\/ca\/messages.json",
+        "_locales\/cs\/messages.json",
+        "_locales\/da\/messages.json",
+        "_locales\/de\/messages.json",
+        "_locales\/el\/messages.json",
         "_locales\/en\/messages.json",
+        "_locales\/en_GB\/messages.json",
+        "_locales\/es\/messages.json",
+        "_locales\/es_419\/messages.json",
+        "_locales\/et\/messages.json",
+        "_locales\/fi\/messages.json",
+        "_locales\/fil\/messages.json",
+        "_locales\/fr\/messages.json",
+        "_locales\/he\/messages.json",
+        "_locales\/hi\/messages.json",
+        "_locales\/hr\/messages.json",
+        "_locales\/hu\/messages.json",
+        "_locales\/id\/messages.json",
+        "_locales\/it\/messages.json",
+        "_locales\/ja\/messages.json",
+        "_locales\/ko\/messages.json",
+        "_locales\/lt\/messages.json",
+        "_locales\/lv\/messages.json",
+        "_locales\/nb\/messages.json",
+        "_locales\/nl\/messages.json",
+        "_locales\/pl\/messages.json",
+        "_locales\/pt_BR\/messages.json",
+        "_locales\/pt_PT\/messages.json",
+        "_locales\/ro\/messages.json",
+        "_locales\/ru\/messages.json",
+        "_locales\/sk\/messages.json",
+        "_locales\/sl\/messages.json",
+        "_locales\/sr\/messages.json",
+        "_locales\/sv\/messages.json",
+        "_locales\/th\/messages.json",
+        "_locales\/tr\/messages.json",
+        "_locales\/uk\/messages.json",
+        "_locales\/vi\/messages.json",
+        "_locales\/zh_CN\/messages.json",
+        "_locales\/zh_TW\/messages.json",
         "javascript\/background.js",
         "javascript\/options.js",
         "javascript\/util.js",
@@ -856,7 +931,7 @@
         "views\/background.html",
         "views\/options.html"
       ],
-      "source_hash": "3d9782a3e8315bbbca36c63297db2c8926df4521",
+      "source_hash": "e11820efcb8d66b06320f786f95ef697f18fe4d8",
       "zip_path": "examples\/extensions\/calendar.zip"
     },
     {
@@ -979,7 +1054,7 @@
         "manifest.json",
         "options.html"
       ],
-      "source_hash": "327e6bf6005b861f17848b59dc50ebb18d1a57f4",
+      "source_hash": "6c4da0f4e9348842619fce0179f3f35ca24027ad",
       "zip_path": "examples\/extensions\/gmail.zip"
     },
     {
@@ -1552,9 +1627,7 @@
       "zip_path": "examples\/api\/browserAction\/print.zip"
     },
     {
-      "api_calls": [
-        "chrome.experimental.processes.onUpdated"
-      ],
+      "api_calls": [],
       "description": "Adds a browser action that monitors resource usage of all browser processes.",
       "features": [
         "browser_action",
@@ -1567,7 +1640,7 @@
       "name": "Process Monitor",
       "path": "examples\/api\/processes\/process_monitor\/",
       "protocols": [],
-      "search_string": "PROCESS MONITOR ADDS A BROWSER ACTION THAT MONITORS RESOURCE USAGE OF ALL BROWSER PROCESSES. BROWSER_ACTION EXPERIMENTAL POPUP TABS CHROME.EXPERIMENTAL.PROCESSES.ONUPDATED",
+      "search_string": "PROCESS MONITOR ADDS A BROWSER ACTION THAT MONITORS RESOURCE USAGE OF ALL BROWSER PROCESSES. BROWSER_ACTION EXPERIMENTAL POPUP TABS",
       "source_files": [
         "manifest.json",
         "popup.html"
@@ -1595,10 +1668,10 @@
       ],
       "icon": "icon128.png",
       "id": "3e8e226d87e431296bb110b4f6eb7eec2ca7a826",
-      "name": "Proxy Settings",
+      "name": "Proxy Extension API Sample",
       "path": "examples\/extensions\/proxy_configuration\/",
       "protocols": [],
-      "search_string": "PROXY SETTINGS SET CHROME-SPECIFIC PROXIES; A DEMONSTRATION OF CHROMES PROXY API BACKGROUND_PAGE BROWSER_ACTION POPUP PROXY CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETTITLE CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.I18N.GETMESSAGE CHROME.PROXY.ONPROXYERROR",
+      "search_string": "PROXY EXTENSION API SAMPLE SET CHROME-SPECIFIC PROXIES; A DEMONSTRATION OF CHROMES PROXY API BACKGROUND_PAGE BROWSER_ACTION POPUP PROXY CHROME.BROWSERACTION.SETBADGEBACKGROUNDCOLOR CHROME.BROWSERACTION.SETBADGETEXT CHROME.BROWSERACTION.SETTITLE CHROME.EXTENSION.ISALLOWEDINCOGNITOACCESS CHROME.EXTENSION.ONREQUEST CHROME.EXTENSION.SENDREQUEST CHROME.I18N.GETMESSAGE CHROME.PROXY.ONPROXYERROR",
       "source_files": [
         "_locales\/en\/messages.json",
         "background.html",
@@ -1611,7 +1684,7 @@
         "test\/proxy_form_controller_test.js",
         "test\/unittest.css"
       ],
-      "source_hash": "fe24cb558aaf23b7d8e6f6ac64574778bac113ec",
+      "source_hash": "9378cbaff5c4aa3def4a92824b88146335feac44",
       "zip_path": "examples\/extensions\/proxy_configuration.zip"
     },
     {
@@ -1682,7 +1755,6 @@
     },
     {
       "api_calls": [
-        "chrome.experimental.processes.getProcessIdForTab",
         "chrome.tabs.get",
         "chrome.tabs.getSelected",
         "chrome.tabs.update",
@@ -1703,7 +1775,7 @@
       "name": "Show Tabs in Process",
       "path": "examples\/api\/processes\/show_tabs\/",
       "protocols": [],
-      "search_string": "SHOW TABS IN PROCESS ADDS A BROWSER ACTION SHOWING WHICH TABS SHARE THE CURRENT TABS PROCESS. BROWSER_ACTION EXPERIMENTAL POPUP TABS CHROME.EXPERIMENTAL.PROCESSES.GETPROCESSIDFORTAB CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.UPDATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT CHROME.WINDOWS.UPDATE",
+      "search_string": "SHOW TABS IN PROCESS ADDS A BROWSER ACTION SHOWING WHICH TABS SHARE THE CURRENT TABS PROCESS. BROWSER_ACTION EXPERIMENTAL POPUP TABS CHROME.TABS.GET CHROME.TABS.GETSELECTED CHROME.TABS.UPDATE CHROME.WINDOWS.GET CHROME.WINDOWS.GETALL CHROME.WINDOWS.GETCURRENT CHROME.WINDOWS.UPDATE",
       "source_files": [
         "manifest.json",
         "popup.html"
@@ -1852,7 +1924,7 @@
         "navigation_collector.js",
         "popup.html"
       ],
-      "source_hash": "efa16032a02c474f9c9bafb90a964fd57c667ea2",
+      "source_hash": "34eab42d863313843fd491a468274fc2c208da05",
       "zip_path": "examples\/api\/webNavigation\/basic.zip"
     },
     {

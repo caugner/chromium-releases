@@ -411,18 +411,26 @@ void DraggedTabController::InitTabDragData(BaseTab* tab,
 ///////////////////////////////////////////////////////////////////////////////
 // DraggedTabController, PageNavigator implementation:
 
+// TODO(adriansc): Remove this method once refactoring changed all call sites.
 TabContents* DraggedTabController::OpenURLFromTab(
     TabContents* source,
     const GURL& url,
     const GURL& referrer,
     WindowOpenDisposition disposition,
     PageTransition::Type transition) {
+  return OpenURLFromTab(source,
+                        OpenURLParams(url, referrer, disposition, transition));
+}
+
+TabContents* DraggedTabController::OpenURLFromTab(TabContents* source,
+                                                  const OpenURLParams& params) {
   if (source_tab_drag_data()->original_delegate) {
-    if (disposition == CURRENT_TAB)
-      disposition = NEW_WINDOW;
+    OpenURLParams forward_params = params;
+    if (params.disposition == CURRENT_TAB)
+      forward_params.disposition = NEW_WINDOW;
 
     return source_tab_drag_data()->original_delegate->OpenURLFromTab(
-        source, url, referrer, disposition, transition);
+        source, forward_params);
   }
   return NULL;
 }
@@ -659,7 +667,7 @@ void DraggedTabController::ContinueDragging() {
       Attach(target_tabstrip, screen_point);
   }
   if (!target_tabstrip) {
-    bring_to_front_timer_.Start(
+    bring_to_front_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(kBringToFrontDelay), this,
         &DraggedTabController::BringWindowUnderMouseToFront);
   }
@@ -1137,7 +1145,7 @@ void DraggedTabController::RevertDrag() {
   // it has been hidden.
   if (restore_frame) {
     if (!restore_bounds_.IsEmpty()) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
       HWND frame_hwnd = source_tabstrip_->GetWidget()->GetNativeView();
       MoveWindow(frame_hwnd, restore_bounds_.x(), restore_bounds_.y(),
                  restore_bounds_.width(), restore_bounds_.height(), TRUE);
@@ -1347,7 +1355,7 @@ gfx::Rect DraggedTabController::GetViewScreenBounds(views::View* view) const {
 }
 
 void DraggedTabController::HideFrame() {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // We don't actually hide the window, rather we just move it way off-screen.
   // If we actually hide it, we stop receiving drag events.
   HWND frame_hwnd = source_tabstrip_->GetWidget()->GetNativeView();
@@ -1400,7 +1408,7 @@ void DraggedTabController::BringWindowUnderMouseToFront() {
     dock_windows_.erase(dragged_view);
   }
   if (window) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     // Move the window to the front.
     SetWindowPos(window, HWND_TOP, 0, 0, 0, 0,
                  SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);

@@ -7,10 +7,10 @@
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/notification.h"
-#include "chrome/browser/ui/cocoa/browser_test_helper.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/notifications/balloon_controller.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 
 // Subclass balloon controller and mock out the initialization of the RVH.

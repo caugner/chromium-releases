@@ -4,16 +4,18 @@
 
 #include "chrome/browser/content_settings/content_settings_policy_provider.h"
 
+#include <string>
+
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_pref_service.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "googleurl/src/gurl.h"
@@ -22,7 +24,7 @@ using ::testing::_;
 
 namespace content_settings {
 
-class PolicyDefaultProviderTest : public TestingBrowserProcessTest {
+class PolicyDefaultProviderTest : public testing::Test {
  public:
   PolicyDefaultProviderTest()
       : ui_thread_(BrowserThread::UI, &message_loop_) {
@@ -142,7 +144,7 @@ class PolicyProviderTest : public testing::Test {
   BrowserThread ui_thread_;
 };
 
-TEST_F(PolicyProviderTest, Default) {
+TEST_F(PolicyProviderTest, GettingManagedContentSettings) {
   TestingProfile profile;
   TestingPrefService* prefs = profile.GetTestingPrefService();
 
@@ -161,10 +163,22 @@ TEST_F(PolicyProviderTest, Default) {
   EXPECT_EQ(CONTENT_SETTING_DEFAULT,
             provider.GetContentSetting(
                 youtube_url, youtube_url, CONTENT_SETTINGS_TYPE_COOKIES, ""));
+  EXPECT_EQ(NULL,
+            provider.GetContentSettingValue(
+                youtube_url, youtube_url, CONTENT_SETTINGS_TYPE_COOKIES, ""));
+
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             provider.GetContentSetting(
                 google_url, google_url, CONTENT_SETTINGS_TYPE_IMAGES, ""));
+  scoped_ptr<Value> value_ptr(provider.GetContentSettingValue(
+                google_url, google_url, CONTENT_SETTINGS_TYPE_IMAGES, ""));
+  int int_value = -1;
+  value_ptr->GetAsInteger(&int_value);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK, IntToContentSetting(int_value));
 
+  // The PolicyProvider does not allow setting content settings as they are
+  // enforced via policies and not set by the user or extension. So a call to
+  // SetContentSetting does nothing.
   provider.SetContentSetting(
       yt_url_pattern,
       yt_url_pattern,
@@ -220,6 +234,51 @@ TEST_F(PolicyProviderTest, ResourceIdentifier) {
                 CONTENT_SETTINGS_TYPE_PLUGINS,
                 "someplugin"));
 
+  provider.ShutdownOnUIThread();
+}
+
+TEST_F(PolicyProviderTest, AutoSelectCertificateList) {
+  TestingProfile profile;
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  PolicyProvider provider(prefs, NULL);
+  GURL google_url("https://mail.google.com");
+  // Tests the default setting for auto selecting certificates
+  EXPECT_EQ(NULL,
+            provider.GetContentSettingValue(
+                google_url,
+                google_url,
+                CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
+                std::string()));
+
+  // Set the content settings pattern list for origins to auto select
+  // certificates.
+  std::string pattern_str("\"pattern\":\"[*.]google.com\"");
+  std::string filter_str("\"filter\":{\"ISSUER\":{\"CN\":\"issuer name\"}}");
+  ListValue* value = new ListValue();
+  value->Append(Value::CreateStringValue(
+      "{" + pattern_str + "," + filter_str + "}"));
+  prefs->SetManagedPref(prefs::kManagedAutoSelectCertificateForUrls,
+                        value);
+  GURL youtube_url("https://www.youtube.com");
+  EXPECT_EQ(NULL,
+            provider.GetContentSettingValue(
+                youtube_url,
+                youtube_url,
+                CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
+                std::string()));
+  scoped_ptr<Value> cert_filter(provider.GetContentSettingValue(
+      google_url,
+      google_url,
+      CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
+      std::string()));
+
+  ASSERT_EQ(Value::TYPE_DICTIONARY, cert_filter->GetType());
+  DictionaryValue* dict_value =
+      static_cast<DictionaryValue*>(cert_filter.get());
+  std::string actual_common_name;
+  ASSERT_TRUE(dict_value->GetString("ISSUER.CN", &actual_common_name));
+  EXPECT_EQ("issuer name", actual_common_name);
   provider.ShutdownOnUIThread();
 }
 

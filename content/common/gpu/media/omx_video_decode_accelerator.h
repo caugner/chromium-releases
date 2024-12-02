@@ -42,7 +42,7 @@ class OmxVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   OmxVideoDecodeAccelerator(media::VideoDecodeAccelerator::Client* client);
 
   // media::VideoDecodeAccelerator implementation.
-  bool Initialize(const std::vector<uint32>& config) OVERRIDE;
+  bool Initialize(Profile profile) OVERRIDE;
   void Decode(const media::BitstreamBuffer& bitstream_buffer) OVERRIDE;
   virtual void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) OVERRIDE;
@@ -59,7 +59,8 @@ class OmxVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   // Because OMX state-transitions are described solely by the "state reached"
   // (3.1.2.9.1, table 3-7 of the spec), we track what transition was requested
   // using this enum.  Note that it is an error to request a transition while
-  // |*this| is in any state other than NO_TRANSITION.
+  // |*this| is in any state other than NO_TRANSITION, unless requesting
+  // DESTROYING or ERRORING.
   enum CurrentStateChange {
     NO_TRANSITION,  // Not in the middle of a transition.
     INITIALIZING,
@@ -80,9 +81,6 @@ class OmxVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
     EGLImageKHR egl_image;
   };
   typedef std::map<int32, OutputPicture> OutputPictureById;
-
-  // Verify that |config| is compatible with this class and hardware.
-  bool VerifyConfigs(const std::vector<uint32>& configs);
 
   MessageLoop* message_loop_;
   OMX_HANDLETYPE component_handle_;
@@ -106,8 +104,6 @@ class OmxVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   // (i.e. the source state is uniquely defined by the pair).
   void OnReachedIdleInInitializing();
   void OnReachedExecutingInInitializing();
-  void OnReachedPauseInFlushing();
-  void OnReachedExecutingInFlushing();
   void OnReachedPauseInResetting();
   void OnReachedExecutingInResetting();
   void OnReachedIdleInDestroying();
@@ -136,14 +132,13 @@ class OmxVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   void OnOutputPortDisabled();
   void OnOutputPortEnabled();
 
+  // Decode bitstream buffers that were queued (see queued_bitstream_buffers_).
+  void DecodeQueuedBitstreamBuffers();
+
   // IL-client state.
   OMX_STATETYPE client_state_;
   // See comment on CurrentStateChange above.
   CurrentStateChange current_state_change_;
-  // TODO(fischman): come up with a better scheme than this.  There must be some
-  // way that OMX signals to its client that EmptyBufferDone/FillBufferDone
-  // callbacks are the result of port-flushing as opposed to normal operation.
-  bool saw_eos_during_flush_;
 
   // Following are input port related variables.
   int input_buffer_count_;
@@ -173,9 +168,23 @@ class OmxVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
   // TODO(fischman): do away with this madness.
   std::set<OMX_BUFFERHEADERTYPE*> fake_output_buffers_;
 
+  // Encoded bitstream buffers awaiting decode, queued while the decoder was
+  // unable to accept them.
+  typedef std::vector<media::BitstreamBuffer> BitstreamBufferList;
+  BitstreamBufferList queued_bitstream_buffers_;
+  // Available output picture buffers released during Reset() and awaiting
+  // re-use once Reset is done.  Is empty most of the time and drained right
+  // before NotifyResetDone is sent.
+  std::vector<int> queued_picture_buffer_ids_;
+
   // To expose client callbacks from VideoDecodeAccelerator.
   // NOTE: all calls to this object *MUST* be executed in message_loop_.
   Client* client_;
+
+  // These two members are only used during Initialization.
+  // OMX_AVCProfile requested during Initialization.
+  uint32 profile_;
+  bool component_name_is_nvidia_h264ext_;
 
   // Method to handle events
   void EventHandlerCompleteTask(OMX_EVENTTYPE event,

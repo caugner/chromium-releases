@@ -17,8 +17,8 @@
 #include "base/platform_file.h"
 #include "base/process.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_operation_context.h"
+#include "webkit/fileapi/file_system_types.h"
 #include "webkit/quota/quota_manager.h"
 
 namespace base {
@@ -38,6 +38,7 @@ class FileSystemCallbackDispatcher;
 class FileSystemContext;
 class FileWriterDelegate;
 class FileSystemOperationTest;
+class FileSystemQuotaUtil;
 
 // This class is designed to serve one-time file system operation per instance.
 // Only one method(CreateFile, CreateDirectory, Copy, Move, DirectoryExists,
@@ -48,12 +49,12 @@ class FileSystemOperationTest;
 class FileSystemOperation {
  public:
   // |dispatcher| will be owned by this class.
-  // |file_system_file_util| is optional; if supplied, it will not be deleted by
+  // |file_util| is optional; if supplied, it will not be deleted by
   // the class.  It's expecting a pointer to a singleton.
   FileSystemOperation(FileSystemCallbackDispatcher* dispatcher,
                       scoped_refptr<base::MessageLoopProxy> proxy,
                       FileSystemContext* file_system_context,
-                      FileSystemFileUtil* file_system_file_util);
+                      FileSystemFileUtil* file_util);
   virtual ~FileSystemOperation();
 
   void OpenFileSystem(const GURL& origin_url,
@@ -92,6 +93,8 @@ class FileSystemOperation {
   void Cancel(FileSystemOperation* cancel_operation);
 
  private:
+  class ScopedQuotaUtilHelper;
+
   FileSystemContext* file_system_context() const {
     return file_system_operation_context_.file_system_context();
   }
@@ -181,7 +184,7 @@ class FileSystemOperation {
                                    GURL* root_url,
                                    FileSystemType* type,
                                    FilePath* virtual_path,
-                                   FileSystemFileUtil** file_system_file_util);
+                                   FileSystemFileUtil** file_util);
 
   // Checks the validity of a given |path| for writing, cracks the path into
   // root URL and virtual path components, and returns the correct
@@ -203,7 +206,7 @@ class FileSystemOperation {
                                     GURL* root_url,
                                     FileSystemType* type,
                                     FilePath* virtual_path,
-                                    FileSystemFileUtil** file_system_file_util);
+                                    FileSystemFileUtil** file_util);
 
 #ifndef NDEBUG
   enum OperationType {
@@ -239,6 +242,8 @@ class FileSystemOperation {
 
   base::ScopedCallbackFactory<FileSystemOperation> callback_factory_;
 
+  scoped_ptr<ScopedQuotaUtilHelper> quota_util_helper_;
+
   // These are all used only by Write().
   friend class FileWriterDelegate;
   scoped_ptr<FileWriterDelegate> file_writer_delegate_;
@@ -248,6 +253,12 @@ class FileSystemOperation {
   // Used only by OpenFile, in order to clone the file handle back to the
   // requesting process.
   base::ProcessHandle peer_handle_;
+
+  // Used to keep a virtual path around while we check for quota.
+  // If an operation needs only one path, use src_virtual_path_, even if it's a
+  // write.
+  FilePath src_virtual_path_;
+  FilePath dest_virtual_path_;
 
   // Options for CreateFile and CreateDirectory.
   bool exclusive_;

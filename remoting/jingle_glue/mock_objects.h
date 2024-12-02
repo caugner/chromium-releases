@@ -27,15 +27,13 @@ class MockIqRequest : public IqRequest {
   MockIqRequest();
   virtual ~MockIqRequest();
 
-  MOCK_METHOD3(SendIq, void(const std::string& type,
-                            const std::string& addressee,
-                            buzz::XmlElement* iq_body));
-  MOCK_METHOD1(set_callback, void(IqRequest::ReplyCallback*));
+  MOCK_METHOD1(SendIq, void(buzz::XmlElement* stanza));
+  MOCK_METHOD1(set_callback, void(const IqRequest::ReplyCallback&));
 
   // Ensure this takes ownership of the pointer, as the real IqRequest object
   // would, to avoid memory-leak.
-  void set_callback_hook(IqRequest::ReplyCallback* callback) {
-    callback_.reset(callback);
+  void set_callback_hook(const IqRequest::ReplyCallback& callback) {
+    callback_ = callback;
   }
 
   void Init() {
@@ -44,10 +42,10 @@ class MockIqRequest : public IqRequest {
             this, &MockIqRequest::set_callback_hook));
   }
 
-  IqRequest::ReplyCallback* callback() { return callback_.get(); }
+  ReplyCallback& callback() { return callback_; }
 
  private:
-  scoped_ptr<IqRequest::ReplyCallback> callback_;
+  ReplyCallback callback_;
 };
 
 }  // namespace remoting

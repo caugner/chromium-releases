@@ -13,8 +13,9 @@
 #include "content/browser/site_instance.h"
 #include "content/common/page_transition_types.h"
 
-TestTabContents::TestTabContents(Profile* profile, SiteInstance* instance)
-    : TabContents(profile, instance, MSG_ROUTING_NONE, NULL, NULL),
+TestTabContents::TestTabContents(content::BrowserContext* browser_context,
+                                 SiteInstance* instance)
+    : TabContents(browser_context, instance, MSG_ROUTING_NONE, NULL, NULL),
       transition_cross_site(false),
       delegate_view_override_(NULL),
       expect_set_history_length_and_prune_(false),
@@ -40,7 +41,7 @@ bool TestTabContents::CreateRenderViewForRenderManager(
 
 TabContents* TestTabContents::Clone() {
   TabContents* tc = new TestTabContents(
-      profile(), SiteInstance::CreateSiteInstance(profile()));
+      browser_context(), SiteInstance::CreateSiteInstance(browser_context()));
   tc->controller().CopyStateFrom(controller_);
   return tc;
 }
@@ -50,7 +51,7 @@ void TestTabContents::NavigateAndCommit(const GURL& url) {
   GURL loaded_url(url);
   bool reverse_on_redirect = false;
   BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
-      &loaded_url, profile(), &reverse_on_redirect);
+      &loaded_url, browser_context(), &reverse_on_redirect);
 
   // LoadURL created a navigation entry, now simulate the RenderView sending
   // a notification that it actually navigated.

@@ -7,6 +7,7 @@
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
@@ -197,11 +198,11 @@ void BookmarkBubbleNotificationBridge::Observe(
   origin.x -= bubbleArrowtip.x;
   [window setFrameOrigin:origin];
   [parentWindow_ addChildWindow:window ordered:NSWindowAbove];
-  // Default is IDS_BOOMARK_BUBBLE_PAGE_BOOKMARK; "Bookmark".
+  // Default is IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARK; "Bookmark".
   // If adding for the 1st time the string becomes "Bookmark Added!"
   if (!alreadyBookmarked_) {
     NSString* title =
-        l10n_util::GetNSString(IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED);
+        l10n_util::GetNSString(IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARKED);
     [bigTitle_ setStringValue:title];
   }
 
@@ -275,7 +276,7 @@ void BookmarkBubbleNotificationBridge::Observe(
 
 - (IBAction)remove:(id)sender {
   [self stopPulsingBookmarkButton];
-  model_->SetURLStarred(node_->url(), node_->GetTitle(), false);
+  bookmark_utils::RemoveAllBookmarks(model_, node_->url());
   UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Unstar"));
   node_ = NULL;  // no longer valid
   [self ok:sender];
@@ -370,7 +371,7 @@ void BookmarkBubbleNotificationBridge::Observe(
 
 + (NSString*)chooseAnotherFolderString {
   return l10n_util::GetNSStringWithFixup(
-      IDS_BOOMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER);
+      IDS_BOOKMARK_BUBBLE_CHOOSER_ANOTHER_FOLDER);
 }
 
 // For the given folder node, walk the tree and add folder names to
@@ -378,7 +379,7 @@ void BookmarkBubbleNotificationBridge::Observe(
 - (void)addFolderNodes:(const BookmarkNode*)parent
          toPopUpButton:(NSPopUpButton*)button
            indentation:(int)indentation {
-  if (!model_->is_root(parent))  {
+  if (!model_->is_root_node(parent))  {
     NSString* title = base::SysUTF16ToNSString(parent->GetTitle());
     NSMenu* menu = [button menu];
     NSMenuItem* item = [menu addItemWithTitle:title

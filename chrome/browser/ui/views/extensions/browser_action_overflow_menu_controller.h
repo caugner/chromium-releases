@@ -16,6 +16,11 @@
 class BrowserActionsContainer;
 class BrowserActionView;
 
+namespace views {
+class MenuRunner;
+class Widget;
+}
+
 // This class handles the overflow menu for browser actions (showing the menu,
 // drag and drop, etc). This class manages its own lifetime.
 class BrowserActionOverflowMenuController : public views::MenuDelegate {
@@ -36,7 +41,7 @@ class BrowserActionOverflowMenuController : public views::MenuDelegate {
   void set_observer(Observer* observer) { observer_ = observer; }
 
   // Shows the overflow menu.
-  bool RunMenu(gfx::NativeWindow window, bool for_drop);
+  bool RunMenu(views::Widget* widget, bool for_drop);
 
   // Closes the overflow menu (and its context menu if open as well).
   void CancelMenu();
@@ -86,8 +91,11 @@ class BrowserActionOverflowMenuController : public views::MenuDelegate {
   // A pointer to the overflow menu button that we are showing the menu for.
   views::MenuButton* menu_button_;
 
-  // The overflow menu for the menu button.
-  scoped_ptr<views::MenuItemView> menu_;
+  // The overflow menu for the menu button. Owned by |menu_runner_|.
+  views::MenuItemView* menu_;
+
+  // Resposible for running the menu.
+  scoped_ptr<views::MenuRunner> menu_runner_;
 
   // The views vector of all the browser actions the container knows about. We
   // won't show all items, just the one starting at |start_index| and above.

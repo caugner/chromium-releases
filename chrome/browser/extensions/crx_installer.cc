@@ -52,7 +52,8 @@ static base::LazyInstance<Whitelist>
 
 }  // namespace
 
-CrxInstaller::WhitelistEntry::WhitelistEntry() {}
+CrxInstaller::WhitelistEntry::WhitelistEntry()
+  : use_app_installed_bubble(false) {}
 CrxInstaller::WhitelistEntry::~WhitelistEntry() {}
 
 // static
@@ -119,6 +120,7 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
       delete_source_(false),
       is_gallery_install_(false),
       create_app_shortcut_(false),
+      page_index_(-1),
       frontend_weak_(frontend_weak),
       client_(client),
       apps_require_extension_mime_type_(false),
@@ -406,6 +408,8 @@ void CrxInstaller::ConfirmInstall() {
       return;
     }
     whitelisted = true;
+    if (entry->use_app_installed_bubble)
+      client_->set_use_app_installed_bubble(true);
   }
 
   if (client_ &&
@@ -560,7 +564,8 @@ void CrxInstaller::ReportSuccessFromUIThread() {
 
   // Tell the frontend about the installation and hand off ownership of
   // extension_ to it.
-  frontend_weak_->OnExtensionInstalled(extension_, is_gallery_install());
+  frontend_weak_->OnExtensionInstalled(extension_, is_gallery_install(),
+                                       page_index_);
   extension_ = NULL;
 
   NotifyCrxInstallComplete();

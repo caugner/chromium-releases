@@ -160,8 +160,8 @@ class NetInternalsMessageHandler
   virtual ~NetInternalsMessageHandler();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // Calls g_browser.receive in the renderer, passing in |command| and |arg|.
   // Takes ownership of |arg|.  If the renderer is displaying a log file, the
@@ -171,7 +171,7 @@ class NetInternalsMessageHandler
   // NotificationObserver implementation.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   // Javascript message handlers.
   void OnRendererReady(const ListValue* list);
@@ -275,7 +275,7 @@ class NetInternalsMessageHandler::IOThreadImpl
     : public base::RefCountedThreadSafe<
           NetInternalsMessageHandler::IOThreadImpl,
           BrowserThread::DeleteOnUIThread>,
-      public ChromeNetLog::ThreadSafeObserver,
+      public ChromeNetLog::ThreadSafeObserverImpl,
       public ConnectionTester::Delegate {
  public:
   // Type for methods that can be used as MessageHandler callbacks.
@@ -465,14 +465,15 @@ NetInternalsMessageHandler::~NetInternalsMessageHandler() {
 WebUIMessageHandler* NetInternalsMessageHandler::Attach(WebUI* web_ui) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  PrefService* pref_service = web_ui->GetProfile()->GetPrefs();
+  Profile* profile = Profile::FromWebUI(web_ui);
+  PrefService* pref_service = profile->GetPrefs();
   http_throttling_enabled_.Init(
       prefs::kHttpThrottlingEnabled, pref_service, this);
   http_throttling_may_experiment_.Init(
       prefs::kHttpThrottlingMayExperiment, pref_service, NULL);
 
   proxy_ = new IOThreadImpl(this->AsWeakPtr(), g_browser_process->io_thread(),
-                            web_ui->GetProfile()->GetRequestContext());
+                            profile->GetRequestContext());
 #ifdef OS_CHROMEOS
   syslogs_getter_.reset(new SystemLogsGetter(this,
       chromeos::system::SyslogsProvider::GetInstance()));
@@ -481,7 +482,7 @@ WebUIMessageHandler* NetInternalsMessageHandler::Attach(WebUI* web_ui) {
       proxy_->CreateCallback(&IOThreadImpl::OnRendererReady));
 
   prerender::PrerenderManager* prerender_manager =
-      web_ui->GetProfile()->GetPrerenderManager();
+      profile->GetPrerenderManager();
   if (prerender_manager) {
     prerender_manager_ = prerender_manager->AsWeakPtr();
   } else {
@@ -629,16 +630,10 @@ void NetInternalsMessageHandler::OnEnableHttpThrottling(const ListValue* list) {
 
   // We never receive OnEnableHttpThrottling unless the user has modified
   // the value of the checkbox on the about:net-internals page.  Once the
-  // user does that, we no longer allow experiments to control its value.
+  // user does that, we no longer change its value automatically (e.g.
+  // by changing the default or running an experiment).
   if (http_throttling_may_experiment_.GetValue()) {
     http_throttling_may_experiment_.SetValue(false);
-
-    // Disable the ongoing trial so that histograms after this point
-    // show as being in the "Default" group of the trial.
-    base::FieldTrial* trial = base::FieldTrialList::Find(
-        "HttpThrottlingEnabled");
-    if (trial)
-      trial->Disable();
   }
 }
 
@@ -648,7 +643,9 @@ void NetInternalsMessageHandler::OnGetPrerenderInfo(const ListValue* list) {
   Value* value = NULL;
   prerender::PrerenderManager* prerender_manager = prerender_manager_.get();
   if (!prerender_manager) {
-    value = new DictionaryValue();
+    DictionaryValue* dict_value = new DictionaryValue();
+    dict_value->SetBoolean("enabled", false);
+    value = dict_value;
   } else {
     value = prerender_manager->GetAsValue();
   }
@@ -761,7 +758,7 @@ NetInternalsMessageHandler::IOThreadImpl::IOThreadImpl(
     const base::WeakPtr<NetInternalsMessageHandler>& handler,
     IOThread* io_thread,
     net::URLRequestContextGetter* context_getter)
-    : ThreadSafeObserver(net::NetLog::LOG_ALL_BUT_BYTES),
+    : ThreadSafeObserverImpl(net::NetLog::LOG_ALL_BUT_BYTES),
       handler_(handler),
       io_thread_(io_thread),
       context_getter_(context_getter),
@@ -784,8 +781,10 @@ NetInternalsMessageHandler::IOThreadImpl::CreateCallback(
 void NetInternalsMessageHandler::IOThreadImpl::Detach() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Unregister with network stack to observe events.
-  if (is_observing_log_)
-    io_thread_->net_log()->RemoveObserver(this);
+  if (is_observing_log_) {
+    is_observing_log_ = false;
+    RemoveAsObserver();
+  }
 
   // Cancel any in-progress connection tests.
   connection_tester_.reset();
@@ -824,8 +823,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnRendererReady(
   // Register with network stack to observe events.
   is_observing_log_ = true;
   ChromeNetLog::EntryList entries;
-  io_thread_->net_log()->AddObserverAndGetAllPassivelyCapturedEvents(this,
-                                                                     &entries);
+  AddAsObserverAndGetAllPassivelyCapturedEvents(io_thread_->net_log(),
+                                                &entries);
   SendPassiveLogEntries(entries);
 }
 

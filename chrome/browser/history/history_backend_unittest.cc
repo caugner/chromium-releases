@@ -14,6 +14,7 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/in_memory_database.h"
@@ -27,6 +28,7 @@
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/codec/jpeg_codec.h"
+#include "ui/gfx/image/image.h"
 
 using base::Time;
 
@@ -267,18 +269,19 @@ TEST_F(HistoryBackendTest, DeleteAll) {
   URLRow outrow1;
   EXPECT_TRUE(mem_backend_->db_->GetRowForURL(row1.url(), NULL));
 
-  // Add thumbnails for each page.
+  // Add thumbnails for each page. The |Images| take ownership of SkBitmap
+  // created from decoding the images.
   ThumbnailScore score(0.25, true, true);
-  scoped_ptr<SkBitmap> google_bitmap(
+  gfx::Image google_bitmap(
       gfx::JPEGCodec::Decode(kGoogleThumbnail, sizeof(kGoogleThumbnail)));
 
   Time time;
   GURL gurl;
-  backend_->thumbnail_db_->SetPageThumbnail(gurl, row1_id, *google_bitmap,
+  backend_->thumbnail_db_->SetPageThumbnail(gurl, row1_id, &google_bitmap,
                                             score, time);
-  scoped_ptr<SkBitmap> weewar_bitmap(
+  gfx::Image weewar_bitmap(
      gfx::JPEGCodec::Decode(kWeewarThumbnail, sizeof(kWeewarThumbnail)));
-  backend_->thumbnail_db_->SetPageThumbnail(gurl, row2_id, *weewar_bitmap,
+  backend_->thumbnail_db_->SetPageThumbnail(gurl, row2_id, &weewar_bitmap,
                                             score, time);
 
   // Star row1.
@@ -384,8 +387,8 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
   URLID row2_id = backend_->db_->GetRowForURL(row2.url(), NULL);
 
   // Star the two URLs.
-  bookmark_model_.SetURLStarred(row1.url(), string16(), true);
-  bookmark_model_.SetURLStarred(row2.url(), string16(), true);
+  bookmark_utils::AddIfNotBookmarked(&bookmark_model_, row1.url(), string16());
+  bookmark_utils::AddIfNotBookmarked(&bookmark_model_, row2.url(), string16());
 
   // Delete url 2. Because url 2 is starred this won't delete the URL, only
   // the visits.
@@ -404,7 +407,8 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
                                                          NULL));
 
   // Unstar row2.
-  bookmark_model_.SetURLStarred(row2.url(), string16(), false);
+  bookmark_utils::RemoveAllBookmarks(&bookmark_model_, row2.url());
+
   // Tell the backend it was unstarred. We have to explicitly do this as
   // BookmarkModel isn't wired up to the backend during testing.
   std::set<GURL> unstarred_urls;
@@ -420,7 +424,7 @@ TEST_F(HistoryBackendTest, URLsNoLongerBookmarked) {
                                                          NULL));
 
   // Unstar row 1.
-  bookmark_model_.SetURLStarred(row1.url(), string16(), false);
+  bookmark_utils::RemoveAllBookmarks(&bookmark_model_, row1.url());
   // Tell the backend it was unstarred. We have to explicitly do this as
   // BookmarkModel isn't wired up to the backend during testing.
   unstarred_urls.clear();
@@ -734,6 +738,33 @@ TEST_F(HistoryBackendTest, AddVisitsSource) {
   ASSERT_EQ(2U, visit_sources.size());
   for (int i = 0; i < 2; i++)
     EXPECT_EQ(history::SOURCE_SYNCED, visit_sources[visits[i].visit_id]);
+}
+
+TEST_F(HistoryBackendTest, GetMostRecentVisits) {
+  ASSERT_TRUE(backend_.get());
+
+  GURL url1("http://www.cnn.com");
+  std::vector<VisitInfo> visits1;
+  visits1.push_back(VisitInfo(
+      Time::Now() - base::TimeDelta::FromDays(5), PageTransition::LINK));
+  visits1.push_back(VisitInfo(
+      Time::Now() - base::TimeDelta::FromDays(1), PageTransition::LINK));
+  visits1.push_back(VisitInfo(
+      Time::Now(), PageTransition::LINK));
+
+  // Clear all history.
+  backend_->DeleteAllHistory();
+
+  // Add the visits.
+  backend_->AddVisits(url1, visits1, history::SOURCE_IE_IMPORTED);
+
+  // Verify the visits were added with their sources.
+  VisitVector visits;
+  URLRow row;
+  URLID id = backend_->db()->GetRowForURL(url1, &row);
+  ASSERT_TRUE(backend_->db()->GetMostRecentVisitsForURL(id, 1, &visits));
+  ASSERT_EQ(1U, visits.size());
+  EXPECT_EQ(visits1[2].first, visits[0].visit_time);
 }
 
 TEST_F(HistoryBackendTest, RemoveVisitsTransitions) {

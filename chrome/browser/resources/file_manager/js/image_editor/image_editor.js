@@ -5,37 +5,77 @@
 /**
  * ImageEditor is the top level object that holds together and connects
  * everything needed for image editing.
- * @param {HTMLElement} parent
- * @param {Function} saveCallback
- * @param {Function} closeCallback
+ * @param {HTMLElement} container
+ * @param {function(Blob)} saveCallback
+ * @param {function()} closeCallback
  */
-function ImageEditor(parent, saveCallback, closeCallback) {
-  this.parent_ = parent;
+function ImageEditor(container, saveCallback, closeCallback) {
+  this.container_ = container;
   this.saveCallback_ = saveCallback;
   this.closeCallback_ = closeCallback;
 
-  var document = this.parent_.ownerDocument;
+  this.container_.innerHTML = '';
 
-  var wrapper = document.createElement('div');
-  wrapper.className = 'canvas-wrapper';
-  parent.appendChild(wrapper);
+  var document = this.container_.ownerDocument;
+
+  this.canvasWrapper_ = document.createElement('div');
+  this.canvasWrapper_.className = 'canvas-wrapper';
+  container.appendChild(this.canvasWrapper_);
 
   var canvas = document.createElement('canvas');
-  wrapper.appendChild(canvas);
-  canvas.width = wrapper.clientWidth;
-  canvas.height = wrapper.clientHeight;
+  this.canvasWrapper_.appendChild(canvas);
+  canvas.width = this.canvasWrapper_.clientWidth;
+  canvas.height = this.canvasWrapper_.clientHeight;
 
   this.buffer_ = new ImageBuffer(canvas);
-  this.buffer_.addOverlay(new ImageBuffer.Overview());
 
-  this.scaleControl_ = new ImageEditor.ScaleControl(wrapper, this.buffer_);
+  this.scaleControl_ = new ImageEditor.ScaleControl(
+      this.canvasWrapper_, this.getBuffer().getViewport());
 
-  this.panControl_ = new ImageEditor.MouseControl(canvas, this.buffer_);
+  this.panControl_ = new ImageEditor.MouseControl(canvas, this.getBuffer());
 
   this.toolbar_ =
-      new ImageEditor.Toolbar(parent, this.onOptionsChange.bind(this));
+      new ImageEditor.Toolbar(container, this.onOptionsChange.bind(this));
   this.initToolbar();
 }
+
+/**
+ * Create an ImageEditor instance bound to a current web page, load the content.
+ *
+ * Use this method when image_editor.html is loaded into an iframe.
+ *
+ * @param {function(Blob)} saveCallback
+ * @param {function()} closeCallback
+ * @param {HTMLCanvasElement|HTMLImageElement|String} source
+ * @param {Object} opt_metadata
+ * @return {ImageEditor}
+ */
+ImageEditor.open = function(saveCallback, closeCallback, source, opt_metadata) {
+  var container = document.getElementsByClassName('image-editor')[0];
+  var editor = new ImageEditor(container, saveCallback, closeCallback);
+  window.addEventListener('resize', editor.resizeFrame.bind(editor), false);
+  editor.load(source, opt_metadata);
+  return editor;
+};
+
+/**
+ * Loads a new image and its metadata.
+ * @param {HTMLCanvasElement|HTMLImageElement|String} source
+ * @param {Object} opt_metadata
+ */
+ImageEditor.prototype.load = function(source, opt_metadata) {
+  this.onModeCancel();
+  this.getBuffer().load(source);
+  this.metadata_ = opt_metadata;
+};
+
+/**
+ * Window resize handler.
+ */
+ImageEditor.prototype.resizeFrame = function() {
+  this.getBuffer().resizeScreen(
+      this.canvasWrapper_.clientWidth, this.canvasWrapper_.clientHeight, true);
+};
 
 /**
  * @return {ImageBuffer}
@@ -48,15 +88,16 @@ ImageEditor.prototype.getBuffer = function () {
  * Destroys the UI and calls the close callback.
  */
 ImageEditor.prototype.close = function() {
-  this.parent_.innerHTML = '';
+  this.container_.innerHTML = '';
   this.closeCallback_();
 };
 
 /**
- * Passes the image canvas to the save callback.
+ * Encode the current image into a blob and pass it to the save callback.
  */
 ImageEditor.prototype.save = function() {
-  this.saveCallback_(this.getBuffer().getImageCanvas());
+  this.saveCallback_(ImageEncoder.getBlob(
+      this.getBuffer().getContent().getCanvas(), 'image/jpeg', this.metadata_));
 };
 
 ImageEditor.prototype.onOptionsChange = function(options) {
@@ -82,7 +123,7 @@ ImageEditor.prototype.initToolbar = function() {
 
 ImageEditor.Mode = function(displayName) {
   this.displayName = displayName;
-}
+};
 
 ImageEditor.Mode.prototype = {__proto__: ImageBuffer.Overlay.prototype };
 
@@ -90,8 +131,16 @@ ImageEditor.Mode.prototype.getBuffer = function() {
   return this.buffer_;
 };
 
-ImageEditor.Mode.prototype.repaint = function() {
-  return this.getBuffer().repaint();
+ImageEditor.Mode.prototype.repaint = function(opt_fromOverlay) {
+  return this.buffer_.repaint(opt_fromOverlay);
+};
+
+ImageEditor.Mode.prototype.getViewport = function() {
+  return this.viewport_;
+};
+
+ImageEditor.Mode.prototype.getContent = function() {
+  return this.content_;
 };
 
 /**
@@ -99,6 +148,8 @@ ImageEditor.Mode.prototype.repaint = function() {
  */
 ImageEditor.Mode.prototype.setUp = function(buffer) {
   this.buffer_ = buffer;
+  this.viewport_ = buffer.getViewport();
+  this.content_ = buffer.getContent();
   this.buffer_.addOverlay(this);
 };
 
@@ -134,7 +185,7 @@ ImageEditor.Mode.constructors = [];
 
 ImageEditor.Mode.register = function(constructor) {
   ImageEditor.Mode.constructors.push(constructor);
-}
+};
 
 ImageEditor.prototype.createModeButtons = function() {
   for (var i = 0; i != ImageEditor.Mode.constructors.length; i++) {
@@ -194,9 +245,9 @@ ImageEditor.prototype.onModeReset = function() {
 /**
  * Scale control for an ImageBuffer.
  */
-ImageEditor.ScaleControl = function(parent, buffer) {
-  this.buffer_ = buffer;
-  this.buffer_.setScaleControl(this);
+ImageEditor.ScaleControl = function(parent, viewport) {
+  this.viewport_ = viewport;
+  this.viewport_.setScaleControl(this);
 
   var div = parent.ownerDocument.createElement('div');
   div.className = 'scale-tool';
@@ -213,13 +264,14 @@ ImageEditor.ScaleControl = function(parent, buffer) {
   var scaleDown = parent.ownerDocument.createElement('button');
   scaleDown.className = 'scale-down';
   scaleDiv.appendChild(scaleDown);
-  scaleDown.addEventListener('click', this.onDownButton.bind(this));
+  scaleDown.addEventListener('click', this.onDownButton.bind(this), false);
   scaleDown.textContent = '-';
 
   this.scaleRange_ = parent.ownerDocument.createElement('input');
   this.scaleRange_.type = 'range';
   this.scaleRange_.max = ImageEditor.ScaleControl.MAX_SCALE;
-  this.scaleRange_.addEventListener('change', this.onSliderChange.bind(this));
+  this.scaleRange_.addEventListener(
+      'change', this.onSliderChange.bind(this), false);
   scaleDiv.appendChild(this.scaleRange_);
 
   this.scaleLabel_ = parent.ownerDocument.createElement('span');
@@ -228,13 +280,19 @@ ImageEditor.ScaleControl = function(parent, buffer) {
   var scaleUp = parent.ownerDocument.createElement('button');
   scaleUp.className = 'scale-up';
   scaleUp.textContent = '+';
-  scaleUp.addEventListener('click', this.onUpButton.bind(this));
+  scaleUp.addEventListener('click', this.onUpButton.bind(this), false);
   scaleDiv.appendChild(scaleUp);
+
+  var scale1to1 = parent.ownerDocument.createElement('button');
+  scale1to1.className = 'scale-1to1';
+  scale1to1.textContent = '1:1';
+  scale1to1.addEventListener('click', this.on1to1Button.bind(this), false);
+  scaleDiv.appendChild(scale1to1);
 
   var scaleFit = parent.ownerDocument.createElement('button');
   scaleFit.className = 'scale-fit';
   scaleFit.textContent = '\u2610';
-  scaleFit.addEventListener('click', this.onFitButton.bind(this));
+  scaleFit.addEventListener('click', this.onFitButton.bind(this), false);
   scaleDiv.appendChild(scaleFit);
 };
 
@@ -255,7 +313,7 @@ ImageEditor.ScaleControl.FACTOR = 100;
  */
 ImageEditor.ScaleControl.prototype.setMinScale = function(scale) {
   this.scaleRange_.min = Math.min(
-      Math.round(scale * ImageEditor.ScaleControl.FACTOR),
+      Math.round(Math.min(1, scale) * ImageEditor.ScaleControl.FACTOR),
       ImageEditor.ScaleControl.MAX_SCALE);
 };
 
@@ -277,10 +335,10 @@ ImageEditor.ScaleControl.prototype.displayScale = function(scale) {
  * Called when the user changes the scale via the controls.
  */
 ImageEditor.ScaleControl.prototype.setScale = function (scale) {
-  scale = ImageUtil.clip(this.scaleRange_.min, scale, this.scaleRange_.max);
+  scale = ImageUtil.clamp(this.scaleRange_.min, scale, this.scaleRange_.max);
   this.updateSlider(scale);
-  this.buffer_.setScale(scale / ImageEditor.ScaleControl.FACTOR, false);
-  this.buffer_.repaint();
+  this.viewport_.setScale(scale / ImageEditor.ScaleControl.FACTOR, false);
+  this.viewport_.repaint();
 };
 
 ImageEditor.ScaleControl.prototype.updateSlider = function(scale) {
@@ -323,27 +381,32 @@ ImageEditor.ScaleControl.prototype.onUpButton = function () {
 };
 
 ImageEditor.ScaleControl.prototype.onFitButton = function () {
-  this.buffer_.fitImage();
-  this.buffer_.repaint();
+  this.viewport_.fitImage();
+  this.viewport_.repaint();
+};
+
+ImageEditor.ScaleControl.prototype.on1to1Button = function () {
+  this.viewport_.setScale(1);
+  this.viewport_.repaint();
 };
 
 /**
  * A helper object for panning the ImageBuffer.
+ * @constructor
  */
-
 ImageEditor.MouseControl = function(canvas, buffer) {
   this.canvas_ = canvas;
   this.buffer_ = buffer;
-  canvas.addEventListener('mousedown', this.onMouseDown.bind(this));
-  canvas.addEventListener('mouseup', this.onMouseUp.bind(this));
-  canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
+  canvas.addEventListener('mousedown', this.onMouseDown.bind(this), false);
+  canvas.addEventListener('mouseup', this.onMouseUp.bind(this), false);
+  canvas.addEventListener('mousemove', this.onMouseMove.bind(this), false);
 };
 
 ImageEditor.MouseControl.getPosition = function(e) {
   var clientRect = e.target.getBoundingClientRect();
   return {
-    x: e.x - clientRect.left,
-    y: e.y - clientRect.top
+    x: e.clientX - clientRect.left,
+    y: e.clientY - clientRect.top
   };
 };
 
@@ -382,14 +445,14 @@ ImageEditor.MouseControl.prototype.onMouseMove = function(e) {
 
 /**
  * A toolbar for the ImageEditor.
+ * @constructor
  */
-
 ImageEditor.Toolbar = function (parent, updateCallback) {
   this.wrapper_ = parent.ownerDocument.createElement('div');
   this.wrapper_.className = 'toolbar';
   parent.appendChild(this.wrapper_);
   this.updateCallback_ = updateCallback;
-}
+};
 
 ImageEditor.Toolbar.prototype.clear = function() {
   this.wrapper_.innerHTML = '';
@@ -413,16 +476,16 @@ ImageEditor.Toolbar.prototype.addLabel = function(text) {
 ImageEditor.Toolbar.prototype.addButton = function(text, handler) {
   var button = this.create_('button');
   button.textContent = text;
-  button.addEventListener('click', handler);
+  button.addEventListener('click', handler, false);
   return this.add(button);
 };
 
 /**
- * @param {String} name An option name.
- * @param {Number} min Min value of the option.
- * @param {Number} value Default value of the option.
- * @param {Number} max Max value of the options.
- * @param {Number} scale A number to multiply by when setting
+ * @param {string} name An option name.
+ * @param {number} min Min value of the option.
+ * @param {number} value Default value of the option.
+ * @param {number} max Max value of the options.
+ * @param {number} scale A number to multiply by when setting
  *                       min/value/max in DOM.
  */
 ImageEditor.Toolbar.prototype.addRange = function(
@@ -456,13 +519,18 @@ ImageEditor.Toolbar.prototype.addRange = function(
     range.setValue(value);
   };
 
-  range.addEventListener('change', function() {
-    mirror();
-    self.updateCallback_(self.getOptions());
-  });
+  range.addEventListener('change',
+      function() {
+        mirror();
+        self.updateCallback_(self.getOptions());
+      },
+      false);
 
   range.setValue(value);
 
+  var descr = this.create_('span');
+  descr.textContent = name;
+  this.add(descr);
   this.add(range);
   this.add(label);
 

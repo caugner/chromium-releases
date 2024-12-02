@@ -16,7 +16,7 @@
 #include "base/threading/non_thread_safe.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/http/http_auth.h"
 
@@ -29,7 +29,7 @@ class HttpAuthCache;
 class HttpRequestHeaders;
 struct HttpRequestInfo;
 
-class NET_TEST HttpAuthController
+class NET_EXPORT_PRIVATE HttpAuthController
     : public base::RefCounted<HttpAuthController>,
       NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
@@ -78,6 +78,7 @@ class NET_TEST HttpAuthController
   // Actions for InvalidateCurrentHandler()
   enum InvalidateHandlerAction {
     INVALIDATE_HANDLER_AND_CACHED_CREDENTIALS,
+    INVALIDATE_HANDLER_AND_DISABLE_SCHEME,
     INVALIDATE_HANDLER
   };
 

@@ -61,13 +61,13 @@ class TypedUrlModelAssociator
   // PerDataTypeAssociatorInterface implementation.
   //
   // Iterates through the sync model looking for matched pairs of items.
-  virtual bool AssociateModels();
+  virtual bool AssociateModels(SyncError* error);
 
   // Delete all typed url nodes.
   bool DeleteAllNodes(sync_api::WriteTransaction* trans);
 
   // Clears all associations.
-  virtual bool DisassociateModels();
+  virtual bool DisassociateModels(SyncError* error);
 
   // The has_nodes out param is true if the sync model has nodes other
   // than the permanent tagged nodes.
@@ -105,41 +105,30 @@ class TypedUrlModelAssociator
                              const history::VisitVector* deleted_visits);
 
   // Bitfield returned from MergeUrls to specify the result of the merge.
-  enum {
-    // No changes were noted.
-    DIFF_NONE           = 0x0000,
-
-    // The local sync node needs to be modified.
-    DIFF_UPDATE_NODE   = 0x0001,
-
-    // The title changed in the local URLRow. DIFF_ROW_CHANGED will also be set
-    // if this is set.
-    DIFF_LOCAL_TITLE_CHANGED  = 0x0002,
-
-    // The local URLRow has changed (typed_count, visit_count, title, etc).
-    DIFF_LOCAL_ROW_CHANGED    = 0x0004,
-
-    // Visits need to be added to the local URLRow.
-    DIFF_LOCAL_VISITS_ADDED   = 0x0008,
-  };
+  typedef uint32 MergeResult;
+  static const MergeResult DIFF_NONE                = 0;
+  static const MergeResult DIFF_UPDATE_NODE         = 1 << 0;
+  static const MergeResult DIFF_LOCAL_TITLE_CHANGED = 1 << 1;
+  static const MergeResult DIFF_LOCAL_ROW_CHANGED   = 1 << 2;
+  static const MergeResult DIFF_LOCAL_VISITS_ADDED  = 1 << 3;
 
   // Merges the URL information in |typed_url| with the URL information from the
   // history database in |url| and |visits|, and returns a bitmask with the
   // results of the merge:
-  // DIFF_NODE_CHANGE - changes have been made to |new_url| and |visits| which
+  // DIFF_UPDATE_NODE - changes have been made to |new_url| and |visits| which
   //   should be persisted to the sync node.
-  // DIFF_TITLE_CHANGED - The title has changed, so the title in |new_url|
+  // DIFF_LOCAL_TITLE_CHANGED - The title has changed, so the title in |new_url|
   //   should be persisted to the history DB.
-  // DIFF_ROW_CHANGED - The history data in |new_url| should be persisted to the
-  //   history DB.
-  // DIFF_VISITS_ADDED - |new_visits| contains a list of visits that should be
-  //   written to the history DB for this URL. Deletions are not written to the
-  //   DB - each client is left to age out visits on their own.
-  static int MergeUrls(const sync_pb::TypedUrlSpecifics& typed_url,
-                       const history::URLRow& url,
-                       history::VisitVector* visits,
-                       history::URLRow* new_url,
-                       std::vector<history::VisitInfo>* new_visits);
+  // DIFF_LOCAL_ROW_CHANGED - The history data in |new_url| should be persisted
+  //   to the history DB.
+  // DIFF_LOCAL_VISITS_ADDED - |new_visits| contains a list of visits that
+  //   should be written to the history DB for this URL. Deletions are not
+  //   written to the DB - each client is left to age out visits on their own.
+  static MergeResult MergeUrls(const sync_pb::TypedUrlSpecifics& typed_url,
+                               const history::URLRow& url,
+                               history::VisitVector* visits,
+                               history::URLRow* new_url,
+                               std::vector<history::VisitInfo>* new_visits);
   static void WriteToSyncNode(const history::URLRow& url,
                               const history::VisitVector& visits,
                               sync_api::WriteNode* node);
@@ -148,6 +137,22 @@ class TypedUrlModelAssociator
                          const sync_pb::TypedUrlSpecifics& new_url,
                          std::vector<history::VisitInfo>* new_visits,
                          history::VisitVector* removed_visits);
+
+  // Converts the passed URL information to a TypedUrlSpecifics structure for
+  // writing to the sync DB
+  static void WriteToTypedUrlSpecifics(const history::URLRow& url,
+                                       const history::VisitVector& visits,
+                                       sync_pb::TypedUrlSpecifics* specifics);
+
+  // Helper function that fetches visits from the history DB corresponding to
+  // the passed URL. This function compensates for the fact that the history DB
+  // has rather poor data integrity (duplicate visits, visit timestamps that
+  // don't match the last_visit timestamp, huge data sets that exhaust memory
+  // when fetched, etc). Returns false if we could not fetch the visits for the
+  // passed URL.
+  static bool GetVisitsForURL(history::HistoryBackend* backend,
+                              const history::URLRow& url,
+                              history::VisitVector* visits);
 
   // Updates the passed |url_row| based on the values in |specifics|. Fields
   // that are not contained in |specifics| (such as typed_count) are left

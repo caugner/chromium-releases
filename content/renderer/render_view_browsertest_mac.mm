@@ -1,10 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/string_util.h"
 #include "base/string16.h"
-#include "chrome/test/render_view_test.h"
+#include "chrome/test/base/render_view_test.h"
 #include "content/common/native_web_keyboard_event.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -79,6 +79,10 @@ TEST_F(RenderViewTest, MacTestCmdUp) {
   </html>
   );
   #undef HTML
+
+  WebPreferences prefs;
+  prefs.enable_scroll_animator = false;
+  view_->OnUpdateWebPreferences(prefs);
 
   const int kMaxOutputCharacters = 1024;
   string16 output;

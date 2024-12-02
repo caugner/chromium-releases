@@ -130,8 +130,8 @@ GL_APICALL void         GL_APIENTRY glGetShaderInfoLog (GLidShader shader, GLsiz
 GL_APICALL void         GL_APIENTRY glGetShaderPrecisionFormat (GLenumShaderType shadertype, GLenumShaderPrecision precisiontype, GLint* range, GLint* precision);
 GL_APICALL void         GL_APIENTRY glGetShaderSource (GLidShader shader, GLsizeiNotNegative bufsize, GLsizei* length, char* source);
 GL_APICALL const GLubyte* GL_APIENTRY glGetString (GLenumStringType name);
-GL_APICALL void         GL_APIENTRY glGetTexParameterfv (GLenumTextureTarget target, GLenumTextureParameter pname, GLfloat* params);
-GL_APICALL void         GL_APIENTRY glGetTexParameteriv (GLenumTextureTarget target, GLenumTextureParameter pname, GLint* params);
+GL_APICALL void         GL_APIENTRY glGetTexParameterfv (GLenumGetTexParamTarget target, GLenumTextureParameter pname, GLfloat* params);
+GL_APICALL void         GL_APIENTRY glGetTexParameteriv (GLenumGetTexParamTarget target, GLenumTextureParameter pname, GLint* params);
 GL_APICALL void         GL_APIENTRY glGetUniformfv (GLidProgram program, GLint location, GLfloat* params);
 GL_APICALL void         GL_APIENTRY glGetUniformiv (GLidProgram program, GLint location, GLint* params);
 GL_APICALL GLint        GL_APIENTRY glGetUniformLocation (GLidProgram program, const char* name);
@@ -208,19 +208,21 @@ GL_APICALL GLuint       GL_APIENTRY glGetMaxValueInBufferCHROMIUM (GLidBuffer bu
 GL_APICALL void         GL_APIENTRY glGenSharedIdsCHROMIUM (GLuint namespace_id, GLuint id_offset, GLsizeiNotNegative n, GLuint* ids);
 GL_APICALL void         GL_APIENTRY glDeleteSharedIdsCHROMIUM (GLuint namespace_id, GLsizeiNotNegative n, const GLuint* ids);
 GL_APICALL void         GL_APIENTRY glRegisterSharedIdsCHROMIUM (GLuint namespace_id, GLsizeiNotNegative n, const GLuint* ids);
-GL_APICALL GLboolean    GL_APIENTRY glCommandBufferEnableCHROMIUM (const char* feature);
+GL_APICALL GLboolean    GL_APIENTRY glEnableFeatureCHROMIUM (const char* feature);
 GL_APICALL void*        GL_APIENTRY glMapBufferSubDataCHROMIUM (GLuint target, GLintptrNotNegative offset, GLsizeiptr size, GLenum access);
 GL_APICALL void         GL_APIENTRY glUnmapBufferSubDataCHROMIUM (const void* mem);
 GL_APICALL void*        GL_APIENTRY glMapTexSubImage2DCHROMIUM (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, GLenum access);
 GL_APICALL void         GL_APIENTRY glUnmapTexSubImage2DCHROMIUM (const void* mem);
-GL_APICALL void         GL_APIENTRY glCopyTextureToParentTextureCHROMIUM (GLidBindTexture client_child_id, GLidBindTexture client_parent_id);
 GL_APICALL void         GL_APIENTRY glResizeCHROMIUM (GLuint width, GLuint height);
 GL_APICALL const GLchar* GL_APIENTRY glGetRequestableExtensionsCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glRequestExtensionCHROMIUM (const char* extension);
 GL_APICALL void         GL_APIENTRY glRateLimitOffscreenContextCHROMIUM (void);
-GL_APICALL void         GL_APIENTRY glSetSurfaceCHROMIUM (GLint surface_id);
 GL_APICALL void         GL_APIENTRY glGetMultipleIntegervCHROMIUM (const GLenum* pnames, GLuint count, GLint* results, GLsizeiptr size);
 GL_APICALL void         GL_APIENTRY glGetProgramInfoCHROMIUM (GLidProgram program, GLsizeiNotNegative bufsize, GLsizei* size, void* info);
+GL_APICALL void         GL_APIENTRY glPlaceholder447CHROMIUM (void);
+GL_APICALL void         GL_APIENTRY glPlaceholder451CHROMIUM (void);
+GL_APICALL void         GL_APIENTRY glPlaceholder452CHROMIUM (void);
+GL_APICALL void         GL_APIENTRY glPlaceholder453CHROMIUM (void);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -415,16 +417,18 @@ _CMD_ID_TABLE = {
   'GenSharedIdsCHROMIUM':                                      439,
   'DeleteSharedIdsCHROMIUM':                                   440,
   'RegisterSharedIdsCHROMIUM':                                 441,
-  'CommandBufferEnableCHROMIUM':                               442,
+  'EnableFeatureCHROMIUM':                                     442,
   'CompressedTexImage2DBucket':                                443,
   'CompressedTexSubImage2DBucket':                             444,
   'RenderbufferStorageMultisampleEXT':                         445,
   'BlitFramebufferEXT':                                        446,
-  'CopyTextureToParentTextureCHROMIUM':                        447,
+  'Placeholder447CHROMIUM':                                    447,
   'ResizeCHROMIUM':                                            448,
   'GetRequestableExtensionsCHROMIUM':                          449,
   'RequestExtensionCHROMIUM':                                  450,
-  'SetSurfaceCHROMIUM':                                        453,
+  'Placeholder451CHROMIUM':                                    451,
+  'Placeholder452CHROMIUM':                                    452,
+  'Placeholder453CHROMIUM':                                    453,
   'GetMultipleIntegervCHROMIUM':                               454,
   'GetProgramInfoCHROMIUM':                                    455,
 }
@@ -577,6 +581,21 @@ _ENUM_LISTS = {
     'invalid': [
       'GL_FOG_HINT',
     ],
+  },
+  'GetTexParamTarget': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_TEXTURE_2D',
+      'GL_TEXTURE_CUBE_MAP_POSITIVE_X',
+      'GL_TEXTURE_CUBE_MAP_NEGATIVE_X',
+      'GL_TEXTURE_CUBE_MAP_POSITIVE_Y',
+      'GL_TEXTURE_CUBE_MAP_NEGATIVE_Y',
+      'GL_TEXTURE_CUBE_MAP_POSITIVE_Z',
+      'GL_TEXTURE_CUBE_MAP_NEGATIVE_Z',
+    ],
+    'invalid': [
+      'GL_PROXY_TEXTURE_CUBE_MAP',
+    ]
   },
   'TextureTarget': {
     'type': 'GLenum',
@@ -1150,10 +1169,10 @@ _FUNCTION_INFO = {
   },
   'ColorMask': {'decoder_func': 'DoColorMask', 'expectation': False},
   'ClearStencil': {'decoder_func': 'DoClearStencil'},
-  'CommandBufferEnableCHROMIUM': {
+  'EnableFeatureCHROMIUM': {
     'type': 'Custom',
     'immediate': False,
-    'decoder_func': 'DoCommandBufferEnableCHROMIUM',
+    'decoder_func': 'DoEnableFeatureCHROMIUM',
     'expectation': False,
     'cmd_args': 'GLuint bucket_id, GLint* result',
     'result': ['GLint'],
@@ -1474,7 +1493,10 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoIsTexture',
     'expectation': False,
   },
-  'LinkProgram': {'decoder_func': 'DoLinkProgram'},
+  'LinkProgram': {
+    'decoder_func': 'DoLinkProgram',
+    'impl_func':  False,
+  },
   'MapBufferSubDataCHROMIUM': {
     'gen_cmd': False,
     'extension': True,
@@ -1523,12 +1545,6 @@ _FUNCTION_INFO = {
   },
   'ReleaseShaderCompiler': {
     'decoder_func': 'DoReleaseShaderCompiler',
-    'unit_test': False,
-  },
-  'SetSurfaceCHROMIUM': {
-    'decoder_func': 'DoSetSurfaceCHROMIUM',
-    'extension': True,
-    'chromium': True,
     'unit_test': False,
   },
   'ShaderBinary': {'type': 'Custom'},
@@ -1704,15 +1720,9 @@ _FUNCTION_INFO = {
       'cmd_args': 'GLuint indx, GLint size, GLenum type, GLboolean normalized, '
                   'GLsizei stride, GLuint offset',
   },
-  'CopyTextureToParentTextureCHROMIUM': {
-      'impl_func': False,
-      'decoder_func': 'DoCopyTextureToParentTextureCHROMIUM',
-      'unit_test': False,
-      'extension': True,
-      'chromium': True,
-  },
   'ResizeCHROMIUM': {
-      'decoder_func': 'DoResizeCHROMIUM',
+      'type': 'Custom',
+      'impl_func': False,
       'unit_test': False,
       'extension': True,
       'chromium': True,
@@ -1737,6 +1747,18 @@ _FUNCTION_INFO = {
     'gen_cmd': False,
     'extension': True,
     'chromium': True,
+  },
+  'Placeholder447CHROMIUM': {
+    'type': 'UnknownCommand',
+  },
+  'Placeholder451CHROMIUM': {
+    'type': 'UnknownCommand',
+  },
+  'Placeholder452CHROMIUM': {
+    'type': 'UnknownCommand',
+  },
+  'Placeholder453CHROMIUM': {
+    'type': 'UnknownCommand',
   },
 }
 
@@ -2262,6 +2284,18 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
       file.Write("\n")
+
+  def WriteGLES2CLibImplementation(self, func, file):
+    file.Write("%s GLES2%s(%s) {\n" %
+               (func.return_type, func.name,
+                func.MakeTypedOriginalArgString("")))
+    result_string = "return "
+    if func.return_type == "void":
+      result_string = ""
+    file.Write("  %sgles2::GetGLContext()->%s(%s);\n" %
+               (result_string, func.original_name,
+                func.MakeOriginalArgString("")))
+    file.Write("}\n")
 
   def WriteClientGLCallLog(self, func, file):
     """Writes a logging macro for the client side code."""
@@ -3053,10 +3087,8 @@ class DeleteHandler(TypeHandler):
       arg.WriteClientSideValidationCode(file, func)
     file.Write(
         "  GPU_CLIENT_DCHECK(%s != 0);\n" % func.GetOriginalArgs()[-1].name)
-    file.Write("  program_and_shader_id_handler_->FreeIds(1, &%s);\n" %
-               func.GetOriginalArgs()[-1].name)
-    file.Write("  helper_->%s(%s);\n" %
-               (func.name, func.MakeCmdArgString("")))
+    file.Write("  %sHelper(%s);\n" %
+               (func.original_name, func.GetOriginalArgs()[-1].name))
     file.Write("}\n")
     file.Write("\n")
 
@@ -3185,7 +3217,6 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
       for arg in func.GetOriginalArgs():
         arg.WriteClientSideValidationCode(file, func)
       code = """  %(name)sHelper(%(args)s);
-  helper_->%(name)sImmediate(%(args)s);
 }
 
 """
@@ -4195,18 +4226,19 @@ class STRnHandler(TypeHandler):
       << static_cast<void*>(%(arg3)s) << ")");
   helper_->SetBucketSize(kResultBucketId, 0);
   helper_->%(func_name)s(%(id_name)s, kResultBucketId);
-  if (bufsize > 0) {
-    std::string str;
-    if (GetBucketAsString(kResultBucketId, &str)) {
-      GLsizei max_size =
+  std::string str;
+  GLsizei max_size = 0;
+  if (GetBucketAsString(kResultBucketId, &str)) {
+    if (bufsize > 0) {
+      max_size =
           std::min(static_cast<size_t>(%(bufsize_name)s) - 1, str.size());
-      if (%(length_name)s != NULL) {
-        *%(length_name)s = max_size;
-      }
       memcpy(%(dest_name)s, str.c_str(), max_size);
       %(dest_name)s[max_size] = '\\0';
       GPU_CLIENT_LOG("------\\n" << %(dest_name)s << "\\n------");
     }
+  }
+  if (%(length_name)s != NULL) {
+    *%(length_name)s = max_size;
   }
 }
 """
@@ -4287,6 +4319,40 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
     """Overrriden from TypeHandler."""
     pass
 
+class UnknownCommandHandler(TypeHandler):
+  """Handler for commands that always fail with kUnknownCommand."""
+
+  def __init__(self):
+    TypeHandler.__init__(self)
+
+  def AddImmediateFunction(self, generator, func):
+    """Overrriden from TypeHandler."""
+    pass
+
+  def WriteServiceImplementation(self, func, file):
+    """Overrriden from TypeHandler."""
+    file.Write(
+        "error::Error GLES2DecoderImpl::Handle%s(\n" % func.name)
+    file.Write(
+        "    uint32 immediate_data_size, const gles2::%s& c) {\n" % func.name)
+    file.Write("  return error::kUnknownCommand;\n")
+    file.Write("}\n")
+
+  def WriteGLES2ImplementationHeader(self, func, file):
+    """Overrriden from TypeHandler."""
+    pass
+
+  def WriteCmdHelper(self, func, file):
+    """Overrriden from TypeHandler."""
+    pass
+
+  def WriteGLES2CLibImplementation(self, func, file):
+    """Overrriden from TypeHandler."""
+    pass;
+
+  def WriteServiceUnitTest(self, func, file):
+    """Overrriden from TypeHandler."""
+    pass;
 
 class FunctionInfo(object):
   """Holds info about a function."""
@@ -5054,6 +5120,10 @@ class Function(object):
     """Writes the service implementation for a command."""
     self.type_handler.WriteServiceUnitTest(self, file)
 
+  def WriteGLES2CLibImplementation(self, file):
+    """Writes the GLES2 C Lib Implemention."""
+    self.type_handler.WriteGLES2CLibImplementation(self, file)
+
   def WriteGLES2ImplementationHeader(self, file):
     """Writes the GLES2 Implemention declaration."""
     self.type_handler.WriteGLES2ImplementationHeader(self, file)
@@ -5282,6 +5352,7 @@ class GLGenerator(object):
       'PUTXn': PUTXnHandler(),
       'STRn': STRnHandler(),
       'Todo': TodoHandler(),
+      'UnknownCommand': UnknownCommandHandler(),
     }
 
     for func_name in _FUNCTION_INFO:
@@ -5548,17 +5619,7 @@ class GLGenerator(object):
         "// These functions emluate GLES2 over command buffers.\n")
 
     for func in self.original_functions:
-      file.Write("%s GLES2%s(%s) {\n" %
-                 (func.return_type, func.name,
-                  func.MakeTypedOriginalArgString("")))
-      result_string = "return "
-      if func.return_type == "void":
-        result_string = ""
-      file.Write("  %sgles2::GetGLContext()->%s(%s);\n" %
-                 (result_string, func.original_name,
-                  func.MakeOriginalArgString("")))
-      file.Write("}\n")
-
+      func.WriteGLES2CLibImplementation(file)
     file.Write("\n")
 
     file.Close()
@@ -5692,10 +5753,10 @@ const size_t GLES2Util::enum_to_string_table_len_ =
       file.Write("typedef %s %s;\n" % (v, k))
     file.Write("#endif  // __gl2_h_\n\n")
 
-    file.Write("#define PPB_OPENGLES2_DEV_INTERFACE "
-        "\"PPB_OpenGLES(Dev);2.0\"\n")
+    file.Write("#define PPB_OPENGLES2_INTERFACE "
+        "\"PPB_OpenGLES;2.0\"\n")
 
-    file.Write("\nstruct PPB_OpenGLES2_Dev {\n")
+    file.Write("\nstruct PPB_OpenGLES2 {\n")
     for func in self.original_functions:
       if not func.IsCoreGLFunction():
         continue
@@ -5757,7 +5818,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
                   func.MakeOriginalArgString("")))
       file.Write("}\n\n")
 
-    file.Write("\nconst struct PPB_OpenGLES2_Dev ppb_opengles2 = {\n")
+    file.Write("\nconst struct PPB_OpenGLES2 ppb_opengles2 = {\n")
     file.Write("  &")
     file.Write(",\n  &".join(
       f.name for f in self.original_functions if f.IsCoreGLFunction()))
@@ -5767,7 +5828,7 @@ const size_t GLES2Util::enum_to_string_table_len_ =
     file.Write("}  // namespace\n")
 
     file.Write("""
-const PPB_OpenGLES2_Dev* OpenGLES2Impl::GetInterface() {
+const PPB_OpenGLES2* OpenGLES2Impl::GetInterface() {
   return &ppb_opengles2;
 }
 
@@ -5806,23 +5867,25 @@ const PPB_OpenGLES2_Dev* OpenGLES2Impl::GetInterface() {
 
   def WritePepperGLES2NaClProxy(self, filename):
     """Writes the Pepper OpenGLES interface implementation for NaCl."""
-
     file = CWriter(filename)
     file.Write(_LICENSE)
     file.Write(_DO_NOT_EDIT_WARNING)
 
     file.Write("#include \"native_client/src/shared/ppapi_proxy"
-        "/plugin_context_3d.h\"\n\n")
+        "/plugin_ppb_graphics_3d.h\"\n\n")
 
     file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"")
-    file.Write("\n#include \"ppapi/c/dev/ppb_opengles_dev.h\"\n\n")
+    file.Write("\n#include \"native_client/src/third_party"
+        "/ppapi/c/dev/ppb_opengles_dev.h\"\n\n")
 
-    file.Write("using ppapi_proxy::PluginContext3D;\n")
+    file.Write("using ppapi_proxy::PluginGraphics3D;\n")
     file.Write("using ppapi_proxy::PluginResource;\n\n")
     file.Write("namespace {\n\n")
 
     for func in self.original_functions:
       if not func.IsCoreGLFunction():
+        continue
+      if func.IsType("UnknownCommand"):
         continue
       args = func.MakeTypedOriginalArgString("")
       if len(args) != 0:
@@ -5832,7 +5895,7 @@ const PPB_OpenGLES2_Dev* OpenGLES2Impl::GetInterface() {
       return_string = "return "
       if func.return_type == "void":
         return_string = ""
-      file.Write("  %sPluginContext3D::implFromResource(context)->"
+      file.Write("  %sPluginGraphics3D::implFromResource(context)->"
                  "%s(%s);\n" %
                  (return_string,
                   func.original_name,
@@ -5841,13 +5904,14 @@ const PPB_OpenGLES2_Dev* OpenGLES2Impl::GetInterface() {
 
     file.Write("\n} // namespace\n\n")
 
-    file.Write("const PPB_OpenGLES2_Dev* "
-               "PluginContext3D::GetOpenGLESInterface() {\n")
+    file.Write("const PPB_OpenGLES2* "
+               "PluginGraphics3D::GetOpenGLESInterface() {\n")
 
-    file.Write("  const static struct PPB_OpenGLES2_Dev ppb_opengles = {\n")
+    file.Write("  const static struct PPB_OpenGLES2 ppb_opengles = {\n")
     file.Write("    &")
     file.Write(",\n    &".join(
-      f.name for f in self.original_functions if f.IsCoreGLFunction()))
+      f.name for f in self.original_functions if (f.IsCoreGLFunction() and
+        not f.IsType("UnknownCommand"))))
     file.Write("\n")
     file.Write("  };\n")
     file.Write("  return &ppb_opengles;\n")

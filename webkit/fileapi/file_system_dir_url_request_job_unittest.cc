@@ -33,6 +33,7 @@
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
+#include "webkit/quota/mock_special_storage_policy.h"
 
 namespace fileapi {
 namespace {
@@ -40,21 +41,6 @@ namespace {
 // We always use the TEMPORARY FileSystem in this test.
 static const char kFileSystemURLPrefix[] =
     "filesystem:http://remote/temporary/";
-
-class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
- public:
-  virtual bool IsStorageProtected(const GURL& origin) {
-    return false;
-  }
-
-  virtual bool IsStorageUnlimited(const GURL& origin) {
-    return true;
-  }
-
-  virtual bool IsFileHandler(const std::string& extension_id) {
-    return true;
-  }
-};
 
 }  // namespace
 
@@ -68,13 +54,13 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   virtual void SetUp() {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    file_thread_proxy_ = base::MessageLoopProxy::CreateForCurrentThread();
+    file_thread_proxy_ = base::MessageLoopProxy::current();
 
-    special_storage_policy_ = new TestSpecialStoragePolicy();
+    special_storage_policy_ = new quota::MockSpecialStoragePolicy;
     file_system_context_ =
         new FileSystemContext(
-            base::MessageLoopProxy::CreateForCurrentThread(),
-            base::MessageLoopProxy::CreateForCurrentThread(),
+            base::MessageLoopProxy::current(),
+            base::MessageLoopProxy::current(),
             special_storage_policy_, NULL,
             FilePath(), false /* is_incognito */,
             false, true,
@@ -133,7 +119,6 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
         file_system_context_, file_util()));
 
     context->set_src_origin_url(GURL("http://remote"));
-    context->set_src_virtual_path(path);
     context->set_src_type(fileapi::kFileSystemTypeTemporary);
     context->set_allowed_bytes_growth(1024);
     return context;
@@ -196,9 +181,9 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
 
     base::Time date;
     icu::UnicodeString date_ustr(match.group(5, status));
-    std::wstring date_wstr;
-    UTF16ToWide(date_ustr.getBuffer(), date_ustr.length(), &date_wstr);
-    EXPECT_TRUE(base::Time::FromString(date_wstr.c_str(), &date));
+    std::string date_str;
+    UTF16ToUTF8(date_ustr.getBuffer(), date_ustr.length(), &date_str);
+    EXPECT_TRUE(base::Time::FromString(date_str.c_str(), &date));
     EXPECT_FALSE(date.is_null());
   }
 
@@ -217,7 +202,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
 
   FileSystemFileUtil* file_util() {
     return file_system_context_->path_manager()->sandbox_provider()->
-        GetFileSystemFileUtil();
+        GetFileUtil();
   }
 
   // Put the message loop at the top, so that it's the last thing deleted.
@@ -230,7 +215,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   FilePath root_path_;
   scoped_ptr<net::URLRequest> request_;
   scoped_ptr<TestDelegate> delegate_;
-  scoped_refptr<TestSpecialStoragePolicy> special_storage_policy_;
+  scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::ScopedCallbackFactory<FileSystemDirURLRequestJobTest> callback_factory_;
 

@@ -6,20 +6,21 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_pref_service.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-class PromoResourceServiceTest : public TestingBrowserProcessTest {
+class PromoResourceServiceTest : public testing::Test {
  public:
   PromoResourceServiceTest()
-      : local_state_(testing_browser_process_.get()),
+      : local_state_(static_cast<TestingBrowserProcess*>(g_browser_process)),
         web_resource_service_(new PromoResourceService(&profile_)) {
   }
 
@@ -108,7 +109,7 @@ TEST_F(PromoResourceServiceTest, UnpackLogoSignal) {
   EXPECT_EQ(logo_end, 0);  // date value reset to 0;
 }
 
-TEST_F(PromoResourceServiceTest, UnpackPromoSignal) {
+TEST_F(PromoResourceServiceTest, UnpackNotificationSignal) {
   // Set up start and end dates and promo line in a Dictionary as if parsed
   // from the service.
   std::string json = "{ "
@@ -116,7 +117,7 @@ TEST_F(PromoResourceServiceTest, UnpackPromoSignal) {
                      "    \"answers\": ["
                      "       {"
                      "        \"name\": \"promo_start\","
-                     "        \"question\": \"3:2\","
+                     "        \"question\": \"3:2:5\","
                      "        \"tooltip\": \"Eat more pie!\","
                      "        \"inproduct\": \"31/01/10 01:00 GMT\""
                      "       },"
@@ -134,7 +135,7 @@ TEST_F(PromoResourceServiceTest, UnpackPromoSignal) {
   MessageLoop loop;
 
   // Check that prefs are set correctly.
-  web_resource_service_->UnpackPromoSignal(*(test_json.get()));
+  web_resource_service_->UnpackNotificationSignal(*(test_json.get()));
   PrefService* prefs = profile_.GetPrefs();
   ASSERT_TRUE(prefs != NULL);
 
@@ -143,7 +144,7 @@ TEST_F(PromoResourceServiceTest, UnpackPromoSignal) {
 
   int promo_group = prefs->GetInteger(prefs::kNTPPromoGroup);
   EXPECT_GE(promo_group, 0);
-  EXPECT_LT(promo_group, 16);
+  EXPECT_LT(promo_group, 100);
 
   int promo_build_type = prefs->GetInteger(prefs::kNTPPromoBuild);
   EXPECT_EQ(promo_build_type & PromoResourceService::DEV_BUILD,
@@ -155,15 +156,34 @@ TEST_F(PromoResourceServiceTest, UnpackPromoSignal) {
   int promo_time_slice = prefs->GetInteger(prefs::kNTPPromoGroupTimeSlice);
   EXPECT_EQ(promo_time_slice, 2);
 
-  double promo_start =
-      prefs->GetDouble(prefs::kNTPPromoStart);
-  int64 actual_start = 1264899600 +  // unix epoch for Jan 31 2010 0100 GMT.
-      promo_group * 2 * 60 * 60;
+  int promo_group_max = prefs->GetInteger(prefs::kNTPPromoGroupMax);
+  EXPECT_EQ(promo_group_max, 5);
+
+  double promo_start = prefs->GetDouble(prefs::kNTPPromoStart);
+  double actual_start = 1264899600;  // unix epoch for Jan 31 2010 0100 GMT.
   EXPECT_EQ(promo_start, actual_start);
 
-  double promo_end =
-      prefs->GetDouble(prefs::kNTPPromoEnd);
+  double modified_start = actual_start + promo_group * 2 * 60 * 60;
+  EXPECT_EQ(PromoResourceService::GetNotificationStartTime(prefs),
+      modified_start);
+
+  double promo_end = prefs->GetDouble(prefs::kNTPPromoEnd);
   EXPECT_EQ(promo_end, 1327971600);  // unix epoch for Jan 31 2012 0100 GMT.
+
+  // Unpack the same json a second time.
+  web_resource_service_->UnpackNotificationSignal(*(test_json.get()));
+
+  // All the data should be unchanged.
+  EXPECT_EQ(promo_line, prefs->GetString(prefs::kNTPPromoLine));
+  EXPECT_EQ(promo_group, prefs->GetInteger(prefs::kNTPPromoGroup));
+  EXPECT_EQ(promo_build_type, prefs->GetInteger(prefs::kNTPPromoBuild));
+  EXPECT_EQ(promo_time_slice,
+      prefs->GetInteger(prefs::kNTPPromoGroupTimeSlice));
+  EXPECT_EQ(promo_group_max, prefs->GetInteger(prefs::kNTPPromoGroupMax));
+  EXPECT_EQ(promo_start, prefs->GetDouble(prefs::kNTPPromoStart));
+  EXPECT_EQ(modified_start,
+      PromoResourceService::GetNotificationStartTime(prefs));
+  EXPECT_EQ(promo_end, prefs->GetDouble(prefs::kNTPPromoEnd));
 }
 
 TEST_F(PromoResourceServiceTest, UnpackWebStoreSignal) {

@@ -16,8 +16,6 @@
 #include "views/views_delegate.h"
 #include "views/widget/widget.h"
 
-using ui::ComboboxModel;  // TODO(beng): remove
-
 namespace views {
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -43,7 +41,7 @@ void NativeComboboxGtk::UpdateFromModel() {
 
   GtkListStore* store =
       GTK_LIST_STORE(gtk_combo_box_get_model(GTK_COMBO_BOX(native_view())));
-  ComboboxModel* model = combobox_->model();
+  ui::ComboboxModel* model = combobox_->model();
   int count = model->GetItemCount();
   gtk_list_store_clear(store);
   GtkTreeIter iter;
@@ -182,11 +180,7 @@ void NativeComboboxGtk::FocusedMenuItemChanged() {
       GtkCellView* cell_view = GTK_CELL_VIEW(child);
       GtkTreePath* path = gtk_cell_view_get_displayed_row(cell_view);
       GtkTreeModel* model = NULL;
-#if GTK_CHECK_VERSION(2, 16, 0)
       model = gtk_cell_view_get_model(cell_view);
-#else
-      g_object_get(cell_view, "model", &model, NULL);
-#endif
       GtkTreeIter iter;
       if (model && gtk_tree_model_get_iter(model, &iter, path)) {
         GValue value = { 0 };

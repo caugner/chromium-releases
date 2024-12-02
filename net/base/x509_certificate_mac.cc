@@ -120,29 +120,6 @@ int CertStatusFromOSStatus(OSStatus status) {
   }
 }
 
-bool OverrideHostnameMismatch(const std::string& hostname,
-                              std::vector<std::string>* dns_names) {
-  // SecTrustEvaluate() does not check dotted IP addresses. If
-  // hostname is provided as, say, 127.0.0.1, then the error
-  // CSSMERR_APPLETP_HOSTNAME_MISMATCH will always be returned,
-  // even if the certificate contains 127.0.0.1 as one of its names.
-  // We, however, want to allow that behavior. SecTrustEvaluate()
-  // only checks for digits and dots when considering whether a
-  // hostname is an IP address, so IPv6 and hex addresses go through
-  // its normal comparison.
-  bool is_dotted_ip = true;
-  bool override_hostname_mismatch = false;
-  for (std::string::const_iterator c = hostname.begin();
-       c != hostname.end() && is_dotted_ip; ++c)
-    is_dotted_ip = (*c >= '0' && *c <= '9') || *c == '.';
-  if (is_dotted_ip) {
-    for (std::vector<std::string>::const_iterator name = dns_names->begin();
-         name != dns_names->end() && !override_hostname_mismatch; ++name)
-      override_hostname_mismatch = (*name == hostname);
-  }
-  return override_hostname_mismatch;
-}
-
 struct CSSMFields {
   CSSMFields() : cl_handle(NULL), num_of_fields(0), fields(NULL) {}
   ~CSSMFields() {
@@ -265,22 +242,36 @@ OSStatus CreatePolicy(const CSSM_OID* policy_OID,
 // Creates a series of SecPolicyRefs to be added to a SecTrustRef used to
 // validate a certificate for an SSL server. |hostname| contains the name of
 // the SSL server that the certificate should be verified against. |flags| is
-// a bitwise-OR of VerifyFlags that can further alter how trust is
-// validated, such as how revocation is checked. If successful, returns
-// noErr, and stores the resultant array of SecPolicyRefs in |policies|.
-OSStatus CreateTrustPolicies(const std::string& hostname, int flags,
+// a bitwise-OR of VerifyFlags that can further alter how trust is validated,
+// such as how revocation is checked. If successful, returns noErr, and
+// stores the resultant array of SecPolicyRefs in |policies|.
+OSStatus CreateTrustPolicies(const std::string& hostname,
+                             int flags,
                              ScopedCFTypeRef<CFArrayRef>* policies) {
   ScopedCFTypeRef<CFMutableArrayRef> local_policies(
       CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks));
   if (!local_policies)
     return memFullErr;
 
-  // Create an SSL SecPolicyRef, and configure it to perform hostname
-  // validation. The hostname check does 99% of what we want, with the
-  // exception of dotted IPv4 addreses, which we handle ourselves below.
+  // Create an SSL server policy. While certificate name validation will be
+  // performed by SecTrustEvaluate(), it has the following limitations:
+  // - Doesn't support IP addresses in dotted-quad literals (127.0.0.1)
+  // - Doesn't support IPv6 addresses
+  // - Doesn't support the iPAddress subjectAltName
+  // Providing the hostname is necessary in order to locate certain user or
+  // system trust preferences, such as those created by Safari. Preferences
+  // created by Keychain Access do not share this requirement.
+  CSSM_APPLE_TP_SSL_OPTIONS tp_ssl_options;
+  memset(&tp_ssl_options, 0, sizeof(tp_ssl_options));
+  tp_ssl_options.Version = CSSM_APPLE_TP_SSL_OPTS_VERSION;
+  if (!hostname.empty()) {
+    tp_ssl_options.ServerName = hostname.data();
+    tp_ssl_options.ServerNameLen = hostname.size();
+  }
+
   SecPolicyRef ssl_policy;
-  OSStatus status = X509Certificate::CreateSSLServerPolicy(hostname,
-                                                           &ssl_policy);
+  OSStatus status = CreatePolicy(&CSSMOID_APPLE_TP_SSL, &tp_ssl_options,
+                                 sizeof(tp_ssl_options), &ssl_policy);
   if (status)
     return status;
   CFArrayAppendValue(local_policies, ssl_policy);
@@ -740,7 +731,6 @@ void X509Certificate::GetSubjectAltName(
         ip_addrs->push_back(std::string(
             reinterpret_cast<const char*>(name_data.Data),
             name_data.Length));
-
       }
     }
   }
@@ -792,7 +782,8 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
   tp_action_data.Version = CSSM_APPLE_TP_ACTION_VERSION;
   // Allow CSSM to download any missing intermediate certificates if an
   // authorityInfoAccess extension or issuerAltName extension is present.
-  tp_action_data.ActionFlags = CSSM_TP_ACTION_FETCH_CERT_FROM_NET;
+  tp_action_data.ActionFlags = CSSM_TP_ACTION_FETCH_CERT_FROM_NET |
+                               CSSM_TP_ACTION_TRUST_SETTINGS;
 
   if (flags & VERIFY_REV_CHECKING_ENABLED) {
     // Require a positive result from an OCSP responder or a CRL (or both)
@@ -848,9 +839,25 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
     return NetErrorFromOSStatus(status);
   ScopedCFTypeRef<CFArrayRef> scoped_completed_chain(completed_chain);
 
+  SecCertificateRef verified_cert = NULL;
+  std::vector<SecCertificateRef> verified_chain;
+  for (CFIndex i = 0, count = CFArrayGetCount(completed_chain);
+       i < count; ++i) {
+    SecCertificateRef chain_cert = reinterpret_cast<SecCertificateRef>(
+        const_cast<void*>(CFArrayGetValueAtIndex(completed_chain, i)));
+    if (i == 0) {
+      verified_cert = chain_cert;
+    } else {
+      verified_chain.push_back(chain_cert);
+    }
+  }
+  if (verified_cert) {
+    verify_result->verified_cert = CreateFromHandle(verified_cert,
+                                                    verified_chain);
+  }
+
   // Evaluate the results
   OSStatus cssm_result;
-  bool got_certificate_error = false;
   switch (trust_result) {
     case kSecTrustResultUnspecified:
     case kSecTrustResultProceed:
@@ -871,23 +878,7 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
       status = SecTrustGetCssmResultCode(trust_ref, &cssm_result);
       if (status)
         return NetErrorFromOSStatus(status);
-      switch (cssm_result) {
-        case CSSMERR_TP_NOT_TRUSTED:
-        case CSSMERR_TP_INVALID_ANCHOR_CERT:
-          verify_result->cert_status |= CERT_STATUS_AUTHORITY_INVALID;
-          break;
-        case CSSMERR_TP_CERT_EXPIRED:
-        case CSSMERR_TP_CERT_NOT_VALID_YET:
-          verify_result->cert_status |= CERT_STATUS_DATE_INVALID;
-          break;
-        case CSSMERR_TP_CERT_REVOKED:
-        case CSSMERR_TP_CERT_SUSPENDED:
-          verify_result->cert_status |= CERT_STATUS_REVOKED;
-          break;
-        default:
-          // Look for specific per-certificate errors below.
-          break;
-      }
+      verify_result->cert_status |= CertStatusFromOSStatus(cssm_result);
       // Walk the chain of error codes in the CSSM_TP_APPLE_EVIDENCE_INFO
       // structure which can catch multiple errors from each certificate.
       for (CFIndex index = 0, chain_count = CFArrayGetCount(completed_chain);
@@ -904,24 +895,11 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
         for (uint32 status_code_index = 0;
              status_code_index < chain_info[index].NumStatusCodes;
              ++status_code_index) {
-          got_certificate_error = true;
-          int cert_status = CertStatusFromOSStatus(
+          verify_result->cert_status |= CertStatusFromOSStatus(
               chain_info[index].StatusCodes[status_code_index]);
-          if (cert_status == CERT_STATUS_COMMON_NAME_INVALID) {
-            std::vector<std::string> names;
-            GetDNSNames(&names);
-            if (OverrideHostnameMismatch(hostname, &names))
-              cert_status = 0;
-          }
-          verify_result->cert_status |= cert_status;
         }
       }
-      // Be paranoid and ensure that we recorded at least one certificate
-      // status on receiving kSecTrustResultRecoverableTrustFailure. The
-      // call to SecTrustGetCssmResultCode() should pick up when the chain
-      // is not trusted and the loop through CSSM_TP_APPLE_EVIDENCE_INFO
-      // should pick up everything else, but let's be safe.
-      if (!verify_result->cert_status && !got_certificate_error) {
+      if (!IsCertStatusError(verify_result->cert_status)) {
         LOG(ERROR) << "cssm_result=" << cssm_result;
         verify_result->cert_status |= CERT_STATUS_INVALID;
         NOTREACHED();
@@ -933,12 +911,18 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
       if (status)
         return NetErrorFromOSStatus(status);
       verify_result->cert_status |= CertStatusFromOSStatus(cssm_result);
-      if (!verify_result->cert_status) {
+      if (!IsCertStatusError(verify_result->cert_status)) {
         LOG(WARNING) << "trust_result=" << trust_result;
         verify_result->cert_status |= CERT_STATUS_INVALID;
       }
       break;
   }
+
+  // Perform hostname verification independent of SecTrustEvaluate. In order to
+  // do so, mask off any reported name errors first.
+  verify_result->cert_status &= ~CERT_STATUS_COMMON_NAME_INVALID;
+  if (!VerifyNameMatch(hostname))
+    verify_result->cert_status |= CERT_STATUS_COMMON_NAME_INVALID;
 
   // TODO(wtc): Suppress CERT_STATUS_NO_REVOCATION_MECHANISM for now to be
   // compatible with Windows, which in turn implements this behavior to be
@@ -1153,21 +1137,6 @@ OSStatus X509Certificate::CreateSSLClientPolicy(SecPolicyRef* policy) {
   memset(&tp_ssl_options, 0, sizeof(tp_ssl_options));
   tp_ssl_options.Version = CSSM_APPLE_TP_SSL_OPTS_VERSION;
   tp_ssl_options.Flags |= CSSM_APPLE_TP_SSL_CLIENT;
-
-  return CreatePolicy(&CSSMOID_APPLE_TP_SSL, &tp_ssl_options,
-                      sizeof(tp_ssl_options), policy);
-}
-
-// static
-OSStatus X509Certificate::CreateSSLServerPolicy(const std::string& hostname,
-                                                SecPolicyRef* policy) {
-  CSSM_APPLE_TP_SSL_OPTIONS tp_ssl_options;
-  memset(&tp_ssl_options, 0, sizeof(tp_ssl_options));
-  tp_ssl_options.Version = CSSM_APPLE_TP_SSL_OPTS_VERSION;
-  if (!hostname.empty()) {
-    tp_ssl_options.ServerName = hostname.data();
-    tp_ssl_options.ServerNameLen = hostname.size();
-  }
 
   return CreatePolicy(&CSSMOID_APPLE_TP_SSL, &tp_ssl_options,
                       sizeof(tp_ssl_options), policy);

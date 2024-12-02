@@ -13,6 +13,7 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
+#include "base/test/test_file_util.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/auth.h"
 #include "net/base/capturing_net_log.h"
@@ -332,34 +333,6 @@ static const char kExpectedNPNString[] = "\x08http/1.1\x06spdy/2";
 // This is the expected return from a current server advertising SPDY.
 static const char kAlternateProtocolHttpHeader[] =
     "Alternate-Protocol: 443:npn-spdy/2\r\n\r\n";
-
-TEST_F(HttpNetworkTransactionTest, LogNumRttVsBytesMetrics_WarmestSocket) {
-  MockRead data_reads[1000];
-  data_reads[0] = MockRead("HTTP/1.0 200 OK\r\n\r\n");
-  for (int i = 1; i < 999; i++) {
-    data_reads[i] = MockRead("Gagan is a good boy!");
-  }
-  data_reads[999] = MockRead(false, OK);
-
-  net::SetSocketReusePolicy(0);
-  SimpleGetHelperResult out = SimpleGetHelper(data_reads,
-                                              arraysize(data_reads));
-
-  base::Histogram* histogram = NULL;
-  base::StatisticsRecorder::FindHistogram(
-      "Net.Num_RTT_vs_KB_warmest_socket_15KB", &histogram);
-  CHECK(histogram);
-
-  base::Histogram::SampleSet sample_set;
-  histogram->SnapshotSample(&sample_set);
-  EXPECT_EQ(1, sample_set.TotalCount());
-
-  EXPECT_EQ(OK, out.rv);
-  EXPECT_EQ("HTTP/1.0 200 OK", out.status_line);
-}
-
-// TODO(gagansingh): Add test for LogNumRttVsBytesMetrics_LastAccessSocket once
-// it is possible to clear histograms from previous tests.
 
 TEST_F(HttpNetworkTransactionTest, Basic) {
   SessionDependencies session_deps;
@@ -5833,20 +5806,21 @@ void BypassHostCacheOnRefreshHelper(int load_flags) {
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(
       CreateSession(&session_deps)));
 
-  // Warm up the host cache so it has an entry for "www.google.com" (by doing
-  // a synchronous lookup.)
+  // Warm up the host cache so it has an entry for "www.google.com".
   AddressList addrlist;
+  TestCompletionCallback callback;
   int rv = session_deps.host_resolver->Resolve(
       HostResolver::RequestInfo(HostPortPair("www.google.com", 80)), &addrlist,
-      NULL, NULL, BoundNetLog());
+      &callback, NULL, BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
 
   // Verify that it was added to host cache, by doing a subsequent async lookup
   // and confirming it completes synchronously.
-  TestCompletionCallback resolve_callback;
   rv = session_deps.host_resolver->Resolve(
       HostResolver::RequestInfo(HostPortPair("www.google.com", 80)), &addrlist,
-      &resolve_callback, NULL, BoundNetLog());
+      &callback, NULL, BoundNetLog());
   ASSERT_EQ(OK, rv);
 
   // Inject a failure the next time that "www.google.com" is resolved. This way
@@ -5861,7 +5835,6 @@ void BypassHostCacheOnRefreshHelper(int load_flags) {
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
   // Run the request.
-  TestCompletionCallback callback;
   rv = trans->Start(&request, &callback, BoundNetLog());
   ASSERT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
@@ -7433,26 +7406,27 @@ TEST_F(HttpNetworkTransactionTest, GenerateAuthToken) {
   };
 
   SessionDependencies session_deps;
-  HttpAuthHandlerMock::Factory* auth_factory(
-      new HttpAuthHandlerMock::Factory());
-  session_deps.http_auth_handler_factory.reset(auth_factory);
-
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_configs); ++i) {
+    HttpAuthHandlerMock::Factory* auth_factory(
+        new HttpAuthHandlerMock::Factory());
+    session_deps.http_auth_handler_factory.reset(auth_factory);
     const TestConfig& test_config = test_configs[i];
 
     // Set up authentication handlers as necessary.
     if (test_config.proxy_auth_timing != AUTH_NONE) {
-      HttpAuthHandlerMock* auth_handler(new HttpAuthHandlerMock());
-      std::string auth_challenge = "Mock realm=proxy";
-      GURL origin(test_config.proxy_url);
-      HttpAuth::ChallengeTokenizer tokenizer(auth_challenge.begin(),
-                                             auth_challenge.end());
-      auth_handler->InitFromChallenge(&tokenizer, HttpAuth::AUTH_PROXY,
-                                      origin, BoundNetLog());
-      auth_handler->SetGenerateExpectation(
-          test_config.proxy_auth_timing == AUTH_ASYNC,
-          test_config.proxy_auth_rv);
-      auth_factory->set_mock_handler(auth_handler, HttpAuth::AUTH_PROXY);
+      for (int n = 0; n < 2; n++) {
+        HttpAuthHandlerMock* auth_handler(new HttpAuthHandlerMock());
+        std::string auth_challenge = "Mock realm=proxy";
+        GURL origin(test_config.proxy_url);
+        HttpAuth::ChallengeTokenizer tokenizer(auth_challenge.begin(),
+                                               auth_challenge.end());
+        auth_handler->InitFromChallenge(&tokenizer, HttpAuth::AUTH_PROXY,
+                                        origin, BoundNetLog());
+        auth_handler->SetGenerateExpectation(
+            test_config.proxy_auth_timing == AUTH_ASYNC,
+            test_config.proxy_auth_rv);
+        auth_factory->AddMockHandler(auth_handler, HttpAuth::AUTH_PROXY);
+      }
     }
     if (test_config.server_auth_timing != AUTH_NONE) {
       HttpAuthHandlerMock* auth_handler(new HttpAuthHandlerMock());
@@ -7465,7 +7439,7 @@ TEST_F(HttpNetworkTransactionTest, GenerateAuthToken) {
       auth_handler->SetGenerateExpectation(
           test_config.server_auth_timing == AUTH_ASYNC,
           test_config.server_auth_rv);
-      auth_factory->set_mock_handler(auth_handler, HttpAuth::AUTH_SERVER);
+      auth_factory->AddMockHandler(auth_handler, HttpAuth::AUTH_SERVER);
     }
     if (test_config.proxy_url) {
       session_deps.proxy_service.reset(
@@ -7559,7 +7533,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
                                          auth_challenge.end());
   auth_handler->InitFromChallenge(&tokenizer, HttpAuth::AUTH_SERVER,
                                   origin, BoundNetLog());
-  auth_factory->set_mock_handler(auth_handler, HttpAuth::AUTH_SERVER);
+  auth_factory->AddMockHandler(auth_handler, HttpAuth::AUTH_SERVER);
 
   int rv = OK;
   const HttpResponseInfo* response = NULL;
@@ -7953,7 +7927,7 @@ TEST_F(HttpNetworkTransactionTest, SpdyAlternateProtocolThroughProxy) {
   HttpAuthHandlerMock::Factory* auth_factory =
       new HttpAuthHandlerMock::Factory();
   HttpAuthHandlerMock* auth_handler = new HttpAuthHandlerMock();
-  auth_factory->set_mock_handler(auth_handler, HttpAuth::AUTH_PROXY);
+  auth_factory->AddMockHandler(auth_handler, HttpAuth::AUTH_PROXY);
   auth_factory->set_do_init_from_challenge(true);
   session_deps.http_auth_handler_factory.reset(auth_factory);
 
@@ -8704,35 +8678,37 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Proxy_Fail) {
   }
 }
 
-void IPPoolingPreloadHostCache(MockCachingHostResolver* host_resolver,
-                               SpdySessionPoolPeer* pool_peer) {
-  const int kTestPort = 443;
-  struct TestHosts {
-    std::string name;
-    std::string iplist;
-  } test_hosts[] = {
-    { "www.google.com", "127.0.0.1"},
-  };
+void IPPoolingAddAlias(MockCachingHostResolver* host_resolver,
+                       SpdySessionPoolPeer* pool_peer,
+                       std::string host,
+                       int port,
+                       std::string iplist) {
+  // Create a host resolver dependency that returns address |iplist| for
+  // resolutions of |host|.
+  host_resolver->rules()->AddIPLiteralRule(host, iplist, "");
 
-  // Preload cache entries into HostCache.
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_hosts); i++) {
-    host_resolver->rules()->AddIPLiteralRule(test_hosts[i].name,
-        test_hosts[i].iplist, "");
+  // Setup a HostPortProxyPair.
+  HostPortPair host_port_pair(host, port);
+  HostPortProxyPair pair = HostPortProxyPair(host_port_pair,
+                                             ProxyServer::Direct());
 
-    AddressList addresses;
-    // This test requires that the HostResolver cache be populated.  Normal
-    // code would have done this already, but we do it manually.
-    HostResolver::RequestInfo info(HostPortPair(test_hosts[i].name, kTestPort));
-    host_resolver->Resolve(
-        info, &addresses, NULL, NULL, BoundNetLog());
+  // Resolve the host and port.
+  AddressList addresses;
+  HostResolver::RequestInfo info(host_port_pair);
+  TestCompletionCallback callback;
+  int rv = host_resolver->Resolve(info, &addresses, &callback, NULL,
+                                  BoundNetLog());
+  if (rv == ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+  DCHECK_EQ(OK, rv);
 
-    // Setup a HostPortProxyPair
-    HostPortProxyPair pair = HostPortProxyPair(
-        HostPortPair(test_hosts[i].name, kTestPort), ProxyServer::Direct());
-
-    const addrinfo* address = addresses.head();
-    pool_peer->AddAlias(address, pair);
-  }
+  // Add the first address as an alias. It would have been better to call
+  // MockClientSocket::GetPeerAddress but that returns 192.0.2.33 whereas
+  // MockHostResolver returns 127.0.0.1 (MockHostResolverBase::Reset). So we use
+  // the first address (127.0.0.1) returned by MockHostResolver as an alias for
+  // the |pair|.
+  const addrinfo* address = addresses.head();
+  pool_peer->AddAlias(address, pair);
 }
 
 TEST_F(HttpNetworkTransactionTest, UseIPConnectionPooling) {
@@ -8811,9 +8787,17 @@ TEST_F(HttpNetworkTransactionTest, UseIPConnectionPooling) {
   HostPortPair host_port("www.gmail.com", 443);
   HostResolver::RequestInfo resolve_info(host_port);
   AddressList ignored;
-  host_resolver.Resolve(resolve_info, &ignored, NULL, NULL, BoundNetLog());
+  rv = host_resolver.Resolve(resolve_info, &ignored, &callback, NULL,
+                             BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
 
-  IPPoolingPreloadHostCache(&host_resolver, &pool_peer);
+  // MockHostResolver returns 127.0.0.1, port 443 for https://www.google.com/
+  // and https://www.gmail.com/. Add 127.0.0.1 as alias for host_port_pair:
+  // (www.google.com, 443).
+  IPPoolingAddAlias(&host_resolver, &pool_peer, "www.google.com", 443,
+                    "127.0.0.1");
 
   HttpRequestInfo request2;
   request2.method = "GET";
@@ -8851,26 +8835,29 @@ class OneTimeCachingHostResolver : public net::HostResolver {
                       AddressList* addresses,
                       CompletionCallback* callback,
                       RequestHandle* out_req,
-                      const BoundNetLog& net_log) {
-    int rv = host_resolver_.Resolve(
+                      const BoundNetLog& net_log) OVERRIDE {
+    return host_resolver_.Resolve(
         info, addresses, callback, out_req, net_log);
-    if (rv == OK && info.only_use_cached_response() &&
-        info.host_port_pair().Equals(host_port_)) {
-      // Discard cache.
+  }
+
+  virtual int ResolveFromCache(const RequestInfo& info,
+                               AddressList* addresses,
+                               const BoundNetLog& net_log) OVERRIDE {
+    int rv = host_resolver_.ResolveFromCache(info, addresses, net_log);
+    if (rv == OK && info.host_port_pair().Equals(host_port_))
       host_resolver_.Reset(NULL);
-    }
     return rv;
   }
 
-  virtual void CancelRequest(RequestHandle req) {
+  virtual void CancelRequest(RequestHandle req) OVERRIDE {
     host_resolver_.CancelRequest(req);
   }
 
-  virtual void AddObserver(Observer* observer) {
+  virtual void AddObserver(Observer* observer) OVERRIDE {
     return host_resolver_.AddObserver(observer);
   }
 
-  virtual void RemoveObserver(Observer* observer) {
+  virtual void RemoveObserver(Observer* observer) OVERRIDE{
     return host_resolver_.RemoveObserver(observer);
   }
 
@@ -8959,7 +8946,11 @@ TEST_F(HttpNetworkTransactionTest,
   // Preload cache entries into HostCache.
   HostResolver::RequestInfo resolve_info(HostPortPair("www.gmail.com", 443));
   AddressList ignored;
-  host_resolver.Resolve(resolve_info, &ignored, NULL, NULL, BoundNetLog());
+  rv = host_resolver.Resolve(resolve_info, &ignored, &callback, NULL,
+                             BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
 
   HttpRequestInfo request2;
   request2.method = "GET";
@@ -8967,7 +8958,11 @@ TEST_F(HttpNetworkTransactionTest,
   request2.load_flags = 0;
   HttpNetworkTransaction trans2(session);
 
-  IPPoolingPreloadHostCache(host_resolver.GetMockHostResolver(), &pool_peer);
+  // MockHostResolver returns 127.0.0.1, port 443 for https://www.google.com/
+  // and https://www.gmail.com/. Add 127.0.0.1 as alias for host_port_pair:
+  // (www.google.com, 443).
+  IPPoolingAddAlias(host_resolver.GetMockHostResolver(), &pool_peer,
+                    "www.google.com", 443, "127.0.0.1");
 
   rv = trans2.Start(&request2, &callback, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);

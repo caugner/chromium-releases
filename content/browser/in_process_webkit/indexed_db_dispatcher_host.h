@@ -14,7 +14,6 @@
 
 class IndexedDBKey;
 class NullableString16;
-class Profile;
 class SerializedScriptValue;
 struct IndexedDBHostMsg_DatabaseCreateObjectStore_Params;
 struct IndexedDBHostMsg_FactoryDeleteDatabase_Params;
@@ -113,7 +112,7 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
                       WebKit::WebExceptionCode* ec);
     void OnTransaction(int32 idb_database_id,
                        const std::vector<string16>& names,
-                       int32 mode, int32 timeout,
+                       int32 mode,
                        int32* idb_transaction_id,
                        WebKit::WebExceptionCode* ec);
     void OnOpen(int32 idb_database_id, int32 response_id);
@@ -219,8 +218,7 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
     void OnKey(int32 idb_object_store_id, IndexedDBKey* key);
     void OnPrimaryKey(int32 idb_object_store_id, IndexedDBKey* primary_key);
     void OnValue(int32 idb_object_store_id,
-                 SerializedScriptValue* script_value,
-                 IndexedDBKey* key);
+                 SerializedScriptValue* script_value);
     void OnUpdate(int32 idb_object_store_id,
                   int32 response_id,
                   const SerializedScriptValue& value,
@@ -263,7 +261,7 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
     WebIDBTransactionIDToSizeMap transaction_size_map_;
   };
 
-  // Data shared between renderer processes with the same profile.
+  // Data shared between renderer processes with the same browser context.
   scoped_refptr<WebKitContext> webkit_context_;
 
   // Only access on WebKit thread.

@@ -7,6 +7,7 @@
 #include <set>
 #include <vector>
 
+#include "base/base_switches.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
@@ -38,6 +39,7 @@
 #include "net/base/mime_util.h"
 #include "ipc/ipc_switches.h"
 #include "net/base/registry_controlled_domain.h"
+#include "ui/base/ui_base_switches.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
@@ -117,13 +119,22 @@ bool WorkerProcessHost::Init(int render_process_id) {
   if (!CreateChannel())
     return false;
 
-  FilePath exe_path = GetChildPath(true);
+#if defined(OS_LINUX)
+  int flags = CHILD_ALLOW_SELF;
+#else
+  int flags = CHILD_NORMAL;
+#endif
+
+  FilePath exe_path = GetChildPath(flags);
   if (exe_path.empty())
     return false;
 
   CommandLine* cmd_line = new CommandLine(exe_path);
   cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kWorkerProcess);
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id());
+  std::string locale =
+      content::GetContentClient()->browser()->GetApplicationLocale();
+  cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
   static const char* const kSwitchNames[] = {
     switches::kWebWorkerShareProcesses,
@@ -242,12 +253,13 @@ void WorkerProcessHost::CreateMessageFilters(int render_process_id) {
       NewCallbackWithReturnValue(
           WorkerService::GetInstance(), &WorkerService::next_worker_route_id));
   AddFilter(worker_message_filter_);
-  AddFilter(new AppCacheDispatcherHost(resource_context_, id()));
+  AddFilter(new AppCacheDispatcherHost(
+      resource_context_->appcache_service(), id()));
   AddFilter(new FileSystemDispatcherHost(
       request_context, resource_context_->file_system_context()));
   AddFilter(new FileUtilitiesMessageFilter(id()));
-  AddFilter(
-      new BlobMessageFilter(id(), resource_context_->blob_storage_context()));
+  AddFilter(new BlobMessageFilter(
+      id(), resource_context_->blob_storage_context()));
   AddFilter(new MimeRegistryMessageFilter());
   AddFilter(new DatabaseMessageFilter(
       resource_context_->database_tracker()));
@@ -485,7 +497,7 @@ void WorkerProcessHost::UpdateTitle() {
     display_title += *i;
   }
 
-  set_name(ASCIIToWide(display_title));
+  set_name(ASCIIToUTF16(display_title));
 }
 
 void WorkerProcessHost::DocumentDetached(WorkerMessageFilter* filter,

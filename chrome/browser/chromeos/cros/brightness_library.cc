@@ -4,46 +4,55 @@
 
 #include "chrome/browser/chromeos/cros/brightness_library.h"
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/observer_list.h"
-#include "chrome/browser/chromeos/brightness_bubble.h"
-#include "chrome/browser/chromeos/volume_bubble.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "content/browser/browser_thread.h"
+#include "third_party/cros/chromeos_brightness.h"
 
 namespace chromeos {
 
 class BrightnessLibraryImpl : public BrightnessLibrary {
  public:
-  BrightnessLibraryImpl() : brightness_connection_(NULL) {
-    if (CrosLibrary::Get()->EnsureLoaded())
-      Init();
-  }
+  BrightnessLibraryImpl() : brightness_connection_(NULL) {}
 
-  ~BrightnessLibraryImpl() {
+  virtual ~BrightnessLibraryImpl() {
     if (brightness_connection_) {
       chromeos::DisconnectBrightness(brightness_connection_);
       brightness_connection_ = NULL;
     }
   }
 
-  void DecreaseScreenBrightness(bool allow_off) {
+  // Begin BrightnessLibrary implementation.
+  virtual void Init() OVERRIDE {
+    if (CrosLibrary::Get()->EnsureLoaded()) {
+      CHECK(!brightness_connection_) << "Already intialized";
+      brightness_connection_ =
+          chromeos::MonitorBrightnessV2(&BrightnessChangedHandler, this);
+    }
+  }
+
+  virtual void AddObserver(Observer* observer) OVERRIDE {
+    observers_.AddObserver(observer);
+  }
+
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
+    observers_.RemoveObserver(observer);
+  }
+
+  virtual void DecreaseScreenBrightness(bool allow_off) OVERRIDE {
     if (chromeos::DecreaseScreenBrightness)
       chromeos::DecreaseScreenBrightness(allow_off);
   }
 
-  void IncreaseScreenBrightness() {
+  virtual void IncreaseScreenBrightness() OVERRIDE {
     if (chromeos::IncreaseScreenBrightness)
       chromeos::IncreaseScreenBrightness();
   }
-
-  void AddObserver(Observer* observer) {
-    observers_.AddObserver(observer);
-  }
-
-  void RemoveObserver(Observer* observer) {
-    observers_.RemoveObserver(observer);
-  }
+  // End BrightnessLibrary implementation.
 
  private:
   static void BrightnessChangedHandler(void* object,
@@ -51,12 +60,6 @@ class BrightnessLibraryImpl : public BrightnessLibrary {
                                        bool user_initiated) {
     BrightnessLibraryImpl* self = static_cast<BrightnessLibraryImpl*>(object);
     self->OnBrightnessChanged(brightness_level, user_initiated);
-  }
-
-  void Init() {
-    DCHECK(!brightness_connection_) << "Already intialized";
-    brightness_connection_ =
-        chromeos::MonitorBrightnessV2(&BrightnessChangedHandler, this);
   }
 
   void OnBrightnessChanged(int brightness_level, bool user_initiated) {
@@ -71,8 +74,7 @@ class BrightnessLibraryImpl : public BrightnessLibrary {
       return;
     }
 
-    FOR_EACH_OBSERVER(Observer,
-                      observers_,
+    FOR_EACH_OBSERVER(Observer, observers_,
                       BrightnessChanged(brightness_level, user_initiated));
   }
 
@@ -86,19 +88,23 @@ class BrightnessLibraryImpl : public BrightnessLibrary {
 class BrightnessLibraryStubImpl : public BrightnessLibrary {
  public:
   BrightnessLibraryStubImpl() {}
-  ~BrightnessLibraryStubImpl() {}
-  void DecreaseScreenBrightness(bool allow_off) {}
-  void IncreaseScreenBrightness() {}
-  void AddObserver(Observer* observer) {}
-  void RemoveObserver(Observer* observer) {}
+  virtual ~BrightnessLibraryStubImpl() {}
+  virtual void Init() OVERRIDE {}
+  virtual void AddObserver(Observer* observer) OVERRIDE {}
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {}
+  virtual void DecreaseScreenBrightness(bool allow_off) OVERRIDE {}
+  virtual void IncreaseScreenBrightness() OVERRIDE {}
 };
 
 // static
 BrightnessLibrary* BrightnessLibrary::GetImpl(bool stub) {
+  BrightnessLibrary* impl;
   if (stub)
-    return new BrightnessLibraryStubImpl();
+    impl = new BrightnessLibraryStubImpl();
   else
-    return new BrightnessLibraryImpl();
+    impl = new BrightnessLibraryImpl();
+  impl->Init();
+  return impl;
 }
 
 }  // namespace chromeos

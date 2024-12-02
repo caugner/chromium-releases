@@ -5,6 +5,7 @@
 #include "chrome/browser/sync/syncable/model_type.h"
 
 #include "base/metrics/histogram.h"
+#include "base/string_split.h"
 #include "base/values.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/protocol/app_specifics.pb.h"
@@ -254,6 +255,21 @@ std::string ModelTypeSetToString(const ModelTypeSet& model_types) {
   return result;
 }
 
+ModelType ModelTypeFromValue(const Value& value) {
+  if (value.IsType(Value::TYPE_STRING)) {
+    std::string result;
+    CHECK(value.GetAsString(&result));
+    return ModelTypeFromString(result);
+  } else if (value.IsType(Value::TYPE_INTEGER)) {
+    int result;
+    CHECK(value.GetAsInteger(&result));
+    return ModelTypeFromInt(result);
+  } else {
+    NOTREACHED() << "Unsupported value type: " << value.GetType();
+    return UNSPECIFIED;
+  }
+}
+
 ModelType ModelTypeFromString(const std::string& model_type_string) {
   if (model_type_string == "Bookmarks")
     return BOOKMARKS;
@@ -298,18 +314,6 @@ std::string ModelTypeBitSetToString(const ModelTypeBitSet& model_types) {
   return result;
 }
 
-bool ModelTypeBitSetFromString(
-    const std::string& model_type_bitset_string,
-    ModelTypeBitSet* model_types) {
-  DCHECK(model_types);
-  if (model_type_bitset_string.length() != MODEL_TYPE_COUNT)
-    return false;
-  if (model_type_bitset_string.find_first_not_of("01") != std::string::npos)
-    return false;
-  *model_types = ModelTypeBitSet(model_type_bitset_string);
-  return true;
-}
-
 ModelTypeBitSet ModelTypeBitSetFromSet(const ModelTypeSet& set) {
   ModelTypeBitSet bitset;
   for (ModelTypeSet::const_iterator iter = set.begin(); iter != set.end();
@@ -330,6 +334,14 @@ ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types) {
   return value;
 }
 
+ModelTypeBitSet ModelTypeBitSetFromValue(const base::ListValue& value) {
+  ModelTypeBitSet result;
+  for (ListValue::const_iterator i = value.begin(); i != value.end(); ++i) {
+    result.set(ModelTypeFromValue(**i));
+  }
+  return result;
+}
+
 ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types) {
   ListValue* value = new ListValue();
   for (ModelTypeSet::const_iterator i = model_types.begin();
@@ -337,6 +349,14 @@ ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types) {
     value->Append(Value::CreateStringValue(ModelTypeToString(*i)));
   }
   return value;
+}
+
+ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
+  ModelTypeSet result;
+  for (ListValue::const_iterator i = value.begin(); i != value.end(); ++i) {
+    result.insert(ModelTypeFromValue(**i));
+  }
+  return result;
 }
 
 // TODO(zea): remove all hardcoded tags in model associators and have them use
@@ -440,58 +460,58 @@ void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time) {
 // TODO(akalin): Figure out a better way to do these mappings.
 
 namespace {
-const char kBookmarkint[] = "BOOKMARK";
-const char kPreferenceint[] = "PREFERENCE";
-const char kPasswordint[] = "PASSWORD";
-const char kAutofillint[] = "AUTOFILL";
-const char kThemeint[] = "THEME";
-const char kTypedUrlint[] = "TYPED_URL";
-const char kExtensionint[] = "EXTENSION";
-const char kNigoriint[] = "NIGORI";
-const char kAppint[] = "APP";
-const char kSearchEngineint[] = "SEARCH_ENGINE";
-const char kSessionint[] = "SESSION";
-const char kAutofillProfileint[] = "AUTOFILL_PROFILE";
+const char kBookmarkNotificationType[] = "BOOKMARK";
+const char kPreferenceNotificationType[] = "PREFERENCE";
+const char kPasswordNotificationType[] = "PASSWORD";
+const char kAutofillNotificationType[] = "AUTOFILL";
+const char kThemeNotificationType[] = "THEME";
+const char kTypedUrlNotificationType[] = "TYPED_URL";
+const char kExtensionNotificationType[] = "EXTENSION";
+const char kNigoriNotificationType[] = "NIGORI";
+const char kAppNotificationType[] = "APP";
+const char kSearchEngineNotificationType[] = "SEARCH_ENGINE";
+const char kSessionNotificationType[] = "SESSION";
+const char kAutofillProfileNotificationType[] = "AUTOFILL_PROFILE";
 }  // namespace
 
-bool RealModelTypeToint(ModelType model_type,
+bool RealModelTypeToNotificationType(ModelType model_type,
                                      std::string* notification_type) {
   switch (model_type) {
     case BOOKMARKS:
-      *notification_type = kBookmarkint;
+      *notification_type = kBookmarkNotificationType;
       return true;
     case PREFERENCES:
-      *notification_type = kPreferenceint;
+      *notification_type = kPreferenceNotificationType;
       return true;
     case PASSWORDS:
-      *notification_type = kPasswordint;
+      *notification_type = kPasswordNotificationType;
       return true;
     case AUTOFILL:
-      *notification_type = kAutofillint;
+      *notification_type = kAutofillNotificationType;
       return true;
     case THEMES:
-      *notification_type = kThemeint;
+      *notification_type = kThemeNotificationType;
       return true;
     case TYPED_URLS:
-      *notification_type = kTypedUrlint;
+      *notification_type = kTypedUrlNotificationType;
       return true;
     case EXTENSIONS:
-      *notification_type = kExtensionint;
+      *notification_type = kExtensionNotificationType;
       return true;
     case NIGORI:
-      *notification_type = kNigoriint;
+      *notification_type = kNigoriNotificationType;
       return true;
     case APPS:
-      *notification_type = kAppint;
+      *notification_type = kAppNotificationType;
       return true;
     case SEARCH_ENGINES:
-      *notification_type = kSearchEngineint;
+      *notification_type = kSearchEngineNotificationType;
       return true;
     case SESSIONS:
-      *notification_type = kSessionint;
+      *notification_type = kSessionNotificationType;
       return true;
     case AUTOFILL_PROFILE:
-      *notification_type = kAutofillProfileint;
+      *notification_type = kAutofillProfileNotificationType;
       return true;
     default:
       break;
@@ -500,47 +520,59 @@ bool RealModelTypeToint(ModelType model_type,
   return false;
 }
 
-bool intToRealModelType(const std::string& notification_type,
+bool NotificationTypeToRealModelType(const std::string& notification_type,
                                      ModelType* model_type) {
-  if (notification_type == kBookmarkint) {
+  if (notification_type == kBookmarkNotificationType) {
     *model_type = BOOKMARKS;
     return true;
-  } else if (notification_type == kPreferenceint) {
+  } else if (notification_type == kPreferenceNotificationType) {
     *model_type = PREFERENCES;
     return true;
-  } else if (notification_type == kPasswordint) {
+  } else if (notification_type == kPasswordNotificationType) {
     *model_type = PASSWORDS;
     return true;
-  } else if (notification_type == kAutofillint) {
+  } else if (notification_type == kAutofillNotificationType) {
     *model_type = AUTOFILL;
     return true;
-  } else if (notification_type == kThemeint) {
+  } else if (notification_type == kThemeNotificationType) {
     *model_type = THEMES;
     return true;
-  } else if (notification_type == kTypedUrlint) {
+  } else if (notification_type == kTypedUrlNotificationType) {
     *model_type = TYPED_URLS;
     return true;
-  } else if (notification_type == kExtensionint) {
+  } else if (notification_type == kExtensionNotificationType) {
     *model_type = EXTENSIONS;
     return true;
-  } else if (notification_type == kNigoriint) {
+  } else if (notification_type == kNigoriNotificationType) {
     *model_type = NIGORI;
     return true;
-  } else if (notification_type == kAppint) {
+  } else if (notification_type == kAppNotificationType) {
     *model_type = APPS;
     return true;
-  } else if (notification_type == kSearchEngineint) {
+  } else if (notification_type == kSearchEngineNotificationType) {
     *model_type = SEARCH_ENGINES;
     return true;
-  } else if (notification_type == kSessionint) {
+  } else if (notification_type == kSessionNotificationType) {
     *model_type = SESSIONS;
     return true;
-  } else if (notification_type == kAutofillProfileint) {
+  } else if (notification_type == kAutofillProfileNotificationType) {
     *model_type = AUTOFILL_PROFILE;
     return true;
   }
   *model_type = UNSPECIFIED;
   return false;
+}
+
+ModelTypeSet GetAllRealModelTypes() {
+  ModelTypeSet all_types;
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    all_types.insert(ModelTypeFromInt(i));
+  }
+  return all_types;
+}
+
+bool IsRealDataType(ModelType model_type) {
+  return model_type >= FIRST_REAL_MODEL_TYPE && model_type < MODEL_TYPE_COUNT;
 }
 
 }  // namespace syncable

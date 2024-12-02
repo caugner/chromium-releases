@@ -5,6 +5,7 @@
 #include "content/renderer/mock_content_renderer_client.h"
 
 #include <string>
+#include "v8/include/v8.h"
 
 namespace content {
 
@@ -57,6 +58,7 @@ bool MockContentRendererClient::AllowPopup(const GURL& creator) {
 bool MockContentRendererClient::ShouldFork(WebKit::WebFrame* frame,
                                            const GURL& url,
                                            bool is_content_initiated,
+                                           bool is_initial_navigation,
                                            bool* send_referrer) {
   return false;
 }
@@ -80,7 +82,7 @@ void MockContentRendererClient::DidDestroyScriptContext(
 }
 
 void MockContentRendererClient::DidCreateIsolatedScriptContext(
-    WebKit::WebFrame* frame) {
+    WebKit::WebFrame* frame, int world_id, v8::Handle<v8::Context> context) {
 }
 
 unsigned long long MockContentRendererClient::VisitedLinkHash(
@@ -102,4 +104,19 @@ bool MockContentRendererClient::ShouldOverridePageVisibilityState(
   return false;
 }
 
+bool MockContentRendererClient::HandleGetCookieRequest(
+    RenderView* sender,
+    const GURL& url,
+    const GURL& first_party_for_cookies,
+    std::string* cookies) {
+  return false;
+}
+
+bool MockContentRendererClient::HandleSetCookieRequest(
+    RenderView* sender,
+    const GURL& url,
+    const GURL& first_party_for_cookies,
+    const std::string& value) {
+  return false;
+}
 }  // namespace content

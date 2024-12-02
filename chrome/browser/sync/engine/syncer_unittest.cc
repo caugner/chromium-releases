@@ -13,6 +13,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 #include "chrome/browser/sync/engine/process_updates_command.h"
+#include "chrome/browser/sync/engine/nigori_util.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
@@ -33,11 +35,10 @@
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/common/deprecated/event_sys-inl.h"
-#include "chrome/test/sync/engine/mock_connection_manager.h"
-#include "chrome/test/sync/engine/test_directory_setter_upper.h"
-#include "chrome/test/sync/engine/test_id_factory.h"
-#include "chrome/test/sync/engine/test_syncable_utils.h"
+#include "chrome/browser/sync/test/engine/mock_connection_manager.h"
+#include "chrome/browser/sync/test/engine/test_directory_setter_upper.h"
+#include "chrome/browser/sync/test/engine/test_id_factory.h"
+#include "chrome/browser/sync/test/engine/test_syncable_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::TimeDelta;
@@ -57,6 +58,7 @@ using syncable::Entry;
 using syncable::GetFirstEntryWithName;
 using syncable::GetOnlyEntryWithName;
 using syncable::Id;
+using syncable::kEncryptedString;
 using syncable::MutableEntry;
 using syncable::ReadTransaction;
 using syncable::ScopedDirLookup;
@@ -106,29 +108,36 @@ class SyncerTest : public testing::Test,
   SyncerTest() : syncer_(NULL), saw_syncer_event_(false) {}
 
   // SyncSession::Delegate implementation.
-  virtual void OnSilencedUntil(const base::TimeTicks& silenced_until) {
+  virtual void OnSilencedUntil(const base::TimeTicks& silenced_until) OVERRIDE {
     FAIL() << "Should not get silenced.";
   }
-  virtual bool IsSyncingCurrentlySilenced() {
+  virtual bool IsSyncingCurrentlySilenced() OVERRIDE {
     return false;
   }
   virtual void OnReceivedLongPollIntervalUpdate(
-      const base::TimeDelta& new_interval) {
+      const base::TimeDelta& new_interval) OVERRIDE {
     last_long_poll_interval_received_ = new_interval;
   }
   virtual void OnReceivedShortPollIntervalUpdate(
-      const base::TimeDelta& new_interval) {
+      const base::TimeDelta& new_interval) OVERRIDE {
     last_short_poll_interval_received_ = new_interval;
   }
-  virtual void OnShouldStopSyncingPermanently() {
+  virtual void OnReceivedSessionsCommitDelay(
+      const base::TimeDelta& new_delay) OVERRIDE {
+    last_sessions_commit_delay_seconds_ = new_delay;
+  }
+  virtual void OnShouldStopSyncingPermanently() OVERRIDE {
+  }
+  virtual void OnSyncProtocolError(
+      const sessions::SyncSessionSnapshot& snapshot) OVERRIDE {
   }
 
   // ModelSafeWorkerRegistrar implementation.
-  virtual void GetWorkers(std::vector<ModelSafeWorker*>* out) {
+  virtual void GetWorkers(std::vector<ModelSafeWorker*>* out) OVERRIDE {
     out->push_back(worker_.get());
   }
 
-  virtual void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
+  virtual void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) OVERRIDE {
     // We're just testing the sync engine here, so we shunt everything to
     // the SyncerThread.  Datatypes which aren't enabled aren't in the map.
     for (int i = 0; i < syncable::MODEL_TYPE_COUNT; ++i) {
@@ -138,7 +147,7 @@ class SyncerTest : public testing::Test,
     }
   }
 
-  virtual void OnSyncEngineEvent(const SyncEngineEvent& event) {
+  virtual void OnSyncEngineEvent(const SyncEngineEvent& event) OVERRIDE {
     VLOG(1) << "HandleSyncEngineEvent in unittest " << event.what_happened;
     // we only test for entry-specific events, not status changed ones.
     switch (event.what_happened) {
@@ -428,7 +437,7 @@ class SyncerTest : public testing::Test,
 
   // Helper getters that work without a transaction, to reduce boilerplate.
   Id Get(int64 metahandle, syncable::IdField field) const {
-    return GetField(metahandle, field, syncable::kNullId);
+    return GetField(metahandle, field, syncable::GetNullId());
   }
 
   string Get(int64 metahandle, syncable::StringField field) const {
@@ -476,6 +485,7 @@ class SyncerTest : public testing::Test,
   bool saw_syncer_event_;
   base::TimeDelta last_short_poll_interval_received_;
   base::TimeDelta last_long_poll_interval_received_;
+  base::TimeDelta last_sessions_commit_delay_seconds_;
   scoped_refptr<ModelSafeWorker> worker_;
 
   syncable::ModelTypeBitSet enabled_datatypes_;
@@ -536,6 +546,57 @@ TEST_F(SyncerTest, GetCommitIdsCommandTruncates) {
   expected_order.push_back(ids_.MakeLocal("c"));
   expected_order.push_back(ids_.MakeLocal("e"));
   DoTruncationTest(dir, unsynced_handle_view, expected_order);
+}
+
+TEST_F(SyncerTest, GetCommitIdsFilterEntriesNeedingEncryption) {
+  ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
+  ASSERT_TRUE(dir.good());
+  int64 handle_x = CreateUnsyncedDirectory("X", ids_.MakeLocal("x"));
+  int64 handle_b = CreateUnsyncedDirectory("B", ids_.MakeLocal("b"));
+  int64 handle_c = CreateUnsyncedDirectory("C", ids_.MakeLocal("c"));
+  int64 handle_e = CreateUnsyncedDirectory("E", ids_.MakeLocal("e"));
+  int64 handle_f = CreateUnsyncedDirectory("F", ids_.MakeLocal("f"));
+  sync_pb::EncryptedData encrypted;
+  sync_pb::EntitySpecifics encrypted_bookmark;
+  encrypted_bookmark.mutable_encrypted();
+  AddDefaultExtensionValue(syncable::BOOKMARKS, &encrypted_bookmark);
+  {
+    WriteTransaction wtrans(FROM_HERE, UNITTEST, dir);
+    MutableEntry entry_x(&wtrans, GET_BY_HANDLE, handle_x);
+    MutableEntry entry_b(&wtrans, GET_BY_HANDLE, handle_b);
+    MutableEntry entry_c(&wtrans, GET_BY_HANDLE, handle_c);
+    MutableEntry entry_e(&wtrans, GET_BY_HANDLE, handle_e);
+    MutableEntry entry_f(&wtrans, GET_BY_HANDLE, handle_f);
+    entry_x.Put(SPECIFICS, encrypted_bookmark);
+    entry_x.Put(NON_UNIQUE_NAME, kEncryptedString);
+    entry_b.Put(SPECIFICS, DefaultBookmarkSpecifics());
+    entry_c.Put(SPECIFICS, DefaultBookmarkSpecifics());
+    entry_e.Put(SPECIFICS, encrypted_bookmark);
+    entry_e.Put(NON_UNIQUE_NAME, kEncryptedString);
+    entry_f.Put(SPECIFICS, DefaultPreferencesSpecifics());
+  }
+
+  syncable::ModelTypeSet encrypted_types;
+  encrypted_types.insert(syncable::BOOKMARKS);
+  syncable::Directory::UnsyncedMetaHandles unsynced_handles;
+  unsynced_handles.push_back(handle_x);
+  unsynced_handles.push_back(handle_b);
+  unsynced_handles.push_back(handle_c);
+  unsynced_handles.push_back(handle_e);
+  unsynced_handles.push_back(handle_f);
+  // The unencrypted bookmarks should be removed from the list.
+  syncable::Directory::UnsyncedMetaHandles expected_handles;
+  expected_handles.push_back(handle_x);  // Was encrypted.
+  expected_handles.push_back(handle_e);  // Was encrypted.
+  expected_handles.push_back(handle_f);  // Does not require encryption.
+  {
+    WriteTransaction wtrans(FROM_HERE, UNITTEST, dir);
+    GetCommitIdsCommand::FilterEntriesNeedingEncryption(
+        encrypted_types,
+        &wtrans,
+        &unsynced_handles);
+    EXPECT_EQ(expected_handles, unsynced_handles);
+  }
 }
 
 // TODO(chron): More corner case unit tests around validation.
@@ -2086,7 +2147,7 @@ TEST_F(SyncerTest, DeletingEntryInFolder) {
   }
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
   StatusController* status(session_->status_controller());
-  EXPECT_TRUE(0 == status->error_counters().num_conflicting_commits);
+  EXPECT_TRUE(0 == status->error().num_conflicting_commits);
 }
 
 TEST_F(SyncerTest, DeletingEntryWithLocalEdits) {
@@ -3855,6 +3916,7 @@ TEST_F(SyncerTest, TestClientCommand) {
   ClientCommand* command = mock_server_->GetNextClientCommand();
   command->set_set_sync_poll_interval(8);
   command->set_set_sync_long_poll_interval(800);
+  command->set_sessions_commit_delay_seconds(3141);
   mock_server_->AddUpdateDirectory(1, 0, "in_root", 1, 1);
   SyncShareAsDelegate();
 
@@ -3862,10 +3924,13 @@ TEST_F(SyncerTest, TestClientCommand) {
               last_short_poll_interval_received_);
   EXPECT_TRUE(TimeDelta::FromSeconds(800) ==
               last_long_poll_interval_received_);
+  EXPECT_TRUE(TimeDelta::FromSeconds(3141) ==
+              last_sessions_commit_delay_seconds_);
 
   command = mock_server_->GetNextClientCommand();
   command->set_set_sync_poll_interval(180);
   command->set_set_sync_long_poll_interval(190);
+  command->set_sessions_commit_delay_seconds(2718);
   mock_server_->AddUpdateDirectory(1, 0, "in_root", 1, 1);
   SyncShareAsDelegate();
 
@@ -3873,6 +3938,8 @@ TEST_F(SyncerTest, TestClientCommand) {
               last_short_poll_interval_received_);
   EXPECT_TRUE(TimeDelta::FromSeconds(190) ==
               last_long_poll_interval_received_);
+  EXPECT_TRUE(TimeDelta::FromSeconds(2718) ==
+              last_sessions_commit_delay_seconds_);
 }
 
 TEST_F(SyncerTest, EnsureWeSendUpOldParent) {

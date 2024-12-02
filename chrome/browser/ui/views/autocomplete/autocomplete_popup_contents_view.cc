@@ -12,7 +12,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/views/autocomplete/autocomplete_result_view.h"
-#include "chrome/browser/ui/views/bubble/bubble_border.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -25,6 +24,7 @@
 #include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
 #include "unicode/ubidi.h"
+#include "views/bubble/bubble_border.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/label.h"
 #include "views/layout/grid_layout.h"
@@ -38,7 +38,9 @@
 #include <objidl.h>
 
 #include "base/win/scoped_gdi_object.h"
+#if !defined(USE_AURA)
 #include "views/widget/native_widget_win.h"
+#endif
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
@@ -117,7 +119,11 @@ class OptInButtonBorder : public views::Border {
 };
 
 gfx::NativeView GetRelativeWindowForPopup(gfx::NativeView edit_native_view) {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng):
+  NOTIMPLEMENTED();
+  return NULL;
+#elif defined(OS_WIN)
   // When an IME is attached to the rich-edit control, retrieve its window
   // handle and show this popup window under the IME windows.
   // Otherwise, show this popup window under top-most windows.
@@ -229,11 +235,11 @@ AutocompletePopupContentsView::AutocompletePopupContentsView(
     const gfx::Font& font,
     OmniboxView* omnibox_view,
     AutocompleteEditModel* edit_model,
-    Profile* profile,
-    const views::View* location_bar)
-    : model_(new AutocompletePopupModel(this, edit_model, profile)),
+    views::View* location_bar)
+    : model_(new AutocompletePopupModel(this, edit_model)),
       opt_in_view_(NULL),
       omnibox_view_(omnibox_view),
+      profile_(edit_model->profile()),
       location_bar_(location_bar),
       result_font_(font.DeriveFont(kEditFontAdjust)),
       result_bold_font_(result_font_.DeriveFont(0, gfx::Font::BOLD)),
@@ -241,7 +247,8 @@ AutocompletePopupContentsView::AutocompletePopupContentsView(
       ALLOW_THIS_IN_INITIALIZER_LIST(size_animation_(this)) {
   // The following little dance is required because set_border() requires a
   // pointer to a non-const object.
-  BubbleBorder* bubble_border = new BubbleBorder(BubbleBorder::NONE);
+  views::BubbleBorder* bubble_border =
+      new views::BubbleBorder(views::BubbleBorder::NONE);
   bubble_border_ = bubble_border;
   set_border(bubble_border);
   // The contents is owned by the LocationBarView.
@@ -331,7 +338,7 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
   for (size_t i = model_->result().size(); i < child_rv_count; ++i)
     child_at(i)->SetVisible(false);
 
-  PromoCounter* counter = model_->profile()->GetInstantPromoCounter();
+  PromoCounter* counter = profile_->GetInstantPromoCounter();
   if (!opt_in_view_ && counter && counter->ShouldShow(base::Time::Now())) {
     opt_in_view_ = new InstantOptInView(this, result_bold_font_, result_font_);
     AddChildView(opt_in_view_);
@@ -357,12 +364,19 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
     params.can_activate = false;
     params.transparent = true;
-    params.parent = location_bar_->GetWidget()->GetNativeView();
+    params.parent_widget = location_bar_->GetWidget();
     params.bounds = GetPopupBounds();
     popup_->Init(params);
     popup_->SetContentsView(this);
     popup_->MoveAbove(
         GetRelativeWindowForPopup(omnibox_view_->GetNativeView()));
+    if (!popup_.get()) {
+      // For some IMEs GetRelativeWindowForPopup triggers the omnibox to lose
+      // focus, thereby closing (and destroying) the popup.
+      // TODO: this won't be needed once we close the omnibox on input window
+      // showing.
+      return;
+    }
     popup_->Show();
   } else {
     // Animate the popup shrinking, but don't animate growing larger since that
@@ -597,12 +611,12 @@ void AutocompletePopupContentsView::MakeContentsPath(
            SkIntToScalar(bounding_rect.right()),
            SkIntToScalar(bounding_rect.bottom()));
 
-  SkScalar radius = SkIntToScalar(BubbleBorder::GetCornerRadius());
+  SkScalar radius = SkIntToScalar(views::BubbleBorder::GetCornerRadius());
   path->addRoundRect(rect, radius, radius);
 }
 
 void AutocompletePopupContentsView::UpdateBlurRegion() {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // We only support background blurring on Vista with Aero-Glass enabled.
   if (!views::NativeWidgetWin::IsAeroGlassEnabled() || !GetWidget())
     return;
@@ -694,12 +708,12 @@ gfx::Rect AutocompletePopupContentsView::CalculateTargetBounds(int h) {
 void AutocompletePopupContentsView::UserPressedOptIn(bool opt_in) {
   delete opt_in_view_;
   opt_in_view_ = NULL;
-  PromoCounter* counter = model_->profile()->GetInstantPromoCounter();
+  PromoCounter* counter = profile_->GetInstantPromoCounter();
   DCHECK(counter);
   counter->Hide();
   if (opt_in) {
     browser::ShowInstantConfirmDialogIfNecessary(
-        location_bar_->GetWidget()->GetNativeWindow(), model_->profile());
+        location_bar_->GetWidget()->GetNativeWindow(), profile_);
   }
   UpdatePopupAppearance();
 }

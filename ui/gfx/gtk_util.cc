@@ -164,12 +164,22 @@ void SubtractRectanglesFromRegion(GdkRegion* region,
   }
 }
 
+PangoContext* GetPangoContext() {
+#if defined(USE_WAYLAND)
+  PangoFontMap* font_map = pango_cairo_font_map_get_default();
+  PangoContext* default_context = pango_font_map_create_context(font_map);
+#else
+  PangoContext* default_context = gdk_pango_context_get();
+#endif
+  return default_context;
+}
+
 double GetPangoResolution() {
   static double resolution;
   static bool determined_resolution = false;
   if (!determined_resolution) {
     determined_resolution = true;
-    PangoContext* default_context = gdk_pango_context_get();
+    PangoContext* default_context = GetPangoContext();
     resolution = pango_cairo_context_get_resolution(default_context);
     g_object_unref(default_context);
   }
@@ -207,6 +217,35 @@ uint8_t* BGRAToRGBA(const uint8_t* pixels, int width, int height, int stride) {
   }
 
   return new_pixels;
+}
+
+void InitRCStyles() {
+  static const char kRCText[] =
+      // Make our dialogs styled like the GNOME HIG.
+      //
+      // TODO(evanm): content-area-spacing was introduced in a later
+      // version of GTK, so we need to set that manually on all dialogs.
+      // Perhaps it would make sense to have a shared FixupDialog() function.
+      "style \"gnome-dialog\" {\n"
+      "  xthickness = 12\n"
+      "  GtkDialog::action-area-border = 0\n"
+      "  GtkDialog::button-spacing = 6\n"
+      "  GtkDialog::content-area-spacing = 18\n"
+      "  GtkDialog::content-area-border = 12\n"
+      "}\n"
+      // Note we set it at the "application" priority, so users can override.
+      "widget \"GtkDialog\" style : application \"gnome-dialog\"\n"
+
+      // Make our about dialog special, so the image is flush with the edge.
+      "style \"about-dialog\" {\n"
+      "  GtkDialog::action-area-border = 12\n"
+      "  GtkDialog::button-spacing = 6\n"
+      "  GtkDialog::content-area-spacing = 18\n"
+      "  GtkDialog::content-area-border = 0\n"
+      "}\n"
+      "widget \"about-dialog\" style : application \"about-dialog\"\n";
+
+  gtk_rc_parse_string(kRCText);
 }
 
 }  // namespace gfx

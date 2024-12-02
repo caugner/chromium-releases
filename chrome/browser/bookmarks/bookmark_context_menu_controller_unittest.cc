@@ -11,7 +11,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/page_navigator.h"
 #include "grit/generated_resources.h"
@@ -24,11 +24,18 @@
 // PageNavigator implementation that records the URL.
 class TestingPageNavigator : public PageNavigator {
  public:
+  // Deprecated. Please use the one-argument variant.
+  // TODO(adriansc): Remove this method once refactoring changed all call
+  // sites.
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
-                               PageTransition::Type transition) {
-    urls_.push_back(url);
+                               PageTransition::Type transition) OVERRIDE {
+    return OpenURL(OpenURLParams(url, referrer, disposition, transition));
+  }
+
+  virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
+    urls_.push_back(params.url);
     return NULL;
   }
 
@@ -62,7 +69,7 @@ class BookmarkContextMenuControllerTest : public testing::Test {
     BookmarkBarView::testing_ = false;
 #endif
 
-    // Flush the message loop to make Purify happy.
+    // Flush the message loop to make application verifiers happy.
     message_loop_.RunAllPending();
   }
 

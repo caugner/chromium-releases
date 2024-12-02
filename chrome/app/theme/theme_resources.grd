@@ -112,6 +112,10 @@
       <include name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_16" file="download_progress_foreground16.png" type="BINDATA" />
       <include name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_32" file="download_progress_foreground32.png" type="BINDATA" />
       <include name="IDR_EXTENSION_DEFAULT_ICON" file="extension_default_icon.png" type="BINDATA" />
+      <include name="IDR_EXTENSIONS_RATING_STAR_HALF_LEFT" file="extensions_rating_star_half_left.png" type="BINDATA" />
+      <include name="IDR_EXTENSIONS_RATING_STAR_HALF_RIGHT" file="extensions_rating_star_half_right.png" type="BINDATA" />
+      <include name="IDR_EXTENSIONS_RATING_STAR_OFF" file="extensions_rating_star_off.png" type="BINDATA" />
+      <include name="IDR_EXTENSIONS_RATING_STAR_ON" file="extensions_rating_star_on.png" type="BINDATA" />
       <include name="IDR_EXTENSIONS_SECTION" file="extensions_section.png" type="BINDATA" />
       <include name="IDR_FINDINPAGE_NEXT" file="find_next.png" type="BINDATA" />
       <include name="IDR_FINDINPAGE_NEXT_H" file="find_next_h.png" type="BINDATA" />
@@ -149,15 +153,12 @@
       </if>
       <include name="IDR_MAXIMIZE_BUTTON_MASK" file="maximize_button_mask.png" type="BINDATA" />
       <include name="IDR_MINIMIZE_BUTTON_MASK" file="minimize_button_mask.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_H" file="newtab_h.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_MASK" file="newtab_button_mask.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_P" file="newtab_p.png" type="BINDATA" />
       <include name="IDR_NEWTAB_CHROME_WELCOME_PAGE_THUMBNAIL" file="ntp_welcome_thumb.png" type="BINDATA" />
       <include name="IDR_NEWTAB_MENU_MASK" file="ntp_menu_mask.png" type="BINDATA" />
       <include name="IDR_NEWTAB_OPTION" file="ntp_option.png" type="BINDATA" />
       <include name="IDR_NEWTAB_OPTION_H" file="ntp_option_h.png" type="BINDATA" />
       <include name="IDR_NEWTAB_OPTION_P" file="ntp_option_p.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_THEMES_GALLERY_THUMBNAIL" file="ntp_themes_gallery_thumb.png" type="BINDATA" />
+      <include name="IDR_NEWTAB_WEBSTORE_THUMBNAIL" file="ntp_webstore_thumb.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_EXTENSION_APP" file="omnibox_extension_app.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_EXTENSION_APP_DARK" file="omnibox_extension_app_dark.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_EXTENSION_APP_SELECTED" file="omnibox_extension_app_selected.png" type="BINDATA" />
@@ -206,27 +207,36 @@
       <!-- NOTE: product_logo_*.* files beyond what's listed above are
            referenced by installer code; don't remove them unless you know what
            you're doing! -->
-      <include name="IDR_PROFILE_AVATAR_0" file="profile_avatar_generic_male.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_1" file="profile_avatar_generic_female.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_2" file="profile_avatar_secret_agent.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_3" file="profile_avatar_superhero.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_4" file="profile_avatar_volley_ball.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_5" file="profile_avatar_businessman.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_6" file="profile_avatar_ninja.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_7" file="profile_avatar_alien.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_8" file="profile_avatar_awesome.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_9" file="profile_avatar_flower.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_10" file="profile_avatar_pizza.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_11" file="profile_avatar_soccer.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_12" file="profile_avatar_burger.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_13" file="profile_avatar_cat.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_14" file="profile_avatar_cupcake.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_15" file="profile_avatar_dog.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_16" file="profile_avatar_horse.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_17" file="profile_avatar_margarita.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_18" file="profile_avatar_note.png" type="BINDATA" />
-      <include name="IDR_PROFILE_AVATAR_19" file="profile_avatar_sun_cloud.png" type="BINDATA" />
-
+      <include name="IDR_PROFILE_AVATAR_0" file="profile_avatar_generic.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_1" file="profile_avatar_generic_aqua.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_2" file="profile_avatar_generic_blue.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_3" file="profile_avatar_generic_green.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_4" file="profile_avatar_generic_orange.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_5" file="profile_avatar_generic_purple.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_6" file="profile_avatar_generic_red.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_7" file="profile_avatar_generic_yellow.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_8" file="profile_avatar_secret_agent.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_9" file="profile_avatar_superhero.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_10" file="profile_avatar_volley_ball.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_11" file="profile_avatar_businessman.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_12" file="profile_avatar_ninja.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_13" file="profile_avatar_alien.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_14" file="profile_avatar_awesome.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_15" file="profile_avatar_flower.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_16" file="profile_avatar_pizza.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_17" file="profile_avatar_soccer.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_18" file="profile_avatar_burger.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_19" file="profile_avatar_cat.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_20" file="profile_avatar_cupcake.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_21" file="profile_avatar_dog.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_22" file="profile_avatar_horse.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_23" file="profile_avatar_margarita.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_24" file="profile_avatar_note.png" type="BINDATA" />
+      <include name="IDR_PROFILE_AVATAR_25" file="profile_avatar_sun_cloud.png" type="BINDATA" />
+      <include name="IDR_PROFILE_EDIT" file="profile_edit.png" type="BINDATA" />
+      <include name="IDR_PROFILE_EDIT_HOVER" file="profile_edit_hover.png" type="BINDATA" />
+      <include name="IDR_PROFILE_EDIT_PRESSED" file="profile_edit_pressed.png" type="BINDATA" />
+      <include name="IDR_PROFILE_SELECTED" file="profile_selected.png" type="BINDATA" />
       <include name="IDR_RESTORE_BUTTON_MASK" file="restore_button_mask.png" type="BINDATA" />
       <include name="IDR_SAD_TAB" file="sadtab.png" type="BINDATA" />
       <include name="IDR_SAFEBROWSING_WARNING" file="safebrowsing_warning.png" type="BINDATA" />
@@ -325,31 +335,7 @@
       <if expr="is_macosx">
         <include name="IDR_TABPOSE_CLOSE" file="tabpose_close.png" type="BINDATA" />
       </if>
-      <include name="IDR_TAB_ACTIVE_CENTER" file="tab_active_center.png" type="BINDATA" />
-      <include name="IDR_TAB_ACTIVE_LEFT" file="tab_active_left.png" type="BINDATA" />
-      <include name="IDR_TAB_ACTIVE_RIGHT" file="tab_active_right.png" type="BINDATA" />
-      <include name="IDR_TAB_ALPHA_LEFT" file="tab_alpha_left.png" type="BINDATA" />
-      <include name="IDR_TAB_ALPHA_RIGHT" file="tab_alpha_right.png" type="BINDATA" />
-      <include name="IDR_TAB_CLOSE" file="tab_close.png" type="BINDATA" />
-      <include name="IDR_TAB_CLOSE_H" file="tab_close_h.png" type="BINDATA" />
-      <include name="IDR_TAB_CLOSE_MASK" file="tab_close_mask.png" type="BINDATA" />
-      <include name="IDR_TAB_CLOSE_P" file="tab_close_p.png" type="BINDATA" />
-      <include name="IDR_TAB_DROP_DOWN" file="tab_drop_down.png" type="BINDATA" />
-      <include name="IDR_TAB_DROP_UP" file="tab_drop_up.png" type="BINDATA" />
-      <include name="IDR_TAB_INACTIVE_CENTER" file="tab_inactive_center.png" type="BINDATA" />
-      <include name="IDR_TAB_INACTIVE_LEFT" file="tab_inactive_left.png" type="BINDATA" />
-      <include name="IDR_TAB_INACTIVE_RIGHT" file="tab_inactive_right.png" type="BINDATA" />
       <include name="IDR_THEME_BUTTON_BACKGROUND" file="notused.png" type="BINDATA" />
-      <if expr="pp_ifdef('chromeos')">
-        <include name="IDR_THEME_FRAME_INACTIVE" file="theme_frame_default2.png" type="BINDATA" />
-        <include name="IDR_THEME_FRAME_INCOGNITO" file="theme_frame_default2_incognito.png" type="BINDATA" />
-        <include name="IDR_THEME_FRAME_INCOGNITO_INACTIVE" file="theme_frame_default2_incognito.png" type="BINDATA" />
-      </if>
-      <if expr="not pp_ifdef('chromeos')">
-        <include name="IDR_THEME_FRAME_INACTIVE" file="theme_frame_default_inactive.png" type="BINDATA" />
-        <include name="IDR_THEME_FRAME_INCOGNITO" file="theme_frame_default_incognito.png" type="BINDATA" />
-        <include name="IDR_THEME_FRAME_INCOGNITO_INACTIVE" file="theme_frame_default_incognito_inactive.png" type="BINDATA" />
-      </if>
       <include name="IDR_THEME_FRAME_OVERLAY" file="notused.png" type="BINDATA" />
       <include name="IDR_THEME_FRAME_OVERLAY_INACTIVE" file="notused.png" type="BINDATA" />
       <include name="IDR_THEME_NTP_ATTRIBUTION" file="notused.png" type="BINDATA" />
@@ -446,6 +432,8 @@
         <include name="IDR_DROPDOWN_TOP_P" file="textbutton_dropdown_t_p.png" type="BINDATA" />
         <include name="IDR_DROPDOWN_TOP_RIGHT_H" file="textbutton_dropdown_tr_h.png" type="BINDATA" />
         <include name="IDR_DROPDOWN_TOP_RIGHT_P" file="textbutton_dropdown_tr_p.png" type="BINDATA" />
+        <include name="IDR_ENROLL_SUCCESS" file="enroll_success.png" type="BINDATA"/>
+        <include name="IDR_ENROLL_FAILURE" file="enroll_failure.png" type="BINDATA"/>
         <include name="IDR_HELP_MENU" file="help_16.png" type="BINDATA" />
         <include name="IDR_INCOGNITO_GUY" file="incognito_guy.png" type="BINDATA" />
         <include name="IDR_ICON_ADD_USER20" file="icon_add_user20.png" type="BINDATA" />
@@ -472,6 +460,9 @@
         <include name="IDR_LOGIN_GUEST" file="login_guest.png" type="BINDATA" />
         <include name="IDR_LOGIN_ADD_USER" file="login_add_user.png" type="BINDATA" />
         <include name="IDR_LOGIN_ADD_USER_HOVER" file="login_add_user_hover.png" type="BINDATA" />
+        <include name="IDR_NETWORK_SHOW_PASSWORD_OFF" file="network_show_password_off.png" type="BINDATA" />
+        <include name="IDR_NETWORK_SHOW_PASSWORD_ON" file="network_show_password_on.png" type="BINDATA" />
+        <include name="IDR_NETWORK_SHOW_PASSWORD_HOVER" file="network_show_password_hover.png" type="BINDATA" />
         <include name="IDR_NOTIFICATION_3G" file="notification_3g.png" type="BINDATA" />
         <include name="IDR_NOTIFICATION_BARS_EMPTY" file="notification_bars_empty.png" type="BINDATA" />
         <include name="IDR_NOTIFICATION_BARS_CRITICAL" file="notification_bars_critical.png" type="BINDATA" />
@@ -489,47 +480,9 @@
         <include name="IDR_OOBE_PROGRESS_LINE_RIGHT" file="oobe_progress_line_right.png" type="BINDATA" />
         <include name="IDR_SHUTDOWN_ICON" file="shutdown_icon.png" type="BINDATA" />
         <include name="IDR_SPINNER" file="spinner.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGED" file="statusbar_battery_charged.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_1" file="statusbar_battery1c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_10" file="statusbar_battery10c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_11" file="statusbar_battery11c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_12" file="statusbar_battery12c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_13" file="statusbar_battery13c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_14" file="statusbar_battery14c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_15" file="statusbar_battery15c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_16" file="statusbar_battery16c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_17" file="statusbar_battery17c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_18" file="statusbar_battery18c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_19" file="statusbar_battery19c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_2" file="statusbar_battery2c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_3" file="statusbar_battery3c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_4" file="statusbar_battery4c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_5" file="statusbar_battery5c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_6" file="statusbar_battery6c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_7" file="statusbar_battery7c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_8" file="statusbar_battery8c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_CHARGING_9" file="statusbar_battery9c.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_1" file="statusbar_battery1d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_10" file="statusbar_battery10d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_11" file="statusbar_battery11d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_12" file="statusbar_battery12d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_13" file="statusbar_battery13d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_14" file="statusbar_battery14d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_15" file="statusbar_battery15d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_16" file="statusbar_battery16d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_17" file="statusbar_battery17d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_18" file="statusbar_battery18d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_19" file="statusbar_battery19d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_2" file="statusbar_battery2d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_3" file="statusbar_battery3d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_4" file="statusbar_battery4d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_5" file="statusbar_battery5d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_6" file="statusbar_battery6d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_7" file="statusbar_battery7d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_8" file="statusbar_battery8d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_DISCHARGING_9" file="statusbar_battery9d.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_MISSING" file="statusbar_battery_missing.png" type="BINDATA" />
-        <include name="IDR_STATUSBAR_BATTERY_UNKNOWN" file="statusbar_battery_unknown.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_ACCESSIBILITY" file="statusbar_accessibility.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_BATTERY_LARGE_ALL" file="statusbar_battery_large_all.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_BATTERY_SMALL_ALL" file="statusbar_battery_small_all.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_CAPS_LOCK" file="statusbar_caps_lock.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_MENU" file="statusbar_menu.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_3G" file="statusbar_network_3g.png" type="BINDATA" />

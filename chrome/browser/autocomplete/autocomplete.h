@@ -44,7 +44,8 @@
 // --------------------------------------------------------------------|-----
 // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
 // Extension App (exact match)                                         | 1425
-// HistoryURL (exact or inline autocomplete match)                     | 1400
+// HistoryURL (exact or inline autocomplete match)                     | 1410
+// HistoryURL intranet url never visited                               | 1400
 // Search Primary Provider (past query in history within 2 days)       | 1399**
 // Search Primary Provider (what you typed)                            | 1300
 // HistoryURL (what you typed)                                         | 1200
@@ -69,7 +70,8 @@
 // --------------------------------------------------------------------|-----
 // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
 // Extension App (exact match)                                         | 1425
-// HistoryURL (exact or inline autocomplete match)                     | 1400
+// HistoryURL (exact or inline autocomplete match)                     | 1410
+// HistoryURL intranet url never visited                               | 1400
 // Search Primary Provider (past query in history within 2 days)       | 1399**
 // HistoryURL (what you typed)                                         | 1200
 // Extension App (inexact match)                                       | 1175*~
@@ -94,7 +96,8 @@
 // --------------------------------------------------------------------|-----
 // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
 // Extension App (exact match)                                         | 1425
-// HistoryURL (exact or inline autocomplete match)                     | 1400
+// HistoryURL (exact or inline autocomplete match)                     | 1410
+// HistoryURL intranet url never visited                               | 1400
 // HistoryURL (what you typed)                                         | 1200
 // Extension App (inexact match)                                       | 1175*~
 // Keyword (substituting, exact match)                                 | 1100
@@ -116,7 +119,6 @@
 // Keyword (non-substituting or in keyword UI mode, exact match)       | 1500
 // Keyword (substituting, exact match)                                 | 1450
 // Extension App (exact match)                                         | 1425
-// HistoryURL (exact or inline autocomplete match)                     | 1400
 // Search Primary Provider (past query in history within 2 days)       | 1399**
 // Search Primary Provider (what you typed)                            | 1300
 // Extension App (inexact match)                                       | 1175*~
@@ -262,13 +264,16 @@ class AutocompleteInput {
       const GURL& url,
       const string16& formatted_url);
 
+  // Returns the number of non-empty components in |parts| besides the host.
+  static int NumNonHostComponents(const url_parse::Parsed& parts);
+
   // User-provided text to be completed.
   const string16& text() const { return text_; }
 
   // Use of this setter is risky, since no other internal state is updated
-  // besides |text_|.  Only callers who know that they're not changing the
-  // type/scheme/etc. should use this.
-  void set_text(const string16& text) { text_ = text; }
+  // besides |text_| and |parts_|.  Only callers who know that they're not
+  // changing the type/scheme/etc. should use this.
+  void UpdateText(const string16& text, const url_parse::Parsed& parts);
 
   // User's desired TLD, if one is not already present in the text to
   // autocomplete.  When this is non-empty, it also implies that "www." should
@@ -358,11 +363,6 @@ class AutocompleteProvider
   AutocompleteProvider(ACProviderListener* listener,
                        Profile* profile,
                        const char* name);
-
-  // Invoked when the profile changes.
-  // NOTE: Do not access any previous Profile* at this point as it may have
-  // already been deleted.
-  void SetProfile(Profile* profile);
 
   // Called to start an autocomplete query.  The provider is responsible for
   // tracking its matches for this query and whether it is done processing the
@@ -610,10 +610,6 @@ class AutocompleteController : public ACProviderListener {
   }
 #endif
   ~AutocompleteController();
-
-  // Invoked when the profile changes. This forwards the call down to all
-  // the AutocompleteProviders.
-  void SetProfile(Profile* profile);
 
   // Starts an autocomplete query, which continues until all providers are
   // done or the query is Stop()ed.  It is safe to Start() a new query without

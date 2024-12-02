@@ -4,10 +4,10 @@
 
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 
+#include "base/command_line.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
-#include "chrome/browser/chromeos/login/touch_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "views/widget/widget.h"
@@ -17,7 +17,7 @@ namespace chromeos {
 namespace {
 
 // URL which corresponds to the login WebUI.
-const char kLoginURL[] = "chrome://login";
+const char kLoginURL[] = "chrome://oobe/login";
 // URL which corresponds to the OOBE WebUI.
 const char kOobeURL[] = "chrome://oobe";
 
@@ -47,7 +47,7 @@ LoginDisplay* WebUILoginDisplayHost::CreateLoginDisplay(
 }
 
 gfx::NativeWindow WebUILoginDisplayHost::GetNativeWindow() const {
-  return NULL;
+  return login_window_ ? login_window_->GetNativeWindow() : NULL;
 }
 
 void WebUILoginDisplayHost::SetOobeProgress(BackgroundView::LoginStep step) {
@@ -75,6 +75,27 @@ void WebUILoginDisplayHost::ShowBackground() {
 
 void WebUILoginDisplayHost::StartWizard(const std::string& first_screen_name,
                                         const GURL& start_url) {
+  // This is a special case for WebUI. We don't want to go through the
+  // OOBE WebUI page loading. Since we already have the browser we just
+  // show the corresponding page.
+  if (first_screen_name == WizardController::kHTMLPageScreenName) {
+    const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+    const CommandLine::StringVector& args = cmd_line->GetArgs();
+    std::string html_page_url;
+    for (size_t i = 0; i < args.size(); i++) {
+      // It's strange but |args| may contain empty strings.
+      if (!args[i].empty()) {
+        DCHECK(html_page_url.empty()) << "More than one URL in command line";
+        html_page_url = args[i];
+      }
+    }
+    DCHECK(!html_page_url.empty()) << "No URL in command line";
+    DCHECK(!login_window_) << "Login window has already been created.";
+
+    LoadURL(GURL(html_page_url));
+    return;
+  }
+
   if (!login_window_)
     LoadURL(GURL(kOobeURL));
 
@@ -83,7 +104,7 @@ void WebUILoginDisplayHost::StartWizard(const std::string& first_screen_name,
 
 void WebUILoginDisplayHost::StartSignInScreen() {
   if (!login_window_)
-    LoadURL(GURL(kOobeURL));
+    LoadURL(GURL(kLoginURL));
 
   BaseLoginDisplayHost::StartSignInScreen();
   GetOobeUI()->ShowSigninScreen();
@@ -97,11 +118,7 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
 
     login_window_ = new views::Widget;
     login_window_->Init(params);
-#if defined(TOUCH_UI)
-    login_view_ = new TouchLoginView();
-#else
     login_view_ = new WebUILoginView();
-#endif
 
     login_view_->Init();
     login_window_->SetContentsView(login_view_);

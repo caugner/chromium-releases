@@ -144,10 +144,9 @@ COMPILE_ASSERT(sizeof(((sockaddr_un*)0)->sun_path) >= kMaxPipeNameLength,
 bool CreateServerUnixDomainSocket(const std::string& pipe_name,
                                   int* server_listen_fd) {
   DCHECK(server_listen_fd);
-  DCHECK_GT(pipe_name.length(), 0u);
-  DCHECK_LT(pipe_name.length(), kMaxPipeNameLength);
 
   if (pipe_name.length() == 0 || pipe_name.length() >= kMaxPipeNameLength) {
+    DLOG(ERROR) << "pipe_name.length() == " << pipe_name.length();
     return false;
   }
 
@@ -294,6 +293,10 @@ bool SocketWriteErrorIsRecoverable() {
 }  // namespace
 //------------------------------------------------------------------------------
 
+#if defined(OS_LINUX)
+int Channel::ChannelImpl::global_pid_ = 0;
+#endif  // OS_LINUX
+
 Channel::ChannelImpl::ChannelImpl(const IPC::ChannelHandle& channel_handle,
                                   Mode mode, Listener* listener)
     : mode_(mode),
@@ -315,7 +318,6 @@ Channel::ChannelImpl::ChannelImpl(const IPC::ChannelHandle& channel_handle,
   if (!CreatePipe(channel_handle)) {
     // The pipe may have been closed already.
     const char *modestr = (mode_ & MODE_SERVER_FLAG) ? "server" : "client";
-    // The pipe may have been closed already.
     LOG(WARNING) << "Unable to create pipe named \"" << channel_handle.name
                  << "\" in " << modestr << " mode";
   }
@@ -583,8 +585,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
       p = input_buf_;
       end = p + bytes_read;
     } else {
-      if (input_overflow_buf_.size() >
-         static_cast<size_t>(kMaximumMessageSize - bytes_read)) {
+      if (input_overflow_buf_.size() > (kMaximumMessageSize - bytes_read)) {
         input_overflow_buf_.clear();
         LOG(ERROR) << "IPC message is too big";
         return false;
@@ -674,7 +675,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
           }
 
           if (header_fds >
-              FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE) {
+              FileDescriptorSet::kMaxDescriptorsPerMessage) {
             // There are too many descriptors in this message
             error = "Message requires an excessive number of descriptors";
           }
@@ -780,7 +781,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
     msgh.msg_iov = &iov;
     msgh.msg_iovlen = 1;
     char buf[CMSG_SPACE(
-        sizeof(int[FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE]))];
+        sizeof(int) * FileDescriptorSet::kMaxDescriptorsPerMessage)];
 
     ssize_t bytes_written = 1;
     int fd_written = -1;
@@ -791,7 +792,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
       struct cmsghdr *cmsg;
       const unsigned num_fds = msg->file_descriptor_set()->size();
 
-      DCHECK_LE(num_fds, FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE);
+      DCHECK(num_fds <= FileDescriptorSet::kMaxDescriptorsPerMessage);
       if (msg->file_descriptor_set()->ContainsDirectoryDescriptor()) {
         LOG(FATAL) << "Panic: attempting to transport directory descriptor over"
                       " IPC. Aborting to maintain sandbox isolation.";
@@ -813,7 +814,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
       msgh.msg_controllen = cmsg->cmsg_len;
 
       // DCHECK_LE above already checks that
-      // num_fds < MAX_DESCRIPTORS_PER_MESSAGE so no danger of overflow.
+      // num_fds < kMaxDescriptorsPerMessage so no danger of overflow.
       msg->header()->num_fds = static_cast<uint16>(num_fds);
 
 #if defined(IPC_USES_READWRITE)
@@ -993,6 +994,19 @@ void Channel::ChannelImpl::ResetToAcceptingConnectionState() {
   input_overflow_fds_.clear();
 }
 
+// static
+bool Channel::ChannelImpl::IsNamedServerInitialized(
+    const std::string& channel_id) {
+  return file_util::PathExists(FilePath(channel_id));
+}
+
+#if defined(OS_LINUX)
+// static
+void Channel::ChannelImpl::SetGlobalPid(int pid) {
+  global_pid_ = pid;
+}
+#endif  // OS_LINUX
+
 // Called by libevent when we can read from the pipe without blocking.
 void Channel::ChannelImpl::OnFileCanReadWithoutBlocking(int fd) {
   bool send_server_hello_msg = false;
@@ -1105,13 +1119,23 @@ void Channel::ChannelImpl::ClosePipeOnError() {
   }
 }
 
+int Channel::ChannelImpl::GetHelloMessageProcId() {
+  int pid = base::GetCurrentProcId();
+#if defined(OS_LINUX)
+  // Our process may be in a sandbox with a separate PID namespace.
+  if (global_pid_) {
+    pid = global_pid_;
+  }
+#endif
+  return pid;
+}
+
 void Channel::ChannelImpl::QueueHelloMessage() {
   // Create the Hello message
   scoped_ptr<Message> msg(new Message(MSG_ROUTING_NONE,
                                       HELLO_MESSAGE_TYPE,
                                       IPC::Message::PRIORITY_NORMAL));
-
-  if (!msg->WriteInt(base::GetCurrentProcId())) {
+  if (!msg->WriteInt(GetHelloMessageProcId())) {
     NOTREACHED() << "Unable to pickle hello message proc id";
   }
 #if defined(IPC_USES_READWRITE)
@@ -1201,5 +1225,17 @@ bool Channel::GetClientEuid(uid_t* client_euid) const {
 void Channel::ResetToAcceptingConnectionState() {
   channel_impl_->ResetToAcceptingConnectionState();
 }
+
+// static
+bool Channel::IsNamedServerInitialized(const std::string& channel_id) {
+  return ChannelImpl::IsNamedServerInitialized(channel_id);
+}
+
+#if defined(OS_LINUX)
+// static
+void Channel::SetGlobalPid(int pid) {
+  ChannelImpl::SetGlobalPid(pid);
+}
+#endif  // OS_LINUX
 
 }  // namespace IPC

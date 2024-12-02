@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,8 @@
 
 struct PPB_AudioConfig;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
-
-class HostResource;
 
 class PPB_AudioConfig_Proxy : public InterfaceProxy {
  public:
@@ -24,10 +22,6 @@ class PPB_AudioConfig_Proxy : public InterfaceProxy {
   virtual ~PPB_AudioConfig_Proxy();
 
   static const Info* GetInfo();
-
-  static PP_Resource CreateProxyResource(PP_Instance instance,
-                                         PP_AudioSampleRate sample_rate,
-                                         uint32_t sample_frame_count);
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -37,6 +31,6 @@ class PPB_AudioConfig_Proxy : public InterfaceProxy {
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_AUDIO_CONFIG_PROXY_H_

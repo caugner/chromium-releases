@@ -10,7 +10,7 @@
 #include "chrome/browser/sync/engine/mock_model_safe_workers.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
-#include "chrome/test/sync/engine/syncer_command_test.h"
+#include "chrome/browser/sync/test/engine/syncer_command_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
@@ -74,7 +74,7 @@ class VerifyUpdatesCommandTest : public SyncerCommandTest {
 };
 
 TEST_F(VerifyUpdatesCommandTest, AllVerified) {
-  string root = syncable::kNullId.GetServerId();
+  string root = syncable::GetNullId().GetServerId();
 
   CreateLocalItem("b1", root, syncable::BOOKMARKS);
   CreateLocalItem("b2", root, syncable::BOOKMARKS);

@@ -63,8 +63,7 @@ int GetCheckForUpgradeEveryMs() {
 // callback task. Otherwise it just deletes the task.
 class DetectUpgradeTask : public Task {
  public:
-  explicit DetectUpgradeTask(Task* upgrade_detected_task,
-                             bool* is_unstable_channel)
+  DetectUpgradeTask(Task* upgrade_detected_task, bool* is_unstable_channel)
       : upgrade_detected_task_(upgrade_detected_task),
         is_unstable_channel_(is_unstable_channel) {
   }
@@ -160,7 +159,7 @@ UpgradeDetectorImpl::UpgradeDetectorImpl()
   if (keystone_glue::KeystoneEnabled())
 #endif
   {
-    detect_upgrade_timer_.Start(
+    detect_upgrade_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(GetCheckForUpgradeEveryMs()),
         this, &UpgradeDetectorImpl::CheckForUpgrade);
   }
@@ -196,7 +195,7 @@ void UpgradeDetectorImpl::UpgradeDetected() {
   // and stop the timer.
   int cycle_time = CmdLineInterval().empty() ? kNotifyCycleTimeMs :
                                                kNotifyCycleTimeForTestingMs;
-  upgrade_notification_timer_.Start(
+  upgrade_notification_timer_.Start(FROM_HERE,
       base::TimeDelta::FromMilliseconds(cycle_time),
       this, &UpgradeDetectorImpl::NotifyOnUpgrade);
 }

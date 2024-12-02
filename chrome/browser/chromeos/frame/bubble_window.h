@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,11 @@
 #define CHROME_BROWSER_CHROMEOS_FRAME_BUBBLE_WINDOW_H_
 #pragma once
 
+#include "chrome/browser/chromeos/frame/bubble_window_style.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "views/widget/native_widget_gtk.h"
 
-namespace gfx {
-class Rect;
-}
-
 namespace views {
-class Throbber;
 class WidgetDelegate;
 }
 
@@ -23,22 +19,12 @@ namespace chromeos {
 // A window that uses BubbleFrameView as its frame.
 class BubbleWindow : public views::NativeWidgetGtk {
  public:
-  enum Style {
-    STYLE_GENERIC = 0, // Default style.
-    STYLE_XBAR = 1 << 0, // Show close button at the top right (left for RTL).
-    STYLE_THROBBER = 1 << 1, // Show throbber for slow rendering.
-    STYLE_XSHAPE = 1 << 2 // Trim the window margins and round corners.
-  };
-
   static views::Widget* Create(gfx::NativeWindow parent,
-                               const gfx::Rect& bounds,
-                               Style style,
+                               BubbleWindowStyle style,
                                views::WidgetDelegate* widget_delegate);
 
-  static const SkColor kBackgroundColor;
-
  protected:
-  BubbleWindow(views::Widget* window, Style style);
+  BubbleWindow(views::Widget* window, BubbleWindowStyle style);
 
   // Overridden from views::NativeWidgetGtk:
   virtual void InitNativeWidget(
@@ -50,7 +36,7 @@ class BubbleWindow : public views::NativeWidgetGtk {
                    int margin_bottom, int border_radius);
 
  private:
-  Style style_;
+  BubbleWindowStyle style_;
 
   DISALLOW_COPY_AND_ASSIGN(BubbleWindow);
 };

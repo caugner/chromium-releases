@@ -26,16 +26,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/launchd_mac.h"
+#include "chrome/common/mac/launchd.h"
 #include "content/common/child_process_host.h"
 
 using ::base::files::FilePathWatcher;
 
 namespace {
 
-// TODO(scottbyer): Determine if we really need to go back to "Background", and
-// subclass NSApplication to prevent -terminate from calling exit() in that
-// case. http://crbug.com/88954
 #define kServiceProcessSessionType "Aqua"
 
 CFStringRef CopyServiceProcessLaunchDName() {
@@ -120,7 +117,8 @@ bool ForceServiceProcessShutdown(const std::string& /* version */,
   CFErrorRef err = NULL;
   bool ret = Launchd::GetInstance()->RemoveJob(label, &err);
   if (!ret) {
-    LOG(ERROR) << "ForceServiceProcessShutdown: " << err;
+    LOG(ERROR) << "ForceServiceProcessShutdown: " << err << " "
+               << base::SysCFStringRefToUTF8(label);
     CFRelease(err);
   }
   return ret;
@@ -177,9 +175,9 @@ bool ServiceProcessState::Initialize() {
   CFErrorRef err = NULL;
   CFDictionaryRef dict =
       Launchd::GetInstance()->CopyDictionaryByCheckingIn(&err);
-
   if (!dict) {
-    LOG(ERROR) << "CopyLaunchdDictionaryByCheckingIn: " << err;
+    LOG(ERROR) << "ServiceProcess must be launched by launchd. "
+               << "CopyLaunchdDictionaryByCheckingIn: " << err;
     CFRelease(err);
     return false;
   }

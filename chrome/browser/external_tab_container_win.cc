@@ -19,6 +19,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/history_tab_helper.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
@@ -185,7 +186,7 @@ bool ExternalTabContainer::Init(Profile* profile,
 
   if (existing_contents) {
     tab_contents_.reset(existing_contents);
-    tab_contents_->controller().set_profile(profile);
+    tab_contents_->controller().set_browser_context(profile);
   } else {
     TabContents* new_contents = new TabContents(profile, NULL, MSG_ROUTING_NONE,
                                                 NULL, NULL);
@@ -193,7 +194,7 @@ bool ExternalTabContainer::Init(Profile* profile,
   }
 
   if (!infobars_enabled)
-    tab_contents_->set_infobars_enabled(false);
+    tab_contents_->infobar_tab_helper()->set_infobars_enabled(false);
 
   tab_contents_->tab_contents()->set_delegate(this);
 
@@ -217,11 +218,6 @@ bool ExternalTabContainer::Init(Profile* profile,
                  Source<TabContents>(tab_contents_->tab_contents()));
   registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
                  NotificationService::AllSources());
-
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_EXTERNAL_TAB_CREATED,
-      Source<NavigationController>(controller),
-      NotificationService::NoDetails());
 
   TabContentsObserver::Observe(tab_contents_->tab_contents());
 
@@ -362,24 +358,25 @@ ExternalTabContainer*
 ////////////////////////////////////////////////////////////////////////////////
 // ExternalTabContainer, TabContentsDelegate implementation:
 
+// TODO(adriansc): Remove this method once refactoring changed all call sites.
 TabContents* ExternalTabContainer::OpenURLFromTab(
     TabContents* source,
     const GURL& url,
     const GURL& referrer,
     WindowOpenDisposition disposition,
     PageTransition::Type transition) {
-  if (pending()) {
-    PendingTopLevelNavigation url_request;
-    url_request.disposition = disposition;
-    url_request.transition = transition;
-    url_request.url = url;
-    url_request.referrer = referrer;
+  return OpenURLFromTab(source,
+                        OpenURLParams(url, referrer, disposition, transition));
+}
 
-    pending_open_url_requests_.push_back(url_request);
+TabContents* ExternalTabContainer::OpenURLFromTab(TabContents* source,
+                                                  const OpenURLParams& params) {
+  if (pending()) {
+    pending_open_url_requests_.push_back(params);
     return NULL;
   }
 
-  switch (disposition) {
+  switch (params.disposition) {
     case CURRENT_TAB:
     case SINGLETON_TAB:
     case NEW_FOREGROUND_TAB:
@@ -389,24 +386,25 @@ TabContents* ExternalTabContainer::OpenURLFromTab(
     case SAVE_TO_DISK:
       if (automation_) {
         automation_->Send(new AutomationMsg_OpenURL(tab_handle_,
-                                                    url, referrer,
-                                                    disposition));
+                                                    params.url,
+                                                    params.referrer,
+                                                    params.disposition));
         // TODO(ananta)
         // We should populate other fields in the
         // ViewHostMsg_FrameNavigate_Params structure. Another option could be
         // to refactor the UpdateHistoryForNavigation function in TabContents.
-        ViewHostMsg_FrameNavigate_Params params;
-        params.referrer = referrer;
-        params.url = url;
-        params.page_id = -1;
-        params.transition = PageTransition::LINK;
+        ViewHostMsg_FrameNavigate_Params nav_params;
+        nav_params.referrer = params.referrer;
+        nav_params.url = params.url;
+        nav_params.page_id = -1;
+        nav_params.transition = PageTransition::LINK;
 
         content::LoadCommittedDetails details;
         details.did_replace_entry = false;
 
         scoped_refptr<history::HistoryAddPageArgs> add_page_args(
             tab_contents_->history_tab_helper()->
-                CreateHistoryAddPageArgs(url, details, params));
+                CreateHistoryAddPageArgs(params.url, details, nav_params));
         tab_contents_->history_tab_helper()->
             UpdateHistoryForNavigation(add_page_args);
 
@@ -464,7 +462,7 @@ void ExternalTabContainer::AddNewContents(TabContents* source,
   // an unwrapped Profile.
   scoped_ptr<TabContentsWrapper> wrapper(new TabContentsWrapper(new_contents));
   bool result = new_container->Init(
-      new_contents->profile()->GetOriginalProfile(),
+      wrapper->profile()->GetOriginalProfile(),
       NULL,
       initial_pos,
       WS_CHILD,
@@ -477,6 +475,7 @@ void ExternalTabContainer::AddNewContents(TabContents* source,
       route_all_top_level_navigations_);
 
   if (result) {
+    Profile* profile = wrapper->profile();
     wrapper.release();  // Ownership has been transferred.
     if (route_all_top_level_navigations_) {
       return;
@@ -491,7 +490,7 @@ void ExternalTabContainer::AddNewContents(TabContents* source,
     attach_params_.user_gesture = user_gesture;
     attach_params_.disposition = disposition;
     attach_params_.profile_name = WideToUTF8(
-        tab_contents()->profile()->GetPath().DirName().BaseName().value());
+        profile->GetPath().DirName().BaseName().value());
     automation_->Send(new AutomationMsg_AttachExternalTab(
         tab_handle_, attach_params_));
   } else {
@@ -539,7 +538,9 @@ bool ExternalTabContainer::IsPopup(const TabContents* source) const {
 }
 
 void ExternalTabContainer::UpdateTargetURL(TabContents* source,
+                                           int32 page_id,
                                            const GURL& url) {
+  Browser::UpdateTargetURLHelper(source, page_id, url);
   if (automation_) {
     std::wstring url_string = CA2W(url.spec().c_str());
     automation_->Send(
@@ -596,7 +597,8 @@ void ExternalTabContainer::ShowPageInfo(Profile* profile,
   PageInfoBubbleView* page_info_bubble =
       new ExternalTabPageInfoBubbleView(this, NULL, profile, url,
                                         ssl, show_history);
-  Bubble* bubble = Bubble::Show(GetWidget(), bounds, BubbleBorder::TOP_LEFT,
+  Bubble* bubble = Bubble::Show(GetWidget(), bounds,
+                                views::BubbleBorder::TOP_LEFT,
                                 page_info_bubble, page_info_bubble);
   page_info_bubble->set_bubble(bubble);
 }
@@ -736,10 +738,64 @@ void ExternalTabContainer::ShowRepostFormWarningDialog(
   browser::ShowRepostFormWarningDialog(GetNativeView(), tab_contents);
 }
 
+void ExternalTabContainer::RunFileChooser(
+    TabContents* tab, const ViewHostMsg_RunFileChooser_Params& params) {
+  Browser::RunFileChooserHelper(tab, params);
+}
+
+void ExternalTabContainer::EnumerateDirectory(TabContents* tab, int request_id,
+                                              const FilePath& path) {
+  Browser::EnumerateDirectoryHelper(tab, request_id, path);
+}
+
+void ExternalTabContainer::JSOutOfMemory(TabContents* tab) {
+  Browser::JSOutOfMemoryHelper(tab);
+}
+
+void ExternalTabContainer::RegisterProtocolHandler(TabContents* tab,
+                                                   const std::string& protocol,
+                                                   const GURL& url,
+                                                   const string16& title) {
+  Browser::RegisterProtocolHandlerHelper(tab, protocol, url, title);
+}
+
+void ExternalTabContainer::RegisterIntentHandler(TabContents* tab,
+                                                 const string16& action,
+                                                 const string16& type,
+                                                 const string16& href,
+                                                 const string16& title) {
+  Browser::RegisterIntentHandlerHelper(tab, action, type, href, title);
+}
+
+void ExternalTabContainer::WebIntentDispatch(TabContents* tab,
+                                             int routing_id,
+                                             const string16& action,
+                                             const string16& type,
+                                             const string16& data,
+                                             int intent_id) {
+  Browser::WebIntentDispatchHelper(tab, routing_id, action, type, data,
+                                   intent_id);
+}
+
+void ExternalTabContainer::FindReply(TabContents* tab,
+                                     int request_id,
+                                     int number_of_matches,
+                                     const gfx::Rect& selection_rect,
+                                     int active_match_ordinal,
+                                     bool final_update) {
+  Browser::FindReplyHelper(tab, request_id, number_of_matches, selection_rect,
+                           active_match_ordinal, final_update);
+}
+
+void ExternalTabContainer::CrashedPlugin(TabContents* tab,
+                                         const FilePath& plugin_path) {
+  Browser::CrashedPluginHelper(tab, plugin_path);
+}
+
 bool ExternalTabContainer::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExternalTabContainer, message)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_ForwardMessageToExternalHost,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ForwardMessageToExternalHost,
                         OnForwardMessageToExternalHost)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -852,9 +908,6 @@ void ExternalTabContainer::OnDestroy() {
   prop_.reset();
   Uninitialize();
   NativeWidgetWin::OnDestroy();
-  if (browser_.get()) {
-    ::DestroyWindow(browser_->window()->GetNativeHandle());
-  }
 }
 
 void ExternalTabContainer::OnFinalMessage(HWND window) {
@@ -1092,10 +1145,8 @@ void ExternalTabContainer::ServicePendingOpenURLRequests() {
 
   for (size_t index = 0; index < pending_open_url_requests_.size();
        ++index) {
-    const PendingTopLevelNavigation& url_request =
-        pending_open_url_requests_[index];
-    OpenURLFromTab(tab_contents(), url_request.url, url_request.referrer,
-                   url_request.disposition, url_request.transition);
+    const OpenURLParams& url_request = pending_open_url_requests_[index];
+    OpenURLFromTab(tab_contents(), url_request);
   }
   pending_open_url_requests_.clear();
 }
@@ -1146,16 +1197,23 @@ TemporaryPopupExternalTabContainer::~TemporaryPopupExternalTabContainer() {
 TabContents* TemporaryPopupExternalTabContainer::OpenURLFromTab(
     TabContents* source, const GURL& url, const GURL& referrer,
     WindowOpenDisposition disposition, PageTransition::Type transition) {
+  return OpenURLFromTab(source,
+                        OpenURLParams(url, referrer, disposition, transition));
+}
+
+TabContents* TemporaryPopupExternalTabContainer::OpenURLFromTab(
+    TabContents* source,
+    const OpenURLParams& params) {
   if (!automation_)
     return NULL;
 
-  if (disposition == CURRENT_TAB) {
+  OpenURLParams forward_params = params;
+  if (params.disposition == CURRENT_TAB) {
     DCHECK(route_all_top_level_navigations_);
-    disposition = NEW_FOREGROUND_TAB;
+    forward_params.disposition = NEW_FOREGROUND_TAB;
   }
   TabContents* new_contents =
-      ExternalTabContainer::OpenURLFromTab(
-          source, url, referrer, disposition, transition);
+      ExternalTabContainer::OpenURLFromTab(source, forward_params);
   // support only one navigation for a dummy tab before it is killed.
   ::DestroyWindow(GetNativeView());
   return new_contents;

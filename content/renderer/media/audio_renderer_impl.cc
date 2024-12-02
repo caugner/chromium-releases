@@ -6,13 +6,17 @@
 
 #include <math.h>
 
-#include "content/common/child_process.h"
+#include <algorithm>
+
 #include "base/command_line.h"
+#include "content/common/child_process.h"
 #include "content/common/content_switches.h"
 #include "content/common/media/audio_messages.h"
 #include "content/renderer/render_thread.h"
 #include "content/renderer/render_view.h"
+#include "media/audio/audio_buffers_state.h"
 #include "media/audio/audio_output_controller.h"
+#include "media/audio/audio_util.h"
 #include "media/base/filter_host.h"
 
 // Static variable that says what code path we are using -- low or high
@@ -62,6 +66,23 @@ base::TimeDelta AudioRendererImpl::ConvertToDuration(int bytes) {
   return base::TimeDelta();
 }
 
+void AudioRendererImpl::UpdateEarliestEndTime(int bytes_filled,
+                                              base::TimeDelta request_delay,
+                                              base::Time time_now) {
+  if (bytes_filled != 0) {
+    base::TimeDelta predicted_play_time = ConvertToDuration(bytes_filled);
+    float playback_rate = GetPlaybackRate();
+    if (playback_rate != 1.0f) {
+      predicted_play_time = base::TimeDelta::FromMicroseconds(
+          static_cast<int64>(ceil(predicted_play_time.InMicroseconds() *
+                                  playback_rate)));
+    }
+    earliest_end_time_ =
+        std::max(earliest_end_time_,
+                 time_now + request_delay + predicted_play_time);
+  }
+}
+
 bool AudioRendererImpl::OnInitialize(const media::AudioDecoderConfig& config) {
   AudioParameters params(config);
   params.format = AudioParameters::AUDIO_PCM_LINEAR;
@@ -75,19 +96,28 @@ bool AudioRendererImpl::OnInitialize(const media::AudioDecoderConfig& config) {
 }
 
 void AudioRendererImpl::OnStop() {
-  base::AutoLock auto_lock(lock_);
-  if (stopped_)
-    return;
-  stopped_ = true;
+  // Since joining with the audio thread can acquire lock_, we make sure to
+  // Join() with it not under lock.
+  base::DelegateSimpleThread* audio_thread = NULL;
+  {
+    base::AutoLock auto_lock(lock_);
+    if (stopped_)
+      return;
+    stopped_ = true;
 
-  ChildProcess::current()->io_message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &AudioRendererImpl::DestroyTask));
+    DCHECK_EQ(!audio_thread_.get(), !socket_.get());
+    if (socket_.get())
+      socket_->Close();
+    if (audio_thread_.get())
+      audio_thread = audio_thread_.get();
 
-  if (audio_thread_.get()) {
-    socket_->Close();
-    audio_thread_->Join();
+    ChildProcess::current()->io_message_loop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &AudioRendererImpl::DestroyTask));
   }
+
+  if (audio_thread)
+    audio_thread->Join();
 }
 
 void AudioRendererImpl::NotifyDataAvailableIfNecessary() {
@@ -244,7 +274,7 @@ void AudioRendererImpl::OnLowLatencyCreated(
     return;
 
   shared_memory_.reset(new base::SharedMemory(handle, false));
-  shared_memory_->Map(length);
+  shared_memory_->Map(media::TotalSharedMemorySizeInBytes(length));
   shared_memory_size_ = length;
 
   CreateSocket(socket_handle);
@@ -320,6 +350,7 @@ void AudioRendererImpl::CreateStreamTask(const AudioParameters& audio_params) {
 void AudioRendererImpl::PlayTask() {
   DCHECK(MessageLoop::current() == ChildProcess::current()->io_message_loop());
 
+  earliest_end_time_ = base::Time::Now();
   Send(new AudioHostMsg_PlayStream(stream_id_));
 }
 
@@ -332,6 +363,7 @@ void AudioRendererImpl::PauseTask() {
 void AudioRendererImpl::SeekTask() {
   DCHECK(MessageLoop::current() == ChildProcess::current()->io_message_loop());
 
+  earliest_end_time_ = base::Time::Now();
   // We have to pause the audio stream before we can flush.
   Send(new AudioHostMsg_PauseStream(stream_id_));
   Send(new AudioHostMsg_FlushStream(stream_id_));
@@ -344,7 +376,10 @@ void AudioRendererImpl::DestroyTask() {
   DCHECK_NE(0, stream_id_);
   filter_->RemoveDelegate(stream_id_);
   Send(new AudioHostMsg_CloseStream(stream_id_));
-  ChildProcess::current()->io_message_loop()->RemoveDestructionObserver(this);
+  // During shutdown this may be NULL; don't worry about deregistering in that
+  // case.
+  if (ChildProcess::current())
+    ChildProcess::current()->io_message_loop()->RemoveDestructionObserver(this);
   stream_id_ = 0;
 }
 
@@ -393,17 +428,27 @@ void AudioRendererImpl::NotifyPacketReadyTask() {
                                   GetPlaybackRate())));
     }
 
+    bool buffer_empty = (request_buffers_state_.pending_bytes == 0) &&
+                        (current_time >= earliest_end_time_);
+
+    // For high latency mode we don't write length into shared memory,
+    // it is explicit part of AudioHostMsg_NotifyPacketReady() message,
+    // so no need to reserve first word of buffer for length.
     uint32 filled = FillBuffer(static_cast<uint8*>(shared_memory_->memory()),
                                shared_memory_size_, request_delay,
-                               request_buffers_state_.pending_bytes == 0);
+                               buffer_empty);
+    UpdateEarliestEndTime(filled, request_delay, current_time);
     pending_request_ = false;
+
     // Then tell browser process we are done filling into the buffer.
     Send(new AudioHostMsg_NotifyPacketReady(stream_id_, filled));
   }
 }
 
 void AudioRendererImpl::WillDestroyCurrentMessageLoop() {
-  DCHECK(MessageLoop::current() == ChildProcess::current()->io_message_loop());
+  DCHECK(!ChildProcess::current() ||  // During shutdown.
+         (MessageLoop::current() ==
+          ChildProcess::current()->io_message_loop()));
 
   // We treat the IO loop going away the same as stopping.
   base::AutoLock auto_lock(lock_);
@@ -421,7 +466,6 @@ void AudioRendererImpl::Run() {
 
   int bytes;
   while (sizeof(bytes) == socket_->Receive(&bytes, sizeof(bytes))) {
-    LOG(ERROR) << "+++ bytes: " << bytes;
     if (bytes == media::AudioOutputController::kPauseMark)
       continue;
     else if (bytes < 0)
@@ -434,16 +478,22 @@ void AudioRendererImpl::Run() {
       continue;
     DCHECK(shared_memory_.get());
     base::TimeDelta request_delay = ConvertToDuration(bytes);
+
     // We need to adjust the delay according to playback rate.
     if (playback_rate != 1.0f) {
       request_delay = base::TimeDelta::FromMicroseconds(
           static_cast<int64>(ceil(request_delay.InMicroseconds() *
                                   playback_rate)));
     }
-    FillBuffer(static_cast<uint8*>(shared_memory_->memory()),
-               shared_memory_size_,
-               request_delay,
-               true  /* buffers empty */);
+    base::Time time_now = base::Time::Now();
+    uint32 size = FillBuffer(static_cast<uint8*>(shared_memory_->memory()),
+                             shared_memory_size_,
+                             request_delay,
+                             time_now >= earliest_end_time_);
+    media::SetActualDataSizeInBytes(shared_memory_.get(),
+                                    shared_memory_size_,
+                                    size);
+    UpdateEarliestEndTime(size, request_delay, time_now);
   }
 }
 

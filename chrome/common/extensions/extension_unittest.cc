@@ -21,7 +21,6 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_sniffer.h"
 #include "skia/ext/image_operations.h"
-#include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -389,10 +388,10 @@ TEST(ExtensionTest, EffectiveHostPermissions) {
   hosts = extension->GetEffectiveHostPermissions();
   EXPECT_TRUE(hosts.MatchesURL(GURL("http://google.com")));
   EXPECT_TRUE(hosts.MatchesURL(GURL("http://www.reddit.com")));
-  EXPECT_TRUE(extension->permission_set()->HasEffectiveAccessToURL(
+  EXPECT_TRUE(extension->GetActivePermissions()->HasEffectiveAccessToURL(
       GURL("http://www.reddit.com")));
   EXPECT_TRUE(hosts.MatchesURL(GURL("http://news.ycombinator.com")));
-  EXPECT_TRUE(extension->permission_set()->HasEffectiveAccessToURL(
+  EXPECT_TRUE(extension->GetActivePermissions()->HasEffectiveAccessToURL(
       GURL("http://news.ycombinator.com")));
   EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
 
@@ -534,6 +533,9 @@ TEST(ExtensionTest, ApiPermissions) {
     { "tabs.remove",      true},
     { "tabs.update",      true},
     { "tabs.getSelected", false},
+    // Test getPermissionWarnings functions. Only one requires permissions.
+    { "management.getPermissionWarningsById", false },
+    { "management.getPermissionWarningsByManifest", true },
   };
 
   scoped_refptr<Extension> extension;
@@ -546,7 +548,22 @@ TEST(ExtensionTest, ApiPermissions) {
   }
 }
 
-TEST(ExtensionTest, GetHostPermissionMessages_ManyHosts) {
+TEST(ExtensionTest, GetPermissionMessages_ManyApiPermissions) {
+  scoped_refptr<Extension> extension;
+  extension = LoadManifest("permissions", "many-apis.json");
+  std::vector<string16> warnings = extension->GetPermissionMessageStrings();
+  ASSERT_EQ(6u, warnings.size());
+  EXPECT_EQ("Your data on api.flickr.com",
+            UTF16ToUTF8(warnings[0]));
+  EXPECT_EQ("Your bookmarks", UTF16ToUTF8(warnings[1]));
+  EXPECT_EQ("Your physical location", UTF16ToUTF8(warnings[2]));
+  EXPECT_EQ("Your browsing history", UTF16ToUTF8(warnings[3]));
+  EXPECT_EQ("Your tabs and browsing activity", UTF16ToUTF8(warnings[4]));
+  EXPECT_EQ("Your list of installed apps, extensions, and themes",
+            UTF16ToUTF8(warnings[5]));
+}
+
+TEST(ExtensionTest, GetPermissionMessages_ManyHosts) {
   scoped_refptr<Extension> extension;
   extension = LoadManifest("permissions", "many-hosts.json");
   std::vector<string16> warnings = extension->GetPermissionMessageStrings();
@@ -633,6 +650,19 @@ TEST(ExtensionTest, WantsFileAccess) {
   EXPECT_FALSE(extension->wants_file_access());
   EXPECT_FALSE(extension->CanExecuteScriptOnPage(
       file_url, &extension->content_scripts()[0], NULL));
+}
+
+TEST(ExtensionTest, ExtraFlags) {
+  scoped_refptr<Extension> extension;
+  extension = LoadManifest("app", "manifest.json", Extension::FROM_WEBSTORE);
+  EXPECT_TRUE(extension->from_webstore());
+
+  extension = LoadManifest("app", "manifest.json", Extension::FROM_BOOKMARK);
+  EXPECT_TRUE(extension->from_bookmark());
+
+  extension = LoadManifest("app", "manifest.json", Extension::NO_FLAGS);
+  EXPECT_FALSE(extension->from_bookmark());
+  EXPECT_FALSE(extension->from_webstore());
 }
 
 // Base class for testing the CanExecuteScriptOnPage and CanCaptureVisiblePage
@@ -772,3 +802,128 @@ TEST(ExtensionTest, GenerateId) {
       "this_string_is_longer_than_a_single_sha256_hash_digest", &result));
   EXPECT_EQ(result, "jimneklojkjdibfkgiiophfhjhbdgcfi");
 }
+
+namespace {
+enum SyncTestExtensionType {
+  EXTENSION,
+  USER_SCRIPT,
+  THEME
+};
+
+static scoped_refptr<Extension> MakeSyncTestExtension(
+    SyncTestExtensionType type,
+    const GURL& update_url,
+    const GURL& launch_url,
+    Extension::Location location,
+    int num_plugins,
+    const FilePath& extension_path) {
+  DictionaryValue source;
+  source.SetString(extension_manifest_keys::kName,
+                   "PossiblySyncableExtension");
+  source.SetString(extension_manifest_keys::kVersion, "0.0.0.0");
+  if (type == THEME) {
+    source.Set(extension_manifest_keys::kTheme, new DictionaryValue());
+  }
+  if (!update_url.is_empty()) {
+    source.SetString(extension_manifest_keys::kUpdateURL,
+                     update_url.spec());
+  }
+  if (!launch_url.is_empty()) {
+    source.SetString(extension_manifest_keys::kLaunchWebURL,
+                     launch_url.spec());
+  }
+  if (type != THEME) {
+    source.SetBoolean(extension_manifest_keys::kConvertedFromUserScript,
+                      type == USER_SCRIPT);
+    ListValue* plugins = new ListValue();
+    for (int i = 0; i < num_plugins; ++i) {
+      DictionaryValue* plugin = new DictionaryValue();
+      plugin->SetString(extension_manifest_keys::kPluginsPath, "");
+      plugins->Set(i, plugin);
+    }
+    source.Set(extension_manifest_keys::kPlugins, plugins);
+  }
+
+  std::string error;
+  scoped_refptr<Extension> extension = Extension::Create(
+      extension_path, location, source, Extension::STRICT_ERROR_CHECKS, &error);
+  EXPECT_TRUE(extension);
+  EXPECT_EQ("", error);
+  return extension;
+}
+
+static const char kValidUpdateUrl1[] =
+    "http://clients2.google.com/service/update2/crx";
+static const char kValidUpdateUrl2[] =
+    "https://clients2.google.com/service/update2/crx";
+}
+
+TEST(ExtensionTest, GetSyncTypeNormalExtensionNoUpdateUrl) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(EXTENSION, GURL(), GURL(),
+                            Extension::INTERNAL, 0, FilePath()));
+  EXPECT_NE(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+TEST(ExtensionTest, GetSyncTypeUserScriptValidUpdateUrl) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(USER_SCRIPT, GURL(kValidUpdateUrl1), GURL(),
+                            Extension::INTERNAL, 0, FilePath()));
+  EXPECT_NE(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+TEST(ExtensionTest, GetSyncTypeUserScriptNoUpdateUrl) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(USER_SCRIPT, GURL(), GURL(),
+                            Extension::INTERNAL, 0, FilePath()));
+  EXPECT_EQ(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+TEST(ExtensionTest, GetSyncTypeThemeNoUpdateUrl) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(THEME, GURL(), GURL(),
+                            Extension::INTERNAL, 0, FilePath()));
+  EXPECT_EQ(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+TEST(ExtensionTest, GetSyncTypeExtensionWithLaunchUrl) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(EXTENSION, GURL(), GURL("http://www.google.com"),
+                            Extension::INTERNAL, 0, FilePath()));
+  EXPECT_NE(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+TEST(ExtensionTest, GetSyncTypeExtensionExternal) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(EXTENSION, GURL(), GURL(),
+                            Extension::EXTERNAL_PREF, 0, FilePath()));
+  EXPECT_EQ(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+TEST(ExtensionTest, GetSyncTypeUserScriptThirdPartyUpdateUrl) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(
+          USER_SCRIPT, GURL("http://third-party.update_url.com"), GURL(),
+          Extension::INTERNAL, 0, FilePath()));
+  EXPECT_EQ(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+// These last 2 tests don't make sense on Chrome OS, where extension plugins
+// are not allowed.
+#if !defined(OS_CHROMEOS)
+TEST(ExtensionTest, GetSyncTypeExtensionWithPlugin) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(EXTENSION, GURL(), GURL(),
+                            Extension::INTERNAL, 1, FilePath()));
+  if (extension)
+    EXPECT_EQ(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+
+TEST(ExtensionTest, GetSyncTypeExtensionWithTwoPlugins) {
+  scoped_refptr<Extension> extension(
+      MakeSyncTestExtension(EXTENSION, GURL(), GURL(),
+                            Extension::INTERNAL, 2, FilePath()));
+  if (extension)
+    EXPECT_EQ(extension->GetSyncType(), Extension::SYNC_TYPE_NONE);
+}
+#endif // !defined(OS_CHROMEOS)

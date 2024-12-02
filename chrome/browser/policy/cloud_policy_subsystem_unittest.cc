@@ -17,8 +17,8 @@
 #include "chrome/browser/policy/testing_policy_url_fetcher_factory.h"
 #include "chrome/browser/policy/user_policy_cache.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_browser_process.h"
-#include "chrome/test/testing_pref_service.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/url_fetcher.h"
 #include "policy/policy_constants.h"
@@ -114,7 +114,6 @@ class CloudPolicySubsystemTestBase : public TESTBASE {
 
     logger_.reset(new EventLogger);
     factory_.reset(new TestingPolicyURLFetcherFactory(logger_.get()));
-    URLFetcher::set_factory(factory_.get());
     ASSERT_TRUE(temp_user_data_dir_.CreateUniqueTempDir());
     data_store_.reset(CloudPolicyDataStore::CreateForUserPolicies());
     cache_ = new UserPolicyCache(
@@ -127,7 +126,7 @@ class CloudPolicySubsystemTestBase : public TESTBASE {
   }
 
   virtual void TearDown() {
-    ((TestingBrowserProcess*) g_browser_process)->SetLocalState(NULL);
+    static_cast<TestingBrowserProcess*>(g_browser_process)->SetLocalState(NULL);
     cloud_policy_subsystem_->Shutdown();
     cloud_policy_subsystem_.reset();
     data_store_.reset();

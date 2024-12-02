@@ -8,6 +8,7 @@
 #include "ppapi/c/dev/ppp_video_decoder_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/cpp/dev/context_3d_dev.h"
+#include "ppapi/cpp/graphics_3d.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
@@ -22,11 +23,22 @@ template <> const char* interface_name<PPB_VideoDecoder_Dev>() {
 
 }  // namespace
 
-VideoDecoder_Dev::VideoDecoder_Dev(const Instance& instance) {
+VideoDecoder_Dev::VideoDecoder_Dev(const Instance* instance,
+                                   const Context3D_Dev& context,
+                                   PP_VideoDecoder_Profile profile) {
   if (!has_interface<PPB_VideoDecoder_Dev>())
     return;
   PassRefFromConstructor(get_interface<PPB_VideoDecoder_Dev>()->Create(
-      instance.pp_instance()));
+      instance->pp_instance(), context.pp_resource(), profile));
+}
+
+VideoDecoder_Dev::VideoDecoder_Dev(const Instance* instance,
+                                   const Graphics3D& context,
+                                   PP_VideoDecoder_Profile profile) {
+  if (!has_interface<PPB_VideoDecoder_Dev>())
+    return;
+  PassRefFromConstructor(get_interface<PPB_VideoDecoder_Dev>()->Create(
+      instance->pp_instance(), context.pp_resource(), profile));
 }
 
 VideoDecoder_Dev::VideoDecoder_Dev(PP_Resource resource) : Resource(resource) {
@@ -34,17 +46,6 @@ VideoDecoder_Dev::VideoDecoder_Dev(PP_Resource resource) : Resource(resource) {
 
 VideoDecoder_Dev::~VideoDecoder_Dev() {
   get_interface<PPB_VideoDecoder_Dev>()->Destroy(pp_resource());
-}
-
-
-int32_t VideoDecoder_Dev::Initialize(const PP_VideoConfigElement* config,
-                                     const Context3D_Dev& context,
-                                     CompletionCallback callback) {
-  if (!has_interface<PPB_VideoDecoder_Dev>())
-    return callback.MayForce(PP_ERROR_NOINTERFACE);
-  return get_interface<PPB_VideoDecoder_Dev>()->Initialize(
-      pp_resource(), context.pp_resource(), config,
-      callback.pp_completion_callback());
 }
 
 void VideoDecoder_Dev::AssignPictureBuffers(

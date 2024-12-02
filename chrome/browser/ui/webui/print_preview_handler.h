@@ -16,6 +16,7 @@
 
 class FilePath;
 class PrintSystemTaskProxy;
+class TabContentsWrapper;
 
 namespace base {
 class FundamentalValue;
@@ -36,48 +37,56 @@ class PrintPreviewHandler : public WebUIMessageHandler,
   virtual ~PrintPreviewHandler();
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
+  virtual void RegisterMessages() OVERRIDE;
 
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const FilePath& path, int index, void* params);
-  virtual void FileSelectionCanceled(void* params);
+  virtual void FileSelected(const FilePath& path,
+                            int index,
+                            void* params) OVERRIDE;
+  virtual void FileSelectionCanceled(void* params) OVERRIDE;
 
   // PrintViewManagerObserver implementation.
-  virtual void OnPrintDialogShown();
+  virtual void OnPrintDialogShown() OVERRIDE;
 
   // Displays a modal dialog, prompting the user to select a file.
   void SelectFile(const FilePath& default_path);
 
-  // Called when the print preview tab navigates. This is the last time this
+  // Called when the print preview tab is destroyed. This is the last time
   // this object has access to the PrintViewManager in order to disconnect the
   // observer.
-  void OnNavigation();
+  void OnTabDestroyed();
+
+  // Called when print preview failed.
+  void OnPrintPreviewFailed();
+
+  // Called when the user press ctrl+shift+p to display the native system
+  // dialog.
+  void ShowSystemDialog();
 
  private:
   friend class PrintSystemTaskProxy;
 
-  TabContents* preview_tab();
+  TabContentsWrapper* preview_tab_wrapper() const;
+  TabContents* preview_tab() const;
 
-  // Get the default printer. |args| is unused.
+  // Gets the default printer. |args| is unused.
   void HandleGetDefaultPrinter(const base::ListValue* args);
 
-  // Get the list of printers. |args| is unused.
+  // Gets the list of printers. |args| is unused.
   void HandleGetPrinters(const base::ListValue* args);
 
-  // Ask the initiator renderer to generate a preview.
-  // First element of |args| is a job settings JSON string.
+  // Asks the initiator renderer to generate a preview.  First element of |args|
+  // is a job settings JSON string.
   void HandleGetPreview(const base::ListValue* args);
 
-  // Get the job settings from Web UI and initiate printing.
-  // First element of |args| is a job settings JSON string.
+  // Gets the job settings from Web UI and initiate printing.  First element of
+  // |args| is a job settings JSON string.
   void HandlePrint(const base::ListValue* args);
 
-  // Handles the request to hide the preview tab for printing.
-  // |args| is unused.
+  // Handles the request to hide the preview tab for printing. |args| is unused.
   void HandleHidePreview(const base::ListValue* args);
 
-  // Handles the request to cancel the pending print request.
-  // |args| is unused.
+  // Handles the request to cancel the pending print request. |args| is unused.
   void HandleCancelPendingPrintRequest(const base::ListValue* args);
 
   // Handles a request to back up data about the last used cloud print
@@ -86,31 +95,41 @@ class PrintPreviewHandler : public WebUIMessageHandler,
   // Second element of |args| is the current cloud print data JSON.
   void HandleSaveLastPrinter(const base::ListValue* args);
 
-  // Get the printer capabilities.
-  // First element of |args| is the printer name.
+  // Gets the printer capabilities. First element of |args| is the printer name.
   void HandleGetPrinterCapabilities(const base::ListValue* args);
 
-  // Ask the initiator renderer to show the native print system dialog.
-  // |args| is unused.
+  // Asks the initiator renderer to show the native print system dialog. |args|
+  // is unused.
   void HandleShowSystemDialog(const base::ListValue* args);
 
-  // Bring up a web page to allow the user to configure cloud print.
+  // Brings up a dialog to allow the user to sign into cloud print.
+  // |args| is unused.
+  void HandleSignin(const base::ListValue* args);
+
+  // Brings up a web page to allow the user to configure cloud print.
   // |args| is unused.
   void HandleManageCloudPrint(const base::ListValue* args);
 
-  // Ask the browser to show the native printer management dialog.
+  // Reloads the initiator tab and closes the associated preview tab. |args| is
+  // unused.
+  void HandleReloadCrashedInitiatorTab(const base::ListValue* args);
+
+  // Asks the browser to show the native printer management dialog.
   // |args| is unused.
   void HandleManagePrinters(const base::ListValue* args);
 
-  // Ask the browser to close the preview tab.
-  // |args| is unused.
+  // Asks the browser to close the preview tab. |args| is unused.
   void HandleClosePreviewTab(const base::ListValue* args);
 
-  // Send the printer capabilities to the Web UI.
-  // |settings_info| contains printer capabilities information.
+  // Asks the browser for the title of the initiator tab.
+  // |args| is unused.
+  void HandleGetInitiatorTabTitle(const base::ListValue* args);
+
+  // Sends the printer capabilities to the Web UI. |settings_info| contains
+  // printer capabilities information.
   void SendPrinterCapabilities(const base::DictionaryValue& settings_info);
 
-  // Send the default printer to the Web UI.
+  // Sends the default printer to the Web UI.
   void SendDefaultPrinter(const base::StringValue& default_printer,
                           const base::StringValue& cloud_print_data);
 
@@ -124,22 +143,22 @@ class PrintPreviewHandler : public WebUIMessageHandler,
   void SendCloudPrintJob(const base::DictionaryValue& settings,
                          std::string print_ticket);
 
-  // Helper function to get the initiator tab for the print preview tab.
-  TabContents* GetInitiatorTab();
+  // Gets the initiator tab for the print preview tab.
+  TabContentsWrapper* GetInitiatorTab() const;
 
-  // Helper function to close the print preview tab.
+  // Closes the print preview tab.
   void ClosePrintPreviewTab();
 
-  // Helper function to activate the initiator tab and close the preview tab.
+  // Activates the initiator tab and close the preview tab.
   void ActivateInitiatorTabAndClosePreviewTab();
 
   // Adds all the recorded stats taken so far to histogram counts.
   void ReportStats();
 
-  // Helper function to hide the preview tab for printing.
+  // Hides the preview tab for printing.
   void HidePreviewTab();
 
-  // Helper function to clear initiator tab details for this preview tab.
+  // Clears initiator tab details for this preview tab.
   void ClearInitiatorTabDetails();
 
   // Pointer to current print system.

@@ -26,8 +26,6 @@ class JingleSessionManager;
 class JingleSession : public protocol::Session,
                       public sigslot::has_slots<> {
  public:
-  static const char kChromotingContentName[];
-
   // Session interface.
   virtual void SetStateChangeCallback(StateChangeCallback* callback) OVERRIDE;
   virtual void CreateStreamChannel(
@@ -38,9 +36,6 @@ class JingleSession : public protocol::Session,
       const DatagramChannelCallback& callback) OVERRIDE;
   virtual net::Socket* control_channel() OVERRIDE;
   virtual net::Socket* event_channel() OVERRIDE;
-  virtual net::Socket* video_channel() OVERRIDE;
-  virtual net::Socket* video_rtp_channel() OVERRIDE;
-  virtual net::Socket* video_rtcp_channel() OVERRIDE;
   virtual const std::string& jid() OVERRIDE;
   virtual const CandidateSessionConfig* candidate_config() OVERRIDE;
   virtual const SessionConfig* config() OVERRIDE;
@@ -83,7 +78,6 @@ class JingleSession : public protocol::Session,
   void set_candidate_config(const CandidateSessionConfig* candidate_config);
   const std::string& local_certificate() const;
   void Init(cricket::Session* cricket_session);
-  std::string GetEncryptedMasterKey() const;
 
   // Close all the channels and terminate the session.
   void CloseInternal(int result, bool failed);
@@ -127,9 +121,8 @@ class JingleSession : public protocol::Session,
   // Callbacks for the channels created in JingleSession.
   // TODO(sergeyu): Remove this method once *_channel() methods are
   // removed from Session interface.
-  void OnStreamChannelConnected(
-      const std::string& name, net::StreamSocket* socket);
-  void OnChannelConnected(const std::string& name, net::Socket* socket);
+  void OnChannelConnected(scoped_ptr<net::Socket>* socket_container,
+                          net::StreamSocket* socket);
 
   const cricket::ContentInfo* GetContentInfo() const;
 
@@ -150,11 +143,6 @@ class JingleSession : public protocol::Session,
   // Public key of the peer.
   std::string peer_public_key_;
 
-  // Master key used to derive ice keys for each ice
-  // session. Generated on the client and sent to the host in the
-  // session-initiate message (encrypted with the host's key).
-  std::string master_key_;
-
   // Shared secret to use in channel authentication.  This is currently only
   // used in IT2Me.
   std::string shared_secret_;
@@ -162,7 +150,6 @@ class JingleSession : public protocol::Session,
   State state_;
   scoped_ptr<StateChangeCallback> state_change_callback_;
 
-  bool closed_;
   bool closing_;
 
   // JID of the other side. Set when the connection is initialized,
@@ -185,7 +172,6 @@ class JingleSession : public protocol::Session,
 
   scoped_ptr<net::Socket> control_channel_socket_;
   scoped_ptr<net::Socket> event_channel_socket_;
-  scoped_ptr<net::Socket> video_channel_socket_;
 
   ScopedRunnableMethodFactory<JingleSession> task_factory_;
 

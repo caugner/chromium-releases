@@ -16,9 +16,7 @@
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
-#include "gpu/command_buffer/service/surface_manager_mock.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "gpu/GLES2/gles2_command_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/gl/gl_context_stub.h"
 #include "ui/gfx/gl/gl_surface_stub.h"
@@ -128,7 +126,7 @@ class GLES2DecoderTestBase : public testing::Test {
     return reinterpret_cast<T>(ptr);
   }
 
-  IdAllocator* GetIdAllocator(GLuint namespace_id) {
+  IdAllocatorInterface* GetIdAllocator(GLuint namespace_id) {
     return group_->GetIdAllocator(namespace_id);
   }
 
@@ -169,7 +167,8 @@ class GLES2DecoderTestBase : public testing::Test {
       bool has_stencil,
       bool request_alpha,
       bool request_depth,
-      bool request_stencil);
+      bool request_stencil,
+      bool bind_generates_resource);
 
   const ContextGroup& group() const {
     return *group_.get();
@@ -276,7 +275,6 @@ class GLES2DecoderTestBase : public testing::Test {
   scoped_refptr<gfx::GLSurfaceStub> surface_;
   scoped_refptr<gfx::GLContextStub> context_;
   scoped_ptr<GLES2Decoder> decoder_;
-  scoped_ptr<MockSurfaceManager> surface_manager_;
 
   GLuint client_buffer_id_;
   GLuint client_framebuffer_id_;
@@ -307,8 +305,7 @@ class GLES2DecoderTestBase : public testing::Test {
     }
 
     virtual Buffer GetSharedMemoryBuffer(int32 shm_id) {
-      return shm_id == kSharedMemoryId || shm_id == gpu::kLatchSharedMemoryId ?
-          valid_buffer_ : invalid_buffer_;
+      return shm_id == kSharedMemoryId ? valid_buffer_ : invalid_buffer_;
     }
 
     void ClearSharedMemory() {

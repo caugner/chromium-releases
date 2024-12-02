@@ -3,13 +3,14 @@
 // found in the LICENSE file.
 
 #include "base/logging.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_browser_process_test.h"
-#include "chrome/test/testing_pref_service.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -35,12 +36,14 @@ void ExpectAppsPromoHidden(PrefService* prefs) {
   // Hiding the promo places the apps section in menu mode and maximizes the
   // most visited section.
   EXPECT_TRUE((ShownSectionsHandler::GetShownSections(prefs) &
+               APPS) == 0);
+  EXPECT_TRUE((ShownSectionsHandler::GetShownSections(prefs) &
                (MENU_APPS | THUMB)) != 0);
 }
 
 } // namespace
 
-class ExtensionAppsPromo : public TestingBrowserProcessTest {
+class ExtensionAppsPromo : public testing::Test {
  public:
   TestingPrefService* prefs() { return &prefs_; }
   AppsPromo* apps_promo() { return &apps_promo_; }
@@ -58,7 +61,7 @@ class ExtensionAppsPromo : public TestingBrowserProcessTest {
 };
 
 ExtensionAppsPromo::ExtensionAppsPromo()
-    : local_state_(testing_browser_process_.get()),
+    : local_state_(static_cast<TestingBrowserProcess*>(g_browser_process)),
       apps_promo_(&prefs_) {
 }
 
@@ -69,6 +72,7 @@ void ExtensionAppsPromo::SetUp() {
 // TODO(dpolukhin): On Chrome OS all apps are installed via external extensions,
 // and the web store promo is never shown.
 #if !defined(OS_CHROMEOS)
+
 TEST_F(ExtensionAppsPromo, HappyPath) {
   const ExtensionIdSet& default_app_ids = apps_promo()->old_default_apps();
 
@@ -310,4 +314,25 @@ TEST_F(ExtensionAppsPromo, UpdatePromoFocus_UsersAll) {
   ExpectAppsSectionMaximized(prefs(), true);
 }
 
-#endif  // OS_CHROMEOS
+TEST_F(ExtensionAppsPromo, PromoHiddenByPref) {
+  prefs()->SetInteger(prefs::kAppsPromoCounter, 0);
+  prefs()->SetBoolean(prefs::kDefaultAppsInstalled, true);
+
+  // When the "hide" pref is false, the promo should still appear.
+  prefs()->SetBoolean(prefs::kNTPHideWebStorePromo, false);
+  AppsPromo::SetPromo(kPromoId, kPromoHeader, kPromoButton,
+                      GURL(kPromoLink), kPromoExpire, GURL(""),
+                      AppsPromo::USERS_NEW | AppsPromo::USERS_EXISTING);
+  bool just_expired;
+  bool show_promo = apps_promo()->ShouldShowPromo(
+      apps_promo()->old_default_apps(), &just_expired);
+  EXPECT_TRUE(show_promo);
+
+  // When the "hide" pref is true, the promo should NOT appear.
+  prefs()->SetBoolean(prefs::kNTPHideWebStorePromo, true);
+  show_promo = apps_promo()->ShouldShowPromo(
+      apps_promo()->old_default_apps(), &just_expired);
+  EXPECT_FALSE(show_promo);
+}
+
+#endif // OS_CHROMEOS

@@ -20,12 +20,10 @@ using ::base::SharedMemory;
 namespace gpu {
 
 GpuScheduler* GpuScheduler::Create(CommandBuffer* command_buffer,
-                                   SurfaceManager* surface_manager,
                                    gles2::ContextGroup* group) {
   DCHECK(command_buffer);
 
-  gles2::GLES2Decoder* decoder =
-      gles2::GLES2Decoder::Create(surface_manager, group);
+  gles2::GLES2Decoder* decoder = gles2::GLES2Decoder::Create(group);
 
   GpuScheduler* scheduler = new GpuScheduler(command_buffer,
                                              decoder,
@@ -214,8 +212,6 @@ Buffer GpuScheduler::GetSharedMemoryBuffer(int32 shm_id) {
 
 void GpuScheduler::set_token(int32 token) {
   command_buffer_->SetToken(token);
-  if (!set_token_callback_.is_null())
-    set_token_callback_.Run(token);
 }
 
 bool GpuScheduler::SetGetOffset(int32 offset) {
@@ -230,31 +226,14 @@ int32 GpuScheduler::GetGetOffset() {
   return parser_->get();
 }
 
-void GpuScheduler::ResizeOffscreenFrameBuffer(const gfx::Size& size) {
-  decoder_->ResizeOffscreenFrameBuffer(size);
-}
-
-void GpuScheduler::SetResizeCallback(Callback1<gfx::Size>::Type* callback) {
+void GpuScheduler::SetResizeCallback(
+    Callback1<gfx::Size>::Type* callback) {
   decoder_->SetResizeCallback(callback);
-}
-
-void GpuScheduler::SetSwapBuffersCallback(
-    Callback0::Type* callback) {
-  wrapped_swap_buffers_callback_.reset(callback);
-  decoder_->SetSwapBuffersCallback(
-      NewCallback(this,
-                  &GpuScheduler::WillSwapBuffers));
 }
 
 void GpuScheduler::SetCommandProcessedCallback(
     Callback0::Type* callback) {
   command_processed_callback_.reset(callback);
-}
-
-void GpuScheduler::SetTokenCallback(
-    const base::Callback<void(int32)>& callback) {
-  DCHECK(set_token_callback_.is_null());
-  set_token_callback_ = callback;
 }
 
 GpuScheduler::GpuScheduler(CommandBuffer* command_buffer,

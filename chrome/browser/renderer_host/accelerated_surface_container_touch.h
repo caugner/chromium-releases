@@ -16,19 +16,16 @@
 class AcceleratedSurfaceContainerTouch : public ui::TextureGL {
  public:
   static AcceleratedSurfaceContainerTouch* CreateAcceleratedSurfaceContainer(
-      ui::CompositorGL* compositor,
       const gfx::Size& size,
       uint64 surface_handle);
 
   // TextureGL implementation
-  virtual void SetBitmap(const SkBitmap& bitmap,
+  virtual void SetCanvas(const SkCanvas& canvas,
                          const gfx::Point& origin,
                          const gfx::Size& overall_size) OVERRIDE;
 
  protected:
-  AcceleratedSurfaceContainerTouch(
-      ui::CompositorGL* compositor,
-      const gfx::Size& size);
+  explicit AcceleratedSurfaceContainerTouch(const gfx::Size& size);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AcceleratedSurfaceContainerTouch);

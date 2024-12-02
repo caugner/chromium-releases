@@ -108,7 +108,9 @@ chrome.fileBrowserPrivate = {
       }
     }
 
-    callback(candidateTasks);
+    setTimeout(function() {
+      callback(candidateTasks);
+    }, 200);
   },
 
   /**
@@ -195,7 +197,7 @@ chrome.fileBrowserPrivate = {
 
       ROOT_DIRECTORY_LABEL: 'Files',
       DOWNLOADS_DIRECTORY_LABEL: 'File Shelf',
-      DOWNLOADS_DIRECTORY_WARNING: "&lt;strong&gt;Caution:&lt;/strong&gt; These files are temporary and may be automatically deleted to free up disk space.  &lt;a href='$1'&gt;Learn More&lt;/a&gt;",
+      DOWNLOADS_DIRECTORY_WARNING: "&lt;strong&gt;Caution:&lt;/strong&gt; These files are temporary and may be automatically deleted to free up disk space.  &lt;a href='javascript://'&gt;Learn More&lt;/a&gt;",
       MEDIA_DIRECTORY_LABEL: 'External Storage',
       NAME_COLUMN_LABEL: 'Name',
       SIZE_COLUMN_LABEL: 'Size',
@@ -221,6 +223,7 @@ chrome.fileBrowserPrivate = {
 
       MOUNT_ARCHIVE: 'Open archive',
       UNMOUNT_ARCHIVE: 'Close archive',
+      FORMAT_DEVICE: 'Format device',
 
       CONFIRM_OVERWRITE_FILE: 'A file named "$1" already exists. Do you want to replace it?',
       FILE_ALREADY_EXISTS: 'The file named "$1" already exists. Please choose a different name.',
@@ -279,6 +282,37 @@ chrome.fileBrowserPrivate = {
 
       CONFIRM_DELETE_ONE: 'Are you sure you want to delete "$1"?',
       CONFIRM_DELETE_SOME: 'Are you sure you want to delete $1 items?',
+
+      UNKNOWN_FILESYSTEM_WARNING:'This device cannot be opened because its' +
+          ' filesystem was not recognized.',
+      UNSUPPORTED_FILESYSTEM_WARNING: 'This device cannot be opened because' +
+          ' its filesystem is not supported.',
+      FORMATTING_WARNING: 'Formatting the removable media is going to erase' +
+          ' all data. Do you wish to continue?',
+
+      ID3_ALBUM: 'Album',  // TALB
+      ID3_BPM: 'BPM ',  // TBPM
+      ID3_COMPOSER: 'Composer',  // TCOM
+      ID3_COPYRIGHT_MESSAGE: 'Copyright message',  // TCOP
+      ID3_DATE: 'Date',  // TDAT
+      ID3_PLAYLIST_DELAY: 'Playlist delay',  // TDLY
+      ID3_ENCODED_BY: 'Encoded by',  // TENC
+      ID3_LYRICIST: 'Lyricist',  // TEXT
+      ID3_FILE_TYPE: 'File type',  // TFLT
+      ID3_TIME: 'Time',  // TIME
+      ID3_TITLE: 'Title',  // TIT2
+      ID3_LENGTH: 'Length',  // TLEN
+      ID3_FILE_OWNER: 'File owner',  // TOWN
+      ID3_LEAD_PERFORMER: 'Artist',  // TPE1
+      ID3_BAND: 'Band',  // TPE2
+      ID3_TRACK_NUMBER: 'Track number',  // TRCK
+      ID3_YEAR: 'Year',  // TYER
+      ID3_COPYRIGHT: 'Copyright',  // WCOP
+      ID3_OFFICIAL_AUDIO_FILE_WEBPAGE: 'Official audio file webpage',  // WOAF
+      ID3_OFFICIAL_ARTIST: 'Official artist',  // WOAR
+      ID3_OFFICIAL_AUDIO_SOURCE_WEBPAGE: 'Official audio source webpage', //WOAS
+      ID3_PUBLISHERS_OFFICIAL_WEBPAGE: 'Publishers official webpage',  // WPUB
+      ID3_USER_DEFINED_URL_LINK_FRAME: 'User defined URL link frame'  // WXXX
     });
   }
 };
@@ -311,5 +345,11 @@ chrome.fileBrowserHandler = {
     addListener: function(listener) {
       chrome.fileBrowserHandler.onExecute.listeners_.push(listener);
     }
+  }
+};
+
+chrome.tabs = {
+  create: function(createOptions) {
+    window.open(createOptions.url);
   }
 };

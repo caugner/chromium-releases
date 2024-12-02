@@ -16,7 +16,9 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_log_unittest.h"
 #include "net/base/ssl_cert_request_info.h"
+#include "net/base/ssl_config_service.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/http/disk_cache_based_ssl_host_info.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
@@ -72,13 +74,13 @@ class MockDiskEntry : public disk_cache::Entry,
                       public base::RefCounted<MockDiskEntry> {
  public:
   MockDiskEntry()
-      : test_mode_(0), doomed_(false), sparse_(false), fail_requests_(false),
-        busy_(false), delayed_(false) {
+      : test_mode_(0), doomed_(false), sparse_(false),
+        fail_requests_(false), busy_(false), delayed_(false) {
   }
 
   explicit MockDiskEntry(const std::string& key)
-      : key_(key), doomed_(false), sparse_(false), fail_requests_(false),
-        busy_(false), delayed_(false) {
+      : key_(key), doomed_(false), sparse_(false),
+        fail_requests_(false), busy_(false), delayed_(false) {
     test_mode_ = GetTestModeForEntry(key);
   }
 
@@ -486,6 +488,8 @@ class MockDiskCache : public disk_cache::Backend {
   virtual void GetStats(
       std::vector<std::pair<std::string, std::string> >* stats) {
   }
+
+  virtual void OnExternalCacheHit(const std::string& key) {}
 
   // returns number of times a cache entry was successfully opened
   int open_count() const { return open_count_; }
@@ -1036,7 +1040,7 @@ struct Context {
 
 
 //-----------------------------------------------------------------------------
-// tests
+// HttpCache tests
 
 TEST(HttpCache, CreateThenDestroy) {
   MockHttpCache cache;
@@ -5098,4 +5102,121 @@ TEST(HttpCache, ReadMetadata) {
   EXPECT_EQ(3, cache.network_layer()->transaction_count());
   EXPECT_EQ(4, cache.disk_cache()->open_count());
   EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
+// Tests that we don't mark entries as truncated when a filter detects the end
+// of the stream.
+TEST(HttpCache, FilterCompletion) {
+  MockHttpCache cache;
+  TestCompletionCallback callback;
+
+  {
+    scoped_ptr<net::HttpTransaction> trans;
+    int rv = cache.http_cache()->CreateTransaction(&trans);
+    EXPECT_EQ(net::OK, rv);
+
+    MockHttpRequest request(kSimpleGET_Transaction);
+    rv = trans->Start(&request, &callback, net::BoundNetLog());
+    EXPECT_EQ(net::OK, callback.GetResult(rv));
+
+    scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
+    rv = trans->Read(buf, 256, &callback);
+    EXPECT_GT(callback.GetResult(rv), 0);
+
+    // Now make sure that the entry is preserved.
+    trans->DoneReading();
+  }
+
+  // Make sure that the ActiveEntry is gone.
+  MessageLoop::current()->RunAllPending();
+
+  // Read from the cache.
+  RunTransactionTest(cache.http_cache(), kSimpleGET_Transaction);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
+// Tests that we detect truncated rersources from the net when there is
+// a Content-Length header.
+TEST(HttpCache, TruncatedByContentLength) {
+  MockHttpCache cache;
+  TestCompletionCallback callback;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
+  transaction.response_headers = "Cache-Control: max-age=10000\n"
+                                 "Content-Length: 100\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+  RemoveMockTransaction(&transaction);
+
+  // Read from the cache.
+  RunTransactionTest(cache.http_cache(), kSimpleGET_Transaction);
+
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
+}
+
+// Tests that we actually flag entries as truncated when we detect an error
+// from the net.
+TEST(HttpCache, TruncatedByContentLength2) {
+  MockHttpCache cache;
+  TestCompletionCallback callback;
+
+  MockTransaction transaction(kSimpleGET_Transaction);
+  AddMockTransaction(&transaction);
+  transaction.response_headers = "Cache-Control: max-age=10000\n"
+                                 "Content-Length: 100\n"
+                                 "Etag: foo\n";
+  RunTransactionTest(cache.http_cache(), transaction);
+  RemoveMockTransaction(&transaction);
+
+  // Verify that the entry is marked as incomplete.
+  disk_cache::Entry* entry;
+  ASSERT_TRUE(cache.OpenBackendEntry(kSimpleGET_Transaction.url, &entry));
+  net::HttpResponseInfo response;
+  bool truncated = false;
+  EXPECT_TRUE(MockHttpCache::ReadResponseInfo(entry, &response, &truncated));
+  EXPECT_TRUE(truncated);
+  entry->Close();
+}
+
+//-----------------------------------------------------------------------------
+// DiskCacheBasedSSLHostInfo tests
+
+class DeleteSSLHostInfoCompletionCallback : public TestCompletionCallback {
+ public:
+  explicit DeleteSSLHostInfoCompletionCallback(net::SSLHostInfo* ssl_host_info)
+      : ssl_host_info_(ssl_host_info) {}
+
+  virtual void RunWithParams(const Tuple1<int>& params) {
+    delete ssl_host_info_;
+    TestCompletionCallback::RunWithParams(params);
+  }
+
+ private:
+  net::SSLHostInfo* ssl_host_info_;
+};
+
+// Tests that we can delete a DiskCacheBasedSSLHostInfo object in a
+// completion callback for DiskCacheBasedSSLHostInfo::WaitForDataReady.
+TEST(DiskCacheBasedSSLHostInfo, DeleteInCallback) {
+  net::CertVerifier cert_verifier;
+  // Use the blocking mock backend factory to force asynchronous completion
+  // of ssl_host_info->WaitForDataReady(), so that the callback will run.
+  MockBlockingBackendFactory* factory = new MockBlockingBackendFactory();
+  MockHttpCache cache(factory);
+  net::SSLConfig ssl_config;
+  net::SSLHostInfo* ssl_host_info =
+      new net::DiskCacheBasedSSLHostInfo("https://www.verisign.com", ssl_config,
+                                         &cert_verifier, cache.http_cache());
+  ssl_host_info->Start();
+  DeleteSSLHostInfoCompletionCallback callback(ssl_host_info);
+  int rv = ssl_host_info->WaitForDataReady(&callback);
+  EXPECT_EQ(net::ERR_IO_PENDING, rv);
+  // Now complete the backend creation and let the callback run.
+  factory->FinishCreation();
+  EXPECT_EQ(net::OK, callback.GetResult(rv));
 }

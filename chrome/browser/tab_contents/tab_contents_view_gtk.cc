@@ -13,24 +13,23 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_gtk.h"
 #include "chrome/browser/tab_contents/web_drag_dest_gtk.h"
-#include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
-#include "chrome/browser/ui/gtk/gtk_expanded_container.h"
-#include "chrome/browser/ui/gtk/gtk_floating_container.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/sad_tab_gtk.h"
 #include "chrome/browser/ui/gtk/tab_contents_drag_source.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
+#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/common/content_notification_types.h"
 #include "content/common/notification_source.h"
+#include "ui/base/gtk/gtk_expanded_container.h"
+#include "ui/base/gtk/gtk_floating_container.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -77,11 +76,6 @@ gboolean OnMouseScroll(GtkWidget* widget, GdkEventScroll* event,
 }
 
 }  // namespace
-
-// static
-TabContentsView* TabContentsView::Create(TabContents* tab_contents) {
-  return new TabContentsViewGtk(tab_contents);
-}
 
 TabContentsViewGtk::TabContentsViewGtk(TabContents* tab_contents)
     : tab_contents_(tab_contents),
@@ -251,9 +245,6 @@ void TabContentsViewGtk::RestoreFocus() {
     gtk_widget_grab_focus(focus_store_.widget());
   else
     SetInitialFocus();
-}
-
-void TabContentsViewGtk::UpdatePreferredSize(const gfx::Size& pref_size) {
 }
 
 bool TabContentsViewGtk::IsDoingDrag() const {
