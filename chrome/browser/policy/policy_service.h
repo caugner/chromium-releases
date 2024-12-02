@@ -18,10 +18,13 @@ namespace policy {
 // Policies are namespaced by a (PolicyDomain, ID) pair. The meaning of the ID
 // string depends on the domain; for example, if the PolicyDomain is
 // "extensions" then the ID identifies the extension that the policies control.
-// Currently CHROME is the only domain available, and its ID is always the empty
-// string.
 enum PolicyDomain {
+  // The component ID for chrome policies is always the empty string.
   POLICY_DOMAIN_CHROME,
+
+  // The extensions policy domain is a work in progress. Included here for
+  // tests.
+  POLICY_DOMAIN_EXTENSIONS,
 };
 
 // The PolicyService merges policies from all available sources, taking into
@@ -29,6 +32,8 @@ enum PolicyDomain {
 // and register for notifications on policy updates.
 //
 // The PolicyService is available from BrowserProcess as a global singleton.
+// There is also a PolicyService for browser-wide policies available from
+// BrowserProcess as a global singleton.
 class PolicyService {
  public:
   class Observer {
@@ -60,8 +65,7 @@ class PolicyService {
                               const std::string& component_id,
                               Observer* observer) = 0;
 
-  // Returns NULL if no policies are available for |domain|, | component_id|.
-  virtual const PolicyMap* GetPolicies(
+  virtual const PolicyMap& GetPolicies(
       PolicyDomain domain,
       const std::string& component_id) const = 0;
 

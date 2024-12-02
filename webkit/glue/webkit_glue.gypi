@@ -12,6 +12,12 @@
       }],
     ],
   },
+  'target_defaults': {
+     # Disable narrowing-conversion-in-initialization-list warnings in that we
+     # do not want to fix it in data file "webcursor_gtk_data.h".
+     'cflags+': ['-Wno-narrowing'],
+     'cflags_cc+': ['-Wno-narrowing'],
+  },
   'targets': [
     {
       'target_name': 'webkit_resources',
@@ -130,7 +136,7 @@
         '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
         '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
         '<(DEPTH)/third_party/npapi/npapi.gyp:npapi',
-        '<(DEPTH)/ui/gfx/gl/gl.gyp:gl',
+        '<(DEPTH)/ui/gl/gl.gyp:gl',
         '<(DEPTH)/ui/ui.gyp:ui',
         '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
         '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
@@ -221,13 +227,10 @@
         '../plugins/ppapi/audio_helper.cc',
         '../plugins/ppapi/audio_helper.h',
         '../plugins/ppapi/common.h',
-        '../plugins/ppapi/dir_contents.h',
         '../plugins/ppapi/event_conversion.cc',
         '../plugins/ppapi/event_conversion.h',
         '../plugins/ppapi/file_callbacks.cc',
         '../plugins/ppapi/file_callbacks.h',
-        '../plugins/ppapi/file_path.cc',
-        '../plugins/ppapi/file_path.h',
         '../plugins/ppapi/fullscreen_container.h',
         '../plugins/ppapi/gfx_conversion.h',
         '../plugins/ppapi/host_array_buffer_var.cc',
@@ -338,7 +341,6 @@
         '../plugins/ppapi/usb_key_code_conversion_linux.cc',
         '../plugins/ppapi/usb_key_code_conversion_mac.cc',
         '../plugins/ppapi/usb_key_code_conversion_win.cc',
-        '../plugins/ppapi/usb_keycode_map.h',
         '../plugins/sad_plugin.cc',
         '../plugins/sad_plugin.h',
         '../plugins/webkit_plugins_export.h',
@@ -385,8 +387,6 @@
         'scoped_clipboard_writer_glue.h',
         'simple_webmimeregistry_impl.cc',
         'simple_webmimeregistry_impl.h',
-        'webaccessibility.cc',
-        'webaccessibility.h',
         'webclipboard_impl.cc',
         'webclipboard_impl.h',
         'webcookie.cc',
@@ -535,12 +535,6 @@
         ['inside_chromium_build==0', {
           'dependencies': [
             '<(DEPTH)/webkit/support/setup_third_party.gyp:third_party_headers',
-          ],
-        }],
-        ['p2p_apis==1', {
-          'sources': [
-            '../plugins/ppapi/ppb_transport_impl.cc',
-            '../plugins/ppapi/ppb_transport_impl.h',
           ],
         }],
       ],

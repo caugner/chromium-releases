@@ -8,23 +8,28 @@
 #include "ash/system/tray/system_tray.h"
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/browser/ui/views/ash/chrome_shell_delegate.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_observer.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/gfx/rect.h"
@@ -32,11 +37,7 @@
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(USE_VIRTUAL_KEYBOARD)
-#include "chrome/browser/ui/virtual_keyboard/virtual_keyboard_manager.h"
-#endif
-
-
+using content::NativeWebKeyboardEvent;
 using content::RenderViewHost;
 using content::WebContents;
 
@@ -45,10 +46,8 @@ namespace {
 const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
 
 // These strings must be kept in sync with handleAccelerator() in oobe.js.
-const char kAccelNameAccessibility[] = "accessibility";
 const char kAccelNameCancel[] = "cancel";
 const char kAccelNameEnrollment[] = "enrollment";
-const char kAccelNameExit[] = "exit";
 const char kAccelNameVersion[] = "version";
 
 // Observes IPC messages from the FrameSniffer and notifies JS if error
@@ -64,7 +63,7 @@ class SnifferObserver : public content::RenderViewHostObserver {
 
   virtual ~SnifferObserver() {}
 
-  // IPC::Channel::Listener implementation.
+  // IPC::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(SnifferObserver, message)
@@ -114,36 +113,17 @@ WebUILoginView::WebUILoginView()
     : webui_login_(NULL),
       login_window_(NULL),
       host_window_frozen_(false),
-      login_page_is_loaded_(false),
       should_emit_login_prompt_visible_(true) {
-
   registrar_.Add(this,
-                 chrome::NOTIFICATION_LOGIN_WEBUI_READY,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_LOGIN_USER_IMAGES_LOADED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
+                 chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
                  content::NotificationService::AllSources());
 
-#if defined(USE_VIRTUAL_KEYBOARD)
-  // Make sure the singleton VirtualKeyboardManager object is created.
-  VirtualKeyboardManager::GetInstance();
-#endif
-  accel_map_[ui::Accelerator(ui::VKEY_Z, false, true, true)] =
-      kAccelNameAccessibility;
-  accel_map_[ui::Accelerator(ui::VKEY_ESCAPE, false, false, false)] =
+  accel_map_[ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE)] =
       kAccelNameCancel;
-  accel_map_[ui::Accelerator(ui::VKEY_E, false, true, true)] =
+  accel_map_[ui::Accelerator(ui::VKEY_E,
+                             ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameEnrollment;
-  // This should be kept in sync with the IDC_EXIT accelerator.
-  accel_map_[ui::Accelerator(ui::VKEY_Q, true, true, false)] =
-      kAccelNameExit;
-  accel_map_[ui::Accelerator(ui::VKEY_V, false, false, true)] =
+  accel_map_[ui::Accelerator(ui::VKEY_V, ui::EF_ALT_DOWN)] =
       kAccelNameVersion;
 
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
@@ -151,7 +131,7 @@ WebUILoginView::WebUILoginView()
 }
 
 WebUILoginView::~WebUILoginView() {
-  ash::SystemTray* tray = ash::Shell::GetInstance()->tray();
+  ash::SystemTray* tray = ash::Shell::GetInstance()->system_tray();
   if (tray)
     tray->SetNextFocusableView(NULL);
 }
@@ -161,13 +141,26 @@ void WebUILoginView::Init(views::Widget* login_window) {
   webui_login_ = new views::WebView(ProfileManager::GetDefaultProfile());
   AddChildView(webui_login_);
 
-  WebContents* web_contents = webui_login_->GetWebContents();
+  // We create the WebContents ourselves because the TabContents assumes
+  // ownership of it. This should be reworked once we don't need to use the
+  // TabContents here.
+  WebContents* web_contents =
+      WebContents::Create(ProfileManager::GetDefaultProfile(),
+                          NULL,
+                          MSG_ROUTING_NONE,
+                          NULL,
+                          NULL);
+  tab_contents_.reset(new TabContents(web_contents));
+  webui_login_->SetWebContents(web_contents);
+
   web_contents->SetDelegate(this);
   renderer_preferences_util::UpdateFromSystemSettings(
       web_contents->GetMutableRendererPrefs(),
       ProfileManager::GetDefaultProfile());
 
-  tab_watcher_.reset(new TabRenderWatcher(web_contents, this));
+  registrar_.Add(this,
+                 content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
+                 content::Source<WebContents>(web_contents));
 }
 
 std::string WebUILoginView::GetClassName() const {
@@ -206,6 +199,22 @@ void WebUILoginView::UpdateWindowType() {
 void WebUILoginView::LoadURL(const GURL & url) {
   webui_login_->LoadInitialURL(url);
   webui_login_->RequestFocus();
+
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  // Only enable transparency on sign in screen, not on lock screen.
+  if (BaseLoginDisplayHost::default_host() &&
+      command_line->HasSwitch(switches::kEnableNewOobe)) {
+    // TODO(nkostylev): Use WebContentsObserver::RenderViewCreated to track
+    // when RenderView is created.
+    // Use a background with transparency to trigger transparency in Webkit.
+    SkBitmap background;
+    background.setConfig(SkBitmap::kARGB_8888_Config, 1, 1);
+    background.allocPixels();
+    background.eraseARGB(0x00, 0x00, 0x00, 0x00);
+    content::RenderViewHost* host =
+        tab_contents_->web_contents()->GetRenderViewHost();
+    host->GetView()->SetBackground(background);
+  }
 }
 
 content::WebUI* WebUILoginView::GetWebUI() {
@@ -219,7 +228,7 @@ void WebUILoginView::OpenProxySettings() {
 }
 
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
-  ash::SystemTray* tray = ash::Shell::GetInstance()->tray();
+  ash::SystemTray* tray = ash::Shell::GetInstance()->system_tray();
   if (tray) {
     if (visible)
       tray->GetWidget()->Show();
@@ -249,42 +258,21 @@ void WebUILoginView::AboutToRequestFocusFromTabTraversal(bool reverse) {
   GetWidget()->Activate();
 }
 
-void WebUILoginView::OnRenderHostCreated(RenderViewHost* host) {
-  new SnifferObserver(host, GetWebUI());
-}
-
-void WebUILoginView::OnTabMainFrameLoaded() {
-  VLOG(1) << "WebUI login main frame loaded.";
-}
-
-void WebUILoginView::OnTabMainFrameRender() {
-  if (!login_page_is_loaded_)
-    return;
-
-  VLOG(1) << "WebUI login main frame rendered.";
-  tab_watcher_.reset();
-
-  if (should_emit_login_prompt_visible_) {
-    chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
-        EmitLoginPromptVisible();
-  }
-
-  OobeUI* oobe_ui = static_cast<OobeUI*>(GetWebUI()->GetController());
-  // Notify OOBE that the login frame has been rendered. Currently
-  // this is used to start camera presence check.
-  oobe_ui->OnLoginPromptVisible();
-}
-
 void WebUILoginView::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_LOGIN_WEBUI_READY:
-    case chrome::NOTIFICATION_LOGIN_USER_IMAGES_LOADED:
-    case chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN:
-    case chrome::NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN:
-      login_page_is_loaded_ = true;
+    case chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE: {
+      OnLoginPromptVisible();
+      registrar_.RemoveAll();
       break;
+    }
+    case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
+      RenderViewHost* render_view_host =
+          content::Details<RenderViewHost>(details).ptr();
+      new SnifferObserver(render_view_host, GetWebUI());
+      break;
+    }
     default:
       NOTREACHED() << "Unexpected notification " << type;
   }
@@ -321,7 +309,7 @@ bool WebUILoginView::IsPopupOrPanel(const WebContents* source) const {
 }
 
 bool WebUILoginView::TakeFocus(bool reverse) {
-  ash::SystemTray* tray = ash::Shell::GetInstance()->tray();
+  ash::SystemTray* tray = ash::Shell::GetInstance()->system_tray();
   if (tray && tray->GetWidget()->IsVisible()) {
     tray->SetNextFocusableView(this);
     ash::Shell::GetInstance()->RotateFocus(reverse ? ash::Shell::BACKWARD :
@@ -329,6 +317,18 @@ bool WebUILoginView::TakeFocus(bool reverse) {
   }
 
   return true;
+}
+
+void WebUILoginView::OnLoginPromptVisible() {
+  if (should_emit_login_prompt_visible_) {
+    chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
+        EmitLoginPromptVisible();
+  }
+
+  OobeUI* oobe_ui = static_cast<OobeUI*>(GetWebUI()->GetController());
+  // Notify OOBE that the login frame has been rendered. Currently
+  // this is used to start camera presence check.
+  oobe_ui->OnLoginPromptVisible();
 }
 
 void WebUILoginView::ReturnFocus(bool reverse) {

@@ -13,10 +13,6 @@
 #include "ui/gfx/rect_base.h"
 #include "ui/gfx/size_f.h"
 
-#if !defined(ENABLE_DIP)
-#error "This class should be used only when DIP feature is enabled"
-#endif
-
 namespace gfx {
 
 class InsetsF;
@@ -36,6 +32,10 @@ class UI_EXPORT RectF : public RectBase<RectF, PointF, SizeF, InsetsF, float> {
 
   std::string ToString() const;
 };
+
+#if !defined(COMPILER_MSVC)
+extern template class RectBase<RectF, PointF, SizeF, InsetsF, float>;
+#endif
 
 }  // namespace gfx
 

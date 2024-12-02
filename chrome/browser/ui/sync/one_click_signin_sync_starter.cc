@@ -19,14 +19,15 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
     const std::string& session_index,
     const std::string& email,
     const std::string& password,
-    bool use_default_settings)
+    StartSyncMode start_mode)
     : profile_(profile),
       signin_tracker_(profile, this),
-      use_default_settings_(use_default_settings) {
+      start_mode_(start_mode) {
   DCHECK(profile_);
 
-  int action = use_default_settings ? one_click_signin::HISTOGRAM_WITH_DEFAULTS
-                                    : one_click_signin::HISTOGRAM_WITH_ADVANCED;
+  int action = start_mode_ == SYNC_WITH_DEFAULT_SETTINGS ?
+      one_click_signin::HISTOGRAM_WITH_DEFAULTS :
+      one_click_signin::HISTOGRAM_WITH_ADVANCED;
   UMA_HISTOGRAM_ENUMERATION("AutoLogin.Reverse", action,
                             one_click_signin::HISTOGRAM_MAX);
 
@@ -34,7 +35,7 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
       ProfileSyncServiceFactory::GetForProfile(profile_);
   // Let the sync service know that setup is in progress so it doesn't start
   // syncing until the user has finished any configuration.
-  profile_sync_service->set_setup_in_progress(true);
+  profile_sync_service->SetSetupInProgress(true);
   SigninManager* manager = SigninManagerFactory::GetForProfile(profile_);
   manager->StartSignInWithCredentials(session_index, email, password);
 }
@@ -49,7 +50,7 @@ void OneClickSigninSyncStarter::SigninFailed(
     const GoogleServiceAuthError& error) {
   ProfileSyncService* profile_sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  profile_sync_service->set_setup_in_progress(false);
+  profile_sync_service->SetSetupInProgress(false);
   delete this;
 }
 
@@ -57,10 +58,10 @@ void OneClickSigninSyncStarter::SigninSuccess() {
   ProfileSyncService* profile_sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
 
-  if (use_default_settings_) {
+  if (start_mode_ == SYNC_WITH_DEFAULT_SETTINGS) {
     // Just kick off the sync machine, no need to configure it first.
     profile_sync_service->SetSyncSetupCompleted();
-    profile_sync_service->set_setup_in_progress(false);
+    profile_sync_service->SetSetupInProgress(false);
     profile_sync_service->UnsuppressAndStart();
   } else {
     // Give the user a chance to configure things. We don't clear the

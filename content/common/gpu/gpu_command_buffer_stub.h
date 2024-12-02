@@ -6,8 +6,7 @@
 #define CONTENT_COMMON_GPU_GPU_COMMAND_BUFFER_STUB_H_
 #pragma once
 
-#if defined(ENABLE_GPU)
-
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -24,11 +23,11 @@
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_surface.h"
-#include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
+#include "ui/gl/gl_context.h"
+#include "ui/gl/gl_surface.h"
+#include "ui/gl/gpu_preference.h"
 #include "ui/surface/transport_dib.h"
 
 #if defined(OS_MACOSX)
@@ -71,9 +70,6 @@ class CONTENT_EXPORT GpuCommandBufferStubBase {
 
   virtual bool IsInSameContextShareGroup(
       const GpuCommandBufferStubBase& other) const = 0;
-
-  virtual void SendMemoryAllocationToProxy(
-      const GpuMemoryAllocation& allocation) = 0;
 
   virtual void SetMemoryAllocation(
       const GpuMemoryAllocation& allocation) = 0;
@@ -129,10 +125,6 @@ class GpuCommandBufferStub
   virtual bool IsInSameContextShareGroup(
       const GpuCommandBufferStubBase& other) const OVERRIDE;
 
-  // Sends memory allocation limits to render process.
-  virtual void SendMemoryAllocationToProxy(
-      const GpuMemoryAllocation& allocation) OVERRIDE;
-
   // Sets buffer usage depending on Memory Allocation
   virtual void SetMemoryAllocation(
       const GpuMemoryAllocation& allocation) OVERRIDE;
@@ -154,6 +146,7 @@ class GpuCommandBufferStub
 
   gpu::gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
   gpu::GpuScheduler* scheduler() const { return scheduler_.get(); }
+  GpuChannel* channel() const { return channel_; }
 
   // Identifies the target surface.
   int32 surface_id() const {
@@ -174,7 +167,14 @@ class GpuCommandBufferStub
   void AddDestructionObserver(DestructionObserver* observer);
   void RemoveDestructionObserver(DestructionObserver* observer);
 
+  // Associates a sync point to this stub. When the stub is destroyed, it will
+  // retire all sync points that haven't been previously retired.
+  void AddSyncPoint(uint32 sync_point);
+
+  void SetPreemptByCounter(scoped_refptr<gpu::RefCountedCounter> counter);
+
  private:
+  bool MakeCurrent();
   void Destroy();
 
   // Cleans up and sends reply if OnInitialize failed.
@@ -212,6 +212,12 @@ class GpuCommandBufferStub
   void OnDiscardBackbuffer();
   void OnEnsureBackbuffer();
 
+  void OnRetireSyncPoint(uint32 sync_point);
+  void OnWaitSyncPoint(uint32 sync_point);
+  void OnSyncPointRetired();
+  void OnSignalSyncPoint(uint32 sync_point, uint32 id);
+  void OnSignalSyncPointAck(uint32 id);
+
   void OnSetClientHasMemoryAllocationChangedCallback(bool);
 
   void OnReschedule();
@@ -240,7 +246,6 @@ class GpuCommandBufferStub
   bool client_has_memory_allocation_changed_callback_;
   uint32 last_flush_count_;
   scoped_ptr<GpuCommandBufferStubBase::SurfaceState> surface_state_;
-  GpuMemoryAllocation allocation_;
 
   scoped_ptr<gpu::CommandBufferService> command_buffer_;
   scoped_ptr<gpu::gles2::GLES2Decoder> decoder_;
@@ -263,9 +268,13 @@ class GpuCommandBufferStub
 
   ObserverList<DestructionObserver> destruction_observers_;
 
+  // A queue of sync points associated with this stub.
+  std::deque<uint32> sync_points_;
+  int sync_point_wait_count_;
+
+  scoped_refptr<gpu::RefCountedCounter> preempt_by_counter_;
+
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferStub);
 };
-
-#endif  // defined(ENABLE_GPU)
 
 #endif  // CONTENT_COMMON_GPU_GPU_COMMAND_BUFFER_STUB_H_

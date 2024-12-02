@@ -13,6 +13,12 @@ class GURL;
 
 namespace fileapi {
 
+typedef base::Callback<
+    void(base::PlatformFileError result,
+         const FilePath& platform_path,
+         const scoped_refptr<webkit_blob::ShareableFileReference>& file_ref)>
+    WritableSnapshotFile;
+
 // The interface class for remote file system proxy.
 class RemoteFileSystemProxyInterface :
     public base::RefCountedThreadSafe<RemoteFileSystemProxyInterface> {
@@ -58,6 +64,23 @@ class RemoteFileSystemProxyInterface :
       bool recursive,
       const FileSystemOperationInterface::StatusCallback& callback) = 0;
 
+  // Creates a file at |url|. If the flag |is_exclusive| is true, an
+  // error is raised when a file already exists at the path. It is
+  // an error if a directory or a hosted document is already present at the
+  // path, or the parent directory of the path is not present yet.
+  virtual void CreateFile(
+      const GURL& url,
+      bool exclusive,
+      const FileSystemOperationInterface::StatusCallback& callback) = 0;
+
+  // Changes the length of an existing file at |path| to |length|. If |length|
+  // is negative, an error is raised. If |length| is more than the current size
+  // of the file, zero is padded for the extended part.
+  virtual void Truncate(
+      const GURL& path,
+      int64 length,
+      const FileSystemOperationInterface::StatusCallback& callback) = 0;
+
   // Creates a local snapshot file for a given |path| and returns the
   // metadata and platform path of the snapshot file via |callback|.
   // See also FileSystemOperationInterface::CreateSnapshotFile().
@@ -65,9 +88,24 @@ class RemoteFileSystemProxyInterface :
       const GURL& path,
       const FileSystemOperationInterface::SnapshotFileCallback& callback) = 0;
 
+  // Creates a local snapshot file for a given |path| and marks it for
+  // modification. A webkit_blob::ShareableFileReference is passed to
+  // |callback|, and when the reference is released, modification to the
+  // snapshot is marked for uploading to the remote file system.
+  virtual void CreateWritableSnapshotFile(
+      const GURL& path,
+      const WritableSnapshotFile& callback) = 0;
+
+  // Opens file for a give |path| with specified |flags| (see
+  // base::PlatformFileFlags for details).
+  virtual void OpenFile(
+      const GURL& path,
+      int flags,
+      base::ProcessHandle peer_handle,
+      const FileSystemOperationInterface::OpenFileCallback& callback) = 0;
   // TODO(zelidrag): More methods to follow as we implement other parts of FSO.
 };
 
-}  // namespace chromeos
+}  // namespace fileapi
 
 #endif  // WEBKIT_CHROMEOS_FILEAPI_REMOTE_FILE_SYSTEM_PROXY_H_

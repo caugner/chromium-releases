@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_STAR_VIEW_H_
 #pragma once
 
+#include "chrome/browser/ui/views/location_bar/touchable_location_bar_view.h"
 #include "ui/views/controls/image_view.h"
 
 class CommandUpdater;
@@ -15,13 +16,18 @@ class KeyEvent;
 class MouseEvent;
 }
 
-class StarView : public views::ImageView {
+class StarView
+    : public views::ImageView,
+      public TouchableLocationBarView {
  public:
   explicit StarView(CommandUpdater* command_updater);
   virtual ~StarView();
 
   // Toggles the star on or off.
   void SetToggled(bool on);
+
+  // TouchableLocationBarView.
+  virtual int GetBuiltInHorizontalPadding() const OVERRIDE;
 
  private:
   // views::ImageView overrides:
@@ -30,6 +36,8 @@ class StarView : public views::ImageView {
                               string16* tooltip) const OVERRIDE;
   virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const views::MouseEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
 
   // The CommandUpdater for the Browser object that owns the location bar.

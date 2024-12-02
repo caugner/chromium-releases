@@ -36,12 +36,12 @@ void LoginWebDialog::Delegate::OnDialogClosed() {
 
 LoginWebDialog::LoginWebDialog(Delegate* delegate,
                                gfx::NativeWindow parent_window,
-                               const std::wstring& title,
+                               const string16& title,
                                const GURL& url,
                                Style style)
     : delegate_(delegate),
       parent_window_(parent_window),
-      title_(WideToUTF16Hack(title)),
+      title_(title),
       url_(url),
       style_(style),
       bubble_frame_view_(NULL),
@@ -57,7 +57,7 @@ LoginWebDialog::~LoginWebDialog() {
 
 void LoginWebDialog::Show() {
   views::Widget::CreateWindowWithParent(
-      new WebDialogView(ProfileManager::GetDefaultProfile(), NULL, this),
+      new WebDialogView(ProfileManager::GetDefaultProfile(), this),
       parent_window_)->Show();
   is_open_ = true;
 }

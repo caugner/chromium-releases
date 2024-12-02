@@ -18,7 +18,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/page_transition_types.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "sync/protocol/session_specifics.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -170,7 +170,7 @@ TEST_F(SyncSessionModelAssociatorTest, PopulateSessionTab) {
   navigation->set_virtual_url("http://foo/1");
   navigation->set_referrer("referrer");
   navigation->set_title("title");
-  navigation->set_page_transition(sync_pb::TabNavigation_PageTransition_TYPED);
+  navigation->set_page_transition(sync_pb::SyncEnums_PageTransition_TYPED);
 
   SyncedSessionTab tab;
   tab.tab_id.set_id(5);  // Expected to be set by the SyncedSessionTracker.

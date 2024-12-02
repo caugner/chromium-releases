@@ -283,12 +283,12 @@ TEST_F(NetworkLibraryStubTest, NetworkLibraryAccessors) {
   WifiNetwork* wifi2 = cros_->FindWifiNetworkByPath("wifi2");
   ASSERT_NE(static_cast<const Network*>(NULL), wifi2);
   Network::TestApi test_wifi2(wifi2);
-  test_wifi2.SetConnecting(true);
+  test_wifi2.SetConnecting();
   // Set cellular1->connecting for these tests.
   CellularNetwork* cellular1 = cros_->FindCellularNetworkByPath("cellular1");
   ASSERT_NE(static_cast<const Network*>(NULL), cellular1);
   Network::TestApi test_cellular1(cellular1);
-  test_cellular1.SetConnecting(true);
+  test_cellular1.SetConnecting();
 
   // Ethernet
   ASSERT_NE(static_cast<const EthernetNetwork*>(NULL),
@@ -355,7 +355,7 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectOncWifi) {
   ASSERT_TRUE(parser.parse_error().empty());
   EXPECT_EQ(1, parser.GetNetworkConfigsSize());
   EXPECT_EQ(2, parser.GetCertificatesSize());
-  scoped_ptr<Network> network(parser.ParseNetwork(0));
+  scoped_ptr<Network> network(parser.ParseNetwork(0, NULL));
   ASSERT_TRUE(network.get());
   EXPECT_EQ(CLIENT_CERT_TYPE_PATTERN, network->client_cert_type());
 
@@ -386,7 +386,7 @@ TEST_F(NetworkLibraryStubTest, NetworkConnectOncVPN) {
   ASSERT_TRUE(parser.parse_error().empty());
   EXPECT_EQ(1, parser.GetNetworkConfigsSize());
   EXPECT_EQ(2, parser.GetCertificatesSize());
-  scoped_ptr<Network> network(parser.ParseNetwork(0));
+  scoped_ptr<Network> network(parser.ParseNetwork(0, NULL));
   ASSERT_TRUE(network.get());
   EXPECT_EQ(CLIENT_CERT_TYPE_PATTERN, network->client_cert_type());
 

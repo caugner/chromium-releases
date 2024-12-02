@@ -9,20 +9,17 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/memory/mru_cache.h"
-#include "base/memory/singleton.h"
 #include "base/message_loop.h"
-#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
-#include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_info_map.h"
+#include "chrome/browser/nacl_host/nacl_browser.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -68,32 +65,6 @@ bool RunningOnWOW64() {
 }
 #endif
 
-// Determine the name of the IRT file based on the architecture.
-#define NACL_IRT_FILE_NAME(arch_string) \
-  (FILE_PATH_LITERAL("nacl_irt_")       \
-   FILE_PATH_LITERAL(arch_string)       \
-   FILE_PATH_LITERAL(".nexe"))
-
-const FilePath::StringType NaClIrtName() {
-#if defined(ARCH_CPU_X86_FAMILY)
-#if defined(ARCH_CPU_X86_64)
-  bool is64 = true;
-#elif defined(OS_WIN)
-  bool is64 = RunningOnWOW64();
-#else
-  bool is64 = false;
-#endif
-  return is64 ? NACL_IRT_FILE_NAME("x86_64") : NACL_IRT_FILE_NAME("x86_32");
-#elif defined(ARCH_CPU_ARMEL)
-  // TODO(mcgrathr): Eventually we'll need to distinguish arm32 vs thumb2.
-  // That may need to be based on the actual nexe rather than a static
-  // choice, which would require substantial refactoring.
-  return NACL_IRT_FILE_NAME("arm");
-#else
-#error Add support for your architecture to NaCl IRT file selection
-#endif
-}
-
 void SetCloseOnExec(nacl::Handle fd) {
 #if defined(OS_POSIX)
   int flags = fcntl(fd, F_GETFD);
@@ -134,168 +105,6 @@ bool ShareHandleToSelLdr(
   return true;
 }
 
-// NaClBrowser -----------------------------------------------------------------
-
-// Represents shared state for all NaClProcessHost objects in the browser.
-// Currently this just handles holding onto the file descriptor for the IRT.
-class NaClBrowser {
- public:
-  static NaClBrowser* GetInstance() {
-    return Singleton<NaClBrowser>::get();
-  }
-
-  bool IrtAvailable() const {
-    return irt_platform_file_ != base::kInvalidPlatformFileValue;
-  }
-
-  base::PlatformFile IrtFile() const {
-    CHECK_NE(irt_platform_file_, base::kInvalidPlatformFileValue);
-    return irt_platform_file_;
-  }
-
-  // Asynchronously attempt to get the IRT open.
-  bool EnsureIrtAvailable();
-
-  // Make sure the IRT gets opened and follow up with the reply when it's ready.
-  bool MakeIrtAvailable(const base::Closure& reply);
-
-  // Path to IRT. Available even before IRT is loaded.
-  const FilePath& GetIrtFilePath();
-
-  // Get the key used for HMACing validation signatures.  This should be a
-  // string of cryptographically secure random bytes.
-  const std::string& GetValidatorCacheKey() const {
-    return validator_cache_key_;
-  }
-
-  // Is the validation signature in the database?
-  bool QueryKnownToValidate(const std::string& signature);
-
-  // Put the validation signature in the database.
-  void SetKnownToValidate(const std::string& signature);
-
- private:
-  friend struct DefaultSingletonTraits<NaClBrowser>;
-
-  NaClBrowser()
-      : irt_platform_file_(base::kInvalidPlatformFileValue),
-        irt_filepath_(),
-        // For the moment, choose an arbitrary cache size.
-        validation_cache_(200),
-        // TODO(ncbray) persist this key along with the cache.
-        // Key size is equal to the block size (not the digest size) of SHA256.
-        validator_cache_key_(base::RandBytesAsString(64)) {
-    InitIrtFilePath();
-  }
-
-  ~NaClBrowser() {
-    if (irt_platform_file_ != base::kInvalidPlatformFileValue)
-      base::ClosePlatformFile(irt_platform_file_);
-  }
-
-  void InitIrtFilePath();
-
-  void OpenIrtLibraryFile();
-
-  static void DoOpenIrtLibraryFile() {
-    GetInstance()->OpenIrtLibraryFile();
-  }
-
-  base::PlatformFile irt_platform_file_;
-
-  FilePath irt_filepath_;
-
-  typedef base::HashingMRUCache<std::string, bool> ValidationCacheType;
-  ValidationCacheType validation_cache_;
-
-  std::string validator_cache_key_;
-
-  DISALLOW_COPY_AND_ASSIGN(NaClBrowser);
-};
-
-// Attempt to ensure the IRT will be available when we need it, but don't wait.
-bool NaClBrowser::EnsureIrtAvailable() {
-  if (IrtAvailable())
-    return true;
-
-  return BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&NaClBrowser::DoOpenIrtLibraryFile));
-}
-
-// We really need the IRT to be available now, so make sure that it is.
-// When it's ready, we'll run the reply closure.
-bool NaClBrowser::MakeIrtAvailable(const base::Closure& reply) {
-  return BrowserThread::PostTaskAndReply(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&NaClBrowser::DoOpenIrtLibraryFile), reply);
-}
-
-const FilePath& NaClBrowser::GetIrtFilePath() {
-  return irt_filepath_;
-}
-
-bool NaClBrowser::QueryKnownToValidate(const std::string& signature) {
-  bool result = false;
-  ValidationCacheType::iterator iter = validation_cache_.Get(signature);
-  if (iter != validation_cache_.end()) {
-    result = iter->second;
-  }
-  UMA_HISTOGRAM_ENUMERATION("NaCl.ValidationCache.Query",
-                            result ? 1 : 0, 2);
-  return result;
-}
-
-void NaClBrowser::SetKnownToValidate(const std::string& signature) {
-  validation_cache_.Put(signature, true);
-  // The number of sets should be equal to the number of cache misses, minus
-  // validation failures and successful validations where stubout occurs.
-  // Bucket zero is reserved for future use.
-  UMA_HISTOGRAM_ENUMERATION("NaCl.ValidationCache.Set", 1, 2);
-}
-
-void NaClBrowser::InitIrtFilePath() {
-  // Allow the IRT library to be overridden via an environment
-  // variable.  This allows the NaCl/Chromium integration bot to
-  // specify a newly-built IRT rather than using a prebuilt one
-  // downloaded via Chromium's DEPS file.  We use the same environment
-  // variable that the standalone NaCl PPAPI plugin accepts.
-  const char* irt_path_var = getenv("NACL_IRT_LIBRARY");
-  if (irt_path_var != NULL) {
-    FilePath::StringType path_string(
-        irt_path_var, const_cast<const char*>(strchr(irt_path_var, '\0')));
-    irt_filepath_ = FilePath(path_string);
-  } else {
-    FilePath plugin_dir;
-    if (!PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &plugin_dir)) {
-      DLOG(ERROR) << "Failed to locate the plugins directory";
-      return;
-    }
-
-    irt_filepath_ = plugin_dir.Append(NaClIrtName());
-  }
-}
-
-// This only ever runs on the BrowserThread::FILE thread.
-// If multiple tasks are posted, the later ones are no-ops.
-void NaClBrowser::OpenIrtLibraryFile() {
-  if (irt_platform_file_ != base::kInvalidPlatformFileValue)
-    // We've already run.
-    return;
-
-  base::PlatformFileError error_code;
-  irt_platform_file_ = base::CreatePlatformFile(irt_filepath_,
-                                                base::PLATFORM_FILE_OPEN |
-                                                base::PLATFORM_FILE_READ,
-                                                NULL,
-                                                &error_code);
-  if (error_code != base::PLATFORM_FILE_OK) {
-    LOG(ERROR) << "Failed to open NaCl IRT file \""
-               << irt_filepath_.LossyDisplayName()
-               << "\": " << error_code;
-  }
-}
-
 }  // namespace
 
 struct NaClProcessHost::NaClInternal {
@@ -305,7 +114,7 @@ struct NaClProcessHost::NaClInternal {
 
 // -----------------------------------------------------------------------------
 
-NaClProcessHost::NaClProcessHost(const GURL& manifest_url)
+NaClProcessHost::NaClProcessHost(const GURL& manifest_url, bool off_the_record)
     : manifest_url_(manifest_url),
 #if defined(OS_WIN)
       process_launched_by_broker_(false),
@@ -318,7 +127,8 @@ NaClProcessHost::NaClProcessHost(const GURL& manifest_url)
 #endif
       internal_(new NaClInternal()),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
-      enable_exception_handling_(false) {
+      enable_exception_handling_(false),
+      off_the_record_(off_the_record) {
   process_.reset(content::BrowserChildProcessHost::Create(
       content::PROCESS_TYPE_NACL_LOADER, this));
 
@@ -402,8 +212,10 @@ void NaClProcessHost::Launch(
 
   // Start getting the IRT open asynchronously while we launch the NaCl process.
   // We'll make sure this actually finished in StartWithLaunchedProcess, below.
-  if (!NaClBrowser::GetInstance()->EnsureIrtAvailable()) {
-    DLOG(ERROR) << "Cannot launch NaCl process after IRT file open failed";
+  NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
+  nacl_browser->EnsureAllResourcesAvailable();
+  if (!nacl_browser->IsOk()) {
+    DLOG(ERROR) << "Cannot launch NaCl process";
     delete this;
     return;
   }
@@ -440,10 +252,10 @@ void NaClProcessHost::Launch(
 void NaClProcessHost::OnChannelConnected(int32 peer_pid) {
   // Set process handle, if it was not set previously.
   // This is needed when NaCl process is launched with nacl-gdb.
-  if (process_->GetData().handle == base::kNullProcessHandle) {
+  if (!CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+          switches::kNaClGdb).empty()) {
     base::ProcessHandle process;
-    DCHECK(!CommandLine::ForCurrentProcess()->GetSwitchValuePath(
-        switches::kNaClGdb).empty());
+    DCHECK(process_->GetData().handle == base::kNullProcessHandle);
     if (base::OpenProcessHandleWithAccess(
             peer_pid,
             base::kProcessAccessDuplicateHandle |
@@ -500,6 +312,12 @@ scoped_ptr<CommandLine> NaClProcessHost::GetCommandForLaunchWithGdb(
     cmd_line->AppendArg("--eval-command");
     cmd_line->AppendArgNative(FILE_PATH_LITERAL("nacl-manifest ") +
                               manifest_path.value());
+  }
+  FilePath script = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+      switches::kNaClGdbScript);
+  if (!script.empty()) {
+    cmd_line->AppendArg("--command");
+    cmd_line->AppendArgNative(script.value());
   }
   cmd_line->AppendArg("--args");
   const CommandLine::StringVector& argv = line->argv();
@@ -574,6 +392,12 @@ bool NaClProcessHost::LaunchNaClGdb(base::ProcessId pid) {
   cmd_line.AppendArg("dump binary value /proc/" +
                      base::IntToString(base::GetCurrentProcId()) +
                      "/fd/" + base::IntToString(fds[1]) + " (char)0");
+  FilePath script = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+      switches::kNaClGdbScript);
+  if (!script.empty()) {
+    cmd_line.AppendArg("--command");
+    cmd_line.AppendArgNative(script.value());
+  }
   // wait on fds[0]
   // If the debugger crashes before attaching to the NaCl process, the user can
   // release resources by terminating the NaCl loader in Chrome Task Manager.
@@ -600,7 +424,7 @@ void NaClProcessHost::OnNaClGdbAttached() {
 #endif
 
 FilePath NaClProcessHost::GetManifestPath() {
-  const Extension* extension = extension_info_map_->extensions()
+  const extensions::Extension* extension = extension_info_map_->extensions()
       .GetExtensionOrAppByURL(ExtensionURLInfo(manifest_url_));
   if (extension != NULL && manifest_url_.SchemeIs(chrome::kExtensionScheme)) {
     std::string path = manifest_url_.path();
@@ -718,21 +542,15 @@ bool NaClProcessHost::OnMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
-void NaClProcessHost::OnProcessCrashed(int exit_code) {
-  std::string message = base::StringPrintf(
-      "NaCl process exited with status %i (0x%x)", exit_code, exit_code);
-  LOG(ERROR) << message;
-}
-
 void NaClProcessHost::OnProcessLaunched() {
   if (!StartWithLaunchedProcess())
     delete this;
 }
 
-// The asynchronous attempt to get the IRT file open has completed.
-void NaClProcessHost::IrtReady() {
+// Called when the NaClBrowser singleton has been fully initialized.
+void NaClProcessHost::OnResourcesReady() {
   NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
-  if (!nacl_browser->IrtAvailable() || !SendStart()) {
+  if (!nacl_browser->IsReady() || !SendStart()) {
     DLOG(ERROR) << "Cannot launch NaCl process";
     delete this;
   }
@@ -794,9 +612,12 @@ bool NaClProcessHost::StartNaClExecution() {
   NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
 
   nacl::NaClStartParams params;
-  params.validation_cache_key = nacl_browser->GetValidatorCacheKey();
+  params.validation_cache_enabled = nacl_browser->ValidationCacheIsEnabled();
+  params.validation_cache_key = nacl_browser->GetValidationCacheKey();
   params.version = chrome::VersionInfo().CreateVersionString();
   params.enable_exception_handling = enable_exception_handling_;
+  params.enable_debug_stub =
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableNaClDebug);
 
   base::PlatformFile irt_file = nacl_browser->IrtFile();
   CHECK_NE(irt_file, base::kInvalidPlatformFileValue);
@@ -861,21 +682,27 @@ bool NaClProcessHost::StartWithLaunchedProcess() {
 #endif
 
   NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
-  if (nacl_browser->IrtAvailable())
-    return SendStart();  // The IRT is already open.  Away we go.
 
-  // We're waiting for the IRT to be open.
-  return nacl_browser->MakeIrtAvailable(
-      base::Bind(&NaClProcessHost::IrtReady, weak_factory_.GetWeakPtr()));
+  if (nacl_browser->IsReady()) {
+    return SendStart();
+  } else if (nacl_browser->IsOk()) {
+    nacl_browser->WaitForResources(
+        base::Bind(&NaClProcessHost::OnResourcesReady,
+                   weak_factory_.GetWeakPtr()));
+    return true;
+  } else {
+    return false;
+  }
 }
 
 void NaClProcessHost::OnQueryKnownToValidate(const std::string& signature,
                                              bool* result) {
-  *result = NaClBrowser::GetInstance()->QueryKnownToValidate(signature);
+  NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
+  *result = nacl_browser->QueryKnownToValidate(signature, off_the_record_);
 }
 
 void NaClProcessHost::OnSetKnownToValidate(const std::string& signature) {
-  NaClBrowser::GetInstance()->SetKnownToValidate(signature);
+  NaClBrowser::GetInstance()->SetKnownToValidate(signature, off_the_record_);
 }
 
 #if defined(OS_WIN)

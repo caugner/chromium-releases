@@ -18,15 +18,23 @@ var remoting = remoting || {};
  * if the host-list is empty.
  *
  * @constructor
- * @param {Element} table The HTML <table> to contain host-list.
+ * @param {Element} table The HTML <div> to contain host-list.
+ * @param {Element} noHosts The HTML <div> containing the "no hosts" message.
  * @param {Element} errorDiv The HTML <div> to display error messages.
  */
-remoting.HostList = function(table, errorDiv) {
+remoting.HostList = function(table, noHosts, errorDiv) {
   /**
    * @type {Element}
    * @private
    */
   this.table_ = table;
+  /**
+   * @type {Element}
+   * @private
+   * TODO(jamiewalch): This should be doable using CSS's sibling selector,
+   * but it doesn't work right now (crbug.com/135050).
+   */
+  this.noHosts_ = noHosts;
   /**
    * @type {Element}
    * @private
@@ -84,21 +92,17 @@ remoting.HostList.prototype.getHostForId = function(hostId) {
  * @return {void} Nothing.
  */
 remoting.HostList.prototype.refresh = function(onDone) {
+  /** @param {XMLHttpRequest} xhr The response from the server. */
+  var parseHostListResponse = this.parseHostListResponse_.bind(this, onDone);
   /** @type {remoting.HostList} */
   var that = this;
-  /** @param {XMLHttpRequest} xhr The response from the server. */
-  var parseHostListResponse = function(xhr) {
-    that.parseHostListResponse_(xhr, onDone);
-  }
   /** @param {string?} token The OAuth2 token. */
   var getHosts = function(token) {
     if (token) {
-      // TODO(simonmorris): Pass the access token in a header, not a URL
-      // parameter, when crbug.com/116574 has a better fix.
-      var params = { 'access_token': token };
+      var headers = { 'Authorization': 'OAuth ' + token };
       remoting.xhr.get(
           'https://www.googleapis.com/chromoting/v1/@me/hosts',
-          parseHostListResponse, params);
+          parseHostListResponse, '', headers);
     } else {
       that.lastError_ = remoting.Error.AUTHENTICATION_FAILED;
       onDone(false);
@@ -114,12 +118,12 @@ remoting.HostList.prototype.refresh = function(onDone) {
  * include a JSON-encoded list of host descriptions, which we display if we're
  * able to successfully parse it.
  *
- * @param {XMLHttpRequest} xhr The XHR object for the host list request.
  * @param {function(boolean):void} onDone The callback passed to |refresh|.
+ * @param {XMLHttpRequest} xhr The XHR object for the host list request.
  * @return {void} Nothing.
  * @private
  */
-remoting.HostList.prototype.parseHostListResponse_ = function(xhr, onDone) {
+remoting.HostList.prototype.parseHostListResponse_ = function(onDone, xhr) {
   try {
     if (xhr.status == 200) {
       var response =
@@ -173,24 +177,13 @@ remoting.HostList.prototype.parseHostListResponse_ = function(xhr, onDone) {
  * @return {void} Nothing.
  */
 remoting.HostList.prototype.display = function(thisHostId) {
-  this.table_.innerHTML = '';
+  this.table_.innerText = '';
   this.errorDiv_.innerText = '';
   this.hostTableEntries_ = [];
 
-  /**
-   * @type {remoting.HostList}
-   */
-  var that = this;
-  /**
-   * @param {remoting.HostTableEntry} hostTableEntry The entry being renamed.
-   */
-  var onRename = function(hostTableEntry) { that.renameHost(hostTableEntry); }
-  /**
-   * @param {remoting.HostTableEntry} hostTableEntry The entry beign deleted.
-   */
-  var onDelete = function(hostTableEntry) { that.deleteHost_(hostTableEntry); }
-
-  this.table_.hidden = (this.hosts_.length == 0);
+  var noHostsRegistered = (this.hosts_.length == 0);
+  this.table_.hidden = noHostsRegistered;
+  this.noHosts_.hidden = !noHostsRegistered;
 
   for (var i = 0; i < this.hosts_.length; ++i) {
     /** @type {remoting.Host} */
@@ -201,7 +194,9 @@ remoting.HostList.prototype.display = function(thisHostId) {
     if (host.hostName && host.hostId && host.status && host.publicKey &&
         host.hostId != thisHostId) {
       var hostTableEntry = new remoting.HostTableEntry();
-      hostTableEntry.create(host, onRename, onDelete);
+      hostTableEntry.create(host,
+                            this.renameHost.bind(this),
+                            this.deleteHost_.bind(this));
       this.hostTableEntries_[i] = hostTableEntry;
       this.table_.appendChild(hostTableEntry.tableRow);
     }

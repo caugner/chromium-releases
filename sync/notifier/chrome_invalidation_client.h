@@ -17,29 +17,36 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "google/cacheinvalidation/include/invalidation-listener.h"
+#include "jingle/notifier/listener/push_client_observer.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/util/weak_handle.h"
 #include "sync/notifier/chrome_system_resources.h"
-#include "sync/notifier/invalidation_version_tracker.h"
+#include "sync/notifier/invalidation_state_tracker.h"
+#include "sync/notifier/notifications_disabled_reason.h"
 #include "sync/notifier/state_writer.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
-#include "sync/util/weak_handle.h"
 
 namespace buzz {
 class XmppTaskParentInterface;
 }  // namespace buzz
 
+namespace notifier {
+class PushClient;
+}  // namespace notifier
+
 namespace sync_notifier {
 
 using invalidation::InvalidationListener;
 
-class CacheInvalidationPacketHandler;
 class RegistrationManager;
 
 // ChromeInvalidationClient is not thread-safe and lives on the sync
 // thread.
 class ChromeInvalidationClient
     : public InvalidationListener,
-      public StateWriter {
+      public StateWriter,
+      public notifier::PushClientObserver,
+      public base::NonThreadSafe {
  public:
   class Listener {
    public:
@@ -48,39 +55,33 @@ class ChromeInvalidationClient
     virtual void OnInvalidate(
         const syncable::ModelTypePayloadMap& type_payloads) = 0;
 
-    virtual void OnSessionStatusChanged(bool has_session) = 0;
+    virtual void OnNotificationsEnabled() = 0;
+
+    virtual void OnNotificationsDisabled(
+        NotificationsDisabledReason reason) = 0;
   };
 
-  ChromeInvalidationClient();
+  explicit ChromeInvalidationClient(
+      scoped_ptr<notifier::PushClient> push_client);
 
   // Calls Stop().
   virtual ~ChromeInvalidationClient();
 
   // Does not take ownership of |listener| or |state_writer|.
-  // |invalidation_version_tracker| must be initialized.
-  // |base_task| must still be non-NULL.
+  // |invalidation_state_tracker| must be initialized.
   void Start(
       const std::string& client_id, const std::string& client_info,
       const std::string& state,
       const InvalidationVersionMap& initial_max_invalidation_versions,
-      const browser_sync::WeakHandle<InvalidationVersionTracker>&
-          invalidation_version_tracker,
-      Listener* listener,
-      StateWriter* state_writer,
-      base::WeakPtr<buzz::XmppTaskParentInterface> base_task);
+      const browser_sync::WeakHandle<InvalidationStateTracker>&
+          invalidation_state_tracker,
+      Listener* listener);
 
-  void Stop();
-
-  // Changes the task used to |base_task|, which must still be
-  // non-NULL.  Must only be called between calls to Start() and
-  // Stop().
-  void ChangeBaseTask(base::WeakPtr<buzz::XmppTaskParentInterface> base_task);
+  void UpdateCredentials(const std::string& email, const std::string& token);
 
   // Register the sync types that we're interested in getting
   // notifications for.  May be called at any time.
   void RegisterTypes(syncable::ModelTypeSet types);
-
-  virtual void WriteState(const std::string& state) OVERRIDE;
 
   // invalidation::InvalidationListener implementation.
   virtual void Ready(
@@ -113,26 +114,44 @@ class ChromeInvalidationClient
       invalidation::InvalidationClient* client,
       const invalidation::ErrorInfo& error_info) OVERRIDE;
 
+  // StateWriter implementation.
+  virtual void WriteState(const std::string& state) OVERRIDE;
+
+  // notifier::PushClientObserver implementation.
+  virtual void OnNotificationsEnabled() OVERRIDE;
+  virtual void OnNotificationsDisabled(
+      notifier::NotificationsDisabledReason reason) OVERRIDE;
+  virtual void OnIncomingNotification(
+      const notifier::Notification& notification) OVERRIDE;
+
  private:
   friend class ChromeInvalidationClientTest;
+
+  void Stop();
+
+  NotificationsDisabledReason GetState() const;
+
+  void EmitStateChange();
 
   void EmitInvalidation(
       syncable::ModelTypeSet types, const std::string& payload);
 
-  base::NonThreadSafe non_thread_safe_;
+  // Owned by |chrome_system_resources_|.
+  notifier::PushClient* const push_client_;
   ChromeSystemResources chrome_system_resources_;
   InvalidationVersionMap max_invalidation_versions_;
-  browser_sync::WeakHandle<InvalidationVersionTracker>
-      invalidation_version_tracker_;
+  browser_sync::WeakHandle<InvalidationStateTracker>
+      invalidation_state_tracker_;
   Listener* listener_;
-  StateWriter* state_writer_;
   scoped_ptr<invalidation::InvalidationClient> invalidation_client_;
-  scoped_ptr<CacheInvalidationPacketHandler>
-      cache_invalidation_packet_handler_;
   scoped_ptr<RegistrationManager> registration_manager_;
   // Stored to pass to |registration_manager_| on start.
   syncable::ModelTypeSet registered_types_;
-  bool ticl_ready_;
+
+  // The states of the ticl and the push client (with
+  // NO_NOTIFICATION_ERROR meaning notifications are enabled).
+  NotificationsDisabledReason ticl_state_;
+  NotificationsDisabledReason push_client_state_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeInvalidationClient);
 };

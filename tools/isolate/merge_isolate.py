@@ -17,9 +17,9 @@ import optparse
 import re
 import sys
 
-import trace_inputs
-# Create shortcuts.
-from trace_inputs import KEY_TRACKED, KEY_UNTRACKED
+from isolate_common import pretty_print, KEY_TRACKED, KEY_UNTRACKED
+
+DEFAULT_OSES = ['linux', 'mac', 'win']
 
 
 def union(lhs, rhs):
@@ -39,6 +39,17 @@ def union(lhs, rhs):
     # Do not go inside the list.
     return lhs + rhs
   assert False, type(lhs)
+
+
+def extract_comment(content):
+  """Extracts file level comment."""
+  out = []
+  for line in content.splitlines(True):
+    if line.startswith('#'):
+      out.append(line)
+    else:
+      break
+  return ''.join(out)
 
 
 def eval_content(content):
@@ -133,7 +144,8 @@ class Configs(object):
   The self.per_os[None] member contains all the 'else' clauses plus the default
   values. It is not included in the flatten() result.
   """
-  def __init__(self, oses):
+  def __init__(self, oses, file_comment):
+    self.file_comment = file_comment
     self.per_os = {
         None: OSSettings(None, {}),
     }
@@ -141,7 +153,8 @@ class Configs(object):
 
   def union(self, rhs):
     items = list(set(self.per_os.keys() + rhs.per_os.keys()))
-    out = Configs(items)
+    # Takes the first file comment, prefering lhs.
+    out = Configs(items, self.file_comment or rhs.file_comment)
     for key in items:
       out.per_os[key] = union(self.per_os.get(key), rhs.per_os.get(key))
     return out
@@ -292,7 +305,7 @@ def convert_map_to_gyp(values, oses):
   return out
 
 
-def load_gyp(value):
+def load_gyp(value, file_comment, default_oses):
   """Parses one gyp skeleton and returns a Configs() instance.
 
   |value| is the loaded dictionary that was defined in the gyp file.
@@ -331,7 +344,8 @@ def load_gyp(value):
   # Scan to get the list of OSes.
   conditions = value.get('conditions', [])
   oses = set(re.match(r'OS==\"([a-z]+)\"', c[0]).group(1) for c in conditions)
-  configs = Configs(oses)
+  oses = oses.union(default_oses)
+  configs = Configs(oses, file_comment)
 
   # Global level variables.
   configs.add_globals(value.get('variables', {}))
@@ -346,7 +360,7 @@ def load_gyp(value):
   return configs
 
 
-def load_gyps(items):
+def load_gyps(items, default_oses):
   """Parses each gyp file and returns the merged results.
 
   It only loads what load_gyp() can process.
@@ -356,14 +370,26 @@ def load_gyps(items):
     dirs:  dict(dirame, set(OS where this dirname is a dependency))
     oses:  set(all the OSes referenced)
     """
-  configs = Configs([])
+  configs = Configs(default_oses, None)
   for item in items:
     logging.debug('loading %s' % item)
-    new_config = load_gyp(eval_content(open(item, 'r').read()))
+    with open(item, 'r') as f:
+      content = f.read()
+    new_config = load_gyp(
+        eval_content(content), extract_comment(content), default_oses)
     logging.debug('has OSes: %s' % ','.join(k for k in new_config.per_os if k))
     configs = union(configs, new_config)
   logging.debug('Total OSes: %s' % ','.join(k for k in configs.per_os if k))
   return configs
+
+
+def print_all(comment, data, stream):
+  """Prints a complete .isolate file and its top-level file comment into a
+  stream.
+  """
+  if comment:
+    stream.write(comment)
+  pretty_print(data, stream)
 
 
 def main(args=None):
@@ -371,6 +397,11 @@ def main(args=None):
       usage='%prog <options> [file1] [file2] ...')
   parser.add_option(
       '-v', '--verbose', action='count', default=0, help='Use multiple times')
+  parser.add_option(
+      '-o', '--output', help='Output to file instead of stdout')
+  parser.add_option(
+      '--os', default=','.join(DEFAULT_OSES),
+      help='Inject the list of OSes, default: %default')
 
   options, args = parser.parse_args(args)
   level = [logging.ERROR, logging.INFO, logging.DEBUG][min(2, options.verbose)]
@@ -378,12 +409,13 @@ def main(args=None):
         level=level,
         format='%(levelname)5s %(module)15s(%(lineno)3d):%(message)s')
 
-  trace_inputs.pretty_print(
-      convert_map_to_gyp(
-          *reduce_inputs(
-              *invert_map(
-                  load_gyps(args).flatten()))),
-      sys.stdout)
+  configs = load_gyps(args, options.os.split(','))
+  data = convert_map_to_gyp(*reduce_inputs(*invert_map(configs.flatten())))
+  if options.output:
+    with open(options.output, 'wb') as f:
+      print_all(configs.file_comment, data, f)
+  else:
+    print_all(configs.file_comment, data, sys.stdout)
   return 0
 
 

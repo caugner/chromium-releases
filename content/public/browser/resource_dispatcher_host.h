@@ -37,9 +37,12 @@ class CONTENT_EXPORT ResourceDispatcherHost {
   // Initiates a download by explicit request of the renderer, e.g. due to
   // alt-clicking a link.  If the download is started, |started_callback| will
   // be called on the UI thread with the DownloadId; otherwise an error code
-  // will be returned.
+  // will be returned.  |is_content_initiated| is used to indicate that
+  // the request was generated from a web page, and hence may not be
+  // as trustworthy as a browser generated request.
   virtual net::Error BeginDownload(
       scoped_ptr<net::URLRequest> request,
+      bool is_content_initiated,
       ResourceContext* context,
       int child_id,
       int route_id,
@@ -49,10 +52,6 @@ class CONTENT_EXPORT ResourceDispatcherHost {
 
   // Clears the ResourceDispatcherHostLoginDelegate associated with the request.
   virtual void ClearLoginDelegateForRequest(net::URLRequest* request) = 0;
-
-  // Marks the request as "parked". This happens if a request is
-  // redirected cross-site and needs to be resumed by a new render view.
-  virtual void MarkAsTransferredNavigation(net::URLRequest* request) = 0;
 
  protected:
   virtual ~ResourceDispatcherHost() {}

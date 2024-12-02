@@ -10,10 +10,9 @@
 // Tests that the old permission name "unlimited_storage" still works for
 // backwards compatibility (we renamed it to "unlimitedStorage").
 TEST_F(ExtensionManifestTest, OldUnlimitedStoragePermission) {
-  scoped_refptr<Extension> extension = LoadAndExpectSuccess(
-      "old_unlimited_storage.json",
-      Extension::INTERNAL,
-      Extension::STRICT_ERROR_CHECKS);
+  scoped_refptr<extensions::Extension> extension = LoadAndExpectSuccess(
+      "old_unlimited_storage.json", extensions::Extension::INTERNAL,
+      extensions::Extension::NO_FLAGS);
   EXPECT_TRUE(extension->HasAPIPermission(
       ExtensionAPIPermission::kUnlimitedStorage));
 }

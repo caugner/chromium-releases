@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/guid.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/policy/device_token_fetcher.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/browser/policy/policy_notifier.h"
-#include "chrome/common/guid.h"
 
 namespace policy {
 
@@ -95,6 +95,7 @@ void SampleErrorStatus(DeviceManagementStatus status) {
     case DM_STATUS_TEMPORARY_UNAVAILABLE:
     case DM_STATUS_SERVICE_ACTIVATION_PENDING:
     case DM_STATUS_HTTP_STATUS_ERROR:
+    case DM_STATUS_MISSING_LICENSES:
       sample = kMetricPolicyFetchServerFailed;
       break;
   }
@@ -218,6 +219,11 @@ void CloudPolicyController::OnPolicyFetchCompleted(
       token_fetcher_->SetSerialNumberInvalidState();
       SetState(STATE_TOKEN_ERROR);
       return;
+    case DM_STATUS_MISSING_LICENSES:
+      VLOG(1) << "There are no valid licenses for this domain left.";
+      token_fetcher_->SetMissingLicensesState();
+      SetState(STATE_TOKEN_UNMANAGED);
+      return;
     case DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED:
       VLOG(1) << "The device is no longer managed.";
       token_fetcher_->SetUnmanagedState();
@@ -319,7 +325,7 @@ void CloudPolicyController::FetchToken() {
     if (CanBeInManagedDomain(data_store_->user_name())) {
       // Generate a new random device id. (It'll only be kept if registration
       // succeeds.)
-      data_store_->set_device_id(guid::GenerateGUID());
+      data_store_->set_device_id(base::GenerateGUID());
       token_fetcher_->FetchToken();
     } else {
       SetState(STATE_TOKEN_UNMANAGED);

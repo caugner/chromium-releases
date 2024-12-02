@@ -4,12 +4,11 @@
 
 #include "chrome/browser/ui/gtk/website_settings_popup_gtk.h"
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -18,9 +17,11 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/website_settings.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/website_settings/website_settings.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/cert_store.h"
+#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
@@ -37,51 +38,44 @@ namespace {
 const GdkColor kBackgroundColor = GDK_COLOR_RGB(0xff, 0xff, 0xff);
 
 std::string PermissionTypeToString(ContentSettingsType type) {
-  switch (type) {
-    case CONTENT_SETTINGS_TYPE_POPUPS:
-      return l10n_util::GetStringUTF8(IDS_WEBSITE_SETTINGS_TYPE_POPUPS);
-    case CONTENT_SETTINGS_TYPE_PLUGINS:
-      return l10n_util::GetStringUTF8(IDS_WEBSITE_SETTINGS_TYPE_PLUGINS);
-    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-      return l10n_util::GetStringUTF8(IDS_WEBSITE_SETTINGS_TYPE_LOCATION);
-    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-      return l10n_util::GetStringUTF8(IDS_WEBSITE_SETTINGS_TYPE_NOTIFICATIONS);
-    default:
-      NOTREACHED();
-      return "";
-  }
+  return l10n_util::GetStringUTF8(
+      WebsiteSettingsUI::PermissionTypeToUIStringID(type));
 }
 
 std::string PermissionValueToString(ContentSetting value) {
-  switch (value) {
-    case CONTENT_SETTING_ALLOW:
-      return l10n_util::GetStringUTF8(IDS_WEBSITE_SETTINGS_PERMISSION_ALLOW);
-    case CONTENT_SETTING_BLOCK:
-      return l10n_util::GetStringUTF8(IDS_WEBSITE_SETTINGS_PERMISSION_BLOCK);
-    case CONTENT_SETTING_ASK:
-      return l10n_util::GetStringUTF8(IDS_WEBSITE_SETTINGS_PERMISSION_ASK);
-    default:
-      NOTREACHED();
-      return "";
-  }
+  return l10n_util::GetStringUTF8(
+      WebsiteSettingsUI::PermissionValueToUIStringID(value));
 }
 
 }  // namespace
 
+// static
+void WebsiteSettingsPopupGtk::Show(gfx::NativeWindow parent,
+                                   Profile* profile,
+                                   TabContents* tab_contents,
+                                   const GURL& url,
+                                   const content::SSLStatus& ssl) {
+  new WebsiteSettingsPopupGtk(parent, profile, tab_contents, url, ssl);
+}
+
 WebsiteSettingsPopupGtk::WebsiteSettingsPopupGtk(
     gfx::NativeWindow parent,
     Profile* profile,
-    TabContentsWrapper* tab_contents_wrapper)
+    TabContents* tab_contents,
+    const GURL& url,
+    const content::SSLStatus& ssl)
     : parent_(parent),
       contents_(NULL),
       theme_service_(GtkThemeService::GetFrom(profile)),
       profile_(profile),
-      tab_contents_wrapper_(tab_contents_wrapper),
+      tab_contents_(tab_contents),
       browser_(NULL),
+      cert_id_(0),
       header_box_(NULL),
       cookies_section_contents_(NULL),
       permissions_section_contents_(NULL),
       identity_tab_contents_(NULL),
+      first_visit_contents_(NULL),
       presenter_(NULL) {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent);
@@ -98,27 +92,30 @@ WebsiteSettingsPopupGtk::WebsiteSettingsPopupGtk(
                             NULL,  // |rect|
                             contents_,
                             arrow_location,
-                            true,  // |match_system_theme|
-                            true,  // |grab_input|
+                            BubbleGtk::MATCH_SYSTEM_THEME |
+                                BubbleGtk::POPUP_WINDOW |
+                                BubbleGtk::GRAB_INPUT,
                             theme_service_,
                             this);  // |delegate|
   if (!bubble_) {
     NOTREACHED();
     return;
   }
+
+  presenter_.reset(new WebsiteSettings(this, profile,
+                                       tab_contents->content_settings(),
+                                       url, ssl,
+                                       content::CertStore::GetInstance()));
 }
 
 WebsiteSettingsPopupGtk::~WebsiteSettingsPopupGtk() {
 }
 
-void WebsiteSettingsPopupGtk::SetPresenter(WebsiteSettings* presenter) {
-  presenter_ = presenter;
-}
-
 void WebsiteSettingsPopupGtk::BubbleClosing(BubbleGtk* bubble,
                                             bool closed_by_escape) {
-  if (presenter_)
-    presenter_->OnUIClosing();
+  if (presenter_.get())
+    presenter_.reset();
+  delete this;
 }
 
 void WebsiteSettingsPopupGtk::InitContents() {
@@ -161,6 +158,13 @@ void WebsiteSettingsPopupGtk::InitContents() {
   gtk_box_pack_start(GTK_BOX(info_tab),
                      identity_tab_contents_,
                      FALSE, FALSE, 0);
+  first_visit_contents_ = gtk_vbox_new(FALSE, ui::kControlSpacing);
+  GtkWidget* history_contents = CreateSection(
+      l10n_util::GetStringUTF8(IDS_PAGE_INFO_SITE_INFO_TITLE),
+      first_visit_contents_);
+  gtk_container_set_border_width(GTK_CONTAINER(history_contents), 10);
+  gtk_box_pack_start(GTK_BOX(info_tab), gtk_hseparator_new(), FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(info_tab), history_contents, FALSE, FALSE, 0);
 
   // Create tab container and add all tabs.
   GtkWidget* notebook = gtk_notebook_new();
@@ -319,6 +323,17 @@ void WebsiteSettingsPopupGtk::SetIdentityInfo(
   GtkWidget* identity_box = gtk_vbox_new(FALSE, ui::kControlSpacing);
   gtk_box_pack_start(GTK_BOX(identity_box), identity_description, FALSE, FALSE,
                      0);
+  if (identity_info.cert_id) {
+    cert_id_ = identity_info.cert_id;
+    GtkWidget* view_cert_link = theme_service_->BuildChromeLinkButton(
+        l10n_util::GetStringUTF8(IDS_PAGEINFO_CERT_INFO_BUTTON));
+    g_signal_connect(view_cert_link, "clicked",
+                     G_CALLBACK(OnViewCertLinkClickedThunk), this);
+    GtkWidget* link_hbox = gtk_hbox_new(FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(link_hbox), view_cert_link,
+                       FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(identity_box), link_hbox, FALSE, FALSE, 0);
+  }
 
   // Create connection section.
   GtkWidget* connection_description =
@@ -349,6 +364,16 @@ void WebsiteSettingsPopupGtk::SetIdentityInfo(
        0);
 
   gtk_widget_show_all(identity_tab_contents_);
+}
+
+void WebsiteSettingsPopupGtk::SetFirstVisit(const string16& first_visit) {
+  DCHECK(first_visit_contents_);
+  ClearContainer(first_visit_contents_);
+
+  GtkWidget* first_visit_label = CreateTextLabel(UTF16ToUTF8(first_visit), 400);
+  gtk_box_pack_start(
+      GTK_BOX(first_visit_contents_), first_visit_label, FALSE, FALSE, 0);
+  gtk_widget_show_all(first_visit_contents_);
 }
 
 void WebsiteSettingsPopupGtk::SetPermissionInfo(
@@ -454,7 +479,7 @@ void WebsiteSettingsPopupGtk::OnComboBoxShown(GtkWidget* widget,
 
 void WebsiteSettingsPopupGtk::OnCookiesLinkClicked(GtkWidget* widget) {
   new CollectedCookiesGtk(GTK_WINDOW(parent_),
-                          tab_contents_wrapper_);
+                          tab_contents_);
   bubble_->Close();
 }
 
@@ -462,7 +487,7 @@ void WebsiteSettingsPopupGtk::OnPermissionsSettingsLinkClicked(
     GtkWidget* widget) {
   browser_->OpenURL(OpenURLParams(
       GURL(std::string(
-          chrome::kChromeUISettingsURL) + chrome::kContentSettingsSubPage),
+           chrome::kChromeUISettingsURL) + chrome::kContentSettingsSubPage),
       content::Referrer(),
       NEW_FOREGROUND_TAB,
       content::PAGE_TRANSITION_LINK,
@@ -481,7 +506,13 @@ void WebsiteSettingsPopupGtk::OnPermissionChanged(GtkWidget* widget) {
   int type = -1;
   gtk_tree_model_get(store, &it, 1, &value, 2, &type, -1);
 
-  if (presenter_)
+  if (presenter_.get())
     presenter_->OnSitePermissionChanged(ContentSettingsType(type),
-                                       ContentSetting(value));
+                                        ContentSetting(value));
+}
+
+void WebsiteSettingsPopupGtk::OnViewCertLinkClicked(GtkWidget* widget) {
+  DCHECK_NE(cert_id_, 0);
+  ShowCertificateViewerByID(GTK_WINDOW(parent_), cert_id_);
+  bubble_->Close();
 }

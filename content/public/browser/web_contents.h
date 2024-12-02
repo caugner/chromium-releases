@@ -14,7 +14,6 @@
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/save_page_type.h"
 #include "content/public/browser/web_ui.h"
-#include "content/public/common/view_type.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -65,6 +64,11 @@ class WebContents : public PageNavigator {
       const WebContents* base_web_contents,
       SessionStorageNamespace* session_storage_namespace);
 
+  // Returns a WebContents that wraps the RenderViewHost, or NULL if the
+  // render view host's delegate isn't a WebContents.
+  CONTENT_EXPORT static WebContents* FromRenderViewHost(
+      const RenderViewHost* rvh);
+
   virtual ~WebContents() {}
 
   // Intrinsic tab state -------------------------------------------------------
@@ -86,10 +90,6 @@ class WebContents : public PageNavigator {
   // Returns the user browser context associated with this WebContents (via the
   // NavigationController).
   virtual content::BrowserContext* GetBrowserContext() const = 0;
-
-  // Allows overriding the type of this tab.
-  virtual void SetViewType(content::ViewType type) = 0;
-  virtual content::ViewType GetViewType() const = 0;
 
   // Gets the URL that is currently being displayed, if there is one.
   virtual const GURL& GetURL() const = 0;
@@ -119,6 +119,10 @@ class WebContents : public PageNavigator {
   // should use GetWebUIForCurrentState instead.
   virtual WebUI* GetWebUI() const = 0;
   virtual WebUI* GetCommittedWebUI() const = 0;
+
+  // Allows overriding the user agent used for NavigationEntries it owns.
+  virtual void SetUserAgentOverride(const std::string& override) = 0;
+  virtual const std::string& GetUserAgentOverride() const = 0;
 
   // Tab navigation state ------------------------------------------------------
 
@@ -193,8 +197,10 @@ class WebContents : public PageNavigator {
   virtual base::TimeTicks GetLastSelectedTime() const = 0;
 
   // Invoked when the WebContents becomes hidden.
-  // NOTE: If you override this, call the superclass version too!
   virtual void WasHidden() = 0;
+
+  // Invoked when the WebContents is restored.
+  virtual void WasRestored() = 0;
 
   // TODO(brettw) document these.
   virtual void ShowContents() = 0;
@@ -304,6 +310,10 @@ class WebContents : public PageNavigator {
   virtual void SetNewTabStartTime(const base::TimeTicks& time) = 0;
   virtual base::TimeTicks GetNewTabStartTime() const = 0;
 
+  // Tells the tab to close now. The tab will take care not to close until it's
+  // out of nested message loops.
+  virtual void Close() = 0;
+
   // Notification that tab closing has started.  This can be called multiple
   // times, subsequent calls are ignored.
   virtual void OnCloseStarted() = 0;
@@ -314,6 +324,11 @@ class WebContents : public PageNavigator {
   // A render view-originated drag has ended. Informs the render view host and
   // WebContentsDelegate.
   virtual void SystemDragEnded() = 0;
+
+  // Notification the user has made a gesture while focus was on the
+  // page. This is used to avoid uninitiated user downloads (aka carpet
+  // bombing), see DownloadRequestLimiter for details.
+  virtual void UserGestureDone() = 0;
 
   // Indicates if this tab was explicitly closed by the user (control-w, close
   // tab menu item...). This is false for actions that indirectly close the tab,

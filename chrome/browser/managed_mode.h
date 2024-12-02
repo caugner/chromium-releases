@@ -10,7 +10,6 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "content/public/browser/notification_observer.h"
@@ -40,8 +39,8 @@ class ManagedMode : public BrowserList::Observer,
   static void LeaveManagedMode();
 
   // BrowserList::Observer implementation:
-  virtual void OnBrowserAdded(const Browser* browser) OVERRIDE;
-  virtual void OnBrowserRemoved(const Browser* browser) OVERRIDE;
+  virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
+  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
 
   // content::NotificationObserver implementation:
   virtual void Observe(int type,
@@ -56,6 +55,7 @@ class ManagedMode : public BrowserList::Observer,
  private:
   friend struct DefaultSingletonTraits<ManagedMode>;
   friend class Singleton<ManagedMode>;
+  FRIEND_TEST_ALL_PREFIXES(ExtensionApiTest, ManagedModeOnChange);
 
   static ManagedMode* GetInstance();
 
@@ -76,7 +76,7 @@ class ManagedMode : public BrowserList::Observer,
   // The managed profile. This is non-NULL only while we're entering
   // managed mode.
   const Profile* managed_profile_;
-  std::set<const Browser*> browsers_to_close_;
+  std::set<Browser*> browsers_to_close_;
   std::vector<EnterCallback> callbacks_;
 };
 

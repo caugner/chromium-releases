@@ -18,6 +18,8 @@
 #include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -35,9 +37,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_fetcher.h"
-#include "content/public/common/url_fetcher_delegate.h"
-#include "content/test/test_browser_thread.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -46,6 +47,7 @@
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
 #include "net/test/test_server.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -61,29 +63,12 @@ const char kSyncPasswordForTest[] = "sync-password-for-test";
 const char kSyncServerCommandLine[] = "sync-server-command-line";
 }
 
-namespace {
-// The URLs for different calls in the Google Accounts programmatic login API.
-const char kClientLoginUrl[] = "https://www.google.com/accounts/ClientLogin";
-const char kGetUserInfoUrl[] = "https://www.google.com/accounts/GetUserInfo";
-const char kIssueAuthTokenUrl[] =
-    "https://www.google.com/accounts/IssueAuthToken";
-const char kSearchDomainCheckUrl[] =
-    "https://www.google.com/searchdomaincheck?format=domain&type=chrome";
-const char kOAuth2LoginTokenValidResponse[] =
-    "{"
-    "  \"refresh_token\": \"rt1\","
-    "  \"access_token\": \"at1\","
-    "  \"expires_in\": 3600,"
-    "  \"token_type\": \"Bearer\""
-    "}";
-}
-
 // Helper class that checks whether a sync test server is running or not.
-class SyncServerStatusChecker : public content::URLFetcherDelegate {
+class SyncServerStatusChecker : public net::URLFetcherDelegate {
  public:
   SyncServerStatusChecker() : running_(false) {}
 
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) {
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) {
     std::string data;
     source->GetResponseAsString(&data);
     running_ =
@@ -110,10 +95,7 @@ void SetProxyConfigCallback(
 }
 
 SyncTest::SyncTest(TestType test_type)
-    : sync_server_(net::TestServer::TYPE_SYNC,
-                   net::TestServer::kLocalhost,
-                   FilePath()),
-      test_type_(test_type),
+    : test_type_(test_type),
       server_type_(SERVER_TYPE_UNDECIDED),
       num_clients_(-1),
       use_verifier_(true),
@@ -216,11 +198,7 @@ void SyncTest::AddTestSwitches(CommandLine* cl) {
     cl->AppendSwitch(switches::kDisableBackgroundNetworking);
 }
 
-void SyncTest::AddOptionalTypesToCommandLine(CommandLine* cl) {
-  // TODO(sync): Remove this once sessions sync is enabled by default.
-  if (!cl->HasSwitch(switches::kEnableSyncTabs))
-    cl->AppendSwitch(switches::kEnableSyncTabs);
-}
+void SyncTest::AddOptionalTypesToCommandLine(CommandLine* cl) {}
 
 // static
 Profile* SyncTest::MakeProfile(const FilePath::StringType name) {
@@ -365,7 +343,7 @@ bool SyncTest::SetupSync() {
 
 void SyncTest::CleanUpOnMainThread() {
   // Close all browser windows.
-  BrowserList::CloseAllBrowsers();
+  browser::CloseAllBrowsers();
   ui_test_utils::RunAllPendingInMessageLoop();
 
   // All browsers should be closed at this point, or else we could see memory
@@ -419,17 +397,49 @@ void SyncTest::SetupMockGaiaResponses() {
   password_ = "password";
   factory_.reset(new URLFetcherImplFactory());
   fake_factory_.reset(new FakeURLFetcherFactory(factory_.get()));
-  fake_factory_->SetFakeResponse(kClientLoginUrl, "SID=sid\nLSID=lsid", true);
-  fake_factory_->SetFakeResponse(kGetUserInfoUrl, "email=user@gmail.com", true);
-  fake_factory_->SetFakeResponse(kIssueAuthTokenUrl, "auth", true);
-  fake_factory_->SetFakeResponse(kSearchDomainCheckUrl, ".google.com", true);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->client_login_url(),
+      "SID=sid\nLSID=lsid",
+      true);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->get_user_info_url(),
+      "email=user@gmail.com",
+      true);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->issue_auth_token_url(),
+      "auth",
+      true);
+  fake_factory_->SetFakeResponse(
+      GoogleURLTracker::kSearchDomainCheckURL,
+      ".google.com",
+      true);
   fake_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->client_login_to_oauth2_url(),
       "some_response",
       true);
   fake_factory_->SetFakeResponse(
       GaiaUrls::GetInstance()->oauth2_token_url(),
-      kOAuth2LoginTokenValidResponse,
+      "{"
+      "  \"refresh_token\": \"rt1\","
+      "  \"access_token\": \"at1\","
+      "  \"expires_in\": 3600,"
+      "  \"token_type\": \"Bearer\""
+      "}",
+      true);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->client_oauth_url(),
+      "{"
+      "  \"oauth2\": {"
+      "    \"refresh_token\": \"rt1\","
+      "    \"access_token\": \"at1\","
+      "    \"expires_in\": 3600,"
+      "    \"token_type\": \"Bearer\""
+      "  }"
+      "}",
+      true);
+  fake_factory_->SetFakeResponse(
+      GaiaUrls::GetInstance()->oauth1_login_url(),
+      "SID=sid\nLSID=lsid\nAuth=auth_token",
       true);
 }
 
@@ -551,8 +561,8 @@ bool SyncTest::IsTestServerRunning() {
   std::string sync_url = cl->GetSwitchValueASCII(switches::kSyncServiceURL);
   GURL sync_url_status(sync_url.append("/healthz"));
   SyncServerStatusChecker delegate;
-  scoped_ptr<content::URLFetcher> fetcher(content::URLFetcher::Create(
-    sync_url_status, content::URLFetcher::GET, &delegate));
+  scoped_ptr<net::URLFetcher> fetcher(content::URLFetcher::Create(
+    sync_url_status, net::URLFetcher::GET, &delegate));
   fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE |
                         net::LOAD_DO_NOT_SEND_COOKIES |
                         net::LOAD_DO_NOT_SAVE_COOKIES);
@@ -607,7 +617,7 @@ void SyncTest::DisableNotificationsImpl() {
   std::string path = "chromiumsync/disablenotifications";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Notifications disabled",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+            UTF16ToASCII(browser()->GetActiveWebContents()->GetTitle()));
 }
 
 void SyncTest::DisableNotifications() {
@@ -620,7 +630,7 @@ void SyncTest::EnableNotificationsImpl() {
   std::string path = "chromiumsync/enablenotifications";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Notifications enabled",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+            UTF16ToASCII(browser()->GetActiveWebContents()->GetTitle()));
 }
 
 void SyncTest::EnableNotifications() {
@@ -640,7 +650,7 @@ void SyncTest::TriggerNotification(
       sync_notifier::kSyncP2PNotificationChannel + "&data=" + data;
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Notification sent",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+            UTF16ToASCII(browser()->GetActiveWebContents()->GetTitle()));
 }
 
 bool SyncTest::ServerSupportsErrorTriggering() const {
@@ -665,7 +675,7 @@ void SyncTest::TriggerMigrationDoneError(
   }
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Migration: 200",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+            UTF16ToASCII(browser()->GetActiveWebContents()->GetTitle()));
 }
 
 void SyncTest::TriggerBirthdayError() {
@@ -673,7 +683,7 @@ void SyncTest::TriggerBirthdayError() {
   std::string path = "chromiumsync/birthdayerror";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Birthday error",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+            UTF16ToASCII(browser()->GetActiveWebContents()->GetTitle()));
 }
 
 void SyncTest::TriggerTransientError() {
@@ -681,7 +691,7 @@ void SyncTest::TriggerTransientError() {
   std::string path = "chromiumsync/transienterror";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Transient error",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+            UTF16ToASCII(browser()->GetActiveWebContents()->GetTitle()));
 }
 
 void SyncTest::TriggerAuthError() {
@@ -759,16 +769,8 @@ void SyncTest::TriggerSyncError(const browser_sync::SyncProtocolError& error,
 
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   std::string output = UTF16ToASCII(
-      browser()->GetSelectedWebContents()->GetTitle());
+      browser()->GetActiveWebContents()->GetTitle());
   ASSERT_TRUE(output.find("SetError: 200") != string16::npos);
-}
-
-void SyncTest::TriggerSetSyncTabs() {
-  ASSERT_TRUE(ServerSupportsErrorTriggering());
-  std::string path = "chromiumsync/synctabs";
-  ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
-  ASSERT_EQ("Sync Tabs",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
 }
 
 void SyncTest::TriggerCreateSyncedBookmarks() {
@@ -776,7 +778,7 @@ void SyncTest::TriggerCreateSyncedBookmarks() {
   std::string path = "chromiumsync/createsyncedbookmarks";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Synced Bookmarks",
-            UTF16ToASCII(browser()->GetSelectedWebContents()->GetTitle()));
+            UTF16ToASCII(browser()->GetActiveWebContents()->GetTitle()));
 }
 
 int SyncTest::NumberOfDefaultSyncItems() const {

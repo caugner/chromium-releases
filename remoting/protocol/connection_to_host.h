@@ -10,6 +10,7 @@
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/threading/non_thread_safe.h"
 #include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/clipboard_filter.h"
@@ -18,10 +19,6 @@
 #include "remoting/protocol/message_reader.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_manager.h"
-
-namespace base {
-class MessageLoopProxy;
-}  // namespace base
 
 namespace pp {
 class Instance;
@@ -42,11 +39,13 @@ class ClipboardStub;
 class HostStub;
 class InputStub;
 class SessionConfig;
+class TransportFactory;
 class VideoReader;
 class VideoStub;
 
 class ConnectionToHost : public SignalStrategy::Listener,
-                         public SessionManager::Listener {
+                         public SessionManager::Listener,
+                         public base::NonThreadSafe {
  public:
   enum State {
     CONNECTING,
@@ -63,15 +62,14 @@ class ConnectionToHost : public SignalStrategy::Listener,
     virtual void OnConnectionState(State state, ErrorCode error) = 0;
   };
 
-  ConnectionToHost(base::MessageLoopProxy* message_loop,
-                   pp::Instance* pp_instance,
-                   bool allow_nat_traversal);
+  ConnectionToHost(bool allow_nat_traversal);
   virtual ~ConnectionToHost();
 
   virtual void Connect(scoped_refptr<XmppProxy> xmpp_proxy,
                        const std::string& local_jid,
                        const std::string& host_jid,
                        const std::string& host_public_key,
+                       scoped_ptr<TransportFactory> transport_factory,
                        scoped_ptr<Authenticator> authenticator,
                        HostEventCallback* event_callback,
                        ClientStub* client_stub,
@@ -82,6 +80,7 @@ class ConnectionToHost : public SignalStrategy::Listener,
 
   virtual const SessionConfig& config();
 
+  // Stubs for sending data to the host.
   virtual ClipboardStub* clipboard_stub();
   virtual HostStub* host_stub();
   virtual InputStub* input_stub();
@@ -111,9 +110,6 @@ class ConnectionToHost : public SignalStrategy::Listener,
 
   void NotifyIfChannelsReady();
 
-  // Callback for |video_reader_|.
-  void OnVideoPacket(VideoPacket* packet);
-
   void CloseOnError(ErrorCode error);
 
   // Stops writing in the channels.
@@ -121,8 +117,6 @@ class ConnectionToHost : public SignalStrategy::Listener,
 
   void SetState(State state, ErrorCode error);
 
-  scoped_refptr<base::MessageLoopProxy> message_loop_;
-  pp::Instance* pp_instance_;
   bool allow_nat_traversal_;
 
   std::string host_jid_;

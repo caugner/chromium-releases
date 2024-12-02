@@ -5,7 +5,7 @@
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 
 #include "base/message_loop.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
@@ -27,7 +27,7 @@ class FakeExternalProtocolHandlerWorker
     return os_state_;
   }
 
-  virtual void SetAsDefault() {}
+  virtual void SetAsDefault(bool interactive_permitted) {}
 
   ShellIntegration::DefaultWebClientState os_state_;
 };

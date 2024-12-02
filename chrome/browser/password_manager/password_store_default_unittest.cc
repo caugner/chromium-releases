@@ -5,7 +5,6 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
@@ -22,8 +21,8 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
-#include "content/test/notification_observer_mock.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/mock_notification_observer.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -43,14 +42,14 @@ class MockPasswordStoreConsumer : public PasswordStoreConsumer {
  public:
   MOCK_METHOD2(OnPasswordStoreRequestDone,
                void(CancelableRequestProvider::Handle,
-                    const std::vector<webkit::forms::PasswordForm*>&));
+                    const std::vector<PasswordForm*>&));
 };
 
 // This class will add and remove a mock notification observer from
 // the DB thread.
-class DBThreadObserverHelper :
-    public base::RefCountedThreadSafe<DBThreadObserverHelper,
-                                      BrowserThread::DeleteOnDBThread> {
+class DBThreadObserverHelper
+    : public base::RefCountedThreadSafe<DBThreadObserverHelper,
+                                        BrowserThread::DeleteOnDBThread> {
  public:
   DBThreadObserverHelper() : done_event_(true, false) {}
 
@@ -65,17 +64,18 @@ class DBThreadObserverHelper :
     done_event_.Wait();
   }
 
-  virtual ~DBThreadObserverHelper() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-    registrar_.RemoveAll();
-  }
-
-  content::NotificationObserverMock& observer() {
+  content::MockNotificationObserver& observer() {
     return observer_;
   }
 
  protected:
-  friend class base::RefCountedThreadSafe<DBThreadObserverHelper>;
+  friend struct BrowserThread::DeleteOnThread<BrowserThread::DB>;
+  friend class base::DeleteHelper<DBThreadObserverHelper>;
+
+  virtual ~DBThreadObserverHelper() {
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+    registrar_.RemoveAll();
+  }
 
   void AddObserverTask(PasswordStore* password_store) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
@@ -87,12 +87,10 @@ class DBThreadObserverHelper :
 
   WaitableEvent done_event_;
   content::NotificationRegistrar registrar_;
-  content::NotificationObserverMock observer_;
+  content::MockNotificationObserver observer_;
 };
 
 }  // anonymous namespace
-
-typedef std::vector<PasswordForm*> VectorOfForms;
 
 class PasswordStoreDefaultTest : public testing::Test {
  protected:
@@ -103,12 +101,11 @@ class PasswordStoreDefaultTest : public testing::Test {
 
   virtual void SetUp() {
     ASSERT_TRUE(db_thread_.Start());
-    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     profile_.reset(new TestingProfile());
 
     login_db_.reset(new LoginDatabase());
-    ASSERT_TRUE(login_db_->Init(temp_dir_.path().Append(
+    ASSERT_TRUE(login_db_->Init(profile_->GetPath().Append(
         FILE_PATH_LITERAL("login_test"))));
   }
 
@@ -125,7 +122,6 @@ class PasswordStoreDefaultTest : public testing::Test {
 
   scoped_ptr<LoginDatabase> login_db_;
   scoped_ptr<TestingProfile> profile_;
-  ScopedTempDir temp_dir_;
 };
 
 ACTION(STLDeleteElements0) {
@@ -143,7 +139,7 @@ TEST_F(PasswordStoreDefaultTest, NonASCIIData) {
   store->Init();
 
   // Some non-ASCII password form data.
-  PasswordFormData form_data[] = {
+  static const PasswordFormData form_data[] = {
     { PasswordForm::SCHEME_HTML,
       "http://foo.example.com",
       "http://foo.example.com/origin",
@@ -157,7 +153,7 @@ TEST_F(PasswordStoreDefaultTest, NonASCIIData) {
   };
 
   // Build the expected forms vector and add the forms to the store.
-  VectorOfForms expected_forms;
+  std::vector<PasswordForm*> expected_forms;
   for (unsigned int i = 0; i < ARRAYSIZE_UNSAFE(form_data); ++i) {
     PasswordForm* form = CreatePasswordFormFromData(form_data[i]);
     expected_forms.push_back(form);
@@ -166,6 +162,8 @@ TEST_F(PasswordStoreDefaultTest, NonASCIIData) {
 
   // The PasswordStore schedules tasks to run on the DB thread so we schedule
   // yet another task to notify us that it's safe to carry on with the test.
+  // The PasswordStore doesn't really understand that it's "done" once the tasks
+  // we posted above have completed, so there's no formal notification for that.
   WaitableEvent done(false, false);
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
       base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));

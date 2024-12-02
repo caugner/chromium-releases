@@ -123,6 +123,13 @@
         "UTNUSERFirstObject",
         "GTECyberTrustGlobalRoot"
       ]
+    },
+    {
+      "name": "tor2web",
+      "static_spki_hashes": [
+        "AlphaSSL_G2",
+        "Tor2web"
+      ]
     }
   ],
 
@@ -192,7 +199,6 @@
     { "name": "support.mayfirst.org", "mode": "force-https" },
     { "name": "id.mayfirst.org", "mode": "force-https" },
     { "name": "lists.mayfirst.org", "mode": "force-https" },
-    { "name": "splendidbacon.com", "include_subdomains": true, "mode": "force-https" },
     { "name": "aladdinschools.appspot.com", "mode": "force-https" },
     { "name": "ottospora.nl", "include_subdomains": true, "mode": "force-https" },
     { "name": "www.paycheckrecords.com", "mode": "force-https" },
@@ -255,6 +261,13 @@
     { "name": "platform.twitter.com", "include_subdomains": true, "pins": "twitterCDN" },
     { "name": "si0.twimg.com", "include_subdomains": true, "pins": "twitterCDN" },
     { "name": "twimg0-a.akamaihd.net", "include_subdomains": true, "pins": "twitterCDN" },
+    { "name": "braintreegateway.com", "include_subdomains": true, "mode": "force-https" },
+    { "name": "braintreepayments.com", "mode": "force-https" },
+    { "name": "www.braintreepayments.com", "mode": "force-https" },
+    { "name": "emailprivacytester.com", "mode": "force-https" },
+    { "name": "tor2web.org", "include_subdomains": true, "pins": "tor2web" },
+    { "name": "business.medbank.com.mt", "include_subdomains": true },
+    { "name": "arivo.com.br", "include_subdomains": true },
 
     // Entries that are only valid if the client supports SNI.
     { "name": "gmail.com", "mode": "force-https", "pins": "google", "snionly": true },

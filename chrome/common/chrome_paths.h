@@ -19,6 +19,10 @@ enum {
   DIR_APP = PATH_START,         // Directory where dlls and data reside.
   DIR_LOGS,                     // Directory where logs should be written.
   DIR_USER_DATA,                // Directory where user data can be written.
+#if defined(OS_WIN)
+  DIR_ALT_USER_DATA,            // Directory of the desktop or metro user data
+                                // (the one that isn't in use).
+#endif
   DIR_CRASH_DUMPS,              // Directory where crash dumps are written.
   DIR_USER_DESKTOP,             // Directory that correspond to the desktop.
   DIR_RESOURCES,                // Directory containing separate file resources
@@ -26,6 +30,7 @@ enum {
   DIR_INSPECTOR,                // Directory where web inspector is located.
   DIR_APP_DICTIONARIES,         // Directory where the global dictionaries are.
   DIR_USER_DOCUMENTS,           // Directory for a user's "My Documents".
+  DIR_USER_PICTURES,            // Directory for a user's pictures.
   DIR_DEFAULT_DOWNLOADS_SAFE,   // Directory for a user's
                                 // "My Documents/Downloads", (Windows) or
                                 // "Downloads". (Linux)
@@ -95,6 +100,7 @@ enum {
   FILE_RESOURCES_PACK,          // Full path to the .pak file containing
                                 // binary data (e.g., html files and images
                                 // used by interal pages).
+  DIR_RESOURCES_EXTENSION,      // Full path to extension resources.
 #if defined(OS_CHROMEOS)
   FILE_CHROMEOS_API,            // Full path to chrome os api shared object.
 #endif

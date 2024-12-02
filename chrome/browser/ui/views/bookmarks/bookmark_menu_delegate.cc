@@ -8,6 +8,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "chrome/browser/event_disposition.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
@@ -16,8 +17,8 @@
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
-#include "grit/ui_resources.h"
+#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -111,8 +112,10 @@ string16 BookmarkMenuDelegate::GetTooltipText(
 }
 
 bool BookmarkMenuDelegate::IsTriggerableEvent(views::MenuItemView* menu,
-                                              const views::MouseEvent& e) {
-  return event_utils::IsPossibleDispositionEvent(e);
+                                              const views::Event& e) {
+  return e.type() == ui::ET_GESTURE_TAP ||
+         e.type() == ui::ET_GESTURE_TAP_DOWN ||
+         event_utils::IsPossibleDispositionEvent(e);
 }
 
 void BookmarkMenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
@@ -122,11 +125,8 @@ void BookmarkMenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
   std::vector<const BookmarkNode*> selection;
   selection.push_back(node);
 
-  WindowOpenDisposition initial_disposition =
-      event_utils::DispositionFromEventFlags(mouse_event_flags);
-
   bookmark_utils::OpenAll(parent_->GetNativeWindow(), profile_, page_navigator_,
-                          selection, initial_disposition);
+      selection, browser::DispositionFromEventFlags(mouse_event_flags));
   bookmark_utils::RecordBookmarkLaunch(location_);
 }
 
@@ -436,7 +436,7 @@ void BookmarkMenuDelegate::BuildMenuForPermanentNode(
   int id = *next_menu_id;
   (*next_menu_id)++;
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  SkBitmap* folder_icon = rb.GetBitmapNamed(IDR_BOOKMARK_BAR_FOLDER);
+  gfx::ImageSkia* folder_icon = rb.GetImageSkiaNamed(IDR_BOOKMARK_BAR_FOLDER);
   MenuItemView* submenu = menu->AppendSubMenuWithIcon(
       id, node->GetTitle(), *folder_icon);
   BuildMenu(node, 0, submenu, next_menu_id);
@@ -455,14 +455,16 @@ void BookmarkMenuDelegate::BuildMenu(const BookmarkNode* parent,
 
     (*next_menu_id)++;
     if (node->is_url()) {
-      SkBitmap icon = profile_->GetBookmarkModel()->GetFavicon(node);
+      gfx::ImageSkia icon = gfx::ImageSkia(
+          profile_->GetBookmarkModel()->GetFavicon(node));
       if (icon.width() == 0) {
-        icon = *rb.GetBitmapNamed(IDR_DEFAULT_FAVICON);
+        icon = *rb.GetImageSkiaNamed(IDR_DEFAULT_FAVICON);
       }
       menu->AppendMenuItemWithIcon(id, node->GetTitle(), icon);
       node_to_menu_id_map_[node] = id;
     } else if (node->is_folder()) {
-      SkBitmap* folder_icon = rb.GetBitmapNamed(IDR_BOOKMARK_BAR_FOLDER);
+      gfx::ImageSkia* folder_icon =
+          rb.GetImageSkiaNamed(IDR_BOOKMARK_BAR_FOLDER);
       MenuItemView* submenu = menu->AppendSubMenuWithIcon(
           id, node->GetTitle(), *folder_icon);
       node_to_menu_id_map_[node] = id;

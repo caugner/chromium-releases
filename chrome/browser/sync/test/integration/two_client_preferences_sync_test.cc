@@ -183,16 +183,13 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kEnableInstant) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantConfirmDialogShown));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabled));
-  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabledOnce));
 
   ChangeBooleanPref(0, prefs::kInstantConfirmDialogShown);
   ChangeBooleanPref(0, prefs::kInstantEnabled);
-  ChangeBooleanPref(0, prefs::kInstantEnabledOnce);
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantConfirmDialogShown));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabled));
-  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabledOnce));
 }
 
 // TCM ID - 3611311.
@@ -325,6 +322,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, ClearData) {
   ASSERT_TRUE(BooleanPrefMatches(prefs::kDeleteCookies));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kDeletePasswords));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kDeleteFormData));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kDeleteHostedAppsData));
 
   ChangeBooleanPref(0, prefs::kDeleteBrowsingHistory);
   ChangeBooleanPref(0, prefs::kDeleteDownloadHistory);
@@ -332,6 +330,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, ClearData) {
   ChangeBooleanPref(0, prefs::kDeleteCookies);
   ChangeBooleanPref(0, prefs::kDeletePasswords);
   ChangeBooleanPref(0, prefs::kDeleteFormData);
+  ChangeBooleanPref(0, prefs::kDeleteHostedAppsData);
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(BooleanPrefMatches(
       prefs::kDeleteBrowsingHistory));
@@ -341,6 +340,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, ClearData) {
   ASSERT_TRUE(BooleanPrefMatches(prefs::kDeleteCookies));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kDeletePasswords));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kDeleteFormData));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kDeleteHostedAppsData));
 }
 
 // TCM ID - 3686300.
@@ -357,13 +357,13 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
 }
 
 // TCM ID - 3673298.
-IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kGlobalDefaultCharset) {
+IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kDefaultCharset) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ASSERT_TRUE(StringPrefMatches(prefs::kGlobalDefaultCharset));
+  ASSERT_TRUE(StringPrefMatches(prefs::kDefaultCharset));
 
-  ChangeStringPref(0, prefs::kGlobalDefaultCharset, "Thai");
+  ChangeStringPref(0, prefs::kDefaultCharset, "Thai");
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(StringPrefMatches(prefs::kGlobalDefaultCharset));
+  ASSERT_TRUE(StringPrefMatches(prefs::kDefaultCharset));
 }
 
 // TCM ID - 3653296.

@@ -2,6 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// This class sets up the environment for running the native tests inside an
+// android application. It outputs (to logcat) markers identifying the
+// START/END/CRASH of the test suite, FAILURE/SUCCESS of individual tests etc.
+// These markers are read by the test runner script to generate test results.
+// It injects an event listener in gtest to detect various test stages and
+// installs signal handlers to detect crashes.
+
+#include <android/log.h>
+#include <signal.h>
 #include <stdio.h>
 
 #include "base/android/jni_android.h"
@@ -17,14 +26,40 @@
 #include "base/stringprintf.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
-#include "base/test/test_suite.h"
-#include "testing/android/jni/chrome_native_test_activity_jni.h"
 #include "gtest/gtest.h"
+#include "testing/android/jni/chrome_native_test_activity_jni.h"
 
-// GTest's main function.
+// The main function of the program to be wrapped as a test apk.
 extern int main(int argc, char** argv);
 
 namespace {
+
+// The list of signals which are considered to be crashes.
+const int kExceptionSignals[] = {
+  SIGSEGV, SIGABRT, SIGFPE, SIGILL, SIGBUS, -1
+};
+
+struct sigaction g_old_sa[NSIG];
+
+// This function runs in a compromised context. It should not allocate memory.
+void SignalHandler(int sig, siginfo_t *info, void *reserved)
+{
+  // Output the crash marker.
+  __android_log_write(ANDROID_LOG_ERROR, "chromium", "[ CRASHED      ]");
+  g_old_sa[sig].sa_sigaction(sig, info, reserved);
+}
+
+void InstallHandlers() {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+
+  sa.sa_sigaction = SignalHandler;
+  sa.sa_flags = SA_SIGINFO;
+
+  for (unsigned int i = 0; kExceptionSignals[i] != -1; ++i) {
+    sigaction(kExceptionSignals[i], &sa, &g_old_sa[kExceptionSignals[i]]);
+  }
+}
 
 void ParseArgsFromString(const std::string& command_line,
                          std::vector<std::string>* args) {
@@ -37,10 +72,12 @@ void ParseArgsFromString(const std::string& command_line,
   }
 }
 
-void ParseArgsFromCommandLineFile(const FilePath& internal_data_path,
-                                  std::vector<std::string>* args) {
-  static const char kCommandLineFile[] = "chrome-native-tests-command-line";
-  FilePath command_line(internal_data_path.Append(FilePath(kCommandLineFile)));
+void ParseArgsFromCommandLineFile(std::vector<std::string>* args) {
+  // The test runner script writes the command line file in
+  // "/data/local/tmp".
+  static const char kCommandLineFilePath[] =
+      "/data/local/tmp/chrome-native-tests-command-line";
+  FilePath command_line(kCommandLineFilePath);
   std::string command_line_string;
   if (file_util::ReadFileToString(command_line, &command_line_string)) {
     ParseArgsFromString(command_line_string, args);
@@ -121,40 +158,6 @@ void AndroidLogPrinter::OnTestProgramEnd(
   LOG(ERROR) << msg;
 }
 
-void LibraryLoadedOnMainThread(JNIEnv* env) {
-  static const char* const kInitialArgv[] = { "ChromeTestActivity" };
-
-  {
-    // We need a test suite to be created before we do any tracing or
-    // logging: it creates a global at_exit_manager and initializes
-    // internal gtest data structures based on the command line.
-    // It needs to be scoped as it also resets the CommandLine.
-    std::vector<std::string> args;
-    FilePath path("/data/user/0/org.chromium.native_test/files/");
-    ParseArgsFromCommandLineFile(path, &args);
-    std::vector<char*> argv;
-    ArgsToArgv(args, &argv);
-    base::TestSuite test_suite(argv.size(), &argv[0]);
-  }
-
-  CommandLine::Init(arraysize(kInitialArgv), kInitialArgv);
-
-  logging::InitLogging(NULL,
-                       logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
-                       logging::DONT_LOCK_LOG_FILE,
-                       logging::DELETE_OLD_LOG_FILE,
-                       logging::ENABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
-  // To view log output with IDs and timestamps use "adb logcat -v threadtime".
-  logging::SetLogItems(false,    // Process ID
-                       false,    // Thread ID
-                       false,    // Timestamp
-                       false);   // Tick count
-  VLOG(0) << "Chromium logging enabled: level = " << logging::GetMinLogLevel()
-          << ", default verbosity = " << logging::GetVlogVerbosity();
-  base::android::RegisterLocaleUtils(env);
-  base::android::RegisterPathUtils(env);
-}
-
 }  // namespace
 
 // This method is called on a separate java thread so that we won't trigger
@@ -163,6 +166,19 @@ static void RunTests(JNIEnv* env,
                      jobject obj,
                      jstring jfiles_dir,
                      jobject app_context) {
+  base::AtExitManager exit_manager;
+
+  static const char* const kInitialArgv[] = { "ChromeTestActivity" };
+  CommandLine::Init(arraysize(kInitialArgv), kInitialArgv);
+
+  // Set the application context in base.
+  base::android::ScopedJavaLocalRef<jobject> scoped_context(
+      env, env->NewLocalRef(app_context));
+  base::android::InitApplicationContext(scoped_context);
+
+  base::android::RegisterLocaleUtils(env);
+  base::android::RegisterPathUtils(env);
+
   FilePath files_dir(base::android::ConvertJavaStringToUTF8(env, jfiles_dir));
   // A few options, such "--gtest_list_tests", will just use printf directly
   // and won't use the "AndroidLogPrinter". Redirect stdout to a known file.
@@ -170,7 +186,7 @@ static void RunTests(JNIEnv* env,
   freopen(stdout_path.value().c_str(), "w", stdout);
 
   std::vector<std::string> args;
-  ParseArgsFromCommandLineFile(files_dir, &args);
+  ParseArgsFromCommandLineFile(&args);
 
   // We need to pass in a non-const char**.
   std::vector<char*> argv;
@@ -181,21 +197,19 @@ static void RunTests(JNIEnv* env,
   AndroidLogPrinter* log = new AndroidLogPrinter();
   log->Init(&argc, &argv[0]);
 
-  // Set the application context in base.
-  base::android::ScopedJavaLocalRef<jobject> scoped_context(
-      env, env->NewLocalRef(app_context));
-  base::android::InitApplicationContext(scoped_context);
-
   main(argc, &argv[0]);
 }
 
 // This is called by the VM when the shared library is first loaded.
 JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+  // Install signal handlers to detect crashes.
+  InstallHandlers();
+
   base::android::InitVM(vm);
   JNIEnv* env = base::android::AttachCurrentThread();
   if (!RegisterNativesImpl(env)) {
     return -1;
   }
-  LibraryLoadedOnMainThread(env);
+
   return JNI_VERSION_1_4;
 }

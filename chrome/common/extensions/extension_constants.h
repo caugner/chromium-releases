@@ -14,9 +14,7 @@
 namespace extension_urls {
   // Returns the URL prefix for the extension/apps gallery. Can be set via the
   // --apps-gallery-url switch. The URL returned will not contain a trailing
-  // slash. Do not use this as a prefix/extent for the store.  Instead see
-  // ExtensionService::GetWebStoreApp or
-  // ExtensionService::IsDownloadFromGallery
+  // slash. Do not use this as a prefix/extent for the store.
   std::string GetWebstoreLaunchURL();
 
   // Returns the URL prefix for an item in the extension/app gallery. This URL
@@ -72,7 +70,6 @@ namespace extension_info_keys {
   extern const char kEnabledKey[];
   extern const char kHomepageUrlKey[];
   extern const char kIdKey[];
-  extern const char kMayDisableKey[];
   extern const char kNameKey[];
   extern const char kOfflineEnabledKey[];
   extern const char kOptionsUrlKey[];
@@ -115,6 +112,9 @@ namespace extension_misc {
 
   // The extension id of the Cloud Print component application.
   extern const char kCloudPrintAppId[];
+
+  // The extension id of the Chrome component application.
+  extern const char kChromeAppId[];
 
   // Note: this structure is an ASN.1 which encodes the algorithm used
   // with its parameters. This is defined in PKCS #1 v2.1 (RFC 3447).

@@ -9,10 +9,16 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/aura/aura_export.h"
 
 namespace aura {
+class RootWindow;
 class Window;
+
+namespace shared {
+class RootWindowCaptureClient;
+}
 
 // A stacking client for the desktop; always sets the default parent to the
 // RootWindow of the passed in Window.
@@ -23,6 +29,12 @@ class AURA_EXPORT DesktopStackingClient : public client::StackingClient {
 
   // Overridden from client::StackingClient:
   virtual Window* GetDefaultParent(Window* window) OVERRIDE;
+
+ private:
+  // Windows with NULL parents are parented to this.
+  scoped_ptr<aura::RootWindow> null_parent_;
+
+  scoped_ptr<aura::shared::RootWindowCaptureClient> capture_client_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopStackingClient);
 };

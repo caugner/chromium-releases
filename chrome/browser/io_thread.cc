@@ -172,38 +172,13 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
   return remapped_resolver;
 }
 
-class LoggingNetworkChangeObserver
-    : public net::NetworkChangeNotifier::IPAddressObserver {
- public:
-  // |net_log| must remain valid throughout our lifetime.
-  explicit LoggingNetworkChangeObserver(net::NetLog* net_log)
-      : net_log_(net_log) {
-    net::NetworkChangeNotifier::AddIPAddressObserver(this);
-  }
-
-  ~LoggingNetworkChangeObserver() {
-    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
-  }
-
-  virtual void OnIPAddressChanged() {
-    VLOG(1) << "Observed a change to the network IP addresses";
-
-    net_log_->AddGlobalEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED,
-                             NULL);
-  }
-
- private:
-  net::NetLog* net_log_;
-  DISALLOW_COPY_AND_ASSIGN(LoggingNetworkChangeObserver);
-};
-
-// Create a separate request context for PAC fetches to avoid reference cycles.
+// TODO(willchan): Remove proxy script fetcher context since it's not necessary
+// now that I got rid of refcounting URLRequestContexts.
 // See IOThread::Globals for details.
-scoped_refptr<net::URLRequestContext>
+net::URLRequestContext*
 ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
                                    net::NetLog* net_log) {
-  scoped_refptr<net::URLRequestContext> context(
-      new URLRequestContextWithUserAgent);
+  net::URLRequestContext* context = new URLRequestContextWithUserAgent;
   context->set_net_log(net_log);
   context->set_host_resolver(globals->host_resolver.get());
   context->set_cert_verifier(globals->cert_verifier.get());
@@ -226,11 +201,10 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
   return context;
 }
 
-scoped_refptr<net::URLRequestContext>
+net::URLRequestContext*
 ConstructSystemRequestContext(IOThread::Globals* globals,
                               net::NetLog* net_log) {
-  scoped_refptr<net::URLRequestContext> context(
-      new SystemURLRequestContext);
+  net::URLRequestContext* context = new SystemURLRequestContext;
   context->set_net_log(net_log);
   context->set_host_resolver(globals->host_resolver.get());
   context->set_cert_verifier(globals->cert_verifier.get());
@@ -252,20 +226,45 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
 
 }  // namespace
 
+class IOThread::LoggingNetworkChangeObserver
+    : public net::NetworkChangeNotifier::IPAddressObserver {
+ public:
+  // |net_log| must remain valid throughout our lifetime.
+  explicit LoggingNetworkChangeObserver(net::NetLog* net_log)
+      : net_log_(net_log) {
+    net::NetworkChangeNotifier::AddIPAddressObserver(this);
+  }
+
+  ~LoggingNetworkChangeObserver() {
+    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+  }
+
+  virtual void OnIPAddressChanged() {
+    VLOG(1) << "Observed a change to the network IP addresses";
+
+    net_log_->AddGlobalEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED);
+  }
+
+ private:
+  net::NetLog* net_log_;
+  DISALLOW_COPY_AND_ASSIGN(LoggingNetworkChangeObserver);
+};
+
 class SystemURLRequestContextGetter : public net::URLRequestContextGetter {
  public:
   explicit SystemURLRequestContextGetter(IOThread* io_thread);
 
   // Implementation for net::UrlRequestContextGetter.
-  virtual net::URLRequestContext* GetURLRequestContext();
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const;
+  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
+  virtual scoped_refptr<base::SingleThreadTaskRunner>
+      GetNetworkTaskRunner() const OVERRIDE;
 
  protected:
   virtual ~SystemURLRequestContextGetter();
 
  private:
   IOThread* const io_thread_;  // Weak pointer, owned by BrowserProcess.
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
 
   base::debug::LeakTracker<SystemURLRequestContextGetter> leak_tracker_;
 };
@@ -273,7 +272,7 @@ class SystemURLRequestContextGetter : public net::URLRequestContextGetter {
 SystemURLRequestContextGetter::SystemURLRequestContextGetter(
     IOThread* io_thread)
     : io_thread_(io_thread),
-      io_message_loop_proxy_(
+      network_task_runner_(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)) {
 }
 
@@ -281,14 +280,14 @@ SystemURLRequestContextGetter::~SystemURLRequestContextGetter() {}
 
 net::URLRequestContext* SystemURLRequestContextGetter::GetURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(io_thread_->globals()->system_request_context);
+  DCHECK(io_thread_->globals()->system_request_context.get());
 
-  return io_thread_->globals()->system_request_context;
+  return io_thread_->globals()->system_request_context.get();
 }
 
-scoped_refptr<base::MessageLoopProxy>
-SystemURLRequestContextGetter::GetIOMessageLoopProxy() const {
-  return io_message_loop_proxy_;
+scoped_refptr<base::SingleThreadTaskRunner>
+SystemURLRequestContextGetter::GetNetworkTaskRunner() const {
+  return network_task_runner_;
 }
 
 IOThread::Globals::
@@ -396,13 +395,18 @@ void IOThread::Init() {
 
   globals_->extension_event_router_forwarder =
       extension_event_router_forwarder_;
-  globals_->system_network_delegate.reset(new ChromeNetworkDelegate(
+  ChromeNetworkDelegate* network_delegate = new ChromeNetworkDelegate(
       extension_event_router_forwarder_,
       NULL,
       NULL,
       NULL,
       NULL,
-      &system_enable_referrers_));
+      &system_enable_referrers_);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableExtensionsHttpThrottling)) {
+    network_delegate->NeverThrottleRequests();
+  }
+  globals_->system_network_delegate.reset(network_delegate);
   globals_->host_resolver.reset(
       CreateGlobalHostResolver(net_log_));
   globals_->cert_verifier.reset(net::CertVerifier::CreateDefault());
@@ -448,16 +452,12 @@ void IOThread::Init() {
       new net::FtpNetworkLayer(globals_->host_resolver.get()));
 
   globals_->throttler_manager.reset(new net::URLRequestThrottlerManager());
+  globals_->throttler_manager->set_net_log(net_log_);
   // Always done in production, disabled only for unit tests.
   globals_->throttler_manager->set_enable_thread_checks(true);
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableExtensionsHttpThrottling)) {
-    globals_->throttler_manager->set_enforce_throttling(false);
-  }
-  globals_->throttler_manager->set_net_log(net_log_);
 
-  globals_->proxy_script_fetcher_context =
-      ConstructProxyScriptFetcherContext(globals_, net_log_);
+  globals_->proxy_script_fetcher_context.reset(
+      ConstructProxyScriptFetcherContext(globals_, net_log_));
 
   sdch_manager_ = new net::SdchManager();
 
@@ -602,7 +602,7 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   globals_->system_proxy_service.reset(
       ProxyServiceFactory::CreateProxyService(
           net_log_,
-          globals_->proxy_script_fetcher_context,
+          globals_->proxy_script_fetcher_context.get(),
           system_proxy_config_service_.release(),
           command_line));
   net::HttpNetworkSession::Params system_params;
@@ -625,8 +625,8 @@ void IOThread::InitSystemRequestContextOnIOThread() {
           new net::HttpNetworkSession(system_params)));
   globals_->system_ftp_transaction_factory.reset(
       new net::FtpNetworkLayer(globals_->host_resolver.get()));
-  globals_->system_request_context =
-      ConstructSystemRequestContext(globals_, net_log_);
+  globals_->system_request_context.reset(
+      ConstructSystemRequestContext(globals_, net_log_));
 
   sdch_manager_->set_sdch_fetcher(
       new SdchDictionaryFetcher(system_url_request_context_getter_.get()));

@@ -15,7 +15,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
-#include "ui/gfx/gl/gpu_preference.h"
+#include "ui/gl/gpu_preference.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
@@ -35,6 +35,38 @@ using WebKit::WebWidget;
 using WebKit::WGC3Dintptr;
 
 namespace {
+
+class FullscreenMouseLockDispatcher : public MouseLockDispatcher {
+ public:
+  explicit FullscreenMouseLockDispatcher(RenderWidgetFullscreenPepper* widget);
+  virtual ~FullscreenMouseLockDispatcher();
+
+ private:
+  // MouseLockDispatcher implementation.
+  virtual void SendLockMouseRequest(bool unlocked_by_target) OVERRIDE;
+  virtual void SendUnlockMouseRequest() OVERRIDE;
+
+  RenderWidgetFullscreenPepper* widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(FullscreenMouseLockDispatcher);
+};
+
+FullscreenMouseLockDispatcher::FullscreenMouseLockDispatcher(
+    RenderWidgetFullscreenPepper* widget) : widget_(widget) {
+}
+
+FullscreenMouseLockDispatcher::~FullscreenMouseLockDispatcher() {
+}
+
+void FullscreenMouseLockDispatcher::SendLockMouseRequest(
+    bool unlocked_by_target) {
+  widget_->Send(new ViewHostMsg_LockMouse(widget_->routing_id(), false,
+                                          unlocked_by_target, true));
+}
+
+void FullscreenMouseLockDispatcher::SendUnlockMouseRequest() {
+  widget_->Send(new ViewHostMsg_UnlockMouse(widget_->routing_id()));
+}
 
 // WebWidget that simply wraps the pepper plugin.
 class PepperWidget : public WebWidget {
@@ -240,7 +272,9 @@ RenderWidgetFullscreenPepper::RenderWidgetFullscreenPepper(
       context_(NULL),
       buffer_(0),
       program_(0),
-      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      mouse_lock_dispatcher_(new FullscreenMouseLockDispatcher(
+          ALLOW_THIS_IN_INITIALIZER_LIST(this))) {
 }
 
 RenderWidgetFullscreenPepper::~RenderWidgetFullscreenPepper() {
@@ -314,6 +348,27 @@ RenderWidgetFullscreenPepper::CreateContext3D() {
 #else
   return NULL;
 #endif
+}
+
+MouseLockDispatcher* RenderWidgetFullscreenPepper::GetMouseLockDispatcher() {
+  return mouse_lock_dispatcher_.get();
+}
+
+bool RenderWidgetFullscreenPepper::OnMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RenderWidgetFullscreenPepper, msg)
+    IPC_MESSAGE_FORWARD(ViewMsg_LockMouse_ACK,
+                        mouse_lock_dispatcher_.get(),
+                        MouseLockDispatcher::OnLockMouseACK)
+    IPC_MESSAGE_FORWARD(ViewMsg_MouseLockLost,
+                        mouse_lock_dispatcher_.get(),
+                        MouseLockDispatcher::OnMouseLockLost)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  if (handled)
+    return true;
+
+  return RenderWidgetFullscreen::OnMessageReceived(msg);
 }
 
 void RenderWidgetFullscreenPepper::WillInitiatePaint() {

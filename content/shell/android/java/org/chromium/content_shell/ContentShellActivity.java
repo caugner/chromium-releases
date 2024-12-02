@@ -11,7 +11,9 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
 
+import org.chromium.content.app.LibraryLoader;
 import org.chromium.content.browser.ContentView;
+import org.chromium.content.common.CommandLine;
 
 /**
  * Activity for managing the Content Shell.
@@ -19,7 +21,7 @@ import org.chromium.content.browser.ContentView;
 public class ContentShellActivity extends Activity {
 
     private static final String COMMAND_LINE_FILE = "/data/local/content-shell-command-line";
-    private static final String TAG = "ContentShellActivity";
+    private static final String TAG = ContentShellActivity.class.getName();
 
     private ShellManager mShellManager;
 
@@ -28,22 +30,28 @@ public class ContentShellActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         // Initializing the command line must occur before loading the library.
-        // TODO(tedchoc): Initialize command line from file.
+        CommandLine.initFromFile(COMMAND_LINE_FILE);
         String startupUrl = getUrlFromIntent(getIntent());
         if (!TextUtils.isEmpty(startupUrl)) {
-            // TODO(tedchoc): Append URL to command line.
+            CommandLine.getInstance().appendSwitchesAndArguments(
+                    new String[] {ShellView.sanitizeUrl(startupUrl)});
         }
+        waitForDebuggerIfNeeded();
 
-        // TODO(jrg,tedchoc): upstream the async library loader, then
-        // make this call look like this:
-        // LibraryLoader.loadAndInitSync();
-        loadNativeLibrary();
-
+        LibraryLoader.loadAndInitSync();
         initializeContentViewResources();
 
         setContentView(R.layout.content_shell_activity);
         mShellManager = (ShellManager) findViewById(R.id.shell_container);
         ContentView.enableMultiProcess(this, ContentView.MAX_RENDERERS_AUTOMATIC);
+    }
+
+    private void waitForDebuggerIfNeeded() {
+        if (CommandLine.getInstance().hasSwitch(CommandLine.WAIT_FOR_JAVA_DEBUGGER)) {
+            Log.e(TAG, "Waiting for Java debugger to connect...");
+            android.os.Debug.waitForDebugger();
+            Log.e(TAG, "Java debugger connected. Resuming execution.");
+        }
     }
 
     @Override
@@ -92,19 +100,5 @@ public class ContentShellActivity extends Activity {
     private void initializeContentViewResources() {
         ContentView.registerPopupOverlayCornerRadius(0);
         ContentView.registerPopupOverlayResourceId(R.drawable.popup_zoomer_overlay);
-    }
-
-
-    private static final String NATIVE_LIBRARY = "content_shell_content_view";
-
-    private void loadNativeLibrary() throws UnsatisfiedLinkError {
-        Log.i(TAG, "loading: " + NATIVE_LIBRARY);
-        try {
-            System.loadLibrary(NATIVE_LIBRARY);
-        } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "Unable to load lib" + NATIVE_LIBRARY + ".so: " + e);
-            throw e;
-        }
-        Log.i(TAG, "loaded: " + NATIVE_LIBRARY);
     }
 }

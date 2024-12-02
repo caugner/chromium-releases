@@ -19,7 +19,7 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
@@ -27,6 +27,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/animation/throb_animation.h"
@@ -326,8 +327,7 @@ void TabRendererGtk::UpdateData(WebContents* contents,
                                 bool app,
                                 bool loading_only) {
   DCHECK(contents);
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(contents);
+  TabContents* tab_contents = TabContents::FromWebContents(contents);
 
   if (!loading_only) {
     data_.title = contents->GetTitle();
@@ -335,12 +335,11 @@ void TabRendererGtk::UpdateData(WebContents* contents,
     data_.crashed = contents->IsCrashed();
 
     SkBitmap* app_icon =
-        TabContentsWrapper::GetCurrentWrapperForContents(contents)->
-            extension_tab_helper()->GetExtensionAppIcon();
+        tab_contents->extension_tab_helper()->GetExtensionAppIcon();
     if (app_icon) {
       data_.favicon = *app_icon;
     } else {
-      data_.favicon = wrapper->favicon_tab_helper()->GetFavicon();
+      data_.favicon = tab_contents->favicon_tab_helper()->GetFavicon();
     }
 
     data_.app = app;
@@ -375,13 +374,13 @@ void TabRendererGtk::UpdateData(WebContents* contents,
 
       GdkPixbuf* pixbuf;
       if (dest_w == src_w && dest_h == src_h) {
-        pixbuf = gfx::GdkPixbufFromSkBitmap(&data_.favicon);
+        pixbuf = gfx::GdkPixbufFromSkBitmap(data_.favicon);
       } else {
         SkBitmap resized_icon = skia::ImageOperations::Resize(
             data_.favicon,
             skia::ImageOperations::RESIZE_BETTER,
             dest_w, dest_h);
-        pixbuf = gfx::GdkPixbufFromSkBitmap(&resized_icon);
+        pixbuf = gfx::GdkPixbufFromSkBitmap(resized_icon);
       }
 
       data_.cairo_favicon.UsePixbuf(pixbuf);
@@ -404,7 +403,7 @@ void TabRendererGtk::UpdateData(WebContents* contents,
   // Loading state also involves whether we show the favicon, since that's where
   // we display the throbber.
   data_.loading = contents->IsLoading();
-  data_.show_icon = wrapper->favicon_tab_helper()->ShouldDisplayFavicon();
+  data_.show_icon = tab_contents->favicon_tab_helper()->ShouldDisplayFavicon();
 }
 
 void TabRendererGtk::UpdateFromModel() {
@@ -870,7 +869,7 @@ void TabRendererGtk::PaintIcon(GtkWidget* widget, cairo_t* cr) {
     to_display = theme_service_->GetImageNamed(IDR_SAD_FAVICON)->ToCairo();
   } else if (!data_.favicon.isNull()) {
     if (data_.is_default_favicon && theme_service_->UsingNativeTheme()) {
-      to_display = GtkThemeService::GetDefaultFavicon(true)->ToCairo();
+      to_display = GtkThemeService::GetDefaultFavicon(true).ToCairo();
     } else if (data_.cairo_favicon.valid()) {
       to_display = &data_.cairo_favicon;
     }

@@ -415,7 +415,7 @@ string16 GoogleChromeDistribution::GetAppGuid() {
   return product_guid();
 }
 
-string16 GoogleChromeDistribution::GetApplicationName() {
+string16 GoogleChromeDistribution::GetBaseAppName() {
   // I'd really like to return L ## PRODUCT_FULLNAME_STRING; but that's no good
   // since it'd be "Chromium" in a non-Chrome build, which isn't at all what I
   // want.  Sigh.
@@ -434,7 +434,7 @@ string16 GoogleChromeDistribution::GetAlternateApplicationName() {
   return alt_product_name;
 }
 
-string16 GoogleChromeDistribution::GetBrowserAppId() {
+string16 GoogleChromeDistribution::GetBaseAppId() {
   return kBrowserAppId;
 }
 
@@ -546,19 +546,15 @@ bool GoogleChromeDistribution::GetDelegateExecuteHandlerData(
     string16* type_lib_uuid,
     string16* type_lib_version,
     string16* interface_uuid) {
-  // Chrome's DelegateExecute verb handler is only used for Windows 8 and up.
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
-    if (handler_class_uuid)
-      *handler_class_uuid = kCommandExecuteImplUuid;
-    if (type_lib_uuid)
-      *type_lib_uuid = kDelegateExecuteLibUuid;
-    if (type_lib_version)
-      *type_lib_version = kDelegateExecuteLibVersion;
-    if (interface_uuid)
-      *interface_uuid = kICommandExecuteImplUuid;
-    return true;
-  }
-  return false;
+  if (handler_class_uuid)
+    *handler_class_uuid = kCommandExecuteImplUuid;
+  if (type_lib_uuid)
+    *type_lib_uuid = kDelegateExecuteLibUuid;
+  if (type_lib_version)
+    *type_lib_version = kDelegateExecuteLibVersion;
+  if (interface_uuid)
+    *interface_uuid = kICommandExecuteImplUuid;
+  return true;
 }
 
 // This method checks if we need to change "ap" key in Google Update to try

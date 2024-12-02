@@ -15,8 +15,8 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/test/base/testing_profile.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/protocol/sync_protocol_error.h"
-#include "sync/syncable/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 class ProfileSyncServiceMock : public ProfileSyncService {
@@ -54,6 +54,9 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_METHOD2(OnUnrecoverableError,
                void(const tracked_objects::Location& location,
                const std::string& message));
+  MOCK_METHOD3(DisableBrokenDatatype, void(syncable::ModelType,
+               const tracked_objects::Location&,
+               std::string message));
   MOCK_CONST_METHOD0(GetUserShare, sync_api::UserShare*());
   MOCK_METHOD3(ActivateDataType,
                void(syncable::ModelType, browser_sync::ModelSafeGroup,
@@ -81,13 +84,14 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_CONST_METHOD0(GetAuthError, const GoogleServiceAuthError&());
   MOCK_CONST_METHOD0(FirstSetupInProgress, bool());
   MOCK_CONST_METHOD0(GetLastSyncedTimeString, string16());
-  MOCK_CONST_METHOD0(unrecoverable_error_detected, bool());
+  MOCK_CONST_METHOD0(HasUnrecoverableError, bool());
   MOCK_CONST_METHOD0(sync_initialized, bool());
   MOCK_CONST_METHOD0(waiting_for_auth, bool());
   MOCK_METHOD1(OnActionableError, void(
       const browser_sync::SyncProtocolError&));
 
-  MOCK_METHOD0(AreCredentialsAvailable, bool());
+  MOCK_METHOD0(IsSyncEnabledAndLoggedIn, bool());
+  MOCK_METHOD0(IsSyncTokenAvailable, bool());
 
   MOCK_CONST_METHOD0(IsPassphraseRequired, bool());
   MOCK_CONST_METHOD0(IsPassphraseRequiredForDecryption, bool());

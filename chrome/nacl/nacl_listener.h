@@ -12,7 +12,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "chrome/common/nacl_types.h"
-#include "ipc/ipc_channel.h"
+#include "ipc/ipc_listener.h"
 
 namespace IPC {
 class SyncChannel;
@@ -21,13 +21,12 @@ class SyncMessageFilter;
 
 // The NaClListener is an IPC channel listener that waits for a
 // request to start a NaCl module.
-class NaClListener : public IPC::Channel::Listener {
+class NaClListener : public IPC::Listener {
  public:
   NaClListener();
   virtual ~NaClListener();
   // Listen for a request to launch a NaCl module.
   void Listen();
-  void set_debug_enabled(bool value) {debug_enabled_ = value;}
 
   bool Send(IPC::Message* msg);
 
@@ -46,8 +45,6 @@ class NaClListener : public IPC::Channel::Listener {
 
   // Used to identify what thread we're on.
   MessageLoop* main_loop_;
-
-  bool debug_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(NaClListener);
 };

@@ -27,6 +27,7 @@
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_messages.h"
@@ -54,6 +55,7 @@ ChromeRenderMessageFilter::ChromeRenderMessageFilter(
     net::URLRequestContextGetter* request_context)
     : render_process_id_(render_process_id),
       profile_(profile),
+      off_the_record_(profile_->IsOffTheRecord()),
       request_context_(request_context),
       extension_info_map_(ExtensionSystem::Get(profile)->info_map()),
       cookie_settings_(CookieSettings::Factory::GetForProfile(profile)),
@@ -99,10 +101,6 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_GenerateUniqueID,
                         OnExtensionGenerateUniqueID)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_UnloadAck, OnExtensionUnloadAck)
-#if defined(USE_TCMALLOC)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_WriteTcmallocHeapProfile_ACK,
-                        OnWriteTcmallocHeapProfile)
-#endif
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowDatabase, OnAllowDatabase)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowDOMStorage, OnAllowDOMStorage)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowFileSystem, OnAllowFileSystem)
@@ -156,7 +154,7 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
 void ChromeRenderMessageFilter::OnLaunchNaCl(const GURL& manifest_url,
                                              int socket_count,
                                              IPC::Message* reply_msg) {
-  NaClProcessHost* host = new NaClProcessHost(manifest_url);
+  NaClProcessHost* host = new NaClProcessHost(manifest_url, off_the_record_);
   host->Launch(this, socket_count, reply_msg, extension_info_map_);
 }
 #endif
@@ -304,7 +302,7 @@ void ChromeRenderMessageFilter::OpenChannelToTabOnUIThread(
 
 void ChromeRenderMessageFilter::OnGetExtensionMessageBundle(
     const std::string& extension_id, IPC::Message* reply_msg) {
-  const Extension* extension =
+  const extensions::Extension* extension =
       extension_info_map_->extensions().GetByID(extension_id);
   FilePath extension_path;
   std::string default_locale;
@@ -414,15 +412,6 @@ void ChromeRenderMessageFilter::OnExtensionGenerateUniqueID(int* unique_id) {
   static int next_unique_id = 1;
   *unique_id = next_unique_id++;
 }
-
-#if defined(USE_TCMALLOC)
-void ChromeRenderMessageFilter::OnWriteTcmallocHeapProfile(
-    const FilePath::StringType& filepath,
-    const std::string& output) {
-  VLOG(0) << "Writing renderer heap profile dump to: " << filepath;
-  file_util::WriteFile(FilePath(filepath), output.c_str(), output.size());
-}
-#endif
 
 void ChromeRenderMessageFilter::OnAllowDatabase(int render_view_id,
                                                 const GURL& origin_url,

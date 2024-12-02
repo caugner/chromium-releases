@@ -19,11 +19,11 @@
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/view_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
@@ -126,7 +126,7 @@ static content::RenderProcessHost* GetExtensionProcess(
     Profile* profile, const std::string& extension_id) {
   SiteInstance* site_instance =
       profile->GetExtensionProcessManager()->GetSiteInstanceForURL(
-          Extension::GetBaseURLFromExtensionId(extension_id));
+          extensions::Extension::GetBaseURLFromExtensionId(extension_id));
 
   if (!site_instance->HasProcess())
     return NULL;
@@ -247,7 +247,7 @@ void ExtensionMessageService::OpenChannelToTab(
     return;
   Profile* profile = Profile::FromBrowserContext(source->GetBrowserContext());
 
-  TabContentsWrapper* contents = NULL;
+  TabContents* contents = NULL;
   MessagePort receiver;
   if (ExtensionTabUtil::GetTabById(tab_id, profile, true,
                                    NULL, NULL, &contents, NULL)) {
@@ -430,7 +430,8 @@ bool ExtensionMessageService::MaybeAddPendingOpenChannelTask(
     const OpenChannelParams& params) {
   ExtensionService* service = profile->GetExtensionService();
   const std::string& extension_id = params.target_extension_id;
-  const Extension* extension = service->extensions()->GetByID(extension_id);
+  const extensions::Extension* extension = service->extensions()->GetByID(
+      extension_id);
   if (extension && extension->has_lazy_background_page()) {
     // If the extension uses spanning incognito mode, make sure we're always
     // using the original profile since that is what the extension process

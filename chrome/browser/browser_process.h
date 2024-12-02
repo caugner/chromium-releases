@@ -12,11 +12,8 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
-#include "base/memory/ref_counted.h"
-#include "ipc/ipc_message.h"
 
 class AutomationProviderList;
 class BackgroundModeManager;
@@ -38,16 +35,22 @@ class SafeBrowsingService;
 class StatusTray;
 class TabCloseableStateWatcher;
 class ThumbnailGenerator;
+class VariationsService;
 class WatchDogThread;
 
 #if defined(OS_CHROMEOS)
-namespace browser {
+namespace chromeos {
 class OomPriorityManager;
 }
 #endif  // defined(OS_CHROMEOS)
 
 namespace net {
 class URLRequestContextGetter;
+}
+
+namespace policy {
+class BrowserPolicyConnector;
+class PolicyService;
 }
 
 namespace prerender {
@@ -58,11 +61,6 @@ namespace printing {
 class BackgroundPrintingManager;
 class PrintJobManager;
 class PrintPreviewTabController;
-}
-
-namespace policy {
-class BrowserPolicyConnector;
-class PolicyService;
 }
 
 namespace safe_browsing {
@@ -95,10 +93,11 @@ class BrowserProcess {
   virtual PrefService* local_state() = 0;
   virtual ui::Clipboard* clipboard() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
+  virtual VariationsService* variations_service() = 0;
 
 #if defined(OS_CHROMEOS)
   // Returns the out-of-memory priority manager.
-  virtual browser::OomPriorityManager* oom_priority_manager() = 0;
+  virtual chromeos::OomPriorityManager* oom_priority_manager() = 0;
 #endif  // defined(OS_CHROMEOS)
 
   virtual ExtensionEventRouterForwarder*

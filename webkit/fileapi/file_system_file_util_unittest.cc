@@ -5,6 +5,7 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/platform_file.h"
 #include "base/scoped_temp_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -49,8 +50,8 @@ class FileSystemFileUtilTest : public testing::Test {
       bool copy) {
     ScopedTempDir base_dir;
     ASSERT_TRUE(base_dir.CreateUniqueTempDir());
-    scoped_refptr<ObfuscatedFileUtil> file_util(
-        new ObfuscatedFileUtil(base_dir.path(), new NativeFileUtil()));
+    scoped_ptr<ObfuscatedFileUtil> file_util(
+        new ObfuscatedFileUtil(base_dir.path()));
     FileSystemTestOriginHelper src_helper(src_origin, src_type);
     src_helper.SetUp(base_dir.path(),
                      false,  // unlimited quota
@@ -149,6 +150,7 @@ class FileSystemFileUtilTest : public testing::Test {
   }
 
  private:
+  MessageLoop message_loop_;
   DISALLOW_COPY_AND_ASSIGN(FileSystemFileUtilTest);
 };
 

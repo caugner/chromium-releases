@@ -20,10 +20,10 @@
 #include "chrome/browser/history/query_parser.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/simple_message_box.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
@@ -155,9 +155,9 @@ void OpenAllImpl(const BookmarkNode* node,
       *opened_url = true;
       // We opened the first URL which may have opened a new window or clobbered
       // the current page, reset the navigator just to be sure.
-      Browser* new_browser = BrowserList::GetLastActiveWithProfile(profile);
+      Browser* new_browser = browser::FindLastActiveWithProfile(profile);
       if (new_browser) {
-        WebContents* current_tab = new_browser->GetSelectedWebContents();
+        WebContents* current_tab = new_browser->GetActiveWebContents();
         if (current_tab)
           *navigator = current_tab;
       }  // else, new_browser == NULL, which happens during testing.
@@ -181,11 +181,11 @@ bool ShouldOpenAll(gfx::NativeWindow parent,
   if (child_count < bookmark_utils::num_urls_before_prompting)
     return true;
 
-  const string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  const string16 message = l10n_util::GetStringFUTF16(
-      IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL,
-      base::IntToString16(child_count));
-  return browser::ShowQuestionMessageBox(parent, title, message);
+  return browser::ShowMessageBox(parent,
+      l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+      l10n_util::GetStringFUTF16(IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL,
+                                 base::IntToString16(child_count)),
+      browser::MESSAGE_BOX_TYPE_QUESTION) == browser::MESSAGE_BOX_RESULT_YES;
 }
 
 // Comparison function that compares based on date modified of the two nodes.
@@ -216,6 +216,10 @@ bool DoesBookmarkContainWords(const BookmarkNode* node,
           node->url(), languages, net::kFormatUrlOmitNothing,
           net::UnescapeRule::NORMAL, NULL, NULL, NULL), words);
 }
+
+#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(USE_AURA)
+bool g_bookmark_bar_view_animations_disabled = false;
+#endif
 
 }  // namespace
 
@@ -388,15 +392,15 @@ void OpenAll(gfx::NativeWindow parent,
 
   NewBrowserPageNavigator navigator_impl(profile);
   if (!navigator) {
-    Browser* browser = BrowserList::FindTabbedBrowser(profile, false);
-    if (!browser || !browser->GetSelectedWebContents()) {
+    Browser* browser = browser::FindTabbedBrowser(profile, false);
+    if (!browser || !browser->GetActiveWebContents()) {
       navigator = &navigator_impl;
     } else {
       if (initial_disposition != NEW_WINDOW &&
           initial_disposition != OFF_THE_RECORD) {
         browser->window()->Activate();
       }
-      navigator = browser->GetSelectedWebContents();
+      navigator = browser->GetActiveWebContents();
     }
   }
 
@@ -666,8 +670,8 @@ void GetURLAndTitleToBookmark(WebContents* web_contents,
 void GetURLAndTitleToBookmarkFromCurrentTab(Profile* profile,
                                             GURL* url,
                                             string16* title) {
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
-  WebContents* web_contents = browser ? browser->GetSelectedWebContents()
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
+  WebContents* web_contents = browser ? browser->GetActiveWebContents()
                                         : NULL;
   if (web_contents)
     GetURLAndTitleToBookmark(web_contents, url, title);
@@ -725,10 +729,11 @@ bool NodeHasURLs(const BookmarkNode* node) {
 bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
                                gfx::NativeWindow window) {
   DCHECK(node && node->is_folder() && !node->empty());
-  return browser::ShowQuestionMessageBox(window,
+  return browser::ShowMessageBox(window,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
       l10n_util::GetStringFUTF16Int(IDS_BOOKMARK_EDITOR_CONFIRM_DELETE,
-                                    ChildURLCountTotal(node)));
+                                    ChildURLCountTotal(node)),
+      browser::MESSAGE_BOX_TYPE_QUESTION) == browser::MESSAGE_BOX_RESULT_YES;
 }
 
 void DeleteBookmarkFolders(BookmarkModel* model,
@@ -779,5 +784,15 @@ void RecordBookmarkLaunch(BookmarkLaunchLocation location) {
   UMA_HISTOGRAM_ENUMERATION("Bookmarks.LaunchLocation", location, LAUNCH_LIMIT);
 #endif
 }
+
+#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(USE_AURA)
+void DisableBookmarkBarViewAnimationsForTesting(bool disabled) {
+  g_bookmark_bar_view_animations_disabled = disabled;
+}
+
+bool IsBookmarkBarViewAnimationsDisabled() {
+  return g_bookmark_bar_view_animations_disabled;
+}
+#endif
 
 }  // namespace bookmark_utils

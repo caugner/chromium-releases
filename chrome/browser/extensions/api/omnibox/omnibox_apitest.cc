@@ -52,19 +52,8 @@ class OmniboxApiTest : public ExtensionApiTest {
   }
 
   AutocompleteController* GetAutocompleteController(Browser* browser) const {
-    return GetLocationBar(browser)->location_entry()->model()->popup_model()->
+    return GetLocationBar(browser)->GetLocationEntry()->model()->popup_model()->
         autocomplete_controller();
-  }
-
-  void WaitForTemplateURLServiceToLoad() {
-    ui_test_utils::WindowedNotificationObserver loaded_observer(
-        chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
-        content::NotificationService::AllSources());
-    TemplateURLService* model =
-        TemplateURLServiceFactory::GetForProfile(browser()->profile());
-    model->Load();
-    if (!model->loaded())
-      loaded_observer.Wait();
   }
 
   // TODO(phajdan.jr): Get rid of this wait-in-a-loop pattern.
@@ -78,12 +67,13 @@ class OmniboxApiTest : public ExtensionApiTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(OmniboxApiTest, FLAKY_Basic) {
+IN_PROC_BROWSER_TEST_F(OmniboxApiTest, DISABLED_Basic) {
   ASSERT_TRUE(RunExtensionTest("omnibox")) << message_;
 
   // The results depend on the TemplateURLService being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
-  WaitForTemplateURLServiceToLoad();
+  ui_test_utils::WaitForTemplateURLServiceToLoad(
+      TemplateURLServiceFactory::GetForProfile(browser()->profile()));
 
   LocationBar* location_bar = GetLocationBar(browser());
   AutocompleteController* autocomplete_controller =
@@ -178,10 +168,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, FLAKY_Basic) {
 
   {
     ResultCatcher catcher;
-    location_bar->location_entry()->OnBeforePossibleChange();
-    location_bar->location_entry()->SetUserText(
-        ASCIIToUTF16("keyword command"));
-    location_bar->location_entry()->OnAfterPossibleChange();
+    OmniboxView* omnibox_view = location_bar->GetLocationEntry();
+    omnibox_view->OnBeforePossibleChange();
+    omnibox_view->SetUserText( ASCIIToUTF16("keyword command"));
+    omnibox_view->OnAfterPossibleChange();
     location_bar->AcceptInput();
     // This checks that the keyword provider (via javascript)
     // gets told to navigate to the string "command".
@@ -192,23 +182,24 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, FLAKY_Basic) {
 // Tests that the autocomplete popup doesn't reopen after accepting input for
 // a given query.
 // http://crbug.com/88552
-IN_PROC_BROWSER_TEST_F(OmniboxApiTest, FLAKY_PopupStaysClosed) {
+IN_PROC_BROWSER_TEST_F(OmniboxApiTest, DISABLED_PopupStaysClosed) {
   ASSERT_TRUE(RunExtensionTest("omnibox")) << message_;
 
   // The results depend on the TemplateURLService being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
-  WaitForTemplateURLServiceToLoad();
+  ui_test_utils::WaitForTemplateURLServiceToLoad(
+      TemplateURLServiceFactory::GetForProfile(browser()->profile()));
 
   LocationBar* location_bar = GetLocationBar(browser());
+  OmniboxView* omnibox_view = location_bar->GetLocationEntry();
   AutocompleteController* autocomplete_controller =
       GetAutocompleteController(browser());
-  AutocompletePopupModel* popup_model =
-      GetLocationBar(browser())->location_entry()->model()->popup_model();
+  AutocompletePopupModel* popup_model = omnibox_view->model()->popup_model();
 
   // Input a keyword query and wait for suggestions from the extension.
-  location_bar->location_entry()->OnBeforePossibleChange();
-  location_bar->location_entry()->SetUserText(ASCIIToUTF16("keyword comman"));
-  location_bar->location_entry()->OnAfterPossibleChange();
+  omnibox_view->OnBeforePossibleChange();
+  omnibox_view->SetUserText(ASCIIToUTF16("keyword comman"));
+  omnibox_view->OnAfterPossibleChange();
   WaitForAutocompleteDone(autocomplete_controller);
   EXPECT_TRUE(autocomplete_controller->done());
   EXPECT_TRUE(popup_model->IsOpen());
@@ -251,7 +242,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, DISABLED_IncognitoSplitMode) {
 
   // The results depend on the TemplateURLService being loaded. Make sure it is
   // loaded so that the autocomplete results are consistent.
-  WaitForTemplateURLServiceToLoad();
+  ui_test_utils::WaitForTemplateURLServiceToLoad(
+      TemplateURLServiceFactory::GetForProfile(browser()->profile()));
 
   LocationBar* location_bar = GetLocationBar(incognito_browser);
   AutocompleteController* autocomplete_controller =

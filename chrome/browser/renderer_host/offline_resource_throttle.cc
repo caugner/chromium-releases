@@ -16,10 +16,11 @@
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/resource_context.h"
-#include "content/public/browser/resource_throttle_controller.h"
+#include "content/public/browser/resource_controller.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -47,7 +48,7 @@ void ShowOfflinePage(
     RenderViewHost* render_view_host =
         RenderViewHost::FromID(render_process_id, render_view_id);
     WebContents* web_contents = render_view_host ?
-        render_view_host->GetDelegate()->GetAsWebContents() : NULL;
+        WebContents::FromRenderViewHost(render_view_host) : NULL;
     // There is a chance that the tab closed after we decided to show
     // the offline page on the IO thread and before we actually show the
     // offline page here on the UI thread.
@@ -119,9 +120,10 @@ void OfflineResourceThrottle::OnBlockingPageComplete(bool proceed) {
 }
 
 bool OfflineResourceThrottle::IsRemote(const GURL& url) const {
-  return url.SchemeIs(chrome::kFtpScheme) ||
-         url.SchemeIs(chrome::kHttpScheme) ||
-         url.SchemeIs(chrome::kHttpsScheme);
+  return !net::IsLocalhost(url.host()) &&
+    (url.SchemeIs(chrome::kFtpScheme) ||
+     url.SchemeIs(chrome::kHttpScheme) ||
+     url.SchemeIs(chrome::kHttpsScheme));
 }
 
 bool OfflineResourceThrottle::ShouldShowOfflinePage(const GURL& url) const {

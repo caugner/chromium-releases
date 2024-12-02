@@ -8,8 +8,10 @@
 
 #include <deque>
 
+#include "base/basictypes.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/history/visit_filter.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_source.h"
 
 class SuggestionsCombiner;
@@ -28,6 +30,7 @@ class SuggestionsSourceTopSites : public SuggestionsSource {
 
  protected:
   // SuggestionsSource overrides:
+  virtual void SetDebug(bool enable) OVERRIDE;
   virtual int GetWeight() OVERRIDE;
   virtual int GetItemCount() OVERRIDE;
   virtual base::DictionaryValue* PopItem() OVERRIDE;
@@ -39,11 +42,24 @@ class SuggestionsSourceTopSites : public SuggestionsSource {
       const history::FilteredURLList& data);
 
  private:
+
+  // Gets the sorting order from the command-line arguments. Defaults to
+  // |ORDER_BY_RECENCY| if there are no command-line argument specifying a
+  // sorting order.
+  static history::VisitFilter::SortingOrder GetSortingOrder();
+
+  // Gets the filter width from the command-line arguments. Defaults to one
+  // hour if there are no command-line argument setting the filter width.
+  static base::TimeDelta GetFilterWidth();
+
   // Our combiner.
   SuggestionsCombiner* combiner_;
 
   // Keep the results of the db query here.
   std::deque<base::DictionaryValue*> items_;
+
+  // Whether the source should provide additional debug information or not.
+  bool debug_;
 
   CancelableRequestConsumer history_consumer_;
 

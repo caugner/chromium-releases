@@ -16,7 +16,7 @@
 class GURL;
 class InfoBarDelegate;
 class PluginFinder;
-class TabContentsWrapper;
+class TabContents;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 class PluginInstaller;
@@ -25,7 +25,7 @@ class PluginPlaceholderHost;
 
 class PluginObserver : public content::WebContentsObserver {
  public:
-  explicit PluginObserver(TabContentsWrapper* tab_contents);
+  explicit PluginObserver(TabContents* tab_contents);
   virtual ~PluginObserver();
 
   // content::WebContentsObserver implementation.
@@ -36,12 +36,13 @@ class PluginObserver : public content::WebContentsObserver {
   void InstallMissingPlugin(PluginInstaller* installer);
 #endif
 
-  TabContentsWrapper* tab_contents_wrapper() { return tab_contents_; }
+  TabContents* tab_contents() { return tab_contents_; }
 
  private:
   class PluginPlaceholderHost;
 
-  void OnBlockedUnauthorizedPlugin(const string16& name);
+  void OnBlockedUnauthorizedPlugin(const string16& name,
+                                   const std::string& identifier);
   void OnBlockedOutdatedPlugin(int placeholder_id,
                                const std::string& identifier);
 #if defined(ENABLE_PLUGIN_INSTALLATION)
@@ -56,10 +57,11 @@ class PluginObserver : public content::WebContentsObserver {
   void OnRemovePluginPlaceholderHost(int placeholder_id);
 #endif
   void OnOpenAboutPlugins();
+  void OnCouldNotLoadPlugin(const FilePath& plugin_path);
 
   base::WeakPtrFactory<PluginObserver> weak_ptr_factory_;
 
-  TabContentsWrapper* tab_contents_;
+  TabContents* tab_contents_;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   // Stores all PluginPlaceholderHosts, keyed by their routing ID.

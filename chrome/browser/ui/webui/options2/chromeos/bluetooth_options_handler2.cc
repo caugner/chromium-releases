@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/webui/options2/chromeos/bluetooth_options_handler2.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -185,6 +187,7 @@ void BluetoothOptionsHandler::EnableChangeCallback(
   args->GetBoolean(0, &bluetooth_enabled);
 
   adapter_->SetPowered(bluetooth_enabled,
+                       base::Bind(&base::DoNothing),
                        base::Bind(&BluetoothOptionsHandler::EnableChangeError,
                                   weak_ptr_factory_.GetWeakPtr()));
 }
@@ -198,6 +201,7 @@ void BluetoothOptionsHandler::FindDevicesCallback(
     const ListValue* args) {
   adapter_->SetDiscovering(
       true,
+      base::Bind(&base::DoNothing),
       base::Bind(&BluetoothOptionsHandler::FindDevicesError,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -252,9 +256,11 @@ void BluetoothOptionsHandler::UpdateDeviceCallback(
       // Connection request.
       DVLOG(1) << "Connect: " << address;
       device->Connect(
-          this, base::Bind(&BluetoothOptionsHandler::ConnectError,
-                           weak_ptr_factory_.GetWeakPtr(),
-                           device->address()));
+          this,
+          base::Bind(&base::DoNothing),
+          base::Bind(&BluetoothOptionsHandler::ConnectError,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     device->address()));
     }
   } else if (command == kCancelCommand) {
     // Cancel pairing.
@@ -271,9 +277,11 @@ void BluetoothOptionsHandler::UpdateDeviceCallback(
   } else if (command == kDisconnectCommand) {
     // Disconnect from device.
     DVLOG(1) << "Disconnect device: " << address;
-    device->Disconnect(base::Bind(&BluetoothOptionsHandler::DisconnectError,
-                                  weak_ptr_factory_.GetWeakPtr(),
-                                  device->address()));
+    device->Disconnect(
+        base::Bind(&base::DoNothing),
+        base::Bind(&BluetoothOptionsHandler::DisconnectError,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   device->address()));
   } else if (command == kForgetCommand) {
     // Disconnect from device and delete pairing information.
     DVLOG(1) << "Forget device: " << address;
@@ -304,6 +312,7 @@ void BluetoothOptionsHandler::StopDiscoveryCallback(
     const ListValue* args) {
   adapter_->SetDiscovering(
       false,
+      base::Bind(&base::DoNothing),
       base::Bind(&BluetoothOptionsHandler::StopDiscoveryError,
                  weak_ptr_factory_.GetWeakPtr()));
 }

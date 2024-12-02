@@ -6,20 +6,16 @@
 
 #include "ash/shell.h"
 #include "ash/wm/activation_controller.h"
+#include "ash/wm/window_properties.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/aura/window_property.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/gfx/monitor.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
 
-DECLARE_WINDOW_PROPERTY_TYPE(bool);
-
 namespace ash {
-DEFINE_WINDOW_PROPERTY_KEY(bool, kOpenWindowSplitKey, false);
-
 namespace wm {
 
 void ActivateWindow(aura::Window* window) {
@@ -46,7 +42,7 @@ bool IsActiveWindow(aura::Window* window) {
 }
 
 aura::Window* GetActiveWindow() {
-  return aura::client::GetActivationClient(Shell::GetRootWindow())->
+  return aura::client::GetActivationClient(Shell::GetPrimaryRootWindow())->
       GetActiveWindow();
 }
 
@@ -98,9 +94,14 @@ void RestoreWindow(aura::Window* window) {
 }
 
 void CenterWindow(aura::Window* window) {
-  const gfx::Monitor monitor = gfx::Screen::GetMonitorNearestWindow(window);
-  gfx::Rect center = monitor.work_area().Center(window->bounds().size());
+  const gfx::Display display = gfx::Screen::GetDisplayNearestWindow(window);
+  gfx::Rect center = display.work_area().Center(window->bounds().size());
   window->SetBounds(center);
+}
+
+internal::RootWindowController* GetRootWindowController(
+    aura::RootWindow* root_window) {
+  return root_window->GetProperty(internal::kRootWindowControllerKey);
 }
 
 }  // namespace wm

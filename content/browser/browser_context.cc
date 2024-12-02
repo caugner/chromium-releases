@@ -6,11 +6,17 @@
 
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
+#include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/download_manager_impl.h"
 #include "content/browser/fileapi/browser_file_system_helper.h"
 #include "content/browser/in_process_webkit/indexed_db_context_impl.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
 #include "content/browser/resource_context_impl.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_constants.h"
+#include "net/base/server_bound_cert_service.h"
+#include "net/base/server_bound_cert_store.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
 #include "net/url_request/url_request_context.h"
@@ -28,6 +34,7 @@ using webkit_database::DatabaseTracker;
 static const char* kAppCacheServicKeyName = "content_appcache_service_tracker";
 static const char* kDatabaseTrackerKeyName = "content_database_tracker";
 static const char* kDOMStorageContextKeyName = "content_dom_storage_context";
+static const char* kDownloadManagerKeyName = "download_manager";
 static const char* kFileSystemContextKeyName = "content_file_system_context";
 static const char* kIndexedDBContextKeyName = "content_indexed_db_context";
 static const char* kQuotaManagerKeyName = "content_quota_manager";
@@ -70,7 +77,7 @@ void CreateQuotaManagerAndClients(BrowserContext* context) {
       context->GetPath(), context->IsOffTheRecord(),
       context->GetSpecialStoragePolicy(), quota_manager->proxy(),
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
-  context->SetUserData(kDatabaseTrackerKeyName, 
+  context->SetUserData(kDatabaseTrackerKeyName,
                        new UserDataAdapter<DatabaseTracker>(db_tracker));
 
   FilePath path = context->IsOffTheRecord() ? FilePath() : context->GetPath();
@@ -111,14 +118,16 @@ void CreateQuotaManagerAndClients(BrowserContext* context) {
 
 void SaveSessionStateOnIOThread(ResourceContext* resource_context) {
   resource_context->GetRequestContext()->cookie_store()->GetCookieMonster()->
-      SaveSessionCookies();
-  ResourceContext::GetAppCacheService(resource_context)->set_save_session_state(
-      true);
+      SetForceKeepSessionState();
+  resource_context->GetRequestContext()->server_bound_cert_service()->
+      GetCertStore()->SetForceKeepSessionState();
+  ResourceContext::GetAppCacheService(resource_context)->
+      set_force_keep_session_state();
 }
 
 void SaveSessionStateOnWebkitThread(
     scoped_refptr<IndexedDBContextImpl> indexed_db_context) {
-  indexed_db_context->SaveSessionState();
+  indexed_db_context->SetForceKeepSessionState();
 }
 
 void PurgeMemoryOnIOThread(ResourceContext* resource_context) {
@@ -131,6 +140,30 @@ DOMStorageContextImpl* GetDOMStorageContextImpl(BrowserContext* context) {
 }
 
 }  // namespace
+
+DownloadManager* BrowserContext::GetDownloadManager(
+    BrowserContext* context) {
+  if (!context->GetUserData(kDownloadManagerKeyName)) {
+    ResourceDispatcherHostImpl* rdh = ResourceDispatcherHostImpl::Get();
+    DCHECK(rdh);
+    DownloadFileManager* file_manager = rdh->download_file_manager();
+    DCHECK(file_manager);
+    scoped_refptr<DownloadManager> download_manager =
+        new DownloadManagerImpl(
+            file_manager,
+            scoped_ptr<DownloadItemFactory>(),
+            GetContentClient()->browser()->GetNetLog());
+
+    context->SetUserData(
+        kDownloadManagerKeyName,
+        new UserDataAdapter<DownloadManager>(download_manager));
+    download_manager->SetDelegate(context->GetDownloadManagerDelegate());
+    download_manager->Init(context);
+  }
+
+  return UserDataAdapter<DownloadManager>::Get(
+      context, kDownloadManagerKeyName);
+}
 
 QuotaManager* BrowserContext::GetQuotaManager(BrowserContext* context) {
   CreateQuotaManagerAndClients(context);
@@ -181,7 +214,7 @@ void BrowserContext::EnsureResourceContextInitialized(BrowserContext* context) {
 }
 
 void BrowserContext::SaveSessionState(BrowserContext* browser_context) {
-  GetDatabaseTracker(browser_context)->SaveSessionState();
+  GetDatabaseTracker(browser_context)->SetForceKeepSessionState();
 
   if (BrowserThread::IsMessageLoopValid(BrowserThread::IO)) {
     BrowserThread::PostTask(
@@ -190,7 +223,7 @@ void BrowserContext::SaveSessionState(BrowserContext* browser_context) {
                    browser_context->GetResourceContext()));
   }
 
-  GetDOMStorageContextImpl(browser_context)->SaveSessionState();
+  GetDOMStorageContextImpl(browser_context)->SetForceKeepSessionState();
 
   if (BrowserThread::IsMessageLoopValid(BrowserThread::WEBKIT_DEPRECATED)) {
     IndexedDBContextImpl* indexed_db = static_cast<IndexedDBContextImpl*>(
@@ -199,23 +232,6 @@ void BrowserContext::SaveSessionState(BrowserContext* browser_context) {
         BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
         base::Bind(&SaveSessionStateOnWebkitThread,
                    make_scoped_refptr(indexed_db)));
-  }
-}
-
-void BrowserContext::ClearLocalOnDestruction(BrowserContext* browser_context) {
-  GetDOMStorageContextImpl(browser_context)->SetClearLocalState(true);
-
-  IndexedDBContextImpl* indexed_db = static_cast<IndexedDBContextImpl*>(
-      GetIndexedDBContext(browser_context));
-  indexed_db->set_clear_local_state_on_exit(true);
-
-  GetDatabaseTracker(browser_context)->SetClearLocalStateOnExit(true);
-
-  if (BrowserThread::IsMessageLoopValid(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-          BrowserThread::IO, FROM_HERE,
-          base::Bind(&appcache::AppCacheService::set_clear_local_state_on_exit,
-              base::Unretained(GetAppCacheService(browser_context)), true));
   }
 }
 
@@ -242,6 +258,9 @@ BrowserContext::~BrowserContext() {
 
   if (GetUserData(kDOMStorageContextKeyName))
     GetDOMStorageContextImpl(this)->Shutdown();
+
+  if (GetUserData(kDownloadManagerKeyName))
+    GetDownloadManager(this)->Shutdown();
 }
 
 }  // namespace content

@@ -13,10 +13,8 @@
 /** @const */ var SCREEN_ACCOUNT_PICKER = 'account-picker';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
-/** @const */ var ACCELERATOR_ACCESSIBILITY = 'accessibility';
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
-/** @const */ var ACCELERATOR_EXIT = 'exit';
 /** @const */ var ACCELERATOR_VERSION = 'version';
 
 /* Help topic identifiers. */
@@ -83,9 +81,7 @@ cr.define('cr.ui.login', function() {
      * @param {string} name Accelerator name.
      */
     handleAccelerator: function(name) {
-      if (name == ACCELERATOR_ACCESSIBILITY) {
-        chrome.send('toggleAccessibility');
-      } else if (name == ACCELERATOR_CANCEL) {
+      if (name == ACCELERATOR_CANCEL) {
         if (this.currentScreen.cancel) {
           this.currentScreen.cancel();
         }
@@ -99,10 +95,6 @@ cr.define('cr.ui.login', function() {
           // proceed straight to enrollment screen when EULA is accepted.
           chrome.send('skipUpdateEnrollAfterEula');
         }
-      } else if (name == ACCELERATOR_EXIT) {
-        if (this.currentScreen.exit) {
-          this.currentScreen.exit();
-        }
       } else if (name == ACCELERATOR_VERSION) {
         if (this.allowToggleVersion_)
           $('version-labels').hidden = !$('version-labels').hidden;
@@ -112,13 +104,18 @@ cr.define('cr.ui.login', function() {
     /**
      * Appends buttons to the button strip.
      * @param {Array} buttons Array with the buttons to append.
+     * @param {string} screenId Id of the screen that buttons belong to.
      */
-    appendButtons_: function(buttons) {
+    appendButtons_: function(buttons, screenId) {
       if (buttons) {
-        var buttonStrip = $('button-strip');
-        for (var i = 0; i < buttons.length; ++i) {
-          var button = buttons[i];
-          buttonStrip.appendChild(button);
+        var buttonStrip = null;
+        if (this.isNewOobe())
+          buttonStrip = $(screenId + '-controls');
+        else
+          buttonStrip = $('button-strip');
+        if (buttonStrip) {
+          for (var i = 0; i < buttons.length; ++i)
+            buttonStrip.appendChild(buttons[i]);
         }
       }
     },
@@ -181,6 +178,8 @@ cr.define('cr.ui.login', function() {
 
       // Adjust inner container height based on new step's height.
       $('inner-container').style.height = newStep.offsetHeight + 'px';
+      if (this.isNewOobe())
+        $('inner-container').style.width = newStep.offsetWidth + 'px';
 
       if (this.currentStep_ != nextStepIndex &&
           !oldStep.classList.contains('hidden')) {
@@ -195,6 +194,10 @@ cr.define('cr.ui.login', function() {
       } else {
         // First screen on OOBE launch.
         newHeader.classList.remove('right');
+        // Report back first OOBE screen being painted.
+        window.webkitRequestAnimationFrame(function() {
+          chrome.send('loginVisible');
+        });
       }
       this.currentStep_ = nextStepIndex;
       $('oobe').className = nextStepId;
@@ -254,9 +257,13 @@ cr.define('cr.ui.login', function() {
       var dot = document.createElement('div');
       dot.id = screenId + '-dot';
       dot.className = 'progdot';
-      $('progress').appendChild(dot);
 
-      this.appendButtons_(el.buttons);
+      if (this.isNewOobe())
+        $('progress-dots').appendChild(dot);
+      else
+        $('progress').appendChild(dot);
+
+      this.appendButtons_(el.buttons, screenId);
     },
 
     /**
@@ -268,7 +275,7 @@ cr.define('cr.ui.login', function() {
       for (var i = 0, screenId; screenId = this.screens_[i]; ++i) {
         var screen = $(screenId);
         $('header-' + screenId).textContent = screen.header;
-        this.appendButtons_(screen.buttons);
+        this.appendButtons_(screen.buttons, screenId);
         if (screen.updateLocalizedContent)
           screen.updateLocalizedContent();
       }
@@ -300,6 +307,13 @@ cr.define('cr.ui.login', function() {
      */
     isOobeUI: function() {
       return !document.body.classList.contains('login-display');
+    },
+
+    /**
+     * Returns true if new OOBE design is used.
+     */
+    isNewOobe: function() {
+      return document.documentElement.getAttribute('oobe') == 'new';
     }
   };
 

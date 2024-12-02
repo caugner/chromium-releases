@@ -6,23 +6,28 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/layout.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -31,7 +36,9 @@
 using content::UserMetricsAction;
 using content::WebContents;
 
-static TabRendererData::NetworkState TabContentsNetworkState(
+namespace {
+
+TabRendererData::NetworkState TabContentsNetworkState(
     WebContents* contents) {
   if (!contents || !contents->IsLoading())
     return TabRendererData::NETWORK_STATE_NONE;
@@ -39,6 +46,31 @@ static TabRendererData::NetworkState TabContentsNetworkState(
     return TabRendererData::NETWORK_STATE_WAITING;
   return TabRendererData::NETWORK_STATE_LOADING;
 }
+
+TabStripLayoutType DetermineTabStripLayout(PrefService* prefs,
+                                           bool* adjust_layout) {
+  *adjust_layout = false;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableStackedTabStrip)) {
+    return TAB_STRIP_LAYOUT_STACKED;
+  }
+  if (ui::GetDisplayLayout() != ui::LAYOUT_TOUCH)
+    return TAB_STRIP_LAYOUT_SHRINK;
+#if defined(USE_ASH)
+  // TODO(sky): remove ifdef when event generation on aura is fixed.
+  return TAB_STRIP_LAYOUT_STACKED;
+#else
+  *adjust_layout = true;
+  switch (prefs->GetInteger(prefs::kTabStripLayoutType)) {
+    case TAB_STRIP_LAYOUT_STACKED:
+      return TAB_STRIP_LAYOUT_STACKED;
+    default:
+      return TAB_STRIP_LAYOUT_SHRINK;
+  }
+#endif
+}
+
+}  // namespace
 
 class BrowserTabStripController::TabContextMenuContents
     : public ui::SimpleMenuModel::Delegate {
@@ -143,6 +175,9 @@ BrowserTabStripController::BrowserTabStripController(Browser* browser,
   notification_registrar_.Add(this,
       chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED,
       content::NotificationService::AllSources());
+
+  local_pref_registrar_.Init(g_browser_process->local_state());
+  local_pref_registrar_.Add(prefs::kTabStripLayoutType, this);
 }
 
 BrowserTabStripController::~BrowserTabStripController() {
@@ -157,6 +192,9 @@ BrowserTabStripController::~BrowserTabStripController() {
 
 void BrowserTabStripController::InitFromModel(TabStrip* tabstrip) {
   tabstrip_ = tabstrip;
+
+  UpdateLayoutType();
+
   // Walk the model, calling our insertion observer method for each item within
   // it.
   for (int i = 0; i < model_->count(); ++i)
@@ -261,7 +299,7 @@ void BrowserTabStripController::UpdateLoadingAnimations() {
   for (int i = 0, tab_count = tabstrip_->tab_count(); i < tab_count; ++i) {
     BaseTab* tab = tabstrip_->tab_at(i);
     if (model_->ContainsIndex(i)) {
-      TabContentsWrapper* contents = model_->GetTabContentsAt(i);
+      TabContents* contents = model_->GetTabContentsAt(i);
       tab->UpdateLoadingAnimation(
           TabContentsNetworkState(contents->web_contents()));
     }
@@ -309,7 +347,6 @@ bool BrowserTabStripController::IsCompatibleWith(TabStrip* other) const {
 }
 
 void BrowserTabStripController::CreateNewTab() {
-  content::RecordAction(UserMetricsAction("NewTab_Button"));
   model_->delegate()->AddBlankTab(true);
 }
 
@@ -322,20 +359,30 @@ bool BrowserTabStripController::IsIncognito() {
   return browser_->profile()->IsOffTheRecord();
 }
 
+void BrowserTabStripController::LayoutTypeMaybeChanged() {
+  bool adjust_layout = false;
+  TabStripLayoutType layout_type =
+      DetermineTabStripLayout(g_browser_process->local_state(), &adjust_layout);
+  if (!adjust_layout || layout_type == tabstrip_->layout_type())
+    return;
+
+  g_browser_process->local_state()->SetInteger(
+      prefs::kTabStripLayoutType,
+      static_cast<int>(tabstrip_->layout_type()));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, TabStripModelObserver implementation:
 
-void BrowserTabStripController::TabInsertedAt(TabContentsWrapper* contents,
+void BrowserTabStripController::TabInsertedAt(TabContents* contents,
                                               int model_index,
                                               bool is_active) {
   DCHECK(contents);
-  CHECK_GE(model_index, 0);
-  CHECK_LT(model_index, model_->count());
-  CHECK_EQ(model_->count(), tabstrip_->tab_count() + 1);
+  DCHECK(model_->ContainsIndex(model_index));
   AddTab(contents, model_index, is_active);
 }
 
-void BrowserTabStripController::TabDetachedAt(TabContentsWrapper* contents,
+void BrowserTabStripController::TabDetachedAt(TabContents* contents,
                                               int model_index) {
   // Cancel any pending tab transition.
   hover_tab_selector_.CancelTabTransition();
@@ -349,7 +396,7 @@ void BrowserTabStripController::TabSelectionChanged(
   tabstrip_->SetSelection(old_model, model_->selection_model());
 }
 
-void BrowserTabStripController::TabMoved(TabContentsWrapper* contents,
+void BrowserTabStripController::TabMoved(TabContents* contents,
                                          int from_model_index,
                                          int to_model_index) {
   // Cancel any pending tab transition.
@@ -362,7 +409,7 @@ void BrowserTabStripController::TabMoved(TabContentsWrapper* contents,
   tabstrip_->MoveTab(from_model_index, to_model_index, data);
 }
 
-void BrowserTabStripController::TabChangedAt(TabContentsWrapper* contents,
+void BrowserTabStripController::TabChangedAt(TabContents* contents,
                                              int model_index,
                                              TabChangeType change_type) {
   if (change_type == TITLE_NOT_LOADING) {
@@ -375,26 +422,26 @@ void BrowserTabStripController::TabChangedAt(TabContentsWrapper* contents,
 }
 
 void BrowserTabStripController::TabReplacedAt(TabStripModel* tab_strip_model,
-                                              TabContentsWrapper* old_contents,
-                                              TabContentsWrapper* new_contents,
+                                              TabContents* old_contents,
+                                              TabContents* new_contents,
                                               int model_index) {
   SetTabDataAt(new_contents, model_index);
 }
 
 void BrowserTabStripController::TabPinnedStateChanged(
-    TabContentsWrapper* contents,
+    TabContents* contents,
     int model_index) {
   // Currently none of the renderers render pinned state differently.
 }
 
 void BrowserTabStripController::TabMiniStateChanged(
-    TabContentsWrapper* contents,
+    TabContents* contents,
     int model_index) {
   SetTabDataAt(contents, model_index);
 }
 
 void BrowserTabStripController::TabBlockedStateChanged(
-    TabContentsWrapper* contents,
+    TabContents* contents,
     int model_index) {
   SetTabDataAt(contents, model_index);
 }
@@ -405,14 +452,28 @@ void BrowserTabStripController::TabBlockedStateChanged(
 void BrowserTabStripController::Observe(int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED);
-  // Note that this notification may be fired during a model mutation and
-  // possibly before the tabstrip has processed the change.
-  // Here, we just re-layout each existing tab to reflect the change in its
-  // closeable state, and then schedule paint for entire tabstrip.
-  for (int i = 0; i < tabstrip_->tab_count(); ++i)
-    static_cast<BaseTab*>(tabstrip_->tab_at(i))->Layout();
-  tabstrip_->SchedulePaint();
+  switch (type) {
+    case chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED:
+      // Note that this notification may be fired during a model mutation and
+      // possibly before the tabstrip has processed the change.
+      // Here, we just re-layout each existing tab to reflect the change in its
+      // closeable state, and then schedule paint for entire tabstrip.
+      for (int i = 0; i < tabstrip_->tab_count(); ++i)
+        static_cast<BaseTab*>(tabstrip_->tab_at(i))->Layout();
+      tabstrip_->SchedulePaint();
+      break;
+
+    case chrome::NOTIFICATION_PREF_CHANGED:
+      if (*content::Details<std::string>(details).ptr() ==
+          prefs::kTabStripLayoutType) {
+        UpdateLayoutType();
+      }
+      break;
+
+    default:
+      NOTREACHED();
+      break;
+  }
 }
 
 void BrowserTabStripController::SetTabRendererDataFromModel(
@@ -421,32 +482,31 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
     TabRendererData* data,
     TabStatus tab_status) {
   SkBitmap* app_icon = NULL;
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(contents);
+  TabContents* tab_contents = TabContents::FromWebContents(contents);
 
   // Extension App icons are slightly larger than favicons, so only allow
   // them if permitted by the model.
   if (model_->delegate()->LargeIconsPermitted())
-    app_icon = wrapper->extension_tab_helper()->GetExtensionAppIcon();
+    app_icon = tab_contents->extension_tab_helper()->GetExtensionAppIcon();
 
   if (app_icon)
     data->favicon = *app_icon;
   else
-    data->favicon = wrapper->favicon_tab_helper()->GetFavicon();
+    data->favicon = tab_contents->favicon_tab_helper()->GetFavicon();
   data->network_state = TabContentsNetworkState(contents);
   data->title = contents->GetTitle();
   data->url = contents->GetURL();
   data->loading = contents->IsLoading();
   data->crashed_status = contents->GetCrashedStatus();
   data->incognito = contents->GetBrowserContext()->IsOffTheRecord();
-  data->show_icon = wrapper->favicon_tab_helper()->ShouldDisplayFavicon();
+  data->show_icon = tab_contents->favicon_tab_helper()->ShouldDisplayFavicon();
   data->mini = model_->IsMiniTab(model_index);
   data->blocked = model_->IsTabBlocked(model_index);
-  data->app = wrapper->extension_tab_helper()->is_app();
+  data->app = tab_contents->extension_tab_helper()->is_app();
 }
 
 void BrowserTabStripController::SetTabDataAt(
-    TabContentsWrapper* contents,
+    TabContents* contents,
     int model_index) {
   TabRendererData data;
   SetTabRendererDataFromModel(contents->web_contents(), model_index, &data,
@@ -481,7 +541,7 @@ void BrowserTabStripController::StopHighlightTabsForCommand(
   }
 }
 
-void BrowserTabStripController::AddTab(TabContentsWrapper* contents,
+void BrowserTabStripController::AddTab(TabContents* contents,
                                        int index,
                                        bool is_active) {
   // Cancel any pending tab transition.
@@ -490,4 +550,11 @@ void BrowserTabStripController::AddTab(TabContentsWrapper* contents,
   TabRendererData data;
   SetTabRendererDataFromModel(contents->web_contents(), index, &data, NEW_TAB);
   tabstrip_->AddTabAt(index, data, is_active);
+}
+
+void BrowserTabStripController::UpdateLayoutType() {
+  bool adjust_layout = false;
+  TabStripLayoutType layout_type =
+      DetermineTabStripLayout(g_browser_process->local_state(), &adjust_layout);
+  tabstrip_->SetLayoutType(layout_type, adjust_layout);
 }

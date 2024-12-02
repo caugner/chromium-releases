@@ -138,6 +138,7 @@ div.disabled {
   background-image: url('chrome://theme/IDR_MANAGED');
   background-position: 5px center;
   background-repeat: no-repeat;
+  background-size: 16px;
   display: block;
   line-height: 24px;
   padding-left: 26px;
@@ -272,7 +273,9 @@ list .row-delete-button {
   -webkit-transition: 150ms opacity;
   background-color: transparent;
   /* TODO(stuartmorgan): Replace with real images once they are available. */
-  background-image: url('../../../../ui/resources/close_bar.png');
+  background-image: -webkit-image-set(
+      url('../../../../ui/resources/default_100_percent/close_bar.png') 1x,
+      url('../../../../ui/resources/default_200_percent/close_bar.png') 2x);
   border: none;
   display: block;
   height: 16px;
@@ -288,12 +291,27 @@ list .row-delete-button[disabled] {
   pointer-events: none;
 }
 
+/* HostedApp entries use the disabled closing button to display the App's
+ * favicon, as an indicator that instead of deleting the permission here
+ * the user has to remove the hosted app.*/
+list div[role='listitem'][managedby='HostedApp'] .row-delete-button {
+  opacity: 1;
+}
+
 list .row-delete-button:hover {
-  background-image: url('../../../../ui/resources/close_bar_h.png');
+  background-image: -webkit-image-set(
+      url('../../../../ui/resources/default_100_percent/close_bar_hover.png')
+          1x,
+      url('../../../../ui/resources/default_200_percent/close_bar_hover.png')
+          2x);
 }
 
 list .row-delete-button:active {
-  background-image: url('../../../../ui/resources/close_bar_p.png');
+  background-image: -webkit-image-set(
+      url('../../../../ui/resources/default_100_percent/close_bar_pressed.png')
+          1x,
+      url('../../../../ui/resources/default_200_percent/close_bar_pressed.png')
+          2x);
 }
 
 list .static-text {
@@ -425,7 +443,8 @@ html:not([hasFlashPlugin]) .flash-plugin-area,
  */
 html[flashPluginSupportsClearSiteData] .flash-plugin-area,
 html:not([flashPluginSupportsClearSiteData]) .clear-plugin-lso-data-enabled,
-html[flashPluginSupportsClearSiteData] .clear-plugin-lso-data-disabled {
+html[flashPluginSupportsClearSiteData] .clear-plugin-lso-data-disabled,
+html:not([enablePepperFlashSettings]) .pepper-flash-settings {
   display: none;
 }
 
@@ -450,31 +469,37 @@ html[flashPluginSupportsClearSiteData] .clear-plugin-lso-data-disabled {
 .controlled-setting-indicator[controlled-by='policy'] summary {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_MANDATORY_GRAY');
+  background-size: 16px;
 }
 
 .controlled-setting-indicator[controlled-by='policy'] summary:hover {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_MANDATORY');
+  background-size: 16px;
 }
 
 .controlled-setting-indicator[controlled-by='extension'] summary {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_EXTENSION_GRAY');
+  background-size: 16px;
 }
 
 .controlled-setting-indicator[controlled-by='extension'] summary:hover {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_EXTENSION');
+  background-size: 16px;
 }
 
 .controlled-setting-indicator[controlled-by='recommended'] summary {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_RECOMMENDED_GRAY');
+  background-size: 16px;
 }
 
 .controlled-setting-indicator[controlled-by='recommended'] summary:hover {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_RECOMMENDED');
+  background-size: 16px;
 }
 
 .controlled-setting-bubble {
@@ -530,18 +555,21 @@ html[dir='rtl'] .controlled-setting-bubble {
     .controlled-setting-bubble-text {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_MANDATORY_LARGE');
+  background-size: 22px;
 }
 
 .controlled-setting-indicator[controlled-by='extension']
     .controlled-setting-bubble-text {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_EXTENSION_LARGE');
+  background-size: 22px;
 }
 
 .controlled-setting-indicator[controlled-by='recommended']
     .controlled-setting-bubble-text {
   background-image:
       url('chrome://theme/IDR_CONTROLLED_SETTING_RECOMMENDED_LARGE');
+  background-size: 22px;
 }
 
 html[dir='rtl'] .controlled-setting-bubble-text {

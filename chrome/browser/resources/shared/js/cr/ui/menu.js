@@ -26,11 +26,49 @@ cr.define('cr.ui', function() {
       this.addEventListener('mouseover', this.handleMouseOver_);
       this.addEventListener('mouseout', this.handleMouseOut_);
 
+      this.classList.add('decorated');
+      this.hidden = true;  // Hide the menu by default.
+
       // Decorate the children as menu items.
       var children = this.children;
       for (var i = 0, child; child = children[i]; i++) {
         cr.ui.decorate(child, MenuItem);
       }
+    },
+
+    /**
+     * Adds menu item at the end of the list.
+     * @param {Object} item Menu item properties.
+     * @return {cr.ui.MenuItem} The created menu item.
+     */
+    addMenuItem: function(item) {
+      var menuItem = this.ownerDocument.createElement('menuitem');
+      this.appendChild(menuItem);
+
+      cr.ui.decorate(menuItem, MenuItem);
+
+      if (item.label)
+        menuItem.label = item.label;
+
+      if (item.iconUrl)
+        menuItem.iconUrl = item.iconUrl;
+
+      return menuItem;
+    },
+
+    /**
+     * Adds separator at the end of the list.
+     */
+    addSeparator: function() {
+      var separator = this.ownerDocument.createElement('hr');
+      this.appendChild(separator);
+    },
+
+    /**
+     * Clears menu.
+     */
+    clear: function() {
+      this.textContent = '';
     },
 
     /**
@@ -76,6 +114,13 @@ cr.define('cr.ui', function() {
     set selectedItem(item) {
       var index = Array.prototype.indexOf.call(this.children, item);
       this.selectedIndex = index;
+    },
+
+    /**
+     * Menu length
+     */
+    get length() {
+      return this.children.length;
     },
 
     /**

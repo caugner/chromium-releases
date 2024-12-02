@@ -12,11 +12,11 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/test_browser_window.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/test/render_view_test.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/render_view_test.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "ui/aura/env.h"
@@ -36,7 +36,7 @@ class TestBrowserWindowAura : public TestBrowserWindow {
   TestBrowserWindowAura(Browser* browser, aura::Window *native_window);
   virtual ~TestBrowserWindowAura();
 
-  virtual gfx::NativeWindow GetNativeHandle() OVERRIDE {
+  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE {
     return native_window_;
   }
 
@@ -121,9 +121,9 @@ WindowPositionerTest::~WindowPositionerTest() {
 void WindowPositionerTest::SetUp() {
   AshTestBase::SetUp();
   // Create some default dummy windows.
-  aura::Window* default_container =
-      ash::Shell::GetInstance()->GetContainer(
-          ash::internal::kShellWindowId_DefaultContainer);
+  aura::Window* default_container = ash::Shell::GetContainer(
+      ash::Shell::GetPrimaryRootWindow(),
+      ash::internal::kShellWindowId_DefaultContainer);
   window_.reset(aura::test::CreateTestWindowWithId(0, default_container));
   window_->SetBounds(gfx::Rect(16, 32, 640, 320));
   popup_.reset(aura::test::CreateTestWindowWithId(1, default_container));
@@ -194,7 +194,7 @@ void WindowPositionerTest::TearDown() {
 } // namespace
 
 TEST_F(WindowPositionerTest, cascading) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryMonitor().work_area();
+  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
 
   // First see that the window will cascade down when there is no space.
   window()->SetBounds(work_area);
@@ -254,7 +254,7 @@ TEST_F(WindowPositionerTest, cascading) {
 }
 
 TEST_F(WindowPositionerTest, filling) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryMonitor().work_area();
+  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
   int grid = ash::Shell::GetInstance()->GetGridSize();
   gfx::Rect popup_position(0, 0, 256, 128);
   // Leave space on the left and the right and see if we fill top to bottom.
@@ -309,7 +309,7 @@ TEST_F(WindowPositionerTest, filling) {
 }
 
 TEST_F(WindowPositionerTest, blockedByPanel) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryMonitor().work_area();
+  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
 
   gfx::Rect pop_position(0, 0, 200, 200);
   // Let the panel cover everything.
@@ -324,7 +324,7 @@ TEST_F(WindowPositionerTest, blockedByPanel) {
 }
 
 TEST_F(WindowPositionerTest, biggerThenBorder) {
-  const gfx::Rect work_area = gfx::Screen::GetPrimaryMonitor().work_area();
+  const gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
 
   gfx::Rect pop_position(0, 0, work_area.width(), work_area.height());
 

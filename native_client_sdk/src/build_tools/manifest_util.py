@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import copy
 import hashlib
 import json
 import sys
@@ -144,25 +145,37 @@ class Archive(dict):
       if key not in VALID_ARCHIVE_KEYS:
         raise Error('Archive "%s" has invalid attribute "%s"' % (host_os, key))
 
-  @property
-  def url(self):
-    """Returns the URL of this archive"""
-    return self['url']
+  def __getattr__(self, name):
+    """Retrieve values from this dict using attributes.
 
-  @url.setter
-  def url(self, url):
-    """Set the URL of this archive"""
-    self['url'] = url
+    This allows for foo.bar instead of foo['bar'].
 
-  @property
-  def size(self):
-    """Returns the size of this archive, in bytes"""
-    return self['size']
+    Args:
+      name: the name of the key, 'bar' in the example above.
+    Returns:
+      The value associated with that key."""
+    if name not in VALID_ARCHIVE_KEYS:
+      raise AttributeError(name)
+    # special case, self.checksum returns the sha1, not the checksum dict.
+    if name == 'checksum':
+      return self.GetChecksum()
+    return self.__getitem__(name)
 
-  @property
-  def host_os(self):
-    """Returns the host OS of this archive"""
-    return self['host_os']
+  def __setattr__(self, name, value):
+    """Set values in this dict using attributes.
+
+    This allows for foo.bar instead of foo['bar'].
+
+    Args:
+      name: The name of the key, 'bar' in the example above.
+      value: The value to associate with that key."""
+    if name not in VALID_ARCHIVE_KEYS:
+      raise AttributeError(name)
+    # special case, self.checksum returns the sha1, not the checksum dict.
+    if name == 'checksum':
+      self.setdefault('checksum', {})['sha1'] = value
+      return
+    return self.__setitem__(name, value)
 
   def GetChecksum(self, type='sha1'):
     """Returns a given cryptographic checksum of the archive"""
@@ -185,25 +198,33 @@ class Bundle(dict):
 
     Merges dict in |bundle| with this one in such a way that keys are not
     duplicated: the values of the keys in |bundle| take precedence in the
-    returned dictionary.
+    resulting dictionary.
 
-    Any keys in either the symlink or links dictionaries that also exist in
-    either of the files or dicts sets are removed from the latter, meaning that
-    symlinks or links which overlap file or directory entries take precedence.
+    Archives in |bundle| will be appended to archives in self. Archives in
+    |bundle| will override archives in self with the same host_os.
 
     Args:
       bundle: The other bundle.  Must be a dict.
-    Returns:
-      A dict which is the result of merging the two Bundles.
     """
-    return Bundle(self.items() + bundle.items())
+    for k, v in bundle.iteritems():
+      if k == ARCHIVES_KEY:
+        for archive in v:
+          self.RemoveArchive(archive['host_os'])
+          self.get(k, []).append(archive)
+      else:
+        self[k] = v
 
-  def ToJSON(self):
-    """Convert this bundle to a JSON-formatted string."""
+  def GetDataAsString(self):
+    """Returns the JSON bundle object, pretty-printed"""
     return DictToJSON(self)
 
-  def FromJSON(self, json_string):
-    """Parse and load bundle data from a JSON-formatted string."""
+  def LoadDataFromString(self, json_string):
+    """Load a JSON bundle string. Raises an exception if json_string
+       is not well-formed JSON.
+
+    Args:
+      json_string: a JSON-formatted string containing the bundle
+    """
     self.CopyFrom(json.loads(json_string))
 
   def CopyFrom(self, dict):
@@ -277,25 +298,79 @@ class Bundle(dict):
     """Returns all the archives in this bundle"""
     return self[ARCHIVES_KEY]
 
-  @property
-  def name(self):
-    """Returns the name of this bundle"""
-    return self[NAME_KEY]
+  def AddArchive(self, archive):
+    """Add an archive to this bundle."""
+    self.RemoveArchive(archive.host_os)
+    self[ARCHIVES_KEY].append(archive)
 
-  @property
-  def version(self):
-    """Returns the version of this bundle"""
-    return self[VERSION_KEY]
+  def RemoveArchive(self, host_os_name):
+    """Remove an archive from this Bundle."""
+    if host_os_name == 'all':
+      del self[ARCHIVES_KEY][:]
+    else:
+      for i, archive in enumerate(self[ARCHIVES_KEY]):
+        if archive.host_os == host_os_name:
+          del self[ARCHIVES_KEY][i]
 
-  @property
-  def revision(self):
-    """Returns the revision of this bundle"""
-    return self[REVISION_KEY]
+  def __getattr__(self, name):
+    """Retrieve values from this dict using attributes.
 
-  @property
-  def recommended(self):
-    """Returns whether this bundle is recommended"""
-    return self['recommended']
+    This allows for foo.bar instead of foo['bar'].
+
+    Args:
+      name: the name of the key, 'bar' in the example above.
+    Returns:
+      The value associated with that key."""
+    if name not in VALID_BUNDLES_KEYS:
+      raise AttributeError(name)
+    return self.__getitem__(name)
+
+  def __setattr__(self, name, value):
+    """Set values in this dict using attributes.
+
+    This allows for foo.bar instead of foo['bar'].
+
+    Args:
+      name: The name of the key, 'bar' in the example above.
+      value: The value to associate with that key."""
+    if name not in VALID_BUNDLES_KEYS:
+      raise AttributeError(name)
+    self.__setitem__(name, value)
+
+  def __eq__(self, bundle):
+    """Test if two bundles are equal.
+
+    Normally the default comparison for two dicts is fine, but in this case we
+    don't care about the list order of the archives.
+
+    Args:
+      bundle: The other bundle to compare against.
+    Returns:
+      True if the bundles are equal."""
+    if not isinstance(bundle, Bundle):
+      return False
+    if len(self.keys()) != len(bundle.keys()):
+      return False
+    for key in self.keys():
+      if key not in bundle:
+        return False
+      # special comparison for ARCHIVE_KEY because we don't care about the list
+      # ordering.
+      if key == ARCHIVES_KEY:
+        if len(self[key]) != len(bundle[key]):
+          return False
+        for archive in self[key]:
+          if archive != bundle.GetArchive(archive.host_os):
+            return False
+      elif self[key] != bundle[key]:
+        return False
+    return True
+
+  def __ne__(self, bundle):
+    """Test if two bundles are unequal.
+
+    See __eq__ for more info."""
+    return not self.__eq__(bundle)
 
 
 class SDKManifest(object):
@@ -360,7 +435,7 @@ class SDKManifest(object):
     for i, bundle in enumerate(bundles):
       if bundle[NAME_KEY] == name:
         del bundles[i]
-    bundles.append(new_bundle)
+    bundles.append(copy.deepcopy(new_bundle))
 
   def BundleNeedsUpdate(self, bundle):
     """Decides if a bundle needs to be updated.
@@ -397,7 +472,7 @@ class SDKManifest(object):
       if not allow_existing:
         raise Error('cannot merge manifest bundle \'%s\', it already exists'
                     % bundle.name)
-      self.SetBundle(local_bundle.MergeWithBundle(bundle))
+      local_bundle.MergeWithBundle(bundle)
 
   def MergeManifest(self, manifest):
     '''Merge another manifest into this manifest, disallowing overiding.

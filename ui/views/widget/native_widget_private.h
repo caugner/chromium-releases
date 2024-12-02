@@ -13,6 +13,7 @@
 #include "ui/views/widget/native_widget.h"
 
 namespace gfx {
+class ImageSkia;
 class Rect;
 }
 
@@ -66,6 +67,9 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
 
   // Returns true if any mouse button is currently down.
   static bool IsMouseButtonDown();
+
+  // Returns true if any touch device is currently down.
+  static bool IsTouchDown();
 
   // Initializes the NativeWidget.
   virtual void InitNativeWidget(const Widget::InitParams& params) = 0;
@@ -121,18 +125,12 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
       View* view,
       ui::AccessibilityTypes::Event event_type) = 0;
 
-  // Sets event capturing for the native widget for events specified in
-  // |flags|. |flags| is ui::CaptureEventFlags. This does nothing if
-  // the window isn't showing (VISIBILITY_SHOWN), or isn't contained
-  // in a valid window hierarchy.
-  virtual void SetCapture(unsigned int flags) = 0;
-
-  // Stop capturing events.
+  // Sets or releases event capturing for this native widget.
+  virtual void SetCapture() = 0;
   virtual void ReleaseCapture() = 0;
 
-  // Returns true if this native widget is capturing all event types
-  // specified by |flags|.  flags is ui::CaptureEventFlags.
-  virtual bool HasCapture(unsigned int flags) const = 0;
+  // Returns true if this native widget is capturing events.
+  virtual bool HasCapture() const = 0;
 
   // Returns the InputMethod for this native widget.
   // Note that all widgets in a widget hierarchy share the same input method.
@@ -156,8 +154,8 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   // Sets the Window icons. |window_icon| is a 16x16 icon suitable for use in
   // a title bar. |app_icon| is a larger size for use in the host environment
   // app switching UI.
-  virtual void SetWindowIcons(const SkBitmap& window_icon,
-                              const SkBitmap& app_icon) = 0;
+  virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
+                              const gfx::ImageSkia& app_icon) = 0;
 
   // Update native accessibility properties on the native window.
   virtual void SetAccessibleName(const string16& name) = 0;

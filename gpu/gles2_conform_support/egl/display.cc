@@ -10,6 +10,7 @@
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/service/context_group.h"
+#include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "gpu/gles2_conform_support/egl/config.h"
 #include "gpu/gles2_conform_support/egl/surface.h"
 
@@ -82,8 +83,13 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
     return EGL_NO_SURFACE;
   }
 
+  {
+    gpu::TransferBufferManager* manager = new gpu::TransferBufferManager();
+    transfer_buffer_manager_.reset(manager);
+    manager->Initialize();
+  }
   scoped_ptr<gpu::CommandBufferService> command_buffer(
-      new gpu::CommandBufferService);
+      new gpu::CommandBufferService(transfer_buffer_manager_.get()));
   if (!command_buffer->Initialize())
     return NULL;
 
@@ -108,6 +114,8 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
                                                 gfx::PreferDiscreteGpu);
   if (!gl_context_.get())
     return EGL_NO_SURFACE;
+
+  gl_context_->MakeCurrent(gl_surface_);
 
   std::vector<int32> attribs;
   if (!decoder_->Initialize(gl_surface_.get(),
@@ -147,7 +155,7 @@ void Display::DestroySurface(EGLSurface surface) {
   DCHECK(IsValidSurface(surface));
   gpu_scheduler_.reset();
   if (decoder_.get()) {
-    decoder_->Destroy();
+    decoder_->Destroy(true);
   }
   decoder_.reset();
   gl_surface_ = NULL;

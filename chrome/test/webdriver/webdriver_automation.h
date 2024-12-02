@@ -68,6 +68,9 @@ class Automation {
 
     // True if the browser should ignore certificate related errors.
     bool ignore_certificate_errors;
+
+    // True if the browser should disable popup blocking.
+    bool disable_popup_blocking;
   };
 
   explicit Automation(const Logger& logger);
@@ -118,6 +121,12 @@ class Automation {
   // on the  screen.
   void CaptureEntirePageAsPNG(
       const WebViewId& view_id, const FilePath& path, Error** error);
+
+#if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+  // Dumps a heap profile of the process of the tab.
+  void HeapProfilerDump(
+      const WebViewId& view_id, const std::string& reason, Error** error);
+#endif  // !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
 
   void NavigateToURL(
       const WebViewId& view_id, const std::string& url, Error** error);
@@ -175,6 +184,9 @@ class Automation {
   void SetViewBounds(const WebViewId& view_id,
                      const Rect& bounds,
                      Error** error);
+
+  // Maximizes the given view.
+  void MaximizeView(const WebViewId& view_id, Error** error);
 
   // Gets the active JavaScript modal dialog's message.
   void GetAppModalDialogMessage(std::string* message, Error** error);
@@ -256,6 +268,7 @@ class Automation {
   Error* CheckAdvancedInteractionsSupported();
   Error* CheckNewExtensionInterfaceSupported();
   Error* CheckGeolocationSupported();
+  Error* CheckMaximizeSupported();
   Error* IsNewMouseApiSupported(bool* supports_new_api);
 
   const Logger& logger_;

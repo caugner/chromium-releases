@@ -13,7 +13,7 @@
 #include "chrome/browser/spellchecker/spelling_service_client.h"
 #include "chrome/common/spellcheck_result.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "net/base/load_flags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -28,7 +28,7 @@ class TestSpellingURLFetcher : public TestURLFetcher {
  public:
   TestSpellingURLFetcher(int id,
                          const GURL& url,
-                         content::URLFetcherDelegate* d,
+                         net::URLFetcherDelegate* d,
                          int version,
                          const std::string& text,
                          int status,
@@ -120,9 +120,11 @@ class TestingSpellingServiceClient : public SpellingServiceClient {
   }
 
   void VerifyResponse(bool success,
+                      const string16& request_text,
                       const std::vector<SpellCheckResult>& results) {
     EXPECT_EQ(success_, success);
     string16 text(UTF8ToUTF16(request_text_));
+    EXPECT_EQ(text, request_text);
     for (std::vector<SpellCheckResult>::const_iterator it = results.begin();
          it != results.end(); ++it) {
       text.replace(it->location, it->length, it->replacement);
@@ -131,7 +133,7 @@ class TestingSpellingServiceClient : public SpellingServiceClient {
   }
 
  private:
-  virtual content::URLFetcher* CreateURLFetcher(const GURL& url) {
+  virtual net::URLFetcher* CreateURLFetcher(const GURL& url) {
     EXPECT_EQ("https://www.googleapis.com/rpc", url.spec());
     fetcher_ = new TestSpellingURLFetcher(0, url, this,
                                           request_type_, request_text_,
@@ -153,15 +155,14 @@ class TestingSpellingServiceClient : public SpellingServiceClient {
 // monitor the class calls the callback with expected results.
 class SpellingServiceClientTest : public testing::Test {
  public:
-  SpellingServiceClientTest() {
-    profile_.CreateRequestContext();
-  }
+  SpellingServiceClientTest() {}
   virtual ~SpellingServiceClientTest() {}
 
   void OnTextCheckComplete(int tag,
                            bool success,
+                           const string16& text,
                            const std::vector<SpellCheckResult>& results) {
-    client_.VerifyResponse(success, results);
+    client_.VerifyResponse(success, text, results);
   }
 
  protected:

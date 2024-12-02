@@ -10,11 +10,11 @@
 #include "base/threading/thread.h"
 #include "jingle/notifier/base/fake_base_task.h"
 #include "net/url_request/url_request_test_util.h"
-#include "sync/notifier/invalidation_version_tracker.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/util/weak_handle.h"
+#include "sync/notifier/invalidation_state_tracker.h"
 #include "sync/notifier/mock_sync_notifier_observer.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
-#include "sync/util/weak_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -42,8 +42,9 @@ class NonBlockingInvalidationNotifierTest : public testing::Test {
         new NonBlockingInvalidationNotifier(
             notifier_options,
             InvalidationVersionMap(),
+            std::string(),  // initial_invalidation_state
             browser_sync::MakeWeakHandle(
-                base::WeakPtr<sync_notifier::InvalidationVersionTracker>()),
+                base::WeakPtr<sync_notifier::InvalidationStateTracker>()),
             "fake_client_info"));
     invalidation_notifier_->AddObserver(&mock_observer_);
   }
@@ -72,22 +73,26 @@ TEST_F(NonBlockingInvalidationNotifierTest, Basic) {
   type_payloads[syncable::BOOKMARKS] = "";
   type_payloads[syncable::AUTOFILL] = "";
 
-  EXPECT_CALL(mock_observer_, OnNotificationStateChange(true));
-  EXPECT_CALL(mock_observer_, StoreState("new_fake_state"));
+  EXPECT_CALL(mock_observer_, OnNotificationsEnabled());
   EXPECT_CALL(mock_observer_,
               OnIncomingNotification(type_payloads,
                                      REMOTE_NOTIFICATION));
-  EXPECT_CALL(mock_observer_, OnNotificationStateChange(false));
+  EXPECT_CALL(mock_observer_,
+              OnNotificationsDisabled(TRANSIENT_NOTIFICATION_ERROR));
+  EXPECT_CALL(mock_observer_,
+              OnNotificationsDisabled(NOTIFICATION_CREDENTIALS_REJECTED));
 
-  invalidation_notifier_->SetState("fake_state");
+  invalidation_notifier_->SetStateDeprecated("fake_state");
   invalidation_notifier_->SetUniqueId("fake_id");
   invalidation_notifier_->UpdateCredentials("foo@bar.com", "fake_token");
 
-  invalidation_notifier_->OnNotificationStateChange(true);
-  invalidation_notifier_->StoreState("new_fake_state");
+  invalidation_notifier_->OnNotificationsEnabled();
   invalidation_notifier_->OnIncomingNotification(type_payloads,
                                                  REMOTE_NOTIFICATION);
-  invalidation_notifier_->OnNotificationStateChange(false);
+  invalidation_notifier_->OnNotificationsDisabled(
+      TRANSIENT_NOTIFICATION_ERROR);
+  invalidation_notifier_->OnNotificationsDisabled(
+      NOTIFICATION_CREDENTIALS_REJECTED);
 
   ui_loop_.RunAllPending();
 }

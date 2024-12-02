@@ -35,7 +35,7 @@ void SetupPrefetchFieldTrial() {
   scoped_refptr<base::FieldTrial> trial(
       base::FieldTrialList::FactoryGetFieldTrial(
           "Prefetch", divisor, "ContentPrefetchPrefetchOff",
-          2012, 6, 30, NULL));
+          2013, 6, 30, NULL));
   const int kPrefetchOnGroup = trial->AppendGroup("ContentPrefetchPrefetchOn",
                                                   prefetch_probability);
   PrerenderManager::SetIsPrefetchEnabled(trial->group() == kPrefetchOnGroup);
@@ -74,7 +74,7 @@ void SetupPrerenderFieldTrial() {
   scoped_refptr<base::FieldTrial> trial(
       base::FieldTrialList::FactoryGetFieldTrial(
           "Prerender", divisor, "ContentPrefetchPrerender1",
-          2012, 6, 30, &experiment_1_group));
+          2013, 6, 30, &experiment_1_group));
 
   const int experiment_15_min_TTL_group =
       trial->AppendGroup("ContentPrefetchPrerenderExp5minTTL1",
@@ -197,33 +197,13 @@ void ConfigureOmniboxPrerender() {
   scoped_refptr<base::FieldTrial> omnibox_prerender_trial(
       base::FieldTrialList::FactoryGetFieldTrial(
           kOmniboxTrialName, kDivisor, "OmniboxPrerenderEnabled",
-          2012, 8, 30, &g_omnibox_trial_default_group_number));
+          2012, 12, 30, &g_omnibox_trial_default_group_number));
   omnibox_prerender_trial->AppendGroup("OmniboxPrerenderDisabled",
                                        kDisabledProbability);
-
-  // Field trial to set weighting of hits.
-  const base::FieldTrial::Probability kFourProbability = 33;
-  const base::FieldTrial::Probability kEightProbability = 33;
-
-  scoped_refptr<base::FieldTrial> weighting_trial(
-      base::FieldTrialList::FactoryGetFieldTrial(
-          "OmniboxPrerenderHitWeightingTrial", kDivisor,
-          "OmniboxPrerenderWeight1.0", 2012, 8, 30, NULL));
-  const int kOmniboxWeightFourGroup =
-      weighting_trial->AppendGroup("OmniboxPrerenderWeight4.0",
-                                   kFourProbability);
-  const int kOmniboxWeightEightGroup =
-      weighting_trial->AppendGroup("OmniboxPrerenderWeight8.0",
-                                   kEightProbability);
-  const int group = weighting_trial->group();
-  if (group == kOmniboxWeightFourGroup)
-    AutocompleteActionPredictor::set_hit_weight(4.0);
-  else if (group == kOmniboxWeightEightGroup)
-    AutocompleteActionPredictor::set_hit_weight(8.0);
 }
 
 bool IsOmniboxEnabled(Profile* profile) {
-  if (!profile || profile->IsOffTheRecord())
+  if (!profile)
     return false;
 
   if (!PrerenderManager::IsPrerenderingPossible())

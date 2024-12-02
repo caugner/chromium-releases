@@ -11,7 +11,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
-#include "content/test/test_navigation_observer.h"
+#include "content/public/test/test_navigation_observer.h"
 
 class BookmarksTest : public InProcessBrowserTest {
  public:
@@ -20,7 +20,7 @@ class BookmarksTest : public InProcessBrowserTest {
   }
 
   void OpenBookmarksManager() {
-    TestNavigationObserver navigation_observer(
+    content::TestNavigationObserver navigation_observer(
         content::NotificationService::AllSources(), NULL, 2);
 
     // Bring up the bookmarks manager tab.
@@ -44,7 +44,7 @@ class BookmarksTest : public InProcessBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(BookmarksTest, ShouldRedirectToExtension) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIBookmarksURL));
-  AssertIsBookmarksPage(browser()->GetSelectedWebContents());
+  AssertIsBookmarksPage(browser()->GetActiveWebContents());
 }
 
 IN_PROC_BROWSER_TEST_F(BookmarksTest, CommandOpensBookmarksTab) {
@@ -53,7 +53,7 @@ IN_PROC_BROWSER_TEST_F(BookmarksTest, CommandOpensBookmarksTab) {
   // Bring up the bookmarks manager tab.
   OpenBookmarksManager();
   ASSERT_EQ(1, browser()->tab_count());
-  AssertIsBookmarksPage(browser()->GetSelectedWebContents());
+  AssertIsBookmarksPage(browser()->GetActiveWebContents());
 }
 
 // If this flakes on Mac, use: http://crbug.com/87200
@@ -68,7 +68,7 @@ IN_PROC_BROWSER_TEST_F(BookmarksTest, CommandAgainGoesBackToBookmarksTab) {
   OpenBookmarksManager();
   ASSERT_EQ(2, browser()->tab_count());
 
-  AssertIsBookmarksPage(browser()->GetSelectedWebContents());
+  AssertIsBookmarksPage(browser()->GetActiveWebContents());
 
   // Switch to first tab and run command again.
   browser()->ActivateTabAt(0, true);
@@ -80,7 +80,7 @@ IN_PROC_BROWSER_TEST_F(BookmarksTest, CommandAgainGoesBackToBookmarksTab) {
 }
 
 IN_PROC_BROWSER_TEST_F(BookmarksTest, TwoCommandsOneTab) {
-  TestNavigationObserver navigation_observer(
+  content::TestNavigationObserver navigation_observer(
       content::NotificationService::AllSources());
   browser()->OpenBookmarkManager();
   browser()->OpenBookmarkManager();
@@ -92,5 +92,5 @@ IN_PROC_BROWSER_TEST_F(BookmarksTest, TwoCommandsOneTab) {
 IN_PROC_BROWSER_TEST_F(BookmarksTest, BookmarksLoaded) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIBookmarksURL));
   ASSERT_EQ(1, browser()->tab_count());
-  AssertIsBookmarksPage(browser()->GetSelectedWebContents());
+  AssertIsBookmarksPage(browser()->GetActiveWebContents());
 }

@@ -10,6 +10,8 @@
 #include "remoting/host/capturer.h"
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
+#include "remoting/protocol/client_stub.h"
+#include "remoting/protocol/clipboard_thread_proxy.h"
 
 namespace remoting {
 
@@ -21,10 +23,12 @@ ClientSession::ClientSession(
     : event_handler_(event_handler),
       connection_(connection.Pass()),
       client_jid_(connection_->session()->jid()),
+      is_authenticated_(false),
       host_event_stub_(host_event_stub),
       input_tracker_(host_event_stub_),
       remote_input_filter_(&input_tracker_),
       mouse_input_filter_(&remote_input_filter_),
+      client_clipboard_factory_(clipboard_echo_filter_.client_filter()),
       capturer_(capturer) {
   connection_->SetEventHandler(this);
 
@@ -34,6 +38,7 @@ ClientSession::ClientSession(
   connection_->set_clipboard_stub(this);
   connection_->set_host_stub(this);
   connection_->set_input_stub(this);
+  clipboard_echo_filter_.set_host_stub(host_event_stub_);
 }
 
 ClientSession::~ClientSession() {
@@ -50,7 +55,7 @@ void ClientSession::InjectClipboardEvent(
   if (disable_input_filter_.input_stub() == NULL)
     return;
 
-  host_event_stub_->InjectClipboardEvent(event);
+  clipboard_echo_filter_.host_filter()->InjectClipboardEvent(event);
 }
 
 void ClientSession::InjectKeyEvent(const protocol::KeyEvent& event) {
@@ -90,7 +95,9 @@ void ClientSession::OnConnectionAuthenticated(
     protocol::ConnectionToClient* connection) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
+  is_authenticated_ = true;
   auth_input_filter_.set_input_stub(&disable_input_filter_);
+  clipboard_echo_filter_.set_client_stub(connection_->client_stub());
   event_handler_->OnSessionAuthenticated(this);
 }
 
@@ -107,7 +114,7 @@ void ClientSession::OnConnectionClosed(
     protocol::ErrorCode error) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
-  if (!auth_input_filter_.input_stub())
+  if (!is_authenticated_)
     event_handler_->OnSessionAuthenticationFailed(this);
   auth_input_filter_.set_input_stub(NULL);
 
@@ -157,6 +164,15 @@ void ClientSession::SetDisableInputs(bool disable_inputs) {
   } else {
     disable_input_filter_.set_input_stub(&mouse_input_filter_);
   }
+}
+
+scoped_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
+  DCHECK(CalledOnValidThread());
+
+  return scoped_ptr<protocol::ClipboardStub>(
+      new protocol::ClipboardThreadProxy(
+          client_clipboard_factory_.GetWeakPtr(),
+          base::MessageLoopProxy::current()));
 }
 
 }  // namespace remoting

@@ -21,6 +21,7 @@ StarView::StarView(CommandUpdater* command_updater)
   set_id(VIEW_ID_STAR_BUTTON);
   SetToggled(false);
   set_accessibility_focusable(true);
+  TouchableLocationBarView::Init(this);
 }
 
 StarView::~StarView() {
@@ -29,8 +30,12 @@ StarView::~StarView() {
 void StarView::SetToggled(bool on) {
   SetTooltipText(l10n_util::GetStringUTF16(
       on ? IDS_TOOLTIP_STARRED : IDS_TOOLTIP_STAR));
-  SetImage(ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
+  SetImage(ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       on ? IDR_STAR_LIT : IDR_STAR));
+}
+
+int StarView::GetBuiltInHorizontalPadding() const {
+  return GetBuiltInHorizontalPaddingImpl();
 }
 
 void StarView::GetAccessibleState(ui::AccessibleViewState* state) {
@@ -55,6 +60,14 @@ bool StarView::OnMousePressed(const views::MouseEvent& event) {
 void StarView::OnMouseReleased(const views::MouseEvent& event) {
   if (event.IsOnlyLeftMouseButton() && HitTest(event.location()))
     command_updater_->ExecuteCommand(IDC_BOOKMARK_PAGE);
+}
+
+ui::GestureStatus StarView::OnGestureEvent(const views::GestureEvent& event) {
+  if (event.type() == ui::ET_GESTURE_TAP) {
+    command_updater_->ExecuteCommand(IDC_BOOKMARK_PAGE);
+    return ui::GESTURE_STATUS_CONSUMED;
+  }
+  return ui::GESTURE_STATUS_UNKNOWN;
 }
 
 bool StarView::OnKeyPressed(const views::KeyEvent& event) {

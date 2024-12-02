@@ -20,8 +20,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
+#include "chrome/common/extensions/command.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "chrome/common/extensions/extension_commands.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_permission_set.h"
@@ -42,20 +42,25 @@ class DictionaryValue;
 class ListValue;
 }
 
-namespace extensions {
-class Manifest;
-}
-
 namespace webkit_glue {
 struct WebIntentServiceData;
 }
 
+FORWARD_DECLARE_TEST(TabStripModelTest, Apps);
+
+namespace extensions {
+
+class Manifest;
+
 // Represents a Chrome extension.
 class Extension : public base::RefCountedThreadSafe<Extension> {
  public:
+  struct InstallWarning;
+
   typedef std::map<const std::string, GURL> URLOverrideMap;
   typedef std::vector<std::string> ScriptingWhitelist;
   typedef std::vector<linked_ptr<FileBrowserHandler> > FileBrowserHandlerList;
+  typedef std::vector<InstallWarning> InstallWarningVector;
 
   // What an extension was loaded from.
   // NOTE: These values are stored as integers in the preferences and used
@@ -138,7 +143,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   enum InputComponentType {
     INPUT_COMPONENT_TYPE_NONE = -1,
     INPUT_COMPONENT_TYPE_IME,
-    INPUT_COMPONENT_TYPE_VIRTUAL_KEYBOARD,
     INPUT_COMPONENT_TYPE_COUNT
   };
 
@@ -181,6 +185,20 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     std::vector<std::string> scopes;
   };
 
+  struct InstallWarning {
+    enum Format {
+      // IMPORTANT: Do not build HTML strings from user or developer-supplied
+      // input.
+      FORMAT_TEXT,
+      FORMAT_HTML,
+    };
+    InstallWarning(Format format, const std::string& message)
+        : format(format), message(message) {
+    }
+    Format format;
+    std::string message;
+  };
+
   enum InitFromValueFlags {
     NO_FLAGS = 0,
 
@@ -195,35 +213,27 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     // manifest version that Chrome understands.
     REQUIRE_MODERN_MANIFEST_VERSION = 1 << 1,
 
-    // |STRICT_ERROR_CHECKS| enables extra error checking, such as
-    // checks that URL patterns do not contain ports.  This error
-    // checking may find an error that a previous version of
-    // Chrome did not flag.  To avoid errors in installed extensions
-    // when Chrome is upgraded, strict error checking is only enabled
-    // when loading extensions as a developer would (such as loading
-    // an unpacked extension), or when loading an extension that is
-    // tied to a specific version of Chrome (such as a component
-    // extension).  Most callers will set the |STRICT_ERROR_CHECKS| bit when
-    // Extension::ShouldDoStrictErrorChecking(location) returns true.
-    STRICT_ERROR_CHECKS = 1 << 2,
-
     // |ALLOW_FILE_ACCESS| indicates that the user is allowing this extension
     // to have file access. If it's not present, then permissions and content
     // scripts that match file:/// URLs will be filtered out.
-    ALLOW_FILE_ACCESS = 1 << 3,
+    ALLOW_FILE_ACCESS = 1 << 2,
 
     // |FROM_WEBSTORE| indicates that the extension was installed from the
     // Chrome Web Store.
-    FROM_WEBSTORE = 1 << 4,
+    FROM_WEBSTORE = 1 << 3,
 
     // |FROM_BOOKMARK| indicates the extension was created using a mock App
     // created from a bookmark.
-    FROM_BOOKMARK = 1 << 5,
+    FROM_BOOKMARK = 1 << 4,
 
     // |FOLLOW_SYMLINKS_ANYWHERE| means that resources can be symlinks to
     // anywhere in the filesystem, rather than being restricted to the
     // extension directory.
-    FOLLOW_SYMLINKS_ANYWHERE = 1 << 6,
+    FOLLOW_SYMLINKS_ANYWHERE = 1 << 5,
+
+    // |ERROR_ON_PRIVATE_KEY| means that private keys inside an
+    // extension should be errors rather than warnings.
+    ERROR_ON_PRIVATE_KEY = 1 << 6,
   };
 
   static scoped_refptr<Extension> Create(const FilePath& path,
@@ -300,22 +310,13 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
            IsExternalLocation(location);
   }
 
-  // Whether extensions with |location| can be uninstalled or not. Policy
-  // controlled extensions are silently auto-installed and updated, and cannot
-  // be disabled by the user. The same applies for internal components.
-  static inline bool UserMayDisable(Location location) {
-    return location != Extension::EXTERNAL_POLICY_DOWNLOAD &&
-           location != Extension::COMPONENT;
-  }
-
-  // Whether extensions with |location| should be loaded with strict
-  // error checking.  Strict error checks may flag errors older versions
-  // of chrome did not detect.  To avoid breaking installed extensions,
-  // strict checks are disabled unless the location indicates that the
-  // developer is loading the extension, or the extension is a component
-  // of chrome.
-  static inline bool ShouldDoStrictErrorChecking(Location location) {
-    return location == Extension::LOAD ||
+  // Policy-required extensions are silently auto-installed and updated, and
+  // cannot be disabled or modified by the user in any way. The same applies
+  // to internal components.
+  // This method is not generally called directly; instead, it is accessed
+  // through the ManagementPolicy held by the ExtensionSystem.
+  static inline bool IsRequired(Location location) {
+    return location == Extension::EXTERNAL_POLICY_DOWNLOAD ||
            location == Extension::COMPONENT;
   }
 
@@ -345,6 +346,15 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Returns true if the specified resource is web accessible.
   bool IsResourceWebAccessible(const std::string& relative_path) const;
+
+  // Returns true if the specified page is sandboxed (served in a unique
+  // origin).
+  bool IsSandboxedPage(const std::string& relative_path) const;
+
+  // Returns the Content Security Policy that the specified resource should be
+  // served with.
+  std::string GetResourceContentSecurityPolicy(const std::string& relative_path)
+      const;
 
   // Returns true when 'web_accessible_resources' are defined for the extension.
   bool HasWebAccessibleResources() const;
@@ -501,6 +511,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // This method is also aware of certain special pages that extensions are
   // usually not allowed to run script on.
   bool CanExecuteScriptOnPage(const GURL& page_url,
+                              int tab_id,
                               const UserScript* script,
                               std::string* error) const;
 
@@ -512,7 +523,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // page as an image.  Since a page may contain sensitive information, this
   // is restricted to the extension's host permissions as well as the
   // extension page itself.
-  bool CanCaptureVisiblePage(const GURL& page_url, std::string* error) const;
+  bool CanCaptureVisiblePage(const GURL& page_url,
+                             int tab_id,
+                             std::string* error) const;
 
   // Returns true if this extension updates itself using the extension
   // gallery.
@@ -534,6 +547,27 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // settings page (i.e. chrome://extensions).
   bool ShouldDisplayInExtensionSettings() const;
 
+  // Returns true if the extension has a content script declared at |url|.
+  bool HasContentScriptAtURL(const GURL& url) const;
+
+  // Returns an ExtensionAction representing the script badge that should be
+  // shown for this extension in the location bar.
+  ExtensionAction* GetScriptBadge() const;
+
+  // Gets the tab-specific host permissions of |tab_id|, or NULL if there
+  // aren't any.
+  //
+  // This is a weak pointer. Callers should create a copy before mutating any
+  // tab specific permissions.
+  const URLPatternSet* GetTabSpecificHostPermissions(int tab_id) const;
+
+  // Sets the tab-specific host permissions of |tab_id| to |permissions|.
+  void SetTabSpecificHostPermissions(int tab_id,
+                                     const URLPatternSet& permissions) const;
+
+  // Clears the tab-specific host permissions of |tab_id|.
+  void ClearTabSpecificHostPermissions(int tab_id) const;
+
   // Accessors:
 
   const FilePath& path() const { return path_; }
@@ -543,7 +577,11 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const Version* version() const { return version_.get(); }
   const std::string VersionString() const;
   const std::string& name() const { return name_; }
-  const std::string public_key() const { return public_key_; }
+  const std::string& non_localized_name() const { return non_localized_name_; }
+  // Base64-encoded version of the key used to sign this extension.
+  // In pseudocode, returns
+  // base::Base64Encode(RSAPrivateKey(pem_file).ExportPublicKey()).
+  const std::string& public_key() const { return public_key_; }
   const std::string& description() const { return description_; }
   int manifest_version() const { return manifest_version_; }
   bool converted_from_user_script() const {
@@ -606,7 +644,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const ExtensionPermissionSet* required_permission_set() const {
     return required_permission_set_.get();
   }
-  const std::vector<std::string>& install_warnings() const {
+  // Appends |new_warnings| to install_warnings().
+  void AddInstallWarnings(const InstallWarningVector& new_warnings);
+  const InstallWarningVector& install_warnings() const {
     return install_warnings_;
   }
   const GURL& update_url() const { return update_url_; }
@@ -632,10 +672,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   int creation_flags() const { return creation_flags_; }
   bool from_webstore() const { return (creation_flags_ & FROM_WEBSTORE) != 0; }
   bool from_bookmark() const { return (creation_flags_ & FROM_BOOKMARK) != 0; }
-
-  const std::string& content_security_policy() const {
-    return content_security_policy_;
-  }
 
   // App-related.
   bool is_app() const {
@@ -683,9 +719,19 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     void SetActivePermissions(const ExtensionPermissionSet* active);
     scoped_refptr<const ExtensionPermissionSet> GetActivePermissions() const;
 
+    const URLPatternSet* GetTabSpecificHostPermissions(int tab_id) const;
+    void SetTabSpecificHostPermissions(int tab_id,
+                                       const URLPatternSet& permissions);
+    void ClearTabSpecificHostPermissions(int tab_id);
+
    private:
     friend class base::RefCountedThreadSafe<RuntimeData>;
+
     scoped_refptr<const ExtensionPermissionSet> active_permissions_;
+
+    typedef std::map<int, linked_ptr<const URLPatternSet> >
+        TabHostPermissionsMap;
+    TabHostPermissionsMap tab_specific_host_permissions_;
   };
 
   // Chooses the extension ID for an extension based on a variety of criteria.
@@ -745,12 +791,17 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool LoadPlugins(string16* error);
   bool LoadNaClModules(string16* error);
   bool LoadWebAccessibleResources(string16* error);
+  bool LoadSandboxedPages(string16* error);
   bool CheckRequirements(string16* error);
   bool LoadDefaultLocale(string16* error);
   bool LoadOfflineEnabled(string16* error);
   bool LoadOptionsPage(string16* error);
   bool LoadBackgroundScripts(string16* error);
+  bool LoadBackgroundScripts(const std::string& key, string16* error);
   bool LoadBackgroundPage(const ExtensionAPIPermissionSet& api_permissions,
+                          string16* error);
+  bool LoadBackgroundPage(const std::string& key,
+                          const ExtensionAPIPermissionSet& api_permissions,
                           string16* error);
   bool LoadBackgroundPersistent(
       const ExtensionAPIPermissionSet& api_permissions,
@@ -771,7 +822,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool LoadContentScripts(string16* error);
   bool LoadPageAction(string16* error);
   bool LoadBrowserAction(string16* error);
-  void GenerateBrowserActionIfPossible();
   bool LoadFileBrowserHandlers(string16* error);
   // Helper method to load a FileBrowserHandlerList from the manifest.
   FileBrowserHandlerList* LoadFileBrowserHandlersHelper(
@@ -845,6 +895,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Check that platform app features are valid. Called after InitFromValue.
   bool CheckPlatformAppFeatures(std::string* utf8_error);
 
+  // Check that features don't conflict. Called after InitFromValue.
+  bool CheckConflictingFeatures(std::string* utf8_error);
+
   // Cached images for this extension. This should only be touched on the UI
   // thread.
   mutable ImageCache image_cache_;
@@ -854,6 +907,10 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // displayed correctly in RTL context.
   // NOTE: Name is UTF-8 and may contain non-ascii characters.
   std::string name_;
+
+  // A non-localized version of the extension's name. This is useful for
+  // debug output.
+  std::string non_localized_name_;
 
   // The version of this extension's manifest. We increase the manifest
   // version when making breaking changes to the extension system.
@@ -890,7 +947,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   scoped_refptr<const ExtensionPermissionSet> required_permission_set_;
 
   // Any warnings that occurred when trying to create/parse the extension.
-  std::vector<std::string> install_warnings_;
+  InstallWarningVector install_warnings_;
 
   // The icons for the extension.
   ExtensionIconSet icons_;
@@ -923,6 +980,10 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // browser actions may be generated without any action declared.
   ExtensionAction::Type declared_action_type_;
 
+  // The extension's script badge. Lazily populated (and subsequently updated)
+  // as required by GetScriptBadge.
+  mutable scoped_ptr<ExtensionAction> script_badge_;
+
   // The extension's file browser actions, if any.
   scoped_ptr<FileBrowserHandlerList> file_browser_handlers_;
 
@@ -942,6 +1003,15 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Optional list of web accessible extension resources.
   base::hash_set<std::string> web_accessible_resources_;
+
+  // Optional list of extension pages that are sandboxed (served from a unique
+  // origin with a different Content Security Policy).
+  base::hash_set<std::string> sandboxed_pages_;
+
+  // Content Security Policy that should be used to enforce the sandbox used
+  // by sandboxed pages (guaranteed to have the "sandbox" directive without the
+  // "allow-same-origin" token).
+  std::string sandboxed_pages_content_security_policy_;
 
   // Optional URL to a master page of which a single instance should be always
   // loaded in the background.
@@ -1052,7 +1122,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   std::string content_security_policy_;
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionTest, LoadPageActionHelper);
-  FRIEND_TEST_ALL_PREFIXES(TabStripModelTest, Apps);
+  FRIEND_TEST_ALL_PREFIXES(::TabStripModelTest, Apps);
 
   DISALLOW_COPY_AND_ASSIGN(Extension);
 };
@@ -1113,5 +1183,7 @@ struct UpdatedExtensionPermissionsInfo {
       const ExtensionPermissionSet* permissions,
       Reason reason);
 };
+
+} // namespace extensions
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_H_

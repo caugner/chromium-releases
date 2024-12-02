@@ -147,13 +147,14 @@ void SpellCheckHostImpl::InitForRenderer(content::RenderProcessHost* process) {
 #if defined(OS_POSIX)
     file = base::FileDescriptor(GetDictionaryFile(), false);
 #elif defined(OS_WIN)
-    ::DuplicateHandle(::GetCurrentProcess(),
-                      GetDictionaryFile(),
-                      process->GetHandle(),
-                      &file,
-                      0,
-                      false,
-                      DUPLICATE_SAME_ACCESS);
+    BOOL ok = ::DuplicateHandle(::GetCurrentProcess(),
+                                GetDictionaryFile(),
+                                process->GetHandle(),
+                                &file,
+                                0,
+                                false,
+                                DUPLICATE_SAME_ACCESS);
+    DCHECK(ok) << ::GetLastError();
 #endif
   }
 
@@ -282,7 +283,7 @@ void SpellCheckHostImpl::DownloadDictionary() {
   }
   GURL url = GURL(std::string(kDownloadServerUrl) +
                   StringToLowerASCII(bdict_file));
-  fetcher_.reset(content::URLFetcher::Create(url, content::URLFetcher::GET,
+  fetcher_.reset(content::URLFetcher::Create(url, net::URLFetcher::GET,
                                 weak_ptr_factory_.GetWeakPtr()));
   fetcher_->SetRequestContext(request_context_getter_);
   fetcher_->SetLoadFlags(
@@ -321,10 +322,10 @@ void SpellCheckHostImpl::WriteWordToCustomDictionary(const std::string& word) {
     profile_->WriteWordToCustomDictionary(word);
 }
 
-void SpellCheckHostImpl::OnURLFetchComplete(const content::URLFetcher* source) {
+void SpellCheckHostImpl::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(source);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  scoped_ptr<content::URLFetcher> fetcher_destructor(fetcher_.release());
+  scoped_ptr<net::URLFetcher> fetcher_destructor(fetcher_.release());
 
   if ((source->GetResponseCode() / 100) != 2) {
     // Initialize will not try to download the file a second time.

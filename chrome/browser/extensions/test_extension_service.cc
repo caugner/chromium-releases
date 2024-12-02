@@ -5,8 +5,10 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/browser/extensions/test_extension_service.h"
-#include "chrome/browser/sync/api/sync_error_factory.h"
+#include "sync/api/sync_error_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using extensions::Extension;
 
 TestExtensionService::~TestExtensionService() {}
 
@@ -31,7 +33,7 @@ bool TestExtensionService::UpdateExtension(
     const GURL& download_url,
     CrxInstaller** out_crx_installer) {
   ADD_FAILURE();
-  return NULL;
+  return false;
 }
 
 const Extension* TestExtensionService::GetExtensionById(

@@ -8,11 +8,9 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/rand_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/instant/instant_delegate.h"
-#include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/instant/instant_loader.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -21,7 +19,7 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -35,23 +33,17 @@
 #include "ui/views/widget/widget.h"
 #endif
 
-InstantController::InstantController(Profile* profile,
-                                     InstantDelegate* delegate)
+InstantController::InstantController(InstantDelegate* delegate,
+                                     Mode mode)
     : delegate_(delegate),
-      template_url_service_(TemplateURLServiceFactory::GetForProfile(profile)),
-      tab_contents_(NULL),
       is_displayable_(false),
       is_out_of_date_(true),
       commit_on_mouse_up_(false),
       last_transition_type_(content::PAGE_TRANSITION_LINK),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
-  DCHECK(template_url_service_);
-  PrefService* prefs = profile->GetPrefs();
-  if (prefs && prefs->GetBoolean(prefs::kInstantEnabled)) {
-    // kInstantEnabledOnce was added after Instant, set it now to make sure it
-    // is correctly set.
-    prefs->SetBoolean(prefs::kInstantEnabledOnce, true);
-  }
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      mode_(mode) {
+  DCHECK(mode_ == INSTANT || mode_ == SUGGEST || mode_ == HIDDEN ||
+         mode_ == SILENT);
 }
 
 InstantController::~InstantController() {
@@ -65,9 +57,6 @@ void InstantController::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kInstantEnabled,
                              false,
                              PrefService::SYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kInstantEnabledOnce,
-                             false,
-                             PrefService::SYNCABLE_PREF);
 }
 
 // static
@@ -77,92 +66,71 @@ void InstantController::RecordMetrics(Profile* profile) {
 
 // static
 bool InstantController::IsEnabled(Profile* profile) {
-  return InstantFieldTrial::GetMode(profile) != InstantFieldTrial::CONTROL;
+  const PrefService* prefs = profile->GetPrefs();
+  return prefs && prefs->GetBoolean(prefs::kInstantEnabled);
 }
 
 // static
 void InstantController::Enable(Profile* profile) {
-  PrefService* service = profile->GetPrefs();
-  if (!service)
+  PrefService* prefs = profile->GetPrefs();
+  if (!prefs)
     return;
 
-  base::Histogram* histogram = base::LinearHistogram::FactoryGet(
-      "Instant.Preference" + InstantFieldTrial::GetModeAsString(profile),
-      1, 2, 3, base::Histogram::kUmaTargetedHistogramFlag);
-  histogram->Add(1);
-
-  service->SetBoolean(prefs::kInstantEnabledOnce, true);
-  service->SetBoolean(prefs::kInstantEnabled, true);
-  service->SetBoolean(prefs::kInstantConfirmDialogShown, true);
+  prefs->SetBoolean(prefs::kInstantEnabled, true);
+  prefs->SetBoolean(prefs::kInstantConfirmDialogShown, true);
+  UMA_HISTOGRAM_ENUMERATION("Instant.Preference", 1, 2);
 }
 
 // static
 void InstantController::Disable(Profile* profile) {
-  PrefService* service = profile->GetPrefs();
-  if (!service || !IsEnabled(profile))
+  PrefService* prefs = profile->GetPrefs();
+  if (!prefs)
     return;
 
-  base::Histogram* histogram = base::LinearHistogram::FactoryGet(
-      "Instant.Preference" + InstantFieldTrial::GetModeAsString(profile),
-      1, 2, 3, base::Histogram::kUmaTargetedHistogramFlag);
-  histogram->Add(0);
-
-  service->SetBoolean(prefs::kInstantEnabledOnce, true);
-  service->SetBoolean(prefs::kInstantEnabled, false);
+  prefs->SetBoolean(prefs::kInstantEnabled, false);
+  UMA_HISTOGRAM_ENUMERATION("Instant.Preference", 0, 2);
 }
 
-// static
-bool InstantController::CommitIfCurrent(InstantController* controller) {
-  if (controller && controller->IsCurrent()) {
-    controller->CommitCurrentPreview(INSTANT_COMMIT_PRESSED_ENTER);
-    return true;
-  }
-  return false;
-}
-
-bool InstantController::Update(TabContentsWrapper* tab_contents,
-                               const AutocompleteMatch& match,
+bool InstantController::Update(const AutocompleteMatch& match,
                                const string16& user_text,
                                bool verbatim,
                                string16* suggested_text) {
   suggested_text->clear();
 
-  tab_contents_ = tab_contents;
+  is_out_of_date_ = false;
   commit_on_mouse_up_ = false;
   last_transition_type_ = match.transition;
   last_url_ = match.destination_url;
   last_user_text_ = user_text;
 
-  const TemplateURL* template_url =
-      match.GetTemplateURL(tab_contents_->profile());
-  const TemplateURL* default_t_url =
-      template_url_service_->GetDefaultSearchProvider();
-  if (!IsValidInstantTemplateURL(template_url) || !default_t_url ||
-      (template_url->id() != default_t_url->id())) {
+  TabContents* tab_contents = delegate_->GetInstantHostTabContents();
+  if (!tab_contents) {
     Hide();
     return false;
   }
 
-  if (!loader_.get()) {
-    loader_.reset(new InstantLoader(this, template_url->id(),
-        InstantFieldTrial::GetModeAsString(tab_contents->profile())));
+  Profile* profile = tab_contents->profile();
+  const TemplateURL* template_url = match.GetTemplateURL(profile);
+  const TemplateURL* default_t_url =
+      TemplateURLServiceFactory::GetForProfile(profile)
+                                 ->GetDefaultSearchProvider();
+  if (!IsValidInstantTemplateURL(template_url) || !default_t_url ||
+      template_url->id() != default_t_url->id()) {
+    Hide();
+    return false;
   }
 
-  // In some rare cases (involving group policy), Instant can go from the field
-  // trial to normal mode, with no intervening call to DestroyPreviewContents().
-  // This would leave the loader in a weird state, which would manifest if the
-  // user pressed <Enter> without calling Update(). TODO(sreeram): Handle it.
-  if (InstantFieldTrial::GetMode(tab_contents->profile()) ==
-          InstantFieldTrial::SILENT) {
-    // For the SILENT mode, we process |user_text| at commit time, which means
-    // we're never really out of date.
-    is_out_of_date_ = false;
+  if (!loader_.get() || loader_->template_url_id() != template_url->id())
+    loader_.reset(new InstantLoader(this, template_url->id(), std::string()));
+
+  if (mode_ == SILENT) {
+    // For the SILENT mode, we process |user_text| at commit time.
     loader_->MaybeLoadInstantURL(tab_contents, template_url);
     return true;
   }
 
-  UpdateLoader(template_url, match.destination_url, match.transition, user_text,
-               verbatim, suggested_text);
+  UpdateLoader(tab_contents, template_url, match.destination_url,
+               match.transition, user_text, verbatim, suggested_text);
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
@@ -179,11 +147,8 @@ void InstantController::SetOmniboxBounds(const gfx::Rect& bounds) {
   // bounds are in sync.
   omnibox_bounds_ = bounds;
 
-  if (loader_.get() && !is_out_of_date_ &&
-      InstantFieldTrial::GetMode(tab_contents_->profile()) ==
-          InstantFieldTrial::INSTANT) {
+  if (loader_.get() && !is_out_of_date_ && mode_ == INSTANT)
     loader_->SetOmniboxBounds(bounds);
-  }
 }
 
 void InstantController::DestroyPreviewContents() {
@@ -192,7 +157,10 @@ void InstantController::DestroyPreviewContents() {
     return;
   }
 
-  delegate_->HideInstant();
+  if (is_displayable_) {
+    is_displayable_ = false;
+    delegate_->HideInstant();
+  }
   delete ReleasePreviewContents(INSTANT_COMMIT_DESTROY, NULL);
 }
 
@@ -213,20 +181,20 @@ bool InstantController::IsCurrent() const {
 }
 
 bool InstantController::PrepareForCommit() {
-  // Basic checks to prevent accessing a dangling |tab_contents_| pointer.
-  // http://crbug.com/100521.
   if (is_out_of_date_ || !loader_.get())
     return false;
 
-  const InstantFieldTrial::Mode mode =
-      InstantFieldTrial::GetMode(tab_contents_->profile());
-
   // If we are in the visible (INSTANT) mode, return the status of the preview.
-  if (mode == InstantFieldTrial::INSTANT)
+  if (mode_ == INSTANT)
     return IsCurrent();
 
+  TabContents* tab_contents = delegate_->GetInstantHostTabContents();
+  if (!tab_contents)
+    return false;
+
   const TemplateURL* template_url =
-      template_url_service_->GetDefaultSearchProvider();
+      TemplateURLServiceFactory::GetForProfile(tab_contents->profile())
+                                 ->GetDefaultSearchProvider();
   if (!IsValidInstantTemplateURL(template_url) ||
       loader_->template_url_id() != template_url->id() ||
       loader_->IsNavigationPending() ||
@@ -236,27 +204,36 @@ bool InstantController::PrepareForCommit() {
 
   // In the SUGGEST and HIDDEN modes, we must have sent an Update() by now, so
   // check if the loader failed to process it.
-  if ((mode == InstantFieldTrial::SUGGEST || mode == InstantFieldTrial::HIDDEN)
+  if ((mode_ == SUGGEST || mode_ == HIDDEN)
       && (!loader_->ready() || !loader_->http_status_ok())) {
     return false;
   }
 
   // Ignore the suggested text, as we are about to commit the verbatim query.
   string16 suggested_text;
-  UpdateLoader(template_url, last_url_, last_transition_type_, last_user_text_,
-               true, &suggested_text);
+  UpdateLoader(tab_contents, template_url, last_url_, last_transition_type_,
+               last_user_text_, true, &suggested_text);
   return true;
 }
 
-TabContentsWrapper* InstantController::CommitCurrentPreview(
-    InstantCommitType type) {
+TabContents* InstantController::CommitCurrentPreview(InstantCommitType type) {
   DCHECK(loader_.get());
-  TabContentsWrapper* tab = ReleasePreviewContents(type, tab_contents_);
-  tab->web_contents()->GetController().CopyStateFromAndPrune(
-      &tab_contents_->web_contents()->GetController());
-  delegate_->CommitInstant(tab);
-  CompleteRelease(tab);
-  return tab;
+  TabContents* tab_contents = delegate_->GetInstantHostTabContents();
+  DCHECK(tab_contents);
+  TabContents* preview = ReleasePreviewContents(type, tab_contents);
+  preview->web_contents()->GetController().CopyStateFromAndPrune(
+      &tab_contents->web_contents()->GetController());
+  delegate_->CommitInstant(preview);
+  CompleteRelease(preview);
+  return preview;
+}
+
+bool InstantController::CommitIfCurrent() {
+  if (IsCurrent()) {
+    CommitCurrentPreview(INSTANT_COMMIT_PRESSED_ENTER);
+    return true;
+  }
+  return false;
 }
 
 void InstantController::SetCommitOnMouseUp() {
@@ -350,29 +327,29 @@ void InstantController::OnAutocompleteLostFocus(
 }
 #endif
 
-void InstantController::OnAutocompleteGotFocus(
-    TabContentsWrapper* tab_contents) {
+void InstantController::OnAutocompleteGotFocus() {
+  TabContents* tab_contents = delegate_->GetInstantHostTabContents();
+  if (!tab_contents)
+    return;
+
   const TemplateURL* template_url =
-      template_url_service_->GetDefaultSearchProvider();
+      TemplateURLServiceFactory::GetForProfile(tab_contents->profile())
+                                 ->GetDefaultSearchProvider();
   if (!IsValidInstantTemplateURL(template_url))
     return;
 
-  tab_contents_ = tab_contents;
-
-  if (!loader_.get()) {
-    loader_.reset(new InstantLoader(this, template_url->id(),
-        InstantFieldTrial::GetModeAsString(tab_contents->profile())));
-  }
+  if (!loader_.get() || loader_->template_url_id() != template_url->id())
+    loader_.reset(new InstantLoader(this, template_url->id(), std::string()));
   loader_->MaybeLoadInstantURL(tab_contents, template_url);
 }
 
-TabContentsWrapper* InstantController::ReleasePreviewContents(
+TabContents* InstantController::ReleasePreviewContents(
     InstantCommitType type,
-    TabContentsWrapper* current_tab) {
+    TabContents* current_tab) {
   if (!loader_.get())
     return NULL;
 
-  TabContentsWrapper* tab = loader_->ReleasePreviewContents(type, current_tab);
+  TabContents* tab = loader_->ReleasePreviewContents(type, current_tab);
   ClearBlacklist();
   is_out_of_date_ = true;
   is_displayable_ = false;
@@ -382,11 +359,11 @@ TabContentsWrapper* InstantController::ReleasePreviewContents(
   return tab;
 }
 
-void InstantController::CompleteRelease(TabContentsWrapper* tab) {
+void InstantController::CompleteRelease(TabContents* tab) {
   tab->blocked_content_tab_helper()->SetAllContentsBlocked(false);
 }
 
-TabContentsWrapper* InstantController::GetPreviewContents() const {
+TabContents* InstantController::GetPreviewContents() const {
   return loader_.get() ? loader_->preview_contents() : NULL;
 }
 
@@ -402,9 +379,7 @@ void InstantController::SetSuggestedTextFor(
   if (is_out_of_date_)
     return;
 
-  const InstantFieldTrial::Mode mode =
-      InstantFieldTrial::GetMode(tab_contents_->profile());
-  if (mode == InstantFieldTrial::INSTANT || mode == InstantFieldTrial::SUGGEST)
+  if (mode_ == INSTANT || mode_ == SUGGEST)
     delegate_->SetSuggestedText(text, behavior);
 }
 
@@ -449,24 +424,15 @@ void InstantController::InstantLoaderContentsFocused() {
 #if defined(USE_AURA)
   // On aura the omnibox only receives a focus lost if we initiate the focus
   // change. This does that.
-  if (InstantFieldTrial::GetMode(tab_contents_->profile()) ==
-          InstantFieldTrial::INSTANT) {
+  if (mode_ == INSTANT)
     delegate_->InstantPreviewFocused();
-  }
 #endif
 }
 
 void InstantController::UpdateIsDisplayable() {
-  if (!is_out_of_date_ &&
-      InstantFieldTrial::GetMode(tab_contents_->profile()) !=
-          InstantFieldTrial::INSTANT) {
-    return;
-  }
-
-  bool displayable =
-      (!is_out_of_date_ && loader_.get() && loader_->ready() &&
-       loader_->http_status_ok());
-  if (displayable == is_displayable_)
+  bool displayable = !is_out_of_date_ && loader_.get() && loader_->ready() &&
+                     loader_->http_status_ok();
+  if (displayable == is_displayable_ || mode_ != INSTANT)
     return;
 
   is_displayable_ = displayable;
@@ -481,22 +447,20 @@ void InstantController::UpdateIsDisplayable() {
   }
 }
 
-void InstantController::UpdateLoader(const TemplateURL* template_url,
+void InstantController::UpdateLoader(TabContents* tab_contents,
+                                     const TemplateURL* template_url,
                                      const GURL& url,
                                      content::PageTransition transition_type,
                                      const string16& user_text,
                                      bool verbatim,
                                      string16* suggested_text) {
-  is_out_of_date_ = false;
-  const InstantFieldTrial::Mode mode =
-      InstantFieldTrial::GetMode(tab_contents_->profile());
-  if (mode == InstantFieldTrial::INSTANT)
+  if (mode_ == INSTANT)
     loader_->SetOmniboxBounds(omnibox_bounds_);
-  loader_->Update(tab_contents_, template_url, url, transition_type, user_text,
+  loader_->Update(tab_contents, template_url, url, transition_type, user_text,
                   verbatim, suggested_text);
   UpdateIsDisplayable();
-  // For the HIDDEN and SILENT field trials, don't send back suggestions.
-  if (mode == InstantFieldTrial::HIDDEN || mode == InstantFieldTrial::SILENT)
+  // For the HIDDEN and SILENT modes, don't send back suggestions.
+  if (mode_ == HIDDEN || mode_ == SILENT)
     suggested_text->clear();
 }
 

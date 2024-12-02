@@ -38,6 +38,7 @@
 #include "net/server/http_server_request_info.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "ui/base/layout.h"
 
 namespace content {
 
@@ -128,14 +129,12 @@ int DevToolsHttpHandler::GetFrontendResourceId(const std::string& name) {
 
 // static
 DevToolsHttpHandler* DevToolsHttpHandler::Start(
-    const std::string& ip,
-    int port,
+    const net::StreamListenSocketFactory* socket_factory,
     const std::string& frontend_url,
     net::URLRequestContextGetter* request_context_getter,
     DevToolsHttpHandlerDelegate* delegate) {
   DevToolsHttpHandlerImpl* http_handler =
-      new DevToolsHttpHandlerImpl(ip,
-                                  port,
+      new DevToolsHttpHandlerImpl(socket_factory,
                                   frontend_url,
                                   request_context_getter,
                                   delegate);
@@ -230,7 +229,8 @@ void DevToolsHttpHandlerImpl::OnHttpRequest(
       int resource_id = DevToolsHttpHandler::GetFrontendResourceId(filename);
       if (resource_id != -1) {
         base::StringPiece data =
-            content::GetContentClient()->GetDataResource(resource_id);
+            content::GetContentClient()->GetDataResource(
+                resource_id, ui::SCALE_FACTOR_NONE);
         server_->Send200(connection_id,
                          data.as_string(),
                          GetMimeType(filename));
@@ -528,14 +528,12 @@ void DevToolsHttpHandlerImpl::OnReadCompleted(net::URLRequest* request,
 }
 
 DevToolsHttpHandlerImpl::DevToolsHttpHandlerImpl(
-    const std::string& ip,
-    int port,
+    const net::StreamListenSocketFactory* socket_factory,
     const std::string& frontend_url,
     net::URLRequestContextGetter* request_context_getter,
     DevToolsHttpHandlerDelegate* delegate)
-    : ip_(ip),
-      port_(port),
-      overridden_frontend_url_(frontend_url),
+    : overridden_frontend_url_(frontend_url),
+      socket_factory_(socket_factory),
       request_context_getter_(request_context_getter),
       delegate_(delegate) {
   if (overridden_frontend_url_.empty())
@@ -548,7 +546,7 @@ DevToolsHttpHandlerImpl::DevToolsHttpHandlerImpl(
 }
 
 void DevToolsHttpHandlerImpl::Init() {
-  server_ = new net::HttpServer(ip_, port_, this);
+  server_ = new net::HttpServer(*socket_factory_.get(), this);
 }
 
 // Run on I/O thread

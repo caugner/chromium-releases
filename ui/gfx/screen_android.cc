@@ -5,23 +5,32 @@
 #include "ui/gfx/screen.h"
 
 #include "base/logging.h"
-#include "ui/gfx/monitor.h"
+#include "ui/gfx/display.h"
 
 namespace gfx {
 
 // static
-gfx::Monitor Screen::GetPrimaryMonitor() {
+bool Screen::IsDIPEnabled() {
+  return false;
+}
+
+// static
+gfx::Display Screen::GetPrimaryDisplay() {
   NOTIMPLEMENTED() << "crbug.com/117839 tracks implementation";
-  return gfx::Monitor(0, gfx::Rect(0, 0, 1, 1));
+  return gfx::Display(0, gfx::Rect(0, 0, 1, 1));
 }
 
 // static
-gfx::Monitor Screen::GetMonitorNearestWindow(gfx::NativeView view) {
-  return GetPrimaryMonitor();
+gfx::Display Screen::GetDisplayNearestWindow(gfx::NativeView view) {
+  return GetPrimaryDisplay();
 }
 
 // static
-int Screen::GetNumMonitors() {
+gfx::Display Screen::GetDisplayNearestPoint(const gfx::Point& point) {
+  return GetPrimaryDisplay();
+}
+
+int Screen::GetNumDisplays() {
   return 1;
 }
 

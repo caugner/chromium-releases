@@ -108,7 +108,7 @@ void ClientSideDetectionService::SetEnabledAndRefreshState(bool enabled) {
     // Cancel pending requests.
     model_fetcher_.reset();
     // Invoke pending callbacks with a false verdict.
-    for (std::map<const content::URLFetcher*, ClientReportInfo*>::iterator it =
+    for (std::map<const net::URLFetcher*, ClientReportInfo*>::iterator it =
              client_phishing_reports_.begin();
          it != client_phishing_reports_.end(); ++it) {
       ClientReportInfo* info = it->second;
@@ -181,7 +181,7 @@ bool ClientSideDetectionService::IsBadIpAddress(
 }
 
 void ClientSideDetectionService::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   std::string data;
   source->GetResponseAsString(&data);
   if (source == model_fetcher_.get()) {
@@ -251,7 +251,7 @@ void ClientSideDetectionService::StartFetchModel() {
     // network if the model isn't in the cache.
     model_fetcher_.reset(content::URLFetcher::Create(
         0 /* ID used for testing */, GURL(kClientModelUrl),
-        content::URLFetcher::GET, this));
+        net::URLFetcher::GET, this));
     model_fetcher_->SetRequestContext(request_context_getter_.get());
     model_fetcher_->Start();
   }
@@ -302,9 +302,9 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
     return;
   }
 
-  content::URLFetcher* fetcher = content::URLFetcher::Create(
+  net::URLFetcher* fetcher = content::URLFetcher::Create(
       0 /* ID used for testing */, GURL(kClientReportPhishingUrl),
-      content::URLFetcher::POST, this);
+      net::URLFetcher::POST, this);
 
   // Remember which callback and URL correspond to the current fetcher object.
   ClientReportInfo* info = new ClientReportInfo;
@@ -322,7 +322,7 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
 }
 
 void ClientSideDetectionService::HandleModelResponse(
-    const content::URLFetcher* source,
+    const net::URLFetcher* source,
     const GURL& url,
     const net::URLRequestStatus& status,
     int response_code,
@@ -363,7 +363,7 @@ void ClientSideDetectionService::HandleModelResponse(
 }
 
 void ClientSideDetectionService::HandlePhishingVerdict(
-    const content::URLFetcher* source,
+    const net::URLFetcher* source,
     const GURL& url,
     const net::URLRequestStatus& status,
     int response_code,

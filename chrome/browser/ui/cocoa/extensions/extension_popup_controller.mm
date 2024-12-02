@@ -136,6 +136,11 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
                         defer:YES]);
   if (!window.get())
     return nil;
+
+  // Don't blur the extension window background. This can interfer with OpenGL
+  // drawing on the window. See http://openradar.appspot.com/11920246
+  [window setHasBlurredBackground:NO];
+
   anchoredAt = [parentWindow convertBaseToScreen:anchoredAt];
   if ((self = [super initWithWindow:window
                        parentWindow:parentWindow
@@ -253,7 +258,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   // closed, so no need to do that here.
   gPopup = [[ExtensionPopupController alloc]
       initWithHost:host
-      parentWindow:browser->window()->GetNativeHandle()
+      parentWindow:browser->window()->GetNativeWindow()
         anchoredAt:anchoredAt
      arrowLocation:arrowLocation
            devMode:devMode];
@@ -288,7 +293,7 @@ class DevtoolsNotificationBridge : public content::NotificationObserver {
   frame.size.height += info_bubble::kBubbleArrowHeight +
                        info_bubble::kBubbleCornerRadius;
   frame.size.width += info_bubble::kBubbleCornerRadius;
-  frame = [extensionView_ convertRectToBase:frame];
+  frame = [extensionView_ convertRect:frame toView:nil];
   // Adjust the origin according to the height and width so that the arrow is
   // positioned correctly at the middle and slightly down from the button.
   NSPoint windowOrigin = self.anchorPoint;

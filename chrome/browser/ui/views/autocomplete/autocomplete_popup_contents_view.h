@@ -32,11 +32,13 @@ class AutocompletePopupContentsView : public views::View,
                                       public AutocompletePopupView,
                                       public ui::AnimationDelegate {
  public:
-  AutocompletePopupContentsView(const gfx::Font& font,
-                                OmniboxView* omnibox_view,
-                                AutocompleteEditModel* edit_model,
-                                views::View* location_bar);
-  virtual ~AutocompletePopupContentsView();
+  // Creates the appropriate type of omnibox dropdown for the
+  // current environment, e.g. desktop vs. touch optimized layout.
+  static AutocompletePopupContentsView* CreateForEnvironment(
+      const gfx::Font& font,
+      OmniboxView* omnibox_view,
+      AutocompleteEditModel* edit_model,
+      views::View* location_bar);
 
   // Returns the bounds the popup should be shown at. This is the display bounds
   // and includes offsets for the dropshadow which this view's border renders.
@@ -71,8 +73,16 @@ class AutocompletePopupContentsView : public views::View,
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(
+      const views::GestureEvent& event) OVERRIDE;
 
  protected:
+  AutocompletePopupContentsView(const gfx::Font& font,
+                                OmniboxView* omnibox_view,
+                                AutocompleteEditModel* edit_model,
+                                views::View* location_bar);
+  virtual ~AutocompletePopupContentsView();
+
   virtual void PaintResultViews(gfx::Canvas* canvas);
 
   // Calculates the height needed to show all the results in the model.
@@ -95,6 +105,9 @@ class AutocompletePopupContentsView : public views::View,
 
  private:
   class AutocompletePopupWidget;
+
+  // Call immediately after construction.
+  void Init();
 
   // Returns true if the model has a match at the specified index.
   bool HasMatchAt(size_t index) const;
@@ -120,6 +133,16 @@ class AutocompletePopupContentsView : public views::View,
   // coordinates. Returns AutocompletePopupModel::kNoMatch if there isn't a
   // match at the specified point.
   size_t GetIndexForPoint(const gfx::Point& point);
+
+  // Processes a located event (e.g. mouse/gesture) and sets the selection/hover
+  // state of a line in the list.
+  void UpdateLineEvent(const views::LocatedEvent& event,
+                       bool should_set_selected_line);
+
+  // Opens an entry from the list depending on the event and the selected
+  // disposition.
+  void OpenSelectedLine(const views::LocatedEvent& event,
+                        WindowOpenDisposition disposition);
 
   // Returns the target bounds given the specified content height.
   gfx::Rect CalculateTargetBounds(int h);

@@ -19,7 +19,6 @@
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/fileapi/obfuscated_file_util.h"
-#include "webkit/fileapi/quota_file_util.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/quota/quota_types.h"
 
@@ -66,7 +65,6 @@ class FileSystemQuotaClientTest : public testing::Test {
  protected:
   FileSystemQuotaClient* NewQuotaClient(bool is_incognito) {
     return new FileSystemQuotaClient(
-        base::MessageLoopProxy::current(),
         file_system_context_, is_incognito);
   }
 
@@ -251,6 +249,7 @@ class FileSystemQuotaClientTest : public testing::Test {
   }
 
   ScopedTempDir data_dir_;
+  MessageLoop message_loop_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::WeakPtrFactory<FileSystemQuotaClientTest> weak_factory_;
   int64 usage_;

@@ -78,7 +78,8 @@ PepperView::PepperView(ChromotingInstance* instance,
     clip_area_(SkIRect::MakeEmpty()),
     source_size_(SkISize::Make(0, 0)),
     flush_pending_(false),
-    is_initialized_(false) {
+    is_initialized_(false),
+    frame_received_(false) {
 }
 
 PepperView::~PepperView() {
@@ -95,7 +96,7 @@ bool PepperView::Initialize() {
 }
 
 void PepperView::TearDown() {
-  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
   DCHECK(is_initialized_);
 
   is_initialized_ = false;
@@ -116,7 +117,7 @@ void PepperView::TearDown() {
 
 void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
                                     protocol::ErrorCode error) {
-  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
 
   switch (state) {
     case protocol::ConnectionToHost::CONNECTING:
@@ -146,6 +147,10 @@ void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
 }
 
 protocol::ClipboardStub* PepperView::GetClipboardStub() {
+  return instance_;
+}
+
+protocol::CursorShapeStub* PepperView::GetCursorShapeStub() {
   return instance_;
 }
 
@@ -183,8 +188,12 @@ void PepperView::ApplyBuffer(const SkISize& view_size,
                              const SkIRect& clip_area,
                              pp::ImageData* buffer,
                              const SkRegion& region) {
-  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
 
+  if (!frame_received_) {
+    instance_->OnFirstFrameReceived();
+    frame_received_ = true;
+  }
   // Currently we cannot use the data in the buffer is scale factor has changed
   // already.
   // TODO(alexeypa): We could rescale and draw it (or even draw it without
@@ -199,7 +208,7 @@ void PepperView::ApplyBuffer(const SkISize& view_size,
 }
 
 void PepperView::ReturnBuffer(pp::ImageData* buffer) {
-  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
 
   // Free the buffer if there is nothing to paint.
   if (!is_initialized_) {
@@ -219,7 +228,7 @@ void PepperView::ReturnBuffer(pp::ImageData* buffer) {
 }
 
 void PepperView::SetSourceSize(const SkISize& source_size) {
-  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
 
   if (source_size_ == source_size)
     return;
@@ -328,7 +337,7 @@ void PepperView::FlushBuffer(const SkIRect& clip_area,
 void PepperView::OnFlushDone(base::Time paint_start,
                              pp::ImageData* buffer,
                              int result) {
-  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
+  DCHECK(context_->main_task_runner()->BelongsToCurrentThread());
   DCHECK(flush_pending_);
 
   instance_->GetStats()->video_paint_ms()->Record(

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/update_recommended_message_box.h"
 
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -32,17 +32,16 @@ void UpdateRecommendedMessageBox::Show(gfx::NativeWindow parent_window) {
 UpdateRecommendedMessageBox::UpdateRecommendedMessageBox() {
   const int kDialogWidth = 400;
 #if defined(OS_CHROMEOS)
-  const int kProductNameID = IDS_PRODUCT_OS_NAME;
+  const int kProductNameID = IDS_SHORT_PRODUCT_OS_NAME;
 #else
   const int kProductNameID = IDS_PRODUCT_NAME;
 #endif
   const string16 product_name = l10n_util::GetStringUTF16(kProductNameID);
+  views::MessageBoxView::InitParams params(
+      l10n_util::GetStringFUTF16(IDS_UPDATE_RECOMMENDED, product_name));
+  params.message_width = kDialogWidth;
   // Also deleted when the window closes.
-  message_box_view_ = new views::MessageBoxView(
-      views::MessageBoxView::NO_OPTIONS,
-      l10n_util::GetStringFUTF16(IDS_UPDATE_RECOMMENDED, product_name),
-      string16(),
-      kDialogWidth);
+  message_box_view_ = new views::MessageBoxView(params);
 }
 
 UpdateRecommendedMessageBox::~UpdateRecommendedMessageBox() {
@@ -53,7 +52,7 @@ bool UpdateRecommendedMessageBox::Accept() {
   chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
   // If running the Chrome OS build, but we're not on the device, fall through
 #endif
-  BrowserList::AttemptRestart();
+  browser::AttemptRestart();
   return true;
 }
 

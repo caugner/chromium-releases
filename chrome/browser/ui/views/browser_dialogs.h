@@ -19,15 +19,19 @@
 
 class BrowserView;
 class EditSearchEngineControllerDelegate;
-class Extension;
 class FindBar;
 class GURL;
 class Profile;
-class TabContentsWrapper;
+class TabContents;
 class TemplateURL;
 
 namespace content {
+class PageNavigator;
 struct SSLStatus;
+}
+
+namespace extensions {
+class Extension;
 }
 
 namespace gfx {
@@ -36,7 +40,6 @@ class Size;
 
 namespace views {
 class View;
-class Widget;
 }
 
 namespace browser {
@@ -59,11 +62,11 @@ void ShowPageInfoBubble(views::View* anchor_view,
                         Profile* profile,
                         const GURL& url,
                         const content::SSLStatus& ssl,
-                        bool show_history);
+                        bool show_history,
+                        content::PageNavigator* navigator);
 
 // Shows the about dialog. See AboutChromeView.
-views::Widget* ShowAboutChromeView(gfx::NativeWindow parent,
-                                   Profile* profile);
+void ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile);
 
 // Creates and returns a find bar for the given browser window. See FindBarWin.
 FindBar* CreateFindBar(BrowserView* browser_view);
@@ -73,11 +76,6 @@ void ShowTaskManager();
 
 // Shows the Task Manager, highlighting the background pages.
 void ShowBackgroundPages();
-
-#if defined(OS_CHROMEOS)
-// Shows the Login Wizard.
-void ShowLoginWizard(const std::string& start_screen, const gfx::Size& size);
-#endif
 
 // Shows a dialog box that allows a search engine to be edited. |template_url|
 // is the search engine being edited. If it is NULL, then the dialog will add a
@@ -91,12 +89,12 @@ void EditSearchEngine(gfx::NativeWindow parent,
 
 // Shows the create web app shortcut dialog box.
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
-                                     TabContentsWrapper* tab_contents);
+                                     TabContents* tab_contents);
 
 // Shows the create chrome app shortcut dialog box.
 void ShowCreateChromeAppShortcutsDialog(gfx::NativeWindow parent_window,
                                         Profile* profile,
-                                        const Extension* app);
+                                        const extensions::Extension* app);
 
 }  // namespace browser
 

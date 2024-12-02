@@ -8,6 +8,7 @@
 
 #include <set>
 #include <stack>
+#include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -44,6 +45,7 @@ class Rect;
 namespace ui {
 class Accelerator;
 class Compositor;
+class Layer;
 class OSExchangeData;
 class ThemeProvider;
 enum TouchStatus;
@@ -99,6 +101,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     virtual void OnWidgetVisibilityChanged(Widget* widget, bool visible) {}
     virtual void OnWidgetActivationChanged(Widget* widget, bool active) {}
     virtual void OnWidgetMoved(Widget* widget) {}
+   protected:
+    virtual ~Observer() {}
   };
 
   typedef std::set<Widget*> Widgets;
@@ -545,6 +549,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Invokes method of same name on the NativeWidget.
   void ReorderLayers();
 
+  // Schedules an update to the root layers. The actual processing occurs when
+  // GetRootLayers() is invoked.
+  void UpdateRootLayers();
+
   // Notifies assistive technology that an accessibility event has
   // occurred on |view|, such as when the view is focused or when its
   // value changes. Pass true for |send_native_event| except for rare
@@ -566,11 +574,15 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     return native_widget_;
   }
 
-  // Sets mouse capture on the specified view.
-  void SetMouseCapture(views::View* view);
+  // Sets capture to the specified view. This makes it so that all mouse, touch
+  // and gesture events go to |view|.
+  void SetCapture(views::View* view);
 
-  // Releases mouse capture.
-  void ReleaseMouseCapture();
+  // Releases capture.
+  void ReleaseCapture();
+
+  // Returns true if the widget has capture.
+  bool HasCapture();
 
   // Returns the current event being processed. If there are multiple events
   // being processed at the same time (e.g. one event triggers another event),
@@ -618,8 +630,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual bool IsInactiveRenderingDisabled() const OVERRIDE;
   virtual void EnableInactiveRendering() OVERRIDE;
   virtual void OnNativeWidgetActivationChanged(bool active) OVERRIDE;
-  virtual void OnNativeFocus(gfx::NativeView focused_view) OVERRIDE;
-  virtual void OnNativeBlur(gfx::NativeView focused_view) OVERRIDE;
+  virtual void OnNativeFocus(gfx::NativeView old_focused_view) OVERRIDE;
+  virtual void OnNativeBlur(gfx::NativeView new_focused_view) OVERRIDE;
   virtual void OnNativeWidgetVisibilityChanged(bool visible) OVERRIDE;
   virtual void OnNativeWidgetCreated() OVERRIDE;
   virtual void OnNativeWidgetDestroying() OVERRIDE;
@@ -642,6 +654,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
   virtual bool ExecuteCommand(int command_id) OVERRIDE;
   virtual InputMethod* GetInputMethodDirect() OVERRIDE;
+  virtual const std::vector<ui::Layer*>& GetRootLayers() OVERRIDE;
+  virtual bool HasHitTestMask() const OVERRIDE;
+  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
   virtual Widget* AsWidget() OVERRIDE;
   virtual const Widget* AsWidget() const OVERRIDE;
 
@@ -773,12 +788,21 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // If true, the mouse is currently down.
   bool is_mouse_button_pressed_;
 
+  // If true, a touch device is currently down.
+  bool is_touch_down_;
+
   // TODO(beng): Remove NativeWidgetGtk's dependence on these:
   // The following are used to detect duplicate mouse move events and not
   // deliver them. Displaying a window may result in the system generating
   // duplicate move events even though the mouse hasn't moved.
   bool last_mouse_event_was_move_;
   gfx::Point last_mouse_event_position_;
+
+  // See description in GetRootLayers().
+  std::vector<ui::Layer*> root_layers_;
+
+  // Is |root_layers_| out of date?
+  bool root_layers_dirty_;
 
   DISALLOW_COPY_AND_ASSIGN(Widget);
 };

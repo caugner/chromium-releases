@@ -19,14 +19,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/navigation_details.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -49,13 +49,13 @@ class KeystonePromotionInfoBarDelegate : public ConfirmInfoBarDelegate {
   void SetCanExpire() { can_expire_ = true; }
 
   // ConfirmInfoBarDelegate
-  virtual bool ShouldExpire(
-      const content::LoadCommittedDetails& details) const OVERRIDE;
   virtual gfx::Image* GetIcon() const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
+  virtual bool ShouldExpireInternal(
+      const content::LoadCommittedDetails& details) const OVERRIDE;
 
   // The prefs to use.
   PrefService* prefs_;  // weak
@@ -87,11 +87,6 @@ KeystonePromotionInfoBarDelegate::KeystonePromotionInfoBarDelegate(
 KeystonePromotionInfoBarDelegate::~KeystonePromotionInfoBarDelegate() {
 }
 
-bool KeystonePromotionInfoBarDelegate::ShouldExpire(
-    const content::LoadCommittedDetails& details) const {
-  return details.is_navigation_to_different_page() && can_expire_;
-}
-
 gfx::Image* KeystonePromotionInfoBarDelegate::GetIcon() const {
   return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_PRODUCT_LOGO_32);
@@ -116,6 +111,11 @@ bool KeystonePromotionInfoBarDelegate::Accept() {
 bool KeystonePromotionInfoBarDelegate::Cancel() {
   prefs_->SetBoolean(prefs::kShowUpdatePromotionInfoBar, false);
   return true;
+}
+
+bool KeystonePromotionInfoBarDelegate::ShouldExpireInternal(
+    const content::LoadCommittedDetails& details) const {
+  return can_expire_;
 }
 
 }  // namespace
@@ -189,19 +189,19 @@ bool KeystonePromotionInfoBarDelegate::Cancel() {
 
   if (status != kAutoupdateRegisterFailed &&
       [[KeystoneGlue defaultKeystoneGlue] needsPromotion]) {
-    Browser* browser = BrowserList::GetLastActive();
+    Browser* browser = browser::GetLastActiveBrowser();
     if (browser) {
-      TabContentsWrapper* wrapper = browser->GetSelectedTabContentsWrapper();
+      TabContents* tabContents = browser->GetActiveTabContents();
 
       // Only show if no other info bars are showing, because that's how the
       // default browser info bar works.
-      if (wrapper) {
-        InfoBarTabHelper* infobar_helper = wrapper->infobar_tab_helper();
+      if (tabContents) {
+        InfoBarTabHelper* infobar_helper = tabContents->infobar_tab_helper();
         if (infobar_helper->infobar_count() == 0) {
           infobar_helper->AddInfoBar(
               new KeystonePromotionInfoBarDelegate(
                   infobar_helper,
-                  wrapper->profile()->GetPrefs()));
+                  tabContents->profile()->GetPrefs()));
         }
       }
     }

@@ -11,14 +11,14 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/threading/non_thread_safe.h"
-#include "sync/engine/model_safe_worker.h"
-#include "sync/util/syncer_error.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/util/syncer_error.h"
 
 namespace browser_sync {
 
 // Fake implementation of ModelSafeWorker that does work on the
 // current thread regardless of the group.
-class FakeModelWorker : public ModelSafeWorker {
+class FakeModelWorker : public ModelSafeWorker, public base::NonThreadSafe {
  public:
   explicit FakeModelWorker(ModelSafeGroup group);
 
@@ -29,8 +29,6 @@ class FakeModelWorker : public ModelSafeWorker {
 
  private:
   virtual ~FakeModelWorker();
-
-  base::NonThreadSafe non_thread_safe_;
 
   const ModelSafeGroup group_;
 

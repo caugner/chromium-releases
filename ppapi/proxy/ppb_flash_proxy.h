@@ -20,6 +20,8 @@
 #include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/ppb_flash_shared.h"
 
+struct PPB_Flash_Print_1_0;
+
 namespace ppapi {
 
 struct PPB_URLRequestInfo_Data;
@@ -34,6 +36,11 @@ class PPB_Flash_Proxy : public InterfaceProxy, public PPB_Flash_Shared {
  public:
   explicit PPB_Flash_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_Flash_Proxy();
+
+  // This flash proxy also proxies the PPB_Flash_Print interface. This one
+  // doesn't use the regular thunk system because the _impl side is actually in
+  // Chrome rather than with the rest of the interface implementations.
+  static const PPB_Flash_Print_1_0* GetFlashPrintInterface();
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -63,11 +70,12 @@ class PPB_Flash_Proxy : public InterfaceProxy, public PPB_Flash_Shared {
                                         PP_Time t) OVERRIDE;
   virtual PP_Bool IsRectTopmost(PP_Instance instance,
                                 const PP_Rect* rect) OVERRIDE;
-  virtual int32_t InvokePrinting(PP_Instance instance) OVERRIDE;
   virtual void UpdateActivity(PP_Instance instance) OVERRIDE;
   virtual PP_Var GetDeviceID(PP_Instance instance) OVERRIDE;
   virtual int32_t GetSettingInt(PP_Instance instance,
                                 PP_FlashSetting setting) OVERRIDE;
+  virtual PP_Var GetSetting(PP_Instance instance,
+                            PP_FlashSetting setting) OVERRIDE;
   virtual PP_Bool IsClipboardFormatAvailable(
       PP_Instance instance,
       PP_Flash_Clipboard_Type clipboard_type,
@@ -99,6 +107,8 @@ class PPB_Flash_Proxy : public InterfaceProxy, public PPB_Flash_Shared {
   virtual int32_t GetDirContents(PP_Instance instance,
                                  const char* path,
                                  PP_DirContents_Dev** contents) OVERRIDE;
+  virtual int32_t CreateTemporaryFile(PP_Instance instance,
+                                      PP_FileHandle* file) OVERRIDE;
   virtual int32_t OpenFileRef(PP_Instance instance,
                               PP_Resource file_ref,
                               int32_t mode,
@@ -154,30 +164,6 @@ class PPB_Flash_Proxy : public InterfaceProxy, public PPB_Flash_Shared {
                                    int clipboard_type,
                                    const std::vector<int>& formats,
                                    SerializedVarVectorReceiveInput data_items);
-  void OnHostMsgOpenFile(PP_Instance instance,
-                         const std::string& path,
-                         int32_t mode,
-                         IPC::PlatformFileForTransit* file_handle,
-                         int32_t* result);
-  void OnHostMsgRenameFile(PP_Instance instance,
-                           const std::string& path_from,
-                           const std::string& path_to,
-                           int32_t* result);
-  void OnHostMsgDeleteFileOrDir(PP_Instance instance,
-                                const std::string& path,
-                                PP_Bool recursive,
-                                int32_t* result);
-  void OnHostMsgCreateDir(PP_Instance instance,
-                          const std::string& path,
-                          int32_t* result);
-  void OnHostMsgQueryFile(PP_Instance instance,
-                          const std::string& path,
-                          PP_FileInfo* info,
-                          int32_t* result);
-  void OnHostMsgGetDirContents(PP_Instance instance,
-                               const std::string& path,
-                               std::vector<SerializedDirEntry>* entries,
-                               int32_t* result);
   void OnHostMsgOpenFileRef(PP_Instance instance,
                             const ppapi::HostResource& host_resource,
                             int32_t mode,
@@ -189,6 +175,7 @@ class PPB_Flash_Proxy : public InterfaceProxy, public PPB_Flash_Shared {
                              int32_t* result);
   void OnHostMsgGetDeviceID(PP_Instance instance,
                             SerializedVarReturnValue id);
+  void OnHostMsgInvokePrinting(PP_Instance instance);
 
   DISALLOW_COPY_AND_ASSIGN(PPB_Flash_Proxy);
 };

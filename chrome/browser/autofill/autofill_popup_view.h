@@ -76,6 +76,9 @@ class AutofillPopupView : public content::NotificationObserver {
   // Change which line is currently selected by the user.
   void SetSelectedLine(int selected_line);
 
+  // Clear the currently selected line so that nothing is selected.
+  void ClearSelectedLine();
+
   // Increase the selected line by 1, properly handling wrapping.
   void SelectNextLine();
 
@@ -88,13 +91,16 @@ class AutofillPopupView : public content::NotificationObserver {
   // The user has removed a suggestion.
   bool RemoveSelectedLine();
 
-  // Return true if the index is the first element of a new section and should
-  // have a separator above it.
-  bool IsSeparatorIndex(int index);
+  // Get the resource value for the given resource, returning -1 if the
+  // resource isn't recognized.
+  int GetIconResourceID(const string16& resource_name);
 
- private:
   // Returns true if the given id refers to an element that can be deleted.
   bool CanDelete(int id);
+
+ private:
+  // Returns true if the given id refers to an element that can be accepted.
+  bool CanAccept(int id);
 
   // Returns true if the popup still has non-options entries to show the user.
   bool HasAutofillEntries();

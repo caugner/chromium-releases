@@ -35,10 +35,10 @@ HttpBridge::RequestContextGetter::~RequestContextGetter() {}
 net::URLRequestContext*
 HttpBridge::RequestContextGetter::GetURLRequestContext() {
   // Lazily create the context.
-  if (!context_) {
+  if (!context_.get()) {
     net::URLRequestContext* baseline_context =
         baseline_context_getter_->GetURLRequestContext();
-    context_ = new RequestContext(baseline_context);
+    context_.reset(new RequestContext(baseline_context));
     baseline_context_getter_ = NULL;
   }
 
@@ -46,11 +46,11 @@ HttpBridge::RequestContextGetter::GetURLRequestContext() {
   if (is_user_agent_set())
     context_->set_user_agent(user_agent_);
 
-  return context_;
+  return context_.get();
 }
 
-scoped_refptr<base::MessageLoopProxy>
-HttpBridge::RequestContextGetter::GetIOMessageLoopProxy() const {
+scoped_refptr<base::SingleThreadTaskRunner>
+HttpBridge::RequestContextGetter::GetNetworkTaskRunner() const {
   return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
 }
 
@@ -222,7 +222,7 @@ void HttpBridge::MakeAsynchronousPost() {
     return;
 
   fetch_state_.url_poster = content::URLFetcher::Create(
-      url_for_request_, content::URLFetcher::POST, this);
+      url_for_request_, net::URLFetcher::POST, this);
   fetch_state_.url_poster->SetRequestContext(context_getter_for_request_);
   fetch_state_.url_poster->SetUploadData(content_type_, request_content_);
   fetch_state_.url_poster->SetExtraRequestHeaders(extra_headers_);
@@ -276,12 +276,12 @@ void HttpBridge::Abort() {
   http_post_completed_.Signal();
 }
 
-void HttpBridge::DestroyURLFetcherOnIOThread(content::URLFetcher* fetcher) {
+void HttpBridge::DestroyURLFetcherOnIOThread(net::URLFetcher* fetcher) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   delete fetcher;
 }
 
-void HttpBridge::OnURLFetchComplete(const content::URLFetcher *source) {
+void HttpBridge::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   base::AutoLock lock(fetch_state_lock_);
   if (fetch_state_.aborted)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -22,6 +22,7 @@ import gyp
 # Add paths so that pymod_do_main(...) can import files.
 sys.path.insert(1, os.path.join(chrome_src, 'tools', 'grit'))
 sys.path.insert(1, os.path.join(chrome_src, 'chrome', 'tools', 'build'))
+sys.path.insert(1, os.path.join(chrome_src, 'native_client', 'build'))
 
 
 # On Windows, Psyco shortens warm runs of build/gyp_chromium by about
@@ -59,7 +60,8 @@ def apply_gyp_environment(file_path=None):
                      'CHROMIUM_GYP_SYNTAX_CHECK',
                      'GYP_DEFINES',
                      'GYP_GENERATOR_FLAGS',
-                     'GYP_GENERATOR_OUTPUT', )
+                     'GYP_GENERATOR_OUTPUT',
+                     'GYP_GENERATORS', )
   for var in supported_vars:
     val = file_data.get(var)
     if val:
@@ -106,8 +108,6 @@ if __name__ == '__main__':
   if psyco:
     psyco.profile()
     print "Enabled Psyco JIT."
-
-  os.environ['GYP_MSVS_VERSION'] = '2008'
 
   # Fall back on hermetic python if we happen to get run under cygwin.
   # TODO(bradnelson): take this out once this issue is fixed:

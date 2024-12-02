@@ -6,13 +6,17 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/stl_util.h"
 #include "base/values.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/history/visit_filter.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/suggestions_combiner.h"
+#include "chrome/common/chrome_switches.h"
+
 
 namespace {
 
@@ -22,11 +26,17 @@ const int kSuggestionsTopListWeight = 1;
 
 }  // namespace
 
-SuggestionsSourceTopSites::SuggestionsSourceTopSites() : combiner_(NULL) {
+SuggestionsSourceTopSites::SuggestionsSourceTopSites()
+    : combiner_(NULL),
+      debug_(false) {
 }
 
 SuggestionsSourceTopSites::~SuggestionsSourceTopSites() {
   STLDeleteElements(&items_);
+}
+
+void SuggestionsSourceTopSites::SetDebug(bool enable) {
+  debug_ = enable;
 }
 
 inline int SuggestionsSourceTopSites::GetWeight() {
@@ -56,11 +66,11 @@ void SuggestionsSourceTopSites::FetchItems(Profile* profile) {
   // |history| may be null during unit tests.
   if (history) {
     history::VisitFilter time_filter;
-    base::TimeDelta half_an_hour =
-       base::TimeDelta::FromMicroseconds(base::Time::kMicrosecondsPerHour / 2);
-    base::Time now = base::Time::Now();
-    time_filter.SetTimeInRangeFilter(now - half_an_hour, now + half_an_hour);
-    history->QueryFilteredURLs(0, time_filter, &history_consumer_,
+    time_filter.SetFilterTime(base::Time::Now());
+    time_filter.SetFilterWidth(GetFilterWidth());
+    time_filter.set_sorting_order(GetSortingOrder());
+
+    history->QueryFilteredURLs(0, time_filter, debug_, &history_consumer_,
         base::Bind(&SuggestionsSourceTopSites::OnSuggestionsURLsAvailable,
                    base::Unretained(this)));
   }
@@ -85,8 +95,50 @@ void SuggestionsSourceTopSites::OnSuggestionsURLsAvailable(
                                       suggested_url.title,
                                       suggested_url.url);
     page_value->SetDouble("score", suggested_url.score);
+    if (debug_) {
+      if (suggested_url.extended_info.total_visits) {
+        page_value->SetInteger("extended_info.total visits",
+                               suggested_url.extended_info.total_visits);
+      }
+      if (suggested_url.extended_info.visits) {
+        page_value->SetInteger("extended_info.visits",
+                               suggested_url.extended_info.visits);
+      }
+      if (suggested_url.extended_info.duration_opened) {
+        page_value->SetInteger("extended_info.duration opened",
+                               suggested_url.extended_info.duration_opened);
+      }
+      if (!suggested_url.extended_info.last_visit_time.is_null()) {
+        base::TimeDelta deltaTime =
+            base::Time::Now() - suggested_url.extended_info.last_visit_time;
+        page_value->SetInteger("extended_info.seconds since last visit",
+                               deltaTime.InSeconds());
+      }
+    }
     items_.push_back(page_value);
   }
 
   combiner_->OnItemsReady();
+}
+
+// static
+base::TimeDelta SuggestionsSourceTopSites::GetFilterWidth() {
+  const CommandLine* cli = CommandLine::ForCurrentProcess();
+  const std::string filter_width_switch =
+      cli->GetSwitchValueASCII(switches::kSuggestionNtpFilterWidth);
+  unsigned int filter_width;
+  if (base::StringToUint(filter_width_switch, &filter_width))
+    return base::TimeDelta::FromMinutes(filter_width);
+  return base::TimeDelta::FromHours(1);
+}
+
+// static
+history::VisitFilter::SortingOrder
+SuggestionsSourceTopSites::GetSortingOrder() {
+  const CommandLine* cli = CommandLine::ForCurrentProcess();
+  if (cli->HasSwitch(switches::kSuggestionNtpGaussianFilter))
+    return history::VisitFilter::ORDER_BY_TIME_GAUSSIAN;
+  if (cli->HasSwitch(switches::kSuggestionNtpLinearFilter))
+    return history::VisitFilter::ORDER_BY_TIME_LINEAR;
+  return history::VisitFilter::ORDER_BY_RECENCY;
 }

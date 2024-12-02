@@ -12,18 +12,19 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/intents/cws_intents_registry_factory.h"
 #include "chrome/browser/intents/default_web_intent_service.h"
 #include "chrome/browser/intents/web_intents_registry_factory.h"
-#include "chrome/browser/intents/cws_intents_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
@@ -33,9 +34,9 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_intents_dispatcher.h"
 #include "content/public/common/url_fetcher.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "grit/generated_resources.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "skia/ext/image_operations.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -53,18 +54,18 @@ const char kSubscribeActionURL[] = "http://webintents.org/subscribe";
 const char kSaveActionURL[] = "http://webintents.org/save";
 
 // Gets the favicon service for the profile in |tab_contents|.
-FaviconService* GetFaviconService(TabContentsWrapper* wrapper) {
-  return wrapper->profile()->GetFaviconService(Profile::EXPLICIT_ACCESS);
+FaviconService* GetFaviconService(TabContents* tab_contents) {
+  return tab_contents->profile()->GetFaviconService(Profile::EXPLICIT_ACCESS);
 }
 
 // Gets the web intents registry for the profile in |tab_contents|.
-WebIntentsRegistry* GetWebIntentsRegistry(TabContentsWrapper* wrapper) {
-  return WebIntentsRegistryFactory::GetForProfile(wrapper->profile());
+WebIntentsRegistry* GetWebIntentsRegistry(TabContents* tab_contents) {
+  return WebIntentsRegistryFactory::GetForProfile(tab_contents->profile());
 }
 
 // Gets the Chrome web store intents registry for the profile in |tab_contents|.
-CWSIntentsRegistry* GetCWSIntentsRegistry(TabContentsWrapper* wrapper) {
-  return CWSIntentsRegistryFactory::GetForProfile(wrapper->profile());
+CWSIntentsRegistry* GetCWSIntentsRegistry(TabContents* tab_contents) {
+  return CWSIntentsRegistryFactory::GetForProfile(tab_contents->profile());
 }
 
 WebIntentPickerModel::Disposition ConvertDisposition(
@@ -99,16 +100,16 @@ string16 GetIntentActionString(const std::string& action) {
 }
 
 // Self-deleting trampoline that forwards A URLFetcher response to a callback.
-class URLFetcherTrampoline : public content::URLFetcherDelegate {
+class URLFetcherTrampoline : public net::URLFetcherDelegate {
  public:
-  typedef base::Callback<void(const content::URLFetcher* source)>
+  typedef base::Callback<void(const net::URLFetcher* source)>
       ForwardingCallback;
 
   explicit URLFetcherTrampoline(const ForwardingCallback& callback);
   ~URLFetcherTrampoline();
 
-  // content::URLFetcherDelegate implementation.
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  // net::URLFetcherDelegate implementation.
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
  private:
   // Fowarding callback from |OnURLFetchComplete|.
@@ -123,7 +124,7 @@ URLFetcherTrampoline::~URLFetcherTrampoline() {
 }
 
 void URLFetcherTrampoline::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   DCHECK(!callback_.is_null());
   callback_.Run(source);
   delete source;
@@ -133,8 +134,8 @@ void URLFetcherTrampoline::OnURLFetchComplete(
 }  // namespace
 
 WebIntentPickerController::WebIntentPickerController(
-    TabContentsWrapper* wrapper)
-    : wrapper_(wrapper),
+    TabContents* tab_contents)
+    : tab_contents_(tab_contents),
       picker_(NULL),
       picker_model_(new WebIntentPickerModel()),
       pending_async_count_(0),
@@ -144,7 +145,7 @@ WebIntentPickerController::WebIntentPickerController(
       service_tab_(NULL),
       weak_ptr_factory_(this) {
   content::NavigationController* controller =
-      &wrapper->web_contents()->GetController();
+      &tab_contents->web_contents()->GetController();
   registrar_.Add(this, content::NOTIFICATION_LOAD_START,
                  content::Source<content::NavigationController>(controller));
   registrar_.Add(this, chrome::NOTIFICATION_TAB_CLOSING,
@@ -180,7 +181,7 @@ void WebIntentPickerController::ShowDialog(const string16& action,
 
   // TODO(binji): Figure out what to do when intents are invoked from incognito
   // mode.
-  if (wrapper_->profile()->IsOffTheRecord()) {
+  if (tab_contents_->profile()->IsOffTheRecord()) {
     if (intents_dispatcher_) {
       intents_dispatcher_->SendReplyMessage(
           webkit_glue::WEB_INTENT_REPLY_FAILURE, string16());
@@ -210,7 +211,7 @@ void WebIntentPickerController::ShowDialog(const string16& action,
       // page for this action/type if it is permitted to be dispatched. (Also
       // required to find disposition set by service.)
       pending_async_count_++;
-      GetWebIntentsRegistry(wrapper_)->GetIntentServices(
+      GetWebIntentsRegistry(tab_contents_)->GetIntentServices(
           action, type, base::Bind(
               &WebIntentPickerController::WebIntentServicesForExplicitIntent,
               weak_ptr_factory_.GetWeakPtr()));
@@ -221,22 +222,22 @@ void WebIntentPickerController::ShowDialog(const string16& action,
   pending_async_count_ += 2;
   pending_registry_calls_count_ += 1;
 
-  GetWebIntentsRegistry(wrapper_)->GetIntentServices(
+  GetWebIntentsRegistry(tab_contents_)->GetIntentServices(
       action, type,
           base::Bind(&WebIntentPickerController::OnWebIntentServicesAvailable,
               weak_ptr_factory_.GetWeakPtr()));
 
-  GURL invoking_url = wrapper_->web_contents()->GetURL();
+  GURL invoking_url = tab_contents_->web_contents()->GetURL();
   if (invoking_url.is_valid()) {
     pending_async_count_++;
     pending_registry_calls_count_++;
-    GetWebIntentsRegistry(wrapper_)->GetDefaultIntentService(
+    GetWebIntentsRegistry(tab_contents_)->GetDefaultIntentService(
         action, type, invoking_url,
         base::Bind(&WebIntentPickerController::OnWebIntentDefaultsAvailable,
                    weak_ptr_factory_.GetWeakPtr()));
   }
 
-  GetCWSIntentsRegistry(wrapper_)->GetIntentServices(
+  GetCWSIntentsRegistry(tab_contents_)->GetIntentServices(
       action, type,
       base::Bind(&WebIntentPickerController::OnCWSIntentServicesAvailable,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -263,12 +264,12 @@ void WebIntentPickerController::OnServiceChosen(const GURL& url,
 
     case WebIntentPickerModel::DISPOSITION_WINDOW: {
       int index = TabStripModel::kNoTab;
-      Browser* browser = Browser::GetBrowserForController(
-          &wrapper_->web_contents()->GetController(), &index);
-      TabContentsWrapper* contents = Browser::TabContentsFactory(
-          wrapper_->profile(),
+      Browser* browser = browser::FindBrowserForController(
+          &tab_contents_->web_contents()->GetController(), &index);
+      TabContents* contents = Browser::TabContentsFactory(
+          tab_contents_->profile(),
           tab_util::GetSiteInstanceForNewTab(
-              wrapper_->profile(), url),
+              tab_contents_->profile(), url),
           MSG_ROUTING_NONE, NULL, NULL);
 
       intents_dispatcher_->DispatchIntent(contents->web_contents());
@@ -282,7 +283,7 @@ void WebIntentPickerController::OnServiceChosen(const GURL& url,
                                      content::PAGE_TRANSITION_AUTO_BOOKMARK);
       params.target_contents = contents;
       params.disposition = NEW_FOREGROUND_TAB;
-      params.profile = wrapper_->profile();
+      params.profile = tab_contents_->profile();
       browser::Navigate(&params);
 
       service_tab_->GetController().LoadURL(
@@ -307,10 +308,14 @@ void WebIntentPickerController::OnInlineDispositionWebContentsCreated(
 
 void WebIntentPickerController::OnExtensionInstallRequested(
     const std::string& id) {
+  scoped_ptr<WebstoreInstaller::Approval> approval(
+      WebstoreInstaller::Approval::CreateWithInstallPrompt(
+          tab_contents_->profile()));
+
   scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
-      wrapper_->profile(), this, &wrapper_->web_contents()->GetController(), id,
-      scoped_ptr<WebstoreInstaller::Approval>(NULL),
-      WebstoreInstaller::FLAG_INLINE_INSTALL);
+      tab_contents_->profile(), this,
+      &tab_contents_->web_contents()->GetController(), id,
+      approval.Pass(), WebstoreInstaller::FLAG_INLINE_INSTALL);
 
   pending_async_count_++;
   installer->Start();
@@ -319,7 +324,7 @@ void WebIntentPickerController::OnExtensionInstallRequested(
 void WebIntentPickerController::OnExtensionLinkClicked(const std::string& id) {
   // Navigate from source tab.
   Browser* browser =
-      BrowserList::FindBrowserWithWebContents(wrapper_->web_contents());
+      browser::FindBrowserWithWebContents(tab_contents_->web_contents());
   GURL extension_url(extension_urls::GetWebstoreItemDetailURLPrefix() + id);
   browser::NavigateParams params(browser, extension_url,
       content::PAGE_TRANSITION_AUTO_BOOKMARK);
@@ -330,7 +335,7 @@ void WebIntentPickerController::OnExtensionLinkClicked(const std::string& id) {
 void WebIntentPickerController::OnSuggestionsLinkClicked() {
   // Navigate from source tab.
   Browser* browser =
-      BrowserList::FindBrowserWithWebContents(wrapper_->web_contents());
+      browser::FindBrowserWithWebContents(tab_contents_->web_contents());
   GURL query_url = extension_urls::GetWebstoreIntentQueryURL(
       UTF16ToUTF8(picker_model_->action()),
       UTF16ToUTF8(picker_model_->mimetype()));
@@ -371,7 +376,7 @@ void WebIntentPickerController::OnExtensionInstallSuccess(
     const std::string& id) {
   picker_->OnExtensionInstallSuccess(id);
   pending_async_count_++;
-  GetWebIntentsRegistry(wrapper_)->GetIntentServicesForExtensionFilter(
+  GetWebIntentsRegistry(tab_contents_)->GetIntentServicesForExtensionFilter(
       picker_model_->action(),
       picker_model_->mimetype(),
       id,
@@ -395,18 +400,18 @@ void WebIntentPickerController::OnSendReturnMessage(
   if (service_tab_ &&
       reply_type != webkit_glue::WEB_INTENT_SERVICE_CONTENTS_CLOSED) {
     int index = TabStripModel::kNoTab;
-    Browser* browser = Browser::GetBrowserForController(
+    Browser* browser = browser::FindBrowserForController(
         &service_tab_->GetController(), &index);
     if (browser) {
-      browser->tabstrip_model()->CloseTabContentsAt(
+      browser->tab_strip_model()->CloseTabContentsAt(
           index, TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
 
       // Activate source tab.
       Browser* source_browser =
-          BrowserList::FindBrowserWithWebContents(wrapper_->web_contents());
+          browser::FindBrowserWithWebContents(tab_contents_->web_contents());
       if (source_browser) {
-        int source_index =
-            source_browser->tabstrip_model()->GetIndexOfTabContents(wrapper_);
+        int source_index = source_browser->tab_strip_model()->
+            GetIndexOfTabContents(tab_contents_);
         source_browser->ActivateTabAt(source_index, false);
       }
     }
@@ -418,7 +423,7 @@ void WebIntentPickerController::OnSendReturnMessage(
 
 void WebIntentPickerController::OnWebIntentServicesAvailable(
     const std::vector<webkit_glue::WebIntentServiceData>& services) {
-  FaviconService* favicon_service = GetFaviconService(wrapper_);
+  FaviconService* favicon_service = GetFaviconService(tab_contents_);
   for (size_t i = 0; i < services.size(); ++i) {
     picker_model_->AddInstalledService(
         services[i].title,
@@ -454,7 +459,7 @@ void WebIntentPickerController::WebIntentServicesForExplicitIntent(
         ConvertDisposition(services[i].disposition));
 
     pending_async_count_++;
-    FaviconService* favicon_service = GetFaviconService(wrapper_);
+    FaviconService* favicon_service = GetFaviconService(tab_contents_);
     FaviconService::Handle handle = favicon_service->GetFaviconForURL(
         services[i].service_url,
         history::FAVICON,
@@ -529,7 +534,7 @@ void WebIntentPickerController::OnFaviconDataAvailable(
     if (gfx::PNGCodec::Decode(favicon_data.image_data->front(),
                               favicon_data.image_data->size(),
                               &icon_bitmap)) {
-      gfx::Image icon_image(new SkBitmap(icon_bitmap));
+      gfx::Image icon_image(icon_bitmap);
       picker_model_->UpdateFaviconAt(index, icon_image);
       return;
     }
@@ -541,7 +546,7 @@ void WebIntentPickerController::OnFaviconDataAvailable(
 void WebIntentPickerController::OnCWSIntentServicesAvailable(
     const CWSIntentsRegistry::IntentExtensionList& extensions) {
   ExtensionServiceInterface* extension_service =
-      wrapper_->profile()->GetExtensionService();
+      tab_contents_->profile()->GetExtensionService();
   for (size_t i = 0; i < extensions.size(); ++i) {
     const CWSIntentsRegistry::IntentExtensionInfo& info = extensions[i];
     if (extension_service->GetExtensionById(UTF16ToUTF8(info.id),
@@ -555,10 +560,10 @@ void WebIntentPickerController::OnCWSIntentServicesAvailable(
         info.average_rating);
 
     pending_async_count_++;
-    content::URLFetcher* icon_url_fetcher = content::URLFetcher::Create(
+    net::URLFetcher* icon_url_fetcher = content::URLFetcher::Create(
         0,
         info.icon_url,
-        content::URLFetcher::GET,
+        net::URLFetcher::GET,
         new URLFetcherTrampoline(
             base::Bind(
                 &WebIntentPickerController::OnExtensionIconURLFetchComplete,
@@ -567,7 +572,7 @@ void WebIntentPickerController::OnCWSIntentServicesAvailable(
     icon_url_fetcher->SetLoadFlags(
         net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES);
     icon_url_fetcher->SetRequestContext(
-        wrapper_->profile()->GetRequestContext());
+        tab_contents_->profile()->GetRequestContext());
     icon_url_fetcher->Start();
   }
 
@@ -575,7 +580,7 @@ void WebIntentPickerController::OnCWSIntentServicesAvailable(
 }
 
 void WebIntentPickerController::OnExtensionIconURLFetchComplete(
-    const string16& extension_id, const content::URLFetcher* source) {
+    const string16& extension_id, const net::URLFetcher* source) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (source->GetResponseCode() != 200) {
     AsyncOperationFinished();
@@ -633,7 +638,7 @@ void WebIntentPickerController::DecodeExtensionIconAndResize(
         icon_bitmap,
         skia::ImageOperations::RESIZE_BEST,
         gfx::kFaviconSize, gfx::kFaviconSize);
-    gfx::Image icon_image(new SkBitmap(resized_icon));
+    gfx::Image icon_image(resized_icon);
 
     content::BrowserThread::PostTask(
         content::BrowserThread::UI,
@@ -683,7 +688,7 @@ void WebIntentPickerController::AsyncOperationFinished() {
 void WebIntentPickerController::CreatePicker() {
   // If picker is non-NULL, it was set by a test.
   if (picker_ == NULL)
-    picker_ = WebIntentPicker::Create(wrapper_, this, picker_model_.get());
+    picker_ = WebIntentPicker::Create(tab_contents_, this, picker_model_.get());
   picker_shown_ = true;
 }
 

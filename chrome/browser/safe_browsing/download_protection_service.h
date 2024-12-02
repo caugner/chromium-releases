@@ -24,6 +24,7 @@ class SafeBrowsingService;
 
 namespace content {
 class DownloadItem;
+class PageNavigator;
 }
 
 namespace net {
@@ -49,6 +50,7 @@ class DownloadProtectionService {
     int64 total_bytes;
     bool user_initiated;
     std::string remote_address;
+    bool zipped_executable;
     DownloadInfo();
     ~DownloadInfo();
     std::string DebugString() const;
@@ -92,12 +94,13 @@ class DownloadProtectionService {
 
   // Returns true iff the download specified by |info| should be scanned by
   // CheckClientDownload() for malicious content.
-  bool IsSupportedDownload(const DownloadInfo& info) const;
+  virtual bool IsSupportedDownload(const DownloadInfo& info) const;
 
   // Display more information to the user regarding the download specified by
   // |info|. This method is invoked when the user requests more information
   // about a download that was marked as malicious.
-  void ShowDetailsForDownload(const DownloadInfo& info);
+  void ShowDetailsForDownload(const DownloadInfo& info,
+                              content::PageNavigator* navigator);
 
   // Enables or disables the service.  This is usually called by the
   // SafeBrowsingService, which tracks whether any profile uses these services
@@ -130,13 +133,14 @@ class DownloadProtectionService {
     REASON_DOWNLOAD_DANGEROUS,
     REASON_DOWNLOAD_SAFE,
     REASON_EMPTY_URL_CHAIN,
-    REASON_HTTPS_URL,
+    DEPRECATED_REASON_HTTPS_URL,
     REASON_PING_DISABLED,
     REASON_TRUSTED_EXECUTABLE,
     REASON_OS_NOT_SUPPORTED,
     REASON_DOWNLOAD_UNCOMMON,
     REASON_DOWNLOAD_NOT_SUPPORTED,
     REASON_INVALID_RESPONSE_VERDICT,
+    REASON_ARCHIVE_WITHOUT_BINARIES,
     REASON_MAX  // Always add new values before this one.
   };
 
@@ -147,6 +151,10 @@ class DownloadProtectionService {
                            CheckClientDownloadValidateRequest);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            CheckClientDownloadSuccess);
+  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
+                           CheckClientDownloadHTTPS);
+  FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
+                           CheckClientDownloadZip);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,
                            CheckClientDownloadFetchFailed);
   FRIEND_TEST_ALL_PREFIXES(DownloadProtectionServiceTest,

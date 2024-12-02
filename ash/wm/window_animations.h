@@ -7,12 +7,16 @@
 #pragma once
 
 #include "ash/ash_export.h"
-#include "base/time.h"
 
 namespace aura {
 class Window;
 }
-
+namespace base {
+class TimeDelta;
+}
+namespace gfx {
+class Rect;
+}
 namespace ui {
 class ImplicitAnimationObserver;
 }
@@ -59,6 +63,10 @@ ASH_EXPORT void SetWindowVisibilityAnimationDuration(
     aura::Window* window,
     const base::TimeDelta& duration);
 
+ASH_EXPORT void SetWindowVisibilityAnimationVerticalPosition(
+    aura::Window* window,
+    float position);
+
 // Creates an ImplicitAnimationObserver that takes ownership of the layers
 // associated with a Window so that the animation can continue after the Window
 // has been destroyed.
@@ -66,7 +74,16 @@ ASH_EXPORT void SetWindowVisibilityAnimationDuration(
 ASH_EXPORT ui::ImplicitAnimationObserver* CreateHidingWindowAnimationObserver(
     aura::Window* window);
 
+// Animate a cross-fade of |window| from its current bounds to |new_bounds|.
+ASH_EXPORT void CrossFadeToBounds(aura::Window* window,
+                                  const gfx::Rect& new_bounds);
+
 namespace internal {
+
+// Returns the duration of the cross-fade animation based on the |old_bounds|
+// and |new_bounds| of the window.
+ASH_EXPORT base::TimeDelta GetCrossFadeDuration(const gfx::Rect& old_bounds,
+                                                const gfx::Rect& new_bounds);
 
 // Returns false if the |window| didn't animate.
 ASH_EXPORT bool AnimateOnChildWindowVisibilityChanged(

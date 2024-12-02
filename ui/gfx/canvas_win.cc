@@ -375,7 +375,7 @@ void Canvas::DrawStringWithShadows(const string16& text,
                                    SkColor color,
                                    const gfx::Rect& text_bounds,
                                    int flags,
-                                   const std::vector<ShadowValue>& shadows) {
+                                   const ShadowValues& shadows) {
   DLOG_IF(WARNING, !shadows.empty()) << "Text shadow not implemented.";
 
   DrawStringInt(text, font.GetNativeFont(), color, text_bounds, flags);
@@ -455,7 +455,7 @@ void Canvas::DrawStringWithHalo(const string16& text,
   }
 
   // Draw the halo bitmap with blur.
-  DrawBitmapInt(text_bitmap, x - 1, y - 1);
+  DrawImageInt(text_bitmap, x - 1, y - 1);
 }
 
 void Canvas::DrawFadeTruncatingString(

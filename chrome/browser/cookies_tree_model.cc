@@ -18,13 +18,14 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "net/base/registry_controlled_domain.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image_skia.h"
 
 static const char kFileOriginNodeName[] = "file://";
 
@@ -180,18 +181,15 @@ CookieTreeNode::DetailedInfo CookieTreeDatabaseNode::GetDetailedInfo() const {
 CookieTreeLocalStorageNode::CookieTreeLocalStorageNode(
     std::list<BrowsingDataLocalStorageHelper::LocalStorageInfo>::iterator
         local_storage_info)
-    : CookieTreeNode(UTF8ToUTF16(
-          local_storage_info->origin.empty() ?
-              local_storage_info->database_identifier :
-              local_storage_info->origin)),
+    : CookieTreeNode(UTF8ToUTF16(local_storage_info->origin_url.spec())),
       local_storage_info_(local_storage_info) {
 }
 
 CookieTreeLocalStorageNode::~CookieTreeLocalStorageNode() {}
 
 void CookieTreeLocalStorageNode::DeleteStoredObjects() {
-  GetModel()->local_storage_helper_->DeleteLocalStorageFile(
-      local_storage_info_->file_path);
+  GetModel()->local_storage_helper_->DeleteOrigin(
+      local_storage_info_->origin_url);
   GetModel()->local_storage_info_list_.erase(local_storage_info_);
 }
 
@@ -207,10 +205,7 @@ CookieTreeLocalStorageNode::GetDetailedInfo() const {
 CookieTreeSessionStorageNode::CookieTreeSessionStorageNode(
     std::list<BrowsingDataLocalStorageHelper::LocalStorageInfo>::iterator
         session_storage_info)
-    : CookieTreeNode(UTF8ToUTF16(
-          session_storage_info->origin.empty() ?
-              session_storage_info->database_identifier :
-              session_storage_info->origin)),
+    : CookieTreeNode(UTF8ToUTF16(session_storage_info->origin_url.spec())),
       session_storage_info_(session_storage_info) {
 }
 
@@ -709,12 +704,12 @@ CookiesTreeModel::~CookiesTreeModel() {}
 // TreeModel methods:
 // Returns the set of icons for the nodes in the tree. You only need override
 // this if you don't want to use the default folder icons.
-void CookiesTreeModel::GetIcons(std::vector<SkBitmap>* icons) {
-  icons->push_back(*ResourceBundle::GetSharedInstance().GetBitmapNamed(
+void CookiesTreeModel::GetIcons(std::vector<gfx::ImageSkia>* icons) {
+  icons->push_back(*ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       IDR_OMNIBOX_HTTP));
-  icons->push_back(*ResourceBundle::GetSharedInstance().GetBitmapNamed(
+  icons->push_back(*ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       IDR_COOKIE_ICON));
-  icons->push_back(*ResourceBundle::GetSharedInstance().GetBitmapNamed(
+  icons->push_back(*ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
       IDR_COOKIE_STORAGE_ICON));
 }
 
@@ -946,7 +941,7 @@ void CookiesTreeModel::PopulateLocalStorageInfoWithFilter(
        local_storage_info_list_.begin();
        local_storage_info != local_storage_info_list_.end();
        ++local_storage_info) {
-    GURL origin(local_storage_info->origin);
+    const GURL& origin(local_storage_info->origin_url);
 
     if (!filter.size() ||
         (CookieTreeOriginNode::TitleForUrl(origin).find(filter) !=
@@ -979,8 +974,7 @@ void CookiesTreeModel::PopulateSessionStorageInfoWithFilter(
        session_storage_info_list_.begin();
        session_storage_info != session_storage_info_list_.end();
        ++session_storage_info) {
-    GURL origin(session_storage_info->origin);
-
+    const GURL& origin = session_storage_info->origin_url;
     if (!filter.size() ||
         (CookieTreeOriginNode::TitleForUrl(origin).find(filter) !=
          std::wstring::npos)) {

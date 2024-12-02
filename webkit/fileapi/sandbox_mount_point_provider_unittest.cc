@@ -53,6 +53,7 @@ class SandboxMountPointProviderOriginEnumeratorTest : public testing::Test {
   }
 
   ScopedTempDir data_dir_;
+  MessageLoop message_loop_;
   scoped_ptr<SandboxMountPointProvider> sandbox_provider_;
 };
 
@@ -294,7 +295,7 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
       break;
     case 3:
       sandbox_provider()->DeleteOriginDataOnFileThread(
-          NULL, origin_url, type);
+          file_system_context_, NULL, origin_url, type);
       break;
     case 4:
       sandbox_provider()->GetOriginsForTypeOnFileThread(
@@ -305,7 +306,8 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
           type, host, &origins);
       break;
     case 6:
-      sandbox_provider()->GetOriginUsageOnFileThread(origin_url, type);
+      sandbox_provider()->GetOriginUsageOnFileThread(
+          file_system_context_, origin_url, type);
       break;
     case 7:
       // This case has to use an origin that already exists in the
@@ -343,6 +345,7 @@ class SandboxMountPointProviderMigrationTest : public testing::Test {
 
  protected:
   ScopedTempDir data_dir_;
+  MessageLoop message_loop_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::WeakPtrFactory<SandboxMountPointProviderMigrationTest> weak_factory_;
 };

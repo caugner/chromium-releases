@@ -4,8 +4,8 @@
 
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 
-#include "base/bind.h"
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -15,6 +15,7 @@
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -23,22 +24,21 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
-#include "sync/protocol/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::WebContents;
 using l10n_util::GetStringFUTF16;
 using l10n_util::GetStringUTF16;
 
@@ -92,10 +92,13 @@ static const size_t kNumDataTypes = arraysize(kDataTypes);
 COMPILE_ASSERT(arraysize(kDataTypeNames) == arraysize(kDataTypes),
                kDataTypes_does_not_match_kDataTypeNames);
 
+static const char kDefaultSigninDomain[] = "gmail.com";
+
 bool GetAuthData(const std::string& json,
                  std::string* username,
                  std::string* password,
                  std::string* captcha,
+                 std::string* otp,
                  std::string* access_code) {
   scoped_ptr<Value> parsed_value(base::JSONReader::Read(json));
   if (!parsed_value.get() || !parsed_value->IsType(Value::TYPE_DICTIONARY))
@@ -105,6 +108,7 @@ bool GetAuthData(const std::string& json,
   if (!result->GetString("user", username) ||
       !result->GetString("pass", password) ||
       !result->GetString("captcha", captcha) ||
+      !result->GetString("otp", otp) ||
       !result->GetString("accessCode", access_code)) {
       return false;
   }
@@ -174,11 +178,16 @@ bool GetPassphrase(const std::string& json, std::string* passphrase) {
 string16 NormalizeUserName(const string16& user) {
   if (user.find_first_of(ASCIIToUTF16("@")) != string16::npos)
     return user;
-  return user + ASCIIToUTF16("@") + ASCIIToUTF16(DEFAULT_SIGNIN_DOMAIN);
+  return user + ASCIIToUTF16("@") + ASCIIToUTF16(kDefaultSigninDomain);
 }
 
 bool AreUserNamesEqual(const string16& user1, const string16& user2) {
   return NormalizeUserName(user1) == NormalizeUserName(user2);
+}
+
+bool IsClientOAuthEnabled() {
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableClientOAuthSignin);
 }
 
 }  // namespace
@@ -295,6 +304,10 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "enterAccessCode", IDS_SYNC_ENTER_ACCESS_CODE_LABEL },
     { "getAccessCodeHelp", IDS_SYNC_ACCESS_CODE_HELP_LABEL },
     { "getAccessCodeURL", IDS_SYNC_GET_ACCESS_CODE_URL },
+    { "invalidOtp", IDS_SYNC_INVALID_OTP_LABEL },
+    { "enterOtp", IDS_SYNC_ENTER_OTP_LABEL },
+    { "getOtpHelp", IDS_SYNC_OTP_HELP_LABEL },
+    { "getOtpURL", IDS_SYNC_GET_OTP_URL },
     { "syncAllDataTypes", IDS_SYNC_EVERYTHING },
     { "chooseDataTypes", IDS_SYNC_CHOOSE_DATATYPES },
     { "bookmarks", IDS_SYNC_DATATYPE_BOOKMARKS },
@@ -497,6 +510,16 @@ void SyncSetupHandler::DisplayGaiaLoginWithErrorMessage(
   DictionaryValue args;
   args.SetString("user", user);
   args.SetInteger("error", error);
+
+  // If the error is two-factor, then ask for an OTP if the ClientOAuth flow
+  // is enasbled.  Otherwise ask for an ASP.  If the error is catptcha required,
+  // then we don't want to show username and password fields if ClientOAuth is
+  // being used, since those fields are ignored by the endpoint on challenges.
+  if (error == GoogleServiceAuthError::TWO_FACTOR)
+    args.SetBoolean("askForOtp", IsClientOAuthEnabled());
+  else if (error == GoogleServiceAuthError::CAPTCHA_REQUIRED)
+    args.SetBoolean("hideEmailAndPassword", IsClientOAuthEnabled());
+
   args.SetBoolean("editableUser", editable_user);
   if (!error_message.empty())
     args.SetString("errorMessage", error_message);
@@ -553,8 +576,8 @@ void SyncSetupHandler::HandleSubmitAuth(const ListValue* args) {
   if (json.empty())
     return;
 
-  std::string username, password, captcha, access_code;
-  if (!GetAuthData(json, &username, &password, &captcha, &access_code)) {
+  std::string username, password, captcha, otp, access_code;
+  if (!GetAuthData(json, &username, &password, &captcha, &otp, &access_code)) {
     // The page sent us something that we didn't understand.
     // This probably indicates a programming error.
     NOTREACHED();
@@ -567,7 +590,23 @@ void SyncSetupHandler::HandleSubmitAuth(const ListValue* args) {
     return;
   }
 
-  TryLogin(username, password, captcha, access_code);
+  // If one of password, captcha and otp is non-empty, then the other two must
+  // be empty.  At least one should be non-empty.
+  DCHECK(password.empty() || (captcha.empty() && otp.empty()));
+  DCHECK(captcha.empty() || (password.empty() && otp.empty()));
+  DCHECK(otp.empty() || (captcha.empty() && password.empty()));
+  DCHECK(!otp.empty() || !captcha.empty() || !password.empty());
+
+  // Last error is two-factor implies otp should not be empty.
+  DCHECK((last_signin_error_.state() != GoogleServiceAuthError::TWO_FACTOR) ||
+      !otp.empty());
+  // Last error is captcha-required implies captcha should not be empty.
+  DCHECK((last_signin_error_.state() !=
+      GoogleServiceAuthError::CAPTCHA_REQUIRED) || !captcha.empty());
+  const std::string& solution = captcha.empty() ?
+      (otp.empty() ? EmptyString() : otp) : captcha;
+
+  TryLogin(username, password, solution, access_code);
 }
 
 void SyncSetupHandler::TryLogin(const std::string& username,
@@ -586,8 +625,7 @@ void SyncSetupHandler::TryLogin(const std::string& username,
   last_signin_error_ = GoogleServiceAuthError::None();
 
   SigninManager* signin = GetSignin();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableClientOAuthSignin)) {
+  if (IsClientOAuthEnabled()) {
     if (!solution.empty()) {
       signin->ProvideOAuthChallengeResponse(current_error.state(),
                                             current_error.token(), solution);
@@ -608,8 +646,7 @@ void SyncSetupHandler::TryLogin(const std::string& username,
   GetSyncService()->UnsuppressAndStart();
 
   // Kick off a sign-in through the signin manager.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableClientOAuthSignin)) {
+  if (IsClientOAuthEnabled()) {
     signin->StartSignInWithOAuth(username, password);
   } else {
     signin->StartSignIn(username, password, current_error.captcha().token,
@@ -631,7 +668,7 @@ void SyncSetupHandler::SigninFailed(const GoogleServiceAuthError& error) {
   // On ChromeOS, this condition should trigger the orange badge on wrench menu
   // and prompt to sign out.
 #if !defined(OS_CHROMEOS)
-  DisplayGaiaLogin(GetSyncService()->unrecoverable_error_detected());
+  DisplayGaiaLogin(GetSyncService()->HasUnrecoverableError());
 #else
   CloseOverlay();
 #endif
@@ -720,16 +757,31 @@ void SyncSetupHandler::HandleConfigure(const ListValue* args) {
     }
   }
 
+  bool user_was_prompted_for_passphrase =
+      service->IsPassphraseRequiredForDecryption();
   service->OnUserChoseDatatypes(configuration.sync_everything,
                                 configuration.data_types);
 
   // Need to call IsPassphraseRequiredForDecryption() *after* calling
   // OnUserChoseDatatypes() because the user may have just disabled the
-  // encrypted datatypes.
+  // encrypted datatypes (in which case we just want to exit, not prompt the
+  // user for a passphrase).
   if (passphrase_failed || service->IsPassphraseRequiredForDecryption()) {
     // We need a passphrase, or the user's attempt to set a passphrase failed -
-    // prompt them again.
-    DisplayConfigureSync(true, passphrase_failed);
+    // prompt them again. This covers a few subtle cases:
+    // 1) The user enters an incorrect passphrase *and* disabled the encrypted
+    //    data types. In that case we want to notify the user that the
+    //    passphrase was incorrect even though there are no longer any encrypted
+    //    types enabled (IsPassphraseRequiredForDecryption() == false).
+    // 2) The user doesn't enter any passphrase. In this case, we won't call
+    //    SetDecryptionPassphrase() (passphrase_failed == false), but we still
+    //    want to display an error message to let the user know that their
+    //    blank passphrase entry is not acceptable.
+    // 3) The user just enabled an encrypted data type - in this case we don't
+    //    want to display an "invalid passphrase" error, since it's the first
+    //    time the user is seeing the prompt.
+    DisplayConfigureSync(
+        true, passphrase_failed || user_was_prompted_for_passphrase);
   } else {
     // No passphrase is required from the user so mark the configuration as
     // complete and close the sync setup overlay.
@@ -766,7 +818,7 @@ void SyncSetupHandler::HandleShowErrorUI(const ListValue* args) {
 #if defined(OS_CHROMEOS)
   if (service->GetAuthError().state() != GoogleServiceAuthError::NONE) {
     DLOG(INFO) << "Signing out the user to fix a sync error.";
-    BrowserList::GetLastActive()->ExecuteCommand(IDC_EXIT);
+    browser::AttemptUserExit();
     return;
   }
 #endif
@@ -777,7 +829,6 @@ void SyncSetupHandler::HandleShowErrorUI(const ListValue* args) {
 }
 
 void SyncSetupHandler::HandleShowSetupUI(const ListValue* args) {
-  DCHECK(!configuring_sync_);
   OpenSyncSetup(false);
 }
 
@@ -811,23 +862,31 @@ void SyncSetupHandler::CloseSyncSetup() {
     // Let the various services know that we're no longer active.
     GetLoginUIService()->LoginUIClosed(this);
     if (sync_service)
-      sync_service->set_setup_in_progress(false);
+      sync_service->SetSetupInProgress(false);
 
     // Make sure user isn't left half-logged-in (signed in, but without sync
     // started up). If the user hasn't finished setting up sync, then sign out
     // and shut down sync.
     if (sync_service && !sync_service->HasSyncSetupCompleted()) {
       DVLOG(1) << "Signin aborted by user action";
+      // Calling DisableForUser() will also sign the user out on desktop
+      // platforms (platforms without sync auto-start enabled).
       sync_service->DisableForUser();
-#if !defined(OS_CHROMEOS)
-      GetSignin()->SignOut();
-#else
-      // TODO(atwilson): Move this suppression to PSS::DisableForUser()
+
+#if defined(OS_CHROMEOS)
+      // Suppress sync startup on ChromeOS, so it doesn't get restarted when
+      // the user logs in again.
       browser_sync::SyncPrefs sync_prefs(GetProfile()->GetPrefs());
       sync_prefs.SetStartSuppressed(true);
 #endif
     }
   }
+
+  // Reset the attempted email address and error, otherwise the sync setup
+  // overlay in the settings page will stay in whatever error state it was last
+  // when it is reopened.
+  last_attempted_user_email_.clear();
+  last_signin_error_ = GoogleServiceAuthError::None();
 
   configuring_sync_ = false;
   signin_tracker_.reset();
@@ -853,11 +912,11 @@ void SyncSetupHandler::OpenSyncSetup(bool force_login) {
 
   // Notify services that we are now active.
   GetLoginUIService()->SetLoginUI(this);
-  service->set_setup_in_progress(true);
+  service->SetSetupInProgress(true);
 
   // There are several different UI flows that can bring the user here:
   // 1) Signin promo (passes force_login=true)
-  // 2) Normal signin through options page (AreCredentialsAvailable() will
+  // 2) Normal signin through options page (IsSyncEnabledAndLoggedIn() will
   //    return false).
   // 3) Previously working credentials have expired
   //    (service->GetAuthError() != NONE).
@@ -870,7 +929,7 @@ void SyncSetupHandler::OpenSyncSetup(bool force_login) {
   // 7) ChromeOS re-enable after disabling sync.
 #if !defined(OS_CHROMEOS)
   if (force_login ||
-      !service->AreCredentialsAvailable() ||
+      !service->IsSyncEnabledAndLoggedIn() ||
       service->GetAuthError().state() != GoogleServiceAuthError::NONE) {
     // User is not logged in, or login has been specially requested - need to
     // display login UI (cases 1-4).
@@ -896,7 +955,7 @@ void SyncSetupHandler::PrepareConfigDialog() {
     signin_tracker_.reset(
         new SigninTracker(GetProfile(), this,
                           SigninTracker::SERVICES_INITIALIZING));
-    service->set_setup_in_progress(true);
+    service->SetSetupInProgress(true);
     service->UnsuppressAndStart();
     DisplaySpinner();
   } else {
@@ -906,7 +965,8 @@ void SyncSetupHandler::PrepareConfigDialog() {
 
 void SyncSetupHandler::FocusUI() {
   DCHECK(IsActiveLogin());
-  web_ui()->GetWebContents()->GetRenderViewHost()->GetDelegate()->Activate();
+  WebContents* web_contents = web_ui()->GetWebContents();
+  web_contents->GetDelegate()->ActivateContents(web_contents);
 }
 
 void SyncSetupHandler::CloseUI() {
@@ -935,11 +995,20 @@ void SyncSetupHandler::CloseOverlay() {
 
 bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,
                                             string16* error_message) {
-  // Happens during unit tests.
-  if (!web_ui() || !profile_manager_)
+  if (username.empty())
     return true;
 
-  if (username.empty())
+  // Can be null during some unit tests.
+  if (!web_ui())
+    return true;
+
+  if (!GetSignin()->IsAllowedUsername(username)) {
+    *error_message = l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_NAME_PROHIBITED);
+    return false;
+  }
+
+  // If running in a unit test, skip profile check.
+  if (!profile_manager_)
     return true;
 
   // Check if the username is already in use by another profile.

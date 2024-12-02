@@ -11,9 +11,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_fetcher_callbacks.h"
+#include "chrome/browser/search_engines/template_url_parser.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/search_engines/template_url_parser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -22,13 +22,13 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_fetcher.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
 
 // RequestDelegate ------------------------------------------------------------
 class TemplateURLFetcher::RequestDelegate
-    : public content::URLFetcherDelegate,
+    : public net::URLFetcherDelegate,
       public content::NotificationObserver {
  public:
   // Takes ownership of |callbacks|.
@@ -45,10 +45,10 @@ class TemplateURLFetcher::RequestDelegate
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details);
 
-  // content::URLFetcherDelegate:
+  // net::URLFetcherDelegate:
   // If data contains a valid OSDD, a TemplateURL is created and added to
   // the TemplateURLService.
-  virtual void OnURLFetchComplete(const content::URLFetcher* source);
+  virtual void OnURLFetchComplete(const net::URLFetcher* source);
 
   // URL of the OSDD.
   GURL url() const { return osdd_url_; }
@@ -62,7 +62,7 @@ class TemplateURLFetcher::RequestDelegate
  private:
   void AddSearchProvider();
 
-  scoped_ptr<content::URLFetcher> url_fetcher_;
+  scoped_ptr<net::URLFetcher> url_fetcher_;
   TemplateURLFetcher* fetcher_;
   scoped_ptr<TemplateURL> template_url_;
   string16 keyword_;
@@ -86,7 +86,7 @@ TemplateURLFetcher::RequestDelegate::RequestDelegate(
     TemplateURLFetcherCallbacks* callbacks,
     ProviderType provider_type)
     : ALLOW_THIS_IN_INITIALIZER_LIST(url_fetcher_(content::URLFetcher::Create(
-          osdd_url, content::URLFetcher::GET, this))),
+          osdd_url, net::URLFetcher::GET, this))),
       fetcher_(fetcher),
       keyword_(keyword),
       osdd_url_(osdd_url),
@@ -108,7 +108,8 @@ TemplateURLFetcher::RequestDelegate::RequestDelegate(
   url_fetcher_->SetRequestContext(fetcher->profile()->GetRequestContext());
   // Can be NULL during tests.
   if (web_contents) {
-    url_fetcher_->AssociateWithRenderView(
+    content::AssociateURLFetcherWithRenderView(
+        url_fetcher_.get(),
         web_contents->GetURL(),
         web_contents->GetRenderProcessHost()->GetID(),
         web_contents->GetRenderViewHost()->GetRoutingID());
@@ -130,7 +131,7 @@ void TemplateURLFetcher::RequestDelegate::Observe(
 }
 
 void TemplateURLFetcher::RequestDelegate::OnURLFetchComplete(
-    const content::URLFetcher* source) {
+    const net::URLFetcher* source) {
   // Validation checks.
   // Make sure we can still replace the keyword, i.e. the fetch was successful.
   // If the OSDD file was loaded HTTP, we also have to check the response_code.

@@ -8,9 +8,9 @@
 
 #include "base/i18n/rtl.h"
 #include "chrome/browser/ui/gtk/status_bubble_gtk.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
@@ -64,11 +64,11 @@ void TabContentsContainerGtk::Init() {
   ViewIDUtil::SetDelegateForWidget(widget(), this);
 }
 
-void TabContentsContainerGtk::SetTab(TabContentsWrapper* tab) {
+void TabContentsContainerGtk::SetTab(TabContents* tab) {
   HideTab(tab_);
   if (tab_) {
-    registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                      content::Source<WebContents>(tab_->web_contents()));
+    registrar_.Remove(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+                      content::Source<TabContents>(tab_));
   }
 
   tab_ = tab;
@@ -80,16 +80,16 @@ void TabContentsContainerGtk::SetTab(TabContentsWrapper* tab) {
   } else if (tab_) {
     // Otherwise we actually have to add it to the widget hierarchy.
     PackTab(tab);
-    registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                   content::Source<WebContents>(tab_->web_contents()));
+    registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+                   content::Source<TabContents>(tab_));
   }
 }
 
-TabContentsWrapper* TabContentsContainerGtk::GetVisibleTab() {
+TabContents* TabContentsContainerGtk::GetVisibleTab() {
   return preview_ ? preview_ : tab_;
 }
 
-void TabContentsContainerGtk::SetPreview(TabContentsWrapper* preview) {
+void TabContentsContainerGtk::SetPreview(TabContents* preview) {
   if (preview_)
     RemovePreview();
   else
@@ -98,8 +98,8 @@ void TabContentsContainerGtk::SetPreview(TabContentsWrapper* preview) {
   preview_ = preview;
 
   PackTab(preview);
-  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                 content::Source<WebContents>(preview_->web_contents()));
+  registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+                 content::Source<TabContents>(preview_));
 }
 
 void TabContentsContainerGtk::RemovePreview() {
@@ -112,8 +112,8 @@ void TabContentsContainerGtk::RemovePreview() {
   if (preview_widget)
     gtk_container_remove(GTK_CONTAINER(expanded_), preview_widget);
 
-  registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                    content::Source<WebContents>(preview_->web_contents()));
+  registrar_.Remove(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+                    content::Source<TabContents>(preview_));
   preview_ = NULL;
 }
 
@@ -126,7 +126,7 @@ void TabContentsContainerGtk::PopPreview() {
   PackTab(tab_);
 }
 
-void TabContentsContainerGtk::PackTab(TabContentsWrapper* tab) {
+void TabContentsContainerGtk::PackTab(TabContents* tab) {
   if (!tab)
     return;
 
@@ -149,7 +149,7 @@ void TabContentsContainerGtk::PackTab(TabContentsWrapper* tab) {
   tab->web_contents()->ShowContents();
 }
 
-void TabContentsContainerGtk::HideTab(TabContentsWrapper* tab) {
+void TabContentsContainerGtk::HideTab(TabContents* tab) {
   if (!tab)
     return;
 
@@ -160,7 +160,7 @@ void TabContentsContainerGtk::HideTab(TabContentsWrapper* tab) {
   tab->web_contents()->WasHidden();
 }
 
-void TabContentsContainerGtk::DetachTab(TabContentsWrapper* tab) {
+void TabContentsContainerGtk::DetachTab(TabContents* tab) {
   gfx::NativeView widget = tab->web_contents()->GetNativeView();
 
   // It is possible to detach an unrealized, unparented WebContents if you
@@ -178,9 +178,9 @@ void TabContentsContainerGtk::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
-
-  WebContentsDestroyed(content::Source<WebContents>(source).ptr());
+  DCHECK_EQ(chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED, type);
+  WebContentsDestroyed(
+      content::Source<TabContents>(source)->web_contents());
 }
 
 void TabContentsContainerGtk::WebContentsDestroyed(WebContents* contents) {

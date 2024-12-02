@@ -28,15 +28,16 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/browser/utility_process_host_client.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
+#include "net/url_request/url_fetcher_delegate.h"
 
 using content::BrowserThread;
 using content::UtilityProcessHost;
 using content::UtilityProcessHostClient;
+using extensions::Extension;
 
 // The component updater is designed to live until process shutdown, so
 // base::Bind() calls are not refcounted.
@@ -112,12 +113,12 @@ bool IsVersionNewer(const Version& current, const std::string& proposed) {
 // OnURLFetchComplete() callbacks for different types of url requests
 // they are differentiated by the |Ctx| type.
 template <typename Del, typename Ctx>
-class DelegateWithContext : public content::URLFetcherDelegate {
+class DelegateWithContext : public net::URLFetcherDelegate {
  public:
   DelegateWithContext(Del* delegate, Ctx* context)
     : delegate_(delegate), context_(context) {}
 
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE {
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
     delegate_->OnURLFetchComplete(source, context_);
     delete this;
   }
@@ -130,12 +131,12 @@ class DelegateWithContext : public content::URLFetcherDelegate {
 };
 // This function creates the right DelegateWithContext using template inference.
 template <typename Del, typename Ctx>
-content::URLFetcherDelegate* MakeContextDelegate(Del* delegate, Ctx* context) {
+net::URLFetcherDelegate* MakeContextDelegate(Del* delegate, Ctx* context) {
   return new DelegateWithContext<Del, Ctx>(delegate, context);
 }
 
 // Helper to start a url request using |fetcher| with the common flags.
-void StartFetch(content::URLFetcher* fetcher,
+void StartFetch(net::URLFetcher* fetcher,
                 net::URLRequestContextGetter* context_getter,
                 bool save_to_file) {
   fetcher->SetRequestContext(context_getter);
@@ -152,7 +153,7 @@ void StartFetch(content::URLFetcher* fetcher,
 }
 
 // Returs true if the url request of |fetcher| was succesful.
-bool FetchSuccess(const content::URLFetcher& fetcher) {
+bool FetchSuccess(const net::URLFetcher& fetcher) {
   return (fetcher.GetStatus().status() == net::URLRequestStatus::SUCCESS) &&
          (fetcher.GetResponseCode() == 200);
 }
@@ -289,10 +290,10 @@ class CrxUpdateService : public ComponentUpdateService {
     CRXContext() : installer(NULL) {}
   };
 
-  void OnURLFetchComplete(const content::URLFetcher* source,
+  void OnURLFetchComplete(const net::URLFetcher* source,
                           UpdateContext* context);
 
-  void OnURLFetchComplete(const content::URLFetcher* source,
+  void OnURLFetchComplete(const net::URLFetcher* source,
                           CRXContext* context);
 
  private:
@@ -324,7 +325,7 @@ class CrxUpdateService : public ComponentUpdateService {
 
   scoped_ptr<Config> config_;
 
-  scoped_ptr<content::URLFetcher> url_fetcher_;
+  scoped_ptr<net::URLFetcher> url_fetcher_;
 
   typedef std::vector<CrxUpdateItem*> UpdateItems;
   UpdateItems work_items_;
@@ -506,7 +507,7 @@ void CrxUpdateService::ProcessPendingItems() {
     context->id = item->id;
     context->installer = item->component.installer;
     url_fetcher_.reset(content::URLFetcher::Create(
-        0, item->crx_url, content::URLFetcher::GET,
+        0, item->crx_url, net::URLFetcher::GET,
         MakeContextDelegate(this, context)));
     StartFetch(url_fetcher_.get(), config_->RequestContext(), true);
     return;
@@ -567,14 +568,14 @@ void CrxUpdateService::ProcessPendingItems() {
                                                 query,
                                                 config_->ExtraRequestParams());
   url_fetcher_.reset(content::URLFetcher::Create(
-      0, GURL(full_query), content::URLFetcher::GET,
+      0, GURL(full_query), net::URLFetcher::GET,
       MakeContextDelegate(this, new UpdateContext())));
   StartFetch(url_fetcher_.get(), config_->RequestContext(), false);
 }
 
 // Caled when we got a response from the update server. It consists of an xml
 // document following the omaha update scheme.
-void CrxUpdateService::OnURLFetchComplete(const content::URLFetcher* source,
+void CrxUpdateService::OnURLFetchComplete(const net::URLFetcher* source,
                                           UpdateContext* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (FetchSuccess(*source)) {
@@ -679,7 +680,7 @@ void CrxUpdateService::OnParseUpdateManifestFailed(
 // Called when the CRX package has been downloaded to a temporary location.
 // Here we fire the notifications and schedule the component-specific installer
 // to be called in the file thread.
-void CrxUpdateService::OnURLFetchComplete(const content::URLFetcher* source,
+void CrxUpdateService::OnURLFetchComplete(const net::URLFetcher* source,
                                           CRXContext* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   base::PlatformFileError error_code;

@@ -179,7 +179,8 @@ void AutocompleteProviderTest::ResetControllerWithTestProviders(
 
 void AutocompleteProviderTest::
     ResetControllerWithTestProvidersWithKeywordAndSearchProviders() {
-  profile_.CreateTemplateURLService();
+  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+      &profile_, &TemplateURLServiceFactory::BuildInstanceFor);
 
   // Reset the default TemplateURL.
   TemplateURLData data;
@@ -218,7 +219,8 @@ void AutocompleteProviderTest::
 
 void AutocompleteProviderTest::
     ResetControllerWithKeywordProvider() {
-  profile_.CreateTemplateURLService();
+  TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+      &profile_, &TemplateURLServiceFactory::BuildInstanceFor);
 
   TemplateURLService* turl_model =
       TemplateURLServiceFactory::GetForProfile(&profile_);
@@ -410,7 +412,8 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("foo.c"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("-foo.com"), AutocompleteInput::URL },
-    { ASCIIToUTF16("foo-.com"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("foo-.com"), AutocompleteInput::URL },
+    { ASCIIToUTF16("foo_.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo.-com"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo/"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo/bar"), AutocompleteInput::UNKNOWN },
@@ -470,7 +473,8 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("http://foo_bar.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://foo/bar baz"), AutocompleteInput::URL },
     { ASCIIToUTF16("http://-foo.com"), AutocompleteInput::URL },
-    { ASCIIToUTF16("http://foo-.com"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("http://foo-.com"), AutocompleteInput::URL },
+    { ASCIIToUTF16("http://foo_.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("http://foo.-com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("http://_foo_.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("http://foo.com:abc"), AutocompleteInput::QUERY },

@@ -18,7 +18,8 @@ namespace shell {
 ShellDelegateImpl::ShellDelegateImpl()
     : watcher_(NULL),
       launcher_delegate_(NULL),
-      locked_(false) {
+      locked_(false),
+      spoken_feedback_enabled_(false) {
 }
 
 ShellDelegateImpl::~ShellDelegateImpl() {
@@ -56,6 +57,9 @@ void ShellDelegateImpl::Exit() {
   MessageLoopForUI::current()->Quit();
 }
 
+void ShellDelegateImpl::NewTab() {
+}
+
 void ShellDelegateImpl::NewWindow(bool incognito) {
   ash::shell::ToplevelWindow::CreateParams create_params;
   create_params.can_resize = true;
@@ -63,16 +67,26 @@ void ShellDelegateImpl::NewWindow(bool incognito) {
   ash::shell::ToplevelWindow::CreateToplevelWindow(create_params);
 }
 
-void ShellDelegateImpl::Search() {
-}
-
-void ShellDelegateImpl::OpenFileManager() {
+void ShellDelegateImpl::OpenFileManager(bool as_dialog) {
 }
 
 void ShellDelegateImpl::OpenCrosh() {
 }
 
-void ShellDelegateImpl::OpenMobileSetup() {
+void ShellDelegateImpl::OpenMobileSetup(const std::string& service_path) {
+}
+
+void ShellDelegateImpl::RestoreTab() {
+}
+
+bool ShellDelegateImpl::RotatePaneFocus(Shell::Direction direction) {
+  return true;
+}
+
+void ShellDelegateImpl::ShowKeyboardOverlay() {
+}
+
+void ShellDelegateImpl::ShowTaskManager() {
 }
 
 content::BrowserContext* ShellDelegateImpl::GetCurrentBrowserContext() {
@@ -80,9 +94,14 @@ content::BrowserContext* ShellDelegateImpl::GetCurrentBrowserContext() {
 }
 
 void ShellDelegateImpl::ToggleSpokenFeedback() {
+  spoken_feedback_enabled_ = !spoken_feedback_enabled_;
 }
 
-ash::AppListViewDelegate* ShellDelegateImpl::CreateAppListViewDelegate() {
+bool ShellDelegateImpl::IsSpokenFeedbackEnabled() const {
+  return spoken_feedback_enabled_;
+}
+
+app_list::AppListViewDelegate* ShellDelegateImpl::CreateAppListViewDelegate() {
   return ash::shell::CreateAppListViewDelegate();
 }
 
@@ -103,6 +122,9 @@ ash::SystemTrayDelegate* ShellDelegateImpl::CreateSystemTrayDelegate(
 }
 
 ash::UserWallpaperDelegate* ShellDelegateImpl::CreateUserWallpaperDelegate() {
+  return NULL;
+}
+aura::client::UserActionClient* ShellDelegateImpl::CreateUserActionClient() {
   return NULL;
 }
 

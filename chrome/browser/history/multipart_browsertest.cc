@@ -31,14 +31,14 @@ class MultipartResponseTest : public InProcessBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(MultipartResponseTest, SingleVisit) {
   // Make sure that visiting a multipart/x-mixed-replace site only
-  // creates one entry in the visits table. 
+  // creates one entry in the visits table.
   ASSERT_TRUE(test_server()->Start());
 
-  Observe(browser()->GetSelectedWebContents());
+  Observe(browser()->GetActiveWebContents());
   ui_test_utils::NavigateToURL(browser(), test_server()->GetURL("multipart"));
 
   EXPECT_EQ(ASCIIToUTF16("page 9"),
-            browser()->GetSelectedWebContents()->GetTitle());
+            browser()->GetActiveWebContents()->GetTitle());
   EXPECT_EQ(1, update_history_count_);
   EXPECT_GT(did_navigate_any_frame_count_, update_history_count_);
 }

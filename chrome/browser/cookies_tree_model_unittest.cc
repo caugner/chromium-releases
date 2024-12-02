@@ -21,7 +21,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -51,7 +51,7 @@ class CookiesTreeModelTest : public testing::Test {
     profile_.reset(new TestingProfile());
     profile_->CreateRequestContext();
     mock_browsing_data_cookie_helper_ =
-      new MockBrowsingDataCookieHelper(profile_.get());
+      new MockBrowsingDataCookieHelper(profile_->GetRequestContext());
     mock_browsing_data_database_helper_ =
       new MockBrowsingDataDatabaseHelper(profile_.get());
     mock_browsing_data_local_storage_helper_ =
@@ -170,9 +170,11 @@ class CookiesTreeModelTest : public testing::Test {
       if (node->GetDetailedInfo().node_type == node_type) {
         switch (node_type) {
           case CookieTreeNode::DetailedInfo::TYPE_SESSION_STORAGE:
-            return node->GetDetailedInfo().session_storage_info->origin + ",";
+            return node->GetDetailedInfo().
+                session_storage_info->origin_url.spec() + ",";
           case CookieTreeNode::DetailedInfo::TYPE_LOCAL_STORAGE:
-            return node->GetDetailedInfo().local_storage_info->origin + ",";
+            return node->GetDetailedInfo().
+                local_storage_info->origin_url.spec() + ",";
           case CookieTreeNode::DetailedInfo::TYPE_DATABASE:
             return node->GetDetailedInfo().database_info->database_name + ",";
           case CookieTreeNode::DetailedInfo::TYPE_COOKIE:

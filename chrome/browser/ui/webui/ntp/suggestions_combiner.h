@@ -23,27 +23,53 @@ namespace base {
 // Combines many different sources of suggestions and generates data from it.
 class SuggestionsCombiner {
  public:
-  explicit SuggestionsCombiner(SuggestionsHandler* suggestions_handler);
+  // Interface to be implemented by classes that will be notified of events from
+  // the SuggestionsCombiner.
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Method that is called when new suggestions are ready from the
+    // SuggestionsCombiner.
+    virtual void OnSuggestionsReady() = 0;
+  };
+
   virtual ~SuggestionsCombiner();
 
   // Add a new source. The SuggestionsCombiner takes ownership of |source|.
   void AddSource(SuggestionsSource* source);
 
+  // Enables or disables debug mode. If debug mode is enabled, the sources are
+  // expected to provide additional data, which could be displayed, for example,
+  // in the chrome://suggestions-internals/ page.
+  void EnableDebug(bool enable);
+
   // Fetch a new set of items from the various suggestion sources.
   void FetchItems(Profile* profile);
 
-  base::ListValue* GetPagesValue();
+  base::ListValue* GetPageValues();
 
   // Called by a source when its items are ready. Make sure suggestion sources
   // call this method exactly once for each call to
   // SuggestionsSource::FetchItems.
   void OnItemsReady();
 
+  void SetSuggestionsCount(size_t suggestions_count);
+
+  // Creates a new instance of the SuggestionsCombiner (owned by the callee),
+  // and sets up the default sources.
+  static SuggestionsCombiner* Create(SuggestionsCombiner::Delegate* delegate,
+                                     Profile* profile);
+
  private:
-  // Fill the pages value from the suggestion sources so they can be sent to
-  // the javascript side. This should only be called when all the suggestion
+  friend class SuggestionsCombinerTest;
+
+  explicit SuggestionsCombiner(SuggestionsCombiner::Delegate* delegate);
+
+  // Fill the page values from the suggestion sources so they can be sent to
+  // the JavaScript side. This should only be called when all the suggestion
   // sources have items ready.
-  void FillPagesValue();
+  void FillPageValues();
 
   typedef ScopedVector<SuggestionsSource> SuggestionsSources;
 
@@ -55,15 +81,19 @@ class SuggestionsCombiner {
   // fetching their data.
   int sources_fetching_count_;
 
-  // The suggestions handler to notify once items are ready.
-  SuggestionsHandler* suggestions_handler_;
+  // The delegate to notify once items are ready.
+  SuggestionsCombiner::Delegate* delegate_;
 
   // Number of suggestions to generate. Used to distribute the suggestions
   // between the various sources.
   size_t suggestions_count_;
 
   // Informations to send to the javascript side.
-  scoped_ptr<base::ListValue> pages_value_;
+  scoped_ptr<base::ListValue> page_values_;
+
+  // Whether debug mode is enabled or not (debug mode provides more data in the
+  // results).
+  bool debug_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(SuggestionsCombiner);
 };

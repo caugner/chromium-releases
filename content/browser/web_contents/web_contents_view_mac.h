@@ -6,8 +6,6 @@
 #define CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_MAC_H_
 #pragma once
 
-#if defined(__OBJC__)
-
 #import <Cocoa/Cocoa.h>
 
 #include <string>
@@ -15,13 +13,14 @@
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/web_contents/web_contents_view_helper.h"
+#include "content/port/browser/render_view_host_delegate_view.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/base/cocoa/base_view.h"
 #include "ui/gfx/size.h"
 
 @class FocusTracker;
 class SkBitmap;
+class WebContentsImpl;
 class WebContentsViewMac;
 @class WebDragDest;
 @class WebDragSource;
@@ -48,7 +47,9 @@ class Point;
 
 // Mac-specific implementation of the WebContentsView. It owns an NSView that
 // contains all of the contents of the tab and associated child views.
-class WebContentsViewMac : public content::WebContentsView {
+class WebContentsViewMac
+    : public content::WebContentsView,
+      public content::RenderViewHostDelegateView {
  public:
   // The corresponding WebContentsImpl is passed in the constructor, and manages
   // our lifetime. This doesn't need to be the case, but is this way currently
@@ -80,22 +81,9 @@ class WebContentsViewMac : public content::WebContentsView {
   virtual WebDropData* GetDropData() const OVERRIDE;
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
-  virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+  virtual gfx::Rect GetViewBounds() const OVERRIDE;
 
-  // Backend implementation of RenderViewHostDelegate::View.
-  virtual void CreateNewWindow(
-      int route_id,
-      const ViewHostMsg_CreateWindow_Params& params) OVERRIDE;
-  virtual void CreateNewWidget(int route_id,
-                               WebKit::WebPopupType popup_type) OVERRIDE;
-  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowCreatedWindow(int route_id,
-                                 WindowOpenDisposition disposition,
-                                 const gfx::Rect& initial_pos,
-                                 bool user_gesture) OVERRIDE;
-  virtual void ShowCreatedWidget(int route_id,
-                                 const gfx::Rect& initial_pos) OVERRIDE;
-  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  // Backend implementation of RenderViewHostDelegateView.
   virtual void ShowContextMenu(
       const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
@@ -103,7 +91,8 @@ class WebContentsViewMac : public content::WebContentsView {
                              double item_font_size,
                              int selected_item,
                              const std::vector<WebMenuItem>& items,
-                             bool right_aligned) OVERRIDE;
+                             bool right_aligned,
+                             bool allow_multiple_selection) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask allowed_operations,
                              const SkBitmap& image,
@@ -123,9 +112,6 @@ class WebContentsViewMac : public content::WebContentsView {
   // The WebContentsImpl whose contents we display.
   WebContentsImpl* web_contents_;
 
-  // Common implementations of some WebContentsView methods.
-  WebContentsViewHelper web_contents_view_helper_;
-
   // The Cocoa NSView that lives in the view hierarchy.
   scoped_nsobject<WebContentsViewCocoa> cocoa_view_;
 
@@ -138,21 +124,5 @@ class WebContentsViewMac : public content::WebContentsView {
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewMac);
 };
-
-#endif  // __OBJC__
-
-// Functions that may be accessed from non-Objective-C C/C++ code.
-namespace content {
-class WebContents;
-class WebContentsView;
-class WebContentsViewDelegate;
-}
-
-namespace web_contents_view_mac {
-// Creates a WebContentsViewMac. Takes ownership of |delegate|.
-CONTENT_EXPORT content::WebContentsView* CreateWebContentsView(
-    WebContentsImpl* web_contents,
-    content::WebContentsViewDelegate* delegate);
-}
 
 #endif  // CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_MAC_H_

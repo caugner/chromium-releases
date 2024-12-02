@@ -13,15 +13,17 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/string16.h"
 #include "chrome/common/extensions/url_pattern_set.h"
 
 // TODO(jstritar): Move each class to its own file in extensions/permissions.
 
-class Extension;
 class ExtensionPermissionsInfo;
+
+namespace extensions {
+class Extension;
+}
 
 // When prompting the user to install or approve permissions, we display
 // messages describing the effects of the permissions rather than listing the
@@ -52,6 +54,9 @@ class ExtensionPermissionMessage {
     kAllPageContent,
     kPrivacy,
     kManagedMode,
+    kInput,
+    kAudioCapture,
+    kVideoCapture,
     kEnumBoundary
   };
 
@@ -95,7 +100,11 @@ class ExtensionAPIPermission {
     kUnknown = -1,
 
     // Real permissions.
+    kActiveTab,
+    kAlarms,
     kAppNotifications,
+    kAppWindow,
+    kAudioCapture,
     kBackground,
     kBookmark,
     kBrowsingData,
@@ -107,10 +116,15 @@ class ExtensionAPIPermission {
     kContextMenus,
     kCookie,
     kDebugger,
+    kDeclarative,
+    kDeclarativeWebRequest,
     kDevtools,
+    kEchoPrivate,
     kExperimental,
     kFileBrowserHandler,
+    kFileBrowserHandlerInternal,
     kFileBrowserPrivate,
+    kFileSystem,
     kGeolocation,
     kHistory,
     kIdle,
@@ -122,7 +136,6 @@ class ExtensionAPIPermission {
     kMediaPlayerPrivate,
     kMetricsPrivate,
     kNotification,
-    kEchoPrivate,
     kPageCapture,
     kPlugin,
     kPrivacy,
@@ -137,9 +150,11 @@ class ExtensionAPIPermission {
     kTtsEngine,
     kUnlimitedStorage,
     kUsb,
+    kVideoCapture,
     kWebNavigation,
     kWebRequest,
     kWebRequestBlocking,
+    kWebRequestInternal,
     kWebSocketProxyPrivate,
     kWebstorePrivate,
     kEnumBoundary
@@ -228,7 +243,7 @@ class ExtensionPermissionsInfo {
 
   // Returns the permission with the given |name|, and NULL if none
   // exists.
-  ExtensionAPIPermission* GetByName(std::string name);
+  ExtensionAPIPermission* GetByName(const std::string& name);
 
   // Returns a set containing all valid api permission ids.
   ExtensionAPIPermissionSet GetAll();
@@ -288,7 +303,7 @@ class ExtensionPermissionSet
   // the api and host permissions (|apis| and |hosts|). The effective hosts
   // of the newly created permission set will be inferred from the |extension|
   // manifest, |apis| and |hosts|.
-  ExtensionPermissionSet(const Extension* extension,
+  ExtensionPermissionSet(const extensions::Extension* extension,
                          const ExtensionAPIPermissionSet& apis,
                          const URLPatternSet& explicit_hosts,
                          const ExtensionOAuth2Scopes& scopes);
@@ -399,6 +414,8 @@ class ExtensionPermissionSet
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtensionPermissionsTest,
                            HasLessHostPrivilegesThan);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionPermissionsTest,
+                           GetWarningMessages_AudioVideo);
   friend class base::RefCountedThreadSafe<ExtensionPermissionSet>;
 
   ~ExtensionPermissionSet();
@@ -409,7 +426,10 @@ class ExtensionPermissionSet
       bool exclude_file_scheme);
 
   // Initializes the set based on |extension|'s manifest data.
-  void InitImplicitExtensionPermissions(const Extension* extension);
+  void InitImplicitExtensionPermissions(const extensions::Extension* extension);
+
+  // Adds permissions implied independently of other context.
+  void InitImplicitPermissions();
 
   // Initializes the effective host permission based on the data in this set.
   void InitEffectiveHosts();

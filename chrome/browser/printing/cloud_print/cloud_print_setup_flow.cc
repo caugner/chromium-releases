@@ -19,9 +19,10 @@
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/web_dialog_controller.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -62,7 +63,7 @@ CloudPrintSetupFlow* CloudPrintSetupFlow::OpenDialog(
     const base::WeakPtr<Delegate>& delegate,
     gfx::NativeWindow parent_window) {
   DCHECK(profile);
-  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+  Browser* browser = browser::FindLastActiveWithProfile(profile);
   // Set the arguments for showing the gaia login page.
   DictionaryValue args;
   args.SetString("user", "");
@@ -79,20 +80,22 @@ CloudPrintSetupFlow* CloudPrintSetupFlow::OpenDialog(
   base::JSONWriter::Write(&args, &json_args);
 
   CloudPrintSetupFlow* flow = new CloudPrintSetupFlow(json_args, profile,
-                                                      delegate, setup_done);
+                                                      browser, delegate,
+                                                      setup_done);
   // We may not always have a browser. This can happen when we are being
   // invoked in the context of a "token expired" notfication. If we don't have
   // a brower, use the underlying dialog system to show the dialog without
   // using a browser.
   if (!parent_window && browser && browser->window())
-    parent_window = browser->window()->GetNativeHandle();
-  browser::ShowWebDialog(parent_window, profile, browser, flow);
+    parent_window = browser->window()->GetNativeWindow();
+  browser::ShowWebDialog(parent_window, profile, flow);
   return flow;
 }
 
 CloudPrintSetupFlow::CloudPrintSetupFlow(
     const std::string& args,
     Profile* profile,
+    Browser* browser,
     const base::WeakPtr<Delegate>& delegate,
     bool setup_done)
     : web_ui_(NULL),
@@ -103,6 +106,10 @@ CloudPrintSetupFlow::CloudPrintSetupFlow(
       delegate_(delegate) {
   // TODO(hclam): The data source should be added once.
   profile_ = profile;
+  if (browser) {
+    web_dialog_controller_.reset(
+        new WebDialogController(this, profile, browser));
+  }
   ChromeURLDataManager::AddDataSource(profile,
       new CloudPrintSetupSource());
 }
@@ -116,7 +123,7 @@ void CloudPrintSetupFlow::Focus() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// WebDialogDelegate implementation.
+// ui::WebDialogDelegate implementation.
 GURL CloudPrintSetupFlow::GetDialogContentURL() const {
   return GURL("chrome://cloudprintsetup/setupflow");
 }
@@ -133,8 +140,8 @@ void CloudPrintSetupFlow::GetWebUIMessageHandlers(
 void CloudPrintSetupFlow::GetDialogSize(gfx::Size* size) const {
   PrefService* prefs = profile_->GetPrefs();
   gfx::Font approximate_web_font(
-      prefs->GetString(prefs::kWebKitGlobalSansSerifFontFamily),
-      prefs->GetInteger(prefs::kWebKitGlobalDefaultFontSize));
+      prefs->GetString(prefs::kWebKitSansSerifFontFamily),
+      prefs->GetInteger(prefs::kWebKitDefaultFontSize));
 
   if (setup_done_) {
     *size = ui::GetLocalizedContentsSizeForFont(
@@ -315,8 +322,8 @@ void CloudPrintSetupFlow::ShowSetupDone() {
   if (web_ui_) {
     PrefService* prefs = profile_->GetPrefs();
     gfx::Font approximate_web_font(
-        prefs->GetString(prefs::kWebKitGlobalSansSerifFontFamily),
-        prefs->GetInteger(prefs::kWebKitGlobalDefaultFontSize));
+        prefs->GetString(prefs::kWebKitSansSerifFontFamily),
+        prefs->GetInteger(prefs::kWebKitDefaultFontSize));
     gfx::Size done_size = ui::GetLocalizedContentsSizeForFont(
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_WIDTH_CHARS,
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_HEIGHT_LINES,

@@ -14,7 +14,6 @@
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/memory/singleton.h"
-#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
@@ -54,6 +53,8 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
@@ -79,19 +80,7 @@ const char kLTRHtmlTextDirection[] = "ltr";
 
 static base::LazyInstance<std::set<const WebUIController*> > g_live_new_tabs;
 
-// Group IDs for the web store link field trial.
-int g_footer_group = 0;
-int g_hint_group = 0;
-
-bool WebStoreLinkExperimentGroupIs(int group) {
-  return base::FieldTrialList::TrialExists(kWebStoreLinkExperiment) &&
-      base::FieldTrialList::FindValue(kWebStoreLinkExperiment) == group;
-}
-
 }  // namespace
-
-// The Web Store footer experiment FieldTrial name.
-const char kWebStoreLinkExperiment[] = "WebStoreLinkExperiment";
 
 ///////////////////////////////////////////////////////////////////////////////
 // NewTabUI
@@ -209,10 +198,12 @@ void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
   content::NotificationSource source =
       content::Source<content::RenderWidgetHost>(render_view_host);
   if (!registrar_.IsRegistered(this,
-          content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
+          content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
           source)) {
-    registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
-                   source);
+    registrar_.Add(
+        this,
+        content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
+        source);
   }
 
   timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
@@ -256,7 +247,7 @@ void NewTabUI::Observe(int type,
       break;
     }
 #endif
-    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT: {
+    case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE: {
       last_paint_ = base::TimeTicks::Now();
       break;
     }
@@ -283,35 +274,6 @@ void NewTabUI::RegisterUserPrefs(PrefService* prefs) {
   if (NewTabUI::IsSuggestionsPageEnabled())
     SuggestionsHandler::RegisterUserPrefs(prefs);
   browser_sync::ForeignSessionHandler::RegisterUserPrefs(prefs);
-}
-
-// static
-void NewTabUI::SetupFieldTrials() {
-  scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial(
-          kWebStoreLinkExperiment, 1, "Disabled", 2025, 6, 1, NULL));
-
-  // Try to give the user a consistent experience, if possible.
-  if (base::FieldTrialList::IsOneTimeRandomizationEnabled())
-    trial->UseOneTimeRandomization();
-
-  // 33.3% in each group.
-  g_footer_group = trial->AppendGroup("FooterLink", 1);
-  g_hint_group = trial->AppendGroup("PlusIcon", 0);
-}
-
-// static
-bool NewTabUI::ShouldShowWebStoreFooterLink() {
-  const CommandLine* cli = CommandLine::ForCurrentProcess();
-  return cli->HasSwitch(switches::kEnableWebStoreLink) ||
-      WebStoreLinkExperimentGroupIs(g_footer_group);
-}
-
-// static
-bool NewTabUI::ShouldShowAppInstallHint() {
-  const CommandLine* cli = CommandLine::ForCurrentProcess();
-  return cli->HasSwitch(switches::kNtpAppInstallHint) ||
-      WebStoreLinkExperimentGroupIs(g_hint_group);
 }
 
 // static
@@ -397,7 +359,7 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
     scoped_refptr<base::RefCountedStaticMemory> resource_bytes(
         it->second.second ?
             ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
-                it->second.second) :
+                it->second.second, ui::SCALE_FACTOR_NONE) :
             new base::RefCountedStaticMemory);
     SendResponse(request_id, resource_bytes);
     return;

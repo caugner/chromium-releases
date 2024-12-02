@@ -26,17 +26,17 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/util/immutable.h"
+#include "sync/internal_api/public/util/report_unrecoverable_error_function.h"
+#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
+#include "sync/internal_api/public/util/weak_handle.h"
+#include "sync/protocol/sync.pb.h"
 #include "sync/syncable/blob.h"
 #include "sync/syncable/dir_open_result.h"
-#include "sync/syncable/model_type.h"
 #include "sync/syncable/syncable_id.h"
 #include "sync/util/cryptographer.h"
-#include "sync/util/immutable.h"
-#include "sync/util/report_unrecoverable_error_function.h"
-#include "sync/util/unrecoverable_error_handler.h"
 #include "sync/util/time.h"
-#include "sync/util/weak_handle.h"
-#include "sync/protocol/sync.pb.h"
 
 namespace base {
 class DictionaryValue;
@@ -199,6 +199,8 @@ enum {
 };
 
 enum BitTemp {
+  // Not to be confused with IS_UNSYNCED, this bit is used to detect local
+  // changes to items that happen during the server Commit operation.
   SYNCING = BIT_TEMPS_BEGIN,
   BIT_TEMPS_END,
 };
@@ -568,7 +570,6 @@ class MutableEntry : public Entry {
   friend class sync_api::WriteNode;
   void* operator new(size_t size) { return (::operator new)(size); }
 
-  bool PutImpl(StringField field, const std::string& value);
   bool PutUniqueClientTag(const std::string& value);
 
   // Adjusts the successor and predecessor entries so that they no longer
@@ -867,6 +868,7 @@ class Directory {
       ModelType type,
       const sync_pb::DataTypeProgressMarker& value);
 
+  ModelTypeSet initial_sync_ended_types() const;
   bool initial_sync_ended_for_type(ModelType type) const;
   void set_initial_sync_ended_for_type(ModelType type, bool value);
 
@@ -1344,6 +1346,10 @@ bool IsLegalNewParent(BaseTransaction* trans, const Id& id, const Id& parentid);
 
 // This function sets only the flags needed to get this entry to sync.
 bool MarkForSyncing(syncable::MutableEntry* e);
+
+void ChangeEntryIDAndUpdateChildren(syncable::WriteTransaction* trans,
+                                    syncable::MutableEntry* entry,
+                                    const syncable::Id& new_id);
 
 }  // namespace syncable
 

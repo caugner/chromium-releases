@@ -357,8 +357,9 @@ ShellIntegration::DefaultWebClientState GetIsDefaultWebClient(
 } // namespace
 
 // static
-bool ShellIntegration::CanSetAsDefaultBrowser() {
-  return true;
+ShellIntegration::DefaultWebClientSetPermission
+    ShellIntegration::CanSetAsDefaultBrowser() {
+  return SET_DEFAULT_UNATTENDED;
 }
 
 // static
@@ -442,7 +443,7 @@ bool GetDesktopShortcutTemplate(base::Environment* env,
   std::string template_filename(GetDesktopName(env));
   for (std::vector<FilePath>::const_iterator i = search_paths.begin();
        i != search_paths.end(); ++i) {
-    FilePath path = (*i).Append(template_filename);
+    FilePath path = i->Append(template_filename);
     VLOG(1) << "Looking for desktop file template in " << path.value();
     if (file_util::PathExists(path)) {
       VLOG(1) << "Found desktop file template at " << path.value();

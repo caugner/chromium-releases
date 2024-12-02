@@ -7,6 +7,7 @@ from model import PropertyType
 import cpp_util
 import model
 import os
+import schema_util
 
 class HGenerator(object):
   """A .h generator for a namespace.
@@ -156,16 +157,10 @@ class HGenerator(object):
   def _GenerateType(self, type_):
     """Generates a struct for a type.
     """
-    classname = cpp_util.Classname(type_.name)
+    classname = cpp_util.Classname(schema_util.StripSchemaNamespace(type_.name))
     c = Code()
 
     if type_.functions:
-      # Types with functions are not instantiable in C++ because they are
-      # handled in pure Javascript and hence have no properties or
-      # additionalProperties.
-      if type_.properties:
-        raise NotImplementedError('\n'.join(model.GetModelHierarchy(type_)) +
-            '\nCannot generate both functions and properties on a type')
       c.Sblock('namespace %(classname)s {')
       for function in type_.functions.values():
         (c.Concat(self._GenerateFunction(function))
@@ -263,6 +258,9 @@ class HGenerator(object):
     for prop in props:
       if prop.type_ == PropertyType.OBJECT:
         c.Concat(self._GenerateType(prop))
+        c.Append()
+      elif prop.type_ == PropertyType.ARRAY:
+        c.Concat(self._GeneratePropertyStructures([prop.item_type]))
         c.Append()
       elif prop.type_ == PropertyType.CHOICES:
         c.Concat(self._GenerateEnumDeclaration(

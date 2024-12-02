@@ -12,10 +12,6 @@
 #include "ui/gfx/size.h"
 #include "ui/gfx/size_base.h"
 
-#if !defined(ENABLE_DIP)
-#error "This class should be used only when DIP feature is enabled"
-#endif
-
 namespace gfx {
 
 // A floating version of gfx::Size.
@@ -29,6 +25,10 @@ class UI_EXPORT SizeF : public SizeBase<SizeF, float> {
 
   std::string ToString() const;
 };
+
+#if !defined(COMPILER_MSVC)
+extern template class SizeBase<SizeF, float>;
+#endif
 
 }  // namespace gfx
 

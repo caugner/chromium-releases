@@ -11,8 +11,10 @@
 #include "base/message_loop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/panels/detached_panel_strip.h"
 #include "chrome/browser/ui/panels/docked_panel_strip.h"
+#include "chrome/browser/ui/panels/old_panel.h"
 #include "chrome/browser/ui/panels/panel_drag_controller.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher.h"
 #include "chrome/browser/ui/panels/panel_resize_controller.h"
@@ -42,6 +44,10 @@ const double kPanelMaxWidthFactor = 0.35;
 
 // Maxmium height of a panel is based on a factor of the working area.
 const double kPanelMaxHeightFactor = 0.5;
+
+// Width to height ratio is used to compute the default width or height
+// when only one value is provided.
+const double kPanelDefaultWidthToHeightRatio = 1.62;  // golden ratio
 }  // namespace
 
 // static
@@ -62,7 +68,8 @@ bool PanelManager::ShouldUsePanels(const std::string& extension_id) {
       wm_type != ui::WM_ICE_WM &&
       wm_type != ui::WM_KWIN &&
       wm_type != ui::WM_METACITY &&
-      wm_type != ui::WM_MUTTER) {
+      wm_type != ui::WM_MUTTER &&
+      wm_type != ui::WM_XFWM4) {
     return false;
   }
 #endif  // TOOLKIT_GTK
@@ -131,28 +138,79 @@ int PanelManager::GetMaxPanelHeight() const {
 }
 
 Panel* PanelManager::CreatePanel(Browser* browser) {
+  return CreatePanel(browser, "", NULL, GURL(),
+                     browser->override_bounds().size());
+}
+
+Panel* PanelManager::CreatePanel(const std::string& app_name,
+                                 Profile* profile,
+                                 const GURL& url,
+                                 const gfx::Size& requested_size) {
+  return CreatePanel(NULL, app_name, profile, url, requested_size);
+}
+
+Panel* PanelManager::CreatePanel(Browser* browser,
+                                 const std::string& app_name,
+                                 Profile* profile,
+                                 const GURL& url,
+                                 const gfx::Size& requested_size) {
   // Need to sync the display area if no panel is present. This is because:
   // 1) Display area is not initialized until first panel is created.
   // 2) On windows, display settings notification is tied to a window. When
   //    display settings are changed at the time that no panel exists, we do
   //    not receive any notification.
-  if (num_panels() == 0)
+  if (num_panels() == 0) {
     display_settings_provider_->OnDisplaySettingsChanged();
-
-  int width = browser->override_bounds().width();
-  int height = browser->override_bounds().height();
-  Panel* panel = new Panel(browser, gfx::Size(width, height));
-  docked_strip_->AddPanel(panel, PanelStrip::DEFAULT_POSITION);
-  docked_strip_->UpdatePanelOnStripChange(panel);
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PANEL_ADDED,
-      content::Source<Panel>(panel),
-      content::NotificationService::NoDetails());
-
-  if (num_panels() == 1) {
     display_settings_provider_->AddFullScreenObserver(this);
   }
+
+  // Compute initial bounds for the panel.
+  int width = requested_size.width();
+  int height = requested_size.height();
+  if (width == 0)
+    width = height * kPanelDefaultWidthToHeightRatio;
+  else if (height == 0)
+    height = width / kPanelDefaultWidthToHeightRatio;
+
+  gfx::Size min_size(panel::kPanelMinWidth, panel::kPanelMinHeight);
+  gfx::Size max_size(GetMaxPanelWidth(), GetMaxPanelHeight());
+  if (width < min_size.width())
+    width = min_size.width();
+  else if (width > max_size.width())
+    width = max_size.width();
+
+  if (height < min_size.height())
+    height = min_size.height();
+  else if (height > max_size.height())
+    height = max_size.height();
+
+  gfx::Size panel_size(width, height);
+  gfx::Rect bounds(docked_strip_->GetDefaultPositionForPanel(panel_size),
+                   panel_size);
+
+  // Create the panel.
+  Panel* panel;
+  if (browser) {
+    // Legacy panel. Delete after refactor.
+    panel = new OldPanel(browser, min_size, max_size);
+    panel->Initialize(bounds, browser);
+  } else {
+    panel = new Panel(app_name, min_size, max_size);
+    panel->Initialize(profile, url, bounds);
+  }
+
+  // Auto resizable feature is enabled only if no initial size is requested.
+  if (auto_sizing_enabled() && requested_size.width() == 0 &&
+      requested_size.height() == 0) {
+    panel->SetAutoResizable(true);
+  }
+
+  // Add the panel to the docked strip.
+  // Delay layout refreshes in case multiple panels are created within
+  // a short time of one another or the focus changes shortly after panel
+  // is created to avoid excessive screen redraws.
+  docked_strip_->AddPanel(panel, PanelStrip::DELAY_LAYOUT_REFRESH);
+  docked_strip_->UpdatePanelOnStripChange(panel);
 
   return panel;
 }
@@ -215,25 +273,6 @@ void PanelManager::OnPanelExpansionStateChanged(Panel* panel) {
 
 }
 
-void PanelManager::OnWindowAutoResized(Panel* panel,
-                                       const gfx::Size& preferred_window_size) {
-  DCHECK(auto_sizing_enabled_);
-  panel->panel_strip()->ResizePanelWindow(panel, preferred_window_size);
-}
-
-void PanelManager::ResizePanel(Panel* panel, const gfx::Size& new_size) {
-  PanelStrip* panel_strip = panel->panel_strip();
-  if (!panel_strip)
-    return;
-  panel_strip->ResizePanelWindow(panel, new_size);
-  panel->SetAutoResizable(false);
-}
-
-void PanelManager::OnPanelResizedByMouse(Panel* panel,
-                                         const gfx::Rect& new_bounds) {
-  panel->panel_strip()->OnPanelResizedByMouse(panel, new_bounds);
-}
-
 void PanelManager::MovePanelToStrip(
     Panel* panel,
     PanelStrip::Type new_layout,
@@ -269,13 +308,13 @@ void PanelManager::BringUpOrDownTitlebars(bool bring_up) {
 }
 
 BrowserWindow* PanelManager::GetNextBrowserWindowToActivate(
-    Panel* panel) const {
+    Browser* current_browser) const {
   // Find the last active browser window that is not minimized.
   BrowserList::const_reverse_iterator iter = BrowserList::begin_last_active();
   BrowserList::const_reverse_iterator end = BrowserList::end_last_active();
   for (; (iter != end); ++iter) {
     Browser* browser = *iter;
-    if (panel->browser() != browser && !browser->window()->IsMinimized())
+    if (current_browser != browser && !browser->window()->IsMinimized())
       return browser->window();
   }
 
@@ -316,4 +355,3 @@ void PanelManager::OnPanelAnimationEnded(Panel* panel) {
       content::Source<Panel>(panel),
       content::NotificationService::NoDetails());
 }
-

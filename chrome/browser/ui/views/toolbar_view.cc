@@ -7,6 +7,7 @@
 #include "base/i18n/number_formatting.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/event_disposition.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -14,10 +15,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/global_error_service.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
-#include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
@@ -80,7 +81,7 @@ const int kPopupBottomSpacingGlass = 1;
 // corner of the wrench menu).
 const int kBadgeTopMargin = 2;
 
-SkBitmap* kPopupBackgroundEdge = NULL;
+gfx::ImageSkia* kPopupBackgroundEdge = NULL;
 
 // The omnibox border has some additional shadow, so we use less vertical
 // spacing than ToolbarView::kVertSpacing.
@@ -137,7 +138,7 @@ ToolbarView::ToolbarView(Browser* browser)
 
   if (!kPopupBackgroundEdge) {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-    kPopupBackgroundEdge = rb.GetBitmapNamed(IDR_LOCATIONBG_POPUPMODE_EDGE);
+    kPopupBackgroundEdge = rb.GetImageSkiaNamed(IDR_LOCATIONBG_POPUPMODE_EDGE);
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
@@ -275,7 +276,8 @@ void ToolbarView::RemoveMenuListener(views::MenuListener* listener) {
   menu_listeners_.RemoveObserver(listener);
 }
 
-SkBitmap ToolbarView::GetAppMenuIcon(views::CustomButton::ButtonState state) {
+gfx::ImageSkia ToolbarView::GetAppMenuIcon(
+    views::CustomButton::ButtonState state) {
   ui::ThemeProvider* tp = GetThemeProvider();
 
   int id = 0;
@@ -285,7 +287,7 @@ SkBitmap ToolbarView::GetAppMenuIcon(views::CustomButton::ButtonState state) {
     case views::CustomButton::BS_PUSHED: id = IDR_TOOLS_P; break;
     default:                             NOTREACHED();     break;
   }
-  SkBitmap icon = *tp->GetBitmapNamed(id);
+  gfx::ImageSkia icon = *tp->GetImageSkiaNamed(id);
 
 #if defined(OS_WIN)
   // Keep track of whether we were showing the badge before, so we don't send
@@ -307,29 +309,29 @@ SkBitmap ToolbarView::GetAppMenuIcon(views::CustomButton::ButtonState state) {
   // Draw the chrome app menu icon onto the canvas.
   scoped_ptr<gfx::Canvas> canvas(new gfx::Canvas(icon, false));
 
-  SkBitmap badge;
+  gfx::ImageSkia badge;
   // Only one badge can be active at any given time. The Upgrade notification
   // is deemed most important, then the DLL conflict badge.
   if (ShouldShowUpgradeRecommended()) {
-    badge = *tp->GetBitmapNamed(
+    badge = *tp->GetImageSkiaNamed(
         UpgradeDetector::GetInstance()->GetIconResourceID(
             UpgradeDetector::UPGRADE_ICON_TYPE_BADGE));
   } else if (ShouldShowIncompatibilityWarning()) {
 #if defined(OS_WIN)
     if (!was_showing)
       content::RecordAction(UserMetricsAction("ConflictBadge"));
-    badge = *tp->GetBitmapNamed(IDR_CONFLICT_BADGE);
+    badge = *tp->GetImageSkiaNamed(IDR_CONFLICT_BADGE);
     incompatibility_badge_showing = true;
 #else
     NOTREACHED();
 #endif
   } else if (error_badge_id) {
-    badge = *tp->GetBitmapNamed(error_badge_id);
+    badge = *tp->GetImageSkiaNamed(error_badge_id);
   } else {
     NOTREACHED();
   }
 
-  canvas->DrawBitmapInt(badge, icon.width() - badge.width(), kBadgeTopMargin);
+  canvas->DrawImageInt(badge, icon.width() - badge.width(), kBadgeTopMargin);
 
   return canvas->ExtractBitmap();
 }
@@ -376,8 +378,8 @@ void ToolbarView::OnMenuButtonClicked(views::View* source,
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, LocationBarView::Delegate implementation:
 
-TabContentsWrapper* ToolbarView::GetTabContentsWrapper() const {
-  return browser_->GetSelectedTabContentsWrapper();
+TabContents* ToolbarView::GetTabContents() const {
+  return browser_->GetActiveTabContents();
 }
 
 InstantController* ToolbarView::GetInstant() {
@@ -441,7 +443,7 @@ void ToolbarView::ButtonPressed(views::Button* sender,
                                 const views::Event& event) {
   int command = sender->tag();
   WindowOpenDisposition disposition =
-      event_utils::DispositionFromEventFlags(sender->mouse_event_flags());
+      browser::DispositionFromEventFlags(sender->mouse_event_flags());
   if ((disposition == CURRENT_TAB) &&
       ((command == IDC_BACK) || (command == IDC_FORWARD))) {
     // Forcibly reset the location bar, since otherwise it won't discard any
@@ -492,23 +494,33 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
   // TODO(cpu) Bug 1109102. Query WebKit land for the actual bindings.
   switch (command_id) {
     case IDC_CUT:
-      *accelerator = ui::Accelerator(ui::VKEY_X, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_X, ui::EF_CONTROL_DOWN);
       return true;
     case IDC_COPY:
-      *accelerator = ui::Accelerator(ui::VKEY_C, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_C, ui::EF_CONTROL_DOWN);
       return true;
     case IDC_PASTE:
-      *accelerator = ui::Accelerator(ui::VKEY_V, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_V, ui::EF_CONTROL_DOWN);
       return true;
 #if defined(USE_ASH)
-    // When USE_ASH is defined, IDC_NEW_WINDOW and IDC_NEW_INCOGNITO_WINDOW are
-    // handled outside Chrome, in ash/accelerators/accelerator_table.cc.
-    // crbug.com/120196
+    // When USE_ASH is defined, the commands listed here are handled outside
+    // Chrome, in ash/accelerators/accelerator_table.cc (crbug.com/120196).
+    case IDC_CLEAR_BROWSING_DATA:
+      *accelerator = ui::Accelerator(ui::VKEY_BACK,
+                                     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
+      return true;
+    case IDC_NEW_TAB:
+      *accelerator = ui::Accelerator(ui::VKEY_T, ui::EF_CONTROL_DOWN);
+      return true;
     case IDC_NEW_WINDOW:
-      *accelerator = ui::Accelerator(ui::VKEY_N, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_N, ui::EF_CONTROL_DOWN);
       return true;
     case IDC_NEW_INCOGNITO_WINDOW:
-      *accelerator = ui::Accelerator(ui::VKEY_N, true, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_N,
+                                     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
+      return true;
+    case IDC_TASK_MANAGER:
+      *accelerator = ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN);
       return true;
 #endif
   }
@@ -531,10 +543,10 @@ gfx::Size ToolbarView::GetPreferredSize() {
         browser_actions_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kRightEdgeSpacing;
 
-    CR_DEFINE_STATIC_LOCAL(SkBitmap, normal_background, ());
+    CR_DEFINE_STATIC_LOCAL(gfx::ImageSkia, normal_background, ());
     if (normal_background.isNull()) {
       ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-      normal_background = *rb.GetBitmapNamed(IDR_CONTENT_TOP_CENTER);
+      normal_background = *rb.GetImageSkiaNamed(IDR_CONTENT_TOP_CENTER);
     }
 
     return gfx::Size(min_width,
@@ -644,9 +656,9 @@ void ToolbarView::OnPaint(gfx::Canvas* canvas) {
   // when they're flush against the edge of the screen they just look glitchy.
   if (!browser_->window() || !browser_->window()->IsMaximized()) {
     int top_spacing = PopupTopSpacing();
-    canvas->DrawBitmapInt(*kPopupBackgroundEdge, 0, top_spacing);
-    canvas->DrawBitmapInt(*kPopupBackgroundEdge,
-                          width() - kPopupBackgroundEdge->width(), top_spacing);
+    canvas->DrawImageInt(*kPopupBackgroundEdge, 0, top_spacing);
+    canvas->DrawImageInt(*kPopupBackgroundEdge,
+                         width() - kPopupBackgroundEdge->width(), top_spacing);
   }
 
   // For glass, we need to draw a black line below the location bar to separate
@@ -682,7 +694,7 @@ int ToolbarView::OnDragUpdated(const views::DropTargetEvent& event) {
 }
 
 int ToolbarView::OnPerformDrop(const views::DropTargetEvent& event) {
-  return location_bar_->location_entry()->OnPerformDrop(event);
+  return location_bar_->GetLocationEntry()->OnPerformDrop(event);
 }
 
 void ToolbarView::OnThemeChanged() {
@@ -748,41 +760,45 @@ int ToolbarView::PopupTopSpacing() const {
 void ToolbarView::LoadImages() {
   ui::ThemeProvider* tp = GetThemeProvider();
 
-  back_->SetImage(views::CustomButton::BS_NORMAL, tp->GetBitmapNamed(IDR_BACK));
-  back_->SetImage(views::CustomButton::BS_HOT, tp->GetBitmapNamed(IDR_BACK_H));
+  back_->SetImage(views::CustomButton::BS_NORMAL,
+      tp->GetImageSkiaNamed(IDR_BACK));
+  back_->SetImage(views::CustomButton::BS_HOT,
+      tp->GetImageSkiaNamed(IDR_BACK_H));
   back_->SetImage(views::CustomButton::BS_PUSHED,
-      tp->GetBitmapNamed(IDR_BACK_P));
+      tp->GetImageSkiaNamed(IDR_BACK_P));
   back_->SetImage(views::CustomButton::BS_DISABLED,
-      tp->GetBitmapNamed(IDR_BACK_D));
+      tp->GetImageSkiaNamed(IDR_BACK_D));
 
   forward_->SetImage(views::CustomButton::BS_NORMAL,
-      tp->GetBitmapNamed(IDR_FORWARD));
+      tp->GetImageSkiaNamed(IDR_FORWARD));
   forward_->SetImage(views::CustomButton::BS_HOT,
-      tp->GetBitmapNamed(IDR_FORWARD_H));
+      tp->GetImageSkiaNamed(IDR_FORWARD_H));
   forward_->SetImage(views::CustomButton::BS_PUSHED,
-      tp->GetBitmapNamed(IDR_FORWARD_P));
+      tp->GetImageSkiaNamed(IDR_FORWARD_P));
   forward_->SetImage(views::CustomButton::BS_DISABLED,
-      tp->GetBitmapNamed(IDR_FORWARD_D));
+      tp->GetImageSkiaNamed(IDR_FORWARD_D));
 
   reload_->SetImage(views::CustomButton::BS_NORMAL,
-      tp->GetBitmapNamed(IDR_RELOAD));
+      tp->GetImageSkiaNamed(IDR_RELOAD));
   reload_->SetImage(views::CustomButton::BS_HOT,
-      tp->GetBitmapNamed(IDR_RELOAD_H));
+      tp->GetImageSkiaNamed(IDR_RELOAD_H));
   reload_->SetImage(views::CustomButton::BS_PUSHED,
-      tp->GetBitmapNamed(IDR_RELOAD_P));
+      tp->GetImageSkiaNamed(IDR_RELOAD_P));
   reload_->SetToggledImage(views::CustomButton::BS_NORMAL,
-      tp->GetBitmapNamed(IDR_STOP));
+      tp->GetImageSkiaNamed(IDR_STOP));
   reload_->SetToggledImage(views::CustomButton::BS_HOT,
-      tp->GetBitmapNamed(IDR_STOP_H));
+      tp->GetImageSkiaNamed(IDR_STOP_H));
   reload_->SetToggledImage(views::CustomButton::BS_PUSHED,
-      tp->GetBitmapNamed(IDR_STOP_P));
+      tp->GetImageSkiaNamed(IDR_STOP_P));
   reload_->SetToggledImage(views::CustomButton::BS_DISABLED,
-      tp->GetBitmapNamed(IDR_STOP_D));
+      tp->GetImageSkiaNamed(IDR_STOP_D));
 
-  home_->SetImage(views::CustomButton::BS_NORMAL, tp->GetBitmapNamed(IDR_HOME));
-  home_->SetImage(views::CustomButton::BS_HOT, tp->GetBitmapNamed(IDR_HOME_H));
+  home_->SetImage(views::CustomButton::BS_NORMAL,
+      tp->GetImageSkiaNamed(IDR_HOME));
+  home_->SetImage(views::CustomButton::BS_HOT,
+      tp->GetImageSkiaNamed(IDR_HOME_H));
   home_->SetImage(views::CustomButton::BS_PUSHED,
-      tp->GetBitmapNamed(IDR_HOME_P));
+      tp->GetImageSkiaNamed(IDR_HOME_P));
 
   app_menu_->SetIcon(GetAppMenuIcon(views::CustomButton::BS_NORMAL));
   app_menu_->SetHoverIcon(GetAppMenuIcon(views::CustomButton::BS_HOT));

@@ -33,7 +33,7 @@
         '../media/media.gyp:media',
         '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
-        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+        '<(webkit_src_dir)/Source/WebKit/chromium/WebKit.gyp:webkit',
         '../ui/ui.gyp:ui',
         '../v8/tools/gyp/v8.gyp:v8',
         '../webkit/support/webkit_support.gyp:appcache',
@@ -46,8 +46,12 @@
         '..',
       ],
       'sources': [
+        'shell/layout_test_controller.cc',
+        'shell/layout_test_controller.h',
         'shell/layout_test_controller_bindings.cc',
         'shell/layout_test_controller_bindings.h',
+        'shell/layout_test_controller_host.cc',
+        'shell/layout_test_controller_host.h',
         'shell/paths_mac.h',
         'shell/paths_mac.mm',
         'shell/shell.cc',
@@ -70,12 +74,8 @@
         'shell/shell_content_browser_client.h',
         'shell/shell_content_client.cc',
         'shell/shell_content_client.h',
-        'shell/shell_content_plugin_client.cc',
-        'shell/shell_content_plugin_client.h',
         'shell/shell_content_renderer_client.cc',
         'shell/shell_content_renderer_client.h',
-        'shell/shell_content_utility_client.cc',
-        'shell/shell_content_utility_client.h',
         'shell/shell_devtools_delegate.cc',
         'shell/shell_devtools_delegate.h',
         'shell/shell_download_manager_delegate.cc',
@@ -96,10 +96,6 @@
         'shell/shell_network_delegate.h',
         'shell/shell_render_process_observer.cc',
         'shell/shell_render_process_observer.h',
-        'shell/shell_render_view_host_observer.cc',
-        'shell/shell_render_view_host_observer.h',
-        'shell/shell_render_view_observer.cc',
-        'shell/shell_render_view_observer.h',
         'shell/shell_resource_context.cc',
         'shell/shell_resource_context.h',
         'shell/shell_resource_dispatcher_host_delegate.cc',
@@ -216,13 +212,6 @@
               '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
-            ],
-            'conditions': [
-              ['OS != "mac"', {
-                'pak_inputs': [
-                  '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.pak',
-                ]
-              }],
             ],
           },
           'inputs': [
@@ -523,21 +512,39 @@
           'actions': [
             {
               'action_name': 'copy_base_jar',
-              'inputs': ['<(PRODUCT_DIR)/chromium_base.jar'],
+              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_base.jar'],
               'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_base.jar'],
               'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
             },
             {
+              'action_name': 'copy_net_jar',
+              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_net.jar'],
+              'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_net.jar'],
+              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
+            },
+            {
+              'action_name': 'copy_media_jar',
+              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_media.jar'],
+              'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_media.jar'],
+              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
+            },
+            {
               'action_name': 'copy_content_jar',
-              'inputs': ['<(PRODUCT_DIR)/chromium_content.jar'],
+              'inputs': ['<(PRODUCT_DIR)/lib.java/chromium_content.jar'],
               'outputs': ['<(PRODUCT_DIR)/content_shell/java/libs/chromium_content.jar'],
               'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
             },
             {
-              'action_name': 'copy_content_shell_content_view',
+              'action_name': 'copy_and_strip_so',
               'inputs': ['<(SHARED_LIB_DIR)/libcontent_shell_content_view.so'],
-              'outputs': ['<(PRODUCT_DIR)/content_shell/libs/armeabi/libcontent_shell_content_view.so'],
-              'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
+              'outputs': ['<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so'],
+              'action': [
+                '<!(/bin/echo -n $STRIP)',
+                '--strip-unneeded',  # All symbols not needed for relocation.
+                '<@(_inputs)',
+                '-o',
+                '<@(_outputs)' 
+              ],
             },
             {
               'action_name': 'content_shell_apk',
@@ -547,8 +554,10 @@
                 '<!@(find shell/android/java -name "*.java")',
                 '<!@(find shell/android/res -name "*")',
                 '<(PRODUCT_DIR)/content_shell/java/libs/chromium_base.jar',
+                '<(PRODUCT_DIR)/content_shell/java/libs/chromium_net.jar',
+                '<(PRODUCT_DIR)/content_shell/java/libs/chromium_media.jar',
                 '<(PRODUCT_DIR)/content_shell/java/libs/chromium_content.jar',
-                '<(PRODUCT_DIR)/content_shell/libs/armeabi/libcontent_shell_content_view.so',
+                '<(PRODUCT_DIR)/content_shell/libs/<(android_app_abi)/libcontent_shell_content_view.so',
               ],
               'outputs': [
                 # Awkwardly, we build a Debug APK even when gyp is in
@@ -559,7 +568,8 @@
               ],
               'action': [
                 'ant',
-                '-DPRODUCT_DIR=<(PRODUCT_DIR)',
+                '-DPRODUCT_DIR=<(ant_build_out)',
+                '-DAPP_ABI=<(android_app_abi)',
                 '-buildfile',
                 '<(DEPTH)/content/shell/android/content_shell_apk.xml',
               ]

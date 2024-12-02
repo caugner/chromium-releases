@@ -33,7 +33,10 @@ class ChromeContentClient : public content::ContentClient {
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) OVERRIDE;
   virtual std::string GetUserAgent() const OVERRIDE;
   virtual string16 GetLocalizedString(int message_id) const OVERRIDE;
-  virtual base::StringPiece GetDataResource(int resource_id) const OVERRIDE;
+  virtual base::StringPiece GetDataResource(
+      int resource_id,
+      ui::ScaleFactor scale_factor) const OVERRIDE;
+  virtual gfx::Image& GetNativeImageNamed(int resource_id) const OVERRIDE;
 
 #if defined(OS_WIN)
   virtual bool SandboxPlugin(CommandLine* command_line,

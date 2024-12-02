@@ -11,8 +11,10 @@
 #include <queue>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
 #include "chrome/browser/chromeos/extensions/file_browser_event_router.h"
+#include "chrome/browser/chromeos/gdata/gdata_cache.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "googleurl/src/url_util.h"
@@ -21,6 +23,10 @@ class GURL;
 
 namespace content {
 struct SelectedFileInfo;
+}
+
+namespace gdata {
+struct SearchResultInfo;
 }
 
 // Implements the chrome.fileBrowserPrivate.requestLocalFileSystem method.
@@ -111,6 +117,19 @@ class ExecuteTasksFileBrowserFunction : public AsyncExtensionFunction {
   class Executor;
 
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.executeTask");
+};
+
+// Implements the chrome.fileBrowserPrivate.setDefaultTask method.
+class SetDefaultTaskFileBrowserFunction : public SyncExtensionFunction {
+ public:
+  SetDefaultTaskFileBrowserFunction();
+  virtual ~SetDefaultTaskFileBrowserFunction();
+
+ protected:
+  // AsyncExtensionFunction overrides.
+  virtual bool RunImpl() OVERRIDE;
+
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.setDefaultTask");
 };
 
 // Parent class for the chromium extension APIs for the file dialog.
@@ -397,12 +416,14 @@ class GetGDataFilePropertiesFunction : public FileBrowserFunction {
 
   // Virtual function that can be overridden to do operations on each virtual
   // file path and update its the properties.
-  virtual void DoOperation(const FilePath& file,
-                           base::DictionaryValue* properties);
-
-  void OnOperationComplete(const FilePath& file,
+  virtual void DoOperation(const FilePath& file_path,
                            base::DictionaryValue* properties,
-                           base::PlatformFileError error);
+                           scoped_ptr<gdata::GDataFileProto> file_proto);
+
+  void OnOperationComplete(const FilePath& file_path,
+                           base::DictionaryValue* properties,
+                           base::PlatformFileError error,
+                           scoped_ptr<gdata::GDataFileProto> file_proto);
 
   // AsyncExtensionFunction overrides.
   virtual bool RunImpl() OVERRIDE;
@@ -411,14 +432,14 @@ class GetGDataFilePropertiesFunction : public FileBrowserFunction {
   void PrepareResults();
 
  private:
-  void OnGetFileInfo(base::DictionaryValue* property_dict,
-                     const FilePath& file_path,
+  void OnGetFileInfo(const FilePath& file_path,
+                     base::DictionaryValue* property_dict,
                      base::PlatformFileError error,
                      scoped_ptr<gdata::GDataFileProto> file_proto);
 
   void CacheStateReceived(base::DictionaryValue* property_dict,
-                          base::PlatformFileError error,
-                          int cache_state);
+                          bool success,
+                          const gdata::GDataCache::CacheEntry& cache_entry);
 
   size_t current_index_;
   base::ListValue* path_list_;
@@ -445,13 +466,18 @@ class PinGDataFileFunction : public GetGDataFilePropertiesFunction {
 
  private:
   // Actually do the pinning/unpinning of each file.
-  virtual void DoOperation(const FilePath& path,
-                           base::DictionaryValue* properties) OVERRIDE;
+  virtual void DoOperation(
+      const FilePath& file_path,
+      base::DictionaryValue* properties,
+      scoped_ptr<gdata::GDataFileProto> file_proto) OVERRIDE;
 
   // Callback for SetPinState. Updates properties with error.
   void OnPinStateSet(const FilePath& path,
                      base::DictionaryValue* properties,
-                     base::PlatformFileError error);
+                     scoped_ptr<gdata::GDataFileProto> file_proto,
+                     base::PlatformFileError error,
+                     const std::string& resource_id,
+                     const std::string& md5);
 
   // True for pin, false for unpin.
   bool set_pin_;
@@ -601,6 +627,29 @@ class GetPathForDriveSearchResultFunction : public AsyncExtensionFunction {
       "fileBrowserPrivate.getPathForDriveSearchResult");
 };
 
+class SearchDriveFunction : public AsyncExtensionFunction {
+ protected:
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  // Callback fo OpenFileSystem called from RunImpl.
+  void OnFileSystemOpened(base::PlatformFileError result,
+                          const std::string& file_system_name,
+                          const GURL& file_system_url);
+  // Callback for gdata::SearchAsync called after file system is opened.
+  void OnSearch(base::PlatformFileError error,
+                scoped_ptr<std::vector<gdata::SearchResultInfo> > result_paths);
+
+  // Query for which the search is being performed.
+  std::string query_;
+  // Information about remote file system we will need to create file entries
+  // to represent search results.
+  std::string file_system_name_;
+  GURL file_system_url_;
+
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.searchGData");
+};
+
 // Implements the chrome.fileBrowserPrivate.getNetworkConnectionState method.
 class GetNetworkConnectionStateFunction : public SyncExtensionFunction {
  protected:
@@ -608,6 +657,15 @@ class GetNetworkConnectionStateFunction : public SyncExtensionFunction {
  private:
   DECLARE_EXTENSION_FUNCTION_NAME(
       "fileBrowserPrivate.getNetworkConnectionState");
+};
+
+// Implements the chrome.fileBrowserPrivate.requestDirectoryRefresh method.
+class RequestDirectoryRefreshFunction : public SyncExtensionFunction {
+ protected:
+  virtual bool RunImpl() OVERRIDE;
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME(
+      "fileBrowserPrivate.requestDirectoryRefresh");
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_PRIVATE_API_H_

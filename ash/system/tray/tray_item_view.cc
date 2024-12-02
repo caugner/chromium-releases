@@ -4,6 +4,9 @@
 
 #include "ash/system/tray/tray_item_view.h"
 
+#include "ash/shell.h"
+#include "ash/system/tray/system_tray.h"
+#include "ash/wm/shelf_auto_hide_behavior.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/compositor/layer.h"
 #include "ui/views/controls/image_view.h"
@@ -13,6 +16,7 @@
 
 namespace {
 const int kTrayIconHeight = 29;
+const int kTrayIconWidth = 29;
 const int kTrayItemAnimationDurationMS = 200;
 }
 
@@ -62,12 +66,6 @@ void TrayItemView::SetVisible(bool set_visible) {
   }
 }
 
-void TrayItemView::ApplyChange() {
-  // Forcing the widget to the new size is sufficient. The positioning is
-  // taken care of by the layout manager (ShelfLayoutManager).
-  GetWidget()->SetSize(GetWidget()->GetContentsView()->GetPreferredSize());
-}
-
 gfx::Size TrayItemView::DesiredSize() {
   return views::View::GetPreferredSize();
 }
@@ -76,19 +74,22 @@ int TrayItemView::GetAnimationDurationMS() {
   return kTrayItemAnimationDurationMS;
 }
 
-void TrayItemView::PreferredSizeChanged() {
-  views::View::PreferredSizeChanged();
-  ApplyChange();
-}
-
 gfx::Size TrayItemView::GetPreferredSize() {
   gfx::Size size = DesiredSize();
-  size.set_height(kTrayIconHeight);
+  if (ash::Shell::GetInstance()->system_tray()->shelf_alignment() ==
+      SHELF_ALIGNMENT_BOTTOM)
+    size.set_height(kTrayIconHeight);
+  else
+    size.set_width(kTrayIconWidth);
   if (!animation_.get() || !animation_->is_animating())
     return size;
   size.set_width(std::max(1,
       static_cast<int>(size.width() * animation_->GetCurrentValue())));
   return size;
+}
+
+void TrayItemView::ChildPreferredSizeChanged(views::View* child) {
+  PreferredSizeChanged();
 }
 
 void TrayItemView::AnimationProgressed(const ui::Animation* animation) {
@@ -98,7 +99,7 @@ void TrayItemView::AnimationProgressed(const ui::Animation* animation) {
   transform.ConcatTranslate(0, animation->CurrentValueBetween(
       static_cast<double>(height()) / 2, 0.));
   layer()->SetTransform(transform);
-  ApplyChange();
+  PreferredSizeChanged();
 }
 
 void TrayItemView::AnimationEnded(const ui::Animation* animation) {

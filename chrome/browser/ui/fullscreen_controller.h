@@ -10,12 +10,14 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
 #include "chrome/common/content_settings.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class Browser;
 class BrowserWindow;
 class GURL;
 class Profile;
-class TabContentsWrapper;
+class TabContents;
 
 namespace content {
 class WebContents;
@@ -32,7 +34,8 @@ class WebContents;
 // its fullscreen mode.
 
 // This class implements fullscreen and mouselock behaviour.
-class FullscreenController : public base::RefCounted<FullscreenController> {
+class FullscreenController : public base::RefCounted<FullscreenController>,
+                             public content::NotificationObserver {
  public:
   FullscreenController(BrowserWindow* window,
                        Profile* profile,
@@ -48,15 +51,28 @@ class FullscreenController : public base::RefCounted<FullscreenController> {
   // The window may still be transitioning, and window_->IsFullscreen()
   // may still return false.
   bool IsFullscreenForTabOrPending() const;
-  bool IsFullscreenForTabOrPending(const content::WebContents* tab) const;
+  bool IsFullscreenForTabOrPending(
+      const content::WebContents* web_contents) const;
+
+#if defined(OS_WIN)
+  // Returns whether we are currently in a Metro snap view.
+  bool IsInMetroSnapMode();
+#endif
 
   bool IsMouseLockRequested() const;
   bool IsMouseLocked() const;
 
   // Requests.
-  void RequestToLockMouse(content::WebContents* tab, bool user_gesture);
-  void ToggleFullscreenModeForTab(content::WebContents* tab,
+  void RequestToLockMouse(content::WebContents* web_contents,
+                          bool user_gesture,
+                          bool last_unlocked_by_target);
+  void ToggleFullscreenModeForTab(content::WebContents* web_contents,
                                   bool enter_fullscreen);
+#if defined(OS_WIN)
+  // API that puts the window into a mode suitable for rendering when Chrome
+  // is rendered in a 20% screen-width Metro snap view on Windows 8.
+  void SetMetroSnapMode(bool enable);
+#endif
 #if defined(OS_MACOSX)
   void TogglePresentationMode();
 #endif
@@ -69,7 +85,7 @@ class FullscreenController : public base::RefCounted<FullscreenController> {
   // Notifications.
   void LostMouseLock();
   void OnTabClosing(content::WebContents* web_contents);
-  void OnTabDeactivated(TabContentsWrapper* contents);
+  void OnTabDeactivated(TabContents* contents);
   void OnAcceptFullscreenPermission(const GURL& url,
                                     FullscreenExitBubbleType bubble_type);
   void OnDenyFullscreenPermission(FullscreenExitBubbleType bubble_type);
@@ -77,6 +93,11 @@ class FullscreenController : public base::RefCounted<FullscreenController> {
   bool HandleUserPressedEscape();
 
   FullscreenExitBubbleType GetFullscreenExitBubbleType() const;
+
+  // content::NotificationObserver
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   friend class base::RefCounted<FullscreenController>;
@@ -87,18 +108,24 @@ class FullscreenController : public base::RefCounted<FullscreenController> {
     // request.
     MOUSELOCK_REQUESTED,
     // Mouse lock has been allowed by the user.
-    MOUSELOCK_ACCEPTED
+    MOUSELOCK_ACCEPTED,
+    // Mouse lock has been silently accepted, no notification to user.
+    MOUSELOCK_ACCEPTED_SILENTLY
   };
 
   virtual ~FullscreenController();
 
-  // Notifies the tab that it has been forced out of fullscreen mode if
-  // necessary.
-  void NotifyTabOfFullscreenExitIfNecessary();
-  // Make the current tab exit fullscreen mode if it is in it.
-  void ExitTabbedFullscreenModeIfNecessary();
+  // Notifies the tab that it has been forced out of fullscreen and mouse lock
+  // mode if necessary.
+  void NotifyTabOfExitIfNecessary();
+
+  void UpdateNotificationRegistrations();
+
+  // Make the current tab exit fullscreen mode or mouse lock if it is in it.
+  void ExitTabFullscreenOrMouseLockIfNecessary();
   void UpdateFullscreenExitBubbleContent();
-  void NotifyFullscreenChange();
+  void NotifyFullscreenChange(bool is_fullscreen);
+  void NotifyMouseLockChange();
   ContentSetting GetFullscreenSetting(const GURL& url) const;
   ContentSetting GetMouseLockSetting(const GURL& url) const;
 
@@ -108,13 +135,17 @@ class FullscreenController : public base::RefCounted<FullscreenController> {
   // TODO(koz): Change |for_tab| to an enum.
   void ToggleFullscreenModeInternal(bool for_tab);
 
+  void SetFullscreenedTab(TabContents* tab);
+  void SetMouseLockTab(TabContents* tab);
+
   BrowserWindow* window_;
   Profile* profile_;
   Browser* browser_;
 
   // If there is currently a tab in fullscreen mode (entered via
-  // webkitRequestFullScreen), this is its wrapper.
-  TabContentsWrapper* fullscreened_tab_;
+  // webkitRequestFullScreen), this is its TabContents.
+  // Assign using SetFullscreenedTab().
+  TabContents* fullscreened_tab_;
 
   // The URL of the extension which trigerred "browser fullscreen" mode.
   GURL extension_caused_fullscreen_;
@@ -125,7 +156,16 @@ class FullscreenController : public base::RefCounted<FullscreenController> {
   // clicking the allow button on the fullscreen infobar.
   bool tab_fullscreen_accepted_;
 
+  // True if this controller has toggled into tab OR browser fullscreen.
+  bool toggled_into_fullscreen_;
+
+  // TabContents for current tab requesting or currently in mouse lock.
+  // Assign using SetMouseLockTab().
+  TabContents* mouse_lock_tab_;
+
   MouseLockState mouse_lock_state_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(FullscreenController);
 };

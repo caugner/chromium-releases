@@ -25,6 +25,7 @@
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -48,6 +49,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_network_session.h"
@@ -83,7 +85,7 @@ const char kGetStartedInitialLocaleParam[] = "initial_locale";
 
 // URL for account creation.
 const char kCreateAccountURL[] =
-    "https://www.google.com/accounts/NewAccount?service=mail";
+    "https://accounts.google.com/NewAccount?service=mail";
 
 // ChromeVox tutorial URL (used in place of "getting started" url when
 // accessibility is enabled).
@@ -148,6 +150,9 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_POLICY_USER_LIST_CHANGED,
                  content::NotificationService::AllSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_AUTH_SUPPLIED,
@@ -222,8 +227,9 @@ void ExistingUserController::Observe(
     registrar_.RemoveAll();
     return;
   }
-  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED) {
-    // Signed settings changed notify views and update them.
+  if (type == chrome::NOTIFICATION_SYSTEM_SETTING_CHANGED ||
+      type == chrome::NOTIFICATION_POLICY_USER_LIST_CHANGED) {
+    // Signed settings or user list changed. Notify views and update them.
     const chromeos::UserList& users = chromeos::UserManager::Get()->GetUsers();
     UpdateLoginDisplay(users);
     return;
@@ -283,7 +289,7 @@ ExistingUserController::~ExistingUserController() {
 //
 
 void ExistingUserController::CreateAccount() {
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Login.CreateAccount", 1, 1, 2, 3);
+  content::RecordAction(content::UserMetricsAction("Login.CreateAccount"));
   guest_mode_url_ =
       google_util::AppendGoogleLocaleParam(GURL(kCreateAccountURL));
   LoginAsGuest();
@@ -400,25 +406,39 @@ void ExistingUserController::LoginAsDemoUser() {
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_DEMOUSER));
 }
 
-
-
 void ExistingUserController::LoginAsGuest() {
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
 
-  // Check allow_guest in case this call is fired from key accelerator.
+  CrosSettingsProvider::TrustedStatus status =
+      cros_settings_->PrepareTrustedValues(
+          base::Bind(&ExistingUserController::LoginAsGuest,
+                     weak_factory_.GetWeakPtr()));
   // Must not proceed without signature verification.
-  if (!cros_settings_->PrepareTrustedValues(
-      base::Bind(&ExistingUserController::LoginAsGuest,
-                 weak_factory_.GetWeakPtr()))) {
-    // Value of AllowGuest setting is still not verified.
-    // Another attempt will be invoked again after verification completion.
+  if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
+    login_display_->ShowError(IDS_LOGIN_ERROR_OWNER_KEY_LOST, 1,
+                              HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
+    // Reenable clicking on other windows and status area.
+    login_display_->SetUIEnabled(true);
+    display_email_.clear();
+    return;
+  } else if (status != CrosSettingsProvider::TRUSTED) {
+    // Value of AllowNewUser setting is still not verified.
+    // Another attempt will be invoked after verification completion.
     return;
   }
+
   bool allow_guest;
   cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &allow_guest);
   if (!allow_guest) {
-    // Disallowed.
+    // Disallowed. The UI should normally not show the guest pod but if for some
+    // reason this has been made available to the user here is the time to tell
+    // this nicely.
+    login_display_->ShowError(IDS_LOGIN_ERROR_WHITELIST, 1,
+                              HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
+    // Reenable clicking on other windows and status area.
+    login_display_->SetUIEnabled(true);
+    display_email_.clear();
     return;
   }
 
@@ -534,10 +554,13 @@ void ExistingUserController::OnLoginSuccess(
   is_login_in_progress_ = false;
   offline_failed_ = false;
   bool known_user = UserManager::Get()->IsKnownUser(username);
+  // TODO(ivankr): remove this as soon as .forget_usernames is removed.
   bool login_only =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kLoginScreen) == WizardController::kLoginScreenName;
-  ready_for_browser_launch_ = known_user || login_only;
+  bool skip_image_screen =
+      WizardController::default_controller()->skip_user_image_selection();
+  ready_for_browser_launch_ = known_user || login_only || skip_image_screen;
 
   bool has_cookies =
       login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION;
@@ -592,12 +615,12 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
 #endif
   } else {
     LoginUtils::Get()->DoBrowserLaunch(profile, host_);
-    // Inform |login_status_consumer_| about successful login after
-    // browser launch.  Set most params to empty since they're not needed.
-    if (login_status_consumer_)
-      login_status_consumer_->OnLoginSuccess("", "", false, false);
     host_ = NULL;
   }
+  // Inform |login_status_consumer_| about successful login. Set most params to
+  // empty since they're not needed.
+  if (login_status_consumer_)
+    login_status_consumer_->OnLoginSuccess("", "", false, false);
   login_display_->OnFadeOut();
 }
 
@@ -622,7 +645,7 @@ void ExistingUserController::OnOffTheRecordLoginSuccess() {
 
 void ExistingUserController::OnPasswordChangeDetected() {
   // Must not proceed without signature verification.
-  if (!cros_settings_->PrepareTrustedValues(
+  if (CrosSettingsProvider::TRUSTED != cros_settings_->PrepareTrustedValues(
       base::Bind(&ExistingUserController::OnPasswordChangeDetected,
                  weak_factory_.GetWeakPtr()))) {
     // Value of owner email is still not verified.
@@ -630,12 +653,19 @@ void ExistingUserController::OnPasswordChangeDetected() {
     return;
   }
 
+  // True if user has already made an attempt to enter old password and failed.
+  bool show_invalid_old_password_error =
+      login_performer_->password_changed_callback_count() > 1;
+
   // Passing 'false' here enables "full sync" mode in the dialog,
   // which disables the requirement for the old owner password,
   // allowing us to recover from a lost owner password/homedir.
   // TODO(gspencer): We shouldn't have to erase stateful data when
   // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
-  PasswordChangedView* view = new PasswordChangedView(this, false);
+  PasswordChangedView* view = new PasswordChangedView(
+      this,
+      false,  // Allow removal of existing cryptohome, perform full migration.
+      show_invalid_old_password_error);
   views::Widget* window = views::Widget::CreateWindowWithParent(
       view, GetNativeWindow());
   window->SetAlwaysOnTop(true);
@@ -649,6 +679,20 @@ void ExistingUserController::OnPasswordChangeDetected() {
 
 void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
   ShowError(IDS_LOGIN_ERROR_WHITELIST, email);
+
+  // Reenable clicking on other windows and status area.
+  login_display_->SetUIEnabled(true);
+
+  if (login_status_consumer_) {
+    login_status_consumer_->OnLoginFailure(LoginFailure(
+          LoginFailure::WHITELIST_CHECK_FAILED));
+  }
+
+  display_email_.clear();
+}
+
+void ExistingUserController::PolicyLoadFailed() {
+  ShowError(IDS_LOGIN_ERROR_OWNER_KEY_LOST, "");
 
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
@@ -706,15 +750,16 @@ void ExistingUserController::InitializeStartUrls() const {
 
   PrefService* prefs = g_browser_process->local_state();
   const base::ListValue *urls;
-  if (UserManager::Get()->IsLoggedInAsDemoUser() &&
-      CrosSettings::Get()->GetList(kStartUpUrls, &urls)) {
-    // the demo user will get its start urls from the special policy if it is
-    // set.
-    for (base::ListValue::const_iterator it = urls->begin();
-         it != urls->end(); ++it) {
-      std::string url;
-      if ((*it)->GetAsString(&url))
-        start_urls.push_back(url);
+  if (UserManager::Get()->IsLoggedInAsDemoUser()) {
+    if (CrosSettings::Get()->GetList(kStartUpUrls, &urls)) {
+      // the demo user will get its start urls from the special policy if it is
+      // set.
+      for (base::ListValue::const_iterator it = urls->begin();
+           it != urls->end(); ++it) {
+        std::string url;
+        if ((*it)->GetAsString(&url))
+          start_urls.push_back(url);
+      }
     }
   } else {
     if (prefs->GetBoolean(prefs::kSpokenFeedbackEnabled)) {
@@ -780,7 +825,7 @@ std::string ExistingUserController::GetGettingStartedGuideURL() const {
 void ExistingUserController::OptionallyShowReleaseNotes(
     Profile* profile) const {
   // TODO(nkostylev): Fix WizardControllerFlowTest case.
-  if (!profile)
+  if (!profile || KioskModeSettings::Get()->IsKioskModeEnabled())
     return;
   PrefService* prefs = profile->GetPrefs();
   chrome::VersionInfo version_info;

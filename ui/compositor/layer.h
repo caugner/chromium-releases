@@ -36,6 +36,8 @@ class Texture;
 // has enabled layers ends up creating a Layer to manage the texture.
 // A Layer can also be created without a texture, in which case it renders
 // nothing and is simply used as a node in a hierarchy of layers.
+// Coordinate system used in layers is DIP (Density Independent Pixel)
+// coordinates unless explicitly mentioned as pixel coordinates.
 //
 // NOTE: unlike Views, each Layer does *not* own its children views. If you
 // delete a Layer and it has children, the parent of each child layer is set to
@@ -132,6 +134,20 @@ class COMPOSITOR_EXPORT Layer :
   int background_blur() const { return background_blur_radius_; }
   void SetBackgroundBlur(int blur_radius);
 
+  // Saturate all pixels of this layer by this amount.
+  // This effect will get "combined" with the inverted and brightness setting.
+  float layer_saturation() const { return layer_saturation_; }
+  void SetLayerSaturation(float saturation);
+
+  // Change the brightness of all pixels from this layer by this amount.
+  // This effect will get "combined" with the inverted and saturate setting.
+  float layer_brightness() const { return layer_brightness_; }
+  void SetLayerBrightness(float brightness);
+
+  // Invert the layer.
+  bool layer_inverted() const { return layer_inverted_; }
+  void SetLayerInverted(bool inverted);
+
   // Return the target opacity if animator is running, or the current opacity
   // otherwise.
   float GetTargetOpacity() const;
@@ -193,22 +209,41 @@ class COMPOSITOR_EXPORT Layer :
   // new paint requests.
   void SuppressPaint();
 
+  // Notifies the layer that the device scale factor has changed.
+  void OnDeviceScaleFactorChanged(float device_scale_factor);
+
+  // Sets whether the layer should scale its content. If true, the canvas will
+  // be scaled in software rendering mode before it is passed to
+  // |LayerDelegate::OnPaint| and the texture will be scaled in accelerated
+  // mode. Set to false if the delegate handles scaling and the texture is
+  // the correct pixel size.
+  void set_scale_content(bool scale_content) { scale_content_ = scale_content; }
+
+  // Returns true if the layer scales its content.
+  bool scale_content() const { return scale_content_; }
+
   // Sometimes the Layer is being updated by something other than SetCanvas
   // (e.g. the GPU process on UI_COMPOSITOR_IMAGE_TRANSPORT).
   bool layer_updated_externally() const { return layer_updated_externally_; }
 
   // WebContentLayerClient
-  virtual void paintContents(WebKit::WebCanvas*, const WebKit::WebRect& clip);
+  virtual void paintContents(WebKit::WebCanvas*,
+                             const WebKit::WebRect& clip
+#if WEBCONTENTLAYERCLIENT_HAS_OPAQUE
+                             , WebKit::WebRect& opaque
+#endif
+                             );
 
   WebKit::WebLayer web_layer() { return web_layer_; }
 
- private:
-  struct LayerProperties {
-   public:
-    ui::Layer* layer;
-    ui::Transform transform_relative_to_root;
-  };
+  float device_scale_factor() const { return device_scale_factor_; }
 
+  // Forces a render surface to be used on this layer. This has no positive
+  // impact, and is only used for benchmarking/testing purpose.
+  void SetForceRenderSurface(bool force);
+  bool force_render_surface() const { return force_render_surface_; }
+
+ private:
   // TODO(vollick): Eventually, if a non-leaf node has an opacity of less than
   // 1.0, we'll render to a separate texture, and then apply the alpha.
   // Currently, we multiply our opacity by all our ancestor's opacities and
@@ -253,6 +288,9 @@ class COMPOSITOR_EXPORT Layer :
   void RecomputeDrawsContentAndUVRect();
   void RecomputeDebugBorderColor();
 
+  // Set all filters which got applied to the layer.
+  void SetLayerFilters();
+
   const LayerType type_;
 
   Compositor* compositor_;
@@ -271,17 +309,25 @@ class COMPOSITOR_EXPORT Layer :
   // Visibility of this layer. See SetVisible/IsDrawn for more details.
   bool visible_;
 
+  bool force_render_surface_;
+
   bool fills_bounds_opaquely_;
 
   // If true the layer is always up to date.
   bool layer_updated_externally_;
 
-  // Union of damaged rects to be used when compositor is ready to
-  // paint the content.
+  // Union of damaged rects, in pixel coordinates, to be used when
+  // compositor is ready to paint the content.
   SkRegion damaged_region_;
 
   float opacity_;
   int background_blur_radius_;
+
+  // Several variables which will change the visible representation of
+  // the layer.
+  float layer_saturation_;
+  float layer_brightness_;
+  bool layer_inverted_;
 
   std::string name_;
 
@@ -292,6 +338,13 @@ class COMPOSITOR_EXPORT Layer :
   WebKit::WebLayer web_layer_;
   bool web_layer_is_accelerated_;
   bool show_debug_borders_;
+
+  // If true, the layer scales the canvas and the texture with the device scale
+  // factor as appropriate. When true, the texture size is in DIP.
+  bool scale_content_;
+
+  // A cached copy of |Compositor::device_scale_factor()|.
+  float device_scale_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(Layer);
 };

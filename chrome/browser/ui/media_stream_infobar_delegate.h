@@ -10,11 +10,11 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
-#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/media_stream_request.h"
 
 class MessageLoop;
-class TabContentsWrapper;
+class TabContents;
 
 // This class configures an infobar shown when a page requests access to a
 // user's microphone and/or video camera.  The user is shown a message asking
@@ -41,7 +41,7 @@ class MediaStreamInfoBarDelegate : public InfoBarDelegate {
 
   // Returns the security origin (e.g. "www.html5rocks.com") at the origin
   // of this request.
-  const std::string& GetSecurityOrigin() const;
+  const GURL& GetSecurityOrigin() const;
 
   // Callbacks to handle accepting devices or denying the request. |audio_id|
   // and |video_id| are the device IDs of the accepted audio and video devices.
@@ -65,7 +65,7 @@ class MediaStreamInfoBarDelegate : public InfoBarDelegate {
   virtual MediaStreamInfoBarDelegate* AsMediaStreamInfoBarDelegate() OVERRIDE;
 
   // The original request for access to devices.
-  const content::MediaStreamRequest* request_;
+  const content::MediaStreamRequest request_;
 
   // The callback that needs to be Run to notify WebRTC of whether access to
   // audio/video devices was granted or not.

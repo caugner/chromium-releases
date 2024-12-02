@@ -9,14 +9,14 @@
 #include "base/process.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
+#include "ipc/ipc_platform_file.h"
 
-#if defined(OS_WIN)
+class CommandLine;
+class FilePath;
+
 namespace sandbox {
 struct SandboxInterfaceInfo;
 }
-#elif defined(OS_MACOSX)
-class FilePath;
-#endif
 
 namespace content {
 
@@ -51,6 +51,12 @@ CONTENT_EXPORT bool BrokerDuplicateHandle(HANDLE source_handle,
 // false otherwise.
 CONTENT_EXPORT bool BrokerAddTargetPeer(HANDLE peer_process);
 
+// Starts a sandboxed process with the given directory unsandboxed
+// and returns a handle to it.
+CONTENT_EXPORT base::ProcessHandle StartProcessWithAccess(
+    CommandLine* cmd_line,
+    const FilePath& exposed_dir);
+
 #elif defined(OS_MACOSX)
 
 // Initialize the sandbox of the given |sandbox_type|, optionally specifying a
@@ -75,6 +81,15 @@ CONTENT_EXPORT bool InitializeSandbox(int sandbox_type,
 CONTENT_EXPORT void InitializeSandbox();
 
 #endif
+
+// Platform neutral wrapper for making an exact copy of a handle for use in
+// the target process. On Windows this wraps BrokerDuplicateHandle() with the
+// DUPLICATE_SAME_ACCESS flag. On posix it behaves essentially the same as
+// IPC::GetFileHandleForProcess()
+CONTENT_EXPORT IPC::PlatformFileForTransit BrokerGetFileHandleForProcess(
+    base::PlatformFile handle,
+    base::ProcessId target_process_id,
+    bool should_close_source);
 
 }  // namespace content
 

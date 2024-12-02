@@ -24,6 +24,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -60,6 +61,10 @@ class SigninManager : public GaiaAuthConsumer,
   // If user was signed in, load tokens from DB if available.
   void Initialize(Profile* profile);
   bool IsInitialized() const;
+
+  // Returns true if the passed username is allowed by policy. Virtual for
+  // mocking in tests.
+  virtual bool IsAllowedUsername(const std::string& username) const;
 
   // If a user has previously established a username and SignOut has not been
   // called, this will return the username.
@@ -130,12 +135,6 @@ class SigninManager : public GaiaAuthConsumer,
   virtual void OnGetUserInfoSuccess(const UserInfoMap& data) OVERRIDE;
   virtual void OnGetUserInfoFailure(
       const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnTokenAuthSuccess(const net::ResponseCookies& cookies,
-                                  const std::string& data) OVERRIDE;
-  virtual void OnTokenAuthFailure(const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnUberAuthTokenSuccess(const std::string& token) OVERRIDE;
-  virtual void OnUberAuthTokenFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -158,8 +157,9 @@ class SigninManager : public GaiaAuthConsumer,
   // Called to setup the transient signin data during one of the
   // StartSigninXXX methods.  |type| indicates which of the methods is being
   // used to perform the signin while |username| and |password| identify the
-  // account to be signed in.
-  void PrepareForSignin(SigninType type,
+  // account to be signed in. Returns false and generates an auth error if the
+  // passed |username| is not allowed by policy.
+  bool PrepareForSignin(SigninType type,
                         const std::string& username,
                         const std::string& password);
 
@@ -190,8 +190,12 @@ class SigninManager : public GaiaAuthConsumer,
   // Actual client login handler.
   scoped_ptr<GaiaAuthFetcher> client_login_;
 
-  // Register for notifications from the TokenService.
+  // Registrar for notifications from the TokenService.
   content::NotificationRegistrar registrar_;
+
+  // Helper object to listen for changes to signin preferences stored in non-
+  // profile-specific local prefs (like kGoogleServicesUsernamePattern).
+  PrefChangeRegistrar local_state_pref_registrar_;
 
   // Actual username after successful authentication.
   std::string authenticated_username_;

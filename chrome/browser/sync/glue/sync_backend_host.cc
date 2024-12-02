@@ -15,6 +15,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/location.h"
+#include "base/metrics/histogram.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/sync/glue/chrome_encryptor.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
+#include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -39,13 +41,13 @@
 #include "jingle/notifier/base/notifier_options.h"
 #include "net/base/host_port_pair.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "sync/engine/model_safe_worker.h"
-#include "sync/internal_api/base_transaction.h"
-#include "sync/internal_api/read_transaction.h"
+#include "sync/internal_api/public/base_transaction.h"
+#include "sync/internal_api/public/engine/model_safe_worker.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/util/experiments.h"
 #include "sync/notifier/sync_notifier.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/sync.pb.h"
-#include "sync/util/experiments.h"
 #include "sync/util/nigori.h"
 
 static const int kSaveChangesIntervalSeconds = 10;
@@ -120,17 +122,18 @@ class SyncBackendHost::Core
   void DoUpdateCredentials(const sync_api::SyncCredentials& credentials);
 
   // Called when the user disables or enables a sync type.
-  void DoUpdateEnabledTypes();
+  void DoUpdateEnabledTypes(const syncable::ModelTypeSet& enabled_types);
 
   // Called to tell the syncapi to start syncing (generally after
   // initialization and authentication).
-  void DoStartSyncing();
+  void DoStartSyncing(const ModelSafeRoutingInfo& routing_info);
 
   // Called to clear server data.
   void DoRequestClearServerData();
 
   // Called to cleanup disabled types.
-  void DoRequestCleanupDisabledTypes();
+  void DoRequestCleanupDisabledTypes(
+      const browser_sync::ModelSafeRoutingInfo& routing_info);
 
   // Called to set the passphrase for encryption.
   void DoSetEncryptionPassphrase(const std::string& passphrase,
@@ -162,6 +165,7 @@ class SyncBackendHost::Core
   void DoShutdown(bool stopping_sync);
 
   virtual void DoRequestConfig(
+      const browser_sync::ModelSafeRoutingInfo& routing_info,
       syncable::ModelTypeSet types_to_config,
       sync_api::ConfigureReason reason);
 
@@ -278,9 +282,11 @@ notifier::NotifierOptions ParseNotifierOptions(
 
 }  // namespace
 
-SyncBackendHost::SyncBackendHost(const std::string& name,
-                                 Profile* profile,
-                                 const base::WeakPtr<SyncPrefs>& sync_prefs)
+SyncBackendHost::SyncBackendHost(
+    const std::string& name,
+    Profile* profile,
+    const base::WeakPtr<SyncPrefs>& sync_prefs,
+    const base::WeakPtr<InvalidatorStorage>& invalidator_storage)
     : weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       sync_thread_("Chrome_SyncThread"),
       frontend_loop_(MessageLoop::current()),
@@ -295,7 +301,7 @@ SyncBackendHost::SyncBackendHost(const std::string& name,
           ParseNotifierOptions(*CommandLine::ForCurrentProcess(),
                                profile_->GetRequestContext()),
           content::GetUserAgent(GURL()),
-          sync_prefs),
+          invalidator_storage),
       frontend_(NULL) {
 }
 
@@ -311,7 +317,7 @@ SyncBackendHost::SyncBackendHost(Profile* profile)
           ParseNotifierOptions(*CommandLine::ForCurrentProcess(),
                                profile_->GetRequestContext()),
           content::GetUserAgent(GURL()),
-          base::WeakPtr<sync_notifier::InvalidationVersionTracker>()),
+          base::WeakPtr<sync_notifier::InvalidationStateTracker>()),
       frontend_(NULL) {
 }
 
@@ -354,10 +360,17 @@ void SyncBackendHost::Initialize(
                                             name_,
                                             profile_,
                                             sync_thread_.message_loop()));
+  ModelSafeRoutingInfo routing_info;
+  std::vector<ModelSafeWorker*> workers;
+  registrar_->GetModelSafeRoutingInfo(&routing_info);
+  registrar_->GetWorkers(&workers);
+
   initialization_state_ = CREATING_SYNC_MANAGER;
   InitCore(DoInitializeOptions(
       sync_thread_.message_loop(),
       registrar_.get(),
+      routing_info,
+      workers,
       &extensions_activity_monitor_,
       event_handler,
       sync_service_url,
@@ -381,8 +394,13 @@ void SyncBackendHost::UpdateCredentials(const SyncCredentials& credentials) {
 
 void SyncBackendHost::StartSyncingWithServer() {
   SDVLOG(1) << "SyncBackendHost::StartSyncingWithServer called.";
+
+  ModelSafeRoutingInfo routing_info;
+  registrar_->GetModelSafeRoutingInfo(&routing_info);
+
   sync_thread_.message_loop()->PostTask(FROM_HERE,
-      base::Bind(&SyncBackendHost::Core::DoStartSyncing, core_.get()));
+      base::Bind(&SyncBackendHost::Core::DoStartSyncing,
+                 core_.get(), routing_info));
 }
 
 void SyncBackendHost::SetEncryptionPassphrase(const std::string& passphrase,
@@ -488,8 +506,13 @@ void SyncBackendHost::StopSyncingForShutdown() {
     // give us the green light that it is not depending on the frontend_loop_
     // to process any more tasks. Stop() blocks until this termination
     // condition is true.
+    base::Time stop_registrar_start_time = base::Time::Now();
     if (registrar_.get())
       registrar_->StopOnUIThread();
+    base::TimeDelta stop_registrar_time = base::Time::Now() -
+        stop_registrar_start_time;
+    UMA_HISTOGRAM_TIMES("Sync.Shutdown.StopRegistrarTime",
+                        stop_registrar_time);
   } else {
     // If the sync thread isn't running, then the syncer is effectively
     // stopped.  Moreover, it implies that we never attempted initialization,
@@ -518,10 +541,15 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
   // Since we are blocking the UI thread here, we need to turn ourselves in
   // with the ThreadRestriction police.  For sentencing and how we plan to fix
   // this, see bug 19757.
+  base::Time stop_thread_start_time = base::Time::Now();
   {
     base::ThreadRestrictions::ScopedAllowIO allow_io;
     sync_thread_.Stop();
   }
+  base::TimeDelta stop_sync_thread_time = base::Time::Now() -
+      stop_thread_start_time;
+  UMA_HISTOGRAM_TIMES("Sync.Shutdown.StopSyncThreadTime",
+                      stop_sync_thread_time);
 
   registrar_.reset();
   frontend_ = NULL;
@@ -562,10 +590,13 @@ void SyncBackendHost::ConfigureDataTypes(
   // callers can assume that the data types are cleaned up once
   // configuration is done.
   if (!types_to_remove_with_nigori.Empty()) {
+    ModelSafeRoutingInfo routing_info;
+    registrar_->GetModelSafeRoutingInfo(&routing_info);
     sync_thread_.message_loop()->PostTask(
         FROM_HERE,
         base::Bind(&SyncBackendHost::Core::DoRequestCleanupDisabledTypes,
-                   core_.get()));
+                   core_.get(),
+                   routing_info));
   }
 
   StartConfiguration(
@@ -749,7 +780,7 @@ void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
   chrome_sync_notification_bridge_.UpdateEnabledTypes(enabled_types);
 
   if (pending_config_mode_state_->added_types.Empty() &&
-      !core_->sync_manager()->InitialSyncEndedForAllEnabledTypes()) {
+      !core_->sync_manager()->InitialSyncEndedTypes().HasAll(enabled_types)) {
 
     // TODO(tim): Log / UMA / count this somehow?
     // Add only the types with empty progress markers. Note: it is possible
@@ -787,18 +818,22 @@ void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
     SDVLOG(1) << "Types "
               << syncable::ModelTypeSetToString(types_to_config)
               << " added; calling DoRequestConfig";
+    ModelSafeRoutingInfo routing_info;
+    registrar_->GetModelSafeRoutingInfo(&routing_info);
     sync_thread_.message_loop()->PostTask(FROM_HERE,
          base::Bind(&SyncBackendHost::Core::DoRequestConfig,
                     core_.get(),
+                    routing_info,
                     types_to_config,
                     pending_download_state_->reason));
   }
 
   pending_config_mode_state_.reset();
 
-  // Notify the SyncManager about the new types.
+  // Notify SyncManager (especially the notification listener) about new types.
   sync_thread_.message_loop()->PostTask(FROM_HERE,
-      base::Bind(&SyncBackendHost::Core::DoUpdateEnabledTypes, core_.get()));
+      base::Bind(&SyncBackendHost::Core::DoUpdateEnabledTypes, core_.get(),
+                 enabled_types));
 }
 
 bool SyncBackendHost::IsDownloadingNigoriForTest() const {
@@ -808,6 +843,8 @@ bool SyncBackendHost::IsDownloadingNigoriForTest() const {
 SyncBackendHost::DoInitializeOptions::DoInitializeOptions(
     MessageLoop* sync_loop,
     SyncBackendRegistrar* registrar,
+    const ModelSafeRoutingInfo& routing_info,
+    const std::vector<ModelSafeWorker*>& workers,
     ExtensionsActivityMonitor* extensions_activity_monitor,
     const WeakHandle<JsEventHandler>& event_handler,
     const GURL& service_url,
@@ -822,6 +859,8 @@ SyncBackendHost::DoInitializeOptions::DoInitializeOptions(
     ReportUnrecoverableErrorFunction report_unrecoverable_error_function)
     : sync_loop(sync_loop),
       registrar(registrar),
+      routing_info(routing_info),
+      workers(workers),
       extensions_activity_monitor(extensions_activity_monitor),
       event_handler(event_handler),
       service_url(service_url),
@@ -1063,12 +1102,12 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
       options.service_url.SchemeIsSecure(),
       BrowserThread::GetBlockingPool(),
       options.make_http_bridge_factory_fn.Run(),
-      options.registrar /* as ModelSafeWorkerRegistrar */,
+      options.routing_info,
+      options.workers,
       options.extensions_activity_monitor,
       options.registrar /* as SyncManager::ChangeDelegate */,
       MakeUserAgentForSyncApi(),
       options.credentials,
-      true,
       new BridgedSyncNotifier(
           options.chrome_sync_notification_bridge,
           options.sync_notifier_factory->CreateSyncNotifier()),
@@ -1097,14 +1136,16 @@ void SyncBackendHost::Core::DoUpdateCredentials(
   sync_manager_->UpdateCredentials(credentials);
 }
 
-void SyncBackendHost::Core::DoUpdateEnabledTypes() {
+void SyncBackendHost::Core::DoUpdateEnabledTypes(
+    const syncable::ModelTypeSet& enabled_types) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  sync_manager_->UpdateEnabledTypes();
+  sync_manager_->UpdateEnabledTypes(enabled_types);
 }
 
-void SyncBackendHost::Core::DoStartSyncing() {
+void SyncBackendHost::Core::DoStartSyncing(
+    const ModelSafeRoutingInfo& routing_info) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  sync_manager_->StartSyncingNormally();
+  sync_manager_->StartSyncingNormally(routing_info);
 }
 
 void SyncBackendHost::Core::DoRequestClearServerData() {
@@ -1112,9 +1153,10 @@ void SyncBackendHost::Core::DoRequestClearServerData() {
   sync_manager_->RequestClearServerData();
 }
 
-void SyncBackendHost::Core::DoRequestCleanupDisabledTypes() {
+void SyncBackendHost::Core::DoRequestCleanupDisabledTypes(
+    const browser_sync::ModelSafeRoutingInfo& routing_info) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  sync_manager_->RequestCleanupDisabledTypes();
+  sync_manager_->RequestCleanupDisabledTypes(routing_info);
 }
 
 void SyncBackendHost::Core::DoSetEncryptionPassphrase(
@@ -1169,10 +1211,11 @@ void SyncBackendHost::Core::DoShutdown(bool sync_disabled) {
 }
 
 void SyncBackendHost::Core::DoRequestConfig(
+    const browser_sync::ModelSafeRoutingInfo& routing_info,
     syncable::ModelTypeSet types_to_config,
     sync_api::ConfigureReason reason) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  sync_manager_->RequestConfig(types_to_config, reason);
+  sync_manager_->RequestConfig(routing_info, types_to_config, reason);
 }
 
 void SyncBackendHost::Core::DoStartConfiguration(

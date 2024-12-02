@@ -25,6 +25,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 namespace {
 
@@ -124,7 +125,7 @@ scoped_refptr<Extension> TestExtensionPrefs::AddApp(std::string name) {
 scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifest(
     const DictionaryValue& manifest, Extension::Location location) {
   return AddExtensionWithManifestAndFlags(manifest, location,
-                                          Extension::STRICT_ERROR_CHECKS);
+                                          Extension::NO_FLAGS);
 }
 
 scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifestAndFlags(

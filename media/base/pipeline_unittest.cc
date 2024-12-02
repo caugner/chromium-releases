@@ -36,8 +36,6 @@ namespace media {
 static const int kTotalBytes = 1024;
 static const int kBufferedBytes = 1024;
 static const int kBitrate = 1234;
-static const bool kLocalSource = false;
-static const bool kSeekable = true;
 
 ACTION_P(InitializeDemuxerWithError, error) {
   arg1.Run(error);
@@ -45,7 +43,6 @@ ACTION_P(InitializeDemuxerWithError, error) {
 
 ACTION_P(SetDemuxerProperties, duration) {
   arg0->SetTotalBytes(kTotalBytes);
-  arg0->SetBufferedBytes(kBufferedBytes);
   arg0->SetDuration(duration);
 }
 
@@ -118,10 +115,6 @@ class PipelineTest : public ::testing::Test {
     // Demuxer properties.
     EXPECT_CALL(*mocks_->demuxer(), GetBitrate())
         .WillRepeatedly(Return(kBitrate));
-    EXPECT_CALL(*mocks_->demuxer(), IsLocalSource())
-        .WillRepeatedly(Return(kLocalSource));
-    EXPECT_CALL(*mocks_->demuxer(), IsSeekable())
-        .WillRepeatedly(Return(kSeekable));
 
     // Configure the demuxer to return the streams.
     for (size_t i = 0; i < streams->size(); ++i) {
@@ -199,7 +192,6 @@ class PipelineTest : public ::testing::Test {
         mocks_->Create().Pass(),
         base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)),
-        NetworkEventCB(),
         base::Bind(&CallbackHelper::OnStart, base::Unretained(&callbacks_)));
     message_loop_.RunAllPending();
   }
@@ -287,10 +279,9 @@ TEST_F(PipelineTest, NotStarted) {
   EXPECT_EQ(0.0f, pipeline_->GetVolume());
 
   EXPECT_TRUE(kZero == pipeline_->GetCurrentTime());
-  EXPECT_TRUE(kZero == pipeline_->GetBufferedTime());
+  EXPECT_EQ(0u, pipeline_->GetBufferedTimeRanges().size());
   EXPECT_TRUE(kZero == pipeline_->GetMediaDuration());
 
-  EXPECT_EQ(0, pipeline_->GetBufferedBytes());
   EXPECT_EQ(0, pipeline_->GetTotalBytes());
 
   // Should always get set to zero.
@@ -313,7 +304,6 @@ TEST_F(PipelineTest, NeverInitializes) {
         mocks_->Create().Pass(),
         base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)),
-        NetworkEventCB(),
         base::Bind(&CallbackHelper::OnStart, base::Unretained(&callbacks_)));
   message_loop_.RunAllPending();
 
@@ -336,7 +326,6 @@ TEST_F(PipelineTest, RequiredFilterMissing) {
       collection.Pass(),
       base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
       base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)),
-      NetworkEventCB(),
       base::Bind(&CallbackHelper::OnStart, base::Unretained(&callbacks_)));
   message_loop_.RunAllPending();
   EXPECT_FALSE(pipeline_->IsInitialized());
@@ -466,15 +455,10 @@ TEST_F(PipelineTest, Properties) {
   EXPECT_EQ(kDuration.ToInternalValue(),
             pipeline_->GetMediaDuration().ToInternalValue());
   EXPECT_EQ(kTotalBytes, pipeline_->GetTotalBytes());
-  EXPECT_EQ(kBufferedBytes, pipeline_->GetBufferedBytes());
-
-  // Because kTotalBytes and kBufferedBytes are equal to each other,
-  // the entire video should be buffered.
-  EXPECT_EQ(kDuration.ToInternalValue(),
-            pipeline_->GetBufferedTime().ToInternalValue());
+  EXPECT_FALSE(pipeline_->DidLoadingProgress());
 }
 
-TEST_F(PipelineTest, GetBufferedTime) {
+TEST_F(PipelineTest, GetBufferedTimeRanges) {
   CreateVideoStream();
   MockDemuxerStreamVector streams;
   streams.push_back(video_stream());
@@ -487,52 +471,44 @@ TEST_F(PipelineTest, GetBufferedTime) {
   InitializePipeline(PIPELINE_OK);
   EXPECT_TRUE(pipeline_->IsInitialized());
 
-  // TODO(vrk): The following mini-test cases are order-dependent, and should
-  // probably be separated into independent test cases.
+  EXPECT_EQ(0u, pipeline_->GetBufferedTimeRanges().size());
 
-  // Buffered time is 0 if no bytes are buffered.
-  pipeline_->SetBufferedBytes(0);
-  EXPECT_EQ(0, pipeline_->GetBufferedTime().ToInternalValue());
+  EXPECT_FALSE(pipeline_->DidLoadingProgress());
+  pipeline_->AddBufferedByteRange(0, kTotalBytes / 8);
+  EXPECT_TRUE(pipeline_->DidLoadingProgress());
+  EXPECT_FALSE(pipeline_->DidLoadingProgress());
+  EXPECT_EQ(1u, pipeline_->GetBufferedTimeRanges().size());
+  EXPECT_EQ(base::TimeDelta(), pipeline_->GetBufferedTimeRanges().start(0));
+  EXPECT_EQ(kDuration / 8, pipeline_->GetBufferedTimeRanges().end(0));
+  pipeline_->AddBufferedTimeRange(base::TimeDelta(), kDuration / 8);
+  EXPECT_EQ(base::TimeDelta(), pipeline_->GetBufferedTimeRanges().start(0));
+  EXPECT_EQ(kDuration / 8, pipeline_->GetBufferedTimeRanges().end(0));
 
-  // We should return buffered_time_ if it is set, valid and less than
-  // the current time.
-  const base::TimeDelta buffered = base::TimeDelta::FromSeconds(10);
-  pipeline_->SetBufferedTime(buffered);
-  EXPECT_EQ(buffered.ToInternalValue(),
-            pipeline_->GetBufferedTime().ToInternalValue());
-
-  // Test the case where the current time is beyond the buffered time.
-  base::TimeDelta kSeekTime = buffered + base::TimeDelta::FromSeconds(5);
+  base::TimeDelta kSeekTime = kDuration / 2;
   ExpectSeek(kSeekTime);
   DoSeek(kSeekTime);
 
-  // Verify that buffered time is equal to the current time.
-  EXPECT_EQ(kSeekTime, pipeline_->GetCurrentTime());
-  EXPECT_EQ(kSeekTime, pipeline_->GetBufferedTime());
+  EXPECT_TRUE(pipeline_->DidLoadingProgress());
+  EXPECT_FALSE(pipeline_->DidLoadingProgress());
+  pipeline_->AddBufferedByteRange(kTotalBytes / 2,
+                                  kTotalBytes / 2 + kTotalBytes / 8);
+  EXPECT_TRUE(pipeline_->DidLoadingProgress());
+  EXPECT_FALSE(pipeline_->DidLoadingProgress());
+  EXPECT_EQ(2u, pipeline_->GetBufferedTimeRanges().size());
+  EXPECT_EQ(base::TimeDelta(), pipeline_->GetBufferedTimeRanges().start(0));
+  EXPECT_EQ(kDuration / 8, pipeline_->GetBufferedTimeRanges().end(0));
+  EXPECT_EQ(kDuration / 2, pipeline_->GetBufferedTimeRanges().start(1));
+  EXPECT_EQ(kDuration / 2 + kDuration / 8,
+            pipeline_->GetBufferedTimeRanges().end(1));
 
-  // Clear buffered time.
-  pipeline_->SetBufferedTime(base::TimeDelta());
-
-  double time_percent =
-      static_cast<double>(pipeline_->GetCurrentTime().ToInternalValue()) /
-      kDuration.ToInternalValue();
-
-  int estimated_bytes = static_cast<int>(time_percent * kTotalBytes);
-
-  // Test VBR case where bytes have been consumed slower than the average rate.
-  pipeline_->SetBufferedBytes(estimated_bytes - 10);
-  EXPECT_EQ(pipeline_->GetCurrentTime(), pipeline_->GetBufferedTime());
-
-  // Test VBR case where the bytes have been consumed faster than the average
-  // rate.
-  pipeline_->SetBufferedBytes(estimated_bytes + 10);
-  EXPECT_LT(pipeline_->GetCurrentTime(), pipeline_->GetBufferedTime());
-
-  // If media has been fully received, we should return the duration
-  // of the media.
-  pipeline_->SetBufferedBytes(kTotalBytes);
-  EXPECT_EQ(kDuration.ToInternalValue(),
-            pipeline_->GetBufferedTime().ToInternalValue());
+  pipeline_->AddBufferedTimeRange(kDuration / 4, 3 * kDuration / 8);
+  EXPECT_EQ(base::TimeDelta(), pipeline_->GetBufferedTimeRanges().start(0));
+  EXPECT_EQ(kDuration / 8, pipeline_->GetBufferedTimeRanges().end(0));
+  EXPECT_EQ(kDuration / 4, pipeline_->GetBufferedTimeRanges().start(1));
+  EXPECT_EQ(3* kDuration / 8, pipeline_->GetBufferedTimeRanges().end(1));
+  EXPECT_EQ(kDuration / 2, pipeline_->GetBufferedTimeRanges().start(2));
+  EXPECT_EQ(kDuration / 2 + kDuration / 8,
+            pipeline_->GetBufferedTimeRanges().end(2));
 }
 
 TEST_F(PipelineTest, DisableAudioRenderer) {
@@ -832,24 +808,6 @@ TEST_F(PipelineTest, StartTimeIsNonZero) {
   EXPECT_TRUE(pipeline_->HasVideo());
 
   EXPECT_EQ(kStartTime, pipeline_->GetCurrentTime());
-}
-
-TEST_F(PipelineTest, DemuxerProperties) {
-  CreateAudioStream();
-  CreateVideoStream();
-  MockDemuxerStreamVector streams;
-  streams.push_back(audio_stream());
-  streams.push_back(video_stream());
-
-  InitializeDemuxer(&streams);
-  InitializeAudioDecoder(audio_stream());
-  InitializeAudioRenderer();
-  InitializeVideoDecoder(video_stream());
-  InitializeVideoRenderer();
-  InitializePipeline(PIPELINE_OK);
-
-  EXPECT_EQ(kLocalSource, pipeline_->IsLocalSource());
-  EXPECT_NE(kSeekable, pipeline_->IsStreaming());
 }
 
 class FlexibleCallbackRunner : public base::DelegateSimpleThread::Delegate {

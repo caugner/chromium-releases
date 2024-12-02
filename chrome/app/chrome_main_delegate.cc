@@ -29,7 +29,6 @@
 #include "chrome/plugin/chrome_content_plugin_client.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/utility/chrome_content_utility_client.h"
-#include "content/common/content_counters.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
@@ -256,26 +255,6 @@ void EnableHeapProfiler(const CommandLine& command_line) {
 #endif
 }
 
-void InitializeChromeContentRendererClient() {
-  content::GetContentClient()->set_renderer(
-      &g_chrome_content_renderer_client.Get());
-}
-
-void InitializeChromeContentClient(const std::string& process_type) {
-  if (process_type.empty()) {
-    content::GetContentClient()->set_browser(
-        &g_chrome_content_browser_client.Get());
-  } else if (process_type == switches::kPluginProcess) {
-    content::GetContentClient()->set_plugin(
-        &g_chrome_content_plugin_client.Get());
-  } else if (process_type == switches::kRendererProcess) {
-    InitializeChromeContentRendererClient();
-  } else if (process_type == switches::kUtilityProcess) {
-    content::GetContentClient()->set_utility(
-        &g_chrome_content_utility_client.Get());
-  }
-}
-
 // Returns true if this subprocess type needs the ResourceBundle initialized
 // and resources loaded.
 bool SubprocessNeedsResourceBundle(const std::string& process_type) {
@@ -448,10 +427,7 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
     base::FieldTrial::EnableBenchmarking();
   }
 
-  std::string process_type =  command_line.GetSwitchValueASCII(
-      switches::kProcessType);
   content::SetContentClient(&chrome_content_client_);
-  InitializeChromeContentClient(process_type);
 
   return false;
 }
@@ -574,8 +550,9 @@ void ChromeMainDelegate::PreSandboxStartup() {
         chrome::ProcessNeedsProfileDir(process_type)));
   }
 
+  base::StatsCounterTimer stats_counter_timer("Chrome.Init");
   startup_timer_.reset(new base::StatsScope<base::StatsCounterTimer>
-                       (content::Counters::chrome_main()));
+                       (stats_counter_timer));
 
   // Enable the heap profiler as early as possible!
   EnableHeapProfiler(command_line);
@@ -583,9 +560,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
   // Enable Message Loop related state asap.
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
     MessageLoop::EnableHistogrammer(true);
-
-  if (command_line.HasSwitch(switches::kSingleProcess))
-    InitializeChromeContentRendererClient();
 
   logging::OldFileDeletionState file_state =
       logging::APPEND_TO_OLD_LOG_FILE;
@@ -618,7 +592,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
     const std::string locale =
         command_line.GetSwitchValueASCII(switches::kLang);
     const std::string loaded_locale =
-        ResourceBundle::InitSharedInstanceWithLocale(locale);
+        ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
     CHECK(!loaded_locale.empty()) << "Locale could not be found for " <<
         locale;
 
@@ -716,10 +690,6 @@ content::ZygoteForkDelegate* ChromeMainDelegate::ZygoteStarting() {
 }
 
 void ChromeMainDelegate::ZygoteForked() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  std::string process_type =
-      command_line.GetSwitchValueASCII(switches::kProcessType);
-
   Profiling::ProcessStarted();
   if (Profiling::BeingProfiled()) {
     base::debug::RestartProfilingAfterFork();
@@ -731,7 +701,25 @@ void ChromeMainDelegate::ZygoteForked() {
   // this up for the browser process in a different manner.
   InitCrashReporter();
 #endif
-
-  InitializeChromeContentClient(process_type);
 }
+
 #endif  // OS_MACOSX
+
+content::ContentBrowserClient*
+    ChromeMainDelegate::CreateContentBrowserClient() {
+  return &g_chrome_content_browser_client.Get();
+}
+
+content::ContentPluginClient* ChromeMainDelegate::CreateContentPluginClient() {
+  return &g_chrome_content_plugin_client.Get();
+}
+
+content::ContentRendererClient*
+    ChromeMainDelegate::CreateContentRendererClient() {
+  return &g_chrome_content_renderer_client.Get();
+}
+
+content::ContentUtilityClient*
+    ChromeMainDelegate::CreateContentUtilityClient() {
+  return &g_chrome_content_utility_client.Get();
+}

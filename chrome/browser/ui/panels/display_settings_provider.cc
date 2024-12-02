@@ -45,7 +45,7 @@ void DisplaySettingsProvider::AddFullScreenObserver(
     FullScreenObserver* observer) {
   full_screen_observers_.AddObserver(observer);
 
-  if (full_screen_observers_.size() == 1) {
+  if (full_screen_observers_.size() == 1 && NeedsPeriodicFullScreenCheck()) {
     full_screen_mode_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(kFullScreenModeCheckIntervalMs),
         this, &DisplaySettingsProvider::CheckFullScreenMode);
@@ -69,7 +69,7 @@ gfx::Rect DisplaySettingsProvider::GetDisplayArea() {
 }
 
 gfx::Rect DisplaySettingsProvider::GetPrimaryScreenArea() const {
-  return gfx::Screen::GetPrimaryMonitor().bounds();
+  return gfx::Screen::GetPrimaryDisplay().bounds();
 }
 
 gfx::Rect DisplaySettingsProvider::GetWorkArea() const {
@@ -78,17 +78,17 @@ gfx::Rect DisplaySettingsProvider::GetWorkArea() const {
   // screen (and overlap Dock). And we also want to exclude the system menu
   // area. Note that the rect returned from gfx::Screen util functions is in
   // platform-independent screen coordinates with (0, 0) as the top-left corner.
-  gfx::Monitor monitor = gfx::Screen::GetPrimaryMonitor();
-  gfx::Rect monitor_area = monitor.bounds();
-  gfx::Rect work_area = monitor.work_area();
-  int system_menu_height = work_area.y() - monitor_area.y();
+  gfx::Display display = gfx::Screen::GetPrimaryDisplay();
+  gfx::Rect display_area = display.bounds();
+  gfx::Rect work_area = display.work_area();
+  int system_menu_height = work_area.y() - display_area.y();
   if (system_menu_height > 0) {
-    monitor_area.set_y(monitor_area.y() + system_menu_height);
-    monitor_area.set_height(monitor_area.height() - system_menu_height);
+    display_area.set_y(display_area.y() + system_menu_height);
+    display_area.set_height(display_area.height() - system_menu_height);
   }
-  return monitor_area;
+  return display_area;
 #else
-  gfx::Rect work_area = gfx::Screen::GetPrimaryMonitor().work_area();
+  gfx::Rect work_area = gfx::Screen::GetPrimaryDisplay().work_area();
 #endif
   return work_area;
 }
@@ -149,8 +149,12 @@ void DisplaySettingsProvider::AdjustWorkAreaForAutoHidingDesktopBars() {
   }
 }
 
+bool DisplaySettingsProvider::NeedsPeriodicFullScreenCheck() const {
+  return true;
+}
+
 void DisplaySettingsProvider::CheckFullScreenMode() {
-  bool is_full_screen = IsFullScreenMode();
+  bool is_full_screen = IsFullScreen();
   if (is_full_screen == is_full_screen_)
     return;
   is_full_screen_ = is_full_screen;
@@ -158,6 +162,10 @@ void DisplaySettingsProvider::CheckFullScreenMode() {
   FOR_EACH_OBSERVER(FullScreenObserver,
                     full_screen_observers_,
                     OnFullScreenModeChanged(is_full_screen_));
+}
+
+bool DisplaySettingsProvider::IsFullScreen() const {
+  return IsFullScreenMode();
 }
 
 #if defined(USE_AURA)

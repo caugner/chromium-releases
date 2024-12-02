@@ -17,10 +17,10 @@
 #include "content/shell/shell_switches.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_module.h"
-#include "ui/base/clipboard/clipboard.h"
 
 #if defined(OS_ANDROID)
-#include "base/message_pump_android.h"
+#include "net/base/network_change_notifier.h"
+#include "net/android/network_change_notifier_factory.h"
 #endif
 
 namespace content {
@@ -34,12 +34,6 @@ static GURL GetStartupURL() {
   return GURL(args[0]);
 }
 
-#if defined(OS_ANDROID)
-static base::MessagePump* CreateMessagePumpForShell() {
-  return new base::MessagePumpForUI();
-}
-#endif
-
 ShellBrowserMainParts::ShellBrowserMainParts(
     const content::MainFunctionParams& parameters)
     : BrowserMainParts(),
@@ -51,20 +45,19 @@ ShellBrowserMainParts::~ShellBrowserMainParts() {
 
 #if !defined(OS_MACOSX)
 void ShellBrowserMainParts::PreMainMessageLoopStart() {
-#if defined(OS_ANDROID)
-  MessageLoopForUI::InitMessagePumpForUIFactory(&CreateMessagePumpForShell);
-  MessageLoopForUI::current()->Start();
-#endif
 }
 #endif
 
-int ShellBrowserMainParts::PreCreateThreads() {
-  return 0;
+void ShellBrowserMainParts::PostMainMessageLoopStart() {
+#if defined(OS_ANDROID)
+  MessageLoopForUI::current()->Start();
+#endif
 }
 
 void ShellBrowserMainParts::PreEarlyInitialization() {
 #if defined(OS_ANDROID)
-  // TODO(tedchoc): Setup the NetworkChangeNotifier here.
+  net::NetworkChangeNotifier::SetFactory(
+      new net::android::NetworkChangeNotifierFactory());
 #endif
 }
 
@@ -101,16 +94,6 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
   if (devtools_delegate_)
     devtools_delegate_->Stop();
   browser_context_.reset();
-}
-
-bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code) {
-  return false;
-}
-
-ui::Clipboard* ShellBrowserMainParts::GetClipboard() {
-  if (!clipboard_.get())
-    clipboard_.reset(new ui::Clipboard());
-  return clipboard_.get();
 }
 
 }  // namespace

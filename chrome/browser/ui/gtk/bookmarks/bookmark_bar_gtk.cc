@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
+#include "base/pickle.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
+#include "chrome/browser/ui/gtk/event_utils.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -689,7 +691,7 @@ bool BookmarkBarGtk::GetTabContentsSize(gfx::Size* size) {
     NOTREACHED();
     return false;
   }
-  WebContents* web_contents = browser->GetSelectedWebContents();
+  WebContents* web_contents = browser->GetActiveWebContents();
   if (!web_contents) {
     // It is possible to have a browser but no WebContents while under testing,
     // so don't NOTREACHED() and error the program.
@@ -1147,8 +1149,8 @@ void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
 
   Profile* profile = browser_->profile();
   RecordAppLaunch(profile, node->url());
-  bookmark_utils::OpenAll(window_->GetNativeHandle(), profile, page_navigator_,
-      node, gtk_util::DispositionForCurrentButtonPressEvent());
+  bookmark_utils::OpenAll(window_->GetNativeWindow(), profile, page_navigator_,
+      node, event_utils::DispositionForCurrentButtonPressEvent());
 
   content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
 }
@@ -1232,7 +1234,7 @@ void BookmarkBarGtk::OnFolderClicked(GtkWidget* sender) {
     PopupForButton(sender);
   } else if (event->button.button == 2) {
     const BookmarkNode* node = GetNodeForToolButton(sender);
-    bookmark_utils::OpenAll(window_->GetNativeHandle(), browser_->profile(),
+    bookmark_utils::OpenAll(window_->GetNativeWindow(), browser_->profile(),
                             page_navigator_, node, NEW_BACKGROUND_TAB);
   }
 }

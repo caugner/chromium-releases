@@ -58,6 +58,13 @@
           }],
         ],
       },
+      # Patch posted for upstream, can be removed once that's landed and
+      # rolled into Chromium.
+      # Internal link: https://mondrian.corp.google.com/#review/29997992
+      'msvs_disabled_warnings': [
+        # Signed/unsigned comparison.
+        4018,
+      ],
       'sources': [
         # Include and then exclude so that all files show up in IDEs, even if
         # they don't build.

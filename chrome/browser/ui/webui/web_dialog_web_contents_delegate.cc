@@ -5,10 +5,10 @@
 #include "chrome/browser/ui/webui/web_dialog_web_contents_delegate.h"
 
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
 
 using content::OpenURLParams;
@@ -20,8 +20,9 @@ using content::WebContents;
 // TODO(akalin): Should we make it so that we have a default incognito
 // profile that's long-lived?  Of course, we'd still have to clear it out
 // when all incognito browsers close.
-WebDialogWebContentsDelegate::WebDialogWebContentsDelegate(Profile* profile)
-    : profile_(profile) {
+WebDialogWebContentsDelegate::WebDialogWebContentsDelegate(
+    content::BrowserContext* context)
+    : profile_(Profile::FromBrowserContext(context)) {
 }
 
 WebDialogWebContentsDelegate::~WebDialogWebContentsDelegate() {
@@ -91,10 +92,10 @@ Browser* WebDialogWebContentsDelegate::StaticAddNewContents(
   // to find a browser matching params.profile or create a new one.
   Browser* browser = NULL;
 
-  TabContentsWrapper* wrapper = new TabContentsWrapper(new_contents);
-  browser::NavigateParams params(browser, wrapper);
+  TabContents* tab_contents = new TabContents(new_contents);
+  browser::NavigateParams params(browser, tab_contents);
   params.profile = profile;
-  // TODO(pinkerton): no way to get a wrapper for this.
+  // TODO(pinkerton): no way to get a TabContents for this.
   // params.source_contents = source;
   params.disposition = disposition;
   params.window_bounds = initial_pos;

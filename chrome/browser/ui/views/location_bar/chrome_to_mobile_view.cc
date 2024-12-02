@@ -22,11 +22,13 @@ ChromeToMobileView::ChromeToMobileView(
       command_updater_(command_updater) {
   set_id(VIEW_ID_CHROME_TO_MOBILE_BUTTON);
   set_accessibility_focusable(true);
-  SetImage(ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_MOBILE));
+  SetImage(
+      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(IDR_MOBILE));
   SetTooltipText(
       l10n_util::GetStringUTF16(IDS_CHROME_TO_MOBILE_BUBBLE_TOOLTIP));
   SetVisible(command_updater_->IsCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE));
   command_updater_->AddCommandObserver(IDC_CHROME_TO_MOBILE_PAGE, this);
+  TouchableLocationBarView::Init(this);
 }
 
 ChromeToMobileView::~ChromeToMobileView() {
@@ -39,6 +41,10 @@ void ChromeToMobileView::EnabledStateChangedForCommand(int id, bool enabled) {
     SetVisible(enabled);
     location_bar_view_->Update(NULL);
   }
+}
+
+int ChromeToMobileView::GetBuiltInHorizontalPadding() const {
+  return GetBuiltInHorizontalPaddingImpl();
 }
 
 void ChromeToMobileView::GetAccessibleState(ui::AccessibleViewState* state) {

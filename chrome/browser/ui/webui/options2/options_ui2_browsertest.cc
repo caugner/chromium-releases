@@ -27,7 +27,7 @@ void OptionsBrowserTest::NavigateToSettings() {
 void OptionsBrowserTest::VerifyNavbar() {
   bool navbar_exist = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      browser()->GetActiveWebContents()->GetRenderViewHost(),
       L"",
       L"domAutomationController.send("
       L"!!document.getElementById('navigation'))", &navbar_exist));
@@ -35,13 +35,13 @@ void OptionsBrowserTest::VerifyNavbar() {
 }
 
 void OptionsBrowserTest::VerifyTitle() {
-  string16 title = browser()->GetSelectedWebContents()->GetTitle();
+  string16 title = browser()->GetActiveWebContents()->GetTitle();
   string16 expected_title = l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE);
   EXPECT_NE(title.find(expected_title), string16::npos);
 }
 
-// If this flakes, use http://crbug.com/119671
-IN_PROC_BROWSER_TEST_F(OptionsBrowserTest, LoadOptionsByURL) {
+// Flaky, see http://crbug.com/119671.
+IN_PROC_BROWSER_TEST_F(OptionsBrowserTest, FLAKY_LoadOptionsByURL) {
   NavigateToSettings();
   VerifyTitle();
   VerifyNavbar();

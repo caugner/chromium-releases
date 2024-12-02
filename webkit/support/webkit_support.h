@@ -9,9 +9,11 @@
 
 #include "base/basictypes.h"
 #include "base/string16.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
@@ -29,7 +31,6 @@ class WebStorageNamespace;
 class WebString;
 class WebThemeEngine;
 class WebURL;
-class WebURLRequest;
 class WebURLResponse;
 class WebView;
 struct WebPluginParams;
@@ -107,8 +108,14 @@ GraphicsContext3DImplementation GetGraphicsContext3DImplementation();
 
 WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
     const WebKit::WebGraphicsContext3D::Attributes& attributes,
+    WebKit::WebView* web_view);
+
+// Deprecated, call the version above.
+WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
+    const WebKit::WebGraphicsContext3D::Attributes& attributes,
     WebKit::WebView* web_view,
     bool direct);
+
 
 // ------- URL load mocking.
 // Registers the file at |file_path| to be served when |url| is requested.
@@ -196,6 +203,9 @@ std::string EscapePath(const std::string& path);
 std::string MakeURLErrorDescription(const WebKit::WebURLError& error);
 // Creates WebURLError for an aborted request.
 WebKit::WebURLError CreateCancelledError(const WebKit::WebURLRequest& request);
+// Create "extra data" for a ResourceRequest required by Chrome's network stack.
+WebKit::WebURLRequest::ExtraData* CreateWebURLRequestExtraData(
+    WebKit::WebReferrerPolicy referrer_policy);
 
 // - Database
 void SetDatabaseQuota(int quota);

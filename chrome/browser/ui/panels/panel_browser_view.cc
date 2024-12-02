@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/native_window_notification_source.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_bounds_animation.h"
@@ -14,15 +15,23 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
-#include "chrome/browser/ui/webui/task_manager/task_manager_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
 
+#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+#include "base/win/windows_version.h"
+#include "chrome/browser/ui/panels/taskbar_window_thumbnailer_win.h"
+#endif
+
+using content::NativeWebKeyboardEvent;
 using content::WebContents;
 
 NativePanel* Panel::CreateNativePanel(Browser* browser, Panel* panel,
@@ -42,7 +51,13 @@ PanelBrowserView::PanelBrowserView(Browser* browser, Panel* panel,
     mouse_pressed_(false),
     mouse_dragging_state_(NO_DRAGGING),
     is_drawing_attention_(false),
+    force_to_paint_as_inactive_(false),
+#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+    old_focused_view_(NULL),
+    thumbnailer_(NULL) {
+#else
     old_focused_view_(NULL) {
+#endif
 }
 
 PanelBrowserView::~PanelBrowserView() {
@@ -91,9 +106,9 @@ void PanelBrowserView::Deactivate() {
 #if defined(OS_WIN) && !defined(USE_AURA)
   gfx::NativeWindow native_window = NULL;
   BrowserWindow* browser_window =
-      panel_->manager()->GetNextBrowserWindowToActivate(panel_.get());
+      panel_->manager()->GetNextBrowserWindowToActivate(GetPanelBrowser());
   if (browser_window)
-    native_window = browser_window->GetNativeHandle();
+    native_window = browser_window->GetNativeWindow();
   else
     native_window = ::GetDesktopWindow();
   if (native_window)
@@ -175,6 +190,20 @@ void PanelBrowserView::OnWidgetActivationChanged(views::Widget* widget,
     return;
   focused_ = focused;
 
+  // Expand the panel if the minimized panel is activated by means other than
+  // clicking on its titlebar. This is the workaround to support restoring the
+  // minimized panel by other means, like alt-tabbing, win-tabbing, or clicking
+  // the taskbar icon. Note that this workaround does not work for one edge
+  // case: the mouse happens to be at the minimized panel when the user tries to
+  // bring up the panel with the above alternatives.
+  // When the user clicks on the minimized panel, the panel expansion will be
+  // done when we process the mouse button pressed message.
+  if (focused_ && panel_->IsMinimized() &&
+      gfx::Screen::GetWindowAtCursorScreenPoint() !=
+          widget->GetNativeWindow()) {
+    panel_->Restore();
+  }
+
   panel()->OnActiveStateChanged(focused);
 }
 
@@ -243,11 +272,17 @@ void PanelBrowserView::OnWindowBeginUserBoundsChange() {
 }
 
 void PanelBrowserView::OnWindowEndUserBoundsChange() {
-  bounds_ = GetBounds();
+  panel_->OnPanelEndUserResizing();
+
+  // No need to proceed with post-resizing update when there is no size change.
+  gfx::Rect new_bounds = GetBounds();
+  if (bounds_ == new_bounds)
+    return;
+  bounds_ = new_bounds;
+
   panel_->IncreaseMaxSize(bounds_.size());
   panel_->set_full_size(bounds_.size());
 
-  panel_->OnPanelEndUserResizing();
   panel_->panel_strip()->RefreshLayout();
 }
 
@@ -306,7 +341,7 @@ void PanelBrowserView::PreventActivationByOS(bool prevent_activation) {
 
 
 gfx::NativeWindow PanelBrowserView::GetNativePanelHandle() {
-  return GetNativeHandle();
+  return GetNativeWindow();
 }
 
 void PanelBrowserView::UpdatePanelTitleBar() {
@@ -318,16 +353,7 @@ void PanelBrowserView::UpdatePanelLoadingAnimations(bool should_animate) {
 }
 
 void PanelBrowserView::ShowTaskManagerForPanel() {
-#if defined(WEBUI_TASK_MANAGER)
-  TaskManagerDialog::Show();
-#else
-  // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (TaskManagerDialog::UseWebUITaskManager()) {
-    TaskManagerDialog::Show();
-  } else {
-    ShowTaskManager();
-  }
-#endif  // defined(WEBUI_TASK_MANAGER)
+  ShowTaskManager();
 }
 
 FindBar* PanelBrowserView::CreatePanelFindBar() {
@@ -419,7 +445,7 @@ void PanelBrowserView::DestroyPanelBrowser() {
 
 void PanelBrowserView::EnsurePanelFullyVisible() {
 #if defined(OS_WIN) && !defined(USE_AURA)
-  ::SetWindowPos(GetNativeHandle(), HWND_TOP, 0, 0, 0, 0,
+  ::SetWindowPos(GetNativeWindow(), HWND_TOP, 0, 0, 0, 0,
                  SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
 #else
   NOTIMPLEMENTED();
@@ -448,9 +474,11 @@ bool PanelBrowserView::OnTitlebarMouseDragged(
   if (mouse_dragging_state_ == NO_DRAGGING &&
       ExceededDragThreshold(delta_x, delta_y)) {
     // When a drag begins, we do not want to the client area to still receive
-    // the focus.
-    old_focused_view_ = GetFocusManager()->GetFocusedView();
-    GetFocusManager()->SetFocusedView(GetFrameView());
+    // the focus. We do not need to do this for the unfocused minimized panel.
+    if (!panel_->IsMinimized()) {
+      old_focused_view_ = GetFocusManager()->GetFocusedView();
+      GetFocusManager()->SetFocusedView(GetFrameView());
+    }
 
     panel_->manager()->StartDragging(panel_.get(), last_mouse_location_);
     mouse_dragging_state_ = DRAGGING_STARTED;
@@ -528,7 +556,6 @@ void PanelBrowserView::UpdatePanelMinimizeRestoreButtonVisibility() {
   GetFrameView()->UpdateTitleBarMinimizeRestoreButtonVisibility();
 }
 
-
 #if defined(OS_WIN) && !defined(USE_AURA)
 void PanelBrowserView::UpdateWindowAttribute(int attribute_index,
                                              int attribute_value,
@@ -544,6 +571,46 @@ void PanelBrowserView::UpdateWindowAttribute(int attribute_index,
     ::SetWindowLong(native_window, attribute_index, expected_value);
 }
 #endif
+
+void PanelBrowserView::PanelExpansionStateChanging(
+    Panel::ExpansionState old_state, Panel::ExpansionState new_state) {
+#if defined(OS_WIN) && !defined(USE_ASH) && !defined(USE_AURA)
+  // Live preview is only available since Windows 7.
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return;
+
+  bool is_minimized = old_state != Panel::EXPANDED;
+  bool will_be_minimized = new_state != Panel::EXPANDED;
+  if (is_minimized == will_be_minimized)
+    return;
+
+  HWND native_window = GetNativeWindow();
+
+  if (!thumbnailer_.get()) {
+    DCHECK(native_window);
+    thumbnailer_.reset(new TaskbarWindowThumbnailerWin(native_window));
+    ui::HWNDSubclass::AddFilterToTarget(native_window, thumbnailer_.get());
+  }
+
+  // Cache the image at this point.
+  if (will_be_minimized) {
+    // If the panel is still active (we will deactivate the minimizd panel at
+    // later time), we need to paint it immediately as inactive so that we can
+    // take a snapshot of inactive panel.
+    if (focused_) {
+      force_to_paint_as_inactive_ = true;
+      ::RedrawWindow(native_window, NULL, NULL,
+                     RDW_NOCHILDREN | RDW_INVALIDATE | RDW_UPDATENOW);
+    }
+
+    thumbnailer_->Start();
+  } else {
+    force_to_paint_as_inactive_ = false;
+    thumbnailer_->Stop();
+  }
+
+#endif
+}
 
 // NativePanelTesting implementation.
 class NativePanelTestingWin : public NativePanelTesting {
@@ -562,15 +629,14 @@ class NativePanelTestingWin : public NativePanelTesting {
   virtual bool VerifyActiveState(bool is_active) OVERRIDE;
   virtual bool IsWindowSizeKnown() const OVERRIDE;
   virtual bool IsAnimatingBounds() const OVERRIDE;
-  virtual bool IsButtonVisible(TitlebarButtonType button_type) const OVERRIDE;
+  virtual bool IsButtonVisible(
+      panel::TitlebarButtonType button_type) const OVERRIDE;
 
   PanelBrowserView* panel_browser_view_;
 };
 
-// static
-NativePanelTesting* NativePanelTesting::Create(NativePanel* native_panel) {
-  return new NativePanelTestingWin(static_cast<PanelBrowserView*>(
-      native_panel));
+NativePanelTesting* PanelBrowserView::CreateNativePanelTesting() {
+  return new NativePanelTestingWin(this);
 }
 
 NativePanelTestingWin::NativePanelTestingWin(
@@ -603,23 +669,14 @@ void NativePanelTestingWin::FinishDragTitlebar() {
 }
 
 bool NativePanelTestingWin::VerifyDrawingAttention() const {
-  PanelBrowserFrameView* frame_view = panel_browser_view_->GetFrameView();
-  SkColor attention_color = frame_view->GetTitleColor(
-      PanelBrowserFrameView::PAINT_FOR_ATTENTION);
-  return attention_color == frame_view->title_label_->enabled_color();
+  return panel_browser_view_->GetFrameView()->paint_state_ ==
+         PanelBrowserFrameView::PAINT_FOR_ATTENTION;
 }
 
 bool NativePanelTestingWin::VerifyActiveState(bool is_active) {
-  PanelBrowserFrameView* frame_view = panel_browser_view_->GetFrameView();
-
-  PanelBrowserFrameView::PaintState expected_paint_state =
-      is_active ? PanelBrowserFrameView::PAINT_AS_ACTIVE
-                : PanelBrowserFrameView::PAINT_AS_INACTIVE;
-  if (frame_view->paint_state_ != expected_paint_state)
-    return false;
-
-  SkColor expected_color = frame_view->GetTitleColor(expected_paint_state);
-  return expected_color == frame_view->title_label_->enabled_color();
+  return panel_browser_view_->GetFrameView()->paint_state_ ==
+         (is_active ? PanelBrowserFrameView::PAINT_AS_ACTIVE
+                    : PanelBrowserFrameView::PAINT_AS_INACTIVE);
 }
 
 bool NativePanelTestingWin::IsWindowSizeKnown() const {
@@ -631,15 +688,15 @@ bool NativePanelTestingWin::IsAnimatingBounds() const {
 }
 
 bool NativePanelTestingWin::IsButtonVisible(
-    TitlebarButtonType button_type) const {
+    panel::TitlebarButtonType button_type) const {
   PanelBrowserFrameView* frame_view = panel_browser_view_->GetFrameView();
 
   switch (button_type) {
-    case CLOSE_BUTTON:
+    case panel::CLOSE_BUTTON:
       return frame_view->close_button_->visible();
-    case MINIMIZE_BUTTON:
+    case panel::MINIMIZE_BUTTON:
       return frame_view->minimize_button_->visible();
-    case RESTORE_BUTTON:
+    case panel::RESTORE_BUTTON:
       return frame_view->restore_button_->visible();
     default:
       NOTREACHED();

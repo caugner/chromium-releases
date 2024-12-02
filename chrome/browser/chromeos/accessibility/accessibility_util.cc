@@ -6,6 +6,8 @@
 
 #include <queue>
 
+#include "ash/high_contrast/high_contrast_controller.h"
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
@@ -18,6 +20,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/speech/extension_api/tts_extension_api_platform.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/user_script.h"
@@ -116,7 +119,7 @@ void EnableSpokenFeedback(bool enabled, content::WebUI* login_web_ui) {
   FilePath path = FilePath(extension_misc::kAccessExtensionPath)
       .AppendASCII(extension_misc::kChromeVoxDirectoryName);
   if (enabled) {  // Load ChromeVox
-    const Extension* extension =
+    const extensions::Extension* extension =
         extension_service->component_loader()->Add(IDR_CHROMEVOX_MANIFEST,
                                                    path);
 
@@ -163,6 +166,10 @@ void EnableHighContrast(bool enabled) {
   PrefService* pref_service = g_browser_process->local_state();
   pref_service->SetBoolean(prefs::kHighContrastEnabled, enabled);
   pref_service->CommitPendingWrite();
+
+#if defined(USE_ASH)
+  ash::Shell::GetInstance()->high_contrast_controller()->SetEnabled(enabled);
+#endif
 }
 
 void EnableScreenMagnifier(bool enabled) {
@@ -202,6 +209,16 @@ bool IsSpokenFeedbackEnabled() {
   bool spoken_feedback_enabled = prefs &&
       prefs->GetBoolean(prefs::kSpokenFeedbackEnabled);
   return spoken_feedback_enabled;
+}
+
+bool IsHighContrastEnabled() {
+  if (!g_browser_process) {
+    return false;
+  }
+  PrefService* prefs = g_browser_process->local_state();
+  bool high_contrast_enabled = prefs &&
+      prefs->GetBoolean(prefs::kHighContrastEnabled);
+  return high_contrast_enabled;
 }
 
 void MaybeSpeak(const std::string& utterance) {

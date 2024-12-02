@@ -11,7 +11,9 @@
 
 #include "ash/launcher/launcher_button_host.h"
 #include "ash/launcher/launcher_model_observer.h"
+#include "ash/wm/shelf_auto_hide_behavior.h"
 #include "base/observer_list.h"
+#include "ui/views/animation/bounds_animator_observer.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/focus/focus_manager.h"
@@ -38,18 +40,24 @@ class LauncherModel;
 namespace internal {
 
 class LauncherButton;
+class LauncherTooltipManager;
 
 class ASH_EXPORT LauncherView : public views::View,
                                 public LauncherModelObserver,
                                 public views::ButtonListener,
                                 public LauncherButtonHost,
                                 public views::ContextMenuController,
-                                public views::FocusTraversable {
+                                public views::FocusTraversable,
+                                public views::BoundsAnimatorObserver {
  public:
   LauncherView(LauncherModel* model, LauncherDelegate* delegate);
   virtual ~LauncherView();
 
+  LauncherTooltipManager* tooltip_manager() { return tooltip_.get(); }
+
   void Init();
+
+  void SetAlignment(ShelfAlignment alignment);
 
   // Returns the ideal bounds of the specified item, or an empty rect if id
   // isn't know.
@@ -60,6 +68,14 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Returns true if we're showing a menu.
   bool IsShowingMenu() const;
+
+  views::View* GetAppListButtonView() const;
+
+  // Returns true if the mouse cursor exits the area for launcher tooltip.
+  // There are thin gaps between launcher buttons but the tooltip shouldn't hide
+  // in the gaps, but the tooltip should hide if the mouse moved totally outside
+  // of the buttons area.
+  bool ShouldHideTooltip(const gfx::Point& cursor_location);
 
   // Overridden from FocusTraversable:
   virtual views::FocusSearch* GetFocusSearch() OVERRIDE;
@@ -76,6 +92,15 @@ class ASH_EXPORT LauncherView : public views::View,
     gfx::Rect overflow_bounds;
   };
 
+  // Used in calculating ideal bounds.
+  int primary_axis_coordinate(int x, int y) const {
+    return is_horizontal_alignment() ? x : y;
+  }
+
+  bool is_horizontal_alignment() const {
+    return alignment_ == SHELF_ALIGNMENT_BOTTOM;
+  }
+
   // Sets the bounds of each view to its ideal bounds.
   void LayoutToIdealBounds();
 
@@ -83,9 +108,9 @@ class ASH_EXPORT LauncherView : public views::View,
   // item in the model is set in |view_model_|.
   void CalculateIdealBounds(IdealBounds* bounds);
 
-  // Returns the index of the last view whose max x-coordinate is less than
-  // |max_x|. Returns -1 if nothing fits, or there are no views.
-  int DetermineLastVisibleIndex(int max_x);
+  // Returns the index of the last view whose max primary axis coordinate is
+  // less than |max_value|. Returns -1 if nothing fits, or there are no views.
+  int DetermineLastVisibleIndex(int max_value);
 
   // Animates the bounds of each view to its ideal bounds.
   void AnimateToIdealBounds();
@@ -108,10 +133,11 @@ class ASH_EXPORT LauncherView : public views::View,
 
   // Returns the range (in the model) the item at the specified index can be
   // dragged to.
-  std::pair<int,int> GetDragRange(int index);
+  std::pair<int, int> GetDragRange(int index);
 
-  // If there is a drag operation in progress it's canceled.
-  void CancelDrag(views::View* deleted_view);
+  // If there is a drag operation in progress it's canceled. If |modified_index|
+  // is valid, the new position of the corresponding item is returned.
+  int CancelDrag(int modified_index);
 
   // Common setup done for all children.
   void ConfigureChildView(views::View* view);
@@ -122,10 +148,17 @@ class ASH_EXPORT LauncherView : public views::View,
   // Shows the overflow menu.
   void ShowOverflowMenu();
 
+  // Update first launcher button's padding. This method adds padding to the
+  // first button to include the leading inset. It needs to be called once on
+  // button creation and every time when shelf alignment is changed.
+  void UpdateFirstButtonPadding();
+
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual FocusTraversable* GetPaneFocusTraversable() OVERRIDE;
+  virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
 
   // Overridden from LauncherModelObserver:
   virtual void LauncherItemAdded(int model_index) OVERRIDE;
@@ -141,16 +174,24 @@ class ASH_EXPORT LauncherView : public views::View,
                                     const views::MouseEvent& event) OVERRIDE;
   virtual void MouseReleasedOnButton(views::View* view,
                                      bool canceled) OVERRIDE;
+  virtual void MouseMovedOverButton(views::View* view) OVERRIDE;
+  virtual void MouseEnteredButton(views::View* view) OVERRIDE;
   virtual void MouseExitedButton(views::View* view) OVERRIDE;
+  virtual ShelfAlignment GetShelfAlignment() const OVERRIDE;
   virtual string16 GetAccessibleName(const views::View* view) OVERRIDE;
 
-  // Overriden from views::ButtonListener:
+  // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE;
 
-  // Overriden from views::ContextMenuController:
+  // Overridden from views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
                                       const gfx::Point& point) OVERRIDE;
+
+  // Overridden from views::BoundsAnimatorObserver:
+  virtual void OnBoundsAnimatorProgressed(
+      views::BoundsAnimator* animator) OVERRIDE;
+  virtual void OnBoundsAnimatorDone(views::BoundsAnimator* animator) OVERRIDE;
 
   // The model; owned by Launcher.
   LauncherModel* model_;
@@ -169,6 +210,8 @@ class ASH_EXPORT LauncherView : public views::View,
   scoped_ptr<views::BoundsAnimator> bounds_animator_;
 
   views::ImageButton* overflow_button_;
+
+  scoped_ptr<LauncherTooltipManager> tooltip_;
 
   // Are we dragging? This is only set if the mouse is dragged far enough to
   // trigger a drag.
@@ -196,6 +239,8 @@ class ASH_EXPORT LauncherView : public views::View,
 #endif
 
   ObserverList<LauncherIconObserver> observers_;
+
+  ShelfAlignment alignment_;
 
   DISALLOW_COPY_AND_ASSIGN(LauncherView);
 };

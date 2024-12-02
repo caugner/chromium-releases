@@ -125,6 +125,28 @@ int drop_shadow_height() {
   return value;
 }
 
+// Size of icon used for throbber and favicon next to tab title.
+int tab_icon_size() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        value = gfx::kFaviconSize;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = 20;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
+
+// Width of touch tabs.
+static const int kTouchWidth = 180;
+
 static const int kToolbarOverlap = 1;
 static const int kFaviconTitleSpacing = 4;
 #if defined(USE_ASH)
@@ -144,7 +166,6 @@ static const int kCloseButtonVertFuzz = 1;
 #else
 static const int kCloseButtonVertFuzz = 0;
 #endif
-static const int kTabIconSize = gfx::kFaviconSize;
 // Additional horizontal offset for close button relative to title text.
 static const int kCloseButtonHorzFuzz = 7;
 
@@ -241,7 +262,7 @@ gfx::Size Tab::GetBasicMinimumUnselectedSize() {
 
   gfx::Size minimum_size;
   minimum_size.set_width(left_padding() + right_padding());
-  // Since we use bitmap images, the real minimum height of the image is
+  // Since we use image images, the real minimum height of the image is
   // defined most accurately by the height of the end cap images.
   minimum_size.set_height(tab_active_.image_l->height());
   return minimum_size;
@@ -265,6 +286,11 @@ gfx::Size Tab::GetStandardSize() {
   standard_size.set_width(
       standard_size.width() + kFaviconTitleSpacing + kStandardTitleWidth);
   return standard_size;
+}
+
+// static
+int Tab::GetTouchWidth() {
+  return kTouchWidth;
 }
 
 // static
@@ -302,6 +328,16 @@ void Tab::OnPaint(gfx::Canvas* canvas) {
   if (width() < GetMinimumUnselectedSize().width() && !data().mini)
     return;
 
+  gfx::Rect clip;
+  if (controller()) {
+    if (!controller()->ShouldPaintTab(this, &clip))
+      return;
+    if (!clip.IsEmpty()) {
+      canvas->Save();
+      canvas->ClipRect(clip);
+    }
+  }
+
   // See if the model changes whether the icons should be painted.
   const bool show_icon = ShouldShowIcon();
   const bool show_close_button = ShouldShowCloseBox();
@@ -326,9 +362,12 @@ void Tab::OnPaint(gfx::Canvas* canvas) {
     close_button_color_ = title_color;
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button()->SetBackground(close_button_color_,
-        rb.GetBitmapNamed(IDR_TAB_CLOSE),
-        rb.GetBitmapNamed(IDR_TAB_CLOSE_MASK));
+        rb.GetImageSkiaNamed(IDR_TAB_CLOSE),
+        rb.GetImageSkiaNamed(IDR_TAB_CLOSE_MASK));
   }
+
+  if (!clip.IsEmpty())
+    canvas->Restore();
 }
 
 void Tab::Layout() {
@@ -340,7 +379,7 @@ void Tab::Layout() {
 
   // The height of the content of the Tab is the largest of the favicon,
   // the title text and the close button graphic.
-  int content_height = std::max(kTabIconSize, font_height());
+  int content_height = std::max(tab_icon_size(), font_height());
   gfx::Size close_button_size(close_button()->GetPreferredSize());
   content_height = std::max(content_height, close_button_size.height());
 
@@ -348,17 +387,17 @@ void Tab::Layout() {
   showing_icon_ = ShouldShowIcon();
   if (showing_icon_) {
     // Use the size of the favicon as apps use a bigger favicon size.
-    int favicon_top = top_padding() + content_height / 2 - kTabIconSize / 2;
+    int favicon_top = top_padding() + content_height / 2 - tab_icon_size() / 2;
     int favicon_left = lb.x();
     favicon_bounds_.SetRect(favicon_left, favicon_top,
-                            kTabIconSize, kTabIconSize);
+                            tab_icon_size(), tab_icon_size());
     if (data().mini && width() < kMiniTabRendererAsNormalTabWidth) {
       // Adjust the location of the favicon when transitioning from a normal
       // tab to a mini-tab.
       int mini_delta = kMiniTabRendererAsNormalTabWidth - GetMiniWidth();
       int ideal_delta = width() - GetMiniWidth();
       if (ideal_delta < mini_delta) {
-        int ideal_x = (GetMiniWidth() - kTabIconSize) / 2;
+        int ideal_x = (GetMiniWidth() - tab_icon_size()) / 2;
         int x = favicon_bounds_.x() + static_cast<int>(
             (1 - static_cast<float>(ideal_delta) /
              static_cast<float>(mini_delta)) *
@@ -448,6 +487,7 @@ bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) const {
 
 void Tab::OnMouseMoved(const views::MouseEvent& event) {
   hover_controller().SetLocation(event.location());
+  BaseTab::OnMouseMoved(event);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -478,7 +518,7 @@ void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
   gfx::Canvas background_canvas(size(), false);
   PaintInactiveTabBackground(&background_canvas);
 
-  SkBitmap background_image = background_canvas.ExtractBitmap();
+  gfx::ImageSkia background_image = background_canvas.ExtractBitmap();
 
   // Draw a radial gradient to hover_canvas.
   gfx::Canvas hover_canvas(size(), false);
@@ -507,19 +547,19 @@ void Tab::PaintInactiveTabBackgroundWithTitleChange(gfx::Canvas* canvas) {
                         paint);
 
   // Draw the radial gradient clipped to the background into hover_image.
-  SkBitmap hover_image = SkBitmapOperations::CreateMaskedBitmap(
+  gfx::ImageSkia hover_image = SkBitmapOperations::CreateMaskedBitmap(
       hover_canvas.ExtractBitmap(), background_image);
 
   // Draw the tab background to the canvas.
-  canvas->DrawBitmapInt(background_image, 0, 0);
+  canvas->DrawImageInt(background_image, 0, 0);
 
   // And then the gradient on top of that.
   if (mini_title_animation_->current_part_index() == 2) {
     canvas->SaveLayerAlpha(mini_title_animation_->CurrentValueBetween(255, 0));
-    canvas->DrawBitmapInt(hover_image, 0, 0);
+    canvas->DrawImageInt(hover_image, 0, 0);
     canvas->Restore();
   } else {
-    canvas->DrawBitmapInt(hover_image, 0, 0);
+    canvas->DrawImageInt(hover_image, 0, 0);
   }
 }
 
@@ -537,7 +577,7 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
                                 IDR_THEME_TAB_BACKGROUND;
   }
 
-  SkBitmap* tab_bg = GetThemeProvider()->GetBitmapNamed(tab_id);
+  gfx::ImageSkia* tab_bg = GetThemeProvider()->GetImageSkiaNamed(tab_id);
 
   TabImage* tab_image = &tab_active_;
   TabImage* tab_inactive_image = &tab_inactive_;
@@ -549,29 +589,29 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   int bg_offset_y = GetThemeProvider()->HasCustomImage(tab_id) ?
       0 : background_offset_.y();
 
-  // We need a gfx::Canvas object to be able to extract the bitmap from.
+  // We need a gfx::Canvas object to be able to extract the image from.
   // We draw everything to this canvas and then output it to the canvas
   // parameter in addition to using it to mask the hover glow if needed.
   gfx::Canvas background_canvas(size(), false);
 
   // Draw left edge.  Don't draw over the toolbar, as we're not the foreground
   // tab.
-  SkBitmap tab_l = SkBitmapOperations::CreateTiledBitmap(
+  gfx::ImageSkia tab_l = SkBitmapOperations::CreateTiledBitmap(
       *tab_bg, offset, bg_offset_y, tab_image->l_width, height());
-  SkBitmap theme_l =
+  gfx::ImageSkia theme_l =
       SkBitmapOperations::CreateMaskedBitmap(tab_l, *alpha->image_l);
-  background_canvas.DrawBitmapInt(theme_l,
+  background_canvas.DrawImageInt(theme_l,
       0, 0, theme_l.width(), theme_l.height() - kToolbarOverlap,
       0, 0, theme_l.width(), theme_l.height() - kToolbarOverlap,
       false);
 
   // Draw right edge.  Again, don't draw over the toolbar.
-  SkBitmap tab_r = SkBitmapOperations::CreateTiledBitmap(*tab_bg,
+  gfx::ImageSkia tab_r = SkBitmapOperations::CreateTiledBitmap(*tab_bg,
       offset + width() - tab_image->r_width, bg_offset_y,
       tab_image->r_width, height());
-  SkBitmap theme_r =
+  gfx::ImageSkia theme_r =
       SkBitmapOperations::CreateMaskedBitmap(tab_r, *alpha->image_r);
-  background_canvas.DrawBitmapInt(theme_r,
+  background_canvas.DrawImageInt(theme_r,
       0, 0, theme_r.width(), theme_r.height() - kToolbarOverlap,
       width() - theme_r.width(), 0, theme_r.width(),
       theme_r.height() - kToolbarOverlap, false);
@@ -587,7 +627,7 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
      width() - tab_image->l_width - tab_image->r_width,
      height() - drop_shadow_height() - kToolbarOverlap - tab_image->y_offset);
 
-  canvas->DrawBitmapInt(background_canvas.ExtractBitmap(), 0, 0);
+  canvas->DrawImageInt(background_canvas.ExtractBitmap(), 0, 0);
 
   if (!GetThemeProvider()->HasCustomImage(tab_id) &&
       hover_controller().ShouldDraw()) {
@@ -595,14 +635,14 @@ void Tab::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   }
 
   // Now draw the highlights/shadows around the tab edge.
-  canvas->DrawBitmapInt(*tab_inactive_image->image_l, 0, 0);
+  canvas->DrawImageInt(*tab_inactive_image->image_l, 0, 0);
   canvas->TileImageInt(*tab_inactive_image->image_c,
                        tab_inactive_image->l_width, 0,
                        width() - tab_inactive_image->l_width -
                            tab_inactive_image->r_width,
                        height());
-  canvas->DrawBitmapInt(*tab_inactive_image->image_r,
-                        width() - tab_inactive_image->r_width, 0);
+  canvas->DrawImageInt(*tab_inactive_image->image_r,
+                       width() - tab_inactive_image->r_width, 0);
 }
 
 void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
@@ -610,24 +650,25 @@ void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
   ui::ThemeProvider* tp = GetThemeProvider();
   DCHECK(tp) << "Unable to get theme provider";
 
-  SkBitmap* tab_bg = GetThemeProvider()->GetBitmapNamed(IDR_THEME_TOOLBAR);
+  gfx::ImageSkia* tab_bg =
+      GetThemeProvider()->GetImageSkiaNamed(IDR_THEME_TOOLBAR);
 
   TabImage* tab_image = &tab_active_;
   TabImage* alpha = &tab_alpha_;
 
   // Draw left edge.
-  SkBitmap tab_l = SkBitmapOperations::CreateTiledBitmap(
+  gfx::ImageSkia tab_l = SkBitmapOperations::CreateTiledBitmap(
       *tab_bg, offset, 0, tab_image->l_width, height());
-  SkBitmap theme_l =
+  gfx::ImageSkia theme_l =
       SkBitmapOperations::CreateMaskedBitmap(tab_l, *alpha->image_l);
-  canvas->DrawBitmapInt(theme_l, 0, 0);
+  canvas->DrawImageInt(theme_l, 0, 0);
 
   // Draw right edge.
-  SkBitmap tab_r = SkBitmapOperations::CreateTiledBitmap(*tab_bg,
+  gfx::ImageSkia tab_r = SkBitmapOperations::CreateTiledBitmap(*tab_bg,
       offset + width() - tab_image->r_width, 0, tab_image->r_width, height());
-  SkBitmap theme_r =
+  gfx::ImageSkia theme_r =
       SkBitmapOperations::CreateMaskedBitmap(tab_r, *alpha->image_r);
-  canvas->DrawBitmapInt(theme_r, width() - tab_image->r_width, 0);
+  canvas->DrawImageInt(theme_r, width() - tab_image->r_width, 0);
 
   // Draw center.  Instead of masking out the top portion we simply skip over it
   // by incrementing by GetDropShadowHeight(), since it's a simple rectangle.
@@ -640,16 +681,16 @@ void Tab::PaintActiveTabBackground(gfx::Canvas* canvas) {
      height() - drop_shadow_height() - tab_image->y_offset);
 
   // Now draw the highlights/shadows around the tab edge.
-  canvas->DrawBitmapInt(*tab_image->image_l, 0, 0);
+  canvas->DrawImageInt(*tab_image->image_l, 0, 0);
   canvas->TileImageInt(*tab_image->image_c, tab_image->l_width, 0,
       width() - tab_image->l_width - tab_image->r_width, height());
-  canvas->DrawBitmapInt(*tab_image->image_r, width() - tab_image->r_width, 0);
+  canvas->DrawImageInt(*tab_image->image_r, width() - tab_image->r_width, 0);
 }
 
 int Tab::IconCapacity() const {
   if (height() < GetMinimumUnselectedSize().height())
     return 0;
-  return (width() - left_padding() - right_padding()) / kTabIconSize;
+  return (width() - left_padding() - right_padding()) / tab_icon_size();
 }
 
 bool Tab::ShouldShowIcon() const {
@@ -706,18 +747,18 @@ void Tab::LoadTabImages() {
   // We're not letting people override tab images just yet.
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
-  tab_alpha_.image_l = rb.GetBitmapNamed(IDR_TAB_ALPHA_LEFT);
-  tab_alpha_.image_r = rb.GetBitmapNamed(IDR_TAB_ALPHA_RIGHT);
+  tab_alpha_.image_l = rb.GetImageSkiaNamed(IDR_TAB_ALPHA_LEFT);
+  tab_alpha_.image_r = rb.GetImageSkiaNamed(IDR_TAB_ALPHA_RIGHT);
 
-  tab_active_.image_l = rb.GetBitmapNamed(IDR_TAB_ACTIVE_LEFT);
-  tab_active_.image_c = rb.GetBitmapNamed(IDR_TAB_ACTIVE_CENTER);
-  tab_active_.image_r = rb.GetBitmapNamed(IDR_TAB_ACTIVE_RIGHT);
+  tab_active_.image_l = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_LEFT);
+  tab_active_.image_c = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_CENTER);
+  tab_active_.image_r = rb.GetImageSkiaNamed(IDR_TAB_ACTIVE_RIGHT);
   tab_active_.l_width = tab_active_.image_l->width();
   tab_active_.r_width = tab_active_.image_r->width();
 
-  tab_inactive_.image_l = rb.GetBitmapNamed(IDR_TAB_INACTIVE_LEFT);
-  tab_inactive_.image_c = rb.GetBitmapNamed(IDR_TAB_INACTIVE_CENTER);
-  tab_inactive_.image_r = rb.GetBitmapNamed(IDR_TAB_INACTIVE_RIGHT);
+  tab_inactive_.image_l = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_LEFT);
+  tab_inactive_.image_c = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_CENTER);
+  tab_inactive_.image_r = rb.GetImageSkiaNamed(IDR_TAB_INACTIVE_RIGHT);
   tab_inactive_.l_width = tab_inactive_.image_l->width();
   tab_inactive_.r_width = tab_inactive_.image_r->width();
 }

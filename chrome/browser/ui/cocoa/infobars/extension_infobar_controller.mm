@@ -14,12 +14,12 @@
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 #include "chrome/browser/ui/cocoa/infobars/infobar.h"
 #import "chrome/browser/ui/cocoa/menu_button.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
@@ -69,7 +69,8 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
 
   // Load the Extension's icon image.
   void LoadIcon() {
-    const Extension* extension = delegate_->extension_host()->extension();
+    const extensions::Extension* extension = delegate_->extension_host()->
+        extension();
     ExtensionResource icon_resource =
         extension->GetIconResource(ExtensionIconSet::EXTENSION_ICON_BITTY,
                                    ExtensionIconSet::MATCH_EXACTLY);
@@ -104,13 +105,13 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
         new gfx::Canvas(
             gfx::Size(image_size + kDropArrowLeftMarginPx + drop_image->width(),
                       image_size), false));
-    canvas->DrawBitmapInt(*icon,
-                          0, 0, icon->width(), icon->height(),
-                          0, 0, image_size, image_size,
-                          false);
-    canvas->DrawBitmapInt(*drop_image,
-                          image_size + kDropArrowLeftMarginPx,
-                          image_size / 2);
+    canvas->DrawImageInt(*icon,
+                         0, 0, icon->width(), icon->height(),
+                         0, 0, image_size, image_size,
+                         false);
+    canvas->DrawImageInt(*drop_image,
+                         image_size + kDropArrowLeftMarginPx,
+                         image_size / 2);
     [owner_ setButtonImage:gfx::SkBitmapToNSImage(canvas->ExtractBitmap())];
   }
 

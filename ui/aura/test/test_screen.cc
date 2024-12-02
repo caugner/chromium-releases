@@ -28,25 +28,25 @@ gfx::NativeWindow TestScreen::GetWindowAtCursorScreenPoint() {
   return root_window_->GetTopWindowContainingPoint(point);
 }
 
-int TestScreen::GetNumMonitors() {
+int TestScreen::GetNumDisplays() {
   return 1;
 }
 
-gfx::Monitor TestScreen::GetMonitorNearestWindow(
+gfx::Display TestScreen::GetDisplayNearestWindow(
     gfx::NativeWindow window) const {
   return GetMonitor();
 }
 
-gfx::Monitor TestScreen::GetMonitorNearestPoint(const gfx::Point& point) const {
+gfx::Display TestScreen::GetDisplayNearestPoint(const gfx::Point& point) const {
   return GetMonitor();
 }
 
-gfx::Monitor TestScreen::GetPrimaryMonitor() const {
+gfx::Display TestScreen::GetPrimaryDisplay() const {
   return GetMonitor();
 }
 
-gfx::Monitor TestScreen::GetMonitor() const {
-  return gfx::Monitor(0, root_window_->bounds());
+gfx::Display TestScreen::GetMonitor() const {
+  return gfx::Display(0, root_window_->bounds());
 }
 
 }  // namespace aura

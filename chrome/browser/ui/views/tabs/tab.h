@@ -51,6 +51,9 @@ class Tab : public BaseTab {
   // available.
   static gfx::Size GetStandardSize();
 
+  // Returns the width for touch tabs.
+  static int GetTouchWidth();
+
   // Returns the width for mini-tabs. Mini-tabs always have this width.
   static int GetMiniWidth();
 
@@ -114,9 +117,9 @@ class Tab : public BaseTab {
   scoped_ptr<ui::MultiAnimation> mini_title_animation_;
 
   struct TabImage {
-    SkBitmap* image_l;
-    SkBitmap* image_c;
-    SkBitmap* image_r;
+    gfx::ImageSkia* image_l;
+    gfx::ImageSkia* image_c;
+    gfx::ImageSkia* image_r;
     int l_width;
     int r_width;
     int y_offset;

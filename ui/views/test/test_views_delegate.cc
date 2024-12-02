@@ -5,7 +5,7 @@
 #include "ui/views/test/test_views_delegate.h"
 
 #include "base/logging.h"
-#include "content/test/web_contents_tester.h"
+#include "content/public/test/web_contents_tester.h"
 #include "ui/base/clipboard/clipboard.h"
 
 namespace views {
@@ -68,8 +68,7 @@ views::NativeWidgetHelperAura* TestViewsDelegate::CreateNativeWidgetHelper(
 content::WebContents* TestViewsDelegate::CreateWebContents(
     content::BrowserContext* browser_context,
     content::SiteInstance* site_instance) {
-  return content::WebContentsTester::CreateTestWebContents(browser_context,
-                                                           site_instance);
+  return NULL;
 }
 
 }  // namespace views

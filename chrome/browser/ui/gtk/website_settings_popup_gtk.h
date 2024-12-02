@@ -6,40 +6,61 @@
 #define CHROME_BROWSER_UI_GTK_WEBSITE_SETTINGS_POPUP_GTK_H_
 #pragma once
 
-#include "chrome/browser/ui/website_settings_ui.h"
-
 #include <gtk/gtk.h>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
+#include "chrome/browser/ui/website_settings/website_settings_ui.h"
 
 class Browser;
-class BubbleGtk;
 class GtkThemeService;
+class GURL;
 class Profile;
-class TabContentsWrapper;
+class TabContents;
 class WebsiteSettings;
 
-// GTK implementation of the website settings UI. The website settings UI is
-// displayed in a popup that is positioned relative the an anchor element.
+namespace content {
+struct SSLStatus;
+}
+
+// GTK implementation of the website settings UI.
 class WebsiteSettingsPopupGtk : public WebsiteSettingsUI,
                                 public BubbleDelegateGtk {
  public:
+  // Creates a |WebsiteSettingsPopupGtk| and displays the UI. The |url|
+  // contains the omnibox URL of the currently active tab, |parent| contains
+  // the currently active window, |profile| contains the currently active
+  // profile and |ssl| contains the |SSLStatus| of the connection to the
+  // website in the currently active tab that is wrapped by the
+  // |tab_contents|.
+  static void Show(gfx::NativeWindow parent,
+                   Profile* profile,
+                   TabContents* tab_contents,
+                   const GURL& url,
+                   const content::SSLStatus& ssl);
+
+ private:
   WebsiteSettingsPopupGtk(gfx::NativeWindow parent,
                           Profile* profile,
-                          TabContentsWrapper* wrapper);
-  virtual ~WebsiteSettingsPopupGtk();
+                          TabContents* tab_contents,
+                          const GURL& url,
+                          const content::SSLStatus& ssl);
 
   // WebsiteSettingsUI implementations.
-  virtual void SetPresenter(WebsiteSettings* presenter) OVERRIDE;
   virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) OVERRIDE;
   virtual void SetPermissionInfo(
       const PermissionInfoList& permission_info_list) OVERRIDE;
   virtual void SetIdentityInfo(const IdentityInfo& identity_info) OVERRIDE;
+  virtual void SetFirstVisit(const string16& first_visit) OVERRIDE;
 
   // BubbleDelegateGtk implementation.
   virtual void BubbleClosing(BubbleGtk* bubble, bool closed_by_escape) OVERRIDE;
 
- private:
+
+  virtual ~WebsiteSettingsPopupGtk();
+
   // Layouts the different sections retrieved from the model.
   void InitContents();
 
@@ -61,6 +82,7 @@ class WebsiteSettingsPopupGtk : public WebsiteSettingsUI,
                        OnPermissionsSettingsLinkClicked);
   CHROMEGTK_CALLBACK_1(WebsiteSettingsPopupGtk, void, OnComboBoxShown,
                        GParamSpec*);
+  CHROMEGTK_CALLBACK_0(WebsiteSettingsPopupGtk, void, OnViewCertLinkClicked);
 
   // Parent window.
   GtkWindow* parent_;
@@ -79,11 +101,15 @@ class WebsiteSettingsPopupGtk : public WebsiteSettingsUI,
 
   Profile* profile_;
 
-  TabContentsWrapper* tab_contents_wrapper_;
+  TabContents* tab_contents_;
 
   // The browser object of the current window. This is needed to open the
   // settings page in a new tab.
   Browser* browser_;
+
+  // For secure connection |cert_id_| is set to the ID of the server
+  // certificate. For non secure connections |cert_id_| is 0.
+  int cert_id_;
 
   // Container for the popup header content.
   GtkWidget* header_box_;
@@ -97,9 +123,12 @@ class WebsiteSettingsPopupGtk : public WebsiteSettingsUI,
   // Container for the identity tab content.
   GtkWidget* identity_tab_contents_;
 
+  // Container for the information about the first visit date of the website.
+  GtkWidget* first_visit_contents_;
+
   // The UI translates user actions to specific events and forwards them to the
   // |presenter_|. The |presenter_| handles these events and updates the UI.
-  WebsiteSettings* presenter_;
+  scoped_ptr<WebsiteSettings> presenter_;
 
   DISALLOW_COPY_AND_ASSIGN(WebsiteSettingsPopupGtk);
 };

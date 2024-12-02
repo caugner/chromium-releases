@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title i18n-content="optionsPageTitle"></title>
 <link rel="icon" href="chrome://theme/IDR_SETTINGS_FAVICON">
-<link rel="stylesheet" href="chrome://resources/css/chrome_shared2.css">
+<link rel="stylesheet" href="chrome://resources/css/chrome_shared.css">
 <link rel="stylesheet" href="chrome://resources/css/list.css">
 <link rel="stylesheet" href="chrome://resources/css/overlay.css">
 <link rel="stylesheet" href="chrome://resources/css/spinner.css">
@@ -20,9 +20,7 @@
 <link rel="stylesheet" href="content_settings.css">
 <link rel="stylesheet" href="cookies_view.css">
 <link rel="stylesheet" href="font_settings.css">
-<if expr="pp_ifdef('enable_register_protocol_handler')">
-  <link rel="stylesheet" href="handler_options.css">
-</if>
+<link rel="stylesheet" href="handler_options.css">
 <link rel="stylesheet" href="home_page_overlay.css">
 <link rel="stylesheet" href="import_data_overlay.css">
 <link rel="stylesheet" href="instant_confirm_overlay.css">
@@ -46,10 +44,7 @@
 <if expr="pp_ifdef('chromeos') and pp_ifdef('use_ash')">
   <link rel="stylesheet" href="chromeos/set_wallpaper_options.css">
 </if>
-<if expr="pp_ifdef('chromeos') and pp_ifdef('use_virtual_keyboard')">
-  <link rel="stylesheet" href="chromeos/virtual_keyboard.css">
-</if>
-<if expr="not is_win and not is_macosx">
+<if expr="pp_ifdef('use_nss')">
   <link rel="stylesheet" href="certificate_manager.css">
   <link rel="stylesheet" href="certificate_tree.css">
 </if>
@@ -60,6 +55,7 @@
 <script src="chrome://resources/js/cr/ui.js"></script>
 <script src="chrome://resources/js/cr/ui/touch_handler.js"></script>
 <script src="chrome://resources/js/cr/ui/array_data_model.js"></script>
+<script src="chrome://resources/js/cr/ui/focus_manager.js"></script>
 <script src="chrome://resources/js/cr/ui/list_selection_model.js"></script>
 <script src="chrome://resources/js/cr/ui/list_selection_controller.js"></script>
 <script src="chrome://resources/js/cr/ui/list_single_selection_model.js">
@@ -74,7 +70,7 @@
 <script src="chrome://resources/js/cr/ui/position_util.js"></script>
 <script src="chrome://resources/js/cr/ui/repeating_button.js"></script>
 <script src="chrome://resources/js/cr/ui/tree.js"></script>
-<script src="chrome://resources/js/local_strings.js"></script>
+<script src="chrome://resources/js/load_time_data.js"></script>
 <script src="chrome://resources/js/util.js"></script>
 <script src="chrome://settings-frame/options_bundle.js"></script>
 </head>
@@ -107,7 +103,7 @@
   <if expr="pp_ifdef('chromeos') and pp_ifdef('use_ash')">
     <include src="chromeos/set_wallpaper_options.html">
   </if>
-  <if expr="not is_win and not is_macosx">
+  <if expr="pp_ifdef('use_nss')">
     <include src="certificate_manager.html">
   </if>
 </div>
@@ -117,6 +113,7 @@
   <include src="autofill_edit_creditcard_overlay.html">
   <include src="content_settings_exceptions_area.html">
   <include src="cookies_view.html">
+  <include src="handler_options.html">
   <include src="language_add_language_overlay.html">
   <if expr="pp_ifdef('chromeos')">
     <include src="chromeos/internet_detail.html">
@@ -125,12 +122,6 @@
     <include src="chromeos/language_hangul_options.html">
     <include src="chromeos/language_mozc_options.html">
     <include src="chromeos/language_pinyin_options.html">
-  </if>
-  <if expr="pp_ifdef('chromeos') and pp_ifdef('use_virtual_keyboard')">
-    <include src="chromeos/virtual_keyboard.html">
-  </if>
-  <if expr="pp_ifdef('enable_register_protocol_handler')">
-    <include src="handler_options.html">
   </if>
   <if expr="not is_win and not is_macosx">
     <include src="certificate_restore_overlay.html">
@@ -165,7 +156,6 @@
 </div>
 
 <script src="chrome://settings-frame/strings.js"></script>
-<script src="chrome://resources/js/i18n_template.js"></script>
-<script src="chrome://resources/js/i18n_process.js"></script>
+<script src="chrome://resources/js/i18n_template2.js"></script>
 </body>
 </html>

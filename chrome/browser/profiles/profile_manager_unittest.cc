@@ -20,6 +20,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -29,7 +30,7 @@
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -503,13 +504,16 @@ TEST_F(ProfileManagerTest, LastOpenedProfilesDoesNotContainIncognito) {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
 
   // Successfully create the profiles.
-  Profile* profile1 = profile_manager->GetProfile(dest_path1);
+  TestingProfile* profile1 =
+      static_cast<TestingProfile*>(profile_manager->GetProfile(dest_path1));
   ASSERT_TRUE(profile1);
 
-  TestingProfile* profile2 =
-      static_cast<TestingProfile*>(profile_manager->GetProfile(dest_path2));
+  // incognito profiles should not be managed by the profile manager but by the
+  // original profile.
+  TestingProfile* profile2 = new TestingProfile();
   ASSERT_TRUE(profile2);
   profile2->set_incognito(true);
+  profile1->SetOffTheRecordProfile(profile2);
 
   std::vector<Profile*> last_opened_profiles =
       profile_manager->GetLastOpenedProfiles();

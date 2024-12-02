@@ -21,6 +21,8 @@
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "net/base/network_change_notifier.h"
+#include "net/socket/ssl_server_socket.h"
+#include "remoting/base/breakpad.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/branding.h"
 #include "remoting/host/constants.h"
@@ -35,12 +37,16 @@
 #include "remoting/host/host_user_interface.h"
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
+#include "remoting/host/network_settings.h"
 #include "remoting/host/policy_hack/nat_policy.h"
+#include "remoting/host/session_manager_factory.h"
 #include "remoting/host/signaling_connector.h"
+#include "remoting/host/usage_stats_consent.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/protocol/me2me_host_authenticator_factory.h"
 
 #if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "remoting/host/sighup_listener_mac.h"
 #endif
 // N.B. OS_WIN is defined by including src/base headers.
@@ -189,7 +195,7 @@ class HostProcess
   void CreateAuthenticatorFactory() {
     scoped_ptr<protocol::AuthenticatorFactory> factory(
         new protocol::Me2MeHostAuthenticatorFactory(
-            xmpp_login_, key_pair_.GenerateCertificate(),
+            key_pair_.GenerateCertificate(),
             *key_pair_.private_key(), host_secret_hash_));
     host_->SetAuthenticatorFactory(factory.Pass());
   }
@@ -335,8 +341,9 @@ class HostProcess
           new XmppSignalStrategy(context_->jingle_thread(), xmpp_login_,
                                  xmpp_auth_token_, xmpp_auth_service_));
 
-      signaling_connector_.reset(
-          new SignalingConnector(signal_strategy_.get()));
+      signaling_connector_.reset(new SignalingConnector(
+          signal_strategy_.get(),
+          base::Bind(&HostProcess::OnAuthFailed, base::Unretained(this))));
 
       if (!oauth_refresh_token_.empty()) {
         OAuthClientInfo client_info = {
@@ -360,7 +367,6 @@ class HostProcess
                 xmpp_login_, oauth_refresh_token_, client_info));
         signaling_connector_->EnableOAuth(
             oauth_credentials.Pass(),
-            base::Bind(&HostProcess::OnOAuthFailed, base::Unretained(this)),
             context_->url_request_context_getter());
       }
     }
@@ -381,7 +387,8 @@ class HostProcess
 
     host_ = new ChromotingHost(
         context_.get(), signal_strategy_.get(), desktop_environment_.get(),
-        network_settings);
+        CreateHostSessionManager(network_settings,
+                                 context_->url_request_context_getter()));
 
     heartbeat_sender_.reset(new HeartbeatSender(
         this, host_id_, signal_strategy_.get(), &key_pair_));
@@ -392,8 +399,8 @@ class HostProcess
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
     host_user_interface_->Start(
-        host_,
-        base::Bind(&HostProcess::OnRestartHostRequest, base::Unretained(this)));
+        host_, base::Bind(&HostProcess::OnDisconnectRequested,
+                          base::Unretained(this)));
 #endif
 
     host_->Start();
@@ -401,18 +408,16 @@ class HostProcess
     CreateAuthenticatorFactory();
   }
 
-  void OnOAuthFailed() {
+  void OnAuthFailed() {
     Shutdown(kInvalidOauthCredentialsExitCode);
   }
 
-  // Invoked from when the user uses the Disconnect windows to terminate
+  // Invoked when the user uses the Disconnect windows to terminate
   // the sessions.
-  void OnRestartHostRequest() {
+  void OnDisconnectRequested() {
     DCHECK(message_loop_.message_loop_proxy()->BelongsToCurrentThread());
 
-    context_->network_message_loop()->PostTask(
-        FROM_HERE,
-        base::Bind(&HostProcess::RestartHost, base::Unretained(this)));
+    host_->DisconnectAllClients();
   }
 
   void RestartHost() {
@@ -511,6 +516,11 @@ class HostProcess
 }  // namespace remoting
 
 int main(int argc, char** argv) {
+#if defined(OS_MACOSX)
+  // Needed so we don't leak objects when threads are created.
+  base::mac::ScopedNSAutoreleasePool pool;
+#endif
+
   CommandLine::Init(argc, argv);
 
   // This object instance is required by Chrome code (for example,
@@ -540,6 +550,10 @@ int main(int argc, char** argv) {
   gfx::GtkInitFromCommandLine(*cmd_line);
 #endif  // TOOLKIT_GTK
 
+  // Enable support for SSL server sockets, which must be done while still
+  // single-threaded.
+  net::EnableSSLServerSockets();
+
   remoting::HostProcess me2me_host;
   me2me_host.InitWithCommandLine(cmd_line);
 
@@ -553,6 +567,10 @@ int CALLBACK WinMain(HINSTANCE instance,
                      HINSTANCE previous_instance,
                      LPSTR command_line,
                      int show_command) {
+  if (remoting::IsCrashReportingEnabled()) {
+    remoting::InitializeCrashReporting();
+  }
+
   g_hModule = instance;
 
   // Register and initialize common controls.
@@ -560,6 +578,9 @@ int CALLBACK WinMain(HINSTANCE instance,
   info.dwSize = sizeof(info);
   info.dwICC = ICC_STANDARD_CLASSES;
   InitCommonControlsEx(&info);
+
+  // Mark the process as DPI-aware, so Windows won't scale coordinates in APIs.
+  SetProcessDPIAware();
 
   // CommandLine::Init() ignores the passed |argc| and |argv| on Windows getting
   // the command line from GetCommandLineW(), so we can safely pass NULL here.

@@ -20,6 +20,8 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/iat_patch_function.h"
+#include "base/win/scoped_hdc.h"
+#include "base/win/scoped_select_object.h"
 #include "base/win/windows_version.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -54,7 +56,9 @@
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/button_drag_utils.h"
-#include "ui/views/controls/menu/menu_2.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/textfield/native_textfield_win.h"
 #include "ui/views/widget/widget.h"
 
@@ -437,9 +441,8 @@ OmniboxViewWin::OmniboxViewWin(AutocompleteEditController* controller,
                                views::View* location_bar)
     : model_(new AutocompleteEditModel(this, controller,
                                        parent_view->profile())),
-      popup_view_(new AutocompletePopupContentsView(parent_view->font(), this,
-                                                    model_.get(),
-                                                    location_bar)),
+      popup_view_(AutocompletePopupContentsView::CreateForEnvironment(
+          parent_view->font(), this, model_.get(), location_bar)),
       controller_(controller),
       parent_view_(parent_view),
       toolbar_model_(toolbar_model),
@@ -475,45 +478,34 @@ OmniboxViewWin::OmniboxViewWin(AutocompleteEditController* controller,
   SetReadOnly(popup_window_mode_);
   SetFont(font_.GetNativeFont());
 
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
-    // Locally define CLSID_TextInputPanel to avoid issues with multiply defined
-    // or undefined symbols if we include peninputpanel_i.c.
-    const GUID CLSID_TextInputPanel = {0xf9b189d7, 0x228b, 0x4f2b, 0x86, 0x50,\
-                0xb9, 0x7f, 0x59, 0xe0, 0x2c, 0x8c};
-    keyboard_.CreateInstance(CLSID_TextInputPanel, NULL, CLSCTX_INPROC);
-    if (keyboard_ != NULL)
-      keyboard_->put_AttachedEditWindow(m_hWnd);
-  }
-
   // NOTE: Do not use SetWordBreakProcEx() here, that is no longer supported as
   // of Rich Edit 2.0 onward.
   SendMessage(m_hWnd, EM_SETWORDBREAKPROC, 0,
               reinterpret_cast<LPARAM>(&WordBreakProc));
 
   // Get the metrics for the font.
-  HDC hdc = ::GetDC(NULL);
-  HGDIOBJ old_font = SelectObject(hdc, font_.GetNativeFont());
+  base::win::ScopedGetDC screen_dc(NULL);
+  base::win::ScopedSelectObject font_in_dc(screen_dc, font_.GetNativeFont());
   TEXTMETRIC tm = {0};
-  GetTextMetrics(hdc, &tm);
-  const float kXHeightRatio = 0.7f;  // The ratio of a font's x-height to its
-                                     // cap height.  Sadly, Windows doesn't
-                                     // provide a true value for a font's
-                                     // x-height in its text metrics, so we
-                                     // approximate.
-  font_x_height_ = static_cast<int>((static_cast<float>(font_.GetBaseline() -
-      tm.tmInternalLeading) * kXHeightRatio) + 0.5);
-  // The distance from the top of the field to the desired baseline of the
-  // rendered text.
-  const int kTextBaseline = popup_window_mode_ ? 15 : 18;
-  font_y_adjustment_ = kTextBaseline - font_.GetBaseline();
+  GetTextMetrics(screen_dc, &tm);
+  int cap_height = font_.GetBaseline() - tm.tmInternalLeading;
+  // The ratio of a font's x-height to its cap height.  Sadly, Windows
+  // doesn't provide a true value for a font's x-height in its text
+  // metrics, so we approximate.
+  const float kXHeightRatio = 0.7f;
+  font_x_height_ = static_cast<int>(
+      (static_cast<float>(cap_height) * kXHeightRatio) + 0.5);
+
+  // We set font_y_adjustment_ so that the ascender of the font gets
+  // centered on the available height of the view.
+  font_y_adjustment_ =
+      (parent_view->GetInternalHeight(true) - cap_height) / 2 -
+      tm.tmInternalLeading;
 
   // Get the number of twips per pixel, which we need below to offset our text
   // by the desired number of pixels.
-  const long kTwipsPerPixel = kTwipsPerInch / GetDeviceCaps(hdc, LOGPIXELSY);
-  // It's unsafe to delete a DC with a non-stock object selected, so restore the
-  // original font.
-  SelectObject(hdc, old_font);
-  ::ReleaseDC(NULL, hdc);
+  const long kTwipsPerPixel =
+      kTwipsPerInch / GetDeviceCaps(screen_dc, LOGPIXELSY);
 
   // Set the default character style -- adjust to our desired baseline.
   CHARFORMAT cf = {0};
@@ -549,17 +541,6 @@ OmniboxViewWin::~OmniboxViewWin() {
 
 views::View* OmniboxViewWin::parent_view() const {
   return parent_view_;
-}
-
-int OmniboxViewWin::WidthOfTextAfterCursor() {
-  CHARRANGE selection;
-  GetSelection(selection);
-  const int start = std::max(0, static_cast<int>(selection.cpMax - 1));
-  return WidthNeededToDisplay(GetText().substr(start));
-}
-
-gfx::Font OmniboxViewWin::GetFont() {
-  return font_;
 }
 
 void OmniboxViewWin::SaveStateToTab(WebContents* tab) {
@@ -714,7 +695,7 @@ void OmniboxViewWin::SetForcedQuery() {
     SetSelection(current_text.length(), start + 1);
 }
 
-bool OmniboxViewWin::IsSelectAll() {
+bool OmniboxViewWin::IsSelectAll() const {
   CHARRANGE selection;
   GetSel(selection);
   return IsSelectAllForRange(selection);
@@ -1007,6 +988,18 @@ views::View* OmniboxViewWin::AddToView(views::View* parent) {
 
 int OmniboxViewWin::OnPerformDrop(const views::DropTargetEvent& event) {
   return OnPerformDropImpl(event, false);
+}
+
+gfx::Font OmniboxViewWin::GetFont() {
+  return font_;
+}
+
+int OmniboxViewWin::WidthOfTextAfterCursor() {
+  CHARRANGE selection;
+  GetSelection(selection);
+  // See comments in LocationBarView::Layout as to why this uses -1.
+  const int start = std::max(0, static_cast<int>(selection.cpMax - 1));
+  return WidthNeededToDisplay(GetText().substr(start));
 }
 
 int OmniboxViewWin::OnPerformDropImpl(const views::DropTargetEvent& event,
@@ -1342,14 +1335,21 @@ void OmniboxViewWin::OnChar(TCHAR ch, UINT repeat_count, UINT flags) {
 
 void OmniboxViewWin::OnContextMenu(HWND window, const CPoint& point) {
   BuildContextMenu();
+
+  views::MenuModelAdapter adapter(context_menu_contents_.get());
+  context_menu_runner_.reset(new views::MenuRunner(adapter.CreateMenu()));
+
+  gfx::Point location(point);
   if (point.x == -1 || point.y == -1) {
     POINT p;
     GetCaretPos(&p);
     MapWindowPoints(HWND_DESKTOP, &p, 1);
-    context_menu_->RunContextMenuAt(gfx::Point(p));
-  } else {
-    context_menu_->RunContextMenuAt(gfx::Point(point));
+    location.SetPoint(p.x, p.y);
   }
+
+  ignore_result(context_menu_runner_->RunMenuAt(native_view_host_->GetWidget(),
+      NULL, gfx::Rect(location, gfx::Size()), views::MenuItemView::TOPLEFT,
+      views::MenuRunner::HAS_MNEMONICS));
 }
 
 void OmniboxViewWin::OnCopy() {
@@ -1447,11 +1447,24 @@ LRESULT OmniboxViewWin::OnImeNotify(UINT message,
 LRESULT OmniboxViewWin::OnPointerDown(UINT message,
                                       WPARAM wparam,
                                       LPARAM lparam) {
-  SetFocus();
-  // ITextInputPanel is not supported on all platforms.  NULL is fine.
-  if (keyboard_ != NULL)
-    keyboard_->SetInPlaceVisibility(true);
-  return DefWindowProc(message, wparam, lparam);
+  if (!model_->has_focus())
+    SetFocus();
+
+  if (IS_POINTER_FIRSTBUTTON_WPARAM(wparam)) {
+    TrackMousePosition(kLeft, CPoint(GET_X_LPARAM(lparam),
+                                     GET_Y_LPARAM(lparam)));
+  }
+
+  SetMsgHandled(false);
+
+  return 0;
+}
+
+LRESULT OmniboxViewWin::OnPointerUp(UINT message, WPARAM wparam,
+                                    LPARAM lparam) {
+  SetMsgHandled(false);
+
+  return 0;
 }
 
 void OmniboxViewWin::OnKeyDown(TCHAR key,
@@ -1665,7 +1678,8 @@ LRESULT OmniboxViewWin::OnMouseActivate(HWND window,
   // there.  Also in those cases, we need to already know in OnSetFocus() that
   // we should not restore the saved selection.
   if (!model_->has_focus() &&
-      ((mouse_message == WM_LBUTTONDOWN || mouse_message == WM_RBUTTONDOWN)) &&
+      ((mouse_message == WM_LBUTTONDOWN || mouse_message == WM_RBUTTONDOWN ||
+        mouse_message == WM_POINTERDOWN)) &&
       (result == MA_ACTIVATE)) {
     DCHECK(!gaining_focus_.get());
     gaining_focus_.reset(new ScopedFreeze(this, GetTextObjectModel()));
@@ -2450,42 +2464,6 @@ void OmniboxViewWin::TextChanged() {
   model_->OnChanged();
 }
 
-string16 OmniboxViewWin::GetClipboardText() const {
-  // Try text format.
-  ui::Clipboard* clipboard = g_browser_process->clipboard();
-  if (clipboard->IsFormatAvailable(ui::Clipboard::GetPlainTextWFormatType(),
-                                   ui::Clipboard::BUFFER_STANDARD)) {
-    string16 text;
-    clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &text);
-    // Note: Unlike in the find popup and textfield view, here we completely
-    // remove whitespace strings containing newlines.  We assume users are
-    // most likely pasting in URLs that may have been split into multiple
-    // lines in terminals, email programs, etc., and so linebreaks indicate
-    // completely bogus whitespace that would just cause the input to be
-    // invalid.
-    return StripJavascriptSchemas(CollapseWhitespace(text, true));
-  }
-
-  // Try bookmark format.
-  //
-  // It is tempting to try bookmark format first, but the URL we get out of a
-  // bookmark has been cannonicalized via GURL.  This means if a user copies
-  // and pastes from the URL bar to itself, the text will get fixed up and
-  // cannonicalized, which is not what the user expects.  By pasting in this
-  // order, we are sure to paste what the user copied.
-  if (clipboard->IsFormatAvailable(ui::Clipboard::GetUrlWFormatType(),
-                                   ui::Clipboard::BUFFER_STANDARD)) {
-    std::string url_str;
-    clipboard->ReadBookmark(NULL, &url_str);
-    // pass resulting url string through GURL to normalize
-    GURL url(url_str);
-    if (url.is_valid())
-      return StripJavascriptSchemas(UTF8ToUTF16(url.spec()));
-  }
-
-  return string16();
-}
-
 bool OmniboxViewWin::CanPasteAndGo(const string16& text) const {
   return !popup_window_mode_ && model_->CanPasteAndGo(text);
 }
@@ -2654,7 +2632,6 @@ void OmniboxViewWin::BuildContextMenu() {
     context_menu_contents_->AddItemWithStringId(IDS_EDIT_SEARCH_ENGINES,
                                                 IDS_EDIT_SEARCH_ENGINES);
   }
-  context_menu_.reset(new views::Menu2(context_menu_contents_.get()));
 }
 
 void OmniboxViewWin::SelectAllIfNecessary(MouseButton button,
@@ -2702,21 +2679,3 @@ bool OmniboxViewWin::IsCaretAtEnd() const {
   GetSelection(sel);
   return sel.cpMin == sel.cpMax && sel.cpMin == length;
 }
-
-#if !defined(USE_AURA)
-// static
-OmniboxView* OmniboxView::CreateOmniboxView(
-    AutocompleteEditController* controller,
-    ToolbarModel* toolbar_model,
-    Profile* profile,
-    CommandUpdater* command_updater,
-    bool popup_window_mode,
-    LocationBarView* location_bar) {
-  return new OmniboxViewWin(controller,
-                            toolbar_model,
-                            location_bar,
-                            command_updater,
-                            popup_window_mode,
-                            location_bar);
-}
-#endif

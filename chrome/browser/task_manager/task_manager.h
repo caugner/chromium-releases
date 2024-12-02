@@ -21,14 +21,21 @@
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
-class Extension;
-class SkBitmap;
-class TabContentsWrapper;
+class TabContents;
 class TaskManagerModel;
 
 namespace base {
 class ProcessMetrics;
 }
+
+namespace extensions {
+class Extension;
+}
+
+namespace gfx {
+class ImageSkia;
+}
+
 namespace net {
 class URLRequest;
 }
@@ -66,7 +73,7 @@ class TaskManager {
 
     virtual string16 GetTitle() const = 0;
     virtual string16 GetProfileName() const = 0;
-    virtual SkBitmap GetIcon() const = 0;
+    virtual gfx::ImageSkia GetIcon() const = 0;
     virtual base::ProcessHandle GetProcess() const = 0;
     virtual int GetUniqueChildProcessId() const = 0;
     virtual Type GetType() const = 0;
@@ -85,7 +92,7 @@ class TaskManager {
 
     // Return extension associated with the resource, or NULL
     // if not applicable.
-    virtual const Extension* GetExtension() const { return NULL; }
+    virtual const extensions::Extension* GetExtension() const { return NULL; }
 
     virtual bool ReportsV8MemoryStats() const { return false; }
     virtual size_t GetV8MemoryAllocated() const { return 0; }
@@ -99,7 +106,7 @@ class TaskManager {
 
     // A helper function for ActivateFocusedTab.  Returns NULL by default
     // because not all resources have an associated tab.
-    virtual TabContentsWrapper* GetTabContents() const { return NULL; }
+    virtual TabContents* GetTabContents() const { return NULL; }
 
     // Whether this resource does report the network usage accurately.
     // This controls whether 0 or N/A is displayed when no bytes have been
@@ -255,6 +262,11 @@ class TaskManagerModelObserver {
   // Invoked when a range of items has been removed.
   virtual void OnItemsRemoved(int start, int length) = 0;
 
+  // Invoked when a range of items is to be immediately removed. It differs
+  // from OnItemsRemoved by the fact that the item is still in the task manager,
+  // so it can be queried for and found.
+  virtual void OnItemsToBeRemoved(int start, int length) {}
+
   // Invoked when the initialization of the model has been finished and
   // periodical updates is started. The first periodical update will be done
   // in a few seconds. (depending on platform)
@@ -281,6 +293,7 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   int64 GetNetworkUsage(int index) const;
   double GetCPUUsage(int index) const;
   int GetProcessId(int index) const;
+  base::ProcessHandle GetProcess(int index) const;
   int GetResourceUniqueId(int index) const;
   // Returns the index of resource that has the given |unique_id|. Returns -1 if
   // no resouce has the |unique_id|.
@@ -334,6 +347,10 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // resource for the given row isn't a renderer.
   bool GetV8Memory(int index, size_t* result) const;
 
+  // Gets the amount of memory used for javascript. Returns false if the
+  // resource for the given row isn't a renderer.
+  bool GetV8MemoryUsed(int index, size_t* result) const;
+
   // Returns true if resource for the given row can be activated.
   bool CanActivate(int index) const;
 
@@ -357,7 +374,7 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   bool IsBackgroundResource(int index) const;
 
   // Returns icon to be used for resource (for example a favicon).
-  SkBitmap GetResourceIcon(int index) const;
+  gfx::ImageSkia GetResourceIcon(int index) const;
 
   // Returns the group range of resource.
   GroupRange GetGroupRangeForResource(int index) const;
@@ -385,17 +402,25 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // Returns the type of the given resource.
   TaskManager::Resource::Type GetResourceType(int index) const;
 
-  // Returns TabContentsWrapper of given resource or NULL if not applicable.
-  TabContentsWrapper* GetResourceTabContents(int index) const;
+  // Returns TabContents of given resource or NULL if not applicable.
+  TabContents* GetResourceTabContents(int index) const;
 
   // Returns Extension of given resource or NULL if not applicable.
-  const Extension* GetResourceExtension(int index) const;
+  const extensions::Extension* GetResourceExtension(int index) const;
 
   void AddResource(TaskManager::Resource* resource);
   void RemoveResource(TaskManager::Resource* resource);
 
   void StartUpdating();
   void StopUpdating();
+
+  // Listening involves calling StartUpdating on all resource providers. This
+  // causes all of them to subscribe to notifications and enumerate current
+  // resources. It differs from StartUpdating that it doesn't start the
+  // Refresh timer. The end result is that we have a full view of resources, but
+  // don't spend unneeded time updating, unless we have a real need to.
+  void StartListening();
+  void StopListening();
 
   void Clear();  // Removes all items.
 
@@ -541,6 +566,10 @@ class TaskManagerModel : public base::RefCountedThreadSafe<TaskManagerModel> {
   // How many calls to StartUpdating have been made without matching calls to
   // StopUpdating.
   int update_requests_;
+
+  // How many calls to StartListening have been made without matching calls to
+  // StopListening.
+  int listen_requests_;
 
   // Whether we are currently in the process of updating.
   UpdateState update_state_;

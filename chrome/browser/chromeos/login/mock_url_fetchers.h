@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,10 @@
 
 #include <string>
 
-#include "base/memory/weak_ptr.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_status.h"
 
@@ -28,8 +28,8 @@ class ExpectCanceledFetcher : public TestURLFetcher {
   ExpectCanceledFetcher(bool success,
                         const GURL& url,
                         const std::string& results,
-                        content::URLFetcher::RequestType request_type,
-                        content::URLFetcherDelegate* d);
+                        net::URLFetcher::RequestType request_type,
+                        net::URLFetcherDelegate* d);
   virtual ~ExpectCanceledFetcher();
 
   virtual void Start() OVERRIDE;
@@ -46,8 +46,8 @@ class GotCanceledFetcher : public TestURLFetcher {
   GotCanceledFetcher(bool success,
                      const GURL& url,
                      const std::string& results,
-                     content::URLFetcher::RequestType request_type,
-                     content::URLFetcherDelegate* d);
+                     net::URLFetcher::RequestType request_type,
+                     net::URLFetcherDelegate* d);
   virtual ~GotCanceledFetcher();
 
   virtual void Start() OVERRIDE;
@@ -61,8 +61,8 @@ class SuccessFetcher : public TestURLFetcher {
   SuccessFetcher(bool success,
                  const GURL& url,
                  const std::string& results,
-                 content::URLFetcher::RequestType request_type,
-                 content::URLFetcherDelegate* d);
+                 net::URLFetcher::RequestType request_type,
+                 net::URLFetcherDelegate* d);
   virtual ~SuccessFetcher();
 
   virtual void Start() OVERRIDE;
@@ -76,8 +76,8 @@ class FailFetcher : public TestURLFetcher {
   FailFetcher(bool success,
               const GURL& url,
               const std::string& results,
-              content::URLFetcher::RequestType request_type,
-              content::URLFetcherDelegate* d);
+              net::URLFetcher::RequestType request_type,
+              net::URLFetcherDelegate* d);
   virtual ~FailFetcher();
 
   virtual void Start() OVERRIDE;
@@ -91,8 +91,8 @@ class CaptchaFetcher : public TestURLFetcher {
   CaptchaFetcher(bool success,
                  const GURL& url,
                  const std::string& results,
-                 content::URLFetcher::RequestType request_type,
-                 content::URLFetcherDelegate* d);
+                 net::URLFetcher::RequestType request_type,
+                 net::URLFetcherDelegate* d);
   virtual ~CaptchaFetcher();
 
   static std::string GetCaptchaToken();
@@ -114,8 +114,8 @@ class HostedFetcher : public TestURLFetcher {
   HostedFetcher(bool success,
                 const GURL& url,
                 const std::string& results,
-                content::URLFetcher::RequestType request_type,
-                content::URLFetcherDelegate* d);
+                net::URLFetcher::RequestType request_type,
+                net::URLFetcherDelegate* d);
   virtual ~HostedFetcher();
 
   virtual void Start() OVERRIDE;

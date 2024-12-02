@@ -19,7 +19,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/values.h"
-#include "chrome/common/json_pref_store.h"
 
 class CommandLine;
 class DefaultPrefStore;
@@ -30,19 +29,20 @@ class PrefNotifier;
 class PrefNotifierImpl;
 class PrefStore;
 class PrefValueStore;
-class Profile;
 class SyncableService;
 
 namespace content {
 class NotificationObserver;
 }
 
+namespace policy{
+class PolicyService;
+}
+
 namespace subtle {
 class PrefMemberBase;
 class ScopedUserPrefUpdateBase;
 };
-
-class PrefService;
 
 class PrefService : public base::NonThreadSafe {
  public:
@@ -145,13 +145,17 @@ class PrefService : public base::NonThreadSafe {
   // applicable PrefStores. The |pref_filename| points to the user preference
   // file. This is the usual way to create a new PrefService.
   // |extension_pref_store| is used as the source for extension-controlled
-  // preferences and may be NULL. The PrefService takes ownership of
-  // |extension_pref_store|. If |async| is true, asynchronous version is used.
+  // preferences and may be NULL.
+  // |policy_service| is used as the source for mandatory or recommended
+  // policies.
+  // The PrefService takes ownership of |extension_pref_store|.
+  // If |async| is true, asynchronous version is used.
   // Notifies using PREF_INITIALIZATION_COMPLETED in the end. Details is set to
   // the created PrefService or NULL if creation has failed. Note, it is
   // guaranteed that in asynchronous version initialization happens after this
   // function returned.
   static PrefService* CreatePrefService(const FilePath& pref_filename,
+                                        policy::PolicyService* policy_service,
                                         PrefStore* extension_pref_store,
                                         bool async);
 
@@ -270,6 +274,10 @@ class PrefService : public base::NonThreadSafe {
   // Returns the value of the given preference, from the user pref store. If
   // the preference is not set in the user pref store, returns NULL.
   const base::Value* GetUserPrefValue(const char* path) const;
+
+  // Returns the default value of the given preference. |path| must point to a
+  // registered preference. In that case, will never return NULL.
+  const base::Value* GetDefaultPrefValue(const char* path) const;
 
   // Removes a user pref and restores the pref to its default value.
   void ClearPref(const char* path);

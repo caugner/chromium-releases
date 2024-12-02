@@ -4,22 +4,22 @@
 
 #include "chrome/browser/webdata/autofill_profile_syncable_service.h"
 
+#include "base/guid.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/form_group.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/api/sync_error.h"
-#include "chrome/browser/sync/api/sync_error_factory.h"
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/guid.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/api/sync_error.h"
+#include "sync/api/sync_error_factory.h"
 #include "sync/protocol/sync.pb.h"
 
 using content::BrowserThread;
@@ -315,7 +315,7 @@ void AutofillProfileSyncableService::WriteAutofillProfile(
   sync_pb::AutofillProfileSpecifics* specifics =
       profile_specifics->mutable_autofill_profile();
 
-  DCHECK(guid::IsValidGUID(profile.guid()));
+  DCHECK(base::IsValidGUID(profile.guid()));
 
   // Reset all multi-valued fields in the protobuf.
   specifics->clear_name_first();
@@ -458,10 +458,11 @@ void AutofillProfileSyncableService::ActOnChange(
   }
   SyncError error = sync_processor_->ProcessSyncChanges(FROM_HERE, new_changes);
   if (error.IsSet()) {
-    DLOG(WARNING) << "[AUTOFILL SYNC]"
-                  << " Failed processing change:"
-                  << " Error:" << error.message()
-                  << " Guid:" << change.key();
+    // TODO(isherman): Investigating http://crbug.com/121592
+    VLOG(1) << "[AUTOFILL SYNC] "
+            << "Failed processing change:\n"
+            << "  Error: " << error.message() << "\n"
+            << "  Guid: " << change.key();
   }
 }
 

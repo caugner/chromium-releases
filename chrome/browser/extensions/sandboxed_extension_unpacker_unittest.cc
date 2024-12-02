@@ -15,7 +15,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_unpacker.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -24,6 +24,7 @@ namespace errors = extension_manifest_errors;
 namespace keys = extension_manifest_keys;
 
 using content::BrowserThread;
+using extensions::Extension;
 using testing::_;
 using testing::Invoke;
 

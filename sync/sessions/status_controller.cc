@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/protocol/sync_protocol_error.h"
-#include "sync/syncable/model_type.h"
 
 namespace browser_sync {
 namespace sessions {
@@ -142,13 +142,6 @@ void StatusController::set_num_successful_bookmark_commits(int value) {
     shared_.syncer_status.mutate()->num_successful_bookmark_commits = value;
 }
 
-void StatusController::set_unsynced_handles(
-    const std::vector<int64>& unsynced_handles) {
-  if (!operator==(unsynced_handles, shared_.unsynced_handles.value())) {
-    *(shared_.unsynced_handles.mutate()) = unsynced_handles;
-  }
-}
-
 void StatusController::increment_num_successful_bookmark_commits() {
   set_num_successful_bookmark_commits(
       shared_.syncer_status.value().num_successful_bookmark_commits + 1);
@@ -176,18 +169,8 @@ void StatusController::set_last_download_updates_result(
   shared_.error.mutate()->last_download_updates_result = result;
 }
 
-void StatusController::set_last_post_commit_result(const SyncerError result) {
-  shared_.error.mutate()->last_post_commit_result = result;
-}
-
-void StatusController::set_last_process_commit_response_result(
-    const SyncerError result) {
-  shared_.error.mutate()->last_process_commit_response_result = result;
-}
-
-void StatusController::set_commit_set(const OrderedCommitSet& commit_set) {
-  DCHECK(!group_restriction_in_effect_);
-  shared_.commit_set = commit_set;
+void StatusController::set_commit_result(const SyncerError result) {
+  shared_.error.mutate()->commit_result = result;
 }
 
 void StatusController::update_conflicts_resolved(bool resolved) {
@@ -195,9 +178,6 @@ void StatusController::update_conflicts_resolved(bool resolved) {
 }
 void StatusController::reset_conflicts_resolved() {
   shared_.control_params.conflicts_resolved = false;
-}
-void StatusController::set_items_committed() {
-  shared_.control_params.items_committed = true;
 }
 
 // Returns the number of updates received from the sync server.
@@ -208,12 +188,6 @@ int64 StatusController::CountUpdates() const {
   } else {
     return 0;
   }
-}
-
-bool StatusController::CurrentCommitIdProjectionHasIndex(size_t index) {
-  OrderedCommitSet::Projection proj =
-      shared_.commit_set.GetCommitIdProjection(group_restriction_);
-  return std::binary_search(proj.begin(), proj.end(), index);
 }
 
 bool StatusController::HasConflictingUpdates() const {

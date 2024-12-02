@@ -193,7 +193,7 @@ void ContentSettingBubbleContents::Init() {
       link->set_listener(this);
       link->SetElideInMiddle(true);
       popup_links_[link] = i - bubble_content.popup_items.begin();
-      layout->AddView(new Favicon((*i).bitmap, this, link));
+      layout->AddView(new Favicon(i->bitmap, this, link));
       layout->AddView(link);
       bubble_content_empty = false;
     }
@@ -208,6 +208,7 @@ void ContentSettingBubbleContents::Init() {
          radio_group.radio_items.begin();
          i != radio_group.radio_items.end(); ++i) {
       views::RadioButton* radio = new views::RadioButton(UTF8ToUTF16(*i), 0);
+      radio->SetEnabled(bubble_content.radio_group_enabled);
       radio->set_listener(this);
       radio_group_.push_back(radio);
       layout->StartRow(0, single_column_set_id);

@@ -9,7 +9,9 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/string_util.h"
@@ -18,11 +20,12 @@
 #include "chrome/browser/chromeos/bluetooth/bluetooth_adapter.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_service_record.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_socket.h"
-#include "chrome/browser/chromeos/dbus/introspect_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_agent_service_provider.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
 #include "chromeos/dbus/bluetooth_input_client.h"
+#include "chromeos/dbus/bluetooth_out_of_band_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/introspectable_client.h"
 #include "dbus/bus.h"
@@ -39,7 +42,8 @@ BluetoothDevice::BluetoothDevice(BluetoothAdapter* adapter)
     bluetooth_class_(0),
     bonded_(false),
     connected_(false),
-    pairing_delegate_(NULL) {
+    pairing_delegate_(NULL),
+    connecting_applications_counter_(0) {
 }
 
 BluetoothDevice::~BluetoothDevice() {
@@ -76,6 +80,8 @@ void BluetoothDevice::Update(
     connected_ = properties->connected.value();
   }
 }
+
+const std::string& BluetoothDevice::address() const { return address_; }
 
 string16 BluetoothDevice::GetName() const {
   if (!name_.empty()) {
@@ -146,6 +152,10 @@ BluetoothDevice::DeviceType BluetoothDevice::GetDeviceType() const {
 }
 
 bool BluetoothDevice::IsSupported() const {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableUnsupportedBluetoothDevices))
+    return true;
+
   DeviceType device_type = GetDeviceType();
   return (device_type == DEVICE_JOYSTICK ||
           device_type == DEVICE_GAMEPAD ||
@@ -191,9 +201,25 @@ string16 BluetoothDevice::GetAddressWithLocalizedDeviceTypeName() const {
   }
 }
 
+bool BluetoothDevice::IsPaired() const { return !object_path_.value().empty(); }
+
+bool BluetoothDevice::IsBonded() const { return bonded_; }
+
 bool BluetoothDevice::IsConnected() const {
   // TODO(keybuk): examine protocol-specific connected state, such as Input
   return connected_;
+}
+
+void BluetoothDevice::GetServiceRecords(const ServiceRecordsCallback& callback,
+                                        const ErrorCallback& error_callback) {
+  DBusThreadManager::Get()->GetBluetoothDeviceClient()->
+      DiscoverServices(
+          object_path_,
+          "",  // empty pattern to browse all services
+          base::Bind(&BluetoothDevice::CollectServiceRecordsCallback,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     callback,
+                     error_callback));
 }
 
 bool BluetoothDevice::ProvidesServiceWithUUID(const std::string& uuid) const {
@@ -208,7 +234,7 @@ bool BluetoothDevice::ProvidesServiceWithUUID(const std::string& uuid) const {
 
 void BluetoothDevice::SearchServicesForNameCallback(
     const std::string& name,
-    ProvidesServiceCallback callback,
+    const ProvidesServiceCallback& callback,
     const dbus::ObjectPath& object_path,
     const BluetoothDeviceClient::ServiceMap& service_map,
     bool success) {
@@ -230,7 +256,7 @@ void BluetoothDevice::SearchServicesForNameCallback(
 }
 
 void BluetoothDevice::ProvidesServiceWithName(const std::string& name,
-    ProvidesServiceCallback callback) {
+    const ProvidesServiceCallback& callback) {
   DBusThreadManager::Get()->GetBluetoothDeviceClient()->
       DiscoverServices(
           object_path_,
@@ -242,10 +268,11 @@ void BluetoothDevice::ProvidesServiceWithName(const std::string& name,
 }
 
 void BluetoothDevice::Connect(PairingDelegate* pairing_delegate,
-                              ErrorCallback error_callback) {
+                              const base::Closure& callback,
+                              const ErrorCallback& error_callback) {
   if (IsPaired() || IsBonded() || IsConnected()) {
     // Connection to already paired or connected device.
-    ConnectApplications(error_callback);
+    ConnectApplications(callback, error_callback);
 
   } else if (!pairing_delegate) {
     // No pairing delegate supplied, initiate low-security connection only.
@@ -253,6 +280,10 @@ void BluetoothDevice::Connect(PairingDelegate* pairing_delegate,
         CreateDevice(adapter_->object_path_,
                      address_,
                      base::Bind(&BluetoothDevice::ConnectCallback,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                callback,
+                                error_callback),
+                     base::Bind(&BluetoothDevice::ConnectErrorCallback,
                                 weak_ptr_factory_.GetWeakPtr(),
                                 error_callback));
   } else {
@@ -283,62 +314,97 @@ void BluetoothDevice::Connect(PairingDelegate* pairing_delegate,
                            bluetooth_agent::kDisplayYesNoCapability,
                            base::Bind(&BluetoothDevice::ConnectCallback,
                                       weak_ptr_factory_.GetWeakPtr(),
+                                      callback,
+                                      error_callback),
+                           base::Bind(&BluetoothDevice::ConnectErrorCallback,
+                                      weak_ptr_factory_.GetWeakPtr(),
                                       error_callback));
   }
 }
 
-void BluetoothDevice::ConnectCallback(ErrorCallback error_callback,
-                                      const dbus::ObjectPath& device_path,
-                                      bool success) {
-  if (success) {
-    DVLOG(1) << "Connection successful: " << device_path.value();
-    if (object_path_.value().empty()) {
-      object_path_ = device_path;
-    } else {
-      LOG_IF(WARNING, object_path_ != device_path)
-          << "Conflicting device paths for objects, result gave: "
-          << device_path.value() << " but signal gave: "
-          << object_path_.value();
-    }
-
-    // Mark the device trusted so it can connect to us automatically, and
-    // we can connect after rebooting. This information is part of the
-    // pairing information of the device, and is unique to the combination
-    // of our bluetooth address and the device's bluetooth address. A
-    // different host needs a new pairing, so it's not useful to sync.
-    DBusThreadManager::Get()->GetBluetoothDeviceClient()->
-        GetProperties(object_path_)->trusted.Set(
-            true,
-            base::Bind(&BluetoothDevice::OnSetTrusted,
-                       weak_ptr_factory_.GetWeakPtr(),
-                       error_callback));
-
-    // Connect application-layer protocols.
-    ConnectApplications(error_callback);
+void BluetoothDevice::ConnectCallback(const base::Closure& callback,
+                                      const ErrorCallback& error_callback,
+                                      const dbus::ObjectPath& device_path) {
+  DVLOG(1) << "Connection successful: " << device_path.value();
+  if (object_path_.value().empty()) {
+    object_path_ = device_path;
   } else {
-    LOG(WARNING) << "Connection failed: " << address_;
-    error_callback.Run();
+    LOG_IF(WARNING, object_path_ != device_path)
+        << "Conflicting device paths for objects, result gave: "
+        << device_path.value() << " but signal gave: "
+        << object_path_.value();
   }
+
+  // Mark the device trusted so it can connect to us automatically, and
+  // we can connect after rebooting. This information is part of the
+  // pairing information of the device, and is unique to the combination
+  // of our bluetooth address and the device's bluetooth address. A
+  // different host needs a new pairing, so it's not useful to sync.
+  DBusThreadManager::Get()->GetBluetoothDeviceClient()->
+      GetProperties(object_path_)->trusted.Set(
+          true,
+          base::Bind(&BluetoothDevice::OnSetTrusted,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     callback,
+                     error_callback));
+
+  // Connect application-layer protocols.
+  ConnectApplications(callback, error_callback);
 }
 
-void BluetoothDevice::OnSetTrusted(ErrorCallback error_callback, bool success) {
+void BluetoothDevice::ConnectErrorCallback(const ErrorCallback& error_callback,
+                                           const std::string& error_name,
+                                           const std::string& error_message) {
+  LOG(WARNING) << "Connection failed: " << address_
+               << ": " << error_name << ": " << error_message;
+  error_callback.Run();
+}
+
+void BluetoothDevice::CollectServiceRecordsCallback(
+    const ServiceRecordsCallback& callback,
+    const ErrorCallback& error_callback,
+    const dbus::ObjectPath& device_path,
+    const BluetoothDeviceClient::ServiceMap& service_map,
+    bool success) {
   if (!success) {
+    error_callback.Run();
+    return;
+  }
+
+  ScopedVector<BluetoothServiceRecord> records;
+  for (BluetoothDeviceClient::ServiceMap::const_iterator i =
+      service_map.begin(); i != service_map.end(); ++i) {
+    records.push_back(
+        new BluetoothServiceRecord(address(), i->second));
+  }
+  callback.Run(records);
+}
+
+void BluetoothDevice::OnSetTrusted(const base::Closure& callback,
+                                   const ErrorCallback& error_callback,
+                                   bool success) {
+  if (success) {
+    callback.Run();
+  } else {
     LOG(WARNING) << "Failed to set device as trusted: " << address_;
     error_callback.Run();
   }
 }
 
-void BluetoothDevice::ConnectApplications(ErrorCallback error_callback) {
+void BluetoothDevice::ConnectApplications(const base::Closure& callback,
+                                          const ErrorCallback& error_callback) {
   // Introspect the device object to determine supported applications.
   DBusThreadManager::Get()->GetIntrospectableClient()->
       Introspect(bluetooth_device::kBluetoothDeviceServiceName,
                  object_path_,
                  base::Bind(&BluetoothDevice::OnIntrospect,
                             weak_ptr_factory_.GetWeakPtr(),
+                            callback,
                             error_callback));
 }
 
-void BluetoothDevice::OnIntrospect(ErrorCallback error_callback,
+void BluetoothDevice::OnIntrospect(const base::Closure& callback,
+                                   const ErrorCallback& error_callback,
                                    const std::string& service_name,
                                    const dbus::ObjectPath& device_path,
                                    const std::string& xml_data,
@@ -354,32 +420,62 @@ void BluetoothDevice::OnIntrospect(ErrorCallback error_callback,
   // device. Send appropraite Connect calls for each of those interfaces
   // to connect all of the application protocols for this device.
   std::vector<std::string> interfaces =
-      GetInterfacesFromIntrospectResult(xml_data);
+      IntrospectableClient::GetInterfacesFromIntrospectResult(xml_data);
 
+  DCHECK_EQ(0, connecting_applications_counter_);
+  connecting_applications_counter_ = 0;
   for (std::vector<std::string>::iterator iter = interfaces.begin();
        iter != interfaces.end(); ++iter) {
     if (*iter == bluetooth_input::kBluetoothInputInterface) {
+      connecting_applications_counter_++;
       // Supports Input interface.
       DBusThreadManager::Get()->GetBluetoothInputClient()->
           Connect(object_path_,
                   base::Bind(&BluetoothDevice::OnConnect,
                              weak_ptr_factory_.GetWeakPtr(),
+                             callback,
+                             *iter),
+                  base::Bind(&BluetoothDevice::OnConnectError,
+                             weak_ptr_factory_.GetWeakPtr(),
                              error_callback, *iter));
     }
   }
+
+  // If OnConnect has been called for every call to Connect above, then this
+  // will decrement the counter to -1.  In that case, call the callback
+  // directly as it has not been called by any of the OnConnect callbacks.
+  // This is safe because OnIntrospect and OnConnect run on the same thread.
+  connecting_applications_counter_--;
+  if (connecting_applications_counter_ == -1)
+    callback.Run();
 }
 
-void BluetoothDevice::OnConnect(ErrorCallback error_callback,
+void BluetoothDevice::OnConnect(const base::Closure& callback,
                                 const std::string& interface_name,
-                                const dbus::ObjectPath& device_path,
-                                bool success) {
-  if (success) {
-    DVLOG(1) << "Application connection successful: " << device_path.value()
-             << ": " << interface_name;
-  } else {
-    LOG(WARNING) << "Connection failed: " << address_ << ": " << interface_name;
-    error_callback.Run();
+                                const dbus::ObjectPath& device_path) {
+  DVLOG(1) << "Application connection successful: " << device_path.value()
+           << ": " << interface_name;
+
+  connecting_applications_counter_--;
+  // |callback| should only be called once, meaning it cannot be called before
+  // all requests have been started.  The extra decrement after all requests
+  // have been started, and the check for -1 instead of 0 below, insure only a
+  // single call to |callback| will occur (provided OnConnect and OnIntrospect
+  // run on the same thread, which is true).
+  if (connecting_applications_counter_ == -1) {
+    connecting_applications_counter_ = 0;
+    callback.Run();
   }
+}
+
+void BluetoothDevice::OnConnectError(const ErrorCallback& error_callback,
+                                     const std::string& interface_name,
+                                     const dbus::ObjectPath& device_path,
+                                     const std::string& error_name,
+                                     const std::string& error_message) {
+  LOG(WARNING) << "Connection failed: " << address_ << ": " << interface_name
+               << ": " << error_name << ": " << error_message;
+  error_callback.Run();
 }
 
 void BluetoothDevice::SetPinCode(const std::string& pincode) {
@@ -442,28 +538,32 @@ void BluetoothDevice::CancelPairing() {
   }
 }
 
-void BluetoothDevice::Disconnect(ErrorCallback error_callback) {
+void BluetoothDevice::Disconnect(const base::Closure& callback,
+                                 const ErrorCallback& error_callback) {
   DBusThreadManager::Get()->GetBluetoothDeviceClient()->
       Disconnect(object_path_,
                  base::Bind(&BluetoothDevice::DisconnectCallback,
                             weak_ptr_factory_.GetWeakPtr(),
+                            callback,
                             error_callback));
 
 }
 
-void BluetoothDevice::DisconnectCallback(ErrorCallback error_callback,
+void BluetoothDevice::DisconnectCallback(const base::Closure& callback,
+                                         const ErrorCallback& error_callback,
                                          const dbus::ObjectPath& device_path,
                                          bool success) {
   DCHECK(device_path == object_path_);
   if (success) {
     DVLOG(1) << "Disconnection successful: " << address_;
+    callback.Run();
   } else {
     LOG(WARNING) << "Disconnection failed: " << address_;
     error_callback.Run();
   }
 }
 
-void BluetoothDevice::Forget(ErrorCallback error_callback) {
+void BluetoothDevice::Forget(const ErrorCallback& error_callback) {
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
       RemoveDevice(adapter_->object_path_,
                    object_path_,
@@ -475,7 +575,7 @@ void BluetoothDevice::Forget(ErrorCallback error_callback) {
 
 void BluetoothDevice::ConnectToMatchingService(
     const std::string& service_uuid,
-    SocketCallback callback,
+    const SocketCallback& callback,
     const dbus::ObjectPath& object_path,
     const BluetoothDeviceClient::ServiceMap& service_map,
     bool success) {
@@ -488,21 +588,24 @@ void BluetoothDevice::ConnectToMatchingService(
           BluetoothSocket::CreateBluetoothSocket(service_record));
       if (socket.get() != NULL) {
         callback.Run(socket);
-        break;
+        return;
       }
     }
   }
   callback.Run(NULL);
 }
 
-void BluetoothDevice::ConnectToService(const std::string& service_uuid,
-                                       SocketCallback callback) {
-  // quick sanity check
-  if (!ProvidesServiceWithUUID(service_uuid)) {
-    callback.Run(NULL);
-    return;
-  }
+void BluetoothDevice::OnRemoteDataCallback(const base::Closure& callback,
+                                           const ErrorCallback& error_callback,
+                                           bool success) {
+  if (success)
+    callback.Run();
+  else
+    error_callback.Run();
+}
 
+void BluetoothDevice::ConnectToService(const std::string& service_uuid,
+                                       const SocketCallback& callback) {
   DBusThreadManager::Get()->GetBluetoothDeviceClient()->
       DiscoverServices(
           object_path_,
@@ -513,7 +616,35 @@ void BluetoothDevice::ConnectToService(const std::string& service_uuid,
                      callback));
 }
 
-void BluetoothDevice::ForgetCallback(ErrorCallback error_callback,
+void BluetoothDevice::SetOutOfBandPairingData(
+    const chromeos::BluetoothOutOfBandPairingData& data,
+    const base::Closure& callback,
+    const ErrorCallback& error_callback) {
+  DBusThreadManager::Get()->GetBluetoothOutOfBandClient()->
+      AddRemoteData(
+          object_path_,
+          address(),
+          data,
+          base::Bind(&BluetoothDevice::OnRemoteDataCallback,
+              weak_ptr_factory_.GetWeakPtr(),
+              callback,
+              error_callback));
+}
+
+void BluetoothDevice::ClearOutOfBandPairingData(
+    const base::Closure& callback,
+    const ErrorCallback& error_callback) {
+  DBusThreadManager::Get()->GetBluetoothOutOfBandClient()->
+      RemoveRemoteData(
+          object_path_,
+          address(),
+          base::Bind(&BluetoothDevice::OnRemoteDataCallback,
+              weak_ptr_factory_.GetWeakPtr(),
+              callback,
+              error_callback));
+}
+
+void BluetoothDevice::ForgetCallback(const ErrorCallback& error_callback,
                                      const dbus::ObjectPath& adapter_path,
                                      bool success) {
   // It's quite normal that this path never gets called on success; we use a

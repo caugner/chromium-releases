@@ -8,12 +8,12 @@
 #include "base/logging.h"
 #include "base/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/api/declarative/url_matcher.h"
-#include "chrome/browser/extensions/api/declarative/url_matcher_factory.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/request_stages.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_condition_attribute.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_constants.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_constants.h"
+#include "chrome/common/extensions/matcher/url_matcher.h"
+#include "chrome/common/extensions/matcher/url_matcher_factory.h"
 #include "net/url_request/url_request.h"
 
 namespace keys = extensions::declarative_webrequest_constants;
@@ -27,7 +27,7 @@ static extensions::URLMatcherConditionSet::ID g_next_id = 0;
 const char kExpectedDictionary[] = "A condition has to be a dictionary.";
 const char kConditionWithoutInstanceType[] = "A condition had no instanceType";
 const char kExpectedOtherConditionType[] = "Expected a condition of type "
-    "experimental.webRequest.RequestMatcher";
+    "declarativeWebRequest.RequestMatcher";
 const char kUnknownConditionAttribute[] = "Unknown condition attribute '%s'";
 const char kInvalidTypeOfParamter[] = "Attribute '%s' has an invalid type";
 }  // namespace

@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/aura/window.h"
 #include "ui/views/widget/widget.h"
@@ -149,8 +150,11 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
         views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.bounds = background_bounds();
     params.show_state = ui::SHOW_STATE_FULLSCREEN;
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableNewOobe))
+      params.transparent = true;
     params.parent =
-        ash::Shell::GetInstance()->GetContainer(
+        ash::Shell::GetContainer(
+            ash::Shell::GetPrimaryRootWindow(),
             ash::internal::kShellWindowId_LockScreenContainer);
 
     login_window_ = new views::Widget;
@@ -177,6 +181,8 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
 }
 
 OobeUI* WebUILoginDisplayHost::GetOobeUI() const {
+  if (!login_view_)
+    return NULL;
   return static_cast<OobeUI*>(login_view_->GetWebUI()->GetController());
 }
 

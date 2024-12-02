@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_files.h"
 #include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/chromeos/gdata/gdata_upload_file_info.h"
@@ -30,8 +31,9 @@ const int kMaxFileOpenTries = 5;
 
 namespace gdata {
 
-GDataUploader::GDataUploader(GDataFileSystem* file_system)
-  : file_system_(file_system),
+GDataUploader::GDataUploader(DocumentsServiceInterface* documents_service)
+  : file_system_(NULL),
+    documents_service_(documents_service),
     next_upload_id_(0),
     ALLOW_THIS_IN_INITIALIZER_LIST(uploader_factory_(this)) {
 }
@@ -39,18 +41,42 @@ GDataUploader::GDataUploader(GDataFileSystem* file_system)
 GDataUploader::~GDataUploader() {
 }
 
-int GDataUploader::UploadFile(scoped_ptr<UploadFileInfo> upload_file_info) {
+int GDataUploader::UploadNewFile(scoped_ptr<UploadFileInfo> upload_file_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(upload_file_info.get());
   DCHECK_EQ(upload_file_info->upload_id, -1);
   DCHECK(!upload_file_info->file_path.empty());
-  DCHECK_NE(upload_file_info->file_size, 0);
   DCHECK(!upload_file_info->gdata_path.empty());
   DCHECK(!upload_file_info->title.empty());
   DCHECK(!upload_file_info->content_type.empty());
+  DCHECK_EQ(UPLOAD_INVALID, upload_file_info->upload_mode);
+
+  upload_file_info->upload_mode = UPLOAD_NEW_FILE;
+
+  // TODO(hshi): Should remove this. crbug.com/133301. We should pass this
+  // URL from callers, instead of getting this here.
+  upload_file_info->initial_upload_location =
+      file_system_->GetUploadUrlForDirectory(
+          upload_file_info->gdata_path.DirName());
+
+  // When uploading a new file, we should retry file open as the file may
+  // not yet be ready. See comments in OpenCompletionCallback.
+  // TODO(satorux): The retry should be done only when we are uploading
+  // while downloading files from web sites (i.e. saving files to Drive).
+  upload_file_info->should_retry_file_open = true;
+  return StartUploadFile(upload_file_info.Pass());
+}
+
+int GDataUploader::StartUploadFile(
+    scoped_ptr<UploadFileInfo> upload_file_info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(upload_file_info.get());
+  DCHECK_EQ(upload_file_info->upload_id, -1);
+  DCHECK_NE(UPLOAD_INVALID, upload_file_info->upload_mode);
 
   const int upload_id = next_upload_id_++;
   upload_file_info->upload_id = upload_id;
+
   // Add upload_file_info to our internal map and take ownership.
   pending_uploads_[upload_id] = upload_file_info.release();
 
@@ -60,16 +86,48 @@ int GDataUploader::UploadFile(scoped_ptr<UploadFileInfo> upload_file_info) {
   // Create a FileStream to make sure the file can be opened successfully.
   info->file_stream = new net::FileStream(NULL);
 
-  // Create buffer to hold upload data.
-  info->buf_len = std::min(info->file_size, kUploadChunkSize);
+  // Create buffer to hold upload data. The full file size may not be known at
+  // this point, so it may not be appropriate to use info->file_size.
+  info->buf_len = kUploadChunkSize;
   info->buf = new net::IOBuffer(info->buf_len);
 
   OpenFile(info);
   return upload_id;
 }
 
+int GDataUploader::UploadExistingFile(
+    const GURL& upload_location,
+    const FilePath& gdata_file_path,
+    const FilePath& local_file_path,
+    int64 file_size,
+    const std::string& content_type,
+    const UploadFileInfo::UploadCompletionCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!upload_location.is_empty());
+  DCHECK(!local_file_path.empty());
+  DCHECK(!content_type.empty());
+
+  scoped_ptr<UploadFileInfo> upload_file_info(new UploadFileInfo);
+  upload_file_info->upload_mode = UPLOAD_EXISTING_FILE;
+  upload_file_info->initial_upload_location = upload_location;
+  upload_file_info->file_path = local_file_path;
+  upload_file_info->file_size = file_size;
+  upload_file_info->content_type = content_type;
+  upload_file_info->completion_callback = callback;
+  upload_file_info->gdata_path = gdata_file_path,
+  upload_file_info->content_length = file_size;
+  upload_file_info->all_bytes_present = true;
+
+  // When uploading an updated file, we should not retry file open as the
+  // file should already be present by definition.
+  upload_file_info->should_retry_file_open = false;
+  return StartUploadFile(upload_file_info.Pass());
+}
+
 void GDataUploader::UpdateUpload(int upload_id,
                                  content::DownloadItem* download) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   UploadFileInfo* upload_file_info = GetUploadFileInfo(upload_id);
   if (!upload_file_info)
     return;
@@ -163,31 +221,41 @@ void GDataUploader::OpenCompletionCallback(int upload_id, int result) {
   // just retry opening the file later.
   if (result != net::OK) {
     DCHECK_EQ(result, net::ERR_FILE_NOT_FOUND);
-    // File open failed. Try again later.
-    upload_file_info->num_file_open_tries++;
 
-    DVLOG(1) << "Error opening \"" << upload_file_info->file_path.value()
-             << "\" for reading: " << net::ErrorToString(result)
-             << ", tries=" << upload_file_info->num_file_open_tries;
+    if (upload_file_info->should_retry_file_open) {
+      // File open failed. Try again later.
+      upload_file_info->num_file_open_tries++;
 
-    // Stop trying to open this file if we exceed kMaxFileOpenTries.
-    const bool exceeded_max_attempts =
-        upload_file_info->num_file_open_tries >= kMaxFileOpenTries;
-    upload_file_info->should_retry_file_open = !exceeded_max_attempts;
-    if (exceeded_max_attempts)
-      UploadFailed(upload_file_info, base::PLATFORM_FILE_ERROR_NOT_FOUND);
+      DVLOG(1) << "Error opening \"" << upload_file_info->file_path.value()
+               << "\" for reading: " << net::ErrorToString(result)
+               << ", tries=" << upload_file_info->num_file_open_tries;
 
+      // Stop trying to open this file if we exceed kMaxFileOpenTries.
+      const bool exceeded_max_attempts =
+          upload_file_info->num_file_open_tries >= kMaxFileOpenTries;
+      upload_file_info->should_retry_file_open = !exceeded_max_attempts;
+    }
+    if (!upload_file_info->should_retry_file_open) {
+      UploadFailed(scoped_ptr<UploadFileInfo>(upload_file_info),
+                   base::PLATFORM_FILE_ERROR_NOT_FOUND);
+    }
     return;
   }
 
   // Open succeeded, initiate the upload.
   upload_file_info->should_retry_file_open = false;
-  file_system_->InitiateUpload(
-      upload_file_info->title,
-      upload_file_info->content_type,
-      upload_file_info->content_length,
-      upload_file_info->gdata_path.DirName(),
-      upload_file_info->gdata_path,
+  if (upload_file_info->initial_upload_location.is_empty()) {
+    UploadFailed(scoped_ptr<UploadFileInfo>(upload_file_info),
+                 base::PLATFORM_FILE_ERROR_ABORT);
+    return;
+  }
+  documents_service_->InitiateUpload(
+      InitiateUploadParams(upload_file_info->upload_mode,
+                           upload_file_info->title,
+                           upload_file_info->content_type,
+                           upload_file_info->content_length,
+                           upload_file_info->initial_upload_location,
+                           upload_file_info->gdata_path),
       base::Bind(&GDataUploader::OnUploadLocationReceived,
                  uploader_factory_.GetWeakPtr(),
                  upload_file_info->upload_id));
@@ -208,7 +276,8 @@ void GDataUploader::OnUploadLocationReceived(
 
   if (code != HTTP_SUCCESS) {
     // TODO(achuith): Handle error codes from Google Docs server.
-    UploadFailed(upload_file_info, base::PLATFORM_FILE_ERROR_ABORT);
+    UploadFailed(scoped_ptr<UploadFileInfo>(upload_file_info),
+                 base::PLATFORM_FILE_ERROR_ABORT);
     return;
   }
 
@@ -244,6 +313,29 @@ void GDataUploader::UploadNextChunk(UploadFileInfo* upload_file_info) {
     return;
   }
 
+  if (bytes_to_read == 0) {
+    // This should only happen when the actual file size is 0.
+    DCHECK(upload_file_info->all_bytes_present &&
+           upload_file_info->content_length == 0);
+
+    upload_file_info->start_range = 0;
+    upload_file_info->end_range = -1;
+    // Skips file_stream->Read and error checks for 0-byte case. Immediately
+    // proceeds to ResumeUpload.
+    // TODO(kinaba): http://crbug.com/134814
+    // Replace the following PostTask() to an direct method call. This is needed
+    // because we have to ResumeUpload after the previous InitiateUpload or
+    // ResumeUpload is completely finished; at this point, we are inside the
+    // callback function from the previous operation, which is not treated as
+    // finished yet.
+    base::MessageLoopProxy::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&GDataUploader::ResumeUpload,
+                   uploader_factory_.GetWeakPtr(),
+                   upload_file_info->upload_id));
+    return;
+  }
+
   upload_file_info->file_stream->Read(
       upload_file_info->buf,
       bytes_to_read,
@@ -275,8 +367,16 @@ void GDataUploader::ReadCompletionCallback(
   upload_file_info->end_range = upload_file_info->start_range +
                                 bytes_read - 1;
 
-  file_system_->ResumeUpload(
-      ResumeUploadParams(upload_file_info->title,
+  ResumeUpload(upload_id);
+}
+
+void GDataUploader::ResumeUpload(int upload_id) {
+  UploadFileInfo* upload_file_info = GetUploadFileInfo(upload_id);
+  if (!upload_file_info)
+    return;
+
+  documents_service_->ResumeUpload(
+      ResumeUploadParams(upload_file_info->upload_mode,
                          upload_file_info->start_range,
                          upload_file_info->end_range,
                          upload_file_info->content_length,
@@ -299,18 +399,23 @@ void GDataUploader::OnResumeUploadResponseReceived(
   if (!upload_file_info)
     return;
 
-  if (response.code == HTTP_CREATED) {
+  const UploadMode upload_mode = upload_file_info->upload_mode;
+  if ((upload_mode == UPLOAD_NEW_FILE && response.code == HTTP_CREATED) ||
+      (upload_mode == UPLOAD_EXISTING_FILE && response.code == HTTP_SUCCESS)) {
     DVLOG(1) << "Successfully created uploaded file=["
              << upload_file_info->title;
+
+    // Remove |upload_id| from the UploadFileInfoMap. The UploadFileInfo object
+    // will be deleted upon completion of completion_callback.
+    RemoveUpload(upload_id);
 
     // Done uploading.
     upload_file_info->entry = entry.Pass();
     if (!upload_file_info->completion_callback.is_null()) {
-      upload_file_info->completion_callback.Run(base::PLATFORM_FILE_OK,
-                                                upload_file_info);
+      upload_file_info->completion_callback.Run(
+          base::PLATFORM_FILE_OK,
+          scoped_ptr<UploadFileInfo>(upload_file_info));
     }
-    // TODO(achuith): DeleteUpload() here and let clients call
-    // GDataFileSystem::AddUploadedFile.
     return;
   }
 
@@ -327,7 +432,8 @@ void GDataUploader::OnResumeUploadResponseReceived(
                << ", start_range_received=" << response.start_range_received
                << ", end_range_received=" << response.end_range_received
                << ", expected end range=" << upload_file_info->end_range;
-    UploadFailed(upload_file_info,
+    UploadFailed(
+        scoped_ptr<UploadFileInfo>(upload_file_info),
         response.code == HTTP_FORBIDDEN ?
             base::PLATFORM_FILE_ERROR_NO_SPACE :
             base::PLATFORM_FILE_ERROR_ABORT);
@@ -347,35 +453,39 @@ void GDataUploader::MoveFileToCache(UploadFileInfo* upload_file_info) {
   if (upload_file_info->entry == NULL)
     return;
 
+  // Remove |upload_id| from the UploadFileInfoMap. The UploadFileInfo object
+  // will be deleted upon completion of AddUploadedFile.
+  RemoveUpload(upload_file_info->upload_id);
+
   DVLOG(1) << "MoveFileToCache " << upload_file_info->file_path.value();
   file_system_->AddUploadedFile(
+      UPLOAD_NEW_FILE,
       upload_file_info->gdata_path.DirName(),
       upload_file_info->entry.get(),
       upload_file_info->file_path,
-      GDataFileSystemInterface::FILE_OPERATION_MOVE);
-  DeleteUpload(upload_file_info);
+      GDataCache::FILE_OPERATION_MOVE,
+      base::Bind(&base::DeletePointer<UploadFileInfo>,
+                 upload_file_info));
 }
 
-void GDataUploader::UploadFailed(UploadFileInfo* upload_file_info,
+void GDataUploader::UploadFailed(scoped_ptr<UploadFileInfo> upload_file_info,
                                  base::PlatformFileError error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  RemoveUpload(upload_file_info->upload_id);
+
   LOG(ERROR) << "Upload failed " << upload_file_info->DebugString();
-  if (!upload_file_info->completion_callback.is_null()) {
-    upload_file_info->completion_callback.Run(error,
-                                              upload_file_info);
-  }
-  DeleteUpload(upload_file_info);
+  // This is subtle but we should take the callback reference before
+  // calling upload_file_info.Pass(). Otherwise, it'll crash.
+  const UploadFileInfo::UploadCompletionCallback& callback =
+      upload_file_info->completion_callback;
+  if (!callback.is_null())
+    callback.Run(error, upload_file_info.Pass());
 }
 
-void GDataUploader::DeleteUpload(UploadFileInfo* upload_file_info) {
+void GDataUploader::RemoveUpload(int upload_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  DVLOG(1) << "Deleting upload " << upload_file_info->gdata_path.value();
-  pending_uploads_.erase(upload_file_info->upload_id);
-
-  // The file stream is closed by the destructor asynchronously.
-  delete upload_file_info->file_stream;
-  delete upload_file_info;
+  pending_uploads_.erase(upload_id);
 }
 
 }  // namespace gdata

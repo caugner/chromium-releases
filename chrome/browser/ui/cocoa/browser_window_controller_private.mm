@@ -14,7 +14,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/fast_resize_view.h"
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
@@ -22,13 +22,14 @@
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
+#import "chrome/browser/ui/cocoa/nsview_additions.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #import "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #import "chrome/browser/ui/cocoa/tab_contents/previewable_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
@@ -146,7 +147,7 @@ const CGFloat kLocBarBottomInset = 1;
 
   // Only save main window information to preferences.
   PrefService* prefs = browser_->profile()->GetPrefs();
-  if (!prefs || browser_ != BrowserList::GetLastActive())
+  if (!prefs || browser_ != browser::GetLastActiveBrowser())
     return;
 
   // Save the current work area, in flipped coordinates.
@@ -371,10 +372,11 @@ willPositionSheet:(NSWindow*)sheet
     // Actually place the badge *above* |maxY|, by +2 to miss the divider.  On
     // Lion or later, shift the badge left to move it away from the fullscreen
     // button.
-    CGFloat badgeOffset = kAvatarRightOffset + possibleExtraShiftForLion;
+    CGFloat badgeXOffset = -(kAvatarRightOffset + possibleExtraShiftForLion);
+    CGFloat badgeYOffset = 2 * [[avatarButton superview] cr_lineWidth];
     NSPoint origin =
-        NSMakePoint(width - NSWidth([avatarButton frame]) - badgeOffset,
-                    maxY + 2);
+        NSMakePoint(width - NSWidth([avatarButton frame]) + badgeXOffset,
+                    maxY + badgeYOffset);
     [avatarButton setFrameOrigin:origin];
     [avatarButton setHidden:NO];  // Make sure it's shown.
   }
@@ -524,7 +526,7 @@ willPositionSheet:(NSWindow*)sheet
 
   // If the relayout shifts the content area up or down, let the renderer know.
   if (contentShifted) {
-    if (WebContents* contents = browser_->GetSelectedWebContents()) {
+    if (WebContents* contents = browser_->GetActiveWebContents()) {
       if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
         rwhv->WindowFrameChanged();
     }
@@ -539,7 +541,7 @@ willPositionSheet:(NSWindow*)sheet
 
 - (BOOL)shouldShowDetachedBookmarkBar {
   DCHECK(browser_.get());
-  TabContentsWrapper* tab = browser_->GetSelectedTabContentsWrapper();
+  TabContents* tab = browser_->GetActiveTabContents();
   return (tab && tab->bookmark_tab_helper()->ShouldShowBookmarkBar() &&
           ![previewableContentsController_ isShowingPreview]);
 }
@@ -756,6 +758,8 @@ willPositionSheet:(NSWindow*)sheet
   fullscreenWindow_.reset();
   [self layoutSubviews];
 
+  [self windowDidExitFullScreen:nil];
+
   // Fade back in.
   if (didFadeOut) {
     CGDisplayFade(token, kFadeDurationSeconds / 2, kCGDisplayBlendSolidColor,
@@ -789,24 +793,30 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (void)showFullscreenExitBubbleIfNecessary {
-  if (!browser_->IsFullscreenForTabOrPending()) {
+  // This method is called in response to
+  // |-updateFullscreenExitBubbleURL:bubbleType:|. If on Lion the system is
+  // transitioning, do not show the bubble because it will cause visual jank
+  // <http://crbug.com/130649>. This will be called again as part of
+  // |-windowDidEnterFullScreen:|, so arrange to do that work then instead.
+  if (enteringFullscreen_)
     return;
-  }
 
   [presentationModeController_ ensureOverlayHiddenWithAnimation:NO delay:NO];
 
-  fullscreenExitBubbleController_.reset(
-      [[FullscreenExitBubbleController alloc]
-          initWithOwner:self
-                browser:browser_.get()
-                    url:fullscreenUrl_
-             bubbleType:fullscreenBubbleType_]);
-  NSView* contentView = [[self window] contentView];
-  CGFloat maxWidth = NSWidth([contentView frame]);
-  CGFloat maxY = NSMaxY([[[self window] contentView] frame]);
-  [fullscreenExitBubbleController_
-      positionInWindowAtTop:maxY width:maxWidth];
-  [fullscreenExitBubbleController_ showWindow];
+  if (fullscreenBubbleType_ == FEB_TYPE_NONE ||
+      fullscreenBubbleType_ == FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION) {
+    // Show no exit instruction bubble on Mac when in Browser Fullscreen.
+    [self destroyFullscreenExitBubbleIfNecessary];
+  } else {
+    [fullscreenExitBubbleController_ closeImmediately];
+    fullscreenExitBubbleController_.reset(
+        [[FullscreenExitBubbleController alloc]
+            initWithOwner:self
+                  browser:browser_.get()
+                      url:fullscreenUrl_
+               bubbleType:fullscreenBubbleType_]);
+    [fullscreenExitBubbleController_ showWindow];
+  }
 }
 
 - (void)destroyFullscreenExitBubbleIfNecessary {
@@ -861,6 +871,7 @@ willPositionSheet:(NSWindow*)sheet
     [self deregisterForContentViewResizeNotifications];
   enteringFullscreen_ = NO;
   [self showFullscreenExitBubbleIfNecessary];
+  browser_->WindowFullscreenStateChanged();
 }
 
 - (void)windowWillExitFullScreen:(NSNotification*)notification {
@@ -871,7 +882,9 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (void)windowDidExitFullScreen:(NSNotification*)notification {
-  [self deregisterForContentViewResizeNotifications];
+  if (base::mac::IsOSLionOrLater())
+    [self deregisterForContentViewResizeNotifications];
+  browser_->WindowFullscreenStateChanged();
 }
 
 - (void)windowDidFailToEnterFullScreen:(NSWindow*)window {

@@ -759,10 +759,11 @@ bool AndroidProviderBackend::UpdateBookmarks() {
   for (std::vector<GURL>::const_iterator i = bookmark_urls.begin();
       i != bookmark_urls.end(); ++i) {
     URLID url_id = history_db_->GetRowForURL(*i, NULL);
-    if (url_id == 0) {
-      VLOG(1) << "Can not find bookmark in history " << i->spec();
+    if (url_id == 0)
+      // TODO(michaelbai): Add a row to url and android_url table as the
+      // bookmark could be added manually by user or insertted by sync.
       continue;
-    }
+
     url_ids.push_back(url_id);
   }
 
@@ -778,8 +779,7 @@ bool AndroidProviderBackend::UpdateFavicon() {
   while (enumerator.GetNextIconMapping(&icon_mapping)) {
     URLID url_id = history_db_->GetRowForURL(icon_mapping.page_url, NULL);
     if (url_id == 0) {
-      LOG(ERROR) << "Can not find favicon's page url " <<
-          icon_mapping.page_url.spec();
+      LOG(ERROR) << "Can not find favicon's page url";
       continue;
     }
     history_db_->SetFaviconID(url_id, icon_mapping.icon_id);
@@ -794,11 +794,12 @@ bool AndroidProviderBackend::UpdateSearchTermTable() {
     string16 term = statement.ColumnString16(0);
     Time last_visit_time = Time::FromInternalValue(statement.ColumnInt64(1));
     SearchTermRow search_term_row;
-    if (history_db_->GetSearchTerm(term, &search_term_row) &&
-        search_term_row.last_visit_time != last_visit_time) {
-      search_term_row.last_visit_time = last_visit_time;
-      if (!history_db_->UpdateSearchTerm(search_term_row.id, search_term_row))
-        return false;
+    if (history_db_->GetSearchTerm(term, &search_term_row)) {
+      if (search_term_row.last_visit_time != last_visit_time) {
+        search_term_row.last_visit_time = last_visit_time;
+        if (!history_db_->UpdateSearchTerm(search_term_row.id, search_term_row))
+          return false;
+      }
     } else {
       if (!history_db_->AddSearchTerm(term, last_visit_time))
         return false;

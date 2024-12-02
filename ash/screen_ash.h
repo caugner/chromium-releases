@@ -6,15 +6,11 @@
 #define ASH_SCREEN_ASH_H_
 #pragma once
 
-#include "base/compiler_specific.h"
 #include "ash/ash_export.h"
+#include "base/compiler_specific.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen_impl.h"
-
-namespace aura {
-class RootWindow;
-}
 
 namespace ash {
 
@@ -22,7 +18,7 @@ namespace ash {
 // dependencies.
 class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
  public:
-  explicit ScreenAsh(aura::RootWindow* root_window);
+  ScreenAsh();
   virtual ~ScreenAsh();
 
   // Returns the bounds for maximized windows. Maximized windows trigger
@@ -36,16 +32,14 @@ class ASH_EXPORT ScreenAsh : public gfx::ScreenImpl {
   virtual gfx::Point GetCursorScreenPoint() OVERRIDE;
   virtual gfx::NativeWindow GetWindowAtCursorScreenPoint() OVERRIDE;
 
-  virtual int GetNumMonitors() OVERRIDE;
-  virtual gfx::Monitor GetMonitorNearestWindow(
+  virtual int GetNumDisplays() OVERRIDE;
+  virtual gfx::Display GetDisplayNearestWindow(
       gfx::NativeView view) const OVERRIDE;
-  virtual gfx::Monitor GetMonitorNearestPoint(
+  virtual gfx::Display GetDisplayNearestPoint(
       const gfx::Point& point) const OVERRIDE;
-  virtual gfx::Monitor GetPrimaryMonitor() const OVERRIDE;
+  virtual gfx::Display GetPrimaryDisplay() const OVERRIDE;
 
  private:
-  aura::RootWindow* root_window_;
-
   DISALLOW_COPY_AND_ASSIGN(ScreenAsh);
 };
 

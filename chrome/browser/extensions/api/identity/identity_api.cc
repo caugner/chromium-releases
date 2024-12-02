@@ -9,7 +9,7 @@
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/extensions/extension.h"
 #include "googleurl/src/gurl.h"
 
@@ -19,6 +19,7 @@ namespace {
 
 const char kInvalidClientId[] = "Invalid OAuth2 Client ID.";
 const char kInvalidScopes[] = "Invalid OAuth2 scopes.";
+const char kInvalidRedirect[] = "Did not redirect to the right URL.";
 
 }  // namespace
 
@@ -66,6 +67,43 @@ void GetAuthTokenFunction::OnMintTokenSuccess(const std::string& access_token) {
 void GetAuthTokenFunction::OnMintTokenFailure(
     const GoogleServiceAuthError& error) {
   error_ = error.ToString();
+  SendResponse(false);
+  Release();  // Balanced in RunImpl.
+}
+
+LaunchWebAuthFlowFunction::LaunchWebAuthFlowFunction() {}
+LaunchWebAuthFlowFunction::~LaunchWebAuthFlowFunction() {}
+
+bool LaunchWebAuthFlowFunction::RunImpl() {
+  DictionaryValue* arg = NULL;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &arg));
+
+  std::string url;
+  EXTENSION_FUNCTION_VALIDATE(arg->GetString("url", &url));
+
+  bool interactive = false;
+  arg->GetBoolean("interactive", &interactive);
+
+  WebAuthFlow::Mode mode = interactive ?
+      WebAuthFlow::INTERACTIVE : WebAuthFlow::SILENT;
+
+  AddRef();  // Balanced in OnAuthFlowSuccess/Failure.
+  GURL auth_url(url);
+  auth_flow_.reset(new WebAuthFlow(
+      this, profile(), GetExtension()->id(), auth_url, mode));
+  auth_flow_->Start();
+  return true;
+}
+
+void LaunchWebAuthFlowFunction::OnAuthFlowSuccess(
+    const std::string& redirect_url) {
+  result_.reset(Value::CreateStringValue(redirect_url));
+  SendResponse(true);
+  Release();  // Balanced in RunImpl.
+}
+
+void LaunchWebAuthFlowFunction::OnAuthFlowFailure() {
+  error_ = kInvalidRedirect;
   SendResponse(false);
   Release();  // Balanced in RunImpl.
 }

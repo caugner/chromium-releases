@@ -16,12 +16,14 @@
 #include "content/browser/renderer_host/render_message_filter.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/process_type.h"
 #include "ipc/ipc_switches.h"
 #include "net/base/network_change_notifier.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ui/base/ui_base_switches.h"
 #include "webkit/plugins/plugin_switches.h"
 
 using content::ChildProcessHost;
@@ -29,16 +31,16 @@ using content::ChildProcessHostImpl;
 
 class PpapiPluginProcessHost::PluginNetworkObserver
     : public net::NetworkChangeNotifier::IPAddressObserver,
-      public net::NetworkChangeNotifier::OnlineStateObserver {
+      public net::NetworkChangeNotifier::ConnectionTypeObserver {
  public:
   explicit PluginNetworkObserver(PpapiPluginProcessHost* process_host)
       : process_host_(process_host) {
     net::NetworkChangeNotifier::AddIPAddressObserver(this);
-    net::NetworkChangeNotifier::AddOnlineStateObserver(this);
+    net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
   }
 
   ~PluginNetworkObserver() {
-    net::NetworkChangeNotifier::RemoveOnlineStateObserver(this);
+    net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
     net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
   }
 
@@ -49,13 +51,15 @@ class PpapiPluginProcessHost::PluginNetworkObserver
     // when I unplug and replug my network cable. Sending this notification when
     // "something" changes seems to make Flash reasonably happy, but seems
     // wrong. We should really be able to provide the real online state in
-    // OnOnlineStateChanged().
+    // OnConnectionTypeChanged().
     process_host_->Send(new PpapiMsg_SetNetworkState(true));
   }
 
-  // OnlineStateObserver implementation.
-  virtual void OnOnlineStateChanged(bool online) OVERRIDE {
-    process_host_->Send(new PpapiMsg_SetNetworkState(online));
+  // ConnectionTypeObserver implementation.
+  virtual void OnConnectionTypeChanged(
+      net::NetworkChangeNotifier::ConnectionType type) {
+    process_host_->Send(new PpapiMsg_SetNetworkState(
+        type != net::NetworkChangeNotifier::CONNECTION_NONE));
   }
 
  private:
@@ -70,9 +74,10 @@ PpapiPluginProcessHost::~PpapiPluginProcessHost() {
 
 PpapiPluginProcessHost* PpapiPluginProcessHost::CreatePluginHost(
     const content::PepperPluginInfo& info,
+    const FilePath& profile_data_directory,
     net::HostResolver* host_resolver) {
-  PpapiPluginProcessHost* plugin_host =
-      new PpapiPluginProcessHost(host_resolver);
+  PpapiPluginProcessHost* plugin_host = new PpapiPluginProcessHost(
+      info.name, profile_data_directory, host_resolver);
   if (plugin_host->Init(info))
     return plugin_host;
 
@@ -108,14 +113,24 @@ void PpapiPluginProcessHost::OpenChannelToPlugin(Client* client) {
   RequestPluginChannel(client);
 }
 
-PpapiPluginProcessHost::PpapiPluginProcessHost(net::HostResolver* host_resolver)
-    : filter_(new PepperMessageFilter(PepperMessageFilter::PLUGIN,
-                                      host_resolver)),
-      network_observer_(new PluginNetworkObserver(this)),
+PpapiPluginProcessHost::PpapiPluginProcessHost(
+    const std::string& plugin_name,
+    const FilePath& profile_data_directory,
+    net::HostResolver* host_resolver)
+    : network_observer_(new PluginNetworkObserver(this)),
+      profile_data_directory_(profile_data_directory),
       is_broker_(false) {
   process_.reset(new BrowserChildProcessHostImpl(
       content::PROCESS_TYPE_PPAPI_PLUGIN, this));
+
+  filter_ = new PepperMessageFilter(
+      PepperMessageFilter::PLUGIN, host_resolver);
+
+  file_filter_ = new PepperTrustedFileMessageFilter(
+      process_->GetData().id, plugin_name, profile_data_directory);
+
   process_->GetHost()->AddFilter(filter_.get());
+  process_->GetHost()->AddFilter(file_filter_.get());
 }
 
 PpapiPluginProcessHost::PpapiPluginProcessHost()
@@ -176,6 +191,13 @@ bool PpapiPluginProcessHost::Init(const content::PepperPluginInfo& info) {
                                arraysize(kPluginForwardSwitches));
   }
 
+  std::string locale =
+      content::GetContentClient()->browser()->GetApplicationLocale();
+  if (!locale.empty()) {
+    // Pass on the locale so the plugin will know what language we're using.
+    cmd_line->AppendSwitchASCII(switches::kLang, locale);
+  }
+
   if (!plugin_launcher.empty())
     cmd_line->PrependWrapper(plugin_launcher);
 
@@ -207,13 +229,12 @@ void PpapiPluginProcessHost::RequestPluginChannel(Client* client) {
   // We can't send any sync messages from the browser because it might lead to
   // a hang. See the similar code in PluginProcessHost for more description.
   PpapiMsg_CreateChannel* msg = new PpapiMsg_CreateChannel(
-      process_handle, renderer_id, client->OffTheRecord());
+      renderer_id, client->OffTheRecord());
   msg->set_unblock(true);
   if (Send(msg)) {
     sent_requests_.push(client);
   } else {
-    client->OnPpapiChannelOpened(base::kNullProcessHandle,
-                                 IPC::ChannelHandle(), 0);
+    client->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
   }
 }
 
@@ -260,14 +281,12 @@ void PpapiPluginProcessHost::CancelRequests() {
   DVLOG(1) << "PpapiPluginProcessHost" << (is_broker_ ? "[broker]" : "")
            << "CancelRequests()";
   for (size_t i = 0; i < pending_requests_.size(); i++) {
-    pending_requests_[i]->OnPpapiChannelOpened(base::kNullProcessHandle,
-                                               IPC::ChannelHandle(), 0);
+    pending_requests_[i]->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
   }
   pending_requests_.clear();
 
   while (!sent_requests_.empty()) {
-    sent_requests_.front()->OnPpapiChannelOpened(base::kNullProcessHandle,
-                                                 IPC::ChannelHandle(), 0);
+    sent_requests_.front()->OnPpapiChannelOpened(IPC::ChannelHandle(), 0);
     sent_requests_.pop();
   }
 }
@@ -283,22 +302,5 @@ void PpapiPluginProcessHost::OnRendererPluginChannelCreated(
   Client* client = sent_requests_.front();
   sent_requests_.pop();
 
-  // Prepare the handle to send to the renderer.
-  base::ProcessHandle plugin_process = process_->GetHandle();
-#if defined(OS_WIN)
-  base::ProcessHandle renderer_process;
-  int renderer_id;
-  client->GetPpapiChannelInfo(&renderer_process, &renderer_id);
-
-  base::ProcessHandle renderers_plugin_handle = NULL;
-  ::DuplicateHandle(::GetCurrentProcess(), plugin_process,
-                    renderer_process, &renderers_plugin_handle,
-                    0, FALSE, DUPLICATE_SAME_ACCESS);
-#elif defined(OS_POSIX)
-  // Don't need to duplicate anything on POSIX since it's just a PID.
-  base::ProcessHandle renderers_plugin_handle = plugin_process;
-#endif
-
-  client->OnPpapiChannelOpened(renderers_plugin_handle, channel_handle,
-                               process_->GetData().id);
+  client->OnPpapiChannelOpened(channel_handle, process_->GetData().id);
 }

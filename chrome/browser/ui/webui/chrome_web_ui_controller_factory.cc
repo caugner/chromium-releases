@@ -11,41 +11,39 @@
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/help/help_ui.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/webui/about_ui.h"
 #include "chrome/browser/ui/webui/bookmarks_ui.h"
-#include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/browser/ui/webui/crashes_ui.h"
 #include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
 #include "chrome/browser/ui/webui/extensions/extension_activity_ui.h"
 #include "chrome/browser/ui/webui/extensions/extensions_ui.h"
 #include "chrome/browser/ui/webui/feedback_ui.h"
-#include "chrome/browser/ui/webui/task_manager/task_manager_ui.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/flash_ui.h"
 #include "chrome/browser/ui/webui/generic_handler.h"
 #include "chrome/browser/ui/webui/gpu_internals_ui.h"
+#include "chrome/browser/ui/webui/help/help_ui.h"
 #include "chrome/browser/ui/webui/history_ui.h"
-#include "chrome/browser/ui/webui/web_dialog_ui.h"
 #include "chrome/browser/ui/webui/inspect_ui.h"
 #include "chrome/browser/ui/webui/media/media_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
-#include "chrome/browser/ui/webui/predictors/autocomplete_action_predictor_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
 #include "chrome/browser/ui/webui/options2/options_ui2.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/policy_ui.h"
+#include "chrome/browser/ui/webui/predictors/predictors_ui.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
 #include "chrome/browser/ui/webui/quota_internals_ui.h"
-#include "chrome/browser/ui/webui/sessions_ui.h"
 #include "chrome/browser/ui/webui/suggestions_internals/suggestions_internals_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
+#include "chrome/browser/ui/webui/task_manager/task_manager_ui.h"
 #include "chrome/browser/ui/webui/test_chrome_web_ui_controller_factory.h"
 #include "chrome/browser/ui/webui/tracing_ui.h"
 #include "chrome/browser/ui/webui/uber/uber_ui.h"
@@ -57,6 +55,8 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
 #include "googleurl/src/gurl.h"
+#include "ui/web_dialogs/constrained_web_dialog_ui.h"
+#include "ui/web_dialogs/web_dialog_ui.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
@@ -70,12 +70,12 @@
 #include "chrome/browser/ui/webui/chromeos/system_info_ui.h"
 #endif
 
-#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
+#if defined(USE_AURA)
+#include "chrome/browser/ui/webui/gesture_config_ui.h"
 #endif
 
-#if defined(USE_VIRTUAL_KEYBOARD)
-#include "chrome/browser/ui/webui/keyboard_ui.h"
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #endif
 
 #if defined(OS_WIN)
@@ -88,6 +88,9 @@
 
 using content::WebUI;
 using content::WebUIController;
+using ui::ConstrainedWebDialogUI;
+using ui::ExternalWebDialogUI;
+using ui::WebDialogUI;
 
 namespace {
 
@@ -116,7 +119,7 @@ WebUIController* NewWebUI<AboutUI>(WebUI* web_ui, const GURL& url) {
 }
 
 // Only create ExtensionWebUI for URLs that are allowed extension bindings,
-// hosted by actual tabs. If tab_contents has no wrapper, it likely refers
+// hosted by actual tabs. If there is no TabContents, it likely refers
 // to another container type, like an extension background page. If there is
 // no WebUI (it's not accessible when calling GetWebUIType and related
 // functions) then we conservatively assume that we need a WebUI.
@@ -125,9 +128,7 @@ bool NeedsExtensionWebUI(WebUI* web_ui,
                          const GURL& url) {
   ExtensionService* service = profile ? profile->GetExtensionService() : NULL;
   return service && service->ExtensionBindingsAllowed(url) &&
-      (!web_ui ||
-        TabContentsWrapper::GetCurrentWrapperForContents(
-            web_ui->GetWebContents()));
+      (!web_ui || TabContents::FromWebContents(web_ui->GetWebContents()));
 }
 
 // Returns a function that can be used to create the right type of WebUI for a
@@ -194,13 +195,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIOmniboxHost)
     return &NewWebUI<OmniboxUI>;
   if (url.host() == chrome::kChromeUIPredictorsHost)
-    return &NewWebUI<AutocompleteActionPredictorUI>;
+    return &NewWebUI<PredictorsUI>;
   if (url.host() == chrome::kChromeUIProfilerHost)
     return &NewWebUI<ProfilerUI>;
   if (url.host() == chrome::kChromeUIQuotaInternalsHost)
     return &NewWebUI<QuotaInternalsUI>;
-  if (url.host() == chrome::kChromeUISessionsHost)
-    return &NewWebUI<SessionsUI>;
   if (url.host() == chrome::kChromeUISuggestionsInternalsHost)
     return &NewWebUI<SuggestionsInternalsUI>;
   if (url.host() == chrome::kChromeUISyncInternalsHost)
@@ -235,15 +234,16 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // extensions, etc) aren't supported.
   if (url.host() == chrome::kChromeUIInspectHost)
     return &NewWebUI<InspectUI>;
-  // Android doesn't support print/print-preview.
+  // Android does not support plugins for now.
+  if (url.host() == chrome::kChromeUIPluginsHost)
+    return &NewWebUI<PluginsUI>;
+#endif
+#if defined(ENABLE_PRINTING)
   if (url.host() == chrome::kChromeUIPrintHost &&
       !g_browser_process->local_state()->GetBoolean(
           prefs::kPrintPreviewDisabled)) {
     return &NewWebUI<PrintPreviewUI>;
   }
-  // Android does not support plugins for now.
-  if (url.host() == chrome::kChromeUIPluginsHost)
-    return &NewWebUI<PluginsUI>;
 #endif
 #if defined(OS_WIN)
   if (url.host() == chrome::kChromeUIConflictsHost)
@@ -281,14 +281,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIPolicyHost)
     return &NewWebUI<PolicyUI>;
 #endif
-#if defined(ENABLE_TASK_MANAGER)
+#if defined(USE_AURA)
   if (url.host() == chrome::kChromeUITaskManagerHost)
     return &NewWebUI<TaskManagerUI>;
-#endif  // defined(ENABLE_TASK_MANAGER)
-#if defined(USE_VIRTUAL_KEYBOARD)
-  if (url.host() == chrome::kChromeUIKeyboardHost)
-    return &NewWebUI<KeyboardUI>;
-#endif
+#endif  // defined(USE_AURA)
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
   if (url.host() == chrome::kChromeUICollectedCookiesHost ||
@@ -296,6 +292,11 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       url.host() == chrome::kChromeUITabModalConfirmDialogHost) {
     return &NewWebUI<ConstrainedWebDialogUI>;
   }
+#endif
+
+#if defined(USE_AURA)
+  if (url.host() == chrome::kChromeUIGestureConfigHost)
+    return &NewWebUI<GestureConfigUI>;
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
@@ -331,7 +332,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       || url.host() == chrome::kChromeUIOSCreditsHost
       || url.host() == chrome::kChromeUITransparencyHost
 #endif
-#if defined(ENABLE_TASK_MANAGER)
+#if defined(WEBUI_TASK_MANAGER)
       || url.host() == chrome::kChromeUITaskManagerHost
 #endif
       ) {
@@ -485,9 +486,6 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
 
   if (page_url.host() == chrome::kChromeUIHistoryHost)
     return HistoryUI::GetFaviconResourceBytes();
-
-  if (page_url.host() == chrome::kChromeUISessionsHost)
-    return SessionsUI::GetFaviconResourceBytes();
 
   if (page_url.host() == chrome::kChromeUIFlashHost)
     return FlashUI::GetFaviconResourceBytes();

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,17 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/memory/weak_ptr.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image_skia.h"
 
 class MessageLoop;
 class Profile;
+
+namespace extensions {
+class Extension;
+}
 
 class ExtensionUninstallDialog
     : public ImageLoadingTracker::Observer,
@@ -41,7 +45,7 @@ class ExtensionUninstallDialog
   // Starts the process of showing a confirmation UI, which is split into two.
   // 1) Set off a 'load icon' task.
   // 2) Handle the load icon response and show the UI (OnImageLoaded).
-  void ConfirmUninstall(const Extension* extension);
+  void ConfirmUninstall(const extensions::Extension* extension);
 
  protected:
   // Constructor used by the derived classes.
@@ -53,14 +57,14 @@ class ExtensionUninstallDialog
   Delegate* delegate_;
 
   // The extension we are showing the dialog for.
-  const Extension* extension_;
+  const extensions::Extension* extension_;
 
   // The extensions icon.
-  SkBitmap icon_;
+  gfx::ImageSkia icon_;
 
  private:
   // Sets the icon that will be used in the dialog. If |icon| contains an empty
-  // bitmap, then we use a default icon instead.
+  // image, then we use a default icon instead.
   void SetIcon(const gfx::Image& image);
 
   // ImageLoadingTracker::Observer:

@@ -16,9 +16,10 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/selected_file_info.h"
@@ -247,14 +248,14 @@ void SelectFileDialogExtension::SelectFileImpl(
   }
   // Extension background pages may not supply an owner_window.
   owner_browser_ = (owner_window ?
-      BrowserList::FindBrowserWithWindow(owner_window) :
+      browser::FindBrowserWithWindow(owner_window) :
       BrowserList::GetLastActive());
   if (!owner_browser_) {
     NOTREACHED() << "Can't find owning browser";
     return;
   }
 
-  TabContentsWrapper* tab = owner_browser_->GetSelectedTabContentsWrapper();
+  TabContents* tab = owner_browser_->GetActiveTabContents();
 
   // Check if we have another dialog opened in the tab. It's unlikely, but
   // possible.
@@ -265,8 +266,10 @@ void SelectFileDialogExtension::SelectFileImpl(
   }
 
   FilePath virtual_path;
-  if (!file_manager_util::ConvertFileToRelativeFileSystemPath(
+  if (file_manager_util::ConvertFileToRelativeFileSystemPath(
           owner_browser_->profile(), default_path, &virtual_path)) {
+    virtual_path = FilePath("/").Append(virtual_path);
+  } else {
     virtual_path = default_path.BaseName();
   }
 

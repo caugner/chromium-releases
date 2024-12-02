@@ -82,6 +82,10 @@ class TouchTabStripLayout {
   // Returns true if the tab at index is stacked.
   bool IsStacked(int index) const;
 
+#if !defined(NDEBUG)
+  std::string BoundsString() const;
+#endif
+
  private:
   friend class TouchTabStripLayoutTest;
 
@@ -91,6 +95,10 @@ class TouchTabStripLayout {
 
   // Resets to an ideal layout state.
   void ResetToIdealState();
+
+  // Makes |index| visible. This is used when a new tab is added that isn't
+  // active.
+  void MakeVisible(int index);
 
   // Returns the x-coordinate for the active tab constrained by the current tab
   // counts.
@@ -151,8 +159,7 @@ class TouchTabStripLayout {
 
   // Width needed to display |count| tabs.
   int width_for_count(int count) const {
-    return count == 0 ? 0 :
-        (count * size_.width()) + (std::max(count - 1, 0) * padding_);
+    return (count * size_.width()) + (std::max(count - 1, 0) * padding_);
   }
 
   // Padding needed for |count| stacked tabs.
@@ -181,10 +188,6 @@ class TouchTabStripLayout {
 
   // Distance between one tab to the next.
   int tab_offset() const { return size_.width() + padding_; }
-
-#if !defined(NDEBUG)
-  std::string BoundsString() const;
-#endif
 
   // Size of tabs.
   const gfx::Size size_;

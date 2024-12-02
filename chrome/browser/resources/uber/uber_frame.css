@@ -28,7 +28,6 @@ li {
   -webkit-border-start: 6px solid transparent;
   -webkit-padding-start: 18px;
   -webkit-user-select: none;
-  margin: 5px 0;
 }
 
 li:hover {
@@ -50,8 +49,8 @@ button {
   border: 0;
   color: #999;
   cursor: pointer;
-  font: 12px 'DejaVu Sans', Arial, sans-serif;
-  line-height: 17px;
+  font: inherit;
+  line-height: 29px;
   margin: 0;
   padding: 0;
 }

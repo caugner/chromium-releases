@@ -10,16 +10,23 @@
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
-class Extension;
 class Profile;
 class SkBitmap;
-class TabContentsWrapper;
+class TabContents;
 class TabModalConfirmDialogDelegate;
 class TemplateURL;
-class WebDialogDelegate;
 
 namespace content {
+class BrowserContext;
 class WebContents;
+}
+
+namespace extensions {
+class Extension;
+}
+
+namespace ui {
+class WebDialogDelegate;
 }
 
 namespace browser {
@@ -42,19 +49,18 @@ void ShowAboutIPCDialog();
 // Make sure to use the returned window only when you know it is safe
 // to do so, i.e. before OnDialogClosed() is called on the delegate.
 gfx::NativeWindow ShowWebDialog(gfx::NativeWindow parent,
-                                Profile* profile,
-                                Browser* browser,
-                                WebDialogDelegate* delegate);
+                                content::BrowserContext* context,
+                                ui::WebDialogDelegate* delegate);
 
 // Shows the collected cookies dialog box.
 void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
-                                TabContentsWrapper* tab_contents);
+                                TabContents* tab_contents);
 
 // Creates the ExtensionInstalledBubble and schedules it to be shown once
 // the extension has loaded. |extension| is the installed extension. |browser|
 // is the browser window which will host the bubble. |icon| is the install
 // icon of the extension.
-void ShowExtensionInstalledBubble(const Extension* extension,
+void ShowExtensionInstalledBubble(const extensions::Extension* extension,
                                   Browser* browser,
                                   const SkBitmap& icon,
                                   Profile* profile);
@@ -67,7 +73,7 @@ void HideHungRendererDialog(content::WebContents* contents);
 
 // Shows a tab-modal dialog box.
 void ShowTabModalConfirmDialog(TabModalConfirmDialogDelegate* delegate,
-                               TabContentsWrapper* wrapper);
+                               TabContents* tab_contents);
 
 }  // namespace browser
 

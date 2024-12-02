@@ -17,11 +17,12 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/disks/disk_mount_manager.h"
 #include "chrome/browser/chromeos/extensions/file_handler_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #include "chrome/browser/chromeos/gdata/drive_webapps_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
-#include "chrome/browser/chromeos/gdata/gdata_file_system_proxy.h"
+#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
@@ -54,11 +55,6 @@
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/glue/webkit_glue.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/disks/disk_mount_manager.h"
-#endif
 
 using chromeos::disks::DiskMountManager;
 using content::BrowserContext;
@@ -66,6 +62,7 @@ using content::BrowserThread;
 using content::ChildProcessSecurityPolicy;
 using content::SiteInstance;
 using content::WebContents;
+using extensions::Extension;
 using file_handler_util::FileTaskExecutor;
 using gdata::GDataOperationRegistry;
 
@@ -92,7 +89,6 @@ ListValue* URLPatternSetToStringList(const URLPatternSet& patterns) {
   return list;
 }
 
-#if defined(OS_CHROMEOS)
 const DiskMountManager::Disk* GetVolumeAsDisk(const std::string& mount_path) {
   DiskMountManager* disk_mount_manager = DiskMountManager::GetInstance();
 
@@ -168,8 +164,6 @@ base::DictionaryValue* CreateValueFromMountPoint(Profile* profile,
 
   return mount_info;
 }
-#endif  // defined(OS_CHROMEOS)
-
 
 // Gives the extension renderer |host| file |permissions| for the given |path|.
 void GrantFilePermissionsToHost(content::RenderViewHost* host,
@@ -185,10 +179,11 @@ void AddGDataMountPoint(
     content::RenderViewHost* render_view_host) {
   fileapi::ExternalFileSystemMountPointProvider* provider =
       BrowserContext::GetFileSystemContext(profile)->external_provider();
+  if (!provider)
+    return;
+
   const FilePath mount_point = gdata::util::GetGDataMountPointPath();
   if (!render_view_host || !render_view_host->GetProcess())
-    return;
-  if (!provider || provider->HasMountPoint(mount_point))
     return;
 
   // Grant R/W permissions to gdata 'folder'. File API layer still
@@ -203,25 +198,21 @@ void AddGDataMountPoint(
   // |system_service| is NULL if incognito window / guest login.
   if (!system_service || !system_service->file_system())
     return;
-  gdata::GDataFileSystem* gdata_file_system = system_service->file_system();
+  gdata::GDataCache* cache = system_service->cache();
 
   // We check permissions for raw cache file paths only for read-only
   // operations (when fileEntry.file() is called), so read only permissions
   // should be sufficient for all cache paths. For the rest of supported
   // operations the file access check is done for drive/ paths.
   GrantFilePermissionsToHost(render_view_host,
-                             gdata_file_system->GetCacheDirectoryPath(
-                                 gdata::GDataRootDirectory::CACHE_TYPE_TMP),
+                             cache->GetCacheDirectoryPath(
+                                 gdata::GDataCache::CACHE_TYPE_TMP),
                              file_handler_util::GetReadOnlyPermissions());
   GrantFilePermissionsToHost(
       render_view_host,
-      gdata_file_system->GetCacheDirectoryPath(
-          gdata::GDataRootDirectory::CACHE_TYPE_PERSISTENT),
+      cache->GetCacheDirectoryPath(
+          gdata::GDataCache::CACHE_TYPE_PERSISTENT),
       file_handler_util::GetReadOnlyPermissions());
-
-  provider->AddRemoteMountPoint(
-      mount_point,
-      new gdata::GDataFileSystemProxy(gdata_file_system));
 
   FilePath mount_point_virtual;
   if (provider->GetVirtualPath(mount_point, &mount_point_virtual))
@@ -481,20 +472,14 @@ bool AddFileWatchBrowserFunction::PerformFileWatchOperation(
     scoped_refptr<FileBrowserEventRouter> event_router,
     const FilePath& local_path, const FilePath& virtual_path,
     const std::string& extension_id) {
-#if defined(OS_CHROMEOS)
   return event_router->AddFileWatch(local_path, virtual_path, extension_id);
-#else
-  return true;
-#endif  // defined(OS_CHROMEOS)
 }
 
 bool RemoveFileWatchBrowserFunction::PerformFileWatchOperation(
     scoped_refptr<FileBrowserEventRouter> event_router,
     const FilePath& local_path, const FilePath& unused,
     const std::string& extension_id) {
-#if defined(OS_CHROMEOS)
   event_router->RemoveFileWatch(local_path, extension_id);
-#endif
   return true;
 }
 
@@ -631,6 +616,26 @@ void ExecuteTasksFileBrowserFunction::OnTaskExecuted(bool success) {
   SendResponse(success);
 }
 
+SetDefaultTaskFileBrowserFunction::SetDefaultTaskFileBrowserFunction() {}
+
+SetDefaultTaskFileBrowserFunction::~SetDefaultTaskFileBrowserFunction() {}
+
+bool SetDefaultTaskFileBrowserFunction::RunImpl() {
+  // First param is task id that was to the extension with setDefaultTask call.
+  std::string task_id;
+  if (!args_->GetString(0, &task_id) || !task_id.size())
+    return false;
+
+  BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(
+            &file_handler_util::UpdateFileHandlerUsageStats,
+            profile_, task_id));
+
+  result_.reset(new base::FundamentalValue(true));
+  return true;
+}
+
 FileBrowserFunction::FileBrowserFunction() {
 }
 
@@ -677,7 +682,6 @@ void FileBrowserFunction::GetLocalPathsOnFileThread(
   std::vector<content::SelectedFileInfo> selected_files;
 
   // FilePath(virtual_path) doesn't work on win, so limit this to ChromeOS.
-#if defined(OS_CHROMEOS)
   fileapi::ExternalFileSystemMountPointProvider* provider =
       BrowserContext::GetFileSystemContext(profile_)->external_provider();
   if (!provider) {
@@ -759,7 +763,6 @@ void FileBrowserFunction::GetLocalPathsOnFileThread(
           content::SelectedFileInfo(real_path, display_name));
     }
   }
-#endif
 
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::Bind(callback, selected_files));
@@ -838,9 +841,8 @@ void ViewFilesFunction::GetLocalPathsResponseOnUIThread(
   for (SelectedFileInfoList::const_iterator iter = files.begin();
        iter != files.end();
        ++iter) {
-    bool handled = file_manager_util::TryViewingFile(profile(), iter->path);
-    // If there is no default browser-defined handler for viewing this type
-    // of file, try to see if we have any extension installed for it instead.
+    bool handled = file_manager_util::ExecuteBuiltinHandler(
+        GetCurrentBrowser(), iter->path, internal_task_id);
     if (!handled && files.size() == 1)
       success = false;
   }
@@ -919,7 +921,6 @@ bool AddMountFunction::RunImpl() {
   // Set default return source path to the empty string.
   result_.reset(Value::CreateStringValue(""));
 
-#if defined(OS_CHROMEOS)
   chromeos::MountType mount_type =
       DiskMountManager::MountTypeFromString(mount_type_str);
   switch (mount_type) {
@@ -932,7 +933,7 @@ bool AddMountFunction::RunImpl() {
       gdata::GDataSystemService* system_service =
           gdata::GDataSystemServiceFactory::GetForProfile(profile_);
       if (system_service) {
-        system_service->file_system()->Authenticate(
+        system_service->docs_service()->Authenticate(
             base::Bind(&AddMountFunction::OnGDataAuthentication,
                        this));
       }
@@ -950,7 +951,6 @@ bool AddMountFunction::RunImpl() {
       break;
     }
   }
-#endif  // defined(OS_CHROMEOS)
 
   return true;
 }
@@ -992,16 +992,14 @@ void AddMountFunction::GetLocalPathsResponseOnUIThread(
     return;
   }
 
-#if defined(OS_CHROMEOS)
   const FilePath& source_path = files[0].path;
   const FilePath::StringType& display_name = files[0].display_name;
   // Check if the source path is under GData cache directory.
   gdata::GDataSystemService* system_service =
       gdata::GDataSystemServiceFactory::GetForProfile(profile_);
-  gdata::GDataFileSystem* file_system =
-      system_service ? system_service->file_system() : NULL;
-  if (file_system && file_system->IsUnderGDataCacheDirectory(source_path)) {
-    file_system->SetMountedState(
+  gdata::GDataCache* cache = system_service ? system_service->cache() : NULL;
+  if (cache && cache->IsUnderGDataCacheDirectory(source_path)) {
+    cache->SetMountedStateOnUIThread(
         source_path,
         true,
         base::Bind(&AddMountFunction::OnMountedStateSet, this, mount_type_str,
@@ -1010,16 +1008,12 @@ void AddMountFunction::GetLocalPathsResponseOnUIThread(
     OnMountedStateSet(mount_type_str, display_name,
                       base::PLATFORM_FILE_OK, source_path);
   }
-#else
-  SendResponse(true);
-#endif  // defined(OS_CHROMEOS)
 }
 
 void AddMountFunction::OnMountedStateSet(const std::string& mount_type,
                                          const FilePath::StringType& file_name,
                                          base::PlatformFileError error,
                                          const FilePath& file_path) {
-#if defined(OS_CHROMEOS)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DiskMountManager* disk_mount_manager = DiskMountManager::GetInstance();
   // Pass back the actual source path of the mount point.
@@ -1030,7 +1024,6 @@ void AddMountFunction::OnMountedStateSet(const std::string& mount_type,
                                 FilePath(file_name).Extension(), file_name,
                                 DiskMountManager::MountTypeFromString(
                                     mount_type));
-#endif  // defined(OS_CHROMEOS)
 }
 
 RemoveMountFunction::RemoveMountFunction() {
@@ -1065,10 +1058,7 @@ void RemoveMountFunction::GetLocalPathsResponseOnUIThread(
     SendResponse(false);
     return;
   }
-#if defined(OS_CHROMEOS)
   DiskMountManager::GetInstance()->UnmountPath(files[0].path.value());
-#endif
-
   SendResponse(true);
 }
 
@@ -1085,7 +1075,6 @@ bool GetMountPointsFunction::RunImpl() {
   base::ListValue *mounts = new base::ListValue();
   result_.reset(mounts);
 
-#if defined(OS_CHROMEOS)
   DiskMountManager* disk_mount_manager = DiskMountManager::GetInstance();
   DiskMountManager::MountPointMap mount_points =
       disk_mount_manager->mount_points();
@@ -1097,7 +1086,6 @@ bool GetMountPointsFunction::RunImpl() {
     mounts->Append(CreateValueFromMountPoint(profile_, it->second,
                    source_url_));
   }
-#endif  // defined(OS_CHROMEOS)
 
   SendResponse(true);
   return true;
@@ -1150,10 +1138,8 @@ void GetSizeStatsFunction::CallGetSizeStatsOnFileThread(
 
   size_t total_size_kb = 0;
   size_t remaining_size_kb = 0;
-#if defined(OS_CHROMEOS)
   DiskMountManager::GetInstance()->
       GetSizeStatsOnFileThread(mount_path, &total_size_kb, &remaining_size_kb);
-#endif
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -1213,10 +1199,7 @@ void FormatDeviceFunction::GetLocalPathsResponseOnUIThread(
     return;
   }
 
-#if defined(OS_CHROMEOS)
   DiskMountManager::GetInstance()->FormatMountedDevice(files[0].path.value());
-#endif
-
   SendResponse(true);
 }
 
@@ -1261,7 +1244,6 @@ void GetVolumeMetadataFunction::GetLocalPathsResponseOnUIThread(
 
   result_.reset();
 
-#if defined(OS_CHROMEOS)
   const DiskMountManager::Disk* volume = GetVolumeAsDisk(
       files[0].path.value());
   if (volume) {
@@ -1269,7 +1251,6 @@ void GetVolumeMetadataFunction::GetLocalPathsResponseOnUIThread(
         CreateValueFromDisk(profile_, volume);
     result_.reset(volume_info);
   }
-#endif
 
   SendResponse(true);
 }
@@ -1342,6 +1323,8 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, FORMAT_DEVICE_BUTTON_LABEL);
   SET_STRING(IDS_FILE_BROWSER, UNMOUNT_DEVICE_BUTTON_LABEL);
 
+  SET_STRING(IDS_FILE_BROWSER, SEARCH_TEXT_LABEL);
+
   SET_STRING(IDS_FILE_BROWSER, ACTION_VIEW);
   SET_STRING(IDS_FILE_BROWSER, ACTION_OPEN);
   SET_STRING(IDS_FILE_BROWSER, ACTION_WATCH);
@@ -1370,6 +1353,9 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, GALLERY_IMAGE_ERROR);
   SET_STRING(IDS_FILE_BROWSER, GALLERY_VIDEO_ERROR);
   SET_STRING(IDS_FILE_BROWSER, AUDIO_ERROR);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_IMAGE_OFFLINE);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_VIDEO_OFFLINE);
+  SET_STRING(IDS_FILE_BROWSER, AUDIO_OFFLINE);
   // Reusing the string, but with alias starting with GALLERY.
   dict->SetString("GALLERY_FILE_HIDDEN_NAME",
       l10n_util::GetStringUTF16(IDS_FILE_BROWSER_ERROR_HIDDEN_NAME));
@@ -1492,8 +1478,8 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, GSLIDES_DOCUMENT_FILE_TYPE);
   SET_STRING(IDS_FILE_BROWSER, GDRAW_DOCUMENT_FILE_TYPE);
   SET_STRING(IDS_FILE_BROWSER, GTABLE_DOCUMENT_FILE_TYPE);
+  SET_STRING(IDS_FILE_BROWSER, GLINK_DOCUMENT_FILE_TYPE);
 
-  SET_STRING(IDS_FILE_BROWSER, GDATA_PRODUCT_NAME);
   SET_STRING(IDS_FILE_BROWSER, GDATA_LOADING);
   SET_STRING(IDS_FILE_BROWSER, GDATA_LOADING_PROGRESS);
   SET_STRING(IDS_FILE_BROWSER, GDATA_CANNOT_REACH);
@@ -1501,6 +1487,7 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, GDATA_RETRY);
 
   SET_STRING(IDS_FILE_BROWSER, AUDIO_PLAYER_TITLE);
+  SET_STRING(IDS_FILE_BROWSER, AUDIO_PLAYER_DEFAULT_ARTIST);
 
   SET_STRING(IDS_FILE_BROWSER, FILE_ERROR_GENERIC);
   SET_STRING(IDS_FILE_BROWSER, FILE_ERROR_NOT_FOUND);
@@ -1510,6 +1497,7 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, FILE_ERROR_INVALID_STATE);
   SET_STRING(IDS_FILE_BROWSER, FILE_ERROR_INVALID_MODIFICATION);
   SET_STRING(IDS_FILE_BROWSER, FILE_ERROR_PATH_EXISTS);
+  SET_STRING(IDS_FILE_BROWSER, FILE_ERROR_QUOTA_EXCEEDED);
 
   SET_STRING(IDS_FILE_BROWSER, SEARCH_NO_MATCHING_FILES);
   SET_STRING(IDS_FILE_BROWSER, SEARCH_EXPAND);
@@ -1517,19 +1505,25 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, CHANGE_DEFAULT_MENU_ITEM);
   SET_STRING(IDS_FILE_BROWSER, CHANGE_DEFAULT_CAPTION);
   SET_STRING(IDS_FILE_BROWSER, DEFAULT_ACTION_LABEL);
+
+  SET_STRING(IDS_FILE_BROWSER, DETAIL_VIEW_TOOLTIP);
+  SET_STRING(IDS_FILE_BROWSER, THUMBNAIL_VIEW_TOOLTIP);
+
+  SET_STRING(IDS_FILE_BROWSER, TIME_TODAY);
+  SET_STRING(IDS_FILE_BROWSER, TIME_YESTERDAY);
 #undef SET_STRING
 
-  dict->SetString("PDF_VIEW_ENABLED",
-      file_manager_util::ShouldBeOpenedWithPdfPlugin(profile(), ".pdf") ?
-          "true" : "false");
+  dict->SetBoolean("PDF_VIEW_ENABLED",
+      file_manager_util::ShouldBeOpenedWithPdfPlugin(profile(), ".pdf"));
 
   ChromeURLDataManager::DataSource::SetFontAndTextDirection(dict);
 
-  if (gdata::util::IsGDataAvailable(profile()))
-    dict->SetString("ENABLE_GDATA", "1");
+  dict->SetBoolean("ENABLE_GDATA", gdata::util::IsGDataAvailable(profile()));
 
 #if defined(USE_ASH)
-    dict->SetString("ASH", "1");
+  dict->SetBoolean("ASH", true);
+#else
+  dict->SetBoolean("ASH", false);
 #endif
 
   return true;
@@ -1542,8 +1536,16 @@ GetGDataFilePropertiesFunction::~GetGDataFilePropertiesFunction() {
 }
 
 void GetGDataFilePropertiesFunction::DoOperation(
-    const FilePath& path, base::DictionaryValue* property_dict) {
-  OnOperationComplete(path, property_dict, base::PLATFORM_FILE_OK);
+    const FilePath& file_path,
+    base::DictionaryValue* property_dict,
+    scoped_ptr<gdata::GDataFileProto> file_proto) {
+  DCHECK(property_dict);
+
+  // Nothing to do here so simply call OnOperationComplete().
+  OnOperationComplete(file_path,
+                      property_dict,
+                      base::PLATFORM_FILE_OK,
+                      file_proto.Pass());
 }
 
 bool GetGDataFilePropertiesFunction::RunImpl() {
@@ -1580,8 +1582,17 @@ void GetGDataFilePropertiesFunction::GetNextFileProperties() {
 
   base::DictionaryValue* property_dict = new base::DictionaryValue;
   property_dict->SetString("fileUrl", file_url.spec());
-  DoOperation(file_path, property_dict);
   file_properties_->Append(property_dict);
+
+  // Start getting the file info.
+  gdata::GDataSystemService* system_service =
+      gdata::GDataSystemServiceFactory::GetForProfile(profile_);
+  system_service->file_system()->GetFileInfoByPath(
+      file_path,
+      base::Bind(&GetGDataFilePropertiesFunction::OnGetFileInfo,
+                 this,
+                 file_path,
+                 property_dict));
 }
 
 void GetGDataFilePropertiesFunction::CompleteGetFileProperties() {
@@ -1592,33 +1603,24 @@ void GetGDataFilePropertiesFunction::CompleteGetFileProperties() {
       Bind(&GetGDataFilePropertiesFunction::GetNextFileProperties, this));
 }
 
-void GetGDataFilePropertiesFunction::OnOperationComplete(
-    const FilePath& path,
-    base::DictionaryValue* property_dict,
-    base::PlatformFileError error) {
-  if (error != base::PLATFORM_FILE_OK) {
-    property_dict->SetInteger("errorCode", error);
-    CompleteGetFileProperties();
-    return;
-  }
-
-  gdata::GDataSystemService* system_service =
-      gdata::GDataSystemServiceFactory::GetForProfile(profile_);
-  system_service->file_system()->GetFileInfoByPathAsync(
-      path,
-      base::Bind(&GetGDataFilePropertiesFunction::OnGetFileInfo,
-                 this,
-                 property_dict,
-                 path));
-}
-
 void GetGDataFilePropertiesFunction::OnGetFileInfo(
-    base::DictionaryValue* property_dict,
     const FilePath& file_path,
+    base::DictionaryValue* property_dict,
     base::PlatformFileError error,
     scoped_ptr<gdata::GDataFileProto> file_proto) {
   DCHECK(property_dict);
 
+  if (error == base::PLATFORM_FILE_OK)
+    DoOperation(file_path, property_dict, file_proto.Pass());
+  else
+    OnOperationComplete(file_path, property_dict, error, file_proto.Pass());
+}
+
+void GetGDataFilePropertiesFunction::OnOperationComplete(
+    const FilePath& file_path,
+    base::DictionaryValue* property_dict,
+    base::PlatformFileError error,
+    scoped_ptr<gdata::GDataFileProto> file_proto) {
   if (error != base::PLATFORM_FILE_OK) {
     property_dict->SetInteger("errorCode", error);
     CompleteGetFileProperties();
@@ -1660,7 +1662,7 @@ void GetGDataFilePropertiesFunction::OnGetFileInfo(
     }
   }
 
-  system_service->file_system()->GetCacheState(
+  system_service->cache()->GetCacheEntryOnUIThread(
       file_proto->gdata_entry().resource_id(),
       file_proto->file_md5(),
       base::Bind(
@@ -1670,19 +1672,21 @@ void GetGDataFilePropertiesFunction::OnGetFileInfo(
 
 void GetGDataFilePropertiesFunction::CacheStateReceived(
     base::DictionaryValue* property_dict,
-    base::PlatformFileError error,
-    int cache_state) {
+    bool success,
+    const gdata::GDataCache::CacheEntry& cache_entry) {
+  const int cache_state = (success ? cache_entry.cache_state :
+                           gdata::GDataCache::CACHE_STATE_NONE);
   property_dict->SetBoolean(
       "isPinned",
-      gdata::GDataFile::IsCachePinned(cache_state));
+      gdata::GDataCache::IsCachePinned(cache_state));
 
   property_dict->SetBoolean(
       "isPresent",
-      gdata::GDataFile::IsCachePresent(cache_state));
+      gdata::GDataCache::IsCachePresent(cache_state));
 
   property_dict->SetBoolean(
       "isDirty",
-      gdata::GDataFile::IsCacheDirty(cache_state));
+      gdata::GDataCache::IsCacheDirty(cache_state));
   CompleteGetFileProperties();
 }
 
@@ -1702,22 +1706,42 @@ bool PinGDataFileFunction::RunImpl() {
   return true;
 }
 
-void PinGDataFileFunction::DoOperation(const FilePath& path,
-                                       base::DictionaryValue* properties) {
+void PinGDataFileFunction::DoOperation(
+    const FilePath& file_path,
+    base::DictionaryValue* properties,
+    scoped_ptr<gdata::GDataFileProto> file_proto) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   gdata::GDataSystemService* system_service =
       gdata::GDataSystemServiceFactory::GetForProfile(profile_);
-  system_service->file_system()->SetPinState(path, set_pin_, base::Bind(
-      &PinGDataFileFunction::OnPinStateSet, this, path, properties));
+  // This is subtle but we should take references of resource_id and md5
+  // before |file_info| is passed to |callback| by base::Passed(). Otherwise,
+  // file_info->whatever() crashes.
+  const std::string& resource_id = file_proto->gdata_entry().resource_id();
+  const std::string& md5 = file_proto->file_md5();
+  const gdata::CacheOperationCallback callback =
+      base::Bind(&PinGDataFileFunction::OnPinStateSet,
+                 this,
+                 file_path,
+                 properties,
+                 base::Passed(&file_proto));
+
+  if (set_pin_)
+    system_service->cache()->PinOnUIThread(resource_id, md5, callback);
+  else
+    system_service->cache()->UnpinOnUIThread(resource_id, md5, callback);
 }
 
-void PinGDataFileFunction::OnPinStateSet(const FilePath& path,
-                                         base::DictionaryValue* properties,
-                                         base::PlatformFileError error) {
+void PinGDataFileFunction::OnPinStateSet(
+    const FilePath& path,
+    base::DictionaryValue* properties,
+    scoped_ptr<gdata::GDataFileProto> file_proto,
+    base::PlatformFileError error,
+    const std::string& /* resource_id */,
+    const std::string& /* md5 */) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  MessageLoop::current()->PostTask(FROM_HERE,
-      Bind(&PinGDataFileFunction::OnOperationComplete,
-           this, path, properties, error));
+
+  OnOperationComplete(path, properties, error, file_proto.Pass());
 }
 
 GetFileLocationsFunction::GetFileLocationsFunction() {
@@ -1866,7 +1890,7 @@ ListValue* GetFileTransfersFunction::GetFileTransfersList() {
     return NULL;
 
   std::vector<gdata::GDataOperationRegistry::ProgressStatus>
-      list = system_service->file_system()->GetOperationRegistry()->
+      list = system_service->docs_service()->operation_registry()->
       GetProgressStatusList();
   return file_manager_util::ProgressStatusVectorToListValue(
       profile_, source_url_.GetOrigin(), list);
@@ -1923,7 +1947,7 @@ void CancelFileTransfersFunction::GetLocalPathsResponseOnUIThread(
   }
 
   gdata::GDataOperationRegistry* operation_registry =
-      system_service->file_system()->GetOperationRegistry();
+      system_service->docs_service()->operation_registry();
 
   scoped_ptr<ListValue> responses(new ListValue());
   for (size_t i = 0; i < files.size(); ++i) {
@@ -2020,7 +2044,7 @@ void TransferFileFunction::OnTransferCompleted(base::PlatformFileError error) {
     SendResponse(true);
   } else {
     error_ = base::StringPrintf("%d", static_cast<int>(
-        webkit_glue::PlatformFileErrorToWebFileError(error)));
+        fileapi::PlatformFileErrorToWebFileError(error)));
     SendResponse(false);
   }
 }
@@ -2081,7 +2105,7 @@ bool GetPathForDriveSearchResultFunction::RunImpl() {
     return false;
 
   FilePath entry_path =  GetVirtualPathFromURL(GURL(file_url_as_string));
-  system_service->file_system()->GetEntryInfoByPathAsync(
+  system_service->file_system()->GetEntryInfoByPath(
       entry_path,
       base::Bind(&GetPathForDriveSearchResultFunction::OnEntryFound, this));
   return true;
@@ -2097,6 +2121,66 @@ void GetPathForDriveSearchResultFunction::OnEntryFound(
   }
 
   result_.reset(Value::CreateStringValue(entry_path.value()));
+  SendResponse(true);
+}
+
+bool SearchDriveFunction::RunImpl() {
+  if (!args_->GetString(0, &query_))
+    return false;
+
+  BrowserContext::GetFileSystemContext(profile())->OpenFileSystem(
+      source_url_.GetOrigin(), fileapi::kFileSystemTypeExternal, false,
+      base::Bind(&SearchDriveFunction::OnFileSystemOpened, this));
+  return true;
+}
+
+void SearchDriveFunction::OnFileSystemOpened(
+    base::PlatformFileError result,
+    const std::string& file_system_name,
+    const GURL& file_system_url) {
+  if (result != base::PLATFORM_FILE_OK) {
+    SendResponse(false);
+    return;
+  }
+
+  file_system_name_ = file_system_name;
+  file_system_url_ = file_system_url;
+
+  gdata::GDataSystemService* system_service =
+      gdata::GDataSystemServiceFactory::GetForProfile(profile_);
+  if (!system_service || !system_service->file_system()) {
+    SendResponse(false);
+    return;
+  }
+
+  system_service->file_system()->Search(
+      query_,
+      base::Bind(&SearchDriveFunction::OnSearch, this));
+}
+
+void SearchDriveFunction::OnSearch(
+    base::PlatformFileError error,
+    scoped_ptr<std::vector<gdata::SearchResultInfo> > results) {
+  if (error != base::PLATFORM_FILE_OK) {
+    SendResponse(false);
+    return;
+  }
+
+  DCHECK(results.get());
+
+  base::ListValue* entries = new ListValue();
+  // Convert gdata files to something File API stack can understand.
+  for (size_t i = 0; i < results->size(); ++i) {
+    DictionaryValue* entry = new DictionaryValue();
+    entry->SetString("fileSystemName", file_system_name_);
+    entry->SetString("fileSystemRoot", file_system_url_.spec());
+    entry->SetString("fileFullPath", "/" + results->at(i).path.value());
+    entry->SetBoolean("fileIsDirectory", results->at(i).is_directory);
+
+    entries->Append(entry);
+  }
+
+  result_.reset(entries);
   SendResponse(true);
 }
 
@@ -2121,6 +2205,22 @@ bool GetNetworkConnectionStateFunction::RunImpl() {
 
   value->SetString("type", type_string);
   result_.reset(value.release());
+
+  return true;
+}
+
+bool RequestDirectoryRefreshFunction::RunImpl() {
+  std::string file_url_as_string;
+  if (!args_->GetString(0, &file_url_as_string))
+    return false;
+
+  gdata::GDataSystemService* system_service =
+      gdata::GDataSystemServiceFactory::GetForProfile(profile_);
+  if (!system_service || !system_service->file_system())
+    return false;
+
+  FilePath directory_path = GetVirtualPathFromURL(GURL(file_url_as_string));
+  system_service->file_system()->RequestDirectoryRefresh(directory_path);
 
   return true;
 }

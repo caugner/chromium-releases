@@ -126,17 +126,6 @@ TEST(TemplateURLPrepopulateDataTest, ProvidersFromPrefs) {
   EXPECT_EQ(1001, t_urls[0]->prepopulate_id());
 }
 
-TEST(TemplateURLPrepopulateDataTest, GetEngineName) {
-  EXPECT_EQ(ASCIIToUTF16("Atlas"),
-       TemplateURLPrepopulateData::GetEngineName("http://search.atlas.cz/"));
-  EXPECT_EQ(ASCIIToUTF16("Google"),
-       TemplateURLPrepopulateData::GetEngineName("http://www.google.com/"));
-  EXPECT_EQ(ASCIIToUTF16("example.com"),
-            TemplateURLPrepopulateData::GetEngineName("http://example.com/"));
-  EXPECT_EQ(l10n_util::GetStringUTF16(IDS_UNKNOWN_SEARCH_ENGINE_NAME),
-            TemplateURLPrepopulateData::GetEngineName("!@#"));
-}
-
 TEST(TemplateURLPrepopulateDataTest, GetEngineTypeBasic) {
   EXPECT_EQ(SEARCH_ENGINE_OTHER,
             TemplateURLPrepopulateData::GetEngineType("http://example.com/"));
@@ -152,17 +141,15 @@ TEST_F(TemplateURLPrepopulateDataTest, GetEngineTypeAdvanced) {
   // Google URLs in different forms.
   const char* kGoogleURLs[] = {
     // Original with google:baseURL:
-    "{google:baseURL}search?{google:RLZ}{google:acceptedSuggestion}"
-    "{google:originalQueryForSuggestion}{google:searchFieldtrialParameter}"
-    "sourceid=chrome&ie={inputEncoding}&q={searchTerms}",
-    // Custom with google.com:
+    "{google:baseURL}search?q={searchTerms}&{google:RLZ}"
+    "{google:acceptedSuggestion}{google:originalQueryForSuggestion}"
+    "{google:searchFieldtrialParameter}sourceid=chrome&ie={inputEncoding}",
+    // Custom with google.com and reordered query params:
     "http://google.com/search?{google:RLZ}{google:acceptedSuggestion}"
     "{google:originalQueryForSuggestion}{google:searchFieldtrialParameter}"
     "sourceid=chrome&ie={inputEncoding}&q={searchTerms}",
-    // Custom with a country TLD:
-    "http://www.google.ru/search?{google:RLZ}{google:acceptedSuggestion}"
-    "{google:originalQueryForSuggestion}{google:searchFieldtrialParameter}"
-    "sourceid=chrome&ie={inputEncoding}&q={searchTerms}"
+    // Custom with a country TLD and almost no query params:
+    "http://www.google.ru/search?q={searchTerms}"
   };
   for (size_t i = 0; i < arraysize(kGoogleURLs); ++i) {
     EXPECT_EQ(SEARCH_ENGINE_GOOGLE,
@@ -178,6 +165,10 @@ TEST_F(TemplateURLPrepopulateDataTest, GetEngineTypeAdvanced) {
     EXPECT_EQ(SEARCH_ENGINE_YAHOO,
               TemplateURLPrepopulateData::GetEngineType(kYahooURLs[i]));
   }
+  // URLs for engines not present in country-specific lists.
+  std::string kNigmaURL = "http://www.nigma.ru/?s={searchTerms}&arg1=value1";
+  EXPECT_EQ(SEARCH_ENGINE_NIGMA,
+            TemplateURLPrepopulateData::GetEngineType(kNigmaURL));
   // Search URL for which no prepopulated search provider exists.
   std::string kExampleSearchURL = "http://example.net/search?q={searchTerms}";
   EXPECT_EQ(SEARCH_ENGINE_OTHER,

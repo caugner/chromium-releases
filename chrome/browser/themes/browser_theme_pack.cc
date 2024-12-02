@@ -18,6 +18,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -29,13 +30,14 @@
 #include "ui/gfx/skbitmap_operations.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 namespace {
 
 // Version number of the current theme pack. We just throw out and rebuild
 // theme packs that aren't int-equal to this. Increment this number if you
 // change default theme assets.
-const int kThemePackVersion = 22;
+const int kThemePackVersion = 23;
 
 // IDs that are in the DataPack won't clash with the positive integer
 // uint16. kHeaderID should always have the maximum value because we want the
@@ -311,15 +313,18 @@ base::RefCountedMemory* ReadFileData(const FilePath& path) {
 // the returned image.
 gfx::Image* CreateHSLShiftedImage(const gfx::Image& image,
                                   const color_utils::HSL& hsl_shift) {
-  const std::vector<const SkBitmap*>& src_bitmaps =
-      image.ToImageSkia()->bitmaps();
-  std::vector<const SkBitmap*> dst_bitmaps;
+  const gfx::ImageSkia* src_image = image.ToImageSkia();
+  const std::vector<SkBitmap> src_bitmaps = src_image->bitmaps();
+  gfx::ImageSkia dst_image;
   for (size_t i = 0; i < src_bitmaps.size(); ++i) {
-    const SkBitmap* bitmap = src_bitmaps[i];
-    dst_bitmaps.push_back(new SkBitmap(
-        SkBitmapOperations::CreateHSLShiftedBitmap(*bitmap, hsl_shift)));
+    const SkBitmap& bitmap = src_bitmaps[i];
+    float scale_factor =
+        static_cast<float>(bitmap.width()) / src_image->width();
+    dst_image.AddBitmapForScale(
+        SkBitmapOperations::CreateHSLShiftedBitmap(bitmap, hsl_shift),
+        scale_factor);
   }
-  return new gfx::Image(dst_bitmaps);
+  return new gfx::Image(dst_image);
 }
 
 }  // namespace
@@ -381,7 +386,7 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromDataPack(
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   scoped_refptr<BrowserThemePack> pack(new BrowserThemePack);
   pack->data_pack_.reset(
-      new ui::DataPack(ui::ResourceHandle::kScaleFactor100x));
+      new ui::DataPack(ui::SCALE_FACTOR_100P));
 
   if (!pack->data_pack_->Load(path)) {
     LOG(ERROR) << "Failed to load theme data pack.";
@@ -992,32 +997,32 @@ void BrowserThemePack::GenerateTabBackgroundImages(ImageCache* bitmaps) const {
     // with a PRS_THEME_FRAME.
     ImageCache::const_iterator it = bitmaps->find(prs_base_id);
     if (it != bitmaps->end()) {
-      const gfx::Image& image_to_tint = *(it->second);
-      const std::vector<const SkBitmap*>& bitmaps_to_tint =
-          image_to_tint.ToImageSkia()->bitmaps();
-      std::vector<const SkBitmap*> tinted_bitmaps;
+      const gfx::ImageSkia* image_to_tint = (it->second)->ToImageSkia();
+      const std::vector<SkBitmap> bitmaps_to_tint = image_to_tint->bitmaps();
+      gfx::ImageSkia tinted_image;
       for (size_t j = 0; j < bitmaps_to_tint.size(); ++j) {
         SkBitmap bg_tint = SkBitmapOperations::CreateHSLShiftedBitmap(
-            *bitmaps_to_tint[j], GetTintInternal(
+            bitmaps_to_tint[j], GetTintInternal(
                 ThemeService::TINT_BACKGROUND_TAB));
         int vertical_offset = bitmaps->count(prs_id)
                               ? kRestoredTabVerticalOffset : 0;
-        SkBitmap* bg_tab = new SkBitmap(SkBitmapOperations::CreateTiledBitmap(
-            bg_tint, 0, vertical_offset, bg_tint.width(), bg_tint.height()));
+        SkBitmap bg_tab = SkBitmapOperations::CreateTiledBitmap(
+            bg_tint, 0, vertical_offset, bg_tint.width(), bg_tint.height());
 
         // If they've provided a custom image, overlay it.
         ImageCache::const_iterator overlay_it = bitmaps->find(prs_id);
         if (overlay_it != bitmaps->end()) {
           const SkBitmap* overlay = overlay_it->second->ToSkBitmap();
-          SkCanvas canvas(*bg_tab);
-          for (int x = 0; x < bg_tab->width(); x += overlay->width())
+          SkCanvas canvas(bg_tab);
+          for (int x = 0; x < bg_tab.width(); x += overlay->width())
             canvas.drawBitmap(*overlay, static_cast<SkScalar>(x), 0, NULL);
         }
-        tinted_bitmaps.push_back(bg_tab);
+        float scale_factor =
+            static_cast<float>(bg_tab.width()) / image_to_tint->width();
+        tinted_image.AddBitmapForScale(bg_tab, scale_factor);
       }
 
-      gfx::Image* tinted_image = new gfx::Image(tinted_bitmaps);
-      temp_output[prs_id] = tinted_image;
+      temp_output[prs_id] = new gfx::Image(tinted_image);
     }
   }
 

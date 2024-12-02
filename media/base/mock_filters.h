@@ -3,8 +3,7 @@
 // found in the LICENSE file.
 //
 // A new breed of mock media filters, this time using gmock!  Feel free to add
-// actions if you need interesting side-effects (i.e., copying data to the
-// buffer passed into MockDataSource::Read()).
+// actions if you need interesting side-effects.
 //
 // Don't forget you can use StrictMock<> and NiceMock<> if you want the mock
 // filters to fail the test or do nothing when an unexpected method is called.
@@ -18,6 +17,7 @@
 #include "base/callback.h"
 #include "media/base/audio_decoder.h"
 #include "media/base/audio_decoder_config.h"
+#include "media/base/audio_renderer.h"
 #include "media/base/demuxer.h"
 #include "media/base/filters.h"
 #include "media/base/filter_collection.h"
@@ -25,6 +25,8 @@
 #include "media/base/video_decoder.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
+#include "media/base/video_renderer.h"
+#include "media/crypto/decryptor_client.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace media {
@@ -70,38 +72,6 @@ class MockFilter : public Filter {
   DISALLOW_COPY_AND_ASSIGN(MockFilter);
 };
 
-class MockDataSource : public DataSource {
- public:
-  MockDataSource();
-
-  virtual void set_host(DataSourceHost* data_source_host);
-
-  MOCK_METHOD1(Stop, void(const base::Closure& callback));
-  MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
-  MOCK_METHOD2(Seek, void(base::TimeDelta time, const PipelineStatusCB& cb));
-  MOCK_METHOD0(OnAudioRendererDisabled, void());
-
-  // DataSource implementation.
-  MOCK_METHOD4(Read, void(int64 position, int size, uint8* data,
-                          const DataSource::ReadCB& callback));
-  MOCK_METHOD1(GetSize, bool(int64* size_out));
-  MOCK_METHOD1(SetBitrate, void(int bitrate));
-  MOCK_METHOD0(IsStreaming, bool());
-
-  // Sets the TotalBytes & BufferedBytes values to be sent to host() when
-  // the set_host() is called.
-  void SetTotalAndBufferedBytes(int64 total_bytes, int64 buffered_bytes);
-
- protected:
-  virtual ~MockDataSource();
-
- private:
-  int64 total_bytes_;
-  int64 buffered_bytes_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockDataSource);
-};
-
 class MockDemuxer : public Demuxer {
  public:
   MockDemuxer();
@@ -115,8 +85,6 @@ class MockDemuxer : public Demuxer {
   MOCK_METHOD1(GetStream, scoped_refptr<DemuxerStream>(DemuxerStream::Type));
   MOCK_CONST_METHOD0(GetStartTime, base::TimeDelta());
   MOCK_METHOD0(GetBitrate, int());
-  MOCK_METHOD0(IsLocalSource, bool());
-  MOCK_METHOD0(IsSeekable, bool());
 
  protected:
   virtual ~MockDemuxer();
@@ -135,6 +103,7 @@ class MockDemuxerStream : public DemuxerStream {
   MOCK_METHOD0(audio_decoder_config, const AudioDecoderConfig&());
   MOCK_METHOD0(video_decoder_config, const VideoDecoderConfig&());
   MOCK_METHOD0(EnableBitstreamConverter, void());
+  MOCK_METHOD0(GetBufferedRanges, Ranges<base::TimeDelta>());
 
  protected:
   virtual ~MockDemuxerStream();
@@ -240,6 +209,41 @@ class MockAudioRenderer : public AudioRenderer {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioRenderer);
+};
+
+class MockDecryptorClient : public DecryptorClient {
+ public:
+  MockDecryptorClient();
+  virtual ~MockDecryptorClient();
+
+  MOCK_METHOD2(KeyAdded, void(const std::string&, const std::string&));
+  MOCK_METHOD4(KeyError, void(const std::string&, const std::string&,
+                              AesDecryptor::KeyError, int));
+  // TODO(xhwang): This is a workaround of the issue that move-only parameters
+  // are not supported in mocked methods. Remove this when the issue is fixed
+  // (http://code.google.com/p/googletest/issues/detail?id=395) or when we use
+  // std::string instead of scoped_array<uint8> (http://crbug.com/130689).
+  MOCK_METHOD5(KeyMessageMock, void(const std::string& key_system,
+                                    const std::string& session_id,
+                                    const uint8* message,
+                                    int message_length,
+                                    const std::string& default_url));
+  MOCK_METHOD4(NeedKeyMock, void(const std::string& key_system,
+                                 const std::string& session_id,
+                                 const uint8* init_data,
+                                 int init_data_length));
+  virtual void KeyMessage(const std::string& key_system,
+                          const std::string& session_id,
+                          scoped_array<uint8> message,
+                          int message_length,
+                          const std::string& default_url) OVERRIDE;
+  virtual void NeedKey(const std::string& key_system,
+                       const std::string& session_id,
+                       scoped_array<uint8> init_data,
+                       int init_data_length) OVERRIDE;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockDecryptorClient);
 };
 
 // FilterFactory that returns canned instances of mock filters.  You can set

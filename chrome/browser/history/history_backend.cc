@@ -560,7 +560,7 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
         UpdateVisitDuration(from_visit_id, last_recorded_time_);
       }
 
-      // Subsequent transitions in the redirect list must all be sever
+      // Subsequent transitions in the redirect list must all be server
       // redirects.
       redirect_info = content::PAGE_TRANSITION_SERVER_REDIRECT;
     }
@@ -1460,7 +1460,8 @@ void HistoryBackend::QueryMostVisitedURLs(
 void HistoryBackend::QueryFilteredURLs(
       scoped_refptr<QueryFilteredURLsRequest> request,
       int result_count,
-      const history::VisitFilter& filter)  {
+      const history::VisitFilter& filter,
+      bool extended_info)  {
   if (request->canceled())
     return;
 
@@ -1468,65 +1469,16 @@ void HistoryBackend::QueryFilteredURLs(
 
   if (!db_.get()) {
     // No History Database - return an empty list.
-    request->ForwardResult(request->handle(),FilteredURLList());
+    request->ForwardResult(request->handle(), FilteredURLList());
     return;
   }
 
   VisitVector visits;
-  db_->GetVisibleVisitsDuringTimes(filter, 0, &visits);
-
-  std::map<VisitID, std::pair<VisitID, URLID> > segment_ids;
-  for (size_t i = 0; i < visits.size(); ++i) {
-    segment_ids[visits[i].visit_id] =
-        std::make_pair(visits[i].referring_visit, visits[i].segment_id);
-  }
+  db_->GetDirectVisitsDuringTimes(filter, 0, &visits);
 
   std::map<URLID, double> score_map;
-  const double kLn2 = 0.6931471805599453;
-  base::Time now = base::Time::Now();
   for (size_t i = 0; i < visits.size(); ++i) {
-    URLID segment_id = visits[i].segment_id;
-    for (VisitID visit_id = visits[i].visit_id; !segment_id && visit_id;) {
-      std::map<VisitID, std::pair<VisitID, URLID> >::iterator vi =
-          segment_ids.find(visit_id);
-      if (vi == segment_ids.end()) {
-        VisitRow visit_row;
-        if (!db_->GetRowForVisit(visit_id, &visit_row))
-          break;
-        segment_ids[visit_id] =
-            std::make_pair(visit_row.referring_visit, visit_row.segment_id);
-        segment_id = visit_row.segment_id;
-        visit_id = visit_row.referring_visit;
-      } else {
-        visit_id = vi->second.first;
-        segment_id = vi->second.second;
-      }
-    }
-    if (!segment_id)
-      continue;
-    double score = 0.0;
-    switch (filter.sorting_order()) {
-      case VisitFilter::ORDER_BY_RECENCY: {
-        // Decay score by half each week.
-        base::TimeDelta time_passed = now - visits[i].visit_time;
-        // Clamp to 0 in case time jumps backwards (e.g. due to DST).
-        double decay_exponent = std::max(0.0, kLn2 * static_cast<double>(
-            time_passed.InMicroseconds()) / base::Time::kMicrosecondsPerWeek);
-        score = 1.0 / exp(decay_exponent);
-      } break;
-      case VisitFilter::ORDER_BY_VISIT_COUNT:
-        score = 1.0;  // Every visit counts the same.
-        break;
-      case VisitFilter::ORDER_BY_DURATION_SPENT:
-        NOTREACHED() << "Not implemented!";
-        break;
-    }
-
-    std::map<URLID, double>::iterator it = score_map.find(visits[i].segment_id);
-    if (it == score_map.end())
-      score_map[visits[i].segment_id] = score;
-    else
-      it->second += score;
+    score_map[visits[i].url_id] += filter.GetVisitScore(visits[i]);
   }
 
   // TODO(georgey): experiment with visit_segment database granularity (it is
@@ -1548,11 +1500,9 @@ void HistoryBackend::QueryFilteredURLs(
     data.resize(result_count);
   }
 
-  // Get URL data.
   for (size_t i = 0; i < data.size(); ++i) {
-    URLID url_id = db_->GetSegmentRepresentationURL(data[i]->GetID());
     URLRow info;
-    if (db_->GetURLRow(url_id, &info)) {
+    if (db_->GetURLRow(data[i]->GetID(), &info)) {
       data[i]->SetURL(info.url());
       data[i]->SetTitle(info.title());
     }
@@ -1562,6 +1512,22 @@ void HistoryBackend::QueryFilteredURLs(
   for (size_t i = 0; i < data.size(); ++i) {
     PageUsageData* current_data = data[i];
     FilteredURL url(*current_data);
+
+    if (extended_info) {
+      VisitVector visits;
+      db_->GetVisitsForURL(current_data->GetID(), &visits);
+      if (visits.size() > 0) {
+        url.extended_info.total_visits = visits.size();
+        for (size_t i = 0; i < visits.size(); ++i) {
+          url.extended_info.duration_opened +=
+              visits[i].visit_duration.InSeconds();
+          if (visits[i].visit_time > url.extended_info.last_visit_time) {
+            url.extended_info.last_visit_time = visits[i].visit_time;
+          }
+        }
+        // TODO(macourteau): implement the url.extended_info.visits stat.
+      }
+    }
     result.push_back(url);
   }
 

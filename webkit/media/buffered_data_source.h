@@ -31,16 +31,23 @@ namespace webkit_media {
 // before being passed to other threads. It may be deleted on any thread.
 class BufferedDataSource : public media::DataSource {
  public:
+  typedef base::Callback<void(bool)> DownloadingCB;
+
+  // |downloading_cb| will be called whenever the downloading/paused state of
+  // the source changes.
   BufferedDataSource(MessageLoop* render_loop,
                      WebKit::WebFrame* frame,
-                     media::MediaLog* media_log);
+                     media::MediaLog* media_log,
+                     const DownloadingCB& downloading_cb);
 
-  // Initialize this object using |url|. This object calls |status_cb| when
-  // initialization has completed.
+  // Initialize this object using |url| and |cors_mode|, and call |status_cb|
+  // when initialization has completed.
   //
   // Method called on the render thread.
-  void Initialize(const GURL& url,
-                  const media::PipelineStatusCB& status_cb);
+  void Initialize(
+      const GURL& url,
+      BufferedResourceLoader::CORSMode cors_mode,
+      const media::PipelineStatusCB& status_cb);
 
   // Adjusts the buffering algorithm based on the given preload value.
   void SetPreload(Preload preload);
@@ -50,6 +57,9 @@ class BufferedDataSource : public media::DataSource {
   //
   // Method called on the render thread.
   bool HasSingleOrigin();
+
+  // Returns true if the media resource passed a CORS access control check.
+  bool DidPassCORSAccessCheck() const;
 
   // Cancels initialization, any pending loaders, and any pending read calls
   // from the demuxer. The caller is expected to release its reference to this
@@ -139,6 +149,8 @@ class BufferedDataSource : public media::DataSource {
 
   // URL of the resource requested.
   GURL url_;
+  // crossorigin attribute on the corresponding HTML media element, if any.
+  BufferedResourceLoader::CORSMode cors_mode_;
 
   // Members for total bytes of the requested object. It is written once on
   // render thread but may be read from any thread. However reading of this
@@ -165,9 +177,10 @@ class BufferedDataSource : public media::DataSource {
 
   // Read parameters received from the Read() method call.
   media::DataSource::ReadCB read_cb_;
-  int64 read_position_;
   int read_size_;
   uint8* read_buffer_;
+  // Retained between reads to make sense of buffering information.
+  int64 last_read_start_;
 
   // This buffer is intermediate, we use it for BufferedResourceLoader to write
   // to. And when read in BufferedResourceLoader is done, we copy data from
@@ -215,6 +228,8 @@ class BufferedDataSource : public media::DataSource {
   float playback_rate_;
 
   scoped_refptr<media::MediaLog> media_log_;
+
+  DownloadingCB downloading_cb_;
 
   DISALLOW_COPY_AND_ASSIGN(BufferedDataSource);
 };

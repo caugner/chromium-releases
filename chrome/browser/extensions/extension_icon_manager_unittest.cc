@@ -10,11 +10,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/skia_util.h"
 
 using content::BrowserThread;
+using extensions::Extension;
 
 // Our test class that takes care of managing the necessary threads for loading
 // extension icons, and waiting for those loads to happen.
@@ -115,7 +116,7 @@ TEST_F(ExtensionIconManagerTest, LoadRemoveLoad) {
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
       manifest_path.DirName(), Extension::INVALID, *manifest.get(),
-      Extension::STRICT_ERROR_CHECKS, &error));
+      Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension.get());
   TestIconManager icon_manager(this);
 
@@ -156,7 +157,7 @@ TEST_F(ExtensionIconManagerTest, LoadComponentExtensionResource) {
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
       manifest_path.DirName(), Extension::COMPONENT, *manifest.get(),
-      Extension::STRICT_ERROR_CHECKS, &error));
+      Extension::NO_FLAGS, &error));
   ASSERT_TRUE(extension.get());
 
   TestIconManager icon_manager(this);

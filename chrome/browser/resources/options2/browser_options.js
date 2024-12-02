@@ -12,7 +12,7 @@ cr.define('options', function() {
   // Encapsulated handling of browser options page.
   //
   function BrowserOptions() {
-    OptionsPage.call(this, 'settings', templateData.settingsTitle,
+    OptionsPage.call(this, 'settings', loadTimeData.getString('settingsTitle'),
                      'settings');
   }
 
@@ -71,13 +71,30 @@ cr.define('options', function() {
       OptionsPage.prototype.initializePage.call(this);
       var self = this;
 
+      // Ensure that navigation events are unblocked on uber page. A reload of
+      // the settings page while an overlay is open would otherwise leave uber
+      // page in a blocked state, where tab switching is not possible.
+      uber.invokeMethodOnParent('stopInterceptingEvents');
+
       window.addEventListener('message', this.handleWindowMessage_.bind(this));
 
       $('advanced-settings-expander').onclick = function() {
         self.toggleSectionWithAnimation_(
             $('advanced-settings'),
             $('advanced-settings-container'));
+
+        // If the link was focused (i.e., it was activated using the keyboard)
+        // and it was used to show the section (rather than hiding it), focus
+        // the first element in the container.
+        if (document.activeElement === $('advanced-settings-expander') &&
+                $('advanced-settings').style.height === '') {
+          var focusElement = $('advanced-settings-container').querySelector(
+              'button, input, list, select, a[href]');
+          if (focusElement)
+            focusElement.focus();
+        }
       }
+
       $('advanced-settings').addEventListener('webkitTransitionEnd',
           this.updateAdvancedSettingsExpander_.bind(this));
 
@@ -85,7 +102,7 @@ cr.define('options', function() {
         UIAccountTweaks.applyGuestModeVisibility(document);
 
       // Sync (Sign in) section.
-      this.updateSyncState_(templateData.syncData);
+      this.updateSyncState_(loadTimeData.getValue('syncData'));
 
       $('sync-action-link').onclick = function(event) {
         SyncSetupOverlay.showErrorUI();
@@ -103,6 +120,8 @@ cr.define('options', function() {
       // Internet connection section (ChromeOS only).
       if (cr.isChromeOS) {
         options.network.NetworkList.decorate($('network-list'));
+        options.network.NetworkList.refreshNetworkData(
+            loadTimeData.getValue('networkData'));
       }
 
       // On Startup section.
@@ -118,8 +137,9 @@ cr.define('options', function() {
       // restore changes has stabilized. For now, only the startup option is
       // renamed to "continue where I left off", but the session related content
       // settings are not disabled or overridden (because
-      // templateData.enable_restore_session_state is forced to false).
-      this.sessionRestoreEnabled_ = templateData.enable_restore_session_state;
+      // 'enable_restore_session_state' is forced to false).
+      this.sessionRestoreEnabled_ =
+          loadTimeData.getBoolean('enable_restore_session_state');
       if (this.sessionRestoreEnabled_) {
         $('startup-restore-session').onclick = function(event) {
           if (!event.currentTarget.checked)
@@ -152,7 +172,7 @@ cr.define('options', function() {
       }
 
       $('themes-gallery').onclick = function(event) {
-        window.open(localStrings.getString('themesGalleryURL'));
+        window.open(loadTimeData.getString('themesGalleryURL'));
       };
       $('themes-reset').onclick = function(event) {
         chrome.send('themesReset');
@@ -187,14 +207,8 @@ cr.define('options', function() {
         }
         return true;
       };
-      $('instant-field-trial-control').onchange = function(evt) {
-        this.checked = true;
-        chrome.send('disableInstant');
-      };
       Preferences.getInstance().addEventListener('instant.confirm_dialog_shown',
           this.onInstantConfirmDialogShownChanged_.bind(this));
-      Preferences.getInstance().addEventListener('instant.enabled',
-          this.onInstantEnabledChanged_.bind(this));
       Preferences.getInstance().addEventListener(
           'restore_session_state.dialog_shown',
           this.onSessionRestoreDialogShownChanged_.bind(this));
@@ -208,14 +222,14 @@ cr.define('options', function() {
           });
 
       // Users section.
-      if (typeof templateData.profilesInfo != 'undefined') {
+      if (loadTimeData.valueExists('profilesInfo')) {
         $('profiles-section').hidden = false;
 
         var profilesList = $('profiles-list');
         options.browser_options.ProfileList.decorate(profilesList);
         profilesList.autoExpands = true;
 
-        this.setProfilesInfo_(templateData.profilesInfo);
+        this.setProfilesInfo_(loadTimeData.getValue('profilesInfo'));
 
         profilesList.addEventListener('change',
             this.setProfileViewButtonsStatus_);
@@ -223,9 +237,7 @@ cr.define('options', function() {
           chrome.send('createProfile');
         };
         $('profiles-manage').onclick = function(event) {
-          var selectedProfile = self.getSelectedProfileItem_();
-          if (selectedProfile)
-            ManageProfileOverlay.showManageDialog(selectedProfile);
+          ManageProfileOverlay.showManageDialog();
         };
         $('profiles-delete').onclick = function(event) {
           var selectedProfile = self.getSelectedProfileItem_();
@@ -243,7 +255,7 @@ cr.define('options', function() {
 
         // Username (canonical email) of the currently logged in user or
         // |kGuestUser| if a guest session is active.
-        this.username_ = localStrings.getString('username');
+        this.username_ = loadTimeData.getString('username');
 
         this.updateAccountPicture_();
 
@@ -370,8 +382,10 @@ cr.define('options', function() {
         $('manage-passwords').disabled = true;
       }
 
-      if (cr.isMac)
-        $('mac-passwords-warning').hidden = !templateData.multiple_profiles;
+      if (cr.isMac) {
+        $('mac-passwords-warning').hidden =
+            !loadTimeData.getBoolean('multiple_profiles');
+      }
 
       // Network section.
       if (!cr.isChromeOS) {
@@ -405,10 +419,12 @@ cr.define('options', function() {
       };
 
       // Downloads section.
+      Preferences.getInstance().addEventListener('download.default_directory',
+          this.onDefaultDownloadDirectoryChanged_.bind(this));
+      $('downloadLocationChangeButton').onclick = function(event) {
+        chrome.send('selectDownloadLocation');
+      };
       if (!cr.isChromeOS) {
-        $('downloadLocationChangeButton').onclick = function(event) {
-          chrome.send('selectDownloadLocation');
-        };
         $('autoOpenFileTypesResetToDefault').onclick = function(event) {
           chrome.send('autoOpenFileTypesAction');
         };
@@ -439,7 +455,7 @@ cr.define('options', function() {
           if ($('cloudPrintManageButton').style.display == 'none') {
             // Disable the button, set its text to the intermediate state.
             $('cloudPrintConnectorSetupButton').textContent =
-              localStrings.getString('cloudPrintConnectorEnablingButton');
+              loadTimeData.getString('cloudPrintConnectorEnablingButton');
             $('cloudPrintConnectorSetupButton').disabled = true;
             chrome.send('showCloudPrintSetupDialog');
           } else {
@@ -455,7 +471,12 @@ cr.define('options', function() {
       if (cr.isChromeOS) {
         $('accessibility-spoken-feedback-check').onchange = function(event) {
           chrome.send('spokenFeedbackChange',
-          [$('accessibility-spoken-feedback-check').checked]);
+                      [$('accessibility-spoken-feedback-check').checked]);
+        };
+
+        $('accessibility-high-contrast-check').onchange = function(event) {
+          chrome.send('highContrastChange',
+                      [$('accessibility-high-contrast-check').checked]);
         };
       }
 
@@ -611,9 +632,9 @@ cr.define('options', function() {
     updateAdvancedSettingsExpander_: function() {
       var expander = $('advanced-settings-expander');
       if ($('advanced-settings').style.height == '')
-        expander.textContent = localStrings.getString('showAdvancedSettings');
+        expander.textContent = loadTimeData.getString('showAdvancedSettings');
       else
-        expander.textContent = localStrings.getString('hideAdvancedSettings');
+        expander.textContent = loadTimeData.getString('hideAdvancedSettings');
     },
 
     /**
@@ -639,10 +660,10 @@ cr.define('options', function() {
           syncData.setupCompleted && cr.isChromeOS;
       startStopButton.textContent =
           syncData.setupCompleted ?
-              localStrings.getString('syncButtonTextStop') :
+              loadTimeData.getString('syncButtonTextStop') :
           syncData.setupInProgress ?
-              localStrings.getString('syncButtonTextInProgress') :
-              localStrings.getString('syncButtonTextStart');
+              loadTimeData.getString('syncButtonTextInProgress') :
+              loadTimeData.getString('syncButtonTextStart');
 
 
       // TODO(estade): can this just be textContent?
@@ -748,28 +769,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Called when the value of the instant.enabled preference changes. Request
-     * the state of the Instant field trial experiment.
-     * @param {Event} event Change event.
-     * @private
-     */
-    onInstantEnabledChanged_: function(event) {
-      chrome.send('getInstantFieldTrialStatus');
-    },
-
-    /**
-     * Called to set the Instant field trial status.
-     * @param {boolean} enabled If true, the experiment is enabled.
-     * @private
-     */
-    setInstantFieldTrialStatus_: function(enabled) {
-      $('instant-enabled-control').hidden = enabled;
-      $('instant-field-trial-control').hidden = !enabled;
-      $('instant-label').htmlFor = enabled ? 'instant-field-trial-control' :
-                                             'instant-enabled-control';
-    },
-
-    /**
      * Called when the value of the restore_session_state.dialog_shown
      * preference changes.
      * @param {Event} event Change event.
@@ -787,6 +786,22 @@ cr.define('options', function() {
      */
     onSpellcheckConfirmDialogShownChanged_: function(event) {
       this.spellcheckConfirmDialogShown_ = event.value['value'];
+    },
+
+    /**
+     * Called when the value of the download.default_directory preference
+     * changes.
+     * @param {Event} event Change event.
+     * @private
+     */
+    onDefaultDownloadDirectoryChanged_: function(event) {
+      $('downloadLocationPath').value = event.value['value'];
+      if (cr.isChromeOS) {
+        // On ChromeOS, strip out /special for drive paths, and
+        // /home/chronos/user for local files.
+        $('downloadLocationPath').value = $('downloadLocationPath').value.
+            replace(/^\/(special|home\/chronos\/user)/, '');
+      }
     },
 
     /**
@@ -946,6 +961,10 @@ cr.define('options', function() {
       var hasSingleProfile = profilesList.dataModel.length == 1;
       $('profiles-manage').disabled = !hasSelection ||
           !selectedProfile.isCurrentProfile;
+      if (hasSelection && !selectedProfile.isCurrentProfile)
+        $('profiles-manage').title = loadTimeData.getString('currentUserOnly');
+      else
+        $('profiles-manage').title = '';
       $('profiles-delete').disabled = !hasSelection && !hasSingleProfile;
       var importData = $('import-data');
       if (importData) {
@@ -966,8 +985,8 @@ cr.define('options', function() {
       $('profiles-single-message').hidden = !hasSingleProfile;
       $('profiles-manage').hidden = hasSingleProfile;
       $('profiles-delete').textContent = hasSingleProfile ?
-          templateData.profilesDeleteSingle :
-          templateData.profilesDelete;
+          loadTimeData.getString('profilesDeleteSingle') :
+          loadTimeData.getString('profilesDelete');
     },
 
     /**
@@ -987,7 +1006,33 @@ cr.define('options', function() {
       // add it to the list, even if the list is hidden so we can access it
       // later.
       $('profiles-list').dataModel = new ArrayDataModel(profiles);
+
+      // Received new data. If showing the "manage" overlay, keep it up to
+      // date. If showing the "delete" overlay, close it.
+      if (ManageProfileOverlay.getInstance().visible &&
+          !$('manage-profile-overlay-manage').hidden) {
+        ManageProfileOverlay.showManageDialog();
+      } else {
+        ManageProfileOverlay.getInstance().visible = false;
+      }
+
       this.setProfileViewButtonsStatus_();
+    },
+
+    /**
+     * Returns the currently active profile for this browser window.
+     * @return {Object} A profile info object.
+     * @private
+     */
+    getCurrentProfile_: function() {
+      for (var i = 0; i < $('profiles-list').dataModel.length; i++) {
+        var profile = $('profiles-list').dataModel.item(i);
+        if (profile.isCurrentProfile)
+          return profile;
+      }
+
+      assert(false,
+             'There should always be a current profile, but none found.');
     },
 
     setGtkThemeButtonEnabled_: function(enabled) {
@@ -1041,6 +1086,17 @@ cr.define('options', function() {
     },
 
     /**
+     * Set the visibility of the password generation checkbox.
+     * @private
+     */
+    setPasswordGenerationSettingVisibility_: function(visible) {
+      if (visible)
+        $('password-generation-checkbox').style.display = 'block';
+      else
+        $('password-generation-checkbox').style.display = 'none';
+    },
+
+    /**
      * Set the font size selected item.
      * @private
      */
@@ -1057,7 +1113,7 @@ cr.define('options', function() {
 
       // Add/Select Custom Option in the font size label list.
       if (!$('Custom')) {
-        var option = new Option(localStrings.getString('fontSizeLabelCustom'),
+        var option = new Option(loadTimeData.getString('fontSizeLabelCustom'),
                                 -1, false, true);
         option.setAttribute('id', 'Custom');
         selectCtl.add(option);
@@ -1157,11 +1213,11 @@ cr.define('options', function() {
         $('cloudPrintConnectorLabel').textContent = label;
         if (disabled || !allowed) {
           $('cloudPrintConnectorSetupButton').textContent =
-            localStrings.getString('cloudPrintConnectorDisabledButton');
+            loadTimeData.getString('cloudPrintConnectorDisabledButton');
           $('cloudPrintManageButton').style.display = 'none';
         } else {
           $('cloudPrintConnectorSetupButton').textContent =
-            localStrings.getString('cloudPrintConnectorEnabledButton');
+            loadTimeData.getString('cloudPrintConnectorEnabledButton');
           $('cloudPrintManageButton').style.display = 'inline';
         }
         $('cloudPrintConnectorSetupButton').disabled = !allowed;
@@ -1192,7 +1248,7 @@ cr.define('options', function() {
      * @private
      */
     setHighContrastCheckboxState_: function(checked) {
-      // TODO(zork): Update UI
+      $('accessibility-high-contrast-check').checked = checked;
     },
 
     /**
@@ -1217,7 +1273,6 @@ cr.define('options', function() {
      */
     showMouseControls_: function(show) {
       $('mouse-settings').hidden = !show;
-      this.updatePointerSettingsText_();
     },
 
     /**
@@ -1226,35 +1281,6 @@ cr.define('options', function() {
      */
     showTouchpadControls_: function(show) {
       $('touchpad-settings').hidden = !show;
-      this.updatePointerSettingsText_();
-    },
-
-    /**
-    * Update pointer settings buttons text content to say mouse settings,
-    * touchpad settings, or mouse/touchpad settings as appropriate. If neither
-    * is available, hides the button and shows "No mouse or touchpad" text.
-    * @private
-    */
-    updatePointerSettingsText_: function() {
-      var pointerSettingsButton = $('pointer-settings-button');
-      pointerSettingsButton.hidden = false;
-      if ($('touchpad-settings').hidden) {
-        if ($('mouse-settings').hidden) {
-          pointerSettingsButton.hidden = true;
-        } else {
-          pointerSettingsButton.textContent =
-              localStrings.getString('mouseSettingsButtonTitle');
-        }
-      } else {
-        if ($('mouse-settings').hidden) {
-          pointerSettingsButton.textContent =
-              localStrings.getString('touchpadSettingsButtonTitle');
-        } else {
-          pointerSettingsButton.textContent =
-              localStrings.getString('touchpadMouseSettingsButtonTitle');
-        }
-      }
-      $('no-pointing-devices').hidden = !pointerSettingsButton.hidden;
     },
 
     /**
@@ -1355,6 +1381,7 @@ cr.define('options', function() {
   //Forward public APIs to private implementations.
   [
     'addBluetoothDevice',
+    'getCurrentProfile',
     'getStartStopSyncButton',
     'hideBluetoothSettings',
     'removeCloudPrintConnectorSection',
@@ -1367,9 +1394,9 @@ cr.define('options', function() {
     'setFontSize',
     'setGtkThemeButtonEnabled',
     'setHighContrastCheckboxState',
-    'setInstantFieldTrialStatus',
     'setMetricsReportingCheckboxState',
     'setMetricsReportingSettingVisibility',
+    'setPasswordGenerationSettingVisibility',
     'setProfilesInfo',
     'setScreenMagnifierCheckboxState',
     'setSpokenFeedbackCheckboxState',

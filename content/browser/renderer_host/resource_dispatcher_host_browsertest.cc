@@ -25,6 +25,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
 using content::DownloadManager;
 
@@ -75,7 +76,7 @@ class ResourceDispatcherHostBrowserTest : public InProcessBrowserTest,
   }
 
   content::RenderViewHost* render_view_host() {
-    return browser()->GetSelectedWebContents()->GetRenderViewHost();
+    return browser()->GetActiveWebContents()->GetRenderViewHost();
   }
 
   GURL GetMockURL(const std::string& file) {
@@ -87,7 +88,7 @@ class ResourceDispatcherHostBrowserTest : public InProcessBrowserTest,
                       int expected_navigations) {
     string16 expected_title16(ASCIIToUTF16(expected_title));
     ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetSelectedWebContents(), expected_title16);
+        browser()->GetActiveWebContents(), expected_title16);
     ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
         browser(), url, expected_navigations);
     EXPECT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
@@ -190,7 +191,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
 IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
                        SniffNoContentTypeNoData) {
   // Make sure no downloads start.
-  GetBrowserContext()->GetDownloadManager()->AddObserver(this);
+  BrowserContext::GetDownloadManager(GetBrowserContext())->AddObserver(this);
   CheckTitleTest(GetMockURL("content-sniffer-test3.html"),
                  "Content Sniffer Test 3", 1);
   EXPECT_EQ(1, browser()->tab_count());
@@ -216,7 +217,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest, SyncXMLHttpRequest) {
   // Let's check the XMLHttpRequest ran successfully.
   bool success = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      browser()->GetActiveWebContents()->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(DidSyncRequestSucceed());",
       &success));
@@ -234,7 +235,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
   // Let's check the XMLHttpRequest ran successfully.
   bool success = false;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      browser()->GetActiveWebContents()->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(DidSucceed());",
       &success));
@@ -248,7 +249,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
 IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
                        SyncXMLHttpRequest_DuringUnload) {
   ASSERT_TRUE(test_server()->Start());
-  GetBrowserContext()->GetDownloadManager()->AddObserver(this);
+  BrowserContext::GetDownloadManager(GetBrowserContext())->AddObserver(this);
 
   CheckTitleTest(
       test_server()->GetURL("files/sync_xmlhttprequest_during_unload.html"),
@@ -280,10 +281,20 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
   EXPECT_EQ("onunloadCookie=foo", GetCookies(url));
 }
 
+// ResourceDispatcherHostBrowserTest.CrossSiteImmediateLoadOnunloadCookie is
+// flaky on Windows. http://crbug.com/130404
+#if defined (OS_WIN)
+#define MAYBE_CrossSiteImmediateLoadOnunloadCookie \
+    DISABLED_CrossSiteImmediateLoadOnunloadCookie
+#else
+#define MAYBE_CrossSiteImmediateLoadOnunloadCookie \
+    CrossSiteImmediateLoadOnunloadCookie
+#endif
+
 // Tests that onunload is run for cross-site requests to URLs that complete
 // without network loads (e.g., about:blank, data URLs).
 IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
-                       CrossSiteImmediateLoadOnunloadCookie) {
+                       MAYBE_CrossSiteImmediateLoadOnunloadCookie) {
   ASSERT_TRUE(test_server()->Start());
 
   GURL url = test_server()->GetURL("files/onunload_cookie.html");
@@ -375,7 +386,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
       browser(), failed_url, 2);
 
   EXPECT_NE(ASCIIToUTF16("set cookie on unload"),
-            browser()->GetSelectedWebContents()->GetTitle());
+            browser()->GetActiveWebContents()->GetTitle());
 
   // Check that the cookie was set, meaning that the onunload handler ran.
   EXPECT_EQ("onunloadCookie=foo", GetCookies(url));
@@ -391,7 +402,7 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
   // off the navigation, and wait to see that the tab loads.
   string16 expected_title16(ASCIIToUTF16("Title Of Awesomeness"));
   ui_test_utils::TitleWatcher title_watcher(
-      browser()->GetSelectedWebContents(), expected_title16);
+      browser()->GetActiveWebContents(), expected_title16);
 
   bool success;
   GURL test_url(test_server()->GetURL("files/title2.html"));
@@ -399,9 +410,35 @@ IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
       test_url.possibly_invalid_spec() + "';" +
       "window.domAutomationController.send(true);";
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      browser()->GetSelectedWebContents()->GetRenderViewHost(),
+      browser()->GetActiveWebContents()->GetRenderViewHost(),
       L"", ASCIIToWide(redirect_script), &success));
   EXPECT_EQ(expected_title16, title_watcher.WaitAndGetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,
+                       CrossSiteNavigationErrorPage2) {
+  ASSERT_TRUE(test_server()->Start());
+
+  GURL url(test_server()->GetURL("files/title2.html"));
+  CheckTitleTest(url, "Title Of Awesomeness", 1);
+
+  // Navigate to a new cross-site URL that results in an error page.
+  // TODO(creis): If this causes crashes or hangs, it might be for the same
+  // reason as ErrorPageTest::DNSError.  See bug 1199491 and
+  // http://crbug.com/22877.
+  GURL failed_url = URLRequestFailedJob::GetMockHttpUrl(
+      net::ERR_NAME_NOT_RESOLVED);
+
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+      browser(), failed_url, 2);
+  EXPECT_NE(ASCIIToUTF16("Title Of Awesomeness"),
+            browser()->GetActiveWebContents()->GetTitle());
+
+  // Repeat navigation.  We are testing that this completes.
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+      browser(), failed_url, 2);
+  EXPECT_NE(ASCIIToUTF16("Title Of Awesomeness"),
+            browser()->GetActiveWebContents()->GetTitle());
 }
 
 IN_PROC_BROWSER_TEST_F(ResourceDispatcherHostBrowserTest,

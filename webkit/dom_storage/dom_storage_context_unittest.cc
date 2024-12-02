@@ -57,11 +57,12 @@ class DomStorageContextTest : public testing::Test {
         new DomStorageContext(temp_dir_.path(), FilePath(), NULL, NULL);
     std::vector<DomStorageContext::UsageInfo> infos;
     context->GetUsageInfo(&infos, kDontIncludeFileInfo);
-    EXPECT_EQ(1u, infos.size());
+    ASSERT_EQ(1u, infos.size());
     EXPECT_EQ(origin, infos[0].origin);
   }
 
  protected:
+  MessageLoop message_loop_;
   ScopedTempDir temp_dir_;
   scoped_refptr<quota::MockSpecialStoragePolicy> storage_policy_;
   scoped_refptr<MockDomStorageTaskRunner> task_runner_;
@@ -78,7 +79,6 @@ TEST_F(DomStorageContextTest, Basics) {
   EXPECT_EQ(storage_policy_.get(), context_->special_storage_policy_.get());
   context_->PurgeMemory();
   context_->DeleteOrigin(GURL("http://chromium.org/"));
-  context_->DeleteDataModifiedSince(base::Time::Now());
   const int kFirstSessionStorageNamespaceId = 1;
   EXPECT_TRUE(context_->GetStorageNamespace(kLocalStorageNamespaceId));
   EXPECT_FALSE(context_->GetStorageNamespace(kFirstSessionStorageNamespaceId));
@@ -142,26 +142,7 @@ TEST_F(DomStorageContextTest, SessionOnly) {
   VerifySingleOriginRemains(kOrigin);
 }
 
-TEST_F(DomStorageContextTest, ClearLocalState) {
-  const GURL kProtectedOrigin("http://www.protected.com/");
-  storage_policy_->AddProtected(kProtectedOrigin);
-
-  // Store data for a normal and a protected origin, setup shutdown options
-  // to clear normal local state, then shutdown and let things flush.
-  NullableString16 old_value;
-  EXPECT_TRUE(context_->GetStorageNamespace(kLocalStorageNamespaceId)->
-      OpenStorageArea(kOrigin)->SetItem(kKey, kValue, &old_value));
-  EXPECT_TRUE(context_->GetStorageNamespace(kLocalStorageNamespaceId)->
-      OpenStorageArea(kProtectedOrigin)->SetItem(kKey, kValue, &old_value));
-  context_->SetClearLocalState(true);
-  context_->Shutdown();
-  context_ = NULL;
-  MessageLoop::current()->RunAllPending();
-
-  VerifySingleOriginRemains(kProtectedOrigin);
-}
-
-TEST_F(DomStorageContextTest, SaveSessionState) {
+TEST_F(DomStorageContextTest, SetForceKeepSessionState) {
   const GURL kSessionOnlyOrigin("http://www.sessiononly.com/");
   storage_policy_->AddSessionOnly(kSessionOnlyOrigin);
 
@@ -170,13 +151,41 @@ TEST_F(DomStorageContextTest, SaveSessionState) {
   NullableString16 old_value;
   EXPECT_TRUE(context_->GetStorageNamespace(kLocalStorageNamespaceId)->
       OpenStorageArea(kSessionOnlyOrigin)->SetItem(kKey, kValue, &old_value));
-  context_->SetClearLocalState(true);
-  context_->SaveSessionState();  // Should override clear behavior.
+  context_->SetForceKeepSessionState();  // Should override clear behavior.
   context_->Shutdown();
   context_ = NULL;
   MessageLoop::current()->RunAllPending();
 
   VerifySingleOriginRemains(kSessionOnlyOrigin);
+}
+
+TEST_F(DomStorageContextTest, PersistentIds) {
+  const int kFirstSessionStorageNamespaceId = 1;
+  const std::string kPersistentId = "persistent";
+  context_->CreateSessionNamespace(kFirstSessionStorageNamespaceId,
+                                   kPersistentId);
+  DomStorageNamespace* dom_namespace =
+      context_->GetStorageNamespace(kFirstSessionStorageNamespaceId);
+  ASSERT_TRUE(dom_namespace);
+  EXPECT_EQ(kPersistentId, dom_namespace->persistent_namespace_id());
+  // Verify that the areas inherit the persistent ID.
+  DomStorageArea* area = dom_namespace->OpenStorageArea(kOrigin);
+  EXPECT_EQ(kPersistentId, area->persistent_namespace_id_);
+
+  // Verify that the persistent IDs are handled correctly when cloning.
+  const int kClonedSessionStorageNamespaceId = 2;
+  const std::string kClonedPersistentId = "cloned";
+  context_->CloneSessionNamespace(kFirstSessionStorageNamespaceId,
+                                  kClonedSessionStorageNamespaceId,
+                                  kClonedPersistentId);
+  DomStorageNamespace* cloned_dom_namespace =
+      context_->GetStorageNamespace(kClonedSessionStorageNamespaceId);
+  ASSERT_TRUE(dom_namespace);
+  EXPECT_EQ(kClonedPersistentId,
+            cloned_dom_namespace->persistent_namespace_id());
+  // Verify that the areas inherit the persistent ID.
+  DomStorageArea* cloned_area = cloned_dom_namespace->OpenStorageArea(kOrigin);
+  EXPECT_EQ(kClonedPersistentId, cloned_area->persistent_namespace_id_);
 }
 
 }  // namespace dom_storage

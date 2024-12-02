@@ -22,42 +22,23 @@ var succeeded = false;
 var waitCount = 0;
 
 // Many thanks to Dennis for his StackOverflow answer: http://goo.gl/UDanx
+// Since amended to handle BlobBuilder deprecation.
 function string2ArrayBuffer(string, callback) {
-  var bb = new WebKitBlobBuilder();
-  bb.append(string);
+  var blob = new Blob([string]);
   var f = new FileReader();
   f.onload = function(e) {
     callback(e.target.result);
   };
-  f.readAsArrayBuffer(bb.getBlob());
+  f.readAsArrayBuffer(blob);
 }
 
 function arrayBuffer2String(buf, callback) {
-  var bb = new WebKitBlobBuilder();
-  bb.append(buf);
+  var blob = new Blob([new Uint8Array(buf)]);
   var f = new FileReader();
   f.onload = function(e) {
     callback(e.target.result);
   };
-  f.readAsText(bb.getBlob());
-}
-
-function arrayBufferToArrayOfLongs(arrayBuffer) {
-  var longs = [];
-  var arrayBufferView = new Uint8Array(arrayBuffer);
-  for (var i = 0; i < arrayBufferView.length; ++i) {
-    longs[i] = arrayBufferView[i];
-  }
-  return longs;
-}
-
-function arrayOfLongsToArrayBuffer(longs) {
-  var arrayBuffer = new ArrayBuffer(longs.length);
-  var arrayBufferView = new Uint8Array(arrayBuffer);
-  for (var i = 0; i < longs.length; ++i) {
-    arrayBufferView[i] = longs[i];
-  }
-  return arrayBuffer;
+  f.readAsText(blob);
 }
 
 var testSocketCreation = function() {
@@ -72,23 +53,21 @@ var testSocketCreation = function() {
     chrome.test.succeed();
   }
 
-  socket.create(protocol, {onEvent: function(e) {}}, onCreate);
+  socket.create(protocol, {}, onCreate);
 };
 
 function onDataRead(readInfo) {
-  if (readInfo.resultCode > 0 || readInfo.data.length > 0) {
-    chrome.test.assertEq(readInfo.resultCode, readInfo.data.length);
+  if (readInfo.resultCode > 0 || readInfo.data.byteLength > 0) {
+    chrome.test.assertEq(readInfo.resultCode, readInfo.data.byteLength);
   }
 
-  // TODO(miket): this isn't correct for multiple calls of onDataRead.
-  arrayBuffer2String(arrayOfLongsToArrayBuffer(readInfo.data), function(s) {
+  arrayBuffer2String(readInfo.data, function(s) {
       dataAsString = s;  // save this for error reporting
-      if (s.match(expectedResponsePattern)) {
-        succeeded = true;
-        chrome.test.succeed();
-      }
-    });
-  // Blocked. Wait for onEvent.
+      var match = !!s.match(expectedResponsePattern);
+      chrome.test.assertTrue(match, "Received data does not match.");
+      succeeded = true;
+      chrome.test.succeed();
+  });
 }
 
 function onWriteOrSendToComplete(writeInfo) {
@@ -99,21 +78,37 @@ function onWriteOrSendToComplete(writeInfo) {
     else
       socket.recvFrom(socketId, onDataRead);
   }
-  // Blocked. Wait for onEvent.
 }
 
-function onConnectOrBindComplete(connectResult) {
-  if (connectResult == 0) {
-    string2ArrayBuffer(request, function(arrayBuffer) {
-        var longs = arrayBufferToArrayOfLongs(arrayBuffer);
-        if (protocol == "tcp")
-          socket.write(socketId, longs, onWriteOrSendToComplete);
-        else
-          socket.sendTo(socketId, longs, address, port,
-              onWriteOrSendToComplete);
-      });
+function onSetKeepAlive(result) {
+  if (protocol == "tcp")
+    chrome.test.assertTrue(result, "setKeepAlive failed for TCP.");
+  else
+    chrome.test.assertFalse(result, "setKeepAlive did not fail for UDP.");
+
+  string2ArrayBuffer(request, function(arrayBuffer) {
+      if (protocol == "tcp")
+        socket.write(socketId, arrayBuffer, onWriteOrSendToComplete);
+      else
+        socket.sendTo(socketId, arrayBuffer, address, port,
+                      onWriteOrSendToComplete);
+    });
+}
+
+function onSetNoDelay(result) {
+  if (protocol == "tcp")
+    chrome.test.assertTrue(result, "setNoDelay failed for TCP.");
+  else
+    chrome.test.assertFalse(result, "setNoDelay did not fail for UDP.");
+  socket.setKeepAlive(socketId, true, 1000, onSetKeepAlive);
+}
+
+function onConnectOrBindComplete(result) {
+  chrome.test.assertEq(0, result,
+                       "Connect or bind failed with error " + result);
+  if (result == 0) {
+    socket.setNoDelay(socketId, true, onSetNoDelay);
   }
-  // Blocked. Wait for onEvent.
 }
 
 function onCreate(socketInfo) {
@@ -124,18 +119,6 @@ function onCreate(socketInfo) {
   else
     socket.bind(socketId, "0.0.0.0", 0, onConnectOrBindComplete);
 }
-
-function onEvent(socketEvent) {
-  if (socketEvent.type == "connectComplete") {
-    onConnectOrBindComplete(socketEvent.resultCode);
-  } else if (socketEvent.type == "dataRead") {
-    onDataRead({resultCode: socketEvent.resultCode, data: socketEvent.data});
-  } else if (socketEvent.type == "writeComplete") {
-    onWriteOnSendToComplete(socketEvent.resultCode);
-  } else {
-    console.log("Received unhandled socketEvent of type " + socketEvent.type);
-  }
-};
 
 function waitForBlockingOperation() {
   if (++waitCount < 10) {
@@ -153,7 +136,7 @@ var testSending = function() {
   waitCount = 0;
 
   setTimeout(waitForBlockingOperation, 1000);
-  socket.create(protocol, {onEvent: onEvent}, onCreate);
+  socket.create(protocol, {}, onCreate);
 };
 
 var onMessageReply = function(message) {

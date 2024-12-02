@@ -28,7 +28,7 @@
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -230,8 +230,9 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
   thumb_db_->AddIconMapping(url_row3.url(), favicon2);
 
   // Thumbnails for each URL. |thumbnail| takes ownership of decoded SkBitmap.
-  gfx::Image thumbnail(
+  scoped_ptr<SkBitmap> thumbnail_bitmap(
       gfx::JPEGCodec::Decode(kGoogleThumbnail, sizeof(kGoogleThumbnail)));
+  gfx::Image thumbnail(*thumbnail_bitmap);
   ThumbnailScore score(0.25, true, true, Time::Now());
 
   Time time;
@@ -382,8 +383,10 @@ void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row) {
   bool found_delete_notification = false;
   for (size_t i = 0; i < notifications_.size(); i++) {
     if (notifications_[i].first == chrome::NOTIFICATION_HISTORY_URLS_DELETED) {
-      const history::URLRows& rows(reinterpret_cast<URLsDeletedDetails*>(
-          notifications_[i].second)->rows);
+      URLsDeletedDetails* details = reinterpret_cast<URLsDeletedDetails*>(
+          notifications_[i].second);
+      EXPECT_FALSE(details->archived);
+      const history::URLRows& rows(details->rows);
       if (std::find_if(rows.begin(), rows.end(),
           history::URLRow::URLRowHasURL(row.url())) != rows.end()) {
         found_delete_notification = true;

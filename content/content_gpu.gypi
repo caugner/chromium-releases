@@ -6,7 +6,7 @@
   'dependencies': [
     '../base/base.gyp:base',
     '../skia/skia.gyp:skia',
-    '../ui/gfx/gl/gl.gyp:gl',
+    '../ui/gl/gl.gyp:gl',
   ],
   'sources': [
     'gpu/gpu_dx_diagnostics_win.cc',
@@ -38,6 +38,7 @@
       'dependencies': [
         '../third_party/angle/src/build_angle.gyp:libEGL',
         '../third_party/angle/src/build_angle.gyp:libGLESv2',
+        '../third_party/libxml/libxml.gyp:libxml',
       ],
       'link_settings': {
         'libraries': [

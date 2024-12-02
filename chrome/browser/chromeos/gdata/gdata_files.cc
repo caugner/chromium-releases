@@ -8,7 +8,6 @@
 #include "base/platform_file.h"
 #include "base/stringprintf.h"
 #include "base/string_util.h"
-#include "chrome/browser/chromeos/gdata/find_entry_delegate.h"
 #include "chrome/browser/chromeos/gdata/gdata.pb.h"
 #include "chrome/browser/chromeos/gdata/gdata_parser.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
@@ -19,26 +18,6 @@ namespace {
 
 const char kSlash[] = "/";
 const char kEscapedSlash[] = "\xE2\x88\x95";
-const FilePath::CharType kGDataRootDirectory[] = FILE_PATH_LITERAL("drive");
-
-std::string CacheSubDirectoryTypeToString(
-    GDataRootDirectory::CacheSubDirectoryType subdir) {
-  switch (subdir) {
-    case GDataRootDirectory::CACHE_TYPE_META: return "meta";
-    case GDataRootDirectory::CACHE_TYPE_PINNED: return "pinned";
-    case GDataRootDirectory::CACHE_TYPE_OUTGOING: return "outgoing";
-    case GDataRootDirectory::CACHE_TYPE_PERSISTENT: return "persistent";
-    case GDataRootDirectory::CACHE_TYPE_TMP: return "tmp";
-    case GDataRootDirectory::CACHE_TYPE_TMP_DOWNLOADS:
-      return "tmp_downloads";
-    case GDataRootDirectory::CACHE_TYPE_TMP_DOCUMENTS:
-      return "tmp_documents";
-    case GDataRootDirectory::NUM_CACHE_TYPES:
-      NOTREACHED();
-  }
-  NOTREACHED();
-  return "unknown subdir";
-}
 
 // Extracts resource_id out of edit url.
 std::string ExtractResourceId(const GURL& url) {
@@ -168,6 +147,12 @@ GDataEntry* GDataFile::FromDocumentEntry(GDataDirectory* parent,
   if (doc->is_file()) {
     file->file_info_.size = doc->file_size();
     file->file_md5_ = doc->file_md5();
+
+    // The resumable-edit-media link should only be present for regualar
+    // files as hosted documents are not uploadable.
+    const Link* upload_link = doc->GetLinkByType(Link::RESUMABLE_EDIT_MEDIA);
+    if (upload_link)
+      file->upload_url_ = upload_link->href();
   } else {
     // ... a hosted document.
     // Attach .g<something> extension to hosted documents so we can special
@@ -386,7 +371,11 @@ bool GDataDirectory::RemoveChild(GDataEntry* entry) {
 }
 
 void GDataDirectory::RemoveChildren() {
-  // Remove child files first.
+  RemoveChildFiles();
+  RemoveChildDirectories();
+}
+
+void GDataDirectory::RemoveChildFiles() {
   for (GDataFileCollection::const_iterator iter = child_files_.begin();
        iter != child_files_.end(); ++iter) {
     if (root_)
@@ -394,7 +383,9 @@ void GDataDirectory::RemoveChildren() {
   }
   STLDeleteValues(&child_files_);
   child_files_.clear();
+}
 
+void GDataDirectory::RemoveChildDirectories() {
   for (GDataDirectoryCollection::iterator iter = child_directories_.begin();
        iter != child_directories_.end(); ++iter) {
     GDataDirectory* dir = iter->second;
@@ -407,37 +398,25 @@ void GDataDirectory::RemoveChildren() {
   child_directories_.clear();
 }
 
-// GDataRootDirectory::CacheEntry struct  implementation.
-
-std::string GDataRootDirectory::CacheEntry::ToString() const {
-  std::vector<std::string> cache_states;
-  if (GDataFile::IsCachePresent(cache_state))
-    cache_states.push_back("present");
-  if (GDataFile::IsCachePinned(cache_state))
-    cache_states.push_back("pinned");
-  if (GDataFile::IsCacheDirty(cache_state))
-    cache_states.push_back("dirty");
-
-  return base::StringPrintf("md5=%s, subdir=%s, cache_state=%s",
-                            md5.c_str(),
-                            CacheSubDirectoryTypeToString(sub_dir_type).c_str(),
-                            JoinString(cache_states, ',').c_str());
-}
-
 // GDataRootDirectory class implementation.
 
 GDataRootDirectory::GDataRootDirectory()
     : ALLOW_THIS_IN_INITIALIZER_LIST(GDataDirectory(NULL, this)),
-      fake_search_directory_(new GDataDirectory(NULL, NULL)),
       largest_changestamp_(0), serialized_size_(0) {
   title_ = kGDataRootDirectory;
   SetFileNameFromTitle();
+  resource_id_ = kGDataRootDirectoryResourceId;
+  // Add self to the map so the root directory can be looked up by the
+  // resource ID.
+  AddEntryToResourceMap(this);
 }
 
 GDataRootDirectory::~GDataRootDirectory() {
-  STLDeleteValues(&cache_map_);
-  cache_map_.clear();
-
+  // Note that children have a reference to root_,
+  // so we need to delete them here.
+  RemoveChildren();
+  RemoveEntryFromResourceMap(this);
+  DCHECK(resource_map_.empty());
   resource_map_.clear();
 }
 
@@ -456,59 +435,10 @@ void GDataRootDirectory::RemoveEntryFromResourceMap(GDataEntry* entry) {
   resource_map_.erase(entry->resource_id());
 }
 
-bool GDataRootDirectory::ModifyFindEntryParamsForSearchPath(
-    const FilePath& file_path,
-    std::vector<FilePath::StringType>* components,
-    GDataDirectory** current_dir,
-    FilePath* directory_path) {
-  DCHECK(current_dir);
-  DCHECK(components);
-  // |components| should contain at least 4 members.
-  // "drive", ".search", query_name and query_result_name. Additionally,
-  // if query result is a directory, it may contain subdirectories and files,
-  // in which case the number of components may be bigger than 4.
-  DCHECK_GT(components->size(), 3u);
-  DCHECK(components->at(0) == "drive" && components->at(1) == ".search");
-
-  FilePath::StringType resource_id;
-  FilePath::StringType file_name;
-  if (!util::ParseSearchFileName((*components)[3], &resource_id, &file_name))
-    return false;
-
-  GDataEntry* file_entry = GetEntryByResourceId(resource_id);
-  if (!file_entry)
-    return false;
-
-  // We should continue search from the entry's parent dir (|current_dir|), so
-  // we have to ammend |components| to be relative to the |current_dir|
-  // (including the dir itself).
-  // We continue the search with the entry's parent instead of the entry itself
-  // to make sure that the returned file really has the name |file_name|. Note
-  // that we may end up with finding an entry even if entry with |resource_id|
-  // has a name different from |file_name|. This is intended, and enables us to
-  // test that new file name is unique (in file manager) when renaming the
-  // entry.
-  DCHECK(file_entry->parent());
-  *current_dir = file_entry->parent();
-
-  if ((*current_dir)->parent()) {
-    *directory_path = (*current_dir)->parent()->GetFilePath();
-  } else {
-    *directory_path = FilePath();
-  }
-
-  // Remove "drive/.search" from path.
-  components->erase(components->begin(), components->begin() + 2);
-  (*components)[0] = (*current_dir)->file_name();
-  (*components)[1] = file_name;
-  return true;
-}
-
-void GDataRootDirectory::FindEntryByPath(
-    const FilePath& file_path,
-    FindEntryDelegate* delegate) {
+void GDataRootDirectory::FindEntryByPath(const FilePath& file_path,
+                                         const FindEntryCallback& callback) {
   // GDataFileSystem has already locked.
-  DCHECK(delegate);
+  DCHECK(!callback.is_null());
 
   std::vector<FilePath::StringType> components;
   file_path.GetComponents(&components);
@@ -516,43 +446,22 @@ void GDataRootDirectory::FindEntryByPath(
   GDataDirectory* current_dir = this;
   FilePath directory_path;
 
-  util::GDataSearchPathType path_type =
-      util::GetSearchPathStatusForPathComponents(components);
-
-  if (path_type == util::GDATA_SEARCH_PATH_ROOT ||
-      path_type == util::GDATA_SEARCH_PATH_QUERY) {
-    delegate->OnDone(base::PLATFORM_FILE_OK, file_path.DirName(),
-                     fake_search_directory_.get());
-    return;
-  }
-
-  // If the path is under search path, we have to modify paremeters for finding
-  // the entry.
-  if (path_type != util::GDATA_SEARCH_PATH_INVALID) {
-    if (!ModifyFindEntryParamsForSearchPath(file_path,
-             &components, &current_dir, &directory_path)) {
-      delegate->OnDone(base::PLATFORM_FILE_ERROR_NOT_FOUND, FilePath(), NULL);
-      return;
-    }
-  }
-
   for (size_t i = 0; i < components.size() && current_dir; i++) {
     directory_path = directory_path.Append(current_dir->file_name());
 
     // Last element must match, if not last then it must be a directory.
     if (i == components.size() - 1) {
-      if (current_dir->file_name() == components[i]) {
-        delegate->OnDone(base::PLATFORM_FILE_OK, directory_path, current_dir);
-      } else {
-        delegate->OnDone(base::PLATFORM_FILE_ERROR_NOT_FOUND, FilePath(), NULL);
-      }
+      if (current_dir->file_name() == components[i])
+        callback.Run(base::PLATFORM_FILE_OK, current_dir);
+      else
+        callback.Run(base::PLATFORM_FILE_ERROR_NOT_FOUND, NULL);
       return;
     }
 
     // Not the last part of the path, search for the next segment.
     GDataEntry* entry = current_dir->FindChild(components[i + 1]);
     if (!entry) {
-      delegate->OnDone(base::PLATFORM_FILE_ERROR_NOT_FOUND, FilePath(), NULL);
+      callback.Run(base::PLATFORM_FILE_ERROR_NOT_FOUND, NULL);
       return;
     }
 
@@ -561,18 +470,30 @@ void GDataRootDirectory::FindEntryByPath(
       // Found directory, continue traversal.
       current_dir = entry->AsGDataDirectory();
     } else {
-      if ((i + 1) == (components.size() - 1)) {
-        delegate->OnDone(base::PLATFORM_FILE_OK,
-                         directory_path,
-                         entry);
-      } else {
-        delegate->OnDone(base::PLATFORM_FILE_ERROR_NOT_FOUND, FilePath(), NULL);
-      }
+      if ((i + 1) == (components.size() - 1))
+        callback.Run(base::PLATFORM_FILE_OK, entry);
+      else
+        callback.Run(base::PLATFORM_FILE_ERROR_NOT_FOUND, NULL);
 
       return;
     }
   }
-  delegate->OnDone(base::PLATFORM_FILE_ERROR_NOT_FOUND, FilePath(), NULL);
+  callback.Run(base::PLATFORM_FILE_ERROR_NOT_FOUND, NULL);
+}
+
+void GDataRootDirectory::RefreshFile(scoped_ptr<GDataFile> fresh_file) {
+  DCHECK(fresh_file.get());
+
+  GDataEntry* old_entry = GetEntryByResourceId(fresh_file->resource_id());
+  GDataDirectory* entry_parent = old_entry ? old_entry->parent() : NULL;
+
+  if (entry_parent) {
+    DCHECK_EQ(fresh_file->resource_id(), old_entry->resource_id());
+    DCHECK(old_entry->AsGDataFile());
+
+    entry_parent->RemoveEntry(old_entry);
+    entry_parent->AddEntry(fresh_file.release());
+  }
 }
 
 GDataEntry* GDataRootDirectory::GetEntryByResourceId(
@@ -582,103 +503,6 @@ GDataEntry* GDataRootDirectory::GetEntryByResourceId(
   if (iter == resource_map_.end())
     return NULL;
   return iter->second;
-}
-
-void GDataRootDirectory::SetCacheMap(const CacheMap& new_cache_map)  {
-  // GDataFileSystem has already locked.
-
-  // Delete everything in cache map before copying.
-  STLDeleteValues(&cache_map_);
-  cache_map_ = new_cache_map;
-}
-
-void GDataRootDirectory::UpdateCacheMap(const std::string& resource_id,
-                                        const std::string& md5,
-                                        CacheSubDirectoryType subdir,
-                                        int cache_state) {
-  // GDataFileSystem has already locked.
-
-  CacheMap::iterator iter = cache_map_.find(resource_id);
-  if (iter == cache_map_.end()) {  // New resource, create new entry.
-    // Makes no sense to create new entry if cache state is NONE.
-    DCHECK(cache_state != GDataFile::CACHE_STATE_NONE);
-    if (cache_state != GDataFile::CACHE_STATE_NONE) {
-      CacheEntry* entry = new CacheEntry(md5, subdir, cache_state);
-      cache_map_.insert(std::make_pair(resource_id, entry));
-      DVLOG(1) << "Added res_id=" << resource_id
-               << ", " << entry->ToString();
-    }
-  } else {  // Resource exists.
-    CacheEntry* entry = iter->second;
-    // If cache state is NONE, delete entry from cache map.
-    if (cache_state == GDataFile::CACHE_STATE_NONE) {
-      DVLOG(1) << "Deleting res_id=" << resource_id
-               << ", " << entry->ToString();
-      delete entry;
-      cache_map_.erase(iter);
-    } else {  // Otherwise, update entry in cache map.
-      entry->md5 = md5;
-      entry->sub_dir_type = subdir;
-      entry->cache_state = cache_state;
-      DVLOG(1) << "Updated res_id=" << resource_id
-               << ", " << entry->ToString();
-    }
-  }
-}
-
-void GDataRootDirectory::RemoveFromCacheMap(const std::string& resource_id) {
-  // GDataFileSystem has already locked.
-
-  CacheMap::iterator iter = cache_map_.find(resource_id);
-  if (iter != cache_map_.end()) {
-    // Delete the CacheEntry and remove it from the map.
-    delete iter->second;
-    cache_map_.erase(iter);
-  }
-}
-
-GDataRootDirectory::CacheEntry* GDataRootDirectory::GetCacheEntry(
-    const std::string& resource_id,
-    const std::string& md5) {
-  // GDataFileSystem has already locked.
-
-  CacheMap::iterator iter = cache_map_.find(resource_id);
-  if (iter == cache_map_.end()) {
-    DVLOG(1) << "Can't find " << resource_id << " in cache map";
-    return NULL;
-  }
-
-  CacheEntry* entry = iter->second;
-
-  // If entry is not dirty, it's only valid if matches with non-empty |md5|.
-  // If entry is dirty, its md5 may have been replaced by "local" during cache
-  // initialization, so we don't compare md5.
-  if (!entry->IsDirty() && !md5.empty() && entry->md5 != md5) {
-    DVLOG(1) << "Non-matching md5: want=" << md5
-             << ", found=[res_id=" << resource_id
-             << ", " << entry->ToString()
-             << "]";
-    return NULL;
-  }
-
-  DVLOG(1) << "Found entry for res_id=" << resource_id
-           << ", " << entry->ToString();
-
-  return entry;
-}
-
-void GDataRootDirectory::RemoveTemporaryFilesFromCacheMap() {
-  CacheMap::iterator iter = cache_map_.begin();
-  while (iter != cache_map_.end()) {
-    CacheEntry* entry = iter->second;
-    if (entry->sub_dir_type == CACHE_TYPE_TMP) {
-      delete entry;
-      // Post-increment the iterator to avoid iterator invalidation.
-      cache_map_.erase(iter++);
-    } else {
-      ++iter;
-    }
-  }
 }
 
 // Convert to/from proto.
@@ -710,7 +534,7 @@ void GDataEntry::ConvertPlatformFileInfoToProto(
   proto->set_creation_time(file_info.creation_time.ToInternalValue());
 }
 
-void GDataEntry::FromProto(const GDataEntryProto& proto) {
+bool GDataEntry::FromProto(const GDataEntryProto& proto) {
   ConvertProtoToPlatformFileInfo(proto.file_info(), &file_info_);
 
   // Don't copy from proto.file_name() as file_name_ is computed in
@@ -721,6 +545,8 @@ void GDataEntry::FromProto(const GDataEntryProto& proto) {
   edit_url_ = GURL(proto.edit_url());
   content_url_ = GURL(proto.content_url());
   SetFileNameFromTitle();
+
+  return true;
 }
 
 void GDataEntry::ToProto(GDataEntryProto* proto) const {
@@ -736,9 +562,12 @@ void GDataEntry::ToProto(GDataEntryProto* proto) const {
   proto->set_content_url(content_url_.spec());
 }
 
-void GDataFile::FromProto(const GDataFileProto& proto) {
+bool GDataFile::FromProto(const GDataFileProto& proto) {
   DCHECK(!proto.gdata_entry().file_info().is_directory());
-  GDataEntry::FromProto(proto.gdata_entry());
+
+  if (!GDataEntry::FromProto(proto.gdata_entry()))
+    return false;
+
   kind_ = DocumentEntry::EntryKind(proto.kind());
   thumbnail_url_ = GURL(proto.thumbnail_url());
   alternate_url_ = GURL(proto.alternate_url());
@@ -747,7 +576,17 @@ void GDataFile::FromProto(const GDataFileProto& proto) {
   id_ = proto.id();
   file_md5_ = proto.file_md5();
   document_extension_ = proto.document_extension();
+  // Reject older protobuf that does not contain the upload URL.  This URL is
+  // necessary for uploading dirty files (ex. updating existing files).
+  if (!proto.has_upload_url()) {
+    LOG(ERROR) << "Incompatible proto detected (no upload URL): "
+               << proto.gdata_entry().title();
+    return false;
+  }
+  upload_url_ = GURL(proto.upload_url());
   is_hosted_document_ = proto.is_hosted_document();
+
+  return true;
 }
 
 void GDataFile::ToProto(GDataFileProto* proto) const {
@@ -761,33 +600,48 @@ void GDataFile::ToProto(GDataFileProto* proto) const {
   proto->set_id(id_);
   proto->set_file_md5(file_md5_);
   proto->set_document_extension(document_extension_);
+  // The upload URL must be stored even if it's empty, as this is used to
+  // detect older protobuf. See FromProto() above.
+  proto->set_upload_url(upload_url_.spec());
   proto->set_is_hosted_document(is_hosted_document_);
 }
 
-void GDataDirectory::FromProto(const GDataDirectoryProto& proto) {
+bool GDataDirectory::FromProto(const GDataDirectoryProto& proto) {
   DCHECK(proto.gdata_entry().file_info().is_directory());
-  GDataEntry::FromProto(proto.gdata_entry());
-  refresh_time_ = base::Time::FromInternalValue(proto.refresh_time());
-  start_feed_url_ = GURL(proto.start_feed_url());
-  next_feed_url_ = GURL(proto.next_feed_url());
-  upload_url_ = GURL(proto.upload_url());
-  origin_ = ContentOrigin(proto.origin());
+
   for (int i = 0; i < proto.child_files_size(); ++i) {
     scoped_ptr<GDataFile> file(new GDataFile(this, root_));
-    file->FromProto(proto.child_files(i));
+    if (!file->FromProto(proto.child_files(i))) {
+      RemoveChildren();
+      return false;
+    }
     AddEntry(file.release());
   }
   for (int i = 0; i < proto.child_directories_size(); ++i) {
     scoped_ptr<GDataDirectory> dir(new GDataDirectory(this, root_));
-    dir->FromProto(proto.child_directories(i));
+    if (!dir->FromProto(proto.child_directories(i))) {
+      RemoveChildren();
+      return false;
+    }
     AddEntry(dir.release());
   }
+
+  // The states of the directory should be updated after children are
+  // handled successfully, so that incomplete states are not left.
+  if (!GDataEntry::FromProto(proto.gdata_entry()))
+    return false;
+
+  start_feed_url_ = GURL(proto.start_feed_url());
+  next_feed_url_ = GURL(proto.next_feed_url());
+  upload_url_ = GURL(proto.upload_url());
+  origin_ = ContentOrigin(proto.origin());
+
+  return true;
 }
 
 void GDataDirectory::ToProto(GDataDirectoryProto* proto) const {
   GDataEntry::ToProto(proto->mutable_gdata_entry());
   DCHECK(proto->gdata_entry().file_info().is_directory());
-  proto->set_refresh_time(refresh_time_.ToInternalValue());
   proto->set_start_feed_url(start_feed_url_.spec());
   proto->set_next_feed_url(next_feed_url_.spec());
   proto->set_upload_url(upload_url_.spec());
@@ -805,10 +659,32 @@ void GDataDirectory::ToProto(GDataDirectoryProto* proto) const {
   }
 }
 
-void GDataRootDirectory::FromProto(const GDataRootDirectoryProto& proto) {
+bool GDataRootDirectory::FromProto(const GDataRootDirectoryProto& proto) {
+  const GDataEntryProto& entry_proto =
+      proto.gdata_directory().gdata_entry();
+  // The title field for the root directory was originally empty, then
+  // changed to "gdata", then changed to "drive". Discard the proto data if
+  // the older formats are detected. See crbug.com/128133 for details.
+  if (entry_proto.title() != "drive") {
+    LOG(ERROR) << "Incompatible proto detected (bad title): "
+               << entry_proto.title();
+    return false;
+  }
+  // The title field for the root directory was originally empty. Discard
+  // the proto data if the older format is detected.
+  if (entry_proto.resource_id() != kGDataRootDirectoryResourceId) {
+    LOG(ERROR) << "Incompatible proto detected (bad resource ID): "
+               << entry_proto.resource_id();
+    return false;
+  }
+
+  if (!GDataDirectory::FromProto(proto.gdata_directory()))
+    return false;
+
   root_ = this;
-  GDataDirectory::FromProto(proto.gdata_directory());
   largest_changestamp_ = proto.largest_changestamp();
+
+  return true;
 }
 
 void GDataRootDirectory::ToProto(GDataRootDirectoryProto* proto) const {
@@ -821,14 +697,14 @@ void GDataEntry::SerializeToString(std::string* serialized_proto) const {
   const GDataDirectory* dir = AsGDataDirectoryConst();
 
   if (file) {
-    scoped_ptr<GDataFileProto> proto(new GDataFileProto());
-    file->ToProto(proto.get());
-    const bool ok = proto->SerializeToString(serialized_proto);
+    GDataFileProto file_proto;
+    file->ToProto(&file_proto);
+    const bool ok = file_proto.SerializeToString(serialized_proto);
     DCHECK(ok);
   } else if (dir) {
-    scoped_ptr<GDataDirectoryProto> proto(new GDataDirectoryProto());
-    dir->ToProto(proto.get());
-    const bool ok = proto->SerializeToString(serialized_proto);
+    GDataDirectoryProto dir_proto;
+    dir->ToProto(&dir_proto);
+    const bool ok = dir_proto.SerializeToString(serialized_proto);
     DCHECK(ok);
   }
 }
@@ -839,20 +715,22 @@ scoped_ptr<GDataEntry> GDataEntry::FromProtoString(
   // First try to parse as GDataDirectoryProto. Note that this can succeed for
   // a serialized_proto that's really a GDataFileProto - we have to check
   // is_directory to be sure.
-  scoped_ptr<GDataDirectoryProto> dir_proto(new GDataDirectoryProto());
-  bool ok = dir_proto->ParseFromString(serialized_proto);
-  if (ok && dir_proto->gdata_entry().file_info().is_directory()) {
+  GDataDirectoryProto dir_proto;
+  bool ok = dir_proto.ParseFromString(serialized_proto);
+  if (ok && dir_proto.gdata_entry().file_info().is_directory()) {
     GDataDirectory* dir = new GDataDirectory(NULL, NULL);
-    dir->FromProto(*dir_proto);
+    if (!dir->FromProto(dir_proto))
+      return scoped_ptr<GDataEntry>(NULL);
     return scoped_ptr<GDataEntry>(dir);
   }
 
-  scoped_ptr<GDataFileProto> file_proto(new GDataFileProto());
-  ok = file_proto->ParseFromString(serialized_proto);
+  GDataFileProto file_proto;
+  ok = file_proto.ParseFromString(serialized_proto);
   if (ok) {
-    DCHECK(!file_proto->gdata_entry().file_info().is_directory());
+    DCHECK(!file_proto.gdata_entry().file_info().is_directory());
     GDataFile* file = new GDataFile(NULL, NULL);
-    file->FromProto(*file_proto);
+    if (!file->FromProto(file_proto))
+      return scoped_ptr<GDataEntry>(NULL);
     return scoped_ptr<GDataEntry>(file);
   }
   return scoped_ptr<GDataEntry>(NULL);
@@ -860,23 +738,22 @@ scoped_ptr<GDataEntry> GDataEntry::FromProtoString(
 
 void GDataRootDirectory::SerializeToString(
     std::string* serialized_proto) const {
-  scoped_ptr<GDataRootDirectoryProto> proto(
-      new GDataRootDirectoryProto());
-  ToProto(proto.get());
-  const bool ok = proto->SerializeToString(serialized_proto);
+  GDataRootDirectoryProto proto;
+  ToProto(&proto);
+  const bool ok = proto.SerializeToString(serialized_proto);
   DCHECK(ok);
 }
 
 bool GDataRootDirectory::ParseFromString(const std::string& serialized_proto) {
-  scoped_ptr<GDataRootDirectoryProto> proto(
-      new GDataRootDirectoryProto());
-  bool ok = proto->ParseFromString(serialized_proto);
-  if (ok) {
-    FromProto(*proto.get());
-    set_origin(FROM_CACHE);
-    set_refresh_time(base::Time::Now());
-  }
-  return ok;
+  GDataRootDirectoryProto proto;
+  if (!proto.ParseFromString(serialized_proto))
+    return false;
+
+  if (!FromProto(proto))
+    return false;
+
+  set_origin(FROM_CACHE);
+  return true;
 }
 
 }  // namespace gdata

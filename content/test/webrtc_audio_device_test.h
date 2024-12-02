@@ -13,7 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
-#include "content/renderer/mock_content_renderer_client.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "media/base/channel_layout.h"
 #include "ipc/ipc_channel.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -164,14 +164,14 @@ class WebRTCAudioDeviceTest
 
   scoped_ptr<ReplaceContentClientRenderer> saved_content_renderer_;
   MessageLoopForUI message_loop_;
-  content::MockContentRendererClient mock_content_renderer_client_;
+  content::ContentRendererClient content_renderer_client_;
   RenderThreadImpl* render_thread_;  // Owned by mock_process_.
   scoped_ptr<WebRTCMockRenderProcess> mock_process_;
   scoped_ptr<MockMediaObserver> media_observer_;
   scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
   scoped_ptr<media::AudioManager> audio_manager_;
-  scoped_ptr<content::MockResourceContext> resource_context_;
-  scoped_refptr<net::URLRequestContext> test_request_context_;
+  scoped_ptr<net::URLRequestContext> test_request_context_;
+  scoped_ptr<content::ResourceContext> resource_context_;
   scoped_ptr<IPC::Channel> channel_;
   scoped_refptr<AudioRendererHost> audio_render_host_;
   scoped_refptr<AudioInputRendererHost> audio_input_renderer_host_;
@@ -188,6 +188,10 @@ class WebRTCAudioDeviceTest
   // These are initialized when we set up our IO thread.
   bool has_input_devices_;
   bool has_output_devices_;
+
+  // The previous state for whether sandbox support was enabled in
+  // RenderViewWebKitPlatformSupportImpl.
+  bool sandbox_was_enabled_;
 };
 
 // A very basic implementation of webrtc::Transport that acts as a transport

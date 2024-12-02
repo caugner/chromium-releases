@@ -29,14 +29,10 @@
           # Whether or not we are building the Ash shell.
           'use_ash%': 0,
 
-          # Enable DIP (Density Independent Pixels) support.
-          'enable_dip%': 0,
-
           # Use OpenSSL instead of NSS. Under development: see http://crbug.com/62803
           'use_openssl%': 0,
 
-          # Disable Virtual keyboard support by default.
-          'use_virtual_keyboard%': 0,
+          'use_ibus%': 0,
 
           # Disable viewport meta tag by default.
           'enable_viewport%': 0,
@@ -47,21 +43,32 @@
           # Enable touch optimized art assets and metrics.
           'enable_touch_ui%': 0,
 
-          # Enable inclusion of touch-optimized resources.
-          # TODO(joi): Rename to enable_touch_assets.
-          'enable_metro%': 0,
+          # Is this change part of the android upstream bringup?
+          # Allows us to *temporarily* disable certain things for
+          # staging.  Only set to 1 in a GYP_DEFINES.
+          'android_upstream_bringup%': 0,
+
+          # Override buildtype to select the desired build flavor.
+          # Dev - everyday build for development/testing
+          # Official - release build (generally implies additional processing)
+          # TODO(mmoss) Once 'buildtype' is fully supported (e.g. Windows gyp
+          # conversion is done), some of the things which are now controlled by
+          # 'branding', such as symbol generation, will need to be refactored
+          # based on 'buildtype' (i.e. we don't care about saving symbols for
+          # non-Official # builds).
+          'buildtype%': 'Dev',
         },
         # Copy conditionally-set variables out one scope.
         'chromeos%': '<(chromeos)',
         'use_aura%': '<(use_aura)',
         'use_ash%': '<(use_ash)',
-        'enable_dip%': '<(enable_dip)',
         'use_openssl%': '<(use_openssl)',
-        'use_virtual_keyboard%': '<(use_virtual_keyboard)',
+        'use_ibus%': '<(use_ibus)',
         'enable_viewport%': '<(enable_viewport)',
         'enable_hidpi%': '<(enable_hidpi)',
         'enable_touch_ui%': '<(enable_touch_ui)',
-        'enable_metro%': '<(enable_metro)',
+        'android_upstream_bringup%': '<(android_upstream_bringup)',
+        'buildtype%': '<(buildtype)',
 
         # Compute the architecture that we're building on.
         'conditions': [
@@ -85,7 +92,7 @@
           # imply using ash. This rule should be removed for the future when
           # both Linux and Windows are using the aura windows without the ash
           # interface.
-          ['use_aura==1 and ((OS=="linux" and chromeos==0) or OS=="win")', {
+          ['use_aura==1 and OS=="win"', {
             'use_ash%': 1,
           }],
           ['use_ash==1', {
@@ -105,7 +112,7 @@
           }],
 
           # Enable touch UI on Metro and Chrome OS.
-          ['enable_metro==1 or chromeos==1', {
+          ['OS=="win" or chromeos==1', {
             'enable_touch_ui%': 1,
           }],
         ],
@@ -117,13 +124,12 @@
       'toolkit_views%': '<(toolkit_views)',
       'use_aura%': '<(use_aura)',
       'use_ash%': '<(use_ash)',
-      'enable_dip%': '<(enable_dip)',
       'use_openssl%': '<(use_openssl)',
-      'use_virtual_keyboard%': '<(use_virtual_keyboard)',
+      'use_ibus%': '<(use_ibus)',
       'enable_viewport%': '<(enable_viewport)',
       'enable_hidpi%': '<(enable_hidpi)',
       'enable_touch_ui%': '<(enable_touch_ui)',
-      'enable_metro%': '<(enable_metro)',
+      'android_upstream_bringup%': '<(android_upstream_bringup)',
 
       # We used to provide a variable for changing how libraries were built.
       # This variable remains until we can clean up all the users.
@@ -135,15 +141,7 @@
       # Override branding to select the desired branding flavor.
       'branding%': 'Chromium',
 
-      # Override buildtype to select the desired build flavor.
-      # Dev - everyday build for development/testing
-      # Official - release build (generally implies additional processing)
-      # TODO(mmoss) Once 'buildtype' is fully supported (e.g. Windows gyp
-      # conversion is done), some of the things which are now controlled by
-      # 'branding', such as symbol generation, will need to be refactored based
-      # on 'buildtype' (i.e. we don't care about saving symbols for non-Official
-      # builds).
-      'buildtype%': 'Dev',
+      'buildtype%': '<(buildtype)',
 
       # Default architecture we're building for is the architecture we're
       # building on.
@@ -163,9 +161,6 @@
 
       # Disable file manager component extension by default.
       'file_manager_extension%': 0,
-
-      # Disable WebUI TaskManager by default.
-      'webui_task_manager%': 0,
 
       # Python version.
       'python_ver%': '2.6',
@@ -205,10 +200,6 @@
       # Remoting compilation is enabled by default. Set to 0 to disable.
       'remoting%': 1,
 
-      # P2P APIs are compiled in by default. Set to 0 to disable.
-      # Also note that this should be enabled for remoting to compile.
-      'p2p_apis%': 1,
-
       # Configuration policy is enabled by default. Set to 0 to disable.
       'configuration_policy%': 1,
 
@@ -232,6 +223,10 @@
       # See https://sites.google.com/a/chromium.org/dev/developers/testing/addresssanitizer
       'asan%': 0,
 
+      # Set to true to instrument the code with function call logger.
+      # See src/third_party/cygprofile/cyg-profile.cc for details.
+      'order_profiling%': 0,
+
       # Use the provided profiled order file to link Chrome image with it.
       # This makes Chrome faster by better using CPU cache when executing code.
       # This is known as PGO (profile guided optimization).
@@ -245,15 +240,17 @@
       # Whether one-click signin is enabled or not.
       'enable_one_click_signin%': 0,
 
-      # Enable navigator.registerProtocolHandler and supporting UI.
-      'enable_register_protocol_handler%': 1,
-
-      # Enable Web Intents support in WebKit, dispatching of intents,
-      # and extensions Web Intents support.
+      # Enable Web Intents support in WebKit.
       'enable_web_intents%': 1,
 
       # Enable Chrome browser extensions
       'enable_extensions%': 1,
+
+      # Enable browser automation.
+      'enable_automation%': 1,
+
+      # Enable printing support and UI.
+      'enable_printing%': 1,
 
       # Enable Web Intents web content registration via HTML element
       # and WebUI managing such registrations.
@@ -266,6 +263,11 @@
       # thread. Set to 1 to turn on experimental support for out-of-process
       # plugins to make call of the main thread.
       'enable_pepper_threading%': 0,
+
+      # Include the PPAPI IPC proxy for NaCl. This is a work-in-progress; this
+      # allows us to build this feature locally without it affecting others
+      # working in affected subsystems like base and ipc.
+      'build_ppapi_ipc_proxy_untrusted%': 0,
 
       # Enables use of the session service, which is enabled by default.
       # Support for disabling depends on the platform.
@@ -339,7 +341,10 @@
       # TODO(maruel): Converted the default from 'check' to 'noop' so work can
       # be done while the builders are being reconfigured to check out test data
       # files.
-      'tests_run%': 'noop',
+      'test_isolation_mode%': 'noop',
+      # It must not be '<(PRODUCT_DIR)' alone, the '/' is necessary otherwise
+      # gyp will remove duplicate flags, causing isolate.py to be confused.
+      'test_isolation_outdir%': '<(PRODUCT_DIR)/isolate',
 
        # Force rlz to use chrome's networking stack.
       'force_rlz_use_chrome_net%': 1,
@@ -423,9 +428,8 @@
           'file_manager_extension%': 0,
         }],
 
-        # Enable WebUI TaskManager on Chrome OS or Aura.
-        ['chromeos==1 or use_aura==1', {
-          'webui_task_manager%': 1,
+        ['OS=="win" or OS=="mac" or (OS=="linux" and use_aura==0)', {	
+          'enable_one_click_signin%': 1,	
         }],
 
         ['OS=="android"', {
@@ -442,7 +446,7 @@
         }],
 
         # Turn precompiled headers on by default for VS 2010.
-        ['OS=="win" and MSVS_VERSION=="2010"', {
+        ['OS=="win" and MSVS_VERSION=="2010" and buildtype!="Official"', {
           'chromium_win_pch%': 1
         }],
 
@@ -475,11 +479,10 @@
           'linux_use_gold_flags%': 0,
         }],
 
-        # Enable automation on platforms other than Android.
         ['OS=="android"', {
-          'enable_automation%': 0,
+          'enable_captive_portal_detection%': 0,
         }, {
-          'enable_automation%': 1,
+          'enable_captive_portal_detection%': 1,
         }],
 
         # Enable Skia UI text drawing incrementally on different platforms.
@@ -487,7 +490,7 @@
         #
         # On Aura, this allows per-tile painting to be used in the browser
         # compositor.
-        ['use_aura==1 or OS=="win"', {
+        ['OS!="mac" and OS!="android"', {
           'use_canvas_skia%': 1,
         }],
       ],
@@ -503,8 +506,8 @@
     'ui_compositor_image_transport%': '<(ui_compositor_image_transport)',
     'use_aura%': '<(use_aura)',
     'use_ash%': '<(use_ash)',
-    'enable_dip%': '<(enable_dip)',
     'use_openssl%': '<(use_openssl)',
+    'use_ibus%': '<(use_ibus)',
     'use_nss%': '<(use_nss)',
     'os_bsd%': '<(os_bsd)',
     'os_posix%': '<(os_posix)',
@@ -515,15 +518,13 @@
     'use_gnome_keyring%': '<(use_gnome_keyring)',
     'linux_fpic%': '<(linux_fpic)',
     'enable_pepper_threading%': '<(enable_pepper_threading)',
+    'build_ppapi_ipc_proxy_untrusted%': '<(build_ppapi_ipc_proxy_untrusted)',
     'chromeos%': '<(chromeos)',
-    'use_virtual_keyboard%': '<(use_virtual_keyboard)',
     'enable_viewport%': '<(enable_viewport)',
     'enable_hidpi%': '<(enable_hidpi)',
     'enable_touch_ui%': '<(enable_touch_ui)',
-    'enable_metro%': '<(enable_metro)',
     'use_xi2_mt%':'<(use_xi2_mt)',
     'file_manager_extension%': '<(file_manager_extension)',
-    'webui_task_manager%': '<(webui_task_manager)',
     'inside_chromium_build%': '<(inside_chromium_build)',
     'fastbuild%': '<(fastbuild)',
     'dcheck_always_on%': '<(dcheck_always_on)',
@@ -540,15 +541,14 @@
     'enable_one_click_signin%': '<(enable_one_click_signin)',
     'enable_webrtc%': '<(enable_webrtc)',
     'chromium_win_pch%': '<(chromium_win_pch)',
-    'p2p_apis%': '<(p2p_apis)',
     'configuration_policy%': '<(configuration_policy)',
     'safe_browsing%': '<(safe_browsing)',
     'input_speech%': '<(input_speech)',
     'notifications%': '<(notifications)',
     'clang_use_chrome_plugins%': '<(clang_use_chrome_plugins)',
     'asan%': '<(asan)',
+    'order_profiling%': '<(order_profiling)',
     'order_text_section%': '<(order_text_section)',
-    'enable_register_protocol_handler%': '<(enable_register_protocol_handler)',
     'enable_extensions%': '<(enable_extensions)',
     'enable_web_intents%': '<(enable_web_intents)',
     'enable_web_intents_tag%': '<(enable_web_intents_tag)',
@@ -561,12 +561,16 @@
     'linux_use_gold_binary%': '<(linux_use_gold_binary)',
     'linux_use_gold_flags%': '<(linux_use_gold_flags)',
     'use_canvas_skia%': '<(use_canvas_skia)',
-    'tests_run%': '<(tests_run)',
+    'test_isolation_mode%': '<(test_isolation_mode)',
+    'test_isolation_outdir%': '<(test_isolation_outdir)',
     'enable_automation%': '<(enable_automation)',
+    'enable_printing%': '<(enable_printing)',
+    'enable_captive_portal_detection%': '<(enable_captive_portal_detection)',
     'force_rlz_use_chrome_net%': '<(force_rlz_use_chrome_net)',
     'enable_task_manager%': '<(enable_task_manager)',
     'platformsdk_path%': '<(platformsdk_path)',
     'wix_path%': '<(wix_path)',
+    'android_upstream_bringup%': '<(android_upstream_bringup)',
 
     # Use system yasm instead of bundled one.
     'use_system_yasm%': 0,
@@ -616,6 +620,11 @@
     # project file called "coverage".
     # Currently ignored on Windows.
     'coverage%': 0,
+
+    # Set to 1 to force Visual C++ to use legacy debug information format /Z7.
+    # This is useful for parallel compilation tools which can't support /Zi.
+    # Only used on Windows.
+    'win_z7%' : 0,
 
     # Although base/allocator lets you select a heap library via an
     # environment variable, the libcmt shim it uses sometimes gets in
@@ -801,7 +810,7 @@
     'wix_exists': '<!(python <(DEPTH)/build/dir_exists.py <(wix_path))',
 
     'conditions': [
-      ['os_posix==1 and OS!="mac" and OS!="android"', {
+      ['os_posix==1 and OS!="mac"', {
         # This will set gcc_version to XY if you are running gcc X.Y.*.
         # This is used to tweak build flags for gcc 4.4.
         'gcc_version%': '<!(python <(DEPTH)/build/compiler_version.py)',
@@ -817,7 +826,7 @@
             'linux_dump_symbols%': 1,
           }],
         ],
-      }],  # os_posix==1 and OS!="mac" and OS!="android"
+      }],
       ['OS=="android"', {
         # Location of Android NDK.
         'variables': {
@@ -831,6 +840,13 @@
             'conditions': [
               ['target_arch == "ia32"', {
                 'target_arch': 'x86',
+                'android_app_abi%': 'x86',
+              }],
+              ['target_arch=="arm" and armv7==0', {
+                'android_app_abi%': 'armeabi',
+              }],
+              ['target_arch=="arm" and armv7==1', {
+                'android_app_abi%': 'armeabi-v7a',
               }],
             ],
 
@@ -841,11 +857,17 @@
           'android_ndk_root%': '<(android_ndk_root)',
           'android_ndk_sysroot': '<(android_ndk_root)/platforms/android-9/arch-<(target_arch)',
           'android_build_type%': '<(android_build_type)',
+          'android_app_abi%': '<(android_app_abi)',
         },
         'android_ndk_root%': '<(android_ndk_root)',
         'android_ndk_sysroot': '<(android_ndk_sysroot)',
         'android_ndk_include': '<(android_ndk_sysroot)/usr/include',
         'android_ndk_lib': '<(android_ndk_sysroot)/usr/lib',
+        'android_app_abi%': '<(android_app_abi)',
+
+        # Provides an absolute path to PRODUCT_DIR (e.g. out/Release). Used
+        # to specify the output directory for Ant in the Android build.
+        'ant_build_out': '`cd <(PRODUCT_DIR) && pwd -P`',
 
         # Uses Android's crash report system
         'linux_breakpad%': 0,
@@ -860,7 +882,10 @@
         'input_speech%': 0,
         'enable_web_intents%': 0,
         'enable_extensions%': 0,
+        'enable_automation%': 0,
+        'enable_printing%': 0,
         'java_bridge%': 1,
+
         # Android does not support themes.
         'enable_themes%': 0,
 
@@ -878,7 +903,7 @@
         'notifications%': 0,
 
         'gtest_target_type%': '<(gtest_target_type)',
-        # TODO(jrg): when 'gtest_target_type'=='shared_libary' and
+        # TODO(jrg): when 'gtest_target_type'=='shared_library' and
         # OS==android, make all gtest_targets depend on
         # testing/android/native_test.gyp:native_test_apk.
         ### 'gtest_target_type': 'shared_libary',
@@ -1022,7 +1047,7 @@
                          '-E', 'CHROMIUM_BUILD=chromium'],
       }],
       ['chromeos==1', {
-        'grit_defines': ['-D', 'chromeos'],
+        'grit_defines': ['-D', 'chromeos', '-D', 'scale_factors=2x'],
       }],
       ['toolkit_views==1', {
         'grit_defines': ['-D', 'toolkit_views'],
@@ -1036,14 +1061,8 @@
       ['use_nss==1', {
         'grit_defines': ['-D', 'use_nss'],
       }],
-      ['use_virtual_keyboard==1', {
-        'grit_defines': ['-D', 'use_virtual_keyboard'],
-      }],
       ['file_manager_extension==1', {
         'grit_defines': ['-D', 'file_manager_extension'],
-      }],
-      ['webui_task_manager==1', {
-        'grit_defines': ['-D', 'webui_task_manager'],
       }],
       ['remoting==1', {
         'grit_defines': ['-D', 'remoting'],
@@ -1061,23 +1080,38 @@
       ['OS=="android"', {
         'grit_defines': ['-D', 'android'],
       }],
+      ['OS=="mac"', {
+        'grit_defines': ['-D', 'scale_factors=2x'],
+      }],
       ['enable_extensions==1', {
         'grit_defines': ['-D', 'enable_extensions'],
       }],
+      ['enable_printing==1', {
+        'grit_defines': ['-D', 'enable_printing'],
+      }],
       ['clang_use_chrome_plugins==1 and OS!="win"', {
-        'clang_chrome_plugins_flags':
-            '<!(<(DEPTH)/tools/clang/scripts/plugin_flags.sh)',
-      }],
-
-      # Set use_ibus to 1 to enable ibus support.
-      ['use_virtual_keyboard==1 and chromeos==1', {
-        'use_ibus%': 1,
-      }, {
-        'use_ibus%': 0,
-      }],
-
-      ['enable_register_protocol_handler==1', {
-        'grit_defines': ['-D', 'enable_register_protocol_handler'],
+        'variables': {
+          'clang_chrome_plugins_flags': [
+            '<!@(<(DEPTH)/tools/clang/scripts/plugin_flags.sh)'
+          ],
+        },
+        'conditions': [
+          ['chromeos==1', {
+            # TODO(rsleevi): http://crbug.com/123295 - Disabled on ChromeOS
+            # for now.
+            'clang_chrome_plugins_flags': [
+              '<@(clang_chrome_plugins_flags)',
+              '-Xclang',
+              '-plugin-arg-find-bad-constructs',
+              '-Xclang',
+              'skip-refcounted-dtors'
+            ],
+          }, {
+            'clang_chrome_plugins_flags': [
+              '<@(clang_chrome_plugins_flags)',
+            ],
+          }],
+        ],
       }],
 
       ['enable_web_intents_tag==1', {
@@ -1148,14 +1182,12 @@
     # default_apps/external_extensions.json file must also be updated.
     'default_apps_list': [
       'browser/resources/default_apps/external_extensions.json',
-      'browser/resources/default_apps/docs.crx',
       'browser/resources/default_apps/gmail.crx',
       'browser/resources/default_apps/search.crx',
       'browser/resources/default_apps/youtube.crx',
     ],
     'default_apps_list_linux_dest': [
       '<(PRODUCT_DIR)/default_apps/external_extensions.json',
-      '<(PRODUCT_DIR)/default_apps/docs.crx',
       '<(PRODUCT_DIR)/default_apps/gmail.crx',
       '<(PRODUCT_DIR)/default_apps/search.crx',
       '<(PRODUCT_DIR)/default_apps/youtube.crx',
@@ -1184,7 +1216,7 @@
 
       # See http://msdn.microsoft.com/en-us/library/2kxx5t2c(v=vs.80).aspx
       # Tri-state: blank is default, 1 on, 0 off
-      'win_release_OmitFramePointers%': '1',
+      'win_release_OmitFramePointers%': '0',
       # Tri-state: blank is default, 1 on, 0 off
       'win_debug_OmitFramePointers%': '',
 
@@ -1219,6 +1251,9 @@
       # output files in src/build/VS2010_{Debug,Release}.
       'build_dir_prefix%': '',
 
+      # Targets are by default not nacl untrusted code.
+      'nacl_untrusted_build%': 0,
+
       'conditions': [
         ['OS=="win" and component=="shared_library"', {
           # See http://msdn.microsoft.com/en-us/library/aa652367.aspx
@@ -1240,6 +1275,17 @@
       }, {  # else: branding!="Chrome"
         'defines': ['CHROMIUM_BUILD'],
       }],
+      ['OS=="mac" and component=="shared_library"', {
+        'xcode_settings': {
+          'DYLIB_INSTALL_NAME_BASE': '@rpath',
+          'LD_RUNPATH_SEARCH_PATHS': [
+            # For unbundled binaries.
+            '@loader_path/.',
+            # For bundled binaries, to get back from Binary.app/Contents/MacOS.
+            '@loader_path/../../..',
+          ],
+        },
+      }],
       ['branding=="Chrome" and (OS=="win" or OS=="mac")', {
         'defines': ['ENABLE_RLZ'],
       }],
@@ -1258,9 +1304,6 @@
       ['use_ash==1', {
         'defines': ['USE_ASH=1'],
       }],
-      ['enable_dip==1', {
-        'defines': ['ENABLE_DIP'],
-      }],
       ['use_nss==1', {
         'defines': ['USE_NSS=1'],
       }],
@@ -1275,17 +1318,11 @@
       ['chromeos==1', {
         'defines': ['OS_CHROMEOS=1'],
       }],
-      ['use_virtual_keyboard==1', {
-        'defines': ['USE_VIRTUAL_KEYBOARD=1'],
-      }],
       ['use_xi2_mt!=0', {
         'defines': ['USE_XI2_MT=<(use_xi2_mt)'],
       }],
       ['file_manager_extension==1', {
         'defines': ['FILE_MANAGER_EXTENSION=1'],
-      }],
-      ['webui_task_manager==1', {
-        'defines': ['WEBUI_TASK_MANAGER=1'],
       }],
       ['profiling==1', {
         'defines': ['ENABLE_PROFILING=1'],
@@ -1300,9 +1337,6 @@
       }],
       ['enable_webrtc==1', {
         'defines': ['ENABLE_WEBRTC=1'],
-      }],
-      ['p2p_apis==1', {
-        'defines': ['ENABLE_P2P_APIS=1'],
       }],
       ['proprietary_codecs==1', {
         'defines': ['USE_PROPRIETARY_CODECS'],
@@ -1325,8 +1359,8 @@
       ['enable_hidpi==1', {
         'defines': ['ENABLE_HIDPI=1'],
       }],
-      ['enable_metro==1', {
-        'defines': ['ENABLE_METRO=1'],
+      ['OS=="android" and gtest_target_type=="shared_library"', {
+        'defines': ['ANDROID_APK_TEST_TARGET=1'],
       }],
       ['fastbuild!=0', {
 
@@ -1437,12 +1471,16 @@
         'include_dirs': [
           '<(DEPTH)/third_party/wtl/include',
         ],
+        'conditions': [
+          ['win_z7!=0', {
+            'msvs_settings': {
+              'VCCLCompilerTool': {
+                'DebugInformationFormat': '1',
+              }
+            }
+          }],
+        ],  # win_z7!=0
       }],  # OS==win
-      ['enable_register_protocol_handler==1', {
-        'defines': [
-          'ENABLE_REGISTER_PROTOCOL_HANDLER=1',
-        ],
-      }],
       ['enable_task_manager==1', {
         'defines': [
           'ENABLE_TASK_MANAGER=1',
@@ -1484,6 +1522,12 @@
       }],
       ['enable_automation==1', {
         'defines': ['ENABLE_AUTOMATION=1'],
+      }],
+      ['enable_printing==1', {
+        'defines': ['ENABLE_PRINTING=1'],
+      }],
+      ['enable_captive_portal_detection==1', {
+        'defines': ['ENABLE_CAPTIVE_PORTAL_DETECTION=1'],
       }],
     ],  # conditions for 'target_defaults'
     'target_conditions': [
@@ -1559,9 +1603,15 @@
           }],
           [ 'OS=="mac"', {
             'xcode_settings': {
-              'GCC_TREAT_WARNINGS_AS_ERRORS': 'NO',
               'WARNING_CFLAGS!': ['-Wall', '-Wextra'],
             },
+            'conditions': [
+              ['buildtype=="Official"', {
+                'xcode_settings': {
+                  'GCC_TREAT_WARNINGS_AS_ERRORS': 'NO',    # -Werror
+                },
+              }],
+            ],
           }],
         ],
       }, {
@@ -1709,8 +1759,12 @@
         },
         'conditions': [
           ['OS=="linux"', {
-            'cflags': [
-              '<@(debug_extra_cflags)',
+            'target_conditions': [
+              ['_toolset=="target"', {
+                'cflags': [
+                  '<@(debug_extra_cflags)',
+                ],
+              }],
             ],
           }],
           ['release_valgrind_build==0', {
@@ -1783,6 +1837,9 @@
           },
         },
         'conditions': [
+          ['msvs_use_common_release', {
+            'includes': ['release.gypi'],
+          }],
           ['release_valgrind_build==0', {
             'defines': [
               'NVALGRIND',
@@ -1798,8 +1855,12 @@
             'defines': ['NO_TCMALLOC'],
           }],
           ['OS=="linux"', {
-            'cflags': [
-             '<@(release_extra_cflags)',
+            'target_conditions': [
+              ['_toolset=="target"', {
+                'cflags': [
+                  '<@(release_extra_cflags)',
+                ],
+              }],
             ],
           }],
         ],
@@ -1812,11 +1873,6 @@
       },
       'Release': {
         'inherit_from': ['Common_Base', 'x86_Base', 'Release_Base'],
-        'conditions': [
-          ['msvs_use_common_release', {
-            'includes': ['release.gypi'],
-          }],
-        ]
       },
       'conditions': [
         [ 'OS=="win"', {
@@ -1900,7 +1956,7 @@
             'target_conditions' : [
               ['_toolset=="target"', {
                 'conditions': [
-                  ['OS=="android" and debug_optimize==0', {
+                  ['OS=="android" and debug_optimize==0 and target_arch=="arm"', {
                     'cflags': [
                       '-mlong-calls',  # Needed when compiling with -O0
                     ],
@@ -2039,7 +2095,8 @@
                   # versions, so we have to shadow those differences off
                   # and make sure a 32-bit-on-64-bit build picks up the
                   # right files.
-                  ['host_arch!="ia32"', {
+                  # For android build, use NDK headers instead of host headers
+                  ['host_arch!="ia32" and OS!="android"', {
                     'include_dirs+': [
                       '/usr/include32',
                     ],
@@ -2174,7 +2231,7 @@
           }],
           ['clang==1 and clang_use_chrome_plugins==1', {
             'cflags': [
-              '<(clang_chrome_plugins_flags)',
+              '<@(clang_chrome_plugins_flags)',
             ],
           }],
           ['clang==1 and clang_load!=""', {
@@ -2194,16 +2251,28 @@
             ],
           }],
           ['asan==1', {
-            'cflags': [
-              '-faddress-sanitizer',
-              '-fno-omit-frame-pointer',
-              '-w',
+            'target_conditions': [
+              ['_toolset=="target"', {
+                  'cflags': [
+                      '-faddress-sanitizer',
+                      '-fno-omit-frame-pointer',
+                  ],
+                  'ldflags': [
+                      '-faddress-sanitizer',
+                  ],
+                  'defines': [
+                      'ADDRESS_SANITIZER',
+                  ],
+              }],
             ],
-            'ldflags': [
-              '-faddress-sanitizer',
-            ],
-            'defines': [
-              'ADDRESS_SANITIZER',
+          }],
+          ['order_profiling!=0 and (chromeos==1 or OS=="linux")', {
+            'target_conditions' : [
+              ['_toolset=="target"', {
+                'cflags': [
+                  '-finstrument-functions',
+                ],
+              }],
             ],
           }],
           ['linux_breakpad==1', {
@@ -2405,6 +2474,9 @@
               '-lm',
             ],
             'conditions': [
+              ['android_upstream_bringup==1', {
+                'defines': ['ANDROID_UPSTREAM_BRINGUP=1',],
+              }],
               ['android_build_type==0', {
                 'ldflags': [
                   '--sysroot=<(android_ndk_sysroot)',
@@ -2593,7 +2665,7 @@
             }],
             ['clang==1 and clang_use_chrome_plugins==1', {
               'OTHER_CFLAGS': [
-                '<(clang_chrome_plugins_flags)',
+                '<@(clang_chrome_plugins_flags)',
               ],
             }],
             ['clang==1 and clang_load!=""', {
@@ -2624,7 +2696,6 @@
             'xcode_settings': {
               'OTHER_CFLAGS': [
                 '-faddress-sanitizer',
-                '-w',
               ],
               'OTHER_LDFLAGS': [
                 '-faddress-sanitizer',
@@ -3036,9 +3107,9 @@
       # Hardcode the compiler names in the Makefile so that
       # it won't depend on the environment at make time.
       'make_global_settings': [
-        ['CC', '<!(/bin/echo -n ${GOMA_WRAPPER} ${ANDROID_TOOLCHAIN}/*-gcc)'],
-        ['CXX', '<!(/bin/echo -n ${GOMA_WRAPPER} ${ANDROID_TOOLCHAIN}/*-g++)'],
-        ['LINK', '<!(/bin/echo -n ${GOMA_WRAPPER} ${ANDROID_TOOLCHAIN}/*-gcc)'],
+        ['CC', '<!(/bin/echo -n ${ANDROID_GOMA_WRAPPER} ${ANDROID_TOOLCHAIN}/*-gcc)'],
+        ['CXX', '<!(/bin/echo -n ${ANDROID_GOMA_WRAPPER} ${ANDROID_TOOLCHAIN}/*-g++)'],
+        ['LINK', '<!(/bin/echo -n ${ANDROID_GOMA_WRAPPER} ${ANDROID_TOOLCHAIN}/*-gcc)'],
         ['CC.host', '<!(which gcc)'],
         ['CXX.host', '<!(which g++)'],
         ['LINK.host', '<!(which g++)'],

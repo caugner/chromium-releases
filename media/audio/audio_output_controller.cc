@@ -13,6 +13,7 @@
 #include "base/time.h"
 
 using base::Time;
+using base::TimeDelta;
 using base::WaitableEvent;
 
 namespace media {
@@ -170,7 +171,7 @@ void AudioOutputController::DoPlay() {
       FROM_HERE,
       base::Bind(&AudioOutputController::PollAndStartIfDataReady,
       weak_this_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kPollPauseInMilliseconds));
+      TimeDelta::FromMilliseconds(kPollPauseInMilliseconds));
 }
 
 void AudioOutputController::PollAndStartIfDataReady() {
@@ -195,7 +196,7 @@ void AudioOutputController::PollAndStartIfDataReady() {
         FROM_HERE,
         base::Bind(&AudioOutputController::PollAndStartIfDataReady,
         weak_this_.GetWeakPtr()),
-        base::TimeDelta::FromMilliseconds(kPollPauseInMilliseconds));
+        TimeDelta::FromMilliseconds(kPollPauseInMilliseconds));
   }
 }
 
@@ -213,8 +214,12 @@ void AudioOutputController::StartStream() {
 void AudioOutputController::DoPause() {
   DCHECK(message_loop_->BelongsToCurrentThread());
 
-  if (stream_)
+  if (stream_) {
+    // Then we stop the audio device. This is not the perfect solution
+    // because it discards all the internal buffer in the audio device.
+    // TODO(hclam): Actually pause the audio device.
     stream_->Stop();
+  }
 
   switch (state_) {
     case kStarting:
@@ -226,11 +231,6 @@ void AudioOutputController::DoPause() {
       break;
     case kPlaying:
       state_ = kPaused;
-
-      // Then we stop the audio device. This is not the perfect solution
-      // because it discards all the internal buffer in the audio device.
-      // TODO(hclam): Actually pause the audio device.
-      stream_->Stop();
 
       // Send a special pause mark to the low-latency audio thread.
       sync_reader_->UpdatePendingBytes(kPauseMark);
@@ -306,11 +306,11 @@ void AudioOutputController::WaitTillDataReady() {
   if (!sync_reader_->DataReady()) {
     // In the different place we use different mechanism to poll, get max
     // polling delay from constants used there.
-    const base::TimeDelta kMaxPollingDelay = base::TimeDelta::FromMilliseconds(
+    const base::TimeDelta kMaxPollingDelay = TimeDelta::FromMilliseconds(
         kPollNumAttempts * kPollPauseInMilliseconds);
     Time start_time = Time::Now();
     do {
-      base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1));
+      base::PlatformThread::Sleep(TimeDelta::FromMilliseconds(1));
     } while (!sync_reader_->DataReady() &&
              Time::Now() - start_time < kMaxPollingDelay);
   }

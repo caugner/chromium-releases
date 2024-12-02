@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/views/frame/app_non_client_frame_view_aura.h"
 
-#include "ash/wm/workspace/frame_maximize_button.h"
 #include "base/debug/stack_trace.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -30,6 +29,10 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
 
+#if defined(USE_ASH)
+#include "ash/wm/workspace/frame_maximize_button.h"
+#endif
+
 namespace {
 // The number of pixels to use as a hover zone at the top of the screen.
 const int kTopMargin = 1;
@@ -51,7 +54,12 @@ class AppNonClientFrameViewAura::ControlView
   explicit ControlView(AppNonClientFrameViewAura* owner) :
       owner_(owner),
       close_button_(new views::ImageButton(this)),
-      restore_button_(new ash::FrameMaximizeButton(this, owner_)) {
+#if defined(USE_ASH)
+      restore_button_(new ash::FrameMaximizeButton(this, owner_))
+#else
+      restore_button_(new views::ImageButton(this))
+#endif
+  {
     close_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
     restore_button_->SetAccessibleName(
@@ -62,15 +70,17 @@ class AppNonClientFrameViewAura::ControlView
     int control_base_resource_id = owner->browser_view()->IsOffTheRecord() ?
         IDR_AURA_WINDOW_HEADER_BASE_INCOGNITO_ACTIVE :
         IDR_AURA_WINDOW_HEADER_BASE_ACTIVE;
-    control_base_ = rb.GetImageNamed(control_base_resource_id).ToSkBitmap();
+    control_base_ = rb.GetImageNamed(control_base_resource_id).ToImageSkia();
 
     separator_ =
-        rb.GetImageNamed(IDR_AURA_WINDOW_FULLSCREEN_SEPARATOR).ToSkBitmap();
-    shadow_ = rb.GetImageNamed(IDR_AURA_WINDOW_FULLSCREEN_SHADOW).ToSkBitmap();
+        rb.GetImageNamed(IDR_AURA_WINDOW_FULLSCREEN_SEPARATOR).ToImageSkia();
+    shadow_ = rb.GetImageNamed(IDR_AURA_WINDOW_FULLSCREEN_SHADOW).ToImageSkia();
 
     AddChildView(close_button_);
     AddChildView(restore_button_);
   }
+
+  virtual ~ControlView() {}
 
   virtual void Layout() OVERRIDE {
     restore_button_->SetPosition(gfx::Point(kShadowStart, 0));
@@ -110,13 +120,13 @@ class AppNonClientFrameViewAura::ControlView
     views::View::OnPaint(canvas);
 
     // Separator overlaps the left edge of the close button.
-    canvas->DrawBitmapInt(*separator_,
-                          close_button_->x(), 0);
-    canvas->DrawBitmapInt(*shadow_, 0, kShadowHeightStretch);
+    canvas->DrawImageInt(*separator_,
+                         close_button_->x(), 0);
+    canvas->DrawImageInt(*shadow_, 0, kShadowHeightStretch);
   }
 
-  void ButtonPressed(views::Button* sender,
-                     const views::Event& event) OVERRIDE {
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE {
     if (sender == close_button_) {
       owner_->Close();
     } else if (sender == restore_button_) {
@@ -128,23 +138,23 @@ class AppNonClientFrameViewAura::ControlView
  private:
   // Sets images whose ids are passed in for each of the respective states
   // of |button|.
-  void SetButtonImages(views::ImageButton* button, int normal_bitmap_id,
-                       int hot_bitmap_id, int pushed_bitmap_id) {
+  void SetButtonImages(views::ImageButton* button, int normal_image_id,
+                       int hot_image_id, int pushed_image_id) {
     ui::ThemeProvider* theme_provider = GetThemeProvider();
     button->SetImage(views::CustomButton::BS_NORMAL,
-                     theme_provider->GetBitmapNamed(normal_bitmap_id));
+                     theme_provider->GetImageSkiaNamed(normal_image_id));
     button->SetImage(views::CustomButton::BS_HOT,
-                     theme_provider->GetBitmapNamed(hot_bitmap_id));
+                     theme_provider->GetImageSkiaNamed(hot_image_id));
     button->SetImage(views::CustomButton::BS_PUSHED,
-                     theme_provider->GetBitmapNamed(pushed_bitmap_id));
+                     theme_provider->GetImageSkiaNamed(pushed_image_id));
   }
 
   AppNonClientFrameViewAura* owner_;
   views::ImageButton* close_button_;
   views::ImageButton* restore_button_;
-  const SkBitmap* control_base_;
-  const SkBitmap* separator_;
-  const SkBitmap* shadow_;
+  const gfx::ImageSkia* control_base_;
+  const gfx::ImageSkia* separator_;
+  const gfx::ImageSkia* shadow_;
 
   DISALLOW_COPY_AND_ASSIGN(ControlView);
 };
@@ -156,7 +166,7 @@ class AppNonClientFrameViewAura::Host : public views::MouseWatcherHost {
 
   virtual bool Contains(
       const gfx::Point& screen_point,
-      views::MouseWatcherHost::MouseEventType type) {
+      views::MouseWatcherHost::MouseEventType type) OVERRIDE {
     gfx::Rect top_margin = owner_->GetScreenBounds();
     top_margin.set_height(kTopMargin);
     gfx::Rect control_bounds = owner_->GetControlBounds();
@@ -165,6 +175,7 @@ class AppNonClientFrameViewAura::Host : public views::MouseWatcherHost {
         control_bounds.Contains(screen_point);
   }
 
+ private:
   AppNonClientFrameViewAura* owner_;
 
   DISALLOW_COPY_AND_ASSIGN(Host);
@@ -235,11 +246,19 @@ void AppNonClientFrameViewAura::UpdateThrobber(bool running) {
 
 void AppNonClientFrameViewAura::OnMouseEntered(
     const views::MouseEvent& event) {
+  if (!control_view_) {
+    // This can only happen when the frame-view (|this|) is in the process of
+    // destroying itself, but the control-widget has already closed, and some
+    // mouse event (possibly queued in the event-stream) has arrived. In such
+    // cases, do not do anything.
+    return;
+  }
+
   if (!control_widget_) {
     control_widget_ = new views::Widget;
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
     control_widget_->AddObserver(this);
-    params.parent = browser_view()->GetNativeHandle();
+    params.parent = browser_view()->GetNativeWindow();
     params.transparent = true;
     control_widget_->Init(params);
     control_widget_->SetContentsView(control_view_);
@@ -283,9 +302,12 @@ void AppNonClientFrameViewAura::MouseMovedOutOfHost() {
 void AppNonClientFrameViewAura::OnWidgetClosing(views::Widget* widget) {
   DCHECK_EQ(control_widget_, widget);
   control_widget_ = NULL;
+  control_view_ = NULL;
 }
 
 gfx::Rect AppNonClientFrameViewAura::GetControlBounds() const {
+  if (!control_view_)
+    return gfx::Rect();
   gfx::Size preferred = control_view_->GetPreferredSize();
   gfx::Point location(width() - preferred.width(), 0);
   ConvertPointToWidget(this, &location);

@@ -8,6 +8,9 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_resize_controller.h"
 
+// Refactor has only been done for Mac panels so far.
+#if defined(OS_MACOSX)
+
 class PanelResizeBrowserTest : public BasePanelBrowserTest {
  public:
   PanelResizeBrowserTest() : BasePanelBrowserTest() {
@@ -288,7 +291,7 @@ IN_PROC_BROWSER_TEST_F(PanelResizeBrowserTest, CloseDetachedPanelOnResize) {
   panel1_bounds.Offset(-10, 0);
   EXPECT_EQ(panel1_bounds, panel1->GetBounds());
 
-  CloseWindowAndWait(panel2->browser());
+  CloseWindowAndWait(panel2);
   EXPECT_TRUE(resize_controller->IsResizing());
   EXPECT_EQ(2, detached_strip->num_panels());
 
@@ -308,7 +311,7 @@ IN_PROC_BROWSER_TEST_F(PanelResizeBrowserTest, CloseDetachedPanelOnResize) {
                                    panel3_bounds.height() - 12));
   EXPECT_EQ(panel3_bounds, panel3->GetBounds());
 
-  CloseWindowAndWait(panel3->browser());
+  CloseWindowAndWait(panel3);
   EXPECT_EQ(1, detached_strip->num_panels());
   // Since we closed the panel we were resizing, we should be out of the
   // resizing mode by now.
@@ -410,3 +413,5 @@ IN_PROC_BROWSER_TEST_F(PanelResizeBrowserTest, ResizeDetachedPanelToTop) {
 
   panel_manager->CloseAll();
 }
+
+#endif // OS_MACOSX

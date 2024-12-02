@@ -229,8 +229,9 @@ IPC_MESSAGE_CONTROL0(ChromeViewMsg_VisitedLink_Reset)
 IPC_MESSAGE_CONTROL1(ChromeViewMsg_SetContentSettingRules,
                      RendererContentSettingRules /* rules */)
 
-// Tells the render view to load all blocked plugins.
-IPC_MESSAGE_ROUTED0(ChromeViewMsg_LoadBlockedPlugins)
+// Tells the render view to load all blocked plugins with the given identifier.
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_LoadBlockedPlugins,
+                    std::string /* identifier */)
 
 // Asks the renderer to send back stats on the WebCore cache broken down by
 // resource types.
@@ -245,19 +246,6 @@ IPC_MESSAGE_CONTROL1(ChromeViewMsg_GetRendererHistograms,
 IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetFieldTrialGroup,
                      std::string /* field trial name */,
                      std::string /* group name that was assigned. */)
-
-#if defined(USE_TCMALLOC)
-// Asks the renderer to enable/disable Tcmalloc heap profiling.
-// Note: filename_prefix arg is effectively ignored since the render process
-// will be unable to write files to disk. Instead use WriteTcmallocHeapProfile
-// to write a profile file.
-IPC_MESSAGE_CONTROL2(ChromeViewMsg_SetTcmallocHeapProfiling,
-                     bool /* enable profiling */,
-                     std::string /* filename prefix for profiles */)
-// Asks the renderer to write the Tcmalloc heap profile to a file.
-IPC_MESSAGE_CONTROL1(ChromeViewMsg_WriteTcmallocHeapProfile,
-                     FilePath::StringType /* filepath */)
-#endif
 
 // Asks the renderer to send back V8 heap stats.
 IPC_MESSAGE_CONTROL0(ChromeViewMsg_GetV8HeapStats)
@@ -461,6 +449,10 @@ IPC_MESSAGE_ROUTED0(ChromeViewMsg_CancelledDownloadingPlugin)
 // chrome:// URLs.
 IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_OpenAboutPlugins)
 
+// Tells the browser that there was an error loading a plug-in.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_CouldNotLoadPlugin,
+                    FilePath /* plugin_path */)
+
 // Specifies the URL as the first parameter (a wstring) and thumbnail as
 // binary data as the second parameter.
 IPC_MESSAGE_ROUTED3(ChromeViewHostMsg_Thumbnail,
@@ -506,13 +498,6 @@ IPC_MESSAGE_CONTROL2(ChromeViewHostMsg_RendererHistograms,
                      int, /* sequence number of Renderer Histograms. */
                      std::vector<std::string>)
 
-#if defined USE_TCMALLOC
-// Send back tcmalloc profile to write to a file.
-IPC_MESSAGE_CONTROL2(ChromeViewHostMsg_WriteTcmallocHeapProfile_ACK,
-                     FilePath::StringType  /* filepath */,
-                     std::string  /* heap profile */)
-#endif
-
 // Sends back stats about the V8 heap.
 IPC_MESSAGE_CONTROL2(ChromeViewHostMsg_V8HeapStats,
                      int /* size of heap (allocated from the OS) */,
@@ -530,8 +515,9 @@ IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedOutdatedPlugin,
 
 // Notifies when a plugin couldn't be loaded because it requires
 // user authorization.
-IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_BlockedUnauthorizedPlugin,
-                    string16 /* name */)
+IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_BlockedUnauthorizedPlugin,
+                    string16 /* name */,
+                    std::string /* plug-in group identifier */)
 
 // Provide the browser process with information about the WebCore resource
 // cache and current renderer framerate.

@@ -48,6 +48,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -170,11 +171,31 @@ bool LaunchSetupWithParam(const std::string& param,
   return (TRUE == ::GetExitCodeProcess(ph, reinterpret_cast<DWORD*>(ret_code)));
 }
 
+// Returns true if the EULA is required but has not been accepted by this user.
+// The EULA is considered having been accepted if the user has gotten past
+// first run in the "other" environment (desktop or metro).
+bool IsEulaNotAccepted(installer::MasterPreferences* install_prefs) {
+  bool value = false;
+  if (install_prefs->GetBool(installer::master_preferences::kRequireEula,
+          &value) && value) {
+    // Check for a first run sentinel in the alternate user data dir.
+    FilePath alt_user_data_dir;
+    if (!PathService::Get(chrome::DIR_ALT_USER_DATA, &alt_user_data_dir) ||
+        !file_util::DirectoryExists(alt_user_data_dir) ||
+        !file_util::PathExists(alt_user_data_dir.AppendASCII(
+            first_run::internal::kSentinelFile))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Writes the EULA to a temporary file, returned in |*eula_path|, and returns
 // true if successful.
 bool WriteEULAtoTempFile(FilePath* eula_path) {
   base::StringPiece terms =
-      ResourceBundle::GetSharedInstance().GetRawDataResource(IDR_TERMS_HTML);
+      ResourceBundle::GetSharedInstance().GetRawDataResource(
+          IDR_TERMS_HTML, ui::SCALE_FACTOR_NONE);
   if (terms.empty())
     return false;
   FILE *file = file_util::CreateAndOpenTemporaryFile(eula_path);
@@ -186,9 +207,7 @@ bool WriteEULAtoTempFile(FilePath* eula_path) {
 }
 
 void ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs) {
-  bool value = false;
-  if (install_prefs->GetBool(installer::master_preferences::kRequireEula,
-          &value) && value) {
+  if (IsEulaNotAccepted(install_prefs)) {
     // Show the post-installation EULA. This is done by setup.exe and the
     // result determines if we continue or not. We wait here until the user
     // dismisses the dialog.
@@ -380,6 +399,10 @@ bool ImportSettingsWin(Profile* profile,
                        int items_to_import,
                        const FilePath& import_bookmarks_path,
                        bool skip_first_run_ui) {
+  if (!items_to_import && import_bookmarks_path.empty()) {
+    return true;
+  }
+
   const CommandLine& cmdline = *CommandLine::ForCurrentProcess();
   CommandLine import_cmd(cmdline.GetProgram());
 
@@ -574,6 +597,10 @@ bool ProcessMasterPreferences(const FilePath& user_data_dir,
   internal::SetupMasterPrefsFromInstallPrefs(out_prefs,
       install_prefs.get());
 
+  // TODO(mirandac): Refactor skip-first-run-ui process into regular first run
+  // import process.  http://crbug.com/49647
+  // Note we are skipping all other master preferences if skip-first-run-ui
+  // is *not* specified. (That is, we continue only if skipping first run ui.)
   if (!internal::SkipFirstRunUI(install_prefs.get()))
     return true;
 

@@ -26,8 +26,9 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "net/base/auth.h"
+#include "net/base/mock_host_resolver.h"
 #include "net/base/net_util.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -76,7 +77,7 @@ bool Contains(const Collection& collection, const Key& key) {
 
 // A mock event router that responds to events with a pre-arranged queue of
 // Tasks.
-class TestIPCSender : public IPC::Message::Sender {
+class TestIPCSender : public IPC::Sender {
  public:
   typedef std::list<linked_ptr<IPC::Message> > SentMessages;
 
@@ -97,7 +98,7 @@ class TestIPCSender : public IPC::Message::Sender {
   }
 
  private:
-  // IPC::Message::Sender
+  // IPC::Sender
   virtual bool Send(IPC::Message* message) {
     EXPECT_EQ(ExtensionMsg_MessageInvoke::ID, message->type());
 
@@ -127,8 +128,9 @@ class ExtensionWebRequestTest : public testing::Test {
     network_delegate_.reset(new ChromeNetworkDelegate(
         event_router_.get(), NULL, NULL, &profile_,
         CookieSettings::Factory::GetForProfile(&profile_), &enable_referrers_));
-    context_ = new TestURLRequestContext();
+    context_.reset(new TestURLRequestContext(true));
     context_->set_network_delegate(network_delegate_.get());
+    context_->Init();
   }
 
   MessageLoopForIO message_loop_;
@@ -141,7 +143,7 @@ class ExtensionWebRequestTest : public testing::Test {
   scoped_refptr<ExtensionEventRouterForwarder> event_router_;
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
   scoped_ptr<ChromeNetworkDelegate> network_delegate_;
-  scoped_refptr<TestURLRequestContext> context_;
+  scoped_ptr<TestURLRequestContext> context_;
 };
 
 // Tests that we handle disagreements among extensions about responses to
@@ -166,7 +168,7 @@ TEST_F(ExtensionWebRequestTest, BlockingEventPrecedenceRedirect) {
   GURL not_chosen_redirect_url("about:not_chosen");
 
   net::URLRequest request(GURL("about:blank"), &delegate_);
-  request.set_context(context_);
+  request.set_context(context_.get());
   {
     // onBeforeRequest will be dispatched twice initially. The second response -
     // the redirect - should win, since it has a later |install_time|. The
@@ -221,7 +223,7 @@ TEST_F(ExtensionWebRequestTest, BlockingEventPrecedenceRedirect) {
 
   // Now test the same thing but the extensions answer in reverse order.
   net::URLRequest request2(GURL("about:blank"), &delegate_);
-  request2.set_context(context_);
+  request2.set_context(context_.get());
   {
     ExtensionWebRequestEventRouter::EventResponse* response = NULL;
 
@@ -295,7 +297,7 @@ TEST_F(ExtensionWebRequestTest, BlockingEventPrecedenceCancel) {
 
   GURL request_url("about:blank");
   net::URLRequest request(request_url, &delegate_);
-  request.set_context(context_);
+  request.set_context(context_.get());
 
   // onBeforeRequest will be dispatched twice. The second response -
   // the redirect - would win, since it has a later |install_time|, but
@@ -363,7 +365,7 @@ TEST_F(ExtensionWebRequestTest, SimulateChancelWhileBlocked) {
 
   GURL request_url("about:blank");
   net::URLRequest request(request_url, &delegate_);
-  request.set_context(context_);
+  request.set_context(context_.get());
 
   ExtensionWebRequestEventRouter::EventResponse* response = NULL;
 
@@ -444,8 +446,12 @@ class ExtensionWebRequestHeaderModificationTest :
     network_delegate_.reset(new ChromeNetworkDelegate(
         event_router_.get(), NULL, NULL, &profile_,
         CookieSettings::Factory::GetForProfile(&profile_), &enable_referrers_));
-    context_ = new TestURLRequestContext();
+    context_.reset(new TestURLRequestContext(true));
+    host_resolver_.reset(new net::MockHostResolver());
+    host_resolver_->rules()->AddSimulatedFailure("doesnotexist");
+    context_->set_host_resolver(host_resolver_.get());
     context_->set_network_delegate(network_delegate_.get());
+    context_->Init();
   }
 
   MessageLoopForIO message_loop_;
@@ -458,7 +464,8 @@ class ExtensionWebRequestHeaderModificationTest :
   scoped_refptr<ExtensionEventRouterForwarder> event_router_;
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
   scoped_ptr<ChromeNetworkDelegate> network_delegate_;
-  scoped_refptr<TestURLRequestContext> context_;
+  scoped_ptr<net::MockHostResolver> host_resolver_;
+  scoped_ptr<TestURLRequestContext> context_;
 };
 
 TEST_P(ExtensionWebRequestHeaderModificationTest, TestModifications) {
@@ -489,7 +496,7 @@ TEST_P(ExtensionWebRequestHeaderModificationTest, TestModifications) {
 
   GURL request_url("http://doesnotexist/does_not_exist.html");
   net::URLRequest request(request_url, &delegate_);
-  request.set_context(context_);
+  request.set_context(context_.get());
 
   // Initialize headers available before extensions are notified of the
   // onBeforeSendHeaders event.
@@ -1478,6 +1485,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnAuthRequiredResponses) {
 }
 
 TEST(ExtensionWebRequestHelpersTest, TestHideRequestForURL) {
+  MessageLoopForIO message_loop;
   const char* sensitive_urls[] = {
       "http://www.google.com/chrome",
       "https://www.google.com/chrome",
@@ -1498,12 +1506,25 @@ TEST(ExtensionWebRequestHelpersTest, TestHideRequestForURL) {
   const char* non_sensitive_urls[] = {
       "http://www.google.com/"
   };
+  // Check that requests are rejected based on the destination
   for (size_t i = 0; i < arraysize(sensitive_urls); ++i) {
-    EXPECT_TRUE(helpers::HideRequestForURL(GURL(sensitive_urls[i])))
-        << sensitive_urls[i];
+    GURL sensitive_url(sensitive_urls[i]);
+    TestURLRequest request(sensitive_url, NULL);
+    EXPECT_TRUE(helpers::HideRequest(&request)) << sensitive_urls[i];
   }
+  // Check that requests are accepted if they don't touch sensitive urls.
   for (size_t i = 0; i < arraysize(non_sensitive_urls); ++i) {
-    EXPECT_FALSE(helpers::HideRequestForURL(GURL(non_sensitive_urls[i])))
-        << non_sensitive_urls[i];
+    GURL non_sensitive_url(non_sensitive_urls[i]);
+    TestURLRequest request(non_sensitive_url, NULL);
+    EXPECT_FALSE(helpers::HideRequest(&request)) << non_sensitive_urls[i];
+  }
+  // Check that requests are rejected if their first party url is sensitive.
+  ASSERT_GE(arraysize(non_sensitive_urls), 1u);
+  GURL non_sensitive_url(non_sensitive_urls[0]);
+  for (size_t i = 0; i < arraysize(sensitive_urls); ++i) {
+    TestURLRequest request(non_sensitive_url, NULL);
+    GURL sensitive_url(sensitive_urls[i]);
+    request.set_first_party_for_cookies(sensitive_url);
+    EXPECT_TRUE(helpers::HideRequest(&request)) << sensitive_urls[i];
   }
 }

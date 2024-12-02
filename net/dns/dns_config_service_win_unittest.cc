@@ -104,7 +104,7 @@ scoped_ptr_malloc<IP_ADAPTER_ADDRESSES> CreateAdapterAddresses(
       IPEndPoint ipe(ip, info.ports[j]);
       address->Address.lpSockaddr =
           reinterpret_cast<LPSOCKADDR>(storage + num_addresses);
-      size_t length = sizeof(struct sockaddr_storage);
+      socklen_t length = sizeof(struct sockaddr_storage);
       CHECK(ipe.ToSockAddr(address->Address.lpSockaddr, &length));
       address->Address.iSockaddrLength = static_cast<int>(length);
     }
@@ -186,11 +186,14 @@ TEST(DnsConfigServiceWinTest, ConvertAdapterAddresses) {
     }
 
     DnsConfig config;
-    bool result = internal::ConvertSettingsToDnsConfig(settings, &config);
-    bool expected_result = !expected_nameservers.empty();
-    ASSERT_EQ(expected_result, result);
+    internal::ConfigParseWinResult result =
+        internal::ConvertSettingsToDnsConfig(settings, &config);
+    internal::ConfigParseWinResult expected_result =
+        expected_nameservers.empty() ? internal::CONFIG_PARSE_WIN_NO_NAMESERVERS
+            : internal::CONFIG_PARSE_WIN_OK;
+    EXPECT_EQ(expected_result, result);
     EXPECT_EQ(expected_nameservers, config.nameservers);
-    if (result) {
+    if (result == internal::CONFIG_PARSE_WIN_OK) {
       ASSERT_EQ(1u, config.search.size());
       EXPECT_EQ(t.expected_suffix, config.search[0]);
     }
@@ -375,8 +378,8 @@ TEST(DnsConfigServiceWinTest, ConvertSuffixSearch) {
   for (size_t i = 0; i < arraysize(cases); ++i) {
     const TestCase& t = cases[i];
     DnsConfig config;
-    ASSERT_TRUE(internal::ConvertSettingsToDnsConfig(t.input_settings,
-                                                     &config));
+    EXPECT_EQ(internal::CONFIG_PARSE_WIN_OK,
+              internal::ConvertSettingsToDnsConfig(t.input_settings, &config));
     std::vector<std::string> expected_search;
     for (size_t j = 0; !t.expected_search[j].empty(); ++j) {
       expected_search.push_back(t.expected_search[j]);
@@ -414,7 +417,8 @@ TEST(DnsConfigServiceWinTest, AppendToMultiLabelName) {
       t.input,
     };
     DnsConfig config;
-    ASSERT_TRUE(internal::ConvertSettingsToDnsConfig(settings, &config));
+    EXPECT_EQ(internal::CONFIG_PARSE_WIN_OK,
+              internal::ConvertSettingsToDnsConfig(settings, &config));
     EXPECT_EQ(config.append_to_multi_label_name, t.expected_output);
   }
 }

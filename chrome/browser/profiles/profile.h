@@ -13,16 +13,13 @@
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/logging.h"
-#include "chrome/browser/net/preconnect.h" // TODO: remove this.
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_factory.h"
 #include "content/public/browser/browser_context.h"
 
-class AutocompleteClassifier;
 class BookmarkModel;
 class ChromeAppCacheService;
 class ChromeURLDataManager;
-class Extension;
 class ExtensionEventRouter;
 class ExtensionProcessManager;
 class ExtensionService;
@@ -40,8 +37,16 @@ class UserScriptMaster;
 class VisitedLinkMaster;
 class WebDataService;
 
+namespace android {
+class TabContentsProvider;
+}
+
 namespace base {
 class Time;
+}
+
+namespace chrome_browser_net {
+class Predictor;
 }
 
 namespace chromeos {
@@ -49,17 +54,9 @@ class LibCrosServiceLibraryImpl;
 class ResetDefaultProxyConfigServiceTask;
 }
 
-namespace chrome_browser_net {
-class Predictor;
-}
 
 namespace content {
-class SpeechRecognitionPreferences;
 class WebUI;
-}
-
-namespace android {
-class TabContentsProvider;
 }
 
 namespace fileapi {
@@ -73,6 +70,10 @@ class ShortcutsBackend;
 
 namespace net {
 class SSLConfigService;
+}
+
+namespace policy {
+class PolicyService;
 }
 
 class Profile : public content::BrowserContext {
@@ -124,26 +125,6 @@ class Profile : public content::BrowserContext {
                                   bool is_new_profile) = 0;
   };
 
-  // Whitelist access to deprecated API in order to prevent new regressions.
-  class Deprecated {
-   private:
-    friend bool IsGoogleGAIACookieInstalled();
-
-    friend class AutofillDownloadManager;
-    friend class BrowserListTabContentsProvider;
-    friend class MetricsService;
-    friend class SafeBrowsingServiceTestHelper;
-    friend class Toolbar5Importer;
-    friend class TranslateManager;
-    friend class android::TabContentsProvider;
-    friend class chromeos::LibCrosServiceLibraryImpl;
-    friend class chromeos::ResetDefaultProxyConfigServiceTask;
-
-    static net::URLRequestContextGetter* GetDefaultRequestContext() {
-      return Profile::GetDefaultRequestContext();
-    }
-  };
-
   // Key used to bind profile to the widget with which it is associated.
   static const char* const kProfileKey;
 
@@ -165,6 +146,12 @@ class Profile : public content::BrowserContext {
 
   // Returns the profile corresponding to the given WebUI.
   static Profile* FromWebUI(content::WebUI* web_ui);
+
+  // TODO(rlp): Please do not use this function. It is a temporary fix
+  // for M19 stable. See crbug.com/125292.
+  static net::URLRequestContextGetter* GetDefaultRequestContextDeprecated() {
+    return Profile::GetDefaultRequestContext();
+  }
 
   // content::BrowserContext implementation ------------------------------------
 
@@ -267,31 +254,16 @@ class Profile : public content::BrowserContext {
   // doesn't already exist.
   virtual HistoryService* GetHistoryServiceWithoutCreating() = 0;
 
-  // Retrieves a pointer to the AutocompleteClassifier associated with this
-  // profile. The AutocompleteClassifier is lazily created the first time that
-  // this method is called.
-  virtual AutocompleteClassifier* GetAutocompleteClassifier() = 0;
-
   // Returns the ShortcutsBackend for this profile. This is owned by
   // the Profile and created on the first call. Callers that outlive the life of
   // this profile need to be sure they refcount the returned value.
   virtual history::ShortcutsBackend* GetShortcutsBackend() = 0;
 
-  // Returns the WebDataService for this profile. This is owned by
-  // the Profile. Callers that outlive the life of this profile need to be
-  // sure they refcount the returned value.
-  //
-  // |access| defines what the caller plans to do with the service. See
-  // the ServiceAccessType definition above.
-  virtual WebDataService* GetWebDataService(ServiceAccessType access) = 0;
-
-  // Similar to GetWebDataService(), but won't create the web data service if it
-  // doesn't already exist.
-  virtual WebDataService* GetWebDataServiceWithoutCreating() = 0;
+  // Returns the PolicyService that provides policies for this profile.
+  virtual policy::PolicyService* GetPolicyService() = 0;
 
   // Retrieves a pointer to the PrefService that manages the preferences
-  // for this user profile.  The PrefService is lazily created the first
-  // time that this method is called.
+  // for this user profile.
   virtual PrefService* GetPrefs() = 0;
 
   // Retrieves a pointer to the PrefService that manages the preferences
@@ -400,13 +372,6 @@ class Profile : public content::BrowserContext {
   // Returns whether it is a guest session.
   static bool IsGuestSession();
 
-#ifdef UNIT_TEST
-  // Use with caution.  GetDefaultRequestContext may be called on any thread!
-  static void set_default_request_context(net::URLRequestContextGetter* c) {
-    default_request_context_ = c;
-  }
-#endif
-
   // Did the user restore the last session? This is set by SessionRestore.
   void set_restored_last_session(bool restored_last_session) {
     restored_last_session_ = restored_last_session;
@@ -423,7 +388,7 @@ class Profile : public content::BrowserContext {
   }
 
   void ResumeAccessibilityEvents() {
-    DCHECK(accessibility_pause_level_ > 0);
+    DCHECK_GT(accessibility_pause_level_, 0);
     accessibility_pause_level_--;
   }
 

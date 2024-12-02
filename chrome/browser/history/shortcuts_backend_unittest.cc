@@ -11,8 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/shortcuts_backend.h"
 #include "chrome/browser/history/shortcuts_database.h"
-#include "chrome/common/guid.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "sql/statement.h"
 
 #include "testing/gtest/include/gtest/gtest.h"

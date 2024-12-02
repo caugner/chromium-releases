@@ -28,9 +28,9 @@ class CompositingIOSurfaceMac {
   void SetIOSurface(uint64 io_surface_handle);
 
   // Blit the IOSurface at the upper-left corner of the |view|. If |view| window
-  // size is larger than the IOSurface, the remaining left and bottom edges will
-  // be white.
-  void DrawIOSurface(NSView* view);
+  // size is larger than the IOSurface, the remaining right and bottom edges
+  // will be white. |scaleFactor| is 1 in normal views, 2 in HiDPI views.
+  void DrawIOSurface(NSView* view, float scale_factor);
 
   // Copy the data of the "live" OpenGL texture referring to this IOSurfaceRef
   // into |out|. The image data is transformed so that it fits in |dst_size|.
@@ -51,7 +51,13 @@ class CompositingIOSurfaceMac {
 
   bool HasIOSurface() { return !!io_surface_.get(); }
 
+  const gfx::Size& pixel_io_surface_size() const {
+    return pixel_io_surface_size_;
+  }
+  // In cocoa view units / DIPs.
   const gfx::Size& io_surface_size() const { return io_surface_size_; }
+
+  bool is_vsync_disabled() const { return is_vsync_disabled_; }
 
  private:
   // Vertex structure for use in glDraw calls.
@@ -63,6 +69,10 @@ class CompositingIOSurfaceMac {
       y_ = y;
       tx_ = tx;
       ty_ = ty;
+    }
+    void set_position(float x, float y) {
+      x_ = x;
+      y_ = y;
     }
     float x_;
     float y_;
@@ -84,12 +94,22 @@ class CompositingIOSurfaceMac {
       verts_[2].set(vw, vh, tw, 0.0f);
       verts_[3].set(vw, 0.0f, tw, th);
     }
+    void set_rect(float x1, float y1, float x2, float y2) {
+      verts_[0].set_position(x1, y1);
+      verts_[1].set_position(x1, y2);
+      verts_[2].set_position(x2, y2);
+      verts_[3].set_position(x2, y1);
+    }
     SurfaceVertex verts_[4];
   };
 
   CompositingIOSurfaceMac(IOSurfaceSupport* io_surface_support,
                           NSOpenGLContext* glContext,
-                          CGLContextObj cglContext);
+                          CGLContextObj cglContext,
+                          GLuint shader_program_blit_rgb,
+                          GLint blit_rgb_sampler_location,
+                          GLuint shader_program_white,
+                          bool is_vsync_disabled);
 
   // Returns true if IOSurface is ready to render. False otherwise.
   bool MapIOSurfaceToTexture(uint64 io_surface_handle);
@@ -110,7 +130,8 @@ class CompositingIOSurfaceMac {
   base::mac::ScopedCFTypeRef<CFTypeRef> io_surface_;
 
   // The width and height of the io surface.
-  gfx::Size io_surface_size_;
+  gfx::Size pixel_io_surface_size_;  // In pixels.
+  gfx::Size io_surface_size_;  // In view units.
 
   // The "live" OpenGL texture referring to this IOSurfaceRef. Note
   // that per the CGLTexImageIOSurface2D API we do not need to
@@ -119,7 +140,14 @@ class CompositingIOSurfaceMac {
   // with it.
   GLuint texture_;
 
+  // Shader parameters.
+  GLuint shader_program_blit_rgb_;
+  GLint blit_rgb_sampler_location_;
+  GLuint shader_program_white_;
+
   SurfaceQuad quad_;
+
+  bool is_vsync_disabled_;
 };
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_ACCELERATED_COMPOSITING_VIEW_MAC_H

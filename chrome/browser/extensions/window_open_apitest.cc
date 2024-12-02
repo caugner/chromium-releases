@@ -8,15 +8,18 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "net/base/mock_host_resolver.h"
 
 using content::OpenURLParams;
 using content::Referrer;
+using content::WebContents;
 
 // Disabled, http://crbug.com/64899.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_WindowOpen) {
@@ -43,14 +46,14 @@ void WaitForTabsAndPopups(Browser* browser,
   const base::TimeDelta kWaitTime = base::TimeDelta::FromSeconds(15);
   base::TimeTicks end_time = base::TimeTicks::Now() + kWaitTime;
   while (base::TimeTicks::Now() < end_time) {
-    if (BrowserList::GetBrowserCount(browser->profile()) == num_browsers &&
+    if (browser::GetBrowserCount(browser->profile()) == num_browsers &&
         browser->tab_count() == num_tabs)
       break;
 
     ui_test_utils::RunAllPendingInMessageLoop();
   }
 
-  EXPECT_EQ(num_browsers, BrowserList::GetBrowserCount(browser->profile()));
+  EXPECT_EQ(num_browsers, browser::GetBrowserCount(browser->profile()));
   EXPECT_EQ(num_tabs, browser->tab_count());
 
   int num_popups_seen = 0;
@@ -225,7 +228,7 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
         new ExtensionTestMessageListener(test_strings[i], false));
   }
 
-  const Extension* extension = LoadExtension(
+  const extensions::Extension* extension = LoadExtension(
       test_data_dir_.AppendASCII("window_open").AppendASCII(
           "close_panels_on_uninstall"));
   ASSERT_TRUE(extension);
@@ -248,4 +251,60 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_WindowOpener) {
   ASSERT_TRUE(RunExtensionTest("window_open/opener")) << message_;
+}
+
+// Tests that an extension page can call window.open to an extension URL and
+// the new window has extension privileges.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenExtension) {
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("uitest").AppendASCII("window_open")));
+
+  GURL start_url(std::string("chrome-extension://") +
+      last_loaded_extension_id_ + "/test.html");
+  ui_test_utils::NavigateToURL(browser(), start_url);
+  WebContents* newtab;
+  ASSERT_NO_FATAL_FAILURE(OpenWindow(browser()->GetActiveWebContents(),
+                          start_url.Resolve("newtab.html"), true, &newtab));
+
+  bool result = false;
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      newtab->GetRenderViewHost(), L"", L"testExtensionApi()", &result));
+  EXPECT_TRUE(result);
+}
+
+// Tests that if an extension page calls window.open to an invalid extension
+// URL, the browser doesn't crash.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenInvalidExtension) {
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("uitest").AppendASCII("window_open")));
+
+  GURL start_url(std::string("chrome-extension://") +
+      last_loaded_extension_id_ + "/test.html");
+  ui_test_utils::NavigateToURL(browser(), start_url);
+  ASSERT_NO_FATAL_FAILURE(OpenWindow(browser()->GetActiveWebContents(),
+      GURL("chrome-extension://thisissurelynotavalidextensionid/newtab.html"),
+      false, NULL));
+
+  // If we got to this point, we didn't crash, so we're good.
+}
+
+// Tests that calling window.open from the newtab page to an extension URL
+// gives the new window extension privileges - even though the opening page
+// does not have extension privileges, we break the script connection, so
+// there is no privilege leak.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenNoPrivileges) {
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("uitest").AppendASCII("window_open")));
+
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+  WebContents* newtab;
+  ASSERT_NO_FATAL_FAILURE(OpenWindow(browser()->GetActiveWebContents(),
+      GURL(std::string("chrome-extension://") + last_loaded_extension_id_ +
+          "/newtab.html"), false, &newtab));
+
+  // Extension API should succeed.
+  bool result = false;
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      newtab->GetRenderViewHost(), L"", L"testExtensionApi()", &result));
+  EXPECT_TRUE(result);
 }

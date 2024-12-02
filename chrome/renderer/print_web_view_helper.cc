@@ -26,6 +26,9 @@
 #include "printing/units.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
@@ -33,9 +36,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPrintScalingOption.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
@@ -49,6 +50,10 @@
 #include "skia/ext/vector_canvas.h"
 #include "skia/ext/vector_platform_device_skia.h"
 #include "third_party/skia/include/core/SkTypeface.h"
+#if defined(OS_WIN)  // Currently Windows only
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/render_text.h"
+#endif  // USE_SKIA && defined(OS_WIN)
 #elif defined(OS_MACOSX)
 #include <CoreGraphics/CGContext.h>
 
@@ -74,6 +79,7 @@ using WebKit::WebFrame;
 using WebKit::WebNode;
 using WebKit::WebPlugin;
 using WebKit::WebPluginDocument;
+using WebKit::WebPrintParams;
 using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
@@ -133,8 +139,8 @@ bool PrintMsg_Print_Params_IsEqual(
              newParams.params.supports_alpha_blend &&
          oldParams.pages.size() == newParams.pages.size() &&
          oldParams.params.print_to_pdf == newParams.params.print_to_pdf &&
-         oldParams.params.fit_to_paper_size ==
-             newParams.params.fit_to_paper_size &&
+         oldParams.params.print_scaling_option ==
+             newParams.params.print_scaling_option &&
          oldParams.params.display_header_footer ==
              newParams.params.display_header_footer &&
          oldParams.params.date == newParams.params.date &&
@@ -302,14 +308,39 @@ void EnsureOrientationMatches(const PrintMsg_Print_Params& css_params,
                 page_params->printable_area.width()));
 }
 
-void CalculatePrintCanvasSize(const PrintMsg_Print_Params& print_params,
-                              gfx::Size* result) {
+void ComputeWebKitPrintParamsInDesiredDpi(
+    const PrintMsg_Print_Params& print_params,
+    WebPrintParams* webkit_print_params) {
   int dpi = GetDPI(&print_params);
-  result->set_width(ConvertUnit(print_params.content_size.width(), dpi,
-                                print_params.desired_dpi));
+  webkit_print_params->printerDPI = dpi;
+  webkit_print_params->printScalingOption = print_params.print_scaling_option;
 
-  result->set_height(ConvertUnit(print_params.content_size.height(), dpi,
-                                 print_params.desired_dpi));
+  webkit_print_params->printContentArea.width =
+      ConvertUnit(print_params.content_size.width(), dpi,
+                  print_params.desired_dpi);
+  webkit_print_params->printContentArea.height =
+      ConvertUnit(print_params.content_size.height(), dpi,
+                  print_params.desired_dpi);
+
+  webkit_print_params->printableArea.x =
+      ConvertUnit(print_params.printable_area.x(), dpi,
+                  print_params.desired_dpi);
+  webkit_print_params->printableArea.y =
+      ConvertUnit(print_params.printable_area.y(), dpi,
+                  print_params.desired_dpi);
+  webkit_print_params->printableArea.width =
+      ConvertUnit(print_params.printable_area.width(), dpi,
+                  print_params.desired_dpi);
+  webkit_print_params->printableArea.height =
+      ConvertUnit(print_params.printable_area.height(),
+                  dpi, print_params.desired_dpi);
+
+  webkit_print_params->paperSize.width =
+      ConvertUnit(print_params.page_size.width(), dpi,
+                  print_params.desired_dpi);
+  webkit_print_params->paperSize.height =
+      ConvertUnit(print_params.page_size.height(), dpi,
+                  print_params.desired_dpi);
 }
 
 bool PrintingNodeOrPdfFrame(const WebFrame* frame, const WebNode& node) {
@@ -339,6 +370,15 @@ printing::MarginType GetMarginsForPdf(WebFrame* frame, const WebNode& node) {
     return printing::NO_MARGINS;
   else
     return printing::PRINTABLE_AREA_MARGINS;
+}
+
+bool FitToPageEnabled(const DictionaryValue& job_settings) {
+  bool fit_to_paper_size = false;
+  if (!job_settings.GetBoolean(printing::kSettingFitToPageEnabled,
+                               &fit_to_paper_size)) {
+    NOTREACHED();
+  }
+  return fit_to_paper_size;
 }
 
 // Get the (x, y) coordinate from where printing of the current text should
@@ -394,6 +434,61 @@ SkPoint GetHeaderFooterPosition(
   return point;
 }
 
+#if defined(USE_SKIA) && defined(OS_WIN)
+void PrintHeaderFooterByRenderText(
+    const string16& text,
+    WebKit::WebCanvas* canvas,
+    HeaderFooterPaint paint,
+    float webkit_scale_factor,
+    const PageSizeMargins& page_layout,
+    printing::HorizontalHeaderFooterPosition horizontal_position,
+    printing::VerticalHeaderFooterPosition vertical_position,
+    double offset_to_baseline) {
+  // TODO(arthurhsu): Following code works on Windows only so far.
+  // See crbug.com/108599 and its blockers for more information.
+  scoped_ptr<gfx::RenderText> render_text(gfx::RenderText::CreateRenderText());
+  render_text->SetText(text);
+  int font_size = printing::kSettingHeaderFooterFontSize / webkit_scale_factor;
+  render_text->SetFontSize(font_size);
+  gfx::Size text_size = render_text->GetStringSize();
+  // Text height includes the configured gap between header/footer and the
+  // context, plus the 1 point that we later substracted for ensuring the
+  // overlapping between RenderText rect and the content area.
+  int text_height = text_size.height() + 1 +
+                    printing::kSettingHeaderFooterInterstice;
+  SkScalar margin_left = page_layout.margin_left / webkit_scale_factor;
+  SkScalar margin_top = page_layout.margin_top / webkit_scale_factor;
+  SkScalar content_height = page_layout.content_height / webkit_scale_factor;
+
+  int text_width = text_size.width();
+  SkPoint point = GetHeaderFooterPosition(webkit_scale_factor, page_layout,
+                                          horizontal_position,
+                                          vertical_position, offset_to_baseline,
+                                          SkScalarToDouble(text_width));
+  // Workaround clipping issue of RenderText to make sure that display rect
+  // overlaps with content area.
+  int rect_y;
+  if (vertical_position == printing::TOP) {
+    // Bottom of display rect must overlap with content.
+    rect_y = margin_top - text_height + 1;
+  } else {  // BOTTOM
+    // Top of display rect must overlap with content.
+    rect_y = margin_top + content_height - 1;
+  }
+
+  gfx::Rect rect(point.x() + margin_left, rect_y, text_width, text_height);
+  render_text->SetDisplayRect(rect);
+
+  int save_count = canvas->save();
+  canvas->translate(-margin_left, -margin_top);
+  {
+    gfx::Canvas gfx_canvas(canvas);
+    render_text->Draw(&gfx_canvas);
+  }
+  canvas->restoreToCount(save_count);
+}
+#endif
+
 // Given a text, the positions, and the paint object, this method gets the
 // coordinates and prints the text at those coordinates on the canvas.
 void PrintHeaderFooterText(
@@ -406,6 +501,12 @@ void PrintHeaderFooterText(
     printing::VerticalHeaderFooterPosition vertical_position,
     double offset_to_baseline) {
 #if defined(USE_SKIA)
+#if defined(OS_WIN)
+  PrintHeaderFooterByRenderText(text, canvas, paint, webkit_scale_factor,
+      page_layout, horizontal_position, vertical_position, offset_to_baseline);
+#else
+  // TODO(arthurhsu): following code has issues with i18n BiDi, see
+  //                  crbug.com/108599.
   size_t text_byte_length = text.length() * sizeof(char16);
   double text_width_in_points = SkScalarToDouble(paint.measureText(
       text.c_str(), text_byte_length));
@@ -417,6 +518,7 @@ void PrintHeaderFooterText(
       paint.getTextSize() / webkit_scale_factor));
   canvas->drawText(text.c_str(), text_byte_length, point.x(), point.y(),
                    paint);
+#endif  // USE_SKIA && OS_WIN
 #elif defined(OS_MACOSX)
   ScopedCFTypeRef<CFStringRef> cf_text(base::SysUTF16ToCFStringRef(text));
   ScopedCFTypeRef<CFAttributedStringRef> cf_attr_text(
@@ -604,18 +706,17 @@ PrepareFrameAndViewForPrint::PrepareFrameAndViewForPrint(
         : frame_(frame),
           node_to_print_(node),
           web_view_(frame->view()),
-          dpi_(static_cast<int>(print_params.dpi)),
           expected_pages_count_(0),
           use_browser_overlays_(true),
           finished_(false) {
-  gfx::Size canvas_size;
-  CalculatePrintCanvasSize(print_params, &canvas_size);
+  WebPrintParams webkit_print_params;
+  ComputeWebKitPrintParamsInDesiredDpi(print_params, &webkit_print_params);
 
   if (WebFrame* web_frame = web_view_->mainFrame())
     prev_scroll_offset_ = web_frame->scrollOffset();
   prev_view_size_ = web_view_->size();
 
-  StartPrinting(canvas_size);
+  StartPrinting(webkit_print_params);
 }
 
 PrepareFrameAndViewForPrint::~PrepareFrameAndViewForPrint() {
@@ -625,33 +726,41 @@ PrepareFrameAndViewForPrint::~PrepareFrameAndViewForPrint() {
 void PrepareFrameAndViewForPrint::UpdatePrintParams(
     const PrintMsg_Print_Params& print_params) {
   DCHECK(!finished_);
-  gfx::Size canvas_size;
-  CalculatePrintCanvasSize(print_params, &canvas_size);
-  if (canvas_size == print_canvas_size_)
+  WebPrintParams webkit_print_params;
+  ComputeWebKitPrintParamsInDesiredDpi(print_params, &webkit_print_params);
+
+  if (webkit_print_params.printContentArea ==
+          web_print_params_.printContentArea &&
+      webkit_print_params.printableArea == web_print_params_.printableArea &&
+      webkit_print_params.paperSize == web_print_params_.paperSize &&
+      webkit_print_params.printScalingOption ==
+          web_print_params_.printScalingOption) {
     return;
+  }
 
   frame_->printEnd();
-  dpi_ = static_cast<int>(print_params.dpi);
-  StartPrinting(canvas_size);
+  StartPrinting(webkit_print_params);
 }
 
 void PrepareFrameAndViewForPrint::StartPrinting(
-    const gfx::Size& print_canvas_size) {
-  print_canvas_size_ = print_canvas_size;
+    const WebPrintParams& webkit_print_params) {
+  web_print_params_ = webkit_print_params;
 
   // Layout page according to printer page size. Since WebKit shrinks the
   // size of the page automatically (from 125% to 200%) we trick it to
   // think the page is 125% larger so the size of the page is correct for
   // minimum (default) scaling.
   // This is important for sites that try to fill the page.
-  gfx::Size print_layout_size(print_canvas_size_);
+  gfx::Size print_layout_size(web_print_params_.printContentArea.width,
+                              web_print_params_.printContentArea.height);
   print_layout_size.set_height(static_cast<int>(
       static_cast<double>(print_layout_size.height()) * 1.25));
 
   web_view_->resize(print_layout_size);
 
-  expected_pages_count_ = frame_->printBegin(print_canvas_size_, node_to_print_,
-                                             dpi_, &use_browser_overlays_);
+  expected_pages_count_ = frame_->printBegin(web_print_params_,
+                                             node_to_print_,
+                                             &use_browser_overlays_);
 }
 
 void PrepareFrameAndViewForPrint::FinishPrinting() {
@@ -721,8 +830,6 @@ bool PrintWebViewHelper::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(PrintMsg_PrintingDone, OnPrintingDone)
     IPC_MESSAGE_HANDLER(PrintMsg_ResetScriptedPrintCount,
                         ResetScriptedPrintCount)
-    IPC_MESSAGE_HANDLER(PrintMsg_PreviewPrintingRequestCancelled,
-                        DisplayPrintJobError)
     IPC_MESSAGE_HANDLER(PrintMsg_SetScriptedPrintingBlocked,
                         SetScriptedPrintBlocked)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -833,6 +940,28 @@ bool PrintWebViewHelper::IsPrintToPdfRequested(
   return print_to_pdf;
 }
 
+WebKit::WebPrintScalingOption PrintWebViewHelper::GetPrintScalingOption(
+    bool source_is_html, const DictionaryValue& job_settings,
+    const PrintMsg_Print_Params& params) {
+  DCHECK(!print_for_preview_);
+
+  if (params.print_to_pdf)
+    return WebKit::WebPrintScalingOptionSourceSize;
+
+  if (!source_is_html) {
+    if (!FitToPageEnabled(job_settings))
+      return WebKit::WebPrintScalingOptionNone;
+
+    bool no_plugin_scaling =
+        print_preview_context_.frame()->isPrintScalingDisabledForPlugin(
+            print_preview_context_.node());
+
+    if (params.is_first_request && no_plugin_scaling)
+      return WebKit::WebPrintScalingOptionNone;
+  }
+  return WebKit::WebPrintScalingOptionFitToPrintableArea;
+}
+
 void PrintWebViewHelper::OnPrintPreview(const DictionaryValue& settings) {
   DCHECK(is_preview_enabled_);
   print_preview_context_.OnPrintPreview();
@@ -867,6 +996,16 @@ void PrintWebViewHelper::OnPrintPreview(const DictionaryValue& settings) {
                                                    preview_params));
     return;
   }
+
+  // If we are previewing a pdf and the print scaling is disabled, send a
+  // message to browser.
+  if (print_pages_params_->params.is_first_request &&
+      !print_preview_context_.IsModifiable() &&
+      print_preview_context_.frame()->isPrintScalingDisabledForPlugin(
+          print_preview_context_.node())) {
+    Send(new PrintHostMsg_PrintPreviewScalingDisabled(routing_id()));
+  }
+
   // Always clear |old_print_pages_params_| before rendering the pages.
   old_print_pages_params_.reset();
   is_print_ready_metafile_sent_ = false;
@@ -1103,8 +1242,6 @@ void PrintWebViewHelper::DidFinishPrinting(PrintingResult result) {
       break;
 
     case FAIL_PRINT:
-      DisplayPrintJobError();
-
       if (notify_browser_of_print_failure_ && print_pages_params_.get()) {
         int cookie = print_pages_params_->params.document_cookie;
         Send(new PrintHostMsg_PrintingFailed(routing_id(), cookie));
@@ -1143,7 +1280,7 @@ bool PrintWebViewHelper::CopyAndPrint(WebKit::WebFrame* web_frame) {
   // Create a new WebView with the same settings as the current display one.
   // Except that we disable javascript (don't want any active content running
   // on the page).
-  WebPreferences prefs = render_view()->GetWebkitPreferences();
+  webkit_glue::WebPreferences prefs = render_view()->GetWebkitPreferences();
   prefs.javascript_enabled = false;
   prefs.java_enabled = false;
 
@@ -1214,7 +1351,9 @@ void PrintWebViewHelper::ComputePageLayoutInPointsForCss(
     PageSizeMargins* page_layout_in_points) {
   PrintMsg_Print_Params params = CalculatePrintParamsForCss(
       frame, page_index, page_params, ignore_css_margins,
-      page_params.fit_to_paper_size, scale_factor);
+      page_params.print_scaling_option ==
+          WebKit::WebPrintScalingOptionFitToPrintableArea,
+      scale_factor);
   CalculatePageLayoutFromPrintParams(params, page_layout_in_points);
 }
 
@@ -1227,13 +1366,15 @@ void PrintWebViewHelper::UpdateFrameAndViewFromCssPageLayout(
     bool ignore_css_margins) {
   if (PrintingNodeOrPdfFrame(frame, node))
     return;
+  bool fit_to_page = ignore_css_margins &&
+                     params.print_scaling_option ==
+                          WebKit::WebPrintScalingOptionFitToPrintableArea;
   PrintMsg_Print_Params print_params = CalculatePrintParamsForCss(
-      frame, 0, params, ignore_css_margins,
-      ignore_css_margins && params.fit_to_paper_size, NULL);
+      frame, 0, params, ignore_css_margins, fit_to_page, NULL);
   prepare->UpdatePrintParams(print_params);
 }
 
-bool PrintWebViewHelper::InitPrintSettings() {
+bool PrintWebViewHelper::InitPrintSettings(bool fit_to_paper_size) {
   PrintMsg_PrintPages_Params settings;
   Send(new PrintHostMsg_GetDefaultPrintSettings(routing_id(),
                                                 &settings.params));
@@ -1253,8 +1394,14 @@ bool PrintWebViewHelper::InitPrintSettings() {
 
   // Reset to default values.
   ignore_css_margins_ = false;
-  settings.params.fit_to_paper_size = true;
   settings.pages.clear();
+
+  settings.params.print_scaling_option =
+      WebKit::WebPrintScalingOptionSourceSize;
+  if (fit_to_paper_size) {
+    settings.params.print_scaling_option =
+        WebKit::WebPrintScalingOptionFitToPrintableArea;
+  }
 
   print_pages_params_.reset(new PrintMsg_PrintPages_Params(settings));
   return result;
@@ -1264,7 +1411,9 @@ bool PrintWebViewHelper::InitPrintSettingsAndPrepareFrame(
     WebKit::WebFrame* frame, const WebKit::WebNode& node,
     scoped_ptr<PrepareFrameAndViewForPrint>* prepare) {
   DCHECK(frame);
-  if (!InitPrintSettings()) {
+
+  bool fit_to_paper_size = !(PrintingNodeOrPdfFrame(frame, node));
+  if (!InitPrintSettings(fit_to_paper_size)) {
     notify_browser_of_print_failure_ = false;
     render_view()->RunModalAlertDialog(
         frame,
@@ -1309,26 +1458,8 @@ bool PrintWebViewHelper::UpdatePrintSettings(
     modified_job_settings.MergeDictionary(job_settings);
     modified_job_settings.SetBoolean(printing::kSettingHeaderFooterEnabled,
                                      false);
-
-    // - On Windows, we don't add a margin until we turn it into an EMF when
-    //   printing for print preview (We could add it in the plugin).
-    // - On Mac with Skia, we don't add a margin until we send it to the printer
-    //   using the CG PDF class (We could add it in the plugin).
-    // - On Mac with CG, we can add a margin when generating the preview.
-    // - On Linux, we never add a margin (We Could add it in the plugin).
-#if defined(OS_MACOSX) && !defined(USE_SKIA)
-    bool get_margins_from_pdf = !source_is_html && !print_for_preview_;
-#elif defined(OS_WIN) || defined(OS_MACOSX)
-    bool get_margins_from_pdf = !source_is_html && print_for_preview_;
-#else
-    bool get_margins_from_pdf = false;
-#endif
-
-    printing::MarginType margin_type = printing::NO_MARGINS;
-    if (get_margins_from_pdf)
-      margin_type = GetMarginsForPdf(frame, node);
     modified_job_settings.SetInteger(printing::kSettingMarginsType,
-                                     margin_type);
+                                     printing::NO_MARGINS);
     job_settings = &modified_job_settings;
   }
 
@@ -1380,10 +1511,8 @@ bool PrintWebViewHelper::UpdatePrintSettings(
 
     settings.params.print_to_pdf = IsPrintToPdfRequested(*job_settings);
     UpdateFrameMarginsCssInfo(*job_settings);
-
-    // Fit to paper size.
-    settings.params.fit_to_paper_size = source_is_html &&
-                                        !IsPrintToPdfRequested(*job_settings);
+    settings.params.print_scaling_option = GetPrintScalingOption(
+        source_is_html, *job_settings, settings.params);
 
     // Header/Footer: Set |header_footer_info_|.
     if (settings.params.display_header_footer) {
@@ -1410,10 +1539,6 @@ bool PrintWebViewHelper::GetPrintSettingsFromUser(WebKit::WebFrame* frame,
   PrintHostMsg_ScriptedPrint_Params params;
   PrintMsg_PrintPages_Params print_settings;
 
-  // host_window_ may be NULL at this point if the current window is a
-  // popup and the print() command has been issued from the parent. The
-  // receiver of this message has to deal with this.
-  params.host_window_id = render_view()->GetHostWindow();
   params.cookie = print_pages_params_->params.document_cookie;
   params.has_selection = frame->hasSelection();
   params.expected_pages_count = expected_pages_count;
@@ -1424,12 +1549,19 @@ bool PrintWebViewHelper::GetPrintSettingsFromUser(WebKit::WebFrame* frame,
 
   Send(new PrintHostMsg_DidShowPrintDialog(routing_id()));
 
+  // PrintHostMsg_ScriptedPrint will reset print_scaling_option, so we save the
+  // value before and restore it afterwards.
+  WebKit::WebPrintScalingOption scaling_option =
+      print_pages_params_->params.print_scaling_option;
+
   print_pages_params_.reset();
   IPC::SyncMessage* msg =
       new PrintHostMsg_ScriptedPrint(routing_id(), params, &print_settings);
   msg->EnableMessagePumping();
   Send(msg);
   print_pages_params_.reset(new PrintMsg_PrintPages_Params(print_settings));
+
+  print_pages_params_->params.print_scaling_option = scaling_option;
   return (print_settings.params.dpi && print_settings.params.document_cookie);
 }
 
@@ -1506,16 +1638,6 @@ void PrintWebViewHelper::ResetScriptedPrintCount() {
 void PrintWebViewHelper::IncrementScriptedPrintCount() {
   ++user_cancelled_scripted_print_count_;
   last_cancelled_script_print_ = base::Time::Now();
-}
-
-void PrintWebViewHelper::DisplayPrintJobError() {
-  WebView* web_view = print_web_view_;
-  if (!web_view)
-    web_view = render_view()->GetWebView();
-
-  render_view()->RunModalAlertDialog(
-      web_view->mainFrame(),
-      l10n_util::GetStringUTF16(IDS_PRINT_SPOOL_FAILED_ERROR_TEXT));
 }
 
 void PrintWebViewHelper::RequestPrintPreview(PrintPreviewRequestType type) {
@@ -1815,8 +1937,7 @@ int PrintWebViewHelper::PrintPreviewContext::last_error() const {
   return error_;
 }
 
-const gfx::Size&
-PrintWebViewHelper::PrintPreviewContext::GetPrintCanvasSize() const {
+gfx::Size PrintWebViewHelper::PrintPreviewContext::GetPrintCanvasSize() const {
   DCHECK(IsRendering());
   return prep_frame_view_->GetPrintCanvasSize();
 }

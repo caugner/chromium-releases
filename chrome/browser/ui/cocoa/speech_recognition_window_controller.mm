@@ -8,7 +8,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/ui/cocoa/info_bubble_view.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #import "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -28,8 +28,7 @@ const int kInstructionLabelMaxWidth = 150;
 
 - (id)initWithParentWindow:(NSWindow*)parentWindow
                   delegate:(SpeechRecognitionBubbleDelegate*)delegate
-              anchoredAt:(NSPoint)anchoredAt {
-  anchoredAt.y += info_bubble::kBubbleArrowHeight / 2.0;
+                anchoredAt:(NSPoint)anchoredAt {
   if ((self = [super initWithWindowNibPath:@"SpeechRecognitionBubble"
                               parentWindow:parentWindow
                                 anchoredAt:anchoredAt])) {
@@ -42,7 +41,13 @@ const int kInstructionLabelMaxWidth = 150;
 
 - (void)awakeFromNib {
   [super awakeFromNib];
-  [[self bubble] setArrowLocation:info_bubble::kTopLeft];
+  InfoBubbleView* bubble = [self bubble];
+  [bubble setArrowLocation:info_bubble::kTopLeft];
+  NSSize arrowSize = NSMakeSize(0, info_bubble::kBubbleArrowHeight);
+  arrowSize = [bubble convertSize:arrowSize toView:nil];
+  NSPoint anchorPoint = self.anchorPoint;
+  anchorPoint.y += arrowSize.height / 2.0;
+  self.anchorPoint = anchorPoint;
 }
 
 - (IBAction)cancel:(id)sender {

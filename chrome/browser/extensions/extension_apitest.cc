@@ -12,6 +12,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -174,7 +175,7 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
   DCHECK(!std::string(extension_name).empty() || !page_url.empty()) <<
       "extension_name and page_url cannot both be empty";
 
-  const Extension* extension = NULL;
+  const extensions::Extension* extension = NULL;
   if (!std::string(extension_name).empty()) {
     FilePath extension_path = test_data_dir_.AppendASCII(extension_name);
     if (load_as_component) {
@@ -209,12 +210,14 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
       ui_test_utils::NavigateToURL(browser(), url);
 
   } else if (launch_platform_app) {
-    Browser::OpenApplication(
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    application_launch::OpenApplication(
         browser()->profile(),
         extension,
         extension_misc::LAUNCH_NONE,
         GURL(),
-        NEW_WINDOW);
+        NEW_WINDOW,
+        command_line);
   }
 
   if (!catcher.GetNextResult()) {
@@ -226,15 +229,15 @@ bool ExtensionApiTest::RunExtensionTestImpl(const char* extension_name,
 }
 
 // Test that exactly one extension is loaded, and return it.
-const Extension* ExtensionApiTest::GetSingleLoadedExtension() {
+const extensions::Extension* ExtensionApiTest::GetSingleLoadedExtension() {
   ExtensionService* service = browser()->profile()->GetExtensionService();
 
-  const Extension* extension = NULL;
+  const extensions::Extension* extension = NULL;
   for (ExtensionSet::const_iterator it = service->extensions()->begin();
        it != service->extensions()->end(); ++it) {
     // Ignore any component extensions. They are automatically loaded into all
     // profiles and aren't the extension we're looking for here.
-    if ((*it)->location() == Extension::COMPONENT)
+    if ((*it)->location() == extensions::Extension::COMPONENT)
       continue;
 
     if (extension != NULL) {

@@ -5,7 +5,6 @@
 #include "ash/wm/window_resizer.h"
 
 #include "ash/shell.h"
-#include "ash/wm/root_window_event_filter.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -203,7 +202,7 @@ gfx::Rect WindowResizer::CalculateBoundsForDrag(
   if (details.window_component == HTBOTTOM ||
       details.window_component == HTBOTTOMRIGHT ||
       details.window_component == HTBOTTOMLEFT) {
-    gfx::Rect work_area = gfx::Screen::GetMonitorNearestWindow(
+    gfx::Rect work_area = gfx::Screen::GetDisplayNearestWindow(
         details.window).work_area();
     if (new_bounds.bottom() > work_area.bottom())
       new_bounds.Inset(0, 0, 0,
@@ -295,7 +294,7 @@ int WindowResizer::GetWidthForDrag(const Details& details,
 
     // And don't let the window go bigger than the monitor.
     int max_width =
-        gfx::Screen::GetMonitorNearestWindow(details.window).bounds().width();
+        gfx::Screen::GetDisplayNearestWindow(details.window).bounds().width();
     if (width > max_width) {
       width = max_width;
       *delta_x = -x_multiplier * (details.initial_bounds.width() - max_width);
@@ -329,7 +328,7 @@ int WindowResizer::GetHeightForDrag(const Details& details,
 
     // And don't let the window go bigger than the monitor.
     int max_height =
-        gfx::Screen::GetMonitorNearestWindow(details.window).bounds().height();
+        gfx::Screen::GetDisplayNearestWindow(details.window).bounds().height();
     if (height > max_height) {
       height = max_height;
       *delta_y = -y_multiplier * (details.initial_bounds.height() - max_height);

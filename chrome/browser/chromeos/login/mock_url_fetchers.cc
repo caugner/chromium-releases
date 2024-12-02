@@ -11,9 +11,9 @@
 #include "base/stringprintf.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/url_fetcher.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "net/http/http_status_code.h"
+#include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,8 +23,8 @@ ExpectCanceledFetcher::ExpectCanceledFetcher(
     bool success,
     const GURL& url,
     const std::string& results,
-    content::URLFetcher::RequestType request_type,
-    content::URLFetcherDelegate* d)
+    net::URLFetcher::RequestType request_type,
+    net::URLFetcherDelegate* d)
     : TestURLFetcher(0, url, d),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
@@ -49,8 +49,8 @@ GotCanceledFetcher::GotCanceledFetcher(
     bool success,
     const GURL& url,
     const std::string& results,
-    content::URLFetcher::RequestType request_type,
-    content::URLFetcherDelegate* d)
+    net::URLFetcher::RequestType request_type,
+    net::URLFetcherDelegate* d)
     : TestURLFetcher(0, url, d) {
   set_url(url);
   set_status(net::URLRequestStatus(net::URLRequestStatus::CANCELED, 0));
@@ -66,8 +66,8 @@ void GotCanceledFetcher::Start() {
 SuccessFetcher::SuccessFetcher(bool success,
                                const GURL& url,
                                const std::string& results,
-                               content::URLFetcher::RequestType request_type,
-                               content::URLFetcherDelegate* d)
+                               net::URLFetcher::RequestType request_type,
+                               net::URLFetcherDelegate* d)
     : TestURLFetcher(0, url, d) {
   set_url(url);
   set_status(net::URLRequestStatus(net::URLRequestStatus::SUCCESS, 0));
@@ -83,8 +83,8 @@ void SuccessFetcher::Start() {
 FailFetcher::FailFetcher(bool success,
                          const GURL& url,
                          const std::string& results,
-                         content::URLFetcher::RequestType request_type,
-                         content::URLFetcherDelegate* d)
+                         net::URLFetcher::RequestType request_type,
+                         net::URLFetcherDelegate* d)
     : TestURLFetcher(0, url, d) {
   set_url(url);
   set_status(net::URLRequestStatus(net::URLRequestStatus::FAILED, ECONNRESET));
@@ -100,7 +100,7 @@ void FailFetcher::Start() {
 // static
 const char CaptchaFetcher::kCaptchaToken[] = "token";
 // static
-const char CaptchaFetcher::kCaptchaUrlBase[] = "http://www.google.com/accounts/";
+const char CaptchaFetcher::kCaptchaUrlBase[] = "http://accounts.google.com/";
 // static
 const char CaptchaFetcher::kCaptchaUrlFragment[] = "fragment";
 // static
@@ -110,8 +110,8 @@ const char CaptchaFetcher::kUnlockUrl[] = "http://what.ever";
 CaptchaFetcher::CaptchaFetcher(bool success,
                                const GURL& url,
                                const std::string& results,
-                               content::URLFetcher::RequestType request_type,
-                               content::URLFetcherDelegate* d)
+                               net::URLFetcher::RequestType request_type,
+                               net::URLFetcherDelegate* d)
     : TestURLFetcher(0, url, d) {
   set_url(url);
   set_status(net::URLRequestStatus(net::URLRequestStatus::SUCCESS, 0));
@@ -150,8 +150,8 @@ void CaptchaFetcher::Start() {
 HostedFetcher::HostedFetcher(bool success,
                              const GURL& url,
                              const std::string& results,
-                             content::URLFetcher::RequestType request_type,
-                             content::URLFetcherDelegate* d)
+                             net::URLFetcher::RequestType request_type,
+                             net::URLFetcherDelegate* d)
     : TestURLFetcher(0, url, d) {
   set_url(url);
   set_status(net::URLRequestStatus(net::URLRequestStatus::SUCCESS, 0));

@@ -17,7 +17,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "ui/gfx/gl/gpu_preference.h"
+#include "ui/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(USE_SKIA)
@@ -127,6 +127,12 @@ class WebGraphicsContext3DCommandBufferImpl
       const GURL& active_url,
       content::CauseForGpuLaunch cause);
 
+  // Create & initialize a WebGraphicsContext3DCommandBufferImpl.  Return NULL
+  // on any failure.
+  static WebGraphicsContext3DCommandBufferImpl* CreateOffscreenContext(
+      GpuChannelHostFactory* factory,
+      const WebGraphicsContext3D::Attributes& attributes);
+
   //----------------------------------------------------------------------
   // WebGraphicsContext3D methods
 
@@ -141,6 +147,9 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual bool isGLES2Compliant();
 
   virtual bool setParentContext(WebGraphicsContext3D* parent_context);
+
+  virtual unsigned int insertSyncPoint();
+  virtual void waitSyncPoint(unsigned int);
 
   virtual void reshape(int width, int height);
 
@@ -555,14 +564,12 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void getQueryObjectuivEXT(
       WebGLId query, WGC3Denum pname, WGC3Duint* params);
 
-  virtual void copyTextureCHROMIUM(WGC3Denum target, WGC3Denum source_id,
-                                   WGC3Denum dest_id, WGC3Dint level,
-                                   WGC3Dint internal_format);
+  virtual void copyTextureCHROMIUM(WGC3Denum target, WebGLId source_id,
+                                   WebGLId dest_id, WGC3Dint level,
+                                   WGC3Denum internal_format);
 
  protected:
-#if WEBKIT_USING_SKIA
   virtual GrGLInterface* onCreateGrGLInterface();
-#endif
 
  private:
   // These are the same error codes as used by EGL.

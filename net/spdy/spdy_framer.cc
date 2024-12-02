@@ -913,7 +913,7 @@ size_t SpdyFramer::ProcessDataFramePayload(const char* data, size_t len) {
 
 bool SpdyFramer::ParseHeaderBlockInBuffer(const char* header_data,
                                           size_t header_length,
-                                          SpdyHeaderBlock* block) {
+                                          SpdyHeaderBlock* block) const {
   SpdyFrameReader reader(header_data, header_length);
 
   // Read number of headers.
@@ -1234,9 +1234,10 @@ SpdyCredentialControlFrame* SpdyFramer::CreateCredentialFrame(
   return reinterpret_cast<SpdyCredentialControlFrame*>(frame.take());
 }
 
-SpdyDataFrame* SpdyFramer::CreateDataFrame(SpdyStreamId stream_id,
+SpdyDataFrame* SpdyFramer::CreateDataFrame(
+    SpdyStreamId stream_id,
                                            const char* data,
-                                           uint32 len, SpdyDataFlags flags) {
+    uint32 len, SpdyDataFlags flags) const {
   DCHECK_EQ(0u, stream_id & ~kStreamIdMask);
   size_t frame_size = SpdyDataFrame::size() + len;
   SpdyFrameBuilder frame(stream_id, flags, frame_size);
@@ -1248,7 +1249,7 @@ SpdyDataFrame* SpdyFramer::CreateDataFrame(SpdyStreamId stream_id,
 // The following compression setting are based on Brian Olson's analysis. See
 // https://groups.google.com/group/spdy-dev/browse_thread/thread/dfaf498542fac792
 // for more details.
-static const int kCompressorLevel = 9;
+static const int kCompressorLevel = 0;
 static const int kCompressorWindowSizeInBits = 11;
 static const int kCompressorMemLevel = 1;
 

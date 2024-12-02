@@ -9,19 +9,19 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/webui/web_dialog_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "googleurl/src/gurl.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
-#include "googleurl/src/gurl.h"
+#include "ui/web_dialogs/web_dialog_delegate.h"
 
 namespace chromeos {
 
 class BubbleFrameView;
 
 // Launches web dialog during OOBE/Login with specified URL and title.
-class LoginWebDialog : public WebDialogDelegate,
+class LoginWebDialog : public ui::WebDialogDelegate,
                        public content::NotificationObserver {
  public:
   // Delegate class to get notifications from the dialog.
@@ -41,7 +41,7 @@ class LoginWebDialog : public WebDialogDelegate,
 
   LoginWebDialog(Delegate* delegate,
                  gfx::NativeWindow parent_window,
-                 const std::wstring& title,
+                 const string16& title,
                  const GURL& url,
                  Style style);
   virtual ~LoginWebDialog();
@@ -59,7 +59,7 @@ class LoginWebDialog : public WebDialogDelegate,
   bool is_open() const { return is_open_; }
 
  protected:
-  // WebDialogDelegate implementation.
+  // ui::WebDialogDelegate implementation.
   virtual ui::ModalType GetDialogModalType() const OVERRIDE;
   virtual string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;

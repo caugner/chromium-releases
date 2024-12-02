@@ -149,19 +149,19 @@ string16 BrowserDistribution::GetAppGuid() {
   return L"";
 }
 
-string16 BrowserDistribution::GetApplicationName() {
+string16 BrowserDistribution::GetBaseAppName() {
   return L"Chromium";
 }
 
 string16 BrowserDistribution::GetAppShortCutName() {
-  return GetApplicationName();
+  return GetBaseAppName();
 }
 
 string16 BrowserDistribution::GetAlternateApplicationName() {
   return L"The Internet";
 }
 
-string16 BrowserDistribution::GetBrowserAppId() {
+string16 BrowserDistribution::GetBaseAppId() {
   return L"Chromium";
 }
 
@@ -244,19 +244,15 @@ bool BrowserDistribution::GetDelegateExecuteHandlerData(
     string16* type_lib_uuid,
     string16* type_lib_version,
     string16* interface_uuid) {
-  // Chrome's DelegateExecute verb handler is only used for Windows 8 and up.
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
-    if (handler_class_uuid)
-      *handler_class_uuid = kCommandExecuteImplUuid;
-    if (type_lib_uuid)
-      *type_lib_uuid = kDelegateExecuteLibUuid;
-    if (type_lib_version)
-      *type_lib_version = kDelegateExecuteLibVersion;
-    if (interface_uuid)
-      *interface_uuid = kICommandExecuteImplUuid;
-    return true;
-  }
-  return false;
+  if (handler_class_uuid)
+    *handler_class_uuid = kCommandExecuteImplUuid;
+  if (type_lib_uuid)
+    *type_lib_uuid = kDelegateExecuteLibUuid;
+  if (type_lib_version)
+    *type_lib_version = kDelegateExecuteLibVersion;
+  if (interface_uuid)
+    *interface_uuid = kICommandExecuteImplUuid;
+  return true;
 }
 
 void BrowserDistribution::UpdateInstallStatus(bool system_install,

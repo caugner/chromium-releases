@@ -42,6 +42,11 @@ class DictionaryValue;
 
 namespace content {
 class RenderViewHost;
+struct NativeWebKeyboardEvent;
+}
+
+namespace gfx {
+class Rect;
 }
 
 namespace webkit {
@@ -58,13 +63,11 @@ class TestingAutomationProvider : public AutomationProvider,
 
   virtual IPC::Channel::Mode GetChannelMode(bool use_named_interface);
 
-  // IPC::Channel::Listener:
+  // IPC::Listener:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
 
  private:
-  class PopupMenuWaiter;
-
   // Storage for ImportSettings() to resume operations after a callback.
   struct ImportSettingsData {
     string16 browser_name;
@@ -77,8 +80,8 @@ class TestingAutomationProvider : public AutomationProvider,
   virtual ~TestingAutomationProvider();
 
   // BrowserList::Observer:
-  virtual void OnBrowserAdded(const Browser* browser) OVERRIDE;
-  virtual void OnBrowserRemoved(const Browser* browser) OVERRIDE;
+  virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
+  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
 
   // importer::ImporterListObserver:
   virtual void OnSourceProfilesLoaded() OVERRIDE;
@@ -90,11 +93,8 @@ class TestingAutomationProvider : public AutomationProvider,
 
   // IPC Message callbacks.
   void CloseBrowser(int handle, IPC::Message* reply_message);
-  void CloseBrowserAsync(int browser_handle);
   void ActivateTab(int handle, int at_index, int* status);
   void AppendTab(int handle, const GURL& url, IPC::Message* reply_message);
-  void AppendBackgroundTab(int handle, const GURL& url,
-                           IPC::Message* reply_message);
   void GetMachPortCount(int* port_count);
   void GetActiveTabIndex(int handle, int* active_tab_index);
   void CloseTab(int tab_handle, bool wait_until_closed,
@@ -105,17 +105,10 @@ class TestingAutomationProvider : public AutomationProvider,
                  const std::string& value,
                  int handle,
                  int* response_value);
-  void DeleteCookie(const GURL& url, const std::string& cookie_name,
-                    int handle, bool* success);
-  void ShowCollectedCookiesDialog(int handle, bool* success);
   void NavigateToURLBlockUntilNavigationsComplete(int handle, const GURL& url,
                                                   int number_of_navigations,
                                                   IPC::Message* reply_message);
   void NavigationAsync(int handle, const GURL& url, bool* status);
-  void NavigationAsyncWithDisposition(int handle,
-                                      const GURL& url,
-                                      WindowOpenDisposition disposition,
-                                      bool* status);
   void Reload(int handle, IPC::Message* reply_message);
   void GetRedirectsFrom(int tab_handle,
                         const GURL& source_url,
@@ -126,25 +119,14 @@ class TestingAutomationProvider : public AutomationProvider,
   // or in incognito mode.
   void GetBrowserWindow(int index, int* handle);
   void FindTabbedBrowserWindow(int* handle);
-  void GetLastActiveBrowserWindow(int* handle);
-  void GetActiveWindow(int* handle);
   void ExecuteBrowserCommandAsync(int handle, int command, bool* success);
   void ExecuteBrowserCommand(int handle, int command,
                              IPC::Message* reply_message);
-  void GetBrowserLocale(string16* locale);
-  void IsWindowActive(int handle, bool* success, bool* is_active);
-  void ActivateWindow(int handle);
-  void IsWindowMaximized(int handle, bool* is_maximized, bool* success);
   void TerminateSession(int handle, bool* success);
   void WindowGetViewBounds(int handle, int view_id, bool screen_coordinates,
                            bool* success, gfx::Rect* bounds);
-  void GetWindowBounds(int handle, gfx::Rect* bounds, bool* result);
   void SetWindowBounds(int handle, const gfx::Rect& bounds, bool* result);
   void SetWindowVisible(int handle, bool visible, bool* result);
-  void WindowSimulateClick(const IPC::Message& message,
-                           int handle,
-                           const gfx::Point& click,
-                           int flags);
   void WindowSimulateMouseMove(const IPC::Message& message,
                                int handle,
                                const gfx::Point& location);
@@ -154,44 +136,15 @@ class TestingAutomationProvider : public AutomationProvider,
                               int flags);
   void GetTabCount(int handle, int* tab_count);
   void GetType(int handle, int* type_as_int);
-  void IsBrowserInApplicationMode(int handle,
-                                  bool* is_application,
-                                  bool* success);
   void GetTab(int win_handle, int tab_index, int* tab_handle);
-  void GetTabProcessID(int handle, int* process_id);
   void GetTabTitle(int handle, int* title_string_size, std::wstring* title);
   void GetTabIndex(int handle, int* tabstrip_index);
   void GetTabURL(int handle, bool* success, GURL* url);
   void GetShelfVisibility(int handle, bool* visible);
-  void IsFullscreen(int handle, bool* is_fullscreen);
-  void GetFullscreenBubbleVisibility(int handle, bool* is_visible);
-
   void ExecuteJavascript(int handle,
                          const std::wstring& frame_xpath,
                          const std::wstring& script,
                          IPC::Message* reply_message);
-
-#if defined(TOOLKIT_VIEWS)
-  void GetFocusedViewID(int handle, int* view_id);
-
-  // Block until the focused view ID changes to something other than
-  // previous_view_id.
-  void WaitForFocusedViewIDToChange(int handle,
-                                    int previous_view_id,
-                                    IPC::Message* reply_message);
-
-  // Start tracking popup menus. Must be called before executing the
-  // command that might open the popup menu; then call WaitForPopupMenuToOpen.
-  void StartTrackingPopupMenus(int browser_handle, bool* success);
-
-  // Wait until a popup menu has opened.
-  void WaitForPopupMenuToOpen(IPC::Message* reply_message);
-#endif  // defined(TOOLKIT_VIEWS)
-
-  void HandleInspectElementRequest(int handle,
-                                   int x,
-                                   int y,
-                                   IPC::Message* reply_message);
 
   void GetDownloadDirectory(int handle, FilePath* download_directory);
 
@@ -202,13 +155,6 @@ class TestingAutomationProvider : public AutomationProvider,
 
   // Retrieves a Browser from a Window and vice-versa.
   void GetWindowForBrowser(int window_handle, bool* success, int* handle);
-  void GetBrowserForWindow(int window_handle, bool* success,
-                           int* browser_handle);
-
-  void ShowInterstitialPage(int tab_handle,
-                            const std::string& html_text,
-                            IPC::Message* reply_message);
-  void HideInterstitialPage(int tab_handle, bool* success);
 
   void WaitForTabToBeRestored(int tab_handle, IPC::Message* reply_message);
 
@@ -242,22 +188,12 @@ class TestingAutomationProvider : public AutomationProvider,
                             int message_num,
                             bool* menu_item_enabled);
 
-  // Save the current web page.
-  void SavePage(int tab_handle,
-                const FilePath& file_name,
-                const FilePath& dir_path,
-                int type,
-                bool* success);
-
   // Responds to requests to open the FindInPage window.
   void HandleOpenFindInPageRequest(const IPC::Message& message,
                                    int handle);
 
   // Get the visibility state of the Find window.
   void GetFindWindowVisibility(int handle, bool* visible);
-
-  // Responds to requests to find the location of the Find window.
-  void HandleFindWindowLocationRequest(int handle, int* x, int* y);
 
   // Get the visibility state of the Bookmark bar.
   void GetBookmarkBarVisibility(
@@ -295,57 +231,8 @@ class TestingAutomationProvider : public AutomationProvider,
                       int64 id,
                       bool* success);
 
-  // Retrieves the number of info-bars currently showing in |count|.
-  void GetInfoBarCount(int handle, size_t* count);
-
-  // Causes a click on the "accept" button of the info-bar at |info_bar_index|.
-  // If |wait_for_navigation| is true, it sends the reply after a navigation has
-  // occurred.
-  void ClickInfoBarAccept(int handle,
-                          size_t info_bar_index,
-                          bool wait_for_navigation,
-                          IPC::Message* reply_message);
-
-  // Retrieves the last time a navigation occurred for the tab.
-  void GetLastNavigationTime(int handle, int64* last_navigation_time);
-
-  // Waits for a new navigation in the tab if none has happened since
-  // |last_navigation_time|.
-  void WaitForNavigation(int handle,
-                         int64 last_navigation_time,
-                         IPC::Message* reply_message);
-
-  // Sets the int value for preference with name |name|.
-  void SetIntPreference(int handle,
-                        const std::string& name,
-                        int value,
-                        bool* success);
-
-  // Sets the string value for preference with name |name|.
-  void SetStringPreference(int handle,
-                           const std::string& name,
-                           const std::string& value,
-                           bool* success);
-
-  // Gets the bool value for preference with name |name|.
-  void GetBooleanPreference(int handle,
-                            const std::string& name,
-                            bool* success,
-                            bool* value);
-
-  // Sets the bool value for preference with name |name|.
-  void SetBooleanPreference(int handle,
-                            const std::string& name,
-                            bool value,
-                            bool* success);
-
-  void GetShowingAppModalDialog(bool* showing_dialog, int* dialog_button);
-  void ClickAppModalDialogButton(int button, bool* success);
-
   void WaitForBrowserWindowCountToBecome(int target_count,
                                          IPC::Message* reply_message);
-
-  void WaitForAppModalDialogToBeShown(IPC::Message* reply_message);
 
   void GoBackBlockUntilNavigationsComplete(int handle,
                                            int number_of_navigations,
@@ -355,12 +242,7 @@ class TestingAutomationProvider : public AutomationProvider,
                                               int number_of_navigations,
                                               IPC::Message* reply_message);
 
-  void GetWindowTitle(int handle, string16* text);
-
   void SetShelfVisibility(int handle, bool visible);
-
-  // Returns the number of blocked popups in the tab |handle|.
-  void GetBlockedPopupCount(int handle, int* count);
 
   // Generic pattern for pyautolib
   // Uses the JSON interface for input/output.
@@ -872,13 +754,13 @@ class TestingAutomationProvider : public AutomationProvider,
   // the error parameter, otherwise returns true.
   bool BuildWebKeyEventFromArgs(base::DictionaryValue* args,
                                 std::string* error,
-                                NativeWebKeyboardEvent* event);
+                                content::NativeWebKeyboardEvent* event);
 
   // Populates the fields of the event parameter with default data, except for
   // the specified key type and key code.
   void BuildSimpleWebKeyEvent(WebKit::WebInputEvent::Type type,
                               int windows_key_code,
-                              NativeWebKeyboardEvent* event);
+                              content::NativeWebKeyboardEvent* event);
 
   // Sends a key press event using the given key code to the specified tab.
   // A key press is a combination of a "key down" event and a "key up" event.
@@ -1212,6 +1094,14 @@ class TestingAutomationProvider : public AutomationProvider,
   //   output: none
   void SetViewBounds(base::DictionaryValue* args, IPC::Message* reply_message);
 
+  // Maximizes the web view.
+  // The single |auto_id| must be given to specify the view.
+  // This method currently is only supported for tabs.
+  // Example:
+  //   input: { "auto_id": { "type": 0, "id": "awoein" } }
+  //   output: none
+  void MaximizeView(base::DictionaryValue* args, IPC::Message* reply_message);
+
   // Sends the WebKit events for a mouse click at a given coordinate.
   // The pair |windex| and |tab_index| or the single |auto_id| must be given
   // to specify the render view.
@@ -1439,14 +1329,75 @@ class TestingAutomationProvider : public AutomationProvider,
   void RefreshPolicies(base::DictionaryValue* args,
                        IPC::Message* reply_message);
 
+  // Simulates a memory bug (reference an array out of bounds) to cause Address
+  // Sanitizer (if it was built it) to catch the bug and abort the process.
+  // Example:
+  //   input: none
+  //   output: none
+  void SimulateAsanMemoryBug(base::DictionaryValue* args,
+                             IPC::Message* reply_message);
+
 #if defined(OS_CHROMEOS)
-  // Login.
+  // OOBE wizard.
+
+  // Accepts the network screen and continues to EULA.
+  // Example:
+  //   input: none
+  //   ouput: { "next_screen": "eula" }
+  void AcceptOOBENetworkScreen(base::DictionaryValue* args,
+                               IPC::Message* reply_message);
+
+  // Accepts or declines EULA, moving forward or back from EULA screen.
+  // Example:
+  //    input: { "accepted": true, "usage_stats_reporting": false }
+  //    output: { "next_screen": "update" }
+  void AcceptOOBEEula(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Forces the ongoing update to cancel and proceed to the login screen.
+  // Example:
+  //    input: none
+  //    output: { "next_screen": "login" }
+  //    output: none (if update was not running)
+  void CancelOOBEUpdate(base::DictionaryValue* args,
+                        IPC::Message* reply_message);
+
+  // Chooses user image on the image picker screen and starts browser session.
+  // Example:
+  //    input: { "image": "profile" } - Google profile image
+  //    input: { "image": 2 } - default image number 2 (0-based)
+  //    output: { "next_screen": "session" }
+  void PickUserImage(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Skips OOBE to login step. Can be called when already at login screen,
+  // in which case does nothing and sends return value immediately.
+  // Example:
+  //    input: { "skip_image_selection": true }
+  //    output: { "next_screen": "login" }
+  void SkipToLogin(DictionaryValue* args, IPC::Message* reply_message);
+
+  // Returns info about the current OOBE screen.
+  // Example:
+  //    input: none
+  //    output: { "screen_name": "network" }
+  //    output: none  (when already logged in)
+  void GetOOBEScreenInfo(DictionaryValue* args, IPC::Message* reply_message);
+
+  // Login / Logout.
   void GetLoginInfo(base::DictionaryValue* args, IPC::Message* reply_message);
 
   void ShowCreateAccountUI(base::DictionaryValue* args,
                            IPC::Message* reply_message);
 
   void LoginAsGuest(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Submits the Chrome OS login form. Watch for the login to complete using
+  // the AddLoginObserver and GetNextEvent commands.
+  // Example:
+  //   input: { "username": "user@gmail.com",
+  //            "password": "fakepassword",
+  //          }
+  void SubmitLoginForm(base::DictionaryValue* args,
+                       IPC::Message* reply_message);
 
   void AddLoginEventObserver(DictionaryValue* args,
                              IPC::Message* reply_message);
@@ -1462,6 +1413,8 @@ class TestingAutomationProvider : public AutomationProvider,
   //   output: { "result": "My Window Name" }
   void ExecuteJavascriptInOOBEWebUI(
       base::DictionaryValue* args, IPC::Message* reply_message);
+
+  void SignOut(base::DictionaryValue* args, IPC::Message* reply_message);
 
   // Screen locker.
   void LockScreen(base::DictionaryValue* args, IPC::Message* reply_message);
@@ -1561,8 +1514,12 @@ class TestingAutomationProvider : public AutomationProvider,
                            DictionaryValue* args,
                            IPC::Message* reply_message);
 
+  // Html terminal.
+  void OpenCrosh(base::DictionaryValue* args, IPC::Message* reply_message);
+
   void AddChromeosObservers();
   void RemoveChromeosObservers();
+
 #endif  // defined(OS_CHROMEOS)
 
   void WaitForTabCountToBecome(int browser_handle,
@@ -1573,28 +1530,10 @@ class TestingAutomationProvider : public AutomationProvider,
                            size_t target_count,
                            IPC::Message* reply_message);
 
-  // Gets the current used encoding name of the page in the specified tab.
-  void GetPageCurrentEncoding(int tab_handle, std::string* current_encoding);
-
-  void ShutdownSessionService(int handle, bool* result);
-
-  void SetContentSetting(int handle,
-                         const std::string& host,
-                         ContentSettingsType content_type,
-                         ContentSetting setting,
-                         bool* success);
-
-  // Load all plug-ins on the page.
-  void LoadBlockedPlugins(int tab_handle, bool* success);
-
   // Resets to the default theme.
   void ResetToDefaultTheme();
 
   void WaitForProcessLauncherThreadToGoIdle(IPC::Message* reply_message);
-
-  // Gets the browser that contains the given tab.
-  void GetParentBrowserOfTab(
-      int tab_handle, int* browser_handle, bool* success);
 
   void OnRemoveProvider();  // Called via PostTask
 
@@ -1603,14 +1542,8 @@ class TestingAutomationProvider : public AutomationProvider,
       const string16& frame_xpath, const string16& script,
       IPC::Message* reply_message, content::RenderViewHost* render_view_host);
 
-#if defined(TOOLKIT_VIEWS)
-  // Keep track of whether a popup menu has been opened since the last time
-  // that StartTrackingPopupMenus has been called.
-  bool popup_menu_opened_;
-
-  // A temporary object that receives a notification when a popup menu opens.
-  PopupMenuWaiter* popup_menu_waiter_;
-#endif  // defined(TOOLKIT_VIEWS)
+  // Selects the given |tab| if not selected already.
+  void EnsureTabSelected(Browser* browser, content::WebContents* tab);
 
 #if defined(OS_CHROMEOS)
   // Avoid scoped ptr here to avoid having to define it completely in the

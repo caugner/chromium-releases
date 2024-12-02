@@ -14,8 +14,8 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/debug/trace_event.h"
 #include "base/compiler_specific.h"
+#include "base/debug/trace_event.h"
 #include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
@@ -29,21 +29,20 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "net/base/escape.h"
+#include "sync/internal_api/public/syncable/model_type.h"
 #include "sync/protocol/proto_value_conversions.h"
-#include "sync/protocol/service_constants.h"
 #include "sync/syncable/directory_backing_store.h"
 #include "sync/syncable/directory_change_delegate.h"
 #include "sync/syncable/in_memory_directory_backing_store.h"
-#include "sync/syncable/model_type.h"
 #include "sync/syncable/on_disk_directory_backing_store.h"
 #include "sync/syncable/syncable-inl.h"
 #include "sync/syncable/syncable_changes_version.h"
 #include "sync/syncable/syncable_columns.h"
 #include "sync/syncable/syncable_enum_conversions.h"
 #include "sync/syncable/transaction_observer.h"
-#include "sync/util/logging.h"
 #include "sync/util/cryptographer.h"
-#include "net/base/escape.h"
+#include "sync/util/logging.h"
 
 namespace {
 
@@ -1021,6 +1020,11 @@ void Directory::SetDownloadProgress(
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
+ModelTypeSet Directory::initial_sync_ended_types() const {
+  ScopedKernelLock lock(this);
+  return kernel_->persisted_info.initial_sync_ended;
+}
+
 bool Directory::initial_sync_ended_for_type(ModelType type) const {
   ScopedKernelLock lock(this);
   return kernel_->persisted_info.initial_sync_ended.Has(type);
@@ -1706,35 +1710,44 @@ MutableEntry::MutableEntry(WriteTransaction* trans, CreateNewUpdateItem,
 
 MutableEntry::MutableEntry(WriteTransaction* trans, GetById, const Id& id)
     : Entry(trans, GET_BY_ID, id), write_transaction_(trans) {
-  trans->SaveOriginal(kernel_);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans, GetByHandle,
                            int64 metahandle)
     : Entry(trans, GET_BY_HANDLE, metahandle), write_transaction_(trans) {
-  trans->SaveOriginal(kernel_);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans, GetByClientTag,
                            const std::string& tag)
     : Entry(trans, GET_BY_CLIENT_TAG, tag), write_transaction_(trans) {
-  trans->SaveOriginal(kernel_);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans, GetByServerTag,
                            const string& tag)
     : Entry(trans, GET_BY_SERVER_TAG, tag), write_transaction_(trans) {
-  trans->SaveOriginal(kernel_);
 }
 
 bool MutableEntry::PutIsDel(bool is_del) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   if (is_del == kernel_->ref(IS_DEL)) {
     return true;
   }
   if (is_del) {
     if (!UnlinkFromOrder()) {
       return false;
+    }
+
+    // If the server never knew about this item and it's deleted then we don't
+    // need to keep it around.  Unsetting IS_UNSYNCED will:
+    // - Ensure that the item is never committed to the server.
+    // - Allow any items with the same UNIQUE_CLIENT_TAG created on other
+    //   clients to override this entry.
+    // - Let us delete this entry permanently through
+    //   DirectoryBackingStore::DropDeletedEntries() when we next restart sync.
+    //   This will save memory and avoid crbug.com/125381.
+    if (!Get(ID).ServerKnows()) {
+      Put(IS_UNSYNCED, false);
     }
   }
 
@@ -1761,6 +1774,7 @@ bool MutableEntry::PutIsDel(bool is_del) {
 
 bool MutableEntry::Put(Int64Field field, const int64& value) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   if (kernel_->ref(field) != value) {
     ScopedKernelLock lock(dir());
     if (SERVER_POSITION_IN_PARENT == field) {
@@ -1777,6 +1791,7 @@ bool MutableEntry::Put(Int64Field field, const int64& value) {
 
 bool MutableEntry::Put(TimeField field, const base::Time& value) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   if (kernel_->ref(field) != value) {
     kernel_->put(field, value);
     kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
@@ -1786,6 +1801,7 @@ bool MutableEntry::Put(TimeField field, const base::Time& value) {
 
 bool MutableEntry::Put(IdField field, const Id& value) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   if (kernel_->ref(field) != value) {
     if (ID == field) {
       if (!dir()->ReindexId(write_transaction(), kernel_, value))
@@ -1806,12 +1822,14 @@ bool MutableEntry::Put(IdField field, const Id& value) {
 }
 
 void MutableEntry::PutParentIdPropertyOnly(const Id& parent_id) {
+  write_transaction_->SaveOriginal(kernel_);
   dir()->ReindexParentId(write_transaction(), kernel_, parent_id);
   kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
 }
 
 bool MutableEntry::Put(BaseVersion field, int64 value) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   if (kernel_->ref(field) != value) {
     kernel_->put(field, value);
     kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
@@ -1820,12 +1838,23 @@ bool MutableEntry::Put(BaseVersion field, int64 value) {
 }
 
 bool MutableEntry::Put(StringField field, const string& value) {
-  return PutImpl(field, value);
+  DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
+  if (field == UNIQUE_CLIENT_TAG) {
+    return PutUniqueClientTag(value);
+  }
+
+  if (kernel_->ref(field) != value) {
+    kernel_->put(field, value);
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
+  }
+  return true;
 }
 
 bool MutableEntry::Put(ProtoField field,
                        const sync_pb::EntitySpecifics& value) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   // TODO(ncarter): This is unfortunately heavyweight.  Can we do
   // better?
   if (kernel_->ref(field).SerializeAsString() != value.SerializeAsString()) {
@@ -1861,6 +1890,7 @@ bool MutableEntry::Put(ProtoField field,
 
 bool MutableEntry::Put(BitField field, bool value) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   if (kernel_->ref(field) != value) {
     kernel_->put(field, value);
     kernel_->mark_dirty(GetDirtyIndexHelper());
@@ -1873,6 +1903,7 @@ MetahandleSet* MutableEntry::GetDirtyIndexHelper() {
 }
 
 bool MutableEntry::PutUniqueClientTag(const string& new_tag) {
+  write_transaction_->SaveOriginal(kernel_);
   // There is no SERVER_UNIQUE_CLIENT_TAG. This field is similar to ID.
   string old_tag = kernel_->ref(UNIQUE_CLIENT_TAG);
   if (old_tag == new_tag) {
@@ -1900,21 +1931,9 @@ bool MutableEntry::PutUniqueClientTag(const string& new_tag) {
   return true;
 }
 
-bool MutableEntry::PutImpl(StringField field, const string& value) {
-  DCHECK(kernel_);
-  if (field == UNIQUE_CLIENT_TAG) {
-    return PutUniqueClientTag(value);
-  }
-
-  if (kernel_->ref(field) != value) {
-    kernel_->put(field, value);
-    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
-  }
-  return true;
-}
-
 bool MutableEntry::Put(IndexedBitField field, bool value) {
   DCHECK(kernel_);
+  write_transaction_->SaveOriginal(kernel_);
   if (kernel_->ref(field) != value) {
     MetahandleSet* index;
     if (IS_UNSYNCED == field) {
@@ -2374,6 +2393,49 @@ EntryKernel* Directory::GetPossibleLastChildForTest(
   }
   // There were no children in the linked list.
   return NULL;
+}
+
+void ChangeEntryIDAndUpdateChildren(
+    syncable::WriteTransaction* trans,
+    syncable::MutableEntry* entry,
+    const syncable::Id& new_id) {
+  syncable::Id old_id = entry->Get(ID);
+  if (!entry->Put(ID, new_id)) {
+    Entry old_entry(trans, GET_BY_ID, new_id);
+    CHECK(old_entry.good());
+    LOG(FATAL) << "Attempt to change ID to " << new_id
+               << " conflicts with existing entry.\n\n"
+               << *entry << "\n\n" << old_entry;
+  }
+  if (entry->Get(IS_DIR)) {
+    // Get all child entries of the old id.
+    syncable::Directory::ChildHandles children;
+    trans->directory()->GetChildHandlesById(trans, old_id, &children);
+    Directory::ChildHandles::iterator i = children.begin();
+    while (i != children.end()) {
+      MutableEntry child_entry(trans, GET_BY_HANDLE, *i++);
+      CHECK(child_entry.good());
+      // Use the unchecked setter here to avoid touching the child's NEXT_ID
+      // and PREV_ID fields (which Put(PARENT_ID) would normally do to
+      // maintain linked-list invariants).  In this case, NEXT_ID and PREV_ID
+      // among the children will be valid after the loop, since we update all
+      // the children at once.
+      child_entry.PutParentIdPropertyOnly(new_id);
+    }
+  }
+  // Update Id references on the previous and next nodes in the sibling
+  // order.  Do this by reinserting into the linked list; the first
+  // step in PutPredecessor is to Unlink from the existing order, which
+  // will overwrite the stale Id value from the adjacent nodes.
+  if (entry->Get(PREV_ID) == entry->Get(NEXT_ID) &&
+      entry->Get(PREV_ID) == old_id) {
+    // We just need a shallow update to |entry|'s fields since it is already
+    // self looped.
+    entry->Put(NEXT_ID, new_id);
+    entry->Put(PREV_ID, new_id);
+  } else {
+    entry->PutPredecessor(entry->Get(PREV_ID));
+  }
 }
 
 }  // namespace syncable

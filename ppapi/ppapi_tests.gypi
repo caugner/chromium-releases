@@ -63,6 +63,9 @@
       'include_dirs': [
         'lib/gl/include',
       ],
+      'defines': [
+        'GL_GLEXT_PROTOTYPES',
+      ],
       'sources': [
         '<@(test_common_source_files)',
         '<@(test_trusted_source_files)',
@@ -93,12 +96,6 @@
           'mac_bundle': 1,
           'product_name': 'ppapi_tests',
           'product_extension': 'plugin',
-        }],
-        ['p2p_apis==1', {
-          'sources': [
-            'tests/test_transport.cc',
-            'tests/test_transport.h',
-          ],
         }],
       ],
 # TODO(dmichael):  Figure out what is wrong with the script on Windows and add

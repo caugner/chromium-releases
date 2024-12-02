@@ -139,10 +139,19 @@
           'global_descriptors_posix.cc',
           'global_descriptors_posix.h',
           'gtest_prod_util.h',
+          'guid.cc',
+          'guid.h',
+          'guid_posix.cc',
+          'guid_win.cc',
           'hash_tables.h',
+          'hi_res_timer_manager_posix.cc',
+          'hi_res_timer_manager_win.cc',
+          'hi_res_timer_manager.h',
           'id_map.h',
           'json/json_file_value_serializer.cc',
           'json/json_file_value_serializer.h',
+          'json/json_parser.cc',
+          'json/json_parser.h',
           'json/json_reader.cc',
           'json/json_reader.h',
           'json/json_string_value_serializer.cc',
@@ -203,6 +212,7 @@
           'memory/scoped_handle.h',
           'memory/scoped_nsobject.h',
           'memory/scoped_open_process.h',
+          'memory/scoped_policy.h',
           'memory/scoped_ptr.h',
           'memory/scoped_vector.h',
           'memory/singleton.cc',
@@ -218,6 +228,8 @@
           'message_loop_proxy_impl.h',
           'message_pump.cc',
           'message_pump.h',
+          'message_pump_android.cc',
+          'message_pump_android.h',
           'message_pump_default.cc',
           'message_pump_default.h',
           'message_pump_win.cc',
@@ -237,6 +249,8 @@
           'observer_list_threadsafe.h',
           'os_compat_android.cc',
           'os_compat_android.h',
+          'os_compat_nacl.cc',
+          'os_compat_nacl.h',
           'path_service.cc',
           'path_service.h',
           'pending_task.cc',
@@ -248,6 +262,8 @@
           'platform_file_posix.cc',
           'platform_file_win.cc',
           'port.h',
+          'posix/unix_domain_socket.cc',
+          'posix/unix_domain_socket.h',
           'process.h',
           'process_linux.cc',
           'process_posix.cc',
@@ -270,7 +286,6 @@
           'property_bag.h',
           'rand_util.cc',
           'rand_util.h',
-          'rand_util_c.h',
           'rand_util_posix.cc',
           'rand_util_win.cc',
           'safe_strerror_posix.cc',
@@ -287,6 +302,7 @@
           'sha1_win.cc',
           'shared_memory.h',
           'shared_memory_android.cc',
+          'shared_memory_nacl.cc',
           'shared_memory_posix.cc',
           'shared_memory_win.cc',
           'single_thread_task_runner.h',
@@ -322,7 +338,7 @@
           'synchronization/waitable_event.h',
           'synchronization/waitable_event_posix.cc',
           'synchronization/waitable_event_watcher.h',
-          'synchronization/waitable_event_watcher_posix.cc',
+          'synchronization/waitable_event_watcher_posix.cc',     
           'synchronization/waitable_event_watcher_win.cc',
           'synchronization/waitable_event_win.cc',
           'system_monitor/system_monitor.cc',
@@ -333,6 +349,7 @@
           'system_monitor/system_monitor_win.cc',
           'sys_byteorder.h',
           'sys_info.h',
+          'sys_info_android.cc',
           'sys_info_chromeos.cc',
           'sys_info_freebsd.cc',
           'sys_info_linux.cc',
@@ -348,6 +365,8 @@
           'task_runner.h',
           'task_runner_util.h',
           'template_util.h',
+          'thread_task_runner_handle.cc',
+          'thread_task_runner_handle.h',
           'threading/non_thread_safe.h',
           'threading/non_thread_safe_impl.cc',
           'threading/non_thread_safe_impl.h',
@@ -411,8 +430,6 @@
           'nix/mime_util_xdg.h',
           'nix/xdg_util.cc',
           'nix/xdg_util.h',
-          'win/accessibility_misc_utils.h',
-          'win/accessibility_misc_utils.cc',
           'win/enum_variant.h',
           'win/enum_variant.cc',
           'win/event_trace_consumer.h',
@@ -442,6 +459,7 @@
           'win/scoped_com_initializer.h',
           'win/scoped_comptr.h',
           'win/scoped_gdi_object.h',
+          'win/scoped_handle.cc',
           'win/scoped_handle.h',
           'win/scoped_hdc.h',
           'win/scoped_hglobal.h',
@@ -467,37 +485,56 @@
         'msvs_disabled_warnings': [
           4244, 4554, 4018, 4102,
         ],
-        'mac_framework_dirs': [
-          '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
-        ],
-        'conditions': [
-          [ 'use_glib==0', {
+        'target_conditions': [
+          ['<(use_glib)==0 or >(nacl_untrusted_build)==1', {
               'sources/': [
                 ['exclude', '^nix/'],
               ],
               'sources!': [
                 'atomicops_internals_x86_gcc.cc',
                 'message_pump_glib.cc',
-                'message_pump_x.cc',
+                'message_pump_aurax11.cc',
               ],
           }],
-          [ 'toolkit_uses_gtk==0', {
-            'sources!': [ 'message_pump_gtk.cc', ],
+          ['<(toolkit_uses_gtk)==0 or >(nacl_untrusted_build)==1', {
+            'sources!': ['message_pump_gtk.cc'],
           }],
-          [ 'use_aura==0 or OS == "win" or OS == "mac"', {
-            'sources!' : [ 'message_pump_x.cc', ],
-          }, {
-            'sources!' : [ 'message_pump_gtk.cc', ],
-            'sources/' : [ [ 'include', '^message_pump_x\\.cc$', ] ],
-          }],
-          [ 'OS != "linux" and os_bsd != 1', {
+          ['(OS != "linux" and <(os_bsd) != 1) or >(nacl_untrusted_build)==1', {
               'sources!': [
                 # Not automatically excluded by the *linux.cc rules.
                 'linux_util.cc',
               ],
             },
           ],
-          [ 'OS == "android"', {
+          ['>(nacl_untrusted_build)==1', {
+            'sources!': [
+               'base_paths.cc',
+               'command_line.cc',
+               'cpu.cc',
+               'debug/stack_trace_posix.cc',
+               'environment.cc',
+               'file_util.cc',
+               'file_util_posix.cc',
+               'file_util_proxy.cc',
+               'files/file_path_watcher_kqueue.cc',
+               'native_library_posix.cc',
+               'path_service.cc',
+               'platform_file_posix.cc',
+               'posix/unix_domain_socket.cc',
+               'process_posix.cc',
+               'process_util.cc',
+               'process_util_posix.cc',
+               'rand_util.cc',
+               'rand_util_posix.cc',
+               'scoped_native_library.cc',
+               'scoped_temp_dir.cc',
+               'shared_memory_posix.cc',
+               'sys_info_posix.cc',
+               'threading/sequenced_worker_pool.cc',
+               'third_party/dynamic_annotations/dynamic_annotations.c',
+            ],
+          }],
+          ['OS == "android" and >(nacl_untrusted_build)==0', {
             'sources!': [
               'files/file_path_watcher_kqueue.cc',
               'system_monitor/system_monitor_posix.cc',
@@ -509,30 +546,30 @@
               ['include', '^worker_pool_linux\\.cc$'],
             ],
           }],
-          [ 'OS != "mac"', {
+          ['OS != "mac" or >(nacl_untrusted_build)==1', {
               'sources!': [
                 'mac/scoped_aedesc.h'
               ],
           }],
           # For now, just test the *BSD platforms enough to exclude them.
           # Subsequent changes will include them further.
-          [ 'OS != "freebsd"', {
+          ['OS != "freebsd" or >(nacl_untrusted_build)==1', {
               'sources/': [ ['exclude', '_freebsd\\.cc$'] ],
             },
           ],
-          [ 'OS != "openbsd"', {
+          ['OS != "openbsd" or >(nacl_untrusted_build)==1', {
               'sources/': [ ['exclude', '_openbsd\\.cc$'] ],
             },
           ],
-          ['OS != "win"', {
+          ['OS != "win" or >(nacl_untrusted_build)==1', {
               'sources/': [ ['exclude', '^win/'] ],
             },
           ],
-          ['OS != "android"', {
+          ['OS != "android" or >(nacl_untrusted_build)==1', {
               'sources/': [ ['exclude', '^android/'] ],
             },
           ],
-          [ 'OS == "win"', {
+          ['OS == "win" and >(nacl_untrusted_build)==0', {
             'include_dirs': [
               '<(DEPTH)/third_party/wtl/include',
             ],
@@ -548,13 +585,13 @@
               'string16.cc',
             ],
           },],
-          [ 'OS == "linux"', {
+          ['OS == "linux" and >(nacl_untrusted_build)==0', {
             'sources!': [
               'files/file_path_watcher_kqueue.cc',
               'files/file_path_watcher_stub.cc',
             ],
           }],
-          [ 'OS == "mac"', {
+          ['OS == "mac" and >(nacl_untrusted_build)==0', {
             'sources/': [
               ['exclude', '^files/file_path_watcher_stub\\.cc$'],
               ['exclude', '^base_paths_posix\\.cc$'],
@@ -562,7 +599,7 @@
               ['exclude', '^sys_string_conversions_posix\\.cc$'],
             ],
           }],
-          [ 'os_bsd==1', {
+          ['<(os_bsd)==1 and >(nacl_untrusted_build)==0', {
             'sources/': [
               ['exclude', '^files/file_path_watcher_linux\\.cc$'],
               ['exclude', '^files/file_path_watcher_stub\\.cc$'],
@@ -572,7 +609,7 @@
               ['exclude', '^sys_info_linux\\.cc$'],
             ],
           }],
-          [ 'chromeos != 1', {
+          ['<(chromeos)!=1 or >(nacl_untrusted_build)==1', {
             'sources/': [
               ['exclude', '^chromeos/'],
             ],
@@ -581,367 +618,4 @@
       }],
     ],
   },
-  'targets': [
-    {
-      'target_name': 'base',
-      'type': '<(component)',
-      'toolsets': ['host', 'target'],
-      'variables': {
-        'base_target': 1,
-        'enable_wexit_time_destructors': 1,
-        'optimize': 'max',
-      },
-      'dependencies': [
-        'base_static',
-        'allocator/allocator.gyp:allocator_extension_thunks',
-        '../testing/gtest.gyp:gtest_prod',
-        '../third_party/modp_b64/modp_b64.gyp:modp_b64',
-        'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-      ],
-      # TODO(gregoryd): direct_dependent_settings should be shared with the
-      #  64-bit target, but it doesn't work due to a bug in gyp
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '..',
-        ],
-      },
-      'conditions': [
-        [ 'use_glib==1', {
-          'conditions': [
-            [ 'chromeos==1', {
-                'sources/': [ ['include', '_chromeos\\.cc$'] ]
-              },
-            ],
-            [ 'linux_use_tcmalloc==0', {
-                'defines': [
-                  'NO_TCMALLOC',
-                ],
-                'direct_dependent_settings': {
-                  'defines': [
-                    'NO_TCMALLOC',
-                  ],
-                },
-              },
-            ],
-            [ 'toolkit_uses_gtk==1', {
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-              'export_dependent_settings': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            }],
-          ],
-          'dependencies': [
-            'symbolize',
-            '../build/util/build_util.gyp:lastchange#target',
-            '../build/linux/system.gyp:glib',
-            '../build/linux/system.gyp:x11',
-            'xdg_mime',
-          ],
-          'defines': [
-            'USE_SYMBOLIZE',
-          ],
-          'cflags': [
-            '-Wno-write-strings',
-          ],
-          'export_dependent_settings': [
-            '../build/linux/system.gyp:glib',
-            '../build/linux/system.gyp:x11',
-          ],
-        }, {  # use_glib!=1
-            'sources/': [
-              ['exclude', '/xdg_user_dirs/'],
-              ['exclude', '_nss\.cc$'],
-            ],
-        }],
-        [ 'OS == "android" and _toolset == "host"', {
-          # Base for host support is the minimum required to run the
-          # ssl false start blacklist tool. It requires further changes
-          # to generically support host builds (and tests).
-          # Note: when building for host, gyp has OS == "android",
-          # hence the *_android.cc files are included but the actual code
-          # doesn't have OS_ANDROID / ANDROID defined.
-          'conditions': [
-            # Host build on linux depends on system.gyp::gtk as
-            # default linux build has TOOLKIT_GTK defined.
-            ['host_os == "linux"', {
-              'sources/': [
-                ['include', '^atomicops_internals_x86_gcc\\.cc$'],
-              ],
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-              'export_dependent_settings': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            }],
-            ['host_os == "mac"', {
-              'sources/': [
-                ['exclude', '^native_library_linux\\.cc$'],
-                ['exclude', '^process_util_linux\\.cc$'],
-                ['exclude', '^sys_info_linux\\.cc$'],
-                ['exclude', '^sys_string_conversions_linux\\.cc$'],
-                ['exclude', '^worker_pool_linux\\.cc$'],
-              ],
-            }],
-          ],
-        }],
-        [ 'OS == "android" and _toolset == "target"', {
-          'conditions': [
-            ['target_arch == "ia32"', {
-              'sources/': [
-                ['include', '^atomicops_internals_x86_gcc\\.cc$'],
-              ],
-            }],
-          ],
-          'dependencies': [
-            'symbolize',
-            '../third_party/ashmem/ashmem.gyp:ashmem',
-            '../third_party/icu/icu.gyp:icuuc',
-            'base_java',
-            'base_jni_headers',
-          ],
-          'include_dirs': [
-            '<(SHARED_INTERMEDIATE_DIR)/base',
-          ],
-          'link_settings': {
-            'libraries': [
-              '-llog',
-            ],
-          },
-          'defines': [
-            'USE_SYMBOLIZE',
-          ],
-          'sources!': [
-            'debug/stack_trace.cc',
-            'debug/stack_trace_posix.cc',
-          ],
-        }],
-        [ 'os_bsd==1', {
-          'include_dirs': [
-            '/usr/local/include',
-          ],
-          'link_settings': {
-            'libraries': [
-              '-L/usr/local/lib -lexecinfo',
-              ],
-            },
-          },
-        ],
-        [ 'OS == "linux"', {
-          'link_settings': {
-             'libraries': [
-             # We need rt for clock_gettime().
-             '-lrt',
-             # For 'native_library_linux.cc'
-             '-ldl',
-           ],
-         },
-        }],
-        [ 'OS == "mac"', {
-          'link_settings': {
-            'libraries': [
-              '$(SDKROOT)/System/Library/Frameworks/AppKit.framework',
-              '$(SDKROOT)/System/Library/Frameworks/Carbon.framework',
-              '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
-              '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
-              '$(SDKROOT)/System/Library/Frameworks/IOKit.framework',
-              '$(SDKROOT)/System/Library/Frameworks/Security.framework',
-            ],
-          },
-          'dependencies': [
-            '../third_party/mach_override/mach_override.gyp:mach_override',
-          ],
-        }],
-        [ 'OS != "win"', {
-            'dependencies': ['../third_party/libevent/libevent.gyp:libevent'],
-        },],
-        [ 'component=="shared_library"', {
-          'conditions': [
-            ['OS=="win"', {
-              'sources!': [
-                'debug/debug_on_start_win.cc',
-              ],
-            }],
-          ],
-        }],
-      ],
-      'sources': [
-        'third_party/nspr/prcpucfg.h',
-        'third_party/nspr/prcpucfg_win.h',
-        'third_party/nspr/prtypes.h',
-        'third_party/xdg_user_dirs/xdg_user_dir_lookup.cc',
-        'third_party/xdg_user_dirs/xdg_user_dir_lookup.h',
-        'auto_reset.h',
-        'base64.cc',
-        'base64.h',
-        'event_recorder.h',
-        'event_recorder_stubs.cc',
-        'event_recorder_win.cc',
-        'file_descriptor_shuffle.cc',
-        'file_descriptor_shuffle.h',
-        'linux_util.cc',
-        'linux_util.h',
-        'md5.cc',
-        'md5.h',
-        'message_pump_android.cc',
-        'message_pump_android.h',
-        'message_pump_glib.cc',
-        'message_pump_glib.h',
-        'message_pump_gtk.cc',
-        'message_pump_gtk.h',
-        'message_pump_observer.h',
-        'message_pump_x.cc',
-        'message_pump_x.h',
-        'message_pump_libevent.cc',
-        'message_pump_libevent.h',
-        'message_pump_mac.h',
-        'message_pump_mac.mm',
-        'metrics/field_trial.cc',
-        'metrics/field_trial.h',
-        'string16.cc',
-        'string16.h',
-        'sync_socket.h',
-        'sync_socket_win.cc',
-        'sync_socket_posix.cc',
-        'time_mac.cc',
-        'time_posix.cc',
-      ],
-    },
-  ],
-  'conditions': [
-    [ 'OS == "win"', {
-      'targets': [
-        {
-          'target_name': 'base_nacl_win64',
-          'type': '<(component)',
-          'variables': {
-            'base_target': 1,
-          },
-          'dependencies': [
-            'base_static_win64',
-            'allocator/allocator.gyp:allocator_extension_thunks_win64',
-            'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
-          ],
-          # TODO(gregoryd): direct_dependent_settings should be shared with the
-          # 32-bit target, but it doesn't work due to a bug in gyp
-          'direct_dependent_settings': {
-            'include_dirs': [
-              '..',
-            ],
-          },
-          'defines': [
-            '<@(nacl_win64_defines)',
-          ],
-          'configurations': {
-            'Common_Base': {
-              'msvs_target_platform': 'x64',
-            },
-          },
-          'conditions': [
-            [ 'component == "shared_library"', {
-              'sources!': [
-                'debug/debug_on_start_win.cc',
-              ],
-            }],
-          ],
-        },
-        {
-          'target_name': 'base_i18n_nacl_win64',
-          'type': '<(component)',
-          # TODO(gregoryd): direct_dependent_settings should be shared with the
-          # 32-bit target, but it doesn't work due to a bug in gyp
-          'direct_dependent_settings': {
-            'include_dirs': [
-              '..',
-            ],
-          },
-          'defines': [
-            '<@(nacl_win64_defines)',
-            'BASE_I18N_IMPLEMENTATION',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'i18n/icu_util_nacl_win64.cc',
-          ],
-          'configurations': {
-            'Common_Base': {
-              'msvs_target_platform': 'x64',
-            },
-          },
-        },
-      ],
-    }],
-    [ 'os_posix==1 and OS!="mac"', {
-      'targets': [
-        {
-          'target_name': 'symbolize',
-          'type': 'static_library',
-          'toolsets': ['host', 'target'],
-          'variables': {
-            'chromium_code': 0,
-          },
-          'conditions': [
-            [ 'OS == "solaris"', {
-              'include_dirs': [
-                '/usr/gnu/include',
-                '/usr/gnu/include/libelf',
-              ],
-            },],
-          ],
-          'cflags': [
-            '-Wno-sign-compare',
-          ],
-          'cflags!': [
-            '-Wextra',
-          ],
-          'sources': [
-            'third_party/symbolize/config.h',
-            'third_party/symbolize/demangle.cc',
-            'third_party/symbolize/demangle.h',
-            'third_party/symbolize/glog/logging.h',
-            'third_party/symbolize/glog/raw_logging.h',
-            'third_party/symbolize/symbolize.cc',
-            'third_party/symbolize/symbolize.h',
-            'third_party/symbolize/utilities.h',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-        },
-        {
-          'target_name': 'xdg_mime',
-          'type': 'static_library',
-          'toolsets': ['host', 'target'],
-          'variables': {
-            'chromium_code': 0,
-          },
-          'cflags!': [
-            '-Wextra',
-          ],
-          'sources': [
-            'third_party/xdg_mime/xdgmime.c',
-            'third_party/xdg_mime/xdgmime.h',
-            'third_party/xdg_mime/xdgmimealias.c',
-            'third_party/xdg_mime/xdgmimealias.h',
-            'third_party/xdg_mime/xdgmimecache.c',
-            'third_party/xdg_mime/xdgmimecache.h',
-            'third_party/xdg_mime/xdgmimeglob.c',
-            'third_party/xdg_mime/xdgmimeglob.h',
-            'third_party/xdg_mime/xdgmimeicon.c',
-            'third_party/xdg_mime/xdgmimeicon.h',
-            'third_party/xdg_mime/xdgmimeint.c',
-            'third_party/xdg_mime/xdgmimeint.h',
-            'third_party/xdg_mime/xdgmimemagic.c',
-            'third_party/xdg_mime/xdgmimemagic.h',
-            'third_party/xdg_mime/xdgmimeparent.c',
-            'third_party/xdg_mime/xdgmimeparent.h',
-          ],
-        },
-      ],
-    }],
-  ],
 }

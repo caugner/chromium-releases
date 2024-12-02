@@ -9,18 +9,20 @@
 #include <string>
 
 #include "chrome/browser/extensions/api/api_function.h"
-#include "chrome/common/extensions/api/experimental.usb.h"
+#include "chrome/common/extensions/api/experimental_usb.h"
 
 namespace extensions {
 
 class APIResourceEventNotifier;
 
-class UsbFindDeviceFunction : public AsyncIOAPIFunction {
+class UsbFindDeviceFunction : public AsyncAPIFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.findDevice");
+
   UsbFindDeviceFunction();
-  virtual ~UsbFindDeviceFunction();
 
  protected:
+  virtual ~UsbFindDeviceFunction();
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
@@ -28,16 +30,16 @@ class UsbFindDeviceFunction : public AsyncIOAPIFunction {
  private:
   scoped_ptr<extensions::api::experimental_usb::FindDevice::Params> parameters_;
   APIResourceEventNotifier* event_notifier_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.findDevice");
 };
 
-class UsbCloseDeviceFunction : public AsyncIOAPIFunction {
+class UsbCloseDeviceFunction : public AsyncAPIFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.closeDevice");
+
   UsbCloseDeviceFunction();
-  virtual ~UsbCloseDeviceFunction();
 
  protected:
+  virtual ~UsbCloseDeviceFunction();
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
@@ -45,16 +47,16 @@ class UsbCloseDeviceFunction : public AsyncIOAPIFunction {
  private:
   scoped_ptr<extensions::api::experimental_usb::CloseDevice::Params>
       parameters_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.closeDevice");
 };
 
-class UsbControlTransferFunction : public AsyncIOAPIFunction {
+class UsbControlTransferFunction : public AsyncAPIFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.controlTransfer");
+
   UsbControlTransferFunction();
-  virtual ~UsbControlTransferFunction();
 
  protected:
+  virtual ~UsbControlTransferFunction();
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
@@ -62,16 +64,16 @@ class UsbControlTransferFunction : public AsyncIOAPIFunction {
  private:
   scoped_ptr<extensions::api::experimental_usb::ControlTransfer::Params>
       parameters_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.controlTransfer");
 };
 
-class UsbBulkTransferFunction : public AsyncIOAPIFunction {
+class UsbBulkTransferFunction : public AsyncAPIFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.bulkTransfer");
+
   UsbBulkTransferFunction();
-  virtual ~UsbBulkTransferFunction();
 
  protected:
+  virtual ~UsbBulkTransferFunction();
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
@@ -79,16 +81,16 @@ class UsbBulkTransferFunction : public AsyncIOAPIFunction {
  private:
   scoped_ptr<extensions::api::experimental_usb::BulkTransfer::Params>
       parameters_;
-
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.bulkTransfer");
 };
 
-class UsbInterruptTransferFunction : public AsyncIOAPIFunction {
+class UsbInterruptTransferFunction : public AsyncAPIFunction {
  public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.interruptTransfer");
+
   UsbInterruptTransferFunction();
-  virtual ~UsbInterruptTransferFunction();
 
  protected:
+  virtual ~UsbInterruptTransferFunction();
   virtual bool Prepare() OVERRIDE;
   virtual void Work() OVERRIDE;
   virtual bool Respond() OVERRIDE;
@@ -96,8 +98,23 @@ class UsbInterruptTransferFunction : public AsyncIOAPIFunction {
  private:
   scoped_ptr<extensions::api::experimental_usb::InterruptTransfer::Params>
       parameters_;
+};
 
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.interruptTransfer");
+class UsbIsochronousTransferFunction : public AsyncAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.usb.isochronousTransfer");
+
+  UsbIsochronousTransferFunction();
+
+ protected:
+  virtual ~UsbIsochronousTransferFunction();
+  virtual bool Prepare() OVERRIDE;
+  virtual void Work() OVERRIDE;
+  virtual bool Respond() OVERRIDE;
+
+ private:
+  scoped_ptr<extensions::api::experimental_usb::IsochronousTransfer::Params>
+      parameters_;
 };
 
 }  // namespace extensions

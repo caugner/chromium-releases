@@ -22,6 +22,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/ssl_cipher_suite_names.h"
 #include "net/base/ssl_connection_status_flags.h"
@@ -228,7 +229,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
         ASCIIToUTF16(ssl_version_str));
 
     bool did_fallback = (ssl.connection_status &
-                         net::SSL_CONNECTION_SSL3_FALLBACK) != 0;
+                         net::SSL_CONNECTION_VERSION_FALLBACK) != 0;
     bool no_renegotiation =
         (ssl.connection_status &
         net::SSL_CONNECTION_NO_RENEGOTIATION_EXTENSION) != 0;
@@ -240,22 +241,19 @@ PageInfoModel::PageInfoModel(Profile* profile,
         IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS,
         ASCIIToUTF16(cipher), ASCIIToUTF16(mac), ASCIIToUTF16(key_exchange));
 
-    description += ASCIIToUTF16("\n\n");
     uint8 compression_id =
         net::SSLConnectionStatusToCompression(ssl.connection_status);
     if (compression_id) {
       const char* compression;
       net::SSLCompressionToString(&compression, compression_id);
+      description += ASCIIToUTF16("\n\n");
       description += l10n_util::GetStringFUTF16(
           IDS_PAGE_INFO_SECURITY_TAB_COMPRESSION_DETAILS,
           ASCIIToUTF16(compression));
-    } else {
-      description += l10n_util::GetStringUTF16(
-          IDS_PAGE_INFO_SECURITY_TAB_NO_COMPRESSION);
     }
 
     if (did_fallback) {
-      // For now, only SSLv3 fallback will trigger a warning icon.
+      // For now, only SSL/TLS version fallback will trigger a warning icon.
       if (icon_id < ICON_STATE_WARNING_MINOR)
         icon_id = ICON_STATE_WARNING_MINOR;
       description += ASCIIToUTF16("\n\n");

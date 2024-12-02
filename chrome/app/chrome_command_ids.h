@@ -9,6 +9,10 @@
 // This file lists all the command IDs understood by e.g. the browser.
 // It is used by Windows RC files, Mac NIB files, and other platforms too.
 
+// Mac NIB files (e.g. chrome/app/nibs/MainMenu.xib) include ID numbers rather
+// than the corresponding #define labels.  If you change a given command's
+// number, any NIB files that refer to it will also need to be updated.
+
 // Values below IDC_MinimumLabelValue are reserved for dynamic menu items.
 #define IDC_MinimumLabelValue           4000
 
@@ -32,6 +36,7 @@
 // Window management commands
 #define IDC_NEW_WINDOW                  34000
 #define IDC_NEW_INCOGNITO_WINDOW        34001
+#define IDC_PIN_TO_START_SCREEN         34005
 #define IDC_CLOSE_WINDOW                34012
 #define IDC_ALWAYS_ON_TOP               34013
 #define IDC_NEW_TAB                     34014
@@ -58,6 +63,8 @@
 #define IDC_TABPOSE                     34036
 #define IDC_DEBUG_FRAME_TOGGLE          34038
 #define IDC_PRESENTATION_MODE           34039
+#define IDC_METRO_SNAP_ENABLE           34040
+#define IDC_METRO_SNAP_DISABLE          34041
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
@@ -158,15 +165,16 @@
 #define IDC_EDIT_SEARCH_ENGINES         40016
 #define IDC_VIEW_PASSWORDS              40017
 #define IDC_ABOUT                       40018
-#define IDC_HELP_PAGE                   40019
-#define IDC_SHOW_APP_MENU               40020
-#define IDC_MANAGE_EXTENSIONS           40021
-#define IDC_DEV_TOOLS_INSPECT           40022
-#define IDC_UPGRADE_DIALOG              40023
-#define IDC_VIEW_INCOMPATIBILITIES      40024
-#define IDC_VIEW_BACKGROUND_PAGES       40025
-#define IDC_SHOW_KEYBOARD_OVERLAY       40026
-#define IDC_PROFILING_ENABLED           40027
+#define IDC_HELP_PAGE_VIA_KEYBOARD      40019
+#define IDC_HELP_PAGE_VIA_MENU          40020
+#define IDC_SHOW_APP_MENU               40021
+#define IDC_MANAGE_EXTENSIONS           40022
+#define IDC_DEV_TOOLS_INSPECT           40023
+#define IDC_UPGRADE_DIALOG              40024
+#define IDC_VIEW_INCOMPATIBILITIES      40025
+#define IDC_VIEW_BACKGROUND_PAGES       40026
+#define IDC_SHOW_KEYBOARD_OVERLAY       40027
+#define IDC_PROFILING_ENABLED           40028
 #define IDC_BOOKMARKS_MENU              40029
 #define IDC_SHOW_SYNC_SETUP             40030
 #define IDC_EXTENSION_ERRORS            40031
@@ -190,7 +198,7 @@
 // [_FIRST, _LAST).
 #define IDC_SPELLCHECK_LANGUAGES_FIRST  41006
 #define IDC_SPELLCHECK_LANGUAGES_LAST   41106
-#define IDC_CHECK_SPELLING_OF_THIS_FIELD  41107
+#define IDC_CHECK_SPELLING_WHILE_TYPING 41107
 #define IDC_SPELLPANEL_TOGGLE           41109
 #define IDC_SPELLCHECK_ADD_TO_DICTIONARY 41110
 

@@ -11,21 +11,24 @@
 #include "base/basictypes.h"
 #import "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/webui/web_dialog_ui.h"
+#include "ui/web_dialogs/web_dialog_ui.h"
 
 class Browser;
+class TabContents;
 class WebDialogWindowDelegateBridge;
-class Profile;
-class TabContentsWrapper;
+
+namespace content {
+class BrowserContext;
+}
 
 // This controller manages a dialog box with properties and HTML content taken
 // from a WebDialogDelegate object.
 @interface WebDialogWindowController : NSWindowController<NSWindowDelegate> {
  @private
-  // Order here is important, as tab_contents_ may send messages to
+  // Order here is important, as tabContents_ may send messages to
   // delegate_ when it gets destroyed.
   scoped_ptr<WebDialogWindowDelegateBridge> delegate_;
-  scoped_ptr<TabContentsWrapper> contentsWrapper_;
+  scoped_ptr<TabContents> tabContents_;
 }
 
 // Creates and shows an WebDialogWindowController with the given
@@ -35,8 +38,8 @@ class TabContentsWrapper;
 //
 // Make sure to use the returned window only when you know it is safe
 // to do so, i.e. before OnDialogClosed() is called on the delegate.
-+ (NSWindow*)showWebDialog:(WebDialogDelegate*)delegate
-                   profile:(Profile*)profile
++ (NSWindow*)showWebDialog:(ui::WebDialogDelegate*)delegate
+                   context:(content::BrowserContext*)context
                    browser:(Browser*)browser;
 
 @end
@@ -45,8 +48,8 @@ class TabContentsWrapper;
 
 // This is the designated initializer.  However, this is exposed only
 // for testing; use showWebDialog instead.
-- (id)initWithDelegate:(WebDialogDelegate*)delegate
-               profile:(Profile*)profile
+- (id)initWithDelegate:(ui::WebDialogDelegate*)delegate
+               context:(content::BrowserContext*)context
                browser:(Browser*)browser;
 
 // Loads the HTML content from the delegate; this is not a lightweight
@@ -57,4 +60,3 @@ class TabContentsWrapper;
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_WEB_DIALOG_WINDOW_CONTROLLER_H_
-

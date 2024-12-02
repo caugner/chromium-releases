@@ -28,6 +28,7 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/global_error_service.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -265,14 +266,10 @@ void SetShowWelcomePagePrefIfNeeded(
 }
 
 bool SkipFirstRunUI(installer::MasterPreferences* install_prefs) {
-  // TODO(mirandac): Refactor skip-first-run-ui process into regular first run
-  // import process.  http://crbug.com/49647
-  // Note we are skipping all other master preferences if skip-first-run-ui
-  // is *not* specified. (That is, we continue only if skipping first run ui.)
   bool value = false;
-  return (install_prefs->GetBool(
-          installer::master_preferences::kDistroSkipFirstRunPref,
-          &value) || !value);
+  install_prefs->GetBool(installer::master_preferences::kDistroSkipFirstRunPref,
+                         &value);
+  return value;
 }
 
 void SetRLZPref(first_run::MasterPrefs* out_prefs,
@@ -374,8 +371,11 @@ void AutoImportPlatformCommon(
     ShowFirstRunDialog(profile);
   }
 
-  if (make_chrome_default)
+  if (make_chrome_default &&
+      ShellIntegration::CanSetAsDefaultBrowser() ==
+          ShellIntegration::SET_DEFAULT_UNATTENDED) {
     ShellIntegration::SetAsDefaultBrowser();
+  }
 
   // Display the first run bubble if there is a default search provider.
   TemplateURLService* template_url =
@@ -497,7 +497,7 @@ void FirstRunBubbleLauncher::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK_EQ(type, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME);
-  Browser* browser = BrowserList::FindBrowserWithWebContents(
+  Browser* browser = browser::FindBrowserWithWebContents(
       content::Source<content::WebContents>(source).ptr());
   if (!browser || !browser->is_type_tabbed())
     return;
@@ -509,7 +509,7 @@ void FirstRunBubbleLauncher::Observe(
     return;
   }
 
-  content::WebContents* contents = browser->GetSelectedWebContents();
+  content::WebContents* contents = browser->GetActiveWebContents();
   if (contents && contents->GetURL().SchemeIs(chrome::kChromeUIScheme)) {
     // Suppress the first run bubble if the sync promo is showing.
     if (contents->GetURL().host() == chrome::kChromeUISyncPromoHost)

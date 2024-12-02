@@ -24,6 +24,12 @@ namespace gfx {
 class GLShareGroup;
 }
 
+namespace gpu {
+namespace gles2 {
+class MailboxManager;
+}
+}
+
 namespace IPC {
 struct ChannelHandle;
 }
@@ -32,6 +38,7 @@ class ChildThread;
 class GpuChannel;
 class GpuWatchdog;
 struct GPUCreateCommandBufferConfig;
+class SyncPointManager;
 
 // A GpuChannelManager is a thread responsible for issuing rendering commands
 // managing the lifetimes of GPU channels and forwarding IPC requests from the
@@ -78,6 +85,8 @@ class GpuChannelManager : public IPC::Channel::Listener,
 
   GpuChannel* LookupChannel(int32 client_id);
 
+  SyncPointManager* sync_point_manager() { return sync_point_manager_; }
+
  private:
   // Message handlers.
   void OnEstablishChannel(int client_id, bool share_context);
@@ -104,8 +113,10 @@ class GpuChannelManager : public IPC::Channel::Listener,
   typedef base::hash_map<int, scoped_refptr<GpuChannel> > GpuChannelMap;
   GpuChannelMap gpu_channels_;
   scoped_refptr<gfx::GLShareGroup> share_group_;
+  scoped_refptr<gpu::gles2::MailboxManager> mailbox_manager_;
   GpuMemoryManager gpu_memory_manager_;
   GpuWatchdog* watchdog_;
+  scoped_refptr<SyncPointManager> sync_point_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChannelManager);
 };

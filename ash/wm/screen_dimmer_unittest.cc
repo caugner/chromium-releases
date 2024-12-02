@@ -4,6 +4,7 @@
 
 #include "ash/wm/screen_dimmer.h"
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/basictypes.h"
@@ -21,7 +22,7 @@ class ScreenDimmerTest : public AshTestBase {
 
   void SetUp() OVERRIDE {
     AshTestBase::SetUp();
-    dimmer_ = Shell::GetInstance()->screen_dimmer();
+    dimmer_ = Shell::GetPrimaryRootWindowController()->screen_dimmer();
     test_api_.reset(new internal::ScreenDimmer::TestApi(dimmer_));
   }
 
@@ -44,7 +45,7 @@ TEST_F(ScreenDimmerTest, DimAndUndim) {
   // of the root's children.
   dimmer_->SetDimming(true);
   ASSERT_TRUE(test_api_->layer() != NULL);
-  ui::Layer* root_layer = Shell::GetInstance()->GetRootWindow()->layer();
+  ui::Layer* root_layer = Shell::GetPrimaryRootWindow()->layer();
   ASSERT_TRUE(!root_layer->children().empty());
   EXPECT_EQ(test_api_->layer(), root_layer->children().back());
   EXPECT_TRUE(test_api_->layer()->visible());
@@ -63,14 +64,14 @@ TEST_F(ScreenDimmerTest, ResizeLayer) {
   dimmer_->SetDimming(true);
   ui::Layer* dimming_layer = test_api_->layer();
   ASSERT_TRUE(dimming_layer != NULL);
-  ui::Layer* root_layer = Shell::GetInstance()->GetRootWindow()->layer();
+  ui::Layer* root_layer = Shell::GetPrimaryRootWindow()->layer();
   EXPECT_EQ(gfx::Rect(root_layer->bounds().size()).ToString(),
             dimming_layer->bounds().ToString());
 
   // When we resize the root window, the dimming layer should be resized to
   // match.
   gfx::Size kNewSize(400, 300);
-  Shell::GetInstance()->GetRootWindow()->SetHostSize(kNewSize);
+  Shell::GetPrimaryRootWindow()->SetHostSize(kNewSize);
   EXPECT_EQ(kNewSize.ToString(), dimming_layer->bounds().size().ToString());
 }
 

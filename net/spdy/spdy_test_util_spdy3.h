@@ -12,7 +12,6 @@
 #include "net/base/mock_host_resolver.h"
 #include "net/base/request_priority.h"
 #include "net/base/ssl_config_service_defaults.h"
-#include "net/base/sys_addrinfo.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
@@ -375,11 +374,9 @@ class SpdySessionDependencies {
 class SpdyURLRequestContext : public URLRequestContext {
  public:
   SpdyURLRequestContext();
+  virtual ~SpdyURLRequestContext();
 
   MockClientSocketFactory& socket_factory() { return socket_factory_; }
-
- protected:
-  virtual ~SpdyURLRequestContext();
 
  private:
   MockClientSocketFactory socket_factory_;
@@ -393,7 +390,7 @@ class SpdySessionPoolPeer {
   explicit SpdySessionPoolPeer(SpdySessionPool* pool)
       : pool_(pool) {}
 
-  void AddAlias(const addrinfo* address, const HostPortProxyPair& pair) {
+  void AddAlias(const IPEndPoint& address, const HostPortProxyPair& pair) {
     pool_->AddAlias(address, pair);
   }
 
@@ -407,6 +404,10 @@ class SpdySessionPoolPeer {
 
   void DisableDomainAuthenticationVerification() {
     pool_->verify_domain_authentication_ = false;
+  }
+
+  void EnableSendingInitialSettings(bool enabled) {
+    pool_->enable_sending_initial_settings_ = enabled;
   }
 
  private:

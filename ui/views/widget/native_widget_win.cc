@@ -21,6 +21,7 @@
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/native_theme/native_theme_win.h"
 #include "ui/base/theme_provider.h"
 #include "ui/base/view_prop.h"
 #include "ui/base/win/hwnd_util.h"
@@ -29,7 +30,6 @@
 #include "ui/gfx/canvas_paint.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/icon_util.h"
-#include "ui/gfx/native_theme_win.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/accessibility/native_view_accessibility_win.h"
@@ -51,7 +51,15 @@
 #include "ui/views/widget/widget_hwnd_utils.h"
 #include "ui/views/window/native_frame_view.h"
 
+#if !defined(USE_AURA)
+#include "base/command_line.h"
+#include "ui/base/ui_base_switches.h"
+#endif
+
 #pragma comment(lib, "dwmapi.lib")
+
+// From msdn:
+#define MOUSEEVENTF_FROMTOUCH 0xFF515700
 
 using ui::ViewProp;
 
@@ -414,6 +422,7 @@ NativeWidgetWin::NativeWidgetWin(internal::NativeWidgetDelegate* delegate)
       accessibility_view_events_(kMaxAccessibilityViewEvents),
       previous_cursor_(NULL),
       fullscreen_(false),
+      metro_snap_(false),
       force_hidden_count_(0),
       lock_updates_count_(0),
       ignore_window_pos_changes_(false),
@@ -651,31 +660,28 @@ void NativeWidgetWin::SendNativeAccessibilityEvent(
                    GetNativeView(), OBJID_CLIENT, child_id);
 }
 
-void NativeWidgetWin::SetCapture(unsigned int flags) {
-  if (flags & ui::CW_LOCK_MOUSE) {
-    DCHECK(!HasCapture(ui::CW_LOCK_MOUSE));
-    ::SetCapture(hwnd());
-  }
+void NativeWidgetWin::SetCapture() {
+  DCHECK(!HasCapture());
+  ::SetCapture(hwnd());
 }
 
 void NativeWidgetWin::ReleaseCapture() {
   ::ReleaseCapture();
 }
 
-bool NativeWidgetWin::HasCapture(unsigned int flags) const {
-  if (flags == ui::CW_LOCK_MOUSE)
-    return ::GetCapture() == hwnd();
-  return false;
+bool NativeWidgetWin::HasCapture() const {
+  return ::GetCapture() == hwnd();
 }
 
 InputMethod* NativeWidgetWin::CreateInputMethod() {
-#if defined(USE_AURA)
+#if !defined(USE_AURA)
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (!command_line->HasSwitch(switches::kEnableViewsTextfield))
+    return NULL;
+#endif
   InputMethod* input_method = new InputMethodWin(this);
   input_method->Init(GetWidget());
   return input_method;
-#else
-  return NULL;
-#endif
 }
 
 void NativeWidgetWin::CenterWindow(const gfx::Size& size) {
@@ -720,8 +726,8 @@ void NativeWidgetWin::SetWindowTitle(const string16& title) {
   SetAccessibleName(title);
 }
 
-void NativeWidgetWin::SetWindowIcons(const SkBitmap& window_icon,
-                                     const SkBitmap& app_icon) {
+void NativeWidgetWin::SetWindowIcons(const gfx::ImageSkia& window_icon,
+                                     const gfx::ImageSkia& app_icon) {
   if (!window_icon.isNull()) {
     HICON windows_icon = IconUtil::CreateHICONFromSkBitmap(window_icon);
     // We need to make sure to destroy the previous icon, otherwise we'll leak
@@ -985,13 +991,28 @@ void NativeWidgetWin::Restore() {
 
 void NativeWidgetWin::SetFullscreen(bool fullscreen) {
   if (fullscreen_ == fullscreen)
-    return;  // Nothing to do.
+    return;
+
+  SetFullscreenInternal(fullscreen, false);
+}
+
+void NativeWidgetWin::SetMetroSnapFullscreen(bool metro_snap) {
+  if (metro_snap_ == metro_snap)
+    return;
+
+  SetFullscreenInternal(metro_snap, true);
+
+  metro_snap_ = metro_snap;
+}
+
+void NativeWidgetWin::SetFullscreenInternal(bool fullscreen,
+                                            bool for_metro) {
 
   // Reduce jankiness during the following position changes by hiding the window
   // until it's in the final position.
   PushForceHidden();
 
-  // Size/position/style window appropriately.
+  // Save current window state if not already fullscreen.
   if (!fullscreen_) {
     // Save current window information.  We force the window into restored mode
     // before going fullscreen because Windows doesn't seem to hide the
@@ -1008,29 +1029,39 @@ void NativeWidgetWin::SetFullscreen(bool fullscreen) {
 
   if (fullscreen_) {
     // Set new window style and size.
-    MONITORINFO monitor_info;
-    monitor_info.cbSize = sizeof(monitor_info);
-    GetMonitorInfo(MonitorFromWindow(GetNativeView(), MONITOR_DEFAULTTONEAREST),
-                   &monitor_info);
-    gfx::Rect monitor_rect(monitor_info.rcMonitor);
     SetWindowLong(GWL_STYLE,
                   saved_window_info_.style & ~(WS_CAPTION | WS_THICKFRAME));
     SetWindowLong(GWL_EXSTYLE,
                   saved_window_info_.ex_style & ~(WS_EX_DLGMODALFRAME |
                   WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
-    SetWindowPos(NULL, monitor_rect.x(), monitor_rect.y(),
-                 monitor_rect.width(), monitor_rect.height(),
-                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    // On expand, if we're given a window_rect, grow to it, otherwise do
+    // not resize.
+    if (!for_metro) {
+      MONITORINFO monitor_info;
+      monitor_info.cbSize = sizeof(monitor_info);
+      GetMonitorInfo(MonitorFromWindow(GetNativeView(),
+                                       MONITOR_DEFAULTTONEAREST),
+                     &monitor_info);
+      gfx::Rect window_rect(monitor_info.rcMonitor);
+      SetWindowPos(NULL, window_rect.x(), window_rect.y(),
+                   window_rect.width(), window_rect.height(),
+                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
   } else {
     // Reset original window style and size.  The multiple window size/moves
     // here are ugly, but if SetWindowPos() doesn't redraw, the taskbar won't be
     // repainted.  Better-looking methods welcome.
-    gfx::Rect new_rect(saved_window_info_.window_rect);
     SetWindowLong(GWL_STYLE, saved_window_info_.style);
     SetWindowLong(GWL_EXSTYLE, saved_window_info_.ex_style);
-    SetWindowPos(NULL, new_rect.x(), new_rect.y(), new_rect.width(),
-                 new_rect.height(),
-                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    if (!for_metro) {
+      // On restore, resize to the previous saved rect size.
+      gfx::Rect new_rect(saved_window_info_.window_rect);
+      SetWindowPos(NULL, new_rect.x(), new_rect.y(), new_rect.width(),
+                   new_rect.height(),
+                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
     if (saved_window_info_.maximized)
       Maximize();
   }
@@ -1041,6 +1072,10 @@ void NativeWidgetWin::SetFullscreen(bool fullscreen) {
 
 bool NativeWidgetWin::IsFullscreen() const {
   return fullscreen_;
+}
+
+bool NativeWidgetWin::IsInMetroSnapMode() const {
+  return metro_snap_;
 }
 
 void NativeWidgetWin::SetOpacity(unsigned char opacity) {
@@ -1135,7 +1170,7 @@ void NativeWidgetWin::FocusNativeView(gfx::NativeView native_view) {
 }
 
 gfx::Rect NativeWidgetWin::GetWorkAreaBoundsInScreen() const {
-  return gfx::Screen::GetMonitorNearestWindow(GetNativeView()).work_area();
+  return gfx::Screen::GetDisplayNearestWindow(GetNativeView()).work_area();
 }
 
 void NativeWidgetWin::SetInactiveRenderingDisabled(bool value) {
@@ -1185,7 +1220,8 @@ HICON NativeWidgetWin::GetDefaultWindowIcon() const {
   return NULL;
 }
 
-LRESULT NativeWidgetWin::OnWndProc(UINT message, WPARAM w_param,
+LRESULT NativeWidgetWin::OnWndProc(UINT message,
+                                   WPARAM w_param,
                                    LPARAM l_param) {
   HWND window = hwnd();
   LRESULT result = 0;
@@ -1338,6 +1374,9 @@ LRESULT NativeWidgetWin::OnCreate(CREATESTRUCT* create_struct) {
   // Get access to a modifiable copy of the system menu.
   GetSystemMenu(hwnd(), false);
 
+  if (base::win::GetVersion() >= base::win::VERSION_WIN7)
+    RegisterTouchWindow(hwnd(), 0);
+
   return 0;
 }
 
@@ -1438,7 +1477,11 @@ void NativeWidgetWin::OnGetMinMaxInfo(MINMAXINFO* minmax_info) {
   }
   minmax_info->ptMinTrackSize.x = min_window_size.width();
   minmax_info->ptMinTrackSize.y = min_window_size.height();
-  if (!max_window_size.IsEmpty()) {
+  if (max_window_size.width() || max_window_size.height()) {
+    if (!max_window_size.width())
+      max_window_size.set_width(GetSystemMetrics(SM_CXMAXTRACK));
+    if (!max_window_size.height())
+      max_window_size.set_height(GetSystemMetrics(SM_CYMAXTRACK));
     minmax_info->ptMaxTrackSize.x = max_window_size.width();
     minmax_info->ptMaxTrackSize.y = max_window_size.height();
   }
@@ -1572,8 +1615,8 @@ LRESULT NativeWidgetWin::OnMouseRange(UINT message,
         // doing this undesirable thing, but that means we need to roll the
         // sys-command handling ourselves.
         // Combine |w_param| with common key state message flags.
-        w_param |= ((GetKeyState(VK_CONTROL) & 0x80) == 0x80)? MK_CONTROL : 0;
-        w_param |= ((GetKeyState(VK_SHIFT) & 0x80) == 0x80)? MK_SHIFT : 0;
+        w_param |= base::win::IsCtrlPressed() ? MK_CONTROL : 0;
+        w_param |= base::win::IsShiftPressed() ? MK_SHIFT : 0;
       }
     }
   } else if (message == WM_NCRBUTTONDOWN &&
@@ -1582,18 +1625,26 @@ LRESULT NativeWidgetWin::OnMouseRange(UINT message,
     // We SetCapture() to ensure we only show the menu when the button
     // down and up are both on the caption. Note: this causes the button up to
     // be WM_RBUTTONUP instead of WM_NCRBUTTONUP.
-    SetCapture(ui::CW_LOCK_MOUSE);
+    SetCapture();
   }
 
   MSG msg = { hwnd(), message, w_param, l_param, 0,
               { GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param) } };
   MouseEvent event(msg);
+  // Only button up/down have MOUSEEVENTF_FROMTOUCH set.
+  if (!touch_ids_.empty() ||
+      ((message == WM_LBUTTONDOWN || message == WM_LBUTTONUP ||
+        message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) &&
+       (GetMessageExtraInfo() & MOUSEEVENTF_FROMTOUCH) ==
+       MOUSEEVENTF_FROMTOUCH)) {
+    event.set_flags(event.flags() | ui::EF_FROM_TOUCH);
+  }
 
   if (!(event.flags() & ui::EF_IS_NON_CLIENT))
     if (tooltip_manager_.get())
       tooltip_manager_->OnMouse(message, w_param, l_param);
 
-  if (event.type() == ui::ET_MOUSE_MOVED && !HasCapture(ui::CW_LOCK_MOUSE)) {
+  if (event.type() == ui::ET_MOUSE_MOVED && !HasCapture()) {
     // Windows only fires WM_MOUSELEAVE events if the application begins
     // "tracking" mouse events for a given HWND during WM_MOUSEMOVE events.
     // We need to call |TrackMouseEvents| to listen for WM_MOUSELEAVE.
@@ -1954,8 +2005,8 @@ LRESULT NativeWidgetWin::OnSetCursor(UINT message,
   return 0;
 }
 
-void NativeWidgetWin::OnSetFocus(HWND focused_window) {
-  delegate_->OnNativeFocus(focused_window);
+void NativeWidgetWin::OnSetFocus(HWND old_focused_window) {
+  delegate_->OnNativeFocus(old_focused_window);
   InputMethod* input_method = GetWidget()->GetInputMethodDirect();
   if (input_method)
     input_method->OnFocus();
@@ -2023,12 +2074,15 @@ void NativeWidgetWin::OnSysCommand(UINT notification_code, CPoint click) {
   // Handle SC_KEYMENU, which means that the user has pressed the ALT
   // key and released it, so we should focus the menu bar.
   if ((notification_code & sc_mask) == SC_KEYMENU && click.x == 0) {
+    int modifiers = ui::EF_NONE;
+    if (base::win::IsShiftPressed())
+      modifiers |= ui::EF_SHIFT_DOWN;
+    if (base::win::IsCtrlPressed())
+      modifiers |= ui::EF_CONTROL_DOWN;
     // Retrieve the status of shift and control keys to prevent consuming
     // shift+alt keys, which are used by Windows to change input languages.
     ui::Accelerator accelerator(ui::KeyboardCodeForWindowsKeyCode(VK_MENU),
-                                !!(GetKeyState(VK_SHIFT) & 0x8000),
-                                !!(GetKeyState(VK_CONTROL) & 0x8000),
-                                false);
+                                modifiers);
     GetWidget()->GetFocusManager()->ProcessAccelerator(accelerator);
     return;
   }
@@ -2042,7 +2096,26 @@ void NativeWidgetWin::OnSysCommand(UINT notification_code, CPoint click) {
 
 void NativeWidgetWin::OnThemeChanged() {
   // Notify NativeThemeWin.
-  gfx::NativeThemeWin::instance()->CloseHandles();
+  ui::NativeThemeWin::instance()->CloseHandles();
+}
+
+LRESULT NativeWidgetWin::OnTouchEvent(UINT message,
+                                      WPARAM w_param,
+                                      LPARAM l_param) {
+  int num_points = LOWORD(w_param);
+  scoped_array<TOUCHINPUT> input(new TOUCHINPUT[num_points]);
+  if (GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(l_param),
+                        num_points, input.get(), sizeof(TOUCHINPUT))) {
+    for (int i = 0; i < num_points; ++i) {
+      if (input[i].dwFlags & TOUCHEVENTF_DOWN)
+        touch_ids_.insert(input[i].dwID);
+      if (input[i].dwFlags & TOUCHEVENTF_UP)
+        touch_ids_.erase(input[i].dwID);
+    }
+  }
+  CloseTouchInputHandle(reinterpret_cast<HTOUCHINPUT>(l_param));
+  SetMsgHandled(FALSE);
+  return 0;
 }
 
 void NativeWidgetWin::OnVScroll(int scroll_type,
@@ -2068,9 +2141,10 @@ void NativeWidgetWin::OnWindowPosChanging(WINDOWPOS* window_pos) {
     gfx::Rect monitor_rect, work_area;
     if (GetWindowRect(&window_rect) &&
         GetMonitorAndRects(window_rect, &monitor, &monitor_rect, &work_area)) {
+      bool work_area_changed = (monitor_rect == last_monitor_rect_) &&
+                               (work_area != last_work_area_);
       if (monitor && (monitor == last_monitor_) &&
-          (IsFullscreen() || ((monitor_rect == last_monitor_rect_) &&
-              (work_area != last_work_area_)))) {
+          ((IsFullscreen() && !metro_snap_) || work_area_changed)) {
         // A rect for the monitor we're on changed.  Normally Windows notifies
         // us about this (and thus we're reaching here due to the SetWindowPos()
         // call in OnSettingChange() above), but with some software (e.g.
@@ -2178,6 +2252,11 @@ gfx::Insets NativeWidgetWin::GetClientAreaInsets() const {
     return gfx::Insets(border_thickness, border_thickness, border_thickness,
                        border_thickness);
   }
+
+  // The hack below doesn't seem to be necessary when the standard frame is
+  // removed.
+  if (remove_standard_frame_)
+    return gfx::Insets();
   // This is weird, but highly essential. If we don't offset the bottom edge
   // of the client rect, the window client area and window area will match,
   // and when returning to glass rendering mode from non-glass, the client
@@ -2683,6 +2762,13 @@ bool NativeWidgetPrivate::IsMouseButtonDown() {
     (GetKeyState(VK_MBUTTON) & 0x80) ||
     (GetKeyState(VK_XBUTTON1) & 0x80) ||
     (GetKeyState(VK_XBUTTON2) & 0x80);
+}
+
+// static
+bool NativeWidgetPrivate::IsTouchDown() {
+  // This currently isn't necessary because we're not generating touch events on
+  // windows.  When we do, this will need to be updated.
+  return false;
 }
 
 }  // namespace internal

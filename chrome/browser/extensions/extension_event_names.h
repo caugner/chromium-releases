@@ -46,6 +46,10 @@ extern const char kOnFileBrowserNetworkConnectionChanged[];
 // InputMethod.
 extern const char kOnInputMethodChanged[];
 
+// Context menus.
+extern const char kOnContextMenus[];
+extern const char kOnContextMenuClicked[];
+
 // Downloads.
 extern const char kOnDownloadCreated[];
 extern const char kOnDownloadChanged[];
@@ -63,6 +67,7 @@ extern const char kOnOffscreenTabUpdated[];
 #if defined(OS_CHROMEOS)
 // Bluetooth.
 extern const char kBluetoothOnAvailabilityChanged[];
+extern const char kBluetoothOnDeviceDiscovered[];
 extern const char kBluetoothOnPowerChanged[];
 #endif
 

@@ -17,16 +17,16 @@
 #include "base/process_util.h"
 #include "base/synchronization/lock.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/client/gpu_video_decode_accelerator_host.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/common/message_router.h"
 #include "content/public/common/gpu_info.h"
-#include "content/common/gpu/client/gpu_video_decode_accelerator_host.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sync_channel.h"
-#include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
+#include "ui/gl/gpu_preference.h"
 
 class CommandBufferProxy;
 class CommandBufferProxyImpl;
@@ -135,20 +135,6 @@ class GpuChannelHost : public IPC::Message::Sender,
   // Add a route for the current message loop.
   void AddRoute(int route_id, base::WeakPtr<IPC::Channel::Listener> listener);
   void RemoveRoute(int route_id);
-
-  // Asks the GPU process whether the creation or destruction of the
-  // given command buffer on the given GPU will provoke a switch of
-  // the GPU from integrated to discrete or vice versa. This requires
-  // all of the GL contexts in the same share group in the GPU process
-  // to be dropped.
-  bool WillGpuSwitchOccur(bool is_creating_context,
-                          gfx::GpuPreference gpu_preference);
-
-  // Forcibly close the channel on the GPU process side. This will
-  // cause all command buffers on this side to soon afterward start
-  // registering lost contexts. It also has the side effect of setting
-  // the state on this side to lost.
-  void ForciblyCloseChannel();
 
   GpuChannelHostFactory* factory() const { return factory_; }
   int gpu_host_id() const { return gpu_host_id_; }

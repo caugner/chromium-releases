@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/download_history.h"
 
 #include "base/logging.h"
-#include "chrome/browser/download/chrome_download_manager_delegate.h"
+#include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/history/history_marshaling.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/download_item.h"
@@ -54,11 +54,11 @@ void DownloadHistory::CheckVisitedReferrerBefore(
           hs->GetVisibleVisitCountToHost(referrer_url, &history_consumer_,
               base::Bind(&DownloadHistory::OnGotVisitCountToHost,
                          base::Unretained(this)));
-      visited_before_requests_[handle] = std::make_pair(download_id, callback);
+      visited_before_requests_[handle] = callback;
       return;
     }
   }
-  callback.Run(download_id, false);
+  callback.Run(false);
 }
 
 void DownloadHistory::AddEntry(
@@ -76,7 +76,7 @@ void DownloadHistory::AddEntry(
   // the neck first. YMMV.
   HistoryService* hs = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   if (download_item->IsOtr() ||
-      ChromeDownloadManagerDelegate::IsExtensionDownload(download_item) ||
+      download_crx_util::IsExtensionDownload(*download_item) ||
       download_item->IsTemporary() || !hs) {
     callback.Run(download_item->GetId(), GetNextFakeDbHandle());
     return;
@@ -139,9 +139,8 @@ void DownloadHistory::OnGotVisitCountToHost(HistoryService::Handle handle,
   VisitedBeforeRequestsMap::iterator request =
       visited_before_requests_.find(handle);
   DCHECK(request != visited_before_requests_.end());
-  int32 download_id = request->second.first;
-  VisitedBeforeDoneCallback callback = request->second.second;
+  VisitedBeforeDoneCallback callback = request->second;
   visited_before_requests_.erase(request);
-  callback.Run(download_id, found_visits && count &&
+  callback.Run(found_visits && count &&
       (first_visit.LocalMidnight() < base::Time::Now().LocalMidnight()));
 }

@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef GL_GLEXT_PROTOTYPES
-#define GL_GLEXT_PROTOTYPES
-#endif
-
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 
@@ -13,7 +9,7 @@
 #include "gpu/command_buffer/tests/gl_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/gl/gl_share_group.h"
+#include "ui/gl/gl_share_group.h"
 
 namespace gpu {
 
@@ -46,29 +42,22 @@ uint32 ReadTexel(GLuint id, GLint x, GLint y) {
 
 class GLTextureMailboxTest : public testing::Test {
  protected:
-  GLTextureMailboxTest() {
-    gles2::MailboxManager* mailbox_manager = new gles2::MailboxManager;
-    gfx::GLShareGroup* share_group = new gfx::GLShareGroup;
-    gl1_.reset(new GLManager(mailbox_manager, share_group));
-    gl2_.reset(new GLManager(mailbox_manager, share_group));
-  }
-
   virtual void SetUp() {
-    gl1_->Initialize(gfx::Size(4, 4));
-    gl2_->Initialize(gfx::Size(4, 4));
+    gl1_.Initialize(gfx::Size(4, 4));
+    gl2_.InitializeSharedMailbox(gfx::Size(4, 4), &gl1_);
   }
 
   virtual void TearDown() {
-    gl1_->Destroy();
-    gl2_->Destroy();
+    gl1_.Destroy();
+    gl2_.Destroy();
   }
 
-  scoped_ptr<GLManager> gl1_;
-  scoped_ptr<GLManager> gl2_;
+  GLManager gl1_;
+  GLManager gl2_;
 };
 
 TEST_F(GLTextureMailboxTest, ProduceAndConsumeTexture) {
-  gl1_->MakeCurrent();
+  gl1_.MakeCurrent();
 
   GLbyte mailbox1[GL_MAILBOX_SIZE_CHROMIUM];
   glGenMailboxCHROMIUM(mailbox1);
@@ -93,7 +82,7 @@ TEST_F(GLTextureMailboxTest, ProduceAndConsumeTexture) {
   glProduceTextureCHROMIUM(GL_TEXTURE_2D, mailbox1);
   glFlush();
 
-  gl2_->MakeCurrent();
+  gl2_.MakeCurrent();
 
   GLuint tex2;
   glGenTextures(1, &tex2);
@@ -104,7 +93,7 @@ TEST_F(GLTextureMailboxTest, ProduceAndConsumeTexture) {
   glProduceTextureCHROMIUM(GL_TEXTURE_2D, mailbox2);
   glFlush();
 
-  gl1_->MakeCurrent();
+  gl1_.MakeCurrent();
 
   glBindTexture(GL_TEXTURE_2D, tex1);
   glConsumeTextureCHROMIUM(GL_TEXTURE_2D, mailbox2);

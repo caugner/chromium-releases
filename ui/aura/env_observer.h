@@ -6,7 +6,6 @@
 #define UI_AURA_ENV_OBSERVER_H_
 #pragma once
 
-#include "base/observer_list.h"
 #include "ui/aura/aura_export.h"
 
 namespace aura {

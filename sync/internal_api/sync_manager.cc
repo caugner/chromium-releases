@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "sync/internal_api/sync_manager.h"
+#include "sync/internal_api/public/sync_manager.h"
 
 #include <string>
 
@@ -18,41 +18,43 @@
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "net/base/network_change_notifier.h"
+#include "sync/engine/all_status.h"
 #include "sync/engine/net/server_connection_manager.h"
 #include "sync/engine/nigori_util.h"
-#include "sync/engine/polling_constants.h"
 #include "sync/engine/sync_scheduler.h"
 #include "sync/engine/syncer_types.h"
-#include "sync/internal_api/all_status.h"
-#include "sync/internal_api/base_node.h"
+#include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/internal_api/change_reorder_buffer.h"
-#include "sync/internal_api/configure_reason.h"
 #include "sync/internal_api/debug_info_event_listener.h"
 #include "sync/internal_api/js_mutation_event_observer.h"
 #include "sync/internal_api/js_sync_manager_observer.h"
-#include "sync/internal_api/read_node.h"
-#include "sync/internal_api/read_transaction.h"
+#include "sync/internal_api/public/base_node.h"
+#include "sync/internal_api/public/configure_reason.h"
+#include "sync/internal_api/public/engine/polling_constants.h"
+#include "sync/internal_api/public/read_node.h"
+#include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/syncable/model_type_payload_map.h"
+#include "sync/internal_api/public/user_share.h"
+#include "sync/internal_api/public/util/experiments.h"
+#include "sync/internal_api/public/write_node.h"
+#include "sync/internal_api/public/write_transaction.h"
 #include "sync/internal_api/syncapi_internal.h"
 #include "sync/internal_api/syncapi_server_connection_manager.h"
-#include "sync/internal_api/user_share.h"
-#include "sync/internal_api/write_node.h"
-#include "sync/internal_api/write_transaction.h"
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_backend.h"
 #include "sync/js/js_event_details.h"
 #include "sync/js/js_event_handler.h"
 #include "sync/js/js_reply_handler.h"
+#include "sync/notifier/notifications_disabled_reason.h"
 #include "sync/notifier/sync_notifier.h"
 #include "sync/notifier/sync_notifier_observer.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/proto_value_conversions.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/syncable/directory_change_delegate.h"
-#include "sync/syncable/model_type.h"
-#include "sync/syncable/model_type_payload_map.h"
 #include "sync/syncable/syncable.h"
 #include "sync/util/cryptographer.h"
-#include "sync/util/experiments.h"
 #include "sync/util/get_session_name.h"
 #include "sync/util/time.h"
 
@@ -68,7 +70,6 @@ using browser_sync::JsEventHandler;
 using browser_sync::JsReplyHandler;
 using browser_sync::JsMutationEventObserver;
 using browser_sync::JsSyncManagerObserver;
-using browser_sync::ModelSafeWorkerRegistrar;
 using browser_sync::kNigoriTag;
 using browser_sync::KeyParams;
 using browser_sync::ModelSafeRoutingInfo;
@@ -141,12 +142,11 @@ class SyncManager::SyncInternal
   explicit SyncInternal(const std::string& name)
       : name_(name),
         weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-        enable_sync_tabs_for_other_clients_(false),
-        registrar_(NULL),
         change_delegate_(NULL),
         initialized_(false),
         testing_mode_(NON_TEST),
         observing_ip_address_changes_(false),
+        throttled_data_type_tracker_(&allstatus_),
         traffic_recorder_(kMaxMessagesToRecord, kMaxMessageSizeToRecord),
         encryptor_(NULL),
         unrecoverable_error_handler_(NULL),
@@ -198,13 +198,13 @@ class SyncManager::SyncInternal
             bool use_ssl,
             const scoped_refptr<base::TaskRunner>& blocking_task_runner,
             HttpPostProviderFactory* post_factory,
-            ModelSafeWorkerRegistrar* model_safe_worker_registrar,
+            const browser_sync::ModelSafeRoutingInfo& model_safe_routing_info,
+            const std::vector<browser_sync::ModelSafeWorker*>& workers,
             browser_sync::ExtensionsActivityMonitor*
                 extensions_activity_monitor,
             ChangeDelegate* change_delegate,
             const std::string& user_agent,
             const SyncCredentials& credentials,
-            bool enable_sync_tabs_for_other_clients,
             sync_notifier::SyncNotifier* sync_notifier,
             const std::string& restored_key_for_bootstrapping,
             TestingMode testing_mode,
@@ -223,14 +223,11 @@ class SyncManager::SyncInternal
   void UpdateCredentials(const SyncCredentials& credentials);
 
   // Called when the user disables or enables a sync type.
-  void UpdateEnabledTypes();
-
-  // Conditionally sets the flag in the Nigori node which instructs other
-  // clients to start syncing tabs.
-  void MaybeSetSyncTabsInNigoriNode(ModelTypeSet enabled_types);
+  void UpdateEnabledTypes(const ModelTypeSet& enabled_types);
 
   // Tell the sync engine to start the syncing process.
-  void StartSyncingNormally();
+  void StartSyncingNormally(
+      const browser_sync::ModelSafeRoutingInfo& routing_info);
 
   // Whether or not the Nigori node is encrypted using an explicit passphrase.
   bool IsUsingExplicitPassphrase();
@@ -324,14 +321,12 @@ class SyncManager::SyncInternal
       bool encrypt_everything) OVERRIDE;
 
   // SyncNotifierObserver implementation.
-  virtual void OnNotificationStateChange(
-      bool notifications_enabled) OVERRIDE;
-
+  virtual void OnNotificationsEnabled() OVERRIDE;
+  virtual void OnNotificationsDisabled(
+      sync_notifier::NotificationsDisabledReason reason) OVERRIDE;
   virtual void OnIncomingNotification(
       const syncable::ModelTypePayloadMap& type_payloads,
       sync_notifier::IncomingNotificationSource source) OVERRIDE;
-
-  virtual void StoreState(const std::string& cookie) OVERRIDE;
 
   void AddObserver(SyncManager::Observer* observer);
   void RemoveObserver(SyncManager::Observer* observer);
@@ -341,6 +336,7 @@ class SyncManager::SyncInternal
   SyncAPIServerConnectionManager* connection_manager() {
     return connection_manager_.get();
   }
+  SyncSessionContext* session_context() { return session_context_.get(); }
   SyncScheduler* scheduler() const { return scheduler_.get(); }
   UserShare* GetUserShare() {
     DCHECK(initialized_);
@@ -353,7 +349,7 @@ class SyncManager::SyncInternal
     return share_.name;
   }
 
-  Status GetStatus();
+  SyncStatus GetStatus();
 
   void RequestNudge(const tracked_objects::Location& nudge_location);
 
@@ -383,16 +379,9 @@ class SyncManager::SyncInternal
   // Called only by our NetworkChangeNotifier.
   virtual void OnIPAddressChanged() OVERRIDE;
 
-  bool InitialSyncEndedForAllEnabledTypes() {
-    syncable::ModelTypeSet types;
-    ModelSafeRoutingInfo enabled_types;
-    registrar_->GetModelSafeRoutingInfo(&enabled_types);
-    for (ModelSafeRoutingInfo::const_iterator i = enabled_types.begin();
-        i != enabled_types.end(); ++i) {
-      types.Put(i->first);
-    }
-
-    return InitialSyncEndedForTypes(types, &share_);
+  syncable::ModelTypeSet InitialSyncEndedTypes() {
+    DCHECK(initialized_);
+    return directory()->initial_sync_ended_types();
   }
 
   // SyncEngineEventListener implementation.
@@ -570,11 +559,13 @@ class SyncManager::SyncInternal
   // client (the Syncer) and the sync server.
   scoped_ptr<SyncAPIServerConnectionManager> connection_manager_;
 
+  // A container of various bits of information used by the SyncScheduler to
+  // create SyncSessions.  Must outlive the SyncScheduler.
+  scoped_ptr<SyncSessionContext> session_context_;
+
   // The scheduler that runs the Syncer. Needs to be explicitly
   // Start()ed.
   scoped_ptr<SyncScheduler> scheduler_;
-
-  bool enable_sync_tabs_for_other_clients_;
 
   // The SyncNotifier which notifies us when updates need to be downloaded.
   scoped_ptr<sync_notifier::SyncNotifier> sync_notifier_;
@@ -590,10 +581,6 @@ class SyncManager::SyncInternal
   // step by HandleTransactionEndingChangeEvent. The list is cleared in the
   // TRANSACTION_COMPLETE step by HandleTransactionCompleteChangeEvent.
   ChangeReorderBuffer change_buffers_[syncable::MODEL_TYPE_COUNT];
-
-  // The entity that provides us with information about which types to sync.
-  // The instance is shared between the SyncManager and the Syncer.
-  ModelSafeWorkerRegistrar* registrar_;
 
   SyncManager::ChangeDelegate* change_delegate_;
 
@@ -617,6 +604,8 @@ class SyncManager::SyncInternal
   WeakHandle<JsEventHandler> js_event_handler_;
   JsSyncManagerObserver js_sync_manager_observer_;
   JsMutationEventObserver js_mutation_event_observer_;
+
+  browser_sync::ThrottledDataTypeTracker throttled_data_type_tracker_;
 
   // This is for keeping track of client events to send to the server.
   DebugInfoEventListener debug_info_event_listener_;
@@ -718,36 +707,6 @@ SyncManager::Observer::~Observer() {}
 SyncManager::SyncManager(const std::string& name)
     : data_(new SyncInternal(name)) {}
 
-SyncManager::Status::Status()
-    : notifications_enabled(false),
-      notifications_received(0),
-      unsynced_count(0),
-      encryption_conflicts(0),
-      hierarchy_conflicts(0),
-      simple_conflicts(0),
-      server_conflicts(0),
-      committed_count(0),
-      syncing(false),
-      initial_sync_ended(false),
-      updates_available(0),
-      updates_received(0),
-      reflected_updates_received(0),
-      tombstone_updates_received(0),
-      num_local_overwrites_total(0),
-      num_server_overwrites_total(0),
-      nonempty_get_updates(0),
-      empty_get_updates(0),
-      sync_cycles_with_commits(0),
-      sync_cycles_without_commits(0),
-      useless_sync_cycles(0),
-      useful_sync_cycles(0),
-      cryptographer_ready(false),
-      crypto_has_pending_keys(false) {
-}
-
-SyncManager::Status::~Status() {
-}
-
 bool SyncManager::Init(
     const FilePath& database_location,
     const WeakHandle<JsEventHandler>& event_handler,
@@ -756,12 +715,12 @@ bool SyncManager::Init(
     bool use_ssl,
     const scoped_refptr<base::TaskRunner>& blocking_task_runner,
     HttpPostProviderFactory* post_factory,
-    ModelSafeWorkerRegistrar* registrar,
+    const browser_sync::ModelSafeRoutingInfo& model_safe_routing_info,
+    const std::vector<browser_sync::ModelSafeWorker*>& workers,
     browser_sync::ExtensionsActivityMonitor* extensions_activity_monitor,
     ChangeDelegate* change_delegate,
     const std::string& user_agent,
     const SyncCredentials& credentials,
-    bool enable_sync_tabs_for_other_clients,
     sync_notifier::SyncNotifier* sync_notifier,
     const std::string& restored_key_for_bootstrapping,
     TestingMode testing_mode,
@@ -779,12 +738,12 @@ bool SyncManager::Init(
                      use_ssl,
                      blocking_task_runner,
                      post_factory,
-                     registrar,
+                     model_safe_routing_info,
+                     workers,
                      extensions_activity_monitor,
                      change_delegate,
                      user_agent,
                      credentials,
-                     enable_sync_tabs_for_other_clients,
                      sync_notifier,
                      restored_key_for_bootstrapping,
                      testing_mode,
@@ -798,15 +757,9 @@ void SyncManager::UpdateCredentials(const SyncCredentials& credentials) {
   data_->UpdateCredentials(credentials);
 }
 
-void SyncManager::UpdateEnabledTypes() {
+void SyncManager::UpdateEnabledTypes(const ModelTypeSet& enabled_types) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  data_->UpdateEnabledTypes();
-}
-
-void SyncManager::MaybeSetSyncTabsInNigoriNode(
-    ModelTypeSet enabled_types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  data_->MaybeSetSyncTabsInNigoriNode(enabled_types);
+  data_->UpdateEnabledTypes(enabled_types);
 }
 
 void SyncManager::ThrowUnrecoverableError() {
@@ -816,13 +769,14 @@ void SyncManager::ThrowUnrecoverableError() {
       FROM_HERE, "Simulating unrecoverable error for testing purposes.");
 }
 
-bool SyncManager::InitialSyncEndedForAllEnabledTypes() {
-  return data_->InitialSyncEndedForAllEnabledTypes();
+syncable::ModelTypeSet SyncManager::InitialSyncEndedTypes() {
+  return data_->InitialSyncEndedTypes();
 }
 
-void SyncManager::StartSyncingNormally() {
+void SyncManager::StartSyncingNormally(
+    const browser_sync::ModelSafeRoutingInfo& routing_info) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  data_->StartSyncingNormally();
+  data_->StartSyncingNormally(routing_info);
 }
 
 void SyncManager::SetEncryptionPassphrase(const std::string& passphrase,
@@ -863,20 +817,24 @@ bool SyncManager::IsUsingExplicitPassphrase() {
   return data_ && data_->IsUsingExplicitPassphrase();
 }
 
-void SyncManager::RequestCleanupDisabledTypes() {
+void SyncManager::RequestCleanupDisabledTypes(
+    const browser_sync::ModelSafeRoutingInfo& routing_info) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (data_->scheduler())
-    data_->scheduler()->ScheduleCleanupDisabledTypes();
+  if (data_->scheduler()) {
+    data_->session_context()->set_routing_info(routing_info);
+    data_->scheduler()->CleanupDisabledTypes();
+  }
 }
 
 void SyncManager::RequestClearServerData() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (data_->scheduler())
-    data_->scheduler()->ScheduleClearUserData();
+    data_->scheduler()->ClearUserData();
 }
 
 void SyncManager::RequestConfig(
-    ModelTypeSet types, ConfigureReason reason) {
+    const browser_sync::ModelSafeRoutingInfo& routing_info,
+    const ModelTypeSet& types, ConfigureReason reason) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!data_->scheduler()) {
     LOG(INFO)
@@ -885,7 +843,8 @@ void SyncManager::RequestConfig(
     return;
   }
   StartConfigurationMode(base::Closure());
-  data_->scheduler()->ScheduleConfig(types, GetSourceFromReason(reason));
+  data_->session_context()->set_routing_info(routing_info);
+  data_->scheduler()->ScheduleConfiguration(types, GetSourceFromReason(reason));
 }
 
 void SyncManager::StartConfigurationMode(const base::Closure& callback) {
@@ -908,12 +867,12 @@ bool SyncManager::SyncInternal::Init(
     bool use_ssl,
     const scoped_refptr<base::TaskRunner>& blocking_task_runner,
     HttpPostProviderFactory* post_factory,
-    ModelSafeWorkerRegistrar* model_safe_worker_registrar,
+    const browser_sync::ModelSafeRoutingInfo& model_safe_routing_info,
+    const std::vector<browser_sync::ModelSafeWorker*>& workers,
     browser_sync::ExtensionsActivityMonitor* extensions_activity_monitor,
     ChangeDelegate* change_delegate,
     const std::string& user_agent,
     const SyncCredentials& credentials,
-    bool enable_sync_tabs_for_other_clients,
     sync_notifier::SyncNotifier* sync_notifier,
     const std::string& restored_key_for_bootstrapping,
     TestingMode testing_mode,
@@ -930,11 +889,8 @@ bool SyncManager::SyncInternal::Init(
 
   blocking_task_runner_ = blocking_task_runner;
 
-  registrar_ = model_safe_worker_registrar;
   change_delegate_ = change_delegate;
   testing_mode_ = testing_mode;
-
-  enable_sync_tabs_for_other_clients_ = enable_sync_tabs_for_other_clients;
 
   sync_notifier_.reset(sync_notifier);
 
@@ -961,7 +917,6 @@ bool SyncManager::SyncInternal::Init(
 
   connection_manager()->AddListener(this);
 
-
   // Test mode does not use a syncer context or syncer thread.
   if (testing_mode_ == NON_TEST) {
     // Build a SyncSessionContext and store the worker in it.
@@ -969,17 +924,18 @@ bool SyncManager::SyncInternal::Init(
     std::vector<SyncEngineEventListener*> listeners;
     listeners.push_back(&allstatus_);
     listeners.push_back(this);
-    SyncSessionContext* context = new SyncSessionContext(
+    session_context_.reset(new SyncSessionContext(
         connection_manager_.get(),
         directory(),
-        model_safe_worker_registrar,
+        model_safe_routing_info,
+        workers,
         extensions_activity_monitor,
+        &throttled_data_type_tracker_,
         listeners,
         &debug_info_event_listener_,
-        &traffic_recorder_);
-    context->set_account_name(credentials.email);
-    // The SyncScheduler takes ownership of |context|.
-    scheduler_.reset(new SyncScheduler(name_, context, new Syncer()));
+        &traffic_recorder_));
+    session_context()->set_account_name(credentials.email);
+    scheduler_.reset(new SyncScheduler(name_, session_context(), new Syncer()));
   }
 
   bool signed_in = SignIn(credentials);
@@ -1158,10 +1114,13 @@ void SyncManager::SyncInternal::NotifyCryptographerState(
       cryptographer->has_pending_keys());
 }
 
-void SyncManager::SyncInternal::StartSyncingNormally() {
+void SyncManager::SyncInternal::StartSyncingNormally(
+    const browser_sync::ModelSafeRoutingInfo& routing_info) {
   // Start the sync scheduler.
-  if (scheduler())  // NULL during certain unittests.
+  if (scheduler()) { // NULL during certain unittests.
+    session_context()->set_routing_info(routing_info);
     scheduler()->Start(SyncScheduler::NORMAL_MODE, base::Closure());
+  }
 }
 
 bool SyncManager::SyncInternal::OpenDirectory() {
@@ -1211,10 +1170,11 @@ bool SyncManager::SyncInternal::SignIn(const SyncCredentials& credentials) {
   }
   allstatus_.SetUniqueId(unique_id);
   sync_notifier_->SetUniqueId(unique_id);
-  sync_notifier_->SetState(state);
+  // TODO(tim): Remove once invalidation state has been migrated to new
+  // InvalidationStateTracker store. Bug 124140.
+  sync_notifier_->SetStateDeprecated(state);
 
   UpdateCredentials(credentials);
-  UpdateEnabledTypes();
   return true;
 }
 
@@ -1236,34 +1196,10 @@ void SyncManager::SyncInternal::UpdateCredentials(
   }
 }
 
-void SyncManager::SyncInternal::UpdateEnabledTypes() {
+void SyncManager::SyncInternal::UpdateEnabledTypes(
+    const ModelTypeSet& enabled_types) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  ModelSafeRoutingInfo routes;
-  registrar_->GetModelSafeRoutingInfo(&routes);
-  const ModelTypeSet enabled_types = GetRoutingInfoTypes(routes);
   sync_notifier_->UpdateEnabledTypes(enabled_types);
-  if (enable_sync_tabs_for_other_clients_)
-    MaybeSetSyncTabsInNigoriNode(enabled_types);
-}
-
-void SyncManager::SyncInternal::MaybeSetSyncTabsInNigoriNode(
-    const ModelTypeSet enabled_types) {
-  // The initialized_ check is to ensure that we don't CHECK in GetUserShare
-  // when this is called on start-up. It's ok to ignore that case, since
-  // presumably this would've run when the user originally enabled sessions.
-  if (initialized_ && enabled_types.Has(syncable::SESSIONS)) {
-    WriteTransaction trans(FROM_HERE, GetUserShare());
-    WriteNode node(&trans);
-    if (node.InitByTagLookup(kNigoriTag) != sync_api::BaseNode::INIT_OK) {
-      LOG(WARNING) << "Unable to set 'sync_tabs' bit because Nigori node not "
-                   << "found.";
-      return;
-    }
-
-    sync_pb::NigoriSpecifics specifics(node.GetNigoriSpecifics());
-    specifics.set_sync_tabs(true);
-    node.SetNigoriSpecifics(specifics);
-  }
 }
 
 void SyncManager::SyncInternal::SetEncryptionPassphrase(
@@ -1628,29 +1564,25 @@ void SyncManager::SyncInternal::RefreshEncryption() {
   ReEncryptEverything(&trans);
 }
 
+// This function iterates over all encrypted types.  There are many scenarios in
+// which data for some or all types is not currently available.  In that case,
+// the lookup of the root node will fail and we will skip encryption for that
+// type.
 void SyncManager::SyncInternal::ReEncryptEverything(WriteTransaction* trans) {
   Cryptographer* cryptographer = trans->GetCryptographer();
   if (!cryptographer || !cryptographer->is_ready())
     return;
   syncable::ModelTypeSet encrypted_types = GetEncryptedTypes(trans);
-  ModelSafeRoutingInfo routes;
-  registrar_->GetModelSafeRoutingInfo(&routes);
-  std::string tag;
   for (syncable::ModelTypeSet::Iterator iter = encrypted_types.First();
        iter.Good(); iter.Inc()) {
     if (iter.Get() == syncable::PASSWORDS ||
-        iter.Get() == syncable::NIGORI ||
-        routes.count(iter.Get()) == 0)
-      continue;
+        iter.Get() == syncable::NIGORI)
+      continue; // These types handle encryption differently.
+
     ReadNode type_root(trans);
-    tag = syncable::ModelTypeToRootTag(iter.Get());
-    if (type_root.InitByTagLookup(tag) != sync_api::BaseNode::INIT_OK) {
-      // This can happen when we enable a datatype for the first time on restart
-      // (for example when we upgrade) and therefore haven't done the initial
-      // download for that type at the time we RefreshEncryption. There's
-      // nothing we can do for now, so just move on to the next type.
-      continue;
-    }
+    std::string tag = syncable::ModelTypeToRootTag(iter.Get());
+    if (type_root.InitByTagLookup(tag) != sync_api::BaseNode::INIT_OK)
+      continue; // Don't try to reencrypt if the type's data is unavailable.
 
     // Iterate through all children of this datatype.
     std::queue<int64> to_visit;
@@ -1679,25 +1611,22 @@ void SyncManager::SyncInternal::ReEncryptEverything(WriteTransaction* trans) {
     }
   }
 
-  if (routes.count(syncable::PASSWORDS) > 0) {
-    // Passwords are encrypted with their own legacy scheme.
-    ReadNode passwords_root(trans);
-    std::string passwords_tag =
-        syncable::ModelTypeToRootTag(syncable::PASSWORDS);
-    // It's possible we'll have the password routing info and not the password
-    // root if we attempted to set a passphrase before passwords was enabled.
-    if (passwords_root.InitByTagLookup(passwords_tag) ==
-            sync_api::BaseNode::INIT_OK) {
-      int64 child_id = passwords_root.GetFirstChildId();
-      while (child_id != kInvalidId) {
-        WriteNode child(trans);
-        if (child.InitByIdLookup(child_id) != sync_api::BaseNode::INIT_OK) {
-          NOTREACHED();
-          return;
-        }
-        child.SetPasswordSpecifics(child.GetPasswordSpecifics());
-        child_id = child.GetSuccessorId();
+  // Passwords are encrypted with their own legacy scheme.  Passwords are always
+  // encrypted so we don't need to check GetEncryptedTypes() here.
+  ReadNode passwords_root(trans);
+  std::string passwords_tag =
+      syncable::ModelTypeToRootTag(syncable::PASSWORDS);
+  if (passwords_root.InitByTagLookup(passwords_tag) ==
+          sync_api::BaseNode::INIT_OK) {
+    int64 child_id = passwords_root.GetFirstChildId();
+    while (child_id != kInvalidId) {
+      WriteNode child(trans);
+      if (child.InitByIdLookup(child_id) != sync_api::BaseNode::INIT_OK) {
+        NOTREACHED();
+        return;
       }
+      child.SetPasswordSpecifics(child.GetPasswordSpecifics());
+      child_id = child.GetSuccessorId();
     }
   }
 
@@ -1750,6 +1679,7 @@ void SyncManager::SyncInternal::ShutdownOnSyncThread() {
   js_mutation_event_observer_.InvalidateWeakPtrs();
 
   scheduler_.reset();
+  session_context_.reset();
 
   SetJsEventHandler(WeakHandle<JsEventHandler>());
   RemoveObserver(&js_sync_manager_observer_);
@@ -1782,7 +1712,6 @@ void SyncManager::SyncInternal::ShutdownOnSyncThread() {
   share_.directory.reset();
 
   change_delegate_ = NULL;
-  registrar_ = NULL;
 
   initialized_ = false;
 
@@ -2006,14 +1935,14 @@ void SyncManager::SyncInternal::HandleCalculateChangesChangeEventFromSyncer(
   }
 }
 
-SyncManager::Status SyncManager::SyncInternal::GetStatus() {
+SyncStatus SyncManager::SyncInternal::GetStatus() {
   return allstatus_.status();
 }
 
 void SyncManager::SyncInternal::RequestNudge(
     const tracked_objects::Location& location) {
   if (scheduler()) {
-     scheduler()->ScheduleNudge(
+     scheduler()->ScheduleNudgeAsync(
         TimeDelta::FromMilliseconds(0), browser_sync::NUDGE_SOURCE_LOCAL,
         ModelTypeSet(), location);
   }
@@ -2038,10 +1967,10 @@ void SyncManager::SyncInternal::RequestNudgeForDataTypes(
   base::TimeDelta nudge_delay = NudgeStrategy::GetNudgeDelayTimeDelta(
       types.First().Get(),
       this);
-  scheduler()->ScheduleNudge(nudge_delay,
-                             browser_sync::NUDGE_SOURCE_LOCAL,
-                             types,
-                             nudge_location);
+  scheduler()->ScheduleNudgeAsync(nudge_delay,
+                                  browser_sync::NUDGE_SOURCE_LOCAL,
+                                  types,
+                                  nudge_location);
 }
 
 void SyncManager::SyncInternal::OnSyncEngineEvent(
@@ -2055,8 +1984,6 @@ void SyncManager::SyncInternal::OnSyncEngineEvent(
   // Notifications are sent at the end of every sync cycle, regardless of
   // whether we should sync again.
   if (event.what_happened == SyncEngineEvent::SYNC_CYCLE_ENDED) {
-    ModelSafeRoutingInfo enabled_types;
-    registrar_->GetModelSafeRoutingInfo(&enabled_types);
     {
       // Check to see if we need to notify the frontend that we have newly
       // encrypted types or that we require a passphrase.
@@ -2344,24 +2271,6 @@ void SyncManager::SyncInternal::OnEncryptedTypesChanged(
       OnEncryptedTypesChanged(encrypted_types, encrypt_everything));
 }
 
-void SyncManager::SyncInternal::OnNotificationStateChange(
-    bool notifications_enabled) {
-  DVLOG(1) << "P2P: Notifications enabled = "
-           << (notifications_enabled ? "true" : "false");
-  allstatus_.SetNotificationsEnabled(notifications_enabled);
-  if (scheduler()) {
-    scheduler()->set_notifications_enabled(notifications_enabled);
-  }
-  if (js_event_handler_.IsInitialized()) {
-    DictionaryValue details;
-    details.Set("enabled", Value::CreateBooleanValue(notifications_enabled));
-    js_event_handler_.Call(FROM_HERE,
-                           &JsEventHandler::HandleJsEvent,
-                           "onNotificationStateChange",
-                           JsEventDetails(&details));
-  }
-}
-
 void SyncManager::SyncInternal::UpdateNotificationInfo(
     const syncable::ModelTypePayloadMap& type_payloads) {
   for (syncable::ModelTypePayloadMap::const_iterator it = type_payloads.begin();
@@ -2372,20 +2281,58 @@ void SyncManager::SyncInternal::UpdateNotificationInfo(
   }
 }
 
+void SyncManager::SyncInternal::OnNotificationsEnabled() {
+  DVLOG(1) << "Notifications enabled";
+  allstatus_.SetNotificationsEnabled(true);
+  if (scheduler()) {
+    scheduler()->set_notifications_enabled(true);
+  }
+  // TODO(akalin): Separate onNotificationStateChange into
+  // enabled/disabled events.
+  if (js_event_handler_.IsInitialized()) {
+    DictionaryValue details;
+    details.Set("enabled", Value::CreateBooleanValue(true));
+    js_event_handler_.Call(FROM_HERE,
+                           &JsEventHandler::HandleJsEvent,
+                           "onNotificationStateChange",
+                           JsEventDetails(&details));
+  }
+}
+
+void SyncManager::SyncInternal::OnNotificationsDisabled(
+    sync_notifier::NotificationsDisabledReason reason) {
+  DVLOG(1) << "Notifications disabled with reason "
+           << sync_notifier::NotificationsDisabledReasonToString(reason);
+  allstatus_.SetNotificationsEnabled(false);
+  if (scheduler()) {
+    scheduler()->set_notifications_enabled(false);
+  }
+  if (js_event_handler_.IsInitialized()) {
+    DictionaryValue details;
+    details.Set("enabled", Value::CreateBooleanValue(false));
+    js_event_handler_.Call(FROM_HERE,
+                           &JsEventHandler::HandleJsEvent,
+                           "onNotificationStateChange",
+                           JsEventDetails(&details));
+  }
+  // TODO(akalin): Treat a CREDENTIALS_REJECTED state as an auth
+  // error.
+}
+
 void SyncManager::SyncInternal::OnIncomingNotification(
     const syncable::ModelTypePayloadMap& type_payloads,
     sync_notifier::IncomingNotificationSource source) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (source == sync_notifier::LOCAL_NOTIFICATION) {
     if (scheduler()) {
-      scheduler()->ScheduleNudgeWithPayloads(
+      scheduler()->ScheduleNudgeWithPayloadsAsync(
           TimeDelta::FromMilliseconds(kSyncRefreshDelayMsec),
           browser_sync::NUDGE_SOURCE_LOCAL_REFRESH,
           type_payloads, FROM_HERE);
     }
   } else if (!type_payloads.empty()) {
     if (scheduler()) {
-      scheduler()->ScheduleNudgeWithPayloads(
+      scheduler()->ScheduleNudgeWithPayloadsAsync(
           TimeDelta::FromMilliseconds(kSyncSchedulerDelayMsec),
           browser_sync::NUDGE_SOURCE_NOTIFICATION,
           type_payloads, FROM_HERE);
@@ -2417,23 +2364,6 @@ void SyncManager::SyncInternal::OnIncomingNotification(
   }
 }
 
-void SyncManager::SyncInternal::StoreState(
-    const std::string& state) {
-  if (!directory()) {
-    LOG(ERROR) << "Could not write notification state";
-    // TODO(akalin): Propagate result callback all the way to this
-    // function and call it with "false" to signal failure.
-    return;
-  }
-  if (VLOG_IS_ON(1)) {
-    std::string encoded_state;
-    base::Base64Encode(state, &encoded_state);
-    DVLOG(1) << "Writing notification state: " << encoded_state;
-  }
-  directory()->SetNotificationState(state);
-  directory()->SaveChanges();
-}
-
 void SyncManager::SyncInternal::AddObserver(
     SyncManager::Observer* observer) {
   observers_.AddObserver(observer);
@@ -2444,7 +2374,7 @@ void SyncManager::SyncInternal::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-SyncManager::Status SyncManager::GetDetailedStatus() const {
+SyncStatus SyncManager::GetDetailedStatus() const {
   return data_->GetStatus();
 }
 
@@ -2488,10 +2418,6 @@ bool SyncManager::ReceivedExperiment(browser_sync::Experiments* experiments)
     return false;
   }
   bool found_experiment = false;
-  if (node.GetNigoriSpecifics().sync_tabs()) {
-    experiments->sync_tabs = true;
-    found_experiment = true;
-  }
   if (node.GetNigoriSpecifics().sync_tab_favicons()) {
     experiments->sync_tab_favicons = true;
     found_experiment = true;
@@ -2504,10 +2430,15 @@ bool SyncManager::HasUnsyncedItems() const {
   return (trans.GetWrappedTrans()->directory()->unsynced_entity_count() != 0);
 }
 
-void SyncManager::TriggerOnNotificationStateChangeForTest(
-    bool notifications_enabled) {
+void SyncManager::SimulateEnableNotificationsForTest() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  data_->OnNotificationStateChange(notifications_enabled);
+  data_->OnNotificationsEnabled();
+}
+
+void SyncManager::SimulateDisableNotificationsForTest(int reason) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  data_->OnNotificationsDisabled(
+      static_cast<sync_notifier::NotificationsDisabledReason>(reason));
 }
 
 void SyncManager::TriggerOnIncomingNotificationForTest(

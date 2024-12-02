@@ -10,7 +10,6 @@
 
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_ptr.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/fileapi/file_system_path.h"
 #include "webkit/fileapi/file_system_types.h"
@@ -55,6 +54,8 @@ class FileSystemTestOriginHelper {
   FilePath GetLocalPath(const FilePath& path);
   FilePath GetLocalPathFromASCII(const std::string& path);
   GURL GetURLForPath(const FilePath& path) const;
+
+  // Returns empty path if filesystem type is neither temporary nor persistent.
   FilePath GetUsageCachePath() const;
 
   // Creates a new FileSystemPath for the given |path|.
@@ -73,8 +74,8 @@ class FileSystemTestOriginHelper {
       const FileSystemPath& src,
       const FileSystemPath& dest) const;
 
+  // This returns cached usage size returned by QuotaUtil.
   int64 GetCachedOriginUsage() const;
-  bool RevokeUsageCache() const;
 
   // This doesn't work with OFSFU.
   int64 ComputeCurrentOriginUsage() const;

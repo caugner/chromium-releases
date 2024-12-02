@@ -10,6 +10,29 @@
 #pragma once
 
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "content/public/browser/notification_observer.h"
+
+class Profile;
+
+class ExtensionManagedModeEventRouter : public content::NotificationObserver {
+ public:
+  explicit ExtensionManagedModeEventRouter(Profile* profile);
+  virtual ~ExtensionManagedModeEventRouter();
+
+  void Init();
+
+  // content::NotificationObserver implementation:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+ private:
+  PrefChangeRegistrar registrar_;
+  Profile* profile_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionManagedModeEventRouter);
+};
 
 class GetManagedModeFunction : public SyncExtensionFunction {
  public:
@@ -35,6 +58,29 @@ class EnterManagedModeFunction : public AsyncExtensionFunction {
  private:
   // Called when we have either successfully entered managed mode or failed.
   void SendResult(bool success);
+};
+
+
+class GetPolicyFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("managedModePrivate.getPolicy")
+
+ protected:
+  virtual ~GetPolicyFunction();
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
+class SetPolicyFunction : public SyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("managedModePrivate.setPolicy")
+
+ protected:
+  virtual ~SetPolicyFunction();
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_MANAGED_MODE_API_H_

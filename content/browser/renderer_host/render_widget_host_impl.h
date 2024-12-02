@@ -48,6 +48,7 @@ struct WebScreenInfo;
 
 namespace content {
 
+class RenderWidgetHostDelegate;
 class RenderWidgetHostViewPort;
 class TapSuppressionController;
 
@@ -58,7 +59,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
  public:
   // routing_id can be MSG_ROUTING_NONE, in which case the next available
   // routing id is taken from the RenderProcessHost.
-  RenderWidgetHostImpl(RenderProcessHost* process, int routing_id);
+  RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
+                       RenderProcessHost* process,
+                       int routing_id);
   virtual ~RenderWidgetHostImpl();
 
   // Use RenderWidgetHostImpl::From(rwh) to downcast a
@@ -79,10 +82,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual void UpdateTextDirection(WebKit::WebTextDirection direction) OVERRIDE;
   virtual void NotifyTextDirection() OVERRIDE;
   virtual void Blur() OVERRIDE;
-  virtual bool CopyFromBackingStore(const gfx::Rect& src_rect,
-                                    const gfx::Size& accelerated_dest_size,
-                                    skia::PlatformCanvas* output) OVERRIDE;
-  virtual void AsyncCopyFromBackingStore(
+  virtual void CopyFromBackingStore(
       const gfx::Rect& src_rect,
       const gfx::Size& accelerated_dest_size,
       skia::PlatformCanvas* output,
@@ -120,6 +120,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   virtual void WasResized() OVERRIDE;
   virtual void AddKeyboardListener(KeyboardListener* listener) OVERRIDE;
   virtual void RemoveKeyboardListener(KeyboardListener* listener) OVERRIDE;
+  virtual void SetDeviceScaleFactor(float scale) OVERRIDE;
+
+  // Notification that the screen info has changed.
+  virtual void NotifyScreenInfoChanged();
 
   // Sets the View of this RenderWidgetHost.
   void SetView(RenderWidgetHostView* view);
@@ -360,6 +364,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // event.
   void CompositingSurfaceUpdated();
 
+  void set_allow_privileged_mouse_lock(bool allow) {
+    allow_privileged_mouse_lock_ = allow;
+  }
+
  protected:
   virtual RenderWidgetHostImpl* AsRenderWidgetHostImpl() OVERRIDE;
 
@@ -380,22 +388,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // when accelerated compositing is enabled.
   gfx::GLSurfaceHandle GetCompositingSurface();
 
-  // Called to handled a keyboard event before sending it to the renderer.
-  // This is overridden by RenderViewHost to send upwards to its delegate.
-  // Returns true if the event was handled, and then the keyboard event will
-  // not be sent to the renderer anymore. Otherwise, if the |event| would
-  // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
-  // |*is_keyboard_shortcut| should be set to true.
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
-
   // "RenderWidgetHostDelegate" ------------------------------------------------
   // There is no RenderWidgetHostDelegate but the following methods serve the
   // same purpose. They are overridden by RenderViewHost to send upwards to its
   // delegate.
-
-  // Called when a keyboard event was not processed by the renderer.
-  virtual void UnhandledKeyboardEvent(const NativeWebKeyboardEvent& event) {}
 
   // Called when a mousewheel event was not processed by the renderer.
   virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) {}
@@ -419,7 +415,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // to allow mouse lock.
   // Once the request is approved or rejected, GotResponseToLockMouseRequest()
   // will be called.
-  virtual void RequestToLockMouse(bool user_gesture);
+  virtual void RequestToLockMouse(bool user_gesture,
+                                  bool last_unlocked_by_target);
 
   void RejectMouseLockOrUnlockIfNecessary();
   bool IsMouseLocked() const;
@@ -436,6 +433,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // RenderViewHostImpl can account for in-flight beforeunload/unload events.
   int increment_in_flight_event_count() { return ++in_flight_event_count_; }
   int decrement_in_flight_event_count() { return --in_flight_event_count_; }
+
+  void GetWebScreenInfo(WebKit::WebScreenInfo* result);
 
   // The View associated with the RenderViewHost. The lifetime of this object
   // is associated with the lifetime of the Render process. If the Renderer
@@ -490,12 +489,16 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   void OnMsgSetCursor(const WebCursor& cursor);
   void OnMsgTextInputStateChanged(ui::TextInputType type,
                                   bool can_compose_inline);
-  void OnMsgImeCompositionRangeChanged(const ui::Range& range);
+  void OnMsgImeCompositionRangeChanged(
+      const ui::Range& range,
+      const std::vector<gfx::Rect>& character_bounds);
   void OnMsgImeCancelComposition();
 
   void OnMsgDidActivateAcceleratedCompositing(bool activated);
 
-  void OnMsgLockMouse(bool user_gesture);
+  void OnMsgLockMouse(bool user_gesture,
+                      bool last_unlocked_by_target,
+                      bool privileged);
   void OnMsgUnlockMouse();
 
 #if defined(OS_POSIX) || defined(USE_AURA)
@@ -539,6 +542,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
                              const gfx::Rect& bitmap_rect,
                              const std::vector<gfx::Rect>& copy_rects,
                              const gfx::Size& view_size,
+                             float scale_factor,
                              const base::Closure& completion_callback);
 
   // Scrolls the given |clip_rect| in the backing by the given dx/dy amount. The
@@ -555,6 +559,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // input messages to be coalesced.
   void ProcessWheelAck(bool processed);
 
+  // Called by OnMsgInputEventAck() to process a gesture event ack message.
+  // This validates the gesture for suppression of touchpad taps and sends one
+  // previously queued coalesced gesture if it exists.
+  void ProcessGestureAck(bool processed, int type);
+
   // Called on OnMsgInputEventAck() to process a touch event ack message.
   // This can result in a gesture event being generated and sent back to the
   // renderer.
@@ -563,6 +572,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // Called when there is a new auto resize (using a post to avoid a stack
   // which may get in recursive loops).
   void DelayedAutoResized();
+
+  // Our delegate, which wants to know mainly about keyboard events.
+  RenderWidgetHostDelegate* delegate_;
 
   // Created during construction but initialized during Init*(). Therefore, it
   // is guaranteed never to be NULL, but its channel may be NULL if the
@@ -636,6 +648,16 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   // mechanism as for mouse moves (just dropping old events when multiple ones
   // would be queued) results in very slow scrolling.
   WheelEventQueue coalesced_mouse_wheel_events_;
+
+  // (Similar to |mouse_wheel_pending_|.). True if gesture event was sent and
+  // we are waiting for a corresponding ack.
+  bool gesture_event_pending_;
+
+  typedef std::deque<WebKit::WebGestureEvent> GestureEventQueue;
+
+  // (Similar to |coalesced_mouse_wheel_events_|.) GestureScrollUpdate events
+  // are coalesced by merging deltas in a similar fashion as wheel events.
+  GestureEventQueue coalesced_gesture_events_;
 
   // The time when an input event was sent to the RenderWidget.
   base::TimeTicks input_event_start_time_;
@@ -717,6 +739,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl : virtual public RenderWidgetHost,
   gfx::Point last_scroll_offset_;
 
   bool pending_mouse_lock_request_;
+  bool allow_privileged_mouse_lock_;
 
   // Keeps track of whether the webpage has any touch event handler. If it does,
   // then touch events are sent to the renderer. Otherwise, the touch events are

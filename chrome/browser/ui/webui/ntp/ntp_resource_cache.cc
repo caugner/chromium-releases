@@ -45,6 +45,7 @@
 #include "grit/theme_resources.h"
 #include "ui/base/animation/animation.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/color_utils.h"
@@ -57,7 +58,6 @@
 #endif
 
 #if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
 #include "chrome/browser/platform_util.h"
 #endif
 
@@ -85,10 +85,6 @@ const char kSyncServiceHelpUrl[] =
 // The URL to be loaded to display Help.
 const char kHelpContentUrl[] =
     "https://www.google.com/support/chrome/";
-
-// The URL for the Mac OS X 10.5 deprecation help center article.
-const char kMacLeopardDeprecationUrl[] =
-    "https://support.google.com/chrome/?p=ui_mac_leopard_support";
 
 string16 GetUrlWithLang(const GURL& url) {
   return ASCIIToUTF16(google_util::AppendGoogleLocaleParam(url).spec());
@@ -190,8 +186,6 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
                      ThemeServiceFactory::GetForProfile(profile)));
   registrar_.Add(this, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NTP4_INTRO_PREF_CHANGED,
-                 content::NotificationService::AllSources());
 
   // Watch for pref changes that cause us to need to invalidate the HTML cache.
   pref_change_registrar_.Init(profile_->GetPrefs());
@@ -254,8 +248,7 @@ void NTPResourceCache::Observe(int type,
     new_tab_html_ = NULL;
     new_tab_incognito_css_ = NULL;
     new_tab_css_ = NULL;
-  } else if (chrome::NOTIFICATION_PREF_CHANGED == type ||
-              chrome::NTP4_INTRO_PREF_CHANGED) {
+  } else if (chrome::NOTIFICATION_PREF_CHANGED == type) {
     // A change occurred to one of the preferences we care about, so flush the
     // cache.
     new_tab_incognito_html_ = NULL;
@@ -296,7 +289,7 @@ void NTPResourceCache::CreateNewTabIncognitoHTML() {
 
   static const base::StringPiece incognito_tab_html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          new_tab_html_idr));
+          new_tab_html_idr, ui::SCALE_FACTOR_NONE));
 
   std::string full_html = jstemplate_builder::GetI18nTemplateHtml(
       incognito_tab_html, &localized_strings);
@@ -374,10 +367,6 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   load_time_data.SetString("webStoreLink",
       GetUrlWithLang(GURL(extension_urls::GetWebstoreLaunchURL())));
-  load_time_data.SetBoolean("isWebStoreExperimentEnabled",
-      NewTabUI::ShouldShowWebStoreFooterLink());
-  load_time_data.SetBoolean("appInstallHintEnabled",
-      NewTabUI::ShouldShowAppInstallHint());
   load_time_data.SetString("appInstallHintText",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_INSTALL_HINT_LABEL));
   load_time_data.SetBoolean("isSuggestionsPageEnabled",
@@ -397,21 +386,6 @@ void NTPResourceCache::CreateNewTabHTML() {
   // feature is enabled.
   load_time_data.SetBoolean("isSwipeTrackingFromScrollEventsEnabled",
                             is_swipe_tracking_from_scroll_events_enabled_);
-
-  // Warn users of Mac OS X 10.5 that their OS will not be supported in the
-  // near future. Switch this to an infobar in M21 <http://crbug.com/122031>.
-#if defined(OS_MACOSX)
-  load_time_data.SetString("hideMacLeopard",
-      base::mac::IsOSLeopard() ? "" : "hidden");
-  load_time_data.SetString("macLeopardMessage",
-      l10n_util::GetStringFUTF16(IDS_MAC_10_5_LEOPARD_DEPRECATED,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
-  load_time_data.SetString("macLeopardLink", kMacLeopardDeprecationUrl);
-#else
-  load_time_data.SetString("hideMacLeopard", "hidden");
-  load_time_data.SetString("macLeopardMessage", "");
-  load_time_data.SetString("macLeopardLink", "");
-#endif
 
 #if defined(OS_CHROMEOS)
   load_time_data.SetString("expandMenu",
@@ -451,7 +425,8 @@ void NTPResourceCache::CreateNewTabHTML() {
 
   // Load the new tab page appropriate for this build
   base::StringPiece new_tab_html(ResourceBundle::GetSharedInstance().
-      GetRawDataResource(IDR_NEW_TAB_4_HTML));
+      GetRawDataResource(IDR_NEW_TAB_4_HTML,
+                         ui::SCALE_FACTOR_NONE));
   jstemplate_builder::UseVersion2 version2;
   std::string full_html =
       jstemplate_builder::GetI18nTemplateHtml(new_tab_html, &load_time_data);
@@ -482,7 +457,7 @@ void NTPResourceCache::CreateNewTabIncognitoCSS() {
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_NEW_INCOGNITO_TAB_THEME_CSS));
+      IDR_NEW_INCOGNITO_TAB_THEME_CSS, ui::SCALE_FACTOR_NONE));
 
   // Create the string from our template and the replacements.
   std::string full_css = ReplaceStringPlaceholders(
@@ -577,7 +552,7 @@ void NTPResourceCache::CreateNewTabCSS() {
   // Get our template.
   static const base::StringPiece new_tab_theme_css(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IDR_NEW_TAB_4_THEME_CSS));
+          IDR_NEW_TAB_4_THEME_CSS, ui::SCALE_FACTOR_NONE));
 
   // Create the string from our template and the replacements.
   std::string css_string;

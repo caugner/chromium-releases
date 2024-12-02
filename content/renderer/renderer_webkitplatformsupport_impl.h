@@ -21,10 +21,6 @@ namespace content {
 class GamepadSharedMemoryReader;
 }
 
-namespace IPC {
-class SyncMessage;
-}
-
 namespace webkit_glue {
 class WebClipboardImpl;
 }
@@ -96,14 +92,20 @@ class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
   virtual WebKit::WebMediaStreamCenter* createMediaStreamCenter(
       WebKit::WebMediaStreamCenterClient* client) OVERRIDE;
 
+  // Disables the WebSandboxSupport implementation for testing.
+  // Tests that do not set up a full sandbox environment should call
+  // SetSandboxEnabledForTesting(false) _before_ creating any instances
+  // of this class, to ensure that we don't attempt to use sandbox-related
+  // file descriptors or other resources.
+  //
+  // Returns the previous |enable| value.
+  static bool SetSandboxEnabledForTesting(bool enable);
+
  protected:
   virtual GpuChannelHostFactory* GetGpuChannelHostFactory() OVERRIDE;
 
  private:
   bool CheckPreparsedJsCachingEnabled() const;
-
-  // Helper function to send synchronous message from any thread.
-  static bool SendSyncMessageFromAnyThread(IPC::SyncMessage* msg);
 
   scoped_ptr<RendererClipboardClient> clipboard_client_;
   scoped_ptr<webkit_glue::WebClipboardImpl> clipboard_;

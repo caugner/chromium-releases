@@ -56,7 +56,6 @@ extern const char kChromeUIPluginsURL[];
 extern const char kChromeUIPolicyURL[];
 extern const char kChromeUIPrintURL[];
 extern const char kChromeUISessionFaviconURL[];
-extern const char kChromeUISessionsURL[];
 extern const char kChromeUISettingsURL[];
 extern const char kChromeUISettingsFrameURL[];
 extern const char kChromeUISuggestionsInternalsURL[];
@@ -88,6 +87,7 @@ extern const char kChromeUISlideshowURL[];
 extern const char kChromeUISystemInfoURL[];
 extern const char kChromeUITermsOemURL[];
 extern const char kChromeUIUserImageURL[];
+extern const char kChromeUIWallpaperURL[];
 extern const char kChromeUIWallpaperThumbnailURL[];
 #endif
 
@@ -97,6 +97,11 @@ extern const char kChromeUITransparencyURL[];
 
 #if defined(FILE_MANAGER_EXTENSION)
 extern const char kChromeUIFileManagerURL[];
+#endif
+
+#if defined(USE_AURA)
+extern const char kChromeUIGestureConfigURL[];
+extern const char kChromeUIGestureConfigHost[];
 #endif
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
@@ -161,7 +166,6 @@ extern const char kChromeUIProfilerHost[];
 extern const char kChromeUIQuotaInternalsHost[];
 extern const char kChromeUIResourcesHost[];
 extern const char kChromeUISessionFaviconHost[];
-extern const char kChromeUISessionsHost[];
 extern const char kChromeUISettingsHost[];
 extern const char kChromeUISettingsFrameHost[];
 extern const char kChromeUIShorthangHost[];
@@ -213,6 +217,7 @@ extern const char kChromeUISimUnlockHost[];
 extern const char kChromeUISlideshowHost[];
 extern const char kChromeUISystemInfoHost[];
 extern const char kChromeUIUserImageHost[];
+extern const char kChromeUIWallpaperHost[];
 extern const char kChromeUIWallpaperThumbnailHost[];
 
 extern const char kChromeUIMenu[];
@@ -266,8 +271,13 @@ extern const char kAutoPasswordGenerationLearnMoreURL[];
 
 extern const char kPasswordManagerLearnMoreURL[];
 
-// General help link for Chrome.
-extern const char kChromeHelpURL[];
+// General help links for Chrome, opened using various actions.
+extern const char kChromeHelpViaKeyboardURL[];
+extern const char kChromeHelpViaMenuURL[];
+extern const char kChromeHelpViaWebUIURL[];
+
+// "Learn more" URL for the one click signin infobar.
+extern const char kChromeSyncLearnMoreURL[];
 
 // Help URL for the settings page's search feature.
 extern const char kSettingsSearchHelpURL[];
@@ -295,6 +305,10 @@ extern const char kKillReasonURL[];
 
 // "Learn more" URL for the Privacy section under Options.
 extern const char kPrivacyLearnMoreURL[];
+
+// "Learn more" URL for the Continue where I left off startup option under
+// Options.
+extern const char kSessionRestoreLearnMoreURL[];
 
 // The URL for the Chromium project used in the About dialog.
 extern const char kChromiumProjectURL[];
@@ -346,15 +360,27 @@ extern const char kSyncCreateNewAccountURL[];
 extern const char kNaturalScrollHelpURL[];
 #endif
 
+#if defined(OS_MACOSX)
+// The URL for the Mac OS X 10.5 deprecation help center article.
+extern const char kMacLeopardObsoleteURL[];
+#endif
+
 // "Debug" pages which are dangerous and not for general consumption.
 extern const char* const kChromeDebugURLs[];
-extern int kNumberOfChromeDebugURLs;
+extern const int kNumberOfChromeDebugURLs;
 
 // Canonical schemes you can use as input to GURL.SchemeIs().
 extern const char kExtensionScheme[];
+
+// Canonical schemes you can use as input to GURL.SchemeIs().
+extern const char kExtensionResourceScheme[];
+
 #if defined(OS_CHROMEOS)
 extern const char kDriveScheme[];
-#endif  // defined(OS_CHROMEOS)
+#endif
+#if defined(OS_ANDROID)
+extern const char kContentScheme[];
+#endif
 
 #if defined(OS_CHROMEOS)
 // "Learn more" URL for the Cloud Print section under Options.

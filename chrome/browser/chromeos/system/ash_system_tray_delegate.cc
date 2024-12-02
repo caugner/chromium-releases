@@ -14,27 +14,32 @@
 #include "ash/system/ime/ime_observer.h"
 #include "ash/system/network/network_observer.h"
 #include "ash/system/power/power_status_observer.h"
-#include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/status_area_widget.h"
 #include "ash/system/tray_accessibility.h"
 #include "ash/system/tray_caps_lock.h"
+#include "ash/system/tray/system_tray_delegate.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/system/user/update_observer.h"
 #include "ash/system/user/user_observer.h"
+#include "base/bind_helpers.h"
+#include "base/callback.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_adapter.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_device.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/gdata/gdata_documents_service.h"
+#include "chrome/browser/chromeos/gdata/gdata_operation_registry.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chrome/browser/chromeos/input_method/input_method_whitelist.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
@@ -46,12 +51,13 @@
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
 #include "chrome/browser/chromeos/status/network_menu.h"
 #include "chrome/browser/chromeos/status/network_menu_icon.h"
-#include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
+#include "chrome/browser/chromeos/system/timezone_settings.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -89,9 +95,9 @@ ash::NetworkIconInfo CreateNetworkIconInfo(const Network* network,
                                            NetworkMenu* network_menu) {
   ash::NetworkIconInfo info;
   info.name = UTF8ToUTF16(network->name());
-  info.image = network_icon->GetBitmap(network, NetworkMenuIcon::COLOR_DARK);
+  info.image = network_icon->GetImage(network, NetworkMenuIcon::COLOR_DARK);
   info.service_path = network->service_path();
-  info.highlight = network_menu->ShouldHighlightNetwork(network);
+  info.highlight = network->connected() || network->connecting();
   info.tray_icon_visible = ShouldShowNetworkIconInTray(network);
   return info;
 }
@@ -102,6 +108,7 @@ void ExtractIMEInfo(const input_method::InputMethodDescriptor& ime,
   info->id = ime.id();
   info->name = util.GetInputMethodLongName(ime);
   info->short_name = util.GetInputMethodShortName(ime);
+  info->third_party = ime.third_party();
 }
 
 ash::DriveOperationStatusList GetDriveStatusList(
@@ -168,6 +175,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         clock_type_(base::k24HourClock),
         search_key_mapped_to_(input_method::kSearchKey),
         screen_locked_(false),
+        state_(STATE_UNKNOWN),
+        connected_network_(NULL),
         data_promo_notification_(new DataPromoNotification()) {
     AudioHandler::GetInstance()->AddVolumeObserver(this);
     DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
@@ -226,22 +235,36 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     if (SystemKeyEventListener::GetInstance())
       SystemKeyEventListener::GetInstance()->RemoveCapsLockObserver(this);
     bluetooth_adapter_->RemoveObserver(this);
+
+    // Stop observing gdata operations.
+    Profile* profile = ProfileManager::GetDefaultProfile();
+    if (gdata::util::IsGDataAvailable(profile)) {
+      GDataSystemService* system_service =
+          GDataSystemServiceFactory::FindForProfile(profile);
+      if (system_service) {
+        system_service->docs_service()->operation_registry()->
+            RemoveObserver(this);
+      }
+    }
   }
 
   // Overridden from ash::SystemTrayDelegate:
   virtual bool GetTrayVisibilityOnStartup() OVERRIDE {
-    return !chromeos::KioskModeSettings::Get()->IsKioskModeEnabled();
+    // If we're either logged in (doesn't matter in KioskMode or not),
+    // or not in KioskMode at all, return true.
+    return UserManager::Get()->IsUserLoggedIn() ||
+        !chromeos::KioskModeSettings::Get()->IsKioskModeEnabled();
   }
 
-  virtual const std::string GetUserDisplayName() const OVERRIDE {
+  virtual const string16 GetUserDisplayName() const OVERRIDE {
     return UserManager::Get()->GetLoggedInUser().GetDisplayName();
   }
 
   virtual const std::string GetUserEmail() const OVERRIDE {
-    return UserManager::Get()->GetLoggedInUser().email();
+    return UserManager::Get()->GetLoggedInUser().display_email();
   }
 
-  virtual const SkBitmap& GetUserImage() const OVERRIDE {
+  virtual const gfx::ImageSkia& GetUserImage() const OVERRIDE {
     return UserManager::Get()->GetLoggedInUser().image();
   }
 
@@ -264,11 +287,6 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
   virtual bool SystemShouldUpgrade() const OVERRIDE {
     return UpgradeDetector::GetInstance()->notify_upgrade();
-  }
-
-  virtual int GetSystemUpdateIconResource() const OVERRIDE {
-    return UpgradeDetector::GetInstance()->GetIconResourceID(
-        UpgradeDetector::UPGRADE_ICON_TYPE_MENU_ICON);
   }
 
   virtual base::HourClockType GetHourClockType() const OVERRIDE {
@@ -318,7 +336,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual void ShowHelp() OVERRIDE {
-    GetAppropriateBrowser()->ShowHelpTab();
+    GetAppropriateBrowser()->ShowHelpTab(Browser::HELP_SOURCE_MENU);
   }
 
   virtual bool IsAudioMuted() const OVERRIDE {
@@ -349,16 +367,12 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     return ime_manager->GetXKeyboard()->SetCapsLockEnabled(enabled);
   }
 
-  virtual bool IsInAccessibilityMode() const OVERRIDE {
-    return accessibility_enabled_.GetValue();
-  }
-
   virtual void ShutDown() OVERRIDE {
     DBusThreadManager::Get()->GetPowerManagerClient()->RequestShutdown();
   }
 
   virtual void SignOut() OVERRIDE {
-    BrowserList::AttemptUserExit();
+    browser::AttemptUserExit();
   }
 
   virtual void RequestLockScreen() OVERRIDE {
@@ -389,10 +403,16 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     BluetoothDevice* device = bluetooth_adapter_->GetDevice(address);
     if (!device)
       return;
-    if (device->IsConnected())
-      device->Disconnect(base::Bind(&BluetoothDeviceDisconnectError));
-    else if (device->IsPaired())
-      device->Connect(NULL, base::Bind(&BluetoothDeviceConnectError));
+    if (device->IsConnected()) {
+      device->Disconnect(
+          base::Bind(&base::DoNothing),
+          base::Bind(&BluetoothDeviceDisconnectError));
+    } else if (device->IsPaired()) {
+      device->Connect(
+          NULL,
+          base::Bind(&base::DoNothing),
+          base::Bind(&BluetoothDeviceConnectError));
+    }
   }
 
   virtual void GetCurrentIME(ash::IMEInfo* info) OVERRIDE {
@@ -452,10 +472,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
     GDataSystemService* system_service =
           GDataSystemServiceFactory::FindForProfile(profile);
-    if (!system_service || !system_service->file_system())
+    if (!system_service)
       return;
 
-    system_service->file_system()->GetOperationRegistry()->CancelForFilePath(
+    system_service->docs_service()->operation_registry()->CancelForFilePath(
         file_path);
   }
 
@@ -467,11 +487,11 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
     GDataSystemService* system_service =
           GDataSystemServiceFactory::FindForProfile(profile);
-    if (!system_service || !system_service->file_system())
+    if (!system_service)
       return;
 
     *list = GetDriveStatusList(
-        system_service->file_system()->GetOperationRegistry()->
+        system_service->docs_service()->operation_registry()->
             GetProgressStatusList());
   }
 
@@ -488,6 +508,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   virtual void GetAvailableNetworks(
       std::vector<ash::NetworkIconInfo>* list) OVERRIDE {
     NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
+
+    int connected_index = 0;
 
     // Ethernet.
     if (crosnet->ethernet_available() && crosnet->ethernet_enabled()) {
@@ -507,26 +529,27 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
                   IDS_STATUSBAR_NETWORK_DEVICE_CONNECTING));
         }
         list->push_back(info);
-      }
-    }
-
-    // Wifi.
-    if (crosnet->wifi_available() && crosnet->wifi_enabled()) {
-      const WifiNetworkVector& wifi = crosnet->wifi_networks();
-      for (size_t i = 0; i < wifi.size(); ++i) {
-        ash::NetworkIconInfo info = CreateNetworkIconInfo(wifi[i],
-            network_icon_.get(), network_menu_.get());
-        if (wifi[i]->connecting()) {
-          info.description = l10n_util::GetStringFUTF16(
-            IDS_STATUSBAR_NETWORK_DEVICE_STATUS,
-            info.name,
-            l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_CONNECTING));
-        }
-        list->push_back(info);
+        if (ethernet_network->connected() || ethernet_network->connecting())
+          ++connected_index;
       }
     }
 
     ash::user::LoginStatus login_status = GetUserLoginStatus();
+
+    // VPN (only if logged in).
+    if (login_status != ash::user::LOGGED_IN_NONE &&
+        (crosnet->connected_network() ||
+         crosnet->virtual_network_connected())) {
+      const VirtualNetworkVector& vpns = crosnet->virtual_networks();
+      for (size_t i = 0; i < vpns.size(); ++i) {
+        ash::NetworkIconInfo info = CreateNetworkIconInfo(vpns[i],
+            network_icon_.get(), network_menu_.get());
+        if (vpns[i]->connected() || vpns[i]->connecting())
+          list->insert(list->begin() + connected_index++, info);
+        else
+          list->push_back(info);
+      }
+    }
 
     // Cellular.
     if (crosnet->cellular_available() && crosnet->cellular_enabled()) {
@@ -557,18 +580,48 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
                   IDS_STATUSBAR_NETWORK_DEVICE_CONNECTING));
         }
 
-        list->push_back(info);
+        if (cell[i]->connected() || cell[i]->connecting())
+          list->insert(list->begin() + connected_index++, info);
+        else
+          list->push_back(info);
       }
     }
 
-    // VPN (only if logged in).
-    if (login_status == ash::user::LOGGED_IN_NONE)
-      return;
-    if (crosnet->connected_network() || crosnet->virtual_network_connected()) {
-      const VirtualNetworkVector& vpns = crosnet->virtual_networks();
-      for (size_t i = 0; i < vpns.size(); ++i) {
-        list->push_back(CreateNetworkIconInfo(vpns[i], network_icon_.get(),
-              network_menu_.get()));
+    // Wimax.
+    if (crosnet->wimax_available() && crosnet->wimax_enabled()) {
+      const WimaxNetworkVector& wimax = crosnet->wimax_networks();
+      for (size_t i = 0; i < wimax.size(); ++i) {
+        ash::NetworkIconInfo info = CreateNetworkIconInfo(wimax[i],
+            network_icon_.get(), network_menu_.get());
+        if (wimax[i]->connecting()) {
+          info.description = l10n_util::GetStringFUTF16(
+            IDS_STATUSBAR_NETWORK_DEVICE_STATUS,
+            info.name,
+            l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_CONNECTING));
+        }
+        if (wimax[i]->connecting() || wimax[i]->connected())
+          list->insert(list->begin() + connected_index++, info);
+        else
+          list->push_back(info);
+      }
+    }
+
+    // Wifi.
+    if (crosnet->wifi_available() && crosnet->wifi_enabled()) {
+      const WifiNetworkVector& wifi = crosnet->wifi_networks();
+      for (size_t i = 0; i < wifi.size(); ++i) {
+        ash::NetworkIconInfo info = CreateNetworkIconInfo(wifi[i],
+            network_icon_.get(), network_menu_.get());
+        if (wifi[i]->connecting()) {
+          info.description = l10n_util::GetStringFUTF16(
+            IDS_STATUSBAR_NETWORK_DEVICE_STATUS,
+            info.name,
+            l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_CONNECTING));
+        }
+        if (wifi[i]->connecting() || wifi[i]->connected())
+          list->insert(list->begin() + connected_index++, info);
+        else
+          list->push_back(info);
       }
     }
   }
@@ -625,12 +678,13 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     network_menu_->ToggleWifi();
   }
 
-  virtual void ToggleCellular() OVERRIDE {
-    network_menu_->ToggleCellular();
+  virtual void ToggleMobile() OVERRIDE {
+    network_menu_->ToggleMobile();
   }
 
   virtual void ToggleBluetooth() OVERRIDE {
     bluetooth_adapter_->SetPowered(!bluetooth_adapter_->IsPowered(),
+                                   base::Bind(&base::DoNothing),
                                    base::Bind(&BluetoothPowerFailure));
   }
 
@@ -642,12 +696,16 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     network_menu_->ShowOtherCellular();
   }
 
+  virtual bool IsNetworkConnected() OVERRIDE {
+    return CrosLibrary::Get()->GetNetworkLibrary()->Connected();
+  }
+
   virtual bool GetWifiAvailable() OVERRIDE {
     return CrosLibrary::Get()->GetNetworkLibrary()->wifi_available();
   }
 
-  virtual bool GetCellularAvailable() OVERRIDE {
-    return CrosLibrary::Get()->GetNetworkLibrary()->cellular_available();
+  virtual bool GetMobileAvailable() OVERRIDE {
+    return CrosLibrary::Get()->GetNetworkLibrary()->mobile_available();
   }
 
   virtual bool GetBluetoothAvailable() OVERRIDE {
@@ -658,18 +716,18 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     return CrosLibrary::Get()->GetNetworkLibrary()->wifi_enabled();
   }
 
-  virtual bool GetCellularEnabled() OVERRIDE {
-    return CrosLibrary::Get()->GetNetworkLibrary()->cellular_enabled();
+  virtual bool GetMobileEnabled() OVERRIDE {
+    return CrosLibrary::Get()->GetNetworkLibrary()->mobile_enabled();
   }
 
   virtual bool GetBluetoothEnabled() OVERRIDE {
     return bluetooth_adapter_->IsPowered();
   }
 
-  virtual bool GetCellularScanSupported() OVERRIDE {
+  virtual bool GetMobileScanSupported() OVERRIDE {
     NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
-    const NetworkDevice* cellular = crosnet->FindCellularDevice();
-    return cellular ? cellular->support_network_scan() : false;
+    const NetworkDevice* mobile = crosnet->FindMobileDevice();
+    return mobile ? mobile->support_network_scan() : false;
   }
 
   virtual bool GetCellularCarrierInfo(std::string* carrier_id,
@@ -715,7 +773,7 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   // Returns the last active browser. If there is no such browser, creates a new
   // browser window with an empty tab and returns it.
   Browser* GetAppropriateBrowser() {
-    return Browser::GetOrCreateTabbedBrowser(
+    return browser::FindOrCreateTabbedBrowser(
         ProfileManager::GetDefaultProfileOrOffTheRecord());
   }
 
@@ -731,11 +789,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
     if (gdata::util::IsGDataAvailable(profile)) {
       GDataSystemService* system_service =
           GDataSystemServiceFactory::FindForProfile(profile);
-      if (!system_service || !system_service->file_system())
+      if (!system_service)
         return;
 
-      system_service->file_system()->GetOperationRegistry()->
-          AddObserver(this);
+      system_service->docs_service()->operation_registry()->AddObserver(this);
     }
   }
 
@@ -755,13 +812,43 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
   void NotifyRefreshNetwork() {
     ash::NetworkObserver* observer = tray_->network_observer();
+    chromeos::NetworkLibrary* crosnet =
+        chromeos::CrosLibrary::Get()->GetNetworkLibrary();
     if (observer) {
-      NetworkLibrary* crosnet = CrosLibrary::Get()->GetNetworkLibrary();
       ash::NetworkIconInfo info;
       info.image = network_icon_->GetIconAndText(&info.description);
       info.tray_icon_visible =
           ShouldShowNetworkIconInTray(crosnet->connected_network());
       observer->OnNetworkRefresh(info);
+    }
+
+    // Determine whether or not we need to update the icon.
+    const Network* connected_network = crosnet->connected_network();
+    if (accessibility::IsSpokenFeedbackEnabled()) {
+      bool speak = false;
+      if (connected_network_ != connected_network) {
+        speak = true;
+      } else if (connected_network) {
+        if ((Network::IsConnectedState(state_) &&
+             !connected_network->connected()) ||
+            (Network::IsConnectingState(state_) &&
+             !connected_network->connecting()) ||
+            (Network::IsDisconnectedState(state_) &&
+             !connected_network->disconnected())) {
+          speak = true;
+        }
+      }
+
+      if (speak) {
+        AccessibilitySpeak(connected_network);
+      }
+    }
+
+    connected_network_ = connected_network;
+    if (connected_network) {
+      state_ = connected_network->state();
+    } else {
+      state_ = STATE_UNKNOWN;
     }
   }
 
@@ -771,10 +858,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
       observer->OnBluetoothRefresh();
   }
 
-  void NotifyRefreshIME() {
+  void NotifyRefreshIME(bool show_message) {
     ash::IMEObserver* observer = tray_->ime_observer();
     if (observer)
-      observer->OnIMERefresh();
+      observer->OnIMERefresh(show_message);
   }
 
   void NotifyRefreshDrive(ash::DriveOperationStatusList& list) {
@@ -803,6 +890,40 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
       cellular_device_path_ = new_cellular_device_path;
   }
 
+  // Generate accessability text and call Speak().
+  void AccessibilitySpeak(const Network* network) {
+    if (!network)
+      return;
+    NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
+    std::string connection_string;
+    if (Network::IsConnectedState(network->state())) {
+      switch (network->type()) {
+        case TYPE_ETHERNET:
+          connection_string = l10n_util::GetStringFUTF8(
+              IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
+              l10n_util::GetStringUTF16(
+                  IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
+          break;
+        default:
+          connection_string = l10n_util::GetStringFUTF8(
+              IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
+              UTF8ToUTF16(network->name()));
+          break;
+      }
+    } else if (Network::IsConnectingState(network->state())) {
+      const Network* connecting_network = cros->connecting_network();
+      if (connecting_network && connecting_network->type() != TYPE_ETHERNET) {
+        connection_string = l10n_util::GetStringFUTF8(
+            IDS_STATUSBAR_NETWORK_CONNECTING_TOOLTIP,
+            UTF8ToUTF16(connecting_network->name()));
+      }
+    } else if (Network::IsDisconnectedState(network->state())) {
+      connection_string = l10n_util::GetStringUTF8(
+          IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP);
+    }
+    accessibility::Speak(connection_string.c_str());
+  }
+
   // Overridden from AudioHandler::VolumeObserver.
   virtual void OnVolumeChanged() OVERRIDE {
     float level = AudioHandler::GetInstance()->GetVolumePercent() / 100.f;
@@ -817,9 +938,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
   virtual void PowerChanged(const PowerSupplyStatus& power_status) OVERRIDE {
     power_supply_status_ = power_status;
-    ash::PowerStatusObserver* observer = tray_->power_status_observer();
-    if (observer)
-      observer->OnPowerStatusChanged(power_status);
+    FOR_EACH_OBSERVER(ash::PowerStatusObserver, tray_->power_status_observers(),
+        OnPowerStatusChanged(power_status));
   }
 
   virtual void SystemResumed() OVERRIDE {
@@ -828,12 +948,14 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
   virtual void LockScreen() OVERRIDE {
     screen_locked_ = true;
-    tray_->UpdateAfterLoginStatusChange(GetUserLoginStatus());
+    ash::Shell::GetInstance()->status_area_widget()->
+        UpdateAfterLoginStatusChange(GetUserLoginStatus());
   }
 
   virtual void UnlockScreen() OVERRIDE {
     screen_locked_ = false;
-    tray_->UpdateAfterLoginStatusChange(GetUserLoginStatus());
+    ash::Shell::GetInstance()->status_area_widget()->
+        UpdateAfterLoginStatusChange(GetUserLoginStatus());
   }
 
   virtual void UnlockScreenFailed() OVERRIDE {
@@ -853,7 +975,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   }
 
   virtual gfx::NativeWindow GetNativeWindow() const OVERRIDE {
-    return ash::Shell::GetInstance()->GetContainer(
+    return ash::Shell::GetContainer(
+        ash::Shell::GetPrimaryRootWindow(),
         GetUserLoginStatus() == ash::user::LOGGED_IN_NONE ?
             ash::internal::kShellWindowId_LockSystemModalContainer :
             ash::internal::kShellWindowId_SystemModalContainer);
@@ -937,7 +1060,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
         break;
       }
       case chrome::NOTIFICATION_SESSION_STARTED: {
-        tray_->UpdateAfterLoginStatusChange(GetUserLoginStatus());
+        ash::Shell::GetInstance()->status_area_widget()->
+            UpdateAfterLoginStatusChange(GetUserLoginStatus());
         SetProfile(ProfileManager::GetDefaultProfile());
         break;
       }
@@ -948,13 +1072,13 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
   // Overridden from InputMethodManager::Observer.
   virtual void InputMethodChanged(
-      input_method::InputMethodManager* manager) OVERRIDE {
-    NotifyRefreshIME();
+      input_method::InputMethodManager* manager, bool show_message) OVERRIDE {
+    NotifyRefreshIME(show_message);
   }
 
   virtual void InputMethodPropertyChanged(
       input_method::InputMethodManager* manager) OVERRIDE {
-    NotifyRefreshIME();
+    NotifyRefreshIME(false);
   }
 
   // gdata::GDataOperationRegistry::Observer overrides.
@@ -1005,10 +1129,10 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
 
     GDataSystemService* system_service =
           GDataSystemServiceFactory::FindForProfile(profile);
-    if (!system_service || !system_service->file_system())
+    if (!system_service)
       return;
 
-    OnProgressUpdate(system_service->file_system()->GetOperationRegistry()->
+    OnProgressUpdate(system_service->docs_service()->operation_registry()->
         GetProgressStatusList());
   }
 
@@ -1109,6 +1233,8 @@ class SystemTrayDelegate : public ash::SystemTrayDelegate,
   base::HourClockType clock_type_;
   int search_key_mapped_to_;
   bool screen_locked_;
+  ConnectionState state_;
+  const Network* connected_network_;
 
   scoped_ptr<BluetoothAdapter> bluetooth_adapter_;
 

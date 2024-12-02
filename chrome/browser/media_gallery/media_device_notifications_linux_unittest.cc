@@ -18,7 +18,7 @@
 #include "base/scoped_temp_dir.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/test/mock_devices_changed_observer.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chrome {
@@ -342,7 +342,6 @@ TEST_F(MediaDeviceNotificationsLinuxTest, MultiDevicesMultiMountPoints) {
 
 // More complicated test case with multiple devices on one mount point.
 TEST_F(MediaDeviceNotificationsLinuxTest, MultiDevicesOneMountPoint) {
-  testing::Sequence mock_sequence;
   FilePath test_path_a = CreateMountPointWithDCIMDir(kMountPointA);
   FilePath test_path_b = CreateMountPointWithDCIMDir(kMountPointB);
   ASSERT_FALSE(test_path_a.empty());

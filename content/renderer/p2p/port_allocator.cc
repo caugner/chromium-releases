@@ -12,7 +12,6 @@
 #include "jingle/glue/utils.h"
 #include "net/base/escape.h"
 #include "net/base/ip_endpoint.h"
-#include "ppapi/c/dev/ppb_transport_dev.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
@@ -70,17 +69,22 @@ P2PPortAllocator::P2PPortAllocator(
 P2PPortAllocator::~P2PPortAllocator() {
 }
 
-cricket::PortAllocatorSession* P2PPortAllocator::CreateSession(
-    const std::string& channel_name,
-    int component) {
-  return new P2PPortAllocatorSession(this, channel_name, component);
+cricket::PortAllocatorSession* P2PPortAllocator::CreateSessionInternal(
+    int component,
+    const std::string& ice_username_fragment,
+    const std::string& ice_password) {
+  return new P2PPortAllocatorSession(
+      this, component, ice_username_fragment, ice_password);
 }
 
 P2PPortAllocatorSession::P2PPortAllocatorSession(
     P2PPortAllocator* allocator,
-    const std::string& channel_name,
-    int component)
-    : cricket::BasicPortAllocatorSession(allocator, channel_name, component),
+    int component,
+    const std::string& ice_username_fragment,
+    const std::string& ice_password)
+    : cricket::BasicPortAllocatorSession(
+        allocator, component,
+        ice_username_fragment, ice_password),
       allocator_(allocator),
       relay_session_attempts_(0),
       relay_udp_port_(0),
@@ -127,20 +131,27 @@ void P2PPortAllocatorSession::GetPortConfigurations() {
   // can be started immediately.
   ConfigReady(new cricket::PortConfiguration(talk_base::SocketAddress()));
 
-  ResolveStunServerAddress();
+  if (stun_server_address_.IsNil()) {
+    ResolveStunServerAddress();
+  } else {
+    AddConfig();
+  }
+
   AllocateRelaySession();
 }
 
 void P2PPortAllocatorSession::ResolveStunServerAddress() {
- if (allocator_->config_.stun_server.empty())
-   return;
+  if (allocator_->config_.stun_server.empty())
+    return;
 
- DCHECK(!stun_address_request_);
- stun_address_request_ =
-     new P2PHostAddressRequest(allocator_->socket_dispatcher_);
- stun_address_request_->Request(allocator_->config_.stun_server, base::Bind(
-     &P2PPortAllocatorSession::OnStunServerAddress,
-     base::Unretained(this)));
+  if (stun_address_request_)
+    return;
+
+  stun_address_request_ =
+      new P2PHostAddressRequest(allocator_->socket_dispatcher_);
+  stun_address_request_->Request(allocator_->config_.stun_server, base::Bind(
+      &P2PPortAllocatorSession::OnStunServerAddress,
+      base::Unretained(this)));
 }
 
 void P2PPortAllocatorSession::OnStunServerAddress(
@@ -178,11 +189,8 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
   WebURLLoaderOptions options;
   options.allowCredentials = false;
 
-  // TODO(sergeyu): Set to CrossOriginRequestPolicyUseAccessControl
-  // when this code can be used by untrusted plugins.
-  // See http://crbug.com/104195 .
   options.crossOriginRequestPolicy =
-      WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+      WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
 
   relay_session_request_.reset(
       allocator_->web_frame_->createAssociatedURLLoader(options));
@@ -195,18 +203,6 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
       kCreateRelaySessionURL +
       "?username=" + net::EscapeUrlEncodedData(username(), true) +
       "&password=" + net::EscapeUrlEncodedData(password(), true);
-
-  // Use |relay_username| parameter to identify type of client for the
-  // relay session.
-  //
-  // TODO(sergeyu): Username is not used for legacy non-TURN relay
-  // servers, so we reuse it here to identify relay client type. This
-  // is currently used for Chromoting only. This code should be removed
-  // once Chromoting stops using Transport API and the API is removed.
-  if (!allocator_->config_.relay_username.empty()) {
-    url += "&sn=" +
-        net::EscapeUrlEncodedData(allocator_->config_.relay_username, true);
-  }
 
   WebURLRequest request;
   request.initialize();
@@ -221,7 +217,7 @@ void P2PPortAllocatorSession::AllocateRelaySession() {
       WebString::fromUTF8("X-Google-Relay-Auth"),
       WebString::fromUTF8(allocator_->config_.relay_password));
   request.addHTTPHeaderField(WebString::fromUTF8("X-Stream-Type"),
-                             WebString::fromUTF8(channel_name()));
+                             WebString::fromUTF8("chromoting"));
 
   relay_session_request_->loadAsynchronously(request, this);
 }

@@ -55,7 +55,6 @@
         '../v8/tools/gyp/v8.gyp:*',
         '../webkit/support/webkit_support.gyp:*',
         '../webkit/webkit.gyp:*',
-        'util/build_util.gyp:*',
         'temp_gyp/googleurl.gyp:*',
         '<(libjpeg_gyp_path):*',
       ],
@@ -107,8 +106,7 @@
           'dependencies': [
             '../breakpad/breakpad.gyp:*',
             '../chrome_frame/chrome_frame.gyp:*',
-            '../cloud_print/service/win/service.gyp:*',
-            '../cloud_print/virtual_driver/virtual_driver.gyp:*',
+            '../cloud_print/cloud_print.gyp:*',
             '../courgette/courgette.gyp:*',
             '../rlz/rlz.gyp:*',
             '../sandbox/sandbox.gyp:*',
@@ -145,6 +143,14 @@
             '../net/third_party/nss/ssl.gyp:*',
           ],
         }],
+        ['disable_nacl==0 and disable_nacl_untrusted==0', {
+          'dependencies': [
+            '../base/base_untrusted.gyp:*',
+            '../ipc/ipc_untrusted.gyp:*',
+            '../ppapi/ppapi_proxy_untrusted.gyp:*',
+            '../ppapi/ppapi_shared_untrusted.gyp:*',
+          ],
+        }],
       ],
     }, # target_name: All
     {
@@ -164,6 +170,8 @@
       'type': 'none',
       'dependencies': [
           '../base/base.gyp:base_unittests_run',
+          '../chrome/chrome.gyp:browser_tests_run',
+          '../chrome/chrome.gyp:unit_tests_run',
           '../net/net.gyp:net_unittests_run',
       ],
     }, # target_name: chromium_swarm_tests
@@ -177,6 +185,7 @@
         '../chrome/chrome.gyp:safe_browsing_tests',
         '../chrome/chrome.gyp:sync_integration_tests',
         '../chrome/chrome.gyp:unit_tests',
+        '../cloud_print/cloud_print.gyp:cloud_print_unittests',
         '../content/content.gyp:content_browsertests',
         '../content/content.gyp:content_unittests',
         '../crypto/crypto.gyp:crypto_unittests',
@@ -218,6 +227,12 @@
             '../webkit/webkit.gyp:test_shell_common',
            ],
         }],
+        ['disable_nacl==0 and disable_nacl_untrusted==0', {
+          'dependencies': [
+            # TODO(bbudge): drop this when we have switched the NaCl proxy to IPC.
+            '../ppapi/ppapi_proxy_untrusted.gyp:ppapi_proxy_untrusted',
+          ],
+        }],
       ],
     }, # target_name: chromium_builder_tests
     {
@@ -242,7 +257,6 @@
         'chromium_builder_qa', # needed for pyauto
         '../chrome/chrome.gyp:performance_browser_tests',
         '../chrome/chrome.gyp:performance_ui_tests',
-        '../chrome/chrome.gyp:plugin_tests',
         '../chrome/chrome.gyp:sync_performance_tests',
       ],
     }, # target_name: chromium_builder_perf
@@ -307,6 +321,7 @@
             '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
             '../chrome/chrome.gyp:unit_tests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_browsertests',
             '../content/content.gyp:content_unittests',
             '../ui/ui.gyp:gfx_unittests',
@@ -331,10 +346,10 @@
             '../chrome/chrome.gyp:browser_tests',
             '../chrome/chrome.gyp:performance_browser_tests',
             '../chrome/chrome.gyp:performance_ui_tests',
-            '../chrome/chrome.gyp:plugin_tests',
             '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
             '../chrome/chrome.gyp:unit_tests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_browsertests',
             '../content/content.gyp:content_unittests',
             '../ui/ui.gyp:gfx_unittests',
@@ -356,6 +371,7 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base_unittests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../crypto/crypto.gyp:crypto_unittests',
             'temp_gyp/googleurl.gyp:googleurl_unittests',
             '../net/net.gyp:net_unittests',
@@ -373,6 +389,7 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base_unittests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../crypto/crypto.gyp:crypto_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../media/media.gyp:media_unittests',
@@ -407,10 +424,10 @@
             '../chrome/chrome.gyp:mini_installer_test',
             '../chrome/chrome.gyp:performance_browser_tests',
             '../chrome/chrome.gyp:performance_ui_tests',
-            '../chrome/chrome.gyp:plugin_tests',
             '../chrome/chrome.gyp:safe_browsing_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
             '../chrome/chrome.gyp:unit_tests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_browsertests',
             '../content/content.gyp:content_unittests',
             # mini_installer_tests depends on mini_installer. This should be
@@ -456,6 +473,7 @@
           'type': 'none',
           'dependencies': [
             '../base/base.gyp:base_unittests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_unittests',
             '../crypto/crypto.gyp:crypto_unittests',
             '../ipc/ipc.gyp:ipc_tests',
@@ -476,6 +494,7 @@
           'dependencies': [
             '../base/base.gyp:base_unittests',
             '../chrome/chrome.gyp:unit_tests',
+            '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../content/content.gyp:content_unittests',
             '../crypto/crypto.gyp:crypto_unittests',
             '../ipc/ipc.gyp:ipc_tests',
@@ -500,6 +519,14 @@
             '../webkit/webkit.gyp:pull_in_DumpRenderTree',
           ],
         },
+        {
+          'target_name': 'chromium_builder_qa_nacl_win64',
+          'type': 'none',
+          'dependencies': [
+            'chromium_builder_qa', # needed for pyauto
+            '../chrome/chrome.gyp:chrome_nacl_win64',
+          ],
+        }, # target_name: chromium_builder_qa_nacl_win64
       ],  # targets
       'conditions': [
         ['branding=="Chrome"', {
@@ -520,7 +547,7 @@
                 '../chrome_frame/chrome_frame.gyp:npchrome_frame',
                 '../courgette/courgette.gyp:courgette',
                 '../courgette/courgette.gyp:courgette64',
-                '../cloud_print/virtual_driver/virtual_driver.gyp:virtual_driver',
+                '../cloud_print/cloud_print.gyp:cloud_print',
                 '../remoting/remoting.gyp:remoting_webapp',
                 '../third_party/adobe/flash/flash_player.gyp:flash_player',
               ],
@@ -553,6 +580,7 @@
             '../chrome/chrome.gyp:chrome',
             '../chrome/chrome.gyp:interactive_ui_tests',            
             '../chrome/chrome.gyp:unit_tests',
+            '../remoting/remoting.gyp:remoting_unittests',
             '../ui/aura/aura.gyp:*',
             '../ui/compositor/compositor.gyp:*',
             '../ui/ui.gyp:gfx_unittests',

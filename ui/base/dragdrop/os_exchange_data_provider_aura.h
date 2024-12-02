@@ -8,11 +8,11 @@
 
 #include <map>
 
-#include "base/pickle.h"
 #include "base/file_path.h"
+#include "base/pickle.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/point.h"
 
 namespace ui {
@@ -29,13 +29,15 @@ class UI_EXPORT OSExchangeDataProviderAura : public OSExchangeData::Provider {
   virtual void SetString(const string16& data) OVERRIDE;
   virtual void SetURL(const GURL& url, const string16& title) OVERRIDE;
   virtual void SetFilename(const FilePath& path) OVERRIDE;
-  virtual void SetFilenames(const std::vector<FilePath>& paths) OVERRIDE;
+  virtual void SetFilenames(
+      const std::vector<OSExchangeData::FileInfo>& filenames) OVERRIDE;
   virtual void SetPickledData(OSExchangeData::CustomFormat format,
                               const Pickle& data) OVERRIDE;
   virtual bool GetString(string16* data) const OVERRIDE;
   virtual bool GetURLAndTitle(GURL* url, string16* title) const OVERRIDE;
   virtual bool GetFilename(FilePath* path) const OVERRIDE;
-  virtual bool GetFilenames(std::vector<FilePath>* paths) const OVERRIDE;
+  virtual bool GetFilenames(
+      std::vector<OSExchangeData::FileInfo>* filenames) const OVERRIDE;
   virtual bool GetPickledData(OSExchangeData::CustomFormat format,
                               Pickle* data) const OVERRIDE;
   virtual bool HasString() const OVERRIDE;
@@ -57,8 +59,11 @@ class UI_EXPORT OSExchangeDataProviderAura : public OSExchangeData::Provider {
   virtual bool GetHtml(string16* html, GURL* base_url) const OVERRIDE;
   virtual bool HasHtml() const OVERRIDE;
 
-  void set_drag_image(const SkBitmap& drag_image) { drag_image_ = drag_image; }
-  const SkBitmap& drag_image() const { return drag_image_; }
+  void set_drag_image(const gfx::ImageSkia& drag_image) {
+      drag_image_ = drag_image;
+  }
+
+  const gfx::ImageSkia& drag_image() const { return drag_image_; }
   void set_drag_image_offset(const gfx::Point& drag_image_offset) {
     drag_image_offset_ = drag_image_offset;
   }
@@ -83,13 +88,13 @@ class UI_EXPORT OSExchangeDataProviderAura : public OSExchangeData::Provider {
   string16 title_;
 
   // File name.
-  std::vector<FilePath> filenames_;
+  std::vector<OSExchangeData::FileInfo> filenames_;
 
   // PICKLED_DATA contents.
   PickleData pickle_data_;
 
   // Drag image and offset data.
-  SkBitmap drag_image_;
+  gfx::ImageSkia drag_image_;
   gfx::Point drag_image_offset_;
 
   // For HTML format

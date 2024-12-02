@@ -8,6 +8,7 @@
 #include "base/logging.h"
 #include "chrome/browser/ui/media_stream_infobar_delegate.h"
 #include "content/public/common/media_stream_request.h"
+#include "googleurl/src/gurl.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -36,12 +37,11 @@ MediaStreamInfoBarDelegate::MediaStreamInfoBarDelegate(
     const content::MediaStreamRequest* request,
     const content::MediaResponseCallback& callback)
     : InfoBarDelegate(tab_helper),
-      request_(request),
+      request_(*request),
       callback_(callback) {
-  DCHECK(request_);
-  has_audio_ = request_->devices.count(
+  has_audio_ = request_.devices.count(
       content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE) != 0;
-  has_video_ = request_->devices.count(
+  has_video_ = request_.devices.count(
       content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE) != 0;
 }
 
@@ -53,8 +53,8 @@ content::MediaStreamDevices
   if (!has_audio_)
     return content::MediaStreamDevices();
   content::MediaStreamDeviceMap::const_iterator it =
-      request_->devices.find(content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE);
-  DCHECK(it != request_->devices.end());
+      request_.devices.find(content::MEDIA_STREAM_DEVICE_TYPE_AUDIO_CAPTURE);
+  DCHECK(it != request_.devices.end());
   return it->second;
 }
 
@@ -63,13 +63,13 @@ content::MediaStreamDevices
   if (!has_video_)
     return content::MediaStreamDevices();
   content::MediaStreamDeviceMap::const_iterator it =
-      request_->devices.find(content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE);
-  DCHECK(it != request_->devices.end());
+      request_.devices.find(content::MEDIA_STREAM_DEVICE_TYPE_VIDEO_CAPTURE);
+  DCHECK(it != request_.devices.end());
   return it->second;
 }
 
-const std::string& MediaStreamInfoBarDelegate::GetSecurityOrigin() const {
-  return request_->security_origin;
+const GURL& MediaStreamInfoBarDelegate::GetSecurityOrigin() const {
+  return request_.security_origin;
 }
 
 void MediaStreamInfoBarDelegate::Accept(const std::string& audio_id,
@@ -98,8 +98,8 @@ void MediaStreamInfoBarDelegate::AddDeviceWithId(
     content::MediaStreamDevices* devices) {
   DCHECK(devices);
   content::MediaStreamDeviceMap::const_iterator device_it =
-      request_->devices.find(type);
-  if (device_it != request_->devices.end()) {
+      request_.devices.find(type);
+  if (device_it != request_.devices.end()) {
     content::MediaStreamDevices::const_iterator it = std::find_if(
         device_it->second.begin(), device_it->second.end(), DeviceIdEquals(id));
     if (it != device_it->second.end())

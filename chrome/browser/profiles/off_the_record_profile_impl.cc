@@ -33,7 +33,6 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/transport_security_persister.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_factory.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
@@ -58,7 +57,7 @@
 #endif
 
 using content::BrowserThread;
-using content::DownloadManager;
+using content::DownloadManagerDelegate;
 using content::HostZoomMap;
 
 namespace {
@@ -239,25 +238,12 @@ FaviconService* OffTheRecordProfileImpl::GetFaviconService(
   return NULL;
 }
 
-AutocompleteClassifier* OffTheRecordProfileImpl::GetAutocompleteClassifier() {
-  return profile_->GetAutocompleteClassifier();
-}
-
 history::ShortcutsBackend* OffTheRecordProfileImpl::GetShortcutsBackend() {
   return NULL;
 }
 
-WebDataService* OffTheRecordProfileImpl::GetWebDataService(
-    ServiceAccessType sat) {
-  if (sat == EXPLICIT_ACCESS)
-    return profile_->GetWebDataService(sat);
-
-  NOTREACHED() << "This profile is OffTheRecord";
-  return NULL;
-}
-
-WebDataService* OffTheRecordProfileImpl::GetWebDataServiceWithoutCreating() {
-  return profile_->GetWebDataServiceWithoutCreating();
+policy::PolicyService* OffTheRecordProfileImpl::GetPolicyService() {
+  return profile_->GetPolicyService();
 }
 
 PrefService* OffTheRecordProfileImpl::GetPrefs() {
@@ -268,8 +254,9 @@ PrefService* OffTheRecordProfileImpl::GetOffTheRecordPrefs() {
   return prefs_;
 }
 
-DownloadManager* OffTheRecordProfileImpl::GetDownloadManager() {
-  return DownloadServiceFactory::GetForProfile(this)->GetDownloadManager();
+DownloadManagerDelegate* OffTheRecordProfileImpl::GetDownloadManagerDelegate() {
+  return DownloadServiceFactory::GetForProfile(this)->
+      GetDownloadManagerDelegate();
 }
 
 net::URLRequestContextGetter* OffTheRecordProfileImpl::GetRequestContext() {
@@ -280,7 +267,7 @@ net::URLRequestContextGetter*
     OffTheRecordProfileImpl::GetRequestContextForRenderProcess(
         int renderer_child_id) {
   if (GetExtensionService()) {
-    const Extension* installed_app = GetExtensionService()->
+    const extensions::Extension* installed_app = GetExtensionService()->
         GetInstalledAppForRenderer(renderer_child_id);
     if (installed_app != NULL && installed_app->is_storage_isolated()) {
       return GetRequestContextForIsolatedApp(installed_app->id());
@@ -319,8 +306,8 @@ HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
   // ensure the preferences have been migrated.
   profile_->GetHostContentSettingsMap();
   if (!host_content_settings_map_.get()) {
-    host_content_settings_map_ = new HostContentSettingsMap(
-        GetPrefs(), GetExtensionService(), true);
+    host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), true);
+    host_content_settings_map_->RegisterExtensionService(GetExtensionService());
   }
   return host_content_settings_map_.get();
 }

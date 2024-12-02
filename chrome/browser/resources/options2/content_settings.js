@@ -16,7 +16,8 @@ cr.define('options', function() {
     this.activeNavTab = null;
     this.sessionRestoreEnabled = false;
     this.sessionRestoreSelected = false;
-    OptionsPage.call(this, 'content', templateData.contentSettingsPageTabTitle,
+    OptionsPage.call(this, 'content',
+                     loadTimeData.getString('contentSettingsPageTabTitle'),
                      'content-settings-page');
 
     // Keep track of the real value of the "clear on exit" preference. (The UI
@@ -50,9 +51,7 @@ cr.define('options', function() {
       for (var i = 0; i < exceptionsButtons.length; i++) {
         exceptionsButtons[i].onclick = function(event) {
           var page = ContentSettingsExceptionsArea.getInstance();
-          page.showList(
-              event.target.getAttribute('contentType'));
-          OptionsPage.navigateToPage('contentExceptions');
+
           // Add on the proper hash for the content type, and store that in the
           // history so back/forward and tab restore works.
           var hash = event.target.getAttribute('contentType');
@@ -60,9 +59,14 @@ cr.define('options', function() {
           window.history.replaceState({pageName: page.name},
                                       page.title,
                                       '/' + url);
+
+          // Navigate after the history has been replaced in order to have the
+          // correct hash loaded.
+          OptionsPage.navigateToPage('contentExceptions');
+
           uber.invokeMethodOnParent('setPath', {path: url});
           uber.invokeMethodOnParent('setTitle',
-              {title: templateData[hash + 'TabTitle']});
+              {title: loadTimeData.getString(hash + 'TabTitle')});
         };
       }
 
@@ -82,19 +86,20 @@ cr.define('options', function() {
         OptionsPage.navigateToPage('cookies');
       };
 
-      // Remove from DOM instead of hiding so :last-of-type applies the style
-      // correctly.
       var intentsSection = $('intents-section');
-      if (!templateData.enable_web_intents && intentsSection)
+      if (!loadTimeData.getBoolean('enable_web_intents') && intentsSection)
         intentsSection.parentNode.removeChild(intentsSection);
 
-      if (templateData.enable_restore_session_state) {
+      if (loadTimeData.getBoolean('enable_restore_session_state')) {
         this.sessionRestoreEnabled = true;
         this.updateSessionRestoreContentSettings();
       }
 
       $('content-settings-overlay-confirm').onclick =
           OptionsPage.closeOverlay.bind(OptionsPage);
+
+      $('pepper-flash-cameramic-section').style.display = 'none';
+      $('pepper-flash-cameramic-exceptions-div').style.display = 'none';
     },
 
     /**
@@ -222,6 +227,16 @@ cr.define('options', function() {
                                'list[mode=' + mode + ']');
     exceptionsList.patternValidityCheckComplete(pattern, valid);
   };
+
+  /**
+   * Enables the Pepper Flash camera and microphone settings.
+   * Please note that whether the settings are actually showed or not is also
+   * affected by the style class pepper-flash-settings.
+   */
+  ContentSettings.enablePepperFlashCameraMicSettings = function() {
+    $('pepper-flash-cameramic-section').style.display = '';
+    $('pepper-flash-cameramic-exceptions-div').style.display = '';
+  }
 
   // Export
   return {

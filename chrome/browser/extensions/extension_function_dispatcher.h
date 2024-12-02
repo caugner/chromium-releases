@@ -11,11 +11,10 @@
 
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/profiles/profile.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_sender.h"
 #include "googleurl/src/gurl.h"
 
 class ChromeRenderMessageFilter;
-class Extension;
 class ExtensionFunction;
 class ExtensionWindowController;
 class ExtensionInfoMap;
@@ -28,6 +27,7 @@ class WebContents;
 }
 
 namespace extensions {
+class Extension;
 class ExtensionAPI;
 class ProcessMap;
 }
@@ -55,13 +55,13 @@ class ExtensionFunctionDispatcher
    public:
     // Returns the ExtensionWindowController associated with this delegate,
     // or NULL if no window is associated with the delegate.
-    virtual ExtensionWindowController* GetExtensionWindowController() const = 0;
+    virtual ExtensionWindowController* GetExtensionWindowController() const;
 
     // Asks the delegate for any relevant WebContents associated with this
     // context. For example, the WebbContents in which an infobar or
     // chrome-extension://<id> URL are being shown. Callers must check for a
     // NULL return value (as in the case of a background page).
-    virtual content::WebContents* GetAssociatedWebContents() const = 0;
+    virtual content::WebContents* GetAssociatedWebContents() const;
 
    protected:
     virtual ~Delegate() {}
@@ -104,7 +104,7 @@ class ExtensionFunctionDispatcher
 
   // Called when an ExtensionFunction is done executing, after it has sent
   // a response (if any) to the extension.
-  void OnExtensionFunctionCompleted(const Extension* extension);
+  void OnExtensionFunctionCompleted(const extensions::Extension* extension);
 
   // The profile that this dispatcher is associated with.
   Profile* profile() { return profile_; }
@@ -115,17 +115,17 @@ class ExtensionFunctionDispatcher
   // Does not set subclass properties, or include_incognito.
   static ExtensionFunction* CreateExtensionFunction(
       const ExtensionHostMsg_Request_Params& params,
-      const Extension* extension,
+      const extensions::Extension* extension,
       int requesting_process_id,
       const extensions::ProcessMap& process_map,
       extensions::ExtensionAPI* api,
       void* profile,
-      IPC::Message::Sender* ipc_sender,
+      IPC::Sender* ipc_sender,
       int routing_id);
 
   // Helper to send an access denied error to the requesting renderer. Can be
   // called on any thread.
-  static void SendAccessDenied(IPC::Message::Sender* ipc_sender,
+  static void SendAccessDenied(IPC::Sender* ipc_sender,
                                int routing_id,
                                int request_id);
 

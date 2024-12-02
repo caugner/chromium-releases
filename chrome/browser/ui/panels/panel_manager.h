@@ -17,8 +17,10 @@
 #include "ui/gfx/rect.h"
 
 class Browser;
+class BrowserWindow;
 class DetachedPanelStrip;
 class DockedPanelStrip;
+class GURL;
 class PanelDragController;
 class PanelResizeController;
 class PanelMouseWatcher;
@@ -35,7 +37,16 @@ class PanelManager : public DisplaySettingsProvider::DisplayAreaObserver,
 
   // Creates a panel and returns it. The panel might be queued for display
   // later.
-  Panel* CreatePanel(Browser* browser);
+  // |app_name| is the default title for Panels when the page content does not
+  // provide a title. For extensions, this is usually the application name
+  // generated from the extension id.
+  // |requested_size| is the desired size for the panel, but actual
+  // size may differ after panel layout.
+  Panel* CreatePanel(const std::string& app_name,
+                     Profile* profile,
+                     const GURL& url,
+                     const gfx::Size& requested_size);
+  Panel* CreatePanel(Browser* browser);  // legacy
 
   // Close all panels (asynchronous). Panels will be removed after closing.
   void CloseAll();
@@ -61,18 +72,6 @@ class PanelManager : public DisplaySettingsProvider::DisplayAreaObserver,
   void ResizeByMouse(const gfx::Point& mouse_location);
   void EndResizingByMouse(bool cancelled);
 
-  // Resizes the panel and sets the origin.
-  void OnPanelResizedByMouse(Panel* panel, const gfx::Rect& new_bounds);
-
-  // Invoked when the preferred window size of the given panel might need to
-  // get changed.
-  void OnWindowAutoResized(Panel* panel,
-                           const gfx::Size& preferred_window_size);
-
-  // Resizes the panel. Explicitly setting the panel size is not allowed
-  // for panels that are auto-sized.
-  void ResizePanel(Panel* panel, const gfx::Size& new_size);
-
   // Invoked when a panel's expansion state changes.
   void OnPanelExpansionStateChanged(Panel* panel);
 
@@ -91,7 +90,7 @@ class PanelManager : public DisplaySettingsProvider::DisplayAreaObserver,
   // Returns the next browser window which could be either panel window or
   // tabbed window, to switch to if the given panel is going to be deactivated.
   // Returns NULL if such window cannot be found.
-  BrowserWindow* GetNextBrowserWindowToActivate(Panel* panel) const;
+  BrowserWindow* GetNextBrowserWindowToActivate(Browser* current_browser) const;
 
   int num_panels() const;
   std::vector<Panel*> panels() const;
@@ -165,6 +164,13 @@ class PanelManager : public DisplaySettingsProvider::DisplayAreaObserver,
 
   PanelManager();
   virtual ~PanelManager();
+
+  // Combined CreatePanel() logic until we can delete legacy CreatePanel().
+  Panel* CreatePanel(Browser* browser,
+                     const std::string& app_name,
+                     Profile* profile,
+                     const GURL& url,
+                     const gfx::Size& requested_size);
 
   // Overridden from DisplaySettingsProvider::DisplayAreaObserver:
   virtual void OnDisplayAreaChanged(const gfx::Rect& display_area) OVERRIDE;

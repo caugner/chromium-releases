@@ -15,29 +15,6 @@ using ::testing::Return;
 
 namespace media {
 
-MockDataSource::MockDataSource()
-    : total_bytes_(-1),
-      buffered_bytes_(-1) {
-}
-
-MockDataSource::~MockDataSource() {}
-
-void MockDataSource::set_host(DataSourceHost* data_source_host) {
-  DataSource::set_host(data_source_host);
-
-  if (total_bytes_ > 0)
-    host()->SetTotalBytes(total_bytes_);
-
-  if (buffered_bytes_ > 0)
-    host()->SetBufferedBytes(buffered_bytes_);
-}
-
-void MockDataSource::SetTotalAndBufferedBytes(int64 total_bytes,
-                                              int64 buffered_bytes) {
-  total_bytes_ = total_bytes;
-  buffered_bytes_ = buffered_bytes;
-}
-
 MockDemuxer::MockDemuxer() {}
 
 MockDemuxer::~MockDemuxer() {}
@@ -63,6 +40,26 @@ MockVideoRenderer::~MockVideoRenderer() {}
 MockAudioRenderer::MockAudioRenderer() {}
 
 MockAudioRenderer::~MockAudioRenderer() {}
+
+MockDecryptorClient::MockDecryptorClient() {}
+
+MockDecryptorClient::~MockDecryptorClient() {}
+
+void MockDecryptorClient::KeyMessage(const std::string& key_system,
+                                     const std::string& session_id,
+                                     scoped_array<uint8> message,
+                                     int message_length,
+                                     const std::string& default_url) {
+  KeyMessageMock(key_system, session_id, message.get(), message_length,
+                 default_url);
+}
+
+void MockDecryptorClient::NeedKey(const std::string& key_system,
+                                  const std::string& session_id,
+                                  scoped_array<uint8> init_data,
+                                  int init_data_length) {
+  NeedKeyMock(key_system, session_id, init_data.get(), init_data_length);
+}
 
 MockFilterCollection::MockFilterCollection()
     : demuxer_(new MockDemuxer()),

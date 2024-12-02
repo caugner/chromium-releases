@@ -8,6 +8,8 @@
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/path.h"
+#include "ui/gfx/skia_util.h"
 
 namespace aura {
 namespace test {
@@ -29,7 +31,7 @@ void TestWindowDelegate::OnBoundsChanged(const gfx::Rect& old_bounds,
                                          const gfx::Rect& new_bounds) {
 }
 
-void TestWindowDelegate::OnFocus() {
+void TestWindowDelegate::OnFocus(Window* old_focused_window) {
 }
 
 void TestWindowDelegate::OnBlur() {
@@ -45,6 +47,12 @@ gfx::NativeCursor TestWindowDelegate::GetCursor(const gfx::Point& point) {
 
 int TestWindowDelegate::GetNonClientComponent(const gfx::Point& point) const {
   return window_component_;
+}
+
+bool TestWindowDelegate::ShouldDescendIntoChildForEventHandling(
+      Window* child,
+      const gfx::Point& location) {
+  return true;
 }
 
 bool TestWindowDelegate::OnMouseEvent(MouseEvent* event) {
@@ -69,6 +77,10 @@ void TestWindowDelegate::OnCaptureLost() {
 void TestWindowDelegate::OnPaint(gfx::Canvas* canvas) {
 }
 
+void TestWindowDelegate::OnDeviceScaleFactorChanged(
+    float device_scale_factor) {
+}
+
 void TestWindowDelegate::OnWindowDestroying() {
 }
 
@@ -78,6 +90,12 @@ void TestWindowDelegate::OnWindowDestroyed() {
 void TestWindowDelegate::OnWindowVisibilityChanged(bool visible) {
 }
 
+bool TestWindowDelegate::HasHitTestMask() const {
+  return false;
+}
+
+void TestWindowDelegate::GetHitTestMask(gfx::Path* mask) const {
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // ColorTestWindowDelegate
@@ -98,6 +116,21 @@ void ColorTestWindowDelegate::OnWindowDestroyed() {
 }
 void ColorTestWindowDelegate::OnPaint(gfx::Canvas* canvas) {
   canvas->DrawColor(color_, SkXfermode::kSrc_Mode);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// MaskedWindowDelegate
+
+MaskedWindowDelegate::MaskedWindowDelegate(const gfx::Rect mask_rect)
+    : mask_rect_(mask_rect) {
+}
+
+bool MaskedWindowDelegate::HasHitTestMask() const {
+  return true;
+}
+
+void MaskedWindowDelegate::GetHitTestMask(gfx::Path* mask) const {
+  mask->addRect(RectToSkRect(mask_rect_));
 }
 
 }  // namespace test

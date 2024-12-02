@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "content/test/test_url_fetcher_factory.h"
+#include "content/public/test/test_url_fetcher_factory.h"
 
 #include <string>
 
@@ -10,26 +10,26 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "content/common/net/url_fetcher_impl.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "net/base/host_port_pair.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/url_fetcher_delegate.h"
+#include "net/url_request/url_fetcher_impl.h"
 #include "net/url_request/url_request_status.h"
 
 ScopedURLFetcherFactory::ScopedURLFetcherFactory(
-    content::URLFetcherFactory* factory) {
-  DCHECK(!URLFetcherImpl::factory());
-  URLFetcherImpl::set_factory(factory);
+    net::URLFetcherFactory* factory) {
+  DCHECK(!net::URLFetcherImpl::factory());
+  net::URLFetcherImpl::set_factory(factory);
 }
 
 ScopedURLFetcherFactory::~ScopedURLFetcherFactory() {
-  DCHECK(URLFetcherImpl::factory());
-  URLFetcherImpl::set_factory(NULL);
+  DCHECK(net::URLFetcherImpl::factory());
+  net::URLFetcherImpl::set_factory(NULL);
 }
 
 TestURLFetcher::TestURLFetcher(int id,
                                const GURL& url,
-                               content::URLFetcherDelegate* d)
+                               net::URLFetcherDelegate* d)
     : id_(id),
       original_url_(url),
       delegate_(d),
@@ -89,10 +89,16 @@ void TestURLFetcher::SetRequestContext(
     net::URLRequestContextGetter* request_context_getter) {
 }
 
-void TestURLFetcher::AssociateWithRenderView(
-    const GURL& first_party_for_cookies,
-    int render_process_id,
-    int render_view_id) {
+void TestURLFetcher::SetFirstPartyForCookies(
+    const GURL& first_party_for_cookies) {
+}
+
+void TestURLFetcher::SetURLRequestUserData(
+    const void* key,
+    const CreateDataCallback& create_data_callback) {
+}
+
+void TestURLFetcher::SetStopOnRedirect(bool stop_on_redirect) {
 }
 
 void TestURLFetcher::SetAutomaticallyRetryOn5xx(bool retry) {
@@ -216,11 +222,11 @@ TestURLFetcherFactory::TestURLFetcherFactory()
 
 TestURLFetcherFactory::~TestURLFetcherFactory() {}
 
-content::URLFetcher* TestURLFetcherFactory::CreateURLFetcher(
+net::URLFetcher* TestURLFetcherFactory::CreateURLFetcher(
     int id,
     const GURL& url,
-    content::URLFetcher::RequestType request_type,
-    content::URLFetcherDelegate* d) {
+    net::URLFetcher::RequestType request_type,
+    net::URLFetcherDelegate* d) {
   TestURLFetcher* fetcher = new TestURLFetcher(id, url, d);
   fetchers_[id] = fetcher;
   return fetcher;
@@ -242,7 +248,7 @@ class FakeURLFetcher : public TestURLFetcher {
  public:
   // Normal URL fetcher constructor but also takes in a pre-baked response.
   FakeURLFetcher(const GURL& url,
-                 content::URLFetcherDelegate* d,
+                 net::URLFetcherDelegate* d,
                  const std::string& response_data, bool success)
     : TestURLFetcher(0, url, d),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
@@ -287,18 +293,18 @@ FakeURLFetcherFactory::FakeURLFetcherFactory()
 }
 
 FakeURLFetcherFactory::FakeURLFetcherFactory(
-    content::URLFetcherFactory* default_factory)
+    net::URLFetcherFactory* default_factory)
     : ScopedURLFetcherFactory(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       default_factory_(default_factory) {
 }
 
 FakeURLFetcherFactory::~FakeURLFetcherFactory() {}
 
-content::URLFetcher* FakeURLFetcherFactory::CreateURLFetcher(
+net::URLFetcher* FakeURLFetcherFactory::CreateURLFetcher(
     int id,
     const GURL& url,
-    content::URLFetcher::RequestType request_type,
-    content::URLFetcherDelegate* d) {
+    net::URLFetcher::RequestType request_type,
+    net::URLFetcherDelegate* d) {
   FakeResponseMap::const_iterator it = fake_responses_.find(url);
   if (it == fake_responses_.end()) {
     if (default_factory_ == NULL) {
@@ -327,10 +333,10 @@ URLFetcherImplFactory::URLFetcherImplFactory() {}
 
 URLFetcherImplFactory::~URLFetcherImplFactory() {}
 
-content::URLFetcher* URLFetcherImplFactory::CreateURLFetcher(
+net::URLFetcher* URLFetcherImplFactory::CreateURLFetcher(
     int id,
     const GURL& url,
-    content::URLFetcher::RequestType request_type,
-    content::URLFetcherDelegate* d) {
-  return new URLFetcherImpl(url, request_type, d);
+    net::URLFetcher::RequestType request_type,
+    net::URLFetcherDelegate* d) {
+  return new net::URLFetcherImpl(url, request_type, d);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #import "chrome/browser/app_controller_mac.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -19,7 +18,8 @@
 #include "chrome/browser/ui/cocoa/applescript/constants_applescript.h"
 #include "chrome/browser/ui/cocoa/applescript/error_applescript.h"
 #import "chrome/browser/ui/cocoa/applescript/tab_applescript.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
 
@@ -99,7 +99,7 @@
 - (NSWindow*)nativeHandle {
   // window() can be NULL during startup.
   if (browser_->window())
-    return browser_->window()->GetNativeHandle();
+    return browser_->window()->GetNativeWindow();
   return nil;
 }
 
@@ -138,7 +138,7 @@
 - (TabAppleScript*)activeTab {
   TabAppleScript* currentTab =
       [[[TabAppleScript alloc]
-          initWithTabContent:browser_->GetSelectedTabContentsWrapper()]
+          initWithTabContent:browser_->GetActiveTabContents()]
               autorelease];
   [currentTab setContainer:self
                   property:AppleScript::kTabsProperty];
@@ -151,13 +151,13 @@
 
   for (int i = 0; i < browser_->tab_count(); ++i) {
     // Check to see if tab is closing.
-    if (browser_->GetWebContentsAt(i)->IsBeingDestroyed()) {
+    TabContents* tab_contents = browser_->GetTabContentsAt(i);
+    if (tab_contents->in_destructor()) {
       continue;
     }
 
     scoped_nsobject<TabAppleScript> tab(
-        [[TabAppleScript alloc]
-            initWithTabContent:(browser_->GetTabContentsWrapperAt(i))]);
+        [[TabAppleScript alloc] initWithTabContent:tab_contents]);
     [tab setContainer:self
              property:AppleScript::kTabsProperty];
     [tabs addObject:tab];
@@ -173,7 +173,7 @@
 
   // Set how long it takes a tab to be created.
   base::TimeTicks newTabStartTime = base::TimeTicks::Now();
-  TabContentsWrapper* contents =
+  TabContents* contents =
       browser_->AddSelectedTabWithURL(GURL(chrome::kChromeUINewTabURL),
                                       content::PAGE_TRANSITION_TYPED);
   contents->web_contents()->SetNewTabStartTime(newTabStartTime);

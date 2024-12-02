@@ -13,8 +13,12 @@
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/ui/views/ash/launcher/chrome_launcher_controller.h"
 
-class Extension;
 class Profile;
+
+namespace extensions {
+class Extension;
+}
+
 
 // Default implementation of LauncherUpdater::AppIconLoader that interacts
 // with the ExtensionService and ImageLoadingTracker to load images.
@@ -25,7 +29,7 @@ class LauncherAppIconLoader : public ChromeLauncherController::AppIconLoader,
   virtual ~LauncherAppIconLoader();
 
   // AppIconLoader:
-  virtual std::string GetAppID(TabContentsWrapper* tab) OVERRIDE;
+  virtual std::string GetAppID(TabContents* tab) OVERRIDE;
   virtual bool IsValidID(const std::string& id) OVERRIDE;
   virtual void FetchImage(const std::string& id) OVERRIDE;
 
@@ -38,10 +42,10 @@ class LauncherAppIconLoader : public ChromeLauncherController::AppIconLoader,
   typedef std::map<int, std::string> ImageLoaderIDToExtensionIDMap;
 
   // Returns the extension for the specified tab.
-  const Extension* GetExtensionForTab(TabContentsWrapper* tab);
+  const extensions::Extension* GetExtensionForTab(TabContents* tab);
 
   // Returns the extension by ID.
-  const Extension* GetExtensionByID(const std::string& id);
+  const extensions::Extension* GetExtensionByID(const std::string& id);
 
   Profile* profile_;
 

@@ -11,12 +11,12 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "content/public/common/url_fetcher_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/host_resolver_proc.h"
 #include "net/base/network_change_notifier.h"
+#include "net/url_request/url_fetcher_delegate.h"
 
 class PrefService;
 
@@ -37,7 +37,7 @@ class PrefService;
 // return a value at all times (even during startup or in unittest mode).  If no
 // redirection is in place, the returned GURL will be empty.
 class IntranetRedirectDetector
-    : public content::URLFetcherDelegate,
+    : public net::URLFetcherDelegate,
       public net::NetworkChangeNotifier::IPAddressObserver {
  public:
   // Only the main browser process loop should call this, when setting up
@@ -60,14 +60,14 @@ class IntranetRedirectDetector
   static const size_t kNumCharsInHostnames;
 
  private:
-  typedef std::set<content::URLFetcher*> Fetchers;
+  typedef std::set<net::URLFetcher*> Fetchers;
 
   // Called when the seven second startup sleep or the one second network
   // switch sleep has finished.  Runs any pending fetch.
   void FinishSleep();
 
-  // content::URLFetcherDelegate
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
+  // net::URLFetcherDelegate
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
 
   // NetworkChangeNotifier::IPAddressObserver
   virtual void OnIPAddressChanged() OVERRIDE;

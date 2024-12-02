@@ -5,7 +5,9 @@
 #include <vector>
 
 #include "base/file_util.h"
+#include "base/guid.h"
 #include "base/path_service.h"
+#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -18,7 +20,6 @@
 #include "chrome/browser/webdata/autofill_table.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/guid.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/forms/form_field.h"
@@ -97,16 +98,8 @@ class AutofillTableTest : public testing::Test {
 #if defined(OS_MACOSX)
     Encryptor::UseMockKeychain(true);
 #endif
-    PathService::Get(chrome::DIR_TEST_DATA, &file_);
-    const std::string test_db = "TestWebDatabase" +
-        base::Int64ToString(Time::Now().ToTimeT()) +
-        ".db";
-    file_ = file_.AppendASCII(test_db);
-    file_util::Delete(file_, false);
-  }
-
-  virtual void TearDown() {
-    file_util::Delete(file_, false);
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+    file_ = temp_dir_.path().AppendASCII("TestWebDatabase");
   }
 
   static AutofillEntry MakeAutofillEntry(const char* name,
@@ -123,6 +116,7 @@ class AutofillTableTest : public testing::Test {
   }
 
   FilePath file_;
+  ScopedTempDir temp_dir_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AutofillTableTest);
@@ -587,7 +581,7 @@ TEST_F(AutofillTableTest, AutofillProfile) {
 
   // Add a 'Billing' profile.
   AutofillProfile billing_profile = home_profile;
-  billing_profile.set_guid(guid::GenerateGUID());
+  billing_profile.set_guid(base::GenerateGUID());
   billing_profile.SetInfo(ADDRESS_HOME_LINE1,
                           ASCIIToUTF16("5678 Bottom Street"));
   billing_profile.SetInfo(ADDRESS_HOME_LINE2, ASCIIToUTF16("suite 3"));

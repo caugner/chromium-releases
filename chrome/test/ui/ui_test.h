@@ -146,11 +146,6 @@ class UITestBase {
   bool WaitForBookmarkBarVisibilityChange(BrowserProxy* browser,
                                           bool wait_for_open);
 
-  // Sends the request to close the browser without blocking.
-  // This is so we can interact with dialogs opened on browser close,
-  // e.g. the beforeunload confirm dialog.
-  void CloseBrowserAsync(BrowserProxy* browser) const;
-
   // Closes the specified browser.  Returns true if the browser was closed.
   // This call is blocking.  |application_closed| is set to true if this was
   // the last browser window (and therefore as a result of it closing the
@@ -231,7 +226,12 @@ class UITestBase {
   }
 
   // Get the number of crash dumps we've logged since the test started.
-  int GetCrashCount();
+  int GetCrashCount() const;
+
+  // Returns empty string if there were no unexpected Chrome asserts or crashes,
+  // a string describing the failures otherwise. As a side effect, it will fail
+  // with EXPECT_EQ macros if this code runs within a gtest harness.
+  std::string CheckErrorsAndCrashes() const;
 
   // Use Chromium binaries from the given directory.
   void SetBrowserDirectory(const FilePath& dir);
@@ -243,6 +243,12 @@ class UITestBase {
   // Appends a command-line switch with associated value to be passed to the
   // browser when launched.
   void AppendBrowserLaunchSwitch(const char* name, const char* value);
+
+  // Pass-through to AutomationProxy::BeginTracing.
+  bool BeginTracing(const std::string& categories);
+
+  // Pass-through to AutomationProxy::EndTracing.
+  std::string EndTracing();
 
  protected:
   // String to display when a test fails because the crash service isn't
@@ -261,13 +267,9 @@ class UITestBase {
   // Closes the browser window.
   virtual void TearDown();
 
-  AutomationProxy* automation() const {
-    return launcher_->automation();
-  }
+  virtual AutomationProxy* automation() const;
 
   ProxyLauncher::LaunchState DefaultLaunchState();
-
-  virtual bool ShouldFilterInet();
 
   // Extra command-line switches that need to be passed to the browser are
   // added in this function. Add new command-line switches here.
@@ -418,16 +420,6 @@ class UITest : public UITestBase, public PlatformTest {
                                       const char* cookie_name,
                                       int timeout_ms);
 
-  // Checks whether the download shelf is visible in the current browser, giving
-  // it a chance to appear (we don't know the exact timing) while finishing as
-  // soon as possible.
-  bool WaitForDownloadShelfVisible(BrowserProxy* browser);
-
-  // Checks whether the download shelf is invisible in the current browser,
-  // giving it a chance to appear (we don't know the exact timing) while
-  // finishing as soon as possible.
-  bool WaitForDownloadShelfInvisible(BrowserProxy* browser);
-
   // Waits until the Find window has become fully visible (if |wait_for_open| is
   // true) or fully hidden (if |wait_for_open| is false). This function can time
   // out (return false) if the window doesn't appear within a specific time.
@@ -445,10 +437,6 @@ class UITest : public UITestBase, public PlatformTest {
   void NavigateToURLAsync(const GURL& url);
 
  private:
-  // Waits for download shelf visibility or invisibility.
-  bool WaitForDownloadShelfVisibilityChange(BrowserProxy* browser,
-                                            bool wait_for_open);
-
   MessageLoop message_loop_;  // Enables PostTask to main thread.
 };
 

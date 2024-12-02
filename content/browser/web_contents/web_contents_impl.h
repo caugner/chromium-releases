@@ -14,14 +14,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/property_bag.h"
-#include "content/browser/browser_plugin/browser_plugin_web_contents_observer.h"
+#include "content/browser/browser_plugin/old/browser_plugin_host.h"
 #include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
+#include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/web_contents/navigation_controller_impl.h"
 #include "content/browser/web_contents/render_view_host_manager.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
 #include "net/base/load_states.h"
@@ -35,29 +36,42 @@
 class InterstitialPageImpl;
 class SavePackage;
 class SessionStorageNamespaceImpl;
-struct ViewHostMsg_DidFailProvisionalLoadWithError_Params;
+class WebContentsImpl;
+struct ViewMsg_PostMessage_Params;
 
 namespace content {
 class ColorChooser;
 class DownloadItem;
 class JavaScriptDialogCreator;
 class RenderViewHost;
+class RenderViewHostDelegateView;
 class RenderViewHostImpl;
 class SiteInstance;
 class TestWebContents;
 class WebContentsDelegate;
 class WebContentsObserver;
 class WebContentsView;
+class WebContentsViewDelegate;
 struct LoadNotificationDetails;
-}
+
+// Factory function for the implementations that content knows about. Takes
+// ownership of |delegate|.
+WebContentsView* CreateWebContentsView(
+    WebContentsImpl* web_contents,
+    WebContentsViewDelegate* delegate,
+    RenderViewHostDelegateView** render_view_host_delegate_view);
+
+}  // namespace content
 
 namespace webkit_glue {
 struct WebIntentData;
+struct WebIntentServiceData;
 }
 
 class CONTENT_EXPORT WebContentsImpl
     : public NON_EXPORTED_BASE(content::WebContents),
       public content::RenderViewHostDelegate,
+      public content::RenderWidgetHostDelegate,
       public RenderViewHostManager::Delegate,
       public content::NotificationObserver {
  public:
@@ -71,7 +85,7 @@ class CONTENT_EXPORT WebContentsImpl
   virtual ~WebContentsImpl();
 
   // Returns the content specific prefs for the given RVH.
-  static WebPreferences GetWebkitPrefs(
+  static webkit_glue::WebPreferences GetWebkitPrefs(
       content::RenderViewHost* rvh, const GURL& url);
 
   // Returns the SavePackage which manages the page saving job. May be NULL.
@@ -104,6 +118,10 @@ class CONTENT_EXPORT WebContentsImpl
   bool NavigateToPendingEntry(
       content::NavigationController::ReloadType reload_type);
 
+  // Called by InterstitialPageImpl when it creates a RenderViewHost.
+  void RenderViewForInterstitialPageCreated(
+      content::RenderViewHost* render_view_host);
+
   // Sets the passed passed interstitial as the currently showing interstitial.
   // |interstitial_page| should be non NULL (use the remove_interstitial_page
   // method to unset the interstitial) and no interstitial page should be set
@@ -125,9 +143,8 @@ class CONTENT_EXPORT WebContentsImpl
     return java_bridge_dispatcher_host_manager_.get();
   }
 
-  content::BrowserPluginWebContentsObserver*
-      browser_plugin_web_contents_observer() const {
-    return browser_plugin_web_contents_observer_.get();
+  content::BrowserPluginHost* browser_plugin_host() const {
+    return browser_plugin_host_.get();
   }
 
   // Like GetController from WebContents, but returns the concrete object.
@@ -144,8 +161,6 @@ class CONTENT_EXPORT WebContentsImpl
   virtual content::NavigationController& GetController() OVERRIDE;
   virtual const content::NavigationController& GetController() const OVERRIDE;
   virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
-  virtual void SetViewType(content::ViewType type) OVERRIDE;
-  virtual content::ViewType GetViewType() const OVERRIDE;
   virtual content::RenderProcessHost* GetRenderProcessHost() const OVERRIDE;
   virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE;
   virtual content::RenderWidgetHostView*
@@ -154,6 +169,8 @@ class CONTENT_EXPORT WebContentsImpl
   virtual content::WebUI* CreateWebUI(const GURL& url) OVERRIDE;
   virtual content::WebUI* GetWebUI() const OVERRIDE;
   virtual content::WebUI* GetCommittedWebUI() const OVERRIDE;
+  virtual void SetUserAgentOverride(const std::string& override) OVERRIDE;
+  virtual const std::string& GetUserAgentOverride() const OVERRIDE;
   virtual const string16& GetTitle() const OVERRIDE;
   virtual int32 GetMaxPageID() OVERRIDE;
   virtual int32 GetMaxPageIDForSiteInstance(
@@ -178,6 +195,7 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void DidBecomeSelected() OVERRIDE;
   virtual base::TimeTicks GetLastSelectedTime() const OVERRIDE;
   virtual void WasHidden() OVERRIDE;
+  virtual void WasRestored() OVERRIDE;
   virtual void ShowContents() OVERRIDE;
   virtual void HideContents() OVERRIDE;
   virtual bool NeedToFireBeforeUnload() OVERRIDE;
@@ -211,9 +229,11 @@ class CONTENT_EXPORT WebContentsImpl
   virtual content::RendererPreferences* GetMutableRendererPrefs() OVERRIDE;
   virtual void SetNewTabStartTime(const base::TimeTicks& time) OVERRIDE;
   virtual base::TimeTicks GetNewTabStartTime() const OVERRIDE;
+  virtual void Close() OVERRIDE;
   virtual void OnCloseStarted() OVERRIDE;
   virtual bool ShouldAcceptDragAndDrop() const OVERRIDE;
   virtual void SystemDragEnded() OVERRIDE;
+  virtual void UserGestureDone() OVERRIDE;
   virtual void SetClosedByUserGesture(bool value) OVERRIDE;
   virtual bool GetClosedByUserGesture() const OVERRIDE;
   virtual double GetZoomLevel() const OVERRIDE;
@@ -240,13 +260,12 @@ class CONTENT_EXPORT WebContentsImpl
 
   // RenderViewHostDelegate ----------------------------------------------------
 
-  virtual content::RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
+  virtual content::RenderViewHostDelegateView* GetDelegateView() OVERRIDE;
   virtual content::RenderViewHostDelegate::RendererManagement*
       GetRendererManagementDelegate() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual const GURL& GetURL() const OVERRIDE;
   virtual WebContents* GetAsWebContents() OVERRIDE;
-  virtual content::ViewType GetRenderViewType() const OVERRIDE;
   virtual gfx::Rect GetRootWindowResizerRect() const OVERRIDE;
   virtual void RenderViewCreated(
       content::RenderViewHost* render_view_host) OVERRIDE;
@@ -257,6 +276,22 @@ class CONTENT_EXPORT WebContentsImpl
                               int error_code) OVERRIDE;
   virtual void RenderViewDeleted(
       content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidStartProvisionalLoadForFrame(
+      content::RenderViewHost* render_view_host,
+      int64 frame_id,
+      bool main_frame,
+      const GURL& opener_url,
+      const GURL& url) OVERRIDE;
+  virtual void DidRedirectProvisionalLoad(
+      content::RenderViewHost* render_view_host,
+      int32 page_id,
+      const GURL& opener_url,
+      const GURL& source_url,
+      const GURL& target_url) OVERRIDE;
+  virtual void DidFailProvisionalLoadWithError(
+      content::RenderViewHost* render_view_host,
+      const ViewHostMsg_DidFailProvisionalLoadWithError_Params& params)
+          OVERRIDE;
   virtual void DidNavigate(
       content::RenderViewHost* render_view_host,
       const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
@@ -294,20 +329,27 @@ class CONTENT_EXPORT WebContentsImpl
       int64 source_frame_id,
       const content::GlobalRequestID& transferred_global_request_id) OVERRIDE;
   virtual void RouteCloseEvent(content::RenderViewHost* rvh) OVERRIDE;
+  virtual void RouteMessageEvent(
+      content::RenderViewHost* rvh,
+      const ViewMsg_PostMessage_Params& params) OVERRIDE;
   virtual void RunJavaScriptMessage(content::RenderViewHost* rvh,
                                     const string16& message,
                                     const string16& default_prompt,
                                     const GURL& frame_url,
-                                    ui::JavascriptMessageType type,
+                                    content::JavaScriptMessageType type,
                                     IPC::Message* reply_msg,
                                     bool* did_suppress_message) OVERRIDE;
   virtual void RunBeforeUnloadConfirm(content::RenderViewHost* rvh,
                                       const string16& message,
                                       bool is_reload,
                                       IPC::Message* reply_msg) OVERRIDE;
+  virtual bool AddMessageToConsole(int32 level,
+                                   const string16& message,
+                                   int32 line_no,
+                                   const string16& source_id) OVERRIDE;
   virtual content::RendererPreferences GetRendererPrefs(
       content::BrowserContext* browser_context) const OVERRIDE;
-  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
+  virtual webkit_glue::WebPreferences GetWebkitPrefs() OVERRIDE;
   virtual void OnUserGesture() OVERRIDE;
   virtual void OnIgnoredUIEvent() OVERRIDE;
   virtual void RendererUnresponsive(content::RenderViewHost* render_view_host,
@@ -322,10 +364,6 @@ class CONTENT_EXPORT WebContentsImpl
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
   virtual void LostCapture() OVERRIDE;
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) OVERRIDE;
-  virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
   virtual void HandleMouseDown() OVERRIDE;
   virtual void HandleMouseUp() OVERRIDE;
   virtual void HandleMouseActivate() OVERRIDE;
@@ -336,8 +374,36 @@ class CONTENT_EXPORT WebContentsImpl
   virtual bool IsFullscreenForCurrentTab() const OVERRIDE;
   virtual void UpdatePreferredSize(const gfx::Size& pref_size) OVERRIDE;
   virtual void ResizeDueToAutoResize(const gfx::Size& new_size) OVERRIDE;
-  virtual void RequestToLockMouse(bool user_gesture) OVERRIDE;
+  virtual void RequestToLockMouse(bool user_gesture,
+                                  bool last_unlocked_by_target) OVERRIDE;
   virtual void LostMouseLock() OVERRIDE;
+  virtual void CreateNewWindow(
+      int route_id,
+      const ViewHostMsg_CreateWindow_Params& params,
+      content::SessionStorageNamespace* session_storage_namespace) OVERRIDE;
+  virtual void CreateNewWidget(int route_id,
+                               WebKit::WebPopupType popup_type) OVERRIDE;
+  virtual void CreateNewFullscreenWidget(int route_id) OVERRIDE;
+  virtual void ShowCreatedWindow(int route_id,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) OVERRIDE;
+  virtual void ShowCreatedWidget(int route_id,
+                                 const gfx::Rect& initial_pos) OVERRIDE;
+  virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
+  virtual void ShowContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
+  virtual void RequestMediaAccessPermission(
+      const content::MediaStreamRequest* request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
+
+  // RenderWidgetHostDelegate --------------------------------------------------
+
+  virtual bool PreHandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event,
+      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const content::NativeWebKeyboardEvent& event) OVERRIDE;
 
   // RenderViewHostManager::Delegate -------------------------------------------
 
@@ -406,26 +472,14 @@ class CONTENT_EXPORT WebContentsImpl
                       const string16& user_input);
 
   // IPC message handlers.
-  void OnRegisterIntentService(const string16& action,
-                               const string16& type,
-                               const string16& href,
-                               const string16& title,
-                               const string16& disposition);
+  void OnRegisterIntentService(const webkit_glue::WebIntentServiceData& data,
+                               bool user_gesture);
   void OnWebIntentDispatch(const webkit_glue::WebIntentData& intent,
                            int intent_id);
-  void OnDidStartProvisionalLoadForFrame(int64 frame_id,
-                                         bool main_frame,
-                                         const GURL& opener_url,
-                                         const GURL& url);
-  void OnDidRedirectProvisionalLoad(int32 page_id,
-                                    const GURL& opener_url,
-                                    const GURL& source_url,
-                                    const GURL& target_url);
-  void OnDidFailProvisionalLoadWithError(
-      const ViewHostMsg_DidFailProvisionalLoadWithError_Params& params);
   void OnDidLoadResourceFromMemoryCache(const GURL& url,
                                         const std::string& security_info,
                                         const std::string& http_request,
+                                        const std::string& mime_type,
                                         ResourceType::Type resource_type);
   void OnDidDisplayInsecureContent();
   void OnDidRunInsecureContent(const std::string& security_origin,
@@ -444,13 +498,14 @@ class CONTENT_EXPORT WebContentsImpl
   void OnUpdateZoomLimits(int minimum_percent,
                           int maximum_percent,
                           bool remember);
-  void OnSaveURL(const GURL& url);
+  void OnSaveURL(const GURL& url, const content::Referrer& referrer);
   void OnEnumerateDirectory(int request_id, const FilePath& path);
   void OnJSOutOfMemory();
 
   void OnRegisterProtocolHandler(const std::string& protocol,
                                  const GURL& url,
-                                 const string16& title);
+                                 const string16& title,
+                                 bool user_gesture);
   void OnFindReply(int request_id, int number_of_matches,
                    const gfx::Rect& selection_rect, int active_match_ordinal,
                    bool final_update);
@@ -531,6 +586,25 @@ class CONTENT_EXPORT WebContentsImpl
   // this tab's RenderView for |instance|.
   int CreateOpenerRenderViews(content::SiteInstance* instance);
 
+  // Helper for CreateNewWidget/CreateNewFullscreenWidget.
+  void CreateNewWidget(int route_id,
+                       bool is_fullscreen,
+                       WebKit::WebPopupType popup_type);
+
+  // Helper for ShowCreatedWidget/ShowCreatedFullscreenWidget.
+  void ShowCreatedWidget(int route_id,
+                         bool is_fullscreen,
+                         const gfx::Rect& initial_pos);
+
+  // Finds the new RenderWidgetHost and returns it. Note that this can only be
+  // called once as this call also removes it from the internal map.
+  content::RenderWidgetHostView* GetCreatedWidget(int route_id);
+
+  // Finds the new WebContentsImpl by route_id, initializes it for
+  // renderer-initiated creation, and returns it. Note that this can only be
+  // called once as this call also removes it from the internal map.
+  WebContentsImpl* GetCreatedWindow(int route_id);
+
   // Misc non-view stuff -------------------------------------------------------
 
   // Helper functions for sending notifications.
@@ -541,16 +615,19 @@ class CONTENT_EXPORT WebContentsImpl
   void SetEncoding(const std::string& encoding);
 
   // Save a URL to the local filesystem.
-  void SaveURL(const GURL& url, const GURL& referrer, bool is_main_frame);
+  void SaveURL(const GURL& url,
+               const content::Referrer& referrer,
+               bool is_main_frame);
 
   content::RenderViewHostImpl* GetRenderViewHostImpl();
+
+  void GetBrowserPluginEmbedderInfo(content::RenderViewHost* render_view_host,
+                                    std::string* embedder_channel_name,
+                                    int* embedder_container_id);
 
   // Stores random bits of data for others to associate with this object.
   // WARNING: this needs to be deleted after NavigationController.
   base::PropertyBag property_bag_;
-
-  // Listen for notifications as well.
-  content::NotificationRegistrar registrar_;
 
   // Data for core operation ---------------------------------------------------
 
@@ -563,6 +640,21 @@ class CONTENT_EXPORT WebContentsImpl
   // The corresponding view.
   scoped_ptr<content::WebContentsView> view_;
 
+  // The view of the RVHD. Usually this is our WebContentsView implementation,
+  // but if an embedder uses a different WebContentsView, they'll need to
+  // provide this.
+  content::RenderViewHostDelegateView* render_view_host_delegate_view_;
+
+  // Tracks created WebContentsImpl objects that have not been shown yet. They
+  // are identified by the route ID passed to CreateNewWindow.
+  typedef std::map<int, WebContentsImpl*> PendingContents;
+  PendingContents pending_contents_;
+
+  // These maps hold on to the widgets that we created on behalf of the renderer
+  // that haven't shown yet.
+  typedef std::map<int, content::RenderWidgetHostView*> PendingWidgetViews;
+  PendingWidgetViews pending_widget_views_;
+
   // A list of observers notified when page state changes. Weak references.
   // This MUST be listed above render_manager_ since at destruction time the
   // latter might cause RenderViewHost's destructor to call us and we might use
@@ -572,6 +664,10 @@ class CONTENT_EXPORT WebContentsImpl
   // The tab that opened this tab, if any.  Will be set to null if the opener
   // is closed.
   WebContentsImpl* opener_;
+
+  // User agent to use if a NavigationEntry requires that the default user agent
+  // is overridden.
+  std::string user_agent_override_;
 
   // Helper classes ------------------------------------------------------------
 
@@ -583,8 +679,9 @@ class CONTENT_EXPORT WebContentsImpl
   scoped_ptr<JavaBridgeDispatcherHostManager>
       java_bridge_dispatcher_host_manager_;
 
-  scoped_ptr<content::BrowserPluginWebContentsObserver>
-      browser_plugin_web_contents_observer_;
+  // Manages the browser plugin instances hosted by this WebContents.
+  scoped_ptr<content::BrowserPluginHost> browser_plugin_host_;
+
   // SavePackage, lazily created.
   scoped_refptr<SavePackage> save_package_;
 
@@ -697,11 +794,12 @@ class CONTENT_EXPORT WebContentsImpl
   // (full-page plugins for now only) permissions.
   int content_restrictions_;
 
-  // Our view type. Default is VIEW_TYPE_WEB_CONTENTS.
-  content::ViewType view_type_;
-
   // Color chooser that was opened by this tab.
   content::ColorChooser* color_chooser_;
+
+  // This must be at the end, or else we might get notifications and use other
+  // member variables that are gone.
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsImpl);
 };

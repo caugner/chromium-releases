@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -109,75 +110,75 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   BodyImageSet normal_body_image_set = {
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM)
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM)
   };
   normal_body_image_set_ = normal_body_image_set;
 
   DropDownImageSet normal_drop_down_image_set = {
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_TOP),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_MIDDLE),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_BOTTOM)
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_TOP),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_MIDDLE),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_BOTTOM)
   };
   normal_drop_down_image_set_ = normal_drop_down_image_set;
 
   BodyImageSet hot_body_image_set = {
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM_H)
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM_H)
   };
   hot_body_image_set_ = hot_body_image_set;
 
   DropDownImageSet hot_drop_down_image_set = {
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_TOP_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_MIDDLE_H),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_BOTTOM_H)
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_TOP_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_MIDDLE_H),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_BOTTOM_H)
   };
   hot_drop_down_image_set_ = hot_drop_down_image_set;
 
   BodyImageSet pushed_body_image_set = {
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM_P)
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM_P)
   };
   pushed_body_image_set_ = pushed_body_image_set;
 
   DropDownImageSet pushed_drop_down_image_set = {
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_TOP_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_MIDDLE_P),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_MENU_BOTTOM_P)
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_TOP_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_MIDDLE_P),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_MENU_BOTTOM_P)
   };
   pushed_drop_down_image_set_ = pushed_drop_down_image_set;
 
   BodyImageSet dangerous_mode_body_image_set = {
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP_NO_DD),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE_NO_DD),
-    rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM_NO_DD)
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_MIDDLE),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_LEFT_BOTTOM),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_TOP),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_MIDDLE),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_CENTER_BOTTOM),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_TOP_NO_DD),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_MIDDLE_NO_DD),
+    rb.GetImageSkiaNamed(IDR_DOWNLOAD_BUTTON_RIGHT_BOTTOM_NO_DD)
   };
   dangerous_mode_body_image_set_ = dangerous_mode_body_image_set;
 
@@ -326,7 +327,7 @@ void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
       FROM_HERE,
       base::Bind(&DownloadItemView::Reenable,
                  weak_ptr_factory_.GetWeakPtr()),
-      kDisabledOnOpenDuration);
+      base::TimeDelta::FromMilliseconds(kDisabledOnOpenDuration));
 
   // Notify our parent.
   parent_->OpenedDownload(this);
@@ -570,8 +571,11 @@ void DownloadItemView::ShowContextMenu(const gfx::Point& p,
                  weak_ptr_factory_.GetWeakPtr()));
   views::View::ConvertPointToScreen(this, &point);
 
-  if (!context_menu_.get())
-    context_menu_.reset(new DownloadShelfContextMenuView(model_.get()));
+  if (!context_menu_.get()) {
+    context_menu_.reset(
+        new DownloadShelfContextMenuView(model_.get(),
+                                         parent_->GetNavigator()));
+  }
   context_menu_->Run(GetWidget()->GetTopLevelWidget(),
                      gfx::Rect(point, size));
   // We could be deleted now.
@@ -735,20 +739,20 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
     canvas->Translate(gfx::Point(width(), 0));
     canvas->Scale(-1, 1);
   }
-  PaintBitmaps(canvas,
-               body_image_set->top_left, body_image_set->left,
-               body_image_set->bottom_left,
-               x, box_y_, box_height_, body_image_set->top_left->width());
+  PaintImages(canvas,
+              body_image_set->top_left, body_image_set->left,
+              body_image_set->bottom_left,
+              x, box_y_, box_height_, body_image_set->top_left->width());
   x += body_image_set->top_left->width();
-  PaintBitmaps(canvas,
-               body_image_set->top, body_image_set->center,
-               body_image_set->bottom,
-               x, box_y_, box_height_, center_width);
+  PaintImages(canvas,
+              body_image_set->top, body_image_set->center,
+              body_image_set->bottom,
+              x, box_y_, box_height_, center_width);
   x += center_width;
-  PaintBitmaps(canvas,
-               body_image_set->top_right, body_image_set->right,
-               body_image_set->bottom_right,
-               x, box_y_, box_height_, body_image_set->top_right->width());
+  PaintImages(canvas,
+              body_image_set->top_right, body_image_set->right,
+              body_image_set->bottom_right,
+              x, box_y_, box_height_, body_image_set->top_right->width());
 
   // Overlay our body hot state. Warning dialogs don't display body a hot state.
   if (!IsShowingWarningDialog() &&
@@ -758,21 +762,21 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
     canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
     int x = kLeftPadding;
-    PaintBitmaps(canvas,
-                 hot_body_image_set_.top_left, hot_body_image_set_.left,
-                 hot_body_image_set_.bottom_left,
-                 x, box_y_, box_height_, hot_body_image_set_.top_left->width());
+    PaintImages(canvas,
+                hot_body_image_set_.top_left, hot_body_image_set_.left,
+                hot_body_image_set_.bottom_left,
+                x, box_y_, box_height_, hot_body_image_set_.top_left->width());
     x += body_image_set->top_left->width();
-    PaintBitmaps(canvas,
-                 hot_body_image_set_.top, hot_body_image_set_.center,
-                 hot_body_image_set_.bottom,
-                 x, box_y_, box_height_, center_width);
+    PaintImages(canvas,
+                hot_body_image_set_.top, hot_body_image_set_.center,
+                hot_body_image_set_.bottom,
+                x, box_y_, box_height_, center_width);
     x += center_width;
-    PaintBitmaps(canvas,
-                 hot_body_image_set_.top_right, hot_body_image_set_.right,
-                 hot_body_image_set_.bottom_right,
-                 x, box_y_, box_height_,
-                 hot_body_image_set_.top_right->width());
+    PaintImages(canvas,
+                hot_body_image_set_.top_right, hot_body_image_set_.right,
+                hot_body_image_set_.bottom_right,
+                x, box_y_, box_height_,
+                hot_body_image_set_.top_right->width());
     canvas->Restore();
   }
 
@@ -780,10 +784,10 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
 
   // Paint the drop-down.
   if (drop_down_image_set) {
-    PaintBitmaps(canvas,
-                 drop_down_image_set->top, drop_down_image_set->center,
-                 drop_down_image_set->bottom,
-                 x, box_y_, box_height_, drop_down_image_set->top->width());
+    PaintImages(canvas,
+                drop_down_image_set->top, drop_down_image_set->center,
+                drop_down_image_set->bottom,
+                x, box_y_, box_height_, drop_down_image_set->top->width());
 
     // Overlay our drop-down hot state.
     if (drop_hover_animation_->GetCurrentValue() > 0) {
@@ -791,10 +795,10 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
           static_cast<int>(drop_hover_animation_->GetCurrentValue() * 255));
       canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
-      PaintBitmaps(canvas,
-                   drop_down_image_set->top, drop_down_image_set->center,
-                   drop_down_image_set->bottom,
-                   x, box_y_, box_height_, drop_down_image_set->top->width());
+      PaintImages(canvas,
+                  drop_down_image_set->top, drop_down_image_set->center,
+                  drop_down_image_set->bottom,
+                  x, box_y_, box_height_, drop_down_image_set->top->width());
 
       canvas->Restore();
     }
@@ -846,11 +850,11 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
   IconManager* im = g_browser_process->icon_manager();
   gfx::Image* image = im->LookupIcon(download_->GetUserVerifiedFilePath(),
                                      IconLoader::SMALL);
-  const SkBitmap* icon = NULL;
+  const gfx::ImageSkia* icon = NULL;
   if (IsShowingWarningDialog())
     icon = warning_icon_;
   else if (image)
-    icon = image->ToSkBitmap();
+    icon = image->ToImageSkia();
 
   // We count on the fact that the icon manager will cache the icons and if one
   // is available, it will be cached here. We *don't* want to request the icon
@@ -891,12 +895,12 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
     }
     icon_x = GetMirroredXWithWidthInView(icon_x, icon->width());
     if (enabled()) {
-      canvas->DrawBitmapInt(*icon, icon_x, icon_y);
+      canvas->DrawImageInt(*icon, icon_x, icon_y);
     } else {
       // Use an alpha to make the image look disabled.
       SkPaint paint;
       paint.setAlpha(120);
-      canvas->DrawBitmapInt(*icon, icon_x, icon_y, paint);
+      canvas->DrawImageInt(*icon, icon_x, icon_y, paint);
     }
   }
 }
@@ -930,26 +934,26 @@ void DownloadItemView::LoadIconIfItemPathChanged() {
 
 // Load an icon for the file type we're downloading, and animate any in progress
 // download state.
-void DownloadItemView::PaintBitmaps(gfx::Canvas* canvas,
-                                    const SkBitmap* top_bitmap,
-                                    const SkBitmap* center_bitmap,
-                                    const SkBitmap* bottom_bitmap,
-                                    int x, int y, int height, int width) {
-  int middle_height = height - top_bitmap->height() - bottom_bitmap->height();
+void DownloadItemView::PaintImages(gfx::Canvas* canvas,
+                                   const gfx::ImageSkia* top_image,
+                                   const gfx::ImageSkia* center_image,
+                                   const gfx::ImageSkia* bottom_image,
+                                   int x, int y, int height, int width) {
+  int middle_height = height - top_image->height() - bottom_image->height();
   // Draw the top.
-  canvas->DrawBitmapInt(*top_bitmap,
-                        0, 0, top_bitmap->width(), top_bitmap->height(),
-                        x, y, width, top_bitmap->height(), false);
-  y += top_bitmap->height();
+  canvas->DrawImageInt(*top_image,
+                       0, 0, top_image->width(), top_image->height(),
+                       x, y, width, top_image->height(), false);
+  y += top_image->height();
   // Draw the center.
-  canvas->DrawBitmapInt(*center_bitmap,
-                        0, 0, center_bitmap->width(), center_bitmap->height(),
-                        x, y, width, middle_height, false);
+  canvas->DrawImageInt(*center_image,
+                       0, 0, center_image->width(), center_image->height(),
+                       x, y, width, middle_height, false);
   y += middle_height;
   // Draw the bottom.
-  canvas->DrawBitmapInt(*bottom_bitmap,
-                        0, 0, bottom_bitmap->width(), bottom_bitmap->height(),
-                        x, y, width, bottom_bitmap->height(), false);
+  canvas->DrawImageInt(*bottom_image,
+                       0, 0, bottom_image->width(), bottom_image->height(),
+                       x, y, width, bottom_image->height(), false);
 }
 
 void DownloadItemView::SetState(State body_state, State drop_down_state) {
@@ -1030,10 +1034,10 @@ void DownloadItemView::ShowWarningDialog() {
   // The dangerous download label text and icon are different under
   // different cases.
   if (mode_ == MALICIOUS_MODE) {
-    warning_icon_ = rb.GetBitmapNamed(IDR_SAFEBROWSING_WARNING);
+    warning_icon_ = rb.GetImageSkiaNamed(IDR_SAFEBROWSING_WARNING);
   } else {
     // The download file has dangerous file type (e.g.: an executable).
-    warning_icon_ = rb.GetBitmapNamed(IDR_WARNING);
+    warning_icon_ = rb.GetImageSkiaNamed(IDR_WARNING);
   }
   string16 dangerous_label = model_->GetWarningText(font_, kTextWidth);
   dangerous_download_label_ = new views::Label(dangerous_label);

@@ -79,11 +79,14 @@ class CONTENT_EXPORT MediaStreamManager
   // created std::string.
   void GenerateStream(MediaStreamRequester* requester, int render_process_id,
                       int render_view_id, const StreamOptions& options,
-                      const std::string& security_origin, std::string* label);
+                      const GURL& security_origin, std::string* label);
 
   // Cancels all non-finished GenerateStream request, i.e. request for which
   // StreamGenerated hasn't been called.
   void CancelRequests(MediaStreamRequester* requester);
+
+  // Cancel generate stream.
+  void CancelGenerateStream(const std::string& label);
 
   // Closes generated stream.
   void StopGeneratedStream(const std::string& label);
@@ -95,7 +98,7 @@ class CONTENT_EXPORT MediaStreamManager
                         int render_process_id,
                         int render_view_id,
                         MediaStreamType type,
-                        const std::string& security_origin,
+                        const GURL& security_origin,
                         std::string* label);
 
   // Open a device identified by |device_id|.
@@ -106,7 +109,7 @@ class CONTENT_EXPORT MediaStreamManager
                   int render_view_id,
                   const std::string& device_id,
                   MediaStreamType type,
-                  const std::string& security_origin,
+                  const GURL& security_origin,
                   std::string* label);
 
   // Implements MediaStreamProviderListener.

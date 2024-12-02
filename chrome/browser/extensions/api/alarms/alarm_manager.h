@@ -10,9 +10,10 @@
 #include <map>
 #include <vector>
 
+#include "base/memory/weak_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/common/extensions/api/experimental.alarms.h"
+#include "chrome/common/extensions/api/alarms.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -20,12 +21,35 @@ class Profile;
 
 namespace extensions {
 
+class ExtensionAlarmsSchedulingTest;
+
+struct Alarm {
+  typedef base::Time (*TimeProvider)();
+
+  Alarm();
+  Alarm(const std::string& name,
+        const api::alarms::AlarmCreateInfo& create_info,
+        base::TimeDelta min_granularity,
+        TimeProvider now);
+  ~Alarm();
+
+  linked_ptr<api::alarms::Alarm> js_alarm;
+  // The granularity isn't exposed to the extension's javascript, but we poll at
+  // least as often as the shortest alarm's granularity.  It's initialized as
+  // the relative delay requested in creation, even if creation uses an absolute
+  // time.  This will always be at least as large as the min_granularity
+  // constructor argument.
+  base::TimeDelta granularity;
+};
+
 // Manages the currently pending alarms for every extension in a profile.
 // There is one manager per virtual Profile.
-class AlarmManager : public content::NotificationObserver {
+class AlarmManager
+    : public content::NotificationObserver,
+      public base::SupportsWeakPtr<AlarmManager> {
  public:
-  typedef extensions::api::experimental_alarms::Alarm Alarm;
-  typedef std::vector<linked_ptr<Alarm> > AlarmList;
+  typedef base::Time (*TimeProvider)();
+  typedef std::vector<Alarm> AlarmList;
 
   class Delegate {
    public:
@@ -35,7 +59,8 @@ class AlarmManager : public content::NotificationObserver {
                          const Alarm& alarm) = 0;
   };
 
-  explicit AlarmManager(Profile* profile);
+  // 'now' is usually &base::Time::Now.
+  explicit AlarmManager(Profile* profile, TimeProvider now);
   virtual ~AlarmManager();
 
   // Override the default delegate. Callee assumes onwership. Used for testing.
@@ -43,7 +68,7 @@ class AlarmManager : public content::NotificationObserver {
 
   // Adds |alarm| for the given extension, and starts the timer.
   void AddAlarm(const std::string& extension_id,
-                const linked_ptr<Alarm>& alarm);
+                const Alarm& alarm);
 
   // Returns the alarm with the given name, or NULL if none exists.
   const Alarm* GetAlarm(const std::string& extension_id,
@@ -61,6 +86,14 @@ class AlarmManager : public content::NotificationObserver {
   void RemoveAllAlarms(const std::string& extension_id);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(ExtensionAlarmsTest, CreateRepeating);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionAlarmsTest, Clear);
+  friend class ExtensionAlarmsSchedulingTest;
+  FRIEND_TEST_ALL_PREFIXES(ExtensionAlarmsSchedulingTest, PollScheduling);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionAlarmsSchedulingTest,
+                           ReleasedExtensionPollsInfrequently);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionAlarmsSchedulingTest, TimerRunning);
+
   typedef std::string ExtensionId;
   typedef std::map<ExtensionId, AlarmList> AlarmMap;
 
@@ -79,16 +112,24 @@ class AlarmManager : public content::NotificationObserver {
   void RemoveAlarmIterator(const AlarmIterator& iter);
 
   // Callback for when an alarm fires.
-  void OnAlarm(const std::string& extension_id, const std::string& name);
+  void OnAlarm(AlarmIterator iter);
 
   // Internal helper to add an alarm and start the timer with the given delay.
   void AddAlarmImpl(const std::string& extension_id,
-                    const linked_ptr<Alarm>& alarm,
-                    base::TimeDelta timer_delay);
+                    const Alarm& alarm);
 
-  // Syncs our alarm data for the given extension to/from the prefs file.
-  void WriteToPrefs(const std::string& extension_id);
-  void ReadFromPrefs(const std::string& extension_id);
+  // Syncs our alarm data for the given extension to/from the state storage.
+  void WriteToStorage(const std::string& extension_id);
+  void ReadFromStorage(const std::string& extension_id,
+                       scoped_ptr<base::Value> value);
+
+  // Schedules the next poll of alarms for when the next soonest alarm runs,
+  // but do not more often than min_period.
+  void ScheduleNextPoll(base::TimeDelta min_period);
+
+  // Polls the alarms, running any that have elapsed. After running them and
+  // rescheduling repeating alarms, schedule the next poll.
+  void PollAlarms();
 
   // NotificationObserver:
   virtual void Observe(int type,
@@ -96,23 +137,20 @@ class AlarmManager : public content::NotificationObserver {
                        const content::NotificationDetails& details) OVERRIDE;
 
   Profile* profile_;
+  const TimeProvider now_;
   content::NotificationRegistrar registrar_;
   scoped_ptr<Delegate> delegate_;
 
+  // The timer for this alarm manager.
+  base::OneShotTimer<AlarmManager> timer_;
+
   // A map of our pending alarms, per extension.
+  // Invariant: None of the AlarmLists are empty.
   AlarmMap alarms_;
 
-  // A map of the timer associated with each alarm.
-  std::map<const Alarm*, linked_ptr<base::Timer> > timers_;
-};
-
-// Contains the data we store in the extension prefs for each alarm.
-struct AlarmPref {
-  linked_ptr<AlarmManager::Alarm> alarm;
-  base::Time scheduled_run_time;
-
-  AlarmPref();
-  ~AlarmPref();
+  // The previous and next time that alarms were and will be run.
+  base::Time last_poll_time_;
+  base::Time next_poll_time_;
 };
 
 } //  namespace extensions

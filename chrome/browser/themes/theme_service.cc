@@ -21,14 +21,22 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image_skia.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "ui/views/widget/native_widget_win.h"
 #endif
 
+#if defined(USE_AURA) && !defined(USE_ASH) && defined(OS_LINUX)
+#include "ui/base/linux_ui.h"
+#endif
+
 using content::BrowserThread;
 using content::UserMetricsAction;
+using extensions::Extension;
 using ui::ResourceBundle;
 
 // Strings used in alignment properties.
@@ -237,6 +245,12 @@ const gfx::Image* ThemeService::GetImageNamed(int id) const {
   if (theme_pack_.get())
     image = theme_pack_->GetImageNamed(id);
 
+#if defined(USE_AURA) && !defined(USE_ASH) && defined(OS_LINUX)
+  const ui::LinuxUI* linux_ui = ui::LinuxUI::instance();
+  if (!image && linux_ui)
+    image = linux_ui->GetThemeImageNamed(id);
+#endif
+
   if (!image)
     image = &rb_.GetNativeImageNamed(id);
 
@@ -244,17 +258,20 @@ const gfx::Image* ThemeService::GetImageNamed(int id) const {
 }
 
 SkBitmap* ThemeService::GetBitmapNamed(int id) const {
-  DCHECK(CalledOnValidThread());
+  const gfx::Image* image = GetImageNamed(id);
+  if (!image)
+    return NULL;
 
-  SkBitmap* bitmap = NULL;
+  return const_cast<SkBitmap*>(image->ToSkBitmap());
+}
 
-  if (theme_pack_.get())
-    bitmap = theme_pack_->GetBitmapNamed(id);
-
-  if (!bitmap)
-    bitmap = rb_.GetBitmapNamed(id);
-
-  return bitmap;
+gfx::ImageSkia* ThemeService::GetImageSkiaNamed(int id) const {
+  const gfx::Image* image = GetImageNamed(id);
+  if (!image)
+    return NULL;
+  // TODO(pkotwicz): Remove this const cast.  The gfx::Image interface returns
+  // its images const. GetImageSkiaNamed() also should but has many callsites.
+  return const_cast<gfx::ImageSkia*>(image->ToImageSkia());
 }
 
 SkColor ThemeService::GetColor(int id) const {
@@ -263,6 +280,12 @@ SkColor ThemeService::GetColor(int id) const {
   SkColor color;
   if (theme_pack_.get() && theme_pack_->GetColor(id, &color))
     return color;
+
+#if defined(USE_AURA) && !defined(USE_ASH) && defined(OS_LINUX)
+  const ui::LinuxUI* linux_ui = ui::LinuxUI::instance();
+  if (linux_ui && linux_ui->GetColor(id, &color))
+    return color;
+#endif
 
   // For backward compat with older themes, some newer colors are generated from
   // older ones if they are missing.
@@ -320,7 +343,7 @@ base::RefCountedMemory* ThemeService::GetRawData(int id) const {
   if (theme_pack_.get())
     data = theme_pack_->GetRawData(id);
   if (!data)
-    data = rb_.LoadDataResourceBytes(id);
+    data = rb_.LoadDataResourceBytes(id, ui::SCALE_FACTOR_100P);
 
   return data;
 }

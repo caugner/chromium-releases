@@ -11,12 +11,13 @@
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #include "chrome/browser/ui/cocoa/info_bubble_view.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -37,6 +38,7 @@
 using content::OpenURLParams;
 using content::Referrer;
 using content::WebContents;
+using extensions::Extension;
 
 // A class that loads the extension icon on the I/O thread before showing the
 // confirmation dialog to uninstall the given extension.
@@ -92,10 +94,10 @@ enum {
 };
 
 int CurrentTabId() {
-  Browser* browser = BrowserList::GetLastActive();
+  Browser* browser = browser::GetLastActiveBrowser();
   if(!browser)
     return -1;
-  WebContents* contents = browser->GetSelectedWebContents();
+  WebContents* contents = browser->GetActiveWebContents();
   if (!contents)
     return -1;
   return ExtensionTabUtil::GetTabId(contents);
@@ -151,7 +153,7 @@ int CurrentTabId() {
 }
 
 - (void)dispatch:(id)menuItem {
-  Browser* browser = BrowserList::FindBrowserWithProfile(profile_);
+  Browser* browser = browser::FindBrowserWithProfile(profile_);
   if (!browser)
     return;
 
@@ -186,7 +188,8 @@ int CurrentTabId() {
     }
     case kExtensionContextHide: {
       ExtensionService* extension_service = profile_->GetExtensionService();
-      extension_service->SetBrowserActionVisibility(extension_, false);
+      extension_service->extension_prefs()->
+          SetBrowserActionVisibility(extension_, false);
       break;
     }
     case kExtensionContextManage: {

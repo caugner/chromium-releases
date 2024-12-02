@@ -4,46 +4,22 @@
 
 #include "chrome/browser/chromeos/network_login_observer.h"
 
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
-#include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
 namespace chromeos {
 
-NetworkLoginObserver::NetworkLoginObserver(NetworkLibrary* netlib) {
-  netlib->AddNetworkManagerObserver(this);
+NetworkLoginObserver::NetworkLoginObserver() {
 }
 
 NetworkLoginObserver::~NetworkLoginObserver() {
-  CrosLibrary::Get()->GetNetworkLibrary()->RemoveNetworkManagerObserver(this);
-}
-
-void NetworkLoginObserver::CreateModalPopup(views::WidgetDelegate* view) {
-  gfx::NativeWindow parent = NULL;
-  if (BaseLoginDisplayHost::default_host()) {
-    parent = BaseLoginDisplayHost::default_host()->GetNativeWindow();
-  } else {
-    Browser* browser = BrowserList::FindTabbedBrowser(
-        ProfileManager::GetDefaultProfileOrOffTheRecord(), true);
-    parent = browser ? browser->window()->GetNativeHandle() : NULL;
-  }
-  views::Widget* window = views::Widget::CreateWindowWithParent(view, parent);
-  window->SetAlwaysOnTop(true);
-  window->Show();
 }
 
 void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {
-  const WifiNetworkVector& wifi_networks = cros->wifi_networks();
-  const VirtualNetworkVector& virtual_networks = cros->virtual_networks();
-
   // Check to see if we have any newly failed wifi network.
+  const WifiNetworkVector& wifi_networks = cros->wifi_networks();
   for (WifiNetworkVector::const_iterator it = wifi_networks.begin();
        it != wifi_networks.end(); it++) {
     WifiNetwork* wifi = *it;
@@ -59,12 +35,35 @@ void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {
           wifi->error() == ERROR_BAD_WEPKEY ||
           wifi->connection_started() ||
           (wifi->encrypted() && wifi->added())) {
-        CreateModalPopup(new NetworkConfigView(wifi));
+        NetworkConfigView::Show(wifi, NULL);
+        return;  // Only support one failure per notification.
+      }
+    }
+  }
+  // Check to see if we have any newly failed wimax network.
+  const WimaxNetworkVector& wimax_networks = cros->wimax_networks();
+  for (WimaxNetworkVector::const_iterator it = wimax_networks.begin();
+       it != wimax_networks.end(); it++) {
+    WimaxNetwork* wimax = *it;
+    if (wimax->notify_failure()) {
+      // Display login dialog again for bad_passphrase and bad_wepkey errors.
+      // Always re-display for user initiated connections that fail.
+      // Always re-display the login dialog for encrypted networks that were
+      // added and failed to connect for any reason.
+      VLOG(1) << "NotifyFailure: " << wimax->name()
+              << ", error: " << wimax->error()
+              << ", added: " << wimax->added();
+      if (wimax->error() == ERROR_BAD_PASSPHRASE ||
+          wimax->error() == ERROR_BAD_WEPKEY ||
+          wimax->connection_started() ||
+          (wimax->passphrase_required() && wimax->added())) {
+        NetworkConfigView::Show(wimax, NULL);
         return;  // Only support one failure per notification.
       }
     }
   }
   // Check to see if we have any newly failed virtual network.
+  const VirtualNetworkVector& virtual_networks = cros->virtual_networks();
   for (VirtualNetworkVector::const_iterator it = virtual_networks.begin();
        it != virtual_networks.end(); it++) {
     VirtualNetwork* vpn = *it;
@@ -74,7 +73,7 @@ void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {
               << ", added: " << vpn->added();
       // Display login dialog for any error or newly added network.
       if (vpn->error() != ERROR_NO_ERROR || vpn->added()) {
-        CreateModalPopup(new NetworkConfigView(vpn));
+        NetworkConfigView::Show(vpn, NULL);
         return;  // Only support one failure per notification.
       }
     }

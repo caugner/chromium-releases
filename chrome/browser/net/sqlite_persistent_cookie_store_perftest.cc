@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/test/thread_test_helper.h"
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -49,7 +49,8 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
     io_thread_.Start();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     store_ = new SQLitePersistentCookieStore(
-      temp_dir_.path().Append(chrome::kCookieFilename));
+        temp_dir_.path().Append(chrome::kCookieFilename),
+        false, NULL);
     std::vector<net::CookieMonster::CanonicalCookie*> cookies;
     Load();
     ASSERT_EQ(0u, cookies_.size());
@@ -64,7 +65,7 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
           net::CookieMonster::CanonicalCookie(gurl,
             base::StringPrintf("Cookie_%d", cookie_num), "1",
             domain_name, "/", std::string(), std::string(),
-            t, t, t, false, false, true));
+            t, t, t, false, false, true, true));
       }
     }
     // Replace the store effectively destroying the current one and forcing it
@@ -77,7 +78,7 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
     ASSERT_TRUE(helper->Run());
 
     store_ = new SQLitePersistentCookieStore(
-      temp_dir_.path().Append(chrome::kCookieFilename));
+      temp_dir_.path().Append(chrome::kCookieFilename), false, NULL);
   }
 
  protected:

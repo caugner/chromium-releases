@@ -9,12 +9,13 @@
 #include <gtk/gtk.h>
 
 #include "base/message_loop.h"
+#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "ui/base/animation/linear_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -106,7 +107,7 @@ DownloadStartedAnimationGtk::DownloadStartedAnimationGtk(
 
   registrar_.Add(
       this,
-      content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
+      content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
       content::Source<WebContents>(web_contents_));
   registrar_.Add(
       this,
@@ -162,7 +163,7 @@ void DownloadStartedAnimationGtk::Close() {
 
   registrar_.Remove(
       this,
-      content::NOTIFICATION_WEB_CONTENTS_HIDDEN,
+      content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
       content::Source<WebContents>(web_contents_));
   registrar_.Remove(
       this,
@@ -196,6 +197,11 @@ void DownloadStartedAnimationGtk::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  if (type == content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED) {
+    bool visible = *content::Details<bool>(details).ptr();
+    if (visible)
+      return;
+  }
   Close();
 }
 

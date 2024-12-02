@@ -57,7 +57,6 @@ enum PropertyIndex {
   PROPERTY_INDEX_FOUND_NETWORKS,
   PROPERTY_INDEX_GUID,
   PROPERTY_INDEX_HARDWARE_REVISION,
-  PROPERTY_INDEX_HIDDEN_SSID,
   PROPERTY_INDEX_HOME_PROVIDER,
   PROPERTY_INDEX_HOST,
   PROPERTY_INDEX_IDENTITY,
@@ -226,7 +225,8 @@ enum ConnectionState {
   STATE_FAILURE            = 7,
   STATE_ACTIVATION_FAILURE = 8,
   STATE_PORTAL             = 9,
-  STATE_ONLINE             = 10
+  STATE_ONLINE             = 10,
+  STATE_CONNECT_REQUESTED  = 11,  // Chrome only state
 };
 
 // Network enums (see flimflam/include/network.h)

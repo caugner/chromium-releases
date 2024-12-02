@@ -9,13 +9,13 @@
 #include <string>
 #include "base/location.h"
 
-#include "chrome/browser/sync/api/sync_error.h"
-#include "sync/util/unrecoverable_error_handler.h"
-#include "sync/syncable/model_type.h"
+#include "sync/api/sync_error.h"
+#include "sync/internal_api/public/syncable/model_type.h"
+#include "sync/internal_api/public/util/unrecoverable_error_handler.h"
 
 namespace browser_sync {
 
-class DataTypeErrorHandler : public UnrecoverableErrorHandler {
+class DataTypeErrorHandler {
  public:
   // Call this to disable a datatype while it is running. This is usually
   // called for a runtime failure that is specific to a datatype.
@@ -37,4 +37,3 @@ class DataTypeErrorHandler : public UnrecoverableErrorHandler {
 
 }  // namespace browser_sync
 #endif  // CHROME_BROWSER_SYNC_GLUE_DATA_TYPE_ERROR_HANDLER_H__
-

@@ -10,10 +10,10 @@
 #include "base/logging.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
-#include "ui/gfx/screen.h"
 #include "ui/aura/root_window.h"
-#include "ui/views/layout/fill_layout.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/controls/webview/webview.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
 using content::BrowserThread;
@@ -21,6 +21,10 @@ using content::BrowserThread;
 namespace {
 
 ash::internal::ScreensaverView* g_instance = NULL;
+
+// Do not restart the screensaver again if it has
+// terminated kMaxTerminations times already.
+const int kMaxTerminations = 3;
 
 }  // namespace
 
@@ -62,16 +66,26 @@ views::View* ScreensaverView::GetContentsView() {
 // ScreensaverView, content::WebContentsObserver implementation.
 void ScreensaverView::RenderViewGone(
     base::TerminationStatus status) {
-  LOG(ERROR) << "Screensaver terminated with status " << status
-             << ", reloading.";
-  // Reload the screensaver url into the webcontents.
-  LoadScreensaver();
+  LOG(ERROR) << "Screensaver terminated with status " << status;
+  termination_count_++;
+
+  if (termination_count_ < kMaxTerminations) {
+    LOG(ERROR) << termination_count_
+               << " terminations is under the threshold of "
+               << kMaxTerminations
+               << "; reloading Screensaver.";
+    LoadScreensaver();
+  } else {
+    LOG(ERROR) << "Exceeded termination threshold, closing Screensaver.";
+    ScreensaverView::CloseScreensaver();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // ScreensaverView private methods.
 ScreensaverView::ScreensaverView(const GURL& url)
     : url_(url),
+      termination_count_(0),
       screensaver_webview_(NULL),
       container_window_(NULL) {
 }
@@ -113,9 +127,9 @@ void ScreensaverView::LoadScreensaver() {
 }
 
 void ScreensaverView::ShowWindow() {
-  aura::RootWindow* root_window = ash::Shell::GetRootWindow();
+  aura::RootWindow* root_window = ash::Shell::GetPrimaryRootWindow();
   gfx::Rect screen_rect =
-      gfx::Screen::GetMonitorNearestWindow(root_window).bounds();
+      gfx::Screen::GetDisplayNearestWindow(root_window).bounds();
 
   // We want to be the fullscreen topmost child of the root window.
   // There should be nothing ever really that should show up on top of us.

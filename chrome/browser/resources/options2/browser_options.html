@@ -93,8 +93,7 @@
           class="settings-row" hidden>
       </div>
       <div class="settings-row">
-        <button id="pointer-settings-button"
-            i18n-content="touchpadMouseSettingsButtonTitle">
+        <button id="pointer-settings-button">
         </button>
         <button id="keyboard-settings-button"
             i18n-content="keyboardSettingsButtonTitle">
@@ -118,8 +117,6 @@
         <div class="checkbox" guest-visibility="disabled">
           <label id="instant-label">
             <!-- TODO(estade): metric? -->
-            <input id="instant-field-trial-control" type="checkbox"
-                checked="checked" hidden>
             <input id="instant-enabled-control" type="checkbox"
                 pref="instant.enabled">
             <!-- TODO(estade) There's a link in here which should not be inside
@@ -311,6 +308,13 @@
           i18n-content="managePasswords"
           pref="profile.password_manager_enabled"></button>
     </div>
+    <div class="checkbox" id="password-generation-checkbox">
+      <label>
+        <input id="password-generation-enabled" pref="password_generation.enabled"
+            metric="Options_PasswordGenerationCheckbox" type="checkbox">
+        <span i18n-content="passwordGenerationEnabledDescription"></span>
+      </label>
+    </div>
 <if expr="is_macosx">
     <div id="mac-passwords-warning" i18n-content="macPasswordsWarning" hidden>
     </div>
@@ -384,22 +388,11 @@
   <section>
     <h3 i18n-content="downloadLocationGroupName"></h3>
     <div>
-<if expr="pp_ifdef('chromeos')">
-      <div class="checkbox">
-        <label>
-          <input type="checkbox" 
-          pref="gdata.disabled" 
-          metric="Options_DisableGData">
-          <span i18n-content="disableGData"></span>
-        </label>
-      </div>  
-</if>    
-<if expr="not pp_ifdef('chromeos')">
       <div class="settings-row">
         <label>
           <span i18n-content="downloadLocationBrowseTitle"></span>
           <input id="downloadLocationPath" class="weakrtl" type="text"
-              pref="download.default_directory" size="36" readonly>
+            size="36" readonly>
         </label>
         <button id="downloadLocationChangeButton"
             pref="download.prompt_for_download"
@@ -413,6 +406,17 @@
           <span i18n-content="downloadLocationAskForSaveLocation"></span>
         </label>
       </div>
+<if expr="pp_ifdef('chromeos')">
+      <div class="checkbox" guest-visibility="disabled">
+        <label>
+          <input type="checkbox" 
+          pref="gdata.disabled" 
+          metric="Options_DisableGData">
+          <span i18n-content="disableGData"></span>
+        </label>
+      </div>  
+</if>    
+<if expr="not pp_ifdef('chromeos')">
       <div id="auto-open-file-types-section" hidden>
         <div id="auto-open-file-types-container">
           <div id="auto-open-file-types-label"
@@ -427,10 +431,12 @@
   <section>
       <h3 i18n-content="advancedSectionTitleSecurity"></h3>
       <div>
+<if expr="pp_ifdef('use_nss') or is_win or is_macosx">
         <div class="settings-row">
           <button id="certificatesManageButton"
               i18n-content="certificatesManageButton"></button>
         </div>
+</if>
         <div class="checkbox">
           <label>
             <input id="sslCheckRevocation" type="checkbox">
@@ -480,6 +486,14 @@
           <label>
             <input id="accessibility-spoken-feedback-check" type="checkbox">
             <span i18n-content="accessibilitySpokenFeedback"></span>
+          </label>
+        </div>
+      </div>
+      <div class="option-name">
+        <div class="checkbox">
+          <label>
+            <input id="accessibility-high-contrast-check" type="checkbox">
+            <span i18n-content="accessibilityHighContrast"></span>
           </label>
         </div>
       </div>

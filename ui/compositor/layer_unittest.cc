@@ -9,8 +9,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/Platform/chromium/public/WebSize.h"
 #include "ui/compositor/compositor_observer.h"
+#include "ui/compositor/compositor_setup.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/test/test_compositor_host.h"
@@ -18,8 +21,6 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/gfx_paths.h"
 #include "ui/gfx/skia_util.h"
-
-#include "ui/compositor/compositor_setup.h"
 
 namespace ui {
 
@@ -130,6 +131,13 @@ class ColoredLayer : public Layer, public LayerDelegate {
     canvas->DrawColor(color_);
   }
 
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {
+  }
+
+  virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE {
+    return base::Closure();
+  }
+
  private:
   SkColor color_;
 };
@@ -210,7 +218,7 @@ class LayerWithRealCompositorTest : public testing::Test {
 // LayerDelegate that paints colors to the layer.
 class TestLayerDelegate : public LayerDelegate {
  public:
-  explicit TestLayerDelegate() : color_index_(0) {}
+  explicit TestLayerDelegate() { reset(); }
   virtual ~TestLayerDelegate() {}
 
   void AddColor(SkColor color) {
@@ -220,18 +228,47 @@ class TestLayerDelegate : public LayerDelegate {
   const gfx::Size& paint_size() const { return paint_size_; }
   int color_index() const { return color_index_; }
 
+  std::string ToScaleString() const {
+    return StringPrintf("%.1f %.1f", scale_x_, scale_y_);
+  }
+
+  float device_scale_factor() const {
+    return device_scale_factor_;
+  }
+
   // Overridden from LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
     SkBitmap contents = canvas->ExtractBitmap();
     paint_size_ = gfx::Size(contents.width(), contents.height());
     canvas->FillRect(gfx::Rect(paint_size_), colors_[color_index_]);
     color_index_ = (color_index_ + 1) % static_cast<int>(colors_.size());
+    const SkMatrix& matrix = canvas->sk_canvas()->getTotalMatrix();
+    scale_x_ = matrix.getScaleX();
+    scale_y_ = matrix.getScaleY();
+  }
+
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {
+    device_scale_factor_ = device_scale_factor;
+  }
+
+  virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE {
+    return base::Closure();
+  }
+
+  void reset() {
+    color_index_ = 0;
+    paint_size_.SetSize(0, 0);
+    scale_x_ = scale_y_ = 0.0f;
+    device_scale_factor_ = 0.0f;
   }
 
  private:
   std::vector<SkColor> colors_;
   int color_index_;
   gfx::Size paint_size_;
+  float scale_x_;
+  float scale_y_;
+  float device_scale_factor_;
 
   DISALLOW_COPY_AND_ASSIGN(TestLayerDelegate);
 };
@@ -253,6 +290,11 @@ class DrawTreeLayerDelegate : public LayerDelegate {
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
     painted_ = true;
   }
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {
+  }
+  virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE {
+    return base::Closure();
+  }
 
   bool painted_;
 
@@ -269,6 +311,11 @@ class NullLayerDelegate : public LayerDelegate {
   // Overridden from LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
   }
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {
+  }
+  virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE {
+    return base::Closure();
+  }
 
   DISALLOW_COPY_AND_ASSIGN(NullLayerDelegate);
 };
@@ -276,13 +323,15 @@ class NullLayerDelegate : public LayerDelegate {
 // Remembers if it has been notified.
 class TestCompositorObserver : public CompositorObserver {
  public:
-  TestCompositorObserver() : started_(false), ended_(false) {}
+  TestCompositorObserver() : started_(false), ended_(false), aborted_(false) {}
 
   bool notified() const { return started_ && ended_; }
+  bool aborted() const { return aborted_; }
 
   void Reset() {
     started_ = false;
     ended_ = false;
+    aborted_ = false;
   }
 
  private:
@@ -294,8 +343,13 @@ class TestCompositorObserver : public CompositorObserver {
     ended_ = true;
   }
 
+  virtual void OnCompositingAborted(Compositor* compositor) OVERRIDE {
+    aborted_ = true;
+  }
+
   bool started_;
   bool ended_;
+  bool aborted_;
 
   DISALLOW_COPY_AND_ASSIGN(TestCompositorObserver);
 };
@@ -315,17 +369,23 @@ class TestCompositorObserver : public CompositorObserver {
 #define MAYBE_CompositorObservers DISABLED_CompositorObservers
 #define MAYBE_ModifyHierarchy DISABLED_ModifyHierarchy
 #define MAYBE_Opacity DISABLED_Opacity
+#define MAYBE_ScaleUpDown DISABLED_ScaleUpDown
+#define MAYBE_ScaleReparent DISABLED_ScaleReparent
+#define MAYBE_NoScaleCanvas DISABLED_NoScaleCanvas
 #else
-#define MAYBE_Delegate DISABLED_Delegate
+#define MAYBE_Delegate Delegate
 #define MAYBE_Draw Draw
-#define MAYBE_DrawTree DISABLED_DrawTree
+#define MAYBE_DrawTree DrawTree
 #define MAYBE_Hierarchy Hierarchy
-#define MAYBE_HierarchyNoTexture DISABLED_HierarchyNoTexture
+#define MAYBE_HierarchyNoTexture HierarchyNoTexture
 #define MAYBE_DrawPixels DrawPixels
 #define MAYBE_SetRootLayer SetRootLayer
-#define MAYBE_CompositorObservers DISABLED_CompositorObservers
+#define MAYBE_CompositorObservers CompositorObservers
 #define MAYBE_ModifyHierarchy ModifyHierarchy
 #define MAYBE_Opacity Opacity
+#define MAYBE_ScaleUpDown ScaleUpDown
+#define MAYBE_ScaleReparent ScaleReparent
+#define MAYBE_NoScaleCanvas NoScaleCanvas
 #endif
 
 TEST_F(LayerWithRealCompositorTest, MAYBE_Draw) {
@@ -366,7 +426,8 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
   virtual void SetUp() OVERRIDE {
     ui::SetupTestCompositor();
     compositor_.reset(new Compositor(
-          this, gfx::kNullAcceleratedWidget, gfx::Size(1000, 1000)));
+        this, gfx::kNullAcceleratedWidget));
+    compositor_->SetScaleAndSize(1.0f, gfx::Size(1000, 1000));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -846,6 +907,15 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_CompositorObservers) {
   RunPendingMessages();
   EXPECT_TRUE(observer.notified());
 
+  // A change resulting in an aborted swap buffer should alert the observer
+  // and also signal an abort.
+  observer.Reset();
+  l2->SetOpacity(0.1f);
+  GetCompositor()->OnSwapBuffersAborted();
+  RunPendingMessages();
+  EXPECT_TRUE(observer.notified());
+  EXPECT_TRUE(observer.aborted());
+
   GetCompositor()->RemoveObserver(&observer);
 
   // Opacity changes should no longer alert the removed observer.
@@ -857,7 +927,7 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_CompositorObservers) {
 
 // Checks that modifying the hierarchy correctly affects final composite.
 TEST_F(LayerWithRealCompositorTest, MAYBE_ModifyHierarchy) {
-  GetCompositor()->WidgetSizeChanged(gfx::Size(50, 50));
+  GetCompositor()->SetScaleAndSize(1.0f, gfx::Size(50, 50));
 
   // l0
   //  +-l11
@@ -917,7 +987,7 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_ModifyHierarchy) {
 // Opacity is rendered correctly.
 // Checks that modifying the hierarchy correctly affects final composite.
 TEST_F(LayerWithRealCompositorTest, MAYBE_Opacity) {
-  GetCompositor()->WidgetSizeChanged(gfx::Size(50, 50));
+  GetCompositor()->SetScaleAndSize(1.0f, gfx::Size(50, 50));
 
   // l0
   //  +-l11
@@ -976,6 +1046,13 @@ class SchedulePaintLayerDelegate : public LayerDelegate {
       last_clip_rect_ = gfx::SkRectToRect(sk_clip_rect);
   }
 
+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {
+  }
+
+  virtual base::Closure PrepareForLayerBoundsChange() OVERRIDE {
+    return base::Closure();
+  }
+
   int paint_count_;
   Layer* layer_;
   gfx::Rect schedule_paint_rect_;
@@ -1019,6 +1096,203 @@ TEST_F(LayerWithDelegateTest, SchedulePaintFromOnPaintLayer) {
   EXPECT_EQ(1, child_delegate.GetPaintCountAndClear());
   EXPECT_TRUE(child_delegate.last_clip_rect().Contains(
                   gfx::Rect(10, 10, 30, 30)));
+}
+
+TEST_F(LayerWithRealCompositorTest, MAYBE_ScaleUpDown) {
+  scoped_ptr<Layer> root(CreateColorLayer(SK_ColorWHITE,
+                                          gfx::Rect(10, 20, 200, 220)));
+  TestLayerDelegate root_delegate;
+  root_delegate.AddColor(SK_ColorWHITE);
+  root->set_delegate(&root_delegate);
+
+  scoped_ptr<Layer> l1(CreateColorLayer(SK_ColorWHITE,
+                                        gfx::Rect(10, 20, 140, 180)));
+  TestLayerDelegate l1_delegate;
+  l1_delegate.AddColor(SK_ColorWHITE);
+  l1->set_delegate(&l1_delegate);
+
+  GetCompositor()->SetScaleAndSize(1.0f, gfx::Size(500, 500));
+  GetCompositor()->SetRootLayer(root.get());
+  root->Add(l1.get());
+  RunPendingMessages();
+
+  EXPECT_EQ("10,20 200x220", root->bounds().ToString());
+  EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
+  gfx::Size size_in_pixel = root->web_layer().bounds();
+  EXPECT_EQ("200x220", size_in_pixel.ToString());
+  size_in_pixel = l1->web_layer().bounds();
+  EXPECT_EQ("140x180", size_in_pixel.ToString());
+  // No scale change, so no scale notification.
+  EXPECT_EQ(0.0f, root_delegate.device_scale_factor());
+  EXPECT_EQ(0.0f, l1_delegate.device_scale_factor());
+
+  RunPendingMessages();
+  EXPECT_EQ("200x220", root_delegate.paint_size().ToString());
+  EXPECT_EQ("140x180", l1_delegate.paint_size().ToString());
+
+  // Scale up to 2.0. Changing scale doesn't change the bounds in DIP.
+  GetCompositor()->SetScaleAndSize(2.0f, gfx::Size(500, 500));
+  EXPECT_EQ("10,20 200x220", root->bounds().ToString());
+  EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
+  // Pixel size must have been scaled up.
+  size_in_pixel = root->web_layer().bounds();
+  EXPECT_EQ("400x440", size_in_pixel.ToString());
+  size_in_pixel = l1->web_layer().bounds();
+  EXPECT_EQ("280x360", size_in_pixel.ToString());
+  // New scale factor must have been notified.
+  EXPECT_EQ(2.0f, root_delegate.device_scale_factor());
+  EXPECT_EQ(2.0f, l1_delegate.device_scale_factor());
+
+  // Canvas size must have been scaled down up.
+  RunPendingMessages();
+  EXPECT_EQ("400x440", root_delegate.paint_size().ToString());
+  EXPECT_EQ("2.0 2.0", root_delegate.ToScaleString());
+  EXPECT_EQ("280x360", l1_delegate.paint_size().ToString());
+  EXPECT_EQ("2.0 2.0", l1_delegate.ToScaleString());
+
+  // Scale down back to 1.0f.
+  GetCompositor()->SetScaleAndSize(1.0f, gfx::Size(500, 500));
+  EXPECT_EQ("10,20 200x220", root->bounds().ToString());
+  EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
+  // Pixel size must have been scaled down.
+  size_in_pixel = root->web_layer().bounds();
+  EXPECT_EQ("200x220", size_in_pixel.ToString());
+  size_in_pixel = l1->web_layer().bounds();
+  EXPECT_EQ("140x180", size_in_pixel.ToString());
+  // New scale factor must have been notified.
+  EXPECT_EQ(1.0f, root_delegate.device_scale_factor());
+  EXPECT_EQ(1.0f, l1_delegate.device_scale_factor());
+
+  // Canvas size must have been scaled down too.
+  RunPendingMessages();
+  EXPECT_EQ("200x220", root_delegate.paint_size().ToString());
+  EXPECT_EQ("1.0 1.0", root_delegate.ToScaleString());
+  EXPECT_EQ("140x180", l1_delegate.paint_size().ToString());
+  EXPECT_EQ("1.0 1.0", l1_delegate.ToScaleString());
+
+  root_delegate.reset();
+  l1_delegate.reset();
+  // Just changing the size shouldn't notify the scale change nor
+  // trigger repaint.
+  GetCompositor()->SetScaleAndSize(1.0f, gfx::Size(1000, 1000));
+  // No scale change, so no scale notification.
+  EXPECT_EQ(0.0f, root_delegate.device_scale_factor());
+  EXPECT_EQ(0.0f, l1_delegate.device_scale_factor());
+  RunPendingMessages();
+  EXPECT_EQ("0x0", root_delegate.paint_size().ToString());
+  EXPECT_EQ("0.0 0.0", root_delegate.ToScaleString());
+  EXPECT_EQ("0x0", l1_delegate.paint_size().ToString());
+  EXPECT_EQ("0.0 0.0", l1_delegate.ToScaleString());
+}
+
+TEST_F(LayerWithRealCompositorTest, MAYBE_ScaleReparent) {
+  scoped_ptr<Layer> root(CreateColorLayer(SK_ColorWHITE,
+                                          gfx::Rect(10, 20, 200, 220)));
+  scoped_ptr<Layer> l1(CreateColorLayer(SK_ColorWHITE,
+                                        gfx::Rect(10, 20, 140, 180)));
+  TestLayerDelegate l1_delegate;
+  l1_delegate.AddColor(SK_ColorWHITE);
+  l1->set_delegate(&l1_delegate);
+
+  GetCompositor()->SetScaleAndSize(1.0f, gfx::Size(500, 500));
+  GetCompositor()->SetRootLayer(root.get());
+  RunPendingMessages();
+
+  root->Add(l1.get());
+  EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
+  gfx::Size size_in_pixel = l1->web_layer().bounds();
+  EXPECT_EQ("140x180", size_in_pixel.ToString());
+  EXPECT_EQ(0.0f, l1_delegate.device_scale_factor());
+
+  RunPendingMessages();
+  EXPECT_EQ("140x180", l1_delegate.paint_size().ToString());
+  EXPECT_EQ("1.0 1.0", l1_delegate.ToScaleString());
+
+  // Remove l1 from root and change the scale.
+  root->Remove(l1.get());
+  EXPECT_EQ(NULL, l1->parent());
+  EXPECT_EQ(NULL, l1->GetCompositor());
+  GetCompositor()->SetScaleAndSize(2.0f, gfx::Size(500, 500));
+  // Sanity check on root and l1.
+  EXPECT_EQ("10,20 200x220", root->bounds().ToString());
+  size_in_pixel = l1->web_layer().bounds();
+  EXPECT_EQ("140x180", size_in_pixel.ToString());
+
+
+  root->Add(l1.get());
+  EXPECT_EQ("10,20 140x180", l1->bounds().ToString());
+  size_in_pixel = l1->web_layer().bounds();
+  EXPECT_EQ("280x360", size_in_pixel.ToString());
+  EXPECT_EQ(2.0f, l1_delegate.device_scale_factor());
+  RunPendingMessages();
+  EXPECT_EQ("280x360", l1_delegate.paint_size().ToString());
+  EXPECT_EQ("2.0 2.0", l1_delegate.ToScaleString());
+}
+
+// Tests layer::set_scale_content(false).
+TEST_F(LayerWithRealCompositorTest, MAYBE_NoScaleCanvas) {
+  scoped_ptr<Layer> root(CreateColorLayer(SK_ColorWHITE,
+                                          gfx::Rect(10, 20, 200, 220)));
+  scoped_ptr<Layer> l1(CreateColorLayer(SK_ColorWHITE,
+                                        gfx::Rect(10, 20, 140, 180)));
+  l1->set_scale_content(false);
+  root->Add(l1.get());
+  TestLayerDelegate l1_delegate;
+  l1_delegate.AddColor(SK_ColorWHITE);
+  l1->set_delegate(&l1_delegate);
+
+  GetCompositor()->SetScaleAndSize(2.0f, gfx::Size(500, 500));
+  GetCompositor()->SetRootLayer(root.get());
+  // Scale factor change is notified regardless of scale_content flag.
+  EXPECT_EQ(2.0f, l1_delegate.device_scale_factor());
+
+  RunPendingMessages();
+  EXPECT_EQ("280x360", l1_delegate.paint_size().ToString());
+  EXPECT_EQ("1.0 1.0", l1_delegate.ToScaleString());
+}
+
+// Verifies that when changing bounds on a layer that is invisible, and then
+// made visible, the right thing happens:
+// - if just a move, then no painting should happen.
+// - if a resize, the layer should be repainted.
+TEST_F(LayerWithDelegateTest, SetBoundsWhenInvisible) {
+  scoped_ptr<Layer> root(CreateNoTextureLayer(gfx::Rect(0, 0, 1000, 1000)));
+
+  scoped_ptr<Layer> child(CreateLayer(LAYER_TEXTURED));
+  child->SetBounds(gfx::Rect(0, 0, 500, 500));
+  DrawTreeLayerDelegate delegate;
+  child->set_delegate(&delegate);
+  root->Add(child.get());
+
+  // Paint once for initial damage.
+  child->SetVisible(true);
+  DrawTree(root.get());
+
+  // Reset into invisible state.
+  child->SetVisible(false);
+  DrawTree(root.get());
+  schedule_draw_invoked_ = false;
+  delegate.Reset();
+
+  // Move layer.
+  child->SetBounds(gfx::Rect(200, 200, 500, 500));
+  child->SetVisible(true);
+  EXPECT_TRUE(schedule_draw_invoked_);
+  DrawTree(root.get());
+  EXPECT_FALSE(delegate.painted());
+
+  // Reset into invisible state.
+  child->SetVisible(false);
+  DrawTree(root.get());
+  schedule_draw_invoked_ = false;
+  delegate.Reset();
+
+  // Resize layer.
+  child->SetBounds(gfx::Rect(200, 200, 400, 400));
+  child->SetVisible(true);
+  EXPECT_TRUE(schedule_draw_invoked_);
+  DrawTree(root.get());
+  EXPECT_TRUE(delegate.painted());
 }
 
 } // namespace ui
