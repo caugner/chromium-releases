@@ -9,8 +9,8 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/platform_file.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/strings/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -252,7 +252,7 @@ FileSelectHelper::GetFileTypesFromAcceptType(
     const std::vector<string16>& accept_types) {
   scoped_ptr<ui::SelectFileDialog::FileTypeInfo> base_file_type(
       new ui::SelectFileDialog::FileTypeInfo());
-  base_file_type->support_gdata = true;
+  base_file_type->support_drive = true;
   if (accept_types.empty())
     return base_file_type.Pass();
 

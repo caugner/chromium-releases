@@ -18,6 +18,9 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/search/search.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -27,7 +30,7 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/search/search.h"
+#include "chrome/browser/ui/send_feedback_experiment.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
@@ -53,6 +56,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
+#include "ui/native_theme/native_theme.h"
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
@@ -69,6 +73,21 @@
 using content::HostZoomMap;
 using content::UserMetricsAction;
 using content::WebContents;
+
+namespace {
+// Conditionally return the update app menu item title based on upgrade detector
+// state.
+string16 GetUpgradeDialogMenuItemName() {
+  if (UpgradeDetector::GetInstance()->is_outdated_install()) {
+    return l10n_util::GetStringFUTF16(
+        IDS_UPGRADE_BUBBLE_MENU_ITEM,
+        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
+  } else {
+    return l10n_util::GetStringUTF16(IDS_UPDATE_NOW);
+  }
+}
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // EncodingMenuModel
@@ -136,7 +155,7 @@ bool EncodingMenuModel::GetAcceleratorForCommandId(
   return false;
 }
 
-void EncodingMenuModel::ExecuteCommand(int command_id) {
+void EncodingMenuModel::ExecuteCommand(int command_id, int event_flags) {
   chrome::ExecuteCommand(browser_, command_id);
 }
 
@@ -185,8 +204,17 @@ void ToolsMenuModel::Build(Browser* browser) {
 
 #if !defined(OS_CHROMEOS)
   // Show IDC_FEEDBACK in "Tools" menu for non-ChromeOS platforms.
-  AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
-  AddSeparator(ui::NORMAL_SEPARATOR);
+  if (!chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
+#else
+  if (chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
 #endif
 
   encoding_menu_model_.reset(new EncodingMenuModel(browser));
@@ -285,7 +313,7 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
                                         num_background_pages);
     }
     case IDC_UPGRADE_DIALOG:
-      return l10n_util::GetStringUTF16(IDS_UPDATE_NOW);
+      return GetUpgradeDialogMenuItemName();
     case IDC_SHOW_SIGNIN:
       return signin_ui_util::GetSigninMenuLabel(
           browser_->profile()->GetOriginalProfile());
@@ -326,7 +354,7 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
   return false;
 }
 
-void WrenchMenuModel::ExecuteCommand(int command_id) {
+void WrenchMenuModel::ExecuteCommand(int command_id, int event_flags) {
   GlobalError* error = GlobalErrorServiceFactory::GetForProfile(
       browser_->profile())->GetGlobalErrorByMenuItemCommandID(command_id);
   if (error) {
@@ -441,7 +469,7 @@ WrenchMenuModel::WrenchMenuModel()
 
 void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
 #if defined(USE_AURA)
-  if (is_new_menu)
+  if (is_new_menu && !ui::NativeTheme::IsNewMenuStyleEnabled())
     AddSeparator(ui::SPACING_SEPARATOR);
 #endif
 
@@ -464,7 +492,7 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
     AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
     AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
   }
-#if defined(USE_ASH)
+#if !defined(NDEBUG) && defined(USE_ASH)
   if (base::win::GetVersion() < base::win::VERSION_WIN8 &&
       chrome::HOST_DESKTOP_TYPE_NATIVE != chrome::HOST_DESKTOP_TYPE_ASH) {
     AddItemWithStringId(IDC_TOGGLE_ASH_DESKTOP,
@@ -487,7 +515,7 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
 
-  if (chrome::search::IsInstantExtendedAPIEnabled(browser_->profile())) {
+  if (chrome::search::IsInstantExtendedAPIEnabled()) {
     recent_tabs_sub_menu_model_.reset(new RecentTabsSubMenuModel(provider_,
                                                                  browser_,
                                                                  NULL));
@@ -536,11 +564,15 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
 
 #if !defined(OS_CHROMEOS)
   // No "Sign in to Chromium..." menu item on ChromeOS.
-  const string16 short_product_name =
-      l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
-  AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
-      IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));
-  AddSeparator(ui::NORMAL_SEPARATOR);
+  SigninManager* signin = SigninManagerFactory::GetForProfile(
+      browser_->profile()->GetOriginalProfile());
+  if (signin && signin->IsSigninAllowed()) {
+    const string16 short_product_name =
+        l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
+    AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
+        IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
 #endif
 
   AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
@@ -568,7 +600,8 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
   }
 
   if (browser_defaults::kShowUpgradeMenuItem)
-    AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringUTF16(IDS_UPDATE_NOW));
+    AddItem(IDC_UPGRADE_DIALOG, GetUpgradeDialogMenuItemName());
+
   AddItem(IDC_VIEW_INCOMPATIBILITIES, l10n_util::GetStringUTF16(
       IDS_VIEW_INCOMPATIBILITIES));
 
@@ -588,8 +621,11 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
     }
   }
 
-  if (browser_defaults::kShowFeedbackMenuItem)
-    AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
+  if (browser_defaults::kShowFeedbackMenuItem &&
+      !chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+  }
 
   AddGlobalErrorMenuItems();
 
@@ -598,13 +634,30 @@ void WrenchMenuModel::Build(bool is_new_menu, bool supports_new_separators) {
                            tools_menu_model_.get());
   }
 
-  if (browser_defaults::kShowExitMenuItem) {
+  bool show_exit_menu = browser_defaults::kShowExitMenuItem;
+#if defined(OS_WIN) && defined(USE_AURA)
+  if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+    show_exit_menu = false;
+#endif
+  if (show_exit_menu)
     AddSeparator(ui::NORMAL_SEPARATOR);
-    AddItemWithStringId(IDC_EXIT, IDS_EXIT);
-  }
 
-  if (is_new_menu && supports_new_separators)
+#if !defined(OS_CHROMEOS)
+  // For Send Feedback Link experiment (crbug.com/169339).
+  if (chrome::UseAlternateSendFeedbackLocation()) {
+    AddItemWithStringId(IDC_FEEDBACK,
+                        chrome::GetSendFeedbackMenuLabelID());
+    AddSeparator(ui::NORMAL_SEPARATOR);
+  }
+#endif
+
+  if (show_exit_menu)
+    AddItemWithStringId(IDC_EXIT, IDS_EXIT);
+
+  if (is_new_menu && supports_new_separators &&
+      !ui::NativeTheme::IsNewMenuStyleEnabled()) {
     AddSeparator(ui::SPACING_SEPARATOR);
+  }
 }
 
 void WrenchMenuModel::AddGlobalErrorMenuItems() {
@@ -698,6 +751,7 @@ void WrenchMenuModel::UpdateZoomControls() {
       IDS_ZOOM_PERCENT, base::IntToString16(zoom_percent));
 }
 
-void WrenchMenuModel::OnZoomLevelChanged(const std::string& host) {
+void WrenchMenuModel::OnZoomLevelChanged(
+    const content::HostZoomMap::ZoomLevelChange& change) {
   UpdateZoomControls();
 }

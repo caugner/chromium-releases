@@ -4,8 +4,8 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
@@ -23,6 +23,7 @@
 #include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
 #include "googleurl/src/gurl.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -35,7 +36,7 @@ class MemoryTest : public UIPerfTest {
  public:
   MemoryTest() : cleanup_temp_dir_on_exit_(false) {}
 
-  ~MemoryTest() {
+  virtual ~MemoryTest() {
     // Cleanup our temporary directory.
     if (cleanup_temp_dir_on_exit_)
       file_util::Delete(temp_dir_, true);
@@ -56,6 +57,15 @@ class MemoryTest : public UIPerfTest {
     launch_arguments_.AppendSwitch(switches::kDisablePlugins);
 
     launch_arguments_.AppendSwitch(switches::kEnableLogging);
+
+#if defined (OS_MACOSX)
+    // On Mac the OpenGL driver will leave around active pages for GPU
+    // memory, resulting in a massive reported memory regression. Limit
+    // the impact of this by minimizing the amount of GPU memory used.
+    // http://crbug.com/178531
+    launch_arguments_.AppendSwitchASCII(switches::kForceGpuMemAvailableMb,
+                                        "1");
+#endif
 
     // In order to record a dataset to cache for future playback,
     // set the |playback| to false and run the test. The source user data dir
@@ -248,7 +258,7 @@ class MemoryTest : public UIPerfTest {
 
 class GeneralMixMemoryTest : public MemoryTest {
  public:
-  virtual base::FilePath GetUserDataDirSource() const {
+  virtual base::FilePath GetUserDataDirSource() const OVERRIDE {
     base::FilePath profile_dir;
     PathService::Get(base::DIR_SOURCE_ROOT, &profile_dir);
     profile_dir = profile_dir.AppendASCII("data");
@@ -257,7 +267,7 @@ class GeneralMixMemoryTest : public MemoryTest {
     return profile_dir;
   }
 
-  virtual size_t GetUrlList(std::string** list) {
+  virtual size_t GetUrlList(std::string** list) OVERRIDE {
     *list = urls_;
     return urls_length_;
   }
@@ -399,7 +409,7 @@ size_t GeneralMixMemoryTest::urls_length_ =
 
 class GeneralMixReferenceMemoryTest : public GeneralMixMemoryTest {
  public:
-  void SetUp() {
+  virtual void SetUp() {
     UseReferenceBuild();
     GeneralMixMemoryTest::SetUp();
   }
@@ -413,7 +423,7 @@ class MembusterMemoryTest : public MemoryTest {
     delete[] test_urls_;
   }
 
-  virtual base::FilePath GetUserDataDirSource() const {
+  virtual base::FilePath GetUserDataDirSource() const OVERRIDE {
     base::FilePath profile_dir;
     PathService::Get(base::DIR_SOURCE_ROOT, &profile_dir);
     profile_dir = profile_dir.AppendASCII("data");
@@ -422,7 +432,7 @@ class MembusterMemoryTest : public MemoryTest {
     return profile_dir;
   }
 
-  virtual size_t GetUrlList(std::string** list) {
+  virtual size_t GetUrlList(std::string** list) OVERRIDE {
     size_t total_url_entries = urls_length_ * kIterations_ * 2 - 1;
     if (!test_urls_) {
       test_urls_ = new std::string[total_url_entries];

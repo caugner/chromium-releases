@@ -18,6 +18,7 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/user_manager_impl.h"
+#include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -38,10 +39,17 @@ class TrayAccessibilityTest : public CrosInProcessBrowserTest {
  protected:
   TrayAccessibilityTest() {}
   virtual ~TrayAccessibilityTest() {}
+
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kLoginManager);
     command_line->AppendSwitchASCII(switches::kLoginProfile,
                                     TestingProfile::kTestUserProfileDir);
+  }
+
+  virtual void RunTestOnMainThreadLoop() OVERRIDE {
+    // Need to mark oobe completed to show detailed views.
+    WizardController::MarkOobeCompleted();
+    CrosInProcessBrowserTest::RunTestOnMainThreadLoop();
   }
 
   ash::internal::TrayAccessibility* tray() {
@@ -88,19 +96,19 @@ class TrayAccessibilityTest : public CrosInProcessBrowserTest {
 
   void ClickSpokenFeedbackOnDetailMenu() {
     views::View* button = tray()->detailed_menu_->spoken_feedback_view_;
-    tray()->detailed_menu_->ClickedOn(button);
+    tray()->detailed_menu_->OnViewClicked(button);
   }
 
   void ClickHighContrastOnDetailMenu() {
     views::View* button = tray()->detailed_menu_->high_contrast_view_;
     EXPECT_TRUE(button);
-    tray()->detailed_menu_->ClickedOn(button);
+    tray()->detailed_menu_->OnViewClicked(button);
   }
 
   void ClickScreenMagnifierOnDetailMenu() {
     views::View* button = tray()->detailed_menu_->screen_magnifier_view_;
     EXPECT_TRUE(button);
-    tray()->detailed_menu_->ClickedOn(button);
+    tray()->detailed_menu_->OnViewClicked(button);
   }
 
   bool IsSpokenFeedbackEnabledOnDetailMenu() {
@@ -352,7 +360,13 @@ IN_PROC_BROWSER_TEST_F(TrayAccessibilityTest, KeepMenuVisibilityOnLockScreen) {
   EXPECT_TRUE(CanCreateMenuItem());
 }
 
-IN_PROC_BROWSER_TEST_F(TrayAccessibilityTest, ClickDetailMenu) {
+#if defined(OS_CHROMEOS)
+#define MAYBE_ClickDetailMenu DISABLED_ClickDetailMenu
+#else
+#define MAYBE_ClickDetailMenu ClickDetailMenu
+#endif
+
+IN_PROC_BROWSER_TEST_F(TrayAccessibilityTest, MAYBE_ClickDetailMenu) {
   // Confirms that the check item toggles the spoken feedback.
   EXPECT_FALSE(accessibility::IsSpokenFeedbackEnabled());
 

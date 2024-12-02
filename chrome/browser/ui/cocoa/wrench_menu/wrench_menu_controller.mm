@@ -48,7 +48,7 @@ namespace WrenchMenuControllerInternal {
 class AcceleratorDelegate : public ui::AcceleratorProvider {
  public:
   virtual bool GetAcceleratorForCommandId(int command_id,
-      ui::Accelerator* out_accelerator) {
+      ui::Accelerator* out_accelerator) OVERRIDE {
     AcceleratorsCocoa* keymap = AcceleratorsCocoa::GetInstance();
     const ui::Accelerator* accelerator =
         keymap->GetAcceleratorForCommand(command_id);
@@ -75,7 +75,7 @@ class ZoomLevelObserver {
   }
 
  private:
-  void OnZoomLevelChanged(const std::string& host) {
+  void OnZoomLevelChanged(const HostZoomMap::ZoomLevelChange& change) {
     WrenchMenuModel* wrenchMenuModel = [controller_ wrenchMenuModel];
     wrenchMenuModel->UpdateZoomControls();
     const string16 level =
@@ -227,7 +227,7 @@ class ZoomLevelObserver {
 
 // Used to perform the actual dispatch on the outermost runloop.
 - (void)performCommandDispatch:(NSNumber*)tag {
-  [self wrenchMenuModel]->ExecuteCommand([tag intValue]);
+  [self wrenchMenuModel]->ExecuteCommand([tag intValue], 0);
 }
 
 - (WrenchMenuModel*)wrenchMenuModel {

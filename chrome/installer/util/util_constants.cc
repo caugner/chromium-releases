@@ -15,8 +15,9 @@ const char kAutoLaunchChrome[] = "auto-launch-chrome";
 // Currently this is only required when used in combination with kMultiInstall.
 const char kChrome[] = "chrome";
 
-// Install Chrome App Host.
-const char kChromeAppHost[] = "app-host";
+// Install Chrome App Host. This is now interpreted as kChromeAppLauncher.
+// TODO(huangs): Remove by M27.
+const char kChromeAppHostDeprecated[] = "app-host";
 
 // Install Chrome App Launcher, which subsumes Chrome App Host, i.e.,
 // App Launcher install converts App Host to App Launcher, and all subsequent
@@ -218,6 +219,7 @@ const wchar_t kChromeLauncherExe[] = L"chrome_launcher.exe";
 const wchar_t kChromeNewExe[] = L"new_chrome.exe";
 const wchar_t kChromeOldExe[] = L"old_chrome.exe";
 const wchar_t kCmdInstallApp[] = L"install-application";
+const wchar_t kCmdInstallExtension[] = L"install-extension";
 const wchar_t kCmdOnOsUpgrade[] = L"on-os-upgrade";
 const wchar_t kCmdQueryEULAAcceptance[] = L"query-eula-acceptance";
 const wchar_t kCmdQuickEnableApplicationHost[] =
@@ -247,7 +249,6 @@ const wchar_t kInstallerResultUIString[] = L"InstallerResultUIString";
 const wchar_t kInstallerSuccessLaunchCmdLine[] =
     L"InstallerSuccessLaunchCmdLine";
 
-const wchar_t kOptionAppHostIsLauncher[] = L"app-host-is-launcher";
 const wchar_t kOptionMultiInstall[] = L"multi-install";
 const wchar_t kOptionReadyMode[] = L"ready-mode";
 

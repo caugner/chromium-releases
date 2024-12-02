@@ -5,11 +5,11 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/infobars/infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/common/chrome_switches.h"
@@ -103,15 +103,35 @@ TEST_F(ContentSettingBubbleModelTest, Cookies) {
 
   scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-         NULL, web_contents(), profile(),
-         CONTENT_SETTINGS_TYPE_COOKIES));
+          NULL, web_contents(), profile(), CONTENT_SETTINGS_TYPE_COOKIES));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
-  EXPECT_FALSE(bubble_content.title.empty());
-  EXPECT_FALSE(bubble_content.radio_group.radio_items.empty());
+  std::string title = bubble_content.title;
+  EXPECT_FALSE(title.empty());
+  ASSERT_EQ(2U, bubble_content.radio_group.radio_items.size());
+  std::string radio1 = bubble_content.radio_group.radio_items[0];
+  std::string radio2 = bubble_content.radio_group.radio_items[1];
   EXPECT_FALSE(bubble_content.custom_link.empty());
   EXPECT_TRUE(bubble_content.custom_link_enabled);
   EXPECT_FALSE(bubble_content.manage_link.empty());
+
+  content_settings->ClearCookieSpecificContentSettings();
+  content_settings->OnContentAllowed(CONTENT_SETTINGS_TYPE_COOKIES);
+  content_setting_bubble_model.reset(
+      ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+          NULL, web_contents(), profile(), CONTENT_SETTINGS_TYPE_COOKIES));
+  const ContentSettingBubbleModel::BubbleContent& bubble_content_2 =
+      content_setting_bubble_model->bubble_content();
+
+  EXPECT_FALSE(bubble_content_2.title.empty());
+  EXPECT_NE(title, bubble_content_2.title);
+  ASSERT_EQ(2U, bubble_content_2.radio_group.radio_items.size());
+  // TODO(bauerb): Update this once the strings have been updated.
+  EXPECT_EQ(radio1, bubble_content_2.radio_group.radio_items[0]);
+  EXPECT_EQ(radio2, bubble_content_2.radio_group.radio_items[1]);
+  EXPECT_FALSE(bubble_content_2.custom_link.empty());
+  EXPECT_TRUE(bubble_content_2.custom_link_enabled);
+  EXPECT_FALSE(bubble_content_2.manage_link.empty());
 }
 
 TEST_F(ContentSettingBubbleModelTest, Mediastream) {
@@ -127,6 +147,7 @@ TEST_F(ContentSettingBubbleModelTest, Mediastream) {
   EXPECT_TRUE(bubble_content.custom_link.empty());
   EXPECT_FALSE(bubble_content.custom_link_enabled);
   EXPECT_FALSE(bubble_content.manage_link.empty());
+  EXPECT_EQ(2U, bubble_content.media_menus.size());
 }
 
 TEST_F(ContentSettingBubbleModelTest, BlockedMediastream) {
@@ -323,7 +344,7 @@ TEST_F(ContentSettingBubbleModelTest, PepperBroker) {
   EXPECT_FALSE(bubble_content.manage_link.empty());
 
   content_settings->ClearBlockedContentSettingsExceptForCookies();
-  content_settings->OnContentAccessed(CONTENT_SETTINGS_TYPE_PPAPI_BROKER);
+  content_settings->OnContentAllowed(CONTENT_SETTINGS_TYPE_PPAPI_BROKER);
   content_setting_bubble_model.reset(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
           NULL, web_contents(), profile(),

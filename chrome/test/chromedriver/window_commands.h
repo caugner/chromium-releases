@@ -27,7 +27,7 @@ typedef base::Callback<Status(
 
 // Execute a Window Command on the target window.
 Status ExecuteWindowCommand(
-    WindowCommand command,
+    const WindowCommand& command,
     Session* session,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
@@ -39,8 +39,15 @@ Status ExecuteGet(
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value);
 
-// Evaluates a given script with arguments.
+// Evaluates a given synchronous script with arguments.
 Status ExecuteExecuteScript(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Evaluates a given asynchronous script with arguments.
+Status ExecuteExecuteAsyncScript(
     Session* session,
     WebView* web_view,
     const base::DictionaryValue& params,
@@ -55,6 +62,13 @@ Status ExecuteSwitchToFrame(
 
 // Get the current page title.
 Status ExecuteGetTitle(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Get the current page source.
+Status ExecuteGetPageSource(
     Session* session,
     WebView* web_view,
     const base::DictionaryValue& params,
@@ -134,6 +148,102 @@ Status ExecuteMouseButtonUp(
 
 // Double-clicks at the current mouse coordinates (set by last moveto).
 Status ExecuteMouseDoubleClick(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteGetActiveElement(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Gets the status of the application cache (window.applicationCache.status).
+Status ExecuteGetAppCacheStatus(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteIsBrowserOnline(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteGetStorageItem(
+    const char* storage,
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteGetStorageKeys(
+    const char* storage,
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteSetStorageItem(
+    const char* storage,
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteRemoveStorageItem(
+    const char* storage,
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteClearStorage(
+    const char* storage,
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteGetStorageSize(
+    const char* storage,
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteScreenshot(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Retrieve all cookies visible to the current page.
+Status ExecuteGetCookies(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Set a cookie. If the cookie path is not specified, it should be set to "/".
+// If the domain is omitted, it should default to the current page's domain.
+Status ExecuteAddCookie(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Delete the cookie with the given name if it exists in the current page.
+Status ExecuteDeleteCookie(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Delete all cookies visible to the current page.
+Status ExecuteDeleteAllCookies(
     Session* session,
     WebView* web_view,
     const base::DictionaryValue& params,

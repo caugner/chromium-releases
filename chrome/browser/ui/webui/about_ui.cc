@@ -81,7 +81,7 @@
 
 #if defined(USE_ASH)
 #include "ash/wm/frame_painter.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #endif
 
 using base::Time;
@@ -108,8 +108,8 @@ const char kStringsJsPath[] = "strings.js";
 // redirect solves the problem by eliminating the process transition during the
 // time that about memory is being computed.
 std::string GetAboutMemoryRedirectResponse(Profile* profile) {
-  return StringPrintf("<meta http-equiv=\"refresh\" content=\"0;%s\">",
-                      chrome::kChromeUIMemoryRedirectURL);
+  return base::StringPrintf("<meta http-equiv=\"refresh\" content=\"0;%s\">",
+                            chrome::kChromeUIMemoryRedirectURL);
 }
 
 // Handling about:memory is complicated enough to encapsulate its related
@@ -183,10 +183,10 @@ class ChromeOSTermsHandler
       }
     } else {
       std::string file_path =
-          StringPrintf(chrome::kEULAPathFormat, locale_.c_str());
+          base::StringPrintf(chrome::kEULAPathFormat, locale_.c_str());
       if (!file_util::ReadFileToString(base::FilePath(file_path), &contents_)) {
         // No EULA for given language - try en-US as default.
-        file_path = StringPrintf(chrome::kEULAPathFormat, "en-US");
+        file_path = base::StringPrintf(chrome::kEULAPathFormat, "en-US");
         if (!file_util::ReadFileToString(base::FilePath(file_path),
                                          &contents_)) {
           // File with EULA not found, ResponseOnUIThread will load EULA from
@@ -315,8 +315,9 @@ std::string AddStringRow(const std::string& name, const std::string& value) {
 std::string AboutDiscardsRun() {
   std::string output;
   AppendHeader(&output, 0, "About discards");
-  output.append(StringPrintf("<meta http-equiv=\"refresh\" content=\"2;%s\">",
-                             chrome::kChromeUIDiscardsURL));
+  output.append(
+      base::StringPrintf("<meta http-equiv=\"refresh\" content=\"2;%s\">",
+      chrome::kChromeUIDiscardsURL));
   output.append(WrapWithTag("p", "Discarding a tab..."));
   g_browser_process->oom_priority_manager()->LogMemoryAndDiscardTab();
   AppendFooter(&output);
@@ -338,21 +339,21 @@ std::string AboutDiscards(const std::string& path) {
   chromeos::OomPriorityManager* oom = g_browser_process->oom_priority_manager();
   std::vector<string16> titles = oom->GetTabTitles();
   if (!titles.empty()) {
-    output.append("<ol>");
+    output.append("<ul>");
     std::vector<string16>::iterator it = titles.begin();
     for ( ; it != titles.end(); ++it) {
       std::string title = UTF16ToUTF8(*it);
       output.append(WrapWithTag("li", title));
     }
-    output.append("</ol>");
+    output.append("</ul>");
   } else {
     output.append("<p>None found.  Wait 10 seconds, then refresh.</p>");
   }
-  output.append(StringPrintf("%d discards this session. ",
+  output.append(base::StringPrintf("%d discards this session. ",
                              oom->discard_count()));
-  output.append(StringPrintf("<a href='%s%s'>Discard tab now</a>",
-                             chrome::kChromeUIDiscardsURL,
-                             kRunCommand));
+  output.append(base::StringPrintf("<a href='%s%s'>Discard tab now</a>",
+                                   chrome::kChromeUIDiscardsURL,
+                                   kRunCommand));
 
   base::SystemMemoryInfoKB meminfo;
   base::GetSystemMemoryInfo(&meminfo);
@@ -383,10 +384,8 @@ std::string AboutDiscards(const std::string& path) {
       "Inactive Anon", base::IntToString(meminfo.inactive_anon / 1024)));
   output.append(AddStringRow(
       "Shared", base::IntToString(meminfo.shmem / 1024)));
-  if (meminfo.gem_size != -1) {
-    output.append(AddStringRow(
-        "Graphics", base::IntToString(meminfo.gem_size / 1024 / 1024)));
-  }
+  output.append(AddStringRow(
+      "Graphics", base::IntToString(meminfo.gem_size / 1024 / 1024)));
   output.append("</table>");
 
   AppendFooter(&output);
@@ -406,7 +405,7 @@ std::string AboutDiscards(const std::string& path) {
 std::string TransparencyLink(const std::string& label,
                              int value,
                              const std::string& key) {
-  return StringPrintf("<p>%s</p>"
+  return base::StringPrintf("<p>%s</p>"
       "<p>"
       "<a href='%s%s=%d'>--</a> "
       "<a href='%s%s=%d'>-</a> "
@@ -475,7 +474,7 @@ std::string AboutTransparency(const std::string& path) {
   output.append(TransparencyLink("Solo window:",
       TransparencyFromOpacity(ash::FramePainter::kSoloWindowOpacity),
       kSolo));
-  output.append(StringPrintf(
+  output.append(base::StringPrintf(
       "<p>Share: %s%s=%d&%s=%d&%s=%d</p>",
       chrome::kChromeUITransparencyURL,
       kActive,
@@ -690,7 +689,7 @@ std::string AboutStats(const std::string& query) {
   } else if (query == "raw") {
     // Dump the raw counters which have changed in text format.
     data = "<pre>";
-    data.append(StringPrintf("Counter changes in the last %ldms\n",
+    data.append(base::StringPrintf("Counter changes in the last %ldms\n",
         static_cast<long int>(time_since_last_sample.InMilliseconds())));
     for (size_t i = 0; i < counters->GetSize(); ++i) {
       Value* entry = NULL;
@@ -799,12 +798,14 @@ std::string AboutSandbox() {
 
   data.append("</table>");
 
-  // The setuid sandbox is required as our first-layer sandbox.  We do still
-  // consider ourselves adequately sandboxed without the second-layer
-  // seccomp-bpf sandbox at the moment.
-  bool good = status & content::kSandboxLinuxSUID &&
-              status & content::kSandboxLinuxPIDNS &&
-              status & content::kSandboxLinuxNetNS;
+  // The setuid sandbox is required as our first-layer sandbox.
+  bool good_layer1 = status & content::kSandboxLinuxSUID &&
+                     status & content::kSandboxLinuxPIDNS &&
+                     status & content::kSandboxLinuxNetNS;
+  // A second-layer sandbox is also required to be adequately sandboxed.
+  bool good_layer2 = status & content::kSandboxLinuxSeccompBpf;
+  bool good = good_layer1 && good_layer2;
+
   if (good) {
     data.append("<p style=\"color: green\">");
     data.append(l10n_util::GetStringUTF8(IDS_ABOUT_SANDBOX_OK));
@@ -853,7 +854,7 @@ void AboutMemoryHandler::AppendProcess(ListValue* child_data,
   BindProcessMetrics(child, info);
 
   std::string child_label(
-      ProcessMemoryInformation::GetFullTypeNameInEnglish(info->type,
+      ProcessMemoryInformation::GetFullTypeNameInEnglish(info->process_type,
                                                          info->renderer_type));
   if (info->is_diagnostics)
     child_label.append(" (diagnostics)");
@@ -926,7 +927,7 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   root->SetString("current_browser_name", process.name);
 
   for (size_t index = 0; index < process.processes.size(); index++) {
-    if (process.processes[index].type == content::PROCESS_TYPE_BROWSER)
+    if (process.processes[index].process_type == content::PROCESS_TYPE_BROWSER)
       BindProcessMetrics(browser_data, &process.processes[index]);
     else
       AppendProcess(child_data, &process.processes[index]);

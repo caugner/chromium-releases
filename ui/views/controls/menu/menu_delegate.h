@@ -66,6 +66,13 @@ class VIEWS_EXPORT MenuDelegate {
   // The font for the menu item label.
   virtual const gfx::Font* GetLabelFont(int id) const;
 
+  // Override the text color of a given menu item dependent on the
+  // |command_id| and its |is_hovered| state. Returns true if it chooses to
+  // override the color.
+  virtual bool GetForegroundColor(int command_id,
+                                  bool is_hovered,
+                                  SkColor* override_color) const;
+
   // Override the background color of a given menu item dependent on the
   // |command_id| and its |is_hovered| state. Returns true if it chooses to
   // override the color.
@@ -216,6 +223,9 @@ class VIEWS_EXPORT MenuDelegate {
                                         int icon_size,
                                         int* left_margin,
                                         int* right_margin) const;
+  // Returns true if the labels should reserve additional spacing for e.g.
+  // submenu indicators at the end of the line.
+  virtual bool ShouldReserveSpaceForSubmenuIndicator() const;
 };
 
 }  // namespace views

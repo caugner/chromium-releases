@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/stringprintf.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
@@ -16,8 +16,9 @@
 
 namespace extensions {
 
-MediaGalleriesCustomBindings::MediaGalleriesCustomBindings()
-    : ChromeV8Extension(NULL) {
+MediaGalleriesCustomBindings::MediaGalleriesCustomBindings(
+    Dispatcher* dispatcher, v8::Handle<v8::Context> v8_context)
+    : ChromeV8Extension(dispatcher, v8_context) {
   RouteFunction(
       "GetMediaFileSystemObject",
       base::Bind(&MediaGalleriesCustomBindings::GetMediaFileSystemObject,
@@ -59,7 +60,8 @@ v8::Handle<v8::Value> MediaGalleriesCustomBindings::GetMediaFileSystemObject(
   const std::string root_url =
       fileapi::GetIsolatedFileSystemRootURIString(
           origin, fsid, extension_misc::kMediaFileSystemPathPart);
-  return webframe->createFileSystem(WebKit::WebFileSystem::TypeIsolated,
+  return webframe->createFileSystem(
+                                    WebKit::WebFileSystemTypeIsolated,
                                     WebKit::WebString::fromUTF8(name),
                                     WebKit::WebString::fromUTF8(root_url));
 }

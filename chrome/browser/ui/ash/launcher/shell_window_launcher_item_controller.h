@@ -8,7 +8,10 @@
 #include <list>
 #include <string>
 
+#include "base/memory/scoped_ptr.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/ui/ash/launcher/launcher_item_controller.h"
+#include "ui/aura/window_observer.h"
 
 namespace aura {
 class Window;
@@ -26,7 +29,11 @@ class ShellWindow;
 // For apps with multiple windows, each item controller keeps track of all
 // windows associated with the app and their activation order.
 // Instances are owned by ShellWindowLauncherController.
-class ShellWindowLauncherItemController : public LauncherItemController {
+//
+// Tests are in chrome_launcher_controller_browsertest.cc
+
+class ShellWindowLauncherItemController : public LauncherItemController,
+                                          public aura::WindowObserver {
  public:
   ShellWindowLauncherItemController(Type type,
                                     const std::string& app_launcher_id,
@@ -44,10 +51,11 @@ class ShellWindowLauncherItemController : public LauncherItemController {
 
   const std::string& app_launcher_id() const { return app_launcher_id_; }
 
-  // LauncherItemController overrides.
+  // LauncherItemController
   virtual string16 GetTitle() OVERRIDE;
   virtual bool HasWindow(aura::Window* window) const OVERRIDE;
   virtual bool IsOpen() const OVERRIDE;
+  virtual bool IsVisible() const OVERRIDE;
   virtual void Launch(int event_flags) OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Close() OVERRIDE;
@@ -58,6 +66,11 @@ class ShellWindowLauncherItemController : public LauncherItemController {
       const ash::LauncherItem& old_item) OVERRIDE {}
   virtual ChromeLauncherAppMenuItems GetApplicationList() OVERRIDE;
 
+  // aura::WindowObserver
+  virtual void OnWindowPropertyChanged(aura::Window* window,
+                                       const void* key,
+                                       intptr_t old) OVERRIDE;
+
   // Get the number of running applications/incarnations of this.
   size_t shell_window_count() const { return shell_windows_.size(); }
 
@@ -67,21 +80,20 @@ class ShellWindowLauncherItemController : public LauncherItemController {
  private:
   typedef std::list<ShellWindow*> ShellWindowList;
 
-  // Get the title of the running application with this |index|.
-  string16 GetTitleOfIndexedApp(size_t index);
+  void ShowAndActivate(ShellWindow* shell_window);
 
-  // Get the title of the running application with this |index|.
-  // Note that the returned image needs to be released by the caller.
-  gfx::Image* GetIconOfIndexedApp(size_t index);
-
-  void RestoreOrShow(ShellWindow* shell_window);
-
-  // List of associated shell windows in activation order.
+  // List of associated shell windows
   ShellWindowList shell_windows_;
+
+  // Pointer to the most recently active shell window
+  ShellWindow* last_active_shell_window_;
 
   // The launcher id associated with this set of windows. There is one
   // AppLauncherItemController for each |app_launcher_id_|.
   const std::string app_launcher_id_;
+
+  // Scoped list of observed windows (for removal on destruction)
+  ScopedObserver<aura::Window, aura::WindowObserver> observed_windows_;
 
   DISALLOW_COPY_AND_ASSIGN(ShellWindowLauncherItemController);
 };

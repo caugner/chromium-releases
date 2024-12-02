@@ -7,13 +7,13 @@
 #include <vector>
 
 #include "base/base_paths.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"

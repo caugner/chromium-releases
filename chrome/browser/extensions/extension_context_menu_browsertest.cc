@@ -17,7 +17,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/context_menu_params.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "ui/base/models/menu_model.h"
 
@@ -265,7 +265,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserTest, Simple) {
   // Look for the extension item in the menu, and execute it.
   int command_id = IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST;
   ASSERT_TRUE(menu->IsCommandIdEnabled(command_id));
-  menu->ExecuteCommand(command_id);
+  menu->ExecuteCommand(command_id, 0);
 
   // Wait for the extension's script to tell us its onclick fired.
   ASSERT_TRUE(listener2.WaitUntilSatisfied());
@@ -485,7 +485,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserTest, MAYBE_IncognitoSplit) {
   // Look for the extension item in the menu, and execute it.
   int command_id = IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST;
   ASSERT_TRUE(menu->IsCommandIdEnabled(command_id));
-  menu->ExecuteCommand(command_id);
+  menu->ExecuteCommand(command_id, 0);
 
   // Wait for the extension's script to tell us its onclick fired. Ensure
   // that the incognito version doesn't fire until we explicitly click the
@@ -494,7 +494,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserTest, MAYBE_IncognitoSplit) {
   EXPECT_FALSE(onclick_incognito.was_satisfied());
 
   ASSERT_TRUE(menu_incognito->IsCommandIdEnabled(command_id));
-  menu_incognito->ExecuteCommand(command_id);
+  menu_incognito->ExecuteCommand(command_id, 0);
   ASSERT_TRUE(onclick_incognito.WaitUntilSatisfied());
 }
 
@@ -532,7 +532,7 @@ class ExtensionContextMenuBrowserLazyTest :
     ExtensionContextMenuBrowserTest::SetUpCommandLine(command_line);
     // Set shorter delays to prevent test timeouts.
     command_line->AppendSwitchASCII(switches::kEventPageIdleTime, "0");
-    command_line->AppendSwitchASCII(switches::kEventPageUnloadingTime, "0");
+    command_line->AppendSwitchASCII(switches::kEventPageSuspendingTime, "0");
   }
 };
 
@@ -562,7 +562,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuBrowserLazyTest, EventPage) {
 
   // Executing the checkbox also fires the onClicked event.
   ExtensionTestMessageListener listener("onClicked fired for checkbox1", false);
-  menu->ExecuteCommand(command_id);
+  menu->ExecuteCommand(command_id, 0);
   checkbox_checked.WaitUntilClosed();
 
   EXPECT_TRUE(menu->IsCommandIdChecked(command_id));

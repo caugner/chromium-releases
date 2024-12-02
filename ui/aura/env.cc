@@ -35,6 +35,8 @@ Env::~Env() {
       &device_list_updater_aurax11_);
 #endif
 
+  FOR_EACH_OBSERVER(EnvObserver, observers_, OnWillDestroyEnv());
+
   ui::Compositor::Terminate();
 }
 
@@ -96,6 +98,12 @@ void Env::Init() {
 
 void Env::NotifyWindowInitialized(Window* window) {
   FOR_EACH_OBSERVER(EnvObserver, observers_, OnWindowInitialized(window));
+}
+
+void Env::NotifyRootWindowInitialized(RootWindow* root_window) {
+  FOR_EACH_OBSERVER(EnvObserver,
+                    observers_,
+                    OnRootWindowInitialized(root_window));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

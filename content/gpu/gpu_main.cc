@@ -34,10 +34,10 @@
 #include "base/win/scoped_com_initializer.h"
 #include "content/common/gpu/media/dxva_video_decode_accelerator.h"
 #include "sandbox/win/src/sandbox.h"
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL) && defined(USE_X11)
 #include "content/common/gpu/media/exynos_video_decode_accelerator.h"
 #include "content/common/gpu/media/omx_video_decode_accelerator.h"
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY) && defined(USE_X11)
 #include "content/common/gpu/media/vaapi_video_decode_accelerator.h"
 #endif
 
@@ -169,15 +169,6 @@ int GpuMain(const MainFunctionParams& parameters) {
       command_line.GetSwitchValueASCII(switches::kGpuDriverVersion);
   GetContentClient()->SetGpuInfo(gpu_info);
 
-#if defined(OS_WIN)
-  // Asynchronously initialize DXVA while GL is being initialized because
-  // they both take tens of ms.
-  base::WaitableEvent dxva_initialized(true, false);
-  DXVAVideoDecodeAccelerator::PreSandboxInitialization(
-      base::Bind(&base::WaitableEvent::Signal,
-                 base::Unretained(&dxva_initialized)));
-#endif
-
   // We need to track that information for the WarmUpSandbox function.
   bool initialized_gl_context = false;
   // Load and initialize the GL implementation and locate the GL entry points.
@@ -250,12 +241,6 @@ int GpuMain(const MainFunctionParams& parameters) {
 #endif
 
 #if defined(OS_WIN)
-  {
-    // DXVA initialization must have completed before the token is lowered.
-    TRACE_EVENT0("gpu", "Wait for DXVA initialization");
-    dxva_initialized.Wait();
-  }
-
   {
     TRACE_EVENT0("gpu", "Lower token");
     // For windows, if the target_services interface is not zero, the process
@@ -338,12 +323,12 @@ void WarmUpSandbox(const GPUInfo& gpu_info,
     (void) ret;
   }
 
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL) && defined(USE_X11)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseExynosVda))
     ExynosVideoDecodeAccelerator::PreSandboxInitialization();
   else
     OmxVideoDecodeAccelerator::PreSandboxInitialization();
-#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+#elif defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY) && defined(USE_X11)
   VaapiVideoDecodeAccelerator::PreSandboxInitialization();
 #endif
 
@@ -359,8 +344,22 @@ void WarmUpSandbox(const GPUInfo& gpu_info,
 #endif
 
 #if defined(OS_WIN)
-  // Preload these DLL because the sandbox prevents them from loading.
-  LoadLibrary(L"setupapi.dll");
+  {
+    TRACE_EVENT0("gpu", "Initialize COM");
+    base::win::ScopedCOMInitializer com_initializer;
+  }
+
+  {
+    TRACE_EVENT0("gpu", "Preload setupapi.dll");
+    // Preload this DLL because the sandbox prevents it from loading.
+    LoadLibrary(L"setupapi.dll");
+  }
+
+  {
+    TRACE_EVENT0("gpu", "Initialize DXVA");
+    // Initialize H/W video decoding stuff which fails in the sandbox.
+    DXVAVideoDecodeAccelerator::PreSandboxInitialization();
+  }
 #endif
 }
 

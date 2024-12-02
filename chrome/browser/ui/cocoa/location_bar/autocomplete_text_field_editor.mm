@@ -544,4 +544,14 @@ BOOL ThePasteboardIsTooDamnBig() {
   [[FindPasteboard sharedInstance] setFindText:[selection string]];
 }
 
+- (void)drawRect:(NSRect)rect {
+  [super drawRect:rect];
+  autocomplete_text_field::DrawInstantSuggestion(
+      [self textStorage],
+      [[self delegate] suggestText],
+      [[self delegate] suggestColor],
+      self,
+      [self bounds]);
+}
+
 @end

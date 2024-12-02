@@ -190,11 +190,9 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kUnlimitedStorage, "unlimitedStorage",
       kFlagCannotBeOptional },
 
-    // Register hosted and packaged app permissions.
-    { APIPermission::kAppNotifications, "appNotifications" },
-
     // Register extension permissions.
     { APIPermission::kActiveTab, "activeTab" },
+    { APIPermission::kAdView, "adview" },
     { APIPermission::kAlarms, "alarms" },
     { APIPermission::kBookmark, "bookmarks", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS,
@@ -218,14 +216,16 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kManagement, "management", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_MANAGEMENT,
       PermissionMessage::kManagement },
+    { APIPermission::kNativeMessaging, "nativeMessaging" },
+    { APIPermission::kPower, "power", },
     { APIPermission::kPrivacy, "privacy", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_PRIVACY,
       PermissionMessage::kPrivacy },
     { APIPermission::kSessionRestore, "sessionRestore" },
     { APIPermission::kStorage, "storage" },
-    // TODO(kinuko): syncFileSystem permission should take the service name
-    // parameter.
-    { APIPermission::kSyncFileSystem, "syncFileSystem" },
+    { APIPermission::kSyncFileSystem, "syncFileSystem", kFlagNone,
+      IDS_EXTENSION_PROMPT_WARNING_SYNCFILESYSTEM,
+      PermissionMessage::kSyncFileSystem },
     { APIPermission::kTab, "tabs", kFlagNone,
       IDS_EXTENSION_PROMPT_WARNING_TABS,
       PermissionMessage::kTabs },
@@ -252,6 +252,7 @@ void APIPermissionInfo::RegisterAllPermissions(
     { APIPermission::kDeveloperPrivate, "developerPrivate",
       kFlagCannotBeOptional },
     { APIPermission::kDial, "dial", kFlagCannotBeOptional },
+    { APIPermission::kDownloadsInternal, "downloadsInternal" },
     { APIPermission::kFileBrowserHandlerInternal, "fileBrowserHandlerInternal",
       kFlagCannotBeOptional },
     { APIPermission::kFileBrowserPrivate, "fileBrowserPrivate",
@@ -283,6 +284,7 @@ void APIPermissionInfo::RegisterAllPermissions(
       kFlagCannotBeOptional },
     { APIPermission::kMediaGalleriesPrivate, "mediaGalleriesPrivate",
       kFlagCannotBeOptional },
+    { APIPermission::kStreamsPrivate, "streamsPrivate", kFlagCannotBeOptional },
 
     // Full url access permissions.
     { APIPermission::kDebugger, "debugger",

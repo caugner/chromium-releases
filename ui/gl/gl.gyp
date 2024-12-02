@@ -41,6 +41,8 @@
       ],
      'sources': [
         'async_pixel_transfer_delegate.h',
+        'async_pixel_transfer_delegate_idle.cc',
+        'async_pixel_transfer_delegate_idle.h',
         'async_pixel_transfer_delegate_stub.cc',
         'async_pixel_transfer_delegate_stub.h',
         'gl_bindings.h',
@@ -97,6 +99,8 @@
         'gl_switches.h',
         'gpu_switching_manager.cc',
         'gpu_switching_manager.h',
+        'safe_shared_memory_pool.h',
+        'safe_shared_memory_pool.cc',
         'scoped_make_current.cc',
         'scoped_make_current.h',
         'gl_state_restorer.cc',

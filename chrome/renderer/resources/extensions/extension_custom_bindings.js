@@ -2,30 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom bindings for the extension API.
+// Custom binding for the extension API.
+
+var binding = require('binding').Binding.create('extension');
 
 var extensionNatives = requireNative('extension');
+var forEach = require('utils').forEach;
 var GetExtensionViews = extensionNatives.GetExtensionViews;
 var runtimeNatives = requireNative('runtime');
 var OpenChannelToExtension = runtimeNatives.OpenChannelToExtension;
 var OpenChannelToNativeApp = runtimeNatives.OpenChannelToNativeApp;
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var chrome = requireNative('chrome').GetChrome();
 var sendMessageUpdateArguments =
     require('miscellaneous_bindings').sendMessageUpdateArguments;
 
 var inIncognitoContext = requireNative('process').InIncognitoContext();
 var sendRequestIsDisabled = requireNative('process').IsSendRequestDisabled();
 var contextType = requireNative('process').GetContextType();
-
-chrome.extension = chrome.extension || {};
-
 var manifestVersion = requireNative('process').GetManifestVersion();
-if (manifestVersion < 2) {
-  chrome.self = chrome.extension;
-  chrome.extension.inIncognitoTab = inIncognitoContext;
-}
-
-chrome.extension.inIncognitoContext = inIncognitoContext;
 
 // This should match chrome.windows.WINDOW_ID_NONE.
 //
@@ -34,8 +29,14 @@ chrome.extension.inIncognitoContext = inIncognitoContext;
 // which may not be the case.
 var WINDOW_ID_NONE = -1;
 
-chromeHidden.registerCustomHook('extension',
-                                function(bindingsAPI, extensionId) {
+binding.registerCustomHook(function(bindingsAPI, extensionId) {
+  var extension = bindingsAPI.compiledApi;
+  if (manifestVersion < 2) {
+    chrome.self = extension;
+    extension.inIncognitoTab = inIncognitoContext;
+  }
+  extension.inIncognitoContext = inIncognitoContext;
+
   var apiFunctions = bindingsAPI.apiFunctions;
 
   apiFunctions.setHandleRequest('getViews', function(properties) {
@@ -78,14 +79,13 @@ chromeHidden.registerCustomHook('extension',
     // Events
     'onConnect', 'onConnectExternal', 'onMessage', 'onMessageExternal'
   ];
-  mayNeedAlias.forEach(function(alias) {
-    try {
-      // Deliberately accessing runtime[alias] rather than testing its
-      // existence, since accessing may throw an exception if this context
-      // doesn't have access.
-      if (chrome.runtime[alias])
-        chrome.extension[alias] = chrome.runtime[alias];
-    } catch(e) {}
+  forEach(mayNeedAlias, function(i, alias) {
+    // Checking existence isn't enough since some functions are disabled via
+    // getters that throw exceptions. Assume that any getter is such a function.
+    if (chrome.runtime.hasOwnProperty(alias) &&
+        chrome.runtime.__lookupGetter__(alias) === undefined) {
+      extension[alias] = chrome.runtime[alias];
+    }
   });
 
   apiFunctions.setUpdateArgumentsPreValidate('sendRequest',
@@ -101,14 +101,15 @@ chromeHidden.registerCustomHook('extension',
   });
 
   if (sendRequestIsDisabled) {
-    chrome.extension.onRequest.addListener = function() {
+    extension.onRequest.addListener = function() {
       throw new Error(sendRequestIsDisabled);
     };
     if (contextType == 'BLESSED_EXTENSION') {
-      chrome.extension.onRequestExternal.addListener = function() {
+      extension.onRequestExternal.addListener = function() {
         throw new Error(sendRequestIsDisabled);
       };
     }
   }
-
 });
+
+exports.binding = binding.generate();

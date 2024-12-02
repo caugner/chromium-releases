@@ -11,7 +11,10 @@
     "128": "images/icon128.png"
   },
   "permissions": [
+    "alarms",
     "storage",
+    "unlimitedStorage",
+    {"fileSystem": ["write"]},
     "wallpaperPrivate",
     "https://commondatastorage.googleapis.com/",
     "https://storage.googleapis.com/"

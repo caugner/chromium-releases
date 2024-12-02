@@ -10,13 +10,13 @@
 #include <shlobj.h>
 #include <shobjidl.h>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/win/metro.h"
 #include "base/win/scoped_co_mem.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "content/public/common/content_switches.h"
 
 namespace chrome {
 

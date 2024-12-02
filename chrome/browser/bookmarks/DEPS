@@ -1,11 +1,10 @@
 include_rules = [
-  # Bookmarks is being made into a Browser Component, so we have these
-  # two basic rules followed by temporary exceptions.  Please don't
-  # add to the list of exceptions!
+  # Bookmarks is being made into a component (it will end up at
+  # //components/bookmarks and not depend on //chrome), so we have these basic
+  # rules followed by temporary exceptions.  Please don't add to the list of
+  # exceptions!
   "-chrome/browser",
-  "+chrome/browser/api",
   "+chrome/browser/bookmarks",
-  "+chrome/browser/common",
 
   # TODO(kaiwang): Bring this list to zero.
   # Do not add to the list of temporarily-allowed dependencies below,
@@ -19,8 +18,6 @@ include_rules = [
   "!chrome/browser/history/query_parser.h",
   "!chrome/browser/history/snippet.h",
   "!chrome/browser/history/url_database.h",
-  "!chrome/browser/prefs/pref_registry_syncable.h",
-  "!chrome/browser/prefs/pref_service.h",
   "!chrome/browser/profiles/profile.h",
   "!chrome/browser/profiles/profile_dependency_manager.h",
   "!chrome/browser/profiles/profile_keyed_service.h",
@@ -34,7 +31,6 @@ specific_include_rules = {
   # Do not add to the list of temporarily-allowed dependencies below,
   # and please do not introduce more #includes of these files.
   '.*_[a-z]*test\.cc': [
-    "!chrome/browser/history/in_memory_database.h",
     "!chrome/browser/importer/firefox2_importer.h",
   ]
 }

@@ -26,6 +26,7 @@ import org.chromium.sync.internal_api.pub.base.ModelType;
 import org.chromium.sync.notifier.InvalidationController.IntentProtocol;
 import org.chromium.sync.notifier.InvalidationPreferences.EditContext;
 import org.chromium.sync.signin.AccountManagerHelper;
+import org.chromium.sync.signin.ChromeSigninController;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -187,8 +188,9 @@ public class InvalidationService extends AndroidListener {
     }
 
     @Override
-    public void requestAuthToken(PendingIntent pendingIntent, @Nullable String invalidAuthToken) {
-        @Nullable Account account = SyncStatusHelper.get(this).getSignedInUser();
+    public void requestAuthToken(final PendingIntent pendingIntent,
+            @Nullable String invalidAuthToken) {
+        @Nullable Account account = ChromeSigninController.get(this).getSignedInUser();
         if (account == null) {
             // This should never happen, because this code should only be run if a user is
             // signed-in.
@@ -198,11 +200,18 @@ public class InvalidationService extends AndroidListener {
 
         // Attempt to retrieve a token for the user. This method will also invalidate
         // invalidAuthToken if it is non-null.
-        String authToken = AccountManagerHelper.get(this).getNewAuthToken(account, invalidAuthToken,
-                SyncStatusHelper.AUTH_TOKEN_TYPE_SYNC);
-        if (authToken != null) {
-            setAuthToken(this, pendingIntent, authToken, SyncStatusHelper.AUTH_TOKEN_TYPE_SYNC);
-        }
+        AccountManagerHelper.get(this).getNewAuthTokenFromForeground(
+                account, invalidAuthToken, SyncStatusHelper.AUTH_TOKEN_TYPE_SYNC,
+                new AccountManagerHelper.GetAuthTokenCallback() {
+                    @Override
+                    public void tokenAvailable(String token) {
+                        if (token != null) {
+                            InvalidationService.setAuthToken(
+                                    InvalidationService.this.getApplicationContext(), pendingIntent,
+                                    token, SyncStatusHelper.AUTH_TOKEN_TYPE_SYNC);
+                        }
+                    }
+                });
     }
 
     @Override
@@ -379,8 +388,8 @@ public class InvalidationService extends AndroidListener {
             bundle.putLong("version", (version == null) ? 0 : version);
             bundle.putString("payload", (payload == null) ? "" : payload);
         }
-        Account account = SyncStatusHelper.get(this).getSignedInUser();
-        String contractAuthority = InvalidationController.newInstance(this).getContractAuthority();
+        Account account = ChromeSigninController.get(this).getSignedInUser();
+        String contractAuthority = InvalidationController.get(this).getContractAuthority();
         requestSyncFromContentResolver(bundle, account, contractAuthority);
     }
 

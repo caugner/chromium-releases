@@ -77,14 +77,21 @@ const AcceleratorData kAcceleratorData[] = {
   // Extra shortcut to lock the screen on linux desktop.
   { true, ui::VKEY_POWER, ui::EF_SHIFT_DOWN, LOCK_PRESSED },
   { false, ui::VKEY_POWER, ui::EF_SHIFT_DOWN, LOCK_RELEASED },
+  // Extra shortcut to rotate/scale up/down the screen on linux desktop.
+  { true, ui::VKEY_R,
+    ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, ROTATE_SCREEN },
 #endif  // !defined(NDEBUG)
-  { true, ui::VKEY_O, ui::EF_CONTROL_DOWN, OPEN_FILE_MANAGER_DIALOG },
+  { true, ui::VKEY_O, ui::EF_CONTROL_DOWN, OPEN_FILE_DIALOG },
+  { true, ui::VKEY_M, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
+    OPEN_FILE_MANAGER },
   { true, ui::VKEY_T, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN, OPEN_CROSH },
   { true, ui::VKEY_G, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     DISABLE_GPU_WATCHDOG },
 #endif  // defined(OS_CHROMEOS)
   { true, ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, OPEN_FEEDBACK_PAGE },
+#if !defined(OS_WIN)
   { true, ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, EXIT },
+#endif
   { true, ui::VKEY_Z, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     TOGGLE_SPOKEN_FEEDBACK },
   { true, ui::VKEY_I, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
@@ -92,18 +99,21 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_I, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
     TOUCH_HUD_CLEAR },
 
-  // When you change the shortcuts for NEW_INCOGNITO_WINDOW, NEW_WINDOW, or
-  // NEW_TAB, you also need to modify
-  // ToolbarView::GetAcceleratorForCommandId() in
-  // chrome/browser/ui/views/toolbar_view.cc.
   { true, ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
     NEW_INCOGNITO_WINDOW },
   { true, ui::VKEY_N, ui::EF_CONTROL_DOWN, NEW_WINDOW },
   { true, ui::VKEY_T, ui::EF_CONTROL_DOWN, NEW_TAB },
-
+  { true, ui::VKEY_OEM_MINUS,
+    ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN, SCALE_UI_UP },
+  { true, ui::VKEY_OEM_PLUS,
+    ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN, SCALE_UI_DOWN },
+  { true, ui::VKEY_0,
+    ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN, SCALE_UI_RESET },
+  { true, ui::VKEY_BROWSER_REFRESH,
+    ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN, ROTATE_SCREEN },
   { true, ui::VKEY_BROWSER_REFRESH,
     ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
-    ROTATE_WINDOWS },
+    ROTATE_WINDOW },
   { true, ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_SHIFT_DOWN,
     CYCLE_BACKWARD_LINEAR },
   { true, ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, RESTORE_TAB },
@@ -127,7 +137,8 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_F14, ui::EF_NONE, SHOW_KEYBOARD_OVERLAY },
   { true, ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
     SHOW_MESSAGE_CENTER_BUBBLE },
-  { true, ui::VKEY_BROWSER_BACK, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+  { true, ui::VKEY_BROWSER_BACK,
+    ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     SHOW_OAK },
   { true, ui::VKEY_S, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
     SHOW_SYSTEM_TRAY_BUBBLE },
@@ -159,6 +170,11 @@ const AcceleratorData kAcceleratorData[] = {
   { true, ui::VKEY_MEDIA_PLAY_PAUSE, ui::EF_NONE, MEDIA_PLAY_PAUSE},
   { true, ui::VKEY_MEDIA_PREV_TRACK, ui::EF_NONE, MEDIA_PREV_TRACK},
 
+  // Debugging shortcuts that need to be available to end-users in
+  // release builds.
+  { true, ui::VKEY_U, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN,
+    PRINT_UI_HIERARCHIES },
+
   // TODO(yusukes): Handle VKEY_MEDIA_STOP, and
   // VKEY_MEDIA_LAUNCH_MAIL.
 };
@@ -166,7 +182,6 @@ const AcceleratorData kAcceleratorData[] = {
 const size_t kAcceleratorDataLength = arraysize(kAcceleratorData);
 
 const AcceleratorData kDebugAcceleratorData[] = {
-  { true, ui::VKEY_HOME, ui::EF_CONTROL_DOWN, ROTATE_SCREEN },
   { true, ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
     TOGGLE_DESKTOP_BACKGROUND_MODE },
   { true, ui::VKEY_F11, ui::EF_CONTROL_DOWN, TOGGLE_ROOT_WINDOW_FULL_SCREEN },
@@ -215,6 +230,7 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   MAGNIFY_SCREEN_ZOOM_OUT,  // Control+F6
   NEXT_IME,
   PREVIOUS_IME,
+  PRINT_UI_HIERARCHIES,
   SWITCH_IME,  // Switch to another IME depending on the accelerator.
   TAKE_SCREENSHOT,
   TAKE_PARTIAL_SCREENSHOT,
@@ -225,12 +241,11 @@ const AcceleratorAction kActionsAllowedAtLoginOrLockScreen[] = {
   VOLUME_DOWN,
   VOLUME_MUTE,
   VOLUME_UP,
-  ROTATE_WINDOWS,
+  ROTATE_WINDOW,
 #if !defined(NDEBUG)
   PRINT_LAYER_HIERARCHY,
   PRINT_VIEW_HIERARCHY,
   PRINT_WINDOW_HIERARCHY,
-  ROTATE_SCREEN,
 #endif
 #if defined(OS_CHROMEOS) && !defined(NDEBUG)
   POWER_PRESSED,
@@ -265,6 +280,7 @@ const AcceleratorAction kActionsAllowedAtModalWindow[] = {
   POWER_PRESSED,
   POWER_RELEASED,
   PREVIOUS_IME,
+  PRINT_UI_HIERARCHIES,
   SHOW_KEYBOARD_OVERLAY,
   SWAP_PRIMARY_DISPLAY,
   SWITCH_IME,
@@ -291,11 +307,60 @@ const AcceleratorAction kNonrepeatableActions[] = {
   CYCLE_BACKWARD_MRU,
   CYCLE_FORWARD_LINEAR,
   CYCLE_FORWARD_MRU,
+  PRINT_UI_HIERARCHIES,  // Don't fill the logs if the key is held down.
+  ROTATE_SCREEN,
+  ROTATE_WINDOW,
+  SCALE_UI_UP,
+  SCALE_UI_DOWN,
+  SCALE_UI_RESET,
   TOGGLE_MAXIMIZED,
   WINDOW_MINIMIZE,
 };
 
 const size_t kNonrepeatableActionsLength =
     arraysize(kNonrepeatableActions);
+
+const AcceleratorAction kActionsAllowedInAppMode[] = {
+  BRIGHTNESS_DOWN,
+  BRIGHTNESS_UP,
+#if defined(OS_CHROMEOS)
+  CYCLE_DISPLAY_MODE,
+  DISABLE_GPU_WATCHDOG,
+#endif  // defined(OS_CHROMEOS)
+  DISABLE_CAPS_LOCK,
+  KEYBOARD_BRIGHTNESS_DOWN,
+  KEYBOARD_BRIGHTNESS_UP,
+  MAGNIFY_SCREEN_ZOOM_IN,  // Control+F7
+  MAGNIFY_SCREEN_ZOOM_OUT,  // Control+F6
+  MEDIA_NEXT_TRACK,
+  MEDIA_PLAY_PAUSE,
+  MEDIA_PREV_TRACK,
+  NEXT_IME,
+  POWER_PRESSED,
+  POWER_RELEASED,
+  PREVIOUS_IME,
+  PRINT_UI_HIERARCHIES,
+  ROTATE_SCREEN,
+  SCALE_UI_UP,
+  SCALE_UI_DOWN,
+  SCALE_UI_RESET,
+  SWAP_PRIMARY_DISPLAY,
+  SWITCH_IME,  // Switch to another IME depending on the accelerator.
+  TOGGLE_CAPS_LOCK,
+  TOGGLE_SPOKEN_FEEDBACK,
+  TOGGLE_WIFI,
+  TOUCH_HUD_CLEAR,
+  VOLUME_DOWN,
+  VOLUME_MUTE,
+  VOLUME_UP,
+#if !defined(NDEBUG)
+  PRINT_LAYER_HIERARCHY,
+  PRINT_VIEW_HIERARCHY,
+  PRINT_WINDOW_HIERARCHY,
+#endif
+};
+
+const size_t kActionsAllowedInAppModeLength =
+    arraysize(kActionsAllowedInAppMode);
 
 }  // namespace ash

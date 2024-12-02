@@ -8,13 +8,13 @@
 #include <windows.storage.pickers.h>
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/win/scoped_comptr.h"
 #include "base/win/metro.h"
+#include "base/win/scoped_comptr.h"
 #include "win8/metro_driver/chrome_app_view.h"
 #include "win8/metro_driver/winrt_utils.h"
 
@@ -228,7 +228,7 @@ HRESULT OpenFilePickerSession::SinglePickerDone(SingleFileAsyncOp* async,
       LOG(ERROR) << "NULL IStorageItem";
     }
   } else {
-    LOG(ERROR) << "Unexpected async status " << status;
+    LOG(ERROR) << "Unexpected async status " << static_cast<int>(status);
   }
 
   event_.Signal();
@@ -260,7 +260,7 @@ HRESULT OpenFilePickerSession::MultiPickerDone(MultiFileAsyncOp* async,
       LOG(ERROR) << "NULL StorageFileVectorCollection";
     }
   } else {
-    LOG(ERROR) << "Unexpected async status " << status;
+    LOG(ERROR) << "Unexpected async status " << static_cast<int>(status);
   }
 
   event_.Signal();
@@ -597,7 +597,7 @@ HRESULT SaveFilePickerSession::FilePickerDone(SaveFileAsyncOp* async,
       LOG(ERROR) << "NULL IStorageItem";
     }
   } else {
-    LOG(ERROR) << "Unexpected async status " << status;
+    LOG(ERROR) << "Unexpected async status " << static_cast<int>(status);
   }
 
   event_.Signal();

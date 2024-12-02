@@ -14,22 +14,18 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner_helpers.h"
-#include "base/synchronization/lock.h"
 #include "chrome/browser/api/webdata/autofill_web_data_service.h"
 #include "chrome/browser/api/webdata/web_data_results.h"
 #include "chrome/browser/api/webdata/web_data_service_base.h"
 #include "chrome/browser/api/webdata/web_data_service_consumer.h"
-#include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/browser/webdata/keyword_table.h"
-#include "chrome/browser/webdata/web_data_request_manager.h"
-#include "content/public/browser/browser_thread.h"
-#include "sql/init_status.h"
+#include "chrome/browser/webdata/web_database.h"
 
 class AutocompleteSyncableService;
 class AutofillChange;
@@ -42,10 +38,14 @@ struct IE7PasswordInfo;
 class MessageLoop;
 class Profile;
 class SkBitmap;
-class WebDatabase;
+class WebDatabaseService;
 
 namespace base {
 class Thread;
+}
+
+namespace content {
+class BrowserContext;
 }
 
 namespace webkit_glue {
@@ -100,14 +100,14 @@ class WebDataServiceConsumer;
 
 class WebDataService
     : public WebDataServiceBase,
-      public AutofillWebData,
-      public RefcountedProfileKeyedService {
+      public AutofillWebData {
  public:
-  WebDataService();
+  // Retrieve a WebDataService for the given context.
+  static scoped_refptr<WebDataService> FromBrowserContext(
+      content::BrowserContext* context);
 
-  // WebDataServiceBase implementation.
-  virtual void CancelRequest(Handle h) OVERRIDE;
-  virtual content::NotificationSource GetNotificationSource() OVERRIDE;
+  WebDataService(scoped_refptr<WebDatabaseService> wdbs,
+                 const ProfileErrorCallback& callback);
 
   // Notifies listeners on the UI thread that multiple changes have been made to
   // to Autofill records of the database.
@@ -115,25 +115,6 @@ class WebDataService
   // it asynchronously notifies listeners on the UI thread.
   // |web_data_service| may be NULL for testing purposes.
   static void NotifyOfMultipleAutofillChanges(WebDataService* web_data_service);
-
-  // RefcountedProfileKeyedService override:
-  // Shutdown the web data service. The service can no longer be used after this
-  // call.
-  virtual void ShutdownOnUIThread() OVERRIDE;
-
-  // Initializes the web data service. Returns false on failure
-  // Takes the path of the profile directory as its argument.
-  bool Init(const base::FilePath& profile_path);
-
-  // Returns false if Shutdown() has been called.
-  bool IsRunning() const;
-
-  // Unloads the database without actually shutting down the service.  This can
-  // be used to temporarily reduce the browser process' memory footprint.
-  void UnloadDatabase();
-
-  virtual bool IsDatabaseLoaded();
-  virtual WebDatabase* GetDatabase();
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -288,7 +269,6 @@ class WebDataService
   virtual void UpdateAutofillProfile(const AutofillProfile& profile) OVERRIDE;
   virtual void RemoveAutofillProfile(const std::string& guid) OVERRIDE;
   virtual Handle GetAutofillProfiles(WebDataServiceConsumer* consumer) OVERRIDE;
-  virtual void EmptyMigrationTrash(bool notify_sync) OVERRIDE;
   virtual void AddCreditCard(const CreditCard& credit_card) OVERRIDE;
   virtual void UpdateCreditCard(const CreditCard& credit_card) OVERRIDE;
   virtual void RemoveCreditCard(const std::string& guid) OVERRIDE;
@@ -303,95 +283,40 @@ class WebDataService
   void RemoveFormElementsAddedBetween(const base::Time& delete_begin,
                                       const base::Time& delete_end);
 
-  // Returns the syncable service for Autofill addresses and credit cards stored
-  // in this table. The returned service is owned by |this| object.
-  virtual AutofillProfileSyncableService*
-      GetAutofillProfileSyncableService() const;
-
-  // Returns the syncable service for field autocomplete stored in this table.
-  // The returned service is owned by |this| object.
-  virtual AutocompleteSyncableService*
-      GetAutocompleteSyncableService() const;
-
-  // Testing
-#ifdef UNIT_TEST
-  void set_failed_init(bool value) { failed_init_ = value; }
-#endif
-
  protected:
+  // TODO(caitkp): We probably don't need these anymore.
   friend class TemplateURLServiceTest;
   friend class TemplateURLServiceTestingProfile;
   friend class WebDataServiceTest;
   friend class WebDataRequest;
 
+  // For unit tests, passes a null callback.
+  WebDataService();
+
   virtual ~WebDataService();
 
-  // This is invoked by the unit test; path is the path of the Web Data file.
-  bool InitWithPath(const base::FilePath& path);
-
-  //////////////////////////////////////////////////////////////////////////////
-  //
-  // The following methods are only invoked in the web data service thread.
-  //
-  //////////////////////////////////////////////////////////////////////////////
  private:
-  friend struct content::BrowserThread::DeleteOnThread<
-      content::BrowserThread::UI>;
-  friend class base::DeleteHelper<WebDataService>;
-
-  // Invoked on the main thread if initializing the db fails.
-  void DBInitFailed(sql::InitStatus init_status);
-
-  // Initialize the database, if it hasn't already been initialized.
-  void InitializeDatabaseIfNecessary();
-
-  // Initialize any syncable services.
-  void InitializeSyncableServices();
-
-  // The notification method.
-  void NotifyDatabaseLoadedOnUIThread();
-
-  // Commit any pending transaction and deletes the database.
-  void ShutdownDatabase();
-
-  // Deletes the syncable services.
-  void ShutdownSyncableServices();
-
-  // Commit the current transaction and creates a new one.
-  void Commit();
-
-  // Schedule a task on our worker thread.
-  void ScheduleTask(const tracked_objects::Location& from_here,
-                    const base::Closure& task);
-
-  void ScheduleDBTask(const tracked_objects::Location& from_here,
-                      const base::Closure& task);
-
-  WebDataService::Handle ScheduleDBTaskWithResult(
-      const tracked_objects::Location& from_here,
-      const ResultTask& task,
-      WebDataServiceConsumer* consumer);
-
-  void DBTaskWrapper(const base::Closure& task,
-                     scoped_ptr<WebDataRequest> request);
-
-  void DBResultTaskWrapper(const ResultTask& task,
-                           scoped_ptr<WebDataRequest> request);
-
-  // Schedule a commit if one is not already pending.
-  void ScheduleCommit();
+  //////////////////////////////////////////////////////////////////////////////
+  //
+  // The following methods are only invoked on the DB thread.
+  //
+  //////////////////////////////////////////////////////////////////////////////
 
   //////////////////////////////////////////////////////////////////////////////
   //
   // Keywords.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddKeywordImpl(const TemplateURLData& data);
-  void RemoveKeywordImpl(TemplateURLID id);
-  void UpdateKeywordImpl(const TemplateURLData& data);
-  scoped_ptr<WDTypedResult> GetKeywordsImpl();
-  void SetDefaultSearchProviderImpl(TemplateURLID r);
-  void SetBuiltinKeywordVersionImpl(int version);
+  WebDatabase::State AddKeywordImpl(
+      const TemplateURLData& data, WebDatabase* db);
+  WebDatabase::State RemoveKeywordImpl(
+      TemplateURLID id, WebDatabase* db);
+  WebDatabase::State UpdateKeywordImpl(
+      const TemplateURLData& data, WebDatabase* db);
+  scoped_ptr<WDTypedResult> GetKeywordsImpl(WebDatabase* db);
+  WebDatabase::State SetDefaultSearchProviderImpl(
+      TemplateURLID r, WebDatabase* db);
+  WebDatabase::State SetBuiltinKeywordVersionImpl(int version, WebDatabase* db);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -399,10 +324,13 @@ class WebDataService
   //
   //////////////////////////////////////////////////////////////////////////////
 
-  void SetWebAppImageImpl(const GURL& app_url, const SkBitmap& image);
-  void SetWebAppHasAllImagesImpl(const GURL& app_url, bool has_all_images);
-  void RemoveWebAppImpl(const GURL& app_url);
-  scoped_ptr<WDTypedResult> GetWebAppImagesImpl(const GURL& app_url);
+  WebDatabase::State SetWebAppImageImpl(const GURL& app_url,
+      const SkBitmap& image, WebDatabase* db);
+  WebDatabase::State SetWebAppHasAllImagesImpl(const GURL& app_url,
+      bool has_all_images, WebDatabase* db);
+  WebDatabase::State RemoveWebAppImpl(const GURL& app_url, WebDatabase* db);
+  scoped_ptr<WDTypedResult> GetWebAppImagesImpl(
+      const GURL& app_url, WebDatabase* db);
 
 #if defined(ENABLE_WEB_INTENTS)
   //////////////////////////////////////////////////////////////////////////////
@@ -410,18 +338,20 @@ class WebDataService
   // Web Intents.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddWebIntentServiceImpl(
+  WebDatabase::State AddWebIntentServiceImpl(
       const webkit_glue::WebIntentServiceData& service);
-  void RemoveWebIntentServiceImpl(
+  WebDatabase::State RemoveWebIntentServiceImpl(
       const webkit_glue::WebIntentServiceData& service);
   scoped_ptr<WDTypedResult> GetWebIntentServicesImpl(const string16& action);
   scoped_ptr<WDTypedResult> GetWebIntentServicesForURLImpl(
       const string16& service_url);
   scoped_ptr<WDTypedResult> GetAllWebIntentServicesImpl();
-  void AddDefaultWebIntentServiceImpl(const DefaultWebIntentService& service);
-  void RemoveDefaultWebIntentServiceImpl(
+  WebDatabase::State AddDefaultWebIntentServiceImpl(
       const DefaultWebIntentService& service);
-  void RemoveWebIntentServiceDefaultsImpl(const GURL& service_url);
+  WebDatabase::State RemoveDefaultWebIntentServiceImpl(
+      const DefaultWebIntentService& service);
+  WebDatabase::State RemoveWebIntentServiceDefaultsImpl(
+      const GURL& service_url);
   scoped_ptr<WDTypedResult> GetDefaultWebIntentServicesForActionImpl(
       const string16& action);
   scoped_ptr<WDTypedResult> GetAllDefaultWebIntentServicesImpl();
@@ -433,10 +363,10 @@ class WebDataService
   //
   //////////////////////////////////////////////////////////////////////////////
 
-  void RemoveAllTokensImpl();
-  void SetTokenForServiceImpl(const std::string& service,
-                              const std::string& token);
-  scoped_ptr<WDTypedResult> GetAllTokensImpl();
+  WebDatabase::State RemoveAllTokensImpl(WebDatabase* db);
+  WebDatabase::State SetTokenForServiceImpl(const std::string& service,
+      const std::string& token, WebDatabase* db);
+  scoped_ptr<WDTypedResult> GetAllTokensImpl(WebDatabase* db);
 
 #if defined(OS_WIN)
   //////////////////////////////////////////////////////////////////////////////
@@ -444,9 +374,12 @@ class WebDataService
   // Password manager.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddIE7LoginImpl(const IE7PasswordInfo& info);
-  void RemoveIE7LoginImpl(const IE7PasswordInfo& info);
-  scoped_ptr<WDTypedResult> GetIE7LoginImpl(const IE7PasswordInfo& info);
+  WebDatabase::State AddIE7LoginImpl(
+      const IE7PasswordInfo& info, WebDatabase* db);
+  WebDatabase::State RemoveIE7LoginImpl(
+      const IE7PasswordInfo& info, WebDatabase* db);
+  scoped_ptr<WDTypedResult> GetIE7LoginImpl(
+      const IE7PasswordInfo& info, WebDatabase* db);
 #endif  // defined(OS_WIN)
 
   //////////////////////////////////////////////////////////////////////////////
@@ -454,66 +387,38 @@ class WebDataService
   // Autofill.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddFormElementsImpl(const std::vector<FormFieldData>& fields);
+  WebDatabase::State AddFormElementsImpl(
+      const std::vector<FormFieldData>& fields, WebDatabase* db);
   scoped_ptr<WDTypedResult> GetFormValuesForElementNameImpl(
-      const string16& name, const string16& prefix, int limit);
-  void RemoveFormElementsAddedBetweenImpl(
-      const base::Time& delete_begin, const base::Time& delete_end);
-  void RemoveExpiredFormElementsImpl();
-  void RemoveFormValueForElementNameImpl(const string16& name,
-                                         const string16& value);
-  void AddAutofillProfileImpl(const AutofillProfile& profile);
-  void UpdateAutofillProfileImpl(const AutofillProfile& profile);
-  void RemoveAutofillProfileImpl(const std::string& guid);
-  scoped_ptr<WDTypedResult> GetAutofillProfilesImpl();
-  void EmptyMigrationTrashImpl(bool notify_sync);
-  void AddCreditCardImpl(const CreditCard& credit_card);
-  void UpdateCreditCardImpl(const CreditCard& credit_card);
-  void RemoveCreditCardImpl(const std::string& guid);
-  scoped_ptr<WDTypedResult> GetCreditCardsImpl();
-  void RemoveAutofillProfilesAndCreditCardsModifiedBetweenImpl(
-      const base::Time& delete_begin, const base::Time& delete_end);
+      const string16& name, const string16& prefix, int limit, WebDatabase* db);
+  WebDatabase::State RemoveFormElementsAddedBetweenImpl(
+      const base::Time& delete_begin, const base::Time& delete_end,
+      WebDatabase* db);
+  WebDatabase::State RemoveExpiredFormElementsImpl(WebDatabase* db);
+  WebDatabase::State RemoveFormValueForElementNameImpl(
+      const string16& name, const string16& value, WebDatabase* db);
+  WebDatabase::State AddAutofillProfileImpl(
+      const AutofillProfile& profile, WebDatabase* db);
+  WebDatabase::State UpdateAutofillProfileImpl(
+      const AutofillProfile& profile, WebDatabase* db);
+  WebDatabase::State RemoveAutofillProfileImpl(
+      const std::string& guid, WebDatabase* db);
+  scoped_ptr<WDTypedResult> GetAutofillProfilesImpl(WebDatabase* db);
+  WebDatabase::State AddCreditCardImpl(
+      const CreditCard& credit_card, WebDatabase* db);
+  WebDatabase::State UpdateCreditCardImpl(
+      const CreditCard& credit_card, WebDatabase* db);
+  WebDatabase::State RemoveCreditCardImpl(
+      const std::string& guid, WebDatabase* db);
+  scoped_ptr<WDTypedResult> GetCreditCardsImpl(WebDatabase* db);
+  WebDatabase::State RemoveAutofillProfilesAndCreditCardsModifiedBetweenImpl(
+      const base::Time& delete_begin, const base::Time& delete_end,
+      WebDatabase* db);
 
   // Callbacks to ensure that sensitive info is destroyed if request is
   // cancelled.
   void DestroyAutofillProfileResult(const WDTypedResult* result);
   void DestroyAutofillCreditCardResult(const WDTypedResult* result);
-
-  // True once initialization has started.
-  bool is_running_;
-
-  // The path with which to initialize the database.
-  base::FilePath path_;
-
-  // Our database.  We own the |db_|, but don't use a |scoped_ptr| because the
-  // |db_| lifetime must be managed on the database thread.
-  WebDatabase* db_;
-
-  // Keeps track of all pending requests made to the db.
-  scoped_refptr<WebDataRequestManager> request_manager_;
-
-  // The application locale.  The locale is needed for some database migrations,
-  // and must be read on the UI thread.  It's cached here so that we can pass it
-  // to the migration code on the DB thread.
-  const std::string app_locale_;
-
-  // Syncable services for the database data.  We own the services, but don't
-  // use |scoped_ptr|s because the lifetimes must be managed on the database
-  // thread.
-  // Currently only Autocomplete and Autofill profiles use the new Sync API, but
-  // all the database data should migrate to this API over time.
-  AutocompleteSyncableService* autocomplete_syncable_service_;
-  AutofillProfileSyncableService* autofill_profile_syncable_service_;
-
-  // Whether the database failed to initialize.  We use this to avoid
-  // continually trying to reinit.
-  bool failed_init_;
-
-  // Whether we should commit the database.
-  bool should_commit_;
-
-  // MessageLoop the WebDataService is created on.
-  MessageLoop* main_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDataService);
 };

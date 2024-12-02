@@ -31,13 +31,33 @@ cr.define('options', function() {
       $('managed-user-passphrase').oninput = this.updateDisplay_;
       $('passphrase-confirm').oninput = this.updateDisplay_;
 
-      $('save-passphrase').onclick = function() {
-        chrome.send('setPassphrase', [$('managed-user-passphrase').value]);
-        $('managed-user-passphrase').value = '';
-        $('passphrase-confirm').value = '';
-        OptionsPage.closeOverlay();
+      $('save-passphrase').onclick = this.setPassphrase_.bind(this);
+
+      $('managed-user-passphrase').onkeypress = function(event) {
+        // Check if the user pressed enter and advance to the
+        // confirmation field since that was probably the intention.
+        if (event.keyCode == 13)
+          $('passphrase-confirm').focus();
+      };
+
+      var self = this;
+      $('passphrase-confirm').onkeypress = function(event) {
+        // Allow submitting only valid information.
+        if (!$('passphrase-confirm').validity.valid ||
+            !$('managed-user-passphrase').validity.valid) {
+          return;
+        }
+        // Check if the user pressed enter.
+        if (event.keyCode == 13)
+          self.setPassphrase_(event);
+      };
+
+      $('cancel-passphrase').onclick = function(event) {
+        self.closePage();
       };
     },
+
+    /** Updates the display according to the validity of the user input. */
     updateDisplay_: function() {
       var valid =
           $('passphrase-confirm').value == $('managed-user-passphrase').value;
@@ -48,9 +68,54 @@ cr.define('options', function() {
           !$('passphrase-confirm').validity.valid ||
           !$('managed-user-passphrase').validity.valid;
     },
+    /**
+     * Sets the passphrase and closes the overlay.
+     * @param {Event} event The event that triggered the call to this function.
+     */
+    setPassphrase_: function(event) {
+      chrome.send('setPassphrase', [$('managed-user-passphrase').value]);
+      this.closePage();
+    },
+
+    /** @override */
+    canShowPage: function() {
+      return ManagedUserSettings.getInstance().authenticationState ==
+          options.ManagedUserAuthentication.AUTHENTICATED;
+    },
+
+    /** @override */
+    didShowPage: function() {
+      $('managed-user-passphrase').focus();
+    },
+
+    /**
+     * Make sure that we reset the fields on cancel.
+     */
+    handleCancel: function() {
+      this.closePage();
+    },
+
+    /** Closes the page and resets the passphrase fields */
+    closePage: function() {
+      // Reseting the fields directly would lead to a flicker, so listen to
+      // webkitTransitionEnd to clear them after that. Similar to how it is done
+      // in setOverlayVisible_ in options_page.js.
+      var self = this;
+      this.container.addEventListener('webkitTransitionEnd', function f(e) {
+        if (e.target != e.currentTarget || e.propertyName != 'opacity')
+          return;
+        self.container.removeEventListener('webkitTransitionEnd', f);
+
+        // Reset the fields.
+        $('managed-user-passphrase').value = '';
+        $('passphrase-confirm').value = '';
+        self.updateDisplay_();
+      });
+      OptionsPage.closeOverlay();
+    }
   };
 
-  // This is a class used for browsertests.
+  /** Used for browsertests. */
   var ManagedUserSetPassphraseForTesting = {
     getPassphraseInput: function() {
       return $('managed-user-passphrase');

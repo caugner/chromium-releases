@@ -44,18 +44,6 @@ MockDecryptor::MockDecryptor() {}
 
 MockDecryptor::~MockDecryptor() {}
 
-void MockDecryptor::InitializeAudioDecoder(
-    scoped_ptr<AudioDecoderConfig> config,
-    const DecoderInitCB& init_cb) {
-  InitializeAudioDecoderMock(*config, init_cb);
-}
-
-void MockDecryptor::InitializeVideoDecoder(
-    scoped_ptr<VideoDecoderConfig> config,
-    const DecoderInitCB& init_cb) {
-  InitializeVideoDecoderMock(*config, init_cb);
-}
-
 MockStatisticsCB::MockStatisticsCB() {}
 
 MockStatisticsCB::~MockStatisticsCB() {}

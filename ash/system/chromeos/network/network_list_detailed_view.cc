@@ -5,8 +5,10 @@
 #include "ash/system/chromeos/network/network_list_detailed_view.h"
 
 #include "ash/shell.h"
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_views.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"

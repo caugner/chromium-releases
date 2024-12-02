@@ -5,7 +5,7 @@
 #include "content/test/content_browser_test_utils.h"
 
 #include "base/bind.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "content/public/browser/navigation_controller.h"
@@ -39,7 +39,6 @@ void NavigateToURLBlockUntilNavigationsComplete(Shell* window,
   NavigationController* controller = &window->web_contents()->GetController();
   TestNavigationObserver same_tab_observer(
       Source<NavigationController>(controller),
-      NULL,
       number_of_navigations);
 
   window->LoadURL(url);

@@ -13,6 +13,7 @@
 #include "content/browser/web_contents/navigation_controller_impl.h"
 #include "content/browser/web_contents/navigation_entry_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -22,6 +23,7 @@
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
 #include "ui/aura/window.h"
+#include "ui/compositor/scoped_animation_duration_scale_mode.h"
 
 namespace content {
 
@@ -66,7 +68,7 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
  public:
   WebContentsViewAuraTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitch(switches::kEnableOverscrollHistoryNavigation);
   }
 
@@ -84,7 +86,8 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
     ASSERT_TRUE(test_server()->Start());
     GURL test_url(test_server()->GetURL(url));
     NavigateToURL(shell(), test_url);
-    aura::Window* content = shell()->web_contents()->GetContentNativeView();
+    aura::Window* content =
+        shell()->web_contents()->GetView()->GetContentNativeView();
     content->GetRootWindow()->SetHostSize(gfx::Size(800, 600));
   }
 
@@ -96,6 +99,9 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
     NavigationController& controller = web_contents->GetController();
     RenderViewHostImpl* view_host = static_cast<RenderViewHostImpl*>(
         web_contents->GetRenderViewHost());
+    WebContentsViewAura* view_aura = static_cast<WebContentsViewAura*>(
+        web_contents->GetView());
+    view_aura->SetupOverlayWindowForTesting();
 
     EXPECT_FALSE(controller.CanGoBack());
     EXPECT_FALSE(controller.CanGoForward());
@@ -116,7 +122,7 @@ class WebContentsViewAuraTest : public ContentBrowserTest {
     EXPECT_TRUE(controller.CanGoBack());
     EXPECT_FALSE(controller.CanGoForward());
 
-    aura::Window* content = web_contents->GetContentNativeView();
+    aura::Window* content = web_contents->GetView()->GetContentNativeView();
     gfx::Rect bounds = content->GetBoundsInRootWindow();
     aura::test::EventGenerator generator(content->GetRootWindow(), content);
 
@@ -202,14 +208,27 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
   TestOverscrollNavigation(true);
 }
 
+// Disabled because the test always fails the first time it runs on the Win Aura
+// bots, and usually but not always passes second-try (See crbug.com/179532).
+#if defined(OS_WIN)
+#define MAYBE_QuickOverscrollDirectionChange \
+        DISABLED_QuickOverscrollDirectionChange
+#else
+#define MAYBE_QuickOverscrollDirectionChange QuickOverscrollDirectionChange
+#endif
 IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
-                       QuickOverscrollDirectionChange) {
+                       MAYBE_QuickOverscrollDirectionChange) {
   ASSERT_NO_FATAL_FAILURE(
       StartTestWithPage("files/overscroll_navigation.html"));
   WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(shell()->web_contents());
   RenderViewHostImpl* view_host = static_cast<RenderViewHostImpl*>(
       web_contents->GetRenderViewHost());
+
+  // This test triggers a large number of animations. Speed them up to ensure
+  // the test completes within its time limit.
+  ui::ScopedAnimationDurationScaleMode fast_duration_mode(
+      ui::ScopedAnimationDurationScaleMode::FAST_DURATION);
 
   // Make sure the page has both back/forward history.
   ExecuteSyncJSFunction(view_host, "navigate_next()");
@@ -219,7 +238,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
   web_contents->GetController().GoBack();
   EXPECT_EQ(1, GetCurrentIndex());
 
-  aura::Window* content = web_contents->GetContentNativeView();
+  aura::Window* content = web_contents->GetView()->GetContentNativeView();
   aura::RootWindow* root_window = content->GetRootWindow();
   gfx::Rect bounds = content->GetBoundsInRootWindow();
 
@@ -321,7 +340,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
     // index 3 to index 2, and index 3 should have a screenshot.
     string16 expected_title = ASCIIToUTF16("Title: #2");
     content::TitleWatcher title_watcher(web_contents, expected_title);
-    aura::Window* content = web_contents->GetContentNativeView();
+    aura::Window* content = web_contents->GetView()->GetContentNativeView();
     gfx::Rect bounds = content->GetBoundsInRootWindow();
     aura::test::EventGenerator generator(content->GetRootWindow(), content);
     generator.GestureScrollSequence(
@@ -412,6 +431,53 @@ IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
         web_contents->GetController().GetActiveEntry());
     EXPECT_FALSE(entry->screenshot().get());
   }
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
+                       ContentWindowReparent) {
+  ASSERT_NO_FATAL_FAILURE(
+      StartTestWithPage("files/overscroll_navigation.html"));
+
+  scoped_ptr<aura::Window> window(new aura::Window(NULL));
+  window->Init(ui::LAYER_NOT_DRAWN);
+
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  ExecuteSyncJSFunction(web_contents->GetRenderViewHost(), "navigate_next()");
+  EXPECT_EQ(1, GetCurrentIndex());
+
+  aura::Window* content = web_contents->GetView()->GetContentNativeView();
+  gfx::Rect bounds = content->GetBoundsInRootWindow();
+  aura::test::EventGenerator generator(content->GetRootWindow(), content);
+  generator.GestureScrollSequence(
+      gfx::Point(bounds.x() + 2, bounds.y() + 10),
+      gfx::Point(bounds.right() - 10, bounds.y() + 10),
+      base::TimeDelta::FromMilliseconds(20),
+      1);
+
+  window->AddChild(shell()->web_contents()->GetView()->GetContentNativeView());
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsViewAuraTest,
+                       ContentWindowClose) {
+  ASSERT_NO_FATAL_FAILURE(
+      StartTestWithPage("files/overscroll_navigation.html"));
+
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  ExecuteSyncJSFunction(web_contents->GetRenderViewHost(), "navigate_next()");
+  EXPECT_EQ(1, GetCurrentIndex());
+
+  aura::Window* content = web_contents->GetView()->GetContentNativeView();
+  gfx::Rect bounds = content->GetBoundsInRootWindow();
+  aura::test::EventGenerator generator(content->GetRootWindow(), content);
+  generator.GestureScrollSequence(
+      gfx::Point(bounds.x() + 2, bounds.y() + 10),
+      gfx::Point(bounds.right() - 10, bounds.y() + 10),
+      base::TimeDelta::FromMilliseconds(20),
+      1);
+
+  delete web_contents->GetView()->GetContentNativeView();
 }
 
 }  // namespace content

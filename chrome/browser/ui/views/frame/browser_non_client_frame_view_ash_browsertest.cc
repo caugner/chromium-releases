@@ -9,7 +9,7 @@
 #include "base/command_line.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/immersive_mode_controller.h"
+#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "ui/base/hit_test.h"
 #include "ui/views/controls/button/image_button.h"
@@ -17,19 +17,7 @@
 
 using views::Widget;
 
-class BrowserNonClientFrameViewAshTest : public InProcessBrowserTest {
- public:
-  BrowserNonClientFrameViewAshTest() {}
-  virtual ~BrowserNonClientFrameViewAshTest() {}
-
-  // content::BrowserTestBase overrides:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(ash::switches::kAshImmersiveMode);
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BrowserNonClientFrameViewAshTest);
-};
+typedef InProcessBrowserTest BrowserNonClientFrameViewAshTest;
 
 IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewAshTest, WindowHeader) {
   // We know we're using Views, so static cast.
@@ -88,6 +76,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewAshTest, WindowHeader) {
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewAshTest, ImmersiveMode) {
+  if (!ImmersiveModeController::UseImmersiveFullscreen())
+    return;
   // We know we're using Views, so static cast.
   BrowserView* browser_view = static_cast<BrowserView*>(browser()->window());
   Widget* widget = browser_view->GetWidget();
@@ -95,35 +85,43 @@ IN_PROC_BROWSER_TEST_F(BrowserNonClientFrameViewAshTest, ImmersiveMode) {
   BrowserNonClientFrameViewAsh* frame_view =
       static_cast<BrowserNonClientFrameViewAsh*>(
           widget->non_client_view()->frame_view());
+  ASSERT_FALSE(widget->IsFullscreen());
 
-  // Normal window does not have immersive mode button.
-  EXPECT_FALSE(frame_view->immersive_button_->visible());
+  // Immersive mode starts disabled.
+  EXPECT_FALSE(browser_view->immersive_mode_controller()->enabled());
 
-  // Maximized window shows immersive mode button.
-  widget->Maximize();
-  EXPECT_TRUE(frame_view->immersive_button_->visible());
+  // Frame paints by default.
+  EXPECT_TRUE(frame_view->ShouldPaint());
 
-  // Entering immersive mode hides the caption buttons.
-  browser_view->immersive_mode_controller()->SetEnabled(true);
-  EXPECT_FALSE(frame_view->immersive_button_->visible());
-  EXPECT_FALSE(frame_view->size_button_->visible());
-  EXPECT_FALSE(frame_view->close_button_->visible());
+  // Going fullscreen enables immersive mode.
+  browser_view->EnterFullscreen(GURL(), FEB_TYPE_NONE);
+  EXPECT_TRUE(browser_view->immersive_mode_controller()->enabled());
 
-  // An immersive reveal shows the buttons.
+  // TODO(jamescook): When adding back the slide-out animation for immersive
+  // mode, this is a good place to test the button visibility. CancelReveal()
+  // can short-circuit the animation if it has to wait on painting.
+
+  // Frame abuts top of window.
+  EXPECT_EQ(0, frame_view->NonClientTopBorderHeight(false));
+
+  // An immersive reveal shows the buttons and the top of the frame.
   browser_view->immersive_mode_controller()->StartRevealForTest();
-  EXPECT_TRUE(frame_view->immersive_button_->visible());
   EXPECT_TRUE(frame_view->size_button_->visible());
   EXPECT_TRUE(frame_view->close_button_->visible());
+  EXPECT_TRUE(frame_view->ShouldPaint());
 
   // Ending reveal hides them again.
   browser_view->immersive_mode_controller()->CancelReveal();
-  EXPECT_FALSE(frame_view->immersive_button_->visible());
   EXPECT_FALSE(frame_view->size_button_->visible());
   EXPECT_FALSE(frame_view->close_button_->visible());
+  EXPECT_FALSE(frame_view->ShouldPaint());
 
-  // Exiting immersive mode makes them visible again.
-  browser_view->immersive_mode_controller()->SetEnabled(false);
-  EXPECT_TRUE(frame_view->immersive_button_->visible());
+  // Exiting fullscreen exits immersive mode.
+  browser_view->ExitFullscreen();
+  EXPECT_FALSE(browser_view->immersive_mode_controller()->enabled());
+
+  // Exiting immersive mode makes controls and frame visible again.
   EXPECT_TRUE(frame_view->size_button_->visible());
   EXPECT_TRUE(frame_view->close_button_->visible());
+  EXPECT_TRUE(frame_view->ShouldPaint());
 }

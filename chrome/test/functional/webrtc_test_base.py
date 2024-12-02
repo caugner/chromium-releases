@@ -4,6 +4,7 @@
 # found in the LICENSE file.
 
 import os
+import re
 import subprocess
 
 import pyauto
@@ -16,10 +17,21 @@ class MissingRequiredBinaryException(Exception):
 class WebrtcTestBase(pyauto.PyUITest):
   """This base class provides helpers for WebRTC calls."""
 
+  DEFAULT_TEST_PAGE = 'webrtc_jsep01_test.html'
+
   def ExtraChromeFlags(self):
     """Adds flags to the Chrome command line."""
     extra_flags = ['--enable-data-channels', '--enable-dcheck']
     return pyauto.PyUITest.ExtraChromeFlags(self) + extra_flags
+
+  def LoadTestPageInTwoTabs(self, test_page=DEFAULT_TEST_PAGE):
+    url = self.GetFileURLForDataPath('webrtc', test_page)
+    self.NavigateToURL(url)
+    self.AppendTab(pyauto.GURL(url))
+
+  def LoadTestPageInOneTab(self, test_page=DEFAULT_TEST_PAGE):
+    url = self.GetFileURLForDataPath('webrtc', test_page)
+    self.NavigateToURL(url)
 
   def GetUserMedia(self, tab_index, action='accept',
                    request_video=True, request_audio=True):
@@ -88,16 +100,31 @@ class WebrtcTestBase(pyauto.PyUITest):
         tab_index=tab_index))
     self.AssertNoFailures(tab_index)
 
+  def CreatePeerConnection(self, tab_index):
+    self.assertEquals('ok-peerconnection-created', self.ExecuteJavascript(
+        'preparePeerConnection()', tab_index=tab_index))
+
+  def AddUserMediaLocalStream(self, tab_index):
+    self.assertEquals('ok-added', self.ExecuteJavascript(
+        'addLocalStream()', tab_index=tab_index))
+
+  def AddWebAudioFile(self, tab_index, input_relative_path):
+    """The path must be relative to where the javascript is.
+
+    This call just loads and adds a file to a peer connection, but it doesn't
+    start to play it until you call PlayWebAudioFile.
+    """
+    self.assertEquals('ok-added', self.ExecuteJavascript(
+        'addAudioFile("%s")' % re.escape(input_relative_path),
+        tab_index=tab_index))
+
+  def PlayWebAudioFile(self, tab_index):
+    """Plays a web audio file which was added earlier."""
+    self.assertEquals('ok-playing', self.ExecuteJavascript(
+        'playAudioFile()', tab_index=tab_index))
+
   def EstablishCall(self, from_tab_with_index, to_tab_with_index):
     self.WaitUntilPeerConnects(tab_index=from_tab_with_index)
-
-    self.assertEquals('ok-peerconnection-created', self.ExecuteJavascript(
-        'preparePeerConnection()', tab_index=from_tab_with_index))
-    self.AssertNoFailures(from_tab_with_index)
-
-    self.assertEquals('ok-added', self.ExecuteJavascript(
-        'addLocalStream()', tab_index=from_tab_with_index))
-    self.AssertNoFailures(from_tab_with_index)
 
     self.assertEquals('ok-negotiating', self.ExecuteJavascript(
         'negotiateCall()', tab_index=from_tab_with_index))

@@ -67,20 +67,23 @@ var WebKitMutationObserver = function(callback) {};
     @param {Object} options */
 WebKitMutationObserver.prototype.observe = function(element, options) {};
 
+// TODO(jamiewalch): Flesh this out with the correct type when we're a v2 app.
+/** @type {remoting.MockStorage} */
+remoting.storage.local = null;
+
 /** @type {Object} */
 chrome.storage = {};
 
-// TODO(jamiewalch): Flesh this out with the correct type when we're a v2 app.
 /** @type {remoting.MockStorage} */
-chrome.storage.local = null;
+chrome.storage.local;
+
+/** @type {remoting.MockStorage} */
+chrome.storage.sync;
 
 /** @type {Object} */
 chrome.app.runtime = {
-  /** @type {Object} */
-  onLaunched: {
-    /** @param {function():void} callback */
-    addListener: function(callback) {}
-  }
+  /** @type {chrome.Event} */
+  onLaunched: null
 };
 
 /** @type {Object} */
@@ -104,14 +107,41 @@ chrome.experimental.identity = {
   getAuthToken: function(parameters, callback) {}
 };
 
+/** @constructor */
+chrome.Event = function() {};
+
+/** @param {function():void} callback */
+chrome.Event.prototype.addListener = function(callback) {};
+
+/** @constructor */
+chrome.extension.Port = function() {};
+
+/** @type {chrome.Event} */
+chrome.extension.Port.prototype.onMessage;
+
+/** @type {chrome.Event} */
+chrome.extension.Port.prototype.onDisconnect;
+
+/**
+ * @param {Object} message
+ */
+chrome.extension.Port.prototype.postMessage = function(message) {};
+
 /** @type {Object} */
 chrome.runtime = {
   /** @type {Object} */
   lastError: {
     /** @type {string} */
     message: ''
-  }
+  },
+  /** @return {{version: string}} */
+  getManifest: function() {}
 };
+
+/**
+ * @type {?function(string):chrome.extension.Port}
+ */
+chrome.runtime.connectNative = function(name) {};
 
 /** @type {Object} */
 chrome.tabs;

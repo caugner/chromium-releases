@@ -37,7 +37,7 @@ class OnMoreDataConverter
   virtual int OnMoreIOData(AudioBus* source,
                            AudioBus* dest,
                            AudioBuffersState buffers_state) OVERRIDE;
-  virtual void OnError(AudioOutputStream* stream, int code) OVERRIDE;
+  virtual void OnError(AudioOutputStream* stream) OVERRIDE;
   virtual void WaitTillDataReady() OVERRIDE;
 
   // Sets |source_callback_|.  If this is not a new object, then Stop() must be
@@ -124,6 +124,9 @@ static void RecordFallbackStats(const AudioParameters& output_params) {
   }
 }
 
+// Only Windows has a high latency output driver that is not the same as the low
+// latency path.
+#if defined(OS_WIN)
 // Converts low latency based |output_params| into high latency appropriate
 // output parameters in error situations.
 static AudioParameters SetupFallbackParams(
@@ -142,6 +145,7 @@ static AudioParameters SetupFallbackParams(
       input_params.sample_rate(), input_params.bits_per_sample(),
       frames_per_buffer);
 }
+#endif
 
 AudioOutputResampler::AudioOutputResampler(AudioManager* audio_manager,
                                            const AudioParameters& input_params,
@@ -188,7 +192,7 @@ bool AudioOutputResampler::OpenStream() {
 
   // If we've already tried to open the stream in high latency mode or we've
   // successfully opened a stream previously, there's nothing more to be done.
-  if (output_params_.format() == AudioParameters::AUDIO_PCM_LINEAR ||
+  if (output_params_.format() != AudioParameters::AUDIO_PCM_LOW_LATENCY ||
       streams_opened_ || !callbacks_.empty()) {
     return false;
   }
@@ -202,17 +206,39 @@ bool AudioOutputResampler::OpenStream() {
     return false;
   }
 
-  DLOG(ERROR) << "Unable to open audio device in low latency mode.  Falling "
-              << "back to high latency audio output.";
-
   // Record UMA statistics about the hardware which triggered the failure so
   // we can debug and triage later.
   RecordFallbackStats(output_params_);
+
+  // Only Windows has a high latency output driver that is not the same as the
+  // low latency path.
+#if defined(OS_WIN)
+  DLOG(ERROR) << "Unable to open audio device in low latency mode.  Falling "
+              << "back to high latency audio output.";
+
   output_params_ = SetupFallbackParams(params_, output_params_);
   Initialize();
+  if (dispatcher_->OpenStream()) {
+    streams_opened_ = true;
+    return true;
+  }
+#endif
 
-  // Retry, if this fails, there's nothing left to do but report the error back.
-  return dispatcher_->OpenStream();
+  DLOG(ERROR) << "Unable to open audio device in high latency mode.  Falling "
+              << "back to fake audio output.";
+
+  // Finally fall back to a fake audio output device.
+  output_params_.Reset(
+      AudioParameters::AUDIO_FAKE, params_.channel_layout(),
+      params_.channels(), params_.input_channels(), params_.sample_rate(),
+      params_.bits_per_sample(), params_.frames_per_buffer());
+  Initialize();
+  if (dispatcher_->OpenStream()) {
+    streams_opened_ = true;
+    return true;
+  }
+
+  return false;
 }
 
 bool AudioOutputResampler::StartStream(
@@ -228,8 +254,12 @@ bool AudioOutputResampler::StartStream(
   } else {
     resampler_callback = it->second;
   }
+
   resampler_callback->Start(callback);
-  return dispatcher_->StartStream(resampler_callback, stream_proxy);
+  bool result = dispatcher_->StartStream(resampler_callback, stream_proxy);
+  if (!result)
+    resampler_callback->Stop();
+  return result;
 }
 
 void AudioOutputResampler::StreamVolumeSet(AudioOutputProxy* stream_proxy,
@@ -285,12 +315,16 @@ OnMoreDataConverter::OnMoreDataConverter(const AudioParameters& input_params,
       output_params.GetBytesPerSecond();
 }
 
-OnMoreDataConverter::~OnMoreDataConverter() {}
+OnMoreDataConverter::~OnMoreDataConverter() {
+  // Ensure Stop() has been called so we don't end up with an AudioOutputStream
+  // calling back into OnMoreData() after destruction.
+  CHECK(!source_callback_);
+}
 
 void OnMoreDataConverter::Start(
     AudioOutputStream::AudioSourceCallback* callback) {
   base::AutoLock auto_lock(source_lock_);
-  DCHECK(!source_callback_);
+  CHECK(!source_callback_);
   source_callback_ = callback;
 
   // While AudioConverter can handle multiple inputs, we're using it only with
@@ -301,6 +335,7 @@ void OnMoreDataConverter::Start(
 
 void OnMoreDataConverter::Stop() {
   base::AutoLock auto_lock(source_lock_);
+  CHECK(source_callback_);
   source_callback_ = NULL;
   audio_converter_.RemoveInput(this);
 }
@@ -359,10 +394,10 @@ double OnMoreDataConverter::ProvideInput(AudioBus* dest,
   return frames > 0 ? 1 : 0;
 }
 
-void OnMoreDataConverter::OnError(AudioOutputStream* stream, int code) {
+void OnMoreDataConverter::OnError(AudioOutputStream* stream) {
   base::AutoLock auto_lock(source_lock_);
   if (source_callback_)
-    source_callback_->OnError(stream, code);
+    source_callback_->OnError(stream);
 }
 
 void OnMoreDataConverter::WaitTillDataReady() {

@@ -11,9 +11,13 @@
 
 #include <X11/extensions/Xrandr.h>
 
+#include "ash/display/display_controller.h"
+#include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
 #include "ash/shell.h"
 #include "base/message_pump_aurax11.h"
+#include "grit/ash_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/gfx/display.h"
@@ -45,10 +49,6 @@ XRRModeInfo* FindMode(XRRScreenResources* screen_resources, XID current_mode) {
   return NULL;
 }
 
-bool CompareDisplayY(const gfx::Display& lhs, const gfx::Display& rhs) {
-  return lhs.bounds_in_pixel().y() < rhs.bounds_in_pixel().y();
-}
-
 // A list of bogus sizes in mm that X detects and should be ignored.
 // See crbug.com/136533.
 const unsigned long kInvalidDisplaySizeList[][2] = {
@@ -76,6 +76,25 @@ bool ShouldIgnoreSize(XRROutputInfo *output_info) {
   return false;
 }
 
+std::string GetDisplayName(XID output_id) {
+  std::string display_name;
+  ui::GetOutputDeviceData(output_id, NULL, NULL, &display_name);
+  return display_name;
+}
+
+int64 GetDisplayId(XID output_id, int output_index) {
+  uint16 manufacturer_id = 0;
+  uint16 product_code = 0;
+  if (ui::GetOutputDeviceData(
+          output_id, &manufacturer_id, &product_code, NULL) &&
+      manufacturer_id != 0) {
+    // An ID based on display's index will be assigned later if this call
+    // fails.
+    return gfx::Display::GetID(manufacturer_id, product_code, output_index);
+  }
+  return gfx::Display::kInvalidDisplayID;
+}
+
 }  // namespace
 
 DisplayChangeObserverX11::DisplayChangeObserverX11()
@@ -84,9 +103,42 @@ DisplayChangeObserverX11::DisplayChangeObserverX11()
       xrandr_event_base_(0) {
   int error_base_ignored;
   XRRQueryExtension(xdisplay_, &xrandr_event_base_, &error_base_ignored);
+
+  // Find internal display.
+  XRRScreenResources* screen_resources =
+      XRRGetScreenResources(xdisplay_, x_root_window_);
+  for (int output_index = 0; output_index < screen_resources->noutput;
+       output_index++) {
+    XID output = screen_resources->outputs[output_index];
+    XRROutputInfo *output_info =
+        XRRGetOutputInfo(xdisplay_, screen_resources, output);
+    bool is_internal = chromeos::OutputConfigurator::IsInternalOutputName(
+        std::string(output_info->name));
+    XRRFreeOutputInfo(output_info);
+    if (is_internal) {
+      int64 id = GetDisplayId(output, output_index);
+      // Fallback to output index. crbug.com/180100
+      gfx::Display::SetInternalDisplayId(
+          id == gfx::Display::kInvalidDisplayID ? output_index : id);
+      break;
+    }
+  }
+  XRRFreeScreenResources(screen_resources);
 }
 
 DisplayChangeObserverX11::~DisplayChangeObserverX11() {
+}
+
+chromeos::OutputState DisplayChangeObserverX11::GetStateForOutputs(
+    const std::vector<chromeos::OutputInfo>& outputs) const {
+  CHECK(outputs.size() == 2);
+  DisplayIdPair pair = std::make_pair(
+      GetDisplayId(outputs[0].output, outputs[0].output_index),
+      GetDisplayId(outputs[1].output, outputs[1].output_index));
+  DisplayLayout layout = Shell::GetInstance()->display_controller()->
+      GetRegisteredDisplayLayout(pair);
+  return layout.mirrored ?
+      chromeos::STATE_DUAL_MIRROR : chromeos::STATE_DUAL_EXTENDED;
 }
 
 void DisplayChangeObserverX11::OnDisplayModeChanged() {
@@ -101,15 +153,13 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
     crtc_info_map[crtc_id] = crtc_info;
   }
 
-  std::vector<gfx::Display> displays;
-  std::set<int> y_coords;
+  std::vector<DisplayInfo> displays;
   std::set<int64> ids;
   for (int output_index = 0; output_index < screen_resources->noutput;
        output_index++) {
+    XID output = screen_resources->outputs[output_index];
     XRROutputInfo *output_info =
-        XRRGetOutputInfo(xdisplay_,
-                         screen_resources,
-                         screen_resources->outputs[output_index]);
+        XRRGetOutputInfo(xdisplay_, screen_resources, output);
     if (output_info->connection != RR_Connected) {
       XRRFreeOutputInfo(output_info);
       continue;
@@ -126,10 +176,6 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
                    << output_index;
       continue;
     }
-    // Mirrored monitors have the same y coordinates.
-    if (y_coords.find(crtc_info->y) != y_coords.end())
-      continue;
-    displays.push_back(gfx::Display());
 
     float device_scale_factor = 1.0f;
     if (!ShouldIgnoreSize(output_info) &&
@@ -137,27 +183,33 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
         kHighDensityDPIThreshold) {
       device_scale_factor = 2.0f;
     }
-    displays.back().SetScaleAndBounds(
-        device_scale_factor,
-        gfx::Rect(crtc_info->x, crtc_info->y, mode->width, mode->height));
+    gfx::Rect display_bounds(
+        crtc_info->x, crtc_info->y, mode->width, mode->height);
 
-    uint16 manufacturer_id = 0;
-    uint16 product_code = 0;
-    if (ui::GetOutputDeviceData(screen_resources->outputs[output_index],
-                                &manufacturer_id, &product_code, NULL) &&
-        manufacturer_id != 0) {
-      // An ID based on display's index will be assigned later if this call
-      // fails.
-      int64 new_id = gfx::Display::GetID(
-          manufacturer_id, product_code, output_index);
-      if (ids.find(new_id) == ids.end()) {
-        displays.back().set_id(new_id);
-        ids.insert(new_id);
-      }
-    }
-
-    y_coords.insert(crtc_info->y);
+    bool is_internal = chromeos::OutputConfigurator::IsInternalOutputName(
+        std::string(output_info->name));
     XRRFreeOutputInfo(output_info);
+
+    std::string name = is_internal ?
+        l10n_util::GetStringUTF8(IDS_ASH_INTERNAL_DISPLAY_NAME) :
+        GetDisplayName(output);
+    if (name.empty())
+      name = l10n_util::GetStringUTF8(IDS_ASH_STATUS_TRAY_UNKNOWN_DISPLAY_NAME);
+
+    bool has_overscan = false;
+    ui::GetOutputOverscanFlag(output, &has_overscan);
+
+    int64 id = GetDisplayId(output, output_index);
+
+    // If ID is invalid or there is an duplicate, just use output index.
+    if (id == gfx::Display::kInvalidDisplayID || ids.find(id) != ids.end())
+      id = output_index;
+    ids.insert(id);
+
+    displays.push_back(DisplayInfo(id, name, has_overscan));
+    displays.back().set_device_scale_factor(device_scale_factor);
+    displays.back().SetBounds(display_bounds);
+    displays.back().set_native(true);
   }
 
   // Free all allocated resources.
@@ -167,17 +219,6 @@ void DisplayChangeObserverX11::OnDisplayModeChanged() {
   }
   XRRFreeScreenResources(screen_resources);
 
-  // PowerManager lays out the outputs vertically. Sort them by Y
-  // coordinates.
-  std::sort(displays.begin(), displays.end(), CompareDisplayY);
-  int64 id = 0;
-  for (std::vector<gfx::Display>::iterator iter = displays.begin();
-       iter != displays.end(); ++iter) {
-    if (iter->id() == gfx::Display::kInvalidDisplayID) {
-      iter->set_id(id);
-      ++id;
-    }
-  }
   // DisplayManager can be null during the boot.
   Shell::GetInstance()->display_manager()->OnNativeDisplaysChanged(displays);
 }

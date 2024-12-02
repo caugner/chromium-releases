@@ -5,6 +5,8 @@
 #ifndef ASH_TEST_TEST_SHELL_DELEGATE_H_
 #define ASH_TEST_TEST_SHELL_DELEGATE_H_
 
+#include <string>
+
 #include "ash/shell_delegate.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -22,17 +24,20 @@ class TestShellDelegate : public ShellDelegate {
   // Overridden from ShellDelegate:
   virtual bool IsUserLoggedIn() const OVERRIDE;
   virtual bool IsSessionStarted() const OVERRIDE;
+  virtual bool IsGuestSession() const OVERRIDE;
   virtual bool IsFirstRunAfterBoot() const OVERRIDE;
+  virtual bool IsRunningInForcedAppMode() const OVERRIDE;
   virtual bool CanLockScreen() const OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
+  virtual void PreInit() OVERRIDE;
   virtual void Shutdown() OVERRIDE;
   virtual void Exit() OVERRIDE;
   virtual void NewTab() OVERRIDE;
   virtual void NewWindow(bool incognito) OVERRIDE;
   virtual void ToggleMaximized() OVERRIDE;
-  virtual void OpenFileManager() OVERRIDE;
+  virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
   virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
   virtual void RestoreTab() OVERRIDE;
@@ -71,6 +76,7 @@ class TestShellDelegate : public ShellDelegate {
   virtual string16 GetProductName() const OVERRIDE;
 
   int num_exit_requests() const { return num_exit_requests_; }
+
  private:
   friend class ash::test::AshTestBase;
 

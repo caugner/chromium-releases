@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * FileGrid constructor.
  *
@@ -88,14 +90,11 @@ FileGrid.decorateThumbnail = function(li, entry, metadataCache) {
  * @param {Entry} entry Entry which thumbnail is generating for.
  * @param {MetadataCache} metadataCache To retrieve metadata.
  * @param {ThumbnailLoader.FillMode} fillMode Fill mode.
- * @param {function(HTMLElement)} opt_imageLoadCallback Callback called when
- *                                the image has been loaded before inserting
- *                                it into the DOM.
+ * @param {function(HTMLElement)=} opt_imageLoadCallback Callback called when
+ *     the image has been loaded before inserting it into the DOM.
  */
 FileGrid.decorateThumbnailBox = function(
     box, entry, metadataCache, fillMode, opt_imageLoadCallback) {
-  var self = this;
-
   box.className = 'img-container';
   if (entry.isDirectory) {
     box.setAttribute('generic-thumbnail', 'folder');
@@ -129,7 +128,11 @@ FileGrid.decorateThumbnailBox = function(
         new ThumbnailLoader(imageUrl,
                             ThumbnailLoader.LoaderType.IMAGE,
                             metadata).
-            load(box, fillMode, opt_imageLoadCallback, onImageLoadError);
+            load(box,
+                 fillMode,
+                 ThumbnailLoader.OptimizationMode.DISCARD_DETACHED,
+                 opt_imageLoadCallback,
+                 onImageLoadError);
       });
 };
 

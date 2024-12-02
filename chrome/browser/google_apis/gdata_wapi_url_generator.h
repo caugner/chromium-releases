@@ -31,10 +31,6 @@ class GDataWapiUrlGenerator {
   // url params (as AddStandardUrlParams above does).
   static GURL AddInitiateUploadUrlParams(const GURL& url);
 
-  // Adds additional parameters to metadata feed to include installed 3rd
-  // party applications.
-  static GURL AddMetadataUrlParams(const GURL& url);
-
   // Adds additional parameters for API version, output content type and to
   // show folders in the feed are added to document feed URLs.
   // Optionally, adds start-index=... parameter if |changestamp| is non-zero,
@@ -104,13 +100,25 @@ class GDataWapiUrlGenerator {
   GURL GenerateResourceUrlForRemoval(const std::string& parent_resource_id,
                                      const std::string& resource_id) const;
 
+  // Generates a URL to initiate uploading a new file to a directory
+  // specified by |parent_resource_id|.
+  GURL GenerateInitiateUploadNewFileUrl(
+      const std::string& parent_resource_id) const;
+
+  // Generates a URL to initiate uploading file content to overwrite a
+  // file specified by |resource_id|.
+  GURL GenerateInitiateUploadExistingFileUrl(
+      const std::string& resource_id) const;
+
   // Generates a URL for getting the root resource list feed.
   // Used to make changes in the root directory (ex. create a directory in the
   // root directory)
   GURL GenerateResourceListRootUrl() const;
 
   // Generates a URL for getting the account metadata feed.
-  GURL GenerateAccountMetadataUrl() const;
+  // If |include_installed_apps| is set to true, the response will include the
+  // list of installed third party applications.
+  GURL GenerateAccountMetadataUrl(bool include_installed_apps) const;
 
  private:
   const GURL base_url_;

@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -26,13 +26,14 @@
 #include "chrome/test/perf/browser_perf_test.h"
 #include "chrome/test/perf/perf_test.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/test/gpu/gpu_test_config.h"
 #include "googleurl/src/gurl.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/net_util.h"
+#include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -220,8 +221,8 @@ class ThroughputTest : public BrowserPerfTest {
 
     gfx::Rect root_bounds = browser()->window()->GetBounds();
     gfx::Rect tab_contents_bounds;
-    browser()->tab_strip_model()->GetActiveWebContents()->GetContainerBounds(
-        &tab_contents_bounds);
+    browser()->tab_strip_model()->GetActiveWebContents()->GetView()->
+        GetContainerBounds(&tab_contents_bounds);
 
     gfx::Rect snapshot_bounds(tab_contents_bounds.x() - root_bounds.x(),
                               tab_contents_bounds.y() - root_bounds.y(),

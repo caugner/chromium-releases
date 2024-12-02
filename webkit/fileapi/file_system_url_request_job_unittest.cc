@@ -7,8 +7,8 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
@@ -108,9 +108,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
       request_->SetExtraRequestHeaders(*headers);
     ASSERT_TRUE(!job_);
     job_ = new FileSystemURLRequestJob(
-        request_.get(),
-        empty_context_.network_delegate(),
-        file_system_context_.get());
+        request_.get(), NULL, file_system_context_.get());
     pending_job_ = job_;
 
     request_->Start();

@@ -12,8 +12,8 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -31,6 +31,7 @@
 #include "chrome/browser/sync/glue/data_type_error_handler_mock.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/test_browser_thread.h"
 #include "sync/api/sync_error.h"
 #include "sync/internal_api/public/change_record.h"
@@ -128,7 +129,7 @@ class FakeServerChange {
       EXPECT_FALSE(node.GetFirstChildId());
       node.GetMutableEntryForTest()->Put(syncer::syncable::SERVER_IS_DEL,
                                          true);
-      node.Remove();
+      node.Tombstone();
     }
     {
       // Verify the deletion.
@@ -292,8 +293,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     bool delete_bookmarks = load == DELETE_EXISTING_STORAGE;
     profile_.CreateBookmarkModel(delete_bookmarks);
     model_ = BookmarkModelFactory::GetForProfile(&profile_);
-    // Wait for the bookmarks model to load.
-    profile_.BlockUntilBookmarkModelLoaded();
+    ui_test_utils::WaitForBookmarkModelToLoad(model_);
     // This noticeably speeds up the unit tests that request it.
     if (save == DONT_SAVE_TO_STORAGE)
       model_->ClearStore();
@@ -981,7 +981,7 @@ TEST_F(ProfileSyncServiceBookmarkTest, UnrecoverableErrorSuspendsService) {
     syncer::WriteTransaction trans(FROM_HERE, test_user_share_.user_share());
     syncer::WriteNode sync_node(&trans);
     ASSERT_TRUE(InitSyncNodeFromChromeNode(node, &sync_node));
-    sync_node.Remove();
+    sync_node.Tombstone();
   }
   // The models don't match at this point, but the ProfileSyncService
   // doesn't know it yet.

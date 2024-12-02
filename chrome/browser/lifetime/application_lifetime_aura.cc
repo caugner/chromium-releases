@@ -9,12 +9,15 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/switch_utils.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
 #include "ui/aura/client/capture_client.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/display/output_configurator.h"
 #endif
 
 namespace chrome {
@@ -39,6 +42,10 @@ void HandleAppExitingForPlatform() {
   views::Widget::CloseAllSecondaryWidgets();
 
 #if defined(OS_CHROMEOS)
+  // Stop handling display configuration events once the shutdown
+  // process starts. crbug.com/177014.
+  ash::Shell::GetInstance()->output_configurator()->Stop();
+
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableZeroBrowsersOpenForTests) &&
       !chrome::IsRunningInAppMode()) {
@@ -51,7 +58,7 @@ void HandleAppExitingForPlatform() {
     // NotifyAndTerminate does nothing if called more than once.
     NotifyAndTerminate(true);
   }
-#endif // OS_CHROMEOS
+#endif  // OS_CHROMEOS
 }
 
 }  // namespace chrome

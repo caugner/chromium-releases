@@ -172,6 +172,14 @@
     ]
   },
 
+  "AllowDeletingBrowserHistory": {
+    "os": [],
+    "test_policy": { "AllowDeletingBrowserHistory": false },
+    "pref_mappings": [
+      { "pref": "history.deleting_enabled" }
+    ]
+  },
+
   "RemoteAccessClientFirewallTraversal": {
   },
 
@@ -349,6 +357,14 @@
     "test_policy": { "SyncDisabled": true },
     "pref_mappings": [
       { "pref": "sync.managed" }
+    ]
+  },
+
+  "SigninAllowed": {
+    "os": ["win", "linux", "mac"],
+    "test_policy": { "SigninAllowed": true },
+    "pref_mappings": [
+      { "pref": "signin.allowed" }
     ]
   },
 
@@ -1450,6 +1466,23 @@
     ]
   },
 
+  "HideWebStoreIcon": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "HideWebStoreIcon": true },
+    "pref_mappings": [
+      { "pref": "hide_web_store_icon" }
+    ]
+  },
+
+  "VariationsRestrictParameter": {
+    "test_policy": { "VariationsRestrictParameter": "restricted" },
+    "pref_mappings": [
+      { "pref": "variations_restrict_parameter",
+        "local_state": true
+      }
+    ]
+  },
+
   "----- Chrome OS policies ------------------------------------------------": {},
 
   "ChromeOsLockOnIdleSuspend": {
@@ -1482,7 +1515,11 @@
     "os": ["chromeos"],
     "test_policy": { "DriveDisabled": true },
     "pref_mappings": [
-      { "pref": "gdata.disabled" }
+      { "pref": "gdata.disabled",
+        "indicator_tests": [
+          { "policy": { "DriveDisabled": true } }
+        ]
+      }
     ]
   },
 
@@ -1582,6 +1619,14 @@
     ]
   },
 
+  "IdleWarningDelayAC": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleWarningDelayAC": 1800000 },
+    "pref_mappings": [
+      { "pref": "power.ac_idle_warning_delay_ms" }
+    ]
+  },
+
   "IdleDelayAC": {
     "os": ["chromeos"],
     "test_policy": { "IdleDelayAC": 1800000 },
@@ -1611,6 +1656,14 @@
     "test_policy": { "ScreenLockDelayBattery": 600000 },
     "pref_mappings": [
       { "pref": "power.battery_screen_lock_delay_ms"  }
+    ]
+  },
+
+  "IdleWarningDelayBattery": {
+    "os": ["chromeos"],
+    "test_policy": { "IdleWarningDelayBattery": 600000 },
+    "pref_mappings": [
+      { "pref": "power.battery_idle_warning_delay_ms" }
     ]
   },
 
@@ -1667,6 +1720,18 @@
     "test_policy": { "TermsOfServiceURL": "http://www.example.com/terms_of_service.txt" },
     "pref_mappings": [
       { "pref": "terms_of_service.url" }
+    ]
+  },
+
+  "ShowAccessibilityOptionsInSystemTrayMenu": {
+    "os": ["chromeos"],
+    "test_policy": { "ShowAccessibilityOptionsInSystemTrayMenu": true },
+    "pref_mappings": [
+      { "pref": "settings.a11y.enable_menu",
+        "indicator_tests": [
+          { "policy": { "ShowAccessibilityOptionsInSystemTrayMenu": true } }
+        ]
+      }
     ]
   },
 
@@ -1772,7 +1837,22 @@
   "DeviceLocalAccounts": {
   },
 
+  "DeviceLocalAccountAutoLoginId": {
+  },
+
+  "DeviceLocalAccountAutoLoginDelay": {
+  },
+
   "DeviceAllowRedeemChromeOsRegistrationOffers": {
+  },
+
+  "DeviceStartUpFlags": {
+  },
+
+  "UptimeLimit": {
+  },
+
+  "RebootAfterUpdate": {
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

@@ -12,7 +12,7 @@
 #include "ash/system/chromeos/network/network_detailed_view.h"
 #include "ash/system/chromeos/network/network_icon.h"
 #include "ash/system/chromeos/network/network_icon_animation_observer.h"
-#include "ash/system/tray/tray_views.h"
+#include "ash/system/tray/view_click_listener.h"
 #include "ash/system/user/login_status.h"
 #include "base/memory/scoped_vector.h"
 #include "ui/views/controls/button/button.h"
@@ -26,9 +26,13 @@ class BubbleDelegateView;
 }
 
 namespace ash {
+
+class SystemTrayItem;
+
 namespace internal {
 
-class TrayNetwork;
+class HoverHighlightView;
+class TrayPopupLabelButton;
 
 namespace tray {
 
@@ -39,7 +43,13 @@ class NetworkStateListDetailedView : public NetworkDetailedView,
                                      public ViewClickListener,
                                      public network_icon::AnimationObserver {
  public:
-  NetworkStateListDetailedView(TrayNetwork* tray_network,
+  enum ListType {
+    LIST_TYPE_NETWORK,
+    LIST_TYPE_VPN
+  };
+
+  NetworkStateListDetailedView(SystemTrayItem* owner,
+                               ListType list_type,
                                user::LoginStatus login);
   virtual ~NetworkStateListDetailedView();
 
@@ -60,7 +70,7 @@ class NetworkStateListDetailedView : public NetworkDetailedView,
                              const ui::Event& event) OVERRIDE;
 
   // Overridden from ViewClickListener.
-  virtual void ClickedOn(views::View* sender) OVERRIDE;
+  virtual void OnViewClicked(views::View* sender) OVERRIDE;
 
  private:
   typedef std::map<views::View*, std::string> NetworkMap;
@@ -69,20 +79,18 @@ class NetworkStateListDetailedView : public NetworkDetailedView,
   // Create UI components.
   void CreateHeaderEntry();
   void CreateHeaderButtons();
-  void CreateNetworkEntries();
   void CreateNetworkExtra();
 
   // Update UI components.
   void UpdateHeaderButtons();
+
   void UpdateNetworks(const NetworkStateList& networks);
-  void UpdateNetworkState();
-  void RefreshNetworkList();
+  void UpdateNetworkList();
   bool CreateOrUpdateInfoLabel(
       int index, const string16& text, views::Label** label);
   bool UpdateNetworkChild(int index, const NetworkInfo* info);
   bool OrderChild(views::View* view, int index);
   bool UpdateNetworkListEntries(std::set<std::string>* new_service_paths);
-  void UpdateNetworkEntries();
   void UpdateNetworkExtra();
 
   // Adds a settings entry when logged in, and an entry for changing proxy
@@ -94,8 +102,11 @@ class NetworkStateListDetailedView : public NetworkDetailedView,
   bool ResetInfoBubble();
   views::View* CreateNetworkInfoView();
 
-  // Typed pointer to the owning tray item.
-  TrayNetwork* tray_network_;
+  // Handle click (connect) action
+  void ConnectToNetwork(const std::string& service_path);
+
+  // Type of list (all networks or vpn)
+  ListType list_type_;
 
   // Track login state.
   user::LoginStatus login_;
@@ -109,20 +120,14 @@ class NetworkStateListDetailedView : public NetworkDetailedView,
   // An owned list of network info.
   ScopedVector<NetworkInfo> network_list_;
 
-  // Cached cellular carrier state info.
-  std::string carrier_id_;
-  std::string topup_url_;
-  std::string setup_url_;
-
   // Child views.
   TrayPopupHeaderButton* info_icon_;
   TrayPopupHeaderButton* button_wifi_;
   TrayPopupHeaderButton* button_mobile_;
-  views::View* view_mobile_account_;
-  views::View* setup_mobile_account_;
   TrayPopupLabelButton* other_wifi_;
   TrayPopupLabelButton* turn_on_wifi_;
   TrayPopupLabelButton* other_mobile_;
+  TrayPopupLabelButton* other_vpn_;
   TrayPopupLabelButton* settings_;
   TrayPopupLabelButton* proxy_settings_;
   views::Label* scanning_view_;

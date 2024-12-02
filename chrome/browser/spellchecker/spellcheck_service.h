@@ -5,11 +5,11 @@
 #ifndef CHROME_BROWSER_SPELLCHECKER_SPELLCHECK_SERVICE_H_
 #define CHROME_BROWSER_SPELLCHECKER_SPELLCHECK_SERVICE_H_
 
-#include "base/gtest_prod_util.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/spellchecker/spellcheck_custom_dictionary.h"
 #include "chrome/browser/spellchecker/spellcheck_hunspell_dictionary.h"
@@ -107,9 +107,8 @@ class SpellcheckService : public ProfileKeyedService,
   // Attaches an event so browser tests can listen the status events.
   static void AttachStatusEvent(base::WaitableEvent* status_event);
 
-  // Waits until a spellchecker updates its status. This function returns
-  // immediately when we do not set an event to |status_event_|.
-  static EventType WaitStatusEvent();
+  // Returns the status event type.
+  static EventType GetStatusEvent();
 
   // Pass all renderers some basic initialization information.
   void InitForAllRenderers();
@@ -121,6 +120,9 @@ class SpellcheckService : public ProfileKeyedService,
   // Reacts to a change in user preference on which language should be used for
   // spellchecking.
   void OnSpellCheckDictionaryChanged();
+
+  // Notification handler for changes to prefs::kSpellCheckUseSpellingService.
+  void OnUseSpellingServiceChanged();
 
   PrefChangeRegistrar pref_change_registrar_;
   content::NotificationRegistrar registrar_;

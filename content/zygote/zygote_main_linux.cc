@@ -14,7 +14,7 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/hash_tables.h"
 #include "base/linux_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -37,8 +37,8 @@
 #include "crypto/nss_util.h"
 #include "sandbox/linux/services/libc_urandom_override.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
-#include "skia/ext/SkFontHost_fontconfig_control.h"
 #include "third_party/icu/public/i18n/unicode/timezone.h"
+#include "third_party/skia/include/ports/SkFontConfigInterface.h"
 
 #if defined(OS_LINUX)
 #include <sys/epoll.h>
@@ -275,9 +275,10 @@ static void PreSandboxInit() {
   // pre-sandbox init, but more likely this is just a build configuration error.
   #error Which SSL library are you using?
 #endif
-
+#if defined(ENABLE_PLUGINS)
   // Ensure access to the Pepper plugins before the sandbox is turned on.
   PepperPluginRegistry::PreloadModules();
+#endif
 }
 
 #if !defined(CHROMIUM_SELINUX)
@@ -367,8 +368,8 @@ static bool EnterSandbox(sandbox::SetuidSandboxClient* setuid_sandbox,
     return false;
 
   PreSandboxInit();
-  SkiaFontConfigSetImplementation(
-      new FontConfigIPC(Zygote::kMagicSandboxIPCDescriptor));
+  SkFontConfigInterface::SetGlobal(
+      new FontConfigIPC(Zygote::kMagicSandboxIPCDescriptor))->unref();
 
   if (setuid_sandbox->IsSuidSandboxChild()) {
     // Use the SUID sandbox.  This still allows the seccomp sandbox to
@@ -437,8 +438,8 @@ static bool EnterSandbox(sandbox::SetuidSandboxClient* setuid_sandbox,
     return false;
 
   PreSandboxInit();
-  SkiaFontConfigSetImplementation(
-      new FontConfigIPC(Zygote::kMagicSandboxIPCDescriptor));
+  SkFontConfigInterface::SetGlobal(
+      new FontConfigIPC(Zygote::kMagicSandboxIPCDescriptor)))->unref();
   return true;
 }
 

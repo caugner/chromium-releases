@@ -69,8 +69,13 @@ class StreamReaderDelegate :
 
   virtual scoped_ptr<InputStream> OpenInputStream(
       JNIEnv* env,
-      net::URLRequest* request) {
+      const GURL& url) {
     return make_scoped_ptr<InputStream>(new NotImplInputStream());
+  }
+
+  virtual void OnInputStreamOpenFailed(net::URLRequest* request,
+                                       bool* restart) {
+    *restart = false;
   }
 
   virtual bool GetMimeType(
@@ -87,6 +92,17 @@ class StreamReaderDelegate :
       android_webview::InputStream* stream,
       std::string* charset) {
     return false;
+  }
+};
+
+class NullStreamReaderDelegate : public StreamReaderDelegate {
+ public:
+  NullStreamReaderDelegate() {}
+
+  virtual scoped_ptr<InputStream> OpenInputStream(
+      JNIEnv* env,
+      const GURL& url) {
+    return make_scoped_ptr<InputStream>(NULL);
   }
 };
 
@@ -141,7 +157,8 @@ class AndroidStreamReaderURLRequestJobTest : public Test {
     req_.reset(
         new TestURLRequest(GURL("content://foo"),
                            &url_request_delegate_,
-                           &context_));
+                           &context_,
+                           &network_delegate_));
     req_->set_method("GET");
   }
 
@@ -155,8 +172,14 @@ class AndroidStreamReaderURLRequestJobTest : public Test {
   }
 
   void SetUpTestJob(scoped_ptr<InputStreamReader> stream_reader) {
-    scoped_ptr<AndroidStreamReaderURLRequestJob::Delegate>
-        stream_reader_delegate(new StreamReaderDelegate());
+    SetUpTestJob(stream_reader.Pass(),
+                 make_scoped_ptr(new StreamReaderDelegate())
+                     .PassAs<AndroidStreamReaderURLRequestJob::Delegate>());
+  }
+
+  void SetUpTestJob(scoped_ptr<InputStreamReader> stream_reader,
+                    scoped_ptr<AndroidStreamReaderURLRequestJob::Delegate>
+                        stream_reader_delegate) {
     TestStreamReaderJob* test_stream_reader_job =
         new TestStreamReaderJob(
             req_.get(),
@@ -203,6 +226,26 @@ TEST_F(AndroidStreamReaderURLRequestJobTest, ReadEmptyStream) {
 
   EXPECT_FALSE(url_request_delegate_.request_failed());
   EXPECT_EQ(1, network_delegate_.completed_requests());
+  EXPECT_EQ(0, network_delegate_.error_count());
+  EXPECT_EQ(200, req_->GetResponseCode());
+}
+
+TEST_F(AndroidStreamReaderURLRequestJobTest, ReadWithNullStream) {
+  SetUpTestJob(scoped_ptr<InputStreamReader>(),
+               make_scoped_ptr(new NullStreamReaderDelegate())
+                   .PassAs<AndroidStreamReaderURLRequestJob::Delegate>());
+  req_->Start();
+
+  // The TestDelegate will quit the message loop on request completion.
+  MessageLoop::current()->Run();
+
+  // The request_failed() method is named confusingly but all it checks is
+  // whether the request got as far as calling NotifyHeadersComplete.
+  EXPECT_FALSE(url_request_delegate_.request_failed());
+  EXPECT_EQ(1, network_delegate_.completed_requests());
+  // A null input stream shouldn't result in an error. See crbug.com/180950.
+  EXPECT_EQ(0, network_delegate_.error_count());
+  EXPECT_EQ(404, req_->GetResponseCode());
 }
 
 TEST_F(AndroidStreamReaderURLRequestJobTest, ReadPartOfStream) {
@@ -233,6 +276,7 @@ TEST_F(AndroidStreamReaderURLRequestJobTest, ReadPartOfStream) {
   EXPECT_FALSE(url_request_delegate_.request_failed());
   EXPECT_EQ(bytes_to_read, url_request_delegate_.bytes_received());
   EXPECT_EQ(1, network_delegate_.completed_requests());
+  EXPECT_EQ(0, network_delegate_.error_count());
 }
 
 TEST_F(AndroidStreamReaderURLRequestJobTest,
@@ -263,6 +307,7 @@ TEST_F(AndroidStreamReaderURLRequestJobTest,
   EXPECT_FALSE(url_request_delegate_.request_failed());
   EXPECT_EQ(bytes_to_read, url_request_delegate_.bytes_received());
   EXPECT_EQ(1, network_delegate_.completed_requests());
+  EXPECT_EQ(0, network_delegate_.error_count());
 }
 
 TEST_F(AndroidStreamReaderURLRequestJobTest, DeleteJobMidWaySeek) {

@@ -28,7 +28,7 @@ typedef base::Callback<Status(
 
 // Execute a command on a specific element.
 Status ExecuteElementCommand(
-    ElementCommand command,
+    const ElementCommand& command,
     Session* session,
     WebView* web_view,
     const base::DictionaryValue& params,
@@ -78,6 +78,106 @@ Status ExecuteClearElement(
 
 // Send a sequence of key strokes to an element.
 Status ExecuteSendKeysToElement(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Submit a form element.
+Status ExecuteSubmitElement(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns the text of a given element.
+Status ExecuteGetElementText(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns the value of a given element.
+Status ExecuteGetElementValue(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns the lower case tag name of a given element.
+Status ExecuteGetElementTagName(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteIsElementSelected(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteIsElementEnabled(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteIsElementDisplayed(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns the location of a given element in page coordinates.
+Status ExecuteGetElementLocation(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns the location of a given element in client coordinates, after
+// scrolling it into view.
+Status ExecuteGetElementLocationOnceScrolledIntoView(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteGetElementSize(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+Status ExecuteGetElementAttribute(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns the effective style for a given property of the specified element.
+Status ExecuteGetElementValueOfCSSProperty(
+    Session* session,
+    WebView* web_view,
+    const std::string& element_id,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value);
+
+// Returns whether the two given elements are equivalent.
+Status ExecuteElementEquals(
     Session* session,
     WebView* web_view,
     const std::string& element_id,

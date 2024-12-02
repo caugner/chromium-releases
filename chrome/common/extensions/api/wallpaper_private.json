@@ -5,6 +5,10 @@
 [
   {
     "namespace":"wallpaperPrivate",
+    "compiler_options": {
+      "implemented_in": "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
+    },
+    "platforms": ["chromeos"],
     "nodoc": "true",
     "functions": [
       {
@@ -27,7 +31,7 @@
         ]
       },
       {
-        "name": "setWallpaperIfExist",
+        "name": "setWallpaperIfExists",
         "type": "function",
         "description": "Sets wallpaper if it exists in the local file system with specified layout",
         "nodoc": "true",
@@ -42,9 +46,19 @@
             "enum": [ "STRETCH", "CENTER", "CENTER_CROPPED"]
           },
           {
+            "type": "string",
+            "name": "source",
+            "enum": [ "ONLINE", "CUSTOM" ]
+          },
+          {
             "type": "function",
             "name": "callback",
-            "parameters": []
+            "parameters": [
+              {
+                "type": "boolean",
+                "name": "exists"
+              }
+            ]
           }
         ]
       },
@@ -75,9 +89,16 @@
         ]
       },
       {
+        "name": "resetWallpaper",
+        "type": "function",
+        "description": "Clears current user's active custom wallpaper and changes to default wallpaper.",
+        "nodoc": "true",
+        "parameters": []
+      },
+      {
         "name": "setCustomWallpaper",
         "type": "function",
-        "description": "Sets wallpaper to the image from local file with specified layout",
+        "description": "Sets wallpaper to the image from local file with specified layout and returns thumbnail if needed.",
         "nodoc": "true",
         "parameters": [
           {
@@ -87,7 +108,40 @@
           {
             "type": "string",
             "name": "layout",
-            "enum": [ "STRETCH", "CENTER", "CENTER_CROPPED"]
+            "enum": [ "STRETCH", "CENTER", "CENTER_CROPPED" ]
+          },
+          {
+            "type": "boolean",
+            "name": "generateThumbnail",
+            "description": "If true, callback should have a binary thumbnail."
+          },
+          {
+            "type": "string",
+            "name": "fileName"
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "type": "binary",
+                "optional": true,
+                "name": "thumbnail"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "setCustomWallpaperLayout",
+        "type": "function",
+        "description": "Sets current custom wallpaper to the specified layout",
+        "nodoc": "true",
+        "parameters": [
+          {
+            "type": "string",
+            "name": "layout",
+            "enum": [ "STRETCH", "CENTER", "CENTER_CROPPED" ]
           },
           {
             "type": "function",
@@ -118,8 +172,13 @@
         "parameters": [
           {
             "type": "string",
-            "name": "url",
-            "description": "Wallpaper url."
+            "name": "urlOrFile",
+            "description": "URL of ONLINE wallpaper or file name of CUSTOM wallpaper"
+          },
+          {
+            "type": "string",
+            "name": "type",
+            "enum": [ "ONLINE", "CUSTOM" ]
           },
           {
             "type": "function",
@@ -167,6 +226,11 @@
         "description": "Get the list of file names of downloaded wallpapers.",
         "nodoc": "true",
         "parameters": [
+          {
+            "type": "string",
+            "name": "source",
+            "enum": [ "ONLINE", "CUSTOM" ]
+          },
           {
             "type": "function",
             "name": "callback",

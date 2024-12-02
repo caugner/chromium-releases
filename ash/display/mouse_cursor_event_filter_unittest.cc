@@ -8,7 +8,6 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/test/cursor_manager_test_api.h"
 #include "ash/display/display_controller.h"
-#include "ash/wm/cursor_manager.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/gfx/display.h"
@@ -322,13 +321,13 @@ TEST_F(MouseCursorEventFilterTest, CursorDeviceScaleFactor) {
   MouseCursorEventFilter* event_filter =
       Shell::GetInstance()->mouse_cursor_filter();
 
-  EXPECT_EQ(1.0f, cursor_test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(1.0f, cursor_test_api.GetDisplay().device_scale_factor());
   event_filter->WarpMouseCursorIfNecessary(root_windows[0],
                                            gfx::Point(399, 200));
-  EXPECT_EQ(2.0f, cursor_test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(2.0f, cursor_test_api.GetDisplay().device_scale_factor());
   event_filter->WarpMouseCursorIfNecessary(root_windows[1],
                                            gfx::Point(400, 200));
-  EXPECT_EQ(1.0f, cursor_test_api.GetDeviceScaleFactor());
+  EXPECT_EQ(1.0f, cursor_test_api.GetDisplay().device_scale_factor());
 }
 
 }  // namespace internal

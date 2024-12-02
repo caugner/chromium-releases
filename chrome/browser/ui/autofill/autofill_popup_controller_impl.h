@@ -47,8 +47,11 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
             const std::vector<int>& identifiers);
 
   // Hides the popup and destroys the controller. This also invalidates
-  // |delegate_|. Virtual for testing.
-  virtual void Hide();
+  // |delegate_|.
+  virtual void Hide() OVERRIDE;
+
+  // Invoked when the view was destroyed by by someone other than this class.
+  virtual void ViewDestroyed() OVERRIDE;
 
   // KeyboardListener implementation.
   virtual bool HandleKeyPressEvent(
@@ -64,7 +67,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   virtual ~AutofillPopupControllerImpl();
 
   // AutofillPopupController implementation.
-  virtual void ViewDestroyed() OVERRIDE;
   virtual void UpdateBoundsAndRedrawPopup() OVERRIDE;
   virtual void MouseHovered(int x, int y) OVERRIDE;
   virtual void MouseClicked(int x, int y) OVERRIDE;
@@ -87,11 +89,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   virtual const gfx::Font& subtext_font() const OVERRIDE;
 #endif
   virtual int selected_line() const OVERRIDE;
-  virtual bool delete_icon_hovered() const OVERRIDE;
-
-  // Like Hide(), but doesn't invalidate |delegate_| (the delegate will still
-  // be informed of destruction).
-  void HideInternal();
 
   // Change which line is currently selected by the user.
   void SetSelectedLine(int selected_line);
@@ -113,10 +110,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
 
   // Returns the height of a row depending on its type.
   int GetRowHeightFromId(int identifier) const;
-
-  // Returns true if the given |x| and |y| coordinates refer to a point that
-  // hits the delete icon in the current selected line.
-  bool DeleteIconIsUnder(int x, int y);
 
   // Returns true if the given id refers to an element that can be accepted.
   bool CanAccept(int id);
@@ -203,15 +196,6 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   // The line that is currently selected by the user.
   // |kNoSelection| indicates that no line is currently selected.
   int selected_line_;
-
-  // Used to indicate if the delete icon within a row is currently selected.
-  bool delete_icon_hovered_;
-
-  // True if |HideInternal| has already been called.
-  bool is_hiding_;
-
-  // True if the delegate should be informed when |this| is destroyed.
-  bool inform_delegate_of_destruction_;
 
   base::WeakPtrFactory<AutofillPopupControllerImpl> weak_ptr_factory_;
 };

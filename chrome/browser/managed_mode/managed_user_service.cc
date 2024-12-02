@@ -9,13 +9,16 @@
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
 #include "chrome/browser/managed_mode/managed_mode_site_list.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -88,7 +91,6 @@ void ManagedUserService::URLFilterContext::SetManualURLs(
 ManagedUserService::ManagedUserService(Profile* profile)
     : profile_(profile),
       is_elevated_(false) {
-  Init();
 }
 
 ManagedUserService::~ManagedUserService() {
@@ -96,6 +98,55 @@ ManagedUserService::~ManagedUserService() {
 
 bool ManagedUserService::ProfileIsManaged() const {
   return profile_->GetPrefs()->GetBoolean(prefs::kProfileIsManaged);
+}
+
+bool ManagedUserService::IsElevated() const {
+  return is_elevated_;
+}
+
+bool ManagedUserService::IsElevatedForWebContents(
+    const content::WebContents* web_contents) const {
+  const ManagedModeNavigationObserver* observer =
+      ManagedModeNavigationObserver::FromWebContents(web_contents);
+  return observer->is_elevated();
+}
+
+bool ManagedUserService::IsPassphraseEmpty() const {
+  PrefService* pref_service = profile_->GetPrefs();
+  return pref_service->GetString(prefs::kManagedModeLocalPassphrase).empty();
+}
+
+bool ManagedUserService::CanSkipPassphraseDialog() {
+  // If the profile is already elevated or there is no passphrase set, no
+  // authentication is needed.
+  return IsElevated() || IsPassphraseEmpty();
+}
+
+bool ManagedUserService::CanSkipPassphraseDialog(
+    const content::WebContents* web_contents) const {
+  return IsElevated() ||
+      IsElevatedForWebContents(web_contents) ||
+      IsPassphraseEmpty();
+}
+
+void ManagedUserService::RequestAuthorization(
+    content::WebContents* web_contents,
+    const PassphraseCheckedCallback& callback) {
+  if (CanSkipPassphraseDialog(web_contents)) {
+    callback.Run(true);
+    return;
+  }
+
+  // Is deleted automatically when the dialog is closed.
+  new ManagedUserPassphraseDialog(web_contents, callback);
+}
+
+void ManagedUserService::RequestAuthorizationUsingActiveWebContents(
+    Browser* browser,
+    const PassphraseCheckedCallback& callback) {
+  RequestAuthorization(
+      browser->tab_strip_model()->GetActiveWebContents(),
+      callback);
 }
 
 // static
@@ -156,7 +207,9 @@ std::string ManagedUserService::GetDebugPolicyProviderName() const {
 bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
                                      string16* error) const {
   string16 tmp_error;
-  if (ExtensionManagementPolicyImpl(&tmp_error))
+  // |extension| can be NULL in unit tests.
+  if (ExtensionManagementPolicyImpl(extension ? extension->id() : "",
+                                    &tmp_error))
     return true;
 
   // If the extension is already loaded, we allow it, otherwise we'd unload
@@ -169,6 +222,24 @@ bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
       extension_service->GetInstalledExtension(extension->id()))
     return true;
 
+  if (extension) {
+    bool was_installed_by_default = extension->was_installed_by_default();
+#if defined(OS_CHROMEOS)
+    // On Chrome OS all external sources are controlled by us so it means that
+    // they are "default". Method was_installed_by_default returns false because
+    // extensions creation flags are ignored in case of default extensions with
+    // update URL(the flags aren't passed to OnExternalExtensionUpdateUrlFound).
+    // TODO(dpolukhin): remove this Chrome OS specific code as soon as creation
+    // flags are not ignored.
+    was_installed_by_default =
+        extensions::Manifest::IsExternalLocation(extension->location());
+#endif
+    if (extension->location() == extensions::Manifest::COMPONENT ||
+        was_installed_by_default) {
+      return true;
+    }
+  }
+
   if (error)
     *error = tmp_error;
   return false;
@@ -177,7 +248,8 @@ bool ManagedUserService::UserMayLoad(const extensions::Extension* extension,
 bool ManagedUserService::UserMayModifySettings(
     const extensions::Extension* extension,
     string16* error) const {
-  return ExtensionManagementPolicyImpl(error);
+  // |extension| can be NULL in unit tests.
+  return ExtensionManagementPolicyImpl(extension ? extension->id() : "", error);
 }
 
 void ManagedUserService::Observe(int type,
@@ -205,11 +277,16 @@ void ManagedUserService::Observe(int type,
   }
 }
 
-bool ManagedUserService::ExtensionManagementPolicyImpl(string16* error) const {
+bool ManagedUserService::ExtensionManagementPolicyImpl(
+    const std::string& extension_id,
+    string16* error) const {
   if (!ProfileIsManaged())
     return true;
 
   if (is_elevated_)
+    return true;
+
+  if (elevated_for_extensions_.count(extension_id))
     return true;
 
   if (error)
@@ -232,7 +309,8 @@ ScopedVector<ManagedModeSiteList> ManagedUserService::GetActiveSiteLists() {
     if (!extension_service->IsExtensionEnabled(extension->id()))
       continue;
 
-    ExtensionResource site_list = extension->GetContentPackSiteList();
+    extensions::ExtensionResource site_list =
+        extension->GetContentPackSiteList();
     if (!site_list.empty())
       site_lists.push_back(new ManagedModeSiteList(extension->id(), site_list));
   }
@@ -314,8 +392,20 @@ void ManagedUserService::SetManualBehaviorForURLs(const std::vector<GURL>& urls,
   UpdateManualURLs();
 }
 
-void ManagedUserService::SetElevatedForTesting(bool is_elevated) {
+// TODO(akuegel): Rename to SetElevatedForTesting when all callers are changed
+// to set elevation on the ManagedModeNavigationObserver.
+void ManagedUserService::SetElevated(bool is_elevated) {
   is_elevated_ = is_elevated;
+}
+
+void ManagedUserService::AddElevationForExtension(
+    const std::string& extension_id) {
+  elevated_for_extensions_.insert(extension_id);
+}
+
+void ManagedUserService::RemoveElevationForExtension(
+    const std::string& extension_id) {
+  elevated_for_extensions_.erase(extension_id);
 }
 
 void ManagedUserService::Init() {
@@ -339,6 +429,12 @@ void ManagedUserService::Init() {
       base::Bind(
           &ManagedUserService::OnDefaultFilteringBehaviorChanged,
           base::Unretained(this)));
+
+  // TODO(bauerb): Setting the default value here does not currently trigger
+  // the proper notification. Once that is fixed use SetDefaultPrefValue
+  // instead.
+  if (!profile_->GetPrefs()->HasPrefPath(prefs::kForceSafeSearch))
+    profile_->GetPrefs()->SetBoolean(prefs::kForceSafeSearch, true);
 
   // Initialize the filter.
   OnDefaultFilteringBehaviorChanged();

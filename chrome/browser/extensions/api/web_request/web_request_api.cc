@@ -369,6 +369,9 @@ void SendOnMessageEventOnUI(
 // Represents a single unique listener to an event, along with whatever filter
 // parameters and extra_info_spec were specified at the time the listener was
 // added.
+// NOTE(benjhayden) New APIs should not use this sub_event_name trick! It does
+// not play well with event pages. See downloads.onDeterminingFilename and
+// ExtensionDownloadsEventRouter for an alternative approach.
 struct ExtensionWebRequestEventRouter::EventListener {
   std::string extension_id;
   std::string extension_name;
@@ -464,11 +467,10 @@ bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
   if (!value.HasKey("urls"))
     return false;
 
-  for (DictionaryValue::key_iterator key = value.begin_keys();
-       key != value.end_keys(); ++key) {
-    if (*key == "urls") {
+  for (DictionaryValue::Iterator it(value); !it.IsAtEnd(); it.Advance()) {
+    if (it.key() == "urls") {
       const ListValue* urls_value = NULL;
-      if (!value.GetList("urls", &urls_value))
+      if (!it.value().GetAsList(&urls_value))
         return false;
       for (size_t i = 0; i < urls_value->GetSize(); ++i) {
         std::string url;
@@ -484,9 +486,9 @@ bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
         }
         urls.AddPattern(pattern);
       }
-    } else if (*key == "types") {
+    } else if (it.key() == "types") {
       const ListValue* types_value = NULL;
-      if (!value.GetList("types", &types_value))
+      if (!it.value().GetAsList(&types_value))
         return false;
       for (size_t i = 0; i < types_value->GetSize(); ++i) {
         std::string type_str;
@@ -496,11 +498,11 @@ bool ExtensionWebRequestEventRouter::RequestFilter::InitFromValue(
           return false;
         types.push_back(type);
       }
-    } else if (*key == "tabId") {
-      if (!value.GetInteger("tabId", &tab_id))
+    } else if (it.key() == "tabId") {
+      if (!it.value().GetAsInteger(&tab_id))
         return false;
-    } else if (*key == "windowId") {
-      if (!value.GetInteger("windowId", &window_id))
+    } else if (it.key() == "windowId") {
+      if (!it.value().GetAsInteger(&window_id))
         return false;
     } else {
       return false;
@@ -1634,10 +1636,8 @@ bool ExtensionWebRequestEventRouter::ProcessDeclarativeRules(
         std::make_pair(rules_registries_[cross_profile].get(), true));
   }
 
-  // TODO(mpcomplete): Eventually we'll want to turn this on, but for now,
-  // we won't block startup for declarative webrequest. I want to measure
-  // its effect first.
-#if defined(BLOCK_STARTUP_ON_DECLARATIVE_RULES)
+  // The following block is experimentally enabled and its impact on load time
+  // logged with UMA Extensions.NetworkDelayRegistryLoad. crbug.com/175961
   for (RelevantRegistries::iterator i = relevant_registries.begin();
        i != relevant_registries.end(); ++i) {
     extensions::WebRequestRulesRegistry* rules_registry = i->first;
@@ -1659,7 +1659,6 @@ bool ExtensionWebRequestEventRouter::ProcessDeclarativeRules(
       return true;
     }
   }
-#endif
 
   base::Time start = base::Time::Now();
 
@@ -1701,6 +1700,10 @@ void ExtensionWebRequestEventRouter::OnRulesRegistryReady(
     return;
 
   BlockedRequest& blocked_request = blocked_requests_[request_id];
+  base::TimeDelta block_time =
+      base::Time::Now() - blocked_request.blocking_time;
+  UMA_HISTOGRAM_TIMES("Extensions.NetworkDelayRegistryLoad", block_time);
+
   ProcessDeclarativeRules(profile, blocked_request.extension_info_map,
                           event_name, blocked_request.request, request_stage,
                           blocked_request.original_response_headers);

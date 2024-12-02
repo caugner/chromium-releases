@@ -13,13 +13,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_split.h"
 #include "base/time.h"
 #include "net/base/address_list.h"
 #include "net/base/host_cache.h"
-#include "net/base/host_resolver_impl.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
@@ -27,6 +26,7 @@
 #include "net/dns/dns_client.h"
 #include "net/dns/dns_config_service.h"
 #include "net/dns/dns_protocol.h"
+#include "net/dns/host_resolver_impl.h"
 #include "net/tools/gdig/file_net_log.h"
 
 #if defined(OS_MACOSX)
@@ -114,7 +114,7 @@ typedef std::vector<ReplayLogEntry> ReplayLog;
 // resolution and is in milliseconds. domain_name is the name to be resolved.
 //
 // The file should be sorted by timestamp in ascending time.
-bool LoadReplayLog(const FilePath& file_path, ReplayLog* replay_log) {
+bool LoadReplayLog(const base::FilePath& file_path, ReplayLog* replay_log) {
   std::string original_replay_log_contents;
   if (!file_util::ReadFileToString(file_path, &original_replay_log_contents)) {
     fprintf(stderr, "Unable to open replay file %s\n",
@@ -329,7 +329,7 @@ bool GDig::ParseCommandLine(int argc, const char* argv[]) {
   }
 
   if (parsed_command_line.HasSwitch("replay_file")) {
-    FilePath replay_path =
+    base::FilePath replay_path =
         parsed_command_line.GetSwitchValuePath("replay_file");
     if (!LoadReplayLog(replay_path, &replay_log_))
       return false;

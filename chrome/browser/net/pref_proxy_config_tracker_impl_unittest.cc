@@ -5,15 +5,15 @@
 #include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/testing_pref_service.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/proxy/proxy_config_service_common_unittest.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -146,7 +146,7 @@ TEST_F(PrefProxyConfigTrackerImplTest, DynamicPrefOverrides) {
   EXPECT_FALSE(actual_config.auto_detect());
   EXPECT_EQ(net::ProxyConfig::ProxyRules::TYPE_SINGLE_PROXY,
             actual_config.proxy_rules().type);
-  EXPECT_EQ(actual_config.proxy_rules().single_proxy,
+  EXPECT_EQ(actual_config.proxy_rules().single_proxies.Get(),
             net::ProxyServer::FromURI("http://example.com:3128",
                                       net::ProxyServer::SCHEME_HTTP));
 

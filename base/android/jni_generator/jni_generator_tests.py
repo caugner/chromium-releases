@@ -796,6 +796,9 @@ static bool RegisterNativesImpl(JNIEnv* env) {
 
     @CalledByNative
     public byte[][] returnArrayOfByteArray();
+
+    @CalledByNative
+    public Bitmap.CompressFormat getCompressFormat();
     """
     jni_generator.JniParams.SetFullyQualifiedClass('org/chromium/Foo')
     jni_generator.JniParams.ExtractImportsAndInnerClasses(test_data)
@@ -987,6 +990,17 @@ static bool RegisterNativesImpl(JNIEnv* env) {
             static=False,
             name='returnArrayOfByteArray',
             method_id_var_name='returnArrayOfByteArray',
+            java_class_name='',
+            params=[],
+            env_call=('Void', ''),
+            unchecked=False,
+        ),
+        CalledByNative(
+            return_type='Bitmap.CompressFormat',
+            system_class=False,
+            static=False,
+            name='getCompressFormat',
+            method_id_var_name='getCompressFormat',
             java_class_name='',
             params=[],
             env_call=('Void', ''),
@@ -1425,6 +1439,29 @@ Java_TestJni_returnArrayOfByteArray(JNIEnv* env, jobject obj) {
   return ScopedJavaLocalRef<jobjectArray>(env, ret);
 }
 
+static base::subtle::AtomicWord g_TestJni_getCompressFormat = 0;
+static ScopedJavaLocalRef<jobject> Java_TestJni_getCompressFormat(JNIEnv* env,
+    jobject obj) {
+  /* Must call RegisterNativesImpl()  */
+  DCHECK(g_TestJni_clazz);
+  jmethodID method_id =
+      base::android::MethodID::LazyGet<
+      base::android::MethodID::TYPE_INSTANCE>(
+      env, g_TestJni_clazz,
+      "getCompressFormat",
+
+"("
+")"
+"Landroid/graphics/Bitmap$CompressFormat;",
+      &g_TestJni_getCompressFormat);
+
+  jobject ret =
+    env->CallObjectMethod(obj,
+      method_id);
+  base::android::CheckException(env);
+  return ScopedJavaLocalRef<jobject>(env, ret);
+}
+
 // Step 3: RegisterNatives.
 
 static bool RegisterNativesImpl(JNIEnv* env) {
@@ -1836,7 +1873,9 @@ static bool RegisterNativesImpl(JNIEnv* env) {
 
   def testJniSelfDocumentingExample(self):
     script_dir = os.path.dirname(sys.argv[0])
-    content = file(os.path.join(script_dir, 'SampleForTests.java')).read()
+    content = file(os.path.join(script_dir,
+        'java/src/org/chromium/example/jni_generator/SampleForTests.java')
+        ).read()
     golden_content = file(os.path.join(script_dir,
                                        'golden_sample_for_tests_jni.h')).read()
     jni_from_java = jni_generator.JNIFromJavaSource(
@@ -1888,7 +1927,6 @@ import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.SandboxedProcessConnection;
 import org.chromium.content.common.ISandboxedProcessCallback;
 import org.chromium.content.common.ISandboxedProcessService;
-import org.chromium.content.common.SurfaceCallback;
 import org.chromium.content.common.WillNotRaise.AnException;
 import org.chromium.content.common.WillRaise.AnException;
 

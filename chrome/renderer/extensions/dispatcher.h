@@ -120,8 +120,8 @@ class Dispatcher : public content::RenderProcessObserver {
   // Checks that the current context contains an extension that has permission
   // to execute the specified function. If it does not, a v8 exception is thrown
   // and the method returns false. Otherwise returns true.
-  bool CheckCurrentContextAccessToExtensionAPI(
-      const std::string& function_name) const;
+  bool CheckContextAccessToExtensionAPI(
+      const std::string& function_name, ChromeV8Context* context) const;
 
  private:
   friend class RenderViewTest;
@@ -146,7 +146,7 @@ class Dispatcher : public content::RenderProcessObserver {
                            const std::string& source_extension_id,
                            const std::string& target_extension_id);
   void OnDeliverMessage(int target_port_id, const std::string& message);
-  void OnDispatchOnDisconnect(int port_id, bool connection_error);
+  void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
   void OnSetFunctionNames(const std::vector<std::string>& names);
   void OnLoaded(
       const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
@@ -173,9 +173,9 @@ class Dispatcher : public content::RenderProcessObserver {
       bool adblock,
       bool adblock_plus,
       bool other_webrequest);
-  void OnShouldUnload(const std::string& extension_id, int sequence_id);
-  void OnUnload(const std::string& extension_id);
-  void OnCancelUnload(const std::string& extension_id);
+  void OnShouldSuspend(const std::string& extension_id, int sequence_id);
+  void OnSuspend(const std::string& extension_id);
+  void OnCancelSuspend(const std::string& extension_id);
 
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
@@ -189,6 +189,9 @@ class Dispatcher : public content::RenderProcessObserver {
 
   void RegisterNativeHandlers(ModuleSystem* module_system,
                               ChromeV8Context* context);
+  void RegisterSchemaGeneratedBindings(ModuleSystem* module_system,
+                                       ChromeV8Context* context,
+                                       v8::Handle<v8::Context> v8_context);
 
   // Inserts static source code into |source_map_|.
   void PopulateSourceMap();
@@ -210,6 +213,11 @@ class Dispatcher : public content::RenderProcessObserver {
   Feature::Context ClassifyJavaScriptContext(const std::string& extension_id,
                                              int extension_group,
                                              const ExtensionURLInfo& url_info);
+
+  // Gets |field| from |object| or creates it as an empty object if it doesn't
+  // exist.
+  v8::Handle<v8::Object> GetOrCreateObject(v8::Handle<v8::Object> object,
+                                           const std::string& field);
 
   // True if this renderer is running extensions.
   bool is_extension_process_;

@@ -19,7 +19,7 @@
 #include "content/public/browser/notification_registrar.h"
 
 class DownloadPrefs;
-class ExtensionDownloadsEventRouter;
+class PrefRegistrySyncable;
 class Profile;
 
 namespace content {
@@ -54,11 +54,13 @@ class ChromeDownloadManagerDelegate
 
   explicit ChromeDownloadManagerDelegate(Profile* profile);
 
-  void SetDownloadManager(content::DownloadManager* dm);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Should be called before the first call to ShouldCompleteDownload() to
   // disable SafeBrowsing checks for |item|.
   static void DisableSafeBrowsing(content::DownloadItem* item);
+
+  void SetDownloadManager(content::DownloadManager* dm);
 
   // content::DownloadManagerDelegate
   virtual void Shutdown() OVERRIDE;
@@ -66,8 +68,6 @@ class ChromeDownloadManagerDelegate
   virtual bool DetermineDownloadTarget(
       content::DownloadItem* item,
       const content::DownloadTargetCallback& callback) OVERRIDE;
-  virtual content::WebContents*
-      GetAlternativeWebContentsToNotifyForDownload() OVERRIDE;
   virtual bool ShouldOpenFileBasedOnExtension(
       const base::FilePath& path) OVERRIDE;
   virtual bool ShouldCompleteDownload(
@@ -142,6 +142,8 @@ class ChromeDownloadManagerDelegate
  private:
   friend class base::RefCountedThreadSafe<ChromeDownloadManagerDelegate>;
 
+  struct ContinueFilenameDeterminationInfo;
+
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -184,11 +186,6 @@ class ChromeDownloadManagerDelegate
       const base::FilePath& unverified_path);
 #endif
 
-  // Determine the intermediate path to use for |target_path|. |danger_type|
-  // specifies the danger level of the download.
-  base::FilePath GetIntermediatePath(const base::FilePath& target_path,
-                               content::DownloadDangerType danger_type);
-
   // Called on the UI thread once a reserved path is available. Updates the
   // download identified by |download_id| with the |target_path|, target
   // disposition and |danger_type|.
@@ -199,6 +196,22 @@ class ChromeDownloadManagerDelegate
       content::DownloadDangerType danger_type,
       const base::FilePath& reserved_path,
       bool reserved_path_verified);
+
+  // When an extension opts to change a download's target filename, this
+  // sanitizes it before continuing with the filename determination process.
+  void OnExtensionOverridingFilename(
+      const ContinueFilenameDeterminationInfo& continue_info,
+      const base::FilePath& changed_filename,
+      bool overwrite);
+
+  // When extensions either opt not to change a download's target filename, or
+  // the changed filename has been sanitized, this method continues with the
+  // filename determination process, optionally prompting the user to manually
+  // set the filename.
+  void ContinueDeterminingFilename(
+      const ContinueFilenameDeterminationInfo& continue_info,
+      const base::FilePath& suggested_path,
+      bool is_forced_path);
 
   // Called on the UI thread once the final target path is available.
   void OnTargetPathDetermined(
@@ -228,20 +241,6 @@ class ChromeDownloadManagerDelegate
   CancelableRequestConsumer history_consumer_;
 
   content::NotificationRegistrar registrar_;
-
-  // On Android, GET downloads are not handled by the DownloadManager.
-  // Once we have extensions on android, we probably need the EventRouter
-  // in ContentViewDownloadDelegate which knows about both GET and POST
-  // downloads.
-#if !defined(OS_ANDROID)
-  // The ExtensionDownloadsEventRouter dispatches download creation, change, and
-  // erase events to extensions. Like ChromeDownloadManagerDelegate, it's a
-  // chrome-level concept and its lifetime should match DownloadManager. There
-  // should be a separate EDER for on-record and off-record managers.
-  // There does not appear to be a separate ExtensionSystem for on-record and
-  // off-record profiles, so ExtensionSystem cannot own the EDER.
-  scoped_ptr<ExtensionDownloadsEventRouter> extension_event_router_;
-#endif
 
   // The directory most recently chosen by the user in response to a Save As
   // dialog for a regular download.

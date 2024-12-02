@@ -16,8 +16,8 @@
 namespace {
 
 std::string GetAppLauncherId(ShellWindow* shell_window) {
-  if (shell_window->window_type() == ShellWindow::WINDOW_TYPE_PANEL)
-    return StringPrintf("panel:%d", shell_window->session_id().id());
+  if (shell_window->window_type_is_panel())
+    return base::StringPrintf("panel:%d", shell_window->session_id().id());
   return shell_window->extension()->id();
 }
 
@@ -75,8 +75,7 @@ void ShellWindowLauncherController::OnShellWindowAdded(
     launcher_id = controller->launcher_id();
     controller->AddShellWindow(shell_window, status);
   } else {
-    LauncherItemController::Type type =
-        shell_window->window_type() == ShellWindow::WINDOW_TYPE_PANEL
+    LauncherItemController::Type type = shell_window->window_type_is_panel()
         ? LauncherItemController::TYPE_APP_PANEL
         : LauncherItemController::TYPE_APP;
     ShellWindowLauncherItemController* controller =
@@ -104,6 +103,7 @@ void ShellWindowLauncherController::OnShellWindowIconChanged(
   if (iter == app_controller_map_.end())
     return;
   ShellWindowLauncherItemController* controller = iter->second;
+  controller->set_image_set_by_controller(true);
   owner_->SetLauncherItemImage(controller->launcher_id(),
                                shell_window->app_icon().AsImageSkia());
 }

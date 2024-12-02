@@ -17,6 +17,8 @@
 #include "chrome/browser/extensions/extension_function.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
+class Profile;
+
 namespace base {
 class FilePath;
 class ListValue;
@@ -28,7 +30,7 @@ namespace extensions {
 // the extension system.
 class BookmarkEventRouter : public BookmarkModelObserver {
  public:
-  explicit BookmarkEventRouter(BookmarkModel* model);
+  BookmarkEventRouter(Profile* profile, BookmarkModel* model);
   virtual ~BookmarkEventRouter();
 
   // BookmarkModelObserver:
@@ -57,10 +59,10 @@ class BookmarkEventRouter : public BookmarkModelObserver {
 
  private:
   // Helper to actually dispatch an event to extension listeners.
-  void DispatchEvent(Profile* profile,
-                     const char* event_name,
+  void DispatchEvent(const char* event_name,
                      scoped_ptr<base::ListValue> event_args);
 
+  Profile* profile_;
   BookmarkModel* model_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkEventRouter);
@@ -121,12 +123,12 @@ class BookmarksFunction : public AsyncExtensionFunction,
   virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
 };
 
-class BookmarksGetTreeFunction : public BookmarksFunction {
+class BookmarksGetFunction : public BookmarksFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("bookmarks.get", BOOKMARKS_GET)
 
  protected:
-  virtual ~BookmarksGetTreeFunction() {}
+  virtual ~BookmarksGetFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
@@ -143,12 +145,23 @@ class BookmarksGetChildrenFunction : public BookmarksFunction {
   virtual bool RunImpl() OVERRIDE;
 };
 
-class BookmarksGetFunction : public BookmarksFunction {
+class BookmarksGetRecentFunction : public BookmarksFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("bookmarks.getRecent", BOOKMARKS_GETRECENT)
 
  protected:
-  virtual ~BookmarksGetFunction() {}
+  virtual ~BookmarksGetRecentFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunImpl() OVERRIDE;
+};
+
+class BookmarksGetTreeFunction : public BookmarksFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("bookmarks.getTree", BOOKMARKS_GETTREE)
+
+ protected:
+  virtual ~BookmarksGetTreeFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;
@@ -156,21 +169,10 @@ class BookmarksGetFunction : public BookmarksFunction {
 
 class BookmarksGetSubTreeFunction : public BookmarksFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("bookmarks.getTree", BOOKMARKS_GETTREE)
-
- protected:
-  virtual ~BookmarksGetSubTreeFunction() {}
-
-  // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
-};
-
-class BookmarksGetRecentFunction : public BookmarksFunction {
- public:
   DECLARE_EXTENSION_FUNCTION("bookmarks.getSubTree", BOOKMARKS_GETSUBTREE)
 
  protected:
-  virtual ~BookmarksGetRecentFunction() {}
+  virtual ~BookmarksGetSubTreeFunction() {}
 
   // ExtensionFunction:
   virtual bool RunImpl() OVERRIDE;

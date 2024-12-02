@@ -7,9 +7,13 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/template_util.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
-#include "googleurl/src/gurl.h"
+
+class GURL;
 
 namespace base {
 class FilePath;
@@ -18,8 +22,9 @@ class Value;
 
 namespace google_apis {
 
+class AboutResource;
+class AccountMetadata;
 class AppList;
-class AccountMetadataFeed;
 class AuthenticatedOperationInterface;
 class ResourceEntry;
 class ResourceList;
@@ -41,6 +46,9 @@ namespace test_util {
 // repeatedly.
 void RunBlockingPoolTask();
 
+// Runs the closure, and then quits the current MessageLoop.
+void RunAndQuit(const base::Closure& closure);
+
 // Removes |prefix| from |input| and stores the result in |output|. Returns
 // true if the prefix is removed.
 bool RemovePrefix(const std::string& input,
@@ -48,7 +56,7 @@ bool RemovePrefix(const std::string& input,
                   std::string* output);
 
 // Returns the absolute path for a test file stored under
-// chrome/test/data/chromeos.
+// chrome/test/data.
 base::FilePath GetTestFilePath(const std::string& relative_path);
 
 // Returns the base URL for communicating with the local test server for
@@ -56,77 +64,8 @@ base::FilePath GetTestFilePath(const std::string& relative_path);
 GURL GetBaseUrlForTesting(int port);
 
 // Loads a test JSON file as a base::Value, from a test file stored under
-// chrome/test/data/chromeos.
+// chrome/test/data.
 scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path);
-
-// Copies the results from EntryActionCallback.
-void CopyResultsFromEntryActionCallback(GDataErrorCode* error_out,
-                                        GDataErrorCode error_in);
-
-// Copies the result from EntryActionCallback and quit the message loop.
-void CopyResultFromEntryActionCallbackAndQuit(GDataErrorCode* error_out,
-                                              GDataErrorCode error_in);
-
-// Copies the results from GetDataCallback.
-void CopyResultsFromGetDataCallback(GDataErrorCode* error_out,
-                                    scoped_ptr<base::Value>* value_out,
-                                    GDataErrorCode error_in,
-                                    scoped_ptr<base::Value> value_in);
-
-// Copies the results from GetDataCallback and quit the message loop.
-void CopyResultsFromGetDataCallbackAndQuit(GDataErrorCode* error_out,
-                                           scoped_ptr<base::Value>* value_out,
-                                           GDataErrorCode error_in,
-                                           scoped_ptr<base::Value> value_in);
-
-// Copies the results from GetResourceEntryCallback.
-void CopyResultsFromGetResourceEntryCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<ResourceEntry>* resource_entry_out,
-    GDataErrorCode error_in,
-    scoped_ptr<ResourceEntry> resource_entry_in);
-
-// Copies the results from GetResourceListCallback.
-void CopyResultsFromGetResourceListCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<ResourceList>* resource_list_out,
-    GDataErrorCode error_in,
-    scoped_ptr<ResourceList> resource_list_in);
-
-// Copies the results from GetAccountMetadataCallback.
-void CopyResultsFromGetAccountMetadataCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<AccountMetadataFeed>* account_metadata_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AccountMetadataFeed> account_metadata_in);
-
-// Copies the results from GetAppListCallback.
-void CopyResultsFromGetAppListCallback(
-    GDataErrorCode* error_out,
-    scoped_ptr<AppList>* app_list_out,
-    GDataErrorCode error_in,
-    scoped_ptr<AppList> app_list_in);
-
-// Copies the results from DownloadActionCallback.
-void CopyResultsFromDownloadActionCallback(
-    GDataErrorCode* error_out,
-    base::FilePath* temp_file_out,
-    GDataErrorCode error_in,
-    const base::FilePath& temp_file_in);
-
-// Copies the results from InitiateUploadCallback.
-void CopyResultsFromInitiateUploadCallback(
-    GDataErrorCode* error_out,
-    GURL* url_out,
-    GDataErrorCode error_in,
-    const GURL& url_in);
-
-// Copies the results from ResumeUploadCallback.
-void CopyResultsFromUploadRangeCallback(
-    UploadRangeResponse* response_out,
-    scoped_ptr<ResourceEntry>* entry_out,
-    const UploadRangeResponse& response_in,
-    scoped_ptr<ResourceEntry> entry_in);
 
 // Returns a HttpResponse created from the given file path.
 scoped_ptr<test_server::HttpResponse> CreateHttpResponseFromFile(
@@ -152,6 +91,179 @@ scoped_ptr<test_server::HttpResponse> HandleDownloadRequest(
 // if necessary.
 bool VerifyJsonData(const base::FilePath& expected_json_file_path,
                     const base::Value* json_data);
+
+// Parses a value of Content-Range header, which looks like
+// "bytes <start_position>-<end_position>/<length>".
+// Returns true on success.
+bool ParseContentRangeHeader(const std::string& value,
+                             int64* start_position,
+                             int64* end_position,
+                             int64* length);
+
+// Google API related code and Drive File System code work on asynchronous
+// architecture and return the results via callbacks.
+// Following code implements a callback to copy such results.
+// Here is how to use:
+//
+//   // Prepare result storage.
+//   ResultType1 result1;
+//   ResultType2 result2;
+//           :
+//
+//   PerformAsynchronousTask(
+//       param1, param2, ...,
+//       CreateCopyResultCallback(&result1, &result2, ...));
+//   RunBlockingPoolTask();  // Run message loop to complete the async task.
+//
+//   // Hereafter, we can write expectation with results.
+//   EXPECT_EQ(expected_result1, result1);
+//   EXPECT_EQ(expected_result2, result2);
+//                     :
+//
+// Note: The max arity of the supported function is 4 based on the usage.
+// TODO(hidehiko): Use replace CopyResultFromXxxCallback method defined above
+//   by this one. (crbug.com/180569).
+namespace internal {
+// Following helper templates are to support Chrome's move semantics.
+// Their goal is defining helper methods which are similar to:
+//   void CopyResultCallback1(T1* out1, T1&& in1)
+//   void CopyResultCallback2(T1* out1, T2* out2, T1&& in1, T2&& in2)
+//            :
+// in C++11.
+
+// Declare if the type is movable or not. Currently limited to scoped_ptr only.
+// We can add more types upon the usage.
+template<typename T> struct IsMovable : base::false_type {};
+template<typename T, typename D>
+struct IsMovable<scoped_ptr<T, D> > : base::true_type {};
+
+// InType is const T& if |UseConstRef| is true, otherwise |T|.
+template<bool UseConstRef, typename T> struct InTypeHelper {
+  typedef const T& InType;
+};
+template<typename T> struct InTypeHelper<false, T> {
+  typedef T InType;
+};
+
+// Simulates the std::move operation in C++11. We use pointer here for argument,
+// instead of rvalue reference.
+template<bool IsMovable, typename T> struct MoveHelper {
+  static const T& Move(const T* in) { return *in; }
+};
+template<typename T> struct MoveHelper<true, T> {
+  static T Move(T* in) { return in->Pass(); }
+};
+
+// Helper to handle Chrome's move semantics correctly.
+template<typename T>
+struct CopyResultCallbackHelper
+      // It is necessary to calculate the exact signature of callbacks we want
+      // to create here. In our case, as we use value-parameters for primitive
+      // types and movable types in the callback declaration.
+      // Thus the incoming type is as follows:
+      // 1) If the argument type |T| is class type but doesn't movable,
+      //    |InType| is const T&.
+      // 2) Otherwise, |T| as is.
+    : InTypeHelper<
+          base::is_class<T>::value && !IsMovable<T>::value,  // UseConstRef
+          T>,
+      MoveHelper<IsMovable<T>::value, T> {
+};
+
+// Copies the |in|'s value to |out|.
+template<typename T1>
+void CopyResultCallback(
+    T1* out,
+    typename CopyResultCallbackHelper<T1>::InType in) {
+  *out = CopyResultCallbackHelper<T1>::Move(&in);
+}
+
+// Copies the |in1|'s value to |out1|, and |in2|'s to |out2|.
+template<typename T1, typename T2>
+void CopyResultCallback(
+    T1* out1,
+    T2* out2,
+    typename CopyResultCallbackHelper<T1>::InType in1,
+    typename CopyResultCallbackHelper<T2>::InType in2) {
+  *out1 = CopyResultCallbackHelper<T1>::Move(&in1);
+  *out2 = CopyResultCallbackHelper<T2>::Move(&in2);
+}
+
+// Copies the |in1|'s value to |out1|, |in2|'s to |out2|, and |in3|'s to |out3|.
+template<typename T1, typename T2, typename T3>
+void CopyResultCallback(
+    T1* out1,
+    T2* out2,
+    T3* out3,
+    typename CopyResultCallbackHelper<T1>::InType in1,
+    typename CopyResultCallbackHelper<T2>::InType in2,
+    typename CopyResultCallbackHelper<T3>::InType in3) {
+  *out1 = CopyResultCallbackHelper<T1>::Move(&in1);
+  *out2 = CopyResultCallbackHelper<T2>::Move(&in2);
+  *out3 = CopyResultCallbackHelper<T3>::Move(&in3);
+}
+
+// Holds the pointers for output. This is introduced for the workaround of
+// the arity limitation of Callback.
+template<typename T1, typename T2, typename T3, typename T4>
+struct OutputParams {
+  OutputParams(T1* out1, T2* out2, T3* out3, T4* out4)
+      : out1(out1), out2(out2), out3(out3), out4(out4) {}
+  T1* out1;
+  T2* out2;
+  T3* out3;
+  T4* out4;
+};
+
+// Copies the |in1|'s value to |output->out1|, |in2|'s to |output->out2|,
+// and so on.
+template<typename T1, typename T2, typename T3, typename T4>
+void CopyResultCallback(
+    const OutputParams<T1, T2, T3, T4>& output,
+    typename CopyResultCallbackHelper<T1>::InType in1,
+    typename CopyResultCallbackHelper<T2>::InType in2,
+    typename CopyResultCallbackHelper<T3>::InType in3,
+    typename CopyResultCallbackHelper<T4>::InType in4) {
+  *output.out1 = CopyResultCallbackHelper<T1>::Move(&in1);
+  *output.out2 = CopyResultCallbackHelper<T2>::Move(&in2);
+  *output.out3 = CopyResultCallbackHelper<T3>::Move(&in3);
+  *output.out4 = CopyResultCallbackHelper<T4>::Move(&in4);
+}
+
+}  // namespace internal
+
+template<typename T1>
+base::Callback<void(typename internal::CopyResultCallbackHelper<T1>::InType)>
+CreateCopyResultCallback(T1* out1) {
+  return base::Bind(&internal::CopyResultCallback<T1>, out1);
+}
+
+template<typename T1, typename T2>
+base::Callback<void(typename internal::CopyResultCallbackHelper<T1>::InType,
+                    typename internal::CopyResultCallbackHelper<T2>::InType)>
+CreateCopyResultCallback(T1* out1, T2* out2) {
+  return base::Bind(&internal::CopyResultCallback<T1, T2>, out1, out2);
+}
+
+template<typename T1, typename T2, typename T3>
+base::Callback<void(typename internal::CopyResultCallbackHelper<T1>::InType,
+                    typename internal::CopyResultCallbackHelper<T2>::InType,
+                    typename internal::CopyResultCallbackHelper<T3>::InType)>
+CreateCopyResultCallback(T1* out1, T2* out2, T3* out3) {
+  return base::Bind(
+      &internal::CopyResultCallback<T1, T2, T3>, out1, out2, out3);
+}
+
+template<typename T1, typename T2, typename T3, typename T4>
+base::Callback<void(typename internal::CopyResultCallbackHelper<T1>::InType,
+                    typename internal::CopyResultCallbackHelper<T2>::InType,
+                    typename internal::CopyResultCallbackHelper<T3>::InType,
+                    typename internal::CopyResultCallbackHelper<T4>::InType)>
+CreateCopyResultCallback(T1* out1, T2* out2, T3* out3, T4* out4) {
+  return base::Bind(
+      &internal::CopyResultCallback<T1, T2, T3, T4>,
+      internal::OutputParams<T1, T2, T3, T4>(out1, out2, out3, out4));
+}
 
 }  // namespace test_util
 }  // namespace google_apis

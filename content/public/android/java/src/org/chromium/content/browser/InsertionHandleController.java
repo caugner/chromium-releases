@@ -80,15 +80,29 @@ abstract class InsertionHandleController implements CursorController {
 
     /**
      * Moves the handle so that it points at the given coordinates.
-     * @param x
-     * @param y
+     * @param x Handle x in physical pixels.
+     * @param y Handle y in physical pixels.
      */
     void setHandlePosition(int x, int y) {
         mHandle.positionAt(x, y);
     }
 
-    void setHandlePosition(PointF point) {
-        setHandlePosition((int)point.x, (int)point.y);
+    void setHandlePosition(float x, float y) {
+        setHandlePosition((int) x, (int) y);
+    }
+
+    /**
+     * If the handle is not visible, sets its visibility to View.VISIBLE and begins fading it in.
+     */
+    void beginHandleFadeIn() {
+        mHandle.beginFadeIn();
+    }
+
+    /**
+     * Sets the handle to the given visibility.
+     */
+    void setHandleVisibility(int visibility) {
+        mHandle.setVisibility(visibility);
     }
 
     int getHandleX() {
@@ -162,6 +176,7 @@ abstract class InsertionHandleController implements CursorController {
         if (!mIsShowing) {
             mIsShowing = true;
             mHandle.show();
+            setHandleVisibility(HandleView.VISIBLE);
         }
     }
 

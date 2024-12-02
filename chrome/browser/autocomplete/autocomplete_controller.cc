@@ -25,6 +25,7 @@
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/autocomplete/shortcuts_provider.h"
 #include "chrome/browser/autocomplete/zero_suggest_provider.h"
+#include "chrome/browser/omnibox/omnibox_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -94,6 +95,8 @@ AutocompleteController::AutocompleteController(
       in_start_(false),
       in_zero_suggest_(false),
       profile_(profile) {
+  // AND with the disabled providers, if any.
+  provider_types &= ~OmniboxFieldTrial::GetDisabledProviderTypes();
   bool use_hqp = !!(provider_types & AutocompleteProvider::TYPE_HISTORY_QUICK);
   // TODO(mrossetti): Permanently modify the HistoryURLProvider to not search
   // titles once HQP is turned on permanently.
@@ -465,6 +468,7 @@ GURL AutocompleteController::GetDestinationURL(
     search_terms_args.assisted_query_stats += base::StringPrintf(
         ".%" PRId64 "j%d",
         query_formulation_time.InMilliseconds(),
+        search_provider_ &&
         search_provider_->field_trial_triggered_in_session());
     destination_url = GURL(template_url->url_ref().
                            ReplaceSearchTerms(search_terms_args));

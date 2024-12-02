@@ -4,8 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 
+#include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
-#include "base/prefs/public/pref_change_registrar.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -59,14 +59,14 @@ class AsyncUninstaller : public ExtensionUninstallDialog::Delegate {
     extension_uninstall_dialog_->ConfirmUninstall(extension_);
   }
 
-  ~AsyncUninstaller() {}
+  virtual ~AsyncUninstaller() {}
 
   // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionUninstallAccepted() {
+  virtual void ExtensionUninstallAccepted() OVERRIDE {
     extensions::ExtensionSystem::Get(profile_)->extension_service()->
         UninstallExtension(extension_->id(), false, NULL);
   }
-  virtual void ExtensionUninstallCanceled() {}
+  virtual void ExtensionUninstallCanceled() OVERRIDE {}
 
  private:
   // The extension that we're loading the icon for. Weak.
@@ -147,7 +147,7 @@ enum {
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_UNINSTALL),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_HIDE_BUTTON),
         [NSMenuItem separatorItem],
-        l10n_util::GetNSStringWithFixup(IDS_MANAGE_EXTENSIONS),
+        l10n_util::GetNSStringWithFixup(IDS_MANAGE_EXTENSION),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSION_ACTION_INSPECT_POPUP),
         nil];
 
@@ -222,7 +222,7 @@ enum {
       break;
     }
     case kExtensionContextManage: {
-      chrome::ShowExtensions(browser_);
+      chrome::ShowExtensions(browser_, extension_->id());
       break;
     }
     case kExtensionContextInspect: {

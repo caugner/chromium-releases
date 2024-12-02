@@ -9,9 +9,9 @@
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/common/id_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/skia_util.h"
 
@@ -76,9 +76,8 @@ class TestIconManager : public ExtensionIconManager {
   explicit TestIconManager(ExtensionIconManagerTest* test) : test_(test) {}
   virtual ~TestIconManager() {}
 
-  // Implements the ImageLoadingTracker::Observer interface, and calls through
-  // to the base class' implementation. Then it lets the test know that an
-  // image load was observed.
+  // Overrides the ImageLoader callback, and calls through to the base class'
+  // implementation. Then it lets the test know that an image load was observed.
   virtual void OnImageLoaded(const std::string& extension_id,
                              const gfx::Image& image) OVERRIDE {
     ExtensionIconManager::OnImageLoaded(extension_id, image);
@@ -94,8 +93,7 @@ class TestIconManager : public ExtensionIconManager {
 // Returns the default icon that ExtensionIconManager gives when an extension
 // doesn't have an icon.
 SkBitmap GetDefaultIcon() {
-  std::string dummy_id;
-  EXPECT_TRUE(Extension::GenerateId(std::string("whatever"), &dummy_id));
+  std::string dummy_id = extensions::id_util::GenerateId("whatever");
   ExtensionIconManager manager;
   return manager.GetIcon(dummy_id);
 }

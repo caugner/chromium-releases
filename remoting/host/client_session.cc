@@ -18,12 +18,17 @@
 #include "remoting/host/audio_capturer.h"
 #include "remoting/host/audio_scheduler.h"
 #include "remoting/host/desktop_environment.h"
-#include "remoting/host/event_executor.h"
+#include "remoting/host/input_injector.h"
+#include "remoting/host/screen_controls.h"
+#include "remoting/host/screen_resolution.h"
 #include "remoting/host/video_scheduler.h"
 #include "remoting/proto/control.pb.h"
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/clipboard_thread_proxy.h"
+
+// Default DPI to assume for old clients that use notifyClientDimensions.
+const int kDefaultDPI = 96;
 
 namespace remoting {
 
@@ -40,12 +45,9 @@ ClientSession::ClientSession(
     const base::TimeDelta& max_duration)
     : event_handler_(event_handler),
       connection_(connection.Pass()),
-      connection_factory_(connection_.get()),
       client_jid_(connection_->session()->jid()),
-      desktop_environment_(desktop_environment_factory->Create(
-          client_jid_,
-          base::Bind(&protocol::ConnectionToClient::Disconnect,
-                     connection_factory_.GetWeakPtr()))),
+      control_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      desktop_environment_factory_(desktop_environment_factory),
       input_tracker_(&host_input_filter_),
       remote_input_filter_(&input_tracker_),
       mouse_clamping_filter_(&remote_input_filter_),
@@ -73,16 +75,44 @@ ClientSession::ClientSession(
   // |auth_*_filter_|'s states reflect whether the session is authenticated.
   auth_input_filter_.set_enabled(false);
   auth_clipboard_filter_.set_enabled(false);
+
+#if defined(OS_WIN)
+  // LocalInputMonitorWin filters out an echo of the injected input before it
+  // reaches |remote_input_filter_|.
+  remote_input_filter_.SetExpectLocalEcho(false);
+#endif  // defined(OS_WIN)
 }
 
-void ClientSession::NotifyClientDimensions(
-    const protocol::ClientDimensions& dimensions) {
-  if (dimensions.has_width() && dimensions.has_height()) {
-    VLOG(1) << "Received ClientDimensions (width="
-            << dimensions.width() << ", height=" << dimensions.height() << ")";
-    event_handler_->OnClientDimensionsChanged(
-        this, SkISize::Make(dimensions.width(), dimensions.height()));
-  }
+ClientSession::~ClientSession() {
+  DCHECK(CalledOnValidThread());
+  DCHECK(!audio_scheduler_);
+  DCHECK(!desktop_environment_);
+  DCHECK(!input_injector_);
+  DCHECK(!screen_controls_);
+  DCHECK(!video_scheduler_);
+
+  connection_.reset();
+}
+
+void ClientSession::NotifyClientResolution(
+    const protocol::ClientResolution& resolution) {
+  if (!resolution.has_dips_width() || !resolution.has_dips_height())
+    return;
+
+  VLOG(1) << "Received ClientResolution (dips_width="
+          << resolution.dips_width() << ", dips_height="
+          << resolution.dips_height() << ")";
+
+  if (!screen_controls_)
+    return;
+
+  ScreenResolution client_resolution(
+      SkISize::Make(resolution.dips_width(), resolution.dips_height()),
+      SkIPoint::Make(kDefaultDPI, kDefaultDPI));
+
+  // Try to match the client's resolution.
+  if (client_resolution.IsValid())
+    screen_controls_->SetScreenResolution(client_resolution);
 }
 
 void ClientSession::ControlVideo(const protocol::VideoControl& video_control) {
@@ -118,7 +148,7 @@ void ClientSession::OnConnectionAuthenticated(
     // TODO(simonmorris): Let Disconnect() tell the client that the
     // disconnection was caused by the session exceeding its maximum duration.
     max_duration_timer_.Start(FROM_HERE, max_duration_,
-                              this, &ClientSession::Disconnect);
+                              this, &ClientSession::DisconnectSession);
   }
 
   event_handler_->OnSessionAuthenticated(this);
@@ -129,17 +159,24 @@ void ClientSession::OnConnectionChannelsConnected(
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
   DCHECK(!audio_scheduler_);
-  DCHECK(!event_executor_);
+  DCHECK(!desktop_environment_);
+  DCHECK(!input_injector_);
+  DCHECK(!screen_controls_);
   DCHECK(!video_scheduler_);
 
+  desktop_environment_ =
+      desktop_environment_factory_->Create(control_factory_.GetWeakPtr());
+
+  // Create the object that controls the screen resolution.
+  screen_controls_ = desktop_environment_->CreateScreenControls();
+
   // Create and start the event executor.
-  event_executor_ = desktop_environment_->CreateEventExecutor(
-      input_task_runner_, ui_task_runner_);
-  event_executor_->Start(CreateClipboardProxy());
+  input_injector_ = desktop_environment_->CreateInputInjector();
+  input_injector_->Start(CreateClipboardProxy());
 
   // Connect the host clipboard and input stubs.
-  host_input_filter_.set_input_stub(event_executor_.get());
-  clipboard_echo_filter_.set_host_stub(event_executor_.get());
+  host_input_filter_.set_input_stub(input_injector_.get());
+  clipboard_echo_filter_.set_host_stub(input_injector_.get());
 
   SetDisableInputs(false);
 
@@ -152,8 +189,7 @@ void ClientSession::OnConnectionChannelsConnected(
       video_capture_task_runner_,
       video_encode_task_runner_,
       network_task_runner_,
-      desktop_environment_->CreateVideoCapturer(video_capture_task_runner_,
-                                                video_encode_task_runner_),
+      desktop_environment_->CreateVideoCapturer(),
       video_encoder.Pass(),
       connection_->client_stub(),
       &mouse_clamping_filter_);
@@ -165,7 +201,7 @@ void ClientSession::OnConnectionChannelsConnected(
     audio_scheduler_ = AudioScheduler::Create(
         audio_task_runner_,
         network_task_runner_,
-        desktop_environment_->CreateAudioCapturer(audio_task_runner_),
+        desktop_environment_->CreateAudioCapturer(),
         audio_encoder.Pass(),
         connection_->audio_stub());
   }
@@ -180,8 +216,8 @@ void ClientSession::OnConnectionClosed(
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
 
-  // Ignore any further callbacks from the DesktopEnvironment.
-  connection_factory_.InvalidateWeakPtrs();
+  // Ignore any further callbacks.
+  control_factory_.InvalidateWeakPtrs();
 
   // If the client never authenticated then the session failed.
   if (!auth_input_filter_.enabled())
@@ -208,7 +244,9 @@ void ClientSession::OnConnectionClosed(
   }
 
   client_clipboard_factory_.InvalidateWeakPtrs();
-  event_executor_.reset();
+  input_injector_.reset();
+  screen_controls_.reset();
+  desktop_environment_.reset();
 
   // Notify the ChromotingHost that this client is disconnected.
   // TODO(sergeyu): Log failure reason?
@@ -235,7 +273,11 @@ void ClientSession::OnRouteChange(
   event_handler_->OnSessionRouteChange(this, channel_name, route);
 }
 
-void ClientSession::Disconnect() {
+const std::string& ClientSession::client_jid() const {
+  return client_jid_;
+}
+
+void ClientSession::DisconnectSession() {
   DCHECK(CalledOnValidThread());
   DCHECK(connection_.get());
 
@@ -246,18 +288,9 @@ void ClientSession::Disconnect() {
   connection_->Disconnect();
 }
 
-void ClientSession::Stop() {
+void ClientSession::OnLocalMouseMoved(const SkIPoint& position) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!audio_scheduler_);
-  DCHECK(!event_executor_);
-  DCHECK(!video_scheduler_);
-
-  connection_.reset();
-}
-
-void ClientSession::LocalMouseMoved(const SkIPoint& mouse_pos) {
-  DCHECK(CalledOnValidThread());
-  remote_input_filter_.LocalMouseMoved(mouse_pos);
+  remote_input_filter_.LocalMouseMoved(position);
 }
 
 void ClientSession::SetDisableInputs(bool disable_inputs) {
@@ -268,13 +301,6 @@ void ClientSession::SetDisableInputs(bool disable_inputs) {
 
   disable_input_filter_.set_enabled(!disable_inputs);
   disable_clipboard_filter_.set_enabled(!disable_inputs);
-}
-
-ClientSession::~ClientSession() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(!audio_scheduler_);
-  DCHECK(!event_executor_);
-  DCHECK(!video_scheduler_);
 }
 
 scoped_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
@@ -317,11 +343,6 @@ scoped_ptr<AudioEncoder> ClientSession::CreateAudioEncoder(
 
   NOTIMPLEMENTED();
   return scoped_ptr<AudioEncoder>(NULL);
-}
-
-// static
-void ClientSessionTraits::Destruct(const ClientSession* client) {
-  client->network_task_runner_->DeleteSoon(FROM_HERE, client);
 }
 
 }  // namespace remoting

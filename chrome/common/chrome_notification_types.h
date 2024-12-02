@@ -314,7 +314,11 @@ enum NotificationType {
   NOTIFICATION_FAVICON_CHANGED,
 
   // Sent by FaviconTabHelper when a tab's favicon has been successfully
-  // updated.
+  // updated. The details are a bool indicating whether the
+  // NavigationEntry's favicon URL has changed since the previous
+  // NOTIFICATION_FAVICON_UPDATED notification. The details are true if
+  // there was no previous NOTIFICATION_FAVICON_UPDATED notification for the
+  // current NavigationEntry.
   NOTIFICATION_FAVICON_UPDATED,
 
   // Profiles -----------------------------------------------------------------
@@ -354,12 +358,6 @@ enum NotificationType {
   // one of the images changes. The source is the TopSites, the details not
   // used.
   NOTIFICATION_TOP_SITES_CHANGED,
-
-  // Bookmarks ---------------------------------------------------------------
-
-  // Sent when the bookmark bar model finishes loading. This source is the
-  // Profile, and the details aren't used.
-  NOTIFICATION_BOOKMARK_MODEL_LOADED,
 
   // Task Manager ------------------------------------------------------------
 
@@ -671,15 +669,6 @@ enum NotificationType {
   // found update.
   NOTIFICATION_EXTENSION_UPDATE_FOUND,
 
-  // An installed app changed notification state (added or removed
-  // notifications). The source is a Profile, and the details are a string
-  // with the extension id of the app.
-  NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED,
-
-  // Finished loading app notification manager.
-  // The source is AppNotificationManager, and the details are NoDetails.
-  NOTIFICATION_APP_NOTIFICATION_MANAGER_LOADED,
-
   // Component Updater -------------------------------------------------------
 
   // Sent when the component updater starts doing update checks. If no
@@ -729,10 +718,6 @@ enum NotificationType {
   // WebDatabase.  The detail is an AutofillProfileChange.
   NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
 
-  // Sent when an Autofill CreditCard has been added/removed/updated in the
-  // WebDatabase.  The detail is an AutofillCreditCardChange.
-  NOTIFICATION_AUTOFILL_CREDIT_CARD_CHANGED,
-
   // Sent when multiple Autofill entries have been modified by Sync.
   // The source is the WebDataService in use by Sync.  No details are specified.
   NOTIFICATION_AUTOFILL_MULTIPLE_CHANGED,
@@ -751,6 +736,9 @@ enum NotificationType {
 
   // Sent when a critical update has been installed. No details are expected.
   NOTIFICATION_CRITICAL_UPGRADE_INSTALLED,
+
+  // Sent when the current install is outdated. No details are expected.
+  NOTIFICATION_OUTDATED_INSTALL,
 
   // Software incompatibility notifications ----------------------------------
 
@@ -905,16 +893,6 @@ enum NotificationType {
   // The source is the Profile. The details are a
   // GoogleServiceSignoutDetails object.
   NOTIFICATION_GOOGLE_SIGNED_OUT,
-
-  // Autofill Notifications --------------------------------------------------
-
-  // Sent when a popup with Autofill suggestions is shown in the renderer.
-  // The source is the corresponding RenderViewHost. There are not details.
-  NOTIFICATION_AUTOFILL_DID_SHOW_SUGGESTIONS,
-
-  // Sent when a form is previewed or filled with Autofill suggestions.
-  // The source is the corresponding RenderViewHost. There are not details.
-  NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA,
 
   // Download Notifications --------------------------------------------------
 
@@ -1103,17 +1081,28 @@ enum NotificationType {
   // Sent each time the InstantController is updated.
   NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
 
-  // Sent when an Instant preview is committed. The Source is the WebContents
-  // containing the committed preview.
+  // Sent when an Instant overlay is committed. The Source is the WebContents
+  // containing the committed overlay.
   NOTIFICATION_INSTANT_COMMITTED,
 
   // Sent when the Instant Controller determines whether the overlay supports
   // the Instant API or not.
   NOTIFICATION_INSTANT_OVERLAY_SUPPORT_DETERMINED,
 
+  // Sent when the Instant Controller determines whether an Instant tab supports
+  // the Instant API or not.
+  NOTIFICATION_INSTANT_TAB_SUPPORT_DETERMINED,
+
   // Sent when the Instant Controller determines whether the NTP supports the
   // Instant API or not.
   NOTIFICATION_INSTANT_NTP_SUPPORT_DETERMINED,
+
+  // Sent when the Instant Controller has sent the Most Visited Items to the
+  // renderer.
+  NOTIFICATION_INSTANT_SENT_MOST_VISITED_ITEMS,
+
+  // Sent when the Instant Controller sets an omnibox suggestion.
+  NOTIFICATION_INSTANT_SET_SUGGESTION,
 
   // Sent when the CaptivePortalService checks if we're behind a captive portal.
   // The Source is the Profile the CaptivePortalService belongs to, and the
@@ -1257,6 +1246,5 @@ enum NotificationType {
 };
 
 }  // namespace chrome
-
 
 #endif  // CHROME_COMMON_CHROME_NOTIFICATION_TYPES_H_

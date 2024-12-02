@@ -487,13 +487,13 @@ void UserView::AddLogoutButton(ash::user::LoginStatus login) {
   if (login == ash::user::LOGGED_IN_PUBLIC) {
     TrayPopupLabelButtonBorder* border =
         static_cast<TrayPopupLabelButtonBorder*>(logout_button_->border());
-    border->SetPainter(views::CustomButton::STATE_NORMAL,
+    border->SetPainter(false, views::Button::STATE_NORMAL,
                        views::Painter::CreateImageGridPainter(
                            kPublicAccountLogoutButtonBorderImagesNormal));
-    border->SetPainter(views::CustomButton::STATE_HOVERED,
+    border->SetPainter(false, views::Button::STATE_HOVERED,
                        views::Painter::CreateImageGridPainter(
                            kPublicAccountLogoutButtonBorderImagesHovered));
-    border->SetPainter(views::CustomButton::STATE_PRESSED,
+    border->SetPainter(false, views::Button::STATE_PRESSED,
                        views::Painter::CreateImageGridPainter(
                            kPublicAccountLogoutButtonBorderImagesHovered));
   }
@@ -514,7 +514,7 @@ void UserView::AddUserCard(SystemTrayItem* owner,
       kTrayPopupPaddingBetweenItems));
   AddChildViewAt(user_card_, 0);
 
-  if (login == ash::user::LOGGED_IN_KIOSK) {
+  if (login == ash::user::LOGGED_IN_RETAIL_MODE) {
     views::Label* details = new views::Label;
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
     details->SetText(
@@ -623,7 +623,8 @@ void TrayUser::UpdateAfterLoginStatusChange(user::LoginStatus status) {
       label_->SetVisible(true);
       break;
 
-    case user::LOGGED_IN_KIOSK:
+    case user::LOGGED_IN_RETAIL_MODE:
+    case user::LOGGED_IN_KIOSK_APP:
     case user::LOGGED_IN_NONE:
       avatar_->SetVisible(false);
       break;

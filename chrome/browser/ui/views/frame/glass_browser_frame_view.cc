@@ -10,10 +10,9 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/hwnd_util.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -26,9 +25,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/win/dpi.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/icon_util.h"
 #include "ui/gfx/image/image.h"
+#include "ui/views/win/hwnd_util.h"
 #include "ui/views/window/client_view.h"
 
 HICON GlassBrowserFrameView::throbber_icons_[
@@ -172,7 +173,7 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForClientView() const {
 
 gfx::Rect GlassBrowserFrameView::GetWindowBoundsForClientBounds(
     const gfx::Rect& client_bounds) const {
-  HWND hwnd = chrome::HWNDForWidget(frame());
+  HWND hwnd = views::HWNDForWidget(frame());
   if (!browser_view()->IsTabStripVisible() && hwnd) {
     // If we don't have a tabstrip, we're either a popup or an app window, in
     // which case we have a standard size non-client area and can just use
@@ -272,7 +273,7 @@ int GlassBrowserFrameView::NonClientTopBorderHeight(
   // We'd like to use FrameBorderThickness() here, but the maximized Aero glass
   // frame has a 0 frame border around most edges and a CYSIZEFRAME-thick border
   // at the top (see AeroGlassFrame::OnGetMinMaxInfo()).
-  return GetSystemMetrics(SM_CYSIZEFRAME) +
+  return ui::win::GetSystemMetricsInDIP(SM_CYSIZEFRAME) +
       ((!restored && !frame()->ShouldLeaveOffsetNearTopBorder()) ?
       -kTabstripTopShadowThickness : kNonClientRestoredExtraThickness);
 }
@@ -340,7 +341,8 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
                 toolbar_bounds.bottom() - kClientEdgeThickness,
                 w - (2 * kClientEdgeThickness),
                 kClientEdgeThickness),
-      ThemeService::GetDefaultColor(ThemeService::COLOR_TOOLBAR_SEPARATOR));
+      ThemeProperties::GetDefaultColor(
+          ThemeProperties::COLOR_TOOLBAR_SEPARATOR));
 }
 
 void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
@@ -379,7 +381,7 @@ void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
   // where not covered by the toolbar image.  NOTE: We do this after drawing the
   // images because the images are meant to alpha-blend atop the frame whereas
   // these rects are meant to be fully opaque, without anything overlaid.
-  SkColor toolbar_color = tp->GetColor(ThemeService::COLOR_TOOLBAR);
+  SkColor toolbar_color = tp->GetColor(ThemeProperties::COLOR_TOOLBAR);
   canvas->FillRect(gfx::Rect(client_area_bounds.x() - kClientEdgeThickness,
       client_area_top, kClientEdgeThickness,
       client_area_bottom + kClientEdgeThickness - client_area_top),
@@ -448,7 +450,7 @@ void GlassBrowserFrameView::StartThrobber() {
     throbber_running_ = true;
     throbber_frame_ = 0;
     InitThrobberIcons();
-    SendMessage(chrome::HWNDForWidget(frame()), WM_SETICON,
+    SendMessage(views::HWNDForWidget(frame()), WM_SETICON,
                 static_cast<WPARAM>(ICON_SMALL),
                 reinterpret_cast<LPARAM>(throbber_icons_[throbber_frame_]));
   }
@@ -470,13 +472,13 @@ void GlassBrowserFrameView::StopThrobber() {
     // Fallback to class icon.
     if (!frame_icon) {
       frame_icon = reinterpret_cast<HICON>(GetClassLongPtr(
-          chrome::HWNDForWidget(frame()), GCLP_HICONSM));
+          views::HWNDForWidget(frame()), GCLP_HICONSM));
     }
 
     // This will reset the small icon which we set in the throbber code.
     // WM_SETICON with NULL icon restores the icon for title bar but not
     // for taskbar. See http://crbug.com/29996
-    SendMessage(chrome::HWNDForWidget(frame()), WM_SETICON,
+    SendMessage(views::HWNDForWidget(frame()), WM_SETICON,
                 static_cast<WPARAM>(ICON_SMALL),
                 reinterpret_cast<LPARAM>(frame_icon));
   }
@@ -484,7 +486,7 @@ void GlassBrowserFrameView::StopThrobber() {
 
 void GlassBrowserFrameView::DisplayNextThrobberFrame() {
   throbber_frame_ = (throbber_frame_ + 1) % kThrobberIconCount;
-  SendMessage(chrome::HWNDForWidget(frame()), WM_SETICON,
+  SendMessage(views::HWNDForWidget(frame()), WM_SETICON,
               static_cast<WPARAM>(ICON_SMALL),
               reinterpret_cast<LPARAM>(throbber_icons_[throbber_frame_]));
 }

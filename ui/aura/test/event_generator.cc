@@ -26,6 +26,9 @@ namespace aura {
 namespace test {
 namespace {
 
+void DummyCallback(ui::EventType, const gfx::Vector2dF&) {
+}
+
 class DefaultEventGeneratorDelegate : public EventGeneratorDelegate {
  public:
   explicit DefaultEventGeneratorDelegate(RootWindow* root_window)
@@ -156,6 +159,7 @@ void EventGenerator::MoveMouseTo(const gfx::Point& point, int count) {
       UpdateCurrentRootWindow(move_point);
     ConvertPointToTarget(current_root_window_, &move_point);
     ui::MouseEvent mouseev(event_type, move_point, move_point, flags_);
+    mouseev.set_system_location(move_point);
     Dispatch(&mouseev);
   }
   current_location_ = point;
@@ -241,10 +245,22 @@ void EventGenerator::GestureScrollSequence(const gfx::Point& start,
                                            const gfx::Point& end,
                                            const base::TimeDelta& step_delay,
                                            int steps) {
+  GestureScrollSequenceWithCallback(start, end, step_delay, steps,
+                                    base::Bind(&DummyCallback));
+}
+
+void EventGenerator::GestureScrollSequenceWithCallback(
+    const gfx::Point& start,
+    const gfx::Point& end,
+    const base::TimeDelta& step_delay,
+    int steps,
+    const ScrollStepCallback& callback) {
   const int kTouchId = 5;
   base::TimeDelta timestamp = ui::EventTimeForNow();
   ui::TouchEvent press(ui::ET_TOUCH_PRESSED, start, kTouchId, timestamp);
   Dispatch(&press);
+
+  callback.Run(ui::ET_GESTURE_SCROLL_BEGIN, gfx::Vector2dF());
 
   int dx = (end.x() - start.x()) / steps;
   int dy = (end.y() - start.y()) / steps;
@@ -254,10 +270,13 @@ void EventGenerator::GestureScrollSequence(const gfx::Point& start,
     timestamp += step_delay;
     ui::TouchEvent move(ui::ET_TOUCH_MOVED, location, kTouchId, timestamp);
     Dispatch(&move);
+    callback.Run(ui::ET_GESTURE_SCROLL_UPDATE, gfx::Vector2dF(dx, dy));
   }
 
   ui::TouchEvent release(ui::ET_TOUCH_RELEASED, end, kTouchId, timestamp);
   Dispatch(&release);
+
+  callback.Run(ui::ET_GESTURE_SCROLL_END, gfx::Vector2dF());
 }
 
 void EventGenerator::GestureMultiFingerScroll(int count,
@@ -312,8 +331,8 @@ void EventGenerator::ScrollSequence(const gfx::Point& start,
                                start,
                                timestamp,
                                0,
-                               0,
-                               0,
+                               0, 0,
+                               0, 0,
                                num_fingers);
   Dispatch(&fling_cancel);
 
@@ -325,8 +344,8 @@ void EventGenerator::ScrollSequence(const gfx::Point& start,
                          start,
                          timestamp,
                          0,
-                         dx,
-                         dy,
+                         dx, dy,
+                         dx, dy,
                          num_fingers);
     Dispatch(&move);
   }
@@ -335,8 +354,8 @@ void EventGenerator::ScrollSequence(const gfx::Point& start,
                               start,
                               timestamp,
                               0,
-                              x_offset,
-                              y_offset,
+                              x_offset, y_offset,
+                              x_offset, y_offset,
                               num_fingers);
   Dispatch(&fling_start);
 }
@@ -351,8 +370,8 @@ void EventGenerator::ScrollSequence(const gfx::Point& start,
                                start,
                                timestamp,
                                0,
-                               0,
-                               0,
+                               0, 0,
+                               0, 0,
                                num_fingers);
   Dispatch(&fling_cancel);
 
@@ -362,8 +381,8 @@ void EventGenerator::ScrollSequence(const gfx::Point& start,
                            start,
                            timestamp,
                            0,
-                           offsets[i].x(),
-                           offsets[i].y(),
+                           offsets[i].x(), offsets[i].y(),
+                           offsets[i].x(), offsets[i].y(),
                            num_fingers);
     Dispatch(&scroll);
   }
@@ -372,8 +391,8 @@ void EventGenerator::ScrollSequence(const gfx::Point& start,
                               start,
                               timestamp,
                               0,
-                              offsets[steps - 1].x(),
-                              offsets[steps - 1].y(),
+                              offsets[steps - 1].x(), offsets[steps - 1].y(),
+                              offsets[steps - 1].x(), offsets[steps - 1].y(),
                               num_fingers);
   Dispatch(&fling_start);
 }

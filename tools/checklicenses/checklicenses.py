@@ -152,21 +152,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'GPL (v2 or later)',
         'UNKNOWN',
     ],
-
-    # http://crbug.com/98107
-    'ppapi/c/documentation/check.sh': [
-        'UNKNOWN',
-    ],
-    'ppapi/cpp/documentation/check.sh': [
-        'UNKNOWN',
-    ],
-    'ppapi/lib/gl/include': [
-        'UNKNOWN',
-    ],
-    'ppapi/native_client/tests/earth/earth_image.inc': [
-        'UNKNOWN',
-    ],
-
     'third_party/WebKit': [
         'UNKNOWN',
     ],
@@ -194,9 +179,13 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/bzip2': [
         'UNKNOWN',
     ],
-    'third_party/cld/encodings/compact_lang_det': [  # http://crbug.com/98120
+
+    # http://crbug.com/222828
+    # http://bugs.python.org/issue17514
+    'third_party/chromite/third_party/argparse.py': [
         'UNKNOWN',
     ],
+
     # Not used. http://crbug.com/156020
     # Using third_party/cros_dbus_cplusplus/cros_dbus_cplusplus.gyp instead.
     'third_party/cros_dbus_cplusplus/source/autogen.sh': [
@@ -219,6 +208,9 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',  # http://crbug.com/98123
     ],
     'third_party/findbugs/doc': [ # http://crbug.com/157206
+        'UNKNOWN',
+    ],
+    'third_party/freetype2': [ # http://crbug.com/177319
         'UNKNOWN',
     ],
     'third_party/gles2_book': [  # http://crbug.com/98130
@@ -335,15 +327,19 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/ocmock/OCMock': [  # http://crbug.com/98454
         'UNKNOWN',
     ],
-    'third_party/opus/src': [  # http://crbug.com/156738
-        'UNKNOWN',
-    ],
     'third_party/ply/__init__.py': [
         'UNKNOWN',
     ],
     'third_party/protobuf': [  # http://crbug.com/98455
         'UNKNOWN',
     ],
+
+    # http://crbug.com/222831
+    # https://bitbucket.org/eliben/pyelftools/issue/12
+    'third_party/pyelftools': [
+        'UNKNOWN',
+    ],
+
     'third_party/pylib': [
         'UNKNOWN',
     ],

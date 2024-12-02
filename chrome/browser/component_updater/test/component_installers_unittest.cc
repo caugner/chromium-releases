@@ -4,8 +4,8 @@
 
 #include "chrome/browser/component_updater/flash_component_installer.h"
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -38,8 +38,15 @@ const base::FilePath::CharType kDataPath[] =
 #endif
 }
 
+// TODO(jschuh): Get Pepper Flash supported on Win64 build. crbug.com/179716
+#if defined(OS_WIN) && defined(ARCH_CPU_X86_64)
+#define MAYBE_PepperFlashCheck DISABLED_PepperFlashCheck
+#else
+#define MAYBE_PepperFlashCheck PepperFlashCheck
+#endif
+
 // TODO(viettrungluu): Separate out into two separate tests; use a test fixture.
-TEST(ComponentInstallerTest, PepperFlashCheck) {
+TEST(ComponentInstallerTest, MAYBE_PepperFlashCheck) {
   MessageLoop message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
 

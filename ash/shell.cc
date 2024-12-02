@@ -28,19 +28,21 @@
 #include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_ash.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_factory.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
-#include "ash/tooltips/tooltip_controller.h"
 #include "ash/touch/touch_observer_hud.h"
 #include "ash/wm/activation_controller.h"
 #include "ash/wm/always_on_top_controller.h"
 #include "ash/wm/app_list_controller.h"
 #include "ash/wm/ash_activation_controller.h"
 #include "ash/wm/ash_focus_rules.h"
+#include "ash/wm/ash_native_cursor_manager.h"
 #include "ash/wm/base_layout_manager.h"
 #include "ash/wm/capture_controller.h"
 #include "ash/wm/coordinate_conversion.h"
@@ -89,6 +91,7 @@
 #include "ui/views/corewm/focus_controller.h"
 #include "ui/views/corewm/input_method_event_filter.h"
 #include "ui/views/corewm/shadow_controller.h"
+#include "ui/views/corewm/tooltip_controller.h"
 #include "ui/views/corewm/visibility_controller.h"
 #include "ui/views/corewm/window_modality_controller.h"
 #include "ui/views/focus/focus_manager_factory.h"
@@ -105,6 +108,7 @@
 #if defined(OS_CHROMEOS)
 #include "ash/ash_constants.h"
 #include "ash/display/display_change_observer_x11.h"
+#include "ash/display/display_error_dialog.h"
 #include "ash/display/output_configurator_animation.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/message_pump_aurax11.h"
@@ -198,6 +202,9 @@ Shell::Shell(ShellDelegate* delegate)
 #if defined(OS_CHROMEOS)
       output_configurator_(new chromeos::OutputConfigurator()),
 #endif  // defined(OS_CHROMEOS)
+      native_cursor_manager_(new AshNativeCursorManager),
+      cursor_manager_(scoped_ptr<views::corewm::NativeCursorManager>(
+          native_cursor_manager_)),
       browser_context_(NULL),
       simulate_modal_window_open_for_testing_(false) {
   DCHECK(delegate_.get());
@@ -206,6 +213,7 @@ Shell::Shell(ShellDelegate* delegate)
   gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_ALTERNATE, screen_);
   if (!gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_NATIVE))
     gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen_);
+  display_controller_.reset(new DisplayController);
 #if defined(OS_CHROMEOS)
   content::GpuFeatureType blacklisted_features =
       content::GpuDataManager::GetInstance()->GetBlacklistedFeatures();
@@ -258,6 +266,7 @@ Shell::~Shell() {
   app_list_controller_.reset();
 
   // Destroy SystemTrayDelegate before destroying the status area(s).
+  system_tray_delegate_->Shutdown();
   system_tray_delegate_.reset();
 
   // Destroy all child windows including widgets.
@@ -288,7 +297,10 @@ Shell::~Shell() {
   power_button_controller_.reset();
   session_state_controller_.reset();
 
-  // This also deletes all RootWindows.
+  // This also deletes all RootWindows. Note that we invoke Shutdown() on
+  // DisplayController before resetting |display_controller_|, since destruction
+  // of its owned RootWindowControllers relies on the value.
+  display_controller_->Shutdown();
   display_controller_.reset();
   screen_position_controller_.reset();
 
@@ -296,17 +308,19 @@ Shell::~Shell() {
   // because they might have registered ActivationChangeObserver.
   activation_controller_.reset();
 
-  DCHECK(instance_ == this);
-  instance_ = NULL;
-
 #if defined(OS_CHROMEOS)
   if (display_change_observer_.get())
     output_configurator_->RemoveObserver(display_change_observer_.get());
   if (output_configurator_animation_.get())
     output_configurator_->RemoveObserver(output_configurator_animation_.get());
+  if (display_error_observer_.get())
+    output_configurator_->RemoveObserver(display_error_observer_.get());
   base::MessagePumpAuraX11::Current()->RemoveDispatcherForRootWindow(
       output_configurator());
 #endif  // defined(OS_CHROMEOS)
+
+  DCHECK(instance_ == this);
+  instance_ = NULL;
 }
 
 // static
@@ -404,15 +418,20 @@ bool Shell::IsLauncherPerDisplayEnabled() {
 }
 
 void Shell::Init() {
+  delegate_->PreInit();
 #if defined(OS_CHROMEOS)
+  output_configurator_animation_.reset(
+      new internal::OutputConfiguratorAnimation());
+  output_configurator_->AddObserver(output_configurator_animation_.get());
   if (base::chromeos::IsRunningOnChromeOS()) {
     display_change_observer_.reset(new internal::DisplayChangeObserverX11);
     // Register |display_change_observer_| first so that the rest of
     // observer gets invoked after the root windows are configured.
     output_configurator_->AddObserver(display_change_observer_.get());
-    output_configurator_animation_.reset(
-        new internal::OutputConfiguratorAnimation()),
-    output_configurator_->AddObserver(output_configurator_animation_.get());
+    display_error_observer_.reset(new internal::DisplayErrorObserver());
+    output_configurator_->AddObserver(display_error_observer_.get());
+    output_configurator_->set_delegate(display_change_observer_.get());
+    output_configurator_->Start();
     display_change_observer_->OnDisplayModeChanged();
   }
 #endif
@@ -448,13 +467,12 @@ void Shell::Init() {
 
   screen_position_controller_.reset(new internal::ScreenPositionController);
   root_window_host_factory_.reset(delegate_->CreateRootWindowHostFactory());
-  display_controller_.reset(new DisplayController);
+  display_controller_->Start();
   display_controller_->InitPrimaryDisplay();
   aura::RootWindow* root_window = display_controller_->GetPrimaryRootWindow();
   active_root_window_ = root_window;
 
-  cursor_manager_.SetDeviceScaleFactor(
-      root_window->AsRootWindowHostDelegate()->GetDeviceScaleFactor());
+  cursor_manager_.SetDisplay(DisplayController::GetPrimaryDisplay());
 
 #if !defined(OS_MACOSX)
   nested_dispatcher_controller_.reset(new NestedDispatcherController);
@@ -533,8 +551,8 @@ void Shell::Init() {
   video_detector_.reset(new VideoDetector);
   window_cycle_controller_.reset(new WindowCycleController(activation_client_));
 
-  tooltip_controller_.reset(new internal::TooltipController(
-      drag_drop_controller_.get()));
+  tooltip_controller_.reset(new views::corewm::TooltipController(
+                                gfx::SCREEN_TYPE_ALTERNATE));
   AddPreTargetHandler(tooltip_controller_.get());
 
   event_client_.reset(new internal::EventClientImpl);
@@ -550,10 +568,10 @@ void Shell::Init() {
   // StatusAreaWidget uses Shell's CapsLockDelegate.
   caps_lock_delegate_.reset(delegate_->CreateCapsLockDelegate());
 
-  if (!command_line->HasSwitch(switches::kAuraNoShadows)) {
+  if (!command_line->HasSwitch(views::corewm::switches::kNoDropShadows)) {
     resize_shadow_controller_.reset(new internal::ResizeShadowController());
     shadow_controller_.reset(
-        new views::corewm::ShadowController(GetPrimaryRootWindow()));
+        new views::corewm::ShadowController(activation_client_));
   }
 
   // Create system_tray_notifier_ before the delegate.
@@ -709,9 +727,9 @@ void Shell::CreateLauncher() {
     RootWindowControllerList controllers = GetAllRootWindowControllers();
     for (RootWindowControllerList::iterator iter = controllers.begin();
          iter != controllers.end(); ++iter)
-      (*iter)->CreateLauncher();
+      (*iter)->shelf()->CreateLauncher();
   } else {
-    GetPrimaryRootWindowController()->CreateLauncher();
+    GetPrimaryRootWindowController()->shelf()->CreateLauncher();
   }
 }
 
@@ -744,24 +762,28 @@ void Shell::UpdateShelfVisibility() {
 
 void Shell::SetShelfAutoHideBehavior(ShelfAutoHideBehavior behavior,
                                      aura::RootWindow* root_window) {
-  GetRootWindowController(root_window)->SetShelfAutoHideBehavior(behavior);
+  ash::internal::ShelfLayoutManager::ForLauncher(root_window)->
+      SetAutoHideBehavior(behavior);
 }
 
 ShelfAutoHideBehavior Shell::GetShelfAutoHideBehavior(
     aura::RootWindow* root_window) const {
-  return GetRootWindowController(root_window)->GetShelfAutoHideBehavior();
+  return ash::internal::ShelfLayoutManager::ForLauncher(root_window)->
+      auto_hide_behavior();
 }
 
 void Shell::SetShelfAlignment(ShelfAlignment alignment,
                               aura::RootWindow* root_window) {
-  if (GetRootWindowController(root_window)->SetShelfAlignment(alignment)) {
+  if (ash::internal::ShelfLayoutManager::ForLauncher(root_window)->
+      SetAlignment(alignment)) {
     FOR_EACH_OBSERVER(
         ShellObserver, observers_, OnShelfAlignmentChanged(root_window));
   }
 }
 
 ShelfAlignment Shell::GetShelfAlignment(aura::RootWindow* root_window) {
-  return GetRootWindowController(root_window)->GetShelfAlignment();
+  return GetRootWindowController(root_window)->
+      GetShelfLayoutManager()->GetAlignment();
 }
 
 void Shell::SetDimming(bool should_dim) {
@@ -800,12 +822,13 @@ void Shell::OnModalWindowRemoved(aura::Window* removed) {
 }
 
 WebNotificationTray* Shell::GetWebNotificationTray() {
-  return GetPrimaryRootWindowController()->status_area_widget()->
-      web_notification_tray();
+  return GetPrimaryRootWindowController()->shelf()->
+      status_area_widget()->web_notification_tray();
 }
 
 bool Shell::HasPrimaryStatusArea() {
-  return !!GetPrimaryRootWindowController()->status_area_widget();
+  ShelfWidget* shelf = GetPrimaryRootWindowController()->shelf();
+  return shelf && shelf->status_area_widget();
 }
 
 SystemTray* Shell::GetPrimarySystemTray() {
@@ -844,12 +867,6 @@ void Shell::InitRootWindowForSecondaryDisplay(aura::RootWindow* root) {
 void Shell::DoInitialWorkspaceAnimation() {
   return GetPrimaryRootWindowController()->workspace_controller()->
       DoInitialAnimation();
-}
-
-message_center::MessageCenter* Shell::message_center() {
-  if (!message_center_.get())
-    message_center_.reset(new message_center::MessageCenter());
-  return message_center_.get();
 }
 
 void Shell::InitRootWindowController(

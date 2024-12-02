@@ -8,8 +8,8 @@
 #include "base/path_service.h"
 #include "base/perftimer.h"
 #include "base/string_util.h"
-#include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver_v8.h"
 #include "net/test/test_server.h"
@@ -205,7 +205,8 @@ class MockJSBindings : public net::ProxyResolverV8::JSBindings {
 
   virtual bool ResolveDns(const std::string& host,
                           ResolveDnsOperation op,
-                          std::string* output) OVERRIDE {
+                          std::string* output,
+                          bool* terminate) OVERRIDE {
     CHECK(false);
     return false;
   }

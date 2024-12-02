@@ -11,6 +11,7 @@
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -80,9 +81,10 @@ void DownloadFilePicker::Init(
     file_type_info.extensions[0].push_back(extension);
   }
   file_type_info.include_all_files = true;
-  file_type_info.support_gdata = true;
+  file_type_info.support_drive = true;
   gfx::NativeWindow owning_window = web_contents ?
-      platform_util::GetTopLevel(web_contents->GetNativeView()) : NULL;
+      platform_util::GetTopLevel(web_contents->GetView()->GetNativeView()) :
+      NULL;
 
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_SAVEAS_FILE,

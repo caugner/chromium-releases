@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_NTP_THUMBNAIL_SOURCE_H_
 #define CHROME_BROWSER_UI_WEBUI_NTP_THUMBNAIL_SOURCE_H_
 
+#include <map>
 #include <string>
 
 #include "base/basictypes.h"
@@ -36,6 +37,8 @@ class ThumbnailSource : public content::URLDataSource {
   virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
   virtual MessageLoop* MessageLoopForRequestPath(
       const std::string& path) const OVERRIDE;
+  virtual bool ShouldServiceRequest(
+      const net::URLRequest* request) const OVERRIDE;
 
  private:
   virtual ~ThumbnailSource();
@@ -46,6 +49,17 @@ class ThumbnailSource : public content::URLDataSource {
 
   // ThumbnailService.
   scoped_refptr<thumbnails::ThumbnailService> thumbnail_service_;
+
+  // Transient mappings from an ID-based path to an URL-based path.
+  // The key is an ID-string, the value is a URL string.
+  // Mappings are added in ShouldServiceRequest() and erased once
+  // the request is serviced in StartDataRequest().
+  // TODO(dhollowa): Consider passing the |request| object through
+  // to the StartDataRequest() call.
+  mutable std::map<std::string, std::string> id_to_url_map_;
+
+  // Only used when servicing requests on the UI thread.
+  Profile* const profile_;
 
   DISALLOW_COPY_AND_ASSIGN(ThumbnailSource);
 };

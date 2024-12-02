@@ -168,6 +168,16 @@ void SystemTrayNotifier::RemoveEnterpriseDomainObserver(
   enterprise_domain_observers_.RemoveObserver(observer);
 }
 
+void SystemTrayNotifier::AddScreenCaptureObserver(
+    ScreenCaptureObserver* observer) {
+  screen_capture_observers_.AddObserver(observer);
+}
+
+void SystemTrayNotifier::RemoveScreenCaptureObserver(
+    ScreenCaptureObserver* observer) {
+  screen_capture_observers_.RemoveObserver(observer);
+}
+
 #endif
 
 void SystemTrayNotifier::NotifyAccessibilityModeChanged(
@@ -228,6 +238,12 @@ void SystemTrayNotifier::NotifyDateFormatChanged() {
                     OnDateFormatChanged());
 }
 
+void SystemTrayNotifier::NotifySystemClockTimeUpdated() {
+  FOR_EACH_OBSERVER(ClockObserver,
+                    clock_observers_,
+                    OnSystemClockTimeUpdated());
+}
+
 void SystemTrayNotifier::NotifyRefreshDrive(DriveOperationStatusList& list) {
   FOR_EACH_OBSERVER(DriveObserver,
                     drive_observers_,
@@ -264,18 +280,16 @@ void SystemTrayNotifier::NotifyPowerStatusChanged(
                     OnPowerStatusChanged(power_status));
 }
 
-void SystemTrayNotifier::NotifySessionStartTimeChanged(
-    const base::Time& session_start_time) {
+void SystemTrayNotifier::NotifySessionStartTimeChanged() {
   FOR_EACH_OBSERVER(SessionLengthLimitObserver,
                     session_length_limit_observers_,
-                    OnSessionStartTimeChanged(session_start_time));
+                    OnSessionStartTimeChanged());
 }
 
-void SystemTrayNotifier::NotifySessionLengthLimitChanged(
-    const base::TimeDelta& limit) {
+void SystemTrayNotifier::NotifySessionLengthLimitChanged() {
   FOR_EACH_OBSERVER(SessionLengthLimitObserver,
                     session_length_limit_observers_,
-                    OnSessionLengthLimitChanged(limit));
+                    OnSessionLengthLimitChanged());
 }
 
 void SystemTrayNotifier::NotifyUpdateRecommended(
@@ -344,6 +358,18 @@ void SystemTrayNotifier::NotifyAddSmsMessage(
 void SystemTrayNotifier::NotifyEnterpriseDomainChanged() {
   FOR_EACH_OBSERVER(EnterpriseDomainObserver, enterprise_domain_observers_,
       OnEnterpriseDomainChanged());
+}
+
+void SystemTrayNotifier::NotifyScreenCaptureStart(
+    const base::Closure& stop_callback,
+    const string16& sharing_app_name) {
+  FOR_EACH_OBSERVER(ScreenCaptureObserver, screen_capture_observers_,
+                    OnScreenCaptureStart(stop_callback, sharing_app_name));
+}
+
+void SystemTrayNotifier::NotifyScreenCaptureStop() {
+  FOR_EACH_OBSERVER(ScreenCaptureObserver, screen_capture_observers_,
+                    OnScreenCaptureStop());
 }
 
 #endif  // OS_CHROMEOS

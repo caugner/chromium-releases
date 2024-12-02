@@ -4,17 +4,17 @@
 
 #include "chrome/browser/task_manager/task_manager.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_test_util.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/panels/panel.h"
@@ -37,7 +38,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_transition_types.h"
 #include "grit/generated_resources.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -79,7 +80,7 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
 
     // Show the task manager. This populates the model, and helps with debugging
     // (you see the task manager).
-    browser()->window()->ShowTaskManager();
+    chrome::ShowTaskManager(browser(), false);
 
     // New Tab Page.
     TaskManagerBrowserTestUtil::WaitForWebResourceChange(1);

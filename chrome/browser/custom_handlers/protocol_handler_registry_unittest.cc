@@ -10,12 +10,12 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
@@ -34,10 +34,11 @@ void AssertInterceptedIO(
     net::URLRequestJobFactory* interceptor) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   net::URLRequestContext context;
+  net::NetworkDelegate *network_delegate = NULL;
   net::URLRequest request(url, NULL, &context);
   scoped_refptr<net::URLRequestJob> job =
       interceptor->MaybeCreateJobWithProtocolHandler(
-          url.scheme(), &request, context.network_delegate());
+          url.scheme(), &request, network_delegate);
   ASSERT_TRUE(job.get() != NULL);
 }
 
@@ -60,30 +61,8 @@ void AssertIntercepted(
 // ProtocolHandlerRegistry properly handled a job creation request.
 class FakeURLRequestJobFactory : public net::URLRequestJobFactory {
   // net::URLRequestJobFactory implementation:
-  virtual bool SetProtocolHandler(const std::string& scheme,
-                                  ProtocolHandler* protocol_handler) OVERRIDE {
-    return false;
-  }
-  virtual void AddInterceptor(Interceptor* interceptor) OVERRIDE {
-  }
-  virtual net::URLRequestJob* MaybeCreateJobWithInterceptor(
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
-    return NULL;
-  }
   virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
-    return NULL;
-  }
-  virtual net::URLRequestJob* MaybeInterceptRedirect(
-      const GURL& location,
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
-    return NULL;
-  }
-  virtual net::URLRequestJob* MaybeInterceptResponse(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate) const OVERRIDE {
     return NULL;

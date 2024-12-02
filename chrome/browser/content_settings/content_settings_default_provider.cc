@@ -14,12 +14,12 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -302,15 +302,13 @@ void DefaultProvider::ForceDefaultsToBeExplicit() {
 
 void DefaultProvider::GetSettingsFromDictionary(
     const DictionaryValue* dictionary) {
-  for (DictionaryValue::key_iterator i(dictionary->begin_keys());
-       i != dictionary->end_keys(); ++i) {
-    const std::string& content_type(*i);
+  for (DictionaryValue::Iterator i(*dictionary); !i.IsAtEnd(); i.Advance()) {
+    const std::string& content_type(i.key());
     for (size_t type = 0; type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
       if (content_type == GetTypeName(ContentSettingsType(type))) {
         int int_value = CONTENT_SETTING_DEFAULT;
-        bool found = dictionary->GetIntegerWithoutPathExpansion(content_type,
-                                                                &int_value);
-        DCHECK(found);
+        bool is_integer = i.value().GetAsInteger(&int_value);
+        DCHECK(is_integer);
         default_settings_[ContentSettingsType(type)].reset(
             Value::CreateIntegerValue(int_value));
         break;

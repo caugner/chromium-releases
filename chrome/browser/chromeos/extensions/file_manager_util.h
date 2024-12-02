@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/google_apis/operation_registry.h"
 #include "googleurl/src/gurl.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -67,6 +67,10 @@ string16 GetTitleFromType(ui::SelectFileDialog::Type type);
 // |path|. In this case the tab will automatically close on |path| unmount.
 void ViewRemovableDrive(const base::FilePath& path);
 
+// Opens a new window of the Files.app on the specified url using the
+// provided profile. If |profile| is null, then the default one is used.
+void OpenNewWindow(Profile* profile, const GURL& url);
+
 // Opens an action choice dialog for an external drive.
 // One of the actions is opening the File Manager.
 void OpenActionChoiceDialog(const base::FilePath& path);
@@ -77,6 +81,9 @@ void ViewItem(const base::FilePath& path);
 // Opens file browser on the folder containing the file, with the file selected.
 void ShowFileInFolder(const base::FilePath& path);
 
+// Opens file browser application.
+void OpenFileBrowser();
+
 // Executes the built-in File Manager handler or tries to open |file| directly
 // in the browser. Returns false if neither is possible.
 bool ExecuteBuiltinHandler(
@@ -84,7 +91,8 @@ bool ExecuteBuiltinHandler(
     const base::FilePath& path,
     const std::string& internal_task_id);
 
-bool ShouldBeOpenedWithPdfPlugin(Profile* profile, const char* file_extension);
+// Checks whether a pepper plugin for |file_extension| is enabled.
+bool ShouldBeOpenedWithPlugin(Profile* profile, const char* file_extension);
 
 // Converts the vector of progress status to their JSON (Value) form.
 base::ListValue* ProgressStatusVectorToListValue(

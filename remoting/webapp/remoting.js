@@ -31,25 +31,16 @@ function consentRequired_(authContinue) {
 }
 
 /**
- * @enum {string} The start-up mode of the web-app
- */
-remoting.TabType = {
-  REGULAR: 'REGULAR',
-  PINNED: 'PINNED',
-  WINDOWED: 'WINDOWED',
-  FULLSCREEN: 'FULLSCREEN',
-  UNKNOWN: 'UNKNOWN'
-};
-
-/**
  * Entry point for app initialization.
  */
 remoting.init = function() {
+  migrateLocalToChromeStorage_();
+
   // TODO(jamiewalch): Remove this when we migrate to apps v2
   // (http://crbug.com/ 134213).
   remoting.initMockStorage();
 
-  remoting.logExtensionInfoAsync_();
+  remoting.logExtensionInfo_();
   l10n.localize();
   // Create global objects.
   remoting.settings = new remoting.Settings();
@@ -104,19 +95,20 @@ remoting.init = function() {
       }
     }
     // No valid URL parameters, start up normally.
-    remoting.initDaemonUi();
+    remoting.initHomeScreenUi();
   }
   remoting.hostList.load(onLoad);
 
   // Show the tab-type warnings if necessary.
-  /** @param {remoting.TabType} tabType */
-  var onTabTypeKnown = function(tabType) {
-    if (tabType != remoting.TabType.WINDOWED) {
+  /** @param {boolean} isWindowed */
+  var onIsWindowed = function(isWindowed) {
+    if (!isWindowed &&
+        navigator.platform.indexOf('Mac') == -1) {
       document.getElementById('startup-mode-box-me2me').hidden = false;
       document.getElementById('startup-mode-box-it2me').hidden = false;
     }
   };
-  getTabType_(onTabTypeKnown);
+  isWindowed_(onIsWindowed);
 };
 
 /**
@@ -132,9 +124,11 @@ remoting.onEmail = function(email) {
   document.getElementById('get-started-me2me').disabled = false;
 };
 
-/** initDaemonUi is called if the app is not starting up in session mode, and
- * also if the user cancels pin entry or the connection in session mode. */
-remoting.initDaemonUi = function() {
+/**
+ * initHomeScreenUi is called if the app is not starting up in session mode,
+ * and also if the user cancels pin entry or the connection in session mode.
+ */
+remoting.initHomeScreenUi = function() {
   remoting.hostController = new remoting.HostController();
   document.getElementById('share-button').disabled =
       !remoting.hostController.isPluginSupported();
@@ -147,6 +141,7 @@ remoting.initDaemonUi = function() {
   // Display the cached host list, then asynchronously update and re-display it.
   remoting.updateLocalHostState();
   remoting.hostList.refresh(remoting.updateLocalHostState);
+  remoting.initSurvey();
 };
 
 /**
@@ -166,24 +161,16 @@ remoting.updateLocalHostState = function() {
 
 /**
  * Log information about the current extension.
- * The extension manifest is loaded and parsed to extract this info.
+ * The extension manifest is parsed to extract this info.
  */
-remoting.logExtensionInfoAsync_ = function() {
-  /** @type {XMLHttpRequest} */
-  var xhr = new XMLHttpRequest();
-  xhr.open('GET', 'manifest.json');
-  xhr.onload = function(e) {
-    var manifest =
-        /** @type {{name: string, version: string, default_locale: string}} */
-        jsonParseSafe(xhr.responseText);
-    if (manifest) {
-      var name = chrome.i18n.getMessage('PRODUCT_NAME');
-      console.log(name + ' version: ' + manifest.version);
-    } else {
-      console.error('Failed to get product version. Corrupt manifest?');
-    }
+remoting.logExtensionInfo_ = function() {
+  var manifest = chrome.runtime.getManifest();
+  if (manifest && manifest.version) {
+    var name = chrome.i18n.getMessage('PRODUCT_NAME');
+    console.log(name + ' version: ' + manifest.version);
+  } else {
+    console.error('Failed to get product version. Corrupt manifest?');
   }
-  xhr.send(null);
 };
 
 /**
@@ -218,7 +205,7 @@ remoting.promptClose = function() {
  */
 remoting.signOut = function() {
   remoting.oauth2.clear();
-  chrome.storage.local.clear();
+  remoting.storage.local.clear();
   remoting.setMode(remoting.AppMode.HOME);
   document.getElementById('auth-dialog').hidden = false;
 };
@@ -340,38 +327,50 @@ remoting.showErrorMessage = function(error) {
 };
 
 /**
- * Get the start-up mode of the application.
- * @param {function(remoting.TabType):void} callback Callback to receive the
- *     type start-up mode of the application (the type of the current tab).
+ * Determine whether or not the app is running in a window.
+ * @param {function(boolean):void} callback Callback to receive whether or not
+ *     the current tab is running in windowed mode.
  */
-function getTabType_(callback) {
+function isWindowed_(callback) {
   /** @param {chrome.Window} win The current window. */
   var windowCallback = function(win) {
-    switch (win.state) {
-      case 'fullscreen':
-        callback(remoting.TabType.FULLSCREEN);
-        return;
-      case 'normal':
-        switch (win.type) {
-          case 'normal':
-            callback(remoting.TabType.REGULAR);
-            return;
-          case 'popup':
-          case 'app':
-            callback(remoting.TabType.WINDOWED);
-            return;
-        }
-    }
-    // TODO(jamiewalch): Decide what to do about "panel".
-    callback(remoting.TabType.UNKNOWN);
+    callback(win.type == 'popup');
   };
   /** @param {chrome.Tab} tab The current tab. */
   var tabCallback = function(tab) {
     if (tab.pinned) {
-      callback(remoting.TabType.PINNED);
+      callback(false);
     } else {
       chrome.windows.get(tab.windowId, null, windowCallback);
     }
   };
-  chrome.tabs.getCurrent(tabCallback);
+  if (chrome.tabs) {
+    chrome.tabs.getCurrent(tabCallback);
+  } else {
+    console.error('chome.tabs is not available.');
+  }
+}
+
+/**
+ * Migrate settings in window.localStorage to chrome.storage.local so that
+ * users of older web-apps that used the former do not lose their settings.
+ */
+function migrateLocalToChromeStorage_() {
+  // The OAuth2 class still uses window.localStorage, so don't migrate any of
+  // those settings.
+  var oauthSettings = [
+      'oauth2-refresh-token',
+      'oauth2-refresh-token-revokable',
+      'oauth2-access-token',
+      'oauth2-xsrf-token',
+      'remoting-email'
+  ];
+  for (var setting in window.localStorage) {
+    if (oauthSettings.indexOf(setting) == -1) {
+      var copy = {}
+      copy[setting] = window.localStorage.getItem(setting);
+      chrome.storage.local.set(copy);
+      window.localStorage.removeItem(setting);
+    }
+  }
 }

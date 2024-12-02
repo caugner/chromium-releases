@@ -8,7 +8,7 @@
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "net/base/default_server_bound_cert_store.h"
+#include "net/ssl/default_server_bound_cert_store.h"
 
 class ClearOnExitPolicy;
 
@@ -37,7 +37,6 @@ class SQLiteServerBoundCertStore
   virtual void DeleteServerBoundCert(
       const net::DefaultServerBoundCertStore::ServerBoundCert& cert) OVERRIDE;
   virtual void SetForceKeepSessionState() OVERRIDE;
-  virtual void Flush(const base::Closure& completion_task) OVERRIDE;
 
  protected:
   virtual ~SQLiteServerBoundCertStore();

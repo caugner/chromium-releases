@@ -22,10 +22,14 @@ class Window;
 class TestScreen : public gfx::Screen,
                    public WindowObserver {
  public:
-  TestScreen();
+  static TestScreen* Create();
+  // Creates a TestScreen that uses fullscreen for the display.
+  static TestScreen* CreateFullscreen();
   virtual ~TestScreen();
 
   RootWindow* CreateRootWindowForPrimaryDisplay();
+
+  void SetDeviceScaleFactor(float device_scale_fator);
 
  protected:
   // WindowObserver overrides:
@@ -50,6 +54,8 @@ class TestScreen : public gfx::Screen,
   virtual void RemoveObserver(gfx::DisplayObserver* observer) OVERRIDE;
 
  private:
+  explicit TestScreen(const gfx::Rect& screen_bounds);
+
   aura::RootWindow* root_window_;
 
   gfx::Display display_;

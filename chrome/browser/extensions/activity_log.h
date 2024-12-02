@@ -10,10 +10,14 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback.h"
+#include "base/hash_tables.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
+#include "chrome/browser/extensions/activity_actions.h"
 #include "chrome/browser/extensions/activity_database.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -72,37 +76,48 @@ class ActivityLog : public ProfileKeyedService,
 
   // Log a successful API call made by an extension.
   // This will create an APIAction for storage in the database.
+  // (Note: implemented as a wrapper for LogAPIActionInternal.)
   void LogAPIAction(const Extension* extension,
                     const std::string& name,    // e.g., tabs.get
-                    const ListValue* args,      // the argument values e.g. 46
+                    ListValue* args,            // the argument values e.g. 46
                     const std::string& extra);  // any extra logging info
 
   // Log an event notification delivered to an extension.
   // This will create an APIAction for storage in the database.
+  // (Note: implemented as a wrapper for LogAPIActionInternal.)
   void LogEventAction(const Extension* extension,
                       const std::string& name,    // e.g., tabs.onUpdate
-                      const ListValue* args,      // arguments to the callback
+                      ListValue* args,            // arguments to the callback
                       const std::string& extra);  // any extra logging info
 
   // Log a blocked API call made by an extension.
   // This will create a BlockedAction for storage in the database.
   void LogBlockedAction(const Extension* extension,
                         const std::string& blocked_call,  // e.g., tabs.get
-                        const ListValue* args,            // argument values
+                        ListValue* args,                  // argument values
                         const char* reason,               // why it's blocked
                         const std::string& extra);        // extra logging info
 
   // Log an interaction between an extension and a URL.
-  // This will create a UrlAction for storage in the database.
+  // This will create a DOMAction for storage in the database.
   // The technical message might be the list of content scripts that have been
   // injected, or the DOM API call; it's what's shown under "More".
-  void LogUrlAction(const Extension* extension,
-                    const UrlAction::UrlActionType verb,  // e.g., XHR
+  void LogDOMAction(const Extension* extension,
                     const GURL& url,                      // target URL
-                    const string16& url_title,            // title of the URL,
-                                                          // can be empty string
-                    const std::string& technical_message, // "More"
+                    const string16& url_title,            // title of the URL
+                    const std::string& api_call,          // api call
+                    const ListValue* args,                // arguments
                     const std::string& extra);            // extra logging info
+
+  // Retrieves the list of actions for a given extension on a specific day.
+  // Today is 0, yesterday is 1, etc. Returns one day at a time.
+  // Response is sent to the method/function in the callback.
+  // Use base::Bind to create the callback.
+  void GetActions(const std::string& extension_id,
+                  const int day,
+                  const base::Callback
+                      <void(scoped_ptr<std::vector<scoped_refptr<Action> > >)>&
+                      callback);
 
   // An error has happened; we want to rollback and close the db.
   // Needs to be public so the error delegate can call it.
@@ -113,6 +128,25 @@ class ActivityLog : public ProfileKeyedService,
 
   explicit ActivityLog(Profile* profile);
   virtual ~ActivityLog();
+
+  // We log callbacks and API calls very similarly, so we handle them the same
+  // way internally.
+  void LogAPIActionInternal(
+      const Extension* extension,
+      const std::string& api_call,
+      const ListValue* args,
+      const std::string& extra,
+      const APIAction::Type type);
+
+  // We log content script injection and DOM API calls using the same underlying
+  // mechanism, so they have the same internal logging structure.
+  void LogDOMActionInternal(const Extension* extension,
+                            const GURL& url,
+                            const string16& url_title,
+                            const std::string& api_call,
+                            const ListValue* args,
+                            const std::string& extra,
+                            DOMAction::DOMActionType verb);
 
   // TabHelper::ScriptExecutionObserver implementation.
   // Fires when a ContentScript is executed.
@@ -165,6 +199,13 @@ class ActivityLog : public ProfileKeyedService,
   // Whether to log activity to stdout or the UI. These are set by switches.
   bool log_activity_to_stdout_;
   bool log_activity_to_ui_;
+
+  // log_arguments controls whether to log API call arguments. By default, we
+  // don't log most arguments to avoid saving too much data. In testing mode,
+  // argument collection is enabled. We also whitelist some arguments for
+  // collection regardless of whether this bool is true.
+  bool log_arguments_;
+  base::hash_set<std::string> arg_whitelist_api_;
 
   DISALLOW_COPY_AND_ASSIGN(ActivityLog);
 };

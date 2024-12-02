@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * @fileoverview MediaControls class implements media playback controls
  * that exist outside of the audio/video HTML element.
@@ -23,6 +25,16 @@ function MediaControls(containerElement, onMediaError) {
   this.onMediaProgressBound_ = this.onMediaProgress_.bind(this);
   this.onMediaError_ = onMediaError || function() {};
 }
+
+/**
+ * Button's state types. Values are used as CSS class names.
+ * @enum {string}
+ */
+MediaControls.ButtonStateType = {
+  DEFAULT: 'default',
+  PLAYING: 'playing',
+  ENDED: 'ended'
+};
 
 /**
  * @return {HTMLAudioElement|HTMLVideoElement} The media element.
@@ -70,25 +82,27 @@ MediaControls.prototype.createControl = function(className, opt_parent) {
  * @param {string} className Class name.
  * @param {function(Event)} handler Click handler.
  * @param {HTMLElement=} opt_parent Parent element or container if undefined.
- * @param {boolean} opt_toggle True if the button has toggle state.
+ * @param {number=} opt_numStates Number of states, default: 1.
  * @return {HTMLElement} The new button element.
  */
 MediaControls.prototype.createButton = function(
-    className, handler, opt_parent, opt_toggle) {
+    className, handler, opt_parent, opt_numStates) {
+  opt_numStates = opt_numStates || 1;
+
   var button = this.createControl(className, opt_parent);
   button.classList.add('media-button');
   button.addEventListener('click', handler);
 
-  var numStates = opt_toggle ? 2 : 1;
-  for (var state = 0; state != numStates; state++) {
-    var stateClass = 'state' + state;
+  var stateTypes = Object.keys(MediaControls.ButtonStateType);
+  for (var state = 0; state != opt_numStates; state++) {
+    var stateClass = MediaControls.ButtonStateType[stateTypes[state]];
     this.createControl('normal ' + stateClass, button);
     this.createControl('hover ' + stateClass, button);
     this.createControl('active ' + stateClass, button);
   }
   this.createControl('disabled', button);
 
-  button.setAttribute('state', 0);
+  button.setAttribute('state', MediaControls.ButtonStateType.DEFAULT);
   button.addEventListener('click', handler);
   return button;
 };
@@ -147,11 +161,11 @@ MediaControls.prototype.togglePlayState = function() {
 };
 
 /**
- * @param {HTMLElement} opt_parent Parent container.
+ * @param {HTMLElement=} opt_parent Parent container.
  */
 MediaControls.prototype.initPlayButton = function(opt_parent) {
   this.playButton_ = this.createButton('play media-control',
-      this.togglePlayState.bind(this), opt_parent, true /* toggle */);
+      this.togglePlayState.bind(this), opt_parent, 3 /* States. */);
 };
 
 /*
@@ -164,9 +178,9 @@ MediaControls.prototype.initPlayButton = function(opt_parent) {
 MediaControls.PROGRESS_RANGE = 5000;
 
 /**
- * @param {boolean} opt_seekMark True if the progress slider should have
- *   a seek mark.
- * @param {HTMLElement} opt_parent Parent container.
+ * @param {boolean=} opt_seekMark True if the progress slider should have
+ *     a seek mark.
+ * @param {HTMLElement=} opt_parent Parent container.
  */
 MediaControls.prototype.initTimeControls = function(opt_seekMark, opt_parent) {
   var timeControls = this.createControl('time-controls', opt_parent);
@@ -202,7 +216,7 @@ MediaControls.prototype.displayProgress_ = function(current, duration) {
 };
 
 /**
- * @param {number} value Progress [0..1]
+ * @param {number} value Progress [0..1].
  * @private
  */
 MediaControls.prototype.onProgressChange_ = function(value) {
@@ -231,6 +245,7 @@ MediaControls.prototype.onProgressDrag_ = function(on) {
       else
         this.media_.play();
     }
+    this.updatePlayButtonState_(this.isPlaying());
   }
 };
 
@@ -239,7 +254,7 @@ MediaControls.prototype.onProgressDrag_ = function(on) {
  */
 
 /**
- * @param {HTMLElement} opt_parent Parent element for the controls.
+ * @param {HTMLElement=} opt_parent Parent element for the controls.
  */
 MediaControls.prototype.initVolumeControls = function(opt_parent) {
   var volumeControls = this.createControl('volume-controls', opt_parent);
@@ -271,7 +286,7 @@ MediaControls.prototype.onSoundButtonClick_ = function() {
 };
 
 /**
- * @param {number} value Volume [0..1]
+ * @param {number} value Volume [0..1].
  * @return {number} The rough level [0..3] used to pick an icon.
  * @private
  */
@@ -365,7 +380,7 @@ MediaControls.prototype.onMediaPlay_ = function(playing) {
   if (this.progressSlider_.isDragging())
     return;
 
-  this.playButton_.setAttribute('state', playing ? '1' : '0');
+  this.updatePlayButtonState_(playing);
   this.onPlayStateChanged();
 };
 
@@ -434,6 +449,24 @@ MediaControls.prototype.onMediaComplete = function() {};
  * This is the right moment to save the play state.
  */
 MediaControls.prototype.onPlayStateChanged = function() {};
+
+/**
+ * Updates the play button state.
+ * @param {boolean} playing If the video is playing.
+ * @private
+ */
+MediaControls.prototype.updatePlayButtonState_ = function(playing) {
+  if (playing) {
+    this.playButton_.setAttribute('state',
+                                  MediaControls.ButtonStateType.PLAYING);
+  } else if (!this.media_.ended) {
+    this.playButton_.setAttribute('state',
+                                  MediaControls.ButtonStateType.DEFAULT);
+  } else {
+    this.playButton_.setAttribute('state',
+                                  MediaControls.ButtonStateType.ENDED);
+  }
+};
 
 /**
  * Restore play state. Base implementation is empty.
@@ -602,7 +635,7 @@ MediaControls.Slider.prototype.getValue = function() {
 };
 
 /**
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  */
 MediaControls.Slider.prototype.setValue = function(value) {
   this.value_ = value;
@@ -612,7 +645,7 @@ MediaControls.Slider.prototype.setValue = function(value) {
 /**
  * Fill the given proportion the slider bar (from the left).
  *
- * @param {number} proportion [0..1]
+ * @param {number} proportion [0..1].
  * @private
  */
 MediaControls.Slider.prototype.setFilled_ = function(proportion) {
@@ -622,7 +655,7 @@ MediaControls.Slider.prototype.setFilled_ = function(proportion) {
 /**
  * Get the value from the input element.
  *
- * @return {number} Value [0..1]
+ * @return {number} Value [0..1].
  * @private
  */
 MediaControls.Slider.prototype.getValueFromUI_ = function() {
@@ -632,7 +665,7 @@ MediaControls.Slider.prototype.getValueFromUI_ = function() {
 /**
  * Update the UI with the current value.
  *
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  * @private
  */
 MediaControls.Slider.prototype.setValueToUI_ = function(value) {
@@ -687,6 +720,7 @@ MediaControls.Slider.prototype.onInputDrag_ = function(on) {
  * @param {function(number)} onChange Value change handler.
  * @param {function(boolean)} onDrag Drag begin/end handler.
  * @param {function(number):string} formatFunction Value formatting function.
+ * @constructor
  */
 MediaControls.AnimatedSlider = function(
     container, value, range, onChange, onDrag, formatFunction) {
@@ -708,7 +742,7 @@ MediaControls.AnimatedSlider.STEPS = 10;
 MediaControls.AnimatedSlider.DURATION = 100;
 
 /**
- * @param {number} value [0..1]
+ * @param {number} value [0..1].
  * @private
  */
 MediaControls.AnimatedSlider.prototype.setValueToUI_ = function(value) {
@@ -740,6 +774,7 @@ MediaControls.AnimatedSlider.prototype.setValueToUI_ = function(value) {
  * @param {function(number)} onChange Value change handler.
  * @param {function(boolean)} onDrag Drag begin/end handler.
  * @param {function(number):string} formatFunction Value formatting function.
+ * @constructor
  */
 MediaControls.PreciseSlider = function(
     container, value, range, onChange, onDrag, formatFunction) {
@@ -749,6 +784,7 @@ MediaControls.PreciseSlider = function(
 
   /**
    * @type {function(number):string}
+   * @private
    */
   this.valueToString_ = null;
 
@@ -809,7 +845,7 @@ MediaControls.PreciseSlider.prototype.setValueToStringFunction =
  *
  * @param {number} ratio [0..1] The proportion of the duration.
  * @param {number} timeout Timeout in ms after which the label should be hidden.
- *   MediaControls.PreciseSlider.NO_AUTO_HIDE means show until the next call.
+ *     MediaControls.PreciseSlider.NO_AUTO_HIDE means show until the next call.
  * @private
  */
 MediaControls.PreciseSlider.prototype.showSeekMark_ =
@@ -925,9 +961,9 @@ MediaControls.PreciseSlider.prototype.onInputDrag_ = function(on) {
  *
  * @param {HTMLElement} containerElement The container for the controls.
  * @param {function} onMediaError Function to display an error message.
- * @param {function} opt_fullScreenToggle Function to toggle fullscreen mode.
- * @param {HTMLElement} opt_stateIconParent The parent for the icon that
- *                      gives visual feedback when the playback state changes.
+ * @param {function=} opt_fullScreenToggle Function to toggle fullscreen mode.
+ * @param {HTMLElement=} opt_stateIconParent The parent for the icon that
+ *     gives visual feedback when the playback state changes.
  * @constructor
  */
 function VideoControls(containerElement, onMediaError,
@@ -952,9 +988,9 @@ function VideoControls(containerElement, onMediaError,
         'playback-state-icon', opt_stateIconParent);
   }
 
-  var video_controls = this;
+  var videoControls = this;
   chrome.mediaPlayerPrivate.onTogglePlayState.addListener(
-      function() { video_controls.togglePlayStateWithFeedback(); });
+      function() { videoControls.togglePlayStateWithFeedback(); });
 }
 
 /**
@@ -1010,8 +1046,8 @@ VideoControls.prototype.togglePlayState = function() {
 
 /**
  * Save the playback position to the persistent storage.
- * @param {boolean} opt_sync True if the position must be saved synchronously
- *   (required when closing app windows).
+ * @param {boolean=} opt_sync True if the position must be saved synchronously
+ *     (required when closing app windows).
  */
 VideoControls.prototype.savePosition = function(opt_sync) {
   if (!this.media_.duration ||
@@ -1099,13 +1135,13 @@ function AudioControls(container, advanceTrack, onError) {
   this.createButton('previous', this.onAdvanceClick_.bind(this, false));
   this.createButton('next', this.onAdvanceClick_.bind(this, true));
 
-  var audio_controls = this;
+  var audioControls = this;
   chrome.mediaPlayerPrivate.onNextTrack.addListener(
-      function() { audio_controls.onAdvanceClick_(true); });
+      function() { audioControls.onAdvanceClick_(true); });
   chrome.mediaPlayerPrivate.onPrevTrack.addListener(
-      function() { audio_controls.onAdvanceClick_(false); });
+      function() { audioControls.onAdvanceClick_(false); });
   chrome.mediaPlayerPrivate.onTogglePlayState.addListener(
-      function() { audio_controls.togglePlayState(); });
+      function() { audioControls.togglePlayState(); });
 }
 
 AudioControls.prototype = { __proto__: MediaControls.prototype };

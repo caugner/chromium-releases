@@ -16,6 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
@@ -36,9 +37,11 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -214,6 +217,10 @@ FindBarGtk::FindBarGtk(BrowserWindowGtk* window)
                    G_CALLBACK(OnFocusInThunk), this);
   g_signal_connect(text_entry_, "focus-out-event",
                    G_CALLBACK(OnFocusOutThunk), this);
+  g_signal_connect_after(text_entry_, "copy-clipboard",
+                         G_CALLBACK(&HandleAfterCopyOrCutClipboardThunk), this);
+  g_signal_connect_after(text_entry_, "cut-clipboard",
+                         G_CALLBACK(&HandleAfterCopyOrCutClipboardThunk), this);
   g_signal_connect(container_, "expose-event",
                    G_CALLBACK(OnExpose), this);
 }
@@ -464,7 +471,14 @@ void FindBarGtk::RestoreSavedFocus() {
   if (focus_store_.widget())
     gtk_widget_grab_focus(focus_store_.widget());
   else
-    find_bar_controller_->web_contents()->Focus();
+    find_bar_controller_->web_contents()->GetView()->Focus();
+}
+
+bool FindBarGtk::HasGlobalFindPasteboard() {
+  return false;
+}
+
+void FindBarGtk::UpdateFindBarForChangedWebContents() {
 }
 
 FindBarTesting* FindBarGtk::GetFindBarTesting() {
@@ -546,7 +560,7 @@ void FindBarGtk::Observe(int type,
     // This is necessary to make the close button dark enough.
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button_->SetBackground(
-        theme_service_->GetColor(ThemeService::COLOR_TAB_TEXT),
+        theme_service_->GetColor(ThemeProperties::COLOR_TAB_TEXT),
         rb.GetImageNamed(IDR_TAB_CLOSE).AsBitmap(),
         rb.GetImageNamed(IDR_TAB_CLOSE).AsBitmap());
   }
@@ -1023,4 +1037,21 @@ gboolean FindBarGtk::OnFocusOut(GtkWidget* entry, GdkEventFocus* event) {
       reinterpret_cast<gpointer>(&OnKeymapDirectionChanged), this);
 
   return FALSE;  // Continue propagation.
+}
+
+void FindBarGtk::HandleAfterCopyOrCutClipboard(GtkWidget* sender) {
+  ui::Clipboard::SourceTag source_tag = content::BrowserContext::
+      GetMarkerForOffTheRecordContext(browser_->profile());
+  if (source_tag == ui::Clipboard::SourceTag())
+    return;
+
+  ui::Clipboard* clipboard = ui::Clipboard::GetForCurrentThread();
+  string16 text;
+  clipboard->ReadText(ui::Clipboard::BUFFER_STANDARD, &text);
+
+  // Overwrite clipboard with the correct source tag.
+  ui::ScopedClipboardWriter scw(clipboard,
+                                ui::Clipboard::BUFFER_STANDARD,
+                                source_tag);
+  scw.WriteText(text);
 }

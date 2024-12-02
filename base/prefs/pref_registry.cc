@@ -28,24 +28,23 @@ PrefRegistry::const_iterator PrefRegistry::end() const {
   return defaults_->end();
 }
 
+void PrefRegistry::SetDefaultPrefValue(const char* pref_name,
+                                       base::Value* value) {
+  DCHECK(value);
+  if (DCHECK_IS_ON()) {
+    const base::Value* current_value = NULL;
+    DCHECK(defaults_->GetValue(pref_name, &current_value))
+        << "Setting default for unregistered pref: " << pref_name;
+    DCHECK(value->IsType(current_value->GetType()))
+        << "Wrong type for new default: " << pref_name;
+  }
+
+  defaults_->ReplaceDefaultValue(pref_name, make_scoped_ptr(value));
+}
+
 void PrefRegistry::SetRegistrationCallback(
     const RegistrationCallback& callback) {
   registration_callback_ = callback;
-}
-
-void PrefRegistry::SetUnregistrationCallback(
-    const UnregistrationCallback& callback) {
-  unregistration_callback_ = callback;
-}
-
-void PrefRegistry::DeprecatedUnregisterPreference(const char* path) {
-  DCHECK(defaults_->GetValue(path, NULL)) <<
-      "Trying to unregister an unregistered pref: " << path;
-
-  defaults_->RemoveDefaultValue(path);
-
-  if (!unregistration_callback_.is_null())
-    unregistration_callback_.Run(path);
 }
 
 void PrefRegistry::RegisterPreference(const char* path,
@@ -57,7 +56,7 @@ void PrefRegistry::RegisterPreference(const char* path,
   DCHECK(!defaults_->GetValue(path, NULL)) <<
       "Trying to register a previously registered pref: " << path;
 
-  defaults_->SetDefaultValue(path, default_value);
+  defaults_->SetDefaultValue(path, make_scoped_ptr(default_value));
 
   if (!registration_callback_.is_null())
     registration_callback_.Run(path, default_value);

@@ -21,9 +21,9 @@
 #include "chrome/browser/chromeos/login/reset_screen.h"
 #include "chrome/browser/chromeos/login/test_login_utils.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
-#include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
+#include "chrome/browser/chromeos/login/wrong_hwid_screen.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -293,8 +293,8 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
       &mock_consumer);
   // This calls StartWizard, destroying the current controller() and its mocks;
   // don't set expectations on those objects.
-  ExistingUserController::current_controller()->CompleteLogin(kUsername,
-                                                              kPassword);
+  ExistingUserController::current_controller()->CompleteLogin(
+      UserCredentials(kUsername, kPassword, ""));
   // Run the tasks posted to complete the login:
   MessageLoop::current()->RunUntilIdle();
 
@@ -302,7 +302,7 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
       WizardController::default_controller()->GetEnterpriseEnrollmentScreen();
   EXPECT_EQ(screen, WizardController::default_controller()->current_screen());
   // This is the main expectation: after auto-enrollment, login is resumed.
-  EXPECT_CALL(mock_consumer, OnLoginSuccess(_, _, _, _)).Times(1);
+  EXPECT_CALL(mock_consumer, OnLoginSuccess(_, _, _)).Times(1);
   OnExit(ScreenObserver::ENTERPRISE_AUTO_MAGIC_ENROLLMENT_COMPLETED);
   // Prevent browser launch when the profile is prepared:
   browser_shutdown::SetTryingToQuit(true);
@@ -328,9 +328,30 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowResetScreen) {
   EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
 }
 
+IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
+                       ControlFlowWrongHWIDScreenFromLogin) {
+  EXPECT_EQ(WizardController::default_controller()->GetNetworkScreen(),
+            WizardController::default_controller()->current_screen());
+
+  BaseLoginDisplayHost::default_host()->StartSignInScreen();
+  EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
+  ExistingUserController::current_controller()->ShowWrongHWIDScreen();
+
+  WrongHWIDScreen* screen =
+      WizardController::default_controller()->GetWrongHWIDScreen();
+  EXPECT_EQ(screen, WizardController::default_controller()->current_screen());
+
+  // After warning is skipped, user returns to sign-in screen.
+  // And this destroys WizardController.
+  OnExit(ScreenObserver::WRONG_HWID_WARNING_SKIPPED);
+  EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
+}
+
+// TODO(dzhioev): Add test emaulating device with wrong HWID.
+
 // TODO(nkostylev): Add test for WebUI accelerators http://crosbug.com/22571
 
-COMPILE_ASSERT(ScreenObserver::EXIT_CODES_COUNT == 16,
+COMPILE_ASSERT(ScreenObserver::EXIT_CODES_COUNT == 15,
                add_tests_for_new_control_flow_you_just_introduced);
 
 }  // namespace chromeos

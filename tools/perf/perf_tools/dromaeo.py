@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import multi_page_benchmark
-from telemetry import util
+from telemetry.core import util
+from telemetry.page import page_benchmark
 
-class Dromaeo(multi_page_benchmark.MultiPageBenchmark):
+class Dromaeo(page_benchmark.PageBenchmark):
   def MeasurePage(self, page, tab, results):
     js_is_done = 'window.document.cookie.indexOf("__done=1") >= 0'
     def _IsDone():
@@ -27,5 +27,4 @@ class Dromaeo(multi_page_benchmark.MultiPageBenchmark):
       data_type = 'unimportant'
       if k == suffix:
         data_type = 'default'
-      results.Add('score', 'runs/s', v, chart_name=Escape(k),
-          data_type=data_type)
+      results.Add(Escape(k), 'runs/s', v, data_type=data_type)

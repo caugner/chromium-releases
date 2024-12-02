@@ -103,7 +103,6 @@ class MockAudioManager : public AudioManagerBase {
       const AudioParameters& params));
   MOCK_METHOD2(MakeAudioInputStream, AudioInputStream*(
       const AudioParameters& params, const std::string& device_id));
-  MOCK_METHOD0(CanShowAudioInputSettings, bool());
   MOCK_METHOD0(ShowAudioInputSettings, void());
   MOCK_METHOD0(GetMessageLoop, scoped_refptr<base::MessageLoopProxy>());
   MOCK_METHOD1(GetAudioInputDeviceNames, void(
@@ -118,6 +117,8 @@ class MockAudioManager : public AudioManagerBase {
       const AudioParameters& params, const std::string& device_id));
   MOCK_METHOD2(MakeLowLatencyInputStream, AudioInputStream*(
       const AudioParameters& params, const std::string& device_id));
+  MOCK_METHOD1(GetPreferredOutputStreamParameters, AudioParameters(
+      const AudioParameters& params));
 };
 
 class MockAudioSourceCallback : public AudioOutputStream::AudioSourceCallback {
@@ -130,7 +131,7 @@ class MockAudioSourceCallback : public AudioOutputStream::AudioSourceCallback {
                    AudioBuffersState buffers_state) {
     return OnMoreData(dest, buffers_state);
   }
-  MOCK_METHOD2(OnError, void(AudioOutputStream* stream, int code));
+  MOCK_METHOD1(OnError, void(AudioOutputStream* stream));
 };
 
 }  // namespace
@@ -414,7 +415,7 @@ class AudioOutputProxyTest : public testing::Test {
     EXPECT_CALL(stream, Close())
         .Times(1);
 
-    AudioOutputProxy* proxy = new AudioOutputProxy(dispatcher_impl_);
+    AudioOutputProxy* proxy = new AudioOutputProxy(dispatcher);
     EXPECT_TRUE(proxy->Open());
 
     // Simulate a delay.
@@ -427,11 +428,17 @@ class AudioOutputProxyTest : public testing::Test {
 
     // |stream| is closed at this point. Start() should reopen it again.
     EXPECT_CALL(manager(), MakeAudioOutputStream(_))
-        .WillOnce(Return(reinterpret_cast<AudioOutputStream*>(NULL)));
+        .Times(2)
+        .WillRepeatedly(Return(reinterpret_cast<AudioOutputStream*>(NULL)));
 
-    EXPECT_CALL(callback_, OnError(_, _))
-        .Times(1);
+    EXPECT_CALL(callback_, OnError(_))
+        .Times(2);
 
+    proxy->Start(&callback_);
+
+    // Double Start() in the error case should be allowed since it's possible a
+    // callback may not have had time to process the OnError() in between.
+    proxy->Stop();
     proxy->Start(&callback_);
 
     Mock::VerifyAndClear(&callback_);
@@ -617,10 +624,54 @@ TEST_F(AudioOutputResamplerTest, LowLatencyOpenFailedFallback) {
 }
 
 // Simulate failures to open both the low latency and the fallback high latency
-// stream and ensure AudioOutputResampler terminates normally.
-TEST_F(AudioOutputResamplerTest, LowLatencyFallbackFailed) {
+// stream and ensure AudioOutputResampler falls back to a fake stream.
+TEST_F(AudioOutputResamplerTest, HighLatencyFallbackFailed) {
+  MockAudioOutputStream okay_stream(&manager_, params_);
+
+// Only Windows has a high latency output driver that is not the same as the low
+// latency path.
+#if defined(OS_WIN)
+  static const int kFallbackCount = 2;
+#else
+  static const int kFallbackCount = 1;
+#endif
   EXPECT_CALL(manager(), MakeAudioOutputStream(_))
-      .Times(2)
+      .Times(kFallbackCount)
+      .WillRepeatedly(Return(static_cast<AudioOutputStream*>(NULL)));
+
+  // To prevent shared memory issues the sample rate and buffer size should
+  // match the input stream parameters.
+  EXPECT_CALL(manager(), MakeAudioOutputStream(AllOf(
+      testing::Property(&AudioParameters::format, AudioParameters::AUDIO_FAKE),
+      testing::Property(&AudioParameters::sample_rate, params_.sample_rate()),
+      testing::Property(
+          &AudioParameters::frames_per_buffer, params_.frames_per_buffer()))))
+      .Times(1)
+      .WillOnce(Return(&okay_stream));
+  EXPECT_CALL(okay_stream, Open())
+      .WillOnce(Return(true));
+  EXPECT_CALL(okay_stream, Close())
+      .Times(1);
+
+  AudioOutputProxy* proxy = new AudioOutputProxy(resampler_);
+  EXPECT_TRUE(proxy->Open());
+  proxy->Close();
+  WaitForCloseTimer(kTestCloseDelayMs);
+}
+
+// Simulate failures to open both the low latency, the fallback high latency
+// stream, and the fake audio output stream and ensure AudioOutputResampler
+// terminates normally.
+TEST_F(AudioOutputResamplerTest, AllFallbackFailed) {
+// Only Windows has a high latency output driver that is not the same as the low
+// latency path.
+#if defined(OS_WIN)
+  static const int kFallbackCount = 3;
+#else
+  static const int kFallbackCount = 2;
+#endif
+  EXPECT_CALL(manager(), MakeAudioOutputStream(_))
+      .Times(kFallbackCount)
       .WillRepeatedly(Return(static_cast<AudioOutputStream*>(NULL)));
 
   AudioOutputProxy* proxy = new AudioOutputProxy(resampler_);

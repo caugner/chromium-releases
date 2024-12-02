@@ -19,6 +19,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -228,8 +229,7 @@ void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
 
   gtk_widget_set_tooltip_text(
       wrench_button,
-      l10n_util::GetStringFUTF8(IDS_APPMENU_TOOLTIP,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)).c_str());
+      l10n_util::GetStringUTF8(IDS_APPMENU_TOOLTIP).c_str());
   g_signal_connect(wrench_button, "button-press-event",
                    G_CALLBACK(OnMenuButtonPressEventThunk), this);
   gtk_widget_set_can_focus(wrench_button, FALSE);
@@ -279,7 +279,7 @@ void BrowserToolbarGtk::SetViewIDs() {
   ViewIDUtil::SetID(forward_->widget(), VIEW_ID_FORWARD_BUTTON);
   ViewIDUtil::SetID(reload_->widget(), VIEW_ID_RELOAD_BUTTON);
   ViewIDUtil::SetID(home_->widget(), VIEW_ID_HOME_BUTTON);
-  ViewIDUtil::SetID(location_bar_->widget(), VIEW_ID_LOCATION_BAR);
+  ViewIDUtil::SetID(location_bar_->widget(), VIEW_ID_OMNIBOX);
   ViewIDUtil::SetID(wrench_menu_button_->widget(), VIEW_ID_APP_MENU);
 }
 
@@ -441,7 +441,8 @@ bool BrowserToolbarGtk::IsWrenchMenuShowing() const {
 
 // BrowserToolbarGtk, private --------------------------------------------------
 
-void BrowserToolbarGtk::OnZoomLevelChanged(const std::string& host) {
+void BrowserToolbarGtk::OnZoomLevelChanged(
+    const HostZoomMap::ZoomLevelChange& change) {
   // Since BrowserToolbarGtk create a new |wrench_menu_model_| in
   // RebuildWrenchMenu(), the ordering of the observers of HostZoomMap
   // can change, and result in subtle bugs like http://crbug.com/118823.
@@ -513,7 +514,7 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
       window_->tabstrip()->GetTabStripOriginForWidget(widget);
   // Fill the entire region with the toolbar color.
   GdkColor color = theme_service_->GetGdkColor(
-      ThemeService::COLOR_TOOLBAR);
+      ThemeProperties::COLOR_TOOLBAR);
   gdk_cairo_set_source_color(cr, &color);
   cairo_fill(cr);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include <iterator>
 
 #include "apps/app_restore_service_factory.h"
+#include "apps/shortcut_manager_factory.h"
+#include "chrome/browser/autofill/autocheckout_whitelist_manager_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -27,30 +29,39 @@
 #include "chrome/browser/extensions/api/font_settings/font_settings_api.h"
 #include "chrome/browser/extensions/api/history/history_api.h"
 #include "chrome/browser/extensions/api/i18n/i18n_api.h"
+#include "chrome/browser/extensions/api/icons/icons_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/idle/idle_manager_factory.h"
 #include "chrome/browser/extensions/api/input/input.h"
-#include "chrome/browser/extensions/api/managed_mode/managed_mode_api.h"
+#include "chrome/browser/extensions/api/managed_mode_private/managed_mode_private_api.h"
 #include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/media_galleries_private/media_galleries_private_api.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/api/page_launcher/page_launcher_api.h"
+#include "chrome/browser/extensions/api/plugins/plugins_api.h"
 #include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/push_messaging/push_messaging_api.h"
 #include "chrome/browser/extensions/api/session_restore/session_restore_api.h"
+#include "chrome/browser/extensions/api/streams_private/streams_private_api.h"
+#include "chrome/browser/extensions/api/system_indicator/system_indicator_api.h"
+#include "chrome/browser/extensions/api/system_info/system_info_api.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
+#include "chrome/browser/extensions/content_scripts_parser.h"
+#include "chrome/browser/extensions/csp_parser.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
+#include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/manifest_url_parser.h"
+#include "chrome/browser/extensions/token_cache/token_cache_service_factory.h"
 #include "chrome/browser/extensions/web_accessible_resources_parser.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context_factory.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/shortcuts_backend_factory.h"
-#include "chrome/browser/media_gallery/media_galleries_preferences_factory.h"
+#include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #if !defined(OS_ANDROID)
 #include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
@@ -93,7 +104,7 @@
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
-#include "chrome/browser/policy/user_policy_signin_service_factory.h"
+#include "chrome/browser/policy/cloud/user_policy_signin_service_factory.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -258,11 +269,15 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   DownloadServiceFactory::GetInstance();
 #if defined(ENABLE_EXTENSIONS)
   apps::AppRestoreServiceFactory::GetInstance();
+  apps::ShortcutManagerFactory::GetInstance();
+  autofill::autocheckout::WhitelistManagerFactory::GetInstance();
   extensions::ActivityLogFactory::GetInstance();
   extensions::BookmarksAPI::GetFactoryInstance();
   extensions::BluetoothAPIFactory::GetInstance();
   extensions::CommandService::GetFactoryInstance();
+  extensions::ContentScriptsParser::GetFactoryInstance();
   extensions::CookiesAPI::GetFactoryInstance();
+  extensions::CSPParser::GetFactoryInstance();
   extensions::DialAPIFactory::GetInstance();
   extensions::ExtensionActionAPI::GetFactoryInstance();
   extensions::ExtensionSystemFactory::GetInstance();
@@ -270,8 +285,10 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   extensions::FontSettingsAPI::GetFactoryInstance();
   extensions::HistoryAPI::GetFactoryInstance();
   extensions::I18nAPI::GetFactoryInstance();
+  extensions::IconsAPI::GetFactoryInstance();
   extensions::IdentityAPI::GetFactoryInstance();
   extensions::IdleManagerFactory::GetInstance();
+  extensions::InstallTrackerFactory::GetInstance();
 #if defined(TOOLKIT_VIEWS)
   extensions::InputAPI::GetFactoryInstance();
 #endif
@@ -288,6 +305,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #endif
   extensions::OmniboxAPI::GetFactoryInstance();
   extensions::PageLauncherAPI::GetFactoryInstance();
+  extensions::PluginsAPI::GetFactoryInstance();
   extensions::PreferenceAPI::GetFactoryInstance();
   extensions::ProcessesAPI::GetFactoryInstance();
   extensions::PushMessagingAPI::GetFactoryInstance();
@@ -295,6 +313,9 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #if defined(ENABLE_INPUT_SPEECH)
   extensions::SpeechInputAPI::GetFactoryInstance();
 #endif
+  extensions::StreamsPrivateAPI::GetFactoryInstance();
+  extensions::SystemIndicatorAPI::GetFactoryInstance();
+  extensions::SystemInfoAPI::GetFactoryInstance();
   extensions::SuggestedLinksRegistryFactory::GetInstance();
   extensions::TabCaptureRegistryFactory::GetInstance();
   extensions::TabsWindowsAPI::GetFactoryInstance();
@@ -357,6 +378,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #if defined(ENABLE_THEMES)
   ThemeServiceFactory::GetInstance();
 #endif
+  TokenCacheServiceFactory::GetInstance();
   TokenServiceFactory::GetInstance();
   UserStyleSheetWatcherFactory::GetInstance();
   WebDataServiceFactory::GetInstance();

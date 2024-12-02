@@ -9,8 +9,10 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/sha1.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/chrome_switches.h"
 
 using chrome::VersionInfo;
@@ -133,6 +135,19 @@ void ParseEnumSet(const DictionaryValue* value,
   }
 }
 
+void ParseURLPatterns(const DictionaryValue* value,
+                      const std::string& key,
+                      URLPatternSet* set) {
+  const ListValue* matches = NULL;
+  if (value->GetList(key, &matches)) {
+    for (size_t i = 0; i < matches->GetSize(); ++i) {
+      std::string pattern;
+      CHECK(matches->GetString(i, &pattern));
+      set->AddPattern(URLPattern(URLPattern::SCHEME_ALL, pattern));
+    }
+  }
+}
+
 // Gets a human-readable name for the given extension type.
 std::string GetDisplayTypeName(Manifest::Type type) {
   switch (type) {
@@ -170,6 +185,7 @@ SimpleFeature::SimpleFeature(const SimpleFeature& other)
     : whitelist_(other.whitelist_),
       extension_types_(other.extension_types_),
       contexts_(other.contexts_),
+      matches_(other.matches_),
       location_(other.location_),
       platform_(other.platform_),
       min_manifest_version_(other.min_manifest_version_),
@@ -184,6 +200,7 @@ bool SimpleFeature::Equals(const SimpleFeature& other) const {
   return whitelist_ == other.whitelist_ &&
       extension_types_ == other.extension_types_ &&
       contexts_ == other.contexts_ &&
+      matches_ == other.matches_ &&
       location_ == other.location_ &&
       platform_ == other.platform_ &&
       min_manifest_version_ == other.min_manifest_version_ &&
@@ -192,6 +209,7 @@ bool SimpleFeature::Equals(const SimpleFeature& other) const {
 }
 
 void SimpleFeature::Parse(const DictionaryValue* value) {
+  ParseURLPatterns(value, "matches", &matches_);
   ParseSet(value, "whitelist", &whitelist_);
   ParseEnumSet<Manifest::Type>(value, "extension_types", &extension_types_,
                                 g_mappings.Get().extension_types);
@@ -219,7 +237,7 @@ Feature::Availability SimpleFeature::IsAvailableToManifest(
     return CreateAvailability(IS_AVAILABLE, type);
 
   if (!whitelist_.empty()) {
-    if (whitelist_.find(extension_id) == whitelist_.end()) {
+    if (!IsIdInWhitelist(extension_id)) {
       // TODO(aa): This is gross. There should be a better way to test the
       // whitelist.
       CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -260,26 +278,33 @@ Feature::Availability SimpleFeature::IsAvailableToManifest(
 Feature::Availability SimpleFeature::IsAvailableToContext(
     const Extension* extension,
     SimpleFeature::Context context,
+    const GURL& url,
     SimpleFeature::Platform platform) const {
-  Availability result = IsAvailableToManifest(
-      extension->id(),
-      extension->GetType(),
-      ConvertLocation(extension->location()),
-      extension->manifest_version(),
-      platform);
-  if (!result.is_available())
-    return result;
-
-  if (!contexts_.empty() &&
-      contexts_.find(context) == contexts_.end()) {
-    return CreateAvailability(INVALID_CONTEXT, extension->GetType());
+  if (extension) {
+    Availability result = IsAvailableToManifest(
+        extension->id(),
+        extension->GetType(),
+        ConvertLocation(extension->location()),
+        extension->manifest_version(),
+        platform);
+    if (!result.is_available())
+      return result;
   }
+
+  if (!contexts_.empty() && contexts_.find(context) == contexts_.end()) {
+    return extension ?
+        CreateAvailability(INVALID_CONTEXT, extension->GetType()) :
+        CreateAvailability(INVALID_CONTEXT);
+  }
+
+  if (!matches_.is_empty() && !matches_.MatchesURL(url))
+    return CreateAvailability(INVALID_URL, url);
 
   return CreateAvailability(IS_AVAILABLE);
 }
 
 std::string SimpleFeature::GetAvailabilityMessage(
-    AvailabilityResult result, Manifest::Type type) const {
+    AvailabilityResult result, Manifest::Type type, const GURL& url) const {
   switch (result) {
     case IS_AVAILABLE:
       return "";
@@ -287,6 +312,10 @@ std::string SimpleFeature::GetAvailabilityMessage(
       return base::StringPrintf(
           "'%s' is not allowed for specified extension ID.",
           name().c_str());
+    case INVALID_URL:
+      CHECK(url.is_valid());
+      return base::StringPrintf("'%s' is not allowed on %s.",
+                                name().c_str(), url.spec().c_str());
     case INVALID_TYPE: {
       std::string allowed_type_names;
       // Turn the set of allowed types into a vector so that it's easier to
@@ -352,16 +381,55 @@ std::string SimpleFeature::GetAvailabilityMessage(
 Feature::Availability SimpleFeature::CreateAvailability(
     AvailabilityResult result) const {
   return Availability(
-      result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN));
+      result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN, GURL()));
 }
 
 Feature::Availability SimpleFeature::CreateAvailability(
     AvailabilityResult result, Manifest::Type type) const {
-  return Availability(result, GetAvailabilityMessage(result, type));
+  return Availability(result, GetAvailabilityMessage(result, type, GURL()));
+}
+
+Feature::Availability SimpleFeature::CreateAvailability(
+    AvailabilityResult result,
+    const GURL& url) const {
+  return Availability(
+      result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN, url));
 }
 
 std::set<Feature::Context>* SimpleFeature::GetContexts() {
   return &contexts_;
+}
+
+bool SimpleFeature::IsIdInWhitelist(const std::string& extension_id) const {
+  // An empty whitelist means the absence of a whitelist, rather than a
+  // whitelist that allows no ID through. This could be surprising behavior, so
+  // we force the caller to handle it explicitly. A DCHECK should be sufficient
+  // here because all whitelists today are hardcoded, meaning that errors
+  // should be caught during development, but if that assumption changes in the
+  // future (e.g., a whitelist that lives in the user's profile and is managed
+  // by runtime behavior), better to die via CHECK than to let an edge case
+  // open up access to a whitelisted API with a whitelist that has shrunk to
+  // size zero.
+  CHECK(!whitelist_.empty());
+
+  // Belt-and-suspenders philosophy here. We should be pretty confident by this
+  // point that we've validated the extension ID format, but in case something
+  // slips through, we avoid a class of attack where creative ID manipulation
+  // leads to hash collisions.
+  if (extension_id.length() != 32)  // 128 bits / 4 = 32 mpdecimal characters
+    return false;
+
+  if (whitelist_.find(extension_id) != whitelist_.end())
+    return true;
+
+  const std::string id_hash = base::SHA1HashString(extension_id);
+  DCHECK(id_hash.length() == base::kSHA1Length);
+  const std::string hexencoded_id_hash = base::HexEncode(id_hash.c_str(),
+      id_hash.length());
+  if (whitelist_.find(hexencoded_id_hash) != whitelist_.end())
+    return true;
+
+  return false;
 }
 
 }  // namespace extensions

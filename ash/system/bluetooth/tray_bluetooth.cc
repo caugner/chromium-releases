@@ -5,13 +5,15 @@
 #include "ash/system/bluetooth/tray_bluetooth.h"
 
 #include "ash/shell.h"
+#include "ash/system/tray/fixed_sized_scroll_view.h"
+#include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
+#include "ash/system/tray/throbber_view.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_details_view.h"
 #include "ash/system/tray/tray_item_more.h"
-#include "ash/system/tray/tray_views.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -32,8 +34,8 @@ namespace tray {
 
 class BluetoothDefaultView : public TrayItemMore {
  public:
-  explicit BluetoothDefaultView(SystemTrayItem* owner)
-      : TrayItemMore(owner, true) {
+  BluetoothDefaultView(SystemTrayItem* owner, bool show_more)
+      : TrayItemMore(owner, show_more) {
     ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
     SetImage(bundle.GetImageNamed(IDR_AURA_UBER_TRAY_BLUETOOTH).ToImageSkia());
     UpdateLabel();
@@ -295,7 +297,7 @@ class BluetoothDetailedView : public TrayDetailsView,
   }
 
   // Overridden from ViewClickListener.
-  virtual void ClickedOn(views::View* sender) OVERRIDE {
+  virtual void OnViewClicked(views::View* sender) OVERRIDE {
     ash::SystemTrayDelegate* delegate =
         ash::Shell::GetInstance()->system_tray_delegate();
     if (sender == footer()->content()) {
@@ -362,7 +364,8 @@ views::View* TrayBluetooth::CreateTrayView(user::LoginStatus status) {
 
 views::View* TrayBluetooth::CreateDefaultView(user::LoginStatus status) {
   CHECK(default_ == NULL);
-  default_ = new tray::BluetoothDefaultView(this);
+  default_ = new tray::BluetoothDefaultView(
+      this, status != user::LOGGED_IN_LOCKED);
   return default_;
 }
 

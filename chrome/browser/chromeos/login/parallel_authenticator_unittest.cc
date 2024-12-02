@@ -6,8 +6,8 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -50,7 +50,7 @@ class TestOnlineAttempt : public OnlineAttempt {
  public:
   TestOnlineAttempt(AuthAttemptState* state,
                     AuthAttemptStateResolver* resolver)
-      : OnlineAttempt(false, state, resolver) {
+      : OnlineAttempt(state, resolver) {
   }
 };
 
@@ -89,8 +89,9 @@ class ParallelAuthenticatorTest : public testing::Test {
 
     auth_ = new ParallelAuthenticator(&consumer_);
     auth_->set_using_oauth(false);
-    state_.reset(new TestAttemptState(username_,
-                                      password_,
+    state_.reset(new TestAttemptState(UserCredentials(username_,
+                                                      password_,
+                                                      std::string()),
                                       hash_ascii_,
                                       "",
                                       "",
@@ -135,7 +136,7 @@ class ParallelAuthenticatorTest : public testing::Test {
   // Allow test to fail and exit gracefully, even if OnLoginSuccess()
   // wasn't supposed to happen.
   void FailOnLoginSuccess() {
-    ON_CALL(consumer_, OnLoginSuccess(_, _, _, _))
+    ON_CALL(consumer_, OnLoginSuccess(_, _, _))
         .WillByDefault(Invoke(MockConsumer::OnSuccessQuitAndFail));
   }
 
@@ -161,7 +162,10 @@ class ParallelAuthenticatorTest : public testing::Test {
   void ExpectLoginSuccess(const std::string& username,
                           const std::string& password,
                           bool pending) {
-    EXPECT_CALL(consumer_, OnLoginSuccess(username, password, pending,
+    EXPECT_CALL(consumer_, OnLoginSuccess(UserCredentials(username,
+                                                          password,
+                                                          std::string()),
+                                          pending,
                                           false))
         .WillOnce(Invoke(MockConsumer::OnSuccessQuit))
         .RetiresOnSaturation();
@@ -229,7 +233,10 @@ class ParallelAuthenticatorTest : public testing::Test {
 };
 
 TEST_F(ParallelAuthenticatorTest, OnLoginSuccess) {
-  EXPECT_CALL(consumer_, OnLoginSuccess(username_, password_, false, false))
+  EXPECT_CALL(consumer_, OnLoginSuccess(UserCredentials(username_,
+                                                        password_,
+                                                        std::string()),
+                                        false, false))
       .Times(1)
       .RetiresOnSaturation();
 
@@ -277,7 +284,7 @@ TEST_F(ParallelAuthenticatorTest, ResolveNeedOldPw) {
   // and been rejected because of unmatched key; additionally,
   // an online auth attempt has completed successfully.
   state_->PresetCryptohomeStatus(false, cryptohome::MOUNT_ERROR_KEY_FAILURE);
-  state_->PresetOnlineLoginStatus(LoginFailure::None());
+  state_->PresetOnlineLoginStatus(LoginFailure::LoginFailureNone());
 
   EXPECT_EQ(ParallelAuthenticator::NEED_OLD_PW,
             SetAndResolveState(auth_, state_.release()));
@@ -304,8 +311,9 @@ TEST_F(ParallelAuthenticatorTest, ResolveOwnerNeededMount) {
   state_->PresetCryptohomeStatus(true, cryptohome::MOUNT_ERROR_NONE);
   SetOwnerState(false, false);
   // and test that the mount has succeeded.
-  state_.reset(new TestAttemptState(username_,
-                                    password_,
+  state_.reset(new TestAttemptState(UserCredentials(username_,
+                                                    password_,
+                                                    std::string()),
                                     hash_ascii_,
                                     "",
                                     "",
@@ -349,8 +357,9 @@ TEST_F(ParallelAuthenticatorTest, ResolveOwnerNeededFailedMount) {
   // Let the owner verification run.
   device_settings_test_helper_.Flush();
   // and test that the mount has succeeded.
-  state_.reset(new TestAttemptState(username_,
-                                    password_,
+  state_.reset(new TestAttemptState(UserCredentials(username_,
+                                                    password_,
+                                                    std::string()),
                                     hash_ascii_,
                                     "",
                                     "",
@@ -454,7 +463,7 @@ TEST_F(ParallelAuthenticatorTest, DriveDataResync) {
       .Times(1)
       .RetiresOnSaturation();
 
-  state_->PresetOnlineLoginStatus(LoginFailure::None());
+  state_->PresetOnlineLoginStatus(LoginFailure::LoginFailureNone());
   SetAttemptState(auth_, state_.release());
 
   auth_->ResyncEncryptedData();
@@ -482,7 +491,7 @@ TEST_F(ParallelAuthenticatorTest, DriveRequestOldPassword) {
   ExpectPasswordChange();
 
   state_->PresetCryptohomeStatus(false, cryptohome::MOUNT_ERROR_KEY_FAILURE);
-  state_->PresetOnlineLoginStatus(LoginFailure::None());
+  state_->PresetOnlineLoginStatus(LoginFailure::LoginFailureNone());
   SetAttemptState(auth_, state_.release());
 
   RunResolve(auth_.get());
@@ -505,7 +514,7 @@ TEST_F(ParallelAuthenticatorTest, DriveDataRecover) {
       .WillOnce(Return(std::string()))
       .RetiresOnSaturation();
 
-  state_->PresetOnlineLoginStatus(LoginFailure::None());
+  state_->PresetOnlineLoginStatus(LoginFailure::LoginFailureNone());
   SetAttemptState(auth_, state_.release());
 
   auth_->RecoverEncryptedData(std::string());
@@ -563,7 +572,7 @@ TEST_F(ParallelAuthenticatorTest, ResolveCreateNew) {
   // an online auth attempt has completed successfully.
   state_->PresetCryptohomeStatus(false,
                                  cryptohome::MOUNT_ERROR_USER_DOES_NOT_EXIST);
-  state_->PresetOnlineLoginStatus(LoginFailure::None());
+  state_->PresetOnlineLoginStatus(LoginFailure::LoginFailureNone());
 
   EXPECT_EQ(ParallelAuthenticator::CREATE_NEW,
             SetAndResolveState(auth_, state_.release()));
@@ -586,7 +595,7 @@ TEST_F(ParallelAuthenticatorTest, DriveCreateForNewUser) {
   // an online auth attempt has completed successfully.
   state_->PresetCryptohomeStatus(false,
                                  cryptohome::MOUNT_ERROR_USER_DOES_NOT_EXIST);
-  state_->PresetOnlineLoginStatus(LoginFailure::None());
+  state_->PresetOnlineLoginStatus(LoginFailure::LoginFailureNone());
   SetAttemptState(auth_, state_.release());
 
   RunResolve(auth_.get());
@@ -667,8 +676,9 @@ TEST_F(ParallelAuthenticatorTest, DriveOfflineLoginGetNewPassword) {
   TestingProfile profile;
 
   auth_->RetryAuth(&profile,
-                   username_,
-                   std::string(),
+                   UserCredentials(username_,
+                                   std::string(),
+                                   std::string()),
                    std::string(),
                    std::string());
   message_loop_.Run();
@@ -710,8 +720,9 @@ TEST_F(ParallelAuthenticatorTest, DriveOfflineLoginGetCaptchad) {
   TestingProfile profile;
 
   auth_->RetryAuth(&profile,
-                   username_,
-                   std::string(),
+                   UserCredentials(username_,
+                                   std::string(),
+                                   std::string()),
                    std::string(),
                    std::string());
   message_loop_.Run();
@@ -725,7 +736,7 @@ TEST_F(ParallelAuthenticatorTest, DriveOnlineLogin) {
   // Set up state as though a cryptohome mount attempt has occurred and
   // succeeded.
   state_->PresetCryptohomeStatus(true, cryptohome::MOUNT_ERROR_NONE);
-  state_->PresetOnlineLoginStatus(LoginFailure::None());
+  state_->PresetOnlineLoginStatus(LoginFailure::LoginFailureNone());
   SetAttemptState(auth_, state_.release());
 
   RunResolve(auth_.get());
@@ -764,7 +775,9 @@ TEST_F(ParallelAuthenticatorTest, DriveUnlock) {
       .WillOnce(Return(std::string()))
       .RetiresOnSaturation();
 
-  auth_->AuthenticateToUnlock(username_, "");
+  auth_->AuthenticateToUnlock(UserCredentials(username_,
+                                              std::string(),
+                                              std::string()));
   message_loop_.Run();
 }
 

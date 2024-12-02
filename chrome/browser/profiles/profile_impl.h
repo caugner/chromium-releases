@@ -9,20 +9,20 @@
 
 #include <string>
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/timer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/host_zoom_map.h"
 
 class NetPrefObserver;
 class PrefRegistrySyncable;
 class PrefService;
-class PrefServiceBase;
 class PrefServiceSyncable;
 class SSLConfigServiceManager;
 
@@ -107,29 +107,11 @@ class ProfileImpl : public Profile {
   virtual bool IsSameProfile(Profile* profile) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual net::URLRequestContextGetter* CreateRequestContext(
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          blob_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          file_system_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          developer_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_devtools_protocol_handler) OVERRIDE;
+      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
   virtual net::URLRequestContextGetter* CreateRequestContextForStoragePartition(
       const base::FilePath& partition_path,
       bool in_memory,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          blob_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          file_system_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          developer_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_protocol_handler,
-      scoped_ptr<net::URLRequestJobFactory::ProtocolHandler>
-          chrome_devtools_protocol_handler) OVERRIDE;
+      content::ProtocolHandlerMap* protocol_handlers) OVERRIDE;
   virtual base::FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const base::FilePath& path) OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
@@ -175,9 +157,10 @@ class ProfileImpl : public Profile {
   void InitHostZoomMap();
 
   void OnDefaultZoomLevelChanged();
-  void OnZoomLevelChanged(const std::string& host);
+  void OnZoomLevelChanged(
+      const content::HostZoomMap::ZoomLevelChange& change);
 
-  void OnInitializationCompleted(PrefServiceBase* pref_service,
+  void OnInitializationCompleted(PrefService* pref_service,
                                  bool succeeded);
 
   // Does final prefs initialization and calls Init().
@@ -225,13 +208,15 @@ class ProfileImpl : public Profile {
   // should become proper ProfileKeyedServices as well.
 #if !defined(OS_CHROMEOS)
   scoped_ptr<policy::UserCloudPolicyManager> cloud_policy_manager_;
-#endif
+#endif  // !defined(OS_CHROMEOS)
+#if defined(ENABLE_MANAGED_USERS)
   scoped_ptr<policy::ManagedModePolicyProvider> managed_mode_policy_provider_;
-#endif
+#endif  // defined(ENABLE_MANAGED_USERS)
+#endif  // defined(ENABLE_CONFIGURATION_POLICY)
   scoped_ptr<policy::PolicyService> policy_service_;
 
   // Keep |prefs_| on top for destruction order because |extension_prefs_|,
-  // |net_pref_observer_|, |io_data_| an others store pointers to |prefs_| and
+  // |net_pref_observer_|, |io_data_| and others store pointers to |prefs_| and
   // shall be destructed first.
   scoped_refptr<PrefRegistrySyncable> pref_registry_;
   scoped_ptr<PrefServiceSyncable> prefs_;

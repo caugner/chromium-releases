@@ -15,6 +15,7 @@
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/signin/about_signin_internals_factory.h"
@@ -38,15 +39,12 @@ ProfileSyncService* ProfileSyncServiceFactory::GetForProfile(
   if (!ProfileSyncService::IsSyncEnabled())
     return NULL;
 
+  // Do not start sync on the import process.
+  if (ProfileManager::IsImportProcess(*CommandLine::ForCurrentProcess()))
+    return NULL;
+
   return static_cast<ProfileSyncService*>(
       GetInstance()->GetServiceForProfile(profile, true));
-}
-
-// static
-ProfileSyncServiceBase* ProfileSyncServiceBase::FromBrowserContext(
-    content::BrowserContext* context) {
-  return ProfileSyncServiceFactory::GetForProfile(
-      static_cast<Profile*>(context));
 }
 
 ProfileSyncServiceFactory::ProfileSyncServiceFactory()

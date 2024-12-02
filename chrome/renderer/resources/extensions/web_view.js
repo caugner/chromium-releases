@@ -7,7 +7,9 @@
 // The actual tag is implemented via the browser plugin. The internals of this
 // are hidden via Shadow DOM.
 
-var watchForTag = require("tagWatcher").watchForTag;
+var chrome = requireNative('chrome').GetChrome();
+var forEach = require('utils').forEach;
+var watchForTag = require('tagWatcher').watchForTag;
 
 var WEB_VIEW_ATTRIBUTES = ['name', 'src', 'partition', 'autosize', 'minheight',
     'minwidth', 'maxheight', 'maxwidth'];
@@ -52,7 +54,7 @@ function WebView(node) {
   // The <object> node fills in the <webview> container.
   this.objectNode_.style.width = '100%';
   this.objectNode_.style.height = '100%';
-  WEB_VIEW_ATTRIBUTES.forEach(function(attributeName) {
+  forEach(WEB_VIEW_ATTRIBUTES, function(i, attributeName) {
     // Only copy attributes that have been assigned values, rather than copying
     // a series of undefined attributes to BrowserPlugin.
     if (this.node_.hasAttribute(attributeName)) {
@@ -66,32 +68,29 @@ function WebView(node) {
   // this.objectNode_[apiMethod] are not necessarily defined immediately after
   // the shadow object is appended to the shadow root.
   var self = this;
-  WEB_VIEW_API_METHODS.forEach(function(apiMethod) {
+  forEach(WEB_VIEW_API_METHODS, function(i, apiMethod) {
     node[apiMethod] = function(var_args) {
       return self.objectNode_[apiMethod].apply(self.objectNode_, arguments);
     };
   }, this);
 
-  node['executeScript'] = function(var_args) {
-    var args = [self.objectNode_.getProcessId(),
-                self.objectNode_.getRouteId()].concat(
-                    Array.prototype.slice.call(arguments));
-    chrome.webview.executeScript.apply(null, args);
-  }
-
   // Map attribute modifications on the <webview> tag to property changes in
   // the underlying <object> node.
-  var handleMutation = this.handleMutation_.bind(this);
+  var handleMutation = function(i, mutation) {
+    this.handleMutation_(mutation);
+  }.bind(this);
   var observer = new WebKitMutationObserver(function(mutations) {
-    mutations.forEach(handleMutation);
+    forEach(mutations, handleMutation);
   });
   observer.observe(
       this.node_,
       {attributes: true, attributeFilter: WEB_VIEW_ATTRIBUTES});
 
-  var handleObjectMutation = this.handleObjectMutation_.bind(this);
+  var handleObjectMutation = function(i, mutation) {
+    this.handleObjectMutation_(mutation);
+  }.bind(this);
   var objectObserver = new WebKitMutationObserver(function(mutations) {
-    mutations.forEach(handleObjectMutation);
+    forEach(mutations, handleObjectMutation);
   });
   objectObserver.observe(
       this.objectNode_,
@@ -99,7 +98,7 @@ function WebView(node) {
 
   var objectNode = this.objectNode_;
   // Expose getters and setters for the attributes.
-  WEB_VIEW_ATTRIBUTES.forEach(function(attributeName) {
+  forEach(WEB_VIEW_ATTRIBUTES, function(i, attributeName) {
     Object.defineProperty(this.node_, attributeName, {
       get: function() {
         return objectNode[attributeName];
@@ -129,6 +128,9 @@ function WebView(node) {
   for (var eventName in WEB_VIEW_EVENTS) {
     this.setupEvent_(eventName, WEB_VIEW_EVENTS[eventName]);
   }
+  this.maybeSetupNewWindowEvent_();
+  this.maybeSetupPermissionEvent_();
+  this.maybeSetupExecuteScript_();
 }
 
 /**
@@ -156,8 +158,17 @@ WebView.prototype.handleObjectMutation_ = function(mutation) {
     this.node_.removeAttribute(mutation.attributeName);
   } else {
     // Update the <webview> attribute to match the BrowserPlugin attribute.
-    this.node_.setAttribute(mutation.attributeName,
-        this.objectNode_.getAttribute(mutation.attributeName));
+    // Note: Calling setAttribute on <webview> will trigger its mutation
+    // observer which will then propagate that attribute to BrowserPlugin. In
+    // cases where we permit assigning a BrowserPlugin attribute the same value
+    // again (such as navigation when crashed), this could end up in an infinite
+    // loop. Thus, we avoid this loop by only updating the <webview> attribute
+    // if the BrowserPlugin attributes differs from it.
+    var oldValue = this.node_.getAttribute(mutation.attributeName);
+    var newValue = this.objectNode_.getAttribute(mutation.attributeName);
+    if (newValue != oldValue) {
+      this.node_.setAttribute(mutation.attributeName, newValue);
+    }
   }
 };
 
@@ -169,9 +180,29 @@ WebView.prototype.setupEvent_ = function(eventname, attribs) {
   this.objectNode_.addEventListener('-internal-' + eventname, function(e) {
     var evt = new Event(eventname, { bubbles: true });
     var detail = e.detail ? JSON.parse(e.detail) : {};
-    attribs.forEach(function(attribName) {
+    forEach(attribs, function(i, attribName) {
       evt[attribName] = detail[attribName];
     });
     node.dispatchEvent(evt);
   });
-}
+};
+
+/**
+ * Implemented when the experimental API is available.
+ * @private
+ */
+WebView.prototype.maybeSetupNewWindowEvent_ = function() {};
+
+/**
+ * Implemented when experimental permission is available.
+ * @private
+ */
+WebView.prototype.maybeSetupPermissionEvent_ = function() {};
+
+/**
+ * Implemented when experimental permission is available.
+ * @private
+ */
+WebView.prototype.maybeSetupExecuteScript_ = function() {};
+
+exports.WebView = WebView;

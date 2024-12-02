@@ -2,17 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Custom bindings for the app_window API.
+// Custom binding for the app_window API.
 
+var Binding = require('binding').Binding;
 var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var chrome = requireNative('chrome').GetChrome();
 var sendRequest = require('sendRequest').sendRequest;
 var appWindowNatives = requireNative('app_window');
 var forEach = require('utils').forEach;
 var GetView = appWindowNatives.GetView;
 var OnContextReady = appWindowNatives.OnContextReady;
 
-chromeHidden.registerCustomHook('app.window', function(bindingsAPI) {
+var appWindow = Binding.create('app.window');
+appWindow.registerCustomHook(function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
+
   apiFunctions.setCustomCallback('create',
                                  function(name, request, windowParams) {
     var view = null;
@@ -81,10 +85,12 @@ chromeHidden.registerCustomHook('app.window', function(bindingsAPI) {
   // This is an internal function, but needs to be bound with setHandleRequest
   // because it is called from a different JS context.
   apiFunctions.setHandleRequest('initializeAppWindow', function(params) {
+    var currentWindowInternal =
+        Binding.create('app.currentWindowInternal').generate();
     var AppWindow = function() {};
-    forEach(chromeHidden.internalAPIs.app.currentWindowInternal, function(fn) {
+    forEach(currentWindowInternal, function(fn) {
       AppWindow.prototype[fn] =
-          chromeHidden.internalAPIs.app.currentWindowInternal[fn];
+          currentWindowInternal[fn];
     });
     AppWindow.prototype.moveTo = window.moveTo.bind(window);
     AppWindow.prototype.resizeTo = window.resizeTo.bind(window);
@@ -97,6 +103,9 @@ chromeHidden.registerCustomHook('app.window', function(bindingsAPI) {
       var bounds = chromeHidden.appWindowData.bounds;
       return { left: bounds.left, top: bounds.top,
                width: bounds.width, height: bounds.height };
+    };
+    AppWindow.prototype.isFullscreen = function() {
+      return chromeHidden.appWindowData.fullscreen;
     };
     AppWindow.prototype.isMinimized = function() {
       return chromeHidden.appWindowData.minimized;
@@ -113,6 +122,7 @@ chromeHidden.registerCustomHook('app.window', function(bindingsAPI) {
       id: params.id || '',
       bounds: { left: params.bounds.left, top: params.bounds.top,
                 width: params.bounds.width, height: params.bounds.height },
+      fullscreen: false,
       minimized: false,
       maximized: false
     };
@@ -139,12 +149,17 @@ chromeHidden.updateAppWindowProperties = function(update) {
   if (!boundsEqual(oldData.bounds, update.bounds))
     currentWindow["onBoundsChanged"].dispatch();
 
+  if (!oldData.fullscreen && update.fullscreen)
+    currentWindow["onFullscreened"].dispatch();
   if (!oldData.minimized && update.minimized)
     currentWindow["onMinimized"].dispatch();
   if (!oldData.maximized && update.maximized)
     currentWindow["onMaximized"].dispatch();
 
-  if ((oldData.minimized && !update.minimized) ||
+  if ((oldData.fullscreen && !update.fullscreen) ||
+      (oldData.minimized && !update.minimized) ||
       (oldData.maximized && !update.maximized))
     currentWindow["onRestored"].dispatch();
 };
+
+exports.binding = appWindow.generate();

@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/base64.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
@@ -25,6 +25,7 @@
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/web_apps.h"
 #include "crypto/sha2.h"
+#include "extensions/common/constants.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -122,9 +123,9 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   DictionaryValue* icons = new DictionaryValue();
   root->Set(keys::kIcons, icons);
   for (size_t i = 0; i < web_app.icons.size(); ++i) {
-    std::string size = StringPrintf("%i", web_app.icons[i].width);
-    std::string icon_path = StringPrintf("%s/%s.png", kIconsDirName,
-                                         size.c_str());
+    std::string size = base::StringPrintf("%i", web_app.icons[i].width);
+    std::string icon_path = base::StringPrintf("%s/%s.png", kIconsDirName,
+                                               size.c_str());
     icons->SetString(size, icon_path);
   }
 
@@ -143,8 +144,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
   }
 
   // Write the manifest.
-  base::FilePath manifest_path = temp_dir.path().Append(
-      Extension::kManifestFilename);
+  base::FilePath manifest_path = temp_dir.path().Append(kManifestFilename);
   JSONFileValueSerializer serializer(manifest_path);
   if (!serializer.Serialize(*root)) {
     LOG(ERROR) << "Could not serialize manifest.";
@@ -163,7 +163,7 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
       continue;
 
     base::FilePath icon_file = icons_dir.AppendASCII(
-        StringPrintf("%i.png", web_app.icons[i].width));
+        base::StringPrintf("%i.png", web_app.icons[i].width));
     std::vector<unsigned char> image_data;
     if (!gfx::PNGCodec::EncodeBGRASkBitmap(web_app.icons[i].data,
                                            false,

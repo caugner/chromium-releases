@@ -5,15 +5,13 @@
 #include "chrome/browser/ui/browser_tab_contents.h"
 
 #include "base/command_line.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
-#include "chrome/browser/autofill/autofill_external_delegate.h"
-#include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/managed_mode/managed_mode_navigation_observer.h"
 #include "chrome/browser/net/load_time_stats.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
@@ -27,7 +25,6 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ssl/ssl_tab_helper.h"
 #include "chrome/browser/tab_contents/navigation_metrics_recorder.h"
-#include "chrome/browser/three_d_api_observer.h"
 #include "chrome/browser/thumbnails/thumbnail_tab_helper.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/alternate_error_tab_observer.h"
@@ -48,6 +45,8 @@
 #include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/autofill/browser/autofill_external_delegate.h"
+#include "components/autofill/browser/autofill_manager.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(ENABLE_AUTOMATION)
@@ -105,11 +104,12 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   SessionTabHelper::CreateForWebContents(web_contents);
 
   AlternateErrorPageTabObserver::CreateForWebContents(web_contents);
-  TabAutofillManagerDelegate::CreateForWebContents(web_contents);
+  autofill::TabAutofillManagerDelegate::CreateForWebContents(web_contents);
   AutofillManager::CreateForWebContentsAndDelegate(
-      web_contents, TabAutofillManagerDelegate::FromWebContents(web_contents));
+      web_contents,
+      autofill::TabAutofillManagerDelegate::FromWebContents(web_contents));
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableNewAutofillUi)) {
+          switches::kEnableNativeAutofillUi)) {
     AutofillExternalDelegate::CreateForWebContentsAndManager(
         web_contents, AutofillManager::FromWebContents(web_contents));
     AutofillManager::FromWebContents(web_contents)->SetExternalDelegate(
@@ -149,7 +149,6 @@ void BrowserTabContents::AttachTabHelpers(WebContents* web_contents) {
   SSLTabHelper::CreateForWebContents(web_contents);
   TabContentsSyncedTabDelegate::CreateForWebContents(web_contents);
   TabSpecificContentSettings::CreateForWebContents(web_contents);
-  ThreeDAPIObserver::CreateForWebContents(web_contents);
   ThumbnailTabHelper::CreateForWebContents(web_contents);
   TranslateTabHelper::CreateForWebContents(web_contents);
   ZoomController::CreateForWebContents(web_contents);

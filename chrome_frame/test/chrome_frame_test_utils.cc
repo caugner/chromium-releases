@@ -12,9 +12,9 @@
 #include <winsock2.h>
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process.h"
@@ -30,6 +30,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chrome_frame/utils.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -46,7 +47,8 @@ const DWORD kCrashServicePipeDesiredAccess = FILE_READ_DATA |
 
 const DWORD kCrashServicePipeFlagsAndAttributes = SECURITY_IDENTIFICATION |
                                                   SECURITY_SQOS_PRESENT;
-const int kCrashServiceStartupTimeoutMs = 500;
+const int kCrashServiceDetectTimeoutMs = 500;
+const int kCrashServiceStartupTimeoutMs = 1000;
 
 const wchar_t kIEImageName[] = L"iexplore.exe";
 const wchar_t kIEBrokerImageName[] = L"ieuser.exe";
@@ -238,6 +240,29 @@ base::ProcessHandle LaunchIE(const std::wstring& url) {
   return LaunchExecutable(kIEImageName, url);
 }
 
+bool TakeSnapshotAndLog() {
+  testing::UnitTest* unit_test = testing::UnitTest::GetInstance();
+  const testing::TestInfo* test_info = unit_test->current_test_info();
+  std::string name;
+  if (test_info != NULL) {
+    name.append(test_info->test_case_name())
+        .append(1, '.')
+        .append(test_info->name());
+  } else {
+    name = "unknown test";
+  }
+
+  base::FilePath snapshot;
+  if (!ui_test_utils::SaveScreenSnapshotToDesktop(&snapshot)) {
+    LOG(ERROR) << "Failed saving screen snapshot for " << name;
+    return false;
+  }
+
+  LOG(ERROR) << "Saved screen snapshot for " << name << " to "
+             << snapshot.value();
+  return true;
+}
+
 int CloseAllIEWindows() {
   int ret = 0;
 
@@ -260,7 +285,7 @@ int CloseAllIEWindows() {
           HWND window = NULL;
           // Check the class of the browser window to make sure we only close
           // IE windows.
-          if (browser->get_HWND(reinterpret_cast<SHANDLE_PTR*>(window))) {
+          if (browser->get_HWND(reinterpret_cast<SHANDLE_PTR*>(&window))) {
             wchar_t class_name[MAX_PATH];
             if (::GetClassName(window, class_name, arraysize(class_name))) {
               is_ie = _wcsicmp(class_name, L"IEFrame") == 0;
@@ -596,7 +621,7 @@ bool DetectRunningCrashService(int timeout_ms) {
 }
 
 base::ProcessHandle StartCrashService() {
-  if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
+  if (DetectRunningCrashService(kCrashServiceDetectTimeoutMs)) {
     VLOG(1) << "crash_service.exe is already running. We will use the "
                "existing process and leave it running after tests complete.";
     return NULL;

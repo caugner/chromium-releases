@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_AURA_H_
 
 #include <map>
+#include <string>
 #include <vector>
 
 #include "base/callback.h"
@@ -14,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/renderer_host/image_transport_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
@@ -32,6 +34,10 @@
 
 namespace aura {
 class WindowTracker;
+}
+
+namespace cc {
+class DelegatedFrameData;
 }
 
 namespace gfx {
@@ -61,6 +67,7 @@ class RenderWidgetHostViewAura
       public aura::client::ActivationChangeObserver,
       public aura::client::FocusChangeObserver,
       public ImageTransportFactoryObserver,
+      public BrowserAccessibilityDelegate,
       public base::SupportsWeakPtr<RenderWidgetHostViewAura> {
  public:
   // Used to notify whenever the paint-content of the view changes.
@@ -105,7 +112,10 @@ class RenderWidgetHostViewAura
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
-  virtual void ScrollOffsetChanged() OVERRIDE;
+#if defined(OS_WIN)
+  virtual void SetParentNativeViewAccessible(
+      gfx::NativeViewAccessible accessible_parent) OVERRIDE;
+#endif
 
   // Overridden from RenderWidgetHostViewPort:
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
@@ -140,6 +150,7 @@ class RenderWidgetHostViewAura
                                 const ui::Range& range) OVERRIDE;
   virtual void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE;
+  virtual void ScrollOffsetChanged() OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void CopyFromCompositingSurface(
       const gfx::Rect& src_subrect,
@@ -158,8 +169,8 @@ class RenderWidgetHostViewAura
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params_in_pixel,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfaceSuspend() OVERRIDE;
-  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void AcceleratedSurfaceRelease() OVERRIDE;
+  virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
   virtual void ProcessAckedTouchEvent(
@@ -170,8 +181,13 @@ class RenderWidgetHostViewAura
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE;
   virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
+  virtual void OnAccessibilityNotifications(
+      const std::vector<AccessibilityHostMsg_NotificationParams>&
+          params) OVERRIDE;
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
+  virtual void OnSwapCompositorFrame(
+      scoped_ptr<cc::CompositorFrame> frame) OVERRIDE;
 
   // Overridden from ui::TextInputClient:
   virtual void SetCompositionText(
@@ -246,6 +262,13 @@ class RenderWidgetHostViewAura
   virtual void OnRootWindowMoved(const aura::RootWindow* root,
                                  const gfx::Point& new_origin) OVERRIDE;
 
+#if defined(OS_WIN)
+  // Sets the cutout rects from constrained windows. These are rectangles that
+  // windowed NPAPI plugins shouldn't paint in. Overwrites any previous cutout
+  // rects.
+  void UpdateConstrainedWindowRects(const std::vector<gfx::Rect>& rects);
+#endif
+
  protected:
   friend class RenderWidgetHostView;
 
@@ -258,22 +281,43 @@ class RenderWidgetHostViewAura
 
   class WindowObserver;
   friend class WindowObserver;
+#if defined(OS_WIN)
+  class TransientWindowObserver;
+  friend class TransientWindowObserver;
+#endif
 
   // Overridden from ui::CompositorObserver:
   virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE;
-  virtual void OnCompositingStarted(ui::Compositor* compositor) OVERRIDE;
+  virtual void OnCompositingStarted(ui::Compositor* compositor,
+                                    base::TimeTicks start_time) OVERRIDE;
   virtual void OnCompositingEnded(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingAborted(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingLockStateChanged(
       ui::Compositor* compositor) OVERRIDE;
+  virtual void OnUpdateVSyncParameters(ui::Compositor* compositor,
+                                       base::TimeTicks timebase,
+                                       base::TimeDelta interval) OVERRIDE;
 
   // Overridden from ImageTransportFactoryObserver:
   virtual void OnLostResources() OVERRIDE;
 
+  // Overridden from BrowserAccessibilityDelegate:
+  virtual void SetAccessibilityFocus(int acc_obj_id) OVERRIDE;
+  virtual void AccessibilityDoDefaultAction(int acc_obj_id) OVERRIDE;
+  virtual void AccessibilityScrollToMakeVisible(
+      int acc_obj_id, gfx::Rect subfocus) OVERRIDE;
+  virtual void AccessibilityScrollToPoint(
+      int acc_obj_id, gfx::Point point) OVERRIDE;
+  virtual void AccessibilitySetTextSelection(
+      int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
+  virtual gfx::Point GetLastTouchEventLocation() const OVERRIDE;
+  virtual void FatalAccessibilityTreeError() OVERRIDE;
+
   virtual ~RenderWidgetHostViewAura();
 
   void UpdateCursorIfOverSelf();
-  bool ShouldSkipFrame(const gfx::Size& size);
+  bool ShouldSkipFrame(gfx::Size size_in_dip);
+  void CheckResizeLocks(gfx::Size size_in_dip);
   void UpdateExternalTexture();
   ui::InputMethod* GetInputMethod() const;
 
@@ -299,20 +343,6 @@ class RenderWidgetHostViewAura
   // Run the compositing callbacks.
   void RunCompositingDidCommitCallbacks();
 
-  struct BufferPresentedParams {
-    BufferPresentedParams(int route_id,
-                          int gpu_host_id);
-    ~BufferPresentedParams();
-
-    int32 route_id;
-    int gpu_host_id;
-    scoped_refptr<ui::Texture> texture_to_produce;
-  };
-
-  // Insert a sync point into the compositor's command stream and acknowledge
-  // that we have presented the accelerated surface buffer.
-  static void InsertSyncPointAndACK(const BufferPresentedParams& params);
-
   // Called after |window_| is parented to a RootWindow.
   void AddedToRootWindow();
 
@@ -336,15 +366,52 @@ class RenderWidgetHostViewAura
   // Detaches |this| from the input method object.
   void DetachFromInputMethod();
 
+  // Dismisses a Web Popup on mouse press outside the popup and its parent.
+  void ApplyEventFilterForPopupExit(ui::MouseEvent* event);
+
   // Converts |rect| from window coordinate to screen coordinate.
   gfx::Rect ConvertRectToScreen(const gfx::Rect& rect);
+
+  typedef base::Callback<void(bool, const scoped_refptr<ui::Texture>&)>
+      BufferPresentedCallback;
+
+  // The common entry point for full buffer updates from renderer
+  // and GPU process.
+  void BuffersSwapped(const gfx::Size& size,
+                      const std::string& mailbox_name,
+                      const BufferPresentedCallback& ack_callback);
 
   bool SwapBuffersPrepare(const gfx::Rect& surface_rect,
                           const gfx::Rect& damage_rect,
                           const std::string& mailbox_name,
-                          BufferPresentedParams* params);
+                          const BufferPresentedCallback& ack_callback);
 
-  void SwapBuffersCompleted(const BufferPresentedParams& params);
+  void SwapBuffersCompleted(
+      const BufferPresentedCallback& ack_callback,
+      const scoped_refptr<ui::Texture>& texture_to_return);
+
+  void SwapDelegatedFrame(
+      scoped_ptr<cc::DelegatedFrameData> frame,
+      float device_scale_factor);
+  void SendDelegatedFrameAck();
+
+  BrowserAccessibilityManager* GetOrCreateBrowserAccessibilityManager();
+
+#if defined(OS_WIN)
+  // Sets the cutout rects from transient windows. These are rectangles that
+  // windowed NPAPI plugins shouldn't paint in. Overwrites any previous cutout
+  // rects.
+  void UpdateTransientRects(const std::vector<gfx::Rect>& rects);
+
+  // Updates the total list of cutout rects, which is the union of transient
+  // windows and constrained windows.
+  void UpdateCutoutRects();
+#endif
+
+  void CopyFromCompositingSurfaceHelper(
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size_in_pixel,
+      const base::Callback<void(bool, const SkBitmap&)>& callback);
 
   // The model object.
   RenderWidgetHostImpl* host_;
@@ -366,6 +433,10 @@ class RenderWidgetHostViewAura
 
   // Our child popup host. NULL if we do not have a child popup.
   RenderWidgetHostViewAura* popup_child_host_view_;
+
+  class EventFilterForPopupExit;
+  friend class EventFilterForPopupExit;
+  scoped_ptr<ui::EventHandler> event_filter_for_popup_exit_;
 
   // True when content is being loaded. Used to show an hourglass cursor.
   bool is_loading_;
@@ -394,9 +465,6 @@ class RenderWidgetHostViewAura
 
   // Current tooltip text.
   string16 tooltip_;
-
-  // The scale factor of the display the renderer is currently on.
-  float device_scale_factor_;
 
   std::vector<base::Closure> on_compositing_did_commit_callbacks_;
 
@@ -473,6 +541,26 @@ class RenderWidgetHostViewAura
   // observer is not owned by the view, and must remove itself as an oberver
   // when it is being destroyed.
   PaintObserver* paint_observer_;
+
+#if defined(OS_WIN)
+  scoped_ptr<TransientWindowObserver> transient_observer_;
+
+  // The list of rectangles from transient and constrained windows over this
+  // view. Windowed NPAPI plugins shouldn't draw over them.
+  std::vector<gfx::Rect> transient_rects_;
+  std::vector<gfx::Rect> constrained_rects_;
+
+  typedef std::map<HWND, webkit::npapi::WebPluginGeometry> PluginWindowMoves;
+  // Contains information about each windowed plugin's clip and cutout rects (
+  // from the renderer). This is needed because when the transient windoiws
+  // over this view changes, we need this information in order to create a new
+  // region for the HWND.
+  PluginWindowMoves plugin_window_moves_;
+#endif
+
+  base::TimeTicks last_draw_ended_;
+
+  gfx::NativeViewAccessible accessible_parent_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);
 };

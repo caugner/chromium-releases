@@ -10,11 +10,12 @@
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "content/public/browser/media_observer.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/media_stream_request.h"
 
+class AudioStreamIndicator;
 class MediaStreamCaptureIndicator;
 class PrefRegistrySyncable;
-class PrefService;
 class Profile;
 
 // This singleton is used to receive updates about media events from the content
@@ -46,8 +47,7 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   static MediaCaptureDevicesDispatcher* GetInstance();
 
   // Registers the preferences related to Media Stream default devices.
-  static void RegisterUserPrefs(PrefService* user_prefs,
-                                PrefRegistrySyncable* registry);
+  static void RegisterUserPrefs(PrefRegistrySyncable* registry);
 
   // Methods for observers. Called on UI thread.
   // Observers should add themselves on construction and remove themselves
@@ -56,6 +56,11 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   void RemoveObserver(Observer* observer);
   const content::MediaStreamDevices& GetAudioCaptureDevices();
   const content::MediaStreamDevices& GetVideoCaptureDevices();
+
+  void RequestAccess(
+      content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback);
 
   // Helper to get the default devices which can be used by the media request,
   // if the return list is empty, it means there is no available device on the
@@ -79,7 +84,8 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   virtual void OnCaptureDevicesOpened(
       int render_process_id,
       int render_view_id,
-      const content::MediaStreamDevices& devices) OVERRIDE;
+      const content::MediaStreamDevices& devices,
+      const base::Closure& close_callback) OVERRIDE;
   virtual void OnCaptureDevicesClosed(
       int render_process_id,
       int render_view_id,
@@ -93,8 +99,15 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
       int render_view_id,
       const content::MediaStreamDevice& device,
       content::MediaRequestState state) OVERRIDE;
+  virtual void OnAudioStreamPlayingChanged(
+      int render_process_id,
+      int render_view_id,
+      int stream_id,
+      bool playing) OVERRIDE;
 
   scoped_refptr<MediaStreamCaptureIndicator> GetMediaStreamCaptureIndicator();
+
+  scoped_refptr<AudioStreamIndicator> GetAudioStreamIndicator();
 
  private:
   friend struct DefaultSingletonTraits<MediaCaptureDevicesDispatcher>;
@@ -125,6 +138,8 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   bool devices_enumerated_;
 
   scoped_refptr<MediaStreamCaptureIndicator> media_stream_capture_indicator_;
+
+  scoped_refptr<AudioStreamIndicator> audio_stream_indicator_;
 };
 
 #endif  // CHROME_BROWSER_MEDIA_MEDIA_CAPTURE_DEVICES_DISPATCHER_H_

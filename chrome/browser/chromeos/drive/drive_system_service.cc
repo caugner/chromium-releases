@@ -21,6 +21,7 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
+#include "chrome/browser/google_apis/auth_service.h"
 #include "chrome/browser/google_apis/drive_api_service.h"
 #include "chrome/browser/google_apis/drive_api_util.h"
 #include "chrome/browser/google_apis/drive_uploader.h"
@@ -87,7 +88,9 @@ std::string GetDriveUserAgent() {
 
   const std::string os_cpu_info = webkit_glue::BuildOSCpuInfo();
 
-  return base::StringPrintf("%s-%s %s (%s)",
+  // Add "gzip" to receive compressed data from the server.
+  // (see https://developers.google.com/drive/performance)
+  return base::StringPrintf("%s-%s %s (%s) (gzip)",
                             kDriveClientName,
                             version.c_str(),
                             kLibraryInfo,
@@ -95,13 +98,6 @@ std::string GetDriveUserAgent() {
 }
 
 }  // namespace
-
-void DriveSystemService::DriveCacheDeleter::operator()(
-    DriveCache* cache) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (cache)
-    cache->Destroy();
-}
 
 DriveSystemService::DriveSystemService(
     Profile* profile,
@@ -124,6 +120,7 @@ DriveSystemService::DriveSystemService(
     drive_service_.reset(new google_apis::DriveAPIService(
         g_browser_process->system_request_context(),
         GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction),
+        GURL(google_apis::GDataWapiUrlGenerator::kBaseUrlForProduction),
         GetDriveUserAgent()));
   } else {
     drive_service_.reset(new google_apis::GDataWapiService(
@@ -137,12 +134,21 @@ DriveSystemService::DriveSystemService(
                               NULL /* free_disk_space_getter */));
   uploader_.reset(new google_apis::DriveUploader(drive_service_.get()));
   webapps_registry_.reset(new DriveWebAppsRegistry);
+
+  // We can call DriveCache::GetCacheDirectoryPath safely even before the cache
+  // gets initialized.
+  resource_metadata_.reset(new DriveResourceMetadata(
+      drive_service_->GetRootResourceId(),
+      cache_->GetCacheDirectoryPath(DriveCache::CACHE_TYPE_META),
+      blocking_task_runner_));
+
   file_system_.reset(test_file_system ? test_file_system :
                      new DriveFileSystem(profile_,
                                          cache(),
                                          drive_service_.get(),
                                          uploader(),
                                          webapps_registry(),
+                                         resource_metadata_.get(),
                                          blocking_task_runner_));
   file_write_helper_.reset(new FileWriteHelper(file_system()));
   download_handler_.reset(new DriveDownloadHandler(file_write_helper(),
@@ -151,7 +157,6 @@ DriveSystemService::DriveSystemService(
   prefetcher_.reset(new DrivePrefetcher(file_system(),
                                         event_logger(),
                                         DrivePrefetcherOptions()));
-  sync_client_->AddObserver(prefetcher_.get());
   stale_cache_files_remover_.reset(new StaleCacheFilesRemover(file_system(),
                                                               cache()));
 }
@@ -165,8 +170,9 @@ void DriveSystemService::Initialize() {
   sync_client_->Initialize();
   drive_service_->Initialize(profile_);
   file_system_->Initialize();
-  cache_->RequestInitialize(base::Bind(&DriveSystemService::OnCacheInitialized,
-                                       weak_ptr_factory_.GetWeakPtr()));
+  cache_->RequestInitialize(
+      base::Bind(&DriveSystemService::InitializeAfterCacheInitialized,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void DriveSystemService::Shutdown() {
@@ -226,21 +232,42 @@ void DriveSystemService::ClearCacheAndRemountFileSystem(
 
   RemoveDriveMountPoint();
   drive_service()->CancelAll();
-  cache_->ClearAll(base::Bind(&DriveSystemService::AddBackDriveMountPoint,
-                              weak_ptr_factory_.GetWeakPtr(),
-                              callback));
+  cache_->ClearAll(base::Bind(
+      &DriveSystemService::ReinitializeResourceMetadataAfterClearCache,
+      weak_ptr_factory_.GetWeakPtr(),
+      callback));
 }
 
-void DriveSystemService::AddBackDriveMountPoint(
+void DriveSystemService::ReinitializeResourceMetadataAfterClearCache(
     const base::Callback<void(bool)>& callback,
     bool success) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
 
+  if (!success) {
+    callback.Run(false);
+    return;
+  }
+  resource_metadata_->Initialize(
+      base::Bind(&DriveSystemService::AddBackDriveMountPoint,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 callback));
+}
+
+void DriveSystemService::AddBackDriveMountPoint(
+    const base::Callback<void(bool)>& callback,
+    DriveFileError error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(!callback.is_null());
+
+  if (error != DRIVE_FILE_OK) {
+    callback.Run(false);
+    return;
+  }
   file_system_->Initialize();
   AddDriveMountPoint();
 
-  callback.Run(success);
+  callback.Run(true);
 }
 
 void DriveSystemService::ReloadAndRemountFileSystem() {
@@ -297,11 +324,28 @@ void DriveSystemService::RemoveDriveMountPoint() {
   event_logger_->Log("RemoveDriveMountPoint");
 }
 
-void DriveSystemService::OnCacheInitialized(bool success) {
+void DriveSystemService::InitializeAfterCacheInitialized(bool success) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!success) {
     LOG(WARNING) << "Failed to initialize the cache. Disabling Drive";
+    DisableDrive();
+    return;
+  }
+
+  resource_metadata_->Initialize(
+      base::Bind(
+          &DriveSystemService::InitializeAfterResourceMetadataInitialized,
+          weak_ptr_factory_.GetWeakPtr()));
+}
+
+void DriveSystemService::InitializeAfterResourceMetadataInitialized(
+    DriveFileError error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (error != DRIVE_FILE_OK) {
+    LOG(WARNING) << "Failed to initialize resource metadata. Disabling Drive : "
+                 << error;
     DisableDrive();
     return;
   }

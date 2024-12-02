@@ -4,7 +4,7 @@
 
 #include "chrome/browser/managed_mode/managed_mode_url_filter.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/hash_tables.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/metrics/histogram.h"
@@ -193,10 +193,6 @@ ManagedModeURLFilter::FilteringBehavior
 ManagedModeURLFilter::GetFilteringBehaviorForURL(const GURL& url) const {
   DCHECK(CalledOnValidThread());
 
-  // If the default behavior is to allow, we don't need to check anything else.
-  if (default_behavior_ == ALLOW)
-    return ALLOW;
-
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // URLs with a non-standard scheme (e.g. chrome://) are always allowed.
   if (!policy::URLBlacklist::HasStandardScheme(url))
@@ -213,6 +209,10 @@ ManagedModeURLFilter::GetFilteringBehaviorForURL(const GURL& url) const {
       host_map_.find(url.host());
   if (host_it != host_map_.end())
     return host_it->second ? ALLOW : BLOCK;
+
+  // If the default behavior is to allow, we don't need to check anything else.
+  if (default_behavior_ == ALLOW)
+    return ALLOW;
 
   // Check the list of URL patterns.
   std::set<URLMatcherConditionSet::ID> matching_ids =

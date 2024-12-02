@@ -7,6 +7,7 @@
 #include "base/auto_reset.h"
 #include "ui/aura/client/activation_change_observer.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_change_observer.h"
 #include "ui/aura/env.h"
 #include "ui/base/events/event.h"
@@ -30,6 +31,24 @@ void StackTransientParentsBelowModalWindow(aura::Window* window) {
   }
 }
 
+// Stack's |window|'s layer above |relative_to|'s layer.
+void StackWindowLayerAbove(aura::Window* window, aura::Window* relative_to) {
+  // Stack |window| above the last transient child of |relative_to| that shares
+  // the same parent.
+  const aura::Window::Windows& window_transients(
+      relative_to->transient_children());
+  for (aura::Window::Windows::const_iterator i = window_transients.begin();
+       i != window_transients.end(); ++i) {
+    aura::Window* transient = *i;
+    if (transient->parent() == relative_to->parent())
+      relative_to = transient;
+  }
+  if (window != relative_to) {
+    window->layer()->parent()->StackAbove(window->layer(),
+                                          relative_to->layer());
+  }
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -39,6 +58,7 @@ FocusController::FocusController(FocusRules* rules)
     : active_window_(NULL),
       focused_window_(NULL),
       updating_focus_(false),
+      updating_activation_(false),
       rules_(rules),
       ALLOW_THIS_IN_INITIALIZER_LIST(observer_manager_(this)) {
   DCHECK(rules);
@@ -105,13 +125,14 @@ void FocusController::RemoveObserver(
 }
 
 void FocusController::FocusWindow(aura::Window* window) {
-  if (updating_focus_)
-    return;
-
   if (window &&
       (window->Contains(focused_window_) || window->Contains(active_window_))) {
     return;
   }
+
+  // We should not be messing with the focus if the window has capture.
+  if (window && (aura::client::GetCaptureWindow(window) == window))
+    return;
 
   // Focusing a window also activates its containing activatable window. Note
   // that the rules could redirect activation activation and/or focus.
@@ -125,10 +146,21 @@ void FocusController::FocusWindow(aura::Window* window) {
   if (window && (!focusable || !activatable))
     return;
   DCHECK((focusable && activatable) || !window);
-  SetActiveWindow(activatable);
-  if (active_window_)
-    DCHECK(active_window_->Contains(focusable));
-  SetFocusedWindow(focusable);
+
+  // Activation change observers may change the focused window. If this happens
+  // we must not adjust the focus below since this will clobber that change.
+  aura::Window* last_focused_window = focused_window_;
+  if (!updating_activation_)
+    SetActiveWindow(activatable);
+
+  // If the window's ActivationChangeObserver shifted focus to a valid window,
+  // we don't want to focus the window we thought would be focused by default.
+  bool activation_changed_focus = last_focused_window != focused_window_;
+  if (!updating_focus_ && (!activation_changed_focus || !focused_window_)) {
+    if (active_window_ && focusable)
+      DCHECK(active_window_->Contains(focusable));
+    SetFocusedWindow(focusable);
+  }
 }
 
 void FocusController::ResetFocusWithinActiveWindow(aura::Window* window) {
@@ -186,10 +218,8 @@ void FocusController::OnWindowVisibilityChanged(aura::Window* window,
     // Despite the focus change, we need to keep the window being hidden
     // stacked above the new window so it stays open on top as it animates away.
     aura::Window* next_window = GetActiveWindow();
-    if (next_window && next_window->parent() == window->parent()) {
-      window->layer()->parent()->StackAbove(window->layer(),
-                                            next_window->layer());
-    }
+    if (next_window && next_window->parent() == window->parent())
+      StackWindowLayerAbove(window, next_window);
   }
 }
 
@@ -250,14 +280,14 @@ void FocusController::SetFocusedWindow(aura::Window* window) {
 }
 
 void FocusController::SetActiveWindow(aura::Window* window) {
-  if (updating_focus_ || window == active_window_)
+  if (updating_activation_ || window == active_window_)
     return;
 
   DCHECK(rules_->CanActivateWindow(window));
   if (window)
     DCHECK_EQ(window, rules_->GetActivatableWindow(window));
 
-  base::AutoReset<bool> updating_focus(&updating_focus_, true);
+  base::AutoReset<bool> updating_activation(&updating_activation_, true);
   aura::Window* lost_activation = active_window_;
   if (active_window_ && observer_manager_.IsObserving(active_window_) &&
       focused_window_ != active_window_) {
@@ -271,9 +301,6 @@ void FocusController::SetActiveWindow(aura::Window* window) {
     active_window_->parent()->StackChildAtTop(active_window_);
   }
 
-  FOR_EACH_OBSERVER(aura::client::ActivationChangeObserver,
-                    activation_observers_,
-                    OnWindowActivated(active_window_, lost_activation));
   aura::client::ActivationChangeObserver* observer =
       aura::client::GetActivationChangeObserver(lost_activation);
   if (observer)
@@ -281,6 +308,9 @@ void FocusController::SetActiveWindow(aura::Window* window) {
   observer = aura::client::GetActivationChangeObserver(active_window_);
   if (observer)
     observer->OnWindowActivated(active_window_, lost_activation);
+  FOR_EACH_OBSERVER(aura::client::ActivationChangeObserver,
+                    activation_observers_,
+                    OnWindowActivated(active_window_, lost_activation));
 }
 
 void FocusController::WindowLostFocusFromDispositionChange(
@@ -297,7 +327,8 @@ void FocusController::WindowLostFocusFromDispositionChange(
   if (window == active_window_) {
     aura::Window* next_activatable = rules_->GetNextActivatableWindow(window);
     SetActiveWindow(next_activatable);
-    SetFocusedWindow(next_activatable);
+    if (!(active_window_ && active_window_->Contains(focused_window_)))
+      SetFocusedWindow(next_activatable);
   } else if (window->Contains(focused_window_)) {
     // Active window isn't changing, but focused window might be.
     SetFocusedWindow(rules_->GetFocusableWindow(next));

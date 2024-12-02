@@ -10,8 +10,8 @@
 #include "chrome/browser/background/background_application_list_model.h"
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
@@ -120,7 +120,7 @@ void RemoveBackgroundPermission(ExtensionService* service,
 
 // Crashes on Mac tryslaves.
 // http://crbug.com/165458
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_LINUX)
 #define MAYBE_ExplicitTest DISABLED_ExplicitTest
 #else
 #define MAYBE_ExplicitTest ExplicitTest

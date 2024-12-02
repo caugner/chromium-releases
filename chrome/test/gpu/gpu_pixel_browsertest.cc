@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -21,6 +21,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
@@ -106,12 +107,12 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
         ref_img_option_(kReferenceImageNone) {
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     command_line->AppendSwitchASCII(switches::kTestGLLib,
                                     "libllvmpipe.so");
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() {
+  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
     InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
 
     CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -392,8 +393,8 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 
     gfx::Rect root_bounds = browser()->window()->GetBounds();
     gfx::Rect tab_contents_bounds;
-    browser()->tab_strip_model()->GetActiveWebContents()->GetContainerBounds(
-        &tab_contents_bounds);
+    browser()->tab_strip_model()->GetActiveWebContents()->GetView()->
+        GetContainerBounds(&tab_contents_bounds);
 
     gfx::Rect snapshot_bounds(tab_contents_bounds.x() - root_bounds.x(),
                               tab_contents_bounds.y() - root_bounds.y(),
@@ -520,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, Canvas2DRedBoxHD) {
 
 class Canvas2DPixelTestSD : public GpuPixelBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
     GpuPixelBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
   }

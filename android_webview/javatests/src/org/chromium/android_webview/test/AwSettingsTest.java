@@ -6,7 +6,12 @@ package org.chromium.android_webview.test;
 
 import android.content.Context;
 import android.os.Build;
+import android.os.SystemClock;
+import android.test.suitebuilder.annotation.LargeTest;
+import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.util.Pair;
+import android.view.MotionEvent;
 import android.webkit.WebSettings;
 
 import org.apache.http.Header;
@@ -14,8 +19,11 @@ import org.apache.http.HttpRequest;
 import org.chromium.android_webview.AndroidProtocolHandler;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
+import org.chromium.android_webview.InterceptedRequestData;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.ImagePageGenerator;
+import org.chromium.android_webview.test.util.JavascriptEventObserver;
+import org.chromium.android_webview.test.util.VideoTestWebServer;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.TestFileUtil;
@@ -30,6 +38,8 @@ import org.chromium.content.browser.test.util.HistoryUtils;
 import org.chromium.net.test.util.TestWebServer;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
 
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.ArrayList;
@@ -40,7 +50,7 @@ import java.util.List;
  * settings applies either to each individual view or to all views of the
  * application
  */
-public class AwSettingsTest extends AndroidWebViewTestBase {
+public class AwSettingsTest extends AwTestBase {
     private static final long TEST_TIMEOUT = 20000L;
     private static final int CHECK_INTERVAL = 100;
 
@@ -91,7 +101,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
         protected abstract T getCurrentValue();
 
-        protected abstract void setCurrentValue(T value);
+        protected abstract void setCurrentValue(T value) throws Throwable;
 
         protected abstract void doEnsureSettingHasValue(T value) throws Throwable;
 
@@ -121,6 +131,11 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 mContentViewClient.getOnPageFinishedHelper(),
                 mContentViewClient.getOnReceivedErrorHelper(),
                 url);
+        }
+
+        protected String executeJavaScriptAndWaitForResult(String script) throws Throwable {
+            return AwSettingsTest.this.executeJavaScriptAndWaitForResult(
+                    mAwContents, mContentViewClient, script);
         }
 
         private void ensureSettingHasValue(T value) throws Throwable {
@@ -188,8 +203,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
             String oldTitle = getTitleOnUiThread();
             String newTitle = oldTitle + "_modified";
-            executeJavaScriptAndWaitForResult(
-                mAwContents, mContentViewClient, getScript(newTitle));
+            executeJavaScriptAndWaitForResult(getScript(newTitle));
             assertEquals(value == ENABLED ? newTitle : oldTitle, getTitleOnUiThread());
         }
 
@@ -488,6 +502,48 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
             loadUrlSync(UrlUtils.getTestFileUrl("webview/localStorage.html"));
             assertEquals(
                 value == ENABLED ? HAS_LOCAL_STORAGE : NO_LOCAL_STORAGE,
+                getTitleOnUiThread());
+        }
+    }
+
+    class AwSettingsDatabaseTestHelper extends AwSettingsTestHelper<Boolean> {
+        private static final String NO_DATABASE = "No database";
+        private static final String HAS_DATABASE = "Has database";
+
+        AwSettingsDatabaseTestHelper(
+                AwContents awContents,
+                TestAwContentsClient contentViewClient) throws Throwable {
+            super(awContents, contentViewClient, true);
+        }
+
+        @Override
+        protected Boolean getAlteredValue() {
+            return ENABLED;
+        }
+
+        @Override
+        protected Boolean getInitialValue() {
+            return DISABLED;
+        }
+
+        @Override
+        protected Boolean getCurrentValue() {
+            return mContentSettings.getDatabaseEnabled();
+        }
+
+        @Override
+        protected void setCurrentValue(Boolean value) {
+            mContentSettings.setDatabaseEnabled(value);
+        }
+
+        @Override
+        protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
+            // It seems accessing the database through a data scheme is not
+            // supported, and fails with a DOM exception (likely a cross-domain
+            // violation).
+            loadUrlSync(UrlUtils.getTestFileUrl("webview/database_access.html"));
+            assertEquals(
+                value == ENABLED ? HAS_DATABASE : NO_DATABASE,
                 getTitleOnUiThread());
         }
     }
@@ -803,21 +859,48 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
 
     // This class provides helper methods for testing of settings related to
     // the text autosizing feature.
-    abstract class AwSettingsTextAutosizingTestHelper<T> extends AwSettingsTestHelper<T> {
+    abstract class AwSettingsTextAutosizingTestHelper<T>
+            extends AwSettingsWithSettingsTestHelper<T> {
         protected static final float PARAGRAPH_FONT_SIZE = 14.0f;
 
         AwSettingsTextAutosizingTestHelper(
                 AwContents awContents,
                 TestAwContentsClient contentViewClient) throws Throwable {
             super(awContents, contentViewClient, true);
+            mNeedToWaitForFontSizeChange = false;
+            loadDataSync(getData());
+        }
+
+        @Override
+        protected void setCurrentValue(T value) throws Throwable {
+            mNeedToWaitForFontSizeChange = false;
+            if (value != getCurrentValue()) {
+                mOldFontSize = getActualFontSize();
+                mNeedToWaitForFontSizeChange = true;
+            }
         }
 
         protected float getActualFontSize() throws Throwable {
-            loadDataSync(getData());
-            // Retrieve font size after the native callback has fired, not in body.onload.
-            // The latter can fire prior to Font autosizer adjustments.
-            executeJavaScriptAndWaitForResult(
-                mAwContents, mContentViewClient, "setTitleToActualFontSize()");
+            if (!mNeedToWaitForFontSizeChange) {
+                executeJavaScriptAndWaitForResult("setTitleToActualFontSize()");
+            } else {
+                final float oldFontSize = mOldFontSize;
+                assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+                        @Override
+                        public boolean isSatisfied() {
+                            try {
+                                executeJavaScriptAndWaitForResult("setTitleToActualFontSize()");
+                                float newFontSize = Float.parseFloat(getTitleOnUiThread());
+                                return newFontSize != oldFontSize;
+                            } catch (Throwable t) {
+                                t.printStackTrace();
+                                fail("Failed to getTitleOnUiThread: " + t.toString());
+                                return false;
+                            }
+                        }
+                    }, TEST_TIMEOUT, CHECK_INTERVAL));
+                mNeedToWaitForFontSizeChange = false;
+            }
             return Float.parseFloat(getTitleOnUiThread());
         }
 
@@ -841,6 +924,9 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
             sb.append("</p></body></html>");
             return sb.toString();
         }
+
+        private boolean mNeedToWaitForFontSizeChange;
+        private float mOldFontSize;
     }
 
     class AwSettingsLayoutAlgorithmTestHelper extends
@@ -852,6 +938,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
             super(awContents, contentViewClient);
             // Font autosizing doesn't step in for narrow layout widths.
             mContentSettings.setUseWideViewPort(true);
+            mAwSettings.setEnableFixedLayoutMode(true);
         }
 
         @Override
@@ -870,7 +957,8 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
 
         @Override
-        protected void setCurrentValue(LayoutAlgorithm value) {
+        protected void setCurrentValue(LayoutAlgorithm value) throws Throwable {
+            super.setCurrentValue(value);
             mContentSettings.setLayoutAlgorithm(value);
         }
 
@@ -895,7 +983,55 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 AwContents awContents,
                 TestAwContentsClient contentViewClient) throws Throwable {
             super(awContents, contentViewClient);
-            // See b/7873666.
+            mInitialActualFontSize = getActualFontSize();
+        }
+
+        @Override
+        protected Integer getAlteredValue() {
+            return INITIAL_TEXT_ZOOM * 2;
+        }
+
+        @Override
+        protected Integer getInitialValue() {
+            return INITIAL_TEXT_ZOOM;
+        }
+
+        @Override
+        protected Integer getCurrentValue() {
+            return mContentSettings.getTextZoom();
+        }
+
+        @Override
+        protected void setCurrentValue(Integer value) throws Throwable {
+            super.setCurrentValue(value);
+            mContentSettings.setTextZoom(value);
+            mAwSettings.setTextZoom(value);
+        }
+
+        @Override
+        protected void doEnsureSettingHasValue(Integer value) throws Throwable {
+            final float actualFontSize = getActualFontSize();
+            // Ensure that actual vs. initial font size ratio is similar to actual vs. initial
+            // text zoom values ratio.
+            final float ratiosDelta = Math.abs(
+                (actualFontSize / mInitialActualFontSize) -
+                (value / (float)INITIAL_TEXT_ZOOM));
+            assertTrue(
+                "|(" + actualFontSize + " / " + mInitialActualFontSize + ") - (" +
+                value + " / " + INITIAL_TEXT_ZOOM + ")| = " + ratiosDelta,
+                ratiosDelta <= 0.2f);
+        }
+    }
+
+    class AwSettingsTextZoomAutosizingTestHelper
+            extends AwSettingsTextAutosizingTestHelper<Integer> {
+        private static final int INITIAL_TEXT_ZOOM = 100;
+        private final float mInitialActualFontSize;
+
+        AwSettingsTextZoomAutosizingTestHelper(
+                AwContents awContents,
+                TestAwContentsClient contentViewClient) throws Throwable {
+            super(awContents, contentViewClient);
             mContentSettings.setLayoutAlgorithm(LayoutAlgorithm.TEXT_AUTOSIZING);
             // The initial font size can be adjusted by font autosizer depending on the page's
             // viewport width.
@@ -918,8 +1054,11 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         }
 
         @Override
-        protected void setCurrentValue(Integer value) {
+        protected void setCurrentValue(Integer value) throws Throwable {
+            super.setCurrentValue(value);
             mContentSettings.setTextZoom(value);
+            // This is to verify that AwSettings will not affect font boosting by Autosizer.
+            mAwSettings.setTextZoom(-1);
         }
 
         @Override
@@ -1059,7 +1198,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     // "viewport" tag is ignored, and the layout width is set to device width in DIP pixels.
     // We specify a very high width value to make sure that it doesn't intersect with
     // device screen widths (in DIP pixels).
-    class AwSettingsUseWideViewportTestHelper extends AwSettingsTestHelper<Boolean> {
+    class AwSettingsUseWideViewportTestHelper extends AwSettingsWithSettingsTestHelper<Boolean> {
         static private final String VIEWPORT_TAG_LAYOUT_WIDTH = "3000";
 
         AwSettingsUseWideViewportTestHelper(
@@ -1086,6 +1225,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         @Override
         protected void setCurrentValue(Boolean value) {
             mContentSettings.setUseWideViewPort(value);
+            mAwSettings.setEnableFixedLayoutMode(value);
         }
 
         @Override
@@ -1105,6 +1245,74 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                     "</head>" +
                     "<body onload='document.title=document.body.clientWidth'></body></html>";
         }
+    }
+
+    class AwSettingsLoadWithOverviewModeTestHelper extends AwSettingsTestHelper<Boolean> {
+        private static final float DEFAULT_PAGE_SCALE = 1.0f;
+
+        AwSettingsLoadWithOverviewModeTestHelper(
+                AwContents awContents,
+                TestAwContentsClient contentViewClient,
+                boolean withViewPortTag) throws Throwable {
+            super(awContents, contentViewClient, true);
+            mWithViewPortTag = withViewPortTag;
+            mContentSettings.setUseWideViewPort(true);
+            mAwContents.getSettings().setEnableFixedLayoutMode(true);
+        }
+
+        @Override
+        protected Boolean getAlteredValue() {
+            return ENABLED;
+        }
+
+        @Override
+        protected Boolean getInitialValue() {
+            return DISABLED;
+        }
+
+        @Override
+        protected Boolean getCurrentValue() {
+            return mContentSettings.getLoadWithOverviewMode();
+        }
+
+        @Override
+        protected void setCurrentValue(Boolean value) {
+            mExpectScaleChange = mContentSettings.getLoadWithOverviewMode() != value;
+            if (mExpectScaleChange) {
+                mOnScaleChangedCallCount =
+                        mContentViewClient.getOnScaleChangedHelper().getCallCount();
+            }
+            mContentSettings.setLoadWithOverviewMode(value);
+            mAwContents.getSettings().resetScrollAndScaleState();
+        }
+
+        @Override
+        protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
+            loadDataSync(getData());
+            if (mExpectScaleChange) {
+                mContentViewClient.getOnScaleChangedHelper().
+                        waitForCallback(mOnScaleChangedCallCount);
+                mExpectScaleChange = false;
+            }
+            float currentScale = AwSettingsTest.this.getScaleOnUiThread(mAwContents);
+            if (value) {
+                assertTrue("Expected: " + currentScale + " < " + DEFAULT_PAGE_SCALE,
+                        currentScale < DEFAULT_PAGE_SCALE);
+            } else {
+                assertEquals(DEFAULT_PAGE_SCALE, currentScale);
+            }
+        }
+
+        private String getData() {
+            return "<html><head>" +
+                    (mWithViewPortTag ? "<meta name='viewport' content='width=3000' />" : "") +
+                    "</head>" +
+                    "<body></body></html>";
+        }
+
+        private final boolean mWithViewPortTag;
+        private boolean mExpectScaleChange;
+        private int mOnScaleChangedCallCount;
     }
 
     // The test verifies that JavaScript is disabled upon WebView
@@ -1466,6 +1674,44 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
             new AwSettingsDomStorageEnabledTestHelper(views.getContents1(), views.getClient1()));
     }
 
+    // Ideally, these three tests below should be combined into one, or tested using
+    // runPerViewSettingsTest. However, it seems the database setting cannot be toggled
+    // once set. Filed b/8186497.
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testDatabaseInitialValue() throws Throwable {
+        TestAwContentsClient client = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(client);
+        final AwContents awContents = testContainerView.getAwContents();
+        AwSettingsDatabaseTestHelper helper = new AwSettingsDatabaseTestHelper(awContents, client);
+        helper.ensureSettingHasInitialValue();
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testDatabaseEnabled() throws Throwable {
+        TestAwContentsClient client = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(client);
+        final AwContents awContents = testContainerView.getAwContents();
+        AwSettingsDatabaseTestHelper helper = new AwSettingsDatabaseTestHelper(awContents, client);
+        helper.setAlteredSettingValue();
+        helper.ensureSettingHasAlteredValue();
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testDatabaseDisabled() throws Throwable {
+        TestAwContentsClient client = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(client);
+        final AwContents awContents = testContainerView.getAwContents();
+        AwSettingsDatabaseTestHelper helper = new AwSettingsDatabaseTestHelper(awContents, client);
+        helper.setInitialSettingValue();
+        helper.ensureSettingHasInitialValue();
+    }
+
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
     public void testUniversalAccessFromFilesWithTwoViews() throws Throwable {
@@ -1700,15 +1946,10 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         final AwTestContainerView testContainerView =
                 createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainerView.getAwContents();
-        try {
-            useTestResourceContext();
-            loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
-                        "file:///android_asset/asset_file.html");
-            assertEquals(expectedTitle, getTitleOnUiThread(awContents));
-        } finally {
-            resetResourceContext();
-        }
+        loadUrlSync(awContents,
+                    contentClient.getOnPageFinishedHelper(),
+                    "file:///android_asset/asset_file.html");
+        assertEquals(expectedTitle, getTitleOnUiThread(awContents));
     }
 
     // Test a resource URL (file:///android_res/).
@@ -1722,15 +1963,10 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         final AwTestContainerView testContainerView =
                 createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainerView.getAwContents();
-        try {
-            useTestResourceContext();
-            loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
-                        "file:///android_res/raw/resource_file.html");
-            assertEquals(expectedTitle, getTitleOnUiThread(awContents));
-        } finally {
-            resetResourceContext();
-        }
+        loadUrlSync(awContents,
+                    contentClient.getOnPageFinishedHelper(),
+                    "file:///android_res/raw/resource_file.html");
+        assertEquals(expectedTitle, getTitleOnUiThread(awContents));
     }
 
     // Test that the file URL access toggle does not affect asset URLs.
@@ -1745,16 +1981,11 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainerView.getAwContents();
         final AwSettings settings = getAwSettingsOnUiThread(awContents);
-        try {
-            useTestResourceContext();
-            settings.setAllowFileAccess(false);
-            loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
-                        "file:///android_asset/asset_file.html");
-            assertEquals(expectedTitle, getTitleOnUiThread(awContents));
-        } finally {
-            resetResourceContext();
-        }
+        settings.setAllowFileAccess(false);
+        loadUrlSync(awContents,
+                    contentClient.getOnPageFinishedHelper(),
+                    "file:///android_asset/asset_file.html");
+        assertEquals(expectedTitle, getTitleOnUiThread(awContents));
     }
 
     // Test that the file URL access toggle does not affect resource URLs.
@@ -1769,24 +2000,15 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 createAwTestContainerViewOnMainSync(contentClient);
         final AwContents awContents = testContainerView.getAwContents();
         final AwSettings settings = getAwSettingsOnUiThread(awContents);
-        try {
-            useTestResourceContext();
-            settings.setAllowFileAccess(false);
-            loadUrlSync(awContents,
-                        contentClient.getOnPageFinishedHelper(),
-                        "file:///android_res/raw/resource_file.html");
-            assertEquals(expectedTitle, getTitleOnUiThread(awContents));
-        } finally {
-            resetResourceContext();
-        }
+        settings.setAllowFileAccess(false);
+        loadUrlSync(awContents,
+                    contentClient.getOnPageFinishedHelper(),
+                    "file:///android_res/raw/resource_file.html");
+        assertEquals(expectedTitle, getTitleOnUiThread(awContents));
     }
 
-    /*
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    http://crbug.com/171492
-    */
-    @DisabledTest
     public void testLayoutAlgorithmWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -1801,6 +2023,15 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         runPerViewSettingsTest(
             new AwSettingsTextZoomTestHelper(views.getContents0(), views.getClient0()),
             new AwSettingsTextZoomTestHelper(views.getContents1(), views.getClient1()));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testTextZoomAutosizingWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
+        runPerViewSettingsTest(
+            new AwSettingsTextZoomAutosizingTestHelper(views.getContents0(), views.getClient0()),
+            new AwSettingsTextZoomAutosizingTestHelper(views.getContents1(), views.getClient1()));
     }
 
     @SmallTest
@@ -2132,6 +2363,7 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
                 Math.abs(displayWidth - actualWidth) <= 1);
 
         settings.setUseWideViewPort(true);
+        awContents.getSettings().setEnableFixedLayoutMode(true);
         // When UseWideViewPort is on, "meta viewport" tag is used.
         // If there is no viewport tag, or width isn't specified,
         // then layout width is set to max(980, <device-width-in-DIP-pixels>)
@@ -2145,6 +2377,231 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
         loadDataSync(
                 awContents, onPageFinishedHelper, pageViewportSpecifiedWidth, "text/html", false);
         assertEquals(viewportTagSpecifiedWidth, getTitleOnUiThread(awContents));
+    }
+
+
+    /* Started failing after http://trac.webkit.org/changeset/146378
+     * http://crbug.com/222584
+     * @MediumTest
+     * @Feature({"AndroidWebView", "Preferences"})
+     */
+    @DisabledTest
+    public void testUseWideViewportControlsDoubleTabToZoom() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        ContentSettings settings = getContentSettingsOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = contentClient.getOnPageFinishedHelper();
+
+        final String page = "<html><body>Page Text</body></html>";
+        assertFalse(settings.getUseWideViewPort());
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        final float initialScale = getScaleOnUiThread(awContents);
+        simulateDoubleTapCenterOfWebViewOnUiThread(testContainerView);
+        Thread.sleep(1000);
+        assertEquals(initialScale, getScaleOnUiThread(awContents));
+
+        settings.setUseWideViewPort(true);
+        awContents.getSettings().setEnableFixedLayoutMode(true);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        int onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        simulateDoubleTapCenterOfWebViewOnUiThread(testContainerView);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        final float zoomedOutScale = getScaleOnUiThread(awContents);
+        assertTrue("zoomedOut: " + zoomedOutScale + ", initial: " + initialScale,
+                zoomedOutScale < initialScale);
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testLoadWithOverviewModeWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
+        runPerViewSettingsTest(
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents0(), views.getClient0(), false),
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents1(), views.getClient1(), false));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testLoadWithOverviewModeViewportTagWithTwoViews() throws Throwable {
+        ViewPair views = createViews();
+        runPerViewSettingsTest(
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents0(), views.getClient0(), true),
+                new AwSettingsLoadWithOverviewModeTestHelper(
+                        views.getContents1(), views.getClient1(), true));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    // Verify that LoadViewOverviewMode doesn't affect pages with initial scale
+    // set in the viewport tag.
+    public void testLoadWithOverviewModeViewportScale() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        ContentSettings settings = getContentSettingsOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = contentClient.getOnPageFinishedHelper();
+
+        final int pageScale = 2;
+        final String page = "<html><head>" +
+                "<meta name='viewport' content='width=3000, initial-scale=" + pageScale +
+                "' /></head>" +
+                "<body></body></html>";
+
+        assertFalse(settings.getUseWideViewPort());
+        assertFalse(settings.getLoadWithOverviewMode());
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        assertEquals(1.0f, getScaleOnUiThread(awContents));
+
+        settings.setUseWideViewPort(true);
+        awContents.getSettings().setEnableFixedLayoutMode(true);
+        settings.setLoadWithOverviewMode(true);
+        awContents.getSettings().resetScrollAndScaleState();
+        int onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals((float)pageScale, getScaleOnUiThread(awContents));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testSetInitialScale() throws Throwable {
+        final TestAwContentsClient contentClient = new TestAwContentsClient();
+        final AwTestContainerView testContainerView =
+                createAwTestContainerViewOnMainSync(contentClient);
+        final AwContents awContents = testContainerView.getAwContents();
+        final AwSettings awSettings = getAwSettingsOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = contentClient.getOnPageFinishedHelper();
+
+        final String page = "<html><body>" +
+                "<p style='height:1000px;width:1000px'>testSetInitialScale</p>" +
+                "</body></html>";
+        final float defaultScale =
+            getInstrumentation().getTargetContext().getResources().getDisplayMetrics().density;
+
+        assertEquals(defaultScale, getPixelScaleOnUiThread(awContents), .01f);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        assertEquals(defaultScale, getPixelScaleOnUiThread(awContents), .01f);
+
+        int onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        awSettings.setInitialPageScale(50);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals(0.5f, getPixelScaleOnUiThread(awContents), .01f);
+
+        onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        awSettings.setInitialPageScale(500);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals(5.0f, getPixelScaleOnUiThread(awContents), .01f);
+
+        onScaleChangedCallCount = contentClient.getOnScaleChangedHelper().getCallCount();
+        awSettings.setInitialPageScale(0);
+        loadDataSync(awContents, onPageFinishedHelper, page, "text/html", false);
+        contentClient.getOnScaleChangedHelper().waitForCallback(onScaleChangedCallCount);
+        assertEquals(defaultScale, getPixelScaleOnUiThread(awContents), .01f);
+    }
+
+    /**
+     * Run video test.
+     * @param requiredUserGesture the settings of MediaPlaybackRequiresUserGesture.
+     * @param waitTime time for waiting event happen, -1 means forever.
+     * @return true if the event happened,
+     * @throws Throwable throw exception if timeout.
+     */
+    private boolean runVideoTest(final boolean requiredUserGesture, long waitTime)
+            throws Throwable {
+        final JavascriptEventObserver observer = new JavascriptEventObserver();
+        TestAwContentsClient client = new TestAwContentsClient();
+        final AwContents awContents = createAwTestContainerViewOnMainSync(client).getAwContents();
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                ContentSettings contentSettings =
+                        awContents.getContentViewCore().getContentSettings();
+                contentSettings.setJavaScriptEnabled(true);
+                contentSettings.setMediaPlaybackRequiresUserGesture(requiredUserGesture);
+                observer.register(awContents.getContentViewCore(), "javaObserver");
+            }
+        });
+        VideoTestWebServer webServer = new VideoTestWebServer(getActivity());
+        try {
+            String data = "<html><head><script>" +
+                "addEventListener('DOMContentLoaded', function() { " +
+                "  document.getElementById('video').addEventListener('play', function() { " +
+                "    javaObserver.notifyJava(); " +
+                "  }, false); " +
+                "}, false); " +
+                "</script></head><body>" +
+                "<video id='video' autoplay control src='" +
+                webServer.getOnePixelOneFrameWebmURL() + "' /> </body></html>";
+            loadDataAsync(awContents, data, "text/html", false);
+            if (waitTime == -1) {
+                observer.waitForEvent();
+                return true;
+            }
+            else {
+                return observer.waitForEvent(waitTime);
+            }
+        } finally {
+            if (webServer != null && webServer.getTestWebServer() != null)
+                webServer.getTestWebServer().shutdown();
+        }
+    }
+
+    @LargeTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testMediaPlaybackWithoutUserGesture() throws Throwable {
+        assertTrue(runVideoTest(false, -1));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testMediaPlaybackWithUserGesture() throws Throwable {
+        // Wait for 5 second to see if video played.
+        assertFalse(runVideoTest(true, 5000));
+    }
+
+    @SmallTest
+    @Feature({"AndroidWebView", "Preferences"})
+    public void testDefaultVideoPosterURL() throws Throwable {
+        final CallbackHelper videoPosterAccessedCallbackHelper = new CallbackHelper();
+        final String DEFAULT_VIDEO_POSTER_URL = "http://default_video_poster/";
+        TestAwContentsClient client = new TestAwContentsClient() {
+            @Override
+            public InterceptedRequestData shouldInterceptRequest(String url) {
+                if (url.equals(DEFAULT_VIDEO_POSTER_URL)) {
+                    videoPosterAccessedCallbackHelper.notifyCalled();
+                }
+                return null;
+            }
+        };
+        final AwContents awContents = createAwTestContainerViewOnMainSync(client).getAwContents();
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                ContentSettings contentSettings =
+                        awContents.getContentViewCore().getContentSettings();
+                contentSettings.setDefaultVideoPosterURL(DEFAULT_VIDEO_POSTER_URL);
+            }
+        });
+        VideoTestWebServer webServer = new VideoTestWebServer(
+                getInstrumentation().getTargetContext());
+        try {
+            String data = "<html><head><body>" +
+                "<video id='video' control src='" +
+                webServer.getOnePixelOneFrameWebmURL() + "' /> </body></html>";
+            loadDataAsync(awContents, data, "text/html", false);
+            videoPosterAccessedCallbackHelper.waitForCallback(0, 1, 20, TimeUnit.SECONDS);
+        } finally {
+            if (webServer.getTestWebServer() != null)
+                webServer.getTestWebServer().shutdown();
+        }
     }
 
     static class ViewPair {
@@ -2258,17 +2715,52 @@ public class AwSettingsTest extends AndroidWebViewTestBase {
     }
 
     /**
-     * Configure the browser to load resources from the test harness instead of the browser
-     * application.
+     * Returns pure page scale.
      */
-    private void useTestResourceContext() {
-        AndroidProtocolHandler.setResourceContextForTesting(getInstrumentation().getContext());
+    private float getScaleOnUiThread(final AwContents awContents) throws Throwable {
+        return runTestOnUiThreadAndGetResult(new Callable<Float>() {
+            @Override
+            public Float call() throws Exception {
+                return awContents.getContentViewCore().getScale();
+            }
+        });
     }
 
     /**
-     * Configure the browser to load resources from the browser application.
+     * Returns page scale multiplied by the screen density.
      */
-    private void resetResourceContext() {
-        AndroidProtocolHandler.setResourceContextForTesting(null);
+    private float getPixelScaleOnUiThread(final AwContents awContents) throws Throwable {
+        return runTestOnUiThreadAndGetResult(new Callable<Float>() {
+            @Override
+            public Float call() throws Exception {
+                return awContents.getScale();
+            }
+        });
+    }
+
+    private void simulateDoubleTapCenterOfWebViewOnUiThread(final AwTestContainerView webView)
+            throws Throwable {
+        final AwContents awContents = webView.getAwContents();
+        runTestOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                long firstTapTime = SystemClock.uptimeMillis();
+                float x = (float)(webView.getRight() - webView.getLeft()) / 2;
+                float y = (float)(webView.getBottom() - webView.getTop()) / 2;
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        firstTapTime, firstTapTime, MotionEvent.ACTION_DOWN,
+                        x, y, 0));
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        firstTapTime, firstTapTime, MotionEvent.ACTION_UP,
+                        x, y, 0));
+                long secondTapTime = firstTapTime + 200;
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        secondTapTime, secondTapTime, MotionEvent.ACTION_DOWN,
+                        x, y, 0));
+                awContents.onTouchEvent(MotionEvent.obtain(
+                        secondTapTime, secondTapTime, MotionEvent.ACTION_UP,
+                        x, y, 0));
+            }
+        });
     }
 }

@@ -81,7 +81,9 @@ bool BackgroundModeManager::BackgroundModeData::GetAcceleratorForCommandId(
   return false;
 }
 
-void BackgroundModeManager::BackgroundModeData::ExecuteCommand(int item) {
+void BackgroundModeManager::BackgroundModeData::ExecuteCommand(
+    int item,
+    int event_flags) {
   switch (item) {
     case IDC_MinimumLabelValue:
       // Do nothing. This is just a label.
@@ -96,9 +98,11 @@ void BackgroundModeManager::BackgroundModeData::ExecuteCommand(int item) {
 }
 
 Browser* BackgroundModeManager::BackgroundModeData::GetBrowserWindow() {
+  chrome::HostDesktopType host_desktop_type = chrome::GetActiveDesktop();
   Browser* browser = chrome::FindLastActiveWithProfile(profile_,
-      chrome::GetActiveDesktop());
-  return browser ? browser : chrome::OpenEmptyWindow(profile_);
+                                                       host_desktop_type);
+  return browser ? browser : chrome::OpenEmptyWindow(profile_,
+                                                     host_desktop_type);
 }
 
 int BackgroundModeManager::BackgroundModeData::GetBackgroundAppCount() const {
@@ -485,7 +489,7 @@ bool BackgroundModeManager::GetAcceleratorForCommandId(
   return false;
 }
 
-void BackgroundModeManager::ExecuteCommand(int command_id) {
+void BackgroundModeManager::ExecuteCommand(int command_id, int event_flags) {
   // When a browser window is necessary, we use the first profile. The windows
   // opened for these commands are not profile-specific, so any profile would
   // work and the first is convenient.
@@ -499,7 +503,7 @@ void BackgroundModeManager::ExecuteCommand(int command_id) {
       break;
     case IDC_EXIT:
       content::RecordAction(UserMetricsAction("Exit"));
-      browser::AttemptExit();
+      chrome::AttemptExit();
       break;
     case IDC_STATUS_TRAY_KEEP_CHROME_RUNNING_IN_BACKGROUND: {
       // Background mode must already be enabled (as otherwise this menu would
@@ -515,7 +519,7 @@ void BackgroundModeManager::ExecuteCommand(int command_id) {
       break;
     }
     default:
-      bmd->ExecuteCommand(command_id);
+      bmd->ExecuteCommand(command_id, event_flags);
       break;
   }
 }

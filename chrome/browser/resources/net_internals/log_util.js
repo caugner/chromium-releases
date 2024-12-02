@@ -71,7 +71,7 @@ log_util = (function() {
         getTabData_(),
         numericDate,
         privacyStripping);
-    return JSON.stringify(logDump, null, ' ');
+    return JSON.stringify(logDump);
   }
 
   /**
@@ -88,7 +88,7 @@ log_util = (function() {
         getTabData_(),
         timeutil.getCurrentTime(),
         privacyStripping);
-    callback(JSON.stringify(logDump, null, ' '));
+    callback(JSON.stringify(logDump));
   }
 
   /**
@@ -256,6 +256,8 @@ log_util = (function() {
           showView = true;
         }
       } catch (error) {
+        errorString += 'Caught error while calling onLoadLogFinish: ' +
+                       error + '\n\n';
       }
       categoryTabSwitcher.showTabHandleNode(tabIds[i], showView);
     }

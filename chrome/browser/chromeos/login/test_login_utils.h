@@ -27,9 +27,8 @@ class TestLoginUtils : public LoginUtils {
 
   virtual void DoBrowserLaunch(Profile* profile,
                                LoginDisplayHost* login_host) OVERRIDE {}
-  virtual void PrepareProfile(const std::string& username,
+  virtual void PrepareProfile(const UserCredentials& credentials,
                               const std::string& display_email,
-                              const std::string& password,
                               bool using_oauth,
                               bool has_cookies,
                               Delegate* delegate) OVERRIDE;
@@ -46,11 +45,6 @@ class TestLoginUtils : public LoginUtils {
   virtual void PrewarmAuthentication() OVERRIDE {}
 
   virtual void RestoreAuthenticationSession(Profile* profile) OVERRIDE {}
-
-  virtual std::string GetOffTheRecordCommandLine(
-      const GURL& start_url,
-      const CommandLine& base_command_line,
-      CommandLine* command_line) OVERRIDE;
 
   virtual void InitRlzDelayed(Profile* user_profile) OVERRIDE;
 

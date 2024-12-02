@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
+
 /**
  * Map of all currently open app window. The key is an app id.
  */
@@ -33,7 +35,7 @@ function getContentWindows() {
  *
  * @param {string} url App window content url.
  * @param {string} id App window id.
- * @param {object|function} options Options object or a function to create it.
+ * @param {Object|function} options Options object or a function to create it.
  * @constructor
  */
 function AppWindowWrapper(url, id, options) {
@@ -98,8 +100,7 @@ AppWindowWrapper.prototype.launch = function(appState) {
  * |window.appState|.
  *
  * @param {string} url App window content url.
- * @param {object|function} options Options object or a function to return it.
- *
+ * @param {Object|function} options Options object or a function to return it.
  * @constructor
  */
 function SingletonAppWindowWrapper(url, options) {
@@ -179,8 +180,8 @@ function createFileManagerOptions() {
 }
 
 /**
- * @param {Object} opt_appState App state.
- * @param {number} opt_id Window id.
+ * @param {Object=} opt_appState App state.
+ * @param {number=} opt_id Window id.
  */
 function launchFileManager(opt_appState, opt_id) {
   var id = opt_id || nextFileManagerWindowID;
@@ -215,7 +216,7 @@ function reopenFileManagers() {
 
 /**
  * @param {string} action Task id.
- * @param {object} details Details object.
+ * @param {Object} details Details object.
  */
 function executeFileBrowserTask(action, details) {
   var urls = details.entries.map(function(e) { return e.toURL() });

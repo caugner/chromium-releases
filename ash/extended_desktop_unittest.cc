@@ -252,7 +252,7 @@ TEST_F(ExtendedDesktopTest, TestCursor) {
 }
 
 TEST_F(ExtendedDesktopTest, TestCursorLocation) {
-  UpdateDisplay("0+0-1000x600,1001+0-600x400");
+  UpdateDisplay("1000x600,600x400");
   Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
   aura::test::WindowTestApi root_window0_test_api(root_windows[0]);
   aura::test::WindowTestApi root_window1_test_api(root_windows[1]);
@@ -696,7 +696,7 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   views::Widget* lock_widget = CreateTestWidget(
       Shell::GetScreen()->GetPrimaryDisplay().bounds());
   views::Textfield* textfield = new views::Textfield;
-  lock_widget->SetContentsView(textfield);
+  lock_widget->client_view()->AddChildView(textfield);
 
   ash::Shell::GetContainer(
       Shell::GetPrimaryRootWindow(),

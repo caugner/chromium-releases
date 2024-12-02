@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/drive/resource_entry_conversion.h"
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/drive_test_util.h"
@@ -16,7 +16,7 @@ namespace drive {
 
 TEST(ResourceEntryConversionTest, ConvertResourceEntryToDriveEntryProto_File) {
   scoped_ptr<base::Value> value =
-      google_apis::test_util::LoadJSONFile("gdata/file_entry.json");
+      google_apis::test_util::LoadJSONFile("chromeos/gdata/file_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> resource_entry(
@@ -97,7 +97,8 @@ TEST(ResourceEntryConversionTest, ConvertResourceEntryToDriveEntryProto_File) {
 TEST(ResourceEntryConversionTest,
      ConvertResourceEntryToDriveEntryProto_HostedDocument) {
   scoped_ptr<base::Value> value =
-      google_apis::test_util::LoadJSONFile("gdata/hosted_document_entry.json");
+      google_apis::test_util::LoadJSONFile(
+          "chromeos/gdata/hosted_document_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> resource_entry(
@@ -181,7 +182,8 @@ TEST(ResourceEntryConversionTest,
 TEST(ResourceEntryConversionTest,
      ConvertResourceEntryToDriveEntryProto_Directory) {
   scoped_ptr<base::Value> value =
-      google_apis::test_util::LoadJSONFile("gdata/directory_entry.json");
+      google_apis::test_util::LoadJSONFile(
+          "chromeos/gdata/directory_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> resource_entry(
@@ -259,7 +261,7 @@ TEST(ResourceEntryConversionTest,
      ConvertResourceEntryToDriveEntryProto_DeletedHostedDocument) {
   scoped_ptr<base::Value> value =
       google_apis::test_util::LoadJSONFile(
-          "gdata/deleted_hosted_document_entry.json");
+          "chromeos/gdata/deleted_hosted_document_entry.json");
   ASSERT_TRUE(value.get());
 
   scoped_ptr<google_apis::ResourceEntry> resource_entry(

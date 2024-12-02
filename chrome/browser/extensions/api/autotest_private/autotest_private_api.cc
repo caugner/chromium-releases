@@ -19,31 +19,38 @@ namespace {
 
 std::string GetUserLoginStatus() {
 #if defined(OS_CHROMEOS)
-  typedef struct {
-    ash::user::LoginStatus login_status;
-    std::string status_string;
-  } StatusString;
-  const StatusString kStatusStrings[] = {
-      { ash::user::LOGGED_IN_LOCKED, "locked" },
-      { ash::user::LOGGED_IN_USER, "user" },
-      { ash::user::LOGGED_IN_OWNER, "owner" },
-      { ash::user::LOGGED_IN_GUEST, "guest" },
-      { ash::user::LOGGED_IN_KIOSK, "kiosk" },
-      { ash::user::LOGGED_IN_PUBLIC, "public" },
-      { ash::user::LOGGED_IN_NONE, "none" },
-  };
   const ash::user::LoginStatus status =
       ash::Shell::GetInstance()->system_tray_delegate() ?
       ash::Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus() :
       ash::user::LOGGED_IN_NONE;
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kStatusStrings); ++i) {
-    if (kStatusStrings[i].login_status == status)
-      return kStatusStrings[i].status_string;
+  switch (status) {
+    case ash::user::LOGGED_IN_LOCKED:
+      return std::string("locked");
+    case ash::user::LOGGED_IN_USER:
+      return std::string("user");
+    case ash::user::LOGGED_IN_OWNER:
+      return std::string("owner");
+    case ash::user::LOGGED_IN_GUEST:
+      return std::string("guest");
+    case ash::user::LOGGED_IN_RETAIL_MODE:
+      return std::string("retail");
+    case ash::user::LOGGED_IN_PUBLIC:
+      return std::string("public");
+    case ash::user::LOGGED_IN_LOCALLY_MANAGED:
+      return std::string("local");
+    case ash::user::LOGGED_IN_KIOSK_APP:
+      return std::string("kiosk");
+    case ash::user::LOGGED_IN_NONE:
+      return std::string("none");
+    // Intentionally leaves out default so that compiler catches missing
+    // branches when new login status is added.
   }
+
+  NOTREACHED();
 #endif
 
-  return "none";
+  return std::string("none");
 }
 
 }  // namespace
@@ -51,14 +58,14 @@ std::string GetUserLoginStatus() {
 bool AutotestPrivateLogoutFunction::RunImpl() {
   DVLOG(1) << "AutotestPrivateLogoutFunction";
   if (!AutotestPrivateAPIFactory::GetForProfile(profile())->test_mode())
-    browser::AttemptUserExit();
+    chrome::AttemptUserExit();
   return true;
 }
 
 bool AutotestPrivateRestartFunction::RunImpl() {
   DVLOG(1) << "AutotestPrivateRestartFunction";
   if (!AutotestPrivateAPIFactory::GetForProfile(profile())->test_mode())
-    browser::AttemptRestart();
+    chrome::AttemptRestart();
   return true;
 }
 
@@ -72,12 +79,12 @@ bool AutotestPrivateShutdownFunction::RunImpl() {
 #if defined(OS_CHROME)
   if (params->force) {
     if (!AutotestPrivateAPIFactory::GetForProfile(profile())->test_mode())
-      browser::ExitCleanly();
+      chrome::ExitCleanly();
     return true;
   }
 #endif
   if (!AutotestPrivateAPIFactory::GetForProfile(profile())->test_mode())
-    browser::AttemptExit();
+    chrome::AttemptExit();
   return true;
 }
 

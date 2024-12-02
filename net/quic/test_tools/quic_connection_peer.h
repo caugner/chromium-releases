@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "net/quic/quic_protocol.h"
+#include "net/quic/quic_stats.h"
 
 namespace net {
 
@@ -48,6 +49,23 @@ class QuicConnectionPeer {
   static size_t GetRetransmissionCount(
       QuicConnection* connection,
       QuicPacketSequenceNumber sequence_number);
+
+  static QuicPacketEntropyHash GetSentEntropyHash(
+      QuicConnection* connection,
+      QuicPacketSequenceNumber sequence_number);
+
+  static bool IsValidEntropy(QuicConnection* connection,
+                             QuicPacketSequenceNumber largest_observed,
+                             const SequenceNumberSet& missing_packets,
+                             QuicPacketEntropyHash entropy_hash);
+
+  static QuicPacketEntropyHash ReceivedEntropyHash(
+      QuicConnection* connection,
+      QuicPacketSequenceNumber sequence_number);
+
+  static bool IsServer(QuicConnection* connection);
+
+  static void SetIsServer(QuicConnection* connection, bool is_server);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

@@ -11,8 +11,6 @@
 #include "base/message_pump_aurax11.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "ui/aura/client/cursor_client.h"
-#include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/user_action_client.h"
 #include "ui/aura/focus_manager.h"
@@ -21,16 +19,20 @@
 #include "ui/base/events/event_utils.h"
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/insets.h"
+#include "ui/linux_ui/linux_ui.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/corewm/compound_event_filter.h"
 #include "ui/views/corewm/corewm_switches.h"
+#include "ui/views/corewm/cursor_manager.h"
 #include "ui/views/corewm/focus_controller.h"
 #include "ui/views/ime/input_method.h"
 #include "ui/views/widget/desktop_aura/desktop_activation_client.h"
-#include "ui/views/widget/desktop_aura/desktop_cursor_client.h"
+#include "ui/views/widget/desktop_aura/desktop_capture_client.h"
 #include "ui/views/widget/desktop_aura/desktop_dispatcher_client.h"
 #include "ui/views/widget/desktop_aura/desktop_focus_rules.h"
 #include "ui/views/widget/desktop_aura/desktop_layout_manager.h"
+#include "ui/views/widget/desktop_aura/desktop_native_cursor_manager.h"
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #include "ui/views/widget/desktop_aura/desktop_screen_position_client.h"
 #include "ui/views/widget/desktop_aura/x11_desktop_handler.h"
@@ -102,6 +104,13 @@ DesktopRootWindowHostLinux::~DesktopRootWindowHostLinux() {
 
 // static
 ui::NativeTheme* DesktopRootWindowHost::GetNativeTheme(aura::Window* window) {
+  const ui::LinuxUI* linux_ui = ui::LinuxUI::instance();
+  if (linux_ui) {
+    ui::NativeTheme* native_theme = linux_ui->GetNativeTheme();
+    if (native_theme)
+      return native_theme;
+  }
+
   return ui::NativeTheme::instance();
 }
 
@@ -145,8 +154,6 @@ void DesktopRootWindowHostLinux::InitX11Window(
 
   if (base::MessagePumpForUI::HasXInput2())
     ui::TouchFactory::GetInstance()->SetupXI2ForXWindow(xwindow_);
-
-  invisible_cursor_ = ui::CreateInvisibleCursor();
 
   // TODO(erg): We currently only request window deletion events. We also
   // should listen for activation events and anything else that GTK+ listens
@@ -214,7 +221,7 @@ aura::RootWindow* DesktopRootWindowHostLinux::InitRootWindow(
 
   native_widget_delegate_->OnNativeWidgetCreated();
 
-  capture_client_.reset(new aura::client::DefaultCaptureClient(root_window_));
+  capture_client_.reset(new views::DesktopCaptureClient(root_window_));
   aura::client::SetCaptureClient(root_window_, capture_client_.get());
 
   // Ensure that the X11DesktopHandler exists so that it dispatches activation
@@ -238,7 +245,10 @@ aura::RootWindow* DesktopRootWindowHostLinux::InitRootWindow(
   aura::client::SetDispatcherClient(root_window_,
                                     dispatcher_client_.get());
 
-  cursor_client_.reset(new DesktopCursorClient(root_window_));
+  cursor_client_.reset(
+      new views::corewm::CursorManager(
+          scoped_ptr<corewm::NativeCursorManager>(
+              new views::DesktopNativeCursorManager(root_window_))));
   aura::client::SetCursorClient(root_window_,
                                 cursor_client_.get());
 
@@ -317,6 +327,9 @@ aura::RootWindow* DesktopRootWindowHostLinux::Init(
 
   InitX11Window(sanitized_params);
   return InitRootWindow(sanitized_params);
+}
+
+void DesktopRootWindowHostLinux::InitFocus(aura::Window* window) {
 }
 
 void DesktopRootWindowHostLinux::Close() {
@@ -451,10 +464,18 @@ gfx::Rect DesktopRootWindowHostLinux::GetWorkAreaBoundsInScreen() const {
     return gfx::Rect(value[0], value[1], value[2], value[3]);
   }
 
-  // TODO(erg): As a fallback, we should return the bounds for the current
-  // monitor. However, that's pretty difficult and requires futzing with XRR.
-  NOTIMPLEMENTED();
-  return gfx::Rect();
+  // Fetch the geometry of the root window.
+  Window root;
+  int x, y;
+  unsigned int width, height;
+  unsigned int border_width, depth;
+  if (!XGetGeometry(xdisplay_, x_root_window_, &root, &x, &y,
+                    &width, &height, &border_width, &depth)) {
+    NOTIMPLEMENTED();
+    return gfx::Rect(0, 0, 10, 10);
+  }
+
+  return gfx::Rect(x, y, width, height);
 }
 
 void DesktopRootWindowHostLinux::SetShape(gfx::NativeRegion native_region) {
@@ -542,11 +563,16 @@ void DesktopRootWindowHostLinux::ClearNativeFocus() {
 }
 
 Widget::MoveLoopResult DesktopRootWindowHostLinux::RunMoveLoop(
-    const gfx::Vector2d& drag_offset) {
+    const gfx::Vector2d& drag_offset,
+    Widget::MoveLoopSource source) {
   SetCapture();
 
-  if (x11_window_move_client_->RunMoveLoop(content_window_, drag_offset) ==
-      aura::client::MOVE_SUCCESSFUL)
+  aura::client::WindowMoveSource window_move_source =
+      source == Widget::MOVE_LOOP_SOURCE_MOUSE ?
+      aura::client::WINDOW_MOVE_SOURCE_MOUSE :
+      aura::client::WINDOW_MOVE_SOURCE_TOUCH;
+  if (x11_window_move_client_->RunMoveLoop(content_window_, drag_offset,
+      window_move_source) == aura::client::MOVE_SUCCESSFUL)
     return Widget::MOVE_LOOP_SUCCESSFUL;
 
   return Widget::MOVE_LOOP_CANCELED;
@@ -589,23 +615,6 @@ void DesktopRootWindowHostLinux::SetOpacity(unsigned char opacity) {
 
 void DesktopRootWindowHostLinux::SetWindowIcons(
     const gfx::ImageSkia& window_icon, const gfx::ImageSkia& app_icon) {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-}
-
-void DesktopRootWindowHostLinux::SetAccessibleName(const string16& name) {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-}
-
-void DesktopRootWindowHostLinux::SetAccessibleRole(
-    ui::AccessibilityTypes::Role role) {
-  // TODO(erg):
-  NOTIMPLEMENTED();
-}
-
-void DesktopRootWindowHostLinux::SetAccessibleState(
-    ui::AccessibilityTypes::State state) {
   // TODO(erg):
   NOTIMPLEMENTED();
 }
@@ -687,6 +696,10 @@ void DesktopRootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
   unsigned value_mask = 0;
 
   if (size_changed) {
+    // X11 will send an XError at our process if have a 0 sized window.
+    DCHECK_GT(bounds.width(), 0);
+    DCHECK_GT(bounds.height(), 0);
+
     changes.width = bounds.width();
     changes.height = bounds.height();
     value_mask |= CWHeight | CWWidth;
@@ -713,6 +726,13 @@ void DesktopRootWindowHostLinux::SetBounds(const gfx::Rect& bounds) {
     root_window_host_delegate_->OnHostResized(bounds.size());
   else
     root_window_host_delegate_->OnHostPaint();
+}
+
+gfx::Insets DesktopRootWindowHostLinux::GetInsets() const {
+  return gfx::Insets();
+}
+
+void DesktopRootWindowHostLinux::SetInsets(const gfx::Insets& insets) {
 }
 
 gfx::Point DesktopRootWindowHostLinux::GetLocationOnNativeScreen() const {
@@ -786,7 +806,8 @@ void DesktopRootWindowHostLinux::UnConfineCursor() {
 }
 
 void DesktopRootWindowHostLinux::OnCursorVisibilityChanged(bool show) {
-  NOTIMPLEMENTED();
+  // TODO(erg): Conditional on us enabling touch on desktop linux builds, do
+  // the same tap-to-click disabling here that chromeos does.
 }
 
 void DesktopRootWindowHostLinux::MoveCursorTo(const gfx::Point& location) {
@@ -915,7 +936,14 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
       // It's possible that the X window may be resized by some other means than
       // from within aura (e.g. the X window manager can change the size). Make
       // sure the root window size is maintained properly.
-      gfx::Rect bounds(xev->xconfigure.x, xev->xconfigure.y,
+      int translated_x = xev->xconfigure.x;
+      int translated_y = xev->xconfigure.y;
+      if (!xev->xconfigure.send_event && !xev->xconfigure.override_redirect) {
+        Window unused;
+        XTranslateCoordinates(xdisplay_, xwindow_, x_root_window_,
+            0, 0, &translated_x, &translated_y, &unused);
+      }
+      gfx::Rect bounds(translated_x, translated_y,
                        xev->xconfigure.width, xev->xconfigure.height);
       bool size_changed = bounds_.size() != bounds.size();
       bool origin_changed = bounds_.origin() != bounds.origin();
@@ -1082,7 +1110,20 @@ bool DesktopRootWindowHostLinux::Dispatch(const base::NativeEvent& event) {
         // Now that we have different window properties, we may need to
         // relayout the window. (The windows code doesn't need this because
         // their window change is synchronous.)
-        native_widget_delegate_->AsWidget()->GetRootView()->Layout();
+        //
+        // TODO(erg): While this does work, there's a quick flash showing the
+        // tabstrip/toolbar/etc. when going into fullscreen mode before hiding
+        // those parts of the UI because we receive the sizing event from the
+        // window manager before we receive the event that changes the
+        // fullscreen state. Unsure what to do about that.
+        Widget* widget = native_widget_delegate_->AsWidget();
+        NonClientView* non_client_view = widget->non_client_view();
+        // non_client_view may be NULL, especially during creation.
+        if (non_client_view) {
+          non_client_view->client_view()->InvalidateLayout();
+          non_client_view->InvalidateLayout();
+        }
+        widget->GetRootView()->Layout();
       }
     }
   }

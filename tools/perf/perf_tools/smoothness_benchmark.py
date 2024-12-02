@@ -2,10 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 from perf_tools import smoothness_measurement
-from telemetry import multi_page_benchmark
-from telemetry import util
+from telemetry.core import util
+from telemetry.page import page_benchmark
 
-class DidNotScrollException(multi_page_benchmark.MeasurementFailure):
+class DidNotScrollException(page_benchmark.MeasurementFailure):
   def __init__(self):
     super(DidNotScrollException, self).__init__('Page did not scroll')
 
@@ -142,7 +142,7 @@ def CalcImageDecodingResults(rendering_stats_deltas, results):
               totalDeferredImageDecodeTimeInSeconds,
               data_type='unimportant')
 
-class SmoothnessBenchmark(multi_page_benchmark.MultiPageBenchmark):
+class SmoothnessBenchmark(page_benchmark.PageBenchmark):
   def __init__(self):
     super(SmoothnessBenchmark, self).__init__('smoothness')
     self.force_enable_threaded_compositing = False
@@ -164,6 +164,8 @@ class SmoothnessBenchmark(multi_page_benchmark.MultiPageBenchmark):
     return hasattr(page, 'smoothness')
 
   def WillRunAction(self, page, tab, action):
+    if tab.browser.platform.IsRawDisplayFrameRateSupported():
+      tab.browser.platform.StartRawDisplayFrameRateMeasurement()
     self._measurement = smoothness_measurement.SmoothnessMeasurement(tab)
     if action.CanBeBound():
       self._measurement.BindToAction(action)
@@ -171,6 +173,8 @@ class SmoothnessBenchmark(multi_page_benchmark.MultiPageBenchmark):
       self._measurement.Start()
 
   def DidRunAction(self, page, tab, action):
+    if tab.browser.platform.IsRawDisplayFrameRateSupported():
+      tab.browser.platform.StopRawDisplayFrameRateMeasurement()
     if not action.CanBeBound():
       self._measurement.Stop()
 
@@ -200,3 +204,7 @@ class SmoothnessBenchmark(multi_page_benchmark.MultiPageBenchmark):
     if self.options.report_all_results:
       for k, v in rendering_stats_deltas.iteritems():
         results.Add(k, '', v)
+
+    if tab.browser.platform.IsRawDisplayFrameRateSupported():
+      for r in tab.browser.platform.GetRawDisplayFrameRateMeasurements():
+        results.Add(r.name, r.unit, r.value)

@@ -29,6 +29,11 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/managed_mode/managed_user_service.h"
+#include "chrome/browser/managed_mode/managed_user_service_factory.h"
+#endif
+
 using content::BrowserThread;
 
 namespace {
@@ -162,6 +167,20 @@ const AvatarMenuModel::Item& AvatarMenuModel::GetItemAt(size_t index) {
   return *items_[index];
 }
 
+bool AvatarMenuModel::ShouldShowAddNewProfileLink() const {
+#if defined(ENABLE_MANAGED_USERS)
+  Profile* active_profile = NULL;
+  if (!browser_)
+    active_profile = ProfileManager::GetLastUsedProfile();
+  else
+    active_profile = browser_->profile();
+  ManagedUserService* service = ManagedUserServiceFactory::GetForProfile(
+      active_profile);
+  return !service->ProfileIsManaged();
+#endif
+  return true;
+}
+
 void AvatarMenuModel::Observe(int type,
                               const content::NotificationSource& source,
                               const content::NotificationDetails& details) {
@@ -173,6 +192,11 @@ void AvatarMenuModel::Observe(int type,
 
 // static
 bool AvatarMenuModel::ShouldShowAvatarMenu() {
+#if defined(OS_CHROMEOS)
+  // On Chrome OS we use different UI for multi-profiles.
+  return false;
+#endif
+
   if (base::FieldTrialList::FindFullName(kShowProfileSwitcherFieldTrialName) ==
       kAlwaysShowSwitcherGroupName) {
     // We should only be in this group when multi-profiles is enabled.

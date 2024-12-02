@@ -34,6 +34,10 @@ class GLContextEGL : public GLContext {
   virtual void SetSwapInterval(int interval) OVERRIDE;
   virtual std::string GetExtensions() OVERRIDE;
   virtual bool WasAllocatedUsingRobustnessExtension() OVERRIDE;
+  virtual bool GetTotalGpuMemory(size_t* bytes) OVERRIDE;
+  virtual void SetRecreateSurfaceOnMakeCurrent() OVERRIDE;
+
+  bool RecreateSurfaceIfNeeded(GLSurface* surface);
 
  protected:
   virtual ~GLContextEGL();
@@ -42,6 +46,7 @@ class GLContextEGL : public GLContext {
   EGLContext context_;
   EGLDisplay display_;
   EGLConfig config_;
+  bool recreate_surface_on_makecurrent_;
 
   DISALLOW_COPY_AND_ASSIGN(GLContextEGL);
 };

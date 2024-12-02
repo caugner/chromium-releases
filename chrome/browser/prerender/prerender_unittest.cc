@@ -312,7 +312,7 @@ class PrerenderTest : public testing::Test {
                  concurrency);
   }
 
-  bool IsEmptyPrerenderLinkManager() {
+  bool IsEmptyPrerenderLinkManager() const {
     return prerender_link_manager_->IsEmpty();
   }
 

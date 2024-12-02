@@ -7,6 +7,7 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -22,8 +23,9 @@
 #include "remoting/host/chromoting_messages.h"
 #include "remoting/host/desktop_session_win.h"
 #include "remoting/host/host_exit_codes.h"
+#include "remoting/host/host_main.h"
 #include "remoting/host/ipc_constants.h"
-#include "remoting/host/win/host_service.h"
+#include "remoting/host/screen_resolution.h"
 #include "remoting/host/win/launch_process_with_token.h"
 #include "remoting/host/win/unprivileged_process_delegate.h"
 #include "remoting/host/win/worker_process_launcher.h"
@@ -33,7 +35,11 @@ using base::TimeDelta;
 
 namespace remoting {
 
-class WtsConsoleMonitor;
+class WtsTerminalMonitor;
+
+// The command line parameters that should be copied from the service's command
+// line to the host process.
+const char* kCopiedSwitchNames[] = { switches::kV, switches::kVModule };
 
 class DaemonProcessWin : public DaemonProcess {
  public:
@@ -59,7 +65,11 @@ class DaemonProcessWin : public DaemonProcess {
 
   // DaemonProcess implementation.
   virtual scoped_ptr<DesktopSession> DoCreateDesktopSession(
-      int terminal_id) OVERRIDE;
+      int terminal_id,
+      const ScreenResolution& resolution,
+      bool virtual_terminal) OVERRIDE;
+  virtual void DoCrashNetworkProcess(
+      const tracked_objects::Location& location) OVERRIDE;
   virtual void LaunchNetworkProcess() OVERRIDE;
 
  private:
@@ -136,12 +146,25 @@ void DaemonProcessWin::DoStop() {
 }
 
 scoped_ptr<DesktopSession> DaemonProcessWin::DoCreateDesktopSession(
-    int terminal_id) {
+    int terminal_id,
+    const ScreenResolution& resolution,
+    bool virtual_terminal) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  return scoped_ptr<DesktopSession>(new DesktopSessionWin(
-      caller_task_runner(), io_task_runner(), this, terminal_id,
-      HostService::GetInstance()));
+  if (virtual_terminal) {
+    return DesktopSessionWin::CreateForVirtualTerminal(
+        caller_task_runner(), io_task_runner(), this, terminal_id, resolution);
+  } else {
+    return DesktopSessionWin::CreateForConsole(
+        caller_task_runner(), io_task_runner(), this, terminal_id, resolution);
+  }
+}
+
+void DaemonProcessWin::DoCrashNetworkProcess(
+    const tracked_objects::Location& location) {
+  DCHECK(caller_task_runner()->BelongsToCurrentThread());
+
+  network_launcher_->Crash(location);
 }
 
 void DaemonProcessWin::LaunchNetworkProcess() {
@@ -155,9 +178,15 @@ void DaemonProcessWin::LaunchNetworkProcess() {
     return;
   }
 
+  scoped_ptr<CommandLine> target(new CommandLine(host_binary));
+  target->AppendSwitchASCII(kProcessTypeSwitchName, kProcessTypeHost);
+  target->CopySwitchesFrom(*CommandLine::ForCurrentProcess(),
+                           kCopiedSwitchNames,
+                           arraysize(kCopiedSwitchNames));
+
   scoped_ptr<UnprivilegedProcessDelegate> delegate(
       new UnprivilegedProcessDelegate(caller_task_runner(), io_task_runner(),
-                                      host_binary));
+                                      target.Pass()));
   network_launcher_.reset(new WorkerProcessLauncher(
       caller_task_runner(), delegate.Pass(), this));
 }

@@ -13,6 +13,12 @@
 #include "media/base/yuv_convert.h"
 #include "third_party/skia/include/core/SkRegion.h"
 
+#if defined(OS_POSIX)
+#include <pwd.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif  // defined(OS_POSIX)
+
 using media::VideoFrame;
 
 namespace remoting {
@@ -25,9 +31,9 @@ std::string GetTimestampString() {
   base::Time t = base::Time::NowFromSystemTime();
   base::Time::Exploded tex;
   t.LocalExplode(&tex);
-  return StringPrintf("%02d%02d/%02d%02d%02d:",
-                      tex.month, tex.day_of_month,
-                      tex.hour, tex.minute, tex.second);
+  return base::StringPrintf("%02d%02d/%02d%02d%02d:",
+                            tex.month, tex.day_of_month,
+                            tex.hour, tex.minute, tex.second);
 }
 
 int CalculateRGBOffset(int x, int y, int stride) {
@@ -309,6 +315,23 @@ bool StringIsUtf8(const char* data, size_t length) {
   }
 
   return true;
+}
+
+std::string GetUsername() {
+#if defined(OS_POSIX)
+  long buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+  if (buf_size <= 0)
+    return std::string();
+  scoped_array<char> buf(new char[buf_size]);
+  struct passwd passwd;
+  struct passwd* passwd_result = NULL;
+  getpwuid_r(getuid(), &passwd, buf.get(), buf_size, &passwd_result);
+  if (!passwd_result)
+    return std::string();
+  return std::string(passwd_result->pw_name);
+#else  // !defined(OS_POSIX)
+  return std::string();
+#endif  // defined(OS_POSIX)
 }
 
 }  // namespace remoting

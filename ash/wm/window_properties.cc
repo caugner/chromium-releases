@@ -20,15 +20,17 @@ namespace internal {
 DEFINE_OWNED_WINDOW_PROPERTY_KEY(ash::internal::AlwaysOnTopController,
                                  kAlwaysOnTopControllerKey,
                                  NULL);
+DEFINE_WINDOW_PROPERTY_KEY(bool, kContinueDragAfterReparent, false);
+DEFINE_WINDOW_PROPERTY_KEY(bool, kCyclingThroughWorkspacesKey, false);
 DEFINE_WINDOW_PROPERTY_KEY(bool, kIgnoreSoloWindowFramePainterPolicy, false);
 DEFINE_WINDOW_PROPERTY_KEY(bool, kIgnoredByShelfKey, false);
 DEFINE_WINDOW_PROPERTY_KEY(bool, kImmersiveModeKey, false);
+DEFINE_WINDOW_PROPERTY_KEY(bool, kPanelAttachedKey, true);
 DEFINE_WINDOW_PROPERTY_KEY(
     ui::WindowShowState, kRestoreShowStateKey, ui::SHOW_STATE_DEFAULT);
 DEFINE_WINDOW_PROPERTY_KEY(RootWindowController*,
                            kRootWindowControllerKey, NULL);
-DEFINE_WINDOW_PROPERTY_KEY(
-    ash::FramePainter*, kSoloWindowFramePainterKey, NULL);
+DEFINE_WINDOW_PROPERTY_KEY(bool, kSoloWindowHeaderKey, false);
 DEFINE_WINDOW_PROPERTY_KEY(bool, kStayInSameRootWindowKey, false);
 DEFINE_WINDOW_PROPERTY_KEY(bool, kUsesScreenCoordinatesKey, false);
 DEFINE_WINDOW_PROPERTY_KEY(bool, kUserChangedWindowPositionOrSizeKey, false);

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,24 +6,25 @@
 
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
+#include "base/metrics/histogram.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "ui/aura/window.h"
 #include "ui/base/events/event.h"
 #include "ui/base/events/event_utils.h"
+#include "ui/base/gestures/gesture_configuration.h"
 #include "ui/views/controls/glow_hover_controller.h"
 
 namespace {
 const int64 kActivationDelayMS = 200;
-const int64 kCancelImmersiveRevelDelayMS = 200;
 }
 
 // static
@@ -59,14 +60,13 @@ TabScrubber::TabScrubber()
       swipe_direction_(LEFT),
       highlighted_tab_(-1),
       activate_timer_(true, false),
-      activation_delay_(base::TimeDelta::FromMilliseconds(kActivationDelayMS)),
-      should_cancel_immersive_reveal_(false),
-      cancel_immersive_reveal_timer_(true, false),
+      activation_delay_(kActivationDelayMS),
+      use_default_activation_delay_(true),
       weak_ptr_factory_(this) {
   ash::Shell::GetInstance()->AddPreTargetHandler(this);
   registrar_.Add(
       this,
-      chrome::NOTIFICATION_BROWSER_CLOSING,
+      chrome::NOTIFICATION_BROWSER_CLOSED,
       content::NotificationService::AllSources());
 }
 
@@ -80,7 +80,7 @@ void TabScrubber::OnScrollEvent(ui::ScrollEvent* event) {
   if (event->type() == ui::ET_SCROLL_FLING_CANCEL ||
       event->type() == ui::ET_SCROLL_FLING_START) {
     FinishScrub(true);
-    CancelImmersiveReveal();
+    immersive_reveal_lock_.reset();
     return;
   }
 
@@ -126,12 +126,8 @@ void TabScrubber::OnScrollEvent(ui::ScrollEvent* event) {
     swipe_y_ = start_point.y();
     ImmersiveModeController* immersive_controller =
         browser_view->immersive_mode_controller();
-    CancelImmersiveReveal();
-    if (immersive_controller->enabled() &&
-        !immersive_controller->IsRevealed()) {
-      immersive_controller->MaybeStartReveal();
-      should_cancel_immersive_reveal_ = true;
-    }
+    if (immersive_controller->enabled())
+      immersive_reveal_lock_.reset(immersive_controller->GetRevealedLock());
     tab_strip->AddObserver(this);
   } else if (highlighted_tab_ == -1) {
     Direction direction = (x_offset < 0) ? LEFT : RIGHT;
@@ -164,15 +160,24 @@ void TabScrubber::OnScrollEvent(ui::ScrollEvent* event) {
     return;
 
   int new_index = tab_strip->GetModelIndexOfTab(new_tab);
+  if (highlighted_tab_ == -1 &&
+      new_index == browser->tab_strip_model()->active_index())
+    return;
+
   if (new_index != highlighted_tab_) {
     if (activate_timer_.IsRunning()) {
       activate_timer_.Reset();
     } else {
-      activate_timer_.Start(FROM_HERE,
-                            activation_delay_,
-                            base::Bind(&TabScrubber::FinishScrub,
-                                       weak_ptr_factory_.GetWeakPtr(),
-                                       true));
+      int delay = use_default_activation_delay_ ?
+          ui::GestureConfiguration::tab_scrub_activation_delay_in_ms() :
+          activation_delay_;
+      if (delay >= 0) {
+        activate_timer_.Start(FROM_HERE,
+                              base::TimeDelta::FromMilliseconds(delay),
+                              base::Bind(&TabScrubber::FinishScrub,
+                                         weak_ptr_factory_.GetWeakPtr(),
+                                         true));
+      }
     }
     if (highlighted_tab_ != -1) {
       Tab* tab = tab_strip->tab_at(highlighted_tab_);
@@ -195,9 +200,14 @@ void TabScrubber::OnScrollEvent(ui::ScrollEvent* event) {
 void TabScrubber::Observe(int type,
                           const content::NotificationSource& source,
                           const content::NotificationDetails& details) {
-  if (content::Source<Browser>(source).ptr() == browser_)
-    FinishScrub(false);
-  browser_ = NULL;
+  if (content::Source<Browser>(source).ptr() == browser_) {
+    activate_timer_.Stop();
+    swipe_x_ = -1;
+    swipe_y_ = -1;
+    scrubbing_ = false;
+    highlighted_tab_ = -1;
+    browser_ = NULL;
+  }
 }
 
 void TabScrubber::TabStripAddedTabAt(TabStrip* tab_strip, int index) {
@@ -253,7 +263,7 @@ Browser* TabScrubber::GetActiveBrowser() {
 void TabScrubber::FinishScrub(bool activate) {
   activate_timer_.Stop();
 
-  if (browser_) {
+  if (browser_ && browser_->window()) {
     BrowserView* browser_view =
         BrowserView::GetBrowserViewForNativeWindow(
             browser_->window()->GetNativeWindow());
@@ -261,31 +271,16 @@ void TabScrubber::FinishScrub(bool activate) {
     if (activate && highlighted_tab_ != -1) {
       Tab* tab = tab_strip->tab_at(highlighted_tab_);
       tab->hover_controller()->HideImmediately();
+      int distance =
+          std::abs(
+              highlighted_tab_ - browser_->tab_strip_model()->active_index());
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Tabs.ScrubDistance", distance, 0, 20, 20);
       browser_->tab_strip_model()->ActivateTabAt(highlighted_tab_, true);
     }
     tab_strip->RemoveObserver(this);
-    if (!cancel_immersive_reveal_timer_.IsRunning() &&
-        should_cancel_immersive_reveal_) {
-      cancel_immersive_reveal_timer_.Start(
-          FROM_HERE,
-          base::TimeDelta::FromMilliseconds(kCancelImmersiveRevelDelayMS),
-          base:: Bind(&TabScrubber::CancelImmersiveReveal,
-                      weak_ptr_factory_.GetWeakPtr()));
-    }
   }
   swipe_x_ = -1;
   swipe_y_ = -1;
   scrubbing_ = false;
   highlighted_tab_ = -1;
-}
-
-void TabScrubber::CancelImmersiveReveal() {
-  cancel_immersive_reveal_timer_.Stop();
-  if (browser_ && should_cancel_immersive_reveal_) {
-    BrowserView* browser_view =
-        BrowserView::GetBrowserViewForNativeWindow(
-            browser_->window()->GetNativeWindow());
-    browser_view->immersive_mode_controller()->CancelReveal();
-  }
-  should_cancel_immersive_reveal_ = false;
 }

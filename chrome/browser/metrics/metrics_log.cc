@@ -32,6 +32,7 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/chrome_process_type.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/metrics/proto/omnibox_event.pb.h"
@@ -90,8 +91,6 @@ OmniboxEventProto::InputType AsOmniboxEventInputType(
       return OmniboxEventProto::INVALID;
     case AutocompleteInput::UNKNOWN:
       return OmniboxEventProto::UNKNOWN;
-    case AutocompleteInput::REQUESTED_URL:
-      return OmniboxEventProto::REQUESTED_URL;
     case AutocompleteInput::URL:
       return OmniboxEventProto::URL;
     case AutocompleteInput::QUERY:
@@ -140,7 +139,7 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
 }
 
 ProfilerEventProto::TrackedObject::ProcessType AsProtobufProcessType(
-    content::ProcessType process_type) {
+    int process_type) {
   switch (process_type) {
     case content::PROCESS_TYPE_BROWSER:
       return ProfilerEventProto::TrackedObject::BROWSER;
@@ -150,24 +149,24 @@ ProfilerEventProto::TrackedObject::ProcessType AsProtobufProcessType(
       return ProfilerEventProto::TrackedObject::PLUGIN;
     case content::PROCESS_TYPE_WORKER:
       return ProfilerEventProto::TrackedObject::WORKER;
-    case content::PROCESS_TYPE_NACL_LOADER:
-      return ProfilerEventProto::TrackedObject::NACL_LOADER;
     case content::PROCESS_TYPE_UTILITY:
       return ProfilerEventProto::TrackedObject::UTILITY;
-    case content::PROCESS_TYPE_PROFILE_IMPORT:
-      return ProfilerEventProto::TrackedObject::PROFILE_IMPORT;
     case content::PROCESS_TYPE_ZYGOTE:
       return ProfilerEventProto::TrackedObject::ZYGOTE;
     case content::PROCESS_TYPE_SANDBOX_HELPER:
       return ProfilerEventProto::TrackedObject::SANDBOX_HELPER;
-    case content::PROCESS_TYPE_NACL_BROKER:
-      return ProfilerEventProto::TrackedObject::NACL_BROKER;
     case content::PROCESS_TYPE_GPU:
       return ProfilerEventProto::TrackedObject::GPU;
     case content::PROCESS_TYPE_PPAPI_PLUGIN:
       return ProfilerEventProto::TrackedObject::PPAPI_PLUGIN;
     case content::PROCESS_TYPE_PPAPI_BROKER:
       return ProfilerEventProto::TrackedObject::PPAPI_BROKER;
+    case PROCESS_TYPE_PROFILE_IMPORT:
+      return ProfilerEventProto::TrackedObject::PROFILE_IMPORT;
+    case PROCESS_TYPE_NACL_LOADER:
+      return ProfilerEventProto::TrackedObject::NACL_LOADER;
+    case PROCESS_TYPE_NACL_BROKER:
+      return ProfilerEventProto::TrackedObject::NACL_BROKER;
     default:
       NOTREACHED();
       return ProfilerEventProto::TrackedObject::UNKNOWN;
@@ -215,7 +214,7 @@ void WriteFieldTrials(const std::vector<ActiveGroupId>& field_trial_ids,
 }
 
 void WriteProfilerData(const ProcessDataSnapshot& profiler_data,
-                       content::ProcessType process_type,
+                       int process_type,
                        ProfilerEventProto* performance_profile) {
   for (std::vector<tracked_objects::TaskSnapshot>::const_iterator it =
            profiler_data.tasks.begin();
@@ -884,7 +883,7 @@ void MetricsLog::RecordEnvironmentProto(
 
 void MetricsLog::RecordProfilerData(
     const tracked_objects::ProcessDataSnapshot& process_data,
-    content::ProcessType process_type) {
+    int process_type) {
   DCHECK(!locked());
 
   if (tracked_objects::GetTimeSourceType() !=
@@ -910,14 +909,12 @@ void MetricsLog::RecordProfilerData(
 void MetricsLog::WriteAllProfilesMetrics(
     const DictionaryValue& all_profiles_metrics) {
   const std::string profile_prefix(prefs::kProfilePrefix);
-  for (DictionaryValue::key_iterator i = all_profiles_metrics.begin_keys();
-       i != all_profiles_metrics.end_keys(); ++i) {
-    const std::string& key_name = *i;
-    if (key_name.compare(0, profile_prefix.size(), profile_prefix) == 0) {
+  for (DictionaryValue::Iterator i(all_profiles_metrics); !i.IsAtEnd();
+       i.Advance()) {
+    if (i.key().compare(0, profile_prefix.size(), profile_prefix) == 0) {
       const DictionaryValue* profile;
-      if (all_profiles_metrics.GetDictionaryWithoutPathExpansion(key_name,
-                                                                 &profile))
-        WriteProfileMetrics(key_name.substr(profile_prefix.size()), *profile);
+      if (i.value().GetAsDictionary(&profile))
+        WriteProfileMetrics(i.key().substr(profile_prefix.size()), *profile);
     }
   }
 }
@@ -926,46 +923,43 @@ void MetricsLog::WriteProfileMetrics(const std::string& profileidhash,
                                      const DictionaryValue& profile_metrics) {
   OPEN_ELEMENT_FOR_SCOPE("userprofile");
   WriteAttribute("profileidhash", profileidhash);
-  for (DictionaryValue::key_iterator i = profile_metrics.begin_keys();
-       i != profile_metrics.end_keys(); ++i) {
-    const Value* value;
-    if (profile_metrics.GetWithoutPathExpansion(*i, &value)) {
-      DCHECK_NE(*i, "id");
-      switch (value->GetType()) {
-        case Value::TYPE_STRING: {
-          std::string string_value;
-          if (value->GetAsString(&string_value)) {
-            OPEN_ELEMENT_FOR_SCOPE("profileparam");
-            WriteAttribute("name", *i);
-            WriteAttribute("value", string_value);
-          }
-          break;
+  for (DictionaryValue::Iterator i(profile_metrics); !i.IsAtEnd();
+       i.Advance()) {
+    DCHECK_NE(i.key(), "id");
+    switch (i.value().GetType()) {
+      case Value::TYPE_STRING: {
+        std::string string_value;
+        if (i.value().GetAsString(&string_value)) {
+          OPEN_ELEMENT_FOR_SCOPE("profileparam");
+          WriteAttribute("name", i.key());
+          WriteAttribute("value", string_value);
         }
-
-        case Value::TYPE_BOOLEAN: {
-          bool bool_value;
-          if (value->GetAsBoolean(&bool_value)) {
-            OPEN_ELEMENT_FOR_SCOPE("profileparam");
-            WriteAttribute("name", *i);
-            WriteIntAttribute("value", bool_value ? 1 : 0);
-          }
-          break;
-        }
-
-        case Value::TYPE_INTEGER: {
-          int int_value;
-          if (value->GetAsInteger(&int_value)) {
-            OPEN_ELEMENT_FOR_SCOPE("profileparam");
-            WriteAttribute("name", *i);
-            WriteIntAttribute("value", int_value);
-          }
-          break;
-        }
-
-        default:
-          NOTREACHED();
-          break;
+        break;
       }
+
+      case Value::TYPE_BOOLEAN: {
+        bool bool_value;
+        if (i.value().GetAsBoolean(&bool_value)) {
+          OPEN_ELEMENT_FOR_SCOPE("profileparam");
+          WriteAttribute("name", i.key());
+          WriteIntAttribute("value", bool_value ? 1 : 0);
+        }
+        break;
+      }
+
+      case Value::TYPE_INTEGER: {
+        int int_value;
+        if (i.value().GetAsInteger(&int_value)) {
+          OPEN_ELEMENT_FOR_SCOPE("profileparam");
+          WriteAttribute("name", i.key());
+          WriteIntAttribute("value", int_value);
+        }
+        break;
+      }
+
+      default:
+        NOTREACHED();
+        break;
     }
   }
 }

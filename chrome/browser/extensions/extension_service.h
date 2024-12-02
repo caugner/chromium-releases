@@ -12,13 +12,12 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "base/string16.h"
-#include "chrome/browser/extensions/app_shortcut_manager.h"
 #include "chrome/browser/extensions/app_sync_bundle.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_function_histogram_value.h"
@@ -32,6 +31,7 @@
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/extensions/process_map.h"
+#include "chrome/browser/extensions/update_observer.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_set.h"
@@ -55,7 +55,6 @@ class SequencedTaskRunner;
 }
 
 namespace extensions {
-class AppNotificationManager;
 class AppSyncData;
 class BrowserEventRouter;
 class ComponentLoader;
@@ -230,15 +229,6 @@ class ExtensionService
   virtual void SetIsIncognitoEnabled(const std::string& extension_id,
                                      bool enabled);
 
-  // When app notification setup is done, we call this to save the developer's
-  // oauth client id which we'll need at uninstall time to revoke the oauth
-  // permission grant for sending notifications.
-  virtual void SetAppNotificationSetupDone(const std::string& extension_id,
-                                           const std::string& oauth_client_id);
-
-  virtual void SetAppNotificationDisabled(const std::string& extension_id,
-      bool value);
-
   // Updates the app launcher value for the moved extension so that it is now
   // located after the given predecessor and before the successor. This will
   // trigger a sync if needed. Empty strings are used to indicate no successor
@@ -383,14 +373,12 @@ class ExtensionService
   // permissions in the |extension|'s manifest and re-enables the
   // extension.
   void GrantPermissionsAndEnableExtension(
-      const extensions::Extension* extension,
-      bool record_oauth2_grant);
+      const extensions::Extension* extension);
 
   // Updates the |extension|'s granted permissions lists to include all
   // permissions in the |extensions|'s manifest.
   void GrantPermissions(
-      const extensions::Extension* extension,
-      bool record_oauth2_grant);
+      const extensions::Extension* extension);
 
   // Check for updates (or potentially new extensions from external providers)
   void CheckForExternalUpdates();
@@ -436,6 +424,9 @@ class ExtensionService
   // checking) before calling AddExtension.
   virtual void AddComponentExtension(const extensions::Extension* extension)
       OVERRIDE;
+
+  // Launch an extension the next time it is loaded.
+  void ScheduleLaunchOnLoad(const std::string& extension_id);
 
   // Informs the service that an extension's files are in place for loading.
   //
@@ -554,10 +545,6 @@ class ExtensionService
   ExtensionsQuotaService* quota_service() { return &quota_service_; }
 
   extensions::MenuManager* menu_manager() { return &menu_manager_; }
-
-  extensions::AppNotificationManager* app_notification_manager() {
-    return app_notification_manager_.get();
-  }
 
   extensions::BrowserEventRouter* browser_event_router() {
     return browser_event_router_.get();
@@ -679,10 +666,6 @@ class ExtensionService
   }
 #endif
 
-  extensions::AppShortcutManager* app_shortcut_manager() {
-    return &app_shortcut_manager_;
-  }
-
   // Specialization of syncer::SyncableService::AsWeakPtr.
   base::WeakPtr<ExtensionService> AsWeakPtr() { return base::AsWeakPtr(this); }
 
@@ -699,6 +682,10 @@ class ExtensionService
   void set_install_updates_when_idle_for_test(bool value) {
     install_updates_when_idle_ = value;
   }
+
+  // Adds/Removes update observers.
+  void AddUpdateObserver(extensions::UpdateObserver* observer);
+  void RemoveUpdateObserver(extensions::UpdateObserver* observer);
 
  private:
   // Contains Extension data that can change during the life of the process,
@@ -809,7 +796,10 @@ class ExtensionService
 
   // Dispatches a restart event to the platform app associated with
   // |extension_host|.
-  static void RestartApplication(extensions::ExtensionHost* extension_host);
+  static void RestartApplication(
+      std::vector<extensions::app_file_handler_util::SavedFileEntry>
+          file_entries,
+      extensions::ExtensionHost* extension_host);
 
   // Helper to inspect an ExtensionHost after it has been loaded.
   void InspectExtensionHost(extensions::ExtensionHost* host);
@@ -930,12 +920,19 @@ class ExtensionService
 
   // Map of inspector cookies that are detached, waiting for an extension to be
   // reloaded.
-  typedef std::map<std::string, int> OrphanedDevTools;
+  typedef std::map<std::string, std::string> OrphanedDevTools;
   OrphanedDevTools orphaned_dev_tools_;
 
   // Maps extension ids to a bitmask that indicates which events should be
   // dispatched to the extension when it is loaded.
   std::map<std::string, int> on_load_events_;
+
+  // Maps extension ids to vectors of saved file entries that the extension
+  // should be given access to on restart.
+  typedef std::map<std::string,
+      std::vector<extensions::app_file_handler_util::SavedFileEntry> >
+          SavedFileEntryMap;
+  SavedFileEntryMap on_restart_file_entries_;
 
   content::NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
@@ -945,9 +942,6 @@ class ExtensionService
 
   // Keeps track of menu items added by extensions.
   extensions::MenuManager menu_manager_;
-
-  // Keeps track of app notifications.
-  scoped_refptr<extensions::AppNotificationManager> app_notification_manager_;
 
   // Flag to make sure event routers are only initialized once.
   bool event_routers_initialized_;
@@ -992,8 +986,6 @@ class ExtensionService
 
   extensions::ProcessMap process_map_;
 
-  extensions::AppShortcutManager app_shortcut_manager_;
-
   scoped_ptr<ExtensionErrorUI> extension_error_ui_;
   // Sequenced task runner for extension related file operations.
   scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
@@ -1002,6 +994,8 @@ class ExtensionService
   scoped_ptr<extensions::ExtensionActionStorageManager>
       extension_action_storage_manager_;
 #endif
+
+  ObserverList<extensions::UpdateObserver, true> update_observers_;
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            InstallAppsWithUnlimtedStorage);

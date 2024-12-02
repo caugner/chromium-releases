@@ -295,7 +295,7 @@ class TaskManagerGtk::ContextMenuController
     return false;
   }
 
-  virtual void ExecuteCommand(int command_id) OVERRIDE {
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {
     if (!task_manager_)
       return;
 
@@ -965,3 +965,12 @@ gboolean TaskManagerGtk::OnGtkAccelerator(GtkAccelGroup* accel_group,
 
   return TRUE;
 }
+
+namespace chrome {
+
+// Declared in browser_dialogs.h.
+void ShowTaskManager(Browser* browser, bool highlight_background_resources) {
+  TaskManagerGtk::Show(highlight_background_resources);
+}
+
+}  // namespace chrome

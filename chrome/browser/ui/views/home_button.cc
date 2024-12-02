@@ -8,6 +8,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/user_prefs.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/bubble/bubble_delegate.h"
@@ -113,8 +114,7 @@ void HomePageUndoBubble::Init() {
 }
 
 void HomePageUndoBubble::LinkClicked(views::Link* source, int event_flags) {
-  PrefServiceBase* prefs =
-      PrefServiceBase::FromBrowserContext(browser_->profile());
+  PrefService* prefs = components::UserPrefs::Get(browser_->profile());
   prefs->SetBoolean(prefs::kHomePageIsNewTabPage, undo_value_is_ntp_);
   prefs->SetString(prefs::kHomePage, undo_url_.spec());
 

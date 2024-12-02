@@ -10,8 +10,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
@@ -27,6 +27,7 @@
 #include "chrome/browser/history/visit_filter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
 #include "content/public/browser/notification_details.h"
@@ -38,6 +39,7 @@
 #include "ui/gfx/image/image.h"
 
 using base::Time;
+using base::TimeDelta;
 
 // This file only tests functionality where it is most convenient to call the
 // backend directly. Most of the history backend functions are tested by the
@@ -358,11 +360,6 @@ class HistoryBackendTest : public testing::Test {
   BookmarkModel bookmark_model_;
 
  protected:
-  bool loaded_;
-
- private:
-  friend class HistoryBackendTestDelegate;
-
   // testing::Test
   virtual void SetUp() {
     if (!file_util::CreateNewTempDirectory(FILE_PATH_LITERAL("BackendTest"),
@@ -374,6 +371,11 @@ class HistoryBackendTest : public testing::Test {
                                   &bookmark_model_);
     backend_->Init(std::string(), false);
   }
+
+  bool loaded_;
+
+ private:
+  friend class HistoryBackendTestDelegate;
 
   virtual void TearDown() {
     if (backend_.get())
@@ -1781,6 +1783,7 @@ TEST_F(HistoryBackendTest, MergeFaviconPageURLInDB) {
 TEST_F(HistoryBackendTest, MergeFaviconIconURLMappedToDifferentPageURL) {
   GURL page_url1("http://www.google.com");
   GURL page_url2("http://news.google.com");
+  GURL page_url3("http://maps.google.com");
   GURL icon_url("http:/www.google.com/favicon.ico");
 
   std::vector<FaviconBitmapData> favicon_bitmap_data;
@@ -1802,20 +1805,43 @@ TEST_F(HistoryBackendTest, MergeFaviconIconURLMappedToDifferentPageURL) {
   EXPECT_TRUE(BitmapDataEqual('a', favicon_bitmap.bitmap_data));
   EXPECT_EQ(kSmallSize, favicon_bitmap.pixel_size);
 
+  // 1) Merge in an identical favicon bitmap data but for a different page URL.
   std::vector<unsigned char> data;
-  data.push_back('b');
+  data.push_back('a');
   scoped_refptr<base::RefCountedBytes> bitmap_data(
       new base::RefCountedBytes(data));
+
   backend_->MergeFavicon(page_url2, icon_url, FAVICON, bitmap_data, kSmallSize);
 
-  // The small favicon bitmap at |icon_url| should be overwritten. |page_url1|
-  // and |page_url2| should both map to the same favicon.
+  FaviconID favicon_id = backend_->thumbnail_db_->GetFaviconIDForFaviconURL(
+      icon_url, FAVICON, NULL);
+  EXPECT_NE(0, favicon_id);
+
+  EXPECT_TRUE(GetOnlyFaviconBitmap(favicon_id, &favicon_bitmap));
+  EXPECT_NE(base::Time(), favicon_bitmap.last_updated);
+  EXPECT_TRUE(BitmapDataEqual('a', favicon_bitmap.bitmap_data));
+  EXPECT_EQ(kSmallSize, favicon_bitmap.pixel_size);
+
+  // 2) Merging a favicon bitmap with different bitmap data for the same icon
+  // URL should overwrite the small favicon bitmap at |icon_url|.
+  bitmap_data->data()[0] = 'b';
+  backend_->MergeFavicon(page_url3, icon_url, FAVICON, bitmap_data, kSmallSize);
+
+  favicon_id = backend_->thumbnail_db_->GetFaviconIDForFaviconURL(
+      icon_url, FAVICON, NULL);
+  EXPECT_NE(0, favicon_id);
+
+  EXPECT_TRUE(GetOnlyFaviconBitmap(favicon_id, &favicon_bitmap));
+  EXPECT_NE(base::Time(), favicon_bitmap.last_updated);
+  EXPECT_TRUE(BitmapDataEqual('b', favicon_bitmap.bitmap_data));
+  EXPECT_EQ(kSmallSize, favicon_bitmap.pixel_size);
+
+  // |icon_url| should be mapped to all three page URLs.
   icon_mappings.clear();
   EXPECT_TRUE(backend_->thumbnail_db_->GetIconMappingsForPageURL(page_url1,
       &icon_mappings));
   EXPECT_EQ(1u, icon_mappings.size());
-  FaviconID favicon_id = icon_mappings[0].icon_id;
-  EXPECT_NE(0, favicon_id);
+  EXPECT_EQ(favicon_id, icon_mappings[0].icon_id);
 
   icon_mappings.clear();
   EXPECT_TRUE(backend_->thumbnail_db_->GetIconMappingsForPageURL(page_url2,
@@ -1823,15 +1849,15 @@ TEST_F(HistoryBackendTest, MergeFaviconIconURLMappedToDifferentPageURL) {
   EXPECT_EQ(1u, icon_mappings.size());
   EXPECT_EQ(favicon_id, icon_mappings[0].icon_id);
 
-  GURL icon_url_in_db;
-  EXPECT_TRUE(backend_->thumbnail_db_->GetFaviconHeader(
-      icon_mappings[0].icon_id, &icon_url_in_db, NULL, NULL));
-  EXPECT_EQ(icon_url, icon_url_in_db);
+  icon_mappings.clear();
+  EXPECT_TRUE(backend_->thumbnail_db_->GetIconMappingsForPageURL(page_url3,
+      &icon_mappings));
+  EXPECT_EQ(1u, icon_mappings.size());
+  EXPECT_EQ(favicon_id, icon_mappings[0].icon_id);
 
-  EXPECT_TRUE(GetOnlyFaviconBitmap(favicon_id, &favicon_bitmap));
-  EXPECT_NE(base::Time(), favicon_bitmap.last_updated);
-  EXPECT_TRUE(BitmapDataEqual('b', favicon_bitmap.bitmap_data));
-  EXPECT_EQ(kSmallSize, favicon_bitmap.pixel_size);
+  // A notification should have been broadcast for each call to SetFavicons()
+  // and MergeFavicon().
+  EXPECT_EQ(3, num_broadcasted_notifications());
 }
 
 // Test that MergeFavicon() does not add more than
@@ -2490,9 +2516,10 @@ TEST_F(HistoryBackendTest, AddPageNoVisitForBookmark) {
 TEST_F(HistoryBackendTest, ExpireHistoryForTimes) {
   ASSERT_TRUE(backend_.get());
 
-  HistoryAddPageArgs args[5];
+  HistoryAddPageArgs args[10];
   for (size_t i = 0; i < arraysize(args); ++i) {
-    args[i].url = GURL("http://example" + base::IntToString(i) + ".com");
+    args[i].url = GURL("http://example" +
+                       std::string((i % 2 == 0 ? ".com" : ".net")));
     args[i].time = base::Time::FromInternalValue(i);
     backend_->AddPage(args[i]);
   }
@@ -2503,22 +2530,185 @@ TEST_F(HistoryBackendTest, ExpireHistoryForTimes) {
     EXPECT_TRUE(backend_->GetURL(args[i].url, &row));
   }
 
-  std::vector<base::Time> times;
-  times.push_back(args[0].time);
-  // Insert twice to make sure we handle duplicate times correctly.
-  times.push_back(args[2].time);
-  times.push_back(args[2].time);
-  times.push_back(args[4].time);
-  backend_->ExpireHistoryForTimes(times);
+  std::set<base::Time> times;
+  times.insert(args[5].time);
+  backend_->ExpireHistoryForTimes(times,
+                                  base::Time::FromInternalValue(2),
+                                  base::Time::FromInternalValue(8));
 
-  EXPECT_EQ(base::Time::FromInternalValue(1),
+  EXPECT_EQ(base::Time::FromInternalValue(0),
             backend_->GetFirstRecordedTimeForTest());
 
-  EXPECT_FALSE(backend_->GetURL(args[0].url, &row));
-  EXPECT_TRUE(backend_->GetURL(args[1].url, &row));
-  EXPECT_FALSE(backend_->GetURL(args[2].url, &row));
-  EXPECT_TRUE(backend_->GetURL(args[3].url, &row));
-  EXPECT_FALSE(backend_->GetURL(args[4].url, &row));
+  // Visits to http://example.com are untouched.
+  VisitVector visit_vector;
+  EXPECT_TRUE(backend_->GetVisitsForURL(
+      backend_->db_->GetRowForURL(GURL("http://example.com"), NULL),
+      &visit_vector));
+  ASSERT_EQ(5u, visit_vector.size());
+  EXPECT_EQ(base::Time::FromInternalValue(0), visit_vector[0].visit_time);
+  EXPECT_EQ(base::Time::FromInternalValue(2), visit_vector[1].visit_time);
+  EXPECT_EQ(base::Time::FromInternalValue(4), visit_vector[2].visit_time);
+  EXPECT_EQ(base::Time::FromInternalValue(6), visit_vector[3].visit_time);
+  EXPECT_EQ(base::Time::FromInternalValue(8), visit_vector[4].visit_time);
+
+  // Visits to http://example.net between [2,8] are removed.
+  visit_vector.clear();
+  EXPECT_TRUE(backend_->GetVisitsForURL(
+      backend_->db_->GetRowForURL(GURL("http://example.net"), NULL),
+      &visit_vector));
+  ASSERT_EQ(2u, visit_vector.size());
+  EXPECT_EQ(base::Time::FromInternalValue(1), visit_vector[0].visit_time);
+  EXPECT_EQ(base::Time::FromInternalValue(9), visit_vector[1].visit_time);
+
+  EXPECT_EQ(base::Time::FromInternalValue(0),
+            backend_->GetFirstRecordedTimeForTest());
+}
+
+TEST_F(HistoryBackendTest, ExpireHistory) {
+  ASSERT_TRUE(backend_.get());
+  // Since history operations are dependent on the local timezone, make all
+  // entries relative to a fixed, local reference time.
+  base::Time reference_time = base::Time::UnixEpoch().LocalMidnight() +
+                              base::TimeDelta::FromHours(12);
+
+  // Insert 4 entries into the database.
+  HistoryAddPageArgs args[4];
+  for (size_t i = 0; i < arraysize(args); ++i) {
+    args[i].url = GURL("http://example" + base::IntToString(i) + ".com");
+    args[i].time = reference_time + base::TimeDelta::FromDays(i);
+    backend_->AddPage(args[i]);
+  }
+
+  URLRow url_rows[4];
+  for (unsigned int i = 0; i < arraysize(args); ++i)
+    ASSERT_TRUE(backend_->GetURL(args[i].url, &url_rows[i]));
+
+  std::vector<ExpireHistoryArgs> expire_list;
+  VisitVector visits;
+
+  // Passing an empty map should be a no-op.
+  backend_->ExpireHistory(expire_list);
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  EXPECT_EQ(4U, visits.size());
+
+  // Trying to delete an unknown URL with the time of the first visit should
+  // also be a no-op.
+  expire_list.resize(expire_list.size() + 1);
+  expire_list[0].SetTimeRangeForOneDay(args[0].time);
+  expire_list[0].urls.insert(GURL("http://google.does-not-exist"));
+  backend_->ExpireHistory(expire_list);
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  EXPECT_EQ(4U, visits.size());
+
+  // Now add the first URL with the same time -- it should get deleted.
+  expire_list.back().urls.insert(url_rows[0].url());
+  backend_->ExpireHistory(expire_list);
+
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  ASSERT_EQ(3U, visits.size());
+  EXPECT_EQ(visits[0].url_id, url_rows[1].id());
+  EXPECT_EQ(visits[1].url_id, url_rows[2].id());
+  EXPECT_EQ(visits[2].url_id, url_rows[3].id());
+
+  // The first recorded time should also get updated.
+  EXPECT_EQ(backend_->GetFirstRecordedTimeForTest(), args[1].time);
+
+  // Now delete the rest of the visits in one call.
+  for (unsigned int i = 1; i < arraysize(args); ++i) {
+    expire_list.resize(expire_list.size() + 1);
+    expire_list[i].SetTimeRangeForOneDay(args[i].time);
+    expire_list[i].urls.insert(args[i].url);
+  }
+  backend_->ExpireHistory(expire_list);
+
+  backend_->db()->GetAllVisitsInRange(base::Time(), base::Time(), 0, &visits);
+  ASSERT_EQ(0U, visits.size());
+}
+
+class HistoryBackendSegmentDurationTest : public HistoryBackendTest {
+ public:
+  HistoryBackendSegmentDurationTest() {}
+
+  virtual void SetUp() {
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kTrackActiveVisitTime);
+    HistoryBackendTest::SetUp();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(HistoryBackendSegmentDurationTest);
+};
+
+// Assertions around segment durations.
+TEST_F(HistoryBackendSegmentDurationTest, SegmentDuration) {
+  const GURL url1("http://www.google.com");
+  const GURL url2("http://www.foo.com/m");
+  const std::string segment1(VisitSegmentDatabase::ComputeSegmentName(url1));
+  const std::string segment2(VisitSegmentDatabase::ComputeSegmentName(url2));
+
+  Time segment_time(VisitSegmentDatabase::SegmentTime(Time::Now()));
+  URLRow url_info1(url1);
+  url_info1.set_visit_count(0);
+  url_info1.set_typed_count(0);
+  url_info1.set_last_visit(segment_time);
+  url_info1.set_hidden(false);
+  const URLID url1_id = backend_->db()->AddURL(url_info1);
+  EXPECT_NE(0, url1_id);
+
+  URLRow url_info2(url2);
+  url_info2.set_visit_count(0);
+  url_info2.set_typed_count(0);
+  url_info2.set_last_visit(Time());
+  url_info2.set_hidden(false);
+  const URLID url2_id = backend_->db()->AddURL(url_info2);
+  EXPECT_NE(0, url2_id);
+  EXPECT_NE(url1_id, url2_id);
+
+  // Should not have any segments for the urls.
+  EXPECT_EQ(0, backend_->db()->GetSegmentNamed(segment1));
+  EXPECT_EQ(0, backend_->db()->GetSegmentNamed(segment2));
+
+  // Update the duration, which should implicitly create the segments.
+  const TimeDelta segment1_time_delta(TimeDelta::FromHours(1));
+  const TimeDelta segment2_time_delta(TimeDelta::FromHours(2));
+  backend_->IncreaseSegmentDuration(url1, segment_time, segment1_time_delta);
+  backend_->IncreaseSegmentDuration(url2, segment_time, segment2_time_delta);
+
+  // Get the ids of the segments that were created.
+  const SegmentID segment1_id = backend_->db()->GetSegmentNamed(segment1);
+  EXPECT_NE(0, segment1_id);
+  const SegmentID segment2_id = backend_->db()->GetSegmentNamed(segment2);
+  EXPECT_NE(0, segment2_id);
+  EXPECT_NE(segment1_id, segment2_id);
+
+  // Make sure the values made it to the db.
+  SegmentDurationID segment1_duration_id;
+  TimeDelta fetched_delta;
+  EXPECT_TRUE(backend_->db()->GetSegmentDuration(
+                  segment1_id, segment_time, &segment1_duration_id,
+                  &fetched_delta));
+  EXPECT_NE(0, segment1_duration_id);
+  EXPECT_EQ(segment1_time_delta.InHours(), fetched_delta.InHours());
+
+  SegmentDurationID segment2_duration_id;
+  EXPECT_TRUE(backend_->db()->GetSegmentDuration(
+                  segment2_id, segment_time, &segment2_duration_id,
+                  &fetched_delta));
+  EXPECT_NE(0, segment2_duration_id);
+  EXPECT_NE(segment1_duration_id, segment2_duration_id);
+  EXPECT_EQ(segment2_time_delta.InHours(), fetched_delta.InHours());
+
+  // Query by duration. |url2| should be first as it has a longer view time.
+  ScopedVector<PageUsageData> data;
+  backend_->db()->QuerySegmentDuration(segment_time, 10, &data.get());
+  ASSERT_EQ(2u, data.size());
+  EXPECT_EQ(url2.spec(), data[0]->GetURL().spec());
+  EXPECT_EQ(url2_id, data[0]->GetID());
+  EXPECT_EQ(segment2_time_delta.InHours(), data[0]->duration().InHours());
+
+  EXPECT_EQ(url1.spec(), data[1]->GetURL().spec());
+  EXPECT_EQ(url1_id, data[1]->GetID());
+  EXPECT_EQ(segment1_time_delta.InHours(), data[1]->duration().InHours());
 }
 
 }  // namespace history

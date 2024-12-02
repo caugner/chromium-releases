@@ -9,16 +9,12 @@
 #include <X11/extensions/XInput2.h>
 #include <X11/Xlib.h>
 
-#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/message_pump_aurax11.h"
-#include "base/string_number_conversions.h"
-#include "base/string_split.h"
 #include "ui/base/events/event_utils.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/touch/touch_factory.h"
-#include "ui/base/ui_base_switches.h"
 #include "ui/base/x/device_list_cache_x.h"
 #include "ui/base/x/valuators.h"
 #include "ui/base/x/x11_atom_cache.h"
@@ -35,6 +31,10 @@
 // CMT specific timings
 #define AXIS_LABEL_PROP_ABS_START_TIME "Abs Start Timestamp"
 #define AXIS_LABEL_PROP_ABS_END_TIME "Abs End Timestamp"
+
+// Ordinal values
+#define AXIS_LABEL_PROP_ABS_DBL_ORDINAL_X   "Abs Dbl Ordinal X"
+#define AXIS_LABEL_PROP_ABS_DBL_ORDINAL_Y   "Abs Dbl Ordinal Y"
 
 // Fling properties
 #define AXIS_LABEL_PROP_ABS_FLING_X       "Abs Fling X Velocity"
@@ -58,6 +58,8 @@ const int kMinWheelButton = 4;
 const int kMaxWheelButton = 7;
 
 const char* kCMTCachedAtoms[] = {
+  AXIS_LABEL_PROP_ABS_DBL_ORDINAL_X,
+  AXIS_LABEL_PROP_ABS_DBL_ORDINAL_Y,
   AXIS_LABEL_PROP_REL_HWHEEL,
   AXIS_LABEL_PROP_REL_WHEEL,
   AXIS_LABEL_PROP_ABS_START_TIME,
@@ -72,17 +74,6 @@ const char* kCMTCachedAtoms[] = {
   AXIS_LABEL_PROP_ABS_FINGER_COUNT,
   NULL
 };
-
-#if defined(USE_XI2_MT)
-// If the calibration values were read, if this is true.
-bool calibration_values_read = false;
-
-// The (positive) calibration values for the four border sides.
-int left_border_touch_calibration = 0;
-int top_border_touch_calibration = 0;
-int right_border_touch_calibration = 0;
-int bottom_border_touch_calibration = 0;
-#endif
 
 // A class to support the detection of scroll events, using X11 valuators.
 class CMTEventData {
@@ -111,6 +102,8 @@ class CMTEventData {
         ui::DeviceListCacheX::GetInstance()->GetXI2DeviceList(display);
     Atom x_axis = atom_cache_.GetAtom(AXIS_LABEL_PROP_REL_HWHEEL);
     Atom y_axis = atom_cache_.GetAtom(AXIS_LABEL_PROP_REL_WHEEL);
+    Atom x_ordinal = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_DBL_ORDINAL_X);
+    Atom y_ordinal = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_DBL_ORDINAL_Y);
     Atom start_time = atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_START_TIME);
     Atom start_time_dbl =
         atom_cache_.GetAtom(AXIS_LABEL_PROP_ABS_DBL_START_TIME);
@@ -149,6 +142,12 @@ class CMTEventData {
           is_cmt = true;
         } else if (v->label == y_axis) {
           valuators.scroll_y = number;
+          is_cmt = true;
+        } else if (v->label == x_ordinal) {
+          valuators.ordinal_x = number;
+          is_cmt = true;
+        } else if (v->label == y_ordinal) {
+          valuators.ordinal_y = number;
           is_cmt = true;
         } else if (v->label == finger_count) {
           valuators.finger_count = number;
@@ -227,6 +226,8 @@ class CMTEventData {
   bool GetScrollOffsets(const XEvent& xev,
                         float* x_offset,
                         float* y_offset,
+                        float* x_offset_ordinal,
+                        float* y_offset_ordinal,
                         int* finger_count) {
     XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev.xcookie.data);
 
@@ -234,7 +235,11 @@ class CMTEventData {
       *x_offset = 0;
     if (y_offset)
       *y_offset = 0;
-    if (finger_count)
+    if (x_offset_ordinal)
+      *x_offset_ordinal = 0;
+    if (y_offset_ordinal)
+      *y_offset_ordinal = 0;
+   if (finger_count)
       *finger_count = 2;
 
     const int sourceid = xiev->sourceid;
@@ -257,6 +262,10 @@ class CMTEventData {
           *x_offset = *valuators * natural_scroll_factor;
         else if (y_offset && v.scroll_y == i)
           *y_offset = *valuators * natural_scroll_factor;
+        else if (x_offset_ordinal && v.ordinal_x == i)
+          *x_offset_ordinal = *valuators * natural_scroll_factor;
+        else if (y_offset_ordinal && v.ordinal_y == i)
+          *y_offset_ordinal = *valuators * natural_scroll_factor;
         else if (finger_count && v.finger_count == i)
           *finger_count = static_cast<int>(*valuators);
         valuators++;
@@ -268,12 +277,20 @@ class CMTEventData {
 
   bool GetFlingData(const XEvent& xev,
                     float* vx, float* vy,
+                    float* vx_ordinal, float* vy_ordinal,
                     bool* is_cancel) {
     XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev.xcookie.data);
 
-    *vx = 0;
-    *vy = 0;
-    *is_cancel = false;
+    if (vx)
+      *vx = 0;
+    if (vy)
+      *vy = 0;
+    if (vx_ordinal)
+      *vx_ordinal = 0;
+    if (vy_ordinal)
+      *vy_ordinal = 0;
+    if (is_cancel)
+      *is_cancel = false;
 
     const int sourceid = xiev->sourceid;
     if (!cmt_devices_[sourceid])
@@ -293,18 +310,22 @@ class CMTEventData {
       if (XIMaskIsSet(xiev->valuators.mask, i)) {
         // Convert values to unsigned ints representing ms before storing them,
         // as that is how they were encoded before conversion to doubles.
-        if (v.fling_vx_dbl == i) {
+        if (vx && v.fling_vx_dbl == i) {
           *vx = natural_scroll_factor * *valuators;
-        } else if (v.fling_vx == i) {
+        } else if (vx && v.fling_vx == i) {
           *vx = natural_scroll_factor *
               static_cast<double>(static_cast<int>(*valuators)) / 1000.0f;
-        } else if (v.fling_vy_dbl == i) {
+        } else if (vy && v.fling_vy_dbl == i) {
           *vy = natural_scroll_factor * *valuators;
-        } else if (v.fling_vy == i) {
+        } else if (vy && v.fling_vy == i) {
           *vy = natural_scroll_factor *
               static_cast<double>(static_cast<int>(*valuators)) / 1000.0f;
-        } else if (v.fling_state == i) {
+        } else if (is_cancel && v.fling_state == i) {
           *is_cancel = !!static_cast<unsigned int>(*valuators);
+        } else if (vx_ordinal && v.ordinal_x == i) {
+          *vx_ordinal = *valuators * natural_scroll_factor;
+        } else if (vy_ordinal && v.ordinal_y == i) {
+          *vy_ordinal = *valuators * natural_scroll_factor;
         }
         valuators++;
       }
@@ -367,6 +388,8 @@ class CMTEventData {
     int max;
     int scroll_x;
     int scroll_y;
+    int ordinal_x;
+    int ordinal_y;
     int finger_count;
     int start_time;
     int end_time;
@@ -383,6 +406,8 @@ class CMTEventData {
         : max(-1),
           scroll_x(-1),
           scroll_y(-1),
+          ordinal_x(-1),
+          ordinal_y(-1),
           finger_count(-1),
           start_time(-1),
           end_time(-1),
@@ -646,86 +671,6 @@ Atom GetNoopEventAtom() {
       "noop", False);
 }
 
-#if defined(USE_XI2_MT)
-
-void ReadTouchCalibrationValues() {
-  calibration_values_read = true;
-
-  std::vector<std::string> parts;
-  base::SplitString(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-      switches::kTouchCalibration), ',', &parts);
-  if (parts.size() >= 4) {
-    if (!base::StringToInt(parts[0], &left_border_touch_calibration))
-      DLOG(ERROR) << "Incorrect left border calibration value passed.";
-    if (!base::StringToInt(parts[1], &right_border_touch_calibration))
-      DLOG(ERROR) << "Incorrect right border calibration value passed.";
-    if (!base::StringToInt(parts[2], &top_border_touch_calibration))
-      DLOG(ERROR) << "Incorrect top border calibration value passed.";
-    if (!base::StringToInt(parts[3], &bottom_border_touch_calibration))
-      DLOG(ERROR) << "Incorrect bottom border calibration value passed.";
-  }
-}
-
-gfx::Point CalibrateTouchCoordinates(
-    const XIDeviceEvent* xievent) {
-  int x = static_cast<int>(xievent->event_x);
-  int y = static_cast<int>(xievent->event_y);
-
-  if (!calibration_values_read)
-    ReadTouchCalibrationValues();
-
-  if (!left_border_touch_calibration && !right_border_touch_calibration &&
-      !top_border_touch_calibration && !bottom_border_touch_calibration)
-    return gfx::Point(x, y);
-
-  gfx::Rect bounds =
-      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().bounds_in_pixel();
-  const int resolution_x = bounds.width();
-  const int resolution_y = bounds.height();
-  // The "grace area" (10% in this case) is to make it easier for the user to
-  // navigate to the corner.
-  const double kGraceAreaFraction = 0.1;
-  if (left_border_touch_calibration || right_border_touch_calibration) {
-    // Offset the x position to the real
-    x -= left_border_touch_calibration;
-    // Check if we are in the grace area of the left side.
-    // Note: We might not want to do this when the gesture is locked?
-    if (x < 0 && x > -left_border_touch_calibration * kGraceAreaFraction)
-      x = 0;
-    // Check if we are in the grace area of the right side.
-    // Note: We might not want to do this when the gesture is locked?
-    if (x > resolution_x - left_border_touch_calibration &&
-        x < resolution_x - left_border_touch_calibration +
-            right_border_touch_calibration * kGraceAreaFraction)
-      x = resolution_x - left_border_touch_calibration;
-    // Scale the screen area back to the full resolution of the screen.
-    x = (x * resolution_x) / (resolution_x - (right_border_touch_calibration +
-                                              left_border_touch_calibration));
-  }
-  if (top_border_touch_calibration || bottom_border_touch_calibration) {
-    // When there is a top bezel we add our border,
-    y -= top_border_touch_calibration;
-
-    // Check if we are in the grace area of the top side.
-    // Note: We might not want to do this when the gesture is locked?
-    if (y < 0 && y > -top_border_touch_calibration * kGraceAreaFraction)
-      y = 0;
-
-    // Check if we are in the grace area of the bottom side.
-    // Note: We might not want to do this when the gesture is locked?
-    if (y > resolution_y - top_border_touch_calibration &&
-        y < resolution_y - top_border_touch_calibration +
-        bottom_border_touch_calibration * kGraceAreaFraction)
-      y = resolution_y - top_border_touch_calibration;
-    // Scale the screen area back to the full resolution of the screen.
-    y = (y * resolution_y) / (resolution_y - (bottom_border_touch_calibration +
-                                              top_border_touch_calibration));
-  }
-  // Set the modified coordinate back to the event.
-  return gfx::Point(x, y);
-}
-#endif // defined(USE_XI2_MT)
-
 }  // namespace
 
 namespace ui {
@@ -790,12 +735,12 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
           return ET_MOUSE_RELEASED;
         }
         case XI_Motion: {
-          float vx, vy;
           bool is_cancel;
-          if (GetFlingData(native_event, &vx, &vy, &is_cancel)) {
+          if (GetFlingData(native_event, NULL, NULL, NULL, NULL, &is_cancel)) {
             return is_cancel ? ET_SCROLL_FLING_CANCEL : ET_SCROLL_FLING_START;
-          } else if (GetScrollOffsets(native_event, NULL, NULL, NULL)) {
-            return ET_SCROLL;
+          } else if (GetScrollOffsets(
+              native_event, NULL, NULL, NULL, NULL, NULL)) {
+            return IsTouchpadEvent(native_event) ? ET_SCROLL : ET_MOUSEWHEEL;
           } else if (GetButtonMaskForX2Event(xievent)) {
             return ET_MOUSE_DRAGGED;
           } else {
@@ -926,7 +871,8 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
           xievent->evtype == XI_TouchUpdate ||
           xievent->evtype == XI_TouchEnd)
         // Note: Touch events are always touch screen events.
-        return CalibrateTouchCoordinates(xievent);
+        return gfx::Point(static_cast<int>(xievent->event_x),
+                          static_cast<int>(xievent->event_y));
 #endif
       // Read the position from the valuators, because the location reported in
       // event_x/event_y seems to be different (and doesn't match for events
@@ -1034,8 +980,13 @@ int GetChangedMouseButtonFlagsFromNative(
 }
 
 int GetMouseWheelOffset(const base::NativeEvent& native_event) {
-  int button = native_event->type == GenericEvent
-    ? EventButtonFromNative(native_event) : native_event->xbutton.button;
+  float offset = 0;
+  if (native_event->type == GenericEvent &&
+      GetScrollOffsets(native_event, NULL, &offset, NULL, NULL, NULL))
+    return static_cast<int>(offset);
+
+  int button = native_event->type == GenericEvent ?
+      EventButtonFromNative(native_event) : native_event->xbutton.button;
 
   switch (button) {
     case 4:
@@ -1112,17 +1063,24 @@ float GetTouchForce(const base::NativeEvent& native_event) {
 bool GetScrollOffsets(const base::NativeEvent& native_event,
                       float* x_offset,
                       float* y_offset,
+                      float* x_offset_ordinal,
+                      float* y_offset_ordinal,
                       int* finger_count) {
   return CMTEventData::GetInstance()->GetScrollOffsets(
-      *native_event, x_offset, y_offset, finger_count);
+      *native_event,
+      x_offset, y_offset,
+      x_offset_ordinal, y_offset_ordinal,
+      finger_count);
 }
 
 bool GetFlingData(const base::NativeEvent& native_event,
                   float* vx,
                   float* vy,
+                  float* vx_ordinal,
+                  float* vy_ordinal,
                   bool* is_cancel) {
   return CMTEventData::GetInstance()->GetFlingData(
-      *native_event, vx, vy, is_cancel);
+      *native_event, vx, vy, vx_ordinal, vy_ordinal, is_cancel);
 }
 
 bool GetGestureTimes(const base::NativeEvent& native_event,

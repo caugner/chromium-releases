@@ -9,17 +9,13 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
+#include "base/prefs/testing_pref_service.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/autofill/autofill_common_test.h"
-#include "chrome/browser/autofill/autofill_profile.h"
-#include "chrome/browser/autofill/credit_card.h"
-#include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
-#include "chrome/browser/autofill/personal_data_manager_observer.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/extensions/mock_extension_special_storage_policy.h"
 #include "chrome/browser/history/history_service.h"
@@ -28,16 +24,20 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/autofill/browser/autofill_common_test.h"
+#include "components/autofill/browser/autofill_profile.h"
+#include "components/autofill/browser/credit_card.h"
+#include "components/autofill/browser/personal_data_manager.h"
+#include "components/autofill/browser/personal_data_manager_observer.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/test/test_browser_thread.h"
-#include "net/base/server_bound_cert_service.h"
-#include "net/base/server_bound_cert_store.h"
-#include "net/base/ssl_client_cert_type.h"
 #include "net/cookies/cookie_monster.h"
+#include "net/ssl/server_bound_cert_service.h"
+#include "net/ssl/server_bound_cert_store.h"
+#include "net/ssl/ssl_client_cert_type.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -833,6 +833,86 @@ TEST_F(BrowsingDataRemoverTest, RemoveHistoryForLastHour) {
   EXPECT_TRUE(tester.HistoryContainsURL(kOrigin2));
 }
 
+// This should crash (DCHECK) in Debug, but death tests don't work properly
+// here.
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
+TEST_F(BrowsingDataRemoverTest, RemoveHistoryProhibited) {
+  RemoveHistoryTester tester(GetProfile());
+  PrefService* prefs = GetProfile()->GetPrefs();
+  prefs->SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
+
+  base::Time two_hours_ago = base::Time::Now() - base::TimeDelta::FromHours(2);
+
+  tester.AddHistory(kOrigin1, base::Time::Now());
+  tester.AddHistory(kOrigin2, two_hours_ago);
+  ASSERT_TRUE(tester.HistoryContainsURL(kOrigin1));
+  ASSERT_TRUE(tester.HistoryContainsURL(kOrigin2));
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::LAST_HOUR,
+      BrowsingDataRemover::REMOVE_HISTORY, false);
+  EXPECT_EQ(BrowsingDataRemover::REMOVE_HISTORY, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+
+  // Nothing should have been deleted.
+  EXPECT_TRUE(tester.HistoryContainsURL(kOrigin1));
+  EXPECT_TRUE(tester.HistoryContainsURL(kOrigin2));
+}
+#endif
+
+TEST_F(BrowsingDataRemoverTest, RemoveMultipleTypes) {
+  // Add some history.
+  RemoveHistoryTester history_tester(GetProfile());
+  history_tester.AddHistory(kOrigin1, base::Time::Now());
+  ASSERT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
+
+  // Add some cookies.
+  RemoveProfileCookieTester cookie_tester(GetProfile());
+  cookie_tester.AddCookie();
+  ASSERT_TRUE(cookie_tester.ContainsCookie());
+
+  int removal_mask = BrowsingDataRemover::REMOVE_HISTORY |
+                     BrowsingDataRemover::REMOVE_COOKIES;
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::EVERYTHING,
+      removal_mask, false);
+
+  EXPECT_EQ(removal_mask, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+  EXPECT_FALSE(history_tester.HistoryContainsURL(kOrigin1));
+  EXPECT_FALSE(cookie_tester.ContainsCookie());
+}
+
+// This should crash (DCHECK) in Debug, but death tests don't work properly
+// here.
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
+TEST_F(BrowsingDataRemoverTest, RemoveMultipleTypesHistoryProhibited) {
+  PrefService* prefs = GetProfile()->GetPrefs();
+  prefs->SetBoolean(prefs::kAllowDeletingBrowserHistory, false);
+
+  // Add some history.
+  RemoveHistoryTester history_tester(GetProfile());
+  history_tester.AddHistory(kOrigin1, base::Time::Now());
+  ASSERT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
+
+  // Add some cookies.
+  RemoveProfileCookieTester cookie_tester(GetProfile());
+  cookie_tester.AddCookie();
+  ASSERT_TRUE(cookie_tester.ContainsCookie());
+
+  int removal_mask = BrowsingDataRemover::REMOVE_HISTORY |
+                     BrowsingDataRemover::REMOVE_COOKIES;
+
+  BlockUntilBrowsingDataRemoved(BrowsingDataRemover::LAST_HOUR,
+                                removal_mask, false);
+  EXPECT_EQ(removal_mask, GetRemovalMask());
+  EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+
+  // Cookie should be gone; history should remain.
+  EXPECT_FALSE(cookie_tester.ContainsCookie());
+  EXPECT_TRUE(history_tester.HistoryContainsURL(kOrigin1));
+}
+#endif
+
 TEST_F(BrowsingDataRemoverTest, QuotaClientMaskGeneration) {
   EXPECT_EQ(quota::QuotaClient::kFileSystem,
             BrowsingDataRemover::GenerateQuotaClientMask(
@@ -1197,6 +1277,8 @@ TEST_F(BrowsingDataRemoverTest, OriginBasedHistoryRemoval) {
 
   EXPECT_EQ(BrowsingDataRemover::REMOVE_HISTORY, GetRemovalMask());
   EXPECT_EQ(BrowsingDataHelper::UNPROTECTED_WEB, GetOriginSetMask());
+
+  // Nothing should have been deleted.
   EXPECT_TRUE(tester.HistoryContainsURL(kOrigin1));
   EXPECT_FALSE(tester.HistoryContainsURL(kOrigin2));
 }

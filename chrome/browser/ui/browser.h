@@ -15,8 +15,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/public/pref_change_registrar.h"
-#include "base/prefs/public/pref_member.h"
+#include "base/prefs/pref_change_registrar.h"
+#include "base/prefs/pref_member.h"
 #include "base/string16.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
 #include "chrome/browser/sessions/session_id.h"
@@ -119,9 +119,6 @@ class Browser : public TabStripModelObserver,
   // Distinguishes between browsers that host an app (opened from
   // ApplicationLauncher::OpenApplication), and child browsers created by an app
   // from Browser::CreateForApp (e.g. by windows.open or the extension API).
-  // TODO(stevenjb): This is currently only needed by the ash Launcher for
-  // identifying child panels. Remove this once panels are no longer
-  // implemented as Browsers, crbug.com/112198.
   enum AppType {
     APP_TYPE_HOST = 1,
     APP_TYPE_CHILD = 2
@@ -155,10 +152,6 @@ class Browser : public TabStripModelObserver,
   };
 
   struct CreateParams {
-    // Deprecated: please use the form taking |host_desktop_type| below.
-    explicit CreateParams(Profile* profile);
-    CreateParams(Type type, Profile* profile);
-
     CreateParams(Profile* profile, chrome::HostDesktopType host_desktop_type);
     CreateParams(Type type,
                  Profile* profile,
@@ -167,9 +160,12 @@ class Browser : public TabStripModelObserver,
     static CreateParams CreateForApp(Type type,
                                      const std::string& app_name,
                                      const gfx::Rect& window_bounds,
-                                     Profile* profile);
+                                     Profile* profile,
+                                     chrome::HostDesktopType host_desktop_type);
 
-    static CreateParams CreateForDevTools(Profile* profile);
+    static CreateParams CreateForDevTools(
+        Profile* profile,
+        chrome::HostDesktopType host_desktop_type);
 
     // The browser type.
     Type type;
@@ -330,6 +326,9 @@ class Browser : public TabStripModelObserver,
   // fullscreen.
   void WindowFullscreenStateChanged();
 
+  // Invoked when visible SSL state (as defined by SSLStatus) changes.
+  void VisibleSSLStateChanged(content::WebContents* web_contents);
+
   // Assorted browser commands ////////////////////////////////////////////////
 
   // NOTE: Within each of the following sections, the IDs are ordered roughly by
@@ -454,11 +453,8 @@ class Browser : public TabStripModelObserver,
   // Show the first run search engine bubble on the location bar.
   void ShowFirstRunBubble();
 
-  // If necessary, update the bookmark bar state according to the instant
-  // preview state: when instant preview shows suggestions and bookmark bar is
-  // still showing attached, hide it.
-  void MaybeUpdateBookmarkBarStateForInstantPreview(
-      const chrome::search::Mode& mode);
+  // Show a download on the download shelf.
+  void ShowDownload(content::DownloadItem* download);
 
   FullscreenController* fullscreen_controller() const {
     return fullscreen_controller_.get();
@@ -488,6 +484,8 @@ class Browser : public TabStripModelObserver,
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
                            OpenAppShortcutWindowPref);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, OpenAppShortcutTabPref);
+
+  class InterstitialObserver;
 
   // Used to describe why a tab is being detached. This is used by
   // TabDetachedAtImpl.
@@ -557,8 +555,6 @@ class Browser : public TabStripModelObserver,
   virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
   virtual void RenderWidgetShowing() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
-  virtual void OnStartDownload(content::WebContents* source,
-                               content::DownloadItem* download) OVERRIDE;
   virtual void ViewSourceForTab(content::WebContents* source,
                                 const GURL& page_url) OVERRIDE;
   virtual void ViewSourceForFrame(
@@ -575,6 +571,7 @@ class Browser : public TabStripModelObserver,
       const GURL& target_url) OVERRIDE;
   virtual void WebContentsCreated(content::WebContents* source_contents,
                                   int64 source_frame_id,
+                                  const string16& frame_name,
                                   const GURL& target_url,
                                   content::WebContents* new_contents) OVERRIDE;
   virtual void ContentRestrictionsChanged(
@@ -678,8 +675,9 @@ class Browser : public TabStripModelObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from chrome::search::SearchModelObserver:
-  virtual void ModeChanged(const chrome::search::Mode& old_mode,
-                           const chrome::search::Mode& new_mode) OVERRIDE;
+  virtual void ModelChanged(
+      const chrome::search::SearchModel::State& old_state,
+      const chrome::search::SearchModel::State& new_state) OVERRIDE;
 
   // Command and state updating ///////////////////////////////////////////////
 
@@ -792,6 +790,8 @@ class Browser : public TabStripModelObserver,
                                      const GURL& target_url);
 
   // Data members /////////////////////////////////////////////////////////////
+
+  std::vector<InterstitialObserver*> interstitial_observers_;
 
   content::NotificationRegistrar registrar_;
 

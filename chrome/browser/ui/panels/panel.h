@@ -105,10 +105,6 @@ class Panel : public BaseWindow,
   // b) it remains on top when an app exits full screen mode.
   void FullScreenModeChanged(bool is_full_screen);
 
-  // Ensures that the panel is fully visible, that is, not obscured by other
-  // top-most windows.
-  void EnsureFullyVisible();
-
   int TitleOnlyHeight() const;
 
   // Returns true if the panel can show minimize or restore button in its
@@ -125,8 +121,8 @@ class Panel : public BaseWindow,
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void Show() OVERRIDE;
-  virtual void ShowInactive() OVERRIDE;
   virtual void Hide() OVERRIDE;
+  virtual void ShowInactive() OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
@@ -213,12 +209,11 @@ class Panel : public BaseWindow,
   // Updates the panel bounds instantly without any animation.
   void SetPanelBoundsInstantly(const gfx::Rect& bounds);
 
-  // Ensures that the panel's size does not exceed the display area by
-  // updating maximum and full size of the panel. This is called each time
-  // when display settings are changed. Note that bounds are not updated here
-  // and the call of setting bounds or refreshing layout should be called after
-  // this.
-  void LimitSizeToDisplayArea(const gfx::Rect& display_area);
+  // Ensures that the panel's size does not exceed the work area by updating
+  // maximum and full size of the panel. This is called each time when display
+  // settings are changed. Note that bounds are not updated here and the call
+  // of setting bounds or refreshing layout should be called after this.
+  void LimitSizeToWorkArea(const gfx::Rect& work_area);
 
   // Sets whether the panel will auto resize according to its content.
   void SetAutoResizable(bool resizable);
@@ -304,6 +299,11 @@ class Panel : public BaseWindow,
 
   // Applies |corner_style| to the panel window.
   void SetWindowCornerStyle(panel::CornerStyle corner_style);
+
+  // Performs the system minimize for the panel, i.e. becoming iconic.
+  void MinimizeBySystem();
+
+  bool IsMinimizedBySystem() const;
 
  protected:
   // Panel can only be created using PanelManager::CreatePanel() or subclass.

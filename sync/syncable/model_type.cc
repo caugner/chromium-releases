@@ -4,7 +4,7 @@
 
 #include "sync/internal_api/public/base/model_type.h"
 
-#include "base/string_split.h"
+#include "base/strings/string_split.h"
 #include "base/values.h"
 #include "sync/protocol/app_notification_specifics.pb.h"
 #include "sync/protocol/app_setting_specifics.pb.h"
@@ -95,6 +95,12 @@ void AddDefaultFieldValue(ModelType datatype,
     case DICTIONARY:
       specifics->mutable_dictionary();
       break;
+    case FAVICON_IMAGES:
+      specifics->mutable_favicon_image();
+      break;
+    case FAVICON_TRACKING:
+      specifics->mutable_favicon_tracking();
+      break;
     default:
       NOTREACHED() << "No known extension for model type.";
   }
@@ -177,6 +183,10 @@ int GetSpecificsFieldNumberFromModelType(ModelType model_type) {
     case DICTIONARY:
       return sync_pb::EntitySpecifics::kDictionaryFieldNumber;
       break;
+    case FAVICON_IMAGES:
+      return sync_pb::EntitySpecifics::kFaviconImageFieldNumber;
+    case FAVICON_TRACKING:
+      return sync_pb::EntitySpecifics::kFaviconTrackingFieldNumber;
     default:
       NOTREACHED() << "No known extension for model type.";
       return 0;
@@ -287,6 +297,12 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.has_dictionary())
     return DICTIONARY;
 
+  if (specifics.has_favicon_image())
+    return FAVICON_IMAGES;
+
+  if (specifics.has_favicon_tracking())
+    return FAVICON_TRACKING;
+
   return UNSPECIFIED;
 }
 
@@ -309,6 +325,26 @@ ModelTypeSet UserTypes() {
     set.Put(ModelTypeFromInt(i));
   }
   return set;
+}
+
+ModelTypeSet UserSelectableTypes() {
+  ModelTypeSet set;
+  // Although the order doesn't technically matter here, it's clearer to keep
+  // these in the same order as their definition in the ModelType enum.
+  set.Put(BOOKMARKS);
+  set.Put(PREFERENCES);;
+  set.Put(PASSWORDS);
+  set.Put(AUTOFILL);
+  set.Put(THEMES);
+  set.Put(TYPED_URLS);
+  set.Put(EXTENSIONS);
+  set.Put(APPS);
+  set.Put(PROXY_TABS);
+  return set;
+}
+
+bool IsUserSelectableType(ModelType model_type) {
+  return UserSelectableTypes().Has(model_type);
 }
 
 ModelTypeSet EncryptableUserTypes() {
@@ -341,7 +377,7 @@ ModelTypeSet ControlTypes() {
 
 ModelTypeSet ProxyTypes() {
   ModelTypeSet set;
-  // TODO(zea): add a TABS type here.
+  set.Put(PROXY_TABS);
   return set;
 }
 
@@ -400,6 +436,12 @@ const char* ModelTypeToString(ModelType model_type) {
       return "Priority Preferences";
     case DICTIONARY:
       return "Dictionary";
+    case FAVICON_IMAGES:
+      return "Favicon Images";
+    case FAVICON_TRACKING:
+      return "Favicon Tracking";
+    case PROXY_TABS:
+      return "Tabs";
     default:
       break;
   }
@@ -407,24 +449,89 @@ const char* ModelTypeToString(ModelType model_type) {
   return "INVALID";
 }
 
-StringValue* ModelTypeToValue(ModelType model_type) {
-  if (model_type >= FIRST_REAL_MODEL_TYPE) {
-    return Value::CreateStringValue(ModelTypeToString(model_type));
-  } else if (model_type == TOP_LEVEL_FOLDER) {
-    return Value::CreateStringValue("Top-level folder");
-  } else if (model_type == UNSPECIFIED) {
-    return Value::CreateStringValue("Unspecified");
+// The normal rules about histograms apply here.  Always append to the bottom of
+// the list, and be careful to not reuse integer values that have already been
+// assigned.  Don't forget to update histograms.xml when you make changes to
+// this list.
+int ModelTypeToHistogramInt(ModelType model_type) {
+  switch (model_type) {
+    case UNSPECIFIED:
+      return 0;
+    case TOP_LEVEL_FOLDER:
+      return 1;
+    case BOOKMARKS:
+      return 2;
+    case PREFERENCES:
+      return 3;
+    case PASSWORDS:
+      return 4;
+    case AUTOFILL_PROFILE:
+      return 5;
+    case AUTOFILL:
+      return 6;
+    case THEMES:
+      return 7;
+    case TYPED_URLS:
+      return 8;
+    case EXTENSIONS:
+      return 9;
+    case SEARCH_ENGINES:
+      return 10;
+    case SESSIONS:
+      return 11;
+    case APPS:
+      return 12;
+    case APP_SETTINGS:
+      return 13;
+    case EXTENSION_SETTINGS:
+      return 14;
+    case APP_NOTIFICATIONS:
+      return 15;
+    case HISTORY_DELETE_DIRECTIVES:
+      return 16;
+    case NIGORI:
+      return 17;
+    case DEVICE_INFO:
+      return 18;
+    case EXPERIMENTS:
+      return 19;
+    case SYNCED_NOTIFICATIONS:
+      return 20;
+    case PRIORITY_PREFERENCES:
+      return 21;
+    case DICTIONARY:
+      return 22;
+    case FAVICON_IMAGES:
+      return 23;
+    case FAVICON_TRACKING:
+      return 24;
+    case PROXY_TABS:
+      return 25;
+    // Silence a compiler warning.
+    case MODEL_TYPE_COUNT:
+      return 0;
   }
-  NOTREACHED();
-  return Value::CreateStringValue("");
+  return 0;
 }
 
-ModelType ModelTypeFromValue(const Value& value) {
-  if (value.IsType(Value::TYPE_STRING)) {
+base::StringValue* ModelTypeToValue(ModelType model_type) {
+  if (model_type >= FIRST_REAL_MODEL_TYPE) {
+    return new base::StringValue(ModelTypeToString(model_type));
+  } else if (model_type == TOP_LEVEL_FOLDER) {
+    return new base::StringValue("Top-level folder");
+  } else if (model_type == UNSPECIFIED) {
+    return new base::StringValue("Unspecified");
+  }
+  NOTREACHED();
+  return new base::StringValue("");
+}
+
+ModelType ModelTypeFromValue(const base::Value& value) {
+  if (value.IsType(base::Value::TYPE_STRING)) {
     std::string result;
     CHECK(value.GetAsString(&result));
     return ModelTypeFromString(result);
-  } else if (value.IsType(Value::TYPE_INTEGER)) {
+  } else if (value.IsType(base::Value::TYPE_INTEGER)) {
     int result;
     CHECK(value.GetAsInteger(&result));
     return ModelTypeFromInt(result);
@@ -477,6 +584,12 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
     return PRIORITY_PREFERENCES;
   else if (model_type_string == "Dictionary")
     return DICTIONARY;
+  else if (model_type_string == "Favicon Images")
+    return FAVICON_IMAGES;
+  else if (model_type_string == "Favicon Tracking")
+    return FAVICON_TRACKING;
+  else if (model_type_string == "Tabs")
+    return PROXY_TABS;
   else
     NOTREACHED() << "No known model type corresponding to "
                  << model_type_string << ".";
@@ -495,17 +608,17 @@ std::string ModelTypeSetToString(ModelTypeSet model_types) {
 }
 
 base::ListValue* ModelTypeSetToValue(ModelTypeSet model_types) {
-  ListValue* value = new ListValue();
+  base::ListValue* value = new base::ListValue();
   for (ModelTypeSet::Iterator it = model_types.First(); it.Good(); it.Inc()) {
-    value->Append(
-        Value::CreateStringValue(ModelTypeToString(it.Get())));
+    value->Append(new base::StringValue(ModelTypeToString(it.Get())));
   }
   return value;
 }
 
 ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
   ModelTypeSet result;
-  for (ListValue::const_iterator i = value.begin(); i != value.end(); ++i) {
+  for (base::ListValue::const_iterator i = value.begin();
+       i != value.end(); ++i) {
     result.Put(ModelTypeFromValue(**i));
   }
   return result;
@@ -559,6 +672,12 @@ std::string ModelTypeToRootTag(ModelType type) {
       return "google_chrome_priority_preferences";
     case DICTIONARY:
       return "google_chrome_dictionary";
+    case FAVICON_IMAGES:
+      return "google_chrome_favicon_images";
+    case FAVICON_TRACKING:
+      return "google_chrome_favicon_tracking";
+    case PROXY_TABS:
+      return std::string();
     default:
       break;
   }
@@ -592,6 +711,8 @@ const char kDeviceInfoNotificationType[] = "DEVICE_INFO";
 const char kExperimentsNotificationType[] = "EXPERIMENTS";
 const char kPriorityPreferenceNotificationType[] = "PRIORITY_PREFERENCE";
 const char kDictionaryNotificationType[] = "DICTIONARY";
+const char kFaviconImageNotificationType[] = "FAVICON_IMAGE";
+const char kFaviconTrackingNotificationType[] = "FAVICON_TRACKING";
 }  // namespace
 
 bool RealModelTypeToNotificationType(ModelType model_type,
@@ -660,6 +781,12 @@ bool RealModelTypeToNotificationType(ModelType model_type,
     case DICTIONARY:
       *notification_type = kDictionaryNotificationType;
       return true;
+    case FAVICON_IMAGES:
+      *notification_type = kFaviconImageNotificationType;
+      return true;
+    case FAVICON_TRACKING:
+      *notification_type = kFaviconTrackingNotificationType;
+      return true;
     default:
       break;
   }
@@ -721,7 +848,7 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
     *model_type = SYNCED_NOTIFICATIONS;
     return true;
   } else if (notification_type == kDeviceInfoNotificationType) {
-    *model_type = DEVICE_INFO;;
+    *model_type = DEVICE_INFO;
     return true;
   } else if (notification_type == kExperimentsNotificationType) {
     *model_type = EXPERIMENTS;
@@ -732,6 +859,12 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
   } else if (notification_type == kDictionaryNotificationType) {
     *model_type = DICTIONARY;
     return true;
+  } else if (notification_type == kFaviconImageNotificationType) {
+    *model_type = FAVICON_IMAGES;
+    return true;
+  } else if (notification_type == kFaviconTrackingNotificationType) {
+    *model_type = FAVICON_TRACKING;
+    return true;
   }
   *model_type = UNSPECIFIED;
   return false;
@@ -739,6 +872,10 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
 
 bool IsRealDataType(ModelType model_type) {
   return model_type >= FIRST_REAL_MODEL_TYPE && model_type < MODEL_TYPE_COUNT;
+}
+
+bool IsActOnceDataType(ModelType model_type) {
+  return model_type == HISTORY_DELETE_DIRECTIVES;
 }
 
 }  // namespace syncer

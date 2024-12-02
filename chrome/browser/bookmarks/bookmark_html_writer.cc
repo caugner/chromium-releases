@@ -20,7 +20,6 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
@@ -195,6 +194,9 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
   // Writes raw text out returning true on success. This does not escape
   // the text in anyway.
   bool Write(const std::string& text) {
+    // net::FileStream does not allow 0-byte writes.
+    if (!text.length())
+      return true;
     size_t wrote = file_stream_->WriteSync(text.c_str(), text.length());
     bool result = (wrote == text.length());
     DCHECK(result);

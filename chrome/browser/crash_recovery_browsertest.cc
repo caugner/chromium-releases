@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_path.h"
+#include "base/files/file_path.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -26,7 +26,7 @@ void SimulateRendererCrash(Browser* browser) {
       content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
       content::NotificationService::AllSources());
   browser->OpenURL(OpenURLParams(
-      GURL(chrome::kChromeUICrashURL), Referrer(), CURRENT_TAB,
+      GURL(content::kChromeUICrashURL), Referrer(), CURRENT_TAB,
       content::PAGE_TRANSITION_TYPED, false));
   observer.Wait();
 }

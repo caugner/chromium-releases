@@ -5,9 +5,9 @@
 #include "chrome/browser/profiles/profile_keyed_base_factory.h"
 
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 
 ProfileKeyedBaseFactory::ProfileKeyedBaseFactory(
     const char* name, ProfileDependencyManager* manager)
@@ -82,9 +82,6 @@ void ProfileKeyedBaseFactory::RegisterUserPrefsOnProfile(Profile* profile) {
     PrefRegistrySyncable* registry = static_cast<PrefRegistrySyncable*>(
         prefs->DeprecatedGetPrefRegistry());
     RegisterUserPrefs(registry);
-    // A few registration functions still need the PrefService pointer
-    // (e.g. to clear preferences).
-    DeprecatedRegisterUserPrefs(prefs, registry);
     registered_preferences_.insert(profile);
   }
 }

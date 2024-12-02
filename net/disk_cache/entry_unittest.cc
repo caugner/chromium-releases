@@ -426,7 +426,7 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
     expected++;
 
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
-  EXPECT_STREQ("the data", buffer1->data());
+  EXPECT_STREQ("the data", buffer2->data());
 
   base::strlcpy(buffer2->data(), "The really big data goes here", kSize2);
   ret = entry->WriteData(
@@ -456,7 +456,8 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
     expected++;
 
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
-  EXPECT_EQ(0, memcmp(buffer2->data(), buffer2->data(), 10000));
+  memset(buffer3->data(), 0, kSize3);
+  EXPECT_EQ(0, memcmp(buffer2->data(), buffer3->data(), 10000));
   ret = entry->ReadData(
       1, 30000, buffer2, kSize2,
       base::Bind(&CallbackTest::Run, base::Unretained(&callback6)));
@@ -474,7 +475,7 @@ void DiskCacheEntryTest::ExternalAsyncIO() {
   if (net::ERR_IO_PENDING == ret)
     expected++;
   ret = entry->WriteData(
-      1, 20000, buffer1, kSize1,
+      1, 20000, buffer3, kSize1,
       base::Bind(&CallbackTest::Run, base::Unretained(&callback9)), false);
   EXPECT_TRUE(17000 == ret || net::ERR_IO_PENDING == ret);
   if (net::ERR_IO_PENDING == ret)
@@ -656,6 +657,9 @@ void DiskCacheEntryTest::GetTimes() {
   if (type_ == net::APP_CACHE) {
     EXPECT_TRUE(entry->GetLastUsed() < t2);
     EXPECT_TRUE(entry->GetLastModified() < t2);
+  } else if (type_ == net::SHADER_CACHE) {
+    EXPECT_TRUE(entry->GetLastUsed() < t3);
+    EXPECT_TRUE(entry->GetLastModified() < t3);
   } else {
     EXPECT_TRUE(entry->GetLastUsed() >= t3);
     EXPECT_TRUE(entry->GetLastModified() < t3);
@@ -676,6 +680,12 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyGetTimes) {
 
 TEST_F(DiskCacheEntryTest, AppCacheGetTimes) {
   SetCacheType(net::APP_CACHE);
+  InitCache();
+  GetTimes();
+}
+
+TEST_F(DiskCacheEntryTest, ShaderCacheGetTimes) {
+  SetCacheType(net::SHADER_CACHE);
   InitCache();
   GetTimes();
 }

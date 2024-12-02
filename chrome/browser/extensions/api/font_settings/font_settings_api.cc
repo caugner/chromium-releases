@@ -67,9 +67,9 @@ std::string GetFontNamePrefPath(fonts::GenericFamily generic_family_enum,
   if (script.empty())
     script = prefs::kWebKitCommonScript;
   std::string generic_family = fonts::ToString(generic_family_enum);
-  return StringPrintf(kWebKitFontPrefFormat,
-                      generic_family.c_str(),
-                      script.c_str());
+  return base::StringPrintf(kWebKitFontPrefFormat,
+                            generic_family.c_str(),
+                            script.c_str());
 }
 
 // Returns the localized name of a font so that it can be matched within the
@@ -162,7 +162,7 @@ void FontSettingsEventRouter::OnFontNamePrefChanged(
     const std::string& pref_name,
     const std::string& generic_family,
     const std::string& script) {
-  const PrefServiceBase::Preference* pref = registrar_.prefs()->FindPreference(
+  const PrefService::Preference* pref = registrar_.prefs()->FindPreference(
       pref_name.c_str());
   CHECK(pref);
 
@@ -193,7 +193,7 @@ void FontSettingsEventRouter::OnFontPrefChanged(
     const std::string& event_name,
     const std::string& key,
     const std::string& pref_name) {
-  const PrefServiceBase::Preference* pref = registrar_.prefs()->FindPreference(
+  const PrefService::Preference* pref = registrar_.prefs()->FindPreference(
       pref_name.c_str());
   CHECK(pref);
 

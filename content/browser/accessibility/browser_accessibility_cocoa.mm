@@ -13,6 +13,7 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/browser/accessibility/browser_accessibility_manager_mac.h"
 #include "content/public/common/content_client.h"
 #include "grit/webkit_strings.h"
 #include "third_party/WebKit/Source/Platform/chromium/public/WebRect.h"
@@ -25,6 +26,7 @@ extern "C" void NSAccessibilityUnregisterUniqueIdForUIElement(id element);
 using content::AccessibilityNodeData;
 using content::BrowserAccessibility;
 using content::BrowserAccessibilityManager;
+using content::BrowserAccessibilityManagerMac;
 using content::ContentClient;
 typedef AccessibilityNodeData::StringAttribute StringAttribute;
 
@@ -76,9 +78,10 @@ RoleMap BuildRoleMap() {
     { AccessibilityNodeData::ROLE_COMBO_BOX, NSAccessibilityComboBoxRole },
     { AccessibilityNodeData::ROLE_COLUMN, NSAccessibilityColumnRole },
     { AccessibilityNodeData::ROLE_COLUMN_HEADER, @"AXCell" },
-    { AccessibilityNodeData::ROLE_DEFINITION_LIST_DEFINITION,
+    { AccessibilityNodeData::ROLE_DEFINITION, NSAccessibilityGroupRole },
+    { AccessibilityNodeData::ROLE_DESCRIPTION_LIST_DETAIL,
         NSAccessibilityGroupRole },
-    { AccessibilityNodeData::ROLE_DEFINITION_LIST_TERM,
+    { AccessibilityNodeData::ROLE_DESCRIPTION_LIST_TERM,
         NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_DIALOG, NSAccessibilityGroupRole },
     { AccessibilityNodeData::ROLE_DIRECTORY, NSAccessibilityListRole },
@@ -211,8 +214,9 @@ RoleMap BuildSubroleMap() {
     { AccessibilityNodeData::ROLE_ALERT, @"AXApplicationAlert" },
     { AccessibilityNodeData::ROLE_ALERT_DIALOG, @"AXApplicationAlertDialog" },
     { AccessibilityNodeData::ROLE_ARTICLE, @"AXDocumentArticle" },
-    { AccessibilityNodeData::ROLE_DEFINITION_LIST_DEFINITION, @"AXDefinition" },
-    { AccessibilityNodeData::ROLE_DEFINITION_LIST_TERM, @"AXTerm" },
+    { AccessibilityNodeData::ROLE_DEFINITION, @"AXDefinition" },
+    { AccessibilityNodeData::ROLE_DESCRIPTION_LIST_DETAIL, @"AXDescription" },
+    { AccessibilityNodeData::ROLE_DESCRIPTION_LIST_TERM, @"AXTerm" },
     { AccessibilityNodeData::ROLE_DIALOG, @"AXApplicationDialog" },
     { AccessibilityNodeData::ROLE_DOCUMENT, @"AXDocument" },
     { AccessibilityNodeData::ROLE_FOOTER, @"AXLandmarkContentInfo" },
@@ -593,7 +597,10 @@ NSDictionary* attributeToMethodNameMap = nil;
         browserAccessibility_->parent()->ToBrowserAccessibilityCocoa());
   } else {
     // Hook back up to RenderWidgetHostViewCocoa.
-    return browserAccessibility_->manager()->GetParentView();
+    BrowserAccessibilityManagerMac* manager =
+        static_cast<BrowserAccessibilityManagerMac*>(
+            browserAccessibility_->manager());
+    return manager->parent_view();
   }
 }
 
@@ -705,7 +712,7 @@ NSDictionary* attributeToMethodNameMap = nil;
         [htmlTag isEqualToString:@"ol"]) {
       return @"AXContentList";
     } else if ([htmlTag isEqualToString:@"dl"]) {
-      return @"AXDefinitionList";
+      return @"AXDescriptionList";
     }
   }
 
@@ -829,11 +836,15 @@ NSDictionary* attributeToMethodNameMap = nil;
   return [delegate_ window];
 }
 
+- (NSString*)methodNameForAttribute:(NSString*)attribute {
+  return [attributeToMethodNameMap objectForKey:attribute];
+}
+
 // Returns the accessibility value for the given attribute.  If the value isn't
 // supported this will return nil.
 - (id)accessibilityAttributeValue:(NSString*)attribute {
   SEL selector =
-      NSSelectorFromString([attributeToMethodNameMap objectForKey:attribute]);
+      NSSelectorFromString([self methodNameForAttribute:attribute]);
   if (selector)
     return [self performSelector:selector];
 
@@ -1004,6 +1015,7 @@ NSDictionary* attributeToMethodNameMap = nil;
       NSAccessibilityWindowAttribute,
       NSAccessibilityURLAttribute,
       @"AXAccessKey",
+      @"AXInvalid",
       @"AXRequired",
       @"AXVisited",
       nil];
@@ -1048,7 +1060,23 @@ NSDictionary* attributeToMethodNameMap = nil;
         NSAccessibilityDisclosureLevelAttribute,
         NSAccessibilityDisclosedRowsAttribute,
         nil]];
+  } else if ([role isEqualToString:NSAccessibilityRowRole]) {
+    if (browserAccessibility_->parent()) {
+      string16 parentRole;
+      browserAccessibility_->parent()->GetHtmlAttribute(
+          "role", &parentRole);
+      const string16 treegridRole(ASCIIToUTF16("treegrid"));
+      if (parentRole == treegridRole) {
+        [ret addObjectsFromArray:[NSArray arrayWithObjects:
+            NSAccessibilityDisclosingAttribute,
+            NSAccessibilityDisclosedByRowAttribute,
+            NSAccessibilityDisclosureLevelAttribute,
+            NSAccessibilityDisclosedRowsAttribute,
+            nil]];
+      }
+    }
   }
+
 
   // Live regions.
   string16 s;

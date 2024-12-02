@@ -5,6 +5,7 @@
 package org.chromium.content.browser;
 
 import android.content.Context;
+import android.os.Build;
 import android.view.Surface;
 import android.view.SurfaceView;
 import android.view.SurfaceHolder;
@@ -25,6 +26,16 @@ public class ContentViewRenderView extends FrameLayout {
 
     private SurfaceView mSurfaceView;
 
+    private ContentView mCurrentContentView;
+
+    private final VSyncMonitor mVSyncMonitor;
+
+    // The VSyncMonitor gives the timebase for the actual vsync, but we don't want render until
+    // we have had a chance for input events to propagate to the compositor thread. This takes
+    // 3 ms typically, so we adjust the vsync timestamps forward by a bit to give input events a
+    // chance to arrive.
+    private static final long INPUT_EVENT_LAG_FROM_VSYNC_MICROSECONDS = 3200;
+
     /**
      * Constructs a new ContentViewRenderView that should be can to a view hierarchy.
      * Native code should add/remove the layers to be rendered through the ContentViewLayerRenderer.
@@ -41,6 +52,10 @@ public class ContentViewRenderView extends FrameLayout {
             @Override
             public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
                 nativeSurfaceSetSize(mNativeContentViewRenderView, width, height);
+                if (mCurrentContentView != null) {
+                    mCurrentContentView.getContentViewCore().onPhysicalBackingSizeChanged(
+                            width, height);
+                }
             }
 
             @Override
@@ -52,6 +67,20 @@ public class ContentViewRenderView extends FrameLayout {
             @Override
             public void surfaceDestroyed(SurfaceHolder holder) {
                 nativeSurfaceDestroyed(mNativeContentViewRenderView);
+            }
+        });
+
+        mVSyncMonitor = new VSyncMonitor(getContext(), new VSyncMonitor.Listener() {
+            @Override
+            public void onVSync(VSyncMonitor monitor, long vsyncTimeMicros) {
+                if (mCurrentContentView == null) return;
+                // Compensate for input event lag. Input events are delivered immediately on
+                // pre-JB releases, so this adjustment is only done for later versions.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+                    vsyncTimeMicros += INPUT_EVENT_LAG_FROM_VSYNC_MICROSECONDS;
+                }
+                mCurrentContentView.getContentViewCore().updateVSync(vsyncTimeMicros,
+                        mVSyncMonitor.getVSyncPeriodInMicroseconds());
             }
         });
 
@@ -75,6 +104,11 @@ public class ContentViewRenderView extends FrameLayout {
     public void setCurrentContentView(ContentView contentView) {
         nativeSetCurrentContentView(mNativeContentViewRenderView,
                 contentView.getContentViewCore().getNativeContentViewCore());
+
+        mCurrentContentView = contentView;
+        mCurrentContentView.getContentViewCore().onPhysicalBackingSizeChanged(
+                getWidth(), getHeight());
+        mVSyncMonitor.requestUpdate();
     }
 
     /**

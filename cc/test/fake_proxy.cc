@@ -6,64 +6,45 @@
 
 namespace cc {
 
-bool FakeProxy::compositeAndReadback(void *pixels, const gfx::Rect&)
-{
-    return true;
+bool FakeProxy::CompositeAndReadback(void* pixels, gfx::Rect rect) {
+  return true;
 }
 
-bool FakeProxy::isStarted() const
-{
-    return true;
+bool FakeProxy::IsStarted() const { return true; }
+
+bool FakeProxy::InitializeOutputSurface() { return true; }
+
+bool FakeProxy::InitializeRenderer() { return true; }
+
+bool FakeProxy::RecreateOutputSurface() { return true; }
+
+const RendererCapabilities& FakeProxy::GetRendererCapabilities() const {
+  return capabilities_;
 }
 
-bool FakeProxy::initializeOutputSurface()
-{
-    return true;
+RendererCapabilities& FakeProxy::GetRendererCapabilities() {
+  return capabilities_;
 }
 
-bool FakeProxy::initializeRenderer()
-{
-    return true;
+bool FakeProxy::CommitRequested() const { return false; }
+
+size_t FakeProxy::MaxPartialTextureUpdates() const {
+  return max_partial_texture_updates_;
 }
 
-bool FakeProxy::recreateOutputSurface()
-{
-    return true;
+void FakeProxy::SetMaxPartialTextureUpdates(size_t max) {
+  max_partial_texture_updates_ = max;
 }
 
-const RendererCapabilities& FakeProxy::rendererCapabilities() const
-{
-    return m_capabilities;
+bool FakeProxy::CommitPendingForTesting() { return false; }
+
+skia::RefPtr<SkPicture> FakeProxy::CapturePicture() {
+  return skia::RefPtr<SkPicture>();
 }
 
-RendererCapabilities& FakeProxy::rendererCapabilities()
-{
-    return m_capabilities;
-}
-
-bool FakeProxy::commitRequested() const
-{
-    return false;
-}
-
-size_t FakeProxy::maxPartialTextureUpdates() const
-{
-    return m_maxPartialTextureUpdates;
-}
-
-void FakeProxy::setMaxPartialTextureUpdates(size_t max)
-{
-    m_maxPartialTextureUpdates = max;
-}
-
-bool FakeProxy::commitPendingForTesting()
-{
-    return false;
-}
-
-skia::RefPtr<SkPicture> FakeProxy::capturePicture()
-{
-    return skia::RefPtr<SkPicture>();
+scoped_ptr<base::Value> FakeProxy::AsValue() const {
+  scoped_ptr<base::DictionaryValue> state(new base::DictionaryValue());
+  return state.PassAs<base::Value>();
 }
 
 }  // namespace cc

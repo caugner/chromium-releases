@@ -113,14 +113,20 @@ class COMPOSITOR_EXPORT LayerAnimator
   // of this animation sequence.
   void ScheduleAnimation(LayerAnimationSequence* animation);
 
-  // Starts the animations to be run together. Obviously will not work if
-  // they animate any common properties. The animator takes ownership of the
+  // Starts the animations to be run together, ensuring that the first elements
+  // in these sequences have the same effective start time even when some of
+  // them start on the compositor thread (but there is no such guarantee for
+  // the effective start time of subsequent elements). Obviously will not work
+  // if they animate any common properties. The animator takes ownership of the
   // animation sequences. Takes PreemptionStrategy into account.
   void StartTogether(const std::vector<LayerAnimationSequence*>& animations);
 
-  // Schedules the animations to be run together. Obviously will not work if
-  // they animate any common properties. The animator takes ownership of the
-  // animation sequences.
+  // Schedules the animations to be run together, ensuring that the first
+  // elements in these sequences have the same effective start time even when
+  // some of them start on the compositor thread (but there is no such guarantee
+  // for the effective start time of subsequent elements). Obviously will not
+  // work if they animate any common properties. The animator takes ownership
+  // of the animation sequences.
   void ScheduleTogether(const std::vector<LayerAnimationSequence*>& animations);
 
   // Schedules a pause for length |duration| of all the specified properties.
@@ -159,6 +165,9 @@ class COMPOSITOR_EXPORT LayerAnimator
   void AddObserver(LayerAnimationObserver* observer);
   void RemoveObserver(LayerAnimationObserver* observer);
 
+  // Called when a threaded animation is actually started.
+  void OnThreadedAnimationStarted(const cc::AnimationEvent& event);
+
   // This determines how implicit animations will be tweened. This has no
   // effect on animations that are explicitly started or scheduled. The default
   // is Tween::LINEAR.
@@ -174,29 +183,6 @@ class COMPOSITOR_EXPORT LayerAnimator
     last_step_time_ = time;
   }
   base::TimeTicks last_step_time() const { return last_step_time_; }
-
-  // When set all animations play slowly for visual debugging.
-  static void set_slow_animation_mode(bool slow) {
-    slow_animation_mode_ = slow;
-  }
-  static bool slow_animation_mode() { return slow_animation_mode_; }
-
-  // When in slow animation mode, animation durations are scaled by this value.
-  static void set_slow_animation_scale_factor(int factor) {
-    slow_animation_scale_factor_ = factor;
-  }
-  static int slow_animation_scale_factor() {
-    return slow_animation_scale_factor_;
-  }
-
-  // When set to true, all animations complete immediately.
-  static void set_disable_animations_for_test(bool disable_animations) {
-    disable_animations_for_test_ = disable_animations;
-  }
-
-  static bool disable_animations_for_test() {
-    return disable_animations_for_test_;
-  }
 
  protected:
   virtual ~LayerAnimator();
@@ -216,6 +202,7 @@ class COMPOSITOR_EXPORT LayerAnimator
  private:
   friend class base::RefCounted<LayerAnimator>;
   friend class ScopedLayerAnimationSettings;
+  friend class LayerAnimatorTestController;
 
   class RunningAnimation {
    public:
@@ -348,15 +335,6 @@ class COMPOSITOR_EXPORT LayerAnimator
   // Prevents timer adjustments in case when we start multiple animations
   // with preemption strategies that discard previous animations.
   bool adding_animations_;
-
-  // This causes all animations to complete immediately.
-  static bool disable_animations_for_test_;
-
-  // Slows down all animations for visual debugging.
-  static bool slow_animation_mode_;
-
-  // Amount to slow animations for debugging.
-  static int slow_animation_scale_factor_;
 
   // Observers are notified when layer animations end, are scheduled or are
   // aborted.

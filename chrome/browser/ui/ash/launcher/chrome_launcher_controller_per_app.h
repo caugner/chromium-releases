@@ -10,15 +10,16 @@
 #include <string>
 #include <vector>
 
+#include "ash/display/display_controller.h"
 #include "ash/launcher/launcher_model_observer.h"
 #include "ash/launcher/launcher_types.h"
-#include "ash/shelf_types.h"
+#include "ash/shelf/shelf_types.h"
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable_observer.h"
 #include "chrome/browser/ui/ash/app_sync_ui_state_observer.h"
@@ -62,6 +63,7 @@ class WebContents;
 // * Shortcuts have no LauncherItemController.
 class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
                                        public ash::ShellObserver,
+                                       public ash::DisplayController::Observer,
                                        public ChromeLauncherController,
                                        public content::NotificationObserver,
                                        public PrefServiceSyncableObserver,
@@ -123,6 +125,15 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   // be pinned.
   virtual bool IsPinnable(ash::LauncherID id) const OVERRIDE;
 
+  // If there is no launcher item in the launcher for application |app_id|, one
+  // gets created. The (existing or created) launcher items get then locked
+  // against a users un-pinning removal.
+  virtual void LockV1AppWithID(const std::string& app_id) OVERRIDE;
+
+  // A previously locked launcher item of type |app_id| gets unlocked. If the
+  // lock count reaches 0 and the item is not pinned it will go away.
+  virtual void UnlockV1AppWithID(const std::string& app_id) OVERRIDE;
+
   // Requests that the launcher item controller specified by |id| open a new
   // instance of the app.  |event_flags| holds the flags of the event which
   // triggered this command.
@@ -164,6 +175,10 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
 
   // Returns true if a pinned launcher item with given |app_id| could be found.
   virtual bool IsAppPinned(const std::string& app_id) OVERRIDE;
+
+  // Find out if the given application |id| is a windowed app item and not a
+  // pinned item in the launcher.
+  bool IsWindowedAppInLauncher(const std::string& app_id);
 
   // Pins an app with |app_id| to launcher. If there is a running instance in
   // launcher, the running instance is pinned. If there is no running instance,
@@ -231,7 +246,7 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
 
   // Returns the extension identified by |app_id|.
   virtual const extensions::Extension* GetExtensionForAppID(
-      const std::string& app_id) OVERRIDE;
+      const std::string& app_id) const OVERRIDE;
 
   // ash::LauncherDelegate overrides:
   virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE;
@@ -241,10 +256,12 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
       const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE;
-  virtual ui::MenuModel* CreateApplicationMenu(
-      const ash::LauncherItem& item) OVERRIDE;
+  virtual ash::LauncherMenuModel* CreateApplicationMenu(
+      const ash::LauncherItem& item,
+      int event_flags) OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
+  virtual bool ShouldShowTooltip(const ash::LauncherItem& item) OVERRIDE;
 
   // ash::LauncherModelObserver overrides:
   virtual void LauncherItemAdded(int index) OVERRIDE;
@@ -262,6 +279,10 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   // ash::ShellObserver overrides:
   virtual void OnShelfAlignmentChanged(aura::RootWindow* root_window) OVERRIDE;
 
+  // ash::DisplayController::Observer overrides:
+  virtual void OnDisplayConfigurationChanging() OVERRIDE;
+  virtual void OnDisplayConfigurationChanged() OVERRIDE;
+
   // PrefServiceSyncableObserver overrides:
   virtual void OnIsSyncingChanged() OVERRIDE;
 
@@ -272,12 +293,15 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   virtual void ExtensionEnableFlowFinished() OVERRIDE;
   virtual void ExtensionEnableFlowAborted(bool user_initiated) OVERRIDE;
 
-  // ash::AppIconLoader overrides:
+  // extensions::AppIconLoader overrides:
   virtual void SetAppImage(const std::string& app_id,
                            const gfx::ImageSkia& image) OVERRIDE;
 
   // Get the list of all running incarnations of this item.
-  ChromeLauncherAppMenuItems GetApplicationList(const ash::LauncherItem& item);
+  // |event_flags| specifies the flags which were set by the event which
+  // triggered this menu generation. It can be used to generate different lists.
+  ChromeLauncherAppMenuItems GetApplicationList(const ash::LauncherItem& item,
+                                                int event_flags);
 
   // Get the list of all tabs which belong to a certain application type.
   std::vector<content::WebContents*> GetV1ApplicationsFromAppId(
@@ -291,9 +315,22 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   bool IsWebContentHandledByApplication(content::WebContents* web_contents,
                                         const std::string& app_id);
 
-  // Get the favicon for the application list by giving the |web_content|.
+  // Get the favicon for the application list entry for |web_contents|.
   // Note that for incognito windows the incognito icon will be returned.
+  // If |web_contents| has not loaded, returns the default favicon.
   gfx::Image GetAppListIcon(content::WebContents* web_contents) const;
+
+  // Get the title for the applicatoin list entry for |web_contents|.
+  // If |web_contents| has not loaded, returns "Net Tab".
+  string16 GetAppListTitle(content::WebContents* web_contents) const;
+
+  // Get the favicon for the browser list entry for |web_contents|.
+  // Note that for incognito windows the incognito icon will be returned.
+  gfx::Image GetBrowserListIcon(content::WebContents* web_contents) const;
+
+  // Get the title for the browser list entry for |web_contents|.
+  // If |web_contents| has not loaded, returns "Net Tab".
+  string16 GetBrowserListTitle(content::WebContents* web_contents) const;
 
   // Overridden from chrome::BrowserListObserver.
   virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
@@ -310,13 +347,22 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   // Sets the AppTabHelper/AppIconLoader, taking ownership of the helper class.
   // These are intended for testing.
   virtual void SetAppTabHelperForTest(AppTabHelper* helper) OVERRIDE;
-  virtual void SetAppIconLoaderForTest(ash::AppIconLoader* loader) OVERRIDE;
+  virtual void SetAppIconLoaderForTest(
+      extensions::AppIconLoader* loader) OVERRIDE;
   virtual const std::string& GetAppIdFromLauncherIdForTest(
       ash::LauncherID id) OVERRIDE;
 
  private:
   friend class ChromeLauncherControllerPerAppTest;
   friend class LauncherPerAppAppBrowserTest;
+  friend class LauncherPlatformPerAppAppBrowserTest;
+
+  // Creates a new app shortcut item and controller on the launcher at |index|.
+   // Use kInsertItemAtEnd to add a shortcut as the last item.
+   virtual ash::LauncherID CreateAppShortcutLauncherItemWithType(
+       const std::string& app_id,
+       int index,
+       ash::LauncherItemType launcher_item_type);
 
   // Updates the activation state of the Broswer item.
   void UpdateBrowserItemStatus();
@@ -359,11 +405,13 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
 
   // Creates an app launcher to insert at |index|. Note that |index| may be
   // adjusted by the model to meet ordering constraints.
+  // The |launcher_item_type| will be set into the LauncherModel.
   ash::LauncherID InsertAppLauncherItem(
       LauncherItemController* controller,
       const std::string& app_id,
       ash::LauncherItemStatus status,
-      int index);
+      int index,
+      ash::LauncherItemType launcher_item_type);
 
   bool HasItemController(ash::LauncherID id) const;
 
@@ -372,9 +420,18 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
       LauncherItemController* controller);
 
   // Returns the list of all browsers runing.
+  // |event_flags| specifies the flags which were set by the event which
+  // triggered this menu generation. It can be used to generate different lists.
   // TODO(skuhne): Move to wherever the BrowserLauncherItemController
   // functionality moves to.
-  ChromeLauncherAppMenuItems GetBrowserApplicationList();
+  ChromeLauncherAppMenuItems GetBrowserApplicationList(int event_flags);
+
+  // Returns true when the given |browser| is listed in the browser application
+  // list.
+  bool IsBrowserRepresentedInBrowserList(Browser* browser);
+
+  // Check if the given |web_contents| is in incognito mode.
+  bool IsIncognito(content::WebContents* web_contents) const;
 
   ash::LauncherModel* model_;
 
@@ -397,7 +454,7 @@ class ChromeLauncherControllerPerApp : public ash::LauncherModelObserver,
   scoped_ptr<AppTabHelper> app_tab_helper_;
 
   // Used to load the image for an app item.
-  scoped_ptr<ash::AppIconLoader> app_icon_loader_;
+  scoped_ptr<extensions::AppIconLoader> app_icon_loader_;
 
   content::NotificationRegistrar notification_registrar_;
 

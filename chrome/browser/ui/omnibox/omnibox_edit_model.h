@@ -21,6 +21,7 @@
 class AutocompleteController;
 class AutocompleteResult;
 struct InstantSuggestion;
+class OmniboxCurrentPageDelegate;
 class OmniboxEditController;
 class OmniboxPopupModel;
 class OmniboxView;
@@ -116,12 +117,6 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
   // of the edit.
   bool UseVerbatimInstant();
 
-  // If the user presses ctrl-enter, it means "add .com to the the end".  The
-  // desired TLD is the TLD the user desires to add to the end of the current
-  // input, if any, based on their control key state and any other actions
-  // they've taken.
-  string16 GetDesiredTLD() const;
-
   // Returns true if the current edit contents will be treated as a
   // URL/navigation, as opposed to a search.
   bool CurrentTextIsURL() const;
@@ -174,10 +169,6 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
   // Returns true if the text was committed.
   // TODO: can the return type be void?
   bool CommitSuggestedText(bool skip_inline_autocomplete);
-
-  // Accepts the currently showing Instant preview, if any, and returns true.
-  // Returns false if there is no Instant preview showing.
-  bool AcceptCurrentInstantPreview();
 
   // Invoked any time the text may have changed in the edit. Updates Instant and
   // notifies the controller.
@@ -323,6 +314,8 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
   void OnPopupBoundsChanged(const gfx::Rect& bounds);
 
  private:
+  friend class InstantTestBase;
+
   enum PasteState {
     NONE,           // Most recent edit was not a paste.
     PASTING,        // In the middle of doing a paste. We need this intermediate
@@ -409,15 +402,9 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
       const string16& new_text,
       size_t caret_position) const;
 
-  // Notifies the SearchTabHelper that autocomplete state has changed.
-  void NotifySearchTabHelper();
-
   // Tries to start an Instant preview for |match|. Returns true if Instant
   // processed the match.
   bool DoInstant(const AutocompleteMatch& match);
-
-  // Starts a prerender for the given |match|.
-  void DoPrerender(const AutocompleteMatch& match);
 
   // Starts a DNS prefetch for the given |match|.
   void DoPreconnect(const AutocompleteMatch& match);
@@ -452,6 +439,8 @@ class OmniboxEditModel : public AutocompleteControllerDelegate {
   OmniboxPopupModel* popup_;
 
   OmniboxEditController* controller_;
+
+  scoped_ptr<OmniboxCurrentPageDelegate> delegate_;
 
   OmniboxFocusState focus_state_;
 

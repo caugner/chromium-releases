@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/common/media_stream_request.h"
 #include "ui/base/models/simple_menu_model.h"
@@ -22,6 +23,7 @@ namespace gfx {
 class ImageSkia;
 }  // namespace gfx
 
+class ScreenCaptureNotificationUI;
 class StatusIcon;
 class StatusTray;
 
@@ -39,12 +41,13 @@ class MediaStreamCaptureIndicator
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
 
   // Called on IO thread when MediaStream opens new capture devices.
   void CaptureDevicesOpened(int render_process_id,
                             int render_view_id,
-                            const content::MediaStreamDevices& devices);
+                            const content::MediaStreamDevices& devices,
+                            const base::Closure& close_callback);
 
   // Called on IO thread when MediaStream closes the opened devices.
   void CaptureDevicesClosed(int render_process_id,
@@ -59,9 +62,6 @@ class MediaStreamCaptureIndicator
   // media for remote broadcast).
   bool IsBeingMirrored(int render_process_id, int render_view_id) const;
 
-  // ImageLoader callback.
-  void OnImageLoaded(const string16& message, const gfx::Image& image);
-
  private:
   class WebContentsDeviceUsage;
 
@@ -71,7 +71,8 @@ class MediaStreamCaptureIndicator
   // Called by the public functions, executed on UI thread.
   void DoDevicesOpenedOnUIThread(int render_process_id,
                                  int render_view_id,
-                                 const content::MediaStreamDevices& devices);
+                                 const content::MediaStreamDevices& devices,
+                                 const base::Closure& close_callback);
   void DoDevicesClosedOnUIThread(int render_process_id,
                                  int render_view_id,
                                  const content::MediaStreamDevices& devices);
@@ -96,7 +97,8 @@ class MediaStreamCaptureIndicator
   // Adds devices to usage map and triggers necessary UI updates.
   void AddCaptureDevices(int render_process_id,
                          int render_view_id,
-                         const content::MediaStreamDevices& devices);
+                         const content::MediaStreamDevices& devices,
+                         const base::Closure& close_callback);
 
   // Removes devices from the usage map and triggers necessary UI updates.
   void RemoveCaptureDevices(int render_process_id,
@@ -108,18 +110,24 @@ class MediaStreamCaptureIndicator
   void ShowBalloon(content::WebContents* web_contents,
                    int balloon_body_message_id);
 
+  // ImageLoader callback.
+  void OnImageLoaded(const string16& message, const gfx::Image& image);
+
   // Removes the status tray icon from the desktop. This function is called by
   // RemoveCaptureDevices() when the device usage map becomes empty.
   void MaybeDestroyStatusTrayIcon();
 
-  // Updates the status tray menu with the new device list. This call will be
-  // triggered by both AddCaptureDevices() and RemoveCaptureDevices().
-  void UpdateStatusTrayIconContextMenu();
+  // Updates the status tray menu and the screen capture notification. Called
+  // from AddCaptureDevices() and RemoveCaptureDevices().
+  void UpdateNotificationUserInterface();
 
   // Updates the status tray tooltip and image according to which kind of
   // devices are being used. This function is called by
   // UpdateStatusTrayIconContextMenu().
   void UpdateStatusTrayIconDisplay(bool audio, bool video);
+
+  // Callback for ScreenCaptureNotificationUI.
+  void OnStopScreenCapture(const base::Closure& stop);
 
   // Reference to our status icon - owned by the StatusTray. If null,
   // the platform doesn't support status icons.
@@ -148,6 +156,8 @@ class MediaStreamCaptureIndicator
   CommandTargets command_targets_;
 
   bool should_show_balloon_;
+
+  scoped_ptr<ScreenCaptureNotificationUI> screen_capture_notification_;
 };
 
 #endif  // CHROME_BROWSER_MEDIA_MEDIA_STREAM_CAPTURE_INDICATOR_H_

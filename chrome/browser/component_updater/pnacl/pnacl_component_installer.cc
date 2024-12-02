@@ -6,9 +6,10 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -19,11 +20,19 @@
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/omaha_query_params.h"
 #include "content/public/browser/browser_thread.h"
 
+using chrome::OmahaQueryParams;
 using content::BrowserThread;
 
 namespace {
+
+// If PNaCl isn't installed yet, but a user is running chrome with
+// --enable-pnacl, this is the amount of time to wait before starting
+// a background install.
+const int kInitialDelaySeconds = 10;
 
 // One of the Pnacl component files, for checking that expected files exist.
 // TODO(jvoung): perhaps replace this with a list of the expected files in the
@@ -35,29 +44,7 @@ const char kPnaclCompilerFileName[] = "llc_nexe";
 // Name of the Pnacl component specified in the manifest.
 const char kPnaclManifestNamePrefix[] = "PNaCl";
 
-// Returns the name of the Pnacl architecture supported by an install.
-// NOTE: this is independent of the Omaha "arch" query parameter.
-const char* PnaclArch() {
-#if defined(ARCH_CPU_X86_FAMILY)
-#if defined(ARCH_CPU_X86_64)
-  return "x86-64";
-#elif defined(OS_WIN)
-  bool x86_64 = (base::win::OSInfo::GetInstance()->wow64_status() ==
-                 base::win::OSInfo::WOW64_ENABLED);
-  return x86_64 ? "x86-64" : "x86-32";
-#else
-  return "x86-32";
-#endif
-#elif defined(ARCH_CPU_ARMEL)
-  return "arm";
-#elif defined(ARCH_CPU_MIPSEL)
-  return "mips32";
-#else
-#error "Add support for your architecture to Pnacl Component Installer."
-#endif
-}
-
-// Sanitize characters given by PnaclArch so that they can be used
+// Sanitize characters from Pnacl Arch value so that they can be used
 // in path names.  This should only be characters in the set: [a-z0-9_].
 // Keep in sync with chrome/browser/nacl_host/pnacl_file_host.
 std::string SanitizeForPath(const std::string& input) {
@@ -127,10 +114,6 @@ void SetPnaclHash(CrxComponent* component) {
 
 
 // If we don't have Pnacl installed, this is the version we claim.
-// TODO(jvoung): Is there a way to trick the configurator to ping the server
-// earlier if there are components that are not yet installed (version 0.0.0.0),
-// So that they will be available ASAP? Be careful not to hurt startup speed.
-// Make kNullVersion part of ComponentUpdater in that case, to avoid skew?
 const char kNullVersion[] = "0.0.0.0";
 
 // Pnacl components have the version encoded in the path itself:
@@ -217,9 +200,9 @@ bool CheckPnaclComponentManifest(base::DictionaryValue* manifest,
 
   std::string arch;
   pnacl_manifest->GetStringASCII("pnacl-arch", &arch);
-  if (arch.compare(PnaclArch()) != 0) {
+  if (arch.compare(OmahaQueryParams::getNaclArch()) != 0) {
     LOG(WARNING) << "'pnacl-arch' field in manifest is invalid ("
-                 << arch << " vs " << PnaclArch() << ")";
+                 << arch << " vs " << OmahaQueryParams::getNaclArch() << ")";
     return false;
   }
 
@@ -256,7 +239,7 @@ namespace {
 bool PathContainsPnacl(const base::FilePath& base_path) {
   // Check that at least one of the compiler files exists, for the current ISA.
   std::string expected_filename("pnacl_public_");
-  std::string arch = PnaclArch();
+  std::string arch = OmahaQueryParams::getNaclArch();
   expected_filename = expected_filename + SanitizeForPath(arch) +
       "_" + kPnaclCompilerFileName;
   return file_util::PathExists(base_path.AppendASCII(expected_filename));
@@ -315,6 +298,13 @@ bool PnaclComponentInstaller::Install(base::DictionaryValue* manifest,
 
 namespace {
 
+void DoCheckForUpdate(ComponentUpdateService* cus,
+                   const CrxComponent& pnacl) {
+  if (cus->CheckForUpdateSoon(pnacl) != ComponentUpdateService::kOk) {
+    LOG(WARNING) << "Pnacl check for update failed.";
+  }
+}
+
 // Finally, do the registration with the right version number.
 void FinishPnaclUpdateRegistration(ComponentUpdateService* cus,
                                    const Version& current_version) {
@@ -328,6 +318,17 @@ void FinishPnaclUpdateRegistration(ComponentUpdateService* cus,
   SetPnaclHash(&pnacl);
   if (cus->RegisterComponent(pnacl) != ComponentUpdateService::kOk) {
     NOTREACHED() << "Pnacl component registration failed.";
+  }
+
+  // If PNaCl is not yet installed but it is requested by --enable-pnacl,
+  // we want it to be available "soon", so kick off an update check
+  // earlier than usual.
+  Version null_version(kNullVersion);
+  if (current_version.Equals(null_version)) {
+    BrowserThread::PostDelayedTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(DoCheckForUpdate, cus, pnacl),
+        base::TimeDelta::FromSeconds(kInitialDelaySeconds));
   }
 }
 
@@ -366,8 +367,13 @@ void StartPnaclUpdateRegistration(ComponentUpdateService* cus) {
 
 }  // namespace
 
-void RegisterPnaclComponent(ComponentUpdateService* cus) {
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&StartPnaclUpdateRegistration, cus));
+void RegisterPnaclComponent(ComponentUpdateService* cus,
+                            const CommandLine& command_line) {
+  // Only register when given the right flag.  This is important since
+  // we do an early component updater check above (in DoCheckForUpdate).
+  if (false /* Disable for now */) {
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::Bind(&StartPnaclUpdateRegistration, cus));
+  }
 }

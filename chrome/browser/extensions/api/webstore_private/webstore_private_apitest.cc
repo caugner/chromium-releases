@@ -4,8 +4,8 @@
 
 #include <vector>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/files/file_path.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
@@ -28,7 +28,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/gpu_info.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "ui/gl/gl_switches.h"
 
 using content::GpuFeatureType;
@@ -227,9 +227,9 @@ class ExtensionWebstorePrivateBundleTest
 class ExtensionWebstoreGetWebGLStatusTest : public InProcessBrowserTest {
  public:
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    // In linux, we need to launch GPU process to decide if WebGL is allowed.
+    // We need to launch GPU process to decide if WebGL is allowed.
     // Run it on top of osmesa to avoid bot driver issues.
-#if defined(OS_LINUX)
+#if !defined(OS_MACOSX)
     CHECK(test_launcher_utils::OverrideGLImplementation(
         command_line, gfx::kGLImplementationOSMesaName)) <<
         "kUseGL must not be set multiple times!";
@@ -467,7 +467,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstoreGetWebGLStatusTest, Blocked) {
       "  \"entries\": [\n"
       "    {\n"
       "      \"id\": 1,\n"
-      "      \"blacklist\": [\n"
+      "      \"features\": [\n"
       "        \"webgl\"\n"
       "      ]\n"
       "    }\n"

@@ -35,12 +35,13 @@
 #include "chrome/browser/extensions/extension_renderer_state.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/gpu/gl_string_manager.h"
+#include "chrome/browser/gpu/gpu_mode_manager.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/idle.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/media_gallery/media_file_system_registry.h"
+#include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
@@ -64,14 +65,13 @@
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
 #include "chrome/common/url_constants.h"
@@ -92,10 +92,6 @@
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
-
-#if defined(ENABLE_MESSAGE_CENTER) && defined(USE_ASH)
-#include "ash/shell.h"
-#endif
 
 #if defined(ENABLE_MESSAGE_CENTER)
 #include "ui/message_center/message_center.h"
@@ -121,6 +117,10 @@
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
 #include "chrome/browser/plugins/plugins_resource_service.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "apps/app_shim/app_shim_host_manager_mac.h"
 #endif
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -159,9 +159,6 @@ BrowserProcessImpl::BrowserProcessImpl(
       created_local_state_(false),
       created_icon_manager_(false),
       created_notification_ui_manager_(false),
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-      created_message_center_(false),
-#endif
       created_safe_browsing_service_(false),
       module_ref_count_(0),
       did_start_(false),
@@ -183,6 +180,8 @@ BrowserProcessImpl::BrowserProcessImpl(
       extensions::kExtensionScheme);
   ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
       chrome::kExtensionResourceScheme);
+  ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
+      chrome::kChromeSearchScheme);
 
 #if defined(OS_MACOSX)
   InitIdleMonitor();
@@ -191,6 +190,10 @@ BrowserProcessImpl::BrowserProcessImpl(
   extension_event_router_forwarder_ = new extensions::EventRouterForwarder;
 
   ExtensionRendererState::GetInstance()->Init();
+
+#if defined(ENABLE_MESSAGE_CENTER)
+  message_center::MessageCenter::Initialize();
+#endif
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
@@ -247,6 +250,10 @@ void BrowserProcessImpl::StartTearDown() {
 
   ExtensionRendererState::GetInstance()->Shutdown();
 
+#if defined(ENABLE_MESSAGE_CENTER)
+  message_center::MessageCenter::Shutdown();
+#endif
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // The policy providers managed by |browser_policy_connector_| need to shut
   // down while the IO and FILE threads are still alive.
@@ -261,6 +268,10 @@ void BrowserProcessImpl::StartTearDown() {
   // Delete aura after the metrics service has been deleted as it accesses
   // monitor information.
   aura::Env::DeleteInstance();
+#endif
+
+#if defined(OS_MACOSX)
+  app_shim_host_manager_.reset();
 #endif
 }
 
@@ -430,8 +441,10 @@ net::URLRequestContextGetter* BrowserProcessImpl::system_request_context() {
 
 chrome_variations::VariationsService* BrowserProcessImpl::variations_service() {
   DCHECK(CalledOnValidThread());
-  if (!variations_service_.get())
-    variations_service_.reset(chrome_variations::VariationsService::Create());
+  if (!variations_service_.get()) {
+    variations_service_.reset(
+        chrome_variations::VariationsService::Create(local_state()));
+  }
   return variations_service_.get();
 }
 
@@ -459,13 +472,7 @@ NotificationUIManager* BrowserProcessImpl::notification_ui_manager() {
 #if defined(ENABLE_MESSAGE_CENTER)
 message_center::MessageCenter* BrowserProcessImpl::message_center() {
   DCHECK(CalledOnValidThread());
-#if defined(USE_ASH)
-  return ash::Shell::GetInstance()->message_center();
-#else
-  if (!created_message_center_)
-    CreateMessageCenter();
-  return message_center_.get();
-#endif
+  return message_center::MessageCenter::Get();
 }
 #endif
 
@@ -473,10 +480,8 @@ policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
   DCHECK(CalledOnValidThread());
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (!created_browser_policy_connector_) {
-    // Init() should not reenter this function. If it does this will DCHECK.
     DCHECK(!browser_policy_connector_);
     browser_policy_connector_.reset(new policy::BrowserPolicyConnector());
-    browser_policy_connector_->Init();
     created_browser_policy_connector_ = true;
   }
   return browser_policy_connector_.get();
@@ -509,6 +514,13 @@ GLStringManager* BrowserProcessImpl::gl_string_manager() {
   return gl_string_manager_.get();
 }
 
+GpuModeManager* BrowserProcessImpl::gpu_mode_manager() {
+  DCHECK(CalledOnValidThread());
+  if (!gpu_mode_manager_.get())
+    gpu_mode_manager_.reset(new GpuModeManager());
+  return gpu_mode_manager_.get();
+}
+
 RenderWidgetSnapshotTaker* BrowserProcessImpl::GetRenderWidgetSnapshotTaker() {
   return render_widget_snapshot_taker_.get();
 }
@@ -526,6 +538,7 @@ AutomationProviderList* BrowserProcessImpl::GetAutomationProviderList() {
 
 void BrowserProcessImpl::CreateDevToolsHttpProtocolHandler(
     Profile* profile,
+    chrome::HostDesktopType host_desktop_type,
     const std::string& ip,
     int port,
     const std::string& frontend_url) {
@@ -535,7 +548,8 @@ void BrowserProcessImpl::CreateDevToolsHttpProtocolHandler(
   // is started with several profiles or existing browser process is reused.
   if (!remote_debugging_server_.get()) {
     remote_debugging_server_.reset(
-        new RemoteDebuggingServer(profile, ip, port, frontend_url));
+        new RemoteDebuggingServer(profile, host_desktop_type, ip, port,
+                                  frontend_url));
   }
 #endif
 }
@@ -623,6 +637,10 @@ void BrowserProcessImpl::PlatformSpecificCommandLineProcessing(
     const CommandLine& command_line) {
 }
 #endif
+
+bool BrowserProcessImpl::created_local_state() const {
+    return created_local_state_;
+}
 
 // static
 void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
@@ -800,6 +818,10 @@ void BrowserProcessImpl::CreateLocalState() {
   base::FilePath local_state_path;
   CHECK(PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path));
   scoped_refptr<PrefRegistrySimple> pref_registry = new PrefRegistrySimple;
+
+  // Register local state preferences.
+  chrome::RegisterLocalState(pref_registry);
+
   local_state_.reset(
       chrome_prefs::CreateLocalState(local_state_path,
                                      local_state_task_runner_,
@@ -807,13 +829,6 @@ void BrowserProcessImpl::CreateLocalState() {
                                      NULL,
                                      pref_registry,
                                      false));
-
-  // Initialize the prefs of the local state.
-  //
-  // TODO(joi): Once we clean up so none of the registration methods
-  // need the PrefService pointer, this should happen before the call
-  // to CreateLocalState.
-  chrome::RegisterLocalState(local_state_.get(), pref_registry);
 
   pref_change_registrar_.Init(local_state_.get());
 
@@ -843,6 +858,16 @@ void BrowserProcessImpl::PreCreateThreads() {
 }
 
 void BrowserProcessImpl::PreMainMessageLoopRun() {
+#if defined(ENABLE_CONFIGURATION_POLICY)
+  // browser_policy_connector() is created very early because local_state()
+  // needs policy to be initialized with the managed preference values.
+  // However, policy fetches from the network and loading of disk caches
+  // requires that threads are running; this Init() call lets the connector
+  // resume its initialization now that the loops are spinning and the
+  // system request context is available for the fetchers.
+  browser_policy_connector()->Init(local_state(), system_request_context());
+#endif
+
   if (local_state_->IsManagedPreference(prefs::kDefaultBrowserSettingEnabled))
     ApplyDefaultBrowserPolicy();
 
@@ -882,6 +907,10 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
     bookmark_prompt_controller_.reset(new BookmarkPromptController());
   }
 #endif
+
+#if defined(OS_MACOSX)
+  app_shim_host_manager_.reset(new AppShimHostManager);
+#endif
 }
 
 void BrowserProcessImpl::CreateIconManager() {
@@ -904,14 +933,6 @@ void BrowserProcessImpl::CreateNotificationUIManager() {
   created_notification_ui_manager_ = true;
 #endif
 }
-
-#if defined(ENABLE_MESSAGE_CENTER) && !defined(USE_ASH)
-void BrowserProcessImpl::CreateMessageCenter() {
-  DCHECK(message_center_.get() == NULL);
-  message_center_.reset(new message_center::MessageCenter());
-  created_message_center_ = true;
-}
-#endif
 
 void BrowserProcessImpl::CreateBackgroundModeManager() {
   DCHECK(background_mode_manager_.get() == NULL);
@@ -987,7 +1008,7 @@ void BrowserProcessImpl::ApplyAllowCrossOriginAuthPromptPolicy() {
 bool BrowserProcessImpl::CanAutorestartForUpdate() const {
   // Check if browser is in the background and if it needs to be restarted to
   // apply a pending update.
-  return BrowserList::empty() && chrome::WillKeepAlive() &&
+  return chrome::GetTotalBrowserCount() == 0 && chrome::WillKeepAlive() &&
          upgrade_util::IsUpdatePendingRestart();
 }
 
@@ -1024,7 +1045,7 @@ void BrowserProcessImpl::RestartBackgroundInstance() {
   }
 
   DLOG(WARNING) << "Shutting down current instance of the browser.";
-  browser::AttemptExit();
+  chrome::AttemptExit();
 
   // Transfer ownership to Upgrade.
   upgrade_util::SetNewCommandLine(new_cl.release());

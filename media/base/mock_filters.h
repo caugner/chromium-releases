@@ -134,6 +134,7 @@ class MockAudioDecoder : public AudioDecoder {
 class MockVideoRenderer : public VideoRenderer {
  public:
   MockVideoRenderer();
+  virtual ~MockVideoRenderer();
 
   // VideoRenderer implementation.
   MOCK_METHOD10(Initialize, void(const scoped_refptr<DemuxerStream>& stream,
@@ -153,9 +154,6 @@ class MockVideoRenderer : public VideoRenderer {
   MOCK_METHOD1(Stop, void(const base::Closure& callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
 
- protected:
-  virtual ~MockVideoRenderer();
-
  private:
   DISALLOW_COPY_AND_ASSIGN(MockVideoRenderer);
 };
@@ -163,10 +161,10 @@ class MockVideoRenderer : public VideoRenderer {
 class MockAudioRenderer : public AudioRenderer {
  public:
   MockAudioRenderer();
+  virtual ~MockAudioRenderer();
 
   // AudioRenderer implementation.
-  MOCK_METHOD9(Initialize, void(const scoped_refptr<DemuxerStream>& stream,
-                                const AudioDecoderList& decoders,
+  MOCK_METHOD8(Initialize, void(const scoped_refptr<DemuxerStream>& stream,
                                 const PipelineStatusCB& init_cb,
                                 const StatisticsCB& statistics_cb,
                                 const base::Closure& underflow_cb,
@@ -182,9 +180,6 @@ class MockAudioRenderer : public AudioRenderer {
   MOCK_METHOD2(Preroll, void(base::TimeDelta time, const PipelineStatusCB& cb));
   MOCK_METHOD1(SetVolume, void(float volume));
   MOCK_METHOD1(ResumeAfterUnderflow, void(bool buffer_more_audio));
-
- protected:
-  virtual ~MockAudioRenderer();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioRenderer);
@@ -213,13 +208,10 @@ class MockDecryptor : public Decryptor {
                              const scoped_refptr<DecoderBuffer>& encrypted,
                              const DecryptCB& decrypt_cb));
   MOCK_METHOD1(CancelDecrypt, void(StreamType stream_type));
-  // TODO(xhwang): The following two methods are workarounds of the issue that
-  // move-only parameters are not supported in mocked methods. Remove when the
-  // issue is fixed: http://code.google.com/p/googletest/issues/detail?id=395
-  MOCK_METHOD2(InitializeAudioDecoderMock,
+  MOCK_METHOD2(InitializeAudioDecoder,
                void(const AudioDecoderConfig& config,
                     const DecoderInitCB& init_cb));
-  MOCK_METHOD2(InitializeVideoDecoderMock,
+  MOCK_METHOD2(InitializeVideoDecoder,
                void(const VideoDecoderConfig& config,
                     const DecoderInitCB& init_cb));
   MOCK_METHOD2(DecryptAndDecodeAudio,
@@ -230,11 +222,6 @@ class MockDecryptor : public Decryptor {
                     const VideoDecodeCB& video_decode_cb));
   MOCK_METHOD1(ResetDecoder, void(StreamType stream_type));
   MOCK_METHOD1(DeinitializeDecoder, void(StreamType stream_type));
-
-  virtual void InitializeAudioDecoder(scoped_ptr<AudioDecoderConfig> config,
-                                      const DecoderInitCB& init_cb) OVERRIDE;
-  virtual void InitializeVideoDecoder(scoped_ptr<VideoDecoderConfig> config,
-                                      const DecoderInitCB& init_cb) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDecryptor);

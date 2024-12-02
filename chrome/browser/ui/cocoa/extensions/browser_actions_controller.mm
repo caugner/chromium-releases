@@ -14,7 +14,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
-#include "chrome/browser/prefs/pref_registry_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -28,6 +27,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -188,9 +188,10 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
   }
 
   // Overridden from content::NotificationObserver.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) {
+  virtual void Observe(
+      int type,
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE: {
         ExtensionPopupController* popup = [ExtensionPopupController popup];
@@ -226,12 +227,14 @@ class ExtensionServiceObserverBridge : public content::NotificationObserver,
   }
 
   // ExtensionToolbarModel::Observer implementation.
-  void BrowserActionAdded(const Extension* extension, int index) {
+  virtual void BrowserActionAdded(
+      const Extension* extension,
+      int index) OVERRIDE {
     [owner_ createActionButtonForExtension:extension withIndex:index];
     [owner_ resizeContainerAndAnimate:NO];
   }
 
-  void BrowserActionRemoved(const Extension* extension) {
+  virtual void BrowserActionRemoved(const Extension* extension) OVERRIDE {
     [owner_ removeActionButtonForExtension:extension];
     [owner_ resizeContainerAndAnimate:NO];
   }

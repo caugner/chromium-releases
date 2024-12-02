@@ -9,6 +9,9 @@
 
 namespace message_center {
 
+// TODO(dimich): remove this function and the kEnableRichNotifications flag
+// when a time period in Canary indicates the new notifications are acceptable
+// for default behavior.
 bool IsRichNotificationEnabled() {
   return CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableRichNotifications);

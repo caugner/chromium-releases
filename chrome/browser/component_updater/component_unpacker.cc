@@ -13,11 +13,11 @@
 #include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/component_updater/component_updater_service.h"
-#include "chrome/browser/extensions/crx_file.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/zip.h"
 #include "crypto/secure_hash.h"
 #include "crypto/signature_verifier.h"
+#include "extensions/common/crx_file.h"
 
 using crypto::SecureHash;
 
@@ -136,7 +136,8 @@ ComponentUnpacker::ComponentUnpacker(const std::vector<uint8>& pk_hash,
   }
   // We want the temporary directory to be unique and yet predictable, so
   // we can easily find the package in a end user machine.
-  std::string dir(StringPrintf("CRX_%s", base::HexEncode(hash, 6).c_str()));
+  std::string dir(
+      base::StringPrintf("CRX_%s", base::HexEncode(hash, 6).c_str()));
   unpack_path_ = path.DirName().AppendASCII(dir.c_str());
   if (file_util::DirectoryExists(unpack_path_)) {
     if (!file_util::Delete(unpack_path_, true)) {

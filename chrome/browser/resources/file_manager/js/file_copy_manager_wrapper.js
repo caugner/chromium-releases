@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-var fileCopyManagerWrapper = null;
+'use strict';
 
 /**
  * While FileCopyManager is run in the background page, this class is used to
  * communicate with it.
- * @constructor
  * @param {DirectoryEntry} root Root directory entry.
+ * @constructor
  */
 function FileCopyManagerWrapper(root) {
   this.root_ = root;
@@ -47,16 +47,16 @@ FileCopyManagerWrapper.prototype.__proto__ = cr.EventTarget.prototype;
  * @return {FileCopyManagerWrapper}  A FileCopyManagerWrapper instance.
  */
 FileCopyManagerWrapper.getInstance = function(root) {
-  if (fileCopyManagerWrapper === null) {
-    fileCopyManagerWrapper = new FileCopyManagerWrapper(root);
-  }
-  return fileCopyManagerWrapper;
+  if (!FileCopyManagerWrapper.instance_)
+    FileCopyManagerWrapper.instance_ = new FileCopyManagerWrapper(root);
+
+  return FileCopyManagerWrapper.instance_;
 };
 
 /**
  * Load background page and call callback with copy manager as an argument.
+ * @param {function} callback Function with FileCopyManager as a parameter.
  * @private
- * @param {Function} callback Function with FileCopyManager as a parameter.
  */
 FileCopyManagerWrapper.prototype.getCopyManagerAsync_ = function(callback) {
   var MAX_RETRIES = 10;

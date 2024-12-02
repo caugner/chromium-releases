@@ -42,6 +42,7 @@
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
+#include "content/public/common/result_codes.h"
 #include "rlz/lib/rlz_lib.h"
 
 // Build-time generated include file.
@@ -422,7 +423,7 @@ void GetLocalStateFolders(const Product& product,
 }
 
 // Creates a copy of the local state file and returns a path to the copy.
-FilePath BackupLocalStateFile(
+base::FilePath BackupLocalStateFile(
     const std::vector<base::FilePath>& local_state_folders) {
   base::FilePath backup;
 
@@ -763,16 +764,13 @@ bool DeleteChromeRegistrationKeys(const InstallerState& installer_state,
   base::FilePath chrome_exe(installer_state.target_path().Append(kChromeExe));
 
   // Delete Software\Classes\ChromeHTML.
-  // For user-level installs we now only write these entries in HKCU, but since
-  // old installs did install them to HKLM we will try to remove them in HKLM as
-  // well anyways.
   const string16 prog_id(ShellUtil::kChromeHTMLProgId + browser_entry_suffix);
   string16 reg_prog_id(ShellUtil::kRegClasses);
   reg_prog_id.push_back(base::FilePath::kSeparators[0]);
   reg_prog_id.append(prog_id);
   InstallUtil::DeleteRegistryKey(root, reg_prog_id);
 
-  // Delete Software\Classes\Chrome (Same comment as above applies for this too)
+  // Delete Software\Classes\Chrome.
   string16 reg_app_id(ShellUtil::kRegClasses);
   reg_app_id.push_back(base::FilePath::kSeparators[0]);
   // Append the requested suffix manually here (as ShellUtil::GetBrowserModelId

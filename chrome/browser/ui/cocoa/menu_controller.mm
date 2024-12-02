@@ -97,7 +97,7 @@
 }
 
 // Adds an item or a hierarchical menu to the item at the |index|,
-// associated with the entry in the model indentifed by |modelIndex|.
+// associated with the entry in the model identified by |modelIndex|.
 - (void)addItemToMenu:(NSMenu*)menu
               atIndex:(NSInteger)index
             fromModel:(ui::MenuModel*)model {
@@ -213,6 +213,10 @@
     }
   }
   return menu_.get();
+}
+
+- (BOOL)isMenuOpen {
+  return isMenuOpen_;
 }
 
 - (void)menuWillOpen:(NSMenu*)menu {

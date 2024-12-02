@@ -22,6 +22,7 @@
 #include "remoting/host/desktop_process.h"
 #include "remoting/host/host_exit_codes.h"
 #include "remoting/host/host_mock_objects.h"
+#include "remoting/host/screen_resolution.h"
 #include "remoting/protocol/protocol_mock_objects.h"
 #include "testing/gmock_mutant.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -58,9 +59,10 @@ class MockNetworkListener : public IPC::Listener {
 
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  MOCK_METHOD1(OnDesktopAttached, void(IPC::PlatformFileForTransit));
   MOCK_METHOD1(OnChannelConnected, void(int32));
   MOCK_METHOD0(OnChannelError, void());
+
+  MOCK_METHOD0(OnDesktopEnvironmentCreated, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockNetworkListener);
@@ -106,9 +108,9 @@ class DesktopProcessTest : public testing::Test {
   // DesktopEnvironmentFactory::Create().
   DesktopEnvironment* CreateDesktopEnvironment();
 
-  // Creates a dummy EventExecutor, to mock
-  // DesktopEnvironment::CreateEventExecutor().
-  EventExecutor* CreateEventExecutor();
+  // Creates a dummy InputInjector, to mock
+  // DesktopEnvironment::CreateInputInjector().
+  InputInjector* CreateInputInjector();
 
   // Creates a fake media::ScreenCapturer, to mock
   // DesktopEnvironment::CreateVideoCapturer().
@@ -118,6 +120,9 @@ class DesktopProcessTest : public testing::Test {
   // exit.
   void DisconnectChannels();
 
+  // Posts DisconnectChannels() to |message_loop_|.
+  void PostDisconnectChannels();
+
   // Runs the desktop process code in a separate thread.
   void RunDesktopProcess();
 
@@ -126,6 +131,9 @@ class DesktopProcessTest : public testing::Test {
 
   // Sends a crash request to the desktop process.
   void SendCrashRequest();
+
+  // Requests the desktop process to start the desktop session agent.
+  void SendStartSessionAgent();
 
  protected:
   // The daemon's end of the daemon-to-desktop channel.
@@ -169,7 +177,7 @@ void DesktopProcessTest::ConnectNetworkChannel(
   IPC::ChannelHandle channel_handle(desktop_process);
 #endif  // defined(OS_WIN)
 
-  daemon_channel_.reset(new IPC::ChannelProxy(
+  network_channel_.reset(new IPC::ChannelProxy(
       channel_handle,
       IPC::Channel::MODE_CLIENT,
       &network_listener_,
@@ -187,23 +195,26 @@ void DesktopProcessTest::OnDesktopAttached(
 
 DesktopEnvironment* DesktopProcessTest::CreateDesktopEnvironment() {
   MockDesktopEnvironment* desktop_environment = new MockDesktopEnvironment();
-  EXPECT_CALL(*desktop_environment, CreateAudioCapturerPtr(_))
+  EXPECT_CALL(*desktop_environment, CreateAudioCapturerPtr())
       .Times(0);
-  EXPECT_CALL(*desktop_environment, CreateEventExecutorPtr(_, _))
+  EXPECT_CALL(*desktop_environment, CreateInputInjectorPtr())
       .Times(AnyNumber())
-      .WillRepeatedly(
-          InvokeWithoutArgs(this, &DesktopProcessTest::CreateEventExecutor));
-  EXPECT_CALL(*desktop_environment, CreateVideoCapturerPtr(_, _))
+      .WillRepeatedly(Invoke(this, &DesktopProcessTest::CreateInputInjector));
+  EXPECT_CALL(*desktop_environment, CreateScreenControlsPtr())
+      .Times(AnyNumber());
+  EXPECT_CALL(*desktop_environment, CreateVideoCapturerPtr())
       .Times(AnyNumber())
-      .WillRepeatedly(
-          InvokeWithoutArgs(this, &DesktopProcessTest::CreateVideoCapturer));
+      .WillRepeatedly(Invoke(this, &DesktopProcessTest::CreateVideoCapturer));
+
+  // Notify the test that the desktop environment has been created.
+  network_listener_.OnDesktopEnvironmentCreated();
   return desktop_environment;
 }
 
-EventExecutor* DesktopProcessTest::CreateEventExecutor() {
-  MockEventExecutor* event_executor = new MockEventExecutor();
-  EXPECT_CALL(*event_executor, StartPtr(_));
-  return event_executor;
+InputInjector* DesktopProcessTest::CreateInputInjector() {
+  MockInputInjector* input_injector = new MockInputInjector();
+  EXPECT_CALL(*input_injector, StartPtr(_));
+  return input_injector;
 }
 
 media::ScreenCapturer* DesktopProcessTest::CreateVideoCapturer() {
@@ -214,6 +225,11 @@ void DesktopProcessTest::DisconnectChannels() {
   daemon_channel_.reset();
   network_channel_.reset();
   io_task_runner_ = NULL;
+}
+
+void DesktopProcessTest::PostDisconnectChannels() {
+  message_loop_.PostTask(FROM_HERE, base::Bind(
+      &DesktopProcessTest::DisconnectChannels, base::Unretained(this)));
 }
 
 void DesktopProcessTest::RunDesktopProcess() {
@@ -245,7 +261,7 @@ void DesktopProcessTest::RunDesktopProcess() {
       .Times(AnyNumber())
       .WillRepeatedly(Return(false));
 
-  DesktopProcess desktop_process(ui_task_runner, channel_name);
+  DesktopProcess desktop_process(ui_task_runner, io_task_runner_, channel_name);
   EXPECT_TRUE(desktop_process.Start(
       desktop_environment_factory.PassAs<DesktopEnvironmentFactory>()));
 
@@ -266,8 +282,18 @@ void DesktopProcessTest::RunDeathTest() {
 
 void DesktopProcessTest::SendCrashRequest() {
   tracked_objects::Location location = FROM_HERE;
-  daemon_channel_->Send(new ChromotingDaemonDesktopMsg_Crash(
+  daemon_channel_->Send(new ChromotingDaemonMsg_Crash(
       location.function_name(), location.file_name(), location.line_number()));
+}
+
+void DesktopProcessTest::SendStartSessionAgent() {
+  // TODO(alexeypa): Fix DesktopProcess to use the desktop environment
+  // to create the disconnect window instead of directly calling
+  // DisconnectWindow::Create(). This will take care of "Uninteresting mock
+  // function call" warnings printed when DisconnectWindow::Show() and
+  // DisconnectWindow::Hide() are called.
+  network_channel_->Send(new ChromotingNetworkDesktopMsg_StartSessionAgent(
+      "user@domain/rest-of-jid", ScreenResolution()));
 }
 
 // Launches the desktop process and waits when it connects back.
@@ -291,6 +317,26 @@ TEST_F(DesktopProcessTest, ConnectNetworkChannel) {
   EXPECT_CALL(network_listener_, OnChannelConnected(_))
       .WillOnce(InvokeWithoutArgs(
           this, &DesktopProcessTest::DisconnectChannels));
+
+  RunDesktopProcess();
+}
+
+// Launches the desktop process, waits when it connects back and starts
+// the desktop session agent.
+TEST_F(DesktopProcessTest, StartSessionAgent) {
+  {
+    InSequence s;
+    EXPECT_CALL(daemon_listener_, OnChannelConnected(_));
+    EXPECT_CALL(daemon_listener_, OnDesktopAttached(_))
+        .WillOnce(Invoke(this, &DesktopProcessTest::ConnectNetworkChannel));
+    EXPECT_CALL(network_listener_, OnChannelConnected(_))
+        .WillOnce(InvokeWithoutArgs(
+            this, &DesktopProcessTest::SendStartSessionAgent));
+  }
+
+  EXPECT_CALL(network_listener_, OnDesktopEnvironmentCreated())
+      .WillOnce(InvokeWithoutArgs(
+          this, &DesktopProcessTest::PostDisconnectChannels));
 
   RunDesktopProcess();
 }

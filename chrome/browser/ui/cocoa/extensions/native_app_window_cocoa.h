@@ -13,7 +13,6 @@
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
-#include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/common/draggable_region.h"
 #include "ui/gfx/rect.h"
@@ -42,8 +41,7 @@ class SkRegion;
 @end
 
 // Cocoa bridge to AppWindow.
-class NativeAppWindowCocoa : public NativeAppWindow,
-                             public content::NotificationObserver {
+class NativeAppWindowCocoa : public NativeAppWindow {
  public:
   NativeAppWindowCocoa(ShellWindow* shell_window,
                        const ShellWindow::CreateParams& params);
@@ -112,7 +110,7 @@ class NativeAppWindowCocoa : public NativeAppWindow,
       const std::vector<extensions::DraggableRegion>& regions) OVERRIDE;
   virtual void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void RenderViewHostChanged() OVERRIDE {}
+  virtual void RenderViewHostChanged() OVERRIDE;
   virtual gfx::Insets GetFrameInsets() const OVERRIDE;
 
  private:
@@ -136,11 +134,6 @@ class NativeAppWindowCocoa : public NativeAppWindow,
   void UpdateDraggableRegionsForCustomDrag(
       const std::vector<extensions::DraggableRegion>& regions);
 
-  // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
   ShellWindow* shell_window_; // weak - ShellWindow owns NativeAppWindow.
 
   bool has_frame_;
@@ -150,6 +143,7 @@ class NativeAppWindowCocoa : public NativeAppWindow,
 
   gfx::Size min_size_;
   gfx::Size max_size_;
+  bool resizable_;
 
   scoped_nsobject<NativeAppWindowController> window_controller_;
   NSInteger attention_request_id_;  // identifier from requestUserAttention
@@ -173,8 +167,6 @@ class NativeAppWindowCocoa : public NativeAppWindow,
   // The Extension Command Registry used to determine which keyboard events to
   // handle.
   scoped_ptr<ExtensionKeybindingRegistryCocoa> extension_keybinding_registry_;
-
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeAppWindowCocoa);
 };

@@ -7,8 +7,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/utf_string_conversions.h"
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_main.h"
@@ -36,7 +36,7 @@
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/base/mock_host_resolver.h"
+#include "net/dns/mock_host_resolver.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/resource_type.h"
@@ -507,7 +507,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, UserAction) {
 
   TestRenderViewContextMenu menu(tab, params);
   menu.Init();
-  menu.ExecuteCommand(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB);
+  menu.ExecuteCommand(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB, 0);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -713,7 +713,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, Crash) {
       test_server()->host_port_pair().port()));
   ui_test_utils::NavigateToURL(browser(), url);
 
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUICrashURL));
+  ui_test_utils::NavigateToURL(browser(), GURL(content::kChromeUICrashURL));
 
   url = GURL(base::StringPrintf(
       "http://www.a.com:%d/"

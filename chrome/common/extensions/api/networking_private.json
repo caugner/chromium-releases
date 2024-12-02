@@ -14,12 +14,38 @@
         "id": "NetworkProperties",
         "type": "object",
         "additionalProperties": { "type": "any" }
+      },
+      {
+        "id": "VerificationProperties",
+        "type": "object",
+        "properties": {
+          "certificate": {
+            "type": "string",
+            "description": "A string containing a PEM-encoded X.509 certificate for use in verifying the signed data."
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "A string containing a PEM-encoded RSA public key to be used to compare with the one in signedData"
+          },
+          "nonce": {
+            "type": "string",
+            "description": "A string containing a base64-encoded random binary data for use in verifying the signed data."
+          },
+          "signedData": {
+            "type": "string",
+            "description": "A string containing the identifying data string signed by the device."
+          },
+          "deviceSerial": {
+            "type": "string",
+            "description": "A string containing the serial number of the device."
+          }
+        }
       }
     ],
     "functions": [
       {
         "name": "getProperties",
-        "description": "Gets the properties of the network with id networkGuid.",
+        "description": "Gets all the properties of the network with id networkGuid.  Includes all properties of the network (read-only and read/write values).",
         "parameters": [
           {
             "name": "networkGuid",
@@ -40,8 +66,51 @@
         ]
       },
       {
+        "name": "getState",
+        "description": "Gets the cached read-only properties of the network with id networkGuid.  This is meant to be a higher performance function than getProperties, which requires a round trip to query the networking subsystem.  It only returns a subset of the properties returned by getProperties.",
+        "parameters": [
+          {
+            "name": "networkGuid",
+            "type": "string",
+            "description": "The unique identifier of the network to set properties on."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "properties",
+                "$ref": "NetworkProperties",
+                "description": "Results of the query for network properties."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "setProperties",
+        "description": "Sets the properties of the network with id networkGuid.",
+        "parameters": [
+          {
+            "name": "networkGuid",
+            "type": "string",
+            "description": "The unique identifier of the network to set properties on."
+          },
+          {
+            "name": "properties",
+            "$ref": "NetworkProperties",
+            "description": "The properties to set on the network."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": []
+          }
+        ]
+      },
+      {
         "name": "getVisibleNetworks",
-        "description": "Gets the list of visible networks.",
+        "description": "Gets the list of visible networks, and returns a list of cached, read-only network properties for each.",
         "parameters": [
           {
             "name": "type",
@@ -96,6 +165,82 @@
             "optional": true,
             "parameters": [],
             "description": "A callback function that indicates that a disconnect has been initiated."
+          }
+        ]
+      },
+      {
+        "name": "verifyDestination",
+        "description": "Verifies that the device is a trusted device.",
+        "parameters": [
+          {
+            "name": "properties",
+            "$ref": "VerificationProperties",
+            "description": "Properties of the destination to use in verifying that it is a trusted device."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "verified",
+                "type": "boolean"
+              }
+            ],
+            "description": "A callback function that indicates whether or not the device is a trusted device."
+          }
+        ]
+      },
+      {
+        "name": "verifyAndEncryptCredentials",
+        "description": "Verifies that the device is a trusted device and retrieves encrypted network credentials.",
+        "parameters": [
+          {
+            "name": "properties",
+            "$ref": "VerificationProperties",
+            "description": "Properties of the destination to use in verifying that it is a trusted device."
+          },
+          {
+            "name": "guid",
+            "type": "string",
+            "description": "A string containing the unique identifier of the network to get credentials for."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "credentials",
+                "type": "string"
+              }
+            ],
+            "description": "A callback function that receives base64-encoded encrypted credential data to send to a trusted device."
+          }
+        ]
+      },
+      {
+        "name": "verifyAndEncryptData",
+        "description": "Verifies that the device is a trusted device and encrypts supplied data with device public key.",
+        "parameters": [
+          {
+            "name": "properties",
+            "$ref": "VerificationProperties",
+            "description": "Properties of the destination to use in verifying that it is a trusted device."
+          },
+          {
+            "name": "data",
+            "type": "string",
+            "description": "A string containing the base64-encoded data to encrypt."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "encryptedData",
+                "type": "string"
+              }
+            ],
+            "description": "A callback function that receives base64-encoded encrypted data to send to a trusted device."
           }
         ]
       }

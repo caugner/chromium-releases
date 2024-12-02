@@ -7,6 +7,10 @@
 
 #include "chromeos/network/managed_state.h"
 
+namespace base {
+class DictionaryValue;
+}
+
 namespace chromeos {
 
 // Simple class to provide network state information about a network service.
@@ -20,19 +24,35 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   virtual ~NetworkState();
 
   // ManagedState overrides
+  // If you change this method, update GetProperties too.
   virtual bool PropertyChanged(const std::string& key,
                                const base::Value& value) OVERRIDE;
 
+  // Fills |dictionary| with the state properties. All the properties that are
+  // accepted by PropertyChanged are stored in |dictionary|, no other values are
+  // stored.
+  void GetProperties(base::DictionaryValue* dictionary) const;
+
   // Accessors
   const std::string& security() const { return security_; }
-  const std::string& technology() const { return technology_; }
   const std::string& ip_address() const { return ip_address_; }
   const std::string& device_path() const { return device_path_; }
+  const std::string& guid() const { return guid_; }
   const std::string& connection_state() const { return connection_state_; }
   const std::string& error() const { return error_; }
+  bool auto_connect() const { return auto_connect_; }
+  bool favorite() const { return favorite_; }
+  int priority() const { return priority_; }
+  // Wireless property accessors
+  int signal_strength() const { return signal_strength_; }
+  // Cellular property accessors
+  const std::string& technology() const { return technology_; }
   const std::string& activation_state() const { return activation_state_; }
   const std::string& roaming() const { return roaming_; }
-  int signal_strength() const { return signal_strength_; }
+  bool activate_over_non_cellular_networks() const {
+    return activate_over_non_cellular_networks_;
+  }
+  bool cellular_out_of_credits() const { return cellular_out_of_credits_; }
 
   bool IsConnectedState() const;
   bool IsConnectingState() const;
@@ -53,15 +73,21 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   // Common Network Service properties
   std::string security_;
   std::string device_path_;
+  std::string guid_;
   std::string ip_address_;
   std::string connection_state_;
   std::string error_;
+  bool auto_connect_;
+  bool favorite_;
+  int priority_;
   // Wireless properties
   int signal_strength_;
   // Cellular properties
   std::string technology_;
   std::string activation_state_;
   std::string roaming_;
+  bool activate_over_non_cellular_networks_;
+  bool cellular_out_of_credits_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkState);
 };

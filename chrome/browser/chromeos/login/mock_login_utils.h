@@ -22,6 +22,7 @@ class Profile;
 namespace chromeos {
 
 class LoginStatusConsumer;
+struct UserCredentials;
 
 class MockLoginUtils : public LoginUtils {
  public:
@@ -29,8 +30,8 @@ class MockLoginUtils : public LoginUtils {
   virtual ~MockLoginUtils();
 
   MOCK_METHOD2(DoBrowserLaunch, void(Profile*, LoginDisplayHost*));
-  MOCK_METHOD6(PrepareProfile,
-               void(const std::string&, const std::string&, const std::string&,
+  MOCK_METHOD5(PrepareProfile,
+               void(const UserCredentials&, const std::string&,
                     bool, bool, LoginUtils::Delegate*));
   MOCK_METHOD1(DelegateDeleted, void(LoginUtils::Delegate*));
   MOCK_METHOD1(CompleteOffTheRecordLogin, void(const GURL&));
@@ -45,8 +46,6 @@ class MockLoginUtils : public LoginUtils {
   MOCK_METHOD2(TransferDefaultAuthCache, void(Profile*, Profile*));
   MOCK_METHOD0(StopBackgroundFetchers, void(void));
   MOCK_METHOD1(InitRlzDelayed, void(Profile*));
-  MOCK_METHOD3(GetOffTheRecordCommandLine,
-               std::string(const GURL&, const CommandLine&, CommandLine*));
 };
 
 }  // namespace chromeos

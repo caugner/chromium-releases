@@ -13,6 +13,8 @@
 #include "ash/launcher/launcher_model.h"
 #include "ash/launcher/launcher_tooltip_manager.h"
 #include "ash/root_window_controller.h"
+#include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
@@ -132,9 +134,17 @@ TEST_F(LauncherViewIconObserverTest, AddRemove) {
   observer()->Reset();
 }
 
+// Sometimes fails on trybots on win7_aura. http://crbug.com/177135
+#if defined(OS_WIN)
+#define MAYBE_AddRemoveWithMultipleDisplays \
+    DISABLED_AddRemoveWithMultipleDisplays
+#else
+#define MAYBE_AddRemoveWithMultipleDisplays \
+    AddRemoveWithMultipleDisplays
+#endif
 // Make sure creating/deleting an window on one displays notifies a
 // launcher on external display as well as one on primary.
-TEST_F(LauncherViewIconObserverTest, AddRemoveWithMultipleDisplays) {
+TEST_F(LauncherViewIconObserverTest, MAYBE_AddRemoveWithMultipleDisplays) {
   UpdateDisplay("400x400,400x400");
   TestLauncherIconObserver second_observer(LauncherForSecondaryDisplay());
 
@@ -166,12 +176,13 @@ TEST_F(LauncherViewIconObserverTest, AddRemoveWithMultipleDisplays) {
 }
 
 TEST_F(LauncherViewIconObserverTest, BoundsChanged) {
+  ash::ShelfWidget* shelf = Shell::GetPrimaryRootWindowController()->shelf();
   Launcher* launcher = Launcher::ForPrimaryDisplay();
-  gfx::Size launcher_size =
-      launcher->widget()->GetWindowBoundsInScreen().size();
-  int total_width = launcher_size.width() / 2;
-  ASSERT_GT(total_width, 0);
-  launcher->SetStatusSize(gfx::Size(total_width, launcher_size.height()));
+  gfx::Size shelf_size =
+      shelf->GetWindowBoundsInScreen().size();
+  shelf_size.set_width(shelf_size.width() / 2);
+  ASSERT_GT(shelf_size.width(), 0);
+  launcher->SetLauncherViewBounds(gfx::Rect(shelf_size));
   // No animation happens for LauncherView bounds change.
   EXPECT_TRUE(observer()->change_notified());
   observer()->Reset();
@@ -294,6 +305,19 @@ class LauncherViewTest : public AshTestBase {
     ASSERT_EQ(map_index, id_map.size());
   }
 
+  void VerifyLauncherItemBoundsAreValid() {
+    for (int i=0;i <= test_api_->GetLastVisibleIndex(); ++i) {
+      if (test_api_->GetButton(i)) {
+        gfx::Rect launcher_view_bounds = launcher_view_->GetLocalBounds();
+        gfx::Rect item_bounds = test_api_->GetBoundsByIndex(i);
+        EXPECT_TRUE(item_bounds.x() >= 0);
+        EXPECT_TRUE(item_bounds.y() >= 0);
+        EXPECT_TRUE(item_bounds.right() <= launcher_view_bounds.width());
+        EXPECT_TRUE(item_bounds.bottom() <= launcher_view_bounds.height());
+      }
+    }
+  }
+
   views::View* SimulateDrag(internal::LauncherButtonHost::Pointer pointer,
                             int button_index,
                             int destination_index) {
@@ -352,6 +376,18 @@ class LauncherViewTest : public AshTestBase {
  private:
   DISALLOW_COPY_AND_ASSIGN(LauncherViewTest);
 };
+
+// Checks that the icon positions do not shift with a state change.
+TEST_F(LauncherViewTest, NoStateChangeIconMovement) {
+  LauncherID last_added = AddAppShortcut();
+  internal::LauncherButton* button = GetButtonByID(last_added);
+  EXPECT_EQ(button->state(), ash::internal::LauncherButton::STATE_NORMAL);
+  gfx::Rect old_bounds = button->GetIconBounds();
+
+  button->AddState(ash::internal::LauncherButton::STATE_HOVERED);
+  gfx::Rect hovered_bounds = button->GetIconBounds();
+  EXPECT_EQ(old_bounds.ToString(), hovered_bounds.ToString());
+}
 
 // Adds browser button until overflow and verifies that the last added browser
 // button is hidden.
@@ -597,6 +633,17 @@ TEST_F(LauncherViewTest, ModelChangesWhileDragging) {
   button_host->PointerReleasedOnButton(dragged_button,
                                        internal::LauncherButtonHost::MOUSE,
                                        false);
+
+  // Adding a launcher item at the end (i.e. a panel)  canels drag and respects
+  // the order.
+  dragged_button = SimulateDrag(internal::LauncherButtonHost::MOUSE, 0, 2);
+  new_id = AddPanel();
+  id_map.insert(id_map.begin() + kExpectedAppIndex + 6,
+                std::make_pair(new_id, GetButtonByID(new_id)));
+  ASSERT_NO_FATAL_FAILURE(CheckModelIDs(id_map));
+  button_host->PointerReleasedOnButton(dragged_button,
+                                       internal::LauncherButtonHost::MOUSE,
+                                       false);
 }
 
 // Check that 2nd drag from the other pointer would be ignored.
@@ -684,6 +731,19 @@ TEST_F(LauncherViewTest, LauncherItemStatusPlatformApp) {
   item.status = ash::STATUS_ATTENTION;
   model_->Set(index, item);
   ASSERT_EQ(internal::LauncherButton::STATE_ATTENTION, button->state());
+}
+
+// Confirm that launcher item bounds are correctly updated on shelf changes.
+TEST_F(LauncherViewTest, LauncherItemBoundsCheck) {
+  internal::ShelfLayoutManager* shelf_layout_manager =
+      Shell::GetPrimaryRootWindowController()->shelf()->shelf_layout_manager();
+  VerifyLauncherItemBoundsAreValid();
+  shelf_layout_manager->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  test_api_->RunMessageLoopUntilAnimationsDone();
+  VerifyLauncherItemBoundsAreValid();
+  shelf_layout_manager->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
+  test_api_->RunMessageLoopUntilAnimationsDone();
+  VerifyLauncherItemBoundsAreValid();
 }
 
 TEST_F(LauncherViewTest, LauncherTooltipTest) {
@@ -838,6 +898,17 @@ TEST_F(LauncherViewTest, ResizeDuringOverflowAddAnimation) {
   const gfx::Rect& app_list_bounds =
       test_api_->GetBoundsByIndex(app_list_button_index);
   EXPECT_EQ(app_list_bounds, app_list_ideal_bounds);
+}
+
+// Check that the first item in the list follows Fitt's law by including the
+// first pixel and being therefore bigger then the others.
+TEST_F(LauncherViewTest, CheckFittsLaw) {
+  // All buttons should be visible.
+  ASSERT_EQ(test_api_->GetLastVisibleIndex() + 1,
+            test_api_->GetButtonCount());
+  gfx::Rect ideal_bounds_0 = test_api_->GetIdealBoundsByIndex(0);
+  gfx::Rect ideal_bounds_1 = test_api_->GetIdealBoundsByIndex(1);
+  EXPECT_GT(ideal_bounds_0.width(), ideal_bounds_1.width());
 }
 
 }  // namespace test

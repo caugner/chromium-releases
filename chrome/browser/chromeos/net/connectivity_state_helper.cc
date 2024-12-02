@@ -10,6 +10,7 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
+#include "chromeos/network/network_state_handler_observer.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
@@ -19,14 +20,23 @@ static ConnectivityStateHelper* g_connectivity_state_helper = NULL;
 // Implementation of the connectivity state helper that uses the network
 // state handler for fetching connectivity state.
 class ConnectivityStateHelperImpl
-    : public ConnectivityStateHelper {
+    : public ConnectivityStateHelper,
+      public NetworkStateHandlerObserver {
  public:
   ConnectivityStateHelperImpl();
   virtual ~ConnectivityStateHelperImpl();
 
+  // NetworkStateHandler overrides.
+  virtual bool IsConnected() OVERRIDE;
   virtual bool IsConnectedType(const std::string& type) OVERRIDE;
   virtual bool IsConnectingType(const std::string& type) OVERRIDE;
   virtual std::string NetworkNameForType(const std::string& type) OVERRIDE;
+  virtual std::string DefaultNetworkName() OVERRIDE;
+  virtual bool DefaultNetworkOnline() OVERRIDE;
+  virtual void RequestScan() const OVERRIDE;
+
+  // NetworkStateHandlerObserver overrides.
+  virtual void NetworkManagerChanged() OVERRIDE;
 
  private:
   NetworkStateHandler* network_state_handler_;
@@ -35,18 +45,33 @@ class ConnectivityStateHelperImpl
 // Implementation of the connectivity state helper that uses the network
 // library for fetching connectivity state.
 class ConnectivityStateHelperNetworkLibrary
-    : public ConnectivityStateHelper {
+    : public ConnectivityStateHelper,
+      public NetworkLibrary::NetworkManagerObserver {
  public:
   ConnectivityStateHelperNetworkLibrary();
   virtual ~ConnectivityStateHelperNetworkLibrary();
 
+  // ConnectivityStateHelper overrides.
+  virtual bool IsConnected() OVERRIDE;
   virtual bool IsConnectedType(const std::string& type) OVERRIDE;
   virtual bool IsConnectingType(const std::string& type) OVERRIDE;
   virtual std::string NetworkNameForType(const std::string& type) OVERRIDE;
+  virtual std::string DefaultNetworkName() OVERRIDE;
+  virtual bool DefaultNetworkOnline() OVERRIDE;
+  virtual void RequestScan() const OVERRIDE;
+
+  // NetworkLibrary::NetworkManagerObserver overrides.
+  virtual void OnNetworkManagerChanged(NetworkLibrary* network_library);
 
  private:
   NetworkLibrary* network_library_;
 };
+
+ConnectivityStateHelper::ConnectivityStateHelper() {
+}
+
+ConnectivityStateHelper::~ConnectivityStateHelper() {
+}
 
 // static
 void ConnectivityStateHelper::Initialize() {
@@ -61,6 +86,19 @@ void ConnectivityStateHelper::Initialize() {
 }
 
 // static
+void ConnectivityStateHelper::InitializeForTesting(
+    ConnectivityStateHelper* connectivity_state_helper) {
+  CHECK(!g_connectivity_state_helper);
+  CHECK(connectivity_state_helper);
+  g_connectivity_state_helper = connectivity_state_helper;
+}
+
+// static
+bool ConnectivityStateHelper::IsInitialized() {
+  return g_connectivity_state_helper != NULL;
+}
+
+// static
 void ConnectivityStateHelper::Shutdown() {
   CHECK(g_connectivity_state_helper);
   delete g_connectivity_state_helper;
@@ -69,16 +107,34 @@ void ConnectivityStateHelper::Shutdown() {
 
 // static
 ConnectivityStateHelper* ConnectivityStateHelper::Get() {
-  DCHECK(g_connectivity_state_helper)
+  CHECK(g_connectivity_state_helper)
       << "ConnectivityStateHelper: Get() called before Initialize()";
   return g_connectivity_state_helper;
 }
 
-ConnectivityStateHelperImpl::ConnectivityStateHelperImpl() {
-  network_state_handler_ = NetworkStateHandler::Get();
+void ConnectivityStateHelper::AddNetworkManagerObserver(
+    ConnectivityStateHelperObserver* observer) {
+  network_manager_observers_.AddObserver(observer);
 }
 
-ConnectivityStateHelperImpl::~ConnectivityStateHelperImpl() {}
+void ConnectivityStateHelper::RemoveNetworkManagerObserver(
+    ConnectivityStateHelperObserver* observer) {
+  network_manager_observers_.RemoveObserver(observer);
+}
+
+ConnectivityStateHelperImpl::ConnectivityStateHelperImpl() {
+  network_state_handler_ = NetworkStateHandler::Get();
+  network_state_handler_->AddObserver(this);
+}
+
+ConnectivityStateHelperImpl::~ConnectivityStateHelperImpl() {
+  NetworkStateHandler::Get()->RemoveObserver(this);
+}
+
+bool ConnectivityStateHelperImpl::IsConnected() {
+  return network_state_handler_->ConnectedNetworkByType(
+      NetworkStateHandler::kMatchTypeDefault) != NULL;
+}
 
 bool ConnectivityStateHelperImpl::IsConnectedType(
     const std::string& type) {
@@ -99,13 +155,49 @@ std::string ConnectivityStateHelperImpl::NetworkNameForType(
   return network ? network->name() : std::string();
 }
 
+std::string ConnectivityStateHelperImpl::DefaultNetworkName() {
+  const NetworkState* default_network = network_state_handler_->
+      DefaultNetwork();
+  return default_network ? default_network->name() : std::string();
+}
+
+bool ConnectivityStateHelperImpl::DefaultNetworkOnline() {
+  const NetworkState* network = network_state_handler_->DefaultNetwork();
+  if (!network)
+    return false;
+  if (!network->IsConnectedState())
+    return false;
+  if (network->connection_state() == flimflam::kStatePortal)
+    return false;
+  return true;
+}
+
+void ConnectivityStateHelperImpl::RequestScan() const {
+  network_state_handler_->RequestScan();
+}
+
+void ConnectivityStateHelperImpl::NetworkManagerChanged() {
+  FOR_EACH_OBSERVER(ConnectivityStateHelperObserver, network_manager_observers_,
+                    NetworkManagerChanged());
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NetworkLibrary implementation.
+//
 
 ConnectivityStateHelperNetworkLibrary::ConnectivityStateHelperNetworkLibrary() {
   network_library_ = CrosLibrary::Get()->GetNetworkLibrary();
+  network_library_->AddNetworkManagerObserver(this);
 }
 
 ConnectivityStateHelperNetworkLibrary::~ConnectivityStateHelperNetworkLibrary()
-{}
+{
+  network_library_->RemoveNetworkManagerObserver(this);
+}
+
+bool ConnectivityStateHelperNetworkLibrary::IsConnected() {
+  return network_library_->Connected();
+}
 
 bool ConnectivityStateHelperNetworkLibrary::IsConnectedType(
     const std::string& type) {
@@ -144,6 +236,33 @@ std::string ConnectivityStateHelperNetworkLibrary::NetworkNameForType(
   if (type == flimflam::kTypeWimax && network_library_->wimax_network())
     return network_library_->wimax_network()->name();
   return std::string();
+}
+
+std::string ConnectivityStateHelperNetworkLibrary::DefaultNetworkName() {
+  if (network_library_->active_network())
+    return network_library_->active_network()->name();
+  return std::string();
+}
+
+bool ConnectivityStateHelperNetworkLibrary::DefaultNetworkOnline() {
+  const Network* active_network = network_library_->active_network();
+  if (!active_network)
+    return false;
+  if (!active_network->connected())
+    return false;
+  if (active_network->restricted_pool())
+    return false;
+  return true;
+}
+
+void ConnectivityStateHelperNetworkLibrary::RequestScan() const {
+  network_library_->RequestNetworkScan();
+}
+
+void ConnectivityStateHelperNetworkLibrary::OnNetworkManagerChanged(
+    NetworkLibrary* network_library) {
+  FOR_EACH_OBSERVER(ConnectivityStateHelperObserver, network_manager_observers_,
+                    NetworkManagerChanged());
 }
 
 }  // namespace chromeos

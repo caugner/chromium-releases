@@ -14,14 +14,16 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/coordinate_conversion.h"
-#include "ash/wm/cursor_manager.h"
 #include "ash/wm/default_window_resizer.h"
 #include "ash/wm/drag_window_resizer.h"
+#include "ash/wm/panels/panel_window_resizer.h"
 #include "ash/wm/property_util.h"
+#include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/phantom_window_controller.h"
 #include "ash/wm/workspace/snap_sizer.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/window_types.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
@@ -59,6 +61,10 @@ scoped_ptr<WindowResizer> CreateWindowResizer(aura::Window* window,
   }
   if (window_resizer) {
     window_resizer = internal::DragWindowResizer::Create(
+        window_resizer, window, point_in_parent, window_component);
+  }
+  if (window_resizer && window->type() == aura::client::WINDOW_TYPE_PANEL) {
+    window_resizer = PanelWindowResizer::Create(
         window_resizer, window, point_in_parent, window_component);
   }
   return make_scoped_ptr<WindowResizer>(window_resizer);
@@ -353,6 +359,8 @@ void WorkspaceWindowResizer::CompleteDrag(int event_flags) {
   // out of a maximized window, it's already in the normal show state when this
   // is called, so it does not matter.
   if (wm::IsWindowNormal(window()) &&
+      (window()->type() != aura::client::WINDOW_TYPE_PANEL ||
+       !window()->GetProperty(kPanelAttachedKey)) &&
       (snap_type_ == SNAP_LEFT_EDGE || snap_type_ == SNAP_RIGHT_EDGE)) {
     if (!GetRestoreBoundsInScreen(window())) {
       gfx::Rect initial_bounds = ScreenAsh::ConvertRectToScreen(

@@ -5,91 +5,90 @@
 #ifndef UI_MESSAGE_CENTER_NOTIFIER_SETTINGS_H_
 #define UI_MESSAGE_CENTER_NOTIFIER_SETTINGS_H_
 
-#include <map>
 #include <string>
-#include <vector>
 
 #include "base/string16.h"
-#include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/native_widget_types.h"
+#include "googleurl/src/gurl.h"
+#include "ui/gfx/image/image.h"
 #include "ui/message_center/message_center_export.h"
-#include "ui/views/controls/button/button.h"
-#include "ui/views/widget/widget_delegate.h"
 
 namespace message_center {
 
-// A class to show the list of notifier extensions / URL patterns and allow
-// users to customize the settings.
-class MESSAGE_CENTER_EXPORT NotifierSettingsView
-    : public views::WidgetDelegateView,
-      public views::ButtonListener {
- public:
-  struct MESSAGE_CENTER_EXPORT Notifier {
-    enum NotifierType {
-      APPLICATION,
-      URL_PATTERN,
-    };
+class NotifierSettingsDelegate;
+class NotifierSettingsProvider;
 
-    Notifier(const std::string& id, NotifierType type, const string16& name);
+// Brings up the settings dialog and returns a weak reference to the delegate,
+// which is typically the view. If the dialog already exists, it is brought to
+// the front, otherwise it is created.
+MESSAGE_CENTER_EXPORT NotifierSettingsDelegate* ShowSettings(
+    NotifierSettingsProvider* provider,
+    gfx::NativeView context);
 
-    // The identifier of the notifier. The extension id or URL pattern itself.
-    std::string id;
-
-    // The human-readable name of the notifier such like the extension name.
-    // It can be empty.
-    string16 name;
-
-    // True if the source is allowed to send notifications. True is default.
-    bool enabled;
-
-    // The type of notifier: Chrome app or URL pattern.
-    NotifierType type;
-
-    // The icon image of the notifier. The extension icon or favicon.
-    gfx::ImageSkia icon;
+// The struct to hold the information of notifiers. The information will be
+// used by NotifierSettingsView.
+struct MESSAGE_CENTER_EXPORT Notifier {
+  enum NotifierType {
+    APPLICATION,
+    WEB_PAGE,
   };
 
-  class MESSAGE_CENTER_EXPORT Delegate {
-   public:
-    // Collects the current notifier list and fills to |notifiers|.
-    virtual void GetNotifierList(std::vector<Notifier>* notifiers) = 0;
+  // Constructor for APPLICATION type.
+  Notifier(const std::string& id, const string16& name, bool enabled);
 
-    // Called when the |enabled| for the |id| has been changed by user
-    // operation.
-    virtual void SetNotifierEnabled(const Notifier& notifier, bool enabled) = 0;
+  // Constructor for WEB_PAGE type.
+  Notifier(const GURL& url, const string16& name, bool enabled);
 
-    // Called when the settings window is closed.
-    virtual void OnNotifierSettingsClosing(NotifierSettingsView* view) = 0;
-  };
+  ~Notifier();
 
-  // Create a new widget of the notifier settings and returns it. Note that
-  // the widget and the view is self-owned. It'll be deleted when it's closed
-  // or the chrome's shutdown.
-  static NotifierSettingsView* Create(Delegate* delegate,
-                                      gfx::NativeView context);
+  // The identifier of the app notifier. Empty if it's URL_PATTERN.
+  std::string id;
 
-  void UpdateIconImage(const std::string& id, const gfx::ImageSkia& icon);
+  // The URL pattern of the notifer.
+  GURL url;
+
+  // The human-readable name of the notifier such like the extension name.
+  // It can be empty.
+  string16 name;
+
+  // True if the source is allowed to send notifications. True is default.
+  bool enabled;
+
+  // The type of notifier: Chrome app or URL pattern.
+  NotifierType type;
+
+  // The icon image of the notifier. The extension icon or favicon.
+  gfx::Image icon;
 
  private:
-  class NotifierButton;
+  DISALLOW_COPY_AND_ASSIGN(Notifier);
+};
 
-  NotifierSettingsView(Delegate* delegate);
-  virtual ~NotifierSettingsView();
+// A class used by NotifierSettingsView to integrate with a setting system
+// for the clients of this module.
+class MESSAGE_CENTER_EXPORT NotifierSettingsProvider {
+ public:
+  // Collects the current notifier list and fills to |notifiers|. Caller takes
+  // the ownership of the elements of |notifiers|.
+  virtual void GetNotifierList(std::vector<Notifier*>* notifiers) = 0;
 
-  // views::WidgetDelegate overrides:
-  virtual bool CanResize() const OVERRIDE;
-  virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual void WindowClosing() OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
+  // Called when the |enabled| for the |notifier| has been changed by user
+  // operation.
+  virtual void SetNotifierEnabled(const Notifier& notifier, bool enabled) = 0;
 
-  // views::ButtonListener overrides:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  // Called when the settings window is closed.
+  virtual void OnNotifierSettingsClosing() = 0;
+};
 
-  Delegate* delegate_;
-  std::set<NotifierButton*> buttons_;
+// A delegate class implemented by the view of the NotifierSettings to get
+// notified when the controller has changed data.
+class MESSAGE_CENTER_EXPORT NotifierSettingsDelegate {
+ public:
+  // Called when an icon in the controller has been updated.
+  virtual void UpdateIconImage(const std::string& id,
+                               const gfx::Image& icon) = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(NotifierSettingsView);
+  // Called when the controller detects that a favicon has changed.
+  virtual void UpdateFavicon(const GURL& url, const gfx::Image& icon) = 0;
 };
 
 }  // namespace message_center

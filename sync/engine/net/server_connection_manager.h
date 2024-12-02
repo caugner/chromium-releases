@@ -256,9 +256,8 @@ class SYNC_EXPORT_PRIVATE ServerConnectionManager {
     return proto_sync_path_;
   }
 
-  std::string get_time_path() const {
-    return get_time_path_;
-  }
+  // Updates server_status_ and notifies listeners if server_status_ changed
+  void SetServerStatus(HttpResponse::ServerConnectionCode server_status);
 
   // NOTE: Tests rely on this protected function being virtual.
   //
@@ -296,7 +295,6 @@ class SYNC_EXPORT_PRIVATE ServerConnectionManager {
 
   // The paths we post to.
   std::string proto_sync_path_;
-  std::string get_time_path_;
 
   // The auth token to use in authenticated requests.
   std::string auth_token_;
@@ -346,12 +344,6 @@ class SYNC_EXPORT_PRIVATE ServerConnectionManager {
 
   DISALLOW_COPY_AND_ASSIGN(ServerConnectionManager);
 };
-
-// Fills a ClientToServerMessage with the appropriate share and birthday
-// settings.
-bool FillMessageWithShareDetails(sync_pb::ClientToServerMessage* csm,
-                                 syncable::Directory* manager,
-                                 const std::string& share);
 
 std::ostream& operator<<(std::ostream& s, const struct HttpResponse& hr);
 

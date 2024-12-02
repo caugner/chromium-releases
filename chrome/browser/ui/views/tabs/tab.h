@@ -10,6 +10,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/ui/tabs/tab_audio_indicator.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/layout.h"
@@ -39,7 +40,8 @@ class ImageButton;
 //  A View that renders a Tab, either in a TabStrip or in a DraggedTabView.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class Tab : public ui::AnimationDelegate,
+class Tab : public TabAudioIndicator::Delegate,
+            public ui::AnimationDelegate,
             public views::ButtonListener,
             public views::ContextMenuController,
             public views::View {
@@ -98,11 +100,6 @@ class Tab : public ui::AnimationDelegate,
     background_offset_ = offset;
   }
 
-  // Recomputes the dominant color of the favicon, used in immersive mode.
-  // TODO(jamescook): Remove this if UX agrees that we don't want colors in the
-  // immersive mode light bar. crbug.com/166929
-  void UpdateIconDominantColor();
-
   views::GlowHoverController* hover_controller() {
     return &hover_controller_;
   }
@@ -128,7 +125,7 @@ class Tab : public ui::AnimationDelegate,
 
  private:
   friend class TabTest;
-   // The animation object used to swap the favicon with the sad tab icon.
+  // The animation object used to swap the favicon with the sad tab icon.
   class FaviconCrashAnimation;
   class TabCloseButton;
 
@@ -148,6 +145,9 @@ class Tab : public ui::AnimationDelegate,
   };
 
   typedef std::list<ImageCacheEntry> ImageCache;
+
+  // Overridden from TabAudioIndicator::Delegate:
+  virtual void ScheduleAudioIndicatorPaint() OVERRIDE;
 
   // Overridden from ui::AnimationDelegate:
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
@@ -197,7 +197,7 @@ class Tab : public ui::AnimationDelegate,
   void PaintTab(gfx::Canvas* canvas);
 
   // Paint with the "immersive mode" light-bar style.
-  void PaintTabImmersive(gfx::Canvas* canvas);
+  void PaintImmersiveTab(gfx::Canvas* canvas);
 
   // Paint various portions of the Tab
   void PaintTabBackground(gfx::Canvas* canvas);
@@ -210,6 +210,7 @@ class Tab : public ui::AnimationDelegate,
 
   // Paints the icon at the specified coordinates, mirrored for RTL if needed.
   void PaintIcon(gfx::Canvas* canvas);
+  void PaintCaptureState(gfx::Canvas* canvas, gfx::Rect bounds);
   void PaintTitle(gfx::Canvas* canvas, SkColor title_color);
 
   // Invoked if data_.network_state changes, or the network_state is not none.
@@ -238,17 +239,23 @@ class Tab : public ui::AnimationDelegate,
   void DisplayCrashedFavicon();
   void ResetCrashedFavicon();
 
+  void StopIconAnimation();
   void StartCrashAnimation();
-  void StopCrashAnimation();
-
   void StartRecordingAnimation();
-  void StopRecordingAnimation();
 
   // Returns true if the crash animation is currently running.
   bool IsPerformingCrashAnimation() const;
 
   // Schedules repaint task for icon.
   void ScheduleIconPaint();
+
+  // Returns the rectangle for the light bar in immersive mode.
+  gfx::Rect GetImmersiveBarRect() const;
+
+  // Gets the tab id and frame id.
+  void GetTabIdAndFrameId(views::Widget* widget,
+                          int* tab_id,
+                          int* frame_id) const;
 
   // Performs a one-time initialization of static resources such as tab images.
   static void InitTabResources();
@@ -287,8 +294,12 @@ class Tab : public ui::AnimationDelegate,
   // crashes.
   int favicon_hiding_offset_;
 
-  // The current index of the loading animation.
+  // The current index of the loading animation. The range varies depending on
+  // whether the tab is loading or waiting, see AdvanceLoadingAnimation().
   int loading_animation_frame_;
+
+  // Step in the immersive loading progress indicator.
+  int immersive_loading_step_;
 
   bool should_display_crashed_favicon_;
 
@@ -300,6 +311,8 @@ class Tab : public ui::AnimationDelegate,
   scoped_ptr<ui::LinearAnimation> icon_animation_;
 
   scoped_refptr<ui::AnimationContainer> animation_container_;
+
+  scoped_ptr<TabAudioIndicator> tab_audio_indicator_;
 
   views::ImageButton* close_button_;
 
@@ -336,12 +349,6 @@ class Tab : public ui::AnimationDelegate,
 
   // The current color of the close button.
   SkColor close_button_color_;
-
-  // The dominant color of the favicon. Used in immersive mode. White until the
-  // color is known so that tab has something visible to draw during page load.
-  // TODO(jamescook): Remove this if UX agrees that we don't want colors in the
-  // immersive mode light bar. crbug.com/166929
-  SkColor icon_dominant_color_;
 
   static gfx::Font* font_;
   static int font_height_;

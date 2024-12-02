@@ -7,8 +7,8 @@
 #include "base/memory/scoped_nsobject.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/browser/api/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/api/infobars/infobar_service.h"
+#include "chrome/browser/infobars/confirm_infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #include "chrome/browser/ui/cocoa/infobars/mock_confirm_infobar_delegate.h"
@@ -117,7 +117,7 @@ class ConfirmInfoBarControllerTest : public CocoaProfileTest,
   bool closed_delegate_link_clicked_;
 
  private:
-  virtual void OnInfoBarDelegateClosed() {
+  virtual void OnInfoBarDelegateClosed() OVERRIDE {
     closed_delegate_ok_clicked_ = delegate_->ok_clicked();
     closed_delegate_cancel_clicked_ = delegate_->cancel_clicked();
     closed_delegate_link_clicked_ = delegate_->link_clicked();
