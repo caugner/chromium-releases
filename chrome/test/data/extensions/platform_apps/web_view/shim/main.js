@@ -32,6 +32,8 @@ embedder.setUp_ = function(config) {
   embedder.testImageBaseURL = embedder.baseGuestURL +
       '/extensions/platform_apps/web_view/shim/';
   embedder.virtualURL = 'http://virtualurl/';
+  embedder.pluginURL = embedder.baseGuestURL +
+      '/extensions/platform_apps/web_view/shim/embed.html';
 };
 
 window.runTest = function(testName) {
@@ -528,38 +530,6 @@ function testWebRequestAPIExistence() {
       embedder.test.assertEq(
           'function',
           typeof webview.request[apiPropertiesToCheck[i]].addListener);
-      embedder.test.assertEq(
-          'function',
-          typeof webview.request[apiPropertiesToCheck[i]].addRules);
-      embedder.test.assertEq(
-          'function',
-          typeof webview.request[apiPropertiesToCheck[i]].getRules);
-      embedder.test.assertEq(
-          'function',
-          typeof webview.request[apiPropertiesToCheck[i]].removeRules);
-    }
-
-    // Try to overwrite webview.request, shall not succeed.
-    webview.request = '123';
-    embedder.test.assertTrue(typeof webview.request !== 'string');
-
-    embedder.test.succeed();
-  });
-  webview.setAttribute('src', 'data:text/html,webview check api');
-  document.body.appendChild(webview);
-}
-
-function testDeclarativeContentAPIExistence() {
-  var apiPropertiesToCheck = [
-    // Declarative Content API.
-    'onPageChanged'
-  ];
-  var webview = document.createElement('webview');
-  webview.setAttribute('partition', arguments.callee.name);
-  webview.addEventListener('loadstop', function(e) {
-    for (var i = 0; i < apiPropertiesToCheck.length; ++i) {
-      embedder.test.assertEq('object',
-                             typeof webview.request[apiPropertiesToCheck[i]]);
       embedder.test.assertEq(
           'function',
           typeof webview.request[apiPropertiesToCheck[i]].addRules);
@@ -1270,6 +1240,29 @@ function testDeclarativeWebRequestAPISendMessage() {
   document.body.appendChild(webview);
 }
 
+// This test verifies that setting a <webview>'s style.display = 'block' does
+// not throw and attach error.
+function testDisplayBlock() {
+  var webview = new WebView();
+  webview.onloadstop = function(e) {
+    LOG('webview.onloadstop');
+    window.console.error = function() {
+      // If we see an error, that means attach failed.
+      embedder.test.fail();
+    };
+    webview.style.display = 'block';
+    embedder.test.assertTrue(webview.getProcessId() > 0);
+
+    webview.onloadstop = function(e) {
+      LOG('Second webview.onloadstop');
+      embedder.test.succeed();
+    };
+    webview.src = 'data:text/html,<body>Second load</body>';
+  }
+  webview.src = 'about:blank';
+  document.body.appendChild(webview);
+}
+
 // This test verifies that the WebRequest API onBeforeRequest event fires on
 // clients*.google.com URLs.
 function testWebRequestAPIGoogleProperty() {
@@ -1770,8 +1763,11 @@ function testResizeWebviewWithDisplayNoneResizesContent() {
 
 function testPostMessageCommChannel() {
   var webview = new WebView();
+  // Run this test with display:none to verify that postMessage works correctly.
+  webview.style.display = 'none';
   webview.src = 'about:blank';
   webview.addEventListener('loadstop', function(e) {
+    window.console.log('loadstop');
     webview.executeScript(
       {file: 'inject_comm_channel.js'},
       function(results) {
@@ -1782,6 +1778,9 @@ function testPostMessageCommChannel() {
         webview.contentWindow.postMessage(JSON.stringify(msg), '*');
       }
     );
+  });
+  webview.addEventListener('consolemessage', function(e) {
+    window.console.log('Guest: "' + e.message + '"');
   });
   window.addEventListener('message', function(e) {
     var data = JSON.parse(e.data);
@@ -2046,7 +2045,7 @@ function testLoadDataAPI() {
             embedder.test.succeed();
           });
         });
-  }
+  };
 
   var loadstopListener1 = function(e) {
     webview.removeEventListener('loadstop', loadstopListener1);
@@ -2058,11 +2057,158 @@ function testLoadDataAPI() {
         "BhIHRlc3QuPGJyPgogIDxpbWcgc3JjPSJ0ZXN0LmJtcCI+PGJyPgo8L2h0bWw+Cg==",
                                 embedder.testImageBaseURL,
                                 embedder.virtualURL);
-  }
+  };
 
   webview.addEventListener('loadstop', loadstopListener1);
   document.body.appendChild(webview);
 };
+
+// Test that the resize events fire with the correct values, and in the
+// correct order, when resizing occurs.
+function testResizeEvents() {
+  var webview = new WebView();
+  webview.src = 'about:blank';
+  webview.style.width = '600px';
+  webview.style.height = '400px';
+
+  var checkSizes = function(e) {
+    embedder.test.assertEq(e.oldWidth, 600)
+    embedder.test.assertEq(e.oldHeight, 400)
+    embedder.test.assertEq(e.newWidth, 500)
+    embedder.test.assertEq(e.newHeight, 400)
+  }
+
+  var resizeListener = function(e) {
+    webview.onresize = null;
+    webview.oncontentresize = contentResizeListener;
+
+    console.log('onresize');
+    checkSizes(e);
+  };
+
+  var contentResizeListener = function(e) {
+    webview.oncontentresize = null;
+
+    console.log('oncontentresize');
+    checkSizes(e);
+    embedder.test.succeed();
+  };
+
+  var loadstopListener = function(e) {
+    webview.removeEventListener('loadstop', loadstopListener);
+    webview.onresize = resizeListener;
+
+    console.log('Resizing <webview> width from 600px to 500px.');
+    webview.style.width = '500px';
+  };
+
+  webview.addEventListener('loadstop', loadstopListener);
+  document.body.appendChild(webview);
+};
+
+function testPerOriginZoomMode() {
+  var webview1 = new WebView();
+  var webview2 = new WebView();
+  webview1.src = 'about:blank';
+  webview2.src = 'about:blank';
+
+  webview1.addEventListener('loadstop', function(e) {
+    document.body.appendChild(webview2);
+  });
+  webview2.addEventListener('loadstop', function(e) {
+    webview1.getZoomMode(function(zoomMode) {
+      // Check that |webview1| is in 'per-origin' mode and zoom it. Check that
+      // both webviews zoomed.
+      embedder.test.assertEq(zoomMode, 'per-origin');
+      webview1.setZoom(3.14, function() {
+        webview1.getZoom(function(zoom) {
+          embedder.test.assertEq(zoom, 3.14);
+          webview2.getZoom(function(zoom) {
+            embedder.test.assertEq(zoom, 3.14);
+            embedder.test.succeed();
+          });
+        });
+      });
+    });
+  });
+
+  document.body.appendChild(webview1);
+}
+
+function testPerViewZoomMode() {
+  var webview1 = new WebView();
+  var webview2 = new WebView();
+  webview1.src = 'about:blank';
+  webview2.src = 'about:blank';
+
+  webview1.addEventListener('loadstop', function(e) {
+    document.body.appendChild(webview2);
+  });
+  webview2.addEventListener('loadstop', function(e) {
+    // Set |webview2| to 'per-view' mode and zoom it. Make sure that the
+    // zoom did not affect |webview1|.
+    webview2.setZoomMode('per-view', function() {
+      webview2.getZoomMode(function(zoomMode) {
+        embedder.test.assertEq(zoomMode, 'per-view');
+        webview2.setZoom(0.45, function() {
+          webview1.getZoom(function(zoom) {
+            embedder.test.assertFalse(zoom == 0.45);
+            webview2.getZoom(function(zoom) {
+              embedder.test.assertEq(zoom, 0.45);
+              embedder.test.succeed();
+            });
+          });
+        });
+      });
+    });
+  });
+
+  document.body.appendChild(webview1);
+}
+
+function testDisabledZoomMode() {
+  var webview = new WebView();
+  webview.src = 'about:blank';
+
+  var zoomchanged = false;
+  var zoomchangeListener = function(e) {
+    embedder.test.assertEq(e.newZoomFactor, 1);
+    zoomchanged = true;
+  };
+
+  webview.addEventListener('loadstop', function(e) {
+    // Set |webview| to 'disabled' mode and check that
+    // zooming is actually disabled. Also check that the
+    // "zoomchange" event pick up changes from changing the
+    // zoom mode.
+    webview.addEventListener('zoomchange', zoomchangeListener);
+    webview.setZoomMode('disabled', function() {
+      webview.getZoomMode(function(zoomMode) {
+        embedder.test.assertEq(zoomMode, 'disabled');
+        webview.removeEventListener('zoomchange', zoomchangeListener);
+        webview.setZoom(1.39, function() {
+          webview.getZoom(function(zoom) {
+            embedder.test.assertEq(zoom, 1);
+            embedder.test.assertTrue(zoomchanged);
+            embedder.test.succeed();
+          });
+        });
+      });
+    });
+  });
+
+  document.body.appendChild(webview);
+}
+
+function testPlugin() {
+  var webview = document.createElement('webview');
+  webview.setAttribute('src', embedder.pluginURL);
+  webview.addEventListener('loadstop', function(e) {
+    // Not crashing means success.
+    embedder.test.succeed();
+  });
+  document.body.appendChild(webview);
+}
 
 embedder.test.testList = {
   'testAllowTransparencyAttribute': testAllowTransparencyAttribute,
@@ -2080,7 +2226,6 @@ embedder.test.testList = {
       testInlineScriptFromAccessibleResources,
   'testInvalidChromeExtensionURL': testInvalidChromeExtensionURL,
   'testWebRequestAPIExistence': testWebRequestAPIExistence,
-  'testDeclarativeContentAPIExistence': testDeclarativeContentAPIExistence,
   'testEventName': testEventName,
   'testOnEventProperties': testOnEventProperties,
   'testLoadProgressEvent': testLoadProgressEvent,
@@ -2111,6 +2256,7 @@ embedder.test.testList = {
   'testDeclarativeWebRequestAPI': testDeclarativeWebRequestAPI,
   'testDeclarativeWebRequestAPISendMessage':
       testDeclarativeWebRequestAPISendMessage,
+  'testDisplayBlock': testDisplayBlock,
   'testWebRequestAPI': testWebRequestAPI,
   'testWebRequestAPIWithHeaders': testWebRequestAPIWithHeaders,
   'testWebRequestAPIGoogleProperty': testWebRequestAPIGoogleProperty,
@@ -2141,7 +2287,12 @@ embedder.test.testList = {
   'testZoomAPI' : testZoomAPI,
   'testFindAPI': testFindAPI,
   'testFindAPI_findupdate': testFindAPI,
-  'testLoadDataAPI': testLoadDataAPI
+  'testLoadDataAPI': testLoadDataAPI,
+  'testResizeEvents': testResizeEvents,
+  'testPerOriginZoomMode': testPerOriginZoomMode,
+  'testPerViewZoomMode': testPerViewZoomMode,
+  'testDisabledZoomMode': testDisabledZoomMode,
+  'testPlugin': testPlugin,
 };
 
 onload = function() {

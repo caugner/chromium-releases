@@ -17,6 +17,7 @@ namespace ash {
 
 class DisplayInfo;
 struct DisplayMode;
+class DisplaySnapshot;
 
 // An object that observes changes in display configuration and
 // update DisplayManagers.
@@ -28,11 +29,11 @@ class DisplayChangeObserver : public ui::DisplayConfigurator::StateController,
   // Returns the mode list for internal display.
   ASH_EXPORT static std::vector<DisplayMode> GetInternalDisplayModeList(
       const DisplayInfo& display_info,
-      const ui::DisplayConfigurator::DisplayState& output);
+      const ui::DisplaySnapshot& output);
 
   // Returns the resolution list.
   ASH_EXPORT static std::vector<DisplayMode> GetExternalDisplayModeList(
-      const ui::DisplayConfigurator::DisplayState& output);
+      const ui::DisplaySnapshot& output);
 
   DisplayChangeObserver();
   ~DisplayChangeObserver() override;
@@ -46,12 +47,12 @@ class DisplayChangeObserver : public ui::DisplayConfigurator::StateController,
   // Overriden from ui::DisplayConfigurator::Observer:
   void OnDisplayModeChanged(
       const ui::DisplayConfigurator::DisplayStateList& outputs) override;
+  void OnDisplayModeChangeFailed(
+      const ui::DisplayConfigurator::DisplayStateList& displays,
+      ui::MultipleDisplayState failed_new_state) override;
 
   // Overriden from ui::InputDeviceEventObserver:
   void OnTouchscreenDeviceConfigurationChanged() override;
-  void OnKeyboardDeviceConfigurationChanged() override;
-  void OnMouseDeviceConfigurationChanged() override;
-  void OnTouchpadDeviceConfigurationChanged() override;
 
   // Overriden from ShellObserver:
   void OnAppTerminating() override;

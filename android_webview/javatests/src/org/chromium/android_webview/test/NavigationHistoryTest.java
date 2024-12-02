@@ -10,6 +10,7 @@ import android.test.suitebuilder.annotation.SmallTest;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.content.browser.test.util.HistoryUtils;
@@ -276,6 +277,7 @@ public class NavigationHistoryTest extends AwTestBase {
      * @MediumTest
      * @Feature({"AndroidWebView"})
      */
+    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @DisabledTest
     public void testNavigateBackToNoncacheableLoginPage() throws Throwable {
         final TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
@@ -317,5 +319,24 @@ public class NavigationHistoryTest extends AwTestBase {
                 return LOGIN_RESPONSE_PAGE_TITLE.equals(title);
             }
         });
+    }
+
+    // See http://crbug.com/481570
+    @SmallTest
+    public void testTitleUpdatedWhenGoingBack() throws Throwable {
+        final TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
+                mContentsClient.getOnPageFinishedHelper();
+        NavigationHistory list = getNavigationHistory(mAwContents);
+        assertEquals(0, list.getEntryCount());
+
+        final String page1Url = addPage1ToServer(mWebServer);
+        final String page2Url = addPage2ToServer(mWebServer);
+
+        loadUrlSync(mAwContents, onPageFinishedHelper, page1Url);
+        loadUrlSync(mAwContents, onPageFinishedHelper, page2Url);
+        assertEquals(PAGE_2_TITLE, mContentsClient.getUpdatedTitle());
+        HistoryUtils.goBackSync(getInstrumentation(), mAwContents.getWebContents(),
+                onPageFinishedHelper);
+        assertEquals(PAGE_1_TITLE, mContentsClient.getUpdatedTitle());
     }
 }

@@ -11,11 +11,11 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/download/download_ui_controller.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/download_manager.h"
 
 #if defined(ENABLE_EXTENSIONS)
@@ -56,7 +56,7 @@ ChromeDownloadManagerDelegate* DownloadService::GetDownloadManagerDelegate() {
 #endif
 
   if (!profile_->IsOffTheRecord()) {
-    HistoryService* history = HistoryServiceFactory::GetForProfile(
+    history::HistoryService* history = HistoryServiceFactory::GetForProfile(
         profile_, ServiceAccessType::EXPLICIT_ACCESS);
     history->GetNextDownloadId(
         manager_delegate_->GetDownloadIdReceiverCallback());

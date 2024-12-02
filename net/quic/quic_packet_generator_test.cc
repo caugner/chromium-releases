@@ -106,7 +106,9 @@ struct PacketContents {
 class QuicPacketGeneratorTest : public ::testing::Test {
  protected:
   QuicPacketGeneratorTest()
-      : framer_(QuicSupportedVersions(), QuicTime::Zero(), false),
+      : framer_(QuicSupportedVersions(),
+                QuicTime::Zero(),
+                Perspective::IS_CLIENT),
         generator_(42, &framer_, &random_, &delegate_),
         creator_(QuicPacketGeneratorPeer::GetPacketCreator(&generator_)),
         packet_(0, PACKET_1BYTE_SEQUENCE_NUMBER, nullptr, 0, nullptr),
@@ -615,14 +617,15 @@ TEST_F(QuicPacketGeneratorTest, ConsumeData_FramesPreviouslyQueued) {
   // but not enough for a stream frame of 0 offset and one with non-zero offset.
   size_t length =
       NullEncrypter().GetCiphertextSize(0) +
-      GetPacketHeaderSize(creator_->connection_id_length(), true,
-                          creator_->next_sequence_number_length(),
-                          NOT_IN_FEC_GROUP) +
+      GetPacketHeaderSize(
+          creator_->connection_id_length(), true,
+          QuicPacketCreatorPeer::NextSequenceNumberLength(creator_),
+          NOT_IN_FEC_GROUP) +
       // Add an extra 3 bytes for the payload and 1 byte so BytesFree is larger
       // than the GetMinStreamFrameSize.
       QuicFramer::GetMinStreamFrameSize(1, 0, false, NOT_IN_FEC_GROUP) + 3 +
       QuicFramer::GetMinStreamFrameSize(1, 0, true, NOT_IN_FEC_GROUP) + 1;
-  creator_->set_max_packet_length(length);
+  creator_->SetMaxPacketLength(length);
   delegate_.SetCanWriteAnything();
   {
      InSequence dummy;

@@ -105,10 +105,24 @@ void UpdatePortaledWifiState(const std::string& service_path) {
                            base::StringValue(shill::kStatePortal));
 }
 
+bool IsCellularTechnology(const std::string& type) {
+  return (type == shill::kNetworkTechnology1Xrtt ||
+          type == shill::kNetworkTechnologyEvdo ||
+          type == shill::kNetworkTechnologyGsm ||
+          type == shill::kNetworkTechnologyGprs ||
+          type == shill::kNetworkTechnologyEdge ||
+          type == shill::kNetworkTechnologyUmts ||
+          type == shill::kNetworkTechnologyHspa ||
+          type == shill::kNetworkTechnologyHspaPlus ||
+          type == shill::kNetworkTechnologyLte ||
+          type == shill::kNetworkTechnologyLteAdvanced);
+}
+
 const char* kTechnologyUnavailable = "unavailable";
 const char* kNetworkActivated = "activated";
 const char* kNetworkDisabled = "disabled";
 const char* kCellularServicePath = "/service/cellular1";
+const char* kRoamingRequired = "required";
 
 }  // namespace
 
@@ -117,6 +131,7 @@ const char FakeShillManagerClient::kFakeEthernetNetworkGuid[] = "eth1_guid";
 
 FakeShillManagerClient::FakeShillManagerClient()
     : interactive_delay_(0),
+      cellular_technology_(shill::kNetworkTechnologyGsm),
       weak_ptr_factory_(this) {
   ParseCommandLineSwitch();
 }
@@ -706,18 +721,15 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
 
     if (portaled) {
       const std::string kPortaledWifiPath = "/service/portaled_wifi";
-      services->AddService(kPortaledWifiPath,
-                           "portaled_wifi_guid",
-                           "Portaled Wifi" /* name */,
-                           shill::kTypeWifi,
-                           shill::kStatePortal,
-                           add_to_visible);
+      services->AddService(kPortaledWifiPath, "portaled_wifi_guid",
+                           "Portaled Wifi" /* name */, shill::kTypeWifi,
+                           shill::kStateIdle, add_to_visible);
       services->SetServiceProperty(kPortaledWifiPath,
                                    shill::kSecurityClassProperty,
                                    base::StringValue(shill::kSecurityNone));
-      services->SetConnectBehavior(kPortaledWifiPath,
-                                   base::Bind(&UpdatePortaledWifiState,
-                                              "portaled_wifi"));
+      services->SetConnectBehavior(
+          kPortaledWifiPath,
+          base::Bind(&UpdatePortaledWifiState, kPortaledWifiPath));
       services->SetServiceProperty(kPortaledWifiPath,
                                    shill::kConnectableProperty,
                                    base::FundamentalValue(true));
@@ -763,6 +775,11 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     devices->SetDeviceProperty("/device/cellular1",
                                shill::kSupportedCarriersProperty,
                                carrier_list);
+    if (roaming_state_ == kRoamingRequired) {
+      devices->SetDeviceProperty("/device/cellular1",
+                                 shill::kProviderRequiresRoamingProperty,
+                                 base::FundamentalValue(true));
+    }
 
     services->AddService(kCellularServicePath,
                          "cellular1_guid",
@@ -770,7 +787,7 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
                          shill::kTypeCellular,
                          state,
                          add_to_visible);
-    base::StringValue technology_value(shill::kNetworkTechnologyGsm);
+    base::StringValue technology_value(cellular_technology_);
     devices->SetDeviceProperty("/device/cellular1",
                                shill::kTechnologyFamilyProperty,
                                technology_value);
@@ -793,9 +810,16 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
           base::StringValue(shill::kActivationStateNotActivated));
     }
 
+    std::string shill_roaming_state;
+    if (roaming_state_ == kRoamingRequired)
+      shill_roaming_state = shill::kRoamingStateRoaming;
+    else if (roaming_state_.empty())
+      shill_roaming_state = shill::kRoamingStateHome;
+    else  // |roaming_state_| is expected to be a valid Shill state.
+      shill_roaming_state = roaming_state_;
     services->SetServiceProperty(kCellularServicePath,
                                  shill::kRoamingStateProperty,
-                                 base::StringValue(shill::kRoamingStateHome));
+                                 base::StringValue(shill_roaming_state));
     profiles->AddService(shared_profile, kCellularServicePath);
   }
 
@@ -1042,6 +1066,10 @@ bool FakeShillManagerClient::ParseOption(const std::string& arg0,
     else
       s_tdls_busy_count = 1;
     return true;
+  } else if (arg0 == "roaming") {
+    // "home", "roaming", or "required"
+    roaming_state_ = arg1;
+    return true;
   }
   return SetInitialNetworkState(arg0, arg1);
 }
@@ -1049,7 +1077,6 @@ bool FakeShillManagerClient::ParseOption(const std::string& arg0,
 bool FakeShillManagerClient::SetInitialNetworkState(std::string type_arg,
                                                     std::string state_arg) {
   std::string state;
-  state_arg = base::StringToLowerASCII(state_arg);
   if (state_arg.empty() || state_arg == "1" || state_arg == "on" ||
       state_arg == "enabled" || state_arg == "connected" ||
       state_arg == "online") {
@@ -1071,12 +1098,20 @@ bool FakeShillManagerClient::SetInitialNetworkState(std::string type_arg,
   } else if (state_arg == "active" || state_arg == "activated") {
     // Technology is enabled, a service is connected and Activated.
     state = kNetworkActivated;
+  } else if (type_arg == shill::kTypeCellular &&
+             IsCellularTechnology(state_arg)) {
+    state = shill::kStateOnline;
+    cellular_technology_ = state_arg;
+  } else if (type_arg == shill::kTypeCellular && state_arg == "LTEAdvanced") {
+    // Special case, Shill name contains a ' '.
+    state = shill::kStateOnline;
+    cellular_technology_ = shill::kNetworkTechnologyLteAdvanced;
   } else {
-    LOG(ERROR) << "Unrecognized initial state: " << state_arg;
+    LOG(ERROR) << "Unrecognized initial state: " << type_arg << "="
+               << state_arg;
     return false;
   }
 
-  type_arg = base::StringToLowerASCII(type_arg);
   // Special cases
   if (type_arg == "wireless") {
     shill_initial_state_map_[shill::kTypeWifi] = state;

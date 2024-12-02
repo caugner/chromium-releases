@@ -98,8 +98,6 @@ ChangePictureOptionsHandler::~ChangePictureOptionsHandler() {
   CameraPresenceNotifier::GetInstance()->RemoveObserver(this);
   if (select_file_dialog_.get())
     select_file_dialog_->ListenerDestroyed();
-  if (image_decoder_.get())
-    image_decoder_->set_delegate(NULL);
 }
 
 void ChangePictureOptionsHandler::GetLocalizedValues(
@@ -240,13 +238,8 @@ void ChangePictureOptionsHandler::HandlePhotoTaken(
   user_photo_ = gfx::ImageSkia();
   user_photo_data_url_ = image_url;
 
-  if (image_decoder_.get())
-    image_decoder_->set_delegate(NULL);
-  image_decoder_ = new ImageDecoder(this, raw_data,
-                                    ImageDecoder::DEFAULT_CODEC);
-  scoped_refptr<base::MessageLoopProxy> task_runner =
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
-  image_decoder_->Start(task_runner);
+  ImageDecoder::Cancel(this);
+  ImageDecoder::Start(this, raw_data);
 }
 
 void ChangePictureOptionsHandler::HandlePageInitialized(
@@ -370,7 +363,6 @@ void ChangePictureOptionsHandler::HandleSelectImage(
   } else if (image_type == "camera") {
     // Camera image is selected.
     if (user_photo_.isNull()) {
-      DCHECK(image_decoder_.get());
       waiting_for_camera_photo = true;
       VLOG(1) << "Still waiting for camera image to decode";
     } else {
@@ -396,8 +388,8 @@ void ChangePictureOptionsHandler::HandleSelectImage(
   }
 
   // Ignore the result of the previous decoding if it's no longer needed.
-  if (!waiting_for_camera_photo && image_decoder_.get())
-    image_decoder_->set_delegate(NULL);
+  if (!waiting_for_camera_photo)
+    ImageDecoder::Cancel(this);
 }
 
 void ChangePictureOptionsHandler::FileSelected(const base::FilePath& path,
@@ -458,16 +450,12 @@ gfx::NativeWindow ChangePictureOptionsHandler::GetBrowserWindow() const {
 }
 
 void ChangePictureOptionsHandler::OnImageDecoded(
-    const ImageDecoder* decoder,
     const SkBitmap& decoded_image) {
-  DCHECK_EQ(image_decoder_.get(), decoder);
-  image_decoder_ = NULL;
   user_photo_ = gfx::ImageSkia::CreateFrom1xBitmap(decoded_image);
   SetImageFromCamera(user_photo_);
 }
 
-void ChangePictureOptionsHandler::OnDecodeImageFailed(
-    const ImageDecoder* decoder) {
+void ChangePictureOptionsHandler::OnDecodeImageFailed() {
   NOTREACHED() << "Failed to decode PNG image from WebUI";
 }
 

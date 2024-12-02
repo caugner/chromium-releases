@@ -6,11 +6,10 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/bookmark_app_helper.h"
-#include "chrome/browser/extensions/chrome_extension_function_details.h"
+#include "chrome/browser/extensions/chrome_requirements_checker.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_json_parser.h"
@@ -24,6 +23,7 @@
 #include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/web_application_info.h"
+#include "components/favicon/core/favicon_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/browser/utility_process_host_client.h"
@@ -45,9 +45,9 @@ class ManagementSetEnabledFunctionInstallPromptDelegate
   ManagementSetEnabledFunctionInstallPromptDelegate(
       extensions::ManagementSetEnabledFunction* function,
       const extensions::Extension* extension)
-      : function_(function), details_(function) {
+      : function_(function) {
     install_prompt_.reset(
-        new ExtensionInstallPrompt(details_.GetAssociatedWebContents()));
+        new ExtensionInstallPrompt(function->GetSenderWebContents()));
     install_prompt_->ConfirmReEnable(this, extension);
   }
   ~ManagementSetEnabledFunctionInstallPromptDelegate() override {}
@@ -61,10 +61,11 @@ class ManagementSetEnabledFunctionInstallPromptDelegate
 
  private:
   extensions::ManagementSetEnabledFunction* function_;
-  ChromeExtensionFunctionDetails details_;
 
   // Used for prompting to re-enable items with permissions escalation updates.
   scoped_ptr<ExtensionInstallPrompt> install_prompt_;
+
+  DISALLOW_COPY_AND_ASSIGN(ManagementSetEnabledFunctionInstallPromptDelegate);
 };
 
 class ManagementUninstallFunctionUninstallDialogDelegate
@@ -73,23 +74,19 @@ class ManagementUninstallFunctionUninstallDialogDelegate
  public:
   ManagementUninstallFunctionUninstallDialogDelegate(
       extensions::ManagementUninstallFunctionBase* function,
-      const std::string& target_extension_id)
+      const extensions::Extension* target_extension,
+      bool show_programmatic_uninstall_ui)
       : function_(function) {
-    const extensions::Extension* target_extension =
-        extensions::ExtensionRegistry::Get(function->browser_context())
-            ->GetExtensionById(target_extension_id,
-                               extensions::ExtensionRegistry::EVERYTHING);
-    content::WebContents* web_contents = function->GetAssociatedWebContents();
+    content::WebContents* web_contents = function->GetSenderWebContents();
     extension_uninstall_dialog_.reset(
         extensions::ExtensionUninstallDialog::Create(
             Profile::FromBrowserContext(function->browser_context()),
-            web_contents ? web_contents->GetTopLevelNativeWindow() : NULL,
+            web_contents ? web_contents->GetTopLevelNativeWindow() : nullptr,
             this));
-    if (function->extension_id() != target_extension_id) {
+    if (show_programmatic_uninstall_ui) {
       extension_uninstall_dialog_->ConfirmProgrammaticUninstall(
           target_extension, function->extension());
     } else {
-      // If this is a self uninstall, show the generic uninstall dialog.
       extension_uninstall_dialog_->ConfirmUninstall(target_extension);
     }
   }
@@ -103,9 +100,11 @@ class ManagementUninstallFunctionUninstallDialogDelegate
     function_->ExtensionUninstallCanceled();
   }
 
- protected:
+ private:
   extensions::ManagementUninstallFunctionBase* function_;
   scoped_ptr<extensions::ExtensionUninstallDialog> extension_uninstall_dialog_;
+
+  DISALLOW_COPY_AND_ASSIGN(ManagementUninstallFunctionUninstallDialogDelegate);
 };
 
 class ChromeAppForLinkDelegate : public extensions::AppForLinkDelegate {
@@ -207,13 +206,19 @@ ChromeManagementAPIDelegate::SetEnabledFunctionDelegate(
                                                             extension));
 }
 
+scoped_ptr<extensions::RequirementsChecker>
+ChromeManagementAPIDelegate::CreateRequirementsChecker() const {
+  return make_scoped_ptr(new extensions::ChromeRequirementsChecker());
+}
+
 scoped_ptr<extensions::UninstallDialogDelegate>
 ChromeManagementAPIDelegate::UninstallFunctionDelegate(
     extensions::ManagementUninstallFunctionBase* function,
-    const std::string& target_extension_id) const {
+    const extensions::Extension* target_extension,
+    bool show_programmatic_uninstall_ui) const {
   return scoped_ptr<extensions::UninstallDialogDelegate>(
       new ManagementUninstallFunctionUninstallDialogDelegate(
-          function, target_extension_id));
+          function, target_extension, show_programmatic_uninstall_ui));
 }
 
 bool ChromeManagementAPIDelegate::CreateAppShortcutFunctionDelegate(
@@ -244,8 +249,9 @@ ChromeManagementAPIDelegate::GenerateAppForLinkFunctionDelegate(
     content::BrowserContext* context,
     const std::string& title,
     const GURL& launch_url) const {
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      Profile::FromBrowserContext(context), ServiceAccessType::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(Profile::FromBrowserContext(context),
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(favicon_service);
 
   ChromeAppForLinkDelegate* delegate = new ChromeAppForLinkDelegate;

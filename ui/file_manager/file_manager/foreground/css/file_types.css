@@ -151,12 +151,6 @@ tree .tree-item[selected] > .tree-row > .shared[file-type-icon='folder'] {
       url(../images/filetype/2x/filetype_word.png) 2x);
 }
 
-[file-type-icon='drive'] {
-  background-image: -webkit-image-set(
-      url(chrome://theme/IDR_FILETYPE_DRIVE) 1x,
-      url(chrome://theme/IDR_FILETYPE_DRIVE@2x) 2x);
-}
-
 /* Large generic thumbnails, used when a file does not have a thumbnail. */
 [generic-thumbnail] {
   background-image: -webkit-image-set(
@@ -170,18 +164,6 @@ tree .tree-item[selected] > .tree-row > .shared[file-type-icon='folder'] {
   background-image: -webkit-image-set(
       url(../images/files/ui/filetype_placeholder_audio.png) 1x,
       url(../images/files/ui/2x/filetype_placeholder_audio.png) 2x);
-}
-
-[generic-thumbnail='folder'] {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/filetype_placeholder_folder.png) 1x,
-      url(../images/files/ui/2x/filetype_placeholder_folder.png) 2x);
-}
-
-.shared[generic-thumbnail='folder'] {
-  background-image: -webkit-image-set(
-      url(../images/files/ui/filetype_placeholder_folder_shared.png) 1x,
-      url(../images/files/ui/2x/filetype_placeholder_folder_shared.png) 2x);
 }
 
 [generic-thumbnail='image'] {
@@ -340,4 +322,15 @@ tree .tree-item[selected] > .tree-row > .shared[file-type-icon='folder'] {
   background-image: -webkit-image-set(
       url(../images/volumes/hard_drive_active.png) 1x,
       url(../images/volumes/2x/hard_drive_active.png) 2x);
+}
+
+.tree-row:not([selected]) [volume-type-icon='provided'] {
+  /* Apply the rgb(90, 90, 90) mask. */
+  -webkit-filter: contrast(0) brightness(0.7143);
+}
+
+.tree-row [command-icon='add-new-services'] {
+  background-image: -webkit-image-set(
+      url(../images/volumes/add.png) 1x,
+      url(../images/volumes/2x/add.png) 2x);
 }

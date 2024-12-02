@@ -24,7 +24,8 @@
 #include "ash/multi_profile_uma.h"
 #include "ash/new_window_delegate.h"
 #include "ash/root_window_controller.h"
-#include "ash/rotator/screen_rotation.h"
+#include "ash/rotator/screen_rotation_animator.h"
+#include "ash/rotator/window_rotation.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf.h"
@@ -293,8 +294,9 @@ void HandleRotateScreen() {
   gfx::Display display = Shell::GetScreen()->GetDisplayNearestPoint(point);
   const DisplayInfo& display_info =
       Shell::GetInstance()->display_manager()->GetDisplayInfo(display.id());
-  Shell::GetInstance()->display_manager()->SetDisplayRotation(
-      display.id(), GetNextRotation(display_info.rotation()));
+  ash::ScreenRotationAnimator(display.id())
+      .Rotate(GetNextRotation(display_info.GetActiveRotation()),
+              gfx::Display::ROTATION_SOURCE_USER);
 }
 
 // Rotate the active window.
@@ -310,7 +312,7 @@ void HandleRotateActiveWindow() {
         set_preemption_strategy(ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
     active_window->layer()->GetAnimator()->StartAnimation(
         new ui::LayerAnimationSequence(
-            new ash::ScreenRotation(360, active_window->layer())));
+            new ash::WindowRotation(360, active_window->layer())));
   }
 }
 
@@ -405,18 +407,17 @@ void HandleSwitchIme(ImeControlDelegate* ime_control_delegate,
 
 void HandleTakePartialScreenshot(ScreenshotDelegate* screenshot_delegate) {
   base::RecordAction(UserMetricsAction("Accel_Take_Partial_Screenshot"));
-  if (screenshot_delegate) {
-    ash::PartialScreenshotController::StartPartialScreenshotSession(
-        screenshot_delegate);
-  }
+  DCHECK(screenshot_delegate);
+  Shell::GetInstance()
+      ->partial_screenshot_controller()
+      ->StartPartialScreenshotSession(screenshot_delegate);
 }
 
 void HandleTakeScreenshot(ScreenshotDelegate* screenshot_delegate) {
   base::RecordAction(UserMetricsAction("Accel_Take_Screenshot"));
-  if (screenshot_delegate &&
-      screenshot_delegate->CanTakeScreenshot()) {
+  DCHECK(screenshot_delegate);
+  if (screenshot_delegate->CanTakeScreenshot())
     screenshot_delegate->HandleTakeScreenshotForAllRootWindows();
-  }
 }
 
 bool CanHandleToggleAppList(const ui::Accelerator& accelerator,

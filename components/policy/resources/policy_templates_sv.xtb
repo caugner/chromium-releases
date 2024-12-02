@@ -1072,9 +1072,9 @@
           Policyn är valfri. Om den inte anges används standarden UTF-8.
 
           Policyn används bara om policyn DefaultSearchProviderEnabled är aktiverad.</translation>
-<translation id="1349276916170108723">Inaktiverar Google Drive-synkronisering i appen Filer i Chrome OS när du använder inställningen sant. I dessa fall överförs ingen data till Google Drive.
+<translation id="1349276916170108723">Inaktiverar Google Drive-synkronisering i appen Filer i Chrome OS när du använder inställningen sant. I dessa fall laddas ingen data upp till Google Drive.
 
-          Om det inte finns någon inställning eller om den är inställd på falskt kommer användaren att kunna överföra filer till Google Drive.</translation>
+          Om det inte finns någon inställning eller om den är inställd på falskt kommer användaren att kunna ladda upp filer till Google Drive.</translation>
 <translation id="1964634611280150550">Inkognitoläget är inaktiverat</translation>
 <translation id="5971128524642832825">Inaktiverar Drive i appen Filer i Chrome OS</translation>
 <translation id="1847960418907100918">Anger parametrarna som används vid sökningar på Instant med POST. Den består av kommaavgränsade namn-/värdepar. Om ett värde är en mallparameter, t.ex. {searchTerms} i ovanstående exempel, kommer det att ersättas med riktiga söktermer.
@@ -1907,7 +1907,7 @@
 <translation id="523505283826916779">Inställningar för tillgänglighet</translation>
 <translation id="1948757837129151165">Policy för HTTP-autentisering</translation>
 <translation id="5946082169633555022">Betakanal</translation>
-<translation id="7187256234726597551">Om detta är sant är vidimering på distans tillåtet för enheten och ett certifikat genereras automatiskt. Det läggs upp på enhetshanteringsservern.
+<translation id="7187256234726597551">Om detta är sant är vidimering på distans tillåtet för enheten och ett certifikat genereras automatiskt. Det laddas upp till enhetshanteringsservern.
 
           Om detta är falskt, eller om alternativet inte har angetts, skapas inget certifikat och anrop till tilläggs-API:et enterprise.platformKeysPrivate misslyckas.</translation>
 <translation id="5242696907817524533">Konfigurerar en lista med hanterade bokmärken.

@@ -20,7 +20,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/easy_unlock_app_manager.h"
-#include "chrome/browser/signin/easy_unlock_auth_attempt.h"
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service_observer.h"
 #include "chrome/browser/signin/screenlock_bridge.h"
@@ -44,7 +43,18 @@
 #include "components/user_manager/user_manager.h"
 #endif
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 namespace {
+
+enum BluetoothType {
+  BT_NO_ADAPTER,
+  BT_NORMAL,
+  BT_LOW_ENERGY_CAPABLE,
+  BT_MAX_TYPE
+};
 
 PrefService* GetLocalState() {
   return g_browser_process ? g_browser_process->local_state() : NULL;
@@ -118,6 +128,10 @@ class EasyUnlockService::BluetoothDetector
     service_->OnBluetoothAdapterPresentChanged();
   }
 
+  device::BluetoothAdapter* getAdapter() {
+    return adapter_.get();
+  }
+
  private:
   void OnAdapterInitialized(scoped_refptr<device::BluetoothAdapter> adapter) {
     adapter_ = adapter;
@@ -129,6 +143,17 @@ class EasyUnlockService::BluetoothDetector
     // toes in the future then we need to revisit this guard.
     if (adapter_->IsDiscoverable())
       TurnOffBluetoothDiscoverability();
+
+#if !defined(OS_CHROMEOS)
+    // Bluetooth detection causes serious performance degradations on Mac
+    // and possibly other platforms as well: http://crbug.com/467316
+    // Since this feature is currently only offered for ChromeOS we just
+    // turn it off on other platforms once the inforamtion about the
+    // adapter has been gathered and reported.
+    // TODO(bcwhite,xiyuan): Revisit when non-chromeos platforms are supported.
+    adapter_->RemoveObserver(this);
+    adapter_ = NULL;
+#endif  // !defined(OS_CHROMEOS)
   }
 
   // apps::AppLifetimeMonitor::Observer:
@@ -202,6 +227,7 @@ class EasyUnlockService::PowerMonitor
         base::Bind(&PowerMonitor::ResetWakingUp,
                    weak_ptr_factory_.GetWeakPtr()),
         base::TimeDelta::FromSeconds(5));
+    service_->OnSuspendDone();
     service_->UpdateAppState();
     // Note that |this| may get deleted after |UpdateAppState| is called.
   }
@@ -366,6 +392,9 @@ void EasyUnlockService::SetHardlockState(
   if (user_id.empty())
     return;
 
+  if (state == GetHardlockState())
+    return;
+
   SetHardlockStateForUser(user_id, state);
 }
 
@@ -452,16 +481,34 @@ bool EasyUnlockService::UpdateScreenlockState(
     if (!handler->InStateValidOnRemoteAuthFailure())
       HandleAuthFailure(GetUserEmail());
   }
+
+  FOR_EACH_OBSERVER(
+      EasyUnlockServiceObserver, observers_, OnScreenlockStateChanged(state));
   return true;
 }
 
+EasyUnlockScreenlockStateHandler::State
+EasyUnlockService::GetScreenlockState() {
+  EasyUnlockScreenlockStateHandler* handler = GetScreenlockStateHandler();
+  if (!handler)
+    return EasyUnlockScreenlockStateHandler::STATE_INACTIVE;
+
+  return handler->state();
+}
+
 void EasyUnlockService::AttemptAuth(const std::string& user_id) {
+  AttemptAuth(user_id, AttemptAuthCallback());
+}
+
+void EasyUnlockService::AttemptAuth(const std::string& user_id,
+                                    const AttemptAuthCallback& callback) {
   CHECK_EQ(GetUserEmail(), user_id);
 
   auth_attempt_.reset(new EasyUnlockAuthAttempt(
-      app_manager_.get(), user_id, GetType() == TYPE_REGULAR
-                                       ? EasyUnlockAuthAttempt::TYPE_UNLOCK
-                                       : EasyUnlockAuthAttempt::TYPE_SIGNIN));
+      app_manager_.get(), user_id,
+      GetType() == TYPE_REGULAR ? EasyUnlockAuthAttempt::TYPE_UNLOCK
+                                : EasyUnlockAuthAttempt::TYPE_SIGNIN,
+      callback));
   if (!auth_attempt_->Start())
     auth_attempt_.reset();
 }
@@ -661,20 +708,31 @@ void EasyUnlockService::InitializeOnAppManagerReady() {
   CHECK(app_manager_.get());
 
   InitializeInternal();
-
-#if defined(OS_CHROMEOS)
-  // Only start Bluetooth detection for ChromeOS since the feature is
-  // only offered on ChromeOS. Enabling this on non-ChromeOS platforms
-  // previously introduced a performance regression: http://crbug.com/404482
-  // Make sure not to reintroduce a performance regression if re-enabling on
-  // additional platforms.
-  // TODO(xiyuan): Revisit when non-chromeos platforms are supported.
   bluetooth_detector_->Initialize();
-#endif  // defined(OS_CHROMEOS)
 }
 
 void EasyUnlockService::OnBluetoothAdapterPresentChanged() {
   UpdateAppState();
+
+  // Whether we've already passed Bluetooth availability information to UMA.
+  // This is static because there may be multiple instances and we want to
+  // report this system-level stat only once per run of Chrome.
+  static bool bluetooth_adapter_has_been_reported = false;
+
+  if (!bluetooth_adapter_has_been_reported) {
+    bluetooth_adapter_has_been_reported = true;
+    int bttype = BT_NO_ADAPTER;
+    if (bluetooth_detector_->IsPresent()) {
+      bttype = BT_LOW_ENERGY_CAPABLE;
+#if defined(OS_WIN)
+      if (base::win::GetVersion() < base::win::VERSION_WIN8) {
+        bttype = BT_NORMAL;
+      }
+#endif
+    }
+    UMA_HISTOGRAM_ENUMERATION(
+      "EasyUnlock.BluetoothAvailability", bttype, BT_MAX_TYPE);
+  }
 }
 
 void EasyUnlockService::SetHardlockStateForUser(

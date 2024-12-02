@@ -20,36 +20,23 @@ var remoting = remoting || {};
  */
 remoting.FallbackSignalStrategy = function(primary,
                                            secondary) {
-  /**
-   * @type {remoting.SignalStrategy}
-   * @private
-   */
+  /** @private {remoting.SignalStrategy} */
   this.primary_ = primary;
   this.primary_.setStateChangedCallback(this.onPrimaryStateChanged_.bind(this));
 
-  /**
-   * @type {remoting.SignalStrategy}
-   * @private
-   */
+  /** @private {remoting.SignalStrategy} */
   this.secondary_ = secondary;
   this.secondary_.setStateChangedCallback(
       this.onSecondaryStateChanged_.bind(this));
 
-  /**
-   * @type {?function(remoting.SignalStrategy.State)}
-   * @private
-   */
+  /** @private {?function(remoting.SignalStrategy.State)} */
   this.onStateChangedCallback_ = null;
 
-  /**
-   * @type {?function(Element):void}
-   * @private
-   */
+  /** @private {?function(Element):void} */
   this.onIncomingStanzaCallback_ = null;
 
   /**
-   * @type {number}
-   * @private
+   * @private {number}
    * @const
    */
   this.PRIMARY_CONNECT_TIMEOUT_MS_ = 10 * 1000;
@@ -68,60 +55,33 @@ remoting.FallbackSignalStrategy = function(primary,
     CLOSED: 'closed'
   };
 
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.state_ = this.State.NOT_CONNECTED;
 
-  /**
-   * @type {?remoting.SignalStrategy.State}
-   * @private
-   */
+  /** @private {?remoting.SignalStrategy.State} */
   this.externalState_ = null;
 
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.server_ = '';
 
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.username_ = '';
 
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.authToken_ = '';
 
-  /**
-   * @type {number}
-   * @private
-   */
+  /** @private {number} */
   this.primaryConnectTimerId_ = 0;
 
-  /**
-   * @type {remoting.LogToServer}
-   * @private
-   */
+  /** @private {remoting.LogToServer} */
   this.logToServer_ = null;
 
   /**
    * @type {Array<{strategyType: remoting.SignalStrategy.Type,
-                    progress: remoting.FallbackSignalStrategy.Progress,
-   *                elapsed: number}>}
+                    progress: remoting.FallbackSignalStrategy.Progress}>}
    */
   this.connectionSetupResults_ = [];
 
-  /**
-   * @type {number}
-   * @private
-   */
-  this.startTime_ = 0;
 };
 
 /**
@@ -178,7 +138,6 @@ remoting.FallbackSignalStrategy.prototype.connect =
   this.username_ = username;
   this.authToken_ = authToken;
   this.state_ = this.State.PRIMARY_PENDING;
-  this.startTime_ = new Date().getTime();
   this.primary_.setIncomingStanzaCallback(this.onIncomingStanzaCallback_);
   this.primary_.connect(server, username, authToken);
   this.primaryConnectTimerId_ =
@@ -211,8 +170,7 @@ remoting.FallbackSignalStrategy.prototype.sendConnectionSetupResultsInternal_ =
   for (var i = 0; i < this.connectionSetupResults_.length; ++i) {
     var result = this.connectionSetupResults_[i];
     this.logToServer_.logSignalStrategyProgress(result.strategyType,
-                                                result.progress,
-                                                result.elapsed);
+                                                result.progress);
   }
   this.connectionSetupResults_ = [];
 };
@@ -224,7 +182,7 @@ remoting.FallbackSignalStrategy.prototype.getState = function() {
       : this.externalState_;
 };
 
-/** @return {remoting.Error} Error when in FAILED state. */
+/** @return {!remoting.Error} Error when in FAILED state. */
 remoting.FallbackSignalStrategy.prototype.getError = function() {
   base.debug.assert(this.state_ == this.State.SECONDARY_FAILED);
   base.debug.assert(
@@ -391,8 +349,7 @@ remoting.FallbackSignalStrategy.prototype.updateProgress_ = function(
       progress);
   this.connectionSetupResults_.push({
     'strategyType': strategy.getType(),
-    'progress': progress,
-    'elapsed': new Date().getTime() - this.startTime_
+    'progress': progress
   });
   if (this.logToServer_) {
     this.sendConnectionSetupResultsInternal_();

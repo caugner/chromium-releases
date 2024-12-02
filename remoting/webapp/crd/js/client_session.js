@@ -32,68 +32,37 @@ var remoting = remoting || {};
 remoting.ACCESS_TOKEN_RESEND_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
+ * @param {remoting.ClientPlugin} plugin
  * @param {remoting.Host} host The host to connect to.
  * @param {remoting.SignalStrategy} signalStrategy Signal strategy.
- * @param {HTMLElement} container Container element for the client view.
- * @param {string} accessCode The IT2Me access code. Blank for Me2Me.
- * @param {function(boolean, function(string): void): void} fetchPin
- *     Called by Me2Me connections when a PIN needs to be obtained
- *     interactively.
- * @param {function(string, string, string,
- *                  function(string, string): void): void}
- *     fetchThirdPartyToken Called by Me2Me connections when a third party
- *     authentication token must be obtained.
- * @param {string} authenticationMethods Comma-separated list of
- *     authentication methods the client should attempt to use.
- * @param {remoting.DesktopConnectedView.Mode} mode The mode of this connection.
- * @param {string} clientPairingId For paired Me2Me connections, the
- *     pairing id for this client, as issued by the host.
- * @param {string} clientPairedSecret For paired Me2Me connections, the
- *     paired secret for this client, as issued by the host.
- * @param {string} defaultRemapKeys The default set of remap keys, to use
- *     when the client doesn't define any.
+ * @param {function(string, string):boolean} onExtensionMessage The handler for
+ *     protocol extension messages. Returns true if a message is recognized;
+ *     false otherwise.
+ *
  * @constructor
  * @extends {base.EventSourceImpl}
+ * @implements {base.Disposable}
+ * @implements {remoting.ClientPlugin.ConnectionEventHandler}
  */
-remoting.ClientSession = function(host, signalStrategy, container, accessCode,
-                                  fetchPin, fetchThirdPartyToken,
-                                  authenticationMethods, mode, clientPairingId,
-                                  clientPairedSecret, defaultRemapKeys) {
-  /** @private */
-  this.state_ = remoting.ClientSession.State.CREATED;
+remoting.ClientSession = function(plugin, host, signalStrategy,
+                                  onExtensionMessage) {
+  base.inherits(this, base.EventSourceImpl);
 
   /** @private */
-  this.error_ = remoting.Error.NONE;
+  this.state_ = remoting.ClientSession.State.INITIALIZING;
+
+  /** @private {!remoting.Error} */
+  this.error_ = remoting.Error.none();
 
   /** @private */
   this.host_ = host;
-  /** @private */
-  this.accessCode_ = accessCode;
-  /** @private */
-  this.fetchPin_ = fetchPin;
-  /** @private */
-  this.fetchThirdPartyToken_ = fetchThirdPartyToken;
-  /** @private */
-  this.authenticationMethods_ = authenticationMethods;
-  /** @private */
-  this.clientPairingId_ = clientPairingId;
-  /** @private */
-  this.clientPairedSecret_ = clientPairedSecret;
-
-  /** @private */
-  this.uiHandler_ = new remoting.DesktopConnectedView(
-      this, container, this.host_, mode, defaultRemapKeys,
-      this.onPluginInitialized_.bind(this));
-  remoting.desktopConnectedView = this.uiHandler_;
 
   /** @private */
   this.sessionId_ = '';
-  /** @type {remoting.ClientPlugin}
-    * @private */
-  this.plugin_ = null;
+
   /** @private */
   this.hasReceivedFrame_ = false;
-  this.logToServer = new remoting.LogToServer(signalStrategy, mode);
+  this.logToServer = new remoting.LogToServer(signalStrategy);
 
   /** @private */
   this.signalStrategy_ = signalStrategy;
@@ -111,16 +80,15 @@ remoting.ClientSession = function(host, signalStrategy, container, accessCode,
    */
   this.logHostOfflineErrors_ = true;
 
-  /** @type {remoting.GnubbyAuthHandler} @private */
-  this.gnubbyAuthHandler_ = null;
+  /** @private {function(string, string):boolean} */
+  this.onExtensionMessageHandler_ = onExtensionMessage;
 
-  /** @type {remoting.CastExtensionHandler} @private */
-  this.castExtensionHandler_ = null;
+  /** @private {remoting.ClientPlugin} */
+  this.plugin_ = plugin;
+  plugin.setConnectionEventHandler(this);
 
   this.defineEvents(Object.keys(remoting.ClientSession.Events));
 };
-
-base.extend(remoting.ClientSession, base.EventSourceImpl);
 
 /** @enum {string} */
 remoting.ClientSession.Events = {
@@ -129,20 +97,27 @@ remoting.ClientSession.Events = {
 };
 
 // Note that the positive values in both of these enums are copied directly
-// from chromoting_scriptable_object.h and must be kept in sync. The negative
-// values represent state transitions that occur within the web-app that have
-// no corresponding plugin state transition.
+// from connection_to_host.h and must be kept in sync. Code in
+// chromoting_instance.cc converts the C++ enums into strings that must match
+// the names given here.
+// The negative values represent state transitions that occur within the
+// web-app that have no corresponding plugin state transition.
 /** @enum {number} */
 remoting.ClientSession.State = {
   CONNECTION_CANCELED: -3,  // Connection closed (gracefully) before connecting.
   CONNECTION_DROPPED: -2,  // Succeeded, but subsequently closed with an error.
   CREATED: -1,
   UNKNOWN: 0,
-  CONNECTING: 1,
-  INITIALIZING: 2,
-  CONNECTED: 3,
-  CLOSED: 4,
-  FAILED: 5
+  INITIALIZING: 1,
+  CONNECTING: 2,
+  // We don't currently receive AUTHENTICATED from the host - it comes through
+  // as 'CONNECTING' instead.
+  // TODO(garykac) Update chromoting_instance.cc to send this once we've
+  // shipped a webapp release with support for AUTHENTICATED.
+  AUTHENTICATED: 3,
+  CONNECTED: 4,
+  CLOSED: 5,
+  FAILED: 6
 };
 
 /**
@@ -272,80 +247,30 @@ remoting.ClientSession.prototype.hasCapability = function(capability) {
 };
 
 /**
- * Adds <embed> element to the UI container and readies the session object.
- *
- * @param {function(string, string):boolean} onExtensionMessage The handler for
- *     protocol extension messages. Returns true if a message is recognized;
- *     false otherwise.
- * @param {Array<string>} requiredCapabilities A list of capabilities
- *     required by this application.
- */
-remoting.ClientSession.prototype.createPluginAndConnect =
-    function(onExtensionMessage, requiredCapabilities) {
-  this.uiHandler_.createPluginAndConnect(onExtensionMessage,
-                                         requiredCapabilities);
-};
-
-/**
- * @param {remoting.Error} error
- * @param {remoting.ClientPlugin} plugin
- */
-remoting.ClientSession.prototype.onPluginInitialized_ = function(
-    error, plugin) {
-  if (error != remoting.Error.NONE) {
-    this.resetWithError_(error);
-  }
-
-  this.plugin_ = plugin;
-  plugin.setOnOutgoingIqHandler(this.sendIq_.bind(this));
-  plugin.setOnDebugMessageHandler(this.onDebugMessage_.bind(this));
-
-  plugin.setConnectionStatusUpdateHandler(
-      this.onConnectionStatusUpdate_.bind(this));
-  plugin.setRouteChangedHandler(this.onRouteChanged_.bind(this));
-  plugin.setConnectionReadyHandler(this.onConnectionReady_.bind(this));
-  plugin.setCapabilitiesHandler(this.onSetCapabilities_.bind(this));
-  plugin.setGnubbyAuthHandler(
-      this.processGnubbyAuthMessage_.bind(this));
-  plugin.setCastExtensionHandler(
-      this.processCastExtensionMessage_.bind(this));
-
-  this.initiateConnection_();
-};
-
-/**
- * @param {remoting.Error} error
- */
-remoting.ClientSession.prototype.resetWithError_ = function(error) {
-  this.signalStrategy_.setIncomingStanzaCallback(null);
-  this.removePlugin();
-  this.error_ = error;
-  this.setState_(remoting.ClientSession.State.FAILED);
-}
-
-/**
- * Deletes the <embed> element from the container, without sending a
- * session_terminate request.  This is to be called when the session was
- * disconnected by the Host.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.removePlugin = function() {
-  this.uiHandler_.removePlugin();
-  this.plugin_ = null;
-};
-
-/**
  * Disconnect the current session with a particular |error|.  The session will
  * raise a |stateChanged| event in response to it.  The caller should then call
- * |cleanup| to remove and destroy the <embed> element.
+ * dispose() to remove and destroy the <embed> element.
  *
- * @param {remoting.Error} error The reason for the disconnection.  Use
- *    remoting.Error.NONE if there is no error.
+ * @param {!remoting.Error} error The reason for the disconnection.  Use
+ *    remoting.Error.none() if there is no error.
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.disconnect = function(error) {
-  var state = (error == remoting.Error.NONE) ?
+  this.sendIq_(
+      '<cli:iq ' +
+          'to="' + this.host_.jabberId + '" ' +
+          'type="set" ' +
+          'id="session-terminate" ' +
+          'xmlns:cli="jabber:client">' +
+        '<jingle ' +
+            'xmlns="urn:xmpp:jingle:1" ' +
+            'action="session-terminate" ' +
+            'sid="' + this.sessionId_ + '">' +
+          '<reason><success/></reason>' +
+        '</jingle>' +
+      '</cli:iq>');
+
+  var state = error.isNone() ?
                   remoting.ClientSession.State.CLOSED :
                   remoting.ClientSession.State.FAILED;
 
@@ -361,21 +286,8 @@ remoting.ClientSession.prototype.disconnect = function(error) {
  *
  * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.cleanup = function() {
-  this.sendIq_(
-      '<cli:iq ' +
-          'to="' + this.host_.jabberId + '" ' +
-          'type="set" ' +
-          'id="session-terminate" ' +
-          'xmlns:cli="jabber:client">' +
-        '<jingle ' +
-            'xmlns="urn:xmpp:jingle:1" ' +
-            'action="session-terminate" ' +
-            'sid="' + this.sessionId_ + '">' +
-          '<reason><success/></reason>' +
-        '</jingle>' +
-      '</cli:iq>');
-  this.removePlugin();
+remoting.ClientSession.prototype.dispose = function() {
+  this.plugin_ = null;
 };
 
 /**
@@ -386,7 +298,7 @@ remoting.ClientSession.prototype.getState = function() {
 };
 
 /**
- * @return {remoting.Error} The current error code.
+ * @return {!remoting.Error} The current error code.
  */
 remoting.ClientSession.prototype.getError = function() {
   return this.error_;
@@ -438,10 +350,16 @@ remoting.ClientSession.prototype.sendIq_ = function(message) {
 };
 
 /**
- * @param {string} msg
- * @private
+ * @param {string} message XML string of IQ stanza to send to server.
  */
-remoting.ClientSession.prototype.onDebugMessage_ = function(msg) {
+remoting.ClientSession.prototype.onOutgoingIq = function(message) {
+  this.sendIq_(message);
+}
+
+/**
+ * @param {string} msg
+ */
+remoting.ClientSession.prototype.onDebugMessage = function(msg) {
   console.log('plugin: ' + msg.trimRight());
 };
 
@@ -460,98 +378,42 @@ remoting.ClientSession.prototype.onIncomingMessage_ = function(message) {
 };
 
 /**
- * @private
- */
-remoting.ClientSession.prototype.initiateConnection_ = function() {
-  /** @type {remoting.ClientSession} */
-  var that = this;
-
-  /** @param {string} sharedSecret Shared secret. */
-  function onSharedSecretReceived(sharedSecret) {
-    that.plugin_.connect(that.host_.jabberId, that.host_.publicKey,
-                         that.signalStrategy_.getJid(), sharedSecret,
-                         that.authenticationMethods_, that.host_.hostId,
-                         that.clientPairingId_, that.clientPairedSecret_);
-  }
-
-  this.getSharedSecret_(onSharedSecretReceived);
-};
-
-/**
- * Gets shared secret to be used for connection.
- *
- * @param {function(string)} callback Callback called with the shared secret.
- * @return {void} Nothing.
- * @private
- */
-remoting.ClientSession.prototype.getSharedSecret_ = function(callback) {
-  /** @type remoting.ClientSession */
-  var that = this;
-  if (this.plugin_.hasFeature(remoting.ClientPlugin.Feature.THIRD_PARTY_AUTH)) {
-    /** @type{function(string, string, string): void} */
-    var fetchThirdPartyToken = function(tokenUrl, hostPublicKey, scope) {
-      that.fetchThirdPartyToken_(
-          tokenUrl, hostPublicKey, scope,
-          that.plugin_.onThirdPartyTokenFetched.bind(that.plugin_));
-    };
-    this.plugin_.setFetchThirdPartyTokenHandler(fetchThirdPartyToken);
-  }
-  if (this.accessCode_) {
-    // Shared secret was already supplied before connecting (It2Me case).
-    callback(this.accessCode_);
-  } else if (this.plugin_.hasFeature(
-      remoting.ClientPlugin.Feature.ASYNC_PIN)) {
-    // Plugin supports asynchronously asking for the PIN.
-    this.plugin_.useAsyncPinDialog();
-    /** @param {boolean} pairingSupported */
-    var fetchPin = function(pairingSupported) {
-      that.fetchPin_(pairingSupported,
-                     that.plugin_.onPinFetched.bind(that.plugin_));
-    };
-    this.plugin_.setFetchPinHandler(fetchPin);
-    callback('');
-  } else {
-    // Clients that don't support asking for a PIN asynchronously also don't
-    // support pairing, so request the PIN now without offering to remember it.
-    this.fetchPin_(false, callback);
-  }
-};
-
-/**
  * Callback that the plugin invokes to indicate that the connection
  * status has changed.
  *
- * @param {number} status The plugin's status.
- * @param {number} error The plugin's error state, if any.
- * @private
+ * @param {remoting.ClientSession.State} status The plugin's status.
+ * @param {remoting.ClientSession.ConnectionError} error The plugin's error
+ *        state, if any.
  */
-remoting.ClientSession.prototype.onConnectionStatusUpdate_ =
+remoting.ClientSession.prototype.onConnectionStatusUpdate =
     function(status, error) {
-  if (status == remoting.ClientSession.State.CONNECTED) {
-    this.uiHandler_.updateClientSessionUi_(this);
-
-  } else if (status == remoting.ClientSession.State.FAILED) {
+  if (status == remoting.ClientSession.State.FAILED) {
     switch (error) {
       case remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE:
-        this.error_ = remoting.Error.HOST_IS_OFFLINE;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.HOST_IS_OFFLINE);
         break;
       case remoting.ClientSession.ConnectionError.SESSION_REJECTED:
-        this.error_ = remoting.Error.INVALID_ACCESS_CODE;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.INVALID_ACCESS_CODE);
         break;
       case remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL:
-        this.error_ = remoting.Error.INCOMPATIBLE_PROTOCOL;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.INCOMPATIBLE_PROTOCOL);
         break;
       case remoting.ClientSession.ConnectionError.NETWORK_FAILURE:
-        this.error_ = remoting.Error.P2P_FAILURE;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.P2P_FAILURE);
         break;
       case remoting.ClientSession.ConnectionError.HOST_OVERLOAD:
-        this.error_ = remoting.Error.HOST_OVERLOAD;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.HOST_OVERLOAD);
         break;
       default:
-        this.error_ = remoting.Error.UNEXPECTED;
+        this.error_ = remoting.Error.unexpected();
     }
   }
-  this.setState_(/** @type {remoting.ClientSession.State} */ (status));
+  this.setState_(status);
 };
 
 /**
@@ -562,7 +424,7 @@ remoting.ClientSession.prototype.onConnectionStatusUpdate_ =
  * @param {string} connectionType The new connection type.
  * @private
  */
-remoting.ClientSession.prototype.onRouteChanged_ =
+remoting.ClientSession.prototype.onRouteChanged =
     function(channel, connectionType) {
   console.log('plugin: Channel ' + channel + ' using ' +
               connectionType + ' connection.');
@@ -574,9 +436,8 @@ remoting.ClientSession.prototype.onRouteChanged_ =
  * ready.
  *
  * @param {boolean} ready True if the connection is ready.
- * @private
  */
-remoting.ClientSession.prototype.onConnectionReady_ = function(ready) {
+remoting.ClientSession.prototype.onConnectionReady = function(ready) {
   // TODO(jamiewalch): Currently, the logic for determining whether or not the
   // connection is available is based solely on whether or not any video frames
   // have been received recently. which leads to poor UX on slow connections.
@@ -586,8 +447,6 @@ remoting.ClientSession.prototype.onConnectionReady_ = function(ready) {
     console.log('Video channel ' + (ready ? '' : 'not ') + 'ready.');
     return;
   }
-
-  this.uiHandler_.onConnectionReady(ready);
 
   this.raiseEvent(remoting.ClientSession.Events.videoChannelStateChanged,
                   ready);
@@ -602,24 +461,24 @@ remoting.ClientSession.prototype.onConnectionReady_ = function(ready) {
  * @return {void} Nothing.
  * @private
  */
-remoting.ClientSession.prototype.onSetCapabilities_ = function(capabilities) {
+remoting.ClientSession.prototype.onSetCapabilities = function(capabilities) {
   if (this.capabilities_ != null) {
     console.error('onSetCapabilities_() is called more than once');
     return;
   }
 
   this.capabilities_ = capabilities;
-  if (this.hasCapability(
-      remoting.ClientSession.Capability.SEND_INITIAL_RESOLUTION)) {
-    this.uiHandler_.notifyClientResolution_();
-  }
   if (this.hasCapability(remoting.ClientSession.Capability.GOOGLE_DRIVE)) {
     this.sendGoogleDriveAccessToken_();
   }
-  if (this.hasCapability(
-      remoting.ClientSession.Capability.VIDEO_RECORDER)) {
-    this.uiHandler_.initVideoFrameRecorder();
-  }
+};
+
+/**
+ * @param {string} type
+ * @param {string} data
+ */
+remoting.ClientSession.prototype.onExtensionMessage = function(type, data) {
+  this.onExtensionMessageHandler_(type, data);
 };
 
 /**
@@ -631,11 +490,12 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
   var oldState = this.state_;
   this.state_ = newState;
   var state = this.state_;
-  if (oldState == remoting.ClientSession.State.CONNECTING) {
+  if (oldState == remoting.ClientSession.State.CONNECTING ||
+      oldState == remoting.ClientSession.State.AUTHENTICATED) {
     if (this.state_ == remoting.ClientSession.State.CLOSED) {
       state = remoting.ClientSession.State.CONNECTION_CANCELED;
     } else if (this.state_ == remoting.ClientSession.State.FAILED &&
-        this.error_ == remoting.Error.HOST_IS_OFFLINE &&
+        this.error_.hasTag(remoting.Error.Tag.HOST_IS_OFFLINE) &&
         !this.logHostOfflineErrors_) {
       // The application requested host-offline errors to be suppressed, for
       // example, because this connection attempt is using a cached host JID.
@@ -647,10 +507,6 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
     state = remoting.ClientSession.State.CONNECTION_DROPPED;
   }
   this.logToServer.logClientSessionStateChange(state, this.error_);
-  if (this.state_ == remoting.ClientSession.State.CONNECTED) {
-    this.createGnubbyAuthHandler_();
-    this.createCastExtensionHandler_();
-  }
 
   this.raiseEvent(remoting.ClientSession.Events.stateChanged,
     new remoting.ClientSession.StateEvent(newState, oldState)
@@ -725,46 +581,6 @@ remoting.ClientSession.prototype.sendClientMessage = function(type, message) {
 };
 
 /**
- * Send a gnubby-auth extension message to the host.
- * @param {Object} data The gnubby-auth message data.
- */
-remoting.ClientSession.prototype.sendGnubbyAuthMessage = function(data) {
-  if (!this.plugin_)
-    return;
-  this.plugin_.sendClientMessage('gnubby-auth', JSON.stringify(data));
-};
-
-/**
- * Process a remote gnubby auth request.
- * @param {string} data Remote gnubby request data.
- * @private
- */
-remoting.ClientSession.prototype.processGnubbyAuthMessage_ = function(data) {
-  if (this.gnubbyAuthHandler_) {
-    try {
-      this.gnubbyAuthHandler_.onMessage(data);
-    } catch (/** @type {*} */ err) {
-      console.error('Failed to process gnubby message: ', err);
-    }
-  } else {
-    console.error('Received unexpected gnubby message');
-  }
-};
-
-/**
- * Create a gnubby auth handler and inform the host that gnubby auth is
- * supported.
- * @private
- */
-remoting.ClientSession.prototype.createGnubbyAuthHandler_ = function() {
-  if (this.uiHandler_.getMode() == remoting.DesktopConnectedView.Mode.ME2ME) {
-    this.gnubbyAuthHandler_ = new remoting.GnubbyAuthHandler(this);
-    // TODO(psj): Move to more generic capabilities mechanism.
-    this.sendGnubbyAuthMessage({'type': 'control', 'option': 'auth-v1'});
-  }
-};
-
-/**
  * Timer callback to send the access token to the host.
  * @private
  */
@@ -779,64 +595,18 @@ remoting.ClientSession.prototype.sendGoogleDriveAccessToken_ = function() {
   var sendToken = function(token) {
     remoting.clientSession.sendClientMessage('accessToken', token);
   };
-  /** @param {remoting.Error} error */
+  /** @param {!remoting.Error} error */
   var sendError = function(error) {
-    console.log('Failed to refresh access token: ' + error);
-  }
-  remoting.identity.callWithNewToken(sendToken, sendError);
+    console.log('Failed to refresh access token: ' + error.toString());
+  };
+  var googleDriveScopes = [
+    'https://docs.google.com/feeds/',
+    'https://www.googleapis.com/auth/drive'
+  ];
+  remoting.identity.getNewToken(googleDriveScopes).
+      then(sendToken).
+      catch(remoting.Error.handler(sendError));
   window.setTimeout(this.sendGoogleDriveAccessToken_.bind(this),
                     remoting.ACCESS_TOKEN_RESEND_INTERVAL_MS);
 };
 
-/**
- * Send a Cast extension message to the host.
- * @param {Object} data The cast message data.
- */
-remoting.ClientSession.prototype.sendCastExtensionMessage = function(data) {
-  if (!this.plugin_)
-    return;
-  this.plugin_.sendClientMessage('cast_message', JSON.stringify(data));
-};
-
-/**
- * Process a remote Cast extension message from the host.
- * @param {string} data Remote cast extension data message.
- * @private
- */
-remoting.ClientSession.prototype.processCastExtensionMessage_ = function(data) {
-  if (this.castExtensionHandler_) {
-    try {
-      this.castExtensionHandler_.onMessage(data);
-    } catch (/** @type {*} */ err) {
-      console.error('Failed to process cast message: ', err);
-    }
-  } else {
-    console.error('Received unexpected cast message');
-  }
-};
-
-/**
- * Create a CastExtensionHandler and inform the host that cast extension
- * is supported.
- * @private
- */
-remoting.ClientSession.prototype.createCastExtensionHandler_ = function() {
-  if (remoting.app.hasCapability(remoting.ClientSession.Capability.CAST) &&
-      this.uiHandler_.getMode() == remoting.DesktopConnectedView.Mode.ME2ME) {
-    this.castExtensionHandler_ = new remoting.CastExtensionHandler(this);
-  }
-};
-
-/**
- * Handles protocol extension messages.
- * @param {string} type Type of extension message.
- * @param {Object} message The parsed extension message data.
- * @return {boolean} True if the message was recognized, false otherwise.
- */
-remoting.ClientSession.prototype.handleExtensionMessage =
-    function(type, message) {
-  if (this.uiHandler_.handleExtensionMessage(type, message)) {
-    return true;
-  }
-  return false;
-};

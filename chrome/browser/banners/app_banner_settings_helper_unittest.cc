@@ -10,6 +10,7 @@
 namespace {
 
 const char kTestURL[] = "https://www.google.com";
+const char kSameOriginTestURL[] = "https://www.google.com/foo.html";
 const char kTestPackageName[] = "test.package";
 
 base::Time GetReferenceTime() {
@@ -34,20 +35,6 @@ bool IsWithinDay(base::Time time1, base::Time time2) {
 class AppBannerSettingsHelperTest : public ChromeRenderViewHostTestHarness {};
 
 }  // namespace
-
-TEST_F(AppBannerSettingsHelperTest, Block) {
-  GURL url(kTestURL);
-  NavigateAndCommit(url);
-
-  // Check that by default, showing the banner is allowed.
-  EXPECT_TRUE(AppBannerSettingsHelper::IsAllowed(web_contents(), url,
-                                                 kTestPackageName));
-
-  // Block the banner and test it is no longer allowed.
-  AppBannerSettingsHelper::Block(web_contents(), url, kTestPackageName);
-  EXPECT_FALSE(AppBannerSettingsHelper::IsAllowed(web_contents(), url,
-                                                  kTestPackageName));
-}
 
 TEST_F(AppBannerSettingsHelperTest, CouldShowEvents) {
   GURL url(kTestURL);
@@ -288,5 +275,33 @@ TEST_F(AppBannerSettingsHelperTest, ShouldNotShowAfterAdding) {
       AppBannerSettingsHelper::APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
       one_year_ago);
   EXPECT_FALSE(AppBannerSettingsHelper::ShouldShowBanner(
+      web_contents(), url, kTestPackageName, reference_time));
+}
+
+TEST_F(AppBannerSettingsHelperTest, OperatesOnOrigins) {
+  GURL url(kTestURL);
+  NavigateAndCommit(url);
+
+  base::Time reference_time = GetReferenceTime();
+  base::Time one_day_ago = reference_time - base::TimeDelta::FromDays(1);
+
+  // By default the banner should not be shown.
+  EXPECT_FALSE(AppBannerSettingsHelper::ShouldShowBanner(
+      web_contents(), url, kTestPackageName, reference_time));
+
+  // Record events such that the banner should show.
+  AppBannerSettingsHelper::RecordBannerEvent(
+      web_contents(), url, kTestPackageName,
+      AppBannerSettingsHelper::APP_BANNER_EVENT_COULD_SHOW, one_day_ago);
+  AppBannerSettingsHelper::RecordBannerEvent(
+      web_contents(), url, kTestPackageName,
+      AppBannerSettingsHelper::APP_BANNER_EVENT_COULD_SHOW, reference_time);
+
+  // Navigate to another page on the same origin.
+  url = GURL(kSameOriginTestURL);
+  NavigateAndCommit(url);
+
+  // The banner should show as settings are per-origin.
+  EXPECT_TRUE(AppBannerSettingsHelper::ShouldShowBanner(
       web_contents(), url, kTestPackageName, reference_time));
 }

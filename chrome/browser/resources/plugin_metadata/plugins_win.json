@@ -137,9 +137,9 @@
     ],
     "versions": [
       {
-        "version": "17.0.0.134",
+        "version": "16.0.0.305",
         "status": "requires_authorization",
-        "reference": "https://helpx.adobe.com/security/products/flash-player/apsb15-05.html"
+        "reference": "https://helpx.adobe.com/security/products/flash-player/apsb15-04.html"
       }
     ],
     "lang": "en-US",
@@ -366,7 +366,7 @@
       {
         "version": "0",
         "status": "requires_authorization",
-        "comment": "Google Update plug-in is versioned but kept automatically up-to-date"
+        "comment": "Google Update plugin is versioned but kept automatically up-to-date"
       }
     ],
     "name": "Google Update",

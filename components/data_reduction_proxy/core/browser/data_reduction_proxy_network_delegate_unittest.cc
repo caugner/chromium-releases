@@ -12,20 +12,19 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "base/time/time.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
-#include "net/base/capturing_net_log.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
-#include "net/base/net_log.h"
 #include "net/http/http_response_headers.h"
+#include "net/log/capturing_net_log.h"
+#include "net/log/net_log.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_server.h"
 #include "net/url_request/url_request.h"
@@ -78,24 +77,24 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
                                                      test_job_interceptor_));
     context_.set_job_factory(&test_job_factory_);
 
-    test_context_.reset(
-        new DataReductionProxyTestContext(
-            DataReductionProxyParams::kAllowed |
-                DataReductionProxyParams::kFallbackAllowed |
-                DataReductionProxyParams::kPromoAllowed,
-            TestDataReductionProxyParams::HAS_EVERYTHING &
-                ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN,
-            DataReductionProxyTestContext::DEFAULT_TEST_CONTEXT_OPTIONS));
-
-    request_options_.reset(
-        new DataReductionProxyRequestOptions(
-        kClient, params(), test_context_->task_runner()));
+    test_context_ =
+        DataReductionProxyTestContext::Builder()
+            .WithParamsFlags(DataReductionProxyParams::kAllowed |
+                                 DataReductionProxyParams::kFallbackAllowed |
+                                 DataReductionProxyParams::kPromoAllowed)
+            .WithParamsDefinitions(
+                TestDataReductionProxyParams::HAS_EVERYTHING &
+                    ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+                    ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)\
+            .WithClient(kClient)
+            .WithURLRequestContext(&context_)
+            .Build();
 
     data_reduction_proxy_network_delegate_.reset(
         new DataReductionProxyNetworkDelegate(
             scoped_ptr<net::NetworkDelegate>(new TestNetworkDelegate()),
-            params(), request_options_.get(), test_context_->configurator()));
+            config(), test_context_->io_data()->request_options(),
+            test_context_->configurator()));
   }
 
   const net::ProxyConfig& GetProxyConfig() const {
@@ -108,7 +107,7 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
       const std::string& raw_response_headers,
       int64 response_content_length) {
     scoped_ptr<net::URLRequest> request = context_.CreateRequest(
-        url, net::IDLE, &delegate_, NULL);
+        url, net::IDLE, &delegate_);
 
     // Create a test job that will fill in the given response headers for the
     // |fake_request|.
@@ -148,11 +147,14 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
     return test_context_->pref_service();
   }
 
-  DataReductionProxyStatisticsPrefs* statistics_prefs() const {
-    return test_context_->data_reduction_proxy_service()->statistics_prefs();
+  TestDataReductionProxyConfig* config() {
+    return test_context_->config();
   }
 
-  scoped_ptr<DataReductionProxyRequestOptions> request_options_;
+  DataReductionProxyCompressionStats* compression_stats() const {
+    return test_context_->data_reduction_proxy_service()->compression_stats();
+  }
+
   scoped_ptr<DataReductionProxyNetworkDelegate>
       data_reduction_proxy_network_delegate_;
 
@@ -314,7 +316,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
   // Another proxy is used. It should be used afterwards.
   result.Use(other_proxy_info);
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(), &result);
+                        empty_proxy_retry_info, config(), &result);
   EXPECT_EQ(other_proxy_info.proxy_server(), result.proxy_server());
 
   // A direct connection is used. The data reduction proxy should be used
@@ -323,7 +325,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
   result.Use(direct_proxy_info);
   net::ProxyConfig::ID prev_id = result.config_id();
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(), &result);
+                        empty_proxy_retry_info, config(), &result);
   EXPECT_EQ(data_reduction_proxy_info.proxy_server(), result.proxy_server());
   // Only the proxy list should be updated, not he proxy info.
   EXPECT_EQ(result.config_id(), prev_id);
@@ -333,8 +335,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
   result.Use(direct_proxy_info);
   prev_id = result.config_id();
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        data_reduction_proxy_retry_info,
-                        params(), &result);
+                        data_reduction_proxy_retry_info, config(), &result);
   EXPECT_TRUE(result.proxy_server().is_direct());
   EXPECT_EQ(result.config_id(), prev_id);
 
@@ -342,37 +343,37 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
   result.UseDirect();
   OnResolveProxyHandler(GURL("ws://echo.websocket.org/"),
                         load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(), &result);
+                        empty_proxy_retry_info, config(), &result);
   EXPECT_TRUE(result.is_direct());
 
   OnResolveProxyHandler(GURL("wss://echo.websocket.org/"),
                         load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(), &result);
+                        empty_proxy_retry_info, config(), &result);
   EXPECT_TRUE(result.is_direct());
 
   // Without DataCompressionProxyCriticalBypass Finch trial set, the
   // BYPASS_DATA_REDUCTION_PROXY load flag should be ignored.
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(),
+                        empty_proxy_retry_info, config(),
                         &result);
   EXPECT_FALSE(result.is_direct());
 
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
                         empty_proxy_retry_info,
-                        params(), &other_proxy_info);
+                        config(), &other_proxy_info);
   EXPECT_FALSE(other_proxy_info.is_direct());
 
   load_flags |= net::LOAD_BYPASS_DATA_REDUCTION_PROXY;
 
   result.UseDirect();
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(),
+                        empty_proxy_retry_info, config(),
                         &result);
   EXPECT_FALSE(result.is_direct());
 
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
                         empty_proxy_retry_info,
-                        params(), &other_proxy_info);
+                        config(), &other_proxy_info);
   EXPECT_FALSE(other_proxy_info.is_direct());
 
   // With Finch trial set, should only bypass if LOAD flag is set and the
@@ -387,12 +388,12 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
 
   result.UseDirect();
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(),
+                        empty_proxy_retry_info, config(),
                         &result);
   EXPECT_FALSE(result.is_direct());
 
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(),
+                        empty_proxy_retry_info, config(),
                         &other_proxy_info);
   EXPECT_FALSE(other_proxy_info.is_direct());
 
@@ -400,12 +401,12 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
 
   result.UseDirect();
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(),
+                        empty_proxy_retry_info, config(),
                         &result);
   EXPECT_TRUE(result.is_direct());
 
   OnResolveProxyHandler(url, load_flags, data_reduction_proxy_config,
-                        empty_proxy_retry_info, params(),
+                        empty_proxy_retry_info, config(),
                         &other_proxy_info);
   EXPECT_FALSE(other_proxy_info.is_direct());
 }
@@ -413,9 +414,6 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
 TEST_F(DataReductionProxyNetworkDelegateTest, TotalLengths) {
   const int64 kOriginalLength = 200;
   const int64 kReceivedLength = 100;
-
-  PrefRegistrySimple* registry = pref_service()->registry();
-  data_reduction_proxy::RegisterSimpleProfilePrefs(registry);
 
   data_reduction_proxy_network_delegate_->data_reduction_proxy_io_data_ =
       io_data();
@@ -427,12 +425,12 @@ TEST_F(DataReductionProxyNetworkDelegateTest, TotalLengths) {
       UNKNOWN_TYPE);
 
   EXPECT_EQ(kReceivedLength,
-            statistics_prefs()->GetInt64(
+            compression_stats()->GetInt64(
                 data_reduction_proxy::prefs::kHttpReceivedContentLength));
   EXPECT_FALSE(pref_service()->GetBoolean(
       data_reduction_proxy::prefs::kDataReductionProxyEnabled));
   EXPECT_EQ(kOriginalLength,
-            statistics_prefs()->GetInt64(
+            compression_stats()->GetInt64(
                 data_reduction_proxy::prefs::kHttpOriginalContentLength));
 
   // Record the same numbers again, and total lengths should be doubled.
@@ -443,73 +441,13 @@ TEST_F(DataReductionProxyNetworkDelegateTest, TotalLengths) {
       UNKNOWN_TYPE);
 
   EXPECT_EQ(kReceivedLength * 2,
-            statistics_prefs()->GetInt64(
+            compression_stats()->GetInt64(
                 data_reduction_proxy::prefs::kHttpReceivedContentLength));
   EXPECT_FALSE(pref_service()->GetBoolean(
       data_reduction_proxy::prefs::kDataReductionProxyEnabled));
   EXPECT_EQ(kOriginalLength * 2,
-            statistics_prefs()->GetInt64(
+            compression_stats()->GetInt64(
                 data_reduction_proxy::prefs::kHttpOriginalContentLength));
-}
-
-class DataReductionProxyHistoricNetworkStatsTest
-    : public testing::Test {
- public:
-  DataReductionProxyHistoricNetworkStatsTest() {
-  }
-
-  void SetUp() override {
-    simple_pref_service_.registry()->RegisterInt64Pref(
-        prefs::kHttpReceivedContentLength, 0);
-    simple_pref_service_.registry()->RegisterInt64Pref(
-        prefs::kHttpOriginalContentLength, 0);
-  }
-
-  // Verify the pref values in |dict| are equal to that in
-  // |simple_pref_service|.
-  void VerifyPrefs(base::DictionaryValue* dict) {
-    base::string16 dict_pref_string;
-    int64 dict_pref;
-    int64 service_pref;
-
-    dict->GetString("historic_original_content_length", &dict_pref_string);
-    base::StringToInt64(dict_pref_string, &dict_pref);
-    service_pref = simple_pref_service_.GetInt64(
-        prefs::kHttpOriginalContentLength);
-    EXPECT_EQ(service_pref, dict_pref);
-
-    dict->GetString("historic_received_content_length", &dict_pref_string);
-    base::StringToInt64(dict_pref_string, &dict_pref);
-    service_pref = simple_pref_service_.GetInt64(
-        prefs::kHttpReceivedContentLength);
-    EXPECT_EQ(service_pref, dict_pref);
-  }
-
-  TestingPrefServiceSimple simple_pref_service_;
-};
-
-TEST_F(DataReductionProxyHistoricNetworkStatsTest,
-       HistoricNetworkStatsInfoToValue) {
-  const int64 kOriginalLength = 150;
-  const int64 kReceivedLength = 100;
-
-  base::DictionaryValue* dict = nullptr;
-  scoped_ptr<base::Value> stats_value(
-      DataReductionProxyNetworkDelegate::HistoricNetworkStatsInfoToValue(
-          &simple_pref_service_));
-  EXPECT_TRUE(stats_value->GetAsDictionary(&dict));
-  VerifyPrefs(dict);
-
-  simple_pref_service_.SetInt64(prefs::kHttpOriginalContentLength,
-                                kOriginalLength);
-  simple_pref_service_.SetInt64(prefs::kHttpReceivedContentLength,
-                                kReceivedLength);
-
-  stats_value.reset(
-      DataReductionProxyNetworkDelegate::HistoricNetworkStatsInfoToValue(
-          &simple_pref_service_));
-  EXPECT_TRUE(stats_value->GetAsDictionary(&dict));
-  VerifyPrefs(dict);
 }
 
 }  // namespace data_reduction_proxy

@@ -24,6 +24,7 @@ import android.widget.Toast;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.R;
 import org.chromium.content.browser.DownloadController;
 import org.chromium.content.browser.DownloadInfo;
@@ -132,6 +133,7 @@ public class DownloadManagerService extends BroadcastReceiver implements
     /**
      * Creates DownloadManagerService.
      */
+    @SuppressFBWarnings("LI_LAZY_INIT") // Findbugs doesn't see this is only UI thread.
     public static DownloadManagerService getDownloadManagerService(final Context context) {
         ThreadUtils.assertOnUiThread();
         assert context == context.getApplicationContext();
@@ -666,8 +668,8 @@ public class DownloadManagerService extends BroadcastReceiver implements
 
         @Override
         protected void onPostExecute(Boolean result) {
-            boolean isPendingOMADownload = mOMADownloadHandler.isPendingOMADownload(
-                    (long) mDownloadInfo.getDownloadId());
+            boolean isPendingOMADownload =
+                    mOMADownloadHandler.isPendingOMADownload(mDownloadInfo.getDownloadId());
             if (!result) {
                 Toast.makeText(mContext, mErrorId, Toast.LENGTH_SHORT).show();
                 if (isPendingOMADownload) {

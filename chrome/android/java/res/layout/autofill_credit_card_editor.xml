@@ -15,6 +15,9 @@
         android:layout_height="wrap_content"
         android:orientation="vertical" >
 
+        <!-- EditText views in FloatLabelLayout require both hint and contentDescription to be set
+             to work correctly for accessibility because FloatLabelLayout sometimes clear hint. -->
+        <!--suppress ContentDescription -->
         <LinearLayout
             style="@style/PreferenceScreenLayout"
             android:layout_width="match_parent"
@@ -32,7 +35,6 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:imeOptions="flagNoExtractUi"
-                    android:contentDescription="@string/autofill_credit_card_editor_name"
                     android:inputType="textCapWords"
                     android:hint="@string/autofill_credit_card_editor_name" />
             </org.chromium.chrome.browser.widget.FloatLabelLayout>
@@ -44,7 +46,6 @@
                 <EditText
                     android:id="@+id/credit_card_number_edit"
                     android:layout_width="match_parent"
-                    android:contentDescription="@string/autofill_credit_card_editor_number"
                     android:layout_height="wrap_content"
                     android:imeOptions="flagNoExtractUi"
                     android:inputType="phone"
@@ -67,6 +68,7 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:paddingTop="8dp"
+                android:baselineAligned="false"
                 android:layout_marginStart="@dimen/pref_autofill_field_horizontal_padding"
                 android:layout_marginEnd="@dimen/pref_autofill_field_horizontal_padding" >
 

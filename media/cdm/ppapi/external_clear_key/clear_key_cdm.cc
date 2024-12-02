@@ -19,6 +19,7 @@
 #include "media/base/cdm_key_information.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
+#include "media/base/key_systems.h"
 #include "media/cdm/json_web_key.h"
 #include "media/cdm/ppapi/cdm_file_io_test.h"
 #include "media/cdm/ppapi/external_clear_key/cdm_video_decoder.h"
@@ -78,7 +79,6 @@ const char kExternalClearKeyCrashKeySystem[] =
 // These constants need to be in sync with
 // chrome/test/data/media/encrypted_media_utils.js
 const char kLoadableSessionId[] = "LoadableSession";
-const char kLoadableSessionContentType[] = "video/webm";
 const uint8 kLoadableSessionKeyId[] = "0123456789012345";
 const uint8 kLoadableSessionKey[] =
     {0xeb, 0xdd, 0x62, 0xf1, 0x68, 0x14, 0xd2, 0x7b,
@@ -152,7 +152,7 @@ static cdm::Error ConvertException(media::MediaKeys::Exception exception_code) {
     case media::MediaKeys::OUTPUT_ERROR:
       return cdm::kOutputError;
   }
-  NOTIMPLEMENTED();
+  NOTREACHED();
   return cdm::kUnknownError;
 }
 
@@ -166,8 +166,22 @@ static media::MediaKeys::SessionType ConvertSessionType(
     case cdm::kPersistentKeyRelease:
       return media::MediaKeys::PERSISTENT_RELEASE_MESSAGE_SESSION;
   }
-  NOTIMPLEMENTED();
+  NOTREACHED();
   return media::MediaKeys::TEMPORARY_SESSION;
+}
+
+static media::EmeInitDataType ConvertInitDataType(
+    cdm::InitDataType init_data_type) {
+  switch (init_data_type) {
+    case cdm::kCenc:
+      return media::EmeInitDataType::CENC;
+    case cdm::kKeyIds:
+      return media::EmeInitDataType::KEYIDS;
+    case cdm::kWebM:
+      return media::EmeInitDataType::WEBM;
+  }
+  NOTREACHED();
+  return media::EmeInitDataType::UNKNOWN;
 }
 
 cdm::KeyStatus ConvertKeyStatus(media::CdmKeyInformation::KeyStatus status) {
@@ -180,8 +194,12 @@ cdm::KeyStatus ConvertKeyStatus(media::CdmKeyInformation::KeyStatus status) {
       return cdm::kExpired;
     case media::CdmKeyInformation::KeyStatus::OUTPUT_NOT_ALLOWED:
       return cdm::kOutputNotAllowed;
+    case media::CdmKeyInformation::KeyStatus::OUTPUT_DOWNSCALED:
+      return cdm::kOutputDownscaled;
+    case media::CdmKeyInformation::KeyStatus::KEY_STATUS_PENDING:
+      return cdm::kStatusPending;
   }
-  NOTIMPLEMENTED();
+  NOTREACHED();
   return cdm::kInternalError;
 }
 
@@ -275,12 +293,18 @@ ClearKeyCdm::ClearKeyCdm(ClearKeyCdmHost* host, const std::string& key_system)
 
 ClearKeyCdm::~ClearKeyCdm() {}
 
-void ClearKeyCdm::CreateSessionAndGenerateRequest(uint32 promise_id,
-                                                  cdm::SessionType session_type,
-                                                  const char* init_data_type,
-                                                  uint32 init_data_type_size,
-                                                  const uint8* init_data,
-                                                  uint32 init_data_size) {
+void ClearKeyCdm::Initialize(bool /* allow_distinctive_identifier */,
+                             bool /* allow_persistent_state */) {
+  // Implementation doesn't use distinctive identifier nor save persistent data,
+  // so nothing to do with these values.
+}
+
+void ClearKeyCdm::CreateSessionAndGenerateRequest(
+    uint32 promise_id,
+    cdm::SessionType session_type,
+    cdm::InitDataType init_data_type,
+    const uint8* init_data,
+    uint32 init_data_size) {
   DVLOG(1) << __FUNCTION__;
 
   scoped_ptr<media::NewSessionCdmPromise> promise(
@@ -292,9 +316,8 @@ void ClearKeyCdm::CreateSessionAndGenerateRequest(uint32 promise_id,
                      base::Unretained(this),
                      promise_id)));
   decryptor_.CreateSessionAndGenerateRequest(
-      ConvertSessionType(session_type),
-      std::string(init_data_type, init_data_type_size), init_data,
-      init_data_size, promise.Pass());
+      ConvertSessionType(session_type), ConvertInitDataType(init_data_type),
+      init_data, init_data_size, promise.Pass());
 
   if (key_system_ == kExternalClearKeyFileIOTestKeySystem)
     StartFileIOTest();
@@ -333,9 +356,9 @@ void ClearKeyCdm::LoadSession(uint32 promise_id,
           base::Bind(&ClearKeyCdm::OnPromiseFailed,
                      base::Unretained(this),
                      promise_id)));
-  decryptor_.CreateSessionAndGenerateRequest(
-      MediaKeys::TEMPORARY_SESSION, std::string(kLoadableSessionContentType),
-      NULL, 0, promise.Pass());
+  decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
+                                             EmeInitDataType::WEBM, NULL, 0,
+                                             promise.Pass());
 }
 
 void ClearKeyCdm::UpdateSession(uint32 promise_id,

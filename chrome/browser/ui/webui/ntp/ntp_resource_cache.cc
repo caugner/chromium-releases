@@ -28,6 +28,7 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/app_list/app_list_util.h"
+#include "chrome/browser/ui/apps/app_info_dialog.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
@@ -75,9 +76,9 @@ namespace {
 // The URL for the the Learn More page shown on incognito new tab.
 const char kLearnMoreIncognitoUrl[] =
 #if defined(OS_CHROMEOS)
-    "https://www.google.com/support/chromeos/bin/answer.py?answer=95464";
+    "https://support.google.com/chromebook/?p=incognito";
 #else
-    "https://www.google.com/support/chrome/bin/answer.py?answer=95464";
+    "https://support.google.com/chrome/?p=incognito";
 #endif
 
 // The URL for the Learn More page shown on guest session new tab.
@@ -172,6 +173,13 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
                      ThemeServiceFactory::GetForProfile(profile)));
   registrar_.Add(this, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
                  content::NotificationService::AllSources());
+
+  PromoResourceService* promo_service =
+      g_browser_process->promo_resource_service();
+  if (promo_service) {
+    promo_resource_subscription_ = promo_service->RegisterStateChangedCallback(
+        base::Bind(&NTPResourceCache::Invalidate, base::Unretained(this)));
+  }
 
   base::Closure callback = base::Bind(&NTPResourceCache::OnPreferenceChanged,
                                       base::Unretained(this));
@@ -274,10 +282,7 @@ void NTPResourceCache::Observe(int type,
   // Invalidate the cache.
   if (chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type ||
       chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED == type) {
-    new_tab_incognito_html_ = NULL;
-    new_tab_html_ = NULL;
-    new_tab_incognito_css_ = NULL;
-    new_tab_css_ = NULL;
+    Invalidate();
   } else {
     NOTREACHED();
   }
@@ -289,6 +294,14 @@ void NTPResourceCache::OnPreferenceChanged() {
   new_tab_incognito_html_ = NULL;
   new_tab_html_ = NULL;
   new_tab_css_ = NULL;
+}
+
+void NTPResourceCache::Invalidate() {
+  new_tab_incognito_html_ = nullptr;
+  new_tab_html_ = nullptr;
+  new_tab_incognito_css_ = nullptr;
+  // TODO(dbeam): Check if it is necessary to clear the CSS on promo changes.
+  new_tab_css_ = nullptr;
 }
 
 void NTPResourceCache::CreateNewTabIncognitoHTML() {
@@ -439,6 +452,8 @@ void NTPResourceCache::CreateNewTabHTML() {
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_OPTIONS));
   load_time_data.SetString("appdetails",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_DETAILS));
+  load_time_data.SetString("appinfodialog",
+      l10n_util::GetStringUTF16(IDS_APP_CONTEXT_MENU_SHOW_INFO));
   load_time_data.SetString("appcreateshortcut",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_CREATE_SHORTCUT));
   load_time_data.SetString("appDefaultPageName",
@@ -501,6 +516,9 @@ void NTPResourceCache::CreateNewTabHTML() {
 
   bool bookmark_apps_enabled = extensions::util::IsNewBookmarkAppsEnabled();
   load_time_data.SetBoolean("enableNewBookmarkApps", bookmark_apps_enabled);
+
+  load_time_data.SetBoolean("canShowAppInfoDialog",
+                            CanShowAppInfoDialog());
 
 #if defined(OS_CHROMEOS)
   load_time_data.SetString("expandMenu",

@@ -170,6 +170,22 @@ bool GetPsshData(const uint8* data,
   return false;
 }
 
+// Convert |init_data_type| to a string supported by MediaDRM.
+// "audio"/"video" does not matter, so use "video".
+std::string ConvertInitDataType(media::EmeInitDataType init_data_type) {
+  // TODO(jrummell): API level >=20 supports "webm" and "cenc", so switch
+  // to those strings.
+  switch (init_data_type) {
+    case media::EmeInitDataType::WEBM:
+      return "video/webm";
+    case media::EmeInitDataType::CENC:
+      return "video/mp4";
+    default:
+      NOTREACHED();
+      return "video/unknown";
+  }
+}
+
 class KeySystemUuidManager {
  public:
   KeySystemUuidManager();
@@ -332,12 +348,12 @@ MediaDrmBridge::MediaDrmBridge(
     const std::vector<uint8>& scheme_uuid,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,
-    const SessionErrorCB& session_error_cb,
+    const LegacySessionErrorCB& legacy_session_error_cb,
     const SessionKeysChangeCB& session_keys_change_cb)
     : scheme_uuid_(scheme_uuid),
       session_message_cb_(session_message_cb),
       session_closed_cb_(session_closed_cb),
-      session_error_cb_(session_error_cb),
+      legacy_session_error_cb_(legacy_session_error_cb),
       session_keys_change_cb_(session_keys_change_cb) {
   JNIEnv* env = AttachCurrentThread();
   CHECK(env);
@@ -352,7 +368,7 @@ MediaDrmBridge::~MediaDrmBridge() {
   JNIEnv* env = AttachCurrentThread();
   player_tracker_.NotifyCdmUnset();
   if (!j_media_drm_.is_null())
-    Java_MediaDrmBridge_release(env, j_media_drm_.obj());
+    Java_MediaDrmBridge_destroy(env, j_media_drm_.obj());
 }
 
 // static
@@ -361,7 +377,7 @@ scoped_ptr<MediaDrmBridge> MediaDrmBridge::Create(
     const std::string& key_system,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,
-    const SessionErrorCB& session_error_cb,
+    const LegacySessionErrorCB& legacy_session_error_cb,
     const SessionKeysChangeCB& session_keys_change_cb,
     const SessionExpirationUpdateCB& /* session_expiration_update_cb */) {
   scoped_ptr<MediaDrmBridge> media_drm_bridge;
@@ -372,9 +388,9 @@ scoped_ptr<MediaDrmBridge> MediaDrmBridge::Create(
   if (scheme_uuid.empty())
     return media_drm_bridge.Pass();
 
-  media_drm_bridge.reset(new MediaDrmBridge(scheme_uuid, session_message_cb,
-                                            session_closed_cb, session_error_cb,
-                                            session_keys_change_cb));
+  media_drm_bridge.reset(
+      new MediaDrmBridge(scheme_uuid, session_message_cb, session_closed_cb,
+                         legacy_session_error_cb, session_keys_change_cb));
 
   if (media_drm_bridge->j_media_drm_.is_null())
     media_drm_bridge.reset();
@@ -386,7 +402,7 @@ scoped_ptr<MediaDrmBridge> MediaDrmBridge::Create(
 scoped_ptr<MediaDrmBridge> MediaDrmBridge::CreateWithoutSessionSupport(
     const std::string& key_system) {
   return MediaDrmBridge::Create(
-      key_system, SessionMessageCB(), SessionClosedCB(), SessionErrorCB(),
+      key_system, SessionMessageCB(), SessionClosedCB(), LegacySessionErrorCB(),
       SessionKeysChangeCB(), SessionExpirationUpdateCB());
 }
 
@@ -420,7 +436,7 @@ void MediaDrmBridge::SetServerCertificate(
 
 void MediaDrmBridge::CreateSessionAndGenerateRequest(
     SessionType session_type,
-    const std::string& init_data_type,
+    media::EmeInitDataType init_data_type,
     const uint8* init_data,
     int init_data_length,
     scoped_ptr<media::NewSessionCdmPromise> promise) {
@@ -434,13 +450,11 @@ void MediaDrmBridge::CreateSessionAndGenerateRequest(
 
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jbyteArray> j_init_data;
-  // Caller should always use "video/*" content types.
-  DCHECK_EQ(0u, init_data_type.find("video/"));
 
   // Widevine MediaDrm plugin only accepts the "data" part of the PSSH box as
   // the init data when using MP4 container.
   if (std::equal(scheme_uuid_.begin(), scheme_uuid_.end(), kWidevineUuid) &&
-      init_data_type == "video/mp4") {
+      init_data_type == media::EmeInitDataType::CENC) {
     std::vector<uint8> pssh_data;
     if (!GetPsshData(init_data, init_data_length, scheme_uuid_, &pssh_data)) {
       promise->reject(INVALID_ACCESS_ERROR, 0, "Invalid PSSH data.");
@@ -454,7 +468,7 @@ void MediaDrmBridge::CreateSessionAndGenerateRequest(
   }
 
   ScopedJavaLocalRef<jstring> j_mime =
-      ConvertUTF8ToJavaString(env, init_data_type);
+      ConvertUTF8ToJavaString(env, ConvertInitDataType(init_data_type));
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(promise.Pass());
   Java_MediaDrmBridge_createSession(env, j_media_drm_.obj(), j_init_data.obj(),
                                     j_mime.obj(), promise_id);
@@ -611,8 +625,8 @@ void MediaDrmBridge::OnLegacySessionError(JNIEnv* env,
                                           jbyteArray j_session_id,
                                           jstring j_error_message) {
   std::string error_message = ConvertJavaStringToUTF8(env, j_error_message);
-  session_error_cb_.Run(GetSessionId(env, j_session_id),
-                        MediaKeys::UNKNOWN_ERROR, 0, error_message);
+  legacy_session_error_cb_.Run(GetSessionId(env, j_session_id),
+                               MediaKeys::UNKNOWN_ERROR, 0, error_message);
 }
 
 ScopedJavaLocalRef<jobject> MediaDrmBridge::GetMediaCrypto() {

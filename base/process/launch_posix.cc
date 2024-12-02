@@ -33,7 +33,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/process/kill.h"
+#include "base/process/process.h"
 #include "base/process/process_metrics.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
@@ -523,6 +523,13 @@ Process LaunchProcess(const std::vector<std::string>& argv,
         RAW_LOG(FATAL, "prctl(PR_SET_NO_NEW_PRIVS) failed");
       }
     }
+
+    if (options.kill_on_parent_death) {
+      if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
+        RAW_LOG(ERROR, "prctl(PR_SET_PDEATHSIG) failed");
+        _exit(127);
+      }
+    }
 #endif
 
     if (current_directory != nullptr) {
@@ -684,7 +691,8 @@ static GetAppOutputInternalResult GetAppOutputInternal(
 
         // Always wait for exit code (even if we know we'll declare
         // GOT_MAX_OUTPUT).
-        bool success = WaitForExitCode(pid, exit_code);
+        Process process(pid);
+        bool success = process.WaitForExit(exit_code);
 
         // If we stopped because we read as much as we wanted, we return
         // GOT_MAX_OUTPUT (because the child may exit due to |SIGPIPE|).

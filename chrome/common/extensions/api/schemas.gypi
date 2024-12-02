@@ -37,8 +37,6 @@
       'downloads.idl',
       'downloads_internal.idl',
       'easy_unlock_private.idl',
-      'echo_private.json',
-      'enterprise_platform_keys_private.json',
       'experience_sampling_private.json',
       'feedback_private.idl',
       'file_manager_private.idl',
@@ -55,7 +53,6 @@
       'identity_private.idl',
       'image_writer_private.idl',
       'inline_install_private.idl',
-      'input_ime.json',
       'launcher_page.idl',
       'location.idl',
       'manifest_types.json',
@@ -68,10 +65,10 @@
       'page_capture.json',
       'permissions.json',
       'preferences_private.json',
-      'push_messaging.idl',
       'reading_list_private.json',
       'screenlock_private.idl',
       'sessions.json',
+      'settings_private.idl',
       'signed_in_devices.idl',
       'streams_private.idl',
       'sync_file_system.idl',
@@ -79,7 +76,6 @@
       'system_private.json',
       'tab_capture.idl',
       'tabs.json',
-      'terminal_private.json',
       'types.json',
       'web_navigation.json',
       # Despite the name, this API does not rely on any
@@ -95,10 +91,8 @@
     ],
     'main_non_compiled_schema_files': [
       'browsing_data.json',
-      'chromeos_info_private.json',
       'extension.json',
       'idltest.idl',
-      'media_player_private.json',
       'music_manager_private.idl',
       'principals_private.idl',
       'top_sites.json',
@@ -106,20 +100,30 @@
 
     # ChromeOS-specific schemas.
     'chromeos_schema_files': [
+      'echo_private.json',
       'enterprise_platform_keys.idl',
       'enterprise_platform_keys_internal.idl',
+      'enterprise_platform_keys_private.json',
       'file_browser_handler_internal.json',
       'file_system_provider.idl',
       'file_system_provider_internal.idl',
       'first_run_private.json',
+      'input_ime.json',
+      'launcher_search_provider.idl',
       'log_private.idl',
       'platform_keys.idl',
       'platform_keys_internal.idl',
+      'terminal_private.json',
       'wallpaper.json',
       'wallpaper_private.json',
     ],
+    'chromeos_non_compiled_schema_files': [
+      'chromeos_info_private.json',
+      'media_player_private.json',
+    ],
 
     'webrtc_schema_files': [
+      'cast_streaming_receiver_session.idl',
       'cast_streaming_rtp_stream.idl',
       'cast_streaming_session.idl',
       'cast_streaming_udp_transport.idl',
@@ -145,6 +149,9 @@
       ['chromeos==1', {
         'schema_files': [
           '<@(chromeos_schema_files)',
+        ],
+        'non_compiled_schema_files': [
+          '<@(chromeos_non_compiled_schema_files)',
         ],
       }],
       ['enable_webrtc==1', {

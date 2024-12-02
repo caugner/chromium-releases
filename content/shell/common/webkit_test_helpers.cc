@@ -77,7 +77,7 @@ void ApplyLayoutTestDefaultPreferences(WebPreferences* prefs) {
   prefs->tabs_to_links = false;
   prefs->hyperlink_auditing_enabled = false;
   prefs->allow_displaying_insecure_content = true;
-  prefs->allow_running_insecure_content = true;
+  prefs->allow_running_insecure_content = false;
   prefs->disable_reading_from_canvas = false;
   prefs->strict_mixed_content_checking = false;
   prefs->strict_powerful_feature_restrictions = false;
@@ -110,6 +110,8 @@ void ApplyLayoutTestDefaultPreferences(WebPreferences* prefs) {
   prefs->text_autosizing_enabled = false;
 #endif
   prefs->viewport_enabled = false;
+  prefs->default_minimum_page_scale_factor = 1.f;
+  prefs->default_maximum_page_scale_factor = 4.f;
 }
 
 base::FilePath GetWebKitRootDirFilePath() {

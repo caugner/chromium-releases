@@ -375,14 +375,6 @@ class BadExtensionsTest(unittest.TestCase):
     results = PRESUBMIT._CheckPatchFiles(mock_input_api, MockOutputApi())
     self.assertEqual(0, len(results))
 
-  def testOnlyOwnersFiles(self):
-    mock_change = MockChange([
-      'some/path/OWNERS',
-      'A\Windows\Path\OWNERS',
-    ])
-    results = PRESUBMIT.GetPreferredTryMasters(None, mock_change)
-    self.assertEqual({}, results)
-
 
 class CheckSingletonInHeadersTest(unittest.TestCase):
   def testSingletonInArbitraryHeader(self):
@@ -781,6 +773,40 @@ class TryServerMasterTest(unittest.TestCase):
         self.assertEqual(master, PRESUBMIT.GetTryServerMasterForBot(bot),
                          'bot=%s: expected %s, computed %s' % (
             bot, master, PRESUBMIT.GetTryServerMasterForBot(bot)))
+
+
+class UserMetricsActionTest(unittest.TestCase):
+  def testUserMetricsActionInActions(self):
+    input_api = MockInputApi()
+    file_with_user_action = 'file_with_user_action.cc'
+    contents_with_user_action = [
+      'base::UserMetricsAction("AboutChrome")'
+    ]
+
+    input_api.files = [MockFile(file_with_user_action,
+                                contents_with_user_action)]
+
+    self.assertEqual(
+      [], PRESUBMIT._CheckUserActionUpdate(input_api, MockOutputApi()))
+
+
+  def testUserMetricsActionNotAddedToActions(self):
+    input_api = MockInputApi()
+    file_with_user_action = 'file_with_user_action.cc'
+    contents_with_user_action = [
+      'base::UserMetricsAction("NotInActionsXml")'
+    ]
+
+    input_api.files = [MockFile(file_with_user_action,
+                                contents_with_user_action)]
+
+    output = PRESUBMIT._CheckUserActionUpdate(input_api, MockOutputApi())
+    self.assertEqual(
+      ('File %s line %d: %s is missing in '
+       'tools/metrics/actions/actions.xml. Please run '
+       'tools/metrics/actions/extract_actions.py to update.'
+       % (file_with_user_action, 1, 'NotInActionsXml')),
+      output[0].message)
 
 
 if __name__ == '__main__':

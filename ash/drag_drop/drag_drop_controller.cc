@@ -105,7 +105,7 @@ class DragDropTrackerDelegate : public aura::WindowDelegate {
     if (drag_drop_controller_->IsDragDropInProgress())
       drag_drop_controller_->DragCancel();
   }
-  void OnPaint(gfx::Canvas* canvas) override {}
+  void OnPaint(const ui::PaintContext& context) override {}
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
   void OnWindowDestroying(aura::Window* window) override {}
   void OnWindowDestroyed(aura::Window* window) override {}
@@ -149,7 +149,7 @@ int DragDropController::StartDragAndDrop(
     const ui::OSExchangeData& data,
     aura::Window* root_window,
     aura::Window* source_window,
-    const gfx::Point& root_location,
+    const gfx::Point& screen_location,
     int operation,
     ui::DragDropTypes::DragEventSource source) {
   if (IsDragDropInProgress())
@@ -194,8 +194,7 @@ int DragDropController::StartDragAndDrop(
     drag_image_scale = kTouchDragImageScale;
     drag_image_vertical_offset = kTouchDragImageVerticalOffset;
   }
-  gfx::Point start_location = root_location;
-  ::wm::ConvertPointToScreen(root_window, &start_location);
+  gfx::Point start_location = screen_location;
   drag_image_final_bounds_for_cancel_animation_ = gfx::Rect(
       start_location - provider->GetDragImageOffset(),
       provider->GetDragImage().size());

@@ -8,8 +8,10 @@
       "Test for chrome.fileSystemProvider.onDeleteEntryRequested().",
   "permissions": [
     "fileSystemProvider",
-    "fileManagerPrivate",
-    "fileBrowserHandler"
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
+    "fileManagerPrivate"
   ],
   "app": {
     "background": {

@@ -13,25 +13,21 @@ static const char kDefaultFallbackOrigin[] = "fallback.net:80";
 static const char kDefaultSSLOrigin[] = "ssl.net:1080";
 static const char kDefaultAltOrigin[] = "https://alt.net:443";
 static const char kDefaultAltFallbackOrigin[] = "altfallback.net:80";
-static const char kDefaultProbeURL[] = "http://probe.net/";
+static const char kDefaultSecureProxyCheckURL[] = "http://proxycheck.net/";
 
 static const char kFlagOrigin[] = "https://origin.org:443";
 static const char kFlagFallbackOrigin[] = "fallback.org:80";
 static const char kFlagSSLOrigin[] = "ssl.org:1080";
 static const char kFlagAltOrigin[] = "https://alt.org:443";
 static const char kFlagAltFallbackOrigin[] = "altfallback.org:80";
-static const char kFlagProbeURL[] = "http://probe.org/";
+static const char kFlagSecureProxyCheckURL[] = "http://proxycheck.org/";
 }
 
 namespace data_reduction_proxy {
 TestDataReductionProxyParams::TestDataReductionProxyParams(
     int flags, unsigned int has_definitions)
     : DataReductionProxyParams(flags, false),
-      has_definitions_(has_definitions),
-      mock_is_bypassed_by_data_reduction_proxy_local_rules_(false),
-      mock_are_data_reduction_proxies_bypassed_(false),
-      is_bypassed_by_data_reduction_proxy_local_rules_return_value_(false),
-      are_data_reduction_proxies_bypassed_return_value_(false) {
+      has_definitions_(has_definitions) {
     init_result_ = Init(
         flags & DataReductionProxyParams::kAllowed,
         flags & DataReductionProxyParams::kFallbackAllowed,
@@ -41,38 +37,6 @@ TestDataReductionProxyParams::TestDataReductionProxyParams(
 
 bool TestDataReductionProxyParams::init_result() const {
   return init_result_;
-}
-
-bool TestDataReductionProxyParams::IsBypassedByDataReductionProxyLocalRules(
-    const net::URLRequest& request,
-    const net::ProxyConfig& data_reduction_proxy_config) const {
-  if (mock_is_bypassed_by_data_reduction_proxy_local_rules_)
-    return is_bypassed_by_data_reduction_proxy_local_rules_return_value_;
-  return DataReductionProxyParams::IsBypassedByDataReductionProxyLocalRules(
-      request, data_reduction_proxy_config);
-}
-
-bool TestDataReductionProxyParams::AreDataReductionProxiesBypassed(
-    const net::URLRequest& request,
-    const net::ProxyConfig& data_reduction_proxy_config,
-    base::TimeDelta* min_retry_delay) const {
-  if (mock_are_data_reduction_proxies_bypassed_)
-    return are_data_reduction_proxies_bypassed_return_value_;
-  return DataReductionProxyParams::AreDataReductionProxiesBypassed(
-      request, data_reduction_proxy_config, min_retry_delay);
-}
-
-void TestDataReductionProxyParams::MockAreDataReductionProxiesBypassed(
-    bool return_value) {
-  mock_are_data_reduction_proxies_bypassed_ = true;
-  are_data_reduction_proxies_bypassed_return_value_ = return_value;
-}
-
-void
-TestDataReductionProxyParams::MockIsBypassedByDataReductionProxyLocalRules(
-    bool return_value) {
-  mock_is_bypassed_by_data_reduction_proxy_local_rules_ = true;
-  is_bypassed_by_data_reduction_proxy_local_rules_return_value_ = return_value;
 }
 
 // Test values to replace the values specified in preprocessor defines.
@@ -104,8 +68,8 @@ std::string TestDataReductionProxyParams::DefaultAltFallbackOrigin() {
   return kDefaultAltFallbackOrigin;
 }
 
-std::string TestDataReductionProxyParams::DefaultProbeURL() {
-  return kDefaultProbeURL;
+std::string TestDataReductionProxyParams::DefaultSecureProxyCheckURL() {
+  return kDefaultSecureProxyCheckURL;
 }
 
 std::string TestDataReductionProxyParams::FlagOrigin() {
@@ -128,8 +92,8 @@ std::string TestDataReductionProxyParams::FlagAltFallbackOrigin() {
   return kFlagAltFallbackOrigin;
 }
 
-std::string TestDataReductionProxyParams::FlagProbeURL() {
-  return kFlagProbeURL;
+std::string TestDataReductionProxyParams::FlagSecureProxyCheckURL() {
+  return kFlagSecureProxyCheckURL;
 }
 
 void TestDataReductionProxyParams::set_origin(const net::ProxyServer& origin) {
@@ -179,9 +143,11 @@ std::string TestDataReductionProxyParams::GetDefaultAltFallbackOrigin() const {
       kDefaultAltFallbackOrigin);
 }
 
-std::string TestDataReductionProxyParams::GetDefaultProbeURL() const {
+std::string TestDataReductionProxyParams::GetDefaultSecureProxyCheckURL()
+    const {
   return GetDefinition(
-      TestDataReductionProxyParams::HAS_PROBE_URL, kDefaultProbeURL);
+      TestDataReductionProxyParams::HAS_SECURE_PROXY_CHECK_URL,
+      kDefaultSecureProxyCheckURL);
 }
 
 std::string TestDataReductionProxyParams::GetDefinition(

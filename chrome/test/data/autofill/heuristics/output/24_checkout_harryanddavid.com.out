@@ -18,13 +18,13 @@ ADDRESS_HOME_LINE2 | address2 | Apt.,suite, bldg. |  | typeOfAddress_1-default
 ADDRESS_HOME_COUNTRY | country | Country* | US | typeOfAddress_1-default
 UNKNOWN_TYPE |  | City* | Χ  | typeOfAddress_1-default
 ADDRESS_HOME_CITY | city | City* |  | typeOfAddress_1-default
-ADDRESS_HOME_STATE | state | State* |  | typeOfAddress_1-default
+ADDRESS_HOME_STATE | state | State* | AL | typeOfAddress_1-default
 UNKNOWN_TYPE |  | ZIP* | Χ  | typeOfAddress_1-default
 ADDRESS_HOME_ZIP | zipCode | ZIP* |  | typeOfAddress_1-default
 UNKNOWN_TYPE |  | Phone number | Χ  | typeOfAddress_1-default
 PHONE_HOME_WHOLE_NUMBER | phone1 | Phone number |  | typeOfAddress_1-default
 UNKNOWN_TYPE |  | Ext | Χ  | typeOfAddress_1-default
-PHONE_HOME_WHOLE_NUMBER | phone2 | Ext |  | typeOfAddress_1-default
+UNKNOWN_TYPE | phone2 | Ext |  | typeOfAddress_1-default
 UNKNOWN_TYPE | phone1Type | Cell phone | C | typeOfAddress_1-default
 UNKNOWN_TYPE |  | Email address* | Χ  | typeOfAddress_1-default
 EMAIL_ADDRESS | email1 | Email address* |  | typeOfAddress_1-default
@@ -38,5 +38,5 @@ UNKNOWN_TYPE | paymentType | What is PayPal? | on | _1-default
 UNKNOWN_TYPE | paymentType | Card Number Expiration Date | on | _1-default
 UNKNOWN_TYPE |  | Card Number | Χ  | _1-default
 CREDIT_CARD_NUMBER | clearTextAccount | Card Number |  | _1-cc
-CREDIT_CARD_EXP_MONTH | expire_month | Expiration Date |  | _1-cc
-CREDIT_CARD_EXP_4_DIGIT_YEAR | expire_year | Expiration Date |  | _1-cc
+CREDIT_CARD_EXP_MONTH | expire_month | Expiration Date | 01 | _1-cc
+CREDIT_CARD_EXP_4_DIGIT_YEAR | expire_year | Expiration Date | 2014 | _1-cc

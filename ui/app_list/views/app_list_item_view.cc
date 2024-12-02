@@ -25,6 +25,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/gfx/transform_util.h"
@@ -55,11 +56,9 @@ const float kDraggingIconScale = 1.5f;
 const int kMouseDragUIDelayInMs = 200;
 
 const gfx::ShadowValues& GetIconShadows() {
-  CR_DEFINE_STATIC_LOCAL(
-      const gfx::ShadowValues,
-      icon_shadows,
-      (1,
-       gfx::ShadowValue(gfx::Point(0, 2), 2, SkColorSetARGB(0x24, 0, 0, 0))));
+  CR_DEFINE_STATIC_LOCAL(const gfx::ShadowValues, icon_shadows,
+                         (1, gfx::ShadowValue(gfx::Vector2d(0, 2), 2,
+                                              SkColorSetARGB(0x24, 0, 0, 0))));
   return icon_shadows;
 }
 
@@ -188,6 +187,7 @@ void AppListItemView::SetUIState(UIState state) {
   }
 #endif  // !OS_WIN
 
+  SetTitleSubpixelAA();
   SchedulePaint();
 }
 
@@ -203,31 +203,6 @@ void AppListItemView::SetTouchDragging(bool touch_dragging) {
 void AppListItemView::OnMouseDragTimer() {
   DCHECK(apps_grid_view_->IsDraggedView(this));
   SetUIState(UI_STATE_DRAGGING);
-}
-
-void AppListItemView::SetTitleSubpixelAA() {
-  // TODO(tapted): Enable AA for folders as well, taking care to play nice with
-  // the folder bubble animation.
-  bool enable_aa = !is_in_folder_ && ui_state_ == UI_STATE_NORMAL &&
-                   !is_highlighted_ && !apps_grid_view_->IsSelectedView(this) &&
-                   !apps_grid_view_->IsAnimatingView(this);
-
-  bool currently_enabled = title_->background() != NULL;
-  if (currently_enabled == enable_aa)
-    return;
-
-  if (enable_aa) {
-    title_->SetBackgroundColor(app_list::kLabelBackgroundColor);
-    title_->set_background(views::Background::CreateSolidBackground(
-        app_list::kLabelBackgroundColor));
-  } else {
-    // In other cases, keep the background transparent to ensure correct
-    // interactions with animations. This will temporarily disable subpixel AA.
-    title_->SetBackgroundColor(0);
-    title_->set_background(NULL);
-  }
-  title_->Invalidate();
-  title_->SchedulePaint();
 }
 
 void AppListItemView::Prerender() {
@@ -277,6 +252,7 @@ void AppListItemView::SetItemName(const base::string16& display_name,
 
 void AppListItemView::SetItemIsHighlighted(bool is_highlighted) {
   is_highlighted_ = is_highlighted;
+  SetTitleSubpixelAA();
   SchedulePaint();
 }
 
@@ -286,6 +262,7 @@ void AppListItemView::SetItemIsInstalling(bool is_installing) {
     title_->SetVisible(!is_installing);
     progress_bar_->SetVisible(is_installing);
   }
+  SetTitleSubpixelAA();
   SchedulePaint();
 }
 
@@ -332,17 +309,13 @@ void AppListItemView::Layout() {
                          title_size.height());
   title_bounds.Intersect(rect);
   title_->SetBoundsRect(title_bounds);
+  SetTitleSubpixelAA();
 
   gfx::Rect progress_bar_bounds(progress_bar_->GetPreferredSize());
   progress_bar_bounds.set_x(GetContentsBounds().x() +
                             kProgressBarHorizontalPadding);
   progress_bar_bounds.set_y(title_bounds.y());
   progress_bar_->SetBoundsRect(progress_bar_bounds);
-}
-
-void AppListItemView::SchedulePaintInRect(const gfx::Rect& r) {
-  SetTitleSubpixelAA();
-  views::CustomButton::SchedulePaintInRect(r);
 }
 
 void AppListItemView::OnPaint(gfx::Canvas* canvas) {
@@ -406,7 +379,7 @@ void AppListItemView::StateChanged() {
       item_weak_->set_highlighted(false);
     title_->SetEnabledColor(kGridTitleColor);
   }
-  title_->Invalidate();
+  SetTitleSubpixelAA();
 }
 
 bool AppListItemView::ShouldEnterPushedState(const ui::Event& event) {
@@ -570,6 +543,28 @@ gfx::Rect AppListItemView::GetIconBoundsForTargetViewBounds(
   gfx::Rect icon_bounds(rect.x(), rect.y(), rect.width(), kGridIconDimension);
   icon_bounds.Inset(gfx::ShadowValue::GetMargin(GetIconShadows()));
   return icon_bounds;
+}
+
+void AppListItemView::SetTitleSubpixelAA() {
+  // TODO(tapted): Enable AA for folders as well, taking care to play nice with
+  // the folder bubble animation.
+  bool enable_aa = !is_in_folder_ && ui_state_ == UI_STATE_NORMAL &&
+                   !is_highlighted_ && !apps_grid_view_->IsSelectedView(this) &&
+                   !apps_grid_view_->IsAnimatingView(this);
+
+  title_->SetSubpixelRenderingEnabled(enable_aa);
+  if (enable_aa) {
+    title_->SetBackgroundColor(app_list::kLabelBackgroundColor);
+    title_->set_background(views::Background::CreateSolidBackground(
+        app_list::kLabelBackgroundColor));
+  } else {
+    // In other cases, keep the background transparent to ensure correct
+    // interactions with animations. This will temporarily disable subpixel AA.
+    title_->SetBackgroundColor(0);
+    title_->set_background(NULL);
+  }
+  title_->Invalidate();
+  title_->SchedulePaint();
 }
 
 void AppListItemView::ItemIconChanged() {

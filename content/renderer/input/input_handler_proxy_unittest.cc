@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "cc/base/swap_promise_monitor.h"
+#include "cc/trees/swap_promise_monitor.h"
 #include "content/common/input/did_overscroll_params.h"
 #include "content/renderer/input/input_handler_proxy_client.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -410,6 +410,17 @@ TEST_F(InputHandlerProxyTest, GesturePinch) {
   gesture_.y = 13;
   EXPECT_CALL(mock_input_handler_, PinchGestureUpdate(1.5, gfx::Point(7, 13)));
   EXPECT_EQ(expected_disposition_, input_handler_->HandleInputEvent(gesture_));
+
+  VERIFY_AND_RESET_MOCKS();
+
+  gesture_.type = WebInputEvent::GesturePinchUpdate;
+  gesture_.data.pinchUpdate.scale = 0.5;
+  gesture_.data.pinchUpdate.zoomDisabled = true;
+  gesture_.x = 9;
+  gesture_.y = 6;
+  EXPECT_EQ(InputHandlerProxy::DROP_EVENT,
+            input_handler_->HandleInputEvent(gesture_));
+  gesture_.data.pinchUpdate.zoomDisabled = false;
 
   VERIFY_AND_RESET_MOCKS();
 
@@ -961,6 +972,8 @@ TEST_F(InputHandlerProxyTest, GestureFlingIgnoredTouchscreen) {
   expected_disposition_ = InputHandlerProxy::DROP_EVENT;
   VERIFY_AND_RESET_MOCKS();
 
+  // Flings ignored by the InputHandler should be dropped, signalling the end
+  // of the touch scroll sequence.
   EXPECT_CALL(mock_input_handler_, FlingScrollBegin())
       .WillOnce(testing::Return(cc::InputHandler::SCROLL_IGNORED));
 
@@ -970,9 +983,12 @@ TEST_F(InputHandlerProxyTest, GestureFlingIgnoredTouchscreen) {
 
   VERIFY_AND_RESET_MOCKS();
 
-  // Even if we didn't start a fling ourselves, we still need to send the cancel
-  // event to the widget.
-  gesture_.type = WebInputEvent::GestureFlingCancel;
+  // Subsequent scrolls should behave normally, even without an intervening
+  // GestureFlingCancel, as the original GestureFlingStart was dropped.
+  expected_disposition_ = InputHandlerProxy::DID_HANDLE;
+  EXPECT_CALL(mock_input_handler_, ScrollBegin(testing::_, testing::_))
+      .WillOnce(testing::Return(cc::InputHandler::SCROLL_STARTED));
+  gesture_.type = WebInputEvent::GestureScrollBegin;
   gesture_.sourceDevice = blink::WebGestureDeviceTouchscreen;
   EXPECT_EQ(expected_disposition_, input_handler_->HandleInputEvent(gesture_));
 }

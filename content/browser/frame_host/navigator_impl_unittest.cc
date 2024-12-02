@@ -48,27 +48,20 @@ class NavigatorTestWithBrowserSideNavigation
 
   void RequestNavigation(FrameTreeNode* node, const GURL& url) {
     RequestNavigationWithParameters(node, url, Referrer(),
-                                    ui::PAGE_TRANSITION_LINK,
-                                    NavigationController::NO_RELOAD);
+                                    ui::PAGE_TRANSITION_LINK);
   }
 
   void RequestNavigationWithParameters(
       FrameTreeNode* node,
       const GURL& url,
       const Referrer& referrer,
-      ui::PageTransition transition_type,
-      NavigationController::ReloadType reload_type) {
-    scoped_ptr<NavigationEntryImpl> entry(
-        NavigationEntryImpl::FromNavigationEntry(
-            NavigationController::CreateNavigationEntry(
-                url,
-                referrer,
-                transition_type,
-                false,
-                std::string(),
-                controller().GetBrowserContext())));
-    static_cast<NavigatorImpl*>(node->navigator())->RequestNavigation(
-        node, *entry, reload_type, base::TimeTicks::Now());
+      ui::PageTransition transition_type) {
+    NavigationController::LoadURLParams load_params(url);
+    load_params.frame_tree_node_id = node->frame_tree_node_id();
+    load_params.referrer = referrer;
+    load_params.transition_type = transition_type;
+
+    controller().LoadURLWithParams(load_params);
   }
 
   NavigationRequest* GetNavigationRequestForFrameTreeNode(
@@ -154,7 +147,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
 // PlzNavigate: Test a complete renderer-initiated same-site navigation.
 TEST_F(NavigatorTestWithBrowserSideNavigation,
-       SimpleRendererInitiatedNavigation) {
+       SimpleRendererInitiatedSameSiteNavigation) {
   const GURL kUrl1("http://www.chromium.org/");
   const GURL kUrl2("http://www.chromium.org/Home");
 
@@ -163,7 +156,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Start a renderer-initiated non-user-initiated navigation.
   process()->sink().ClearMessages();
-  main_test_rfh()->SendBeginNavigationWithURL(kUrl2, false);
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl2, false);
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
   NavigationRequest* request = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(request);
@@ -192,6 +185,52 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_FALSE(GetNavigationRequestForFrameTreeNode(node));
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
   EXPECT_FALSE(node->render_manager()->pending_frame_host());
+}
+
+// PlzNavigate: Test a complete renderer-initiated navigation that should be
+// cross-site but does not result in a SiteInstance swap because its
+// renderer-initiated.
+TEST_F(NavigatorTestWithBrowserSideNavigation,
+       SimpleRendererInitiatedCrossSiteNavigation) {
+  const GURL kUrl1("http://www.chromium.org/");
+  const GURL kUrl2("http://www.google.com");
+
+  contents()->NavigateAndCommit(kUrl1);
+  EXPECT_TRUE(main_test_rfh()->IsRenderFrameLive());
+  int32 site_instance_id_1 = main_test_rfh()->GetSiteInstance()->GetId();
+
+  // Start a renderer-initiated non-user-initiated navigation.
+  process()->sink().ClearMessages();
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl2, false);
+  FrameTreeNode* node = main_test_rfh()->frame_tree_node();
+  NavigationRequest* request = GetNavigationRequestForFrameTreeNode(node);
+  ASSERT_TRUE(request);
+
+  // The navigation is immediately started as there's no need to wait for
+  // beforeUnload to be executed.
+  EXPECT_EQ(NavigationRequest::STARTED, request->state());
+  EXPECT_FALSE(request->begin_params().has_user_gesture);
+  EXPECT_EQ(kUrl2, request->common_params().url);
+  EXPECT_FALSE(request->browser_initiated());
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+
+  // Have the current RenderFrameHost commit the navigation.
+  scoped_refptr<ResourceResponse> response(new ResourceResponse);
+  GetLoaderForNavigationRequest(request)
+      ->CallOnResponseStarted(response, MakeEmptyStream());
+  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_EQ(NavigationRequest::RESPONSE_STARTED, request->state());
+
+  // Commit the navigation.
+  main_test_rfh()->SendNavigate(0, kUrl2);
+  EXPECT_EQ(RenderFrameHostImpl::STATE_DEFAULT, main_test_rfh()->rfh_state());
+  EXPECT_EQ(kUrl2, contents()->GetLastCommittedURL());
+  EXPECT_FALSE(GetNavigationRequestForFrameTreeNode(node));
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  EXPECT_FALSE(node->render_manager()->pending_frame_host());
+
+  // The SiteInstance did not change.
+  EXPECT_EQ(site_instance_id_1, main_test_rfh()->GetSiteInstance()->GetId());
 }
 
 // PlzNavigate: Test that a beforeUnload denial cancels the navigation.
@@ -421,21 +460,14 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, RedirectCrossSite) {
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // It then redirects to another site.
-  net::RedirectInfo redirect_info;
-  redirect_info.status_code = 302;
-  redirect_info.new_method = "GET";
-  redirect_info.new_url = kUrl2;
-  redirect_info.new_first_party_for_cookies = kUrl2;
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
-  GetLoaderForNavigationRequest(main_request)->CallOnRequestRedirected(
-      redirect_info, response);
+  GetLoaderForNavigationRequest(main_request)->SimulateServerRedirect(kUrl2);
 
   // The redirect should have been followed.
   EXPECT_EQ(1, GetLoaderForNavigationRequest(main_request)->redirect_count());
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Have the RenderFrameHost commit the navigation.
-  response = new ResourceResponse;
+  scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(main_request)->CallOnResponseStarted(
       response, MakeEmptyStream());
   TestRenderFrameHost* final_speculative_rfh =
@@ -549,14 +581,12 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
       GetLoaderForNavigationRequest(request1)->AsWeakPtr();
   EXPECT_TRUE(loader1);
 
-  // Confirm a speculative RenderFrameHost was created.
-  TestRenderFrameHost* speculative_rfh = GetSpeculativeRenderFrameHost(node);
-  ASSERT_TRUE(speculative_rfh);
-  int32 site_instance_id_1 = speculative_rfh->GetSiteInstance()->GetId();
+  // Confirm that a speculative RenderFrameHost was created.
+  ASSERT_TRUE(GetSpeculativeRenderFrameHost(node));
 
   // Now receive a renderer-initiated user-initiated request. It should replace
   // the current NavigationRequest.
-  main_test_rfh()->SendBeginNavigationWithURL(kUrl2, true);
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl2, true);
   NavigationRequest* request2 = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(request2);
   EXPECT_EQ(kUrl2, request2->common_params().url);
@@ -566,28 +596,21 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // Confirm that the first loader got destroyed.
   EXPECT_FALSE(loader1);
 
-  // Confirm that a new speculative RenderFrameHost was created.
-  speculative_rfh = GetSpeculativeRenderFrameHost(node);
-  ASSERT_TRUE(speculative_rfh);
-  int32 site_instance_id_2 = speculative_rfh->GetSiteInstance()->GetId();
-  EXPECT_NE(site_instance_id_1, site_instance_id_2);
+  // Confirm that the speculative RenderFrameHost was destroyed.
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Have the RenderFrameHost commit the navigation.
   scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(request2)
       ->CallOnResponseStarted(response, MakeEmptyStream());
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
 
   // Commit the navigation.
-  speculative_rfh->SendNavigate(0, kUrl2);
+  main_test_rfh()->SendNavigate(0, kUrl2);
 
   // Confirm that the commit corresponds to the new request.
   ASSERT_TRUE(main_test_rfh());
   EXPECT_EQ(kUrl2, contents()->GetLastCommittedURL());
-
-  // Confirm that the committed RenderFrameHost is the latest speculative one.
-  EXPECT_EQ(site_instance_id_2, main_test_rfh()->GetSiteInstance()->GetId());
 }
 
 // PlzNavigate: Test that a renderer-initiated user-initiated navigation is NOT
@@ -605,35 +628,33 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Start a renderer-initiated user-initiated navigation to the 1st URL.
   process()->sink().ClearMessages();
-  main_test_rfh()->SendBeginNavigationWithURL(kUrl1, true);
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl1, true);
   NavigationRequest* request1 = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(request1);
   EXPECT_EQ(kUrl1, request1->common_params().url);
   EXPECT_FALSE(request1->browser_initiated());
   EXPECT_TRUE(request1->begin_params().has_user_gesture);
-  EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Now receive a renderer-initiated non-user-initiated request. Nothing should
   // change.
-  main_test_rfh()->SendBeginNavigationWithURL(kUrl2, false);
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl2, false);
   NavigationRequest* request2 = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(request2);
   EXPECT_EQ(request1, request2);
   EXPECT_EQ(kUrl1, request2->common_params().url);
   EXPECT_FALSE(request2->browser_initiated());
   EXPECT_TRUE(request2->begin_params().has_user_gesture);
-  TestRenderFrameHost* speculative_rfh = GetSpeculativeRenderFrameHost(node);
-  ASSERT_TRUE(speculative_rfh);
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Have the RenderFrameHost commit the navigation.
   scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(request2)
       ->CallOnResponseStarted(response, MakeEmptyStream());
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
 
   // Commit the navigation.
-  speculative_rfh->SendNavigate(0, kUrl1);
+  main_test_rfh()->SendNavigate(0, kUrl1);
   EXPECT_EQ(kUrl1, contents()->GetLastCommittedURL());
 }
 
@@ -660,7 +681,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Now receive a renderer-initiated non-user-initiated request. Nothing should
   // change.
-  main_test_rfh()->SendBeginNavigationWithURL(kUrl2, false);
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl2, false);
   NavigationRequest* request2 = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(request2);
   EXPECT_EQ(request1, request2);
@@ -696,28 +717,28 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // Initialization.
   contents()->NavigateAndCommit(kUrl0);
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
+  int32 site_instance_id_0 = main_test_rfh()->GetSiteInstance()->GetId();
 
   // Start a renderer-initiated non-user-initiated navigation to the 1st URL.
   process()->sink().ClearMessages();
-  main_test_rfh()->SendBeginNavigationWithURL(kUrl1, false);
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl1, false);
   NavigationRequest* request1 = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(request1);
   EXPECT_EQ(kUrl1, request1->common_params().url);
   EXPECT_FALSE(request1->browser_initiated());
   EXPECT_FALSE(request1->begin_params().has_user_gesture);
-  EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
   base::WeakPtr<TestNavigationURLLoader> loader1 =
       GetLoaderForNavigationRequest(request1)->AsWeakPtr();
   EXPECT_TRUE(loader1);
 
   // Now receive a 2nd similar request that should replace the current one.
-  main_test_rfh()->SendBeginNavigationWithURL(kUrl2, false);
+  main_test_rfh()->SendRendererInitiatedNavigationRequest(kUrl2, false);
   NavigationRequest* request2 = GetNavigationRequestForFrameTreeNode(node);
   EXPECT_EQ(kUrl2, request2->common_params().url);
   EXPECT_FALSE(request2->browser_initiated());
   EXPECT_FALSE(request2->begin_params().has_user_gesture);
-  TestRenderFrameHost* speculative_rfh = GetSpeculativeRenderFrameHost(node);
-  ASSERT_TRUE(speculative_rfh);
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Confirm that the first loader got destroyed.
   EXPECT_FALSE(loader1);
@@ -726,12 +747,14 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(request2)
       ->CallOnResponseStarted(response, MakeEmptyStream());
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(speculative_rfh));
-  EXPECT_FALSE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
 
   // Commit the navigation.
-  speculative_rfh->SendNavigate(0, kUrl2);
+  main_test_rfh()->SendNavigate(0, kUrl2);
   EXPECT_EQ(kUrl2, contents()->GetLastCommittedURL());
+
+  // The SiteInstance did not change.
+  EXPECT_EQ(site_instance_id_0, main_test_rfh()->GetSiteInstance()->GetId());
 }
 
 // PlzNavigate: Test that a reload navigation is properly signaled to the
@@ -742,30 +765,26 @@ TEST_F(NavigatorTestWithBrowserSideNavigation, Reload) {
   contents()->NavigateAndCommit(kUrl);
 
   FrameTreeNode* node = main_test_rfh()->frame_tree_node();
-  RequestNavigationWithParameters(node, kUrl, Referrer(),
-                                  ui::PAGE_TRANSITION_LINK,
-                                  NavigationController::RELOAD);
+  controller().Reload(false);
   // A NavigationRequest should have been generated.
   NavigationRequest* main_request = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(main_request != NULL);
   EXPECT_EQ(FrameMsg_Navigate_Type::RELOAD,
             main_request->common_params().navigation_type);
-  main_test_rfh()->PrepareForCommit(kUrl);
+  main_test_rfh()->PrepareForCommit();
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   main_test_rfh()->SendNavigate(0, kUrl);
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 
   // Now do a shift+reload.
-  RequestNavigationWithParameters(node, kUrl, Referrer(),
-                                  ui::PAGE_TRANSITION_LINK,
-                                  NavigationController::RELOAD_IGNORING_CACHE);
+  controller().ReloadIgnoringCache(false);
   // A NavigationRequest should have been generated.
   main_request = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(main_request != NULL);
   EXPECT_EQ(FrameMsg_Navigate_Type::RELOAD_IGNORING_CACHE,
             main_request->common_params().navigation_type);
-  main_test_rfh()->PrepareForCommit(kUrl);
+  main_test_rfh()->PrepareForCommit();
   EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 }
 
@@ -843,14 +862,8 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   NavigationRequest* main_request = GetNavigationRequestForFrameTreeNode(node);
   ASSERT_TRUE(main_request);
   const GURL kUrlRedirect("https://www.google.com/");
-  net::RedirectInfo redirect_info;
-  redirect_info.status_code = 302;
-  redirect_info.new_method = "GET";
-  redirect_info.new_url = kUrlRedirect;
-  redirect_info.new_first_party_for_cookies = kUrlRedirect;
-  scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(main_request)
-      ->CallOnRequestRedirected(redirect_info, response);
+      ->SimulateServerRedirect(kUrlRedirect);
   EXPECT_EQ(init_site_instance_id, main_test_rfh()->GetSiteInstance()->GetId());
   speculative_rfh = GetSpeculativeRenderFrameHost(node);
   ASSERT_TRUE(speculative_rfh);
@@ -863,7 +876,7 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
 
   // Commit the navigation with Navigator by simulating the call to
   // OnResponseStarted.
-  response = new ResourceResponse;
+  scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(main_request)
       ->CallOnResponseStarted(response, MakeEmptyStream());
   speculative_rfh = GetSpeculativeRenderFrameHost(node);
@@ -939,6 +952,49 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(rfh1, main_test_rfh());
   EXPECT_EQ(RenderFrameHostImpl::STATE_DEFAULT, rfh1->rfh_state());
   EXPECT_FALSE(rfhm->IsOnSwappedOutList(rfh1));
+}
+
+// PlzNavigate: Verify that data urls are properly handled.
+TEST_F(NavigatorTestWithBrowserSideNavigation, DataUrls) {
+  const GURL kUrl1("http://wikipedia.org/");
+  const GURL kUrl2("data:text/html,test");
+
+  // Navigate to an initial site.
+  contents()->NavigateAndCommit(kUrl1);
+  FrameTreeNode* node = main_test_rfh()->frame_tree_node();
+
+  // Navigate to a data url.
+  RequestNavigation(node, kUrl2);
+  NavigationRequest* navigation_request =
+      GetNavigationRequestForFrameTreeNode(node);
+  ASSERT_TRUE(navigation_request);
+  EXPECT_EQ(NavigationRequest::WAITING_FOR_RENDERER_RESPONSE,
+            navigation_request->state());
+  main_test_rfh()->SendBeforeUnloadACK(true);
+
+  // The request should not have been sent to the IO thread but committed
+  // immediately.
+  EXPECT_EQ(NavigationRequest::RESPONSE_STARTED,
+            navigation_request->state());
+  EXPECT_FALSE(navigation_request->loader_for_testing());
+  TestRenderFrameHost* speculative_rfh = GetSpeculativeRenderFrameHost(node);
+  ASSERT_TRUE(speculative_rfh);
+  speculative_rfh->SendNavigate(0, kUrl2);
+  EXPECT_EQ(main_test_rfh(), speculative_rfh);
+
+  // Go back to the initial site.
+  contents()->NavigateAndCommit(kUrl1);
+
+  // Do a renderer-initiated navigation to a data url. The request should not be
+  // sent to the IO thread, nor committed.
+  TestRenderFrameHost* main_rfh = main_test_rfh();
+  main_rfh->SendRendererInitiatedNavigationRequest(kUrl2, true);
+  navigation_request = GetNavigationRequestForFrameTreeNode(node);
+  ASSERT_TRUE(navigation_request);
+  EXPECT_EQ(NavigationRequest::RESPONSE_STARTED,
+            navigation_request->state());
+  EXPECT_FALSE(navigation_request->loader_for_testing());
+  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
 }
 
 }  // namespace content

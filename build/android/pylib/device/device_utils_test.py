@@ -1046,29 +1046,98 @@ class DeviceUtilsPullFileTest(DeviceUtilsTest):
 
 class DeviceUtilsReadFileTest(DeviceUtilsTest):
 
+  def testReadFileWithPull_success(self):
+    tmp_host_dir = '/tmp/dir/on.host/'
+    tmp_host = MockTempFile('/tmp/dir/on.host/tmp_ReadFileWithPull')
+    tmp_host.file.read.return_value = 'some interesting contents'
+    with self.assertCalls(
+        (mock.call.tempfile.mkdtemp(), tmp_host_dir),
+        (self.call.adb.Pull('/path/to/device/file', mock.ANY)),
+        (mock.call.__builtin__.open(mock.ANY, 'r'), tmp_host),
+        (mock.call.os.path.exists(tmp_host_dir), True),
+        (mock.call.shutil.rmtree(tmp_host_dir), None)):
+      self.assertEquals('some interesting contents',
+                        self.device._ReadFileWithPull('/path/to/device/file'))
+    tmp_host.file.read.assert_called_once_with()
+
+  def testReadFileWithPull_rejected(self):
+    tmp_host_dir = '/tmp/dir/on.host/'
+    with self.assertCalls(
+        (mock.call.tempfile.mkdtemp(), tmp_host_dir),
+        (self.call.adb.Pull('/path/to/device/file', mock.ANY),
+         self.CommandError()),
+        (mock.call.os.path.exists(tmp_host_dir), True),
+        (mock.call.shutil.rmtree(tmp_host_dir), None)):
+      with self.assertRaises(device_errors.CommandFailedError):
+        self.device._ReadFileWithPull('/path/to/device/file')
+
   def testReadFile_exists(self):
-    with self.assertCall(
-        self.call.adb.Shell('cat /read/this/test/file'),
-        'this is a test file\r\n'):
+    with self.assertCalls(
+        (self.call.device.RunShellCommand(
+            ['ls', '-l', '/read/this/test/file'],
+            as_root=False, check_return=True),
+         ['-rw-rw---- root foo 256 1970-01-01 00:00 file']),
+        (self.call.device.RunShellCommand(
+            ['cat', '/read/this/test/file'], as_root=False, check_return=True),
+         ['this is a test file'])):
       self.assertEqual('this is a test file\n',
                        self.device.ReadFile('/read/this/test/file'))
 
   def testReadFile_doesNotExist(self):
     with self.assertCall(
-        self.call.adb.Shell('cat /this/file/does.not.exist'),
-        self.ShellError('/system/bin/sh: cat: /this/file/does.not.exist: '
-                        'No such file or directory')):
-      with self.assertRaises(device_errors.AdbCommandFailedError):
+        self.call.device.RunShellCommand(
+            ['ls', '-l', '/this/file/does.not.exist'],
+            as_root=False, check_return=True),
+        self.CommandError('File does not exist')):
+      with self.assertRaises(device_errors.CommandFailedError):
         self.device.ReadFile('/this/file/does.not.exist')
 
   def testReadFile_withSU(self):
     with self.assertCalls(
-      (self.call.device.NeedsSU(), True),
-      (self.call.adb.Shell("su -c sh -c 'cat /this/file/can.be.read.with.su'"),
-       'this is a test file\nread with su')):
+        (self.call.device.RunShellCommand(
+            ['ls', '-l', '/this/file/can.be.read.with.su'],
+            as_root=True, check_return=True),
+         ['-rw------- root root 256 1970-01-01 00:00 can.be.read.with.su']),
+        (self.call.device.RunShellCommand(
+            ['cat', '/this/file/can.be.read.with.su'],
+            as_root=True, check_return=True),
+         ['this is a test file', 'read with su'])):
       self.assertEqual(
           'this is a test file\nread with su\n',
           self.device.ReadFile('/this/file/can.be.read.with.su',
+                               as_root=True))
+
+  def testReadFile_withPull(self):
+    contents = 'a' * 123456
+    with self.assertCalls(
+        (self.call.device.RunShellCommand(
+            ['ls', '-l', '/read/this/big/test/file'],
+            as_root=False, check_return=True),
+         ['-rw-rw---- root foo 123456 1970-01-01 00:00 file']),
+        (self.call.device._ReadFileWithPull('/read/this/big/test/file'),
+         contents)):
+      self.assertEqual(
+          contents, self.device.ReadFile('/read/this/big/test/file'))
+
+  def testReadFile_withPullAndSU(self):
+    contents = 'b' * 123456
+    with self.assertCalls(
+        (self.call.device.RunShellCommand(
+            ['ls', '-l', '/this/big/file/can.be.read.with.su'],
+            as_root=True, check_return=True),
+         ['-rw------- root root 123456 1970-01-01 00:00 can.be.read.with.su']),
+        (self.call.device.NeedsSU(), True),
+        (mock.call.pylib.utils.device_temp_file.DeviceTempFile(self.adb),
+         MockTempFile('/sdcard/tmp/on.device')),
+        self.call.device.RunShellCommand(
+            ['cp', '/this/big/file/can.be.read.with.su',
+             '/sdcard/tmp/on.device'],
+            as_root=True, check_return=True),
+        (self.call.device._ReadFileWithPull('/sdcard/tmp/on.device'),
+         contents)):
+      self.assertEqual(
+          contents,
+          self.device.ReadFile('/this/big/file/can.be.read.with.su',
                                as_root=True))
 
 
@@ -1382,6 +1451,116 @@ class DeviceUtilsGetMemoryUsageForPidTest(DeviceUtilsTest):
           self.device.GetMemoryUsageForPid(4321))
 
 
+class DeviceUtilsGetBatteryInfoTest(DeviceUtilsTest):
+  def testGetBatteryInfo_normal(self):
+    with self.assertCall(
+        self.call.device.RunShellCommand(
+            ['dumpsys', 'battery'], check_return=True),
+        [
+          'Current Battery Service state:',
+          '  AC powered: false',
+          '  USB powered: true',
+          '  level: 100',
+          '  temperature: 321',
+        ]):
+      self.assertEquals(
+          {
+            'AC powered': 'false',
+            'USB powered': 'true',
+            'level': '100',
+            'temperature': '321',
+          },
+          self.device.GetBatteryInfo())
+
+
+  def testGetBatteryInfo_nothing(self):
+    with self.assertCall(
+        self.call.device.RunShellCommand(
+            ['dumpsys', 'battery'], check_return=True), []):
+      self.assertEquals({}, self.device.GetBatteryInfo())
+
+
+class DeviceUtilsGetChargingTest(DeviceUtilsTest):
+  def testGetCharging_usb(self):
+    with self.assertCall(
+        self.call.device.GetBatteryInfo(), {'USB powered': 'true'}):
+      self.assertTrue(self.device.GetCharging())
+
+  def testGetCharging_usbFalse(self):
+    with self.assertCall(
+        self.call.device.GetBatteryInfo(), {'USB powered': 'false'}):
+      self.assertFalse(self.device.GetCharging())
+
+  def testGetCharging_ac(self):
+    with self.assertCall(
+        self.call.device.GetBatteryInfo(), {'AC powered': 'true'}):
+      self.assertTrue(self.device.GetCharging())
+
+  def testGetCharging_wireless(self):
+    with self.assertCall(
+        self.call.device.GetBatteryInfo(), {'Wireless powered': 'true'}):
+      self.assertTrue(self.device.GetCharging())
+
+  def testGetCharging_unknown(self):
+    with self.assertCall(
+        self.call.device.GetBatteryInfo(), {'level': '42'}):
+      self.assertFalse(self.device.GetCharging())
+
+
+class DeviceUtilsSetChargingTest(DeviceUtilsTest):
+
+  @mock.patch('time.sleep', mock.Mock())
+  def testSetCharging_enabled(self):
+    with self.assertCalls(
+        (self.call.device.FileExists(mock.ANY), True),
+        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
+        (self.call.device.GetCharging(), False),
+        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
+        (self.call.device.GetCharging(), True)):
+      self.device.SetCharging(True)
+
+  def testSetCharging_alreadyEnabled(self):
+    with self.assertCalls(
+        (self.call.device.FileExists(mock.ANY), True),
+        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
+        (self.call.device.GetCharging(), True)):
+      self.device.SetCharging(True)
+
+  @mock.patch('time.sleep', mock.Mock())
+  def testSetCharging_disabled(self):
+    with self.assertCalls(
+        (self.call.device.FileExists(mock.ANY), True),
+        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
+        (self.call.device.GetCharging(), True),
+        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
+        (self.call.device.GetCharging(), False)):
+      self.device.SetCharging(False)
+
+
+class DeviceUtilsSetBatteryMeasurementTest(DeviceUtilsTest):
+
+  def testBatteryMeasurement(self):
+    with self.assertCalls(
+        (self.call.device.RunShellCommand(
+            mock.ANY, retries=0, single_line=True,
+            timeout=10, check_return=True), '22'),
+        (self.call.device.RunShellCommand(
+            ['dumpsys', 'batterystats', '--reset'], check_return=True), []),
+        (self.call.device.RunShellCommand(
+            ['dumpsys', 'batterystats', '--charged', '--checkin'],
+            check_return=True), []),
+        (self.call.device.RunShellCommand(
+            ['dumpsys', 'battery', 'set', 'usb', '0'], check_return=True), []),
+        (self.call.device.GetCharging(), False),
+        (self.call.device.RunShellCommand(
+            ['dumpsys', 'battery', 'set', 'usb', '1'], check_return=True), []),
+        (self.call.device.RunShellCommand(
+            ['dumpsys', 'battery', 'reset'], check_return=True), []),
+        (self.call.device.GetCharging(), True)):
+      with self.device.BatteryMeasurement():
+        pass
+
+
 class DeviceUtilsStrTest(DeviceUtilsTest):
 
   def testStr_returnsSerial(self):
@@ -1410,6 +1589,32 @@ class DeviceUtilsParallelTest(mock_calls.TestCase):
       with self.assertRaises(device_errors.NoDevicesError):
         device_utils.DeviceUtils.parallel()
 
+
+class DeviceUtilsClientCache(DeviceUtilsTest):
+
+  def testClientCache_twoCaches(self):
+    self.device._cache['test'] = 0
+    client_cache_one = self.device.GetClientCache('ClientOne')
+    client_cache_one['test'] = 1
+    client_cache_two = self.device.GetClientCache('ClientTwo')
+    client_cache_two['test'] = 2
+    self.assertEqual(self.device._cache, {'test': 0})
+    self.assertEqual(client_cache_one, {'test': 1})
+    self.assertEqual(client_cache_two, {'test': 2})
+    self.device._ClearCache()
+    self.assertEqual(self.device._cache, {})
+    self.assertEqual(client_cache_one, {})
+    self.assertEqual(client_cache_two, {})
+
+  def testClientCache_multipleInstances(self):
+    client_cache_one = self.device.GetClientCache('ClientOne')
+    client_cache_one['test'] = 1
+    client_cache_two = self.device.GetClientCache('ClientOne')
+    self.assertEqual(client_cache_one, {'test': 1})
+    self.assertEqual(client_cache_two, {'test': 1})
+    self.device._ClearCache()
+    self.assertEqual(client_cache_one, {})
+    self.assertEqual(client_cache_two, {})
 
 if __name__ == '__main__':
   logging.getLogger().setLevel(logging.DEBUG)

@@ -25,10 +25,10 @@ using content_common_gpu_media::InitializeStubs;
 using content_common_gpu_media::IsVtInitialized;
 using content_common_gpu_media::StubPathMap;
 
-#define NOTIFY_STATUS(name, status)          \
-    do {                                     \
-      OSSTATUS_DLOG(ERROR, status) << name;  \
-      NotifyError(PLATFORM_FAILURE);         \
+#define NOTIFY_STATUS(name, status, session_failure)   \
+    do {                                               \
+      OSSTATUS_DLOG(ERROR, status) << name;            \
+      NotifyError(PLATFORM_FAILURE, session_failure);  \
     } while (0)
 
 namespace content {
@@ -46,44 +46,6 @@ static const int kNumPictureBuffers = media::limits::kMaxVideoFrames + 1;
 // more. (NotifyEndOfBitstreamBuffer() is called when frames are moved into the
 // reorder queue.)
 static const int kMaxReorderQueueSize = 16;
-
-// Logged to UMA, so never reuse values. Make sure to update
-// VTVDAInitializationFailureType in histograms.xml to match.
-enum VTVDAInitializationFailureType {
-  IFT_SUCCESSFULLY_INITIALIZED = 0,
-  IFT_FRAMEWORK_LOAD_ERROR = 1,
-  IFT_HARDWARE_SESSION_ERROR = 2,
-  IFT_SOFTWARE_SESSION_ERROR = 3,
-  // Must always be equal to largest entry logged.
-  IFT_MAX = IFT_SOFTWARE_SESSION_ERROR
-};
-
-// Logged to UMA, so never reuse values. Make sure to update
-// VTVDASessionFailureType in histograms.xml to match.
-enum VTVDASessionFailureType {
-  SFT_SUCCESSFULLY_INITIALIZED = 0,
-  SFT_PLATFORM_ERROR = 1,
-  SFT_INVALID_STREAM = 2,
-  SFT_UNSUPPORTED_STREAM = 3,
-  SFT_DECODE_ERROR = 4,
-  // Must always be equal to largest entry logged.
-  SFT_MAX = SFT_DECODE_ERROR
-};
-
-static void ReportInitializationFailure(
-    VTVDAInitializationFailureType failure_type) {
-  DCHECK_LT(failure_type, IFT_MAX);
-  UMA_HISTOGRAM_ENUMERATION("Media.VTVDA.InitializationFailureReason",
-                            failure_type,
-                            IFT_MAX + 1);
-}
-
-static void ReportSessionFailure(VTVDASessionFailureType failure_type) {
-  DCHECK_LT(failure_type, SFT_MAX);
-  UMA_HISTOGRAM_ENUMERATION("Media.VTVDA.SessionFailureReason",
-                            failure_type,
-                            SFT_MAX + 1);
-}
 
 // Build an |image_config| dictionary for VideoToolbox initialization.
 static base::ScopedCFTypeRef<CFMutableDictionaryRef>
@@ -134,13 +96,14 @@ static bool CreateVideoToolboxSession(const uint8_t* sps, size_t sps_size,
   base::ScopedCFTypeRef<CMFormatDescriptionRef> format;
   OSStatus status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
       kCFAllocatorDefault,
-      2,                          // parameter_set_count
-      data_ptrs,                  // &parameter_set_pointers
-      data_sizes,                 // &parameter_set_sizes
-      kNALUHeaderLength,          // nal_unit_header_length
+      2,                    // parameter_set_count
+      data_ptrs,            // &parameter_set_pointers
+      data_sizes,           // &parameter_set_sizes
+      kNALUHeaderLength,    // nal_unit_header_length
       format.InitializeInto());
   if (status) {
-    OSSTATUS_LOG(ERROR, status) << "Failed to create CMVideoFormatDescription.";
+    OSSTATUS_DLOG(WARNING, status)
+        << "Failed to create CMVideoFormatDescription.";
     return false;
   }
 
@@ -177,9 +140,7 @@ static bool CreateVideoToolboxSession(const uint8_t* sps, size_t sps_size,
       &callback,            // output_callback
       session.InitializeInto());
   if (status) {
-    ReportInitializationFailure(require_hardware ? IFT_HARDWARE_SESSION_ERROR
-                                                 : IFT_SOFTWARE_SESSION_ERROR);
-    OSSTATUS_LOG(ERROR, status) << "Failed to create VTDecompressionSession";
+    OSSTATUS_DLOG(WARNING, status) << "Failed to create VTDecompressionSession";
     return false;
   }
 
@@ -207,9 +168,8 @@ static bool InitializeVideoToolboxInternal() {
     paths[kModuleVt].push_back(FILE_PATH_LITERAL(
         "/System/Library/Frameworks/VideoToolbox.framework/VideoToolbox"));
     if (!InitializeStubs(paths)) {
-      ReportInitializationFailure(IFT_FRAMEWORK_LOAD_ERROR);
-      LOG(ERROR) << "Failed to initialize VideoToobox framework. "
-                 << "Hardware accelerated video decoding will be disabled.";
+      LOG(WARNING) << "Failed to initialize VideoToolbox framework. "
+                   << "Hardware accelerated video decoding will be disabled.";
       return false;
     }
   }
@@ -222,8 +182,8 @@ static bool InitializeVideoToolboxInternal() {
   const uint8_t pps_normal[] = {0x68, 0xe9, 0x7b, 0xcb};
   if (!CreateVideoToolboxSession(sps_normal, arraysize(sps_normal), pps_normal,
                                  arraysize(pps_normal), true)) {
-    LOG(ERROR) << "Failed to create hardware VideoToolbox session. "
-               << "Hardware accelerated video decoding will be disabled.";
+    LOG(WARNING) << "Failed to create hardware VideoToolbox session. "
+                 << "Hardware accelerated video decoding will be disabled.";
     return false;
   }
 
@@ -235,12 +195,11 @@ static bool InitializeVideoToolboxInternal() {
   const uint8_t pps_small[] = {0x68, 0xe9, 0x79, 0x72, 0xc0};
   if (!CreateVideoToolboxSession(sps_small, arraysize(sps_small), pps_small,
                                  arraysize(pps_small), false)) {
-    LOG(ERROR) << "Failed to create software VideoToolbox session. "
-               << "Hardware accelerated video decoding will be disabled.";
+    LOG(WARNING) << "Failed to create software VideoToolbox session. "
+                 << "Hardware accelerated video decoding will be disabled.";
     return false;
   }
 
-  ReportInitializationFailure(IFT_SUCCESSFULLY_INITIALIZED);
   return true;
 }
 
@@ -342,7 +301,10 @@ bool VTVideoDecodeAccelerator::Initialize(
   if (!decoder_thread_.Start())
     return false;
 
-  ReportSessionFailure(SFT_SUCCESSFULLY_INITIALIZED);
+  // Count the session as successfully initialized.
+  UMA_HISTOGRAM_ENUMERATION("Media.VTVDA.SessionFailureReason",
+                            SFT_SUCCESSFULLY_INITIALIZED,
+                            SFT_MAX + 1);
   return true;
 }
 
@@ -351,9 +313,8 @@ bool VTVideoDecodeAccelerator::FinishDelayedFrames() {
   if (session_) {
     OSStatus status = VTDecompressionSessionWaitForAsynchronousFrames(session_);
     if (status) {
-      ReportSessionFailure(SFT_PLATFORM_ERROR);
       NOTIFY_STATUS("VTDecompressionSessionWaitForAsynchronousFrames()",
-                    status);
+                    status, SFT_PLATFORM_ERROR);
       return false;
     }
   }
@@ -390,9 +351,8 @@ bool VTVideoDecodeAccelerator::ConfigureDecoder() {
       kNALUHeaderLength,          // nal_unit_header_length
       format_.InitializeInto());
   if (status) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
     NOTIFY_STATUS("CMVideoFormatDescriptionCreateFromH264ParameterSets()",
-                  status);
+                  status, SFT_PLATFORM_ERROR);
     return false;
   }
 
@@ -415,9 +375,8 @@ bool VTVideoDecodeAccelerator::ConfigureDecoder() {
           &kCFTypeDictionaryKeyCallBacks,
           &kCFTypeDictionaryValueCallBacks));
   if (!decoder_config.get()) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
     DLOG(ERROR) << "Failed to create CFMutableDictionary.";
-    NotifyError(PLATFORM_FAILURE);
+    NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
     return false;
   }
 
@@ -430,9 +389,8 @@ bool VTVideoDecodeAccelerator::ConfigureDecoder() {
   base::ScopedCFTypeRef<CFMutableDictionaryRef> image_config(
       BuildImageConfig(coded_dimensions));
   if (!image_config.get()) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
     DLOG(ERROR) << "Failed to create decoder image configuration.";
-    NotifyError(PLATFORM_FAILURE);
+    NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
     return false;
   }
 
@@ -450,8 +408,8 @@ bool VTVideoDecodeAccelerator::ConfigureDecoder() {
       &callback_,           // output_callback
       session_.InitializeInto());
   if (status) {
-    ReportSessionFailure(SFT_UNSUPPORTED_STREAM);
-    NOTIFY_STATUS("VTDecompressionSessionCreate()", status);
+    NOTIFY_STATUS("VTDecompressionSessionCreate()", status,
+                  SFT_UNSUPPORTED_STREAM_PARAMETERS);
     return false;
   }
 
@@ -480,9 +438,8 @@ void VTVideoDecodeAccelerator::DecodeTask(
   base::SharedMemory memory(bitstream.handle(), true);
   size_t size = bitstream.size();
   if (!memory.Map(size)) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
     DLOG(ERROR) << "Failed to map bitstream buffer";
-    NotifyError(PLATFORM_FAILURE);
+    NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
     return;
   }
   const uint8_t* buf = static_cast<uint8_t*>(memory.memory());
@@ -503,10 +460,14 @@ void VTVideoDecodeAccelerator::DecodeTask(
     media::H264Parser::Result result = parser_.AdvanceToNextNALU(&nalu);
     if (result == media::H264Parser::kEOStream)
       break;
+    if (result == media::H264Parser::kUnsupportedStream) {
+      DLOG(ERROR) << "Unsupported H.264 stream";
+      NotifyError(PLATFORM_FAILURE, SFT_UNSUPPORTED_STREAM);
+      return;
+    }
     if (result != media::H264Parser::kOk) {
-      ReportSessionFailure(SFT_INVALID_STREAM);
-      DLOG(ERROR) << "Failed to find H.264 NALU";
-      NotifyError(UNREADABLE_INPUT);
+      DLOG(ERROR) << "Failed to parse H.264 stream";
+      NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
       return;
     }
     switch (nalu.nal_unit_type) {
@@ -514,10 +475,15 @@ void VTVideoDecodeAccelerator::DecodeTask(
         last_sps_.assign(nalu.data, nalu.data + nalu.size);
         last_spsext_.clear();
         config_changed = true;
-        if (parser_.ParseSPS(&last_sps_id_) != media::H264Parser::kOk) {
-          ReportSessionFailure(SFT_INVALID_STREAM);
+        result = parser_.ParseSPS(&last_sps_id_);
+        if (result == media::H264Parser::kUnsupportedStream) {
+          DLOG(ERROR) << "Unsupported SPS";
+          NotifyError(PLATFORM_FAILURE, SFT_UNSUPPORTED_STREAM);
+          return;
+        }
+        if (result != media::H264Parser::kOk) {
           DLOG(ERROR) << "Could not parse SPS";
-          NotifyError(UNREADABLE_INPUT);
+          NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
           return;
         }
         break;
@@ -531,10 +497,15 @@ void VTVideoDecodeAccelerator::DecodeTask(
       case media::H264NALU::kPPS:
         last_pps_.assign(nalu.data, nalu.data + nalu.size);
         config_changed = true;
-        if (parser_.ParsePPS(&last_pps_id_) != media::H264Parser::kOk) {
-          ReportSessionFailure(SFT_INVALID_STREAM);
+        result = parser_.ParsePPS(&last_pps_id_);
+        if (result == media::H264Parser::kUnsupportedStream) {
+          DLOG(ERROR) << "Unsupported PPS";
+          NotifyError(PLATFORM_FAILURE, SFT_UNSUPPORTED_STREAM);
+          return;
+        }
+        if (result != media::H264Parser::kOk) {
           DLOG(ERROR) << "Could not parse PPS";
-          NotifyError(UNREADABLE_INPUT);
+          NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
           return;
         }
         break;
@@ -552,10 +523,14 @@ void VTVideoDecodeAccelerator::DecodeTask(
         if (!has_slice) {
           media::H264SliceHeader slice_hdr;
           result = parser_.ParseSliceHeader(nalu, &slice_hdr);
+          if (result == media::H264Parser::kUnsupportedStream) {
+            DLOG(ERROR) << "Unsupported slice header";
+            NotifyError(PLATFORM_FAILURE, SFT_UNSUPPORTED_STREAM);
+            return;
+          }
           if (result != media::H264Parser::kOk) {
-            ReportSessionFailure(SFT_INVALID_STREAM);
             DLOG(ERROR) << "Could not parse slice header";
-            NotifyError(UNREADABLE_INPUT);
+            NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
             return;
           }
 
@@ -565,25 +540,22 @@ void VTVideoDecodeAccelerator::DecodeTask(
           const media::H264PPS* pps =
               parser_.GetPPS(slice_hdr.pic_parameter_set_id);
           if (!pps) {
-            ReportSessionFailure(SFT_INVALID_STREAM);
             DLOG(ERROR) << "Mising PPS referenced by slice";
-            NotifyError(UNREADABLE_INPUT);
+            NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
             return;
           }
 
           DCHECK_EQ(pps->seq_parameter_set_id, last_sps_id_);
           const media::H264SPS* sps = parser_.GetSPS(pps->seq_parameter_set_id);
           if (!sps) {
-            ReportSessionFailure(SFT_INVALID_STREAM);
             DLOG(ERROR) << "Mising SPS referenced by PPS";
-            NotifyError(UNREADABLE_INPUT);
+            NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
             return;
           }
 
           if (!poc_.ComputePicOrderCnt(sps, slice_hdr, &frame->pic_order_cnt)) {
-            ReportSessionFailure(SFT_INVALID_STREAM);
             DLOG(ERROR) << "Unable to compute POC";
-            NotifyError(UNREADABLE_INPUT);
+            NotifyError(UNREADABLE_INPUT, SFT_INVALID_STREAM);
             return;
           }
 
@@ -607,9 +579,8 @@ void VTVideoDecodeAccelerator::DecodeTask(
   // select from them using the slice header.
   if (config_changed) {
     if (last_sps_.size() == 0 || last_pps_.size() == 0) {
-      ReportSessionFailure(SFT_INVALID_STREAM);
       DLOG(ERROR) << "Invalid configuration data";
-      NotifyError(INVALID_ARGUMENT);
+      NotifyError(INVALID_ARGUMENT, SFT_INVALID_STREAM);
       return;
     }
     if (!ConfigureDecoder())
@@ -628,9 +599,8 @@ void VTVideoDecodeAccelerator::DecodeTask(
 
   // If the session is not configured by this point, fail.
   if (!session_) {
-    ReportSessionFailure(SFT_INVALID_STREAM);
     DLOG(ERROR) << "Configuration data missing";
-    NotifyError(INVALID_ARGUMENT);
+    NotifyError(INVALID_ARGUMENT, SFT_INVALID_STREAM);
     return;
   }
 
@@ -651,8 +621,8 @@ void VTVideoDecodeAccelerator::DecodeTask(
       0,                    // flags
       data.InitializeInto());
   if (status) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
-    NOTIFY_STATUS("CMBlockBufferCreateWithMemoryBlock()", status);
+    NOTIFY_STATUS("CMBlockBufferCreateWithMemoryBlock()", status,
+                  SFT_PLATFORM_ERROR);
     return;
   }
 
@@ -664,15 +634,15 @@ void VTVideoDecodeAccelerator::DecodeTask(
     status = CMBlockBufferReplaceDataBytes(
         &header, data, offset, kNALUHeaderLength);
     if (status) {
-      ReportSessionFailure(SFT_PLATFORM_ERROR);
-      NOTIFY_STATUS("CMBlockBufferReplaceDataBytes()", status);
+      NOTIFY_STATUS("CMBlockBufferReplaceDataBytes()", status,
+                    SFT_PLATFORM_ERROR);
       return;
     }
     offset += kNALUHeaderLength;
     status = CMBlockBufferReplaceDataBytes(nalu.data, data, offset, nalu.size);
     if (status) {
-      ReportSessionFailure(SFT_PLATFORM_ERROR);
-      NOTIFY_STATUS("CMBlockBufferReplaceDataBytes()", status);
+      NOTIFY_STATUS("CMBlockBufferReplaceDataBytes()", status,
+                    SFT_PLATFORM_ERROR);
       return;
     }
     offset += nalu.size;
@@ -694,8 +664,7 @@ void VTVideoDecodeAccelerator::DecodeTask(
       nullptr,              // &sample_size_array
       sample.InitializeInto());
   if (status) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
-    NOTIFY_STATUS("CMSampleBufferCreate()", status);
+    NOTIFY_STATUS("CMSampleBufferCreate()", status, SFT_PLATFORM_ERROR);
     return;
   }
 
@@ -713,8 +682,8 @@ void VTVideoDecodeAccelerator::DecodeTask(
       reinterpret_cast<void*>(frame),         // source_frame_refcon
       nullptr);                               // &info_flags_out
   if (status) {
-    ReportSessionFailure(SFT_DECODE_ERROR);
-    NOTIFY_STATUS("VTDecompressionSessionDecodeFrame()", status);
+    NOTIFY_STATUS("VTDecompressionSessionDecodeFrame()", status,
+                  SFT_DECODE_ERROR);
     return;
   }
 }
@@ -725,8 +694,7 @@ void VTVideoDecodeAccelerator::Output(
     OSStatus status,
     CVImageBufferRef image_buffer) {
   if (status) {
-    ReportSessionFailure(SFT_DECODE_ERROR);
-    NOTIFY_STATUS("Decoding", status);
+    NOTIFY_STATUS("Decoding", status, SFT_DECODE_ERROR);
     return;
   }
 
@@ -739,9 +707,8 @@ void VTVideoDecodeAccelerator::Output(
   // smoothly handle NULL as a dropped frame, we choose to fail permanantly here
   // until the issue is better understood.
   if (!image_buffer || CFGetTypeID(image_buffer) != CVPixelBufferGetTypeID()) {
-    ReportSessionFailure(SFT_DECODE_ERROR);
     DLOG(ERROR) << "Decoded frame is not a CVPixelBuffer";
-    NotifyError(PLATFORM_FAILURE);
+    NotifyError(PLATFORM_FAILURE, SFT_DECODE_ERROR);
     return;
   }
 
@@ -894,9 +861,8 @@ bool VTVideoDecodeAccelerator::ProcessTaskQueue() {
       return false;
 
     case TASK_DESTROY:
-      ReportSessionFailure(SFT_PLATFORM_ERROR);
       NOTREACHED() << "Can't destroy while in STATE_DECODING.";
-      NotifyError(ILLEGAL_STATE);
+      NotifyError(ILLEGAL_STATE, SFT_PLATFORM_ERROR);
       return false;
   }
 }
@@ -972,9 +938,8 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
   IOSurfaceRef surface = CVPixelBufferGetIOSurface(frame.image.get());
 
   if (!make_context_current_.Run()) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
     DLOG(ERROR) << "Failed to make GL context current";
-    NotifyError(PLATFORM_FAILURE);
+    NotifyError(PLATFORM_FAILURE, SFT_PLATFORM_ERROR);
     return false;
   }
 
@@ -992,8 +957,7 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
       surface,                      // io_surface
       0);                           // plane
   if (status != kCGLNoError) {
-    ReportSessionFailure(SFT_PLATFORM_ERROR);
-    NOTIFY_STATUS("CGLTexImageIOSurface2D()", status);
+    NOTIFY_STATUS("CGLTexImageIOSurface2D()", status, SFT_PLATFORM_ERROR);
     return false;
   }
   glDisable(GL_TEXTURE_RECTANGLE_ARB);
@@ -1005,13 +969,20 @@ bool VTVideoDecodeAccelerator::SendFrame(const Frame& frame) {
   return true;
 }
 
-void VTVideoDecodeAccelerator::NotifyError(Error error) {
+void VTVideoDecodeAccelerator::NotifyError(
+    Error vda_error_type,
+    VTVDASessionFailureType session_failure_type) {
+  DCHECK_LT(session_failure_type, SFT_MAX + 1);
   if (!gpu_thread_checker_.CalledOnValidThread()) {
     gpu_task_runner_->PostTask(FROM_HERE, base::Bind(
-        &VTVideoDecodeAccelerator::NotifyError, weak_this_, error));
+        &VTVideoDecodeAccelerator::NotifyError, weak_this_, vda_error_type,
+        session_failure_type));
   } else if (state_ == STATE_DECODING) {
     state_ = STATE_ERROR;
-    client_->NotifyError(error);
+    UMA_HISTOGRAM_ENUMERATION("Media.VTVDA.SessionFailureReason",
+                              session_failure_type,
+                              SFT_MAX + 1);
+    client_->NotifyError(vda_error_type);
   }
 }
 

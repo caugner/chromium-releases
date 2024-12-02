@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/history/history_backend.h"
+#include "components/history/core/browser/history_backend.h"
 
 #include <algorithm>
 #include <set>
@@ -22,19 +22,19 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/history/content_visit_delegate.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/favicon_base/favicon_usage_data.h"
+#include "components/history/content/browser/content_visit_delegate.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/in_memory_database.h"
+#include "components/history/core/browser/in_memory_history_backend.h"
 #include "components/history/core/browser/keyword_search_term.h"
 #include "components/history/core/browser/visit_filter.h"
 #include "components/history/core/test/history_client_fake_bookmarks.h"
@@ -250,8 +250,8 @@ class HistoryBackendTestBase : public testing::Test {
     if (!base::CreateNewTempDirectory(FILE_PATH_LITERAL("BackendTest"),
                                       &test_dir_))
       return;
-    backend_ = new HistoryBackend(
-        test_dir_, new HistoryBackendTestDelegate(this), &history_client_);
+    backend_ = new HistoryBackend(new HistoryBackendTestDelegate(this),
+                                  &history_client_);
     backend_->Init(std::string(), false,
                    TestHistoryDatabaseParamsForPath(test_dir_));
   }
@@ -888,6 +888,17 @@ TEST_F(HistoryBackendTest, KeywordGenerated) {
   backend_->db()->GetVisibleVisitsInRange(query_options, &visits);
   EXPECT_TRUE(visits.empty());
 
+  // Going back to the same entry should not increment the typed count.
+  ui::PageTransition back_transition = ui::PageTransitionFromInt(
+      ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FORWARD_BACK);
+  HistoryAddPageArgs back_request(url, visit_time, NULL, 0, GURL(),
+                                  history::RedirectList(), back_transition,
+                                  history::SOURCE_BROWSED, false);
+  backend_->AddPage(back_request);
+  url_id = backend_->db()->GetRowForURL(url, &row);
+  ASSERT_NE(0, url_id);
+  ASSERT_EQ(1, row.typed_count());
+
   // Expire the visits.
   std::set<GURL> restrict_urls;
   backend_->expire_backend()->ExpireHistoryBetween(restrict_urls,
@@ -1200,6 +1211,81 @@ TEST_F(HistoryBackendTest, StripUsernamePasswordTest) {
 
   // Check if stripped url is stored in database.
   ASSERT_EQ(1U, visits.size());
+}
+
+TEST_F(HistoryBackendTest, AddPageVisitBackForward) {
+  ASSERT_TRUE(backend_.get());
+
+  GURL url("http://www.google.com");
+
+  // Clear all history.
+  backend_->DeleteAllHistory();
+
+  // Visit the url after typing it.
+  backend_->AddPageVisit(url, base::Time::Now(), 0,
+      ui::PAGE_TRANSITION_TYPED,
+      history::SOURCE_BROWSED);
+
+  // Ensure both the typed count and visit count are 1.
+  VisitVector visits;
+  URLRow row;
+  URLID id = backend_->db()->GetRowForURL(url, &row);
+  ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
+  EXPECT_EQ(1, row.typed_count());
+  EXPECT_EQ(1, row.visit_count());
+
+  // Visit the url again via back/forward.
+  backend_->AddPageVisit(url, base::Time::Now(), 0,
+      ui::PageTransitionFromInt(
+          ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_FORWARD_BACK),
+      history::SOURCE_BROWSED);
+
+  // Ensure the typed count is still 1 but the visit count is 2.
+  id = backend_->db()->GetRowForURL(url, &row);
+  ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
+  EXPECT_EQ(1, row.typed_count());
+  EXPECT_EQ(2, row.visit_count());
+}
+
+TEST_F(HistoryBackendTest, AddPageVisitRedirectBackForward) {
+  ASSERT_TRUE(backend_.get());
+
+  GURL url1("http://www.google.com");
+  GURL url2("http://www.chromium.org");
+
+  // Clear all history.
+  backend_->DeleteAllHistory();
+
+  // Visit a typed URL with a redirect.
+  backend_->AddPageVisit(url1, base::Time::Now(), 0,
+      ui::PAGE_TRANSITION_TYPED,
+      history::SOURCE_BROWSED);
+  backend_->AddPageVisit(url2, base::Time::Now(), 0,
+      ui::PageTransitionFromInt(
+          ui::PAGE_TRANSITION_TYPED | ui::PAGE_TRANSITION_CLIENT_REDIRECT),
+      history::SOURCE_BROWSED);
+
+  // Ensure the redirected URL does not count as typed.
+  VisitVector visits;
+  URLRow row;
+  URLID id = backend_->db()->GetRowForURL(url2, &row);
+  ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
+  EXPECT_EQ(0, row.typed_count());
+  EXPECT_EQ(1, row.visit_count());
+
+  // Visit the redirected url again via back/forward.
+  backend_->AddPageVisit(url2, base::Time::Now(), 0,
+      ui::PageTransitionFromInt(
+          ui::PAGE_TRANSITION_TYPED |
+          ui::PAGE_TRANSITION_FORWARD_BACK |
+          ui::PAGE_TRANSITION_CLIENT_REDIRECT),
+      history::SOURCE_BROWSED);
+
+  // Ensure the typed count is still 1 but the visit count is 2.
+  id = backend_->db()->GetRowForURL(url2, &row);
+  ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
+  EXPECT_EQ(0, row.typed_count());
+  EXPECT_EQ(2, row.visit_count());
 }
 
 TEST_F(HistoryBackendTest, AddPageVisitSource) {
@@ -1564,8 +1650,8 @@ TEST_F(HistoryBackendTest, MigrationVisitSource) {
   base::FilePath new_history_file = new_history_path.Append(kHistoryFilename);
   ASSERT_TRUE(base::CopyFile(old_history_path, new_history_file));
 
-  backend_ = new HistoryBackend(
-      new_history_path, new HistoryBackendTestDelegate(this), &history_client_);
+  backend_ = new HistoryBackend(new HistoryBackendTestDelegate(this),
+                                &history_client_);
   backend_->Init(std::string(), false,
                  TestHistoryDatabaseParamsForPath(new_history_path));
   backend_->Closing();
@@ -1732,9 +1818,9 @@ TEST_F(HistoryBackendTest, SetFaviconsDeleteBitmaps) {
   scoped_refptr<base::RefCountedMemory> bitmap_data_out;
   gfx::Size pixel_size_out;
   EXPECT_FALSE(backend_->thumbnail_db_->GetFaviconBitmap(small_bitmap_id,
-      NULL, &bitmap_data_out, &pixel_size_out));
+      NULL, NULL, &bitmap_data_out, &pixel_size_out));
   EXPECT_TRUE(backend_->thumbnail_db_->GetFaviconBitmap(large_bitmap_id,
-      NULL, &bitmap_data_out, &pixel_size_out));
+      NULL, NULL, &bitmap_data_out, &pixel_size_out));
   EXPECT_TRUE(BitmapColorEqual(SK_ColorWHITE, bitmap_data_out));
   EXPECT_EQ(kLargeSize, pixel_size_out);
 
@@ -2817,8 +2903,8 @@ TEST_F(HistoryBackendTest, MigrationVisitDuration) {
   base::FilePath new_history_file = new_history_path.Append(kHistoryFilename);
   ASSERT_TRUE(base::CopyFile(old_history, new_history_file));
 
-  backend_ = new HistoryBackend(
-      new_history_path, new HistoryBackendTestDelegate(this), &history_client_);
+  backend_ = new HistoryBackend(new HistoryBackendTestDelegate(this),
+                                &history_client_);
   backend_->Init(std::string(), false,
                  TestHistoryDatabaseParamsForPath(new_history_path));
   backend_->Closing();

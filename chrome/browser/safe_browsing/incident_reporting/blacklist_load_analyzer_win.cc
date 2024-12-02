@@ -13,11 +13,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/install_verification/win/module_info.h"
 #include "chrome/browser/install_verification/win/module_verification_common.h"
-#include "chrome/browser/safe_browsing/binary_feature_extractor.h"
 #include "chrome/browser/safe_browsing/incident_reporting/blacklist_load_incident.h"
 #include "chrome/browser/safe_browsing/incident_reporting/incident_receiver.h"
 #include "chrome/browser/safe_browsing/path_sanitizer.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome_elf/blacklist/blacklist.h"
 
@@ -92,8 +92,13 @@ void VerifyBlacklistLoadState(scoped_ptr<IncidentReceiver> incident_receiver) {
                           base::TimeTicks::Now() - start_time);
 
       // Image headers.
-      binary_feature_extractor->ExtractImageHeaders(
-          module_path, blacklist_load->mutable_image_headers());
+      if (!binary_feature_extractor->ExtractImageFeatures(
+              module_path,
+              BinaryFeatureExtractor::kDefaultOptions,
+              blacklist_load->mutable_image_headers(),
+              nullptr /* signed_data */)) {
+        blacklist_load->clear_image_headers();
+      }
 
       // Send the report.
       incident_receiver->AddIncidentForProcess(

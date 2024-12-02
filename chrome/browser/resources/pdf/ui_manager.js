@@ -35,9 +35,7 @@ UiManager.prototype = {
     for (var i = 0; i < this.panes_.length; i++)
       this.panes_[i].showIfOpenedByUser();
 
-    if (this.uiTimeout_)
-      clearTimeout(this.uiTimeout_);
-    this.uiTimeout_ = setTimeout(this.hideUi_.bind(this), HIDE_TIMEOUT);
+    this.hideUiAfterTimeout();
   },
 
   /**
@@ -45,10 +43,17 @@ UiManager.prototype = {
    * Hide the toolbar and any pane that was previously opened.
    */
   hideUi_: function() {
-    if (this.window_.scrollY !== 0) {
-      this.toolbar_.hide();
-      for (var i = 0; i < this.panes_.length; i++)
-        this.panes_[i].hideIfOpenedByUser();
-    }
+    this.toolbar_.hide();
+    for (var i = 0; i < this.panes_.length; i++)
+      this.panes_[i].hideIfOpenedByUser();
+  },
+
+  /**
+   * Hide the toolbar after the HIDE_TIMEOUT has elapsed.
+   */
+  hideUiAfterTimeout: function() {
+    if (this.uiTimeout_)
+      clearTimeout(this.uiTimeout_);
+    this.uiTimeout_ = setTimeout(this.hideUi_.bind(this), HIDE_TIMEOUT);
   }
 };

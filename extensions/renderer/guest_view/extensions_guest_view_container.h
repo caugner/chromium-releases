@@ -11,7 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "extensions/renderer/guest_view/guest_view_container.h"
-#include "extensions/renderer/scoped_persistent.h"
+#include "v8/include/v8.h"
 
 namespace gfx {
 class Size;
@@ -32,6 +32,9 @@ class ExtensionsGuestViewContainer : public GuestViewContainer {
     virtual void PerformRequest() = 0;
     virtual void HandleResponse(const IPC::Message& message) = 0;
 
+    void ExecuteCallbackIfAvailable(int argc,
+                                    scoped_ptr<v8::Handle<v8::Value>[]> argv);
+
     GuestViewContainer* container() const { return container_; }
 
     bool HasCallback() const;
@@ -42,7 +45,7 @@ class ExtensionsGuestViewContainer : public GuestViewContainer {
 
    private:
     GuestViewContainer* container_;
-    ScopedPersistent<v8::Function> callback_;
+    v8::Global<v8::Function> callback_;
     v8::Isolate* const isolate_;
   };
 
@@ -99,6 +102,8 @@ class ExtensionsGuestViewContainer : public GuestViewContainer {
  private:
   void OnHandleCallback(const IPC::Message& message);
 
+  void CallElementResizeCallback(const gfx::Size& old_size,
+                                 const gfx::Size& new_size);
   void EnqueueRequest(linked_ptr<Request> request);
   void PerformPendingRequest();
   void HandlePendingResponseCallback(const IPC::Message& message);
@@ -108,11 +113,14 @@ class ExtensionsGuestViewContainer : public GuestViewContainer {
   std::deque<linked_ptr<Request> > pending_requests_;
   linked_ptr<Request> pending_response_;
 
-  ScopedPersistent<v8::Function> destruction_callback_;
+  v8::Global<v8::Function> destruction_callback_;
   v8::Isolate* destruction_isolate_;
 
-  ScopedPersistent<v8::Function> element_resize_callback_;
+  v8::Global<v8::Function> element_resize_callback_;
   v8::Isolate* element_resize_isolate_;
+
+  // Weak pointer factory used for calling the element resize callback.
+  base::WeakPtrFactory<ExtensionsGuestViewContainer> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionsGuestViewContainer);
 };

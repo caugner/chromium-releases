@@ -3,6 +3,7 @@
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/> এর জন্য একটি অ্যাকাউন্ট যোগ করুন</translation>
 <translation id="1270290102613614947">অন-স্ক্রীন কীবোর্ড অক্ষম করা রয়েছে</translation>
 <translation id="1057289296854808272">ঘূর্ণন চালু (পরিবর্তন করতে এখানে আলতো চাপুন)</translation>
+<translation id="5548285847212963613">&quot;<ph name="EXTENSION_NAME"/>&quot; এক্সটেনশানটি এই নেটওয়ার্কের সাথে সংযোগ স্থাপন করতে সাহায্য করতে পারে৷</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> এবং <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">ওভারফ্লো বোতাম</translation>
 <translation id="7904094684485781019">এই অ্যাকাউন্টের প্রশাসক একাধিক সাইন ইন অননুমোদিত করেছেন৷</translation>
@@ -61,6 +62,7 @@
 <translation id="1723752762323179280">সেশন থেকে প্রস্থান করা হচ্ছে</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">হ্যাঁ</translation>
+<translation id="4804818685124855865">সংযোগ বিচ্ছিন্ন</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">সাইন আউট</translation>
 <translation id="2391579633712104609">১৮০°</translation>
@@ -130,7 +132,6 @@
 <translation id="2761704814324807722">স্থিতি ট্রে, সময় <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">লক করুন</translation>
 <translation id="2805756323405976993">অ্যাপ্স</translation>
-<translation id="2313845391432982560">&quot;<ph name="EXTENSION_NAME"/>&quot; এক্সটেনশানটি এই নেটওয়ার্কটিকে কনফিগার করতে পারে৷</translation>
 <translation id="2872961005593481000">বন্ধ করুন</translation>
 <translation id="3433830597744061105">অ্যাকাউন্টগুলি পরিচালনা করুন</translation>
 <translation id="742594950370306541">ক্যামেরা ব্যবহার করা হচ্ছে।</translation>

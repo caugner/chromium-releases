@@ -39,6 +39,7 @@ component("system") {
     "channel_manager.h",
     "configuration.cc",
     "configuration.h",
+    "connection_manager.cc",
     "connection_manager.h",
     "core.cc",
     "core.h",
@@ -46,6 +47,8 @@ component("system") {
     "data_pipe.h",
     "data_pipe_consumer_dispatcher.cc",
     "data_pipe_consumer_dispatcher.h",
+    "data_pipe_impl.cc",
+    "data_pipe_impl.h",
     "data_pipe_producer_dispatcher.cc",
     "data_pipe_producer_dispatcher.h",
     "dispatcher.cc",
@@ -57,8 +60,8 @@ component("system") {
     "handle_table.h",
     "incoming_endpoint.cc",
     "incoming_endpoint.h",
-    "local_data_pipe.cc",
-    "local_data_pipe.h",
+    "local_data_pipe_impl.cc",
+    "local_data_pipe_impl.h",
     "local_message_pipe_endpoint.cc",
     "local_message_pipe_endpoint.h",
     "mapping_table.cc",
@@ -86,6 +89,11 @@ component("system") {
     "raw_channel.h",
     "raw_channel_posix.cc",
     "raw_channel_win.cc",
+    "remote_consumer_data_pipe_impl.cc",
+    "remote_consumer_data_pipe_impl.h",
+    "remote_data_pipe_ack.h",
+    "remote_producer_data_pipe_impl.cc",
+    "remote_producer_data_pipe_impl.h",
     "shared_buffer_dispatcher.cc",
     "shared_buffer_dispatcher.h",
     "simple_dispatcher.cc",
@@ -117,7 +125,6 @@ component("system") {
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
-    "//crypto",
   ]
 
   allow_circular_includes_from = [ "../embedder" ]
@@ -142,6 +149,7 @@ mojo_edk_source_set("test_utils") {
   deps = [
     "//base",
     "//base/test:test_support",
+    "../../public/c/system",
   ]
 }
 
@@ -156,9 +164,9 @@ test("mojo_system_unittests") {
     "core_test_base.cc",
     "core_test_base.h",
     "core_unittest.cc",
+    "data_pipe_impl_unittest.cc",
     "data_pipe_unittest.cc",
     "dispatcher_unittest.cc",
-    "local_data_pipe_unittest.cc",
     "memory_unittest.cc",
     "message_pipe_dispatcher_unittest.cc",
     "message_pipe_test_utils.cc",
@@ -168,6 +176,7 @@ test("mojo_system_unittests") {
     "options_validation_unittest.cc",
     "platform_handle_dispatcher_unittest.cc",
     "raw_channel_unittest.cc",
+    "remote_data_pipe_impl_unittest.cc",
     "remote_message_pipe_unittest.cc",
     "run_all_unittests.cc",
     "shared_buffer_dispatcher_unittest.cc",
@@ -194,8 +203,8 @@ test("mojo_system_unittests") {
 test("mojo_message_pipe_perftests") {
   sources = [
     "message_pipe_perftest.cc",
-    "message_pipe_test_utils.h",
     "message_pipe_test_utils.cc",
+    "message_pipe_test_utils.h",
   ]
 
   deps = [

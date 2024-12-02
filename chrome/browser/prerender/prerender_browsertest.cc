@@ -311,10 +311,8 @@ class NavigationOrSwapObserver : public WebContentsObserver,
   }
 
   // WebContentsObserver implementation:
-  void DidStartLoading(RenderViewHost* render_view_host) override {
-    did_start_loading_ = true;
-  }
-  void DidStopLoading(RenderViewHost* render_view_host) override {
+  void DidStartLoading() override { did_start_loading_ = true; }
+  void DidStopLoading() override {
     if (!did_start_loading_)
       return;
     number_of_loads_--;
@@ -1090,16 +1088,8 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
         prefs::kNetworkPredictionOptions, value);
   }
 
-  void CreateTestFieldTrial(const std::string& name,
-                            const std::string& group_name) {
-    base::FieldTrial* trial = base::FieldTrialList::CreateFieldTrial(
-        name, group_name);
-    trial->group();
-  }
-
-  // Verifies, for the current field trial, whether
-  // ShouldDisableLocalPredictorDueToPreferencesAndNetwork produces the desired
-  // output.
+  // Verifies whether ShouldDisableLocalPredictorDueToPreferencesAndNetwork
+  // produces the desired output.
   void TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
       bool preference_wifi_network_wifi,
       bool preference_wifi_network_4g,
@@ -1216,12 +1206,6 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
                          expected_number_of_loads).release(&prerenders);
     CHECK_EQ(1u, prerenders.size());
     return scoped_ptr<TestPrerender>(prerenders[0]);
-  }
-
-  // Navigates to a URL, unrelated to prerendering
-  void NavigateStraightToURL(const std::string dest_html_file) {
-    ui_test_utils::NavigateToURL(current_browser(),
-                                 test_server()->GetURL(dest_html_file));
   }
 
   void NavigateToDestURL() const {
@@ -1580,22 +1564,6 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
                                       base::ASCIIToUTF16(page_title));
   }
 
-  void RunJSReturningString(const char* js, std::string* result) {
-    ASSERT_TRUE(
-        content::ExecuteScriptAndExtractString(
-            GetActiveWebContents(),
-            base::StringPrintf("window.domAutomationController.send(%s)",
-                               js).c_str(),
-            result));
-  }
-
-  void RunJS(const char* js) {
-    ASSERT_TRUE(content::ExecuteScript(
-        GetActiveWebContents(),
-        base::StringPrintf("window.domAutomationController.send(%s)",
-                           js).c_str()));
-  }
-
   const base::HistogramTester& histogram_tester() { return histogram_tester_; }
 
  protected:
@@ -1750,7 +1718,6 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
   std::string loader_query_;
   Browser* explicitly_set_browser_;
   base::HistogramTester histogram_tester_;
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
 };
 
 // Checks that a page is correctly prerendered in the case of a
@@ -4015,103 +3982,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderPPLTNormalNavigation) {
       "Prerender.none_PerceivedPLTMatchedComplete", 0);
 }
 
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       PrerenderCookieChangeConflictTest) {
-  NavigateStraightToURL(
-      "files/prerender/prerender_cookie.html?set=1&key=c&value=1");
-
-  GURL url = test_server()->GetURL(
-      "files/prerender/prerender_cookie.html?set=1&key=c&value=2");
-
-  scoped_ptr<TestPrerender> prerender =
-      ExpectPrerender(FINAL_STATUS_COOKIE_CONFLICT);
-  AddPrerender(url, 1);
-  prerender->WaitForStart();
-  prerender->WaitForLoads(1);
-  // Ensure that in the prerendered page, querying the cookie again
-  // via javascript yields the same value that was set during load.
-  EXPECT_TRUE(DidPrerenderPass(prerender->contents()->prerender_contents()));
-
-  // The prerender has loaded. Ensure that the change is not visible
-  // to visible tabs.
-  std::string value;
-  RunJSReturningString("GetCookie('c')", &value);
-  ASSERT_EQ(value, "1");
-
-  // Make a conflicting cookie change, which should cancel the prerender.
-  RunJS("SetCookie('c', '3')");
-  prerender->WaitForStop();
-}
-
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderCookieChangeUseTest) {
-  // Permit 2 concurrent prerenders.
-  GetPrerenderManager()->mutable_config().max_link_concurrency = 2;
-  GetPrerenderManager()->mutable_config().max_link_concurrency_per_launcher = 2;
-
-  // Go to a first URL setting the cookie to value "1".
-  NavigateStraightToURL(
-      "files/prerender/prerender_cookie.html?set=1&key=c&value=1");
-
-  // Prerender a URL setting the cookie to value "2".
-  GURL url = test_server()->GetURL(
-      "files/prerender/prerender_cookie.html?set=1&key=c&value=2");
-
-  scoped_ptr<TestPrerender> prerender1 = ExpectPrerender(FINAL_STATUS_USED);
-  AddPrerender(url, 1);
-  prerender1->WaitForStart();
-  prerender1->WaitForLoads(1);
-
-  // Launch a second prerender, setting the cookie to value "3".
-  scoped_ptr<TestPrerender> prerender2 =
-      ExpectPrerender(FINAL_STATUS_COOKIE_CONFLICT);
-  AddPrerender(test_server()->GetURL(
-      "files/prerender/prerender_cookie.html?set=1&key=c&value=3"), 1);
-  prerender2->WaitForStart();
-  prerender2->WaitForLoads(1);
-
-  // Both prerenders have loaded. Ensure that the visible tab is still
-  // unchanged and cannot see their changes.
-  // to visible tabs.
-  std::string value;
-  RunJSReturningString("GetCookie('c')", &value);
-  ASSERT_EQ(value, "1");
-
-  // Navigate to the prerendered URL. The first prerender should be swapped in,
-  // and the changes should now be visible. The second prerender should
-  // be cancelled due to the conflict.
-  ui_test_utils::NavigateToURLWithDisposition(
-      current_browser(),
-      url,
-      CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_NONE);
-  RunJSReturningString("GetCookie('c')", &value);
-  ASSERT_EQ(value, "2");
-  prerender2->WaitForStop();
-}
-
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       PrerenderCookieChangeConflictHTTPHeaderTest) {
-  NavigateStraightToURL(
-      "files/prerender/prerender_cookie.html?set=1&key=c&value=1");
-
-  GURL url = test_server()->GetURL("set-cookie?c=2");
-  scoped_ptr<TestPrerender> prerender =
-      ExpectPrerender(FINAL_STATUS_COOKIE_CONFLICT);
-  AddPrerender(url, 1);
-  prerender->WaitForStart();
-  prerender->WaitForLoads(1);
-
-  // The prerender has loaded. Ensure that the change is not visible
-  // to visible tabs.
-  std::string value;
-  RunJSReturningString("GetCookie('c')", &value);
-  ASSERT_EQ(value, "1");
-
-  // Make a conflicting cookie change, which should cancel the prerender.
-  RunJS("SetCookie('c', '3')");
-  prerender->WaitForStop();
-}
-
 // Checks that a prerender which calls window.close() on itself is aborted.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderWindowClose) {
   DisableLoadEventCheck();
@@ -4191,14 +4061,6 @@ class PrerenderOmniboxBrowserTest : public PrerenderBrowserTest {
 // http://crbug.com/395152
 IN_PROC_BROWSER_TEST_F(PrerenderOmniboxBrowserTest,
                        DISABLED_PrerenderOmniboxCancel) {
-  // Ensure the cookie store has been loaded.
-  if (!GetPrerenderManager()->cookie_store_loaded()) {
-    base::RunLoop loop;
-    GetPrerenderManager()->set_on_cookie_store_loaded_cb_for_testing(
-        loop.QuitClosure());
-    loop.Run();
-  }
-
   // Fake an omnibox prerender.
   scoped_ptr<TestPrerender> prerender = StartOmniboxPrerender(
       test_server()->GetURL("files/empty.html"),
@@ -4217,14 +4079,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderOmniboxBrowserTest,
   // flakiness if the prerender times out before the test completes.
   GetPrerenderManager()->mutable_config().abandon_time_to_live =
       base::TimeDelta::FromDays(999);
-
-  // Ensure the cookie store has been loaded.
-  if (!GetPrerenderManager()->cookie_store_loaded()) {
-    base::RunLoop loop;
-    GetPrerenderManager()->set_on_cookie_store_loaded_cb_for_testing(
-        loop.QuitClosure());
-    loop.Run();
-  }
 
   // Enter a URL into the Omnibox.
   OmniboxView* omnibox_view = GetOmniboxView();
@@ -4264,55 +4118,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
       false /*preference_always_network_4g*/,
       false /*preference_never_network_wifi*/,
       false /*preference_never_network_4g*/);
-}
-
-// Prefetch should be allowed depending on preference and network type.
-// LocalPredictorOnCellularOnly should disable all wifi cases.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       LocalPredictorDisableWorksCellularOnly) {
-  CreateTestFieldTrial("PrerenderLocalPredictorSpec",
-                       "LocalPredictorOnCellularOnly=Enabled");
-  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
-      true /*preference_wifi_network_wifi*/,
-      false /*preference_wifi_network_4g*/,
-      true /*preference_always_network_wifi*/,
-      false /*preference_always_network_4g*/,
-      true /*preference_never_network_wifi*/,
-      false /*preference_never_network_4g*/);
-}
-
-// Prefetch should be allowed depending on preference and network type.
-// LocalPredictorNetworkPredictionEnabledOnly should disable whenever
-// network predictions will not be exercised.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       LocalPredictorDisableWorksNetworkPredictionEnableOnly) {
-  CreateTestFieldTrial("PrerenderLocalPredictorSpec",
-                       "LocalPredictorNetworkPredictionEnabledOnly=Enabled");
-  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
-      false /*preference_wifi_network_wifi*/,
-      true /*preference_wifi_network_4g*/,
-      false /*preference_always_network_wifi*/,
-      false /*preference_always_network_4g*/,
-      true /*preference_never_network_wifi*/,
-      true /*preference_never_network_4g*/);
-}
-
-// Prefetch should be allowed depending on preference and network type.
-// If LocalPredictorNetworkPredictionEnabledOnly and
-// LocalPredictorOnCellularOnly are both selected, we must disable whenever
-// network predictions are not exercised, or when we are on wifi.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       LocalPredictorDisableWorksBothOptions) {
-  CreateTestFieldTrial("PrerenderLocalPredictorSpec",
-                       "LocalPredictorOnCellularOnly=Enabled:"
-                       "LocalPredictorNetworkPredictionEnabledOnly=Enabled");
-  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
-      true /*preference_wifi_network_wifi*/,
-      true /*preference_wifi_network_4g*/,
-      true /*preference_always_network_wifi*/,
-      false /*preference_always_network_4g*/,
-      true /*preference_never_network_wifi*/,
-      true /*preference_never_network_4g*/);
 }
 
 }  // namespace prerender

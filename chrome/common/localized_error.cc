@@ -4,6 +4,7 @@
 
 #include "chrome/common/localized_error.h"
 
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/strings/string16.h"
@@ -11,6 +12,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/error_page/common/error_page_params.h"
@@ -24,6 +26,11 @@
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "base/command_line.h"
+#include "chrome/common/chrome_switches.h"
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
@@ -129,6 +136,13 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_NAME_NOT_RESOLVED,
    SUGGEST_RELOAD | SUGGEST_CHECK_CONNECTION | SUGGEST_DNS_CONFIG |
        SUGGEST_FIREWALL_CONFIG | SUGGEST_PROXY_CONFIG,
+  },
+  {net::ERR_ICANN_NAME_COLLISION,
+   IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
+   IDS_ERRORPAGES_HEADING_NOT_AVAILABLE,
+   IDS_ERRORPAGES_SUMMARY_ICANN_NAME_COLLISION,
+   IDS_ERRORPAGES_DETAILS_ICANN_NAME_COLLISION,
+   SUGGEST_NONE,
   },
   {net::ERR_ADDRESS_UNREACHABLE,
    IDS_ERRORPAGES_TITLE_NOT_AVAILABLE,
@@ -508,7 +522,7 @@ void LocalizedError::GetStrings(int error_code,
                                 const std::string& error_domain,
                                 const GURL& failed_url,
                                 bool is_post,
-                                bool show_stale_load_button,
+                                bool stale_copy_in_cache,
                                 const std::string& locale,
                                 const std::string& accept_languages,
                                 scoped_ptr<error_page::ErrorPageParams> params,
@@ -566,6 +580,18 @@ void LocalizedError::GetStrings(int error_code,
       error_code == chrome_common_net::DNS_PROBE_FINISHED_NO_INTERNET) {
     error_strings->SetString("primaryParagraph",
         l10n_util::GetStringUTF16(options.summary_resource_id));
+
+#if defined(OS_CHROMEOS)
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+
+    // Check if easter egg should be disabled.
+    if (command_line->HasSwitch(switches::kDisableDinosaurEasterEgg)) {
+      // The prescence of this string disables the easter egg. Acts as a flag.
+      error_strings->SetString("disabledEasterEgg",
+          l10n_util::GetStringUTF16(IDS_ERRORPAGE_FUN_DISABLED));
+    }
+#endif
+
   } else {
     // Set summary message in the details.
     summary->SetString("msg",
@@ -688,14 +714,28 @@ void LocalizedError::GetStrings(int error_code,
   if (!use_default_suggestions)
     return;
 
-  if (show_stale_load_button) {
-    base::DictionaryValue* stale_load_button = new base::DictionaryValue;
-    stale_load_button->SetString(
-        "msg", l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_LOAD_STALE));
-    stale_load_button->SetString(
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  const std::string& show_saved_copy_value =
+      command_line->GetSwitchValueASCII(switches::kShowSavedCopy);
+  bool show_saved_copy_primary = (show_saved_copy_value ==
+      switches::kEnableShowSavedCopyPrimary);
+  bool show_saved_copy_secondary = (show_saved_copy_value ==
+      switches::kEnableShowSavedCopySecondary);
+  bool show_saved_copy_visible =
+      (stale_copy_in_cache && !is_post &&
+      (show_saved_copy_primary || show_saved_copy_secondary));
+
+  if (show_saved_copy_visible) {
+    base::DictionaryValue* show_saved_copy_button = new base::DictionaryValue;
+    show_saved_copy_button->SetString(
+        "msg", l10n_util::GetStringUTF16(
+            IDS_ERRORPAGES_BUTTON_SHOW_SAVED_COPY));
+    show_saved_copy_button->SetString(
         "title",
-        l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_LOAD_STALE_HELP));
-    error_strings->Set("staleLoadButton", stale_load_button);
+        l10n_util::GetStringUTF16(IDS_ERRORPAGES_BUTTON_SHOW_SAVED_COPY_HELP));
+    if (show_saved_copy_primary)
+      show_saved_copy_button->SetString("primary", "true");
+    error_strings->Set("showSavedCopyButton", show_saved_copy_button);
   }
 
 #if defined(OS_CHROMEOS)

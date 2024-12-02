@@ -34,25 +34,29 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   // to keep content always crisp when possible.
   settings.layer_transforms_should_scale_layer_contents = true;
 
-  cc::SharedBitmapManager* shared_bitmap_manager = NULL;
-  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = NULL;
+  cc::SharedBitmapManager* shared_bitmap_manager = nullptr;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = nullptr;
+  cc::TaskGraphRunner* task_graph_runner = nullptr;
 
   layer_tree_host_ =
       cc::LayerTreeHost::CreateThreaded(this,
                                         shared_bitmap_manager,
                                         gpu_memory_buffer_manager,
+                                        task_graph_runner,
                                         settings,
                                         base::MessageLoopProxy::current(),
                                         compositor_message_loop_proxy,
                                         nullptr);
   DCHECK(layer_tree_host_);
 
-  mojo::CommandBufferPtr cb;
-  gpu_service->CreateOffscreenGLES2Context(GetProxy(&cb));
-  scoped_refptr<cc::ContextProvider> context_provider(
-      new mojo::ContextProviderMojo(cb.PassMessagePipe()));
-  output_surface_.reset(
-      new mojo::OutputSurfaceMojo(this, context_provider, surface.Pass()));
+  if (surface && gpu_service) {
+    mojo::CommandBufferPtr cb;
+    gpu_service->CreateOffscreenGLES2Context(GetProxy(&cb));
+    scoped_refptr<cc::ContextProvider> context_provider(
+        new mojo::ContextProviderMojo(cb.PassMessagePipe()));
+    output_surface_.reset(
+        new mojo::OutputSurfaceMojo(this, context_provider, surface.Pass()));
+  }
   layer_tree_host_->SetLayerTreeHostClientReady();
 }
 

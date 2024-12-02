@@ -50,6 +50,10 @@ _NEGATIVE_FILTER = [
     # This test is flaky since it uses setTimeout.
     # Re-enable once crbug.com/177511 is fixed and we can remove setTimeout.
     'ChromeDriverTest.testAlert',
+    # This test is too flaky on the bots, but seems to run perfectly fine
+    # on developer workstations.
+    'ChromeDriverTest.testEmulateNetworkConditionsNameSpeed',
+    'ChromeDriverTest.testEmulateNetworkConditionsSpeed',
 ]
 
 _VERSION_SPECIFIC_FILTER = {}
@@ -154,6 +158,12 @@ _ANDROID_NEGATIVE_FILTER['chromedriver_webview_shell'] = (
         'ChromeDriverTest.testChromeDriverSendLargeData',
         'PerformanceLoggerTest.testPerformanceLogger',
         'ChromeDriverTest.testShadowDom*',
+        # WebView doesn't support emulating network conditions.
+        'ChromeDriverTest.testEmulateNetworkConditions',
+        'ChromeDriverTest.testEmulateNetworkConditionsNameSpeed',
+        'ChromeDriverTest.testEmulateNetworkConditionsOffline',
+        'ChromeDriverTest.testEmulateNetworkConditionsSpeed',
+        'ChromeDriverTest.testEmulateNetworkConditionsName',
     ]
 )
 
@@ -787,6 +797,95 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     lots_of_data = self._driver.ExecuteScript(script)
     self.assertEquals('0'.zfill(int(10e6)), lots_of_data)
 
+  def testEmulateNetworkConditions(self):
+    # Network conditions must be set before it can be retrieved.
+    self.assertRaises(chromedriver.UnknownError,
+                      self._driver.GetNetworkConditions)
+
+    # DSL: 2Mbps throughput, 5ms RTT
+    latency = 5
+    throughput = 2048 * 1024
+    self._driver.SetNetworkConditions(latency, throughput, throughput)
+
+    network = self._driver.GetNetworkConditions()
+    self.assertEquals(latency, network['latency']);
+    self.assertEquals(throughput, network['download_throughput']);
+    self.assertEquals(throughput, network['upload_throughput']);
+    self.assertEquals(False, network['offline']);
+
+    # Network Conditions again cannot be retrieved after they've been deleted.
+    self._driver.DeleteNetworkConditions()
+    self.assertRaises(chromedriver.UnknownError,
+                      self._driver.GetNetworkConditions)
+
+  def testEmulateNetworkConditionsName(self):
+    # DSL: 2Mbps throughput, 5ms RTT
+    #latency = 5
+    #throughput = 2048 * 1024
+    self._driver.SetNetworkConditionsName('DSL')
+
+    network = self._driver.GetNetworkConditions()
+    self.assertEquals(5, network['latency']);
+    self.assertEquals(2048*1024, network['download_throughput']);
+    self.assertEquals(2048*1024, network['upload_throughput']);
+    self.assertEquals(False, network['offline']);
+
+  def testEmulateNetworkConditionsSpeed(self):
+    # Warm up the browser.
+    self._http_server.SetDataForPath(
+        '/', "<html><body>blank</body></html>")
+    self._driver.Load(self._http_server.GetUrl() + '/')
+
+    # DSL: 2Mbps throughput, 5ms RTT
+    latency = 5
+    throughput_kbps = 2048
+    throughput = throughput_kbps * 1024
+    self._driver.SetNetworkConditions(latency, throughput, throughput)
+
+    _32_bytes = " 0 1 2 3 4 5 6 7 8 9 A B C D E F"
+    _1_megabyte = _32_bytes * 32768
+    self._http_server.SetDataForPath(
+        '/1MB',
+        "<html><body>%s</body></html>" % _1_megabyte)
+    start = time.time()
+    self._driver.Load(self._http_server.GetUrl() + '/1MB')
+    finish = time.time()
+    duration = finish - start
+    actual_throughput_kbps = 1024 / duration
+    self.assertLessEqual(actual_throughput_kbps, throughput_kbps * 1.5)
+    self.assertGreaterEqual(actual_throughput_kbps, throughput_kbps / 1.5)
+
+  def testEmulateNetworkConditionsNameSpeed(self):
+    # Warm up the browser.
+    self._http_server.SetDataForPath(
+        '/', "<html><body>blank</body></html>")
+    self._driver.Load(self._http_server.GetUrl() + '/')
+
+    # DSL: 2Mbps throughput, 5ms RTT
+    throughput_kbps = 2048
+    throughput = throughput_kbps * 1024
+    self._driver.SetNetworkConditionsName('DSL')
+
+    _32_bytes = " 0 1 2 3 4 5 6 7 8 9 A B C D E F"
+    _1_megabyte = _32_bytes * 32768
+    self._http_server.SetDataForPath(
+        '/1MB',
+        "<html><body>%s</body></html>" % _1_megabyte)
+    start = time.time()
+    self._driver.Load(self._http_server.GetUrl() + '/1MB')
+    finish = time.time()
+    duration = finish - start
+    actual_throughput_kbps = 1024 / duration
+    self.assertLessEqual(actual_throughput_kbps, throughput_kbps * 1.5)
+    self.assertGreaterEqual(actual_throughput_kbps, throughput_kbps / 1.5)
+
+  def testEmulateNetworkConditionsOffline(self):
+    # A workaround for crbug.com/177511; when setting offline, the throughputs
+    # must be 0.
+    self._driver.SetNetworkConditions(0, 0, 0, offline=True)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
+    self.assertIn('is not available', self._driver.GetTitle())
+
   def testShadowDomFindElementWithSlashDeep(self):
     """Checks that chromedriver can find elements in a shadow DOM using /deep/
     css selectors."""
@@ -1298,7 +1397,8 @@ class RemoteBrowserTest(ChromeDriverBaseTest):
     temp_dir = util.MakeTempDir()
     process = subprocess.Popen([_CHROME_BINARY,
                                 '--remote-debugging-port=%d' % port,
-                                '--user-data-dir=%s' % temp_dir])
+                                '--user-data-dir=%s' % temp_dir,
+                                '--use-mock-keychain'])
     if process is None:
       raise RuntimeError('Chrome could not be started with debugging port')
     try:

@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "base/memory/scoped_vector.h"
-#include "cc/base/swap_promise.h"
+#include "cc/output/swap_promise.h"
 #include "content/renderer/gpu/frame_swap_message_queue.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/render_widget.h"
@@ -294,8 +294,34 @@ TEST_F(QueueMessageSwapPromiseTest, VisalStateSwapPromiseDidNotSwapNoUpdate) {
 }
 
 TEST_F(QueueMessageSwapPromiseTest,
-       VisalStateSwapPromiseDidNotSwapCommitFails) {
-  VisualStateSwapPromiseDidNotSwap(cc::SwapPromise::COMMIT_FAILS);
+       VisualStateSwapPromiseDidNotSwapCommitFails) {
+  // COMMIT_FAILS is treated differently:
+  //    If we fail to swap with COMMIT_FAILS, then the renderer is
+  //    shutting down, which implies that the RenderFrameHostImpl
+  //    destructor will eventually be called, firing the remaining
+  //    response callbacks (with swap_success = false) itself.
+  QueueMessageData data[] = {
+    /* { policy, source_frame_number } */
+    {MESSAGE_DELIVERY_POLICY_WITH_VISUAL_STATE, 1},
+    {MESSAGE_DELIVERY_POLICY_WITH_VISUAL_STATE, 1},
+    {MESSAGE_DELIVERY_POLICY_WITH_VISUAL_STATE, 2},
+  };
+  QueueMessages(data, arraysize(data));
+
+  promises_[0]->DidNotSwap(cc::SwapPromise::COMMIT_FAILS);
+  ASSERT_FALSE(promises_[1]);
+  EXPECT_TRUE(NextSwapMessages().empty());
+  EXPECT_EQ(0u, DirectSendMessages().size());
+  EXPECT_FALSE(ContainsMessage(DirectSendMessages(), messages_[0]));
+  EXPECT_FALSE(ContainsMessage(DirectSendMessages(), messages_[1]));
+  EXPECT_FALSE(ContainsMessage(DirectSendMessages(), messages_[2]));
+
+  promises_[2]->DidNotSwap(cc::SwapPromise::COMMIT_FAILS);
+  EXPECT_TRUE(NextSwapMessages().empty());
+  EXPECT_FALSE(ContainsMessage(DirectSendMessages(), messages_[2]));
+
+  EXPECT_TRUE(NextSwapMessages().empty());
+  EXPECT_FALSE(frame_swap_message_queue_->Empty());
 }
 
 TEST_F(QueueMessageSwapPromiseTest, VisalStateSwapPromiseDidNotSwapSwapFails) {

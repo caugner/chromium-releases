@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "components/password_manager/core/browser/affiliation_fetch_throttler_delegate.h"
 #include "components/password_manager/core/browser/affiliation_fetcher_delegate.h"
 #include "components/password_manager/core/browser/affiliation_service.h"
 #include "components/password_manager/core/browser/affiliation_utils.h"
@@ -20,7 +21,9 @@
 namespace base {
 class Clock;
 class FilePath;
+class SingleThreadTaskRunner;
 class ThreadChecker;
+class TickClock;
 class Time;
 }  // namespace base
 
@@ -32,6 +35,7 @@ namespace password_manager {
 
 class AffiliationDatabase;
 class AffiliationFetcher;
+class AffiliationFetchThrottler;
 class FacetManager;
 
 // The AffiliationBackend is the part of the AffiliationService that lives on a
@@ -41,20 +45,25 @@ class FacetManager;
 //
 // This class is not thread-safe, but it is fine to construct it on one thread
 // and then transfer it to the background thread for the rest of its life.
-// Initialize() must be called already on the background thread.
+// Initialize() must be called already on the final (background) thread.
 class AffiliationBackend : public FacetManagerHost,
-                           public AffiliationFetcherDelegate {
+                           public AffiliationFetcherDelegate,
+                           public AffiliationFetchThrottlerDelegate {
  public:
+  using StrategyOnCacheMiss = AffiliationService::StrategyOnCacheMiss;
+
   // Constructs an instance that will use |request_context_getter| for all
-  // network requests, and will rely on |time_source| to tell the current time,
-  // which is expected to always be strictly greater than the NULL time.
+  // network requests, use |task_runner| for asynchronous tasks, and will rely
+  // on |time_source| and |time_tick_source| to tell the current time/ticks.
   // Construction is very cheap, expensive steps are deferred to Initialize().
   AffiliationBackend(
       const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
-      scoped_ptr<base::Clock> time_source);
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+      scoped_ptr<base::Clock> time_source,
+      scoped_ptr<base::TickClock> time_tick_source);
   ~AffiliationBackend() override;
 
-  // Performs the I/O-heavy part of initialization. The database to cache
+  // Performs the I/O-heavy part of initialization. The database used to cache
   // affiliation information locally will be opened/created at |db_path|.
   void Initialize(const base::FilePath& db_path);
 
@@ -62,7 +71,7 @@ class AffiliationBackend : public FacetManagerHost,
   // are not documented here again. See affiliation_service.h for details:
   void GetAffiliations(
       const FacetURI& facet_uri,
-      bool cached_only,
+      StrategyOnCacheMiss cache_miss_strategy,
       const AffiliationService::ResultCallback& callback,
       const scoped_refptr<base::TaskRunner>& callback_task_runner);
   void Prefetch(const FacetURI& facet_uri, const base::Time& keep_fresh_until);
@@ -71,17 +80,23 @@ class AffiliationBackend : public FacetManagerHost,
   void TrimCache();
 
  private:
-  // Collects facet URIs that require fetching and issues a network request
-  // against the Affiliation API to fetch corresponding affiliation information.
-  void SendNetworkRequest();
+  friend class AffiliationBackendTest;
+
+  // Retrieves the FacetManager corresponding to |facet_uri|, creating it and
+  // storing it into |facet_managers_| if it did not exist.
+  FacetManager* GetOrCreateFacetManager(const FacetURI& facet_uri);
+
+  // Scheduled by RequestNotificationAtTime() to be called back at times when a
+  // FacetManager needs to be notified.
+  void OnSendNotification(const FacetURI& facet_uri);
 
   // FacetManagerHost:
-  base::Time GetCurrentTime() override;
-  base::Time ReadLastUpdateTimeFromDatabase(const FacetURI& facet_uri) override;
   bool ReadAffiliationsFromDatabase(
       const FacetURI& facet_uri,
       AffiliatedFacetsWithUpdateTime* affiliations) override;
   void SignalNeedNetworkRequest() override;
+  void RequestNotificationAtTime(const FacetURI& facet_uri,
+                                 base::Time time) override;
 
   // AffiliationFetcherDelegate:
   void OnFetchSucceeded(
@@ -89,17 +104,28 @@ class AffiliationBackend : public FacetManagerHost,
   void OnFetchFailed() override;
   void OnMalformedResponse() override;
 
+  // AffiliationFetchThrottlerDelegate:
+  bool OnCanSendNetworkRequest() override;
+
+  // Returns the number of in-memory FacetManagers. Used only for testing.
+  size_t facet_manager_count_for_testing() { return facet_managers_.size(); }
+
+  // To be called after Initialize() to use |throttler| instead of the default
+  // one. Used only for testing.
+  void SetThrottlerForTesting(scoped_ptr<AffiliationFetchThrottler> throttler);
+
   // Created in Initialize(), and ensures that all subsequent methods are called
   // on the same thread.
   scoped_ptr<base::ThreadChecker> thread_checker_;
 
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
-
-  // Will always return a Now() that is strictly greater than the NULL time.
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_ptr<base::Clock> clock_;
+  scoped_ptr<base::TickClock> tick_clock_;
 
   scoped_ptr<AffiliationDatabase> cache_;
   scoped_ptr<AffiliationFetcher> fetcher_;
+  scoped_ptr<AffiliationFetchThrottler> throttler_;
 
   // Contains a FacetManager for each facet URI that need ongoing attention. To
   // save memory, managers are discarded as soon as they become redundant.

@@ -288,8 +288,8 @@ class InputRouterImplTest : public testing::Test {
     return input_router()->touch_event_queue_.IsAckTimeoutEnabled();
   }
 
-  void Flush() const {
-    return input_router_->Flush();
+  void RequestNotificationWhenFlushed() const {
+    return input_router_->RequestNotificationWhenFlushed();
   }
 
   size_t GetAndResetDidFlushCount() {
@@ -818,8 +818,6 @@ TEST_F(InputRouterImplTest, TouchEventQueueFlush) {
   EXPECT_EQ(0U, GetSentMessageCountAndResetSink());
   EXPECT_TRUE(TouchEventQueueEmpty());
 
-  EXPECT_TRUE(input_router_->ShouldForwardTouchEvent());
-
   // Send a touch-press event.
   PressTouchPoint(1, 1);
   SendTouchEvent();
@@ -834,14 +832,12 @@ TEST_F(InputRouterImplTest, TouchEventQueueFlush) {
   EXPECT_FALSE(client_->has_touch_handler());
   EXPECT_EQ(0U, GetSentMessageCountAndResetSink());
   EXPECT_FALSE(TouchEventQueueEmpty());
-  EXPECT_TRUE(input_router_->ShouldForwardTouchEvent());
 
   // After the ack, the touch-event queue should be empty, and none of the
   // flushed touch-events should have been sent to the renderer.
   SendInputEventACK(WebInputEvent::TouchStart, INPUT_EVENT_ACK_STATE_CONSUMED);
   EXPECT_EQ(0U, GetSentMessageCountAndResetSink());
   EXPECT_TRUE(TouchEventQueueEmpty());
-  EXPECT_FALSE(input_router_->ShouldForwardTouchEvent());
 }
 
 #if defined(USE_AURA)
@@ -851,7 +847,6 @@ TEST_F(InputRouterImplTest, AckedTouchEventState) {
   input_router_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, true));
   EXPECT_EQ(0U, GetSentMessageCountAndResetSink());
   EXPECT_TRUE(TouchEventQueueEmpty());
-  EXPECT_TRUE(input_router_->ShouldForwardTouchEvent());
 
   // Send a bunch of events, and make sure the ACKed events are correct.
   ScopedVector<ui::TouchEvent> expected_events;
@@ -1550,7 +1545,7 @@ TEST_F(InputRouterImplTest, InputFlush) {
   EXPECT_FALSE(HasPendingEvents());
 
   // Flushing an empty router should immediately trigger DidFlush.
-  Flush();
+  RequestNotificationWhenFlushed();
   EXPECT_EQ(1U, GetAndResetDidFlushCount());
   EXPECT_FALSE(HasPendingEvents());
 
@@ -1561,7 +1556,7 @@ TEST_F(InputRouterImplTest, InputFlush) {
   EXPECT_TRUE(HasPendingEvents());
 
   // DidFlush should be called only after the event is ack'ed.
-  Flush();
+  RequestNotificationWhenFlushed();
   EXPECT_EQ(0U, GetAndResetDidFlushCount());
   SendInputEventACK(WebInputEvent::TouchStart,
                     INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
@@ -1580,11 +1575,11 @@ TEST_F(InputRouterImplTest, InputFlush) {
                        blink::WebGestureDeviceTouchscreen);
   SimulateGestureEvent(WebInputEvent::GesturePinchUpdate,
                        blink::WebGestureDeviceTouchscreen);
-  Flush();
+  RequestNotificationWhenFlushed();
   EXPECT_EQ(0U, GetAndResetDidFlushCount());
 
   // Repeated flush calls should have no effect.
-  Flush();
+  RequestNotificationWhenFlushed();
   EXPECT_EQ(0U, GetAndResetDidFlushCount());
 
   // There are still pending gestures.

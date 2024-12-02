@@ -446,6 +446,11 @@
       "3F65507A3B39259B38C8173C6FFA3D12DF64CCE9"   // http://crbug.com/371562
     ]
   }],
+  "fileSystem.requestFileSystem": [{
+    "channel": "dev",
+    "extension_types": ["platform_app"],
+    "platforms": ["chromeos"]
+  }],
   "fileSystemProvider": {
     "channel": "stable",
     "extension_types": ["extension", "platform_app"],
@@ -489,8 +494,7 @@
     "channel": "stable",
     "extension_types": ["extension", "platform_app"],
     "whitelist": [
-      "8CE39F175D076AD6BDF7CBF418F2409558B367E3",  // hotword_helper
-      "09FDCB5851B8F3378DB630D06E316076E89C95A6",  // hotword nacl
+      "62CCAAD339E6451BBF97C4BBDF758E934A05AD0B",  // hotword component
       "B6356EFF4047BC5F868C7D91868B6F5C01951A8A"   // hotword_audio_verification
     ]
   },
@@ -534,6 +538,14 @@
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
     "location": "component"
   }],
+  "launcherSearchProvider": {
+    "channel": "dev",
+    "extension_types": ["extension", "platform_app"],
+    "platform": ["chromeos"],
+    "whitelist": [
+      "A948368FC53BE437A55FEB414106E207925482F5"  // File Manager
+    ]
+  },
   "location": [
     {
       "channel": "dev",
@@ -634,6 +646,13 @@
     "location": "component",
     "platforms": ["chromeos"]
   },
+  "mediaRouterPrivate": {
+    "channel": "stable",
+    "extension_types": ["extension"],
+    "whitelist": [
+      "63ED55E43214C211F82122ED56407FF1A807F2A3"   // http://crbug.com/448569
+    ]
+  },
   "metricsPrivate": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
@@ -671,9 +690,9 @@
       "F410C88469990EE7947450311D24B8AF2ADB2595"   // http://crbug.com/456214
     ]
   },
-  "mdns": {
+  "mdns": [{
     "channel": "stable",
-    "extension_types": ["extension", "platform_app"],
+    "extension_types": ["extension"],
     "whitelist": [
       "63ED55E43214C211F82122ED56407FF1A807F2A3",  // Dev
       "FA01E0B81978950F2BC5A50512FD769725F57510",  // Beta
@@ -688,6 +707,10 @@
       "EF2AB692559EA97C3BBDEA018A8C45F92457BD4E"   // http://crbug.com/457908
     ]
   },
+  {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  }],
   "musicManagerPrivate": {
     "channel": "stable",
     "extension_types": ["platform_app"],
@@ -801,10 +824,6 @@
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
   },
-  "pushMessaging": {
-    "channel": "stable",
-    "extension_types": ["extension", "platform_app"]
-  },
   "imageWriterPrivate": {
     "channel": "stable",
     "extension_types": ["platform_app"],
@@ -859,6 +878,12 @@
   "sessions": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
+  },
+  "settingsPrivate": {
+    "channel": "trunk",
+    "extension_types": ["extension", "platform_app"],
+    "platforms": ["chromeos", "mac", "win", "linux"],
+    "whitelist": []
   },
   "signedInDevices": {
     "channel": "dev",
@@ -925,21 +950,9 @@
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
   },
-  "virtualKeyboardPrivate": {
-    "channel": "stable",
-    "extension_types": ["extension"],
-    "platforms": ["chromeos"],
-    "whitelist": [
-      "3F50C3A83839D9C76334BCE81CDEC06174F266AF",  // System-level virtual kbd
-      "06BE211D5F014BAB34BC22D9DDA09C63A81D828E",  // Official XKB virtual kbd
-      "CFBF7EE448FA48960FFDA7CEB30F7A21B26AA981",  // Official m17n virtual kbd
-      "F94EE6AB36D6C6588670B2B01EB65212D9C64E33",  // Public XKB virtual kbd
-      "3E03D9B67FDD31B2438D1CF5070573415DCB3CBA"  // Public m17n virtual kbd
-    ]
-  },
   "wallpaper": {
-    "channel": "dev",
-    "extension_types": ["platform_app"],
+    "channel": "stable",
+    "extension_types": ["platform_app", "extension"],
     "platforms": ["chromeos"]
   },
   "wallpaperPrivate": {
@@ -979,8 +992,7 @@
     "extension_types": ["extension", "legacy_packaged_app", "hosted_app"],
     "whitelist": [
       "B44D08FD98F1523ED5837D78D0A606EA9D6206E5",  // Web Store
-      "2653F6F6C39BC6EEBD36A09AFB92A19782FF7EB4",  // Enterprise Web Store
-      "2779FA8B45841D61A37207CCFAC9CB393964FE5B"   // Login Proxy (prototype)
+      "2653F6F6C39BC6EEBD36A09AFB92A19782FF7EB4"   // Enterprise Web Store
     ]
   }
 }

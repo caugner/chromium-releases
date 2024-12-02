@@ -66,6 +66,9 @@ CmaRenderer::~CmaRenderer() {
     base::ResetAndReturn(&init_cb_).Run(::media::PIPELINE_ERROR_ABORT);
   else if (!flush_cb_.is_null())
     base::ResetAndReturn(&flush_cb_).Run();
+
+  if (has_audio_ || has_video_)
+    media_pipeline_->Stop();
 }
 
 void CmaRenderer::Initialize(
@@ -75,7 +78,8 @@ void CmaRenderer::Initialize(
     const ::media::BufferingStateCB& buffering_state_cb,
     const PaintCB& paint_cb,
     const base::Closure& ended_cb,
-    const ::media::PipelineStatusCB& error_cb) {
+    const ::media::PipelineStatusCB& error_cb,
+    const base::Closure& waiting_for_decryption_key_cb) {
   CMALOG(kLogControl) << __FUNCTION__;
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_EQ(state_, kUninitialized) << state_;
@@ -84,6 +88,7 @@ void CmaRenderer::Initialize(
   DCHECK(!ended_cb.is_null());
   DCHECK(!error_cb.is_null());
   DCHECK(!buffering_state_cb.is_null());
+  DCHECK(!waiting_for_decryption_key_cb.is_null());
   DCHECK(demuxer_stream_provider->GetStream(::media::DemuxerStream::AUDIO) ||
          demuxer_stream_provider->GetStream(::media::DemuxerStream::VIDEO));
 
@@ -95,6 +100,8 @@ void CmaRenderer::Initialize(
   paint_cb_ = paint_cb;
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
+  // TODO(erickung): wire up waiting_for_decryption_key_cb.
+  waiting_for_decryption_key_cb_ = waiting_for_decryption_key_cb;
 
   MediaPipelineClient media_pipeline_client;
   media_pipeline_client.error_cb = error_cb_;

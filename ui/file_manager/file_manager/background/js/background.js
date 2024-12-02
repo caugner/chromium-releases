@@ -48,7 +48,7 @@ function FileBrowserBackground() {
    *
    * @type {!importer.HistoryLoader}
    */
-  this.historyLoader = new importer.RuntimeHistoryLoader();
+  this.historyLoader = new importer.RuntimeHistoryLoader(this.tracker);
 
   /**
    * Event handler for progress center.
@@ -79,7 +79,9 @@ function FileBrowserBackground() {
    */
   this.mediaScanner = new importer.DefaultMediaScanner(
       importer.createMetadataHashcode,
-      this.historyLoader,
+      importer.DispositionChecker.createChecker(
+          this.historyLoader,
+          this.tracker),
       importer.DefaultDirectoryWatcher.create);
 
   /**
@@ -87,12 +89,10 @@ function FileBrowserBackground() {
    * devices.
    * @type {!importer.MediaImportHandler}
    */
-  this.mediaImportHandler =
-      new importer.MediaImportHandler(
-          this.progressCenter,
-          this.historyLoader,
-          new importer.DriveDuplicateFinder.Factory(),
-          this.tracker);
+  this.mediaImportHandler = new importer.MediaImportHandler(
+      this.progressCenter,
+      this.historyLoader,
+      this.tracker);
 
   /**
    * Promise of string data.
@@ -311,7 +311,7 @@ var FILE_MANAGER_WINDOW_CREATE_OPTIONS = {
     height: Math.round(window.screen.availHeight * 0.8)
   },
   frame: {
-    color: '#1687d0'
+    color: '#1976d2'
   },
   minWidth: 480,
   minHeight: 300,
@@ -614,8 +614,12 @@ FileBrowserBackground.prototype.initContextMenu_ = function() {
     // According to the spec [1], the callback is optional. But no callback
     // causes an error for some reason, so we call it with null-callback to
     // prevent the error. http://crbug.com/353877
+    // Also, we read the runtime.lastError here not to output the message on the
+    // console as an unchecked error.
     // - [1] https://developer.chrome.com/extensions/contextMenus#method-remove
-    chrome.contextMenus.remove('new-window', function() {});
+    chrome.contextMenus.remove('new-window', function() {
+      var ignore = chrome.runtime.lastError;
+    });
   } catch (ignore) {
     // There is no way to detect if the context menu is already added, therefore
     // try to recreate it every time.
@@ -629,6 +633,7 @@ FileBrowserBackground.prototype.initContextMenu_ = function() {
 
 /**
  * Singleton instance of Background.
+ * NOTE: This must come after the call to metrics.clearUserId.
  * @type {FileBrowserBackground}
  */
 window.background = new FileBrowserBackground();

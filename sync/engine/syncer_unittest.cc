@@ -23,6 +23,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "sync/engine/backoff_delay_provider.h"
 #include "sync/engine/get_commit_ids.h"
 #include "sync/engine/net/server_connection_manager.h"
 #include "sync/engine/sync_scheduler_impl.h"
@@ -195,7 +196,7 @@ class SyncerTest : public testing::Test,
   }
   void OnTypesThrottled(ModelTypeSet types,
                         const base::TimeDelta& throttle_duration) override {
-    FAIL() << "Should not get silenced.";
+    scheduler_->OnTypesThrottled(types, throttle_duration);
   }
   bool IsCurrentlyThrottled() override { return false; }
   void OnReceivedLongPollIntervalUpdate(
@@ -308,6 +309,12 @@ class SyncerTest : public testing::Test,
         "fake_invalidator_client_id"));
     context_->SetRoutingInfo(routing_info);
     syncer_ = new Syncer(&cancelation_signal_);
+    scheduler_.reset(new SyncSchedulerImpl(
+        "TestSyncScheduler",
+        BackoffDelayProvider::FromDefaults(),
+        context_.get(),
+        // scheduler_ owned syncer_ now and will manage the memory of syncer_
+        syncer_));
 
     syncable::ReadTransaction trans(FROM_HERE, directory());
     syncable::Directory::Metahandles children;
@@ -325,8 +332,7 @@ class SyncerTest : public testing::Test,
     model_type_registry_->UnregisterDirectoryTypeDebugInfoObserver(
         &debug_info_cache_);
     mock_server_.reset();
-    delete syncer_;
-    syncer_ = NULL;
+    scheduler_.reset();
     dir_maker_.TearDown();
   }
 
@@ -585,6 +591,7 @@ class SyncerTest : public testing::Test,
   TypeDebugInfoCache debug_info_cache_;
   MockNudgeHandler mock_nudge_handler_;
   scoped_ptr<ModelTypeRegistry> model_type_registry_;
+  scoped_ptr<SyncSchedulerImpl> scheduler_;
   scoped_ptr<SyncSessionContext> context_;
   bool saw_syncer_event_;
   base::TimeDelta last_short_poll_interval_received_;
@@ -791,6 +798,87 @@ TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
     VERIFY_ENTRY(2, false, false, false, 0, 11, 11, ids_, &rtrans);
     VERIFY_ENTRY(3, false, false, false, 0, 11, 11, ids_, &rtrans);
     VERIFY_ENTRY(4, false, false, false, 0, 11, 11, ids_, &rtrans);
+  }
+}
+
+TEST_F(SyncerTest, GetUpdatesPartialThrottled) {
+  sync_pb::EntitySpecifics bookmark, pref;
+  bookmark.mutable_bookmark()->set_title("title");
+  pref.mutable_preference()->set_name("name");
+  AddDefaultFieldValue(BOOKMARKS, &bookmark);
+  AddDefaultFieldValue(PREFERENCES, &pref);
+
+  // Normal sync, all the data types should get synced.
+  mock_server_->AddUpdateSpecifics(1, 0, "A", 10, 10, true, 0, bookmark,
+                                   foreign_cache_guid(), "-1");
+  mock_server_->AddUpdateSpecifics(2, 1, "B", 10, 10, false, 2, bookmark,
+                                   foreign_cache_guid(), "-2");
+  mock_server_->AddUpdateSpecifics(3, 1, "C", 10, 10, false, 1, bookmark,
+                                   foreign_cache_guid(), "-3");
+  mock_server_->AddUpdateSpecifics(4, 0, "D", 10, 10, false, 0, pref);
+
+  SyncShareNudge();
+  {
+    // Initial state. Everything is normal.
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    VERIFY_ENTRY(1, false, false, false, 0, 10, 10, ids_, &rtrans);
+    VERIFY_ENTRY(2, false, false, false, 1, 10, 10, ids_, &rtrans);
+    VERIFY_ENTRY(3, false, false, false, 1, 10, 10, ids_, &rtrans);
+    VERIFY_ENTRY(4, false, false, false, 0, 10, 10, ids_, &rtrans);
+  }
+
+  // Set BOOKMARKS throttled but PREFERENCES not,
+  // then BOOKMARKS should not get synced but PREFERENCES should.
+  ModelTypeSet throttled_types(BOOKMARKS);
+  mock_server_->set_partial_throttling(true);
+  mock_server_->SetThrottledTypes(throttled_types);
+
+  mock_server_->AddUpdateSpecifics(1, 0, "E", 20, 20, true, 0, bookmark,
+                                   foreign_cache_guid(), "-1");
+  mock_server_->AddUpdateSpecifics(2, 1, "F", 20, 20, false, 2, bookmark,
+                                   foreign_cache_guid(), "-2");
+  mock_server_->AddUpdateSpecifics(3, 1, "G", 20, 20, false, 1, bookmark,
+                                   foreign_cache_guid(), "-3");
+  mock_server_->AddUpdateSpecifics(4, 0, "H", 20, 20, false, 0, pref);
+  {
+    WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
+    MutableEntry A(&wtrans, GET_BY_ID, ids_.FromNumber(1));
+    MutableEntry B(&wtrans, GET_BY_ID, ids_.FromNumber(2));
+    MutableEntry C(&wtrans, GET_BY_ID, ids_.FromNumber(3));
+    MutableEntry D(&wtrans, GET_BY_ID, ids_.FromNumber(4));
+    A.PutIsUnsynced(true);
+    B.PutIsUnsynced(true);
+    C.PutIsUnsynced(true);
+    D.PutIsUnsynced(true);
+  }
+  SyncShareNudge();
+  {
+    // BOOKMARKS throttled.
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    VERIFY_ENTRY(1, false, true, false, 0, 10, 10, ids_, &rtrans);
+    VERIFY_ENTRY(2, false, true, false, 1, 10, 10, ids_, &rtrans);
+    VERIFY_ENTRY(3, false, true, false, 1, 10, 10, ids_, &rtrans);
+    VERIFY_ENTRY(4, false, false, false, 0, 21, 21, ids_, &rtrans);
+  }
+
+  // Unthrottled BOOKMARKS, then BOOKMARKS should get synced now.
+  mock_server_->set_partial_throttling(false);
+
+  mock_server_->AddUpdateSpecifics(1, 0, "E", 30, 30, true, 0, bookmark,
+                                   foreign_cache_guid(), "-1");
+  mock_server_->AddUpdateSpecifics(2, 1, "F", 30, 30, false, 2, bookmark,
+                                   foreign_cache_guid(), "-2");
+  mock_server_->AddUpdateSpecifics(3, 1, "G", 30, 30, false, 1, bookmark,
+                                   foreign_cache_guid(), "-3");
+  mock_server_->AddUpdateSpecifics(4, 0, "H", 30, 30, false, 0, pref);
+  SyncShareNudge();
+  {
+    // BOOKMARKS unthrottled.
+    syncable::ReadTransaction rtrans(FROM_HERE, directory());
+    VERIFY_ENTRY(1, false, false, false, 0, 31, 31, ids_, &rtrans);
+    VERIFY_ENTRY(2, false, false, false, 1, 31, 31, ids_, &rtrans);
+    VERIFY_ENTRY(3, false, false, false, 1, 31, 31, ids_, &rtrans);
+    VERIFY_ENTRY(4, false, false, false, 0, 30, 30, ids_, &rtrans);
   }
 }
 
@@ -4578,13 +4666,23 @@ class SyncerBookmarksTest : public SyncerTest {
     MutableEntry bookmark(
         &trans, CREATE, BOOKMARKS, ids_.root(), "clientname");
     ASSERT_TRUE(bookmark.good());
-    bookmark.PutIsUnsynced(true);
-    bookmark.PutSyncing(false);
     bookmark.PutSpecifics(DefaultBookmarkSpecifics());
     EXPECT_FALSE(bookmark.GetIsUnappliedUpdate());
     EXPECT_FALSE(bookmark.GetId().ServerKnows());
     metahandle_ = bookmark.GetMetahandle();
     local_id_ = bookmark.GetId();
+    bookmark.PutIsUnsynced(true);
+  }
+
+  void Update() {
+    WriteTransaction trans(FROM_HERE, UNITTEST, directory());
+    MutableEntry bookmark(&trans, GET_BY_ID, local_id_);
+    ASSERT_TRUE(bookmark.good());
+    bookmark.PutSpecifics(DefaultBookmarkSpecifics());
+    EXPECT_FALSE(bookmark.GetIsUnappliedUpdate());
+    bookmark.PutIsUnsynced(true);
+    if (bookmark.GetSyncing())
+      bookmark.PutDirtySync(true);
   }
 
   void Delete() {
@@ -4595,8 +4693,14 @@ class SyncerBookmarksTest : public SyncerTest {
     // The order of setting IS_UNSYNCED vs IS_DEL matters. See
     // WriteNode::Tombstone().
     entry.PutIsUnsynced(true);
+    if (entry.GetSyncing())
+      entry.PutDirtySync(true);
     entry.PutIsDel(true);
-    entry.PutSyncing(false);
+  }
+
+  void UpdateAndDelete() {
+    Update();
+    Delete();
   }
 
   void Undelete() {
@@ -4607,7 +4711,8 @@ class SyncerBookmarksTest : public SyncerTest {
     EXPECT_TRUE(entry.GetIsDel());
     entry.PutIsDel(false);
     entry.PutIsUnsynced(true);
-    entry.PutSyncing(false);
+    if (entry.GetSyncing())
+      entry.PutDirtySync(true);
   }
 
   int64 GetMetahandleOfTag() {
@@ -4776,6 +4881,20 @@ TEST_F(SyncerBookmarksTest, CreateThenDeleteDuringCommit) {
   ExpectSyncedAndDeleted();
 }
 
+TEST_F(SyncerBookmarksTest, CreateThenUpdateAndDeleteDuringCommit) {
+  Create();
+  ExpectUnsyncedCreation();
+
+  // In the middle of the initial creation commit, perform an updated followed
+  // by a deletion. This should trigger performing two consecutive commit
+  // cycles, resulting in the bookmark being both deleted and synced.
+  mock_server_->SetMidCommitCallback(base::Bind(
+      &SyncerBookmarksTest::UpdateAndDelete, base::Unretained(this)));
+
+  SyncShareNudge();
+  ExpectSyncedAndDeleted();
+}
+
 // Test what happens if a client deletes, then recreates, an object very
 // quickly.  It is possible that the deletion gets sent as a commit, and
 // the undelete happens during the commit request.  The principle here
@@ -4809,7 +4928,8 @@ class SyncerUndeletionTest : public SyncerTest {
     ASSERT_TRUE(perm_folder.good());
     perm_folder.PutUniqueClientTag(client_tag_);
     perm_folder.PutIsUnsynced(true);
-    perm_folder.PutSyncing(false);
+    if (perm_folder.GetSyncing())
+      perm_folder.PutDirtySync(true);
     perm_folder.PutSpecifics(DefaultPreferencesSpecifics());
     EXPECT_FALSE(perm_folder.GetIsUnappliedUpdate());
     EXPECT_FALSE(perm_folder.GetId().ServerKnows());
@@ -4825,8 +4945,9 @@ class SyncerUndeletionTest : public SyncerTest {
     // The order of setting IS_UNSYNCED vs IS_DEL matters. See
     // WriteNode::Tombstone().
     entry.PutIsUnsynced(true);
+    if (entry.GetSyncing())
+      entry.PutDirtySync(true);
     entry.PutIsDel(true);
-    entry.PutSyncing(false);
   }
 
   void Undelete() {
@@ -4837,7 +4958,8 @@ class SyncerUndeletionTest : public SyncerTest {
     EXPECT_TRUE(entry.GetIsDel());
     entry.PutIsDel(false);
     entry.PutIsUnsynced(true);
-    entry.PutSyncing(false);
+    if (entry.GetSyncing())
+      entry.PutDirtySync(true);
   }
 
   int64 GetMetahandleOfTag() {

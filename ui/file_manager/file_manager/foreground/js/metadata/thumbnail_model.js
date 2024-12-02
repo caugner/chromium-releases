@@ -3,25 +3,32 @@
 // found in the LICENSE file.
 
 /**
- * @param {!FileSystemMetadata} fileSystemMetadata
+ * Metadata containing thumbnail information.
+ * @typedef {Object}
+ */
+var ThumbnailMetadataItem;
+
+/**
+ * @param {!MetadataModel} metadataModel
  * @struct
  * @constructor
  */
-function ThumbnailModel(fileSystemMetadata) {
+function ThumbnailModel(metadataModel) {
   /**
-   * @private {!FileSystemMetadata}
+   * @private {!MetadataModel}
    * @const
    */
-  this.fileSystemMetadata_ = fileSystemMetadata;
+  this.metadataModel_ = metadataModel;
 }
 
 /**
  * @param {!Array<!Entry>} entries
- * @return {Promise} Promise fulfilled with old format metadata list.
+ * @return {Promise<ThumbnailMetadataItem>} Promise fulfilled with old format
+ *     metadata list.
  */
 ThumbnailModel.prototype.get = function(entries) {
   var results = {};
-  return this.fileSystemMetadata_.get(
+  return this.metadataModel_.get(
       entries,
       [
         'modificationTime',
@@ -36,12 +43,16 @@ ThumbnailModel.prototype.get = function(entries) {
           // using old metadata format.
           results[url] = {
             filesystem: {
-              modificationTime: metadataList[i].modificationTime
+              modificationTime: metadataList[i].modificationTime,
+              modificationTimeError: metadataList[i].modificationTimeError
             },
             external: {
               thumbnailUrl: metadataList[i].thumbnailUrl,
+              thumbnailUrlError: metadataList[i].thumbnailUrlError,
               customIconUrl: metadataList[i].customIconUrl,
-              present: metadataList[i].present
+              customIconUrlError: metadataList[i].customIconUrlError,
+              present: metadataList[i].present,
+              presentError: metadataList[i].presentError
             },
             thumbnail: {},
             media: {}
@@ -52,7 +63,7 @@ ThumbnailModel.prototype.get = function(entries) {
             contentRequestEntries.push(entries[i]);
         }
         if (contentRequestEntries.length) {
-          return this.fileSystemMetadata_.get(
+          return this.metadataModel_.get(
               contentRequestEntries,
               [
                 'contentThumbnailUrl',
@@ -63,10 +74,16 @@ ThumbnailModel.prototype.get = function(entries) {
                   var url = contentRequestEntries[i].toURL();
                   results[url].thumbnail.url =
                       contentMetadataList[i].contentThumbnailUrl;
+                  results[url].thumbnail.urlError =
+                      contentMetadataList[i].contentThumbnailUrlError;
                   results[url].thumbnail.transform =
                       contentMetadataList[i].contentThumbnailTransform;
+                  results[url].thumbnail.transformError =
+                      contentMetadataList[i].contentThumbnailTransformError;
                   results[url].media.imageTransform =
                       contentMetadataList[i].contentImageTransform;
+                  results[url].media.imageTransformError =
+                      contentMetadataList[i].contentImageTransformError;
                 }
               });
         }

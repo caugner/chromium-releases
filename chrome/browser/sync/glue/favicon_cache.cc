@@ -6,10 +6,10 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "sync/api/time.h"
 #include "sync/protocol/favicon_image_specifics.pb.h"
@@ -226,7 +226,7 @@ FaviconCache::FaviconCache(Profile* profile, int max_sync_favicon_limit)
       max_sync_favicon_limit_(max_sync_favicon_limit),
       history_service_observer_(this),
       weak_ptr_factory_(this) {
-  HistoryService* hs = NULL;
+  history::HistoryService* hs = NULL;
   if (profile_) {
     hs = HistoryServiceFactory::GetForProfile(
         profile_, ServiceAccessType::EXPLICIT_ACCESS);
@@ -437,8 +437,9 @@ void FaviconCache::OnPageFaviconUpdated(const GURL& page_url) {
     page_task_map_[page_url] = 0;  // For testing only.
     return;
   }
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (!favicon_service)
     return;
   // TODO(zea): This appears to only fetch one favicon (best match based on
@@ -1033,7 +1034,7 @@ size_t FaviconCache::NumTasksForTest() const {
   return page_task_map_.size();
 }
 
-void FaviconCache::OnURLsDeleted(HistoryService* history_service,
+void FaviconCache::OnURLsDeleted(history::HistoryService* history_service,
                                  bool all_history,
                                  bool expired,
                                  const history::URLRows& deleted_rows,

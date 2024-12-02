@@ -85,7 +85,7 @@ component("gfx") {
     "font.h",
     "font_fallback.h",
     "font_fallback_linux.cc",
-    "font_fallback_mac.cc",
+    "font_fallback_mac.mm",
     "font_fallback_win.cc",
     "font_fallback_win.h",
     "font_list.cc",
@@ -139,6 +139,8 @@ component("gfx") {
     "linux_font_delegate.h",
     "mac/coordinate_conversion.h",
     "mac/coordinate_conversion.mm",
+    "mac/nswindow_frame_controls.h",
+    "mac/nswindow_frame_controls.mm",
     "mac/scoped_ns_disable_screen_updates.h",
     "native_widget_types.h",
     "nine_image_painter.cc",
@@ -289,16 +291,15 @@ component("gfx") {
       sources -= [ "path.cc" ]
     }
 
-    if (!is_android_webview_build) {
-      deps += [ "//base:base_java" ]
-    }
-
     if (!is_debug) {
       configs -= [ "//build/config/compiler:optimize" ]
       configs += [ "//build/config/compiler:optimize_max" ]
     }
 
-    deps += [ ":gfx_jni_headers" ]
+    deps += [
+      ":gfx_jni_headers",
+      "//base:base_java",
+    ]
     libs = [
       "android",
       "jnigraphics",
@@ -327,11 +328,15 @@ component("gfx") {
 
   if (!use_aura) {
     sources -= [
-      "nine_image_painter.cc",
-      "nine_image_painter.h",
       "path_aura.cc",
       "screen_aura.cc",
     ]
+    if (!toolkit_views) {
+      sources -= [
+        "nine_image_painter.cc",
+        "nine_image_painter.h",
+      ]
+    }
   }
 
   if (use_x11) {
@@ -420,6 +425,7 @@ test("gfx_unittests") {
       "color_utils_unittest.cc",
       "display_change_notifier_unittest.cc",
       "display_unittest.cc",
+      "font_fallback_mac_unittest.cc",
       "font_list_unittest.cc",
       "geometry/box_unittest.cc",
       "geometry/cubic_bezier_unittest.cc",
@@ -428,7 +434,6 @@ test("gfx_unittests") {
       "geometry/point3_unittest.cc",
       "geometry/point_unittest.cc",
       "geometry/quad_unittest.cc",
-      "geometry/r_tree_unittest.cc",
       "geometry/rect_unittest.cc",
       "geometry/safe_integer_conversions_unittest.cc",
       "geometry/scroll_offset_unittest.cc",
@@ -438,6 +443,7 @@ test("gfx_unittests") {
       "image/image_mac_unittest.mm",
       "image/image_util_unittest.cc",
       "mac/coordinate_conversion_unittest.mm",
+      "nine_image_painter_unittest.cc",
       "platform_font_mac_unittest.mm",
       "range/range_mac_unittest.mm",
       "range/range_unittest.cc",
@@ -491,6 +497,8 @@ test("gfx_unittests") {
 
   if (use_aura) {
     sources -= [ "screen_unittest.cc" ]
+  } else {
+    sources -= [ "nine_image_painter_unittest.cc" ]
   }
 
   if (is_win) {

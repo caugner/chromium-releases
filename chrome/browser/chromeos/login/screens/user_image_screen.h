@@ -32,7 +32,7 @@ class UserImageManager;
 class UserImageView;
 
 class UserImageScreen : public UserImageModel,
-                        public ImageDecoder::Delegate,
+                        public ImageDecoder::ImageRequest,
                         public content::NotificationObserver,
                         public UserImageSyncObserver::Observer,
                         public CameraPresenceNotifier::Observer {
@@ -62,10 +62,9 @@ class UserImageScreen : public UserImageModel,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
-  // ImageDecoder::Delegate implementation:
-  void OnImageDecoded(const ImageDecoder* decoder,
-                      const SkBitmap& decoded_image) override;
-  void OnDecodeImageFailed(const ImageDecoder* decoder) override;
+  // ImageDecoder::ImageRequest implementation:
+  void OnImageDecoded(const SkBitmap& decoded_image) override;
+  void OnDecodeImageFailed() override;
 
   // CameraPresenceNotifier::Observer implementation:
   void OnCameraPresenceCheckDone(bool is_camera_present) override;
@@ -108,14 +107,10 @@ class UserImageScreen : public UserImageModel,
 
   UserImageView* view_;
 
-  // Last ImageDecoder instance used to decode an image blob received by
-  // HandlePhotoTaken.
-  scoped_refptr<ImageDecoder> image_decoder_;
-
   // Last user photo, if taken.
   gfx::ImageSkia user_photo_;
 
-  // If |true|, decoded photo should be immediately accepeted (i.e., both
+  // If |true|, decoded photo should be immediately accepted (i.e., both
   // HandleTakePhoto and HandleImageAccepted have already been called but we're
   // still waiting for  photo image decoding to finish.
   bool accept_photo_after_decoding_;

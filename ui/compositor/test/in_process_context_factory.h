@@ -7,6 +7,7 @@
 
 #include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "ui/compositor/compositor.h"
 
 namespace base {
@@ -35,28 +36,28 @@ class InProcessContextFactory : public ContextFactory {
   }
 
   // ContextFactory implementation
-  void CreateOutputSurface(base::WeakPtr<Compositor> compositor,
-                           bool software_fallback) override;
+  void CreateOutputSurface(base::WeakPtr<Compositor> compositor) override;
 
-  scoped_refptr<Reflector> CreateReflector(Compositor* mirrored_compositor,
-                                           Layer* mirroring_layer) override;
-  void RemoveReflector(scoped_refptr<Reflector> reflector) override;
+  scoped_ptr<Reflector> CreateReflector(Compositor* mirrored_compositor,
+                                        Layer* mirroring_layer) override;
+  void RemoveReflector(Reflector* reflector) override;
 
   scoped_refptr<cc::ContextProvider> SharedMainThreadContextProvider() override;
   void RemoveCompositor(Compositor* compositor) override;
   bool DoesCreateTestContexts() override;
+  uint32 GetImageTextureTarget() override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
-  base::MessageLoopProxy* GetCompositorMessageLoop() override;
+  cc::TaskGraphRunner* GetTaskGraphRunner() override;
   scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() override;
   void ResizeDisplay(ui::Compositor* compositor,
                      const gfx::Size& size) override;
 
  private:
-  scoped_ptr<base::Thread> compositor_thread_;
   scoped_refptr<cc::ContextProvider> shared_main_thread_contexts_;
   cc::TestSharedBitmapManager shared_bitmap_manager_;
   cc::TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
+  cc::TestTaskGraphRunner task_graph_runner_;
   uint32_t next_surface_id_namespace_;
   bool use_test_surface_;
   bool context_factory_for_test_;

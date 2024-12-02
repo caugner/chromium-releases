@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">Afegeix un compte per a <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">Teclat en pantalla desactivat</translation>
 <translation id="1057289296854808272">Rotació activada (toqueu aquí per canviar)</translation>
+<translation id="5548285847212963613">L'extensió &quot;<ph name="EXTENSION_NAME"/>&quot; pot ajudar a connectar-se a aquesta xarxa.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> i <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Botó de desbordament</translation>
 <translation id="7904094684485781019">L'administrador d'aquest compte no ha permès l'inici de sessió múltiple.</translation>
@@ -61,6 +62,7 @@ Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="1723752762323179280">S'està tancant la sessió</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Sí</translation>
+<translation id="4804818685124855865">Desconnecta</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Tanca la sessió</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@ Premeu Maj+Alt per canviar-lo.</translation>
 <translation id="2761704814324807722">Safata d'estat. Hora: <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Bloqueja</translation>
 <translation id="2805756323405976993">Aplicacions</translation>
-<translation id="2313845391432982560">És possible que l'extensió <ph name="EXTENSION_NAME"/> pugui configurar aquesta xarxa.</translation>
 <translation id="2872961005593481000">Apaga</translation>
 <translation id="3433830597744061105">Gestiona els comptes</translation>
 <translation id="742594950370306541">La càmera s'està utilitzant.</translation>

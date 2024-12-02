@@ -24,6 +24,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "jni/WebContentsImpl_jni.h"
+#include "net/android/network_library.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
@@ -60,7 +61,7 @@ namespace content {
 // static
 WebContents* WebContents::FromJavaWebContents(
     jobject jweb_contents_android) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!jweb_contents_android)
     return NULL;
 
@@ -104,6 +105,12 @@ WebContentsAndroid::WebContentsAndroid(WebContents* web_contents)
                  env,
                  reinterpret_cast<intptr_t>(this),
                  navigation_controller_.GetJavaObject().obj()).obj());
+  RendererPreferences* prefs = web_contents_->GetMutableRendererPrefs();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  prefs->network_contry_iso =
+      command_line->HasSwitch(switches::kNetworkCountryIso) ?
+          command_line->GetSwitchValueASCII(switches::kNetworkCountryIso)
+          : net::android::GetTelephonyNetworkCountryIso();
 }
 
 WebContentsAndroid::~WebContentsAndroid() {
@@ -493,6 +500,10 @@ jboolean WebContentsAndroid::HasAccessedInitialDocument(
     jobject jobj) {
   return static_cast<content::WebContentsImpl*>(web_contents_)->
       HasAccessedInitialDocument();
+}
+
+jint WebContentsAndroid::GetThemeColor(JNIEnv* env, jobject obj) {
+  return web_contents_->GetThemeColor();
 }
 
 }  // namespace content

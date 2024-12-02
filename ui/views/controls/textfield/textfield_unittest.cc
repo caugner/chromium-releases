@@ -503,7 +503,12 @@ TEST_F(TextfieldTest, KeyTest) {
   SendKeyEvent(ui::VKEY_1, false, false, false, false);
   SendKeyEvent(ui::VKEY_1, false, true,  false, true);
   SendKeyEvent(ui::VKEY_1, false, false, false, true);
-  EXPECT_STR_EQ("TexT!1!1", textfield_->text());
+
+  // On Mac, Caps+Shift remains uppercase.
+  if (TestingNativeMac())
+    EXPECT_STR_EQ("TeXT!1!1", textfield_->text());
+  else
+    EXPECT_STR_EQ("TexT!1!1", textfield_->text());
 }
 
 TEST_F(TextfieldTest, ControlAndSelectTest) {
@@ -684,19 +689,26 @@ TEST_F(TextfieldTest, OnKeyPress) {
   EXPECT_TRUE(textfield_->key_handled());
   textfield_->clear();
 
-  SendKeyEvent(ui::VKEY_HOME);
+  const bool shift = false;
+  SendHomeEvent(shift);
   EXPECT_TRUE(textfield_->key_received());
   EXPECT_TRUE(textfield_->key_handled());
   textfield_->clear();
 
-  SendKeyEvent(ui::VKEY_END);
+  SendEndEvent(shift);
   EXPECT_TRUE(textfield_->key_received());
   EXPECT_TRUE(textfield_->key_handled());
   textfield_->clear();
 
-  // F24, up/down key won't be handled.
-  SendKeyEvent(ui::VKEY_F24);
+  // F20, up/down key won't be handled.
+  SendKeyEvent(ui::VKEY_F20);
+#if defined(OS_MACOSX)
+  // On Mac, key combinations that don't map to editing commands are forwarded
+  // on to the next responder, usually ending up at the window, which will beep.
+  EXPECT_FALSE(textfield_->key_received());
+#else
   EXPECT_TRUE(textfield_->key_received());
+#endif
   EXPECT_FALSE(textfield_->key_handled());
   textfield_->clear();
 
@@ -768,19 +780,20 @@ TEST_F(TextfieldTest, CursorMovement) {
   SendKeyEvent(ui::VKEY_END);
 
   // Ctrl+Left should move the cursor just before the last word.
-  SendKeyEvent(ui::VKEY_LEFT, false, true);
+  const bool shift = false;
+  SendWordEvent(ui::VKEY_LEFT, shift);
   SendKeyEvent(ui::VKEY_T);
   EXPECT_STR_EQ("one two thre ", textfield_->text());
   EXPECT_STR_EQ("one two thre ", last_contents_);
 
   // Ctrl+Right should move the cursor to the end of the last word.
-  SendKeyEvent(ui::VKEY_RIGHT, false, true);
+  SendWordEvent(ui::VKEY_RIGHT, shift);
   SendKeyEvent(ui::VKEY_E);
   EXPECT_STR_EQ("one two three ", textfield_->text());
   EXPECT_STR_EQ("one two three ", last_contents_);
 
   // Ctrl+Right again should move the cursor to the end.
-  SendKeyEvent(ui::VKEY_RIGHT, false, true);
+  SendWordEvent(ui::VKEY_RIGHT, shift);
   SendKeyEvent(ui::VKEY_BACK);
   EXPECT_STR_EQ("one two three", textfield_->text());
   EXPECT_STR_EQ("one two three", last_contents_);
@@ -789,20 +802,20 @@ TEST_F(TextfieldTest, CursorMovement) {
   textfield_->SetText(ASCIIToUTF16(" ne two"));
 
   // Send the cursor at the beginning.
-  SendKeyEvent(ui::VKEY_HOME);
+  SendHomeEvent(shift);
 
   // Ctrl+Right, then Ctrl+Left should move the cursor to the beginning of the
   // first word.
-  SendKeyEvent(ui::VKEY_RIGHT, false, true);
-  SendKeyEvent(ui::VKEY_LEFT, false, true);
+  SendWordEvent(ui::VKEY_RIGHT, shift);
+  SendWordEvent(ui::VKEY_LEFT, shift);
   SendKeyEvent(ui::VKEY_O);
   EXPECT_STR_EQ(" one two", textfield_->text());
   EXPECT_STR_EQ(" one two", last_contents_);
 
   // Ctrl+Left to move the cursor to the beginning of the first word.
-  SendKeyEvent(ui::VKEY_LEFT, false, true);
+  SendWordEvent(ui::VKEY_LEFT, shift);
   // Ctrl+Left again should move the cursor back to the very beginning.
-  SendKeyEvent(ui::VKEY_LEFT, false, true);
+  SendWordEvent(ui::VKEY_LEFT, shift);
   SendKeyEvent(ui::VKEY_DELETE);
   EXPECT_STR_EQ("one two", textfield_->text());
   EXPECT_STR_EQ("one two", last_contents_);
@@ -843,6 +856,25 @@ TEST_F(TextfieldTest, FocusTraversalTest) {
                        ui::EF_LEFT_MOUSE_BUTTON);
   textfield_->OnMousePressed(click);
   EXPECT_EQ(1, GetFocusedView()->id());
+
+  // Tab/Shift+Tab should also cycle focus, not insert a tab character.
+  SendKeyEvent(ui::VKEY_TAB, false, false);
+  EXPECT_EQ(2, GetFocusedView()->id());
+  SendKeyEvent(ui::VKEY_TAB, false, false);
+  EXPECT_EQ(3, GetFocusedView()->id());
+  // Cycle back to the first textfield.
+  SendKeyEvent(ui::VKEY_TAB, false, false);
+  EXPECT_EQ(1, GetFocusedView()->id());
+
+  SendKeyEvent(ui::VKEY_TAB, true, false);
+  EXPECT_EQ(3, GetFocusedView()->id());
+  SendKeyEvent(ui::VKEY_TAB, true, false);
+  EXPECT_EQ(2, GetFocusedView()->id());
+  SendKeyEvent(ui::VKEY_TAB, true, false);
+  EXPECT_EQ(1, GetFocusedView()->id());
+  // Cycle back to the last textfield.
+  SendKeyEvent(ui::VKEY_TAB, true, false);
+  EXPECT_EQ(3, GetFocusedView()->id());
 }
 
 TEST_F(TextfieldTest, ContextMenuDisplayTest) {
@@ -1345,11 +1377,23 @@ TEST_F(TextfieldTest, TextInputClientTest) {
   EXPECT_EQ(0, on_after_user_action_);
 
   input_method_->Clear();
+
+  // Changing the Textfield to readonly shouldn't change the input client, since
+  // it's still required for selections and clipboard copy.
+  ui::TextInputClient* text_input_client = textfield_->GetTextInputClient();
+  EXPECT_TRUE(text_input_client);
+  EXPECT_NE(ui::TEXT_INPUT_TYPE_NONE, text_input_client->GetTextInputType());
   textfield_->SetReadOnly(true);
   EXPECT_TRUE(input_method_->text_input_type_changed());
-  EXPECT_FALSE(textfield_->GetTextInputClient());
+  EXPECT_EQ(text_input_client, textfield_->GetTextInputClient());
+  EXPECT_EQ(ui::TEXT_INPUT_TYPE_NONE, text_input_client->GetTextInputType());
 
+  input_method_->Clear();
   textfield_->SetReadOnly(false);
+  EXPECT_TRUE(input_method_->text_input_type_changed());
+  EXPECT_EQ(text_input_client, textfield_->GetTextInputClient());
+  EXPECT_NE(ui::TEXT_INPUT_TYPE_NONE, text_input_client->GetTextInputType());
+
   input_method_->Clear();
   textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
   EXPECT_TRUE(input_method_->text_input_type_changed());
@@ -1556,7 +1600,11 @@ TEST_F(TextfieldTest, OvertypeMode) {
   InitTextfield();
   // Overtype mode should be disabled (no-op [Insert]).
   textfield_->SetText(ASCIIToUTF16("2"));
-  SendKeyEvent(ui::VKEY_HOME);
+  const bool shift = false;
+  SendHomeEvent(shift);
+  // Note: On Mac, there is no insert key. Insert sends kVK_Help. Currently,
+  // since there is no overtype on toolkit-views, the behavior happens to match.
+  // However, there's no enable-overtype equivalent key combination on OSX.
   SendKeyEvent(ui::VKEY_INSERT);
   SendKeyEvent(ui::VKEY_1, false, false);
   EXPECT_STR_EQ("12", textfield_->text());
@@ -1734,12 +1782,13 @@ TEST_F(TextfieldTest, HitOutsideTextAreaTest) {
   // LTR-RTL string in LTR context.
   textfield_->SetText(WideToUTF16(L"ab\x05E1\x5E2"));
 
-  SendKeyEvent(ui::VKEY_HOME);
+  const bool shift = false;
+  SendHomeEvent(shift);
   gfx::Rect bound = GetCursorBounds();
   MouseClick(bound, -10);
   EXPECT_EQ(bound, GetCursorBounds());
 
-  SendKeyEvent(ui::VKEY_END);
+  SendEndEvent(shift);
   bound = GetCursorBounds();
   MouseClick(bound, 10);
   EXPECT_EQ(bound, GetCursorBounds());
@@ -1749,12 +1798,12 @@ TEST_F(TextfieldTest, HitOutsideTextAreaTest) {
   // RTL-LTR string in LTR context.
   textfield_->SetText(WideToUTF16(L"\x05E1\x5E2" L"ab"));
 
-  SendKeyEvent(ui::VKEY_HOME);
+  SendHomeEvent(shift);
   bound = GetCursorBounds();
   MouseClick(bound, 10);
   EXPECT_EQ(bound, GetCursorBounds());
 
-  SendKeyEvent(ui::VKEY_END);
+  SendEndEvent(shift);
   bound = GetCursorBounds();
   MouseClick(bound, -10);
   EXPECT_EQ(bound, GetCursorBounds());
@@ -1768,12 +1817,13 @@ TEST_F(TextfieldTest, HitOutsideTextAreaInRTLTest) {
 
   // RTL-LTR string in RTL context.
   textfield_->SetText(WideToUTF16(L"\x05E1\x5E2" L"ab"));
-  SendKeyEvent(ui::VKEY_HOME);
+  const bool shift = false;
+  SendHomeEvent(shift);
   gfx::Rect bound = GetCursorBounds();
   MouseClick(bound, 10);
   EXPECT_EQ(bound, GetCursorBounds());
 
-  SendKeyEvent(ui::VKEY_END);
+  SendEndEvent(shift);
   bound = GetCursorBounds();
   MouseClick(bound, -10);
   EXPECT_EQ(bound, GetCursorBounds());
@@ -1782,12 +1832,12 @@ TEST_F(TextfieldTest, HitOutsideTextAreaInRTLTest) {
 
   // LTR-RTL string in RTL context.
   textfield_->SetText(WideToUTF16(L"ab\x05E1\x5E2"));
-  SendKeyEvent(ui::VKEY_HOME);
+  SendHomeEvent(shift);
   bound = GetCursorBounds();
   MouseClick(bound, -10);
   EXPECT_EQ(bound, GetCursorBounds());
 
-  SendKeyEvent(ui::VKEY_END);
+  SendEndEvent(shift);
   bound = GetCursorBounds();
   MouseClick(bound, 10);
   EXPECT_EQ(bound, GetCursorBounds());
@@ -2257,7 +2307,14 @@ TEST_F(TextfieldTouchSelectionTest, TouchSelectionInUnfocusableTextfield) {
   textfield_->SetFocusable(true);
 }
 
-TEST_F(TextfieldTouchSelectionTest, TapOnSelection) {
+// No touch on desktop Mac. Tracked in http://crbug.com/445520.
+#if defined(OS_MACOSX) && !defined(USE_AURA)
+#define MAYBE_TapOnSelection DISABLED_TapOnSelection
+#else
+#define MAYBE_TapOnSelection TapOnSelection
+#endif
+
+TEST_F(TextfieldTouchSelectionTest, MAYBE_TapOnSelection) {
   InitTextfield();
   textfield_->SetText(ASCIIToUTF16("hello world"));
   gfx::Range sel_range(2, 7);

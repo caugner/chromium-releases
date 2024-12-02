@@ -62,9 +62,9 @@ _TEST_ONLY_WARNING = (
 
 
 _INCLUDE_ORDER_WARNING = (
-    'Your #include order seems to be broken. Send mail to\n'
-    'marja@chromium.org if this is not the case.')
-
+    'Your #include order seems to be broken. Remember to use the right '
+    'collation (LC_COLLATE=C) and check https://google-styleguide.googlecode'
+    '.com/svn/trunk/cppguide.html#Names_and_Order_of_Includes')
 
 _BANNED_OBJC_FUNCTIONS = (
     (
@@ -174,7 +174,8 @@ _BANNED_CPP_FUNCTIONS = (
             r"simple_platform_shared_buffer_posix\.cc$",
         r"^net[\\\/]disk_cache[\\\/]cache_util\.cc$",
         r"^net[\\\/]url_request[\\\/]test_url_fetcher_factory\.cc$",
-        r"^ui[\\\/]ozone[\\\/]platform[\\\/]dri[\\\/]native_display_delegate_proxy\.cc$",
+        r"^ui[\\\/]ozone[\\\/]platform[\\\/]drm[\\\/]host[\\\/]"
+            "drm_native_display_delegate\.cc$",
       ),
     ),
     (
@@ -402,10 +403,12 @@ def _CheckUmaHistogramChanges(input_api, output_api):
     if not histogram_name_found:
       unmatched_histograms.append(histogram_info)
 
+  histograms_xml_path = 'tools/metrics/histograms/histograms.xml'
   problems = []
   if unmatched_histograms:
-    with open('tools/metrics/histograms/histograms.xml') as histograms_xml:
+    with open(histograms_xml_path) as histograms_xml:
       for histogram_name, f, line_num in unmatched_histograms:
+        histograms_xml.seek(0)
         histogram_name_found = False
         for line in histograms_xml:
           histogram_name_found = _FindHistogramNameInLine(histogram_name, line)
@@ -419,7 +422,7 @@ def _CheckUmaHistogramChanges(input_api, output_api):
     return []
   return [output_api.PresubmitPromptWarning('Some UMA_HISTOGRAM lines have '
     'been modified and the associated histogram name has no match in either '
-    'metrics/histograms.xml or the modifications of it:',  problems)]
+    '%s or the modifications of it:' % (histograms_xml_path),  problems)]
 
 
 def _CheckNoNewWStrings(input_api, output_api):
@@ -1642,7 +1645,7 @@ def _CheckForWindowsLineEndings(input_api, output_api):
   """Check source code and known ascii text files for Windows style line
   endings.
   """
-  known_text_files = r'.*\.(txt|html|htm|mhtml|py)$'
+  known_text_files = r'.*\.(txt|html|htm|mhtml|py|gyp|gypi|gn|isolate)$'
 
   file_inclusion_pattern = (
     known_text_files,
@@ -1697,9 +1700,7 @@ def GetTryServerMasterForBot(bot):
   }
   master = master_map.get(bot)
   if not master:
-    if 'gpu' in bot:
-      master = 'tryserver.chromium.gpu'
-    elif 'linux' in bot or 'android' in bot or 'presubmit' in bot:
+    if 'linux' in bot or 'android' in bot or 'presubmit' in bot:
       master = 'tryserver.chromium.linux'
     elif 'win' in bot:
       master = 'tryserver.chromium.win'
@@ -1744,37 +1745,16 @@ def GetPreferredTryMasters(project, change):
   import re
   files = change.LocalPaths()
 
-  if not files or all(re.search(r'[\\\/]OWNERS$', f) for f in files):
-    return {}
-
-  if all(re.search(r'\.(m|mm)$|(^|[\\\/_])mac[\\\/_.]', f) for f in files):
-    return GetDefaultTryConfigs([
-        'mac_chromium_compile_dbg_ng',
-        'mac_chromium_rel_ng',
-    ])
-  if all(re.search('(^|[/_])win[/_.]', f) for f in files):
-    return GetDefaultTryConfigs([
-        'win8_chromium_rel',
-        'win_chromium_rel_ng',
-        'win_chromium_x64_rel_ng',
-    ])
-  if all(re.search(r'(^|[\\\/_])android[\\\/_.]', f) and
-         not re.search(r'(^|[\\\/_])devtools[\\\/_.]', f) for f in files):
-    return GetDefaultTryConfigs([
-        'android_aosp',
-        'android_rel_tests_recipe',
-    ])
-  if all(re.search(r'[\\\/_]ios[\\\/_.]', f) for f in files):
-    return GetDefaultTryConfigs(['ios_rel_device', 'ios_dbg_simulator'])
-
   import os
   import json
   with open(os.path.join(
       change.RepositoryRoot(), 'testing', 'commit_queue', 'config.json')) as f:
     cq_config = json.load(f)
-    cq_trybots = cq_config.get('trybots', {})
-    builders = cq_trybots.get('launched', {})
-    for master, master_config in cq_trybots.get('triggered', {}).iteritems():
+    cq_verifiers = cq_config.get('verifiers_no_patch', {})
+    cq_try_jobs = cq_verifiers.get('try_job_verifier', {})
+    builders = cq_try_jobs.get('launched', {})
+
+    for master, master_config in cq_try_jobs.get('triggered', {}).iteritems():
       for triggered_bot in master_config:
         builders.get(master, {}).pop(triggered_bot, None)
 
@@ -1786,11 +1766,5 @@ def GetPreferredTryMasters(project, change):
         # running local presubmit anyway.
         if 'presubmit' in builder:
           builders[master].pop(builder)
-
-  # Match things like path/aura/file.cc and path/file_aura.cc.
-  # Same for chromeos.
-  if any(re.search(r'[\\\/_](aura|chromeos)', f) for f in files):
-    tryserver_linux = builders.setdefault('tryserver.chromium.linux', {})
-    tryserver_linux['linux_chromium_chromeos_asan_rel_ng'] = ['defaulttests']
 
   return builders

@@ -5,6 +5,7 @@
 #include "cc/trees/property_tree.h"
 
 #include "cc/test/geometry_test_utils.h"
+#include "cc/trees/draw_property_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace cc {
@@ -168,6 +169,75 @@ TEST(PropertyTreeTest, ComputeTransformSiblingSingularAncestor) {
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected, transform);
 }
 
+TEST(PropertyTreeTest, TransformsWithFlattening) {
+  TransformTree tree;
+
+  int grand_parent = tree.Insert(TransformNode(), 0);
+  tree.Node(grand_parent)->data.content_target_id = grand_parent;
+  tree.Node(grand_parent)->data.target_id = grand_parent;
+
+  gfx::Transform rotation_about_x;
+  rotation_about_x.RotateAboutXAxis(15);
+
+  int parent = tree.Insert(TransformNode(), grand_parent);
+  tree.Node(parent)->data.needs_sublayer_scale = true;
+  tree.Node(parent)->data.target_id = grand_parent;
+  tree.Node(parent)->data.content_target_id = parent;
+  tree.Node(parent)->data.local = rotation_about_x;
+
+  int child = tree.Insert(TransformNode(), parent);
+  tree.Node(child)->data.target_id = parent;
+  tree.Node(child)->data.content_target_id = parent;
+  tree.Node(child)->data.flattens_inherited_transform = true;
+  tree.Node(child)->data.local = rotation_about_x;
+
+  int grand_child = tree.Insert(TransformNode(), child);
+  tree.Node(grand_child)->data.target_id = parent;
+  tree.Node(grand_child)->data.content_target_id = parent;
+  tree.Node(grand_child)->data.flattens_inherited_transform = true;
+  tree.Node(grand_child)->data.local = rotation_about_x;
+
+  ComputeTransforms(&tree);
+
+  gfx::Transform flattened_rotation_about_x = rotation_about_x;
+  flattened_rotation_about_x.FlattenTo2d();
+
+  EXPECT_TRANSFORMATION_MATRIX_EQ(rotation_about_x,
+                                  tree.Node(child)->data.to_target);
+
+  EXPECT_TRANSFORMATION_MATRIX_EQ(flattened_rotation_about_x * rotation_about_x,
+                                  tree.Node(child)->data.to_screen);
+
+  EXPECT_TRANSFORMATION_MATRIX_EQ(flattened_rotation_about_x * rotation_about_x,
+                                  tree.Node(grand_child)->data.to_target);
+
+  EXPECT_TRANSFORMATION_MATRIX_EQ(flattened_rotation_about_x *
+                                      flattened_rotation_about_x *
+                                      rotation_about_x,
+                                  tree.Node(grand_child)->data.to_screen);
+
+  gfx::Transform grand_child_to_child;
+  bool success =
+      tree.ComputeTransform(grand_child, child, &grand_child_to_child);
+  EXPECT_TRUE(success);
+  EXPECT_TRANSFORMATION_MATRIX_EQ(rotation_about_x, grand_child_to_child);
+
+  // Remove flattening at grand_child, and recompute transforms.
+  tree.Node(grand_child)->data.flattens_inherited_transform = false;
+  ComputeTransforms(&tree);
+
+  EXPECT_TRANSFORMATION_MATRIX_EQ(rotation_about_x * rotation_about_x,
+                                  tree.Node(grand_child)->data.to_target);
+
+  EXPECT_TRANSFORMATION_MATRIX_EQ(
+      flattened_rotation_about_x * rotation_about_x * rotation_about_x,
+      tree.Node(grand_child)->data.to_screen);
+
+  success = tree.ComputeTransform(grand_child, child, &grand_child_to_child);
+  EXPECT_TRUE(success);
+  EXPECT_TRANSFORMATION_MATRIX_EQ(rotation_about_x, grand_child_to_child);
+}
+
 TEST(PropertyTreeTest, MultiplicationOrder) {
   TransformTree tree;
   TransformNode& root = *tree.Node(0);
@@ -199,6 +269,35 @@ TEST(PropertyTreeTest, MultiplicationOrder) {
   transform = transform * inverse;
   expected.MakeIdentity();
   EXPECT_TRANSFORMATION_MATRIX_EQ(expected, transform);
+}
+
+TEST(PropertyTreeTest, ComputeTransformWithUninvertibleTransform) {
+  TransformTree tree;
+  TransformNode& root = *tree.Node(0);
+  root.data.target_id = 0;
+  tree.UpdateTransforms(0);
+
+  TransformNode child;
+  child.data.local.Scale(0, 0);
+  child.data.target_id = 0;
+
+  tree.Insert(child, 0);
+  tree.UpdateTransforms(1);
+
+  gfx::Transform expected;
+  expected.Scale(0, 0);
+
+  gfx::Transform transform;
+  gfx::Transform inverse;
+
+  bool success = tree.ComputeTransform(1, 0, &transform);
+  EXPECT_TRUE(success);
+  EXPECT_TRANSFORMATION_MATRIX_EQ(expected, transform);
+
+  // To compute this would require inverting the 0 matrix, so we cannot
+  // succeed.
+  success = tree.ComputeTransform(0, 1, &inverse);
+  EXPECT_FALSE(success);
 }
 
 }  // namespace cc

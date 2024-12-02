@@ -53,8 +53,6 @@ AvPipelineImpl::AvPipelineImpl(
 }
 
 AvPipelineImpl::~AvPipelineImpl() {
-  // If there are weak pointers in the wild, they must be invalidated
-  // on the right thread.
   DCHECK(thread_checker_.CalledOnValidThread());
   media_component_device_->SetClient(MediaComponentDevice::Client());
 
@@ -188,10 +186,8 @@ void AvPipelineImpl::SetCdm(BrowserCdmCast* media_keys) {
 
   media_keys_ = media_keys;
   media_keys_callback_id_ = media_keys_->RegisterPlayer(
-      ::media::BindToCurrentLoop(
-          base::Bind(&AvPipelineImpl::OnCdmStateChanged, weak_this_)),
-      ::media::BindToCurrentLoop(
-          base::Bind(&AvPipelineImpl::OnCdmDestroyed, weak_this_)));
+      base::Bind(&AvPipelineImpl::OnCdmStateChanged, weak_this_),
+      base::Bind(&AvPipelineImpl::OnCdmDestroyed, weak_this_));
 }
 
 void AvPipelineImpl::OnEos() {

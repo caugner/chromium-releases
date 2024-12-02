@@ -31,10 +31,6 @@ namespace extensions {
 class BrowserPermissionsPolicyDelegate;
 }
 
-namespace prerender {
-class PrerenderTracker;
-}
-
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
@@ -170,10 +166,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const base::Callback<void(bool)>& callback,
       content::CertificateRequestResultType* request) override;
   void SelectClientCertificate(
-      int render_process_id,
-      int render_frame_id,
+      content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
-      const base::Callback<void(net::X509Certificate*)>& callback) override;
+      scoped_ptr<content::ClientCertificateDelegate> delegate) override;
   void AddCertificate(net::CertificateMimeType cert_type,
                       const void* cert_data,
                       size_t cert_size,
@@ -182,31 +177,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   content::MediaObserver* GetMediaObserver() override;
   content::PlatformNotificationService* GetPlatformNotificationService()
       override;
-  void RequestPermission(
-      content::PermissionType permission,
-      content::WebContents* web_contents,
-      int bridge_id,
-      const GURL& requesting_frame,
-      bool user_gesture,
-      const base::Callback<void(bool)>& result_callback) override;
-  content::PermissionStatus GetPermissionStatus(
-      content::PermissionType permission,
-      content::BrowserContext* browser_context,
-      const GURL& requesting_origin,
-      const GURL& embedding_origin) override;
-  void ResetPermission(
-      content::PermissionType permission,
-      content::BrowserContext* browser_context,
-      const GURL& requesting_origin,
-      const GURL& embedding_origin) override;
-  void CancelPermissionRequest(content::PermissionType permission,
-                               content::WebContents* web_contents,
-                               int bridge_id,
-                               const GURL& requesting_frame) override;
-  void RegisterPermissionUsage(content::PermissionType permission,
-                               content::WebContents* web_contents,
-                               const GURL& frame_url,
-                               const GURL& main_frame_url) override;
   bool CanCreateWindow(const GURL& opener_url,
                        const GURL& opener_top_level_frame_url,
                        const GURL& source_origin,
@@ -230,8 +200,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void OverrideWebkitPrefs(content::RenderViewHost* rvh,
                            content::WebPreferences* prefs) override;
   void BrowserURLHandlerCreated(content::BrowserURLHandler* handler) override;
-  void ClearCache(content::RenderViewHost* rvh) override;
-  void ClearCookies(content::RenderViewHost* rvh) override;
+  void ClearCache(content::RenderFrameHost* rfh) override;
+  void ClearCookies(content::RenderFrameHost* rfh) override;
   base::FilePath GetDefaultDownloadDirectory() override;
   std::string GetDefaultDownloadName() override;
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;
@@ -260,8 +230,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool IsPluginAllowedToUseDevChannelAPIs(
       content::BrowserContext* browser_context,
       const GURL& url) override;
-  net::CookieStore* OverrideCookieStoreForRenderProcess(
-      int render_process_id) override;
   void OverridePageVisibilityState(
       content::RenderFrameHost* render_frame_host,
       blink::WebPageVisibilityState* visibility_state) override;
@@ -285,6 +253,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                const content::OpenURLParams& params,
                const base::Callback<void(content::WebContents*)>& callback)
       override;
+
+  void RecordURLMetric(const std::string& metric, const GURL& url) override;
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;
@@ -327,14 +297,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   // versions of Chrome.
   std::set<std::string> allowed_dev_channel_origins_;
 #endif
-
-  // The prerender tracker used to determine whether a render process is used
-  // for prerendering and an override cookie store must be provided.
-  // This needs to be kept as a member rather than just looked up from
-  // the profile due to initialization ordering, as well as due to threading.
-  // It is initialized on the UI thread when the ResoureDispatcherHost is
-  // created. It is used only the IO thread.
-  prerender::PrerenderTracker* prerender_tracker_;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   base::ScopedFD v8_natives_fd_;

@@ -22,6 +22,8 @@
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
+        'content_settings/core/browser/content_settings_binary_value_map.cc',
+        'content_settings/core/browser/content_settings_binary_value_map.h',
         'content_settings/core/browser/content_settings_client.h',
         'content_settings/core/browser/content_settings_default_provider.cc',
         'content_settings/core/browser/content_settings_default_provider.h',
@@ -36,6 +38,8 @@
         'content_settings/core/browser/content_settings_override_provider.h',
         'content_settings/core/browser/content_settings_policy_provider.cc',
         'content_settings/core/browser/content_settings_policy_provider.h',
+        'content_settings/core/browser/content_settings_pref.cc',
+        'content_settings/core/browser/content_settings_pref.h',
         'content_settings/core/browser/content_settings_pref_provider.cc',
         'content_settings/core/browser/content_settings_pref_provider.h',
         'content_settings/core/browser/content_settings_provider.h',

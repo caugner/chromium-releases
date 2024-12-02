@@ -6,6 +6,7 @@
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
@@ -74,6 +75,8 @@ const char kJsApiUserManagerLaunchGuest[] = "launchGuest";
 const char kJsApiUserManagerLaunchUser[] = "launchUser";
 const char kJsApiUserManagerRemoveUser[] = "removeUser";
 const char kJsApiUserManagerAttemptUnlock[] = "attemptUnlock";
+const char kJsApiUserManagerLogRemoveUserWarningShown[] =
+    "logRemoveUserWarningShown";
 
 const size_t kAvatarIconSize = 180;
 
@@ -211,6 +214,11 @@ void UrlHashHelper::ExecuteUrlHash() {
     chrome::ShowMemory(target_browser);
 }
 
+void HandleLogRemoveUserWarningShown(const base::ListValue* args) {
+  ProfileMetrics::LogProfileDeleteUser(
+      ProfileMetrics::DELETE_PROFILE_USER_MANAGER_SHOW_WARNING);
+}
+
 }  // namespace
 
 // ProfileUpdateObserver ------------------------------------------------------
@@ -258,6 +266,11 @@ class UserManagerScreenHandler::ProfileUpdateObserver
 
   void OnProfileHighResAvatarLoaded(
       const base::FilePath& profile_path) override {
+    // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "461175 UserManagerScreenHandler::OnProfileHighResAvatarLoaded"));
     user_manager_handler_->SendUserList();
   }
 
@@ -588,6 +601,8 @@ void UserManagerScreenHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kJsApiUserManagerAttemptUnlock,
       base::Bind(&UserManagerScreenHandler::HandleAttemptUnlock,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(kJsApiUserManagerLogRemoveUserWarningShown,
+      base::Bind(&HandleLogRemoveUserWarningShown));
 
   const content::WebUI::MessageCallback& kDoNothingCallback =
       base::Bind(&HandleAndDoNothing);
@@ -620,6 +635,8 @@ void UserManagerScreenHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_GO_INCOGNITO_BUTTON));
   localized_strings->SetString("signOutUser",
       l10n_util::GetStringUTF16(IDS_SCREEN_LOCK_SIGN_OUT));
+  localized_strings->SetString("addSupervisedUser",
+      l10n_util::GetStringUTF16(IDS_CREATE_SUPERVISED_USER_MENU_LABEL));
 
   // For AccountPickerScreen.
   localized_strings->SetString("screenType", "login-add-user");
@@ -749,6 +766,11 @@ void UserManagerScreenHandler::SendUserList() {
 
   web_ui()->CallJavascriptFunction("login.AccountPickerScreen.loadUsers",
       users_list, base::FundamentalValue(IsGuestModeEnabled()));
+
+  // This is the latest C++ code we have in the flow to show the UserManager.
+  // This may be invoked more than once per UserManager lifetime; the
+  // UserManager will ensure all relevant logging only happens once.
+  UserManager::OnUserManagerShown();
 }
 
 void UserManagerScreenHandler::ReportAuthenticationResult(

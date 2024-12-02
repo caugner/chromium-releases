@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "\u52a0\u5165\u500b\u4eba\u5b57\u5178"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "\u9032\u968e"
@@ -2616,7 +2627,7 @@
     "message": "\u5f88\u62b1\u6b49\uff0c\u76ee\u524d\u672a\u9023\u7dda\u81f3\u7db2\u8def\uff0c\u56e0\u6b64\u7121\u6cd5\u8b93\u60a8\u4f7f\u7528\u624b\u5beb\u8f38\u5165\u3002"
   },
   "handwriting_privacy_info": {
-    "message": "\u60a8\u7684\u8f38\u5165\u5167\u5bb9\u5c07\u50b3\u9001\u81f3 Google \u4f3a\u670d\u5668\uff0c\u7528\u65bc\u8fa8\u8b58\u6587\u5b57"
+    "message": "\u60a8\u8f38\u5165\u7684\u5167\u5bb9\u5c07\u50b3\u9001\u5230 Google \u4f3a\u670d\u5668\u9032\u884c\u6587\u5b57\u8fa8\u8b58\u3002"
   },
   "hide_keyboard": {
     "message": "\u96b1\u85cf\u9375\u76e4"
@@ -2634,7 +2645,7 @@
     "message": "\u4e0d\u66f4\u6b63\u4ee5\u4e0b\u5b57\u8a5e\uff1a"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "\u4e0d\u9032\u884c\u66f4\u6b63"
   },
   "il_heb_settings_page": {
     "message": "\u5e0c\u4f2f\u4f86\u6587\u9375\u76e4\u8a2d\u5b9a\u9801\u9762"
@@ -3000,10 +3011,10 @@
     "message": "\u97d3\u6587\u9375\u76e4\u914d\u7f6e"
   },
   "korean_settings_page": {
-    "message": "\u97d3\u6587\u8a2d\u5b9a\u9801\u9762"
+    "message": "\u97d3\u6587\u8f38\u5165\u6cd5\u8a2d\u5b9a\u9801\u9762"
   },
   "korean_syllable_input": {
-    "message": "\u9010\u4e00\u8f38\u5165\u97d3\u6587\u62fc\u97f3\u5b57\u6bcd"
+    "message": "\u4e00\u6b21\u8f38\u5165\u4e00\u500b\u97f3\u7bc0"
   },
   "latam_spa_settings_page": {
     "message": "\u62c9\u4e01\u7f8e\u6d32\u6587\u9375\u76e4 (\u897f\u73ed\u7259\u6587) \u8a2d\u5b9a\u9801\u9762"
@@ -3105,7 +3116,7 @@
     "message": "\u6309\u4e0b Backspace \u9375\u6642\u986f\u793a\u5efa\u8b70\u5b57\u8a5e\u4e0b\u62c9\u5f0f\u9078\u55ae"
   },
   "show_hangul_candidate": {
-    "message": "\u986f\u793a\u97d3\u6587\u5efa\u8b70"
+    "message": "\u5728\u97d3\u6587\u6a21\u5f0f\u4e2d\u986f\u793a\u5019\u9078\u62fc\u97f3\u5b57\u6bcd"
   },
   "shrink_candidates": {
     "message": "\u6536\u5408\u5019\u9078\u5b57\u6e05\u55ae"
@@ -3147,7 +3158,7 @@
     "message": "Tab \u9375"
   },
   "touch_keyboard": {
-    "message": "\u89f8\u63a7\u9375\u76e4"
+    "message": "\u87a2\u5e55\u5c0f\u9375\u76e4"
   },
   "tr_tur_settings_page": {
     "message": "\u571f\u8033\u5176\u6587\u9375\u76e4\u8a2d\u5b9a\u9801\u9762"
@@ -3300,7 +3311,7 @@
     "message": "\u8a9e\u97f3"
   },
   "voice_privacy_info": {
-    "message": "Chrome \u6703\u5c07\u60a8\u7684\u8a9e\u97f3\u50b3\u9001\u5230 Google \u4f3a\u670d\u5668\uff0c\u7528\u65bc\u8fa8\u8b58\u6587\u5b57"
+    "message": "\u60a8\u8f38\u5165\u7684\u8a9e\u97f3\u5167\u5bb9\u5c07\u50b3\u9001\u5230 Google \u4f3a\u670d\u5668\u9032\u884c\u6587\u5b57\u8fa8\u8b58\u3002"
   },
   "voice_turn_off": {
     "message": "\u95dc\u9589\u8a9e\u97f3\u8f38\u5165\u5de5\u5177"

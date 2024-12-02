@@ -5,6 +5,8 @@
   <include src="reset_profile_settings_banner.html">
   <include src="automatic_settings_reset_banner.html">
 <if expr="chromeos">
+  <link rel="import" href="chrome://resources/cr_elements/cr_network_icon/cr_network_icon.html">
+  <link rel="import" href="chrome://resources/cr_elements/cr_onc/cr_onc_data.html">
   <include src="secondary_user_banner.html">
   <section>
     <div id="network-section-header" class="section-header">
@@ -457,17 +459,6 @@
               class="standalone-action-link"></a><span></span>
         </span>
 </if>
-      </div>
-      <div id="rappor-setting" class="checkbox controlled-setting-with-label">
-        <label>
-          <input pref="rappor.enabled" type="checkbox"
-              metric="Options_RapporEnabledCheckbox">
-          <span>
-            <span i18n-values=".innerHTML:enableRappor"></span>
-            <span class="controlled-setting-indicator"
-                pref="rappor.enabled"></span>
-          </span>
-        </label>
       </div>
 </if>  <!-- _google_chrome -->
       <div class="checkbox">
@@ -983,7 +974,6 @@
       </button>
     </div>
   </section>
-</if>
 </if>
 <if expr="not chromeos">
   <section id="system-section">

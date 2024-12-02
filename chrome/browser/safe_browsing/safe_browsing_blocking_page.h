@@ -37,6 +37,7 @@
 #include "chrome/browser/interstitials/security_interstitial_metrics_helper.h"
 #include "chrome/browser/interstitials/security_interstitial_page.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
+#include "content/public/browser/interstitial_page_delegate.h"
 #include "url/gurl.h"
 
 class MalwareDetails;
@@ -53,7 +54,7 @@ class SafeBrowsingBlockingPage : public SecurityInterstitialPage {
   typedef std::map<content::WebContents*, UnsafeResourceList> UnsafeResourceMap;
 
   // Interstitial type, used in tests.
-  static const void* kTypeForTesting;
+  static content::InterstitialPageDelegate::TypeID kTypeForTesting;
 
   ~SafeBrowsingBlockingPage() override;
 
@@ -83,15 +84,13 @@ class SafeBrowsingBlockingPage : public SecurityInterstitialPage {
   void OnDontProceed() override;
   void CommandReceived(const std::string& command) override;
   void OverrideRendererPrefs(content::RendererPreferences* prefs) override;
-
-  // SecurityInterstitialPage method:
-  const void* GetTypeForTesting() const override;
+  content::InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
 
  protected:
   friend class SafeBrowsingBlockingPageTest;
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingBlockingPageTest,
                            ProceedThenDontProceed);
-  void SetReportingPreference(bool report);
+
   void UpdateReportingPref();  // Used for the transition from old to new pref.
 
   // Don't instantiate this class directly, use ShowBlockingPage instead.
@@ -125,10 +124,6 @@ class SafeBrowsingBlockingPage : public SecurityInterstitialPage {
   // enabled, the report is scheduled to be sent on the |ui_manager_|.
   void FinishMalwareDetails(int64 delay_ms);
 
-  // Returns the boolean value of the given |pref| from the PrefService of the
-  // Profile associated with |web_contents_|.
-  bool IsPrefEnabled(const char* pref);
-
   // A list of SafeBrowsingUIManager::UnsafeResource for a tab that the user
   // should be warned about.  They are queued when displaying more than one
   // interstitial at a time.
@@ -149,7 +144,6 @@ class SafeBrowsingBlockingPage : public SecurityInterstitialPage {
 
   // For reporting back user actions.
   SafeBrowsingUIManager* ui_manager_;
-  base::MessageLoop* report_loop_;
 
   // True if the interstitial is blocking the main page because it is on one
   // of our lists.  False if a subresource is being blocked, or in the case of
@@ -193,8 +187,6 @@ class SafeBrowsingBlockingPage : public SecurityInterstitialPage {
 
   std::string GetMetricPrefix() const;
   std::string GetSamplingEventName() const;
-
-  scoped_ptr<SecurityInterstitialMetricsHelper> metrics_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBlockingPage);
 };

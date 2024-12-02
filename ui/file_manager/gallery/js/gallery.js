@@ -6,7 +6,7 @@
  * Overrided metadata worker's path.
  * @type {string}
  */
-ContentProvider.WORKER_SCRIPT = '/js/metadata_worker.js';
+ContentMetadataProvider.WORKER_SCRIPT = '/js/metadata_worker.js';
 
 /**
  * Gallery for viewing and editing image files.
@@ -19,9 +19,9 @@ function Gallery(volumeManager) {
   /**
    * @type {{appWindow: chrome.app.window.AppWindow, onClose: function(),
    *     onMaximize: function(), onMinimize: function(),
-   *     onAppRegionChanged: function(), metadataCache: MetadataCache,
-   *     readonlyDirName: string, displayStringFunction: function(),
-   *     loadTimeData: Object, curDirEntry: Entry, searchResults: *}}
+   *     onAppRegionChanged: function(), readonlyDirName: string,
+   *     displayStringFunction: function(), loadTimeData: Object,
+   *     curDirEntry: Entry, searchResults: *}}
    * @private
    *
    * TODO(yawano): curDirEntry and searchResults seem not to be used.
@@ -39,7 +39,6 @@ function Gallery(volumeManager) {
     },
     onMinimize: function() { chrome.app.window.current().minimize(); },
     onAppRegionChanged: function() {},
-    metadataCache: MetadataCache.createFull(volumeManager),
     readonlyDirName: '',
     displayStringFunction: function() { return ''; },
     loadTimeData: {},
@@ -48,15 +47,22 @@ function Gallery(volumeManager) {
   };
   this.container_ = queryRequiredElement(document, '.gallery');
   this.document_ = document;
-  this.metadataCache_ = this.context_.metadataCache;
   this.volumeManager_ = volumeManager;
+  /**
+   * @private {!MetadataModel}
+   * @const
+   */
+  this.metadataModel_ = MetadataModel.create(volumeManager);
+  /**
+   * @private {!ThumbnailModel}
+   * @const
+   */
+  this.thumbnailModel_ = new ThumbnailModel(this.metadataModel_);
   this.selectedEntry_ = null;
-  this.metadataCacheObserverId_ = null;
   this.onExternallyUnmountedBound_ = this.onExternallyUnmounted_.bind(this);
   this.initialized_ = false;
 
-  this.dataModel_ = new GalleryDataModel(
-      this.context_.metadataCache);
+  this.dataModel_ = new GalleryDataModel(this.metadataModel_);
   var downloadVolumeInfo = this.volumeManager_.getCurrentProfileVolumeInfo(
       VolumeManagerCommon.VolumeType.DOWNLOADS);
   downloadVolumeInfo.resolveDisplayRoot().then(function(entry) {
@@ -155,6 +161,8 @@ function Gallery(volumeManager) {
                                   this.errorBanner_,
                                   this.dataModel_,
                                   this.selectionModel_,
+                                  this.metadataModel_,
+                                  this.thumbnailModel_,
                                   this.context_,
                                   this.volumeManager_,
                                   this.toggleMode_.bind(this),
@@ -162,9 +170,6 @@ function Gallery(volumeManager) {
 
   this.slideMode_.addEventListener('image-displayed', function() {
     cr.dispatchSimpleEvent(this, 'image-displayed');
-  }.bind(this));
-  this.slideMode_.addEventListener('image-saved', function() {
-    cr.dispatchSimpleEvent(this, 'image-saved');
   }.bind(this));
 
   this.deleteButton_ = this.initToolbarButton_('delete', 'GALLERY_DELETE');
@@ -191,15 +196,7 @@ function Gallery(volumeManager) {
   this.inactivityWatcher_ = new MouseInactivityWatcher(
       this.container_, Gallery.FADE_TIMEOUT, this.hasActiveTool.bind(this));
 
-  // Search results may contain files from different subdirectories so
-  // the observer is not going to work.
-  if (!this.context_.searchResults && this.context_.curDirEntry) {
-    this.metadataCacheObserverId_ = this.metadataCache_.addObserver(
-        this.context_.curDirEntry,
-        MetadataCache.CHILDREN,
-        'thumbnail',
-        this.updateThumbnails_.bind(this));
-  }
+  // TODO(hirono): Add observer to handle thumbnail update.
   this.volumeManager_.addEventListener(
       'externally-unmounted', this.onExternallyUnmountedBound_);
   // The 'pagehide' event is called when the app window is closed.
@@ -236,9 +233,10 @@ Gallery.MOSAIC_BACKGROUND_INIT_DELAY = 1000;
 /**
  * Types of metadata Gallery uses (to query the metadata cache).
  * @const
- * @type {string}
+ * @type {!Array<string>}
  */
-Gallery.METADATA_TYPE = 'thumbnail|filesystem|media|external';
+Gallery.PREFETCH_PROPERTY_NAMES =
+    ['imageWidth', 'imageHeight', 'size', 'present'];
 
 /**
  * Closes gallery when a volume containing the selected item is unmounted.
@@ -260,8 +258,6 @@ Gallery.prototype.onExternallyUnmounted_ = function(event) {
  * @private
  */
 Gallery.prototype.onPageHide_ = function() {
-  if (this.metadataCacheObserverId_ !== null)
-    this.metadataCache_.removeObserver(this.metadataCacheObserverId_);
   this.volumeManager_.removeEventListener(
       'externally-unmounted', this.onExternallyUnmountedBound_);
   this.volumeManager_.dispose();
@@ -303,12 +299,12 @@ Gallery.prototype.loadInternal_ = function(entries, selectedEntries) {
   // Obtains max chank size.
   var maxChunkSize = 20;
   var volumeInfo = this.volumeManager_.getVolumeInfo(entries[0]);
-  if (volumeInfo &&
-      volumeInfo.volumeType === VolumeManagerCommon.VolumeType.MTP) {
-    maxChunkSize = 1;
+  if (volumeInfo) {
+    if (volumeInfo.volumeType === VolumeManagerCommon.VolumeType.MTP)
+      maxChunkSize = 1;
+    if (volumeInfo.isReadOnly)
+      this.context_.readonlyDirName = volumeInfo.label;
   }
-  if (volumeInfo.isReadOnly)
-    this.context_.readonlyDirName = volumeInfo.label;
 
   // Make loading list.
   var entrySet = {};
@@ -349,22 +345,20 @@ Gallery.prototype.loadInternal_ = function(entries, selectedEntries) {
   // Load entries.
   // Use the self variable capture-by-closure because it is faster than bind.
   var self = this;
+  var thumbnailModel = new ThumbnailModel(this.metadataModel_);
   var loadChunk = function(firstChunk) {
     // Extract chunk.
     var chunk = loadingList.splice(0, maxChunkSize);
     if (!chunk.length)
       return;
-
-    return new Promise(function(fulfill) {
-      // Obtains metadata for chunk.
-      var entries = chunk.map(function(chunkItem) {
-        return chunkItem.entry;
-      });
-      self.metadataCache_.get(entries, Gallery.METADATA_TYPE, fulfill);
-    }).then(function(metadataList) {
-      if (chunk.length !== metadataList.length)
-        return Promise.reject('Failed to load metadata.');
-
+    var entries = chunk.map(function(chunkItem) {
+      return chunkItem.entry;
+    });
+    var metadataPromise = self.metadataModel_.get(
+        entries, Gallery.PREFETCH_PROPERTY_NAMES);
+    var thumbnailPromise = thumbnailModel.get(entries);
+    return Promise.all([metadataPromise, thumbnailPromise]).then(
+        function(metadataLists) {
       // Remove all the previous items if it's the first chunk.
       // Do it here because prevent a flicker between removing all the items
       // and adding new ones.
@@ -379,12 +373,11 @@ Gallery.prototype.loadInternal_ = function(entries, selectedEntries) {
         var locationInfo = self.volumeManager_.getLocationInfo(chunkItem.entry);
         if (!locationInfo)  // Skip the item, since gone.
           return;
-        var clonedMetadata = MetadataCache.cloneMetadata(metadataList[index]);
         items.push(new Gallery.Item(
             chunkItem.entry,
             locationInfo,
-            clonedMetadata,
-            self.metadataCache_,
+            metadataLists[0][index],
+            metadataLists[1][index],
             /* original */ true));
       });
       self.dataModel_.push.apply(self.dataModel_, items);
@@ -813,7 +806,7 @@ Gallery.prototype.onFilenameEditBlur_ = function(event) {
       var event = new Event('content');
       event.item = item;
       event.oldEntry = oldEntry;
-      event.metadata = null;  // Metadata unchanged.
+      event.thumbnailChanged = false;
       this.dataModel_.dispatchEvent(event);
     }.bind(this), function(error) {
       if (error === 'NOT_CHANGED')
@@ -878,7 +871,7 @@ Gallery.prototype.onShareButtonClick_ = function() {
   var item = this.getSingleSelectedItem();
   if (!item)
     return;
-  this.shareDialog_.show(item.getEntry(), function() {});
+  this.shareDialog_.showEntry(item.getEntry(), function() {});
 };
 
 /**
@@ -951,7 +944,7 @@ var loadTimeDataPromise = new Promise(function(fulfill, reject) {
  */
 var volumeManagerPromise = new Promise(function(fulfill, reject) {
   var volumeManager = new VolumeManagerWrapper(
-      VolumeManagerWrapper.DriveEnabledStatus.DRIVE_ENABLED);
+      VolumeManagerWrapper.NonNativeVolumeStatus.ENABLED);
   volumeManager.ensureInitialized(fulfill.bind(null, volumeManager));
 });
 

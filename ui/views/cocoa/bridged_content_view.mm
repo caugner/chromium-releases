@@ -8,6 +8,7 @@
 #import "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
 #include "ui/base/ime/text_input_client.h"
+#include "ui/compositor/paint_context.h"
 #import "ui/events/cocoa/cocoa_event_utils.h"
 #include "ui/events/keycodes/dom3/dom_code.h"
 #import "ui/events/keycodes/keyboard_code_conversion_mac.h"
@@ -41,13 +42,29 @@ gfx::Point MovePointToWindow(const NSPoint& point,
                     NSHeight(content_rect) - point_in_window.y);
 }
 
+// Checks if there's an active MenuController during key event dispatch. If
+// there is one, it gets preference, and it will likely swallow the event.
+bool DispatchEventToMenu(views::Widget* widget, ui::KeyboardCode key_code) {
+  MenuController* menuController = MenuController::GetActiveInstance();
+  if (menuController && menuController->owner() == widget) {
+    if (menuController->OnWillDispatchKeyEvent(0, key_code) ==
+        ui::POST_DISPATCH_NONE)
+      return true;
+  }
+  return false;
 }
+
+}  // namespace
 
 @interface BridgedContentView ()
 
 // Translates the location of |theEvent| to toolkit-views coordinates and passes
 // the event to NativeWidgetMac for handling.
 - (void)handleMouseEvent:(NSEvent*)theEvent;
+
+// Translates keycodes and modifiers on |theEvent| to ui::KeyEvents and passes
+// the event to the InputMethod for dispatch.
+- (void)handleKeyEvent:(NSEvent*)theEvent;
 
 // Handles an NSResponder Action Message by mapping it to a corresponding text
 // editing command from ui_strings.grd and, when not being sent to a
@@ -140,6 +157,18 @@ gfx::Point MovePointToWindow(const NSPoint& point,
   hostedView_->GetWidget()->OnMouseEvent(&event);
 }
 
+- (void)handleKeyEvent:(NSEvent*)theEvent {
+  if (!hostedView_)
+    return;
+
+  DCHECK(theEvent);
+  ui::KeyEvent event(theEvent);
+  if (DispatchEventToMenu(hostedView_->GetWidget(), event.key_code()))
+    return;
+
+  hostedView_->GetWidget()->GetInputMethod()->DispatchKeyEvent(event);
+}
+
 - (void)handleAction:(int)commandId
              keyCode:(ui::KeyboardCode)keyCode
              domCode:(ui::DomCode)domCode
@@ -147,14 +176,8 @@ gfx::Point MovePointToWindow(const NSPoint& point,
   if (!hostedView_)
     return;
 
-  // If there's an active MenuController it gets preference, and it will likely
-  // swallow the event.
-  MenuController* menuController = MenuController::GetActiveInstance();
-  if (menuController && menuController->owner() == hostedView_->GetWidget()) {
-    if (menuController->OnWillDispatchKeyEvent(0, keyCode) ==
-        ui::POST_DISPATCH_NONE)
-      return;
-  }
+  if (DispatchEventToMenu(hostedView_->GetWidget(), keyCode))
+    return;
 
   // If there's an active TextInputClient, schedule the editing command to be
   // performed.
@@ -226,7 +249,24 @@ gfx::Point MovePointToWindow(const NSPoint& point,
   return YES;
 }
 
+- (void)viewDidMoveToWindow {
+  // When this view is added to a window, AppKit calls setFrameSize before it is
+  // added to the window, so the behavior in setFrameSize is not triggered.
+  NSWindow* window = [self window];
+  if (window)
+    [self setFrameSize:NSZeroSize];
+}
+
 - (void)setFrameSize:(NSSize)newSize {
+  // The size passed in here does not always use
+  // -[NSWindow contentRectForFrameRect]. The following ensures that the
+  // contentView for a frameless window can extend over the titlebar of the new
+  // window containing it, since AppKit requires a titlebar to give frameless
+  // windows correct shadows and rounded corners.
+  NSWindow* window = [self window];
+  if (window)
+    newSize = [window contentRectForFrameRect:[window frame]].size;
+
   [super setFrameSize:newSize];
   if (!hostedView_)
     return;
@@ -245,7 +285,7 @@ gfx::Point MovePointToWindow(const NSPoint& point,
     return;
 
   gfx::CanvasSkiaPaint canvas(dirtyRect, false /* opaque */);
-  hostedView_->GetWidget()->OnNativeWidgetPaint(&canvas);
+  hostedView_->GetWidget()->OnNativeWidgetPaint(ui::PaintContext(&canvas));
 }
 
 - (NSTextInputContext*)inputContext {
@@ -326,10 +366,14 @@ gfx::Point MovePointToWindow(const NSPoint& point,
 // NSResponder Action Messages. Keep sorted according NSResponder.h (from the
 // 10.9 SDK). The list should eventually be complete. Anything not defined will
 // beep when interpretKeyEvents: would otherwise call it.
-// TODO(tapted): Make this list complete.
+// TODO(tapted): Make this list complete, except for insert* methods which are
+// dispatched as regular key events in doCommandBySelector:.
 
 // The insertText action message forwards to the TextInputClient unless a menu
-// is active.
+// is active. Note that NSResponder's interpretKeyEvents: implementation doesn't
+// direct insertText: through doCommandBySelector:, so this is still needed to
+// handle the case when inputContext: is nil. When inputContext: returns non-nil
+// text goes directly to insertText:replacementRange:.
 - (void)insertText:(id)text {
   [self insertText:text replacementRange:NSMakeRange(NSNotFound, 0)];
 }
@@ -434,15 +478,6 @@ gfx::Point MovePointToWindow(const NSPoint& point,
           eventFlags:ui::EF_SHIFT_DOWN];
 }
 
-// Insertions and Indentations.
-
-- (void)insertNewline:(id)sender {
-  [self handleAction:0
-             keyCode:ui::VKEY_RETURN
-             domCode:ui::DomCode::ENTER
-          eventFlags:0];
-}
-
 // Deletions.
 
 - (void)deleteForward:(id)sender {
@@ -545,6 +580,13 @@ gfx::Point MovePointToWindow(const NSPoint& point,
 }
 
 - (void)doCommandBySelector:(SEL)selector {
+  // Like the renderer, handle insert action messages as a regular key dispatch.
+  // This ensures, e.g., insertTab correctly changes focus between fields.
+  if (inKeyDown_ && [NSStringFromSelector(selector) hasPrefix:@"insert"]) {
+    [self handleKeyEvent:[NSApp currentEvent]];
+    return;
+  }
+
   if ([self respondsToSelector:selector])
     [self performSelector:selector withObject:nil];
   else

@@ -63,11 +63,16 @@ const base::TimeDelta kLidRecentlyOpenedDuration =
 #if defined(OS_CHROMEOS)
 // When the device approaches vertical orientation (i.e. portrait orientation)
 // the accelerometers for the base and lid approach the same values (i.e.
-// gravity pointing in the direction of the hinge). When this happens we cannot
-// compute the hinge angle reliably and must turn ignore accelerometer readings.
-// This is the minimum acceleration perpendicular to the hinge under which to
-// detect hinge angle in m/s^2.
-const float kHingeAngleDetectionThreshold = 2.5f;
+// gravity pointing in the direction of the hinge). When this happens abrupt
+// small acceleration perpendicular to the hinge can lead to incorrect hinge
+// angle calculations. To prevent this the accelerometer updates will be
+// smoothed over time in order to reduce this noise.
+// This is the minimum acceleration parallel to the hinge under which to begin
+// smoothing in m/s^2.
+const float kHingeVerticalSmoothingStart = 7.0f;
+// This is the maximum acceleration parallel to the hinge under which smoothing
+// will incorporate new acceleration values, in m/s^2.
+const float kHingeVerticalSmoothingMaximum = 9.5f;
 
 // The maximum deviation between the magnitude of the two accelerometers under
 // which to detect hinge angle in m/s^2. These accelerometers are attached to
@@ -97,7 +102,11 @@ MaximizeModeController::MaximizeModeController()
       touchview_usage_interval_start_time_(base::Time::Now()),
       tick_clock_(new base::DefaultTickClock()),
       lid_is_closed_(false) {
-  Shell::GetInstance()->AddShellObserver(this);
+  Shell* shell = Shell::GetInstance();
+  shell->AddShellObserver(this);
+  shell->metrics()->RecordUserMetricsAction(
+      ash::UMA_MAXIMIZE_MODE_INITIALLY_DISABLED);
+
 #if defined(OS_CHROMEOS)
   chromeos::AccelerometerReader::GetInstance()->AddObserver(this);
   chromeos::DBusThreadManager::Get()->
@@ -128,15 +137,24 @@ bool MaximizeModeController::CanEnterMaximizeMode() {
              switches::kAshEnableTouchViewTesting);
 }
 
-void MaximizeModeController::EnableMaximizeModeWindowManager(bool enable) {
-  if (enable && !maximize_mode_window_manager_.get()) {
+void MaximizeModeController::EnableMaximizeModeWindowManager(
+    bool should_enable) {
+  bool is_enabled = !!maximize_mode_window_manager_.get();
+  if (should_enable == is_enabled)
+    return;
+
+  Shell* shell = Shell::GetInstance();
+
+  if (should_enable) {
     maximize_mode_window_manager_.reset(new MaximizeModeWindowManager());
     // TODO(jonross): Move the maximize mode notifications from ShellObserver
     // to MaximizeModeController::Observer
-    Shell::GetInstance()->OnMaximizeModeStarted();
-  } else if (!enable && maximize_mode_window_manager_.get()) {
+    shell->metrics()->RecordUserMetricsAction(ash::UMA_MAXIMIZE_MODE_ENABLED);
+    shell->OnMaximizeModeStarted();
+  } else {
     maximize_mode_window_manager_.reset();
-    Shell::GetInstance()->OnMaximizeModeEnded();
+    shell->metrics()->RecordUserMetricsAction(ash::UMA_MAXIMIZE_MODE_DISABLED);
+    shell->OnMaximizeModeEnded();
   }
 }
 
@@ -151,23 +169,23 @@ void MaximizeModeController::AddWindow(aura::Window* window) {
 
 #if defined(OS_CHROMEOS)
 void MaximizeModeController::OnAccelerometerUpdated(
-    const chromeos::AccelerometerUpdate& update) {
+    scoped_refptr<const chromeos::AccelerometerUpdate> update) {
   bool first_accelerometer_update = !have_seen_accelerometer_data_;
   have_seen_accelerometer_data_ = true;
 
-  if (!update.has(chromeos::ACCELEROMETER_SOURCE_SCREEN))
+  if (!update->has(chromeos::ACCELEROMETER_SOURCE_SCREEN))
     return;
 
   // Whether or not we enter maximize mode affects whether we handle screen
   // rotation, so determine whether to enter maximize mode first.
-  if (!update.has(chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD)) {
+  if (!update->has(chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD)) {
     if (first_accelerometer_update)
       EnterMaximizeMode();
   } else if (ui::IsAccelerometerReadingStable(
-                 update, chromeos::ACCELEROMETER_SOURCE_SCREEN) &&
+                 *update, chromeos::ACCELEROMETER_SOURCE_SCREEN) &&
              ui::IsAccelerometerReadingStable(
-                 update, chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD) &&
-             IsAngleBetweenAccelerometerReadingsStable(update)) {
+                 *update, chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD) &&
+             IsAngleBetweenAccelerometerReadingsStable(*update)) {
     // update.has(chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD)
     // Ignore the reading if it appears unstable. The reading is considered
     // unstable if it deviates too much from gravity and/or the magnitude of the
@@ -197,24 +215,39 @@ void MaximizeModeController::SuspendDone(
 }
 
 void MaximizeModeController::HandleHingeRotation(
-    const chromeos::AccelerometerUpdate& update) {
+    scoped_refptr<const chromeos::AccelerometerUpdate> update) {
   static const gfx::Vector3dF hinge_vector(1.0f, 0.0f, 0.0f);
-  // Ignore the component of acceleration parallel to the hinge for the purposes
-  // of hinge angle calculation.
-  gfx::Vector3dF base_flattened(ui::ConvertAccelerometerReadingToVector3dF(
-      update.get(chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD)));
-  gfx::Vector3dF lid_flattened(ui::ConvertAccelerometerReadingToVector3dF(
-      update.get(chromeos::ACCELEROMETER_SOURCE_SCREEN)));
-  base_flattened.set_x(0.0f);
-  lid_flattened.set_x(0.0f);
+  gfx::Vector3dF base_reading(ui::ConvertAccelerometerReadingToVector3dF(
+      update->get(chromeos::ACCELEROMETER_SOURCE_ATTACHED_KEYBOARD)));
+  gfx::Vector3dF lid_reading(ui::ConvertAccelerometerReadingToVector3dF(
+      update->get(chromeos::ACCELEROMETER_SOURCE_SCREEN)));
 
   // As the hinge approaches a vertical angle, the base and lid accelerometers
   // approach the same values making any angle calculations highly inaccurate.
-  // Bail out early when it is too close.
-  if (base_flattened.Length() < kHingeAngleDetectionThreshold ||
-      lid_flattened.Length() < kHingeAngleDetectionThreshold) {
-    return;
-  }
+  // Smooth out instantaneous acceleration when nearly vertical to increase
+  // accuracy.
+  float largest_hinge_acceleration =
+      std::max(std::abs(base_reading.x()), std::abs(lid_reading.x()));
+  float smoothing_ratio =
+      std::max(0.0f, std::min(1.0f, (largest_hinge_acceleration -
+                                     kHingeVerticalSmoothingStart) /
+                                        (kHingeVerticalSmoothingMaximum -
+                                         kHingeVerticalSmoothingStart)));
+
+  base_smoothed_.Scale(smoothing_ratio);
+  base_reading.Scale(1.0f - smoothing_ratio);
+  base_smoothed_.Add(base_reading);
+
+  lid_smoothed_.Scale(smoothing_ratio);
+  lid_reading.Scale(1.0f - smoothing_ratio);
+  lid_smoothed_.Add(lid_reading);
+
+  // Ignore the component of acceleration parallel to the hinge for the purposes
+  // of hinge angle calculation.
+  gfx::Vector3dF base_flattened(base_smoothed_);
+  gfx::Vector3dF lid_flattened(lid_smoothed_);
+  base_flattened.set_x(0.0f);
+  lid_flattened.set_x(0.0f);
 
   // Compute the angle between the base and the lid.
   float lid_angle = 180.0f - gfx::ClockwiseAngleBetweenVectorsInDegrees(

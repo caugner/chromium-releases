@@ -19,11 +19,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
-#include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -771,6 +771,12 @@ void ProfileSyncService::OnGetTokenFailure(
 
 void ProfileSyncService::OnRefreshTokenAvailable(
     const std::string& account_id) {
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 ProfileSyncService::OnRefreshTokenAvailable"));
+
   if (account_id == signin_->GetAccountIdToUse())
     OnRefreshTokensLoaded();
 }
@@ -928,12 +934,12 @@ void ProfileSyncService::UpdateLastSyncedTime() {
 }
 
 void ProfileSyncService::NotifyObservers() {
-  FOR_EACH_OBSERVER(ProfileSyncServiceBase::Observer, observers_,
+  FOR_EACH_OBSERVER(sync_driver::SyncServiceObserver, observers_,
                     OnStateChanged());
 }
 
 void ProfileSyncService::NotifySyncCycleCompleted() {
-  FOR_EACH_OBSERVER(ProfileSyncServiceBase::Observer, observers_,
+  FOR_EACH_OBSERVER(sync_driver::SyncServiceObserver, observers_,
                     OnSyncCycleCompleted());
 }
 
@@ -950,12 +956,6 @@ void ProfileSyncService::ClearUnrecoverableError() {
   unrecoverable_error_reason_ = ERROR_REASON_UNSET;
   unrecoverable_error_message_.clear();
   unrecoverable_error_location_ = tracked_objects::Location();
-}
-
-void ProfileSyncService::RegisterNewDataType(syncer::ModelType data_type) {
-  if (directory_data_type_controllers_.count(data_type) > 0)
-    return;
-  NOTREACHED();
 }
 
 // An invariant has been violated.  Transition to an error state where we try
@@ -995,7 +995,8 @@ void ProfileSyncService::OnUnrecoverableErrorImpl(
 }
 
 void ProfileSyncService::ReenableDatatype(syncer::ModelType type) {
-  DCHECK(backend_initialized_);
+  if (!backend_initialized_)
+    return;
   directory_data_type_manager_->ReenableType(type);
 }
 
@@ -1156,64 +1157,6 @@ void ProfileSyncService::OnExperimentsChanged(
   profile()->GetPrefs()->SetBoolean(
       autofill::prefs::kAutofillWalletSyncExperimentEnabled,
       experiments.wallet_sync_enabled);
-
-  if (experiments.enhanced_bookmarks_enabled) {
-    profile_->GetPrefs()->SetString(
-        sync_driver::prefs::kEnhancedBookmarksExtensionId,
-        experiments.enhanced_bookmarks_ext_id);
-  } else {
-    profile_->GetPrefs()->ClearPref(
-        sync_driver::prefs::kEnhancedBookmarksExtensionId);
-  }
-  UpdateBookmarksExperimentState(
-      profile_->GetPrefs(), g_browser_process->local_state(), true,
-      experiments.enhanced_bookmarks_enabled ? BOOKMARKS_EXPERIMENT_ENABLED :
-                                               BOOKMARKS_EXPERIMENT_NONE);
-
-  // If this is a first time sync for a client, this will be called before
-  // OnBackendInitialized() to ensure the new datatypes are available at sync
-  // setup. As a result, the migrator won't exist yet. This is fine because for
-  // first time sync cases we're only concerned with making the datatype
-  // available.
-  if (migrator_.get() &&
-      migrator_->state() != browser_sync::BackendMigrator::IDLE) {
-    DVLOG(1) << "Dropping OnExperimentsChanged due to migrator busy.";
-    return;
-  }
-
-  const syncer::ModelTypeSet registered_types = GetRegisteredDataTypes();
-  syncer::ModelTypeSet to_add;
-  const syncer::ModelTypeSet to_register =
-      Difference(to_add, registered_types);
-  DVLOG(2) << "OnExperimentsChanged called with types: "
-           << syncer::ModelTypeSetToString(to_add);
-  DVLOG(2) << "Enabling types: " << syncer::ModelTypeSetToString(to_register);
-
-  for (syncer::ModelTypeSet::Iterator it = to_register.First();
-       it.Good(); it.Inc()) {
-    // Received notice to enable experimental type. Check if the type is
-    // registered, and if not register a new datatype controller.
-    RegisterNewDataType(it.Get());
-  }
-
-  // Check if the user has "Keep Everything Synced" enabled. If so, we want
-  // to turn on all experimental types if they're not already on. Otherwise we
-  // leave them off.
-  // Note: if any types are already registered, we don't turn them on. This
-  // covers the case where we're already in the process of reconfiguring
-  // to turn an experimental type on.
-  if (sync_prefs_.HasKeepEverythingSynced()) {
-    // Mark all data types as preferred.
-    sync_prefs_.SetPreferredDataTypes(registered_types, registered_types);
-
-    // Only automatically turn on types if we have already finished set up.
-    // Otherwise, just leave the experimental types on by default.
-    if (!to_register.Empty() && HasSyncSetupCompleted() && migrator_) {
-      DVLOG(1) << "Dynamically enabling new datatypes: "
-               << syncer::ModelTypeSetToString(to_register);
-      OnMigrationNeededForTypes(to_register);
-    }
-  }
 }
 
 void ProfileSyncService::UpdateAuthErrorState(const AuthError& error) {
@@ -1814,7 +1757,6 @@ void ProfileSyncService::OnUserChoseDatatypes(
   if (directory_data_type_manager_.get())
     directory_data_type_manager_->ResetDataTypeErrors();
   ChangePreferredDataTypes(chosen_types);
-  AcknowledgeSyncedTypes();
 }
 
 void ProfileSyncService::ChangePreferredDataTypes(
@@ -2293,12 +2235,12 @@ void ProfileSyncService::GoogleSignedOut(const std::string& account_id,
 }
 
 void ProfileSyncService::AddObserver(
-    ProfileSyncServiceBase::Observer* observer) {
+    sync_driver::SyncServiceObserver* observer) {
   observers_.AddObserver(observer);
 }
 
 void ProfileSyncService::RemoveObserver(
-    ProfileSyncServiceBase::Observer* observer) {
+    sync_driver::SyncServiceObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
@@ -2455,7 +2397,7 @@ void ProfileSyncService::GetAllNodes(
 }
 
 bool ProfileSyncService::HasObserver(
-    const ProfileSyncServiceBase::Observer* observer) const {
+    const sync_driver::SyncServiceObserver* observer) const {
   return observers_.HasObserver(observer);
 }
 
@@ -2502,10 +2444,6 @@ void ProfileSyncService::UnsuppressAndStart() {
   sync_prefs_.SetStartSuppressed(false);
   DCHECK(!signin_.get() || signin_->GetOriginal()->IsAuthenticated());
   startup_controller_->TryStart();
-}
-
-void ProfileSyncService::AcknowledgeSyncedTypes() {
-  sync_prefs_.AcknowledgeSyncedTypes(GetRegisteredDataTypes());
 }
 
 void ProfileSyncService::ReconfigureDatatypeManager() {

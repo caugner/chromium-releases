@@ -52,6 +52,7 @@
 #include "chrome/browser/apps/scoped_keep_alive.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/ui/apps/chrome_app_delegate.h"
 #include "chrome/browser/ui/ash/launcher/app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/browser_status_monitor.h"
@@ -648,7 +649,7 @@ scoped_ptr<TestBrowserWindowAura> CreateTestBrowserWindow(
   aura::Window* window = new aura::Window(NULL);
   window->set_id(0);
   window->SetType(ui::wm::WINDOW_TYPE_NORMAL);
-  window->Init(aura::WINDOW_LAYER_TEXTURED);
+  window->Init(ui::LAYER_TEXTURED);
   window->Show();
 
   scoped_ptr<TestBrowserWindowAura> browser_window(
@@ -690,7 +691,7 @@ class V1App : public TestBrowserWindow {
     native_window_.reset(new aura::Window(NULL));
     native_window_->set_id(0);
     native_window_->SetType(ui::wm::WINDOW_TYPE_POPUP);
-    native_window_->Init(aura::WINDOW_LAYER_TEXTURED);
+    native_window_->Init(ui::LAYER_TEXTURED);
     native_window_->Show();
     aura::client::ParentWindowWithContext(native_window_.get(),
                                           ash::Shell::GetPrimaryRootWindow(),
@@ -783,6 +784,9 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
     user_manager_enabler_.reset(new chromeos::ScopedUserManagerEnabler(
         new chromeos::FakeChromeUserManager));
 
+    // Initialize the WallpaperManager singleton.
+    chromeos::WallpaperManager::Initialize();
+
     // Initialize the rest.
     ChromeLauncherControllerTest::SetUp();
 
@@ -799,6 +803,7 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
     for (ProfileToNameMap::iterator it = created_profiles_.begin();
          it != created_profiles_.end(); ++it)
       profile_manager_->DeleteTestingProfile(it->second);
+    chromeos::WallpaperManager::Shutdown();
 
     // A Task is leaked if we don't destroy everything, then run the message
     // loop.

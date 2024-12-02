@@ -62,6 +62,12 @@ class WebViewGuest : public GuestView<WebViewGuest>,
       int embedder_process_id,
       int web_view_instance_id);
 
+  // Get the current zoom.
+  double GetZoom() const;
+
+  // Get the current zoom mode.
+  ui_zoom::ZoomController::ZoomMode GetZoomMode();
+
   // Request navigating the guest to the provided |src| URL.
   void NavigateGuest(const std::string& src, bool force_navigation);
 
@@ -79,10 +85,15 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   // Set the zoom factor.
   void SetZoom(double zoom_factor);
 
+  // Set the zoom mode.
+  void SetZoomMode(ui_zoom::ZoomController::ZoomMode zoom_mode);
+
   void SetAllowScaling(bool allow);
+  bool allow_scaling() const { return allow_scaling_; }
 
   // Sets the transparency of the guest.
   void SetAllowTransparency(bool allow);
+  bool allow_transparency() const { return allow_transparency_; }
 
   // Loads a data URL with a specified base URL and virtual URL.
   bool LoadDataWithBaseURL(const std::string& data_url,
@@ -95,8 +106,10 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) override;
   void DidAttachToEmbedder() override;
+  void DidDropLink(const GURL& url) override;
   void DidInitialize(const base::DictionaryValue& create_params) override;
-  void DidStopLoading() override;
+  void GuestViewDidStopLoading() override;
+  void EmbedderFullscreenToggled(bool entered_fullscreen) override;
   void EmbedderWillBeDestroyed() override;
   const char* GetAPINamespace() const override;
   int GetTaskPrefix() const override;
@@ -104,6 +117,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   void GuestReady() override;
   void GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
                                      const gfx::Size& new_size) override;
+  void GuestZoomChanged(double old_zoom_level, double new_zoom_level) override;
   bool IsAutoSizeSupported() const override;
   bool IsDragAndDropEnabled() const override;
   void WillAttachToEmbedder() override;
@@ -163,14 +177,16 @@ class WebViewGuest : public GuestView<WebViewGuest>,
                           const base::string16& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) override;
+  void EnterFullscreenModeForTab(content::WebContents* web_contents,
+                                 const GURL& origin) override;
+  void ExitFullscreenModeForTab(content::WebContents* web_contents) override;
+  bool IsFullscreenForTabOrPending(
+      const content::WebContents* web_contents) const override;
 
   // NotificationObserver implementation.
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
-
-  // Returns the current zoom factor.
-  double zoom() const { return current_zoom_factor_; }
 
   // Begin or continue a find request.
   void StartFindInternal(
@@ -236,6 +252,12 @@ class WebViewGuest : public GuestView<WebViewGuest>,
 
   ScriptExecutor* script_executor() { return script_executor_.get(); }
 
+  scoped_ptr<WebViewGuestDelegate> SetDelegateForTesting(
+      scoped_ptr<WebViewGuestDelegate> delegate) {
+    web_view_guest_delegate_.swap(delegate);
+    return delegate.Pass();
+  }
+
  private:
   friend class WebViewPermissionHelper;
 
@@ -245,9 +267,18 @@ class WebViewGuest : public GuestView<WebViewGuest>,
 
   void AttachWebViewHelpers(content::WebContents* contents);
 
+  void ClearDataInternal(const base::Time remove_since,
+                         uint32 removal_mask,
+                         const base::Closure& callback);
+
   void OnWebViewNewWindowResponse(int new_window_instance_id,
                                   bool allow,
                                   const std::string& user_input);
+
+  void OnFullscreenPermissionDecided(bool allowed,
+                                     const std::string& user_input);
+  bool GuestMadeEmbedderFullscreen() const;
+  void SetFullscreenState(bool is_fullscreen);
 
   // WebContentsObserver implementation.
   void DidCommitProvisionalLoadForFrame(
@@ -265,10 +296,10 @@ class WebViewGuest : public GuestView<WebViewGuest>,
       bool is_iframe_srcdoc) override;
   void DocumentLoadedInFrame(
       content::RenderFrameHost* render_frame_host) override;
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* render_frame_host) override;
   void RenderProcessGone(base::TerminationStatus status) override;
   void UserAgentOverrideSet(const std::string& user_agent) override;
+  void FrameNameChanged(content::RenderFrameHost* render_frame_host,
+                        const std::string& name) override;
 
   // Informs the embedder of a frame name change.
   void ReportFrameNameChange(const std::string& name);
@@ -307,8 +338,6 @@ class WebViewGuest : public GuestView<WebViewGuest>,
                  const GURL& url,
                  const std::string& error_type);
 
-  void OnFrameNameChanged(bool is_top_level, const std::string& name);
-
   // Creates a new guest window owned by this WebViewGuest.
   void CreateNewGuestWebViewWindow(const content::OpenURLParams& params);
 
@@ -337,7 +366,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   std::string name_;
 
   // Stores whether the contents of the guest can be transparent.
-  bool guest_opaque_;
+  bool allow_transparency_;
 
   // Stores the src URL of the WebView.
   GURL src_;
@@ -365,11 +394,11 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   using PendingWindowMap = std::map<WebViewGuest*, NewWindowInfo>;
   PendingWindowMap pending_new_windows_;
 
-  // Stores the current zoom factor.
-  double current_zoom_factor_;
-
   // Determines if this guest accepts pinch-zoom gestures.
   bool allow_scaling_;
+  bool is_guest_fullscreen_;
+  bool is_embedder_fullscreen_;
+  bool last_fullscreen_permission_was_allowed_by_embedder_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

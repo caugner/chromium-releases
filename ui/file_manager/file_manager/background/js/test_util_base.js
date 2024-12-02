@@ -8,6 +8,41 @@
 var test = test || {};
 
 /**
+ * Extract the information of the given element.
+ * @param {Element} element Element to be extracted.
+ * @param {Window} contentWindow Window to be tested.
+ * @param {Array.<string>=} opt_styleNames List of CSS property name to be
+ *     obtained.
+ * @return {{attributes:Object.<string, string>, text:string,
+ *                  styles:Object.<string, string>, hidden:boolean}} Element
+ *     information that contains contentText, attribute names and
+ *     values, hidden attribute, and style names and values.
+ */
+function extractElementInfo(element, contentWindow, opt_styleNames) {
+  var attributes = {};
+  for (var i = 0; i < element.attributes.length; i++) {
+    attributes[element.attributes[i].nodeName] =
+        element.attributes[i].nodeValue;
+  }
+  var styles = {};
+  var styleNames = opt_styleNames || [];
+  var computedStyles = contentWindow.getComputedStyle(element);
+  for (var i = 0; i < styleNames.length; i++) {
+    styles[styleNames[i]] = computedStyles[styleNames[i]];
+  }
+  var text = element.textContent;
+  return {
+    attributes: attributes,
+    text: text,
+    value: element.value,
+    styles: styles,
+    // The hidden attribute is not in the element.attributes even if
+    // element.hasAttribute('hidden') is true.
+    hidden: !!element.hidden
+  };
+}
+
+/**
  * Namespace for test utility functions.
  *
  * Public functions in the test.util.sync and the test.util.async namespaces are
@@ -36,6 +71,7 @@ test.util.async = {};
  */
 test.util.TESTING_EXTENSION_IDS = [
   'oobinhbdbiehknkpbpejbbpdbkdjmoco',  // File Manager test
+  'ejhcmmdhhpdhhgmifplfmjobgegbibkn',  // Gallery test
   'ljoplibgfehghmibaoaepfagnmbbfiga',  // Video Player test
 ];
 
@@ -146,27 +182,32 @@ test.util.sync.queryAllElements = function(
   return Array.prototype.map.call(
       doc.querySelectorAll(targetQuery),
       function(element) {
-        var attributes = {};
-        for (var i = 0; i < element.attributes.length; i++) {
-          attributes[element.attributes[i].nodeName] =
-              element.attributes[i].nodeValue;
-        }
-        var styles = {};
-        var styleNames = opt_styleNames || [];
-        var computedStyles = contentWindow.getComputedStyle(element);
-        for (var i = 0; i < styleNames.length; i++) {
-          styles[styleNames[i]] = computedStyles[styleNames[i]];
-        }
-        var text = element.textContent;
-        return {
-          attributes: attributes,
-          text: text,
-          styles: styles,
-          // The hidden attribute is not in the element.attributes even if
-          // element.hasAttribute('hidden') is true.
-          hidden: !!element.hidden
-        };
+        return extractElementInfo(element, contentWindow, opt_styleNames);
       });
+};
+
+/**
+ * Get the information of the active element.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @param {string} targetQuery Query to specify the element.
+ * @param {?string} iframeQuery Iframe selector or null if no iframe.
+ * @param {Array.<string>=} opt_styleNames List of CSS property name to be
+ *     obtained.
+ * @return {?{attributes:Object.<string, string>, text:string,
+ *                  styles:Object.<string, string>, hidden:boolean}} Element
+ *     information that contains contentText, attribute names and
+ *     values, hidden attribute, and style names and values. If there is no
+ *     active element, returns null.
+ */
+test.util.sync.getActiveElement = function(
+    contentWindow, targetQuery, iframeQuery, opt_styleNames) {
+  var doc = test.util.sync.getDocument_(
+      contentWindow, iframeQuery || undefined);
+  if (!doc || !doc.activeElement)
+    return null;
+
+  return extractElementInfo(doc.activeElement, contentWindow, opt_styleNames);
 };
 
 /**
@@ -366,6 +407,36 @@ test.util.sync.fakeMouseUp = function(
  */
 test.util.async.getNotificationIDs = function(callback) {
   chrome.notifications.getAll(callback);
+};
+
+/**
+ * Gets file entries just under the volume.
+ *
+ * @param {VolumeManagerCommon.VolumeType} volumeType Volume type.
+ * @param {Array.<string>} names File name list.
+ * @param {function(*)} callback Callback function with results returned by the
+ *     script.
+ */
+test.util.async.getFilesUnderVolume = function(volumeType, names, callback) {
+  var displayRootPromise =
+      VolumeManager.getInstance().then(function(volumeManager) {
+    var volumeInfo = volumeManager.getCurrentProfileVolumeInfo(volumeType);
+    return volumeInfo.resolveDisplayRoot();
+  });
+
+  var retrievePromise = displayRootPromise.then(function(displayRoot) {
+    var filesPromise = names.map(function(name) {
+      return new Promise(
+          displayRoot.getFile.bind(displayRoot, name, {}));
+    });
+    return Promise.all(filesPromise).then(function(aa) {
+      return util.entriesToURLs(aa);
+    }).catch(function() {
+      return [];
+    });
+  });
+
+  retrievePromise.then(callback);
 };
 
 /**

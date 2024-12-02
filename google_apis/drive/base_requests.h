@@ -30,6 +30,8 @@ namespace google_apis {
 class FileResource;
 class RequestSender;
 
+typedef base::Callback<void(DriveApiErrorCode)> PrepareCallback;
+
 // Callback used for requests that the server returns FileResource data
 // formatted into JSON value.
 typedef base::Callback<void(DriveApiErrorCode error,
@@ -140,6 +142,10 @@ class UrlFetchRequestBase : public AuthenticatedRequestInterface,
   explicit UrlFetchRequestBase(RequestSender* sender);
   ~UrlFetchRequestBase() override;
 
+  // Does async initialization for the request. |Start| calls this method so you
+  // don't need to call this before |Start|.
+  virtual void Prepare(const PrepareCallback& callback);
+
   // Gets URL for the request.
   virtual GURL GetURL() const = 0;
 
@@ -200,6 +206,16 @@ class UrlFetchRequestBase : public AuthenticatedRequestInterface,
   base::SequencedTaskRunner* blocking_task_runner() const;
 
  private:
+  // Continues |Start| function after |Prepare|.
+  void StartAfterPrepare(const std::string& access_token,
+                         const std::string& custom_user_agent,
+                         const ReAuthenticateCallback& callback,
+                         DriveApiErrorCode code);
+
+  // Invokes callback with |code| and request to delete the request to
+  // |sender_|.
+  void CompleteRequestWithError(DriveApiErrorCode code);
+
   // URLFetcherDelegate overrides.
   void OnURLFetchComplete(const net::URLFetcher* source) override;
 
@@ -449,25 +465,17 @@ class MultipartUploadRequestBase : public UrlFetchRequestBase {
   // |content_type| and |content_length| should be the attributes of the
   // uploading file. Other parameters are optional and can be empty or null
   // depending on Upload URL provided by the subclasses.
-  MultipartUploadRequestBase(
-      RequestSender* sender,
-      const std::string& title,
-      const std::string& parent_resource_id,
-      const std::string& content_type,
-      int64 content_length,
-      const base::Time& modified_date,
-      const base::Time& last_viewed_by_me_date,
-      const base::FilePath& local_file_path,
-      const FileResourceCallback& callback,
-      const google_apis::ProgressCallback& progress_callback);
+  MultipartUploadRequestBase(RequestSender* sender,
+                             const std::string& metadata_json,
+                             const std::string& content_type,
+                             int64 content_length,
+                             const base::FilePath& local_file_path,
+                             const FileResourceCallback& callback,
+                             const ProgressCallback& progress_callback);
   ~MultipartUploadRequestBase() override;
 
-  // Overridden from AuthenticatedRequestInterface.
-  void Start(const std::string& access_token,
-             const std::string& custom_user_agent,
-             const ReAuthenticateCallback& callback) override;
-
   // Overridden from UrlFetchRequestBase.
+  void Prepare(const PrepareCallback& callback) override;
   bool GetContentData(std::string* upload_content_type,
                       std::string* upload_content) override;
   void ProcessURLFetchResults(const net::URLFetcher* source) override;
@@ -481,15 +489,10 @@ class MultipartUploadRequestBase : public UrlFetchRequestBase {
   // Parses the response value and invokes |callback_| with |FileResource|.
   void OnDataParsed(DriveApiErrorCode code, scoped_ptr<base::Value> value);
 
-  // Whether to the request has modified date information or not.
-  bool has_modified_date() const { return has_modified_date_; }
-
  private:
   // Continues to rest part of |Start| method after determining boundary string
   // of multipart/related.
-  void OnPrepareUploadContent(const std::string& access_token,
-                              const std::string& custom_user_agent,
-                              const ReAuthenticateCallback& callback,
+  void OnPrepareUploadContent(const PrepareCallback& callback,
                               std::string* upload_content_type,
                               std::string* upload_content_data,
                               bool result);
@@ -497,7 +500,6 @@ class MultipartUploadRequestBase : public UrlFetchRequestBase {
   const std::string metadata_json_;
   const std::string content_type_;
   const base::FilePath local_path_;
-  const bool has_modified_date_;
   const FileResourceCallback callback_;
   const ProgressCallback progress_callback_;
 

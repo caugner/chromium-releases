@@ -15,7 +15,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
@@ -25,6 +24,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/resource_request_info.h"
@@ -568,8 +568,9 @@ void ResourcePrefetchPredictor::OnNavigationComplete(
   inflight_navigations_.erase(nav_it);
 
   // Kick off history lookup to determine if we should record the URL.
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
   history_service->ScheduleDBTask(
       scoped_ptr<history::HistoryDBTask>(
@@ -1297,7 +1298,7 @@ void ResourcePrefetchPredictor::ReportPredictedAccuracyStatsHelper(
 }
 
 void ResourcePrefetchPredictor::OnURLsDeleted(
-    HistoryService* history_service,
+    history::HistoryService* history_service,
     bool all_history,
     bool expired,
     const history::URLRows& deleted_rows,
@@ -1320,15 +1321,16 @@ void ResourcePrefetchPredictor::OnURLsDeleted(
 }
 
 void ResourcePrefetchPredictor::OnHistoryServiceLoaded(
-    HistoryService* history_service) {
+    history::HistoryService* history_service) {
   OnHistoryAndCacheLoaded();
   history_service_observer_.Remove(history_service);
 }
 
 void ResourcePrefetchPredictor::ConnectToHistoryService() {
   // Register for HistoryServiceLoading if it is not ready.
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (!history_service)
     return;
   if (history_service->BackendLoaded()) {

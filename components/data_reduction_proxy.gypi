@@ -33,6 +33,39 @@
       ],
     },
     {
+      # GN version: //components/data_reduction_proxy/content/common
+      'target_name': 'data_reduction_proxy_content_common',
+      'type': 'static_library',
+      'dependencies': [
+        '../content/content.gyp:content_common',
+        '../ipc/ipc.gyp:ipc',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'data_reduction_proxy/content/common/data_reduction_proxy_messages.cc',
+        'data_reduction_proxy/content/common/data_reduction_proxy_messages.h',
+      ],
+    },
+    {
+      # GN version: //components/data_reduction_proxy/content/browser
+      'target_name': 'data_reduction_proxy_content_browser',
+      'type': 'static_library',
+      'dependencies': [
+        '../content/content.gyp:content_common',
+        '../ipc/ipc.gyp:ipc',
+        'data_reduction_proxy_content_common',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'data_reduction_proxy/content/browser/data_reduction_proxy_message_filter.cc',
+        'data_reduction_proxy/content/browser/data_reduction_proxy_message_filter.h',
+      ],
+    },
+    {
       # GN version: //components/data_reduction_proxy/core/browser
       'target_name': 'data_reduction_proxy_core_browser',
       'type': 'static_library',
@@ -50,6 +83,7 @@
         '../net/net.gyp:net',
         '../url/url.gyp:url_lib',
         'data_reduction_proxy_core_common',
+        'data_reduction_proxy_proto',
         'pref_registry',
       ],
       'include_dirs': [
@@ -60,8 +94,14 @@
         "data_reduction_proxy/core/browser/data_reduction_proxy_debug_ui_service.h",
         'data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_config.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_config.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_config_service_client.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_config_service_client.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_configurator.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_delegate.cc',
@@ -72,6 +112,8 @@
         'data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_metrics.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_mutable_config_values.cc',
+        'data_reduction_proxy/core/browser/data_reduction_proxy_mutable_config_values.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_prefs.cc',
@@ -82,12 +124,8 @@
         'data_reduction_proxy/core/browser/data_reduction_proxy_service.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_settings.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_settings.h',
-        'data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.cc',
-        'data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h',
         'data_reduction_proxy/core/browser/data_reduction_proxy_tamper_detection.cc',
         'data_reduction_proxy/core/browser/data_reduction_proxy_tamper_detection.h',
-        'data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.cc',
-        'data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h',
       ],
     },
     {
@@ -97,6 +135,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../url/url.gyp:url_lib',
+        'data_reduction_proxy_proto',
       ],
       'include_dirs': [
         '..',
@@ -104,6 +143,9 @@
       'sources': [
         # Note: sources list duplicated in GN build.
         'data_reduction_proxy/core/common/data_reduction_proxy_bypass_type_list.h',
+        'data_reduction_proxy/core/common/data_reduction_proxy_client_config_parser.cc',
+        'data_reduction_proxy/core/common/data_reduction_proxy_client_config_parser.h',
+        'data_reduction_proxy/core/common/data_reduction_proxy_config_values.h',
         'data_reduction_proxy/core/common/data_reduction_proxy_event_store.cc',
         'data_reduction_proxy/core/common/data_reduction_proxy_event_store.h',
         'data_reduction_proxy/core/common/data_reduction_proxy_headers.cc',
@@ -148,6 +190,26 @@
         'data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.cc',
         'data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h',
       ],
+      # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+      'msvs_disabled_warnings': [4267, ],
+    },
+    {
+      # GN version: //components/data_reduction_proxy/proto
+      'target_name': 'data_reduction_proxy_proto',
+      'type': 'static_library',
+      'dependencies': [
+      ],
+      'include_dirs': [
+      ],
+      'sources': [
+        # Note: sources list duplicated in GN build.
+        'data_reduction_proxy/proto/client_config.proto',
+      ],
+      'variables': {
+        'proto_in_dir': 'data_reduction_proxy/proto',
+        'proto_out_dir': 'components/data_reduction_proxy/proto',
+      },
+      'includes': [ '../build/protoc.gypi' ],
     },
     {
       'target_name': 'data_reduction_proxy_version_header',
@@ -181,6 +243,5 @@
         },
       ],
     },
-
   ],
 }

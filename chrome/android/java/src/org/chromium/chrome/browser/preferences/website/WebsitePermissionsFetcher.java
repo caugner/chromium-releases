@@ -59,6 +59,8 @@ public class WebsitePermissionsFetcher {
         queue.add(new MidiInfoFetcher());
         // Cookies are stored per-origin.
         queue.add(new CookieInfoFetcher());
+        // Fullscreen are stored per-origin.
+        queue.add(new FullscreenInfoFetcher());
         // Local storage info is per-origin.
         queue.add(new LocalStorageInfoFetcher());
         // Website storage is per-host.
@@ -66,6 +68,8 @@ public class WebsitePermissionsFetcher {
         // Popup exceptions are host-based patterns (unless we start
         // synchronizing popup exceptions with desktop Chrome.)
         queue.add(new PopupExceptionInfoFetcher());
+        // JavaScript exceptions are host-based patterns.
+        queue.add(new JavaScriptExceptionInfoFetcher());
         // Protected media identifier permission is per-origin and per-embedder.
         queue.add(new ProtectedMediaIdentifierInfoFetcher());
         // Push notification permission is per-origin and per-embedder.
@@ -101,6 +105,9 @@ public class WebsitePermissionsFetcher {
         } else if (filterHelper.showStorageSites(filter)) {
             // Local storage info is per-origin.
             queue.add(new LocalStorageInfoFetcher());
+        } else if (filterHelper.showFullscreenSites(filter)) {
+            // Local storage info is per-origin.
+            queue.add(new FullscreenInfoFetcher());
         } else if (filterHelper.showCameraMicSites(filter)) {
             // Voice and Video capture permission is per-origin and per-embedder.
             queue.add(new VoiceAndVideoCaptureInfoFetcher());
@@ -108,6 +115,9 @@ public class WebsitePermissionsFetcher {
             // Popup exceptions are host-based patterns (unless we start
             // synchronizing popup exceptions with desktop Chrome.)
             queue.add(new PopupExceptionInfoFetcher());
+        } else if (filterHelper.showJavaScriptSites(filter)) {
+            // JavaScript exceptions are host-based patterns.
+            queue.add(new JavaScriptExceptionInfoFetcher());
         } else if (filterHelper.showPushNotificationsSites(filter)) {
             // Push notification permission is per-origin and per-embedder.
             queue.add(new PushNotificationInfoFetcher());
@@ -205,6 +215,24 @@ public class WebsitePermissionsFetcher {
         }
     }
 
+    private class JavaScriptExceptionInfoFetcher implements Task {
+        @Override
+        public void run(TaskQueue queue) {
+            for (JavaScriptExceptionInfo info
+                    : WebsitePreferenceBridge.getJavaScriptExceptionInfo()) {
+                // The pattern "*" represents the default setting, not a specific website.
+                if (info.getPattern().equals("*")) continue;
+                WebsiteAddress address = WebsiteAddress.create(info.getPattern());
+                if (address == null) continue;
+                Set<Website> sites = findOrCreateSitesByHost(address);
+                for (Website site : sites) {
+                    site.setJavaScriptExceptionInfo(info);
+                }
+            }
+            queue.next();
+        }
+    }
+
     private class CookieInfoFetcher implements Task {
         @Override
         public void run(TaskQueue queue) {
@@ -212,6 +240,21 @@ public class WebsitePermissionsFetcher {
                 WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
                 if (address == null) continue;
                 createSiteByOriginAndHost(address).setCookieInfo(info);
+            }
+            queue.next();
+        }
+    }
+
+    /**
+     * Class for fetching the fullscreen information.
+     */
+    private class FullscreenInfoFetcher implements Task {
+        @Override
+        public void run(TaskQueue queue) {
+            for (FullscreenInfo info : WebsitePreferenceBridge.getFullscreenInfo()) {
+                WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
+                if (address == null) continue;
+                createSiteByOriginAndHost(address).setFullscreenInfo(info);
             }
             queue.next();
         }

@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "Lis\u00e4\u00e4 omaan sanakirjaan"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Lis\u00e4asetukset"
@@ -2616,7 +2627,7 @@
     "message": "Et voi k\u00e4ytt\u00e4\u00e4 k\u00e4sinkirjoitusta, koska verkko ei ole k\u00e4ytett\u00e4viss\u00e4."
   },
   "handwriting_privacy_info": {
-    "message": "Sy\u00f6tt\u00e4m\u00e4si teksti tunnistetaan Googlen palvelimella"
+    "message": "Sy\u00f6tteesi l\u00e4hetet\u00e4\u00e4n Googlen palvelimille, jotta teksti voidaan tunnistaa."
   },
   "hide_keyboard": {
     "message": "piilota n\u00e4pp\u00e4imist\u00f6"
@@ -2634,7 +2645,7 @@
     "message": "\u00c4l\u00e4 korjaa:"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Ohita korjaus"
   },
   "il_heb_settings_page": {
     "message": "Hepreankielisen n\u00e4pp\u00e4imist\u00f6n asetukset"
@@ -3000,10 +3011,10 @@
     "message": "Ulkoasu: korealainen n\u00e4pp\u00e4imist\u00f6"
   },
   "korean_settings_page": {
-    "message": "Korean asetukset"
+    "message": "Koreankielisen sy\u00f6tt\u00f6tavan asetussivu"
   },
   "korean_syllable_input": {
-    "message": "Sy\u00f6t\u00e4 hangul-merkit yksi kerrallaan"
+    "message": "Kirjoita tavu kerrallaan."
   },
   "latam_spa_settings_page": {
     "message": "Latinalaisen Amerikan espanjankielisen n\u00e4pp\u00e4imist\u00f6n asetukset"
@@ -3105,7 +3116,7 @@
     "message": "N\u00e4yt\u00e4 ehdotusvalikko askelpalauttimella"
   },
   "show_hangul_candidate": {
-    "message": "N\u00e4yt\u00e4 Hangul-ehdotukset"
+    "message": "N\u00e4yt\u00e4 ehdokkaat Hangul-tilassa"
   },
   "shrink_candidates": {
     "message": "pienenn\u00e4 vaihtoehtoluettelo"
@@ -3147,7 +3158,7 @@
     "message": "sarkain"
   },
   "touch_keyboard": {
-    "message": "Kosketusn\u00e4pp\u00e4imist\u00f6"
+    "message": "N\u00e4ytt\u00f6n\u00e4pp\u00e4imist\u00f6"
   },
   "tr_tur_settings_page": {
     "message": "Turkin n\u00e4pp\u00e4imist\u00f6n asetukset"
@@ -3300,7 +3311,7 @@
     "message": "Puhe"
   },
   "voice_privacy_info": {
-    "message": "Googlen palvelimelle l\u00e4hetet\u00e4\u00e4n \u00e4\u00e4nt\u00e4si, jotta teksti voidaan tunnistaa"
+    "message": "\u00c4\u00e4nisy\u00f6tteesi l\u00e4hetet\u00e4\u00e4n Googlen palvelimille, jotta teksti voidaan tunnistaa."
   },
   "voice_turn_off": {
     "message": "poista \u00e4\u00e4nisy\u00f6tety\u00f6kalu k\u00e4yt\u00f6st\u00e4"

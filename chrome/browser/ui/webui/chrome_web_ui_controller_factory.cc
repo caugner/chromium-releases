@@ -14,7 +14,6 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/about_ui.h"
@@ -37,7 +36,6 @@
 #include "chrome/browser/ui/webui/interstitials/interstitial_ui.h"
 #include "chrome/browser/ui/webui/invalidations_ui.h"
 #include "chrome/browser/ui/webui/local_state/local_state_ui.h"
-#include "chrome/browser/ui/webui/md_settings_ui.h"
 #include "chrome/browser/ui/webui/memory_internals/memory_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
@@ -46,6 +44,7 @@
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
 #include "chrome/browser/ui/webui/profiler_ui.h"
+#include "chrome/browser/ui/webui/settings/md_settings_ui.h"
 #include "chrome/browser/ui/webui/signin/inline_login_ui.h"
 #include "chrome/browser/ui/webui/signin/profile_signin_confirmation_ui.h"
 #include "chrome/browser/ui/webui/signin/user_manager_ui.h"
@@ -61,6 +60,7 @@
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/webui/dom_distiller_ui.h"
+#include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/favicon_base/select_favicon_frames.h"
 #include "components/history/core/browser/history_types.h"
@@ -71,6 +71,7 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_utils.h"
 #include "ui/gfx/favicon_size.h"
+#include "ui/oobe/oobe_md_ui.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 #include "url/gurl.h"
 
@@ -108,6 +109,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/oobe/oobe.h"
 #include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_ui.h"
 #include "chrome/browser/ui/webui/chromeos/certificate_manager_dialog_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
@@ -205,6 +207,12 @@ WebUIController* NewWebUI<AboutUI>(WebUI* web_ui, const GURL& url) {
 template<>
 WebUIController* NewWebUI<chromeos::OobeUI>(WebUI* web_ui, const GURL& url) {
   return new chromeos::OobeUI(web_ui, url);
+}
+
+template <>
+WebUIController* NewWebUI<OobeMdUI>(WebUI* web_ui, const GURL& url) {
+  chromeos::Oobe::Register();
+  return new OobeMdUI(web_ui, url.host());
 }
 #endif
 
@@ -428,6 +436,8 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::NfcDebugUI>;
   if (url.host() == chrome::kChromeUIOobeHost)
     return &NewWebUI<chromeos::OobeUI>;
+  if (url.host() == chrome::kChromeUIOobeMdHost)
+    return &NewWebUI<OobeMdUI>;
   if (url.host() == chrome::kChromeUIProvidedFileSystemsHost)
     return &NewWebUI<chromeos::ProvidedFileSystemsUI>;
   if (url.host() == chrome::kChromeUIProxySettingsHost)
@@ -549,7 +559,7 @@ void RunFaviconCallbackAsync(
     const std::vector<favicon_base::FaviconRawBitmapResult>* results) {
   base::MessageLoopProxy::current()->PostTask(
       FROM_HERE,
-      base::Bind(&FaviconService::FaviconResultsCallbackRunner,
+      base::Bind(&favicon::FaviconService::FaviconResultsCallbackRunner,
                  callback, base::Owned(results)));
 }
 

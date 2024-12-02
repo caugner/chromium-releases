@@ -21,7 +21,6 @@
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_test_util.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/pref_names.h"
@@ -35,6 +34,7 @@
 #include "components/domain_reliability/clear_mode.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/service.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/local_storage_usage_info.h"
@@ -153,6 +153,11 @@ class TestStoragePartition : public StoragePartition {
     return nullptr;
   }
 
+  content::PlatformNotificationContext* GetPlatformNotificationContext()
+      override {
+    return nullptr;
+  }
+
   content::HostZoomMap* GetHostZoomMap() override { return NULL; }
   content::HostZoomLevelContext* GetHostZoomLevelContext() override {
     return NULL;
@@ -193,6 +198,8 @@ class TestStoragePartition : public StoragePartition {
         base::Bind(&TestStoragePartition::AsyncRunCallback,
                    base::Unretained(this), callback));
   }
+
+  void Flush() override {}
 
   StoragePartitionRemovalData GetStoragePartitionRemovalData() {
     return storage_partition_removal_data_;
@@ -421,7 +428,7 @@ class RemoveHistoryTester {
   base::Closure quit_closure_;
 
   // TestingProfile owns the history service; we shouldn't delete it.
-  HistoryService* history_service_;
+  history::HistoryService* history_service_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveHistoryTester);
 };

@@ -265,6 +265,7 @@ cr.define('print_preview', function() {
                 print_preview.Destination.GooglePromotedId.SAVE_AS_PDF,
         'printWithCloudPrint': destination != null && !destination.isLocal,
         'printWithPrivet': destination != null && destination.isPrivet,
+        'printWithExtension': destination != null && destination.isExtension,
         'deviceName': destination == null ? 'foo' : destination.id,
         'generateDraftData': documentInfo.isModifiable,
         'fitToPageEnabled': printTicketStore.fitToPage.getValue(),
@@ -704,7 +705,8 @@ cr.define('print_preview', function() {
     /**
      * Updates print preset options from source PDF document.
      * Called from PrintPreviewUI::OnSetOptionsFromDocument().
-     * @param {{disableScaling: boolean, copies: number}} options Specifies
+     * @param {{disableScaling: boolean, copies: number,
+     *          duplex: number}} options Specifies
      *     printing options according to source document presets.
      * @private
      */
@@ -765,9 +767,10 @@ cr.define('print_preview', function() {
 
     /**
      * @param {Array<!{extensionId: string,
-     *                  id: string,
-     *                  name: string,
-     *                  description: (string|undefined)}>} printers The list
+     *                 extensionName: string,
+     *                 id: string,
+     *                 name: string,
+     *                 description: (string|undefined)}>} printers The list
      *     containing information about printers added by an extension.
      * @param {boolean} done Whether this is the final list of extension
      *     managed printers.

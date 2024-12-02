@@ -11,7 +11,7 @@
 #include "base/values.h"
 #include "components/ui/zoom/zoom_observer.h"
 #include "content/public/browser/browser_plugin_guest_delegate.h"
-#include "content/public/browser/guest_sizer.h"
+#include "content/public/browser/guest_host.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -80,9 +80,16 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   static GuestViewBase* Create(content::WebContents* owner_web_contents,
                                const std::string& view_type);
 
-  static GuestViewBase* FromWebContents(content::WebContents* web_contents);
+  static GuestViewBase* FromWebContents(
+      const content::WebContents* web_contents);
 
   static GuestViewBase* From(int owner_process_id, int instance_id);
+
+  // Given a |web_contents|, returns the top level owner WebContents. If
+  // |web_contents| does not belong to a GuestView, it will be returned
+  // unchanged.
+  static content::WebContents* GetTopLevelWebContents(
+      content::WebContents* web_contents);
 
   static bool IsGuest(content::WebContents* web_contents);
 
@@ -103,13 +110,17 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // This method is called when the initial set of frames within the page have
   // completed loading.
-  virtual void DidStopLoading() {}
+  virtual void GuestViewDidStopLoading() {}
 
   // This method is called before the embedder is destroyed.
   // |owner_web_contents_| should still be valid during this call. This
   // allows the derived class to perform some cleanup related to the embedder
   // web contents.
   virtual void EmbedderWillBeDestroyed() {}
+
+  // This method is called when the embedder's zoom changes.
+  virtual void EmbedderZoomChanged(double old_zoom_level,
+                                   double new_zoom_level) {}
 
   // This method is called when the guest WebContents has been destroyed. This
   // object will be destroyed after this call returns.
@@ -123,6 +134,15 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // This gives the derived class an opportunity to perform some initialization
   // work.
   virtual void GuestReady() {}
+
+  // This method is called when the guest's zoom changes.
+  virtual void GuestZoomChanged(double old_zoom_level, double new_zoom_level) {}
+
+  // This method is called when embedder WebContents's fullscreen is toggled.
+  //
+  // If the guest asked the embedder to enter fullscreen, the guest uses this
+  // signal to exit fullscreen state.
+  virtual void EmbedderFullscreenToggled(bool entered_fullscreen) {}
 
   // This method is invoked when the contents auto-resized to give the container
   // an opportunity to match it if it wishes.
@@ -198,6 +218,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void InitWithWebContents(const base::DictionaryValue& create_params,
                            content::WebContents* guest_web_contents);
 
+  void LoadURLWithParams(
+      const content::NavigationController::LoadURLParams& load_params);
+
   bool IsViewType(const char* const view_type) const {
     return !strcmp(GetViewType(), view_type);
   }
@@ -214,6 +237,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   content::WebContents* owner_web_contents() const {
     return owner_web_contents_;
+  }
+
+  content::GuestHost* host() const {
+    return guest_host_;
   }
 
   // Returns the parameters associated with the element hosting this GuestView
@@ -255,7 +282,11 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   const GURL& GetOwnerSiteURL() const;
 
   // Whether the guest view is inside a plugin document.
-  bool is_full_page_plugin() { return is_full_page_plugin_; }
+  bool is_full_page_plugin() const { return is_full_page_plugin_; }
+
+  // Returns the routing ID of the guest proxy in the owner's renderer process.
+  // This value is only valid after attachment or first navigation.
+  int proxy_routing_id() const { return guest_proxy_routing_id_; }
 
   // Destroy this guest.
   void Destroy();
@@ -269,18 +300,16 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
       const content::WebContents::CreateParams& create_params) final;
   void DidAttach(int guest_proxy_routing_id) final;
   void DidDetach() final;
-  void ElementSizeChanged(const gfx::Size& size) final;
   content::WebContents* GetOwnerWebContents() const final;
   void GuestSizeChanged(const gfx::Size& new_size) final;
-  void RegisterDestructionCallback(const DestructionCallback& callback) final;
-  void SetGuestSizer(content::GuestSizer* guest_sizer) final;
+  void SetGuestHost(content::GuestHost* guest_host) final;
   void WillAttach(content::WebContents* embedder_web_contents,
                   int browser_plugin_instance_id,
                   bool is_full_page_plugin) final;
 
   // ui_zoom::ZoomObserver implementation.
   void OnZoomChanged(
-      const ui_zoom::ZoomController::ZoomChangedEventData& data) override;
+      const ui_zoom::ZoomController::ZoomChangedEventData& data) final;
 
   // Dispatches an event to the guest proxy.
   void DispatchEventToGuestProxy(Event* event);
@@ -298,19 +327,22 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // (hence |logical_pixels| is represented as a double), but will always
   // consist of an integral number of physical pixels (hence the return value
   // is represented as an int).
-  int LogicalPixelsToPhysicalPixels(double logical_pixels);
+  int LogicalPixelsToPhysicalPixels(double logical_pixels) const;
 
   // Convert sizes in pixels from physical to logical numbers of pixels.
   // Note that a size can consist of a fractional number of logical pixels
   // (hence the return value is represented as a double), but will always
   // consist of an integral number of physical pixels (hence |physical_pixels|
   // is represented as an int).
-  double PhysicalPixelsToLogicalPixels(int physical_pixels);
+  double PhysicalPixelsToLogicalPixels(int physical_pixels) const;
 
   // WebContentsObserver implementation.
-  void DidStopLoading(content::RenderViewHost* render_view_host) final;
+  void DidStopLoading() final;
   void RenderViewReady() final;
   void WebContentsDestroyed() final;
+  void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) override;
 
   // WebContentsDelegate implementation.
   void ActivateContents(content::WebContents* contents) final;
@@ -337,8 +369,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
                            const gfx::Size& pref_size) final;
   void UpdateTargetURL(content::WebContents* source, const GURL& url) override;
 
+  void SetGuestZoomLevelToMatchEmbedder();
+
  private:
-  class OwnerLifetimeObserver;
+  class OwnerContentsObserver;
 
   class OpenerLifetimeObserver;
 
@@ -354,8 +388,11 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void DispatchOnResizeEvent(const gfx::Size& old_size,
                              const gfx::Size& new_size);
 
+  // Returns the default size of the guestview.
+  gfx::Size GetDefaultSize() const;
+
   // Get the zoom factor for the embedder's web contents.
-  double GetEmbedderZoomFactor();
+  double GetEmbedderZoomFactor() const;
 
   void SetUpSizing(const base::DictionaryValue& params);
 
@@ -397,8 +434,6 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // The opener guest view.
   base::WeakPtr<GuestViewBase> opener_;
 
-  DestructionCallback destruction_callback_;
-
   // The parameters associated with the element hosting this GuestView that
   // are passed in from JavaScript. This will typically be the view instance ID,
   // and element-specific parameters. These parameters are passed along to new
@@ -407,7 +442,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // This observer ensures that this guest self-destructs if the embedder goes
   // away.
-  scoped_ptr<OwnerLifetimeObserver> owner_lifetime_observer_;
+  scoped_ptr<OwnerContentsObserver> owner_contents_observer_;
 
   // This observer ensures that if the guest is unattached and its opener goes
   // away then this guest also self-destructs.
@@ -417,8 +452,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // element may not match the size of the guest.
   gfx::Size guest_size_;
 
-  // A pointer to the guest_sizer.
-  content::GuestSizer* guest_sizer_;
+  // A pointer to the guest_host.
+  content::GuestHost* guest_host_;
 
   // Indicates whether autosize mode is enabled or not.
   bool auto_size_enabled_;
@@ -434,6 +469,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // Whether the guest view is inside a plugin document.
   bool is_full_page_plugin_;
+
+  // The routing ID of the proxy to the guest in the owner's renderer process.
+  int guest_proxy_routing_id_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

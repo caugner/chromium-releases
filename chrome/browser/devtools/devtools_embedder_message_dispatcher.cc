@@ -9,6 +9,8 @@
 
 namespace {
 
+using DispatchCallback = DevToolsEmbedderMessageDispatcher::DispatchCallback;
+
 bool GetValue(const base::Value* value, std::string* result) {
   return value->GetAsString(result);
 }
@@ -65,11 +67,7 @@ template <typename T, typename... Ts>
 struct ParamTuple<T, Ts...> {
   bool Parse(const base::ListValue& list,
              const base::ListValue::const_iterator& it) {
-    if (it == list.end())
-      return false;
-    if (!GetValue(*it, &head))
-      return false;
-    return tail.Parse(list, it + 1);
+    return it != list.end() && GetValue(*it, &head) && tail.Parse(list, it + 1);
   }
 
   template <typename H, typename... As>
@@ -83,11 +81,24 @@ struct ParamTuple<T, Ts...> {
 
 template<typename... As>
 bool ParseAndHandle(const base::Callback<void(As...)>& handler,
+                    const DispatchCallback& callback,
                     const base::ListValue& list) {
   ParamTuple<As...> tuple;
   if (!tuple.Parse(list, list.begin()))
     return false;
   tuple.Apply(handler);
+  return true;
+}
+
+template<typename... As>
+bool ParseAndHandleWithCallback(
+    const base::Callback<void(const DispatchCallback&, As...)>& handler,
+    const DispatchCallback& callback,
+    const base::ListValue& list) {
+  ParamTuple<As...> tuple;
+  if (!tuple.Parse(list, list.begin()))
+    return false;
+  tuple.Apply(handler, callback);
   return true;
 }
 
@@ -105,43 +116,44 @@ class DispatcherImpl : public DevToolsEmbedderMessageDispatcher {
  public:
   ~DispatcherImpl() override {}
 
-  bool Dispatch(const std::string& method,
-                const base::ListValue* params,
-                std::string* error) override {
+  bool Dispatch(const DispatchCallback& callback,
+                const std::string& method,
+                const base::ListValue* params) override {
     HandlerMap::iterator it = handlers_.find(method);
-    if (it == handlers_.end())
-      return false;
-
-    if (it->second.Run(*params))
-      return true;
-
-    if (error)
-      *error = "Invalid frontend host message parameters: " + method;
-    return false;
+    return it != handlers_.end() && it->second.Run(callback, *params);
   }
 
-  typedef base::Callback<bool(const base::ListValue&)> Handler;
-  void RegisterHandler(const std::string& method, const Handler& handler) {
-    handlers_[method] = handler;
-  }
-
-  template<typename T, typename... As>
+  template<typename... As>
   void RegisterHandler(const std::string& method,
-                       void (T::*handler)(As...), T* delegate) {
+                       void (Delegate::*handler)(As...),
+                       Delegate* delegate) {
     handlers_[method] = base::Bind(&ParseAndHandle<As...>,
                                    base::Bind(handler,
                                               base::Unretained(delegate)));
   }
 
+  template<typename... As>
+  void RegisterHandlerWithCallback(
+      const std::string& method,
+      void (Delegate::*handler)(const DispatchCallback&, As...),
+      Delegate* delegate) {
+    handlers_[method] = base::Bind(&ParseAndHandleWithCallback<As...>,
+                                   base::Bind(handler,
+                                              base::Unretained(delegate)));
+  }
+
+
  private:
-  typedef std::map<std::string, Handler> HandlerMap;
+  using Handler = base::Callback<bool(const DispatchCallback&,
+                                      const base::ListValue&)>;
+  using HandlerMap = std::map<std::string, Handler>;
   HandlerMap handlers_;
 };
 
-
+// static
 DevToolsEmbedderMessageDispatcher*
-    DevToolsEmbedderMessageDispatcher::createForDevToolsFrontend(
-        Delegate* delegate) {
+DevToolsEmbedderMessageDispatcher::CreateForDevToolsFrontend(
+    Delegate* delegate) {
   DispatcherImpl* d = new DispatcherImpl();
 
   d->RegisterHandler("bringToFront", &Delegate::ActivateWindow, delegate);
@@ -153,7 +165,8 @@ DevToolsEmbedderMessageDispatcher*
                      &Delegate::InspectElementCompleted, delegate);
   d->RegisterHandler("inspectedURLChanged",
                      &Delegate::InspectedURLChanged, delegate);
-  d->RegisterHandler("setIsDocked", &Delegate::SetIsDocked, delegate);
+  d->RegisterHandlerWithCallback("setIsDocked",
+                                 &Delegate::SetIsDocked, delegate);
   d->RegisterHandler("openInNewTab", &Delegate::OpenInNewTab, delegate);
   d->RegisterHandler("save", &Delegate::SaveToFile, delegate);
   d->RegisterHandler("append", &Delegate::AppendToFile, delegate);
@@ -164,6 +177,8 @@ DevToolsEmbedderMessageDispatcher*
   d->RegisterHandler("upgradeDraggedFileSystemPermissions",
                      &Delegate::UpgradeDraggedFileSystemPermissions, delegate);
   d->RegisterHandler("indexPath", &Delegate::IndexPath, delegate);
+  d->RegisterHandlerWithCallback("loadNetworkResource",
+                                 &Delegate::LoadNetworkResource, delegate);
   d->RegisterHandler("stopIndexing", &Delegate::StopIndexing, delegate);
   d->RegisterHandler("searchInPath", &Delegate::SearchInPath, delegate);
   d->RegisterHandler("setWhitelistedShortcuts",
@@ -171,15 +186,12 @@ DevToolsEmbedderMessageDispatcher*
   d->RegisterHandler("zoomIn", &Delegate::ZoomIn, delegate);
   d->RegisterHandler("zoomOut", &Delegate::ZoomOut, delegate);
   d->RegisterHandler("resetZoom", &Delegate::ResetZoom, delegate);
-  d->RegisterHandler("openUrlOnRemoteDeviceAndInspect",
-                     &Delegate::OpenUrlOnRemoteDeviceAndInspect, delegate);
-  d->RegisterHandler("setDeviceCountUpdatesEnabled",
-                     &Delegate::SetDeviceCountUpdatesEnabled, delegate);
   d->RegisterHandler("setDevicesUpdatesEnabled",
                      &Delegate::SetDevicesUpdatesEnabled, delegate);
   d->RegisterHandler("sendMessageToBrowser",
                      &Delegate::SendMessageToBrowser, delegate);
-  d->RegisterHandler("recordActionUMA",
-                     &Delegate::RecordActionUMA, delegate);
+  d->RegisterHandler("recordActionUMA", &Delegate::RecordActionUMA, delegate);
+  d->RegisterHandlerWithCallback("sendJsonRequest",
+                                 &Delegate::SendJsonRequest, delegate);
   return d;
 }

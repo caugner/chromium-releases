@@ -4,12 +4,15 @@
 
 package org.chromium.content.browser.webcontents;
 
+import android.graphics.Color;
+
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.content_public.browser.JavaScriptCallback;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationTransitionDelegate;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.WebContentsObserver;
 
 /**
  * The WebContentsImpl Java wrapper to allow communicating with the native WebContentsImpl
@@ -22,6 +25,9 @@ import org.chromium.content_public.browser.WebContents;
 
     private long mNativeWebContentsAndroid;
     private NavigationController mNavigationController;
+
+    // Lazily created proxy observer for handling all Java-based WebContentsObservers.
+    private WebContentsObserverProxy mObserverProxy;
 
     private NavigationTransitionDelegate mNavigationTransitionDelegate = null;
 
@@ -41,6 +47,10 @@ import org.chromium.content_public.browser.WebContents;
     private void clearNativePtr() {
         mNativeWebContentsAndroid = 0;
         mNavigationController = null;
+        if (mObserverProxy != null) {
+            mObserverProxy.destroy();
+            mObserverProxy = null;
+        }
     }
 
     @CalledByNative
@@ -310,6 +320,27 @@ import org.chromium.content_public.browser.WebContents;
         callback.handleJavaScriptResult(jsonResult);
     }
 
+    @Override
+    public int getThemeColor(int defaultColor) {
+        int color = nativeGetThemeColor(mNativeWebContentsAndroid);
+        if (color == Color.TRANSPARENT) return defaultColor;
+
+        return (color | 0xFF000000);
+    }
+
+    @Override
+    public void addObserver(WebContentsObserver observer) {
+        assert mNativeWebContentsAndroid != 0;
+        if (mObserverProxy == null) mObserverProxy = new WebContentsObserverProxy(this);
+        mObserverProxy.addObserver(observer);
+    }
+
+    @Override
+    public void removeObserver(WebContentsObserver observer) {
+        if (mObserverProxy == null) return;
+        mObserverProxy.removeObserver(observer);
+    }
+
     // This is static to avoid exposing a public destroy method on the native side of this class.
     private static native void nativeDestroyWebContents(long webContentsAndroidPtr);
 
@@ -358,4 +389,5 @@ import org.chromium.content_public.browser.WebContents;
             long nativeWebContentsAndroid, int level, String message);
     private native boolean nativeHasAccessedInitialDocument(
             long nativeWebContentsAndroid);
+    private native int nativeGetThemeColor(long nativeWebContentsAndroid);
 }

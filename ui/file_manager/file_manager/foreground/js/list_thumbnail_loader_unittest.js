@@ -45,6 +45,9 @@ var listThumbnailLoader;
 var getCallbacks;
 var thumbnailLoadedEvents;
 var fileListModel;
+var directoryModel;
+var currentVolumeType;
+var isScanningForTest = false;
 var fileSystem = new MockFileSystem('volume-id');
 var directory1 = new MockDirectoryEntry(fileSystem, '/TestDirectory');
 var entry1 = new MockEntry(fileSystem, '/Test1.jpg');
@@ -55,9 +58,9 @@ var entry5 = new MockEntry(fileSystem, '/Test5.jpg');
 var entry6 = new MockEntry(fileSystem, '/Test6.jpg');
 
 function setUp() {
-  ListThumbnailLoader.NUM_OF_MAX_ACTIVE_TASKS = 2;
-  ListThumbnailLoader.NUM_OF_PREFETCH = 1;
+  currentVolumeType = ListThumbnailLoader.TEST_VOLUME_TYPE;
   ListThumbnailLoader.CACHE_SIZE = 5;
+  ListThumbnailLoader.numOfMaxActiveTasksForTest = 2;
   MockThumbnailLoader.errorUrls = [];
   MockThumbnailLoader.testImageDataUrl = generateSampleImageDataUrl(document);
   MockThumbnailLoader.testImageWidth = 160;
@@ -74,7 +77,25 @@ function setUp() {
 
   fileListModel = new FileListModel(thumbnailModel);
 
-  listThumbnailLoader = new ListThumbnailLoader(fileListModel, thumbnailModel,
+  directoryModel = {
+    __proto__: cr.EventTarget.prototype,
+    getFileList: function() {
+      return fileListModel;
+    },
+    isScanning: function() {
+      return isScanningForTest;
+    }
+  };
+
+  listThumbnailLoader = new ListThumbnailLoader(
+      directoryModel,
+      thumbnailModel,
+      // Mocking volume manager
+      {
+        getVolumeInfo: function(entry) {
+          return { volumeType: currentVolumeType };
+        }
+      },
       MockThumbnailLoader);
 
   thumbnailLoadedEvents = [];
@@ -92,7 +113,7 @@ function getKeyOfGetCallback_(entries) {
 function resolveGetLatestCallback(entries) {
   var key = getKeyOfGetCallback_(entries);
   assert(getCallbacks[key]);
-  getCallbacks[key](entries.map(function() { return {}; }));
+  getCallbacks[key](entries.map(function() { return { thumbnail: {} }; }));
   delete getCallbacks[key];
 }
 
@@ -189,7 +210,7 @@ function testRangeIsAtTheEndOfList() {
 }
 
 function testCache(callback) {
-  ListThumbnailLoader.NUM_OF_MAX_ACTIVE_TASKS = 5;
+  ListThumbnailLoader.numOfMaxActiveTasksForTest = 5;
 
   // Set high priority range to 0 - 2.
   listThumbnailLoader.setHighPriorityRange(0, 2);
@@ -282,4 +303,68 @@ function testSortedEvent(callback) {
           hasPendingGetLatestCallback([entry4]);
     });
   }), callback);
+}
+
+/**
+ * Test case for handling change event in data model.
+ */
+function testChangeEvent(callback) {
+  listThumbnailLoader.setHighPriorityRange(0, 2);
+  fileListModel.push(directory1, entry1, entry2, entry3);
+
+  resolveGetLatestCallback([entry1]);
+  resolveGetLatestCallback([entry2]);
+  assertEquals(0, Object.keys(getCallbacks).length);
+
+  reportPromise(waitUntil(function() {
+    return thumbnailLoadedEvents.length === 2;
+  }).then(function() {
+    // entry1 is changed.
+    var changeEvent = new Event('change');
+    changeEvent.index = 1;
+    fileListModel.dispatchEvent(changeEvent);
+
+    // cache of entry1 should become invalid.
+    var thumbnail = listThumbnailLoader.getThumbnailFromCache(entry1);
+    assertTrue(thumbnail.outdated);
+
+    resolveGetLatestCallback([entry1]);
+
+    // Wait until thumbnailLoaded event is fired again for the change.
+    return waitUntil(function() {
+      return thumbnailLoadedEvents.length === 3;
+    });
+  }), callback);
+}
+
+/**
+ * Test case for MTP volume.
+ */
+function testMTPVolume() {
+  currentVolumeType = VolumeManagerCommon.VolumeType.MTP;
+
+  listThumbnailLoader.setHighPriorityRange(0, 2);
+  fileListModel.push(directory1, entry1, entry2, entry3);
+
+  // Only one request should be enqueued on MTP volume.
+  assertEquals(1, Object.keys(getCallbacks).length);
+}
+
+/**
+ * Test case that directory scan is running.
+ */
+function testDirectoryScanIsRunning() {
+  // Items are added during directory scan.
+  isScanningForTest = true;
+
+  listThumbnailLoader.setHighPriorityRange(0,2);
+  fileListModel.push(directory1, entry1, entry2);
+  assertEquals(0, Object.keys(getCallbacks).length);
+
+  // Scan completed after adding the last item.
+  fileListModel.push(entry3);
+  isScanningForTest = false;
+  directoryModel.dispatchEvent(new Event('scan-completed'));
+
+  assertEquals(2, Object.keys(getCallbacks).length);
 }

@@ -478,11 +478,6 @@ cr.define('options', function() {
         $('metrics-reporting-enabled').checked =
             loadTimeData.getBoolean('metricsReportingEnabledAtStart');
       }
-      // 'rappor-setting' element is only present on Chrome branded builds.
-      if ($('rappor-setting')) {
-        $('rappor-setting').hidden =
-            !loadTimeData.getBoolean('hasRapporOption');
-      }
       $('networkPredictionOptions').onchange = function(event) {
         var value = (event.target.checked ?
             NetworkPredictionOptions.WIFI_ONLY :
@@ -1696,12 +1691,14 @@ cr.define('options', function() {
     },
 
     /**
-     * Enables or disables the ChromeOS display settings button.
+     * Enables or disables the Chrome OS display settings button and overlay.
      * @private
      */
-    enableDisplayButton_: function(enabled) {
-      if (cr.isChromeOS)
+    enableDisplaySettings_: function(enabled) {
+      if (cr.isChromeOS) {
         $('display-options').disabled = !enabled;
+        DisplayOptions.getInstance().setEnabled(enabled);
+      }
     },
 
     /**
@@ -2168,7 +2165,7 @@ cr.define('options', function() {
     'addBluetoothDevice',
     'deleteCurrentProfile',
     'enableCertificateButton',
-    'enableDisplayButton',
+    'enableDisplaySettings',
     'enableFactoryResetSection',
     'getCurrentProfile',
     'getStartStopSyncButton',

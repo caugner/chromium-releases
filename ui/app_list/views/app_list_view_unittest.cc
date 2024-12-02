@@ -111,6 +111,9 @@ class AppListViewTestContext {
   // Tests displaying of the search results.
   void RunSearchResultsTest();
 
+  // Tests displaying the app list overlay.
+  void RunAppListOverlayTest();
+
   // A standard set of checks on a view, e.g., ensuring it is drawn and visible.
   static void CheckView(views::View* subview);
 
@@ -133,7 +136,7 @@ class AppListViewTestContext {
   // and returns false on failure.
   bool SetAppListState(AppListModel::State state);
 
-  // Returns whether the app list showing |state|.
+  // Returns true if all of the pages are in their correct position for |state|.
   bool IsStateShown(AppListModel::State state);
 
   // Shows the app list and waits until a paint occurs.
@@ -231,20 +234,18 @@ void AppListViewTestContext::CheckView(views::View* subview) {
 
 bool AppListViewTestContext::SetAppListState(AppListModel::State state) {
   ContentsView* contents_view = view_->app_list_main_view()->contents_view();
-  int index = contents_view->GetPageIndexForState(state);
-  contents_view->SetActivePage(index);
+  contents_view->SetActiveState(state);
   contents_view->Layout();
   return IsStateShown(state);
 }
 
 bool AppListViewTestContext::IsStateShown(AppListModel::State state) {
   ContentsView* contents_view = view_->app_list_main_view()->contents_view();
-  int index = contents_view->GetPageIndexForState(state);
   bool success = true;
   for (int i = 0; i < contents_view->NumLauncherPages(); ++i) {
     success = success &&
-              (i == index) == (contents_view->GetOnscreenPageBounds(i) ==
-                               contents_view->GetPageView(i)->bounds());
+              (contents_view->GetPageView(i)->GetPageBoundsForState(state) ==
+               contents_view->GetPageView(i)->bounds());
   }
   return success && state == delegate_->GetTestModel()->state();
 }
@@ -506,47 +507,24 @@ void AppListViewTestContext::RunPageSwitchingAnimationTest() {
     EXPECT_NO_FATAL_FAILURE(CheckView(main_view->contents_view()));
 
     ContentsView* contents_view = main_view->contents_view();
-    // Pad the ContentsView with blank pages so we have at least 3 views.
-    while (contents_view->NumLauncherPages() < 3)
-      contents_view->AddBlankPageForTesting();
 
-    contents_view->SetActivePage(0);
+    contents_view->SetActiveState(AppListModel::STATE_START);
     contents_view->Layout();
 
-    EXPECT_EQ(contents_view->GetOnscreenPageBounds(0),
-              contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
-              contents_view->GetPageView(1)->bounds());
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(2),
-              contents_view->GetPageView(2)->bounds());
+    IsStateShown(AppListModel::STATE_START);
 
     // Change pages. View should not have moved without Layout().
-    contents_view->SetActivePage(1);
-    EXPECT_EQ(contents_view->GetOnscreenPageBounds(0),
-              contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
-              contents_view->GetPageView(1)->bounds());
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(2),
-              contents_view->GetPageView(2)->bounds());
+    contents_view->SetActiveState(AppListModel::STATE_SEARCH_RESULTS);
+    IsStateShown(AppListModel::STATE_START);
 
     // Change to a third page. This queues up the second animation behind the
     // first.
-    contents_view->SetActivePage(2);
-    EXPECT_EQ(contents_view->GetOnscreenPageBounds(0),
-              contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
-              contents_view->GetPageView(1)->bounds());
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(2),
-              contents_view->GetPageView(2)->bounds());
+    contents_view->SetActiveState(AppListModel::STATE_APPS);
+    IsStateShown(AppListModel::STATE_START);
 
     // Call Layout(). Should jump to the third page.
     contents_view->Layout();
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(0),
-              contents_view->GetPageView(0)->bounds());
-    EXPECT_NE(contents_view->GetOnscreenPageBounds(1),
-              contents_view->GetPageView(1)->bounds());
-    EXPECT_EQ(contents_view->GetOnscreenPageBounds(2),
-              contents_view->GetPageView(2)->bounds());
+    IsStateShown(AppListModel::STATE_APPS);
   }
 
   Close();
@@ -662,6 +640,25 @@ void AppListViewTestContext::RunSearchResultsTest() {
     EXPECT_TRUE(
         CheckSearchBoxWidget(contents_view->GetDefaultSearchBoxBounds()));
   }
+
+  Close();
+}
+
+void AppListViewTestContext::RunAppListOverlayTest() {
+  Show();
+
+  AppListMainView* main_view = view_->app_list_main_view();
+  SearchBoxView* search_box_view = main_view->search_box_view();
+
+  // The search box should not be enabled when the app list overlay is shown.
+  view_->SetAppListOverlayVisible(true);
+  EXPECT_FALSE(search_box_view->enabled());
+
+  // The search box should be refocused when the app list overlay is hidden.
+  view_->SetAppListOverlayVisible(false);
+  EXPECT_TRUE(search_box_view->enabled());
+  EXPECT_EQ(search_box_view->search_box(),
+            view_->GetWidget()->GetFocusManager()->GetFocusedView());
 
   Close();
 }
@@ -823,6 +820,15 @@ TEST_P(AppListViewTestAura, BackTest) {
 
 TEST_P(AppListViewTestDesktop, BackTest) {
   EXPECT_NO_FATAL_FAILURE(test_context_->RunBackTest());
+}
+
+// Tests that the correct views are displayed for showing search results.
+TEST_P(AppListViewTestAura, AppListOverlayTest) {
+  EXPECT_NO_FATAL_FAILURE(test_context_->RunAppListOverlayTest());
+}
+
+TEST_P(AppListViewTestDesktop, AppListOverlayTest) {
+  EXPECT_NO_FATAL_FAILURE(test_context_->RunAppListOverlayTest());
 }
 
 #if defined(USE_AURA)

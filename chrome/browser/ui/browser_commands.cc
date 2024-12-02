@@ -568,8 +568,7 @@ void CloseTab(Browser* browser) {
 bool CanZoomIn(content::WebContents* contents) {
   ui_zoom::ZoomController* zoom_controller =
       ui_zoom::ZoomController::FromWebContents(contents);
-  return zoom_controller->GetZoomPercent() !=
-      contents->GetMaximumZoomPercent() + 1;
+  return zoom_controller->GetZoomPercent() != contents->GetMaximumZoomPercent();
 }
 
 bool CanZoomOut(content::WebContents* contents) {
@@ -579,10 +578,11 @@ bool CanZoomOut(content::WebContents* contents) {
       contents->GetMinimumZoomPercent();
 }
 
-bool ActualSize(content::WebContents* contents) {
+bool CanResetZoom(content::WebContents* contents) {
   ui_zoom::ZoomController* zoom_controller =
       ui_zoom::ZoomController::FromWebContents(contents);
-  return zoom_controller->GetZoomPercent() != 100.0f;
+  return !zoom_controller->IsAtDefaultZoom() ||
+         !zoom_controller->PageScaleFactorIsOne();
 }
 
 TabStripModelDelegate::RestoreTabType GetRestoreTabType(
@@ -811,9 +811,6 @@ void Translate(Browser* browser) {
 }
 
 void ManagePasswordsForPage(Browser* browser) {
-  if (!browser->window()->IsActive())
-    return;
-
   WebContents* web_contents =
       browser->tab_strip_model()->GetActiveWebContents();
   ManagePasswordsUIController* controller =
@@ -1058,6 +1055,12 @@ void ShowAppMenu(Browser* browser) {
 void ShowAvatarMenu(Browser* browser) {
   browser->window()->ShowAvatarBubbleFromAvatarButton(
       BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT,
+      signin::ManageAccountsParams());
+}
+
+void ShowFastUserSwitcher(Browser* browser) {
+  browser->window()->ShowAvatarBubbleFromAvatarButton(
+      BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH,
       signin::ManageAccountsParams());
 }
 

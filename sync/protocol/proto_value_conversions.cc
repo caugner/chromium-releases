@@ -418,14 +418,6 @@ base::DictionaryValue* FaviconSyncFlagsToValue(
   return value;
 }
 
-base::DictionaryValue* EnhancedBookmarksFlagsToValue(
-    const sync_pb::EnhancedBookmarksFlags& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_BOOL(enabled);
-  SET_STR(extension_id);
-  return value;
-}
-
 }  // namespace
 
 base::DictionaryValue* ExperimentsSpecificsToValue(
@@ -437,7 +429,6 @@ base::DictionaryValue* ExperimentsSpecificsToValue(
   SET_EXPERIMENT_ENABLED_FIELD(pre_commit_update_avoidance);
   SET(favicon_sync, FaviconSyncFlagsToValue);
   SET_EXPERIMENT_ENABLED_FIELD(gcm_channel);
-  SET(enhanced_bookmarks, EnhancedBookmarksFlagsToValue);
   SET_EXPERIMENT_ENABLED_FIELD(gcm_invalidations);
   SET_EXPERIMENT_ENABLED_FIELD(wallet_sync);
   return value;
@@ -700,6 +691,7 @@ base::DictionaryValue* WalletMaskedCreditCardToValue(
 base::DictionaryValue* WalletPostalAddressToValue(
     const sync_pb::WalletPostalAddress& proto) {
   base::DictionaryValue* value = new base::DictionaryValue();
+  SET_STR(recipient_name);
   SET_STR(company_name);
   SET_STR_REP(street_address);
   SET_STR(address_1);
@@ -709,6 +701,7 @@ base::DictionaryValue* WalletPostalAddressToValue(
   SET_STR(postal_code);
   SET_STR(sorting_code);
   SET_STR(country_code);
+  SET_STR(phone_number);
   SET_STR(language_code);
   return value;
 }

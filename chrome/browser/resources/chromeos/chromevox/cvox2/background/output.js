@@ -56,8 +56,6 @@ Output = function() {
   this.speechStartCallback_;
   /** @type {function()} */
   this.speechEndCallback_;
-  /** @type {function()} */
-  this.speechInterruptedCallback_;
 
   /**
    * Current global options.
@@ -79,21 +77,68 @@ Output = function() {
 Output.SPACE = ' ';
 
 /**
+ * Metadata about supported automation roles.
+ * @const {Object<string, {msgId: string, earcon: (string|undefined)}>}
+ * @private
+ */
+Output.ROLE_INFO_ = {
+  alert: {
+    msgId: 'aria_role_alert',
+    earcon: 'ALERT_NONMODAL',
+  },
+  button: {
+    msgId: 'tag_button',
+    earcon: 'BUTTON'
+  },
+  checkbox: {
+    msgId: 'input_type_checkbox'
+  },
+  heading: {
+    msgId: 'aria_role_heading',
+  },
+  link: {
+    msgId: 'tag_link',
+    earcon: 'LINK'
+  },
+  listItem: {
+    msgId: 'ARIA_ROLE_LISTITEM',
+    earcon: 'list_item'
+  },
+  menuListOption: {
+    msgId: 'aria_role_menuitem'
+  },
+  popUpButton: {
+    msgId: 'tag_button'
+  },
+  radioButton: {
+    msgId: 'input_type_radio'
+  },
+  textBox: {
+    msgId: 'input_type_text',
+    earcon: 'EDITABLE_TEXT'
+  },
+  textField: {
+    msgId: 'input_type_text',
+    earcon: 'EDITABLE_TEXT'
+  },
+  toolbar: {
+    msgId: 'aria_role_toolbar'
+  }
+};
+
+/**
  * Rules specifying format of AutomationNodes for output.
  * @type {!Object<string, Object<string, Object<string, string>>>}
  */
 Output.RULES = {
   navigate: {
     'default': {
-      speak: '$name $role $value',
+      speak: '$name $value $role',
       braille: ''
     },
     alert: {
       speak: '!doNotInterrupt ' +
           '@aria_role_alert $name $earcon(ALERT_NONMODAL) $descendants'
-    },
-    button: {
-      speak: '$name $earcon(BUTTON, @tag_button)'
     },
     checkBox: {
       speak: '$if($checked, @describe_checkbox_checked($name), ' +
@@ -118,7 +163,7 @@ Output.RULES = {
       speak: '$name= $visited $earcon(LINK, @tag_link)='
     },
     list: {
-      enter: '$role'
+      enter: '@aria_role_list @list_with_items($parentChildCount)'
     },
     listItem: {
       enter: '$role'
@@ -152,14 +197,8 @@ Output.RULES = {
     staticText: {
       speak: '$value'
     },
-    textBox: {
-      speak: '$name $value $earcon(EDITABLE_TEXT, @input_type_text)'
-    },
     tab: {
       speak: '@describe_tab($name)'
-    },
-    textField: {
-      speak: '$name $value $earcon(EDITABLE_TEXT, @input_type_text) $protected'
     },
     toolbar: {
       enter: '$name $role'
@@ -287,6 +326,22 @@ Output.prototype = {
   },
 
   /**
+   * Apply a format string directly to the output buffer. This lets you
+   * output a message directly to the buffer using the format syntax.
+   * @param {string} formatStr
+   * @return {!Output}
+   */
+  format: function(formatStr) {
+    this.formatOptions_ = {speech: true, braille: false, location: true};
+    this.format_(null, formatStr, this.buffer_);
+
+    this.formatOptions_ = {speech: false, braille: true, location: false};
+    this.format_(null, formatStr, this.brailleBuffer_);
+
+    return this;
+  },
+
+  /**
    * Triggers callback for a speech event.
    * @param {function()} callback
    */
@@ -305,40 +360,17 @@ Output.prototype = {
   },
 
   /**
-   * Triggers callback for a speech event.
-   * @param {function()} callback
-   */
-  onSpeechInterrupted: function(callback) {
-    this.speechInterruptedCallback_ = callback;
-    return this;
-  },
-
-  /**
    * Executes all specified output.
    */
   go: function() {
     // Speech.
     var buff = this.buffer_;
-
-    var onEvent = function(evt) {
-      switch (evt.type) {
-        case 'start':
-          this.speechStartCallback_();
-          break;
-        case 'end':
-          this.speechEndCallback_();
-          break;
-        case 'interrupted':
-          this.speechInterruptedCallback_ && this.speechInterruptedCallback_();
-          break;
-      }
-    }.bind(this);
-
     if (buff.toString()) {
-      if (this.speechStartCallback_ ||
-          this.speechEndCallback_ ||
-          this.speechInterruptedCallback_)
-        this.speechProperties_['onEvent'] = onEvent;
+      if (this.speechStartCallback_)
+        this.speechProperties_['startCallback'] = this.speechStartCallback_;
+      if (this.speechEndCallback_) {
+        this.speechProperties_['endCallback'] = this.speechEndCallback_;
+      }
 
       cvox.ChromeVox.tts.speak(
           buff.toString(), cvox.QueueMode.FLUSH, this.speechProperties_);
@@ -356,19 +388,17 @@ Output.prototype = {
         this.brailleBuffer_.getSpanInstanceOf(Output.SelectionSpan);
     var startIndex = -1, endIndex = -1;
     if (selSpan) {
-      var valueStart = this.brailleBuffer_.getSpanStart(selSpan);
-      var valueEnd = this.brailleBuffer_.getSpanEnd(selSpan);
-      if (valueStart === undefined || valueEnd === undefined) {
-        valueStart = -1;
-        valueEnd = -1;
-      } else {
-        startIndex = valueStart + selSpan.startIndex;
-        endIndex = valueStart + selSpan.endIndex;
-        this.brailleBuffer_.setSpan(new cvox.ValueSpan(valueStart),
-                                    valueStart, valueEnd);
-        this.brailleBuffer_.setSpan(new cvox.ValueSelectionSpan(),
-                                    startIndex, endIndex);
-      }
+      // Casts ok, since the span is known to be in the spannable.
+      var valueStart =
+          /** @type {number} */ (this.brailleBuffer_.getSpanStart(selSpan));
+      var valueEnd =
+          /** @type {number} */ (this.brailleBuffer_.getSpanEnd(selSpan));
+      startIndex = valueStart + selSpan.startIndex;
+      endIndex = valueStart + selSpan.endIndex;
+      this.brailleBuffer_.setSpan(new cvox.ValueSpan(0),
+                                  valueStart, valueEnd);
+      this.brailleBuffer_.setSpan(new cvox.ValueSelectionSpan(),
+                                  startIndex, endIndex);
     }
 
     var output = new cvox.NavBraille({
@@ -402,9 +432,10 @@ Output.prototype = {
 
   /**
    * Format the node given the format specifier.
-   * @param {!chrome.automation.AutomationNode} node
+   * @param {chrome.automation.AutomationNode} node
    * @param {string|!Object} format The output format either specified as an
    * output template string or a parsed output format tree.
+   * @param {!cvox.Spannable} buff Buffer to receive rendered output.
    * @param {!Object=} opt_exclude A set of attributes to exclude.
    * @private
    */
@@ -452,12 +483,9 @@ Output.prototype = {
       // All possible tokens based on prefix.
       if (prefix == '$') {
         options.annotation = token;
-        if (token == 'role') {
-          // Non-localized role and state obtained by default.
-          this.addToSpannable_(buff, node.role, options);
-        } else if (token == 'value') {
+        if (token == 'value') {
           var text = node.attributes.value;
-          if (text) {
+          if (text !== undefined) {
             var offset = buff.getLength();
             if (node.attributes.textSelStart !== undefined) {
               options.annotation = new Output.SelectionSpan(
@@ -505,6 +533,26 @@ Output.prototype = {
               new cursors.Cursor(leftmost, 0),
               new cursors.Cursor(rightmost, 0));
           this.range_(subrange, null, 'navigate', buff);
+        } else if (token == 'role') {
+          var msg = node.role;
+          var earconId = null;
+          var info = Output.ROLE_INFO_[node.role];
+          if (info) {
+            if (this.formatOptions_.braille)
+              msg = cvox.ChromeVox.msgs.getMsg(info.msgId + '_brl');
+            else
+              msg = cvox.ChromeVox.msgs.getMsg(info.msgId);
+            earconId = info.earcon;
+          } else {
+            console.error('Missing role info for ' + node.role);
+          }
+          if (earconId) {
+            options.annotation = new Output.Action(function() {
+              cvox.ChromeVox.earcons.playEarcon(
+                  cvox.AbstractEarcons[earconId]);
+            });
+          }
+          this.addToSpannable_(buff, msg, options);
         } else if (node.attributes[token]) {
           this.addToSpannable_(buff, node.attributes[token], options);
         } else if (node.state[token]) {
@@ -701,7 +749,7 @@ Output.prototype = {
    */
   addToSpannable_: function(spannable, value, opt_options) {
     opt_options = opt_options || {ifEmpty: false, annotation: undefined};
-    if (value.length == 0 && !opt_options.annotation)
+    if ((!value || value.length == 0) && !opt_options.annotation)
       return;
 
     var spannableToAdd = new cvox.Spannable(value, opt_options.annotation);

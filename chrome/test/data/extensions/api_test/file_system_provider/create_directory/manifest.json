@@ -8,8 +8,10 @@
       "Test for chrome.fileSystemProvider.onCreateDirectoryRequested().",
   "permissions": [
     "fileSystemProvider",
-    "fileManagerPrivate",
-    "fileBrowserHandler"
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
+    "fileManagerPrivate"
   ],
   "app": {
     "background": {

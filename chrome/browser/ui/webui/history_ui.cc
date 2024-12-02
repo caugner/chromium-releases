@@ -23,7 +23,6 @@
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -40,6 +39,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/web_history_service.h"
 #include "components/search/search.h"
@@ -191,10 +191,14 @@ content::WebUIDataSource* CreateHistoryUIHTMLSource(Profile* profile) {
   source->AddLocalizedString("entrySummary", IDS_HISTORY_ENTRY_SUMMARY);
   source->AddBoolean("isFullHistorySyncEnabled",
                      WebHistoryServiceFactory::GetForProfile(profile) != NULL);
-  source->AddBoolean("groupByDomain",
-                     profile->IsSupervised() ||
-                         base::CommandLine::ForCurrentProcess()->HasSwitch(
-                             switches::kHistoryEnableGroupByDomain));
+  bool group_by_domain = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kHistoryEnableGroupByDomain);
+  // Supervised users get the "group by domain" version, but not on mobile,
+  // because that version isn't adjusted for small screens yet. crbug.com/452859
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  group_by_domain = group_by_domain || profile->IsSupervised();
+#endif
+  source->AddBoolean("groupByDomain", group_by_domain);
   bool allow_deleting_history =
       prefs->GetBoolean(prefs::kAllowDeletingBrowserHistory);
   source->AddBoolean("allowDeletingHistory", allow_deleting_history);
@@ -433,7 +437,7 @@ void BrowsingHistoryHandler::RegisterMessages() {
       profile, new FaviconSource(profile, FaviconSource::ANY));
 
   // Get notifications when history is cleared.
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile, ServiceAccessType::EXPLICIT_ACCESS);
   if (hs)
     history_service_observer_.Add(hs);
@@ -486,7 +490,7 @@ void BrowsingHistoryHandler::QueryHistory(
   query_results_.clear();
   results_info_value_.Clear();
 
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
       profile, ServiceAccessType::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text,
                    options,
@@ -575,8 +579,9 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
     return;
   }
 
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile, ServiceAccessType::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   history::WebHistoryService* web_history =
       WebHistoryServiceFactory::GetForProfile(profile);
 
@@ -1004,11 +1009,12 @@ std::string BrowsingHistoryHandler::GetAcceptLanguages() const {
   return profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
 }
 
-void BrowsingHistoryHandler::OnURLsDeleted(HistoryService* history_service,
-                                           bool all_history,
-                                           bool expired,
-                                           const history::URLRows& deleted_rows,
-                                           const std::set<GURL>& favicon_urls) {
+void BrowsingHistoryHandler::OnURLsDeleted(
+    history::HistoryService* history_service,
+    bool all_history,
+    bool expired,
+    const history::URLRows& deleted_rows,
+    const std::set<GURL>& favicon_urls) {
   if (all_history || DeletionsDiffer(deleted_rows, urls_to_be_deleted_))
     web_ui()->CallJavascriptFunction("historyDeleted");
 }

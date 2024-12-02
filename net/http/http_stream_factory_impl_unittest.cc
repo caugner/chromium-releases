@@ -9,7 +9,6 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "net/base/net_log.h"
 #include "net/base/test_completion_callback.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/dns/mock_host_resolver.h"
@@ -22,6 +21,7 @@
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/http_stream.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/client_socket_handle.h"
@@ -381,17 +381,18 @@ CapturePreconnectsSOCKSSocketPool;
 typedef CapturePreconnectsSocketPool<SSLClientSocketPool>
 CapturePreconnectsSSLSocketPool;
 
-template<typename ParentPool>
+template <typename ParentPool>
 CapturePreconnectsSocketPool<ParentPool>::CapturePreconnectsSocketPool(
-    HostResolver* host_resolver, CertVerifier* /* cert_verifier */)
-    : ParentPool(0, 0, nullptr, host_resolver, nullptr, nullptr),
-      last_num_streams_(-1) {}
+    HostResolver* host_resolver,
+    CertVerifier* /* cert_verifier */)
+    : ParentPool(0, 0, host_resolver, nullptr, nullptr), last_num_streams_(-1) {
+}
 
 template <>
 CapturePreconnectsHttpProxySocketPool::CapturePreconnectsSocketPool(
     HostResolver* /* host_resolver */,
     CertVerifier* /* cert_verifier */)
-    : HttpProxyClientSocketPool(0, 0, nullptr, nullptr, nullptr, nullptr),
+    : HttpProxyClientSocketPool(0, 0, nullptr, nullptr, nullptr),
       last_num_streams_(-1) {
 }
 
@@ -401,7 +402,6 @@ CapturePreconnectsSSLSocketPool::CapturePreconnectsSocketPool(
     CertVerifier* cert_verifier)
     : SSLClientSocketPool(0,
                           0,
-                          nullptr,  // ssl_histograms
                           cert_verifier,
                           nullptr,        // channel_id_store
                           nullptr,        // transport_security_state
@@ -413,7 +413,6 @@ CapturePreconnectsSSLSocketPool::CapturePreconnectsSocketPool(
                           nullptr,
                           nullptr,
                           nullptr,   // ssl_config_service
-                          false,     // enable_ssl_connect_job_waiting
                           nullptr),  // net_log
       last_num_streams_(-1) {
 }
@@ -422,10 +421,11 @@ class HttpStreamFactoryTest : public ::testing::Test,
                               public ::testing::WithParamInterface<NextProto> {
 };
 
-INSTANTIATE_TEST_CASE_P(
-    NextProto,
-    HttpStreamFactoryTest,
-    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
+INSTANTIATE_TEST_CASE_P(NextProto,
+                        HttpStreamFactoryTest,
+                        testing::Values(kProtoSPDY31,
+                                        kProtoSPDY4_14,
+                                        kProtoSPDY4));
 
 TEST_P(HttpStreamFactoryTest, PreconnectDirect) {
   for (size_t i = 0; i < arraysize(kTests); ++i) {
@@ -1324,8 +1324,9 @@ TEST_P(HttpStreamFactoryTest, DISABLED_OrphanedWebSocketStream) {
   request_info.url = GURL("ws://www.google.com:8888");
   request_info.load_flags = 0;
 
-  session->http_server_properties()->SetAlternateProtocol(
-      HostPortPair("www.google.com", 8888), 9999, NPN_SPDY_3, 1.0);
+  session->http_server_properties()->SetAlternativeService(
+      HostPortPair("www.google.com", 8888),
+      AlternativeService(NPN_SPDY_4, "www.google.com", 9999), 1.0);
 
   SSLConfig ssl_config;
   StreamRequestWaiter waiter;

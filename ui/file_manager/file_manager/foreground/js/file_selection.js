@@ -104,12 +104,23 @@ function FileSelection(fileManager, indexes) {
 }
 
 /**
+ * Metadata property names used by FileSelection.
+ * These metadata is expected to be cached to accelerate completeInit() of
+ * FileSelection. crbug.com/458915.
+ * @const {!Array<string>}
+ */
+FileSelection.METADATA_PREFETCH_PROPERTY_NAMES = [
+  'availableOffline',
+  'contentMimeType',
+];
+
+/**
  * Computes data required to get file tasks and requests the tasks.
  * @return {!Promise}
  */
 FileSelection.prototype.completeInit = function() {
   if (!this.asyncInitPromise_) {
-    this.asyncInitPromise_ = this.fileManager_.getFileSystemMetadata().get(
+    this.asyncInitPromise_ = this.fileManager_.getMetadataModel().get(
         this.entries, ['availableOffline', 'contentMimeType']
     ).then(function(props) {
       var present = props.filter(function(p) { return p.availableOffline; });
@@ -171,12 +182,28 @@ FileSelectionHandler.EventType = {
   CHANGE: 'change',
 
   /**
-   * Dispatched 200ms later after the selecton is changed.
+   * Dispatched |UPDATE_DELAY| ms after the selecton is changed.
    * If multiple changes are happened during the term, only one CHANGE_THROTTLED
    * event is dispatched.
    */
   CHANGE_THROTTLED: 'changethrottled'
 };
+
+/**
+ * Delay in milliseconds before recalculating the selection in case the
+ * selection is changed fast, or there are many items. Used to avoid freezing
+ * the UI.
+ * @const {number}
+ */
+FileSelectionHandler.UPDATE_DELAY = 200;
+
+/**
+ * Number of items in the selection which triggers the update delay. Used to
+ * let the Material Design animations complete before performing a heavy task
+ * which would cause the UI freezing.
+ * @const {number}
+ */
+FileSelectionHandler.NUMBER_OF_ITEMS_HEAVY_TO_COMPUTE = 100;
 
 /**
  * FileSelectionHandler extends cr.EventTarget.
@@ -201,10 +228,14 @@ FileSelectionHandler.prototype.onFileSelectionChanged = function() {
   // asynchronous calls. We initiate these calls after a timeout. If the
   // selection is changing quickly we only do this once when it slows down.
 
-  var updateDelay = 200;
+  var updateDelay = FileSelectionHandler.UPDATE_DELAY;
   var now = Date.now();
-  if (now > (this.lastFileSelectionTime_ || 0) + updateDelay) {
-    // The previous selection change happened a while ago. Update the UI soon.
+
+  if (now > (this.lastFileSelectionTime_ || 0) + updateDelay &&
+      indexes.length < FileSelectionHandler.NUMBER_OF_ITEMS_HEAVY_TO_COMPUTE) {
+    // The previous selection change happened a while ago and there is few
+    // selected items, so computation is lightweight. Update the UI without
+    // delay.
     updateDelay = 0;
   }
   this.lastFileSelectionTime_ = now;

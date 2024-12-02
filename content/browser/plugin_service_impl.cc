@@ -18,6 +18,7 @@
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/common/content_switches_internal.h"
 #include "content/common/pepper_plugin_list.h"
 #include "content/common/plugin_list.h"
 #include "content/common/view_messages.h"
@@ -99,7 +100,7 @@ void WillLoadPluginsCallback(
 
 #if defined(OS_MACOSX)
 void NotifyPluginsOfActivation() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   for (PluginProcessHostIterator iter; !iter.Done(); ++iter)
     iter->OnAppActivation();
@@ -277,7 +278,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindPpapiBrokerProcess(
 PluginProcessHost* PluginServiceImpl::FindOrStartNpapiPluginProcess(
     int render_process_id,
     const base::FilePath& plugin_path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (filter_ && !filter_->CanLoadPlugin(render_process_id, plugin_path))
     return NULL;
@@ -318,7 +319,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
     int render_process_id,
     const base::FilePath& plugin_path,
     const base::FilePath& profile_data_directory) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (filter_ && !filter_->CanLoadPlugin(render_process_id, plugin_path)) {
     VLOG(1) << "Unable to load ppapi plugin: " << plugin_path.MaybeAsASCII();
@@ -361,7 +362,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
 PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiBrokerProcess(
     int render_process_id,
     const base::FilePath& plugin_path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (filter_ && !filter_->CanLoadPlugin(render_process_id, plugin_path))
     return NULL;
@@ -389,7 +390,7 @@ void PluginServiceImpl::OpenChannelToNpapiPlugin(
     const GURL& page_url,
     const std::string& mime_type,
     PluginProcessHost::Client* client) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!ContainsKey(pending_plugin_clients_, client));
   pending_plugin_clients_.insert(client);
 
@@ -436,7 +437,7 @@ void PluginServiceImpl::OpenChannelToPpapiBroker(
 
 void PluginServiceImpl::CancelOpenChannelToNpapiPlugin(
     PluginProcessHost::Client* client) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(ContainsKey(pending_plugin_clients_, client));
   pending_plugin_clients_.erase(client);
 }
@@ -478,13 +479,18 @@ void PluginServiceImpl::GetAllowedPluginForOpenChannelToPlugin(
                  render_process_id,
                  plugin_path,
                  client));
+  if (filter_) {
+    DCHECK_EQ(WebPluginInfo::PLUGIN_TYPE_NPAPI, info.type);
+    filter_->NPAPIPluginLoaded(render_process_id, render_frame_id, mime_type,
+                               info);
+  }
 }
 
 void PluginServiceImpl::FinishOpenChannelToPlugin(
     int render_process_id,
     const base::FilePath& plugin_path,
     PluginProcessHost::Client* client) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // Make sure it hasn't been canceled yet.
   if (!ContainsKey(pending_plugin_clients_, client))
@@ -623,7 +629,7 @@ void PluginServiceImpl::GetPluginsInternal(
 void PluginServiceImpl::GetPluginsOnIOThread(
     base::MessageLoopProxy* target_loop,
     const GetPluginsCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // If we switch back to loading plugins in process, then we need to make
   // sure g_thread_init() gets called since plugins may call glib at load.
@@ -717,7 +723,7 @@ static const unsigned int kMaxCrashesPerInterval = 3;
 static const unsigned int kCrashesInterval = 120;
 
 void PluginServiceImpl::RegisterPluginCrash(const base::FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   std::map<base::FilePath, std::vector<base::Time> >::iterator i =
       crash_times_.find(path);
   if (i == crash_times_.end()) {
@@ -732,7 +738,7 @@ void PluginServiceImpl::RegisterPluginCrash(const base::FilePath& path) {
 }
 
 bool PluginServiceImpl::IsPluginUnstable(const base::FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   std::map<base::FilePath, std::vector<base::Time> >::const_iterator i =
       crash_times_.find(path);
   if (i == crash_times_.end()) {
@@ -789,6 +795,9 @@ void PluginServiceImpl::GetInternalPlugins(
 }
 
 bool PluginServiceImpl::NPAPIPluginsSupported() {
+  if (npapi_plugins_enabled_)
+    return true;
+
   static bool command_line_checked = false;
 
   if (!command_line_checked) {
@@ -812,8 +821,16 @@ void PluginServiceImpl::DisablePluginsDiscoveryForTesting() {
   PluginList::Singleton()->DisablePluginsDiscovery();
 }
 
-void PluginServiceImpl::EnableNpapiPluginsForTesting() {
+void PluginServiceImpl::EnableNpapiPlugins() {
+#if defined(OS_WIN)
+  DisableWin32kRendererLockdown();
+#endif
   npapi_plugins_enabled_ = true;
+  RefreshPlugins();
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&PluginService::PurgePluginListCache,
+                 static_cast<BrowserContext*>(NULL), false));
 }
 
 #if defined(OS_MACOSX)

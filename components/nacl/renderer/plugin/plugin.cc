@@ -26,15 +26,6 @@
 
 namespace plugin {
 
-namespace {
-
-// Up to 20 seconds
-const int64_t kTimeSmallMin = 1;         // in ms
-const int64_t kTimeSmallMax = 20000;     // in ms
-const uint32_t kTimeSmallBuckets = 100;
-
-}  // namespace
-
 void Plugin::ShutDownSubprocesses() {
   PLUGIN_PRINTF(("Plugin::ShutDownSubprocesses (this=%p)\n",
                  static_cast<void*>(this)));
@@ -45,15 +36,6 @@ void Plugin::ShutDownSubprocesses() {
 
   PLUGIN_PRINTF(("Plugin::ShutDownSubprocess (this=%p, return)\n",
                  static_cast<void*>(this)));
-}
-
-void Plugin::HistogramTimeSmall(const std::string& name,
-                                int64_t ms) {
-  if (ms < 0) return;
-  uma_interface_.HistogramCustomTimes(name,
-                                      ms,
-                                      kTimeSmallMin, kTimeSmallMax,
-                                      kTimeSmallBuckets);
 }
 
 bool Plugin::LoadHelperNaClModuleInternal(NaClSubprocess* subprocess,
@@ -251,8 +233,6 @@ Plugin::Plugin(PP_Instance pp_instance)
 }
 
 Plugin::~Plugin() {
-  int64_t shutdown_start = NaClGetTimeOfDayMicroseconds();
-
   // Destroy the coordinator while the rest of the data is still there
   pnacl_coordinator_.reset(NULL);
 
@@ -285,11 +265,6 @@ Plugin::~Plugin() {
   ShutDownSubprocesses();
 
   delete wrapper_factory_;
-
-  HistogramTimeSmall(
-      "NaCl.Perf.ShutdownTime.Total",
-      (NaClGetTimeOfDayMicroseconds() - shutdown_start)
-          / NACL_MICROS_PER_MILLI);
 }
 
 bool Plugin::HandleDocumentLoad(const pp::URLLoader& url_loader) {
@@ -335,7 +310,7 @@ void Plugin::NaClManifestFileDidOpen(int32_t pp_error) {
     return;
 
   PP_Var pp_program_url;
-  PP_PNaClOptions pnacl_options = {PP_FALSE, PP_FALSE, 2};
+  PP_PNaClOptions pnacl_options = {PP_FALSE, PP_FALSE, PP_FALSE, 2};
   PP_Bool uses_nonsfi_mode;
   if (nacl_interface_->GetManifestProgramURL(
           pp_instance(), &pp_program_url, &pnacl_options, &uses_nonsfi_mode)) {

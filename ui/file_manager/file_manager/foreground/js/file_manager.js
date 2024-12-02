@@ -54,15 +54,9 @@ function FileManager() {
   this.mediaImportHandler_ = null;
 
   /**
-   * @private {!MetadataProviderCache}
-   * @const
+   * @private {MetadataModel}
    */
-  this.metadataProviderCache_ = new MetadataProviderCache();
-
-  /**
-   * @private {FileSystemMetadata}
-   */
-  this.fileSystemMetadata_ = null;
+  this.metadataModel_ = null;
 
   /**
    * @private {ThumbnailModel}
@@ -192,6 +186,12 @@ function FileManager() {
   this.toolbarController_ = null;
 
   /**
+   * Empty folder controller.
+   * @private {EmptyFolderController}
+   */
+  this.emptyFolderController_ = null;
+
+  /**
    * App state controller.
    * @type {AppStateController}
    * @private
@@ -224,6 +224,9 @@ function FileManager() {
    * @private
    */
   this.taskController_ = null;
+
+  /** @private {ColumnVisibilityController} */
+  this.columnVisibilityController_ = null;
 
   // --------------------------------------------------------------------------
   // DOM elements.
@@ -262,9 +265,9 @@ function FileManager() {
   /**
    * Indicates whether cloud import is enabled.  This is initialized in
    * #initSettings.
-   * @private {?boolean}
+   * @private {boolean}
    */
-  this.importEnabled_ = null;
+  this.importEnabled_ = true;
 }
 
 FileManager.prototype = /** @struct */ {
@@ -274,6 +277,12 @@ FileManager.prototype = /** @struct */ {
    */
   get directoryModel() {
     return this.directoryModel_;
+  },
+  /**
+   * @return {!FileFilter}
+   */
+  get fileFilter() {
+    return this.fileFilter_;
   },
   /**
    * @return {FolderShortcutsDataModel}
@@ -352,6 +361,12 @@ FileManager.prototype = /** @struct */ {
    */
   get ui() {
     return this.ui_;
+  },
+  /**
+   * @return {analytics.Tracker}
+   */
+  get tracker() {
+    return this.tracker_;
   }
 };
 
@@ -422,8 +437,11 @@ FileManager.prototype = /** @struct */ {
     this.toolbarController_ = new ToolbarController(
         this.ui_.toolbar,
         this.ui_.dialogNavigationList,
-        this.ui_.locationLine,
+        assert(this.ui_.locationLine),
         this.selectionHandler_,
+        this.directoryModel_);
+    this.emptyFolderController_ = new EmptyFolderController(
+        this.ui_.emptyFolder,
         this.directoryModel_);
 
     importer.importEnabled().then(
@@ -433,10 +451,8 @@ FileManager.prototype = /** @struct */ {
                 new importer.RuntimeControllerEnvironment(
                     this,
                     this.selectionHandler_),
-                /** @type {!importer.MediaScanner} */ (
-                    this.mediaScanner_),
-                /** @type {!importer.ImportRunner} */ (
-                    this.mediaImportHandler_),
+                this.mediaScanner_,
+                this.mediaImportHandler_,
                 new importer.RuntimeCommandWidget(),
                 assert(this.tracker_));
           }
@@ -469,7 +485,10 @@ FileManager.prototype = /** @struct */ {
               this.directoryModel_,
               this.volumeManager_,
               this.document_,
-              pref.allowRedeemOffers));
+              // Whether to show offers on the welcome banner.
+              pref.allowRedeemOffers,
+              // Whether to show any welcome banner.
+              this.dialogType === DialogType.FULL_PAGE));
       callback();
     }.bind(this));
   };
@@ -480,7 +499,7 @@ FileManager.prototype = /** @struct */ {
   FileManager.prototype.initDataTransferOperations_ = function() {
     // CopyManager are required for 'Delete' operation in
     // Open and Save dialogs. But drag-n-drop and copy-paste are not needed.
-    if (this.dialogType != DialogType.FULL_PAGE)
+    if (this.dialogType !== DialogType.FULL_PAGE)
       return;
 
     this.fileTransferController_ = new FileTransferController(
@@ -490,7 +509,7 @@ FileManager.prototype = /** @struct */ {
         this.ui_.multiProfileShareDialog,
         assert(this.backgroundPage_.background.progressCenter),
         assert(this.fileOperationManager_),
-        assert(this.fileSystemMetadata_),
+        assert(this.metadataModel_),
         assert(this.thumbnailModel_),
         assert(this.directoryModel_),
         assert(this.volumeManager_),
@@ -614,6 +633,12 @@ FileManager.prototype = /** @struct */ {
     // Initialize the member variables that depend this.launchParams_.
     this.dialogType = this.launchParams_.type;
 
+    // We used to share the tracker with background, but due to
+    // its use of instanceof checks for some functionality
+    // we really can't do this (as instanceof checks fail across
+    // different script contexts).
+    this.tracker_ = metrics.getTracker();
+
     callback();
   };
 
@@ -639,7 +664,6 @@ FileManager.prototype = /** @struct */ {
             this.mediaScanner_ =
                 this.backgroundPage_.background.mediaScanner;
             this.historyLoader_ = this.backgroundPage_.background.historyLoader;
-            this.tracker_ = this.backgroundPage_.background.tracker;
             callback();
           }.bind(this));
         }.bind(this)));
@@ -663,10 +687,11 @@ FileManager.prototype = /** @struct */ {
     // true.
     // Note that the Drive enabling preference change is listened by
     // DriveIntegrationService, so here we don't need to take care about it.
-    var driveEnabled =
+    var nonNativeEnabled =
         !noLocalPathResolution || !this.launchParams_.shouldReturnLocalPath;
     this.volumeManager_ = new VolumeManagerWrapper(
-        /** @type {VolumeManagerWrapper.DriveEnabledStatus} */ (driveEnabled),
+        /** @type {VolumeManagerWrapper.NonNativeVolumeStatus} */
+        (nonNativeEnabled),
         this.backgroundPage_);
     callback();
   };
@@ -694,10 +719,8 @@ FileManager.prototype = /** @struct */ {
 
     // Create the metadata cache.
     assert(this.volumeManager_);
-    this.fileSystemMetadata_ = FileSystemMetadata.create(
-        this.metadataProviderCache_,
-        this.volumeManager_);
-    this.thumbnailModel_ = new ThumbnailModel(this.fileSystemMetadata_);
+    this.metadataModel_ = MetadataModel.create(this.volumeManager_);
+    this.thumbnailModel_ = new ThumbnailModel(this.metadataModel_);
 
     // Create the root view of FileManager.
     assert(this.dialogDom_);
@@ -722,11 +745,11 @@ FileManager.prototype = /** @struct */ {
    * @private
    */
   FileManager.prototype.initAdditionalUI_ = function(callback) {
-    assert(this.fileSystemMetadata_);
+    assert(this.metadataModel_);
     assert(this.volumeManager_);
     assert(this.historyLoader_);
     assert(this.dialogDom_);
-    assert(this.fileSystemMetadata_);
+    assert(this.metadataModel_);
 
     // Cache nodes we'll be manipulating.
     var dom = this.dialogDom_;
@@ -736,19 +759,16 @@ FileManager.prototype = /** @struct */ {
     FileManagerDialogBase.setFileManager(this);
 
     var table = queryRequiredElement(dom, '.detail-table');
-    // TODO(kenobi): See crbug/460135.  The import status column in table view
-    // is disabled until it works properly.
-    table.importEnabled = false;
     FileTable.decorate(
         table,
-        this.fileSystemMetadata_,
+        this.metadataModel_,
         this.volumeManager_,
         this.historyLoader_,
         this.dialogType == DialogType.FULL_PAGE);
     var grid = queryRequiredElement(dom, '.thumbnail-grid');
     FileGrid.decorate(
         grid,
-        this.fileSystemMetadata_,
+        this.metadataModel_,
         this.volumeManager_,
         this.historyLoader_);
 
@@ -759,7 +779,6 @@ FileManager.prototype = /** @struct */ {
         assertInstanceof(grid, FileGrid),
         new LocationLine(
             queryRequiredElement(dom, '#location-breadcrumbs'),
-            this.fileSystemMetadata_,
             this.volumeManager_));
 
     // Handle UI events.
@@ -770,6 +789,12 @@ FileManager.prototype = /** @struct */ {
 
     // Populate the static localized strings.
     i18nTemplate.process(this.document_, loadTimeData);
+
+    // The cwd is not known at this point.  Hide the import status column before
+    // redrawing, to avoid ugly flashing in the UI, caused when the first redraw
+    // has a visible status column, and then the cwd is later discovered to be
+    // not an import-eligible location.
+    this.ui_.listContainer.table.setImportStatusVisible(false);
 
     // Arrange the file list.
     this.ui_.listContainer.table.normalizeColumns();
@@ -806,7 +831,6 @@ FileManager.prototype = /** @struct */ {
    * @private
    */
   FileManager.prototype.onHistoryChanged_ = function(event) {
-    this.tracker_.send(metrics.ImportEvents.HISTORY_CHANGED);
     // Ignore any entry that isn't an immediate child of the
     // current directory.
     util.isChildEntry(event.entry, this.getCurrentDirectoryEntry())
@@ -840,14 +864,14 @@ FileManager.prototype = /** @struct */ {
 
     assert(this.volumeManager_);
     assert(this.fileOperationManager_);
-    assert(this.fileSystemMetadata_);
+    assert(this.metadataModel_);
     this.directoryModel_ = new DirectoryModel(
         singleSelection,
         this.fileFilter_,
-        this.metadataProviderCache_,
-        this.fileSystemMetadata_,
+        this.metadataModel_,
         this.volumeManager_,
-        this.fileOperationManager_);
+        this.fileOperationManager_,
+        assert(this.tracker_));
 
     this.folderShortcutsModel_ = new FolderShortcutsDataModel(
         this.volumeManager_);
@@ -858,44 +882,36 @@ FileManager.prototype = /** @struct */ {
         this.selectionHandler_.onFileSelectionChanged.bind(
             this.selectionHandler_));
 
-    this.directoryModel_.addEventListener(
-        'directory-changed',
-        function(event) {
-          if (event.volumeChanged) {
-            var volumeInfo =
-                this.volumeManager_.getVolumeInfo(event.newDirEntry);
-            // NOTE: That dynamic values, like volume name MUST NOT
-            // be sent to GA as that value can contain PII.
-            // VolumeType is an enum.
-            this.tracker_.sendAppView(volumeInfo.volumeType);
-          }
-        }.bind(this));
-
     // TODO(mtomasz, yoshiki): Create navigation list earlier, and here just
     // attach the directory model.
     this.initDirectoryTree_();
 
     this.ui_.listContainer.listThumbnailLoader = new ListThumbnailLoader(
-        assert(this.directoryModel_.getFileList()),
-        assert(this.thumbnailModel_));
+        this.directoryModel_,
+        assert(this.thumbnailModel_),
+        this.volumeManager_);
     this.ui_.listContainer.dataModel = this.directoryModel_.getFileList();
+    this.ui_.listContainer.emptyDataModel =
+        this.directoryModel_.getEmptyFileList();
     this.ui_.listContainer.selectionModel =
         this.directoryModel_.getFileListSelection();
 
     this.appStateController_.initialize(this.ui_, this.directoryModel_);
 
+    this.columnVisibilityController_ = new ColumnVisibilityController(
+        this.ui_, this.directoryModel_, this.volumeManager_);
+
     // Create metadata update controller.
     this.metadataUpdateController_ = new MetadataUpdateController(
         this.ui_.listContainer,
         this.directoryModel_,
-        this.metadataProviderCache_,
-        this.fileSystemMetadata_);
+        this.metadataModel_);
 
     // Create task controller.
     this.taskController_ = new TaskController(
         this.dialogType,
         this.ui_,
-        this.fileSystemMetadata_,
+        this.metadataModel_,
         this.selectionHandler_,
         this.metadataUpdateController_,
         function() { return new FileTasks(this); }.bind(this));
@@ -930,7 +946,7 @@ FileManager.prototype = /** @struct */ {
         this.dialogType,
         this.ui_.dialogFooter,
         this.directoryModel_,
-        this.fileSystemMetadata_,
+        this.metadataModel_,
         this.volumeManager_,
         this.fileFilter_,
         this.namingController_,
@@ -949,10 +965,13 @@ FileManager.prototype = /** @struct */ {
     DirectoryTree.decorate(directoryTree,
                            assert(this.directoryModel_),
                            assert(this.volumeManager_),
-                           assert(this.fileSystemMetadata_),
+                           assert(this.metadataModel_),
                            fakeEntriesVisible);
     directoryTree.dataModel = new NavigationListModel(
-        this.volumeManager_, this.folderShortcutsModel_);
+        this.volumeManager_,
+        this.folderShortcutsModel_,
+        new NavigationModelCommandItem(
+          util.queryDecoratedElement('#add-new-services', cr.ui.Command)));
 
     this.ui_.initDirectoryTree(directoryTree);
   };
@@ -1151,7 +1170,7 @@ FileManager.prototype = /** @struct */ {
   };
 
   /**
-   * @param {DirectoryEntry} directoryEntry Directory to be opened.
+   * @param {!DirectoryEntry} directoryEntry Directory to be opened.
    * @param {Entry=} opt_selectionEntry Entry to be selected.
    * @param {string=} opt_suggestedName Suggested name for a non-existing\
    *     selection.
@@ -1226,9 +1245,9 @@ FileManager.prototype = /** @struct */ {
 
   /**
    * Return DirectoryEntry of the current directory or null.
-   * @return {DirectoryEntry} DirectoryEntry of the current directory. Returns
-   *     null if the directory model is not ready or the current directory is
-   *     not set.
+   * @return {DirectoryEntry|FakeEntry} DirectoryEntry of the current directory.
+   *     Returns null if the directory model is not ready or the current
+   *     directory is not set.
    */
   FileManager.prototype.getCurrentDirectoryEntry = function() {
     return this.directoryModel_ && this.directoryModel_.getCurrentDirEntry();
@@ -1283,10 +1302,10 @@ FileManager.prototype = /** @struct */ {
   };
 
   /**
-   * @return {!FileSystemMetadata}
+   * @return {!MetadataModel}
    */
-  FileManager.prototype.getFileSystemMetadata = function() {
-    return assert(this.fileSystemMetadata_);
+  FileManager.prototype.getMetadataModel = function() {
+    return assert(this.metadataModel_);
   };
 
   /**

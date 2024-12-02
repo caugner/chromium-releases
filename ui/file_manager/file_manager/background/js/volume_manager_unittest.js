@@ -12,6 +12,17 @@ loadTimeData.data = {
 function setUp() {
   // Set up mock of chrome.fileManagerPrivate APIs.
   chrome = {
+    runtime: {
+      lastError: undefined
+    },
+    fileSystem: {
+      requestFileSystem: function(options, callback) {
+        if (!(options.volumeId in chrome.fileManagerPrivate.fileSystemMap_)) {
+          chrome.runtime.lastError = {message: 'Not found.'};
+        }
+        callback(chrome.fileManagerPrivate.fileSystemMap_[options.volumeId]);
+      },
+    },
     fileManagerPrivate: {
       mountSourcePath_: null,
       onMountCompletedListeners_: [],
@@ -57,8 +68,9 @@ function setUp() {
       getVolumeMetadataList: function(callback) {
         callback(chrome.fileManagerPrivate.volumeMetadataList_);
       },
-      requestFileSystem: function(volumeId, callback) {
-        callback(chrome.fileManagerPrivate.fileSystemMap_[volumeId]);
+      resolveIsolatedEntries: function(entries, callback) {
+        console.log('*** RESOLVE ISOLATED');
+        callback(entries);
       },
       set driveConnectionState(state) {
         chrome.fileManagerPrivate.driveConnectionState_ = state;
@@ -250,4 +262,34 @@ function testVolumeInfoListWhenReady(callback) {
         assertEquals(volumeInfo, volumes[0]);
         assertEquals(volumeInfo, volumes[1]);
       }), callback);
+}
+
+function testDriveMountedDuringInitialization(callback) {
+  var sendMetadataListCallback;
+  chrome.fileManagerPrivate.getVolumeMetadataList = function(callback) {
+    sendMetadataListCallback = callback;
+  };
+
+  // Start initialization.
+  var instancePromise = VolumeManager.getInstance();
+
+  // Drive is mounted during initialization.
+  chrome.fileManagerPrivate.onMountCompleted.dispatchEvent({
+    eventType: 'mount',
+    status: 'success',
+    volumeMetadata: {
+      volumeId: 'drive',
+      volumeType: VolumeManagerCommon.VolumeType.DRIVE,
+      sourcePath: '/drive',
+      profile: getMockProfile()
+    }
+  });
+
+  // Complete initialization.
+  sendMetadataListCallback([]);
+
+  reportPromise(instancePromise.then(function(volumeManager) {
+    assertTrue(!!volumeManager.getCurrentProfileVolumeInfo(
+        VolumeManagerCommon.VolumeType.DRIVE));
+  }), callback);
 }

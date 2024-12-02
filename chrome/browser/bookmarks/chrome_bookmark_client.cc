@@ -8,15 +8,16 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/values.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/bookmarks/managed/managed_bookmarks_tracker.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/url_database.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
@@ -29,6 +30,7 @@
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
 using bookmarks::BookmarkPermanentNode;
+using bookmarks::ManagedBookmarksTracker;
 
 namespace {
 
@@ -52,7 +54,7 @@ void LoadInitialContents(BookmarkPermanentNode* node,
   // Load the initial contents of the |node| now, and assign it an unused ID.
   int64 id = *next_node_id;
   node->set_id(id);
-  *next_node_id = policy::ManagedBookmarksTracker::LoadInitial(
+  *next_node_id = ManagedBookmarksTracker::LoadInitial(
       node, initial_bookmarks, id + 1);
   node->set_visible(!node->empty());
 }
@@ -76,13 +78,13 @@ void ChromeBookmarkClient::Init(BookmarkModel* model) {
   model_ = model;
   model_->AddObserver(this);
 
-  managed_bookmarks_tracker_.reset(new policy::ManagedBookmarksTracker(
+  managed_bookmarks_tracker_.reset(new ManagedBookmarksTracker(
       model_,
       profile_->GetPrefs(),
       false,
       base::Bind(&ChromeBookmarkClient::GetManagedBookmarksDomain,
                  base::Unretained(this))));
-  supervised_bookmarks_tracker_.reset(new policy::ManagedBookmarksTracker(
+  supervised_bookmarks_tracker_.reset(new ManagedBookmarksTracker(
       model_,
       profile_->GetPrefs(),
       true,
@@ -112,8 +114,9 @@ ChromeBookmarkClient::GetFaviconImageForPageURL(
     favicon_base::IconType type,
     const favicon_base::FaviconImageCallback& callback,
     base::CancelableTaskTracker* tracker) {
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (!favicon_service)
     return base::CancelableTaskTracker::kBadTaskId;
   if (type == favicon_base::FAVICON) {
@@ -215,7 +218,8 @@ bool ChromeBookmarkClient::CanBeEditedByUser(const BookmarkNode* node) {
          !bookmarks::IsDescendantOf(node, supervised_node_);
 }
 
-void ChromeBookmarkClient::SetHistoryService(HistoryService* history_service) {
+void ChromeBookmarkClient::SetHistoryService(
+    history::HistoryService* history_service) {
   DCHECK(history_service);
   history_service_ = history_service;
   favicon_changed_subscription_ = history_service_->AddFaviconChangedCallback(

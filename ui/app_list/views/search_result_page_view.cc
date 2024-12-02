@@ -4,6 +4,8 @@
 
 #include "ui/app_list/views/search_result_page_view.h"
 
+#include <algorithm>
+
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/app_list_view_delegate.h"
@@ -24,12 +26,16 @@ namespace {
 const int kGroupSpacing = 6;
 const int kTopPadding = 8;
 
+// The z-height of the search box and cards in this view.
+const int kSearchResultZHeight = 1;
+
 // A container view that ensures the card background and the shadow are painted
 // in the correct order.
 class SearchCardView : public views::View {
  public:
   explicit SearchCardView(views::View* content_view) {
-    SetBorder(make_scoped_ptr(new views::ShadowBorder(GetShadowForZHeight(1))));
+    SetBorder(make_scoped_ptr(
+        new views::ShadowBorder(GetShadowForZHeight(kSearchResultZHeight))));
     SetLayoutManager(new views::FillLayout());
     content_view->set_background(
         views::Background::CreateSolidBackground(kCardBackgroundColor));
@@ -48,7 +54,7 @@ class SearchCardView : public views::View {
 
 SearchResultPageView::SearchResultPageView() : selected_index_(0) {
   if (switches::IsExperimentalAppListEnabled()) {
-    gfx::ShadowValue shadow = GetShadowForZHeight(1);
+    gfx::ShadowValue shadow = GetShadowForZHeight(kSearchResultZHeight);
     scoped_ptr<views::Border> border(new views::ShadowBorder(shadow));
 
     gfx::Insets insets = gfx::Insets(kTopPadding, kExperimentalSearchBoxPadding,
@@ -159,6 +165,36 @@ void SearchResultPageView::ChildPreferredSizeChanged(views::View* child) {
 
   Layout();
   SetSelectedIndex(0, false);
+}
+
+gfx::Rect SearchResultPageView::GetPageBoundsForState(
+    AppListModel::State state) const {
+  gfx::Rect onscreen_bounds = GetDefaultContentsBounds();
+  switch (state) {
+    case AppListModel::STATE_SEARCH_RESULTS:
+      return onscreen_bounds;
+    default:
+      return GetAboveContentsOffscreenBounds(onscreen_bounds.size());
+  }
+}
+
+void SearchResultPageView::OnAnimationUpdated(double progress,
+                                              AppListModel::State from_state,
+                                              AppListModel::State to_state) {
+  if (from_state != AppListModel::STATE_SEARCH_RESULTS &&
+      to_state != AppListModel::STATE_SEARCH_RESULTS) {
+    return;
+  }
+
+  gfx::Rect onscreen_bounds(
+      GetPageBoundsForState(AppListModel::STATE_SEARCH_RESULTS));
+  set_clip_insets(bounds().InsetsFrom(onscreen_bounds));
+}
+
+int SearchResultPageView::GetSearchBoxZHeight() const {
+  return switches::IsExperimentalAppListEnabled()
+             ? kSearchResultZHeight
+             : AppListPage::GetSearchBoxZHeight();
 }
 
 }  // namespace app_list

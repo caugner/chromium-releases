@@ -217,7 +217,7 @@ class StartPageService::AudioStatus
   }
 
   // chromeos::CrasAudioHandler::AudioObserver:
-  void OnInputMuteChanged() override { CheckAndUpdate(); }
+  void OnInputMuteChanged(bool /* mute_on */) override { CheckAndUpdate(); }
 
   void OnActiveInputNodeChanged() override { CheckAndUpdate(); }
 
@@ -281,7 +281,7 @@ StartPageService* StartPageService::Get(Profile* profile) {
 StartPageService::StartPageService(Profile* profile)
     : profile_(profile),
       profile_destroy_observer_(new ProfileDestroyObserver(this)),
-      state_(app_list::SPEECH_RECOGNITION_OFF),
+      state_(app_list::SPEECH_RECOGNITION_READY),
       speech_button_toggled_manually_(false),
       speech_result_obtained_(false),
       webui_finished_loading_(false),
@@ -290,12 +290,6 @@ StartPageService::StartPageService(Profile* profile)
       microphone_available_(true),
       search_engine_is_google_(false),
       weak_factory_(this) {
-  // If experimental hotwording is enabled, then we're always "ready".
-  // Transitioning into the "hotword recognizing" state is handled by the
-  // hotword extension.
-  if (HotwordService::IsExperimentalHotwordingEnabled()) {
-    state_ = app_list::SPEECH_RECOGNITION_READY;
-  }
   if (switches::IsExperimentalAppListEnabled()) {
     TemplateURLService* template_url_service =
         TemplateURLServiceFactory::GetForProfile(profile_);
@@ -332,11 +326,13 @@ void StartPageService::OnNetworkChanged(bool available) {
 }
 
 void StartPageService::UpdateRecognitionState() {
-  if (microphone_available_ && network_available_) {
-    if (state_ == SPEECH_RECOGNITION_OFF)
+  if (ShouldEnableSpeechRecognition()) {
+    if (state_ == SPEECH_RECOGNITION_OFF ||
+        state_ == SPEECH_RECOGNITION_NETWORK_ERROR)
       OnSpeechRecognitionStateChanged(SPEECH_RECOGNITION_READY);
   } else {
-    OnSpeechRecognitionStateChanged(SPEECH_RECOGNITION_OFF);
+    OnSpeechRecognitionStateChanged(network_available_ ? SPEECH_RECOGNITION_OFF
+                                        : SPEECH_RECOGNITION_NETWORK_ERROR);
   }
 }
 
@@ -359,20 +355,18 @@ void StartPageService::LoadContentsIfNeeded() {
     LoadContents();
 }
 
+bool StartPageService::ShouldEnableSpeechRecognition() const {
+  return microphone_available_ && network_available_;
+}
+
 void StartPageService::AppListShown() {
   if (!contents_) {
     LoadContents();
   } else if (contents_->IsCrashed()) {
     LoadStartPageURL();
   } else if (contents_->GetWebUI()) {
-    // If experimental hotwording is enabled, don't initialize the web speech
-    // API, which is not used with
-    // experimental hotwording.
     contents_->GetWebUI()->CallJavascriptFunction(
-        "appList.startPage.onAppListShown",
-        base::FundamentalValue(HotwordEnabled()),
-        base::FundamentalValue(
-            !HotwordService::IsExperimentalHotwordingEnabled()));
+        "appList.startPage.onAppListShown");
   }
 
 #if defined(OS_CHROMEOS)
@@ -381,15 +375,10 @@ void StartPageService::AppListShown() {
 }
 
 void StartPageService::AppListHidden() {
-  if (contents_->GetWebUI()) {
-    contents_->GetWebUI()->CallJavascriptFunction(
-        "appList.startPage.onAppListHidden");
-  }
   if (!app_list::switches::IsExperimentalAppListEnabled())
     UnloadContents();
 
-  if (HotwordService::IsExperimentalHotwordingEnabled() &&
-      speech_recognizer_) {
+  if (speech_recognizer_) {
     speech_recognizer_->Stop();
     speech_recognizer_.reset();
 
@@ -410,58 +399,33 @@ void StartPageService::ToggleSpeechRecognition(
   DCHECK(contents_);
   speech_button_toggled_manually_ = true;
 
-  // Speech recognition under V2 hotwording does not depend in any way on the
-  // start page web contents. Do this code path first to make this explicit and
-  // easier to identify what code needs to be deleted when V2 hotwording is
-  // stable.
-  if (HotwordService::IsExperimentalHotwordingEnabled()) {
-    if (!speech_recognizer_) {
-      std::string profile_locale;
+  if (!speech_recognizer_) {
+    std::string profile_locale;
 #if defined(OS_CHROMEOS)
-      profile_locale = profile_->GetPrefs()->GetString(
-          prefs::kApplicationLocale);
+    profile_locale = profile_->GetPrefs()->GetString(
+        prefs::kApplicationLocale);
 #endif
-      if (profile_locale.empty())
-        profile_locale = g_browser_process->GetApplicationLocale();
+    if (profile_locale.empty())
+      profile_locale = g_browser_process->GetApplicationLocale();
 
-      speech_recognizer_.reset(
-          new SpeechRecognizer(weak_factory_.GetWeakPtr(),
-                               profile_->GetRequestContext(),
-                               profile_locale));
-    }
-
-    speech_recognizer_->Start(preamble);
-    return;
+    speech_recognizer_.reset(
+        new SpeechRecognizer(weak_factory_.GetWeakPtr(),
+                             profile_->GetRequestContext(),
+                             profile_locale));
   }
 
-  if (!contents_->GetWebUI())
-    return;
-
-  if (!webui_finished_loading_) {
-    pending_webui_callbacks_.push_back(
-        base::Bind(&StartPageService::ToggleSpeechRecognition,
-                   base::Unretained(this),
-                   preamble));
-    return;
-  }
-
-  contents_->GetWebUI()->CallJavascriptFunction(
-      "appList.startPage.toggleSpeechRecognition");
+  speech_recognizer_->Start(preamble);
 }
 
 bool StartPageService::HotwordEnabled() {
 // Voice input for the launcher is unsupported on non-ChromeOS platforms.
 // TODO(amistry): Make speech input, and hotwording, work on non-ChromeOS.
 #if defined(OS_CHROMEOS)
-  if (HotwordService::IsExperimentalHotwordingEnabled()) {
-    HotwordService* service = HotwordServiceFactory::GetForProfile(profile_);
-    return state_ != SPEECH_RECOGNITION_OFF &&
-        HotwordServiceFactory::IsServiceAvailable(profile_) &&
-        service &&
-        (service->IsSometimesOnEnabled() || service->IsAlwaysOnEnabled());
-  }
-  return HotwordServiceFactory::IsServiceAvailable(profile_) &&
-      profile_->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled);
+  HotwordService* service = HotwordServiceFactory::GetForProfile(profile_);
+  return state_ != SPEECH_RECOGNITION_OFF &&
+      service &&
+      (service->IsSometimesOnEnabled() || service->IsAlwaysOnEnabled()) &&
+      service->IsServiceAvailable();
 #else
   return false;
 #endif
@@ -505,15 +469,17 @@ void StartPageService::OnSpeechRecognitionStateChanged(
   if (audio_status_ && !audio_status_->CanListen())
     new_state = SPEECH_RECOGNITION_OFF;
 #endif
-  if (!network_available_ || !microphone_available_)
+  if (!microphone_available_)
     new_state = SPEECH_RECOGNITION_OFF;
+  if (!network_available_)
+    new_state = SPEECH_RECOGNITION_NETWORK_ERROR;
 
   if (state_ == new_state)
     return;
 
-  if (HotwordService::IsExperimentalHotwordingEnabled() &&
-      (new_state == SPEECH_RECOGNITION_READY ||
-       new_state == SPEECH_RECOGNITION_OFF) &&
+  if ((new_state == SPEECH_RECOGNITION_READY ||
+       new_state == SPEECH_RECOGNITION_OFF ||
+       new_state == SPEECH_RECOGNITION_NETWORK_ERROR) &&
       speech_recognizer_) {
     speech_recognizer_->Stop();
   }
@@ -539,15 +505,13 @@ void StartPageService::OnSpeechRecognitionStateChanged(
 
 void StartPageService::GetSpeechAuthParameters(std::string* auth_scope,
                                                std::string* auth_token) {
-  if (HotwordService::IsExperimentalHotwordingEnabled()) {
-    HotwordService* service = HotwordServiceFactory::GetForProfile(profile_);
-    if (service &&
-        service->IsOptedIntoAudioLogging() &&
-        service->IsAlwaysOnEnabled() &&
-        !speech_auth_helper_->GetToken().empty()) {
-      *auth_scope = speech_auth_helper_->GetScope();
-      *auth_token = speech_auth_helper_->GetToken();
-    }
+  HotwordService* service = HotwordServiceFactory::GetForProfile(profile_);
+  if (service &&
+      service->IsOptedIntoAudioLogging() &&
+      service->IsAlwaysOnEnabled() &&
+      !speech_auth_helper_->GetToken().empty()) {
+    *auth_scope = speech_auth_helper_->GetScope();
+    *auth_token = speech_auth_helper_->GetToken();
   }
 }
 
@@ -648,7 +612,7 @@ void StartPageService::OnURLFetchComplete(const net::URLFetcher* source) {
   if (json_start_index != std::string::npos)
     json_data_substr.remove_prefix(json_start_index);
 
-  JSONStringValueSerializer deserializer(json_data_substr);
+  JSONStringValueDeserializer deserializer(json_data_substr);
   deserializer.set_allow_trailing_comma(true);
   int error_code = 0;
   scoped_ptr<base::Value> doodle_json(

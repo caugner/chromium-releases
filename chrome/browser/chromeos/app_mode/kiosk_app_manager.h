@@ -102,6 +102,9 @@ class KioskAppManager : public KioskAppDataDelegate,
   // Registers kiosk app entries in local state.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
+  // Removes cryptohomes which could not be removed during the previous session.
+  static void RemoveObsoleteCryptohomes();
+
   // Initiates reading of consumer kiosk mode auto-launch status.
   void GetConsumerKioskAutoLaunchStatus(
       const GetConsumerKioskAutoLaunchStatusCallback& callback);
@@ -125,9 +128,6 @@ class KioskAppManager : public KioskAppDataDelegate,
 
   // Returns true if owner/policy enabled auto launch.
   bool IsAutoLaunchEnabled() const;
-
-  // Returns true if current app was auto launched with zero delay.
-  bool IsCurrentAppAutoLaunchedWithZeroDelay() const;
 
   // Enable auto launch setter.
   void SetEnableAutoLaunch(bool value);

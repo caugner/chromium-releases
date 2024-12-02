@@ -23,6 +23,7 @@ namespace data_reduction_proxy {
 
 class DataReductionProxyConfigurator;
 class DataReductionProxyEventStore;
+class DataReductionProxyMutableConfigValues;
 class TestDataReductionProxyParams;
 
 // Test version of |DataReductionProxyConfig|, which uses an underlying
@@ -39,10 +40,24 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
       net::NetLog* net_log,
       DataReductionProxyConfigurator* configurator,
       DataReductionProxyEventStore* event_store);
+
+  // Creates a |TestDataReductionProxyConfig| with the provided |config_values|.
+  // This permits any DataReductionProxyConfigValues to be used (such as
+  // DataReductionProxyParams or DataReductionProxyMutableConfigValues).
+  TestDataReductionProxyConfig(
+      scoped_ptr<DataReductionProxyConfigValues> config_values,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+      net::NetLog* net_log,
+      DataReductionProxyConfigurator* configurator,
+      DataReductionProxyEventStore* event_store);
+
   ~TestDataReductionProxyConfig() override;
 
   void GetNetworkList(net::NetworkInterfaceList* interfaces,
                       int policy) override;
+
+  // If true, uses QUIC instead of SPDY to connect to proxies that use TLS.
+  void EnableQuic(bool enable);
 
   // Allows tests to reset the params being used for configuration.
   void ResetParamFlagsForTest(int flags);
@@ -50,11 +65,14 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
   // Retrieves the test params being used for the configuration.
   TestDataReductionProxyParams* test_params();
 
+  // Retrieves the underlying config values.
+  // TODO(jeremyim): Rationalize with test_params().
+  DataReductionProxyConfigValues* config_values();
+
   // Allows tests to set the internal state.
   void SetStateForTest(bool enabled_by_user,
                        bool alternative_enabled_by_user,
-                       bool restricted_by_carrier,
-                       bool at_startup);
+                       bool restricted_by_carrier);
 
   net::NetworkInterfaceList* interfaces() {
     return network_interfaces_.get();
@@ -68,21 +86,36 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
 // testing.
 class MockDataReductionProxyConfig : public TestDataReductionProxyConfig {
  public:
-  // Creates a |MockDataReductionProxyConfig| with the provided |params_flags|.
+  // Creates a |MockDataReductionProxyConfig|.
   MockDataReductionProxyConfig(
-      int params_flags,
-      unsigned int params_definitions,
+      scoped_ptr<DataReductionProxyConfigValues> config_values,
       scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
       net::NetLog* net_log,
       DataReductionProxyConfigurator* configurator,
       DataReductionProxyEventStore* event_store);
   ~MockDataReductionProxyConfig();
 
-  MOCK_METHOD1(RecordProbeURLFetchResult, void(ProbeURLFetchResult result));
+  MOCK_METHOD1(RecordSecureProxyCheckFetchResult,
+               void(SecureProxyCheckFetchResult result));
   MOCK_METHOD3(LogProxyState,
                void(bool enabled, bool restricted, bool at_startup));
   MOCK_METHOD3(SetProxyPrefs,
                void(bool enabled, bool alternative_enabled, bool at_startup));
+  MOCK_CONST_METHOD2(IsDataReductionProxy,
+                     bool(const net::HostPortPair& host_port_pair,
+                          DataReductionProxyTypeInfo* proxy_info));
+  MOCK_CONST_METHOD2(WasDataReductionProxyUsed,
+                     bool(const net::URLRequest*,
+                          DataReductionProxyTypeInfo* proxy_info));
+  MOCK_CONST_METHOD1(ContainsDataReductionProxy,
+                     bool(const net::ProxyConfig::ProxyRules& proxy_rules));
+  MOCK_CONST_METHOD2(IsBypassedByDataReductionProxyLocalRules,
+                     bool(const net::URLRequest& request,
+                          const net::ProxyConfig& data_reduction_proxy_config));
+  MOCK_CONST_METHOD3(AreDataReductionProxiesBypassed,
+                     bool(const net::URLRequest& request,
+                          const net::ProxyConfig& data_reduction_proxy_config,
+                          base::TimeDelta* min_retry_delay));
 
   // UpdateConfigurator should always call LogProxyState exactly once.
   void UpdateConfigurator(bool enabled,
@@ -90,10 +123,11 @@ class MockDataReductionProxyConfig : public TestDataReductionProxyConfig {
                           bool restricted,
                           bool at_startup) override;
 
-  // HandleProbeResponse should always call RecordProbeURLFetchResult exactly
-  // once.
-  void HandleProbeResponse(const std::string& response,
-                           const net::URLRequestStatus& status) override;
+  // HandleSecureProxyCheckResponse should always call
+  // RecordSecureProxyCheckFetchResult exactly once.
+  void HandleSecureProxyCheckResponse(
+      const std::string& response,
+      const net::URLRequestStatus& status) override;
 };
 
 }  // namespace data_reduction_proxy

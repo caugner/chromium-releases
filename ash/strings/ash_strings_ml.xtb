@@ -3,6 +3,7 @@
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/> എന്നയാൾക്കായി ഒരു അക്കൗണ്ട് ചേർക്കുക</translation>
 <translation id="1270290102613614947">ഓൺ-സ്‌ക്രീൻ കീബോർഡ് പ്രവർത്തനരഹിതമാക്കി</translation>
 <translation id="1057289296854808272">റൊട്ടേഷൻ ഓണാണ് (മാറ്റാൻ ഇവിടെ ടാപ്പുചെയ്യുക)</translation>
+<translation id="5548285847212963613">ഈ നെറ്റ്‌വർക്കിലേക്ക് കണക്റ്റുചെയ്യാൻ &quot;<ph name="EXTENSION_NAME"/>&quot; വിപുലീകരണത്തിന് സഹായിക്കാനാകും.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/>, <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">ഓവർഫ്ലോ ബട്ടൺ</translation>
 <translation id="7904094684485781019">ഈ അക്കൗണ്ടിന്റെ അഡ്‌മിനിസ്‌ട്രേറ്റർ ഒന്നിലധികം സൈൻ-ഇൻ അനുവദിക്കുന്നില്ല.</translation>
@@ -61,6 +62,7 @@
 <translation id="1723752762323179280">സെഷനിൽ നിന്ന് പുറത്തുകടക്കുന്നു</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">അതെ</translation>
+<translation id="4804818685124855865">വിച്ഛേദിക്കുക</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">പുറത്തുകടക്കുക</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -129,7 +131,6 @@
 <translation id="2761704814324807722">സ്‌റ്റാറ്റസ് ട്രേ, സമയം, <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">ലോക്കുചെയ്യുക</translation>
 <translation id="2805756323405976993">ആപ്സ്</translation>
-<translation id="2313845391432982560">&quot;<ph name="EXTENSION_NAME"/>&quot; വിപുലീകരണത്തിന് ഈ നെറ്റ്‌വർക്ക് കോൺഫിഗർ ചെയ്യാനാകും.</translation>
 <translation id="2872961005593481000">അടയ്ക്കുക</translation>
 <translation id="3433830597744061105">അക്കൗണ്ടുകൾ നിയന്ത്രിക്കുക</translation>
 <translation id="742594950370306541">ക്യാമറ ഉപയോഗത്തിലാണ്.</translation>

@@ -33,9 +33,12 @@ class ChromeManagementAPIDelegate : public extensions::ManagementAPIDelegate {
   scoped_ptr<extensions::InstallPromptDelegate> SetEnabledFunctionDelegate(
       extensions::ManagementSetEnabledFunction* function,
       const extensions::Extension* extension) const override;
+  scoped_ptr<extensions::RequirementsChecker> CreateRequirementsChecker()
+      const override;
   scoped_ptr<extensions::UninstallDialogDelegate> UninstallFunctionDelegate(
       extensions::ManagementUninstallFunctionBase* function,
-      const std::string& target_extension_id) const override;
+      const extensions::Extension* target_extension,
+      bool show_programmatic_uninstall_ui) const override;
   bool CreateAppShortcutFunctionDelegate(
       extensions::ManagementCreateAppShortcutFunction* function,
       const extensions::Extension* extension) const override;

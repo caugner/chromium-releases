@@ -58,9 +58,10 @@ class WebGLConformanceExpectations(GpuTestExpectations):
         ['win', 'amd', 'd3d9'], bug=839) # angle bug ID
 
     # Win / D3D9 failures
-    self.Fail('conformance/extensions/oes-texture-float-with-canvas.html',
+    # Skipping these tests because they're causing assertion failures.
+    self.Skip('conformance/extensions/oes-texture-float-with-canvas.html',
         ['win', 'd3d9'], bug=896) # angle bug ID
-    self.Fail('conformance/extensions/oes-texture-half-float-with-canvas.html',
+    self.Skip('conformance/extensions/oes-texture-half-float-with-canvas.html',
         ['win', 'd3d9'], bug=896) # angle bug ID
 
     # Mac / Intel failures

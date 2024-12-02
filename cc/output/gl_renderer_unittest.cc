@@ -97,25 +97,24 @@ static inline SkXfermode::Mode BlendModeToSkXfermode(BlendMode blend_mode) {
 // Explicitly named to be a friend in GLRenderer for shader access.
 class GLRendererShaderPixelTest : public GLRendererPixelTest {
  public:
-  void TestShaders() {
+  void SetUp() override {
+    GLRendererPixelTest::SetUp();
     ASSERT_FALSE(renderer()->IsContextLost());
+  }
+
+  void TearDown() override {
+    GLRendererPixelTest::TearDown();
+    ASSERT_FALSE(renderer()->IsContextLost());
+  }
+
+  void TestBasicShaders() {
     EXPECT_PROGRAM_VALID(renderer()->GetTileCheckerboardProgram());
     EXPECT_PROGRAM_VALID(renderer()->GetDebugBorderProgram());
     EXPECT_PROGRAM_VALID(renderer()->GetSolidColorProgram());
     EXPECT_PROGRAM_VALID(renderer()->GetSolidColorProgramAA());
-    TestShadersWithTexCoordPrecision(TEX_COORD_PRECISION_MEDIUM);
-    TestShadersWithTexCoordPrecision(TEX_COORD_PRECISION_HIGH);
-    ASSERT_FALSE(renderer()->IsContextLost());
   }
 
-  void TestShadersWithTexCoordPrecision(TexCoordPrecision precision) {
-    for (int i = 0; i <= LAST_BLEND_MODE; ++i) {
-      BlendMode blend_mode = static_cast<BlendMode>(i);
-      EXPECT_PROGRAM_VALID(
-          renderer()->GetRenderPassProgram(precision, blend_mode));
-      EXPECT_PROGRAM_VALID(
-          renderer()->GetRenderPassProgramAA(precision, blend_mode));
-    }
+  void TestShadersWithPrecision(TexCoordPrecision precision) {
     EXPECT_PROGRAM_VALID(renderer()->GetTextureProgram(precision));
     EXPECT_PROGRAM_VALID(
         renderer()->GetNonPremultipliedTextureProgram(precision));
@@ -125,20 +124,28 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
     EXPECT_PROGRAM_VALID(renderer()->GetTextureIOSurfaceProgram(precision));
     EXPECT_PROGRAM_VALID(renderer()->GetVideoYUVProgram(precision));
     EXPECT_PROGRAM_VALID(renderer()->GetVideoYUVAProgram(precision));
-    // This is unlikely to be ever true in tests due to usage of osmesa.
     if (renderer()->Capabilities().using_egl_image)
       EXPECT_PROGRAM_VALID(renderer()->GetVideoStreamTextureProgram(precision));
     else
       EXPECT_FALSE(renderer()->GetVideoStreamTextureProgram(precision));
-    TestShadersWithSamplerType(precision, SAMPLER_TYPE_2D);
-    TestShadersWithSamplerType(precision, SAMPLER_TYPE_2D_RECT);
-    // This is unlikely to be ever true in tests due to usage of osmesa.
-    if (renderer()->Capabilities().using_egl_image)
-      TestShadersWithSamplerType(precision, SAMPLER_TYPE_EXTERNAL_OES);
   }
 
-  void TestShadersWithSamplerType(TexCoordPrecision precision,
-                                  SamplerType sampler) {
+  void TestShadersWithPrecisionAndBlend(TexCoordPrecision precision,
+                                        BlendMode blend_mode) {
+    EXPECT_PROGRAM_VALID(
+        renderer()->GetRenderPassProgram(precision, blend_mode));
+    EXPECT_PROGRAM_VALID(
+        renderer()->GetRenderPassProgramAA(precision, blend_mode));
+  }
+
+  void TestShadersWithPrecisionAndSampler(TexCoordPrecision precision,
+                                          SamplerType sampler) {
+    if (!renderer()->Capabilities().using_egl_image &&
+        sampler == SAMPLER_TYPE_EXTERNAL_OES) {
+      // This will likely be hit in tests due to usage of osmesa.
+      return;
+    }
+
     EXPECT_PROGRAM_VALID(renderer()->GetTileProgram(precision, sampler));
     EXPECT_PROGRAM_VALID(renderer()->GetTileProgramOpaque(precision, sampler));
     EXPECT_PROGRAM_VALID(renderer()->GetTileProgramAA(precision, sampler));
@@ -147,24 +154,126 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
         renderer()->GetTileProgramSwizzleOpaque(precision, sampler));
     EXPECT_PROGRAM_VALID(
         renderer()->GetTileProgramSwizzleAA(precision, sampler));
-    for (int i = 0; i <= LAST_BLEND_MODE; ++i) {
-      BlendMode blend_mode = static_cast<BlendMode>(i);
-      EXPECT_PROGRAM_VALID(
-          renderer()->GetRenderPassMaskProgram(precision, sampler, blend_mode));
-      EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskProgramAA(
-          precision, sampler, blend_mode));
-      EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskColorMatrixProgramAA(
-          precision, sampler, blend_mode));
-      EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskColorMatrixProgram(
-          precision, sampler, blend_mode));
+  }
+
+  void TestShadersWithMasks(TexCoordPrecision precision,
+                            SamplerType sampler,
+                            BlendMode blend_mode,
+                            bool mask_for_background) {
+    if (!renderer()->Capabilities().using_egl_image &&
+        sampler == SAMPLER_TYPE_EXTERNAL_OES) {
+      // This will likely be hit in tests due to usage of osmesa.
+      return;
     }
+
+    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskProgram(
+        precision, sampler, blend_mode, mask_for_background));
+    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskProgramAA(
+        precision, sampler, blend_mode, mask_for_background));
+    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskColorMatrixProgramAA(
+        precision, sampler, blend_mode, mask_for_background));
+    EXPECT_PROGRAM_VALID(renderer()->GetRenderPassMaskColorMatrixProgram(
+        precision, sampler, blend_mode, mask_for_background));
   }
 };
 
 namespace {
 
-#if !defined(OS_ANDROID)
-TEST_F(GLRendererShaderPixelTest, AllShadersCompile) { TestShaders(); }
+#if !defined(OS_ANDROID) && !defined(OS_WIN)
+static const TexCoordPrecision kPrecisionList[] = {TEX_COORD_PRECISION_MEDIUM,
+                                                   TEX_COORD_PRECISION_HIGH};
+
+static const BlendMode kBlendModeList[LAST_BLEND_MODE + 1] = {
+    BLEND_MODE_NONE,
+    BLEND_MODE_NORMAL,
+    BLEND_MODE_SCREEN,
+    BLEND_MODE_OVERLAY,
+    BLEND_MODE_DARKEN,
+    BLEND_MODE_LIGHTEN,
+    BLEND_MODE_COLOR_DODGE,
+    BLEND_MODE_COLOR_BURN,
+    BLEND_MODE_HARD_LIGHT,
+    BLEND_MODE_SOFT_LIGHT,
+    BLEND_MODE_DIFFERENCE,
+    BLEND_MODE_EXCLUSION,
+    BLEND_MODE_MULTIPLY,
+    BLEND_MODE_HUE,
+    BLEND_MODE_SATURATION,
+    BLEND_MODE_COLOR,
+    BLEND_MODE_LUMINOSITY,
+};
+
+static const SamplerType kSamplerList[] = {
+    SAMPLER_TYPE_2D,
+    SAMPLER_TYPE_2D_RECT,
+    SAMPLER_TYPE_EXTERNAL_OES,
+};
+
+TEST_F(GLRendererShaderPixelTest, BasicShadersCompile) {
+  TestBasicShaders();
+}
+
+class PrecisionShaderPixelTest
+    : public GLRendererShaderPixelTest,
+      public ::testing::WithParamInterface<TexCoordPrecision> {};
+
+TEST_P(PrecisionShaderPixelTest, ShadersCompile) {
+  TestShadersWithPrecision(GetParam());
+}
+
+INSTANTIATE_TEST_CASE_P(PrecisionShadersCompile,
+                        PrecisionShaderPixelTest,
+                        ::testing::ValuesIn(kPrecisionList));
+
+class PrecisionBlendShaderPixelTest
+    : public GLRendererShaderPixelTest,
+      public ::testing::WithParamInterface<
+          std::tr1::tuple<TexCoordPrecision, BlendMode>> {};
+
+TEST_P(PrecisionBlendShaderPixelTest, ShadersCompile) {
+  TestShadersWithPrecisionAndBlend(std::tr1::get<0>(GetParam()),
+                                   std::tr1::get<1>(GetParam()));
+}
+
+INSTANTIATE_TEST_CASE_P(
+    PrecisionBlendShadersCompile,
+    PrecisionBlendShaderPixelTest,
+    ::testing::Combine(::testing::ValuesIn(kPrecisionList),
+                       ::testing::ValuesIn(kBlendModeList)));
+
+class PrecisionSamplerShaderPixelTest
+    : public GLRendererShaderPixelTest,
+      public ::testing::WithParamInterface<
+          std::tr1::tuple<TexCoordPrecision, SamplerType>> {};
+
+TEST_P(PrecisionSamplerShaderPixelTest, ShadersCompile) {
+  TestShadersWithPrecisionAndSampler(std::tr1::get<0>(GetParam()),
+                                     std::tr1::get<1>(GetParam()));
+}
+
+INSTANTIATE_TEST_CASE_P(PrecisionSamplerShadersCompile,
+                        PrecisionSamplerShaderPixelTest,
+                        ::testing::Combine(::testing::ValuesIn(kPrecisionList),
+                                           ::testing::ValuesIn(kSamplerList)));
+
+class MaskShaderPixelTest
+    : public GLRendererShaderPixelTest,
+      public ::testing::WithParamInterface<
+          std::tr1::tuple<TexCoordPrecision, SamplerType, BlendMode, bool>> {};
+
+TEST_P(MaskShaderPixelTest, ShadersCompile) {
+  TestShadersWithMasks(
+      std::tr1::get<0>(GetParam()), std::tr1::get<1>(GetParam()),
+      std::tr1::get<2>(GetParam()), std::tr1::get<3>(GetParam()));
+}
+
+INSTANTIATE_TEST_CASE_P(MaskShadersCompile,
+                        MaskShaderPixelTest,
+                        ::testing::Combine(::testing::ValuesIn(kPrecisionList),
+                                           ::testing::ValuesIn(kSamplerList),
+                                           ::testing::ValuesIn(kBlendModeList),
+                                           ::testing::Bool()));
+
 #endif
 
 class FakeRendererGL : public GLRenderer {
@@ -269,10 +378,15 @@ class GLRendererShaderTest : public GLRendererTest {
                                  SamplerType sampler,
                                  BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(
-        &renderer_->render_pass_mask_program_[precision][sampler][blend_mode]);
+        &renderer_->render_pass_mask_program_[precision]
+                                             [sampler]
+                                             [blend_mode]
+                                             [NO_MASK]);
     EXPECT_EQ(
-        renderer_->render_pass_mask_program_[precision][sampler][blend_mode]
-            .program(),
+        renderer_->render_pass_mask_program_[precision]
+                                            [sampler]
+                                            [blend_mode]
+                                            [NO_MASK].program(),
         renderer_->program_shadow_);
   }
 
@@ -280,9 +394,9 @@ class GLRendererShaderTest : public GLRendererTest {
                                             SamplerType sampler,
                                             BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(&renderer_->render_pass_mask_color_matrix_program_
-                              [precision][sampler][blend_mode]);
+                              [precision][sampler][blend_mode][NO_MASK]);
     EXPECT_EQ(renderer_->render_pass_mask_color_matrix_program_
-                  [precision][sampler][blend_mode].program(),
+                  [precision][sampler][blend_mode][NO_MASK].program(),
               renderer_->program_shadow_);
   }
 
@@ -311,10 +425,11 @@ class GLRendererShaderTest : public GLRendererTest {
                                    BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(
         &renderer_
-             ->render_pass_mask_program_aa_[precision][sampler][blend_mode]);
+             ->render_pass_mask_program_aa_
+                 [precision][sampler][blend_mode][NO_MASK]);
     EXPECT_EQ(
         renderer_->render_pass_mask_program_aa_[precision][sampler][blend_mode]
-            .program(),
+            [NO_MASK].program(),
         renderer_->program_shadow_);
   }
 
@@ -322,9 +437,9 @@ class GLRendererShaderTest : public GLRendererTest {
                                               SamplerType sampler,
                                               BlendMode blend_mode) {
     EXPECT_PROGRAM_VALID(&renderer_->render_pass_mask_color_matrix_program_aa_
-                              [precision][sampler][blend_mode]);
+                              [precision][sampler][blend_mode][NO_MASK]);
     EXPECT_EQ(renderer_->render_pass_mask_color_matrix_program_aa_
-                  [precision][sampler][blend_mode].program(),
+                  [precision][sampler][blend_mode][NO_MASK].program(),
               renderer_->program_shadow_);
   }
 
@@ -1297,32 +1412,8 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
 
 class FlippedScissorAndViewportContext : public TestWebGraphicsContext3D {
  public:
-  FlippedScissorAndViewportContext()
-      : did_call_viewport_(false), did_call_scissor_(false) {}
-  ~FlippedScissorAndViewportContext() override {
-    EXPECT_TRUE(did_call_viewport_);
-    EXPECT_TRUE(did_call_scissor_);
-  }
-
-  void viewport(GLint x, GLint y, GLsizei width, GLsizei height) override {
-    EXPECT_EQ(10, x);
-    EXPECT_EQ(390, y);
-    EXPECT_EQ(100, width);
-    EXPECT_EQ(100, height);
-    did_call_viewport_ = true;
-  }
-
-  void scissor(GLint x, GLint y, GLsizei width, GLsizei height) override {
-    EXPECT_EQ(30, x);
-    EXPECT_EQ(450, y);
-    EXPECT_EQ(20, width);
-    EXPECT_EQ(20, height);
-    did_call_scissor_ = true;
-  }
-
- private:
-  bool did_call_viewport_;
-  bool did_call_scissor_;
+  MOCK_METHOD4(viewport, void(GLint x, GLint y, GLsizei width, GLsizei height));
+  MOCK_METHOD4(scissor, void(GLint x, GLint y, GLsizei width, GLsizei height));
 };
 
 TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
@@ -1332,6 +1423,12 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
   // the glViewport can be at a nonzero origin within the surface.
   scoped_ptr<FlippedScissorAndViewportContext> context_owned(
       new FlippedScissorAndViewportContext);
+
+  // We expect exactly one call to viewport on this context and exactly two
+  // to scissor (one to scissor the clear, one to scissor the quad draw).
+  EXPECT_CALL(*context_owned, viewport(10, 390, 100, 100));
+  EXPECT_CALL(*context_owned, scissor(10, 390, 100, 100));
+  EXPECT_CALL(*context_owned, scissor(30, 450, 20, 20));
 
   FakeOutputSurfaceClient output_surface_client;
   scoped_ptr<OutputSurface> output_surface(

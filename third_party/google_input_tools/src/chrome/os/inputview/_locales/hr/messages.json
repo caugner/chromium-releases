@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "Dodaj u osobni rje\u010dnik"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Napredno"
@@ -2616,7 +2627,7 @@
     "message": "\u017dao nam je, ali ne mo\u017eete upotrebljavati rukopis jer mre\u017ea nije dostupna."
   },
   "handwriting_privacy_info": {
-    "message": "Va\u0161 \u0107e se unos poslati Googleovom poslu\u017eitelju radi prepoznavanja teksta"
+    "message": "Va\u0161 \u0107e se unos poslati Googleovim poslu\u017eiteljima radi prepoznavanja teksta"
   },
   "hide_keyboard": {
     "message": "sakrij tipkovnicu"
@@ -2634,7 +2645,7 @@
     "message": "Zanemari ispravak za"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Zanemari ispravak"
   },
   "il_heb_settings_page": {
     "message": "Stranica postavki hebrejske tipkovnice"
@@ -3000,10 +3011,10 @@
     "message": "Raspored korejske tipkovnice"
   },
   "korean_settings_page": {
-    "message": "Stranica postavki korejskog"
+    "message": "Stranica postavki korejskog na\u010dina unosa"
   },
   "korean_syllable_input": {
-    "message": "Unos hangula jedan po jedan znak"
+    "message": "Unos jednog po jednog sloga"
   },
   "latam_spa_settings_page": {
     "message": "Stranica postavki latinoameri\u010dke (\u0161panjolske) tipkovnice"
@@ -3105,7 +3116,7 @@
     "message": "Prika\u017ei padaju\u0107i izbornik prijedloga tipkom Backspace"
   },
   "show_hangul_candidate": {
-    "message": "Prika\u017ei prijedloge za hangul"
+    "message": "Prikaz prijedloga u na\u010dinu hangul"
   },
   "shrink_candidates": {
     "message": "smanji popis kandidata"
@@ -3147,7 +3158,7 @@
     "message": "tabulator"
   },
   "touch_keyboard": {
-    "message": "Dodirna tipkovnica"
+    "message": "Tipkovnica na zaslonu"
   },
   "tr_tur_settings_page": {
     "message": "Stranica postavki turske tipkovnice"
@@ -3300,7 +3311,7 @@
     "message": "Glasovno"
   },
   "voice_privacy_info": {
-    "message": "Snimka va\u0161eg glasa poslat \u0107e se Googleovu poslu\u017eitelju radi prepoznavanja teksta"
+    "message": "Va\u0161 \u0107e se glasovni unos poslati Googleovim poslu\u017eiteljima radi prepoznavanja teksta"
   },
   "voice_turn_off": {
     "message": "isklju\u010di alat za glasovni unos"

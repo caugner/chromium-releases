@@ -14,7 +14,9 @@
 #include "base/synchronization/lock.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/permissions/api_permission.h"
+#include "extensions/common/permissions/coalesced_permission_message.h"
 #include "extensions/common/permissions/permission_message.h"
+#include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permission_set.h"
 
 class GURL;
@@ -70,7 +72,7 @@ class PermissionsData {
       const Extension* extension,
       const PermissionSet* permissions);
 
-  // Returns true if we should skip the permisisons warning for the extension
+  // Returns true if we should skip the permissions warning for the extension
   // with the given |extension_id|.
   static bool ShouldSkipPermissionWarnings(const std::string& extension_id);
 
@@ -130,17 +132,28 @@ class PermissionsData {
   // network, etc.)
   bool HasEffectiveAccessToAllHosts() const;
 
-  // Returns the full list of permission messages that should display at
-  // install time.
-  PermissionMessages GetPermissionMessages() const;
+  // Returns the full list of legacy permission message IDs.
+  // Deprecated. You DO NOT want to call this!
+  // TODO(treib): Remove once we've switched to the new system.
+  PermissionMessageIDs GetLegacyPermissionMessageIDs() const;
 
   // Returns the full list of permission messages that should display at install
   // time as strings.
-  std::vector<base::string16> GetPermissionMessageStrings() const;
+  PermissionMessageStrings GetPermissionMessageStrings() const;
+
+  // Returns the full list of permission messages that should display at install
+  // time as strings.
+  // TODO(sashab): Deprecate this in favor of GetPermissionMessageStrings.
+  std::vector<base::string16> GetLegacyPermissionMessageStrings() const;
 
   // Returns the full list of permission details for messages that should
   // display at install time as strings.
-  std::vector<base::string16> GetPermissionMessageDetailsStrings() const;
+  // TODO(sashab): Deprecate this in favor of GetPermissionMessageStrings.
+  std::vector<base::string16> GetLegacyPermissionMessageDetailsStrings() const;
+
+  // Returns the full list of permission details for messages that should
+  // display at install time, in a nested format ready for display.
+  CoalescedPermissionMessages GetCoalescedPermissionMessages() const;
 
   // Returns true if the extension has requested all-hosts permissions (or
   // something close to it), but has had it withheld.

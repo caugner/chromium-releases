@@ -25,6 +25,7 @@
 #include "ui/app_list/views/apps_container_view.h"
 #include "ui/app_list/views/apps_grid_view.h"
 #include "ui/app_list/views/contents_view.h"
+#include "ui/app_list/views/custom_launcher_page_view.h"
 #include "ui/app_list/views/search_box_view.h"
 #include "ui/app_list/views/search_result_page_view.h"
 #include "ui/app_list/views/start_page_view.h"
@@ -144,10 +145,9 @@ void AppListMainView::ShowAppListWhenReady() {
 }
 
 void AppListMainView::ResetForShow() {
-  if (switches::IsExperimentalAppListEnabled()) {
-    contents_view_->SetActivePage(
-        contents_view_->GetPageIndexForState(AppListModel::STATE_START));
-  }
+  if (switches::IsExperimentalAppListEnabled())
+    contents_view_->SetActiveState(AppListModel::STATE_START);
+
   contents_view_->apps_container_view()->ResetForShowApps();
   // We clear the search when hiding so when app list appears it is not showing
   // search results.
@@ -251,44 +251,31 @@ bool AppListMainView::ShouldShowCustomLauncherPage() const {
 }
 
 void AppListMainView::UpdateCustomLauncherPageVisibility() {
-  if (ShouldShowCustomLauncherPage()) {
-    // Make the custom page view visible again.
-    contents_view_->custom_page_view()->SetVisible(true);
-  } else if (contents_view_->IsStateActive(
-                 AppListModel::STATE_CUSTOM_LAUNCHER_PAGE)) {
-    // Animate to the start page if currently on the custom page view. The view
-    // will hide on animation completion.
-    contents_view_->SetActivePage(
-        contents_view_->GetPageIndexForState(AppListModel::STATE_START));
-  } else {
-    // Hide the view immediately otherwise.
-    contents_view_->custom_page_view()->SetVisible(false);
-  }
-}
-
-void AppListMainView::OnCustomLauncherPageEnabledStateChanged(bool enabled) {
   views::View* custom_page = contents_view_->custom_page_view();
   if (!custom_page)
     return;
 
-  if (enabled) {
+  if (ShouldShowCustomLauncherPage()) {
     // Make the custom page view visible again.
     custom_page->SetVisible(true);
   } else if (contents_view_->IsStateActive(
                  AppListModel::STATE_CUSTOM_LAUNCHER_PAGE)) {
     // Animate to the start page if currently on the custom page view. The view
     // will hide on animation completion.
-    contents_view_->SetActivePage(
-        contents_view_->GetPageIndexForState(AppListModel::STATE_START));
+    contents_view_->SetActiveState(AppListModel::STATE_START);
   } else {
     // Hide the view immediately otherwise.
     custom_page->SetVisible(false);
   }
 }
 
+void AppListMainView::OnCustomLauncherPageEnabledStateChanged(bool enabled) {
+  UpdateCustomLauncherPageVisibility();
+}
+
 void AppListMainView::OnSearchEngineIsGoogleChanged(bool is_google) {
   if (contents_view_->custom_page_view())
-    OnCustomLauncherPageEnabledStateChanged(is_google);
+    UpdateCustomLauncherPageVisibility();
 
   if (contents_view_->start_page_view()) {
     contents_view_->start_page_view()->instant_container()->SetVisible(

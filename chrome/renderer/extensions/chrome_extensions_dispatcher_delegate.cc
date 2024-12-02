@@ -15,7 +15,6 @@
 #include "chrome/grit/renderer_resources.h"
 #include "chrome/renderer/extensions/app_bindings.h"
 #include "chrome/renderer/extensions/automation_internal_custom_bindings.h"
-#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/file_browser_handler_custom_bindings.h"
 #include "chrome/renderer/extensions/file_manager_private_custom_bindings.h"
 #include "chrome/renderer/extensions/media_galleries_custom_bindings.h"
@@ -50,23 +49,6 @@ ChromeExtensionsDispatcherDelegate::ChromeExtensionsDispatcherDelegate() {
 }
 
 ChromeExtensionsDispatcherDelegate::~ChromeExtensionsDispatcherDelegate() {
-}
-
-scoped_ptr<extensions::ScriptContext>
-ChromeExtensionsDispatcherDelegate::CreateScriptContext(
-    const v8::Handle<v8::Context>& v8_context,
-    blink::WebFrame* frame,
-    const extensions::Extension* extension,
-    extensions::Feature::Context context_type,
-    const extensions::Extension* effective_extension,
-    extensions::Feature::Context effective_context_type) {
-  return scoped_ptr<extensions::ScriptContext>(
-      new extensions::ChromeV8Context(v8_context,
-                                      frame,
-                                      extension,
-                                      context_type,
-                                      effective_extension,
-                                      effective_context_type));
 }
 
 void ChromeExtensionsDispatcherDelegate::InitOriginPermissions(
@@ -214,6 +196,9 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource(
       "cast.streaming.udpTransport",
       IDR_CAST_STREAMING_UDP_TRANSPORT_CUSTOM_BINDINGS_JS);
+  source_map->RegisterSource(
+      "cast.streaming.receiverSession",
+      IDR_CAST_STREAMING_RECEIVER_SESSION_CUSTOM_BINDINGS_JS);
 #endif
   source_map->RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 
@@ -226,15 +211,10 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   // Platform app sources that are not API-specific..
   source_map->RegisterSource("fileEntryBindingUtil",
                              IDR_FILE_ENTRY_BINDING_UTIL_JS);
-  source_map->RegisterSource("extensionOptions", IDR_EXTENSION_OPTIONS_JS);
-  source_map->RegisterSource("extensionOptionsEvents",
-                             IDR_EXTENSION_OPTIONS_EVENTS_JS);
   source_map->RegisterSource("tagWatcher", IDR_TAG_WATCHER_JS);
   source_map->RegisterSource("chromeWebViewInternal",
                              IDR_CHROME_WEB_VIEW_INTERNAL_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("chromeWebView", IDR_CHROME_WEB_VIEW_JS);
-  source_map->RegisterSource("chromeWebViewExperimental",
-                             IDR_CHROME_WEB_VIEW_EXPERIMENTAL_JS);
   source_map->RegisterSource("injectAppTitlebar", IDR_INJECT_APP_TITLEBAR_JS);
 }
 
@@ -259,14 +239,6 @@ void ChromeExtensionsDispatcherDelegate::RequireAdditionalModules(
   // The API will be automatically set up when first used.
   if (context->GetAvailability("webViewInternal").is_available()) {
     module_system->Require("chromeWebView");
-    if (context->GetAvailability("webViewExperimentalInternal")
-            .is_available()) {
-      module_system->Require("chromeWebViewExperimental");
-    }
-  }
-
-  if (context->GetAvailability("extensionOptionsInternal").is_available()) {
-    module_system->Require("extensionOptions");
   }
 }
 

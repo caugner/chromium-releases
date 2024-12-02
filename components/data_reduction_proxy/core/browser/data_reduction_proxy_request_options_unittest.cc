@@ -7,11 +7,11 @@
 #include "base/command_line.h"
 #include "base/md5.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings_test_utils.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "net/base/auth.h"
@@ -28,7 +28,6 @@ const char kVersion[] = "0.1.2.3";
 const char kExpectedBuild[] = "2";
 const char kExpectedPatch[] = "3";
 const char kBogusVersion[] = "0.0";
-const char kTestKey[] = "test-key";
 const char kExpectedCredentials[] = "96bd72ec4a050ba60981743d41787768";
 const char kExpectedSession[] = "0-1633771873-1633771873-1633771873";
 
@@ -77,41 +76,6 @@ const Client kClient = Client::UNKNOWN;
 const char kClientStr[] = "";
 #endif
 
-class TestDataReductionProxyRequestOptions
-    : public DataReductionProxyRequestOptions {
- public:
-  TestDataReductionProxyRequestOptions(
-      Client client,
-      const std::string& version,
-      DataReductionProxyParams* params,
-      base::MessageLoopProxy* loop_proxy)
-      : DataReductionProxyRequestOptions(
-            client, version, params, loop_proxy) {}
-
-  std::string GetDefaultKey() const override {
-    return kTestKey;
-  }
-
-  base::Time Now() const override {
-    return base::Time::UnixEpoch() + now_offset_;
-  }
-
-  void RandBytes(void* output, size_t length) override {
-    char* c =  static_cast<char*>(output);
-    for (size_t i = 0; i < length; ++i) {
-      c[i] = 'a';
-    }
-  }
-
-  // Time after the unix epoch that Now() reports.
-  void set_offset(const base::TimeDelta& now_offset) {
-    now_offset_ = now_offset;
-  }
-
- private:
-  base::TimeDelta now_offset_;
-};
-
 void SetHeaderExpectations(const std::string& session,
                            const std::string& credentials,
                            const std::string& client,
@@ -158,29 +122,28 @@ void SetHeaderExpectations(const std::string& session,
 class DataReductionProxyRequestOptionsTest : public testing::Test {
  public:
   DataReductionProxyRequestOptionsTest() {
-    params_.reset(
-        new TestDataReductionProxyParams(
-            DataReductionProxyParams::kAllowed |
-            DataReductionProxyParams::kFallbackAllowed |
-            DataReductionProxyParams::kPromoAllowed,
-            TestDataReductionProxyParams::HAS_EVERYTHING &
-            ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-            ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN));
+    test_context_ =
+        DataReductionProxyTestContext::Builder()
+            .WithParamsFlags(DataReductionProxyParams::kAllowed |
+                                 DataReductionProxyParams::kFallbackAllowed |
+                                 DataReductionProxyParams::kPromoAllowed)
+            .WithParamsDefinitions(
+                TestDataReductionProxyParams::HAS_EVERYTHING &
+                    ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
+                    ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)
+            .Build();
   }
 
   void CreateRequestOptions(const std::string& version) {
     request_options_.reset(
         new TestDataReductionProxyRequestOptions(
-            kClient, version, params(), loop_proxy()));
+            kClient, version, test_context_->config(),
+            test_context_->task_runner()));
     request_options_->Init();
   }
 
   TestDataReductionProxyParams* params() {
-    return params_.get();
-  }
-
-  base::MessageLoopProxy* loop_proxy() {
-    return base::MessageLoopProxy::current().get();
+    return test_context_->config()->test_params();
   }
 
   TestDataReductionProxyRequestOptions* request_options() {
@@ -189,7 +152,7 @@ class DataReductionProxyRequestOptionsTest : public testing::Test {
 
   void VerifyExpectedHeader(const std::string& proxy_uri,
                             const std::string& expected_header) {
-    base::RunLoop().RunUntilIdle();
+    test_context_->RunUntilIdle();
     net::HttpRequestHeaders headers;
     request_options_->MaybeAddRequestHeader(
         NULL,
@@ -206,11 +169,8 @@ class DataReductionProxyRequestOptionsTest : public testing::Test {
     EXPECT_EQ(expected_header, header_value);
   }
 
- private:
-  // Required for MessageLoopProxy::current().
-  base::MessageLoopForUI loop_;
-  scoped_ptr<TestDataReductionProxyParams> params_;
   scoped_ptr<TestDataReductionProxyRequestOptions> request_options_;
+  scoped_ptr<DataReductionProxyTestContext> test_context_;
 };
 
 TEST_F(DataReductionProxyRequestOptionsTest, AuthHashForSalt) {
@@ -235,7 +195,7 @@ TEST_F(DataReductionProxyRequestOptionsTest, AuthorizationOnIOThread) {
                         std::vector<std::string>(), &expected_header2);
 
   CreateRequestOptions(kVersion);
-  base::RunLoop().RunUntilIdle();
+  test_context_->RunUntilIdle();
 
   // Now set a key.
   request_options()->SetKeyOnIO(kTestKey2);
@@ -341,6 +301,66 @@ TEST_F(DataReductionProxyRequestOptionsTest, ParseExperiments) {
 
   CreateRequestOptions(kBogusVersion);
   VerifyExpectedHeader(params()->DefaultOrigin(), expected_header);
+}
+
+TEST_F(DataReductionProxyRequestOptionsTest, ParseLocalSessionKey) {
+  const struct {
+    bool should_succeed;
+    std::string session_key;
+    std::string expected_session;
+    std::string expected_credentials;
+  } tests[] = {
+      {
+          true,
+          "foobar|1234",
+          "foobar",
+          "1234",
+      },
+      {
+          false,
+          "foobar|1234|foobaz",
+          std::string(),
+          std::string(),
+      },
+      {
+          false,
+          "foobar",
+          std::string(),
+          std::string(),
+      },
+      {
+          false,
+          std::string(),
+          std::string(),
+          std::string(),
+      },
+  };
+
+  std::string session;
+  std::string credentials;
+  for (size_t i = 0; i < arraysize(tests); ++i) {
+    EXPECT_EQ(tests[i].should_succeed,
+              DataReductionProxyRequestOptions::ParseLocalSessionKey(
+                  tests[i].session_key, &session, &credentials));
+    if (tests[i].should_succeed) {
+      EXPECT_EQ(tests[i].expected_session, session);
+      EXPECT_EQ(tests[i].expected_credentials, credentials);
+    }
+  }
+}
+
+TEST_F(DataReductionProxyRequestOptionsTest, PopulateConfigResponse) {
+  CreateRequestOptions(kBogusVersion);
+  scoped_ptr<base::DictionaryValue> values(new base::DictionaryValue());
+  request_options()->PopulateConfigResponse(values.get());
+  std::string session;
+  std::string expire_time;
+  EXPECT_TRUE(values->GetString("sessionKey", &session));
+  EXPECT_TRUE(values->GetString("expireTime", &expire_time));
+  EXPECT_EQ(
+      "0-1633771873-1633771873-1633771873|96bd72ec4a050ba60981743d41787768",
+      session);
+  EXPECT_EQ("1970-01-02T00:00:00.000Z", expire_time);
 }
 
 }  // namespace data_reduction_proxy

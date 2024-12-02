@@ -30,11 +30,6 @@ IN_PROC_BROWSER_TEST_F(FileManagerJsTest, DeviceHandlerTest) {
       FILE_PATH_LITERAL("background/js/device_handler_unittest.html")));
 }
 
-IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MetadataCacheTest) {
-  RunTest(base::FilePath(FILE_PATH_LITERAL(
-      "foreground/js/metadata/metadata_cache_unittest.html")));
-}
-
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, FileOperationManagerTest) {
   RunTest(base::FilePath(
       FILE_PATH_LITERAL("background/js/file_operation_manager_unittest.html")));
@@ -58,6 +53,11 @@ IN_PROC_BROWSER_TEST_F(FileManagerJsTest, VolumeManagerTest) {
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, DirectoryTreeTest) {
   RunTest(base::FilePath(
       FILE_PATH_LITERAL("foreground/js/ui/directory_tree_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, FileTableTest) {
+  RunTest(base::FilePath(
+      FILE_PATH_LITERAL("foreground/js/ui/file_table_unittest.html")));
 }
 
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MediaScannerTest) {
@@ -124,9 +124,9 @@ IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MetadataCacheSet) {
       "foreground/js/metadata/metadata_cache_set_unittest.html")));
 }
 
-IN_PROC_BROWSER_TEST_F(FileManagerJsTest, NewMetadataProvider) {
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MultiMetadataProvider) {
   RunTest(base::FilePath(FILE_PATH_LITERAL(
-      "foreground/js/metadata/new_metadata_provider_unittest.html")));
+      "foreground/js/metadata/multi_metadata_provider_unittest.html")));
 }
 
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ListThumbnailLoader) {
@@ -149,9 +149,9 @@ IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ContentMetadataProvider) {
       "foreground/js/metadata/content_metadata_provider_unittest.html")));
 }
 
-IN_PROC_BROWSER_TEST_F(FileManagerJsTest, FileSystemMetadata) {
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, MetadataModel) {
   RunTest(base::FilePath(FILE_PATH_LITERAL(
-      "foreground/js/metadata/file_system_metadata_unittest.html")));
+      "foreground/js/metadata/metadata_model_unittest.html")));
 }
 
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ThumbnailModel) {
@@ -162,4 +162,9 @@ IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ThumbnailModel) {
 IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ExifParser) {
   RunTest(base::FilePath(FILE_PATH_LITERAL(
       "foreground/js/metadata/exif_parser_unittest.html")));
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerJsTest, ImageOrientation) {
+  RunTest(base::FilePath(FILE_PATH_LITERAL(
+      "foreground/js/metadata/image_orientation_unittest.html")));
 }

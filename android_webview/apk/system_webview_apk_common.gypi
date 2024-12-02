@@ -16,9 +16,16 @@
     'never_lint': 1,
     'R_package': 'com.android.webview.chromium',
     'R_package_relpath': 'com/android/webview/chromium',
+    'shared_resources': 1,
     'extensions_to_not_compress': 'pak,bin,dat',
     'asset_location': '<(INTERMEDIATE_DIR)/assets/',
     'snapshot_copy_files': '<(snapshot_copy_files)',
+    'jinja_inputs': ['<(android_manifest_template_path)'],
+    'jinja_output': '<(INTERMEDIATE_DIR)/AndroidManifest.xml',
+    'jinja_variables': [ '<@(android_manifest_template_vars)' ],
+    'android_manifest_template_vars': [ ],
+    'android_manifest_template_path': '<(DEPTH)/android_webview/apk/java/AndroidManifest.xml',
+    'android_manifest_path': '<(jinja_output)',
     # TODO: crbug.com/442348 Update proguard.flags and re-enable.
     'proguard_enabled': 'false',
     'proguard_flags_paths': ['<(DEPTH)/android_webview/apk/java/proguard.flags'],
@@ -80,5 +87,6 @@
   'includes': [
     'system_webview_locales_paks.gypi',
     '../../build/java_apk.gypi',
+    '../../build/android/jinja_template.gypi',
   ],
 }

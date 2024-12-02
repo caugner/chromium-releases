@@ -13,16 +13,17 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/metrics/metrics_memory_details.h"
-#include "chrome/browser/metrics/network_stats_uploader.h"
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/profiler/tracking_synchronizer_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
 class ChromeOSMetricsProvider;
+class DriveMetricsProvider;
 class GoogleUpdateMetricsProviderWin;
 class PluginMetricsProvider;
 class PrefRegistrySimple;
+class PrefService;
 
 #if !defined(OS_CHROMEOS) && !defined(OS_IOS)
 class SigninStatusMetricsProvider;
@@ -69,6 +70,7 @@ class ChromeMetricsServiceClient
   void CollectFinalMetrics(const base::Closure& done_callback) override;
   scoped_ptr<metrics::MetricsLogUploader> CreateUploader(
       const base::Callback<void(int)>& on_upload_complete) override;
+  base::TimeDelta GetStandardUploadInterval() override;
   base::string16 GetRegistryBackupKey() override;
 
   metrics::MetricsService* metrics_service() { return metrics_service_.get(); }
@@ -95,8 +97,13 @@ class ChromeMetricsServiceClient
 
   // TrackingSynchronizerObserver:
   void ReceivedProfilerData(
-      const tracked_objects::ProcessDataSnapshot& process_data,
-      int process_type) override;
+      const tracked_objects::ProcessDataPhaseSnapshot& process_data_phase,
+      base::ProcessId process_id,
+      content::ProcessType process_type,
+      int profiling_phase,
+      base::TimeDelta phase_start,
+      base::TimeDelta phase_finish,
+      const metrics::ProfilerEvents& past_profiler_events) override;
   void FinishedReceivingProfilerData() override;
 
   // Callbacks for various stages of final log info collection. Do not call
@@ -138,8 +145,6 @@ class ChromeMetricsServiceClient
   // that has been registered with MetricsService. On other platforms, is NULL.
   ChromeOSMetricsProvider* chromeos_metrics_provider_;
 
-  NetworkStatsUploader network_stats_uploader_;
-
   // Saved callback received from CollectFinalMetrics().
   base::Closure collect_final_metrics_done_callback_;
 
@@ -165,12 +170,20 @@ class ChromeMetricsServiceClient
   GoogleUpdateMetricsProviderWin* google_update_metrics_provider_;
 #endif
 
+  // The DriveMetricsProvider instance that was registered with MetricsService.
+  // Has the same lifetime as |metrics_service_|.
+  DriveMetricsProvider* drive_metrics_provider_;
+
   // Callback that is called when initial metrics gathering is complete.
   base::Closure finished_gathering_initial_metrics_callback_;
 
   // The MemoryGrowthTracker instance that tracks memory usage growth in
   // MemoryDetails.
   MemoryGrowthTracker memory_growth_tracker_;
+
+  // Callback to determine whether or not a cellular network is currently being
+  // used.
+  base::Callback<void(bool*)> cellular_callback_;
 
   base::WeakPtrFactory<ChromeMetricsServiceClient> weak_ptr_factory_;
 

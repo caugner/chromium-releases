@@ -29,6 +29,7 @@ class ManageCredentialItemView : public views::View,
                                  public views::ButtonListener,
                                  public views::LinkListener {
  public:
+  // The caller is responsible for |password_form| lifetime.
   ManageCredentialItemView(ManagePasswordsBubbleModel* model,
                            const autofill::PasswordForm* password_form);
   ~ManageCredentialItemView() override;
@@ -42,6 +43,7 @@ class ManageCredentialItemView : public views::View,
   // LinkListener:
   void LinkClicked(views::Link* source, int event_flags) override;
 
+  const autofill::PasswordForm* const form_;
   scoped_ptr<CredentialsItemView> credential_button_;
   views::ImageButton* delete_button_;
   views::Link* undo_link_;

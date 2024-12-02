@@ -7,11 +7,12 @@
  *
  * ListThumbnailLoader is a thubmanil loader designed for list style ui. List
  * thumbnail loader loads thumbnail in a viewport of the UI. ListThumbnailLoader
- * is responsible to return dataUrls of valid thumbnails and fetch them with
- * proper priority.
+ * is responsible to return dataUrls of thumbnails and fetch them with proper
+ * priority.
  *
- * @param {!FileListModel} dataModel A file list model.
+ * @param {!DirectoryModel} directoryModel A directory model.
  * @param {!ThumbnailModel} thumbnailModel Thumbnail metadata model.
+ * @param {!VolumeManagerWrapper} volumeManager Volume manager.
  * @param {Function=} opt_thumbnailLoaderConstructor A constructor of thumbnail
  *     loader. This argument is used for testing.
  * @struct
@@ -20,60 +21,69 @@
  * @suppress {checkStructDictInheritance}
  */
 function ListThumbnailLoader(
-    dataModel, thumbnailModel, opt_thumbnailLoaderConstructor) {
+    directoryModel, thumbnailModel, volumeManager,
+    opt_thumbnailLoaderConstructor) {
   /**
-   * @type {!FileListModel}
-   * @private
+   * @private {!DirectoryModel}
    */
-  this.dataModel_ = dataModel;
+  this.directoryModel_ = directoryModel;
 
   /**
-   * @type {!ThumbnailModel}
-   * @private
+   * @private {!ThumbnailModel}
    */
   this.thumbnailModel_ = thumbnailModel;
 
   /**
+   * @private {!VolumeManagerWrapper}
+   */
+  this.volumeManager_ = volumeManager;
+
+  /**
    * Constructor of thumbnail loader.
-   * @type {!Function}
-   * @private
+   * @private {!Function}
    */
   this.thumbnailLoaderConstructor_ =
       opt_thumbnailLoaderConstructor || ThumbnailLoader;
 
   /**
-   * @type {Object<string, !ListThumbnailLoader.Task>}
-   * @private
+   * @private {Object<string, !ListThumbnailLoader.Task>}
    */
   this.active_ = {};
 
   /**
-   * @type {LRUCache<!ListThumbnailLoader.ThumbnailData>}
-   * @private
+   * @private {LRUCache<!ListThumbnailLoader.ThumbnailData>}
    */
   this.cache_ = new LRUCache(ListThumbnailLoader.CACHE_SIZE);
 
   /**
-   * @type {number}
-   * @private
+   * @private {number}
    */
   this.beginIndex_ = 0;
 
   /**
-   * @type {number}
-   * @private
+   * @private {number}
    */
   this.endIndex_ = 0;
 
   /**
    * Cursor.
-   * @type {number}
-   * @private
+   * @private {number}
    */
   this.cursor_ = 0;
 
-  // TODO(yawano): Change FileListModel to dispatch change event for file
-  // change, and change this class to handle it.
+  /**
+   * Current volume type.
+   * @private {?ListThumbnailLoader.VolumeType}
+   */
+  this.currentVolumeType_ = null;
+
+  /**
+   * @private {!FileListModel}
+   */
+  this.dataModel_ = assert(this.directoryModel_.getFileList());
+
+  this.directoryModel_.addEventListener(
+      'scan-completed', this.onScanCompleted_.bind(this));
   this.dataModel_.addEventListener('splice', this.onSplice_.bind(this));
   this.dataModel_.addEventListener('sorted', this.onSorted_.bind(this));
   this.dataModel_.addEventListener('change', this.onChange_.bind(this));
@@ -82,23 +92,77 @@ function ListThumbnailLoader(
 ListThumbnailLoader.prototype.__proto__ = cr.EventTarget.prototype;
 
 /**
- * Number of maximum active tasks.
- * @const {number}
- */
-ListThumbnailLoader.NUM_OF_MAX_ACTIVE_TASKS = 10;
-
-/**
- * Number of prefetch requests.
- * @const {number}
- */
-ListThumbnailLoader.NUM_OF_PREFETCH = 20;
-
-/**
  * Cache size. Cache size must be larger than sum of high priority range size
  * and number of prefetch tasks.
  * @const {number}
  */
 ListThumbnailLoader.CACHE_SIZE = 500;
+
+/**
+ * Volume type for testing.
+ * @const {string}
+ */
+ListThumbnailLoader.TEST_VOLUME_TYPE = 'test_volume_type';
+
+/**
+ * Number of maximum active tasks for testing.
+ * @type {number}
+ */
+ListThumbnailLoader.numOfMaxActiveTasksForTest = 2;
+
+/**
+ * @typedef {(VolumeManagerCommon.VolumeType|string)}
+ */
+ListThumbnailLoader.VolumeType;
+
+/**
+ * Gets number of prefetch requests. This number changes based on current volume
+ * type.
+ * @return {number} Number of prefetch requests.
+ * @private
+ */
+ListThumbnailLoader.prototype.getNumOfPrefetch_ = function () {
+  switch (/** @type {?ListThumbnailLoader.VolumeType} */
+      (this.currentVolumeType_)) {
+    case VolumeManagerCommon.VolumeType.MTP:
+      return 0;
+    case ListThumbnailLoader.TEST_VOLUME_TYPE:
+      return 1;
+    default:
+      return 20;
+  }
+};
+
+/**
+ * Gets maximum number of active thumbnail fetch tasks. This number changes
+ * based on current volume type.
+ * @return {number} Maximum number of active thumbnail fetch tasks.
+ * @private
+ */
+ListThumbnailLoader.prototype.getNumOfMaxActiveTasks_ = function() {
+  switch (/** @type {?ListThumbnailLoader.VolumeType} */
+      (this.currentVolumeType_)) {
+    case VolumeManagerCommon.VolumeType.MTP:
+      return 1;
+    case ListThumbnailLoader.TEST_VOLUME_TYPE:
+      return ListThumbnailLoader.numOfMaxActiveTasksForTest;
+    default:
+      return 10;
+  }
+};
+
+/**
+ * An event handler for scan-completed event of directory model. When directory
+ * scan is running, we don't fetch thumbnail in order not to block IO for
+ * directory scan. i.e. modification events during directory scan is ignored.
+ * We need to check thumbnail loadings after directory scan is completed.
+ *
+ * @param {!Event} event Event
+ */
+ListThumbnailLoader.prototype.onScanCompleted_ = function(event) {
+  this.cursor_ = this.beginIndex_;
+  this.continue_();
+};
 
 /**
  * An event handler for splice event of data model. When list is changed, start
@@ -128,10 +192,11 @@ ListThumbnailLoader.prototype.onSorted_ = function(event) {
  * @param {!Event} event Event
  */
 ListThumbnailLoader.prototype.onChange_ = function(event) {
-  // Revoke cache of updated file.
-  var item = this.dataModel_.item(event.index);
-  if (item)
-    this.cache_.remove(item.toURL());
+  // Mark the thumbnail in cache as invalid.
+  var entry = this.dataModel_.item(event.index);
+  var cachedThumbnail = this.cache_.peek(entry.toURL());
+  if (cachedThumbnail)
+    cachedThumbnail.outdated = true;
 
   this.cursor_ = this.beginIndex_;
   this.continue_();
@@ -156,9 +221,11 @@ ListThumbnailLoader.prototype.setHighPriorityRange = function(
 };
 
 /**
- * Returns a thumbnail of an entry if it is in cache.
+ * Returns a thumbnail of an entry if it is in cache. This method returns
+ * thumbnail even if the thumbnail is outdated.
  *
- * @return {Object} If the thumbnail is not in cache, this returns null.
+ * @return {ListThumbnailLoader.ThumbnailData} If the thumbnail is not in cache,
+ *     this returns null.
  */
 ListThumbnailLoader.prototype.getThumbnailFromCache = function(entry) {
   // Since we want to evict cache based on high priority range, we use peek here
@@ -168,24 +235,29 @@ ListThumbnailLoader.prototype.getThumbnailFromCache = function(entry) {
 
 /**
  * Enqueues tasks if available.
- *
- * TODO(yawano): Make queueing for low priority thumbnail fetches more moderate
- * and smart.
  */
 ListThumbnailLoader.prototype.continue_ = function() {
-  // If tasks are running full or all items are scanned, do nothing.
-  if (!(Object.keys(this.active_).length <
-        ListThumbnailLoader.NUM_OF_MAX_ACTIVE_TASKS) ||
-      !(this.cursor_ < this.dataModel_.length) ||
-      !(this.cursor_ < this.endIndex_ + ListThumbnailLoader.NUM_OF_PREFETCH)) {
+  // If directory scan is running or all items are scanned, do nothing.
+  if (this.directoryModel_.isScanning() ||
+      !(this.cursor_ < this.dataModel_.length))
     return;
-  }
 
   var entry = /** @type {Entry} */ (this.dataModel_.item(this.cursor_));
 
-  // If the entry is a directory, already in cache or fetching, skip it.
+  // Check volume type for optimizing the parameters.
+  var volumeInfo = this.volumeManager_.getVolumeInfo(entry);
+  this.currentVolumeType_ = volumeInfo ? volumeInfo.volumeType : null;
+
+  // If tasks are running full or all items are scanned, do nothing.
+  if (!(Object.keys(this.active_).length < this.getNumOfMaxActiveTasks_()) ||
+      !(this.cursor_ < this.endIndex_ + this.getNumOfPrefetch_())) {
+    return;
+  }
+
+  // If the entry is a directory, already in cache as valid or fetching, skip.
+  var thumbnail = this.cache_.get(entry.toURL());
   if (entry.isDirectory ||
-      this.cache_.get(entry.toURL()) ||
+      (thumbnail && !thumbnail.outdated) ||
       this.active_[entry.toURL()]) {
     this.cursor_++;
     this.continue_();
@@ -307,6 +379,11 @@ ListThumbnailLoader.ThumbnailData = function(fileUrl, dataUrl, width, height) {
    * @const {number}
    */
   this.height = height;
+
+  /**
+   * @type {boolean}
+   */
+  this.outdated = false;
 };
 
 /**
@@ -334,6 +411,10 @@ ListThumbnailLoader.Task = function(
  */
 ListThumbnailLoader.Task.prototype.fetch = function() {
   return this.thumbnailModel_.get([this.entry_]).then(function(metadatas) {
+    // When an error happens during metadata fetch, abort here.
+    if (metadatas[0].thumbnail.urlError)
+      throw metadatas[0].thumbnail.urlError;
+
     return new this.thumbnailLoaderConstructor_(
         this.entry_, ThumbnailLoader.LoaderType.IMAGE, metadatas[0])
         .loadAsDataUrl();

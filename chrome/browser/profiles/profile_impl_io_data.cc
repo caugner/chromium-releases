@@ -4,11 +4,15 @@
 
 #include "chrome/browser/profiles/profile_impl_io_data.h"
 
+#include <set>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
+#include "base/prefs/json_pref_store.h"
+#include "base/prefs/pref_filter.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
@@ -85,6 +89,20 @@ net::BackendType ChooseCacheBackendType() {
 #endif
 }
 
+bool ShouldUseSdchPersistence() {
+  const std::string group =
+      base::FieldTrialList::FindFullName("SdchPersistence");
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableSdchPersistence)) {
+    return true;
+  }
+  if (command_line->HasSwitch(switches::kDisableSdchPersistence)) {
+    return false;
+  }
+  return group == "Enabled";
+}
+
 }  // namespace
 
 using content::BrowserThread;
@@ -114,7 +132,11 @@ ProfileImplIOData::Handle::~Handle() {
   if (io_data_->http_server_properties_manager_)
     io_data_->http_server_properties_manager_->ShutdownOnPrefThread();
 
-  io_data_->data_reduction_proxy_io_data()->ShutdownOnUIThread();
+  // io_data_->data_reduction_proxy_io_data() might be NULL if Init() was
+  // never called.
+  if (io_data_->data_reduction_proxy_io_data())
+    io_data_->data_reduction_proxy_io_data()->ShutdownOnUIThread();
+
   io_data_->ShutdownOnUIThread(GetAllContextGetters().Pass());
 }
 
@@ -127,7 +149,6 @@ void ProfileImplIOData::Handle::Init(
     int media_cache_max_size,
     const base::FilePath& extensions_cookie_path,
     const base::FilePath& profile_path,
-    const base::FilePath& infinite_cache_path,
     chrome_browser_net::Predictor* predictor,
     content::CookieStoreConfig::SessionCookieMode session_cookie_mode,
     storage::SpecialStoragePolicy* special_storage_policy,
@@ -146,7 +167,6 @@ void ProfileImplIOData::Handle::Init(
   lazy_params->media_cache_path = media_cache_path;
   lazy_params->media_cache_max_size = media_cache_max_size;
   lazy_params->extensions_cookie_path = extensions_cookie_path;
-  lazy_params->infinite_cache_path = infinite_cache_path;
   lazy_params->session_cookie_mode = session_cookie_mode;
   lazy_params->special_storage_policy = special_storage_policy;
 
@@ -423,6 +443,16 @@ void ProfileImplIOData::InitializeInternal(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "436671 ProfileImplIOData::InitializeInternal"));
 
+  // Set up a persistent store for use by the network stack on the IO thread.
+  base::FilePath network_json_store_filepath(
+      profile_path_.Append(chrome::kNetworkPersistentStateFilename));
+  network_json_store_ = new JsonPrefStore(
+      network_json_store_filepath,
+      JsonPrefStore::GetTaskRunnerForFile(network_json_store_filepath,
+                                          BrowserThread::GetBlockingPool()),
+      scoped_ptr<PrefFilter>());
+  network_json_store_->ReadPrefsAsync(nullptr);
+
   net::URLRequestContext* main_context = main_request_context();
 
   IOThread* const io_thread = profile_params->io_thread;
@@ -482,19 +512,6 @@ void ProfileImplIOData::InitializeInternal(
 
   scoped_refptr<net::CookieStore> cookie_store = NULL;
   net::ChannelIDService* channel_id_service = NULL;
-  if (chrome_browser_net::ShouldUseInMemoryCookiesAndCache()) {
-    // Don't use existing cookies and use an in-memory store.
-    using content::CookieStoreConfig;
-    cookie_store = content::CreateCookieStore(CookieStoreConfig(
-        base::FilePath(),
-        CookieStoreConfig::EPHEMERAL_SESSION_COOKIES,
-        NULL,
-        profile_params->cookie_monster_delegate.get()));
-    // Don't use existing channel ids and use an in-memory store.
-    channel_id_service = new net::ChannelIDService(
-        new net::DefaultChannelIDStore(NULL),
-        base::WorkerPool::GetTaskRunner(true));
-  }
 
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
   tracked_objects::ScopedTracker tracking_profile5(
@@ -560,14 +577,6 @@ void ProfileImplIOData::InitializeInternal(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "436671 ProfileImplIOData::InitializeInternal71"));
 
-  main_cache->InitializeInfiniteCache(lazy_params_->infinite_cache_path);
-
-  if (chrome_browser_net::ShouldUseInMemoryCookiesAndCache()) {
-    main_cache->set_mode(
-        chrome_browser_net::IsCookieRecordMode() ?
-        net::HttpCache::RECORD : net::HttpCache::PLAYBACK);
-  }
-
   main_http_factory_.reset(main_cache.release());
   main_context->set_http_transaction_factory(main_http_factory_.get());
 
@@ -611,6 +620,9 @@ void ProfileImplIOData::InitializeInternal(
   sdch_manager_.reset(new net::SdchManager);
   sdch_policy_.reset(new net::SdchOwner(sdch_manager_.get(), main_context));
   main_context->set_sdch_manager(sdch_manager_.get());
+  if (ShouldUseSdchPersistence()) {
+    sdch_policy_->EnablePersistentStorage(network_json_store_.get());
+  }
 
   // Create a media request context based on the main context, but using a
   // media cache.  It shares the same job factory as the main context.
@@ -705,15 +717,6 @@ net::URLRequestContext* ProfileImplIOData::InitializeAppRequestContext(
   scoped_refptr<net::CookieStore> cookie_store = NULL;
   if (partition_descriptor.in_memory) {
     cookie_store = content::CreateCookieStore(content::CookieStoreConfig());
-  } else if (chrome_browser_net::ShouldUseInMemoryCookiesAndCache()) {
-    // Don't use existing cookies and use an in-memory store.
-    // TODO(creis): We should have a cookie delegate for notifying the cookie
-    // extensions API, but we need to update it to understand isolated apps
-    // first.
-    cookie_store = content::CreateCookieStore(content::CookieStoreConfig());
-    app_http_cache->set_mode(
-        chrome_browser_net::IsCookieRecordMode() ?
-        net::HttpCache::RECORD : net::HttpCache::PLAYBACK);
   }
 
   // Use an app-specific cookie store.

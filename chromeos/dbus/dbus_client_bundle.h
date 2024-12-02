@@ -12,6 +12,9 @@
 
 namespace chromeos {
 
+class AmplifierClient;
+class ApManagerClient;
+class AudioDspClient;
 class BluetoothAdapterClient;
 class BluetoothAgentManagerClient;
 class BluetoothDeviceClient;
@@ -28,29 +31,31 @@ class CrosDisksClient;
 class CryptohomeClient;
 class DebugDaemonClient;
 class EasyUnlockClient;
-class LeadershipDaemonManagerClient;
-class LorgnetteManagerClient;
-class ShillDeviceClient;
-class ShillIPConfigClient;
-class ShillManagerClient;
-class ShillServiceClient;
-class ShillProfileClient;
-class ShillThirdPartyVpnDriverClient;
 class GsmSMSClient;
 class ImageBurnerClient;
 class IntrospectableClient;
+class LeadershipDaemonManagerClient;
+class LorgnetteManagerClient;
+class MetronomeClient;
 class ModemMessagingClient;
-class NfcManagerClient;
 class NfcAdapterClient;
 class NfcDeviceClient;
-class NfcTagClient;
+class NfcManagerClient;
 class NfcRecordClient;
+class NfcTagClient;
 class PeerDaemonManagerClient;
 class PermissionBrokerClient;
-class SystemClockClient;
 class PowerManagerClient;
-class SessionManagerClient;
+class PrivetDaemonManagerClient;
 class SMSClient;
+class SessionManagerClient;
+class ShillDeviceClient;
+class ShillIPConfigClient;
+class ShillManagerClient;
+class ShillProfileClient;
+class ShillServiceClient;
+class ShillThirdPartyVpnDriverClient;
+class SystemClockClient;
 class UpdateEngineClient;
 
 // The bundle of all D-Bus clients used in DBusThreadManager. The bundle
@@ -85,6 +90,11 @@ class CHROMEOS_EXPORT DBusClientBundle {
     UPDATE_ENGINE =        1 << 18,
     PEER_DAEMON =          1 << 19,
     LEADERSHIP_DAEMON =    1 << 20,
+    METRONOME =            1 << 21,
+    AP_MANAGER =           1 << 22,
+    PRIVET_DAEMON =        1 << 23,
+    AMPLIFIER =            1 << 24,
+    AUDIO_DSP =            1 << 25,
   };
 
   explicit DBusClientBundle(DBusClientTypeMask unstub_client_mask);
@@ -102,6 +112,12 @@ class CHROMEOS_EXPORT DBusClientBundle {
   // Parses command line param values for dbus subsystem that should be
   // un-stubbed.
   static DBusClientTypeMask ParseUnstubList(const std::string& unstub_list);
+
+  AmplifierClient* amplifier_client() { return amplifier_client_.get(); }
+
+  ApManagerClient* ap_manager_client() { return ap_manager_client_.get(); }
+
+  AudioDspClient* audio_dsp_client() { return audio_dsp_client_.get(); }
 
   BluetoothAdapterClient* bluetooth_adapter_client() {
     return bluetooth_adapter_client_.get();
@@ -175,6 +191,8 @@ class CHROMEOS_EXPORT DBusClientBundle {
     return lorgnette_manager_client_.get();
   }
 
+  MetronomeClient* metronome_client() { return metronome_client_.get(); }
+
   ShillDeviceClient* shill_device_client() {
     return shill_device_client_.get();
   }
@@ -243,6 +261,10 @@ class CHROMEOS_EXPORT DBusClientBundle {
     return permission_broker_client_.get();
   }
 
+  PrivetDaemonManagerClient* privet_daemon_manager_client() {
+    return privet_daemon_manager_client_.get();
+  }
+
   SystemClockClient* system_clock_client() {
     return system_clock_client_.get();
   }
@@ -270,6 +292,9 @@ class CHROMEOS_EXPORT DBusClientBundle {
   // are defined within DBusClientType enum.
   DBusClientTypeMask unstub_client_mask_;
 
+  scoped_ptr<AmplifierClient> amplifier_client_;
+  scoped_ptr<ApManagerClient> ap_manager_client_;
+  scoped_ptr<AudioDspClient> audio_dsp_client_;
   scoped_ptr<BluetoothAdapterClient> bluetooth_adapter_client_;
   scoped_ptr<BluetoothAgentManagerClient> bluetooth_agent_manager_client_;
   scoped_ptr<BluetoothDeviceClient> bluetooth_device_client_;
@@ -289,7 +314,9 @@ class CHROMEOS_EXPORT DBusClientBundle {
   scoped_ptr<EasyUnlockClient> easy_unlock_client_;
   scoped_ptr<LeadershipDaemonManagerClient> leadership_daemon_manager_client_;
   scoped_ptr<LorgnetteManagerClient> lorgnette_manager_client_;
+  scoped_ptr<MetronomeClient> metronome_client_;
   scoped_ptr<PeerDaemonManagerClient> peer_daemon_manager_client_;
+  scoped_ptr<PrivetDaemonManagerClient> privet_daemon_manager_client_;
   scoped_ptr<ShillDeviceClient> shill_device_client_;
   scoped_ptr<ShillIPConfigClient> shill_ipconfig_client_;
   scoped_ptr<ShillManagerClient> shill_manager_client_;

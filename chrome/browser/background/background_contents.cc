@@ -4,6 +4,7 @@
 
 #include "chrome/browser/background/background_contents.h"
 
+#include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
@@ -16,6 +17,7 @@
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/deferred_start_render_host_observer.h"
 #include "extensions/browser/extension_host_delegate.h"
 #include "extensions/browser/extension_host_queue.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -41,6 +43,7 @@ BackgroundContents::BackgroundContents(
   WebContents::CreateParams create_params(profile_, site_instance);
   create_params.routing_id = routing_id;
   create_params.main_frame_routing_id = main_frame_routing_id;
+  create_params.renderer_initiated_creation = true;
   if (session_storage_namespace) {
     content::SessionStorageNamespaceMap session_storage_namespace_map;
     session_storage_namespace_map.insert(
@@ -87,6 +90,9 @@ BackgroundContents::~BackgroundContents() {
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
       content::Source<Profile>(profile_),
       content::Details<BackgroundContents>(this));
+  FOR_EACH_OBSERVER(extensions::DeferredStartRenderHostObserver,
+                    deferred_start_render_host_observer_list_,
+                    OnDeferredStartRenderHostDestroyed(this));
 
   extension_host_delegate_->GetExtensionHostQueue()->Remove(this);
 }
@@ -156,6 +162,22 @@ void BackgroundContents::RenderProcessGone(base::TerminationStatus status) {
   delete this;
 }
 
+void BackgroundContents::DidStartLoading() {
+  // BackgroundContents only loads once, so this can only be the first time it
+  // has started loading.
+  FOR_EACH_OBSERVER(extensions::DeferredStartRenderHostObserver,
+                    deferred_start_render_host_observer_list_,
+                    OnDeferredStartRenderHostDidStartFirstLoad(this));
+}
+
+void BackgroundContents::DidStopLoading() {
+  // BackgroundContents only loads once, so this can only be the first time
+  // it has stopped loading.
+  FOR_EACH_OBSERVER(extensions::DeferredStartRenderHostObserver,
+                    deferred_start_render_host_observer_list_,
+                    OnDeferredStartRenderHostDidStopFirstLoad(this));
+}
+
 void BackgroundContents::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
@@ -174,7 +196,21 @@ void BackgroundContents::Observe(int type,
 }
 
 void BackgroundContents::CreateRenderViewNow() {
+  // TODO(robliao): Remove ScopedTracker below once crbug.com/464206 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "464206 BackgroundContents::CreateRenderViewNow"));
   web_contents()->GetController().LoadURL(initial_url_, content::Referrer(),
                                           ui::PAGE_TRANSITION_LINK,
                                           std::string());
+}
+
+void BackgroundContents::AddDeferredStartRenderHostObserver(
+    extensions::DeferredStartRenderHostObserver* observer) {
+  deferred_start_render_host_observer_list_.AddObserver(observer);
+}
+
+void BackgroundContents::RemoveDeferredStartRenderHostObserver(
+    extensions::DeferredStartRenderHostObserver* observer) {
+  deferred_start_render_host_observer_list_.RemoveObserver(observer);
 }

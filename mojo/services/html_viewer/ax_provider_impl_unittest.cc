@@ -33,13 +33,13 @@ namespace {
 
 class TestWebFrameClient : public WebFrameClient {
  public:
-  virtual ~TestWebFrameClient() {}
-  virtual void didStopLoading() { base::MessageLoop::current()->Quit(); }
+  ~TestWebFrameClient() override {}
+  void didStopLoading() override { base::MessageLoop::current()->Quit(); }
 };
 
 class TestWebViewClient : public WebViewClient {
  public:
-  virtual bool allowsBrokenNullLayerTreeView() const { return true; }
+  bool allowsBrokenNullLayerTreeView() const override { return true; }
   virtual ~TestWebViewClient() {}
 };
 
@@ -52,7 +52,7 @@ class AxProviderImplTest : public testing::Test {
     blink::initialize(new html_viewer::BlinkPlatformImpl());
   }
 
-  virtual ~AxProviderImplTest() override { blink::shutdown(); }
+  ~AxProviderImplTest() override { blink::shutdown(); }
 
  private:
   base::MessageLoopForUI message_loop;
@@ -112,9 +112,9 @@ TEST_F(AxProviderImplTest, Basic) {
   }
 
   typedef decltype(lookup)::value_type MapEntry;
-  auto is_link = [](MapEntry pair) { return pair.second->link.get(); };
+  auto is_link = [](MapEntry pair) { return !pair.second->link.is_null(); };
   auto is_text = [](MapEntry pair, const char* content) {
-    return pair.second->text.get() &&
+    return !pair.second->text.is_null() &&
            pair.second->text->content.To<std::string>() == content;
   };
   auto is_foo = [&is_text](MapEntry pair) { return is_text(pair, "foo"); };

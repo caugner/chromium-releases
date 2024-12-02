@@ -26,6 +26,7 @@ class SyncableService;
 
 namespace password_manager {
 
+class AffiliatedMatchHelper;
 class PasswordStoreConsumer;
 class PasswordSyncableService;
 
@@ -64,6 +65,17 @@ class PasswordStore : protected PasswordStoreSync,
 
   // Reimplement this to add custom initialization. Always call this too.
   virtual bool Init(const syncer::SyncableService::StartSyncFlare& flare);
+
+  // Sets the affiliation-based match |helper| that will be used by subsequent
+  // GetLogins() calls to return credentials stored not only for the requested
+  // sign-on realm, but also for affiliated Android applications. If |helper| is
+  // null, clears the the currently set helper if any. Unless a helper is set,
+  // affiliation-based matching is disabled. The passed |helper| must already be
+  // initialized if it is non-null.
+  void SetAffiliatedMatchHelper(scoped_ptr<AffiliatedMatchHelper> helper);
+
+  // Returns whether or not an affiliation-based match helper is set.
+  bool HasAffiliatedMatchHelper() const;
 
   // Adds the given PasswordForm to the secure password store asynchronously.
   virtual void AddLogin(const autofill::PasswordForm& form);
@@ -122,9 +134,7 @@ class PasswordStore : protected PasswordStoreSync,
   // needs to shut itself down.
   virtual void Shutdown();
 
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
   base::WeakPtr<syncer::SyncableService> GetPasswordSyncableService();
-#endif
 
  protected:
   friend class base::RefCountedThreadSafe<PasswordStore>;
@@ -194,8 +204,9 @@ class PasswordStore : protected PasswordStoreSync,
   // Finds all PasswordForms with a signon_realm that is equal to, or is a
   // PSL-match to that of |form|, and takes care of notifying the consumer with
   // the results when done.
-  // Note: subclasses should implement FillMatchingLogins() instead, which will
-  // later be used by additional flavors of this method.
+  // Note: subclasses should implement FillMatchingLogins() instead. This needs
+  // to be virtual only because asynchronous behavior in PasswordStoreWin.
+  // TODO(engedy): Make this non-virtual once https://crbug.com/78830 is fixed.
   virtual void GetLoginsImpl(const autofill::PasswordForm& form,
                              AuthorizationPromptPolicy prompt_policy,
                              scoped_ptr<GetLoginsRequest> request);
@@ -255,19 +266,38 @@ class PasswordStore : protected PasswordStoreSync,
   void RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
                                          base::Time delete_end);
 
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
+  // Extended version of GetLoginsImpl that also returns credentials stored for
+  // the specified affiliated Android applications. That is, it finds all
+  // PasswordForms with a signon_realm that is either:
+  //  * equal to that of |form|,
+  //  * is a PSL-match to the realm of |form|,
+  //  * is one of those in |additional_android_realms|,
+  // and takes care of notifying the consumer with the results when done.
+  void GetLoginsWithAffiliationsImpl(
+      const autofill::PasswordForm& form,
+      AuthorizationPromptPolicy prompt_policy,
+      scoped_ptr<GetLoginsRequest> request,
+      const std::vector<std::string>& additional_android_realms);
+
+  // Schedules GetLoginsWithAffiliationsImpl() to be run on the DB thread.
+  void ScheduleGetLoginsWithAffiliations(
+      const autofill::PasswordForm& form,
+      AuthorizationPromptPolicy prompt_policy,
+      scoped_ptr<GetLoginsRequest> request,
+      const std::vector<std::string>& additional_android_realms);
+
   // Creates PasswordSyncableService instance on the background thread.
   void InitSyncableService(
       const syncer::SyncableService::StartSyncFlare& flare);
 
   // Deletes PasswordSyncableService instance on the background thread.
   void DestroySyncableService();
-#endif
 
   // The observers.
   scoped_refptr<ObserverListThreadSafe<Observer>> observers_;
 
   scoped_ptr<PasswordSyncableService> syncable_service_;
+  scoped_ptr<AffiliatedMatchHelper> affiliated_match_helper_;
 
   bool shutdown_called_;
 

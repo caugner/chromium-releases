@@ -16,8 +16,10 @@ namespace system {
 
 // SlaveConnectionManager ------------------------------------------------------
 
-SlaveConnectionManager::SlaveConnectionManager()
-    : slave_process_delegate_(),
+SlaveConnectionManager::SlaveConnectionManager(
+    embedder::PlatformSupport* platform_support)
+    : ConnectionManager(platform_support),
+      slave_process_delegate_(),
       private_thread_("SlaveConnectionManagerPrivateThread"),
       awaiting_ack_type_(NOT_AWAITING_ACK),
       ack_result_(),
@@ -48,7 +50,6 @@ void SlaveConnectionManager::Init(
   DCHECK(!private_thread_.message_loop());
 
   delegate_thread_task_runner_ = delegate_thread_task_runner;
-  AssertOnDelegateThread();
   slave_process_delegate_ = slave_process_delegate;
   CHECK(private_thread_.StartWithOptions(
       base::Thread::Options(base::MessageLoop::TYPE_IO, 0)));
@@ -60,7 +61,7 @@ void SlaveConnectionManager::Init(
 }
 
 void SlaveConnectionManager::Shutdown() {
-  AssertOnDelegateThread();
+  AssertNotOnPrivateThread();
   DCHECK(slave_process_delegate_);
   DCHECK(private_thread_.message_loop());
 
@@ -292,12 +293,6 @@ void SlaveConnectionManager::OnError(Error error) {
   delegate_thread_task_runner_->PostTask(
       FROM_HERE, base::Bind(&embedder::SlaveProcessDelegate::OnMasterDisconnect,
                             base::Unretained(slave_process_delegate_)));
-}
-
-void SlaveConnectionManager::AssertOnDelegateThread() const {
-  DCHECK(base::MessageLoop::current());
-  DCHECK_EQ(base::MessageLoop::current()->task_runner(),
-            delegate_thread_task_runner_);
 }
 
 void SlaveConnectionManager::AssertNotOnPrivateThread() const {

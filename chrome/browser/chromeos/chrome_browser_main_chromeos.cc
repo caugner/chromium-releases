@@ -35,7 +35,6 @@
 #include "chrome/browser/chromeos/dbus/chrome_proxy_resolver_delegate.h"
 #include "chrome/browser/chromeos/dbus/printer_service_provider.h"
 #include "chrome/browser/chromeos/dbus/screen_lock_service_provider.h"
-#include "chrome/browser/chromeos/device/input_service_proxy.h"
 #include "chrome/browser/chromeos/events/event_rewriter.h"
 #include "chrome/browser/chromeos/events/event_rewriter_controller.h"
 #include "chrome/browser/chromeos/events/keyboard_driven_event_rewriter.h"
@@ -423,6 +422,7 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
   // Add observers for WallpaperManager. This depends on PowerManagerClient,
   // TimezoneSettings and CrosSettings.
+  WallpaperManager::Initialize();
   WallpaperManager::Get()->AddObservers();
 
   base::PostTaskAndReplyWithResult(
@@ -531,6 +531,12 @@ void SetGuestLocale(Profile* const profile) {
 void ChromeBrowserMainPartsChromeos::PostProfileInit() {
   // -- This used to be in ChromeBrowserMainParts::PreMainMessageLoopRun()
   // -- just after CreateProfile().
+
+  // Force loading of signin profile if it was not loaded before. It is possible
+  // when we are restoring session or skipping login screen for some other
+  // reason.
+  if (!chromeos::ProfileHelper::IsSigninProfile(profile()))
+    chromeos::ProfileHelper::GetSigninProfile();
 
   BootTimesRecorder::Get()->OnChromeProcessStart();
 
@@ -658,9 +664,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
 
   g_browser_process->platform_part()->oom_priority_manager()->Stop();
 
-  // Early wake-up of HID device service.
-  InputServiceProxy::WarmUp();
-
   // Destroy the application name notifier for Kiosk mode.
   KioskModeIdleAppNameNotification::Shutdown();
 
@@ -721,7 +724,7 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // that the UserManager has no URLRequest pending (see
   // http://crbug.com/276659).
   g_browser_process->platform_part()->user_manager()->Shutdown();
-  WallpaperManager::Get()->Shutdown();
+  WallpaperManager::Shutdown();
 
   // Let the DeviceDisablingManager unregister itself as an observer of the
   // CrosSettings singleton before it is destroyed.

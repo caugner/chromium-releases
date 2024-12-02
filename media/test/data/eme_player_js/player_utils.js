@@ -84,9 +84,17 @@ PlayerUtils.registerEMEEventListeners = function(player) {
   });
 
   this.registerDefaultEventListeners(player);
+  player.video.receivedKeyMessage = false;
   Utils.timeLog('Setting video media keys: ' + player.testConfig.keySystem);
+  var config = {};
+  if (player.testConfig.sessionToLoad) {
+    config = {
+        persistentState: "required",
+        sessionTypes: ["temporary", "persistent-license"]
+    };
+  }
   return navigator.requestMediaKeySystemAccess(
-      player.testConfig.keySystem, [{}])
+      player.testConfig.keySystem, [config])
       .then(function(access) { return access.createMediaKeys(); })
       .then(function(mediaKeys) {
         return player.video.setMediaKeys(mediaKeys);
@@ -139,6 +147,7 @@ PlayerUtils.registerPrefixedEMEEventListeners = function(player) {
   // The prefixed API is all synchronous, so wrap the calls in a promise.
   return new Promise(function(resolve, reject) {
     PlayerUtils.registerDefaultEventListeners(player);
+    player.video.receivedKeyMessage = false;
     resolve(player);
   });
 };

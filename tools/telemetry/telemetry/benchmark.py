@@ -9,16 +9,16 @@ import shutil
 import sys
 import zipfile
 
-from telemetry import decorators
-from telemetry import page
 from telemetry.core import browser_finder
 from telemetry.core import command_line
 from telemetry.core import util
-from telemetry.user_story import user_story_runner
+from telemetry import decorators
+from telemetry import page
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import test_expectations
 from telemetry.results import results_options
+from telemetry.user_story import user_story_runner
 from telemetry.util import cloud_storage
 from telemetry.util import exception_formatter
 from telemetry.web_perf import timeline_based_measurement
@@ -138,17 +138,22 @@ class Benchmark(command_line.Command):
   def ProcessCommandLineArgs(cls, parser, args):
     pass
 
+  # pylint: disable=unused-argument
   @classmethod
-  def ValueCanBeAddedPredicate(cls, value):  # pylint: disable=unused-argument
-    """ Returns whether |value| can be added to the test results.
+  def ValueCanBeAddedPredicate(cls, value, is_first_result):
+    """Returns whether |value| can be added to the test results.
+
     Override this method to customize the logic of adding values to test
     results.
 
     Args:
-        value: a value.Value instance.
+      value: a value.Value instance.
+      is_first_result: True if |value| is the first result for its
+          corresponding user story.
 
-    Returns: a boolean. True if value should be added to the test results and
-        False otherwise.
+    Returns:
+      True if |value| should be added to the test results.
+      Otherwise, it returns False.
     """
     return True
 
@@ -189,8 +194,9 @@ class Benchmark(command_line.Command):
     self._DownloadGeneratedProfileArchive(finder_options)
 
     benchmark_metadata = self.GetMetadata()
-    with results_options.CreateResults(benchmark_metadata,
-                                       finder_options) as results:
+    with results_options.CreateResults(
+        benchmark_metadata, finder_options,
+        self.ValueCanBeAddedPredicate) as results:
       try:
         user_story_runner.Run(pt, us, expectations, finder_options, results,
                               max_failures=self._max_failures)
@@ -224,6 +230,8 @@ class Benchmark(command_line.Command):
 
     # Download profile directory from cloud storage.
     found_browser = browser_finder.FindBrowser(options)
+    if found_browser.IsRemote():
+      return
     test_data_dir = os.path.join(util.GetChromiumSrcDir(), 'tools', 'perf',
         'generated_profiles',
         found_browser.target_os)

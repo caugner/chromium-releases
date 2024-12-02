@@ -92,17 +92,12 @@ class TabSpecificContentSettings
   // current page or while loading it. |blocked_by_policy| should be true, if
   // reading cookies was blocked due to the user's content settings. In that
   // case, this function should invoke OnContentBlocked.
-  // |is_for_blocking_resource| indicates whether the cookies read were for a
-  // blocking resource (eg script, css). It is only temporarily added for
-  // diagnostic purposes, per bug 353678. Will be removed again once data
-  // collection is finished.
   static void CookiesRead(int render_process_id,
                           int render_frame_id,
                           const GURL& url,
                           const GURL& first_party_url,
                           const net::CookieList& cookie_list,
-                          bool blocked_by_policy,
-                          bool is_for_blocking_resource);
+                          bool blocked_by_policy);
 
   // Called when a specific cookie in the current page was changed.
   // |blocked_by_policy| should be true, if the cookie was blocked due to the
@@ -185,7 +180,9 @@ class TabSpecificContentSettings
   bool IsContentAllowed(ContentSettingsType content_type) const;
 
   // Returns the names of plugins that have been blocked for this tab.
-  const base::string16 GetBlockedPluginNames() const;
+  const std::vector<base::string16>& blocked_plugin_names() const {
+    return blocked_plugin_names_;
+  }
 
   const GURL& media_stream_access_origin() const {
     return media_stream_access_origin_;

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/base_paths.h"
+#include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/debug/stack_trace.h"
@@ -23,16 +24,13 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
-#include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/net/chrome_extensions_network_delegate.h"
-#include "chrome/browser/net/client_hints.h"
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/safe_search_util.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
@@ -41,18 +39,18 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_request_info.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/log/net_log.h"
 #include "net/url_request/url_request.h"
-#include "net/url_request/url_request_context.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/io_thread.h"
@@ -61,7 +59,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "base/command_line.h"
 #include "base/sys_info.h"
 #include "chrome/common/chrome_switches.h"
 #endif
@@ -295,8 +292,9 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
       url_blacklist_manager_(NULL),
 #endif
       domain_reliability_monitor_(NULL),
-      first_request_(true),
-      prerender_tracker_(NULL) {
+      experimental_web_platform_features_enabled_(
+          base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableExperimentalWebPlatformFeatures)) {
   DCHECK(enable_referrers);
   extensions_delegate_.reset(
       ChromeExtensionsNetworkDelegate::Create(event_router));
@@ -323,11 +321,6 @@ void ChromeNetworkDelegate::set_predictor(
     chrome_browser_net::Predictor* predictor) {
   connect_interceptor_.reset(
       new chrome_browser_net::ConnectInterceptor(predictor));
-}
-
-void ChromeNetworkDelegate::SetEnableClientHints() {
-  client_hints_.reset(new ClientHints());
-  client_hints_->Init();
 }
 
 // static
@@ -404,12 +397,6 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   if (enable_do_not_track_ && enable_do_not_track_->GetValue())
     request->SetExtraRequestHeaderByName(kDNTHeader, "1", true /* override */);
 
-  if (client_hints_) {
-    request->SetExtraRequestHeaderByName(
-        ClientHints::kDevicePixelRatioHeader,
-        client_hints_->GetDevicePixelRatioHeader(), true);
-  }
-
   bool force_safe_search =
       (force_safe_search_ && force_safe_search_->GetValue()) ||
       (force_google_safe_search_ && force_google_safe_search_->GetValue());
@@ -444,7 +431,6 @@ int ChromeNetworkDelegate::OnBeforeSendHeaders(
   if (force_safety_mode)
     safe_search_util::ForceYouTubeSafetyMode(request, headers);
 
-  TRACE_EVENT_ASYNC_STEP_PAST0("net", "URLRequest", request, "SendRequest");
   return extensions_delegate_->OnBeforeSendHeaders(request, callback, headers);
 }
 
@@ -477,7 +463,6 @@ void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
 
 
 void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
-  TRACE_EVENT_ASYNC_STEP_PAST0("net", "URLRequest", request, "ResponseStarted");
   extensions_delegate_->OnResponseStarted(request);
 }
 
@@ -488,8 +473,6 @@ void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "423948 ChromeNetworkDelegate::OnRawBytesRead"));
 
-  TRACE_EVENT_ASYNC_STEP_PAST1("net", "URLRequest", &request, "DidRead",
-                               "bytes_read", bytes_read);
 #if defined(ENABLE_TASK_MANAGER)
   // This is not completely accurate, but as a first approximation ignore
   // requests that are served from the cache. See bug 330931 for more info.
@@ -523,7 +506,6 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
     RecordCacheStateStats(request);
   }
 
-  TRACE_EVENT_ASYNC_END0("net", "URLRequest", request);
   if (request->status().status() == net::URLRequestStatus::SUCCESS) {
 #if defined(OS_ANDROID)
     // For better accuracy, we use the actual bytes read instead of the length
@@ -585,19 +567,6 @@ bool ChromeNetworkDelegate::OnCanGetCookies(
 
   int render_process_id = -1;
   int render_frame_id = -1;
-
-  // |is_for_blocking_resource| indicates whether the cookies read were for a
-  // blocking resource (eg script, css). It is only temporarily added for
-  // diagnostic purposes, per bug 353678. Will be removed again once data
-  // collection is finished.
-  bool is_for_blocking_resource = false;
-  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(&request);
-  if (info && ((!info->IsAsync()) ||
-               info->GetResourceType() == content::RESOURCE_TYPE_STYLESHEET ||
-               info->GetResourceType() == content::RESOURCE_TYPE_SCRIPT)) {
-    is_for_blocking_resource = true;
-  }
-
   if (content::ResourceRequestInfo::GetRenderFrameForRequest(
           &request, &render_process_id, &render_frame_id)) {
     BrowserThread::PostTask(
@@ -605,7 +574,7 @@ bool ChromeNetworkDelegate::OnCanGetCookies(
         base::Bind(&TabSpecificContentSettings::CookiesRead,
                    render_process_id, render_frame_id,
                    request.url(), request.first_party_for_cookies(),
-                   cookie_list, !allow, is_for_blocking_resource));
+                   cookie_list, !allow));
   }
 
   return allow;
@@ -631,13 +600,6 @@ bool ChromeNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
                    render_process_id, render_frame_id,
                    request.url(), request.first_party_for_cookies(),
                    cookie_line, *options, !allow));
-  }
-
-  if (prerender_tracker_) {
-    prerender_tracker_->OnCookieChangedForURL(
-        render_process_id,
-        request.context()->cookie_store()->GetCookieMonster(),
-        request.url());
   }
 
   return allow;
@@ -740,6 +702,10 @@ bool ChromeNetworkDelegate::OnCanEnablePrivacyMode(
       url, first_party_for_cookies);
   bool privacy_mode = !(reading_cookie_allowed && setting_cookie_allowed);
   return privacy_mode;
+}
+
+bool ChromeNetworkDelegate::OnFirstPartyOnlyCookieExperimentEnabled() const {
+  return experimental_web_platform_features_enabled_;
 }
 
 bool ChromeNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(

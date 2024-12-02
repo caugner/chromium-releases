@@ -7,8 +7,10 @@
   "description": "Test for chrome.fileSystemProvider.getAll().",
   "permissions": [
     "fileSystemProvider",
-    "fileManagerPrivate",
-    "fileBrowserHandler"
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
+    "fileManagerPrivate"
   ],
   "app": {
     "background": {

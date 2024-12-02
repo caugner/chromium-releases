@@ -76,10 +76,6 @@ class PolicyHeaderIOHelper;
 class URLBlacklistManager;
 }  // namespace policy
 
-namespace prerender {
-class PrerenderTracker;
-}
-
 // Conceptually speaking, the ProfileIOData represents data that lives on the IO
 // thread that is owned by a Profile, such as, but not limited to, network
 // objects like CookieMonster, HttpTransactionFactory, etc.  Profile owns
@@ -150,30 +146,6 @@ class ProfileIOData {
 
   StringPrefMember* google_services_account_id() const {
     return &google_services_user_account_id_;
-  }
-
-  StringPrefMember* google_services_username() const {
-    return &google_services_username_;
-  }
-
-  StringPrefMember* google_services_username_pattern() const {
-    return &google_services_username_pattern_;
-  }
-
-  BooleanPrefMember* reverse_autologin_enabled() const {
-    return &reverse_autologin_enabled_;
-  }
-
-  const std::string& reverse_autologin_pending_email() const {
-    return reverse_autologin_pending_email_;
-  }
-
-  void set_reverse_autologin_pending_email(const std::string& email) {
-    reverse_autologin_pending_email_ = email;
-  }
-
-  StringListPrefMember* one_click_signin_rejected_email_list() const {
-    return &one_click_signin_rejected_email_list_;
   }
 
   net::URLRequestContext* extensions_request_context() const {
@@ -344,8 +316,6 @@ class ProfileIOData {
     // ensure it's not accidently used on the IO thread. Before using it on the
     // UI thread, call ProfileManager::IsValidProfile to ensure it's alive.
     void* profile;
-
-    prerender::PrerenderTracker* prerender_tracker;
   };
 
   explicit ProfileIOData(Profile::ProfileType profile_type);
@@ -528,15 +498,6 @@ class ProfileIOData {
       client_cert_store_factory_;
 
   mutable StringPrefMember google_services_user_account_id_;
-  mutable StringPrefMember google_services_username_;
-  mutable StringPrefMember google_services_username_pattern_;
-  mutable BooleanPrefMember reverse_autologin_enabled_;
-
-  // During the reverse autologin request chain processing, this member saves
-  // the email of the google account that is being signed into.
-  std::string reverse_autologin_pending_email_;
-
-  mutable StringListPrefMember one_click_signin_rejected_email_list_;
 
   mutable scoped_refptr<MediaDeviceIDSalt> media_device_id_salt_;
 

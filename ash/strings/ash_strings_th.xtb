@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">เพิ่มบัญชีสำหรับ <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">ปิดใช้แป้นพิมพ์บนหน้าจออยู่</translation>
 <translation id="1057289296854808272">การหมุนเปิดอยู่ (แตะที่นี่เพื่อเปลี่ยนแปลง)</translation>
+<translation id="5548285847212963613">ส่วนขยาย &quot;<ph name="EXTENSION_NAME"/>&quot; สามารถช่วยในการเชื่อมต่อเครือข่ายนี้</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> กับ <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">ปุ่มแบบโอเวอร์โฟลว์</translation>
 <translation id="7904094684485781019">ผู้ดูแลระบบของบัญชีนี้ไม่อนุญาตการลงชื่อเข้าสู่ระบบพร้อมกันหลายบัญชี</translation>
@@ -61,6 +62,7 @@
 <translation id="1723752762323179280">กำลังออกจากเซสชัน</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">ใช่</translation>
+<translation id="4804818685124855865">ตัดการเชื่อมต่อ</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">ออกจากระบบ</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@
 <translation id="2761704814324807722">ถาดสถานะ เวลา <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">ล็อก</translation>
 <translation id="2805756323405976993">แอป</translation>
-<translation id="2313845391432982560">ส่วนขยาย &quot;<ph name="EXTENSION_NAME"/>&quot; สามารถกำหนดค่าเครือข่ายนี้ได้</translation>
 <translation id="2872961005593481000">ปิด</translation>
 <translation id="3433830597744061105">จัดการบัญชี</translation>
 <translation id="742594950370306541">ใช้กล้องถ่ายรูปอยู่</translation>

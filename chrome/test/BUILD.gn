@@ -183,10 +183,6 @@ source_set("test_support") {
     deps += [ "//ui/views:test_support" ]
   }
 
-  if (enable_background) {
-    defines += [ "ENABLE_BACKGROUND=1" ]
-  }
-
   if (enable_extensions) {
     deps += [
       "//chrome/common/extensions/api",
@@ -215,16 +211,22 @@ source_set("test_support_unit") {
   ]
 }
 
-if (!is_android && (!is_win || link_chrome_on_windows)) {
-  gypi_values = exec_script("//build/gypi_to_gn.py",
-                            [ rebase_path("../chrome_tests.gypi") ],
-                            "scope",
-                            [ "../chrome_tests.gypi" ])
+if (!is_android) {
+  import("//chrome/chrome_tests.gni")
+  import("//third_party/protobuf/proto_library.gni")
+
+  # GYP version: chrome/chrome_tests_unit.gypi:ipc_protobuf_message_test_proto
+  proto_library("test_proto") {
+    sources = [
+      "../common/safe_browsing/ipc_protobuf_message_test.proto",
+    ]
+  }
 
   test("interactive_ui_tests") {
-    sources = rebase_path(gypi_values.chrome_interactive_ui_test_sources,
-                          ".",
-                          "//chrome")
+    sources =
+        rebase_path(chrome_tests_gypi_values.chrome_interactive_ui_test_sources,
+                    ".",
+                    "//chrome")
 
     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
     ldflags = []
@@ -246,8 +248,6 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       "//net",
       "//net:net_resources",
       "//net:test_support",
-
-      #"//ppapi:ppapi_tests",  # TODO(GYP) this doesn't exist yet.
       "//skia",
       "//sync",
       "//testing/gmock",
@@ -258,19 +258,21 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       "//third_party/npapi",
       "//third_party/zlib",
       "//ui/base:test_support",
+      "//ui/resources:ui_test_pak",
       "//ui/web_dialogs:test_support",
     ]
 
     # Runtime dependencies
     datadeps = [
+      "//ppapi:ppapi_tests",
       "//third_party/mesa:osmesa",
     ]
 
     if (toolkit_views) {
-      sources +=
-          rebase_path(gypi_values.chrome_interactive_ui_test_views_sources,
-                      ".",
-                      "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_interactive_ui_test_views_sources,
+              ".",
+              "//chrome")
       deps += [
         "//ui/views",
         "//ui/views:test_support",
@@ -278,7 +280,7 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       ]
       if (!is_mac) {
         sources += rebase_path(
-                gypi_values.chrome_interactive_ui_test_views_non_mac_sources,
+                chrome_tests_gypi_values.chrome_interactive_ui_test_views_non_mac_sources,
                 ".",
                 "//chrome")
       }
@@ -306,16 +308,16 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
     } else {
       # Everything but desktop Linux.
       sources += rebase_path(
-              gypi_values.chrome_interactive_ui_test_non_desktop_linux_sources,
+              chrome_tests_gypi_values.chrome_interactive_ui_test_non_desktop_linux_sources,
               ".",
               "//chrome")
     }
 
     if (is_chromeos) {
-      sources +=
-          rebase_path(gypi_values.chrome_interactive_ui_test_chromeos_sources,
-                      ".",
-                      "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_interactive_ui_test_chromeos_sources,
+              ".",
+              "//chrome")
       sources += [ "../browser/notifications/login_state_notification_blocker_chromeos_browsertest.cc" ]
       sources -= [
         # Use only the _chromeos version on ChromeOS.
@@ -328,10 +330,10 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       ]
 
       if (enable_nacl) {
-        # TODO(GYP) this is also under a disable_nacl_untrusted==0 condition.
         deps += [
-          # '../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',  TODO(GYP)
-          # '../components/nacl.gyp:nacl_helper',  TODO(GYP)
+          "//native_client/src/trusted/service_runtime/linux:munge_nacl_helper_bootstrap",
+          "//components/nacl:nacl_helper",
+
           # '../components/nacl_nonsfi.gyp:nacl_helper_nonsfi',  TODO(GYP)
         ]
       }
@@ -344,15 +346,15 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       }
     } else {
       # ChromeOS doesn't use panels, everybody else does.
-      sources +=
-          rebase_path(gypi_values.chrome_interactive_ui_test_panels_sources,
-                      ".",
-                      "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_interactive_ui_test_panels_sources,
+              ".",
+              "//chrome")
 
       # TODO(tapted): Include on mac when views panels are ported.
       if (toolkit_views && !is_mac) {
         sources += rebase_path(
-                gypi_values.chrome_interactive_ui_test_panels_views_sources,
+                chrome_tests_gypi_values.chrome_interactive_ui_test_panels_views_sources,
                 ".",
                 "//chrome")
       }
@@ -361,15 +363,16 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
     if (!is_linux) {
       # Non-Linux platforms (Linux includes ChromeOS here).
       sources += rebase_path(
-              gypi_values.chrome_interactive_ui_test_non_linux_and_chromeos_sources,
+              chrome_tests_gypi_values.chrome_interactive_ui_test_non_linux_and_chromeos_sources,
               ".",
               "//chrome")
     }
 
     if (is_win) {
-      sources += rebase_path(gypi_values.chrome_interactive_ui_test_win_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_interactive_ui_test_win_sources,
+              ".",
+              "//chrome")
       sources += [ "$root_gen_dir/chrome/other_version.rc" ]
       deps += [
         "//chrome:chrome_version_resources",
@@ -380,9 +383,7 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
     }
 
     if (is_mac) {
-      datadeps = [
-        "//chrome",
-      ]
+      datadeps += [ "//chrome" ]
 
       # TODO(mark): We really want this for all non-static library targets, but
       # when we tried to pull it up to the common.gypi level, it broke other
@@ -402,22 +403,23 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
     }
 
     if (enable_app_list) {
-      sources +=
-          rebase_path(gypi_values.chrome_interactive_ui_test_app_list_sources,
-                      ".",
-                      "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_interactive_ui_test_app_list_sources,
+              ".",
+              "//chrome")
     }
 
     if (use_ash) {
-      sources += rebase_path(gypi_values.chrome_interactive_ui_test_ash_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_interactive_ui_test_ash_sources,
+              ".",
+              "//chrome")
       deps += [ "//ash:test_support" ]
     }
 
     if (enable_notifications) {
       sources += rebase_path(
-              gypi_values.chrome_interactive_ui_test_notifications_sources,
+              chrome_tests_gypi_values.chrome_interactive_ui_test_notifications_sources,
               ".",
               "//chrome")
 
@@ -450,9 +452,10 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
 
   source_set("sync_integration_test_support") {
     testonly = true
-    sources = rebase_path(gypi_values.test_support_sync_integration_sources,
-                          ".",
-                          "//chrome")
+    sources = rebase_path(
+            chrome_tests_gypi_values.test_support_sync_integration_sources,
+            ".",
+            "//chrome")
     public_deps = [
       "//chrome/browser",
     ]
@@ -492,104 +495,100 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
     }
   }
 
-  # TODO(GYP) when v8's GN build supports "//v8:d8" then enable the code
-  # controlled by this flag (and the flg itself can be deleted).
-  has_d8_definition = false
+  template("js2webui") {
+    action_name = target_name + "_action"
+    source_set_name = target_name
 
-  if (has_d8_definition) {
-    template("js2webui") {
-      action_name = target_name + "_action"
-      source_set_name = target_name
+    action_foreach(action_name) {
+      testonly = true
+      visibility = [ ":$source_set_name" ]
+      script = "//tools/gypv8sh.py"
 
-      action_foreach(action_name) {
-        testonly = true
-        visibility = [ ":$source_set_name" ]
-        script = "//tools/gypv8sh.py"
+      sources = invoker.sources
 
-        sources = invoker.sources
-
-        d8_path =
-            get_label_info("//v8:d8($host_toolchain)", "root_out_dir") + "/d8"
-        if (is_win) {
-          d8_path += ".exe"
-        }
-
-        input_js = [
-          "//chrome/third_party/mock4js/mock4js.js",
-          "//chrome/test/data/webui/test_api.js",
-          "//chrome/test/base/js2gtest.js",
-        ]
-        inputs = [ d8_path ] + input_js
-
-        outputs = [
-          "$target_gen_dir/{{source_name_part}}-gen.cc",
-          "$root_out_dir/test_data/chrome/{{source_root_relative_dir}}/{{source_file_part}}",
-        ]
-
-        args = [
-          # Need "./" for script to find binary (cur dir is not on path).
-          "./" + rebase_path(d8_path, root_build_dir),
-        ]
-        args += rebase_path(input_js, root_build_dir) + [ "webui" ]
-        if (v8_use_external_startup_data) {
-          args += [ "--external=y" ]
-        } else {
-          args += [ "--external=n" ]
-        }
-        args += [
-          "{{source}}",
-          "{{source_root_relative_dir}}/{{source_file_part}}",
-        ]
-        args += rebase_path(outputs, root_build_dir)
-
-        deps = [
-          "//v8:d8($host_toolchain)",
-        ]
+      d8_path =
+          get_label_info("//v8:d8($host_toolchain)", "root_out_dir") + "/d8"
+      if (is_win) {
+        d8_path += ".exe"
       }
 
-      source_set(source_set_name) {
-        testonly = true
-        if (defined(invoker.visibility)) {
-          visibility = invoker.visibility
-        }
-        sources = get_target_outputs(":$action_name")
-        defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
-        deps = [
-          ":$action_name",
+      input_js = [
+        "//chrome/third_party/mock4js/mock4js.js",
+        "//chrome/test/data/webui/test_api.js",
+        "//chrome/test/base/js2gtest.js",
+      ]
+      inputs = [ d8_path ] + input_js
 
-          # The generator implicitly makes includes from these targets.
-          "//testing/gmock",
-          "//testing/gtest",
-          "//url",
-        ]
-        if (defined(invoker.deps)) {
-          deps += invoker.deps
-        }
-      }
-    }
+      outputs = [
+        "$target_gen_dir/{{source_name_part}}-gen.cc",
+        "$root_out_dir/test_data/chrome/{{source_root_relative_dir}}/{{source_file_part}}",
+      ]
 
-    js2webui("browser_tests_js_webui") {
-      sources = rebase_path(gypi_values.chrome_browser_tests_webui_js_sources,
-                            ".",
-                            "//chrome")
-      if (is_chrome_branded) {
-        # crbug.com/230471
-        sources -= [ "data/webui/accessibility_audit_browsertest.js" ]
+      args = [
+        # Need "./" for script to find binary (cur dir is not on path).
+        "./" + rebase_path(d8_path, root_build_dir),
+      ]
+      args += rebase_path(input_js, root_build_dir) + [ "webui" ]
+      if (v8_use_external_startup_data) {
+        args += [ "--external=y" ]
+      } else {
+        args += [ "--external=n" ]
       }
-      if (!is_chromeos) {
-        sources -= [ "data/webui/certificate_viewer_dialog_test.js" ]
-      }
-      if (!enable_app_list) {
-        sources -= [ "../browser/ui/webui/app_list/start_page_browsertest.js" ]
-      }
-      if (!enable_supervised_users) {
-        sources -=
-            [ "../browser/ui/webui/downloads_ui_supervised_browsertest.js" ]
-      }
+      args += [
+        "{{source}}",
+        "{{source_root_relative_dir}}/{{source_file_part}}",
+      ]
+      args += rebase_path(outputs, root_build_dir)
+
       deps = [
-        "//skia",
+        "//v8:d8($host_toolchain)",
       ]
     }
+
+    source_set(source_set_name) {
+      testonly = true
+      if (defined(invoker.visibility)) {
+        visibility = invoker.visibility
+      }
+      sources = get_target_outputs(":$action_name")
+      defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+      deps = [
+        ":$action_name",
+
+        # The generator implicitly makes includes from these targets.
+        "//testing/gmock",
+        "//testing/gtest",
+        "//url",
+      ]
+      if (defined(invoker.deps)) {
+        deps += invoker.deps
+      }
+    }
+  }
+
+  js2webui("browser_tests_js_webui") {
+    sources = rebase_path(
+            chrome_tests_gypi_values.chrome_browser_tests_webui_js_sources,
+            ".",
+            "//chrome")
+    if (is_chrome_branded) {
+      # crbug.com/230471
+      sources -= [ "data/webui/accessibility_audit_browsertest.js" ]
+    }
+    if (!is_chromeos) {
+      sources -= [ "data/webui/certificate_viewer_dialog_test.js" ]
+    }
+    if (!enable_app_list) {
+      sources -= [ "../browser/ui/webui/app_list/start_page_browsertest.js" ]
+    }
+    if (!enable_supervised_users) {
+      sources -=
+          [ "../browser/ui/webui/downloads_ui_supervised_browsertest.js" ]
+    }
+    deps = [
+      "//chrome/browser/ui",
+      "//skia",
+    ]
   }
 
   test("browser_tests") {
@@ -597,13 +596,16 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       "base/browser_tests_main.cc",
     ]
     sources +=
-        rebase_path(gypi_values.chrome_browser_tests_sources, ".", "//chrome")
-    sources +=
-        rebase_path(gypi_values.chrome_browser_extensions_test_support_sources,
+        rebase_path(chrome_tests_gypi_values.chrome_browser_tests_sources,
                     ".",
                     "//chrome")
+    sources += rebase_path(
+            chrome_tests_gypi_values.chrome_browser_extensions_test_support_sources,
+            ".",
+            "//chrome")
 
     deps = [
+      ":browser_tests_js_webui",
       ":sync_integration_test_support",
       ":test_support",
       "//base",
@@ -616,6 +618,7 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       "//chrome:resources",
       "//chrome:strings",
       "//chrome/browser",
+      "//chrome/browser/resources:extension_resource_demo",
       "//chrome/common/extensions/api",
       "//chrome/renderer",
       "//components/autofill/content/browser:risk_proto",
@@ -658,15 +661,13 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       "//ui/web_dialogs:test_support",
       "//v8",
     ]
-    if (has_d8_definition) {
-      deps += [ ":browser_tests_js_webui" ]
-    }
 
     # Runtime dependencies
     data_deps = [
-      #"//ppapi:ppapi_tests",  # TODO(GYP) this doesn't exist yet.
+      "//ppapi:ppapi_tests",
+
       #'../remoting/remoting.gyp:remoting_browser_test_resources',  TODO(GYP)
-      #'../remoting/remoting.gyp:remoting_webapp_unittest',  TODO(GYP)
+      #'../remoting/remoting.gyp:remoting_webapp_unittests',  TODO(GYP)
       "//third_party/mesa:osmesa",
       "//third_party/widevine/cdm:widevine_test_license_server",
     ]
@@ -702,28 +703,32 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
           "nacl/pnacl_header_test.cc",
           "nacl/pnacl_header_test.h",
         ]
-        deps += [
-          #'test/data/nacl/nacl_test_data.gyp:*',  # TODO(GYP)
-          #'../ppapi/native_client/native_client.gyp:nacl_irt',  # TODO(GYP)
-          #'../ppapi/ppapi_nacl.gyp:ppapi_nacl_tests',  # TODO(GYP)
-          #'../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_background_keepalive',  # TODO(GYP)
-          #'../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_media_galleries',  # TODO(GYP)
-          #'../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_packaged_app',  # TODO(GYP)          #'../ppapi/ppapi_tests_mojo.gyp:ppapi_tests_mojo',  # TODO(GYP)
-          #'../ppapi/ppapi_tests_mojo.gyp:ppapi_tests_mojo',  # TODO(GYP)
+
+        # TODO(GYP): Make NaCl work in other configs and update the irt
+        # dependency as appropriate. We should probably push this
+        # dependency into ppapi/native_client so that clients don't need
+        # to know all of the different toolchain options.
+        assert(current_cpu == "x64")
+        data_deps += [
+          # "test/data/nacl:shared_test_files",  # TODO(GYP)
+          "//ppapi/native_client:nacl_irt(//native_client/build/toolchain/nacl:irt_x64)",
+          # "../ppapi/ppapi_nacl.gyp:ppapi_nacl_tests",  # TODO(GYP)
+          # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_background_keepalive",  # TODO(GYP)
+          # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_media_galleries",  # TODO(GYP)
+          # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_packaged_app",  # TODO(GYP)
+          # "../ppapi/ppapi_tests_mojo.gyp:ppapi_tests_mojo",  # TODO(GYP)
         ]
         if (is_chromeos) {
           sources += [ "//third_party/liblouis/nacl_wrapper/liblouis_wrapper_browsertest.cc" ]
+          deps += [
+            #'browser_chromeos',  TODO(GYP)
+            #'../third_party/liblouis/liblouis_nacl.gyp:liblouis_test_data',  TODO(GYP)
+          ]
         }
-        deps += [
-          #'browser_chromeos',  TODO(GYP)
-          #'../third_party/liblouis/liblouis_nacl.gyp:liblouis_test_data',  TODO(GYP)
-        ]
       }
       if (is_win || is_linux) {
         sources += [ "../browser/nacl_host/test/nacl_gdb_browsertest.cc" ]
-        deps += [
-          #'browser/nacl_host/test/mock_nacl_gdb.gyp:mock_nacl_gdb',  TODO(GYP)
-        ]
+        deps += [ "//chrome/browser/nacl_host/test:mock_nacl_gdb" ]
       }
       if (is_win) {
         # TODO(halyavin) NaCl on Windows can't open debug stub socket in
@@ -733,15 +738,13 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
           #'chrome.gyp:chrome_nacl_win64',  TODO(GYP)
         ]
       }
-      is(is_linux) {
+      if (is_linux) {
         deps += [
-          #'../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap', TODO(GYP)
-          #'../components/nacl.gyp:nacl_helper', TODO(GYP)
-          #'../components/nacl_nonsfi.gyp:nacl_helper_nonsfi', TODO(GYP)
+          "//native_client/src/trusted/service_runtime/linux:munge_nacl_helper_bootstrap",
+          "//components/nacl:nacl_helper",
+
+          # "//components/nacl_nonsfi.gyp:nacl_helper_nonsfi",  # TODO(GYP)
         ]
-      }
-      if (!is_chromeos) {
-        sources -= [ "test/data/chromeos/oobe_webui_browsertest.js" ]
       }
     }
     if (debug_devtools) {
@@ -754,21 +757,23 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       deps += [ "//ui/events:test_support" ]
     }
     if (toolkit_views) {
-      sources += rebase_path(gypi_values.chrome_browser_tests_views_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_views_sources,
+              ".",
+              "//chrome")
       deps += [ "//ui/views" ]
       if (!is_mac) {
-        sources +=
-            rebase_path(gypi_values.chrome_browser_tests_views_non_mac_sources,
-                        ".",
-                        "//chrome")
+        sources += rebase_path(
+                chrome_tests_gypi_values.chrome_browser_tests_views_non_mac_sources,
+                ".",
+                "//chrome")
       }
     }
     if (is_chromeos) {
-      sources += rebase_path(gypi_values.chrome_browser_tests_chromeos_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_chromeos_sources,
+              ".",
+              "//chrome")
       sources -= [
         "../../apps/load_and_launch_browsertest.cc",
         "../browser/printing/cloud_print/test/cloud_print_policy_browsertest.cc",
@@ -777,7 +782,6 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
         # chromeos does not support profile list avatar menu
         "../browser/profiles/profile_list_desktop_browsertest.cc",
         "../browser/service_process/service_process_control_browsertest.cc",
-        "../browser/signin/signin_browsertest.cc",
 
         # chromeos does not use cross-platform panels
         "../browser/ui/panels/panel_extension_browsertest.cc",
@@ -806,18 +810,20 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       }
     }
     if (enable_configuration_policy) {
-      sources += rebase_path(gypi_values.chrome_browser_tests_policy_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_policy_sources,
+              ".",
+              "//chrome")
     }
     if (enable_web_speech) {
-      sources += rebase_path(gypi_values.chrome_browser_tests_speech_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_speech_sources,
+              ".",
+              "//chrome")
     }
     if (safe_browsing_mode == 1) {
       sources += rebase_path(
-              gypi_values.chrome_browser_tests_full_safe_browsing_sources,
+              chrome_tests_gypi_values.chrome_browser_tests_full_safe_browsing_sources,
               ".",
               "//chrome")
       defines += [ "FULL_SAFE_BROWSING" ]
@@ -880,7 +886,6 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       ]
       sources += [
         "../browser/media_galleries/fileapi/iphoto_data_provider_browsertest.cc",
-        "../browser/renderer_host/chrome_render_widget_host_view_mac_delegate_browsertest.cc",
         "../browser/renderer_host/chrome_render_widget_host_view_mac_history_swiper_browsertest.mm",
         "../browser/spellchecker/spellcheck_message_filter_mac_browsertest.cc",
       ]
@@ -891,11 +896,13 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
 
         # TODO(rouslan): This test depends on the custom dictionary UI,
         # which is disabled on Mac.
-        "../browser/ui/webui/options/edit_dictionary_browsertest.js",
+        # TODO(GYP): This should be added somewhere first ...
+        # "../browser/ui/webui/options/edit_dictionary_browsertest.js",
 
         # TODO(rouslan): This test depends on hunspell and we cannot run it
         # on Mac, which does use hunspell by default.
-        "../browser/ui/webui/options/language_options_dictionary_download_browsertest.js",
+        # TODO(GYP): This should be added somewhere first ...
+        # "../browser/ui/webui/options/language_options_dictionary_download_browsertest.js",
 
         # ProcessSingletonMac doesn"t do anything.
         "../browser/process_singleton_browsertest.cc",
@@ -947,21 +954,22 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       ]
     }
     if (enable_app_list) {
-      sources += rebase_path(gypi_values.chrome_browser_tests_app_list_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_app_list_sources,
+              ".",
+              "//chrome")
     }
     if (enable_supervised_users) {
-      sources +=
-          rebase_path(gypi_values.chrome_browser_tests_supervised_user_sources,
-                      ".",
-                      "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_supervised_user_sources,
+              ".",
+              "//chrome")
     }
     if (enable_pepper_cdms) {
       # Runtime dependencies.
       data_deps += [
         "//media/cdm/ppapi:clearkeycdmadapter",
-        #'../third_party/widevine/cdm/widevine_cdm.gyp:widevinecdmadapter',  TODO(GYP)
+        "//third_party/widevine/cdm:adapter",
       ]
     }
     if (!enable_print_preview) {
@@ -998,17 +1006,11 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
     if (!enable_autofill_dialog || is_android || is_ios) {
       deps -= [ "//third_party/libaddressinput" ]
     }
-    if (use_ozone) {
-      sources -= [
-        # crbug.com/362698
-        "../browser/chromeos/input_method/input_method_engine_browsertests.cc",
-        "../browser/extensions/api/input_ime/input_ime_apitest_chromeos.cc",
-      ]
-    }
     if (enable_remoting) {
-      sources += rebase_path(gypi_values.chrome_browser_tests_remoting_sources,
-                             ".",
-                             "//chrome")
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_remoting_sources,
+              ".",
+              "//chrome")
       #deps += [ "//remoting:remoting_webapp" ]  TODO(GYP)
     }
     if (use_x11) {
@@ -1018,7 +1020,9 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
 
   test("sync_integration_tests") {
     sources =
-        rebase_path(gypi_values.sync_integration_tests_sources, ".", "//chrome")
+        rebase_path(chrome_tests_gypi_values.sync_integration_tests_sources,
+                    ".",
+                    "//chrome")
 
     # TODO(phajdan.jr): Only temporary, to make transition easier.
     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
@@ -1096,7 +1100,9 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
 
   test("sync_performance_tests") {
     sources =
-        rebase_path(gypi_values.sync_performance_tests_sources, ".", "//chrome")
+        rebase_path(chrome_tests_gypi_values.sync_performance_tests_sources,
+                    ".",
+                    "//chrome")
 
     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
 
@@ -1152,14 +1158,12 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       "//third_party/widevine/cdm:version_h",
     ]
 
-    # TODO(GYP) CDM adapter stuff.
-    #if (enable_pepper_cdms) {
-    #  deps += [
-    #    "//media/cdm/ppapi:clearkeycdmadapter",
-    #    "//ppapi/cpp",
-    #    "//third_party/widevine/cdm:adapter",
-    #  ]
-    #}
+    if (enable_pepper_cdms) {
+      data_deps = [
+        "//media/cdm/ppapi:clearkeycdmadapter",
+        "//third_party/widevine/cdm:adapter",
+      ]
+    }
   }
 
   unit_gypi_values = exec_script("//build/gypi_to_gn.py",
@@ -1292,11 +1296,7 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
         sources -= [ "../browser/ui/views/sync/one_click_signin_bubble_view_unittest.cc" ]
       }
     }
-    if (enable_nacl) {
-      sources += rebase_path(unit_gypi_values.chrome_unit_tests_nacl_sources,
-                             ".",
-                             "//chrome")
-    }
+
     if (enable_extensions) {
       sources +=
           rebase_path(unit_gypi_values.chrome_unit_tests_extensions_sources,
@@ -1440,15 +1440,17 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
               ".",
               "//chrome")
       defines += [ "FULL_SAFE_BROWSING" ]
-      if (is_chromeos) {
-        sources -= [ "../browser/safe_browsing/download_protection_service_unittest.cc" ]
-      } else if (is_android) {
+      deps += [ ":test_proto" ]
+      if (is_android) {
+        deps -= [ ":test_proto" ]
         sources -= [
           # Android doesn't support download feedbacks.
           "../browser/safe_browsing/download_feedback_service_unittest.cc",
           "../browser/safe_browsing/download_feedback_unittest.cc",
           "../browser/safe_browsing/download_protection_service_unittest.cc",
           "../browser/safe_browsing/two_phase_uploader_unittest.cc",
+          "../common/safe_browsing/ipc_protobuf_message_test_messages.h",
+          "../common/safe_browsing/ipc_protobuf_message_unittest.cc",
         ]
       }
     }
@@ -1486,6 +1488,9 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
                              ".",
                              "//chrome")
     }
+    if (enable_media_router) {
+      deps += [ "//chrome/browser/media/router:unit_tests" ]
+    }
     if (is_chromeos) {
       sources +=
           rebase_path(unit_gypi_values.chrome_unit_tests_chromeos_sources,
@@ -1502,6 +1507,10 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
         "../browser/ui/views/app_list/linux/app_list_linux_unittest.cc",
         "../browser/ui/views/frame/opaque_browser_frame_view_layout_unittest.cc",
       ]
+      if (use_ozone) {
+        # crbug.com/354036
+        sources -= [ "../browser/chromeos/events/event_rewriter_unittest.cc" ]
+      }
     }
     if (use_x11) {
       deps += [ "//ui/events/devices" ]
@@ -1552,7 +1561,7 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
       # on disk so it can pull from it.
       deps += [
         "//third_party/google_toolbox_for_mac",
-        "//third_party/ocmock",
+        # "//third_party/ocmock", # TODO(GYP)
       ]
 
       # TODO(mark): We really want this for all non-static library targets,
@@ -1667,12 +1676,82 @@ if (!is_android && (!is_win || link_chrome_on_windows)) {
                       "//chrome")
       deps += [ "//ui/app_list:test_support" ]
     }
-    if (use_ozone) {
-      # crbug.com/354036
-      sources -= [ "../browser/chromeos/events/event_rewriter_unittest.cc" ]
-    }
     if (!enable_plugin_installation) {
       sources -= [ "../browser/plugins/plugin_installer_unittest.cc" ]
+    }
+  }
+
+  if (is_linux && !is_chromeos) {
+    # TODO(GYP): Figure out which of these work and are needed on other
+    # platforms.
+    test("chrome_app_unittests") {
+      sources = [
+        "../app/chrome_watcher_client_unittest_win.cc",
+        "../app/chrome_watcher_client_win.cc",
+        "../app/chrome_watcher_command_line_unittest_win.cc",
+        "../app/chrome_watcher_command_line_win.cc",
+        "../app/delay_load_hook_unittest_win.cc",
+        "../app/delay_load_hook_win.cc",
+        "../app/delay_load_hook_win.h",
+        "../app/signature_validator_win.cc",
+        "../app/signature_validator_win.h",
+        "../app/signature_validator_win_unittest.cc",
+        "../common/crash_keys.cc",
+        "../common/crash_keys.h",
+      ]
+
+      deps = [
+        ":test_support",
+        "//chrome/browser",
+        "//chrome/child",
+        "//base/test:run_all_unittests",
+        "//base/test:test_support",
+      ]
+      if (cld_version == 0 || cld_version == 2) {
+        # Use whatever CLD2 data access mode that the
+        # application embedder is using.
+        deps += [ "//third_party/cld_2:cld2_platform_impl" ]
+      }
+    }
+
+    test("performance_browser_tests") {
+      sources = rebase_path(
+              chrome_tests_gypi_values.performance_browser_tests_sources,
+              ".",
+              "//chrome")
+
+      defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+
+      deps = [
+        ":test_support",
+        "//base",
+        "//base:i18n",
+        "//base/test:test_support",
+        "//chrome/browser",
+        "//chrome/renderer",
+        "//media/cast:test_support",
+        "//testing/gtest",
+        "//testing/perf",
+      ]
+
+      if (!is_win) {
+        sources -= [
+          "../app/chrome_command_ids.h",
+
+          #"../app/chrome_dll.rc",
+          #"../app/chrome_dll_resource.h",
+          "../app/chrome_version.rc.version",
+        ]
+      }
+      if (!is_mac) {
+        sources -= [ "perf/mach_ports_performancetest.cc" ]
+      }
+
+      if (cld_version == 0 || cld_version == 2) {
+        # Use whatever CLD2 data access mode that the
+        # application embedder is using.
+        deps += [ "//third_party/cld_2:cld2_platform_impl" ]
+      }
     }
   }
 }

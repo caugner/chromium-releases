@@ -281,9 +281,49 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrossSiteIframe) {
   EXPECT_TRUE(child->current_frame_host()->GetRenderWidgetHost());
 }
 
+// Tests OOPIF rendering by checking that the RWH of the iframe generates
+// OnSwapCompositorFrame message.
+#if defined(OS_ANDROID)
+// http://crbug.com/471850
+#define MAYBE_CompositorFrameSwapped DISABLED_CompositorFrameSwapped
+#else
+#define MAYBE_CompositorFrameSwapped CompositorFrameSwapped
+#endif
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       MAYBE_CompositorFrameSwapped) {
+  GURL main_url(
+      embedded_test_server()->GetURL("/frame_tree/page_with_one_frame.html"));
+  NavigateToURL(shell(), main_url);
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+  ASSERT_EQ(1U, root->child_count());
+
+  FrameTreeNode* child_node = root->child_at(0);
+  GURL site_url(embedded_test_server()->GetURL("baz.com", "/title1.html"));
+  EXPECT_EQ(site_url, child_node->current_url());
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            child_node->current_frame_host()->GetSiteInstance());
+  RenderWidgetHostViewBase* rwhv_base = static_cast<RenderWidgetHostViewBase*>(
+      child_node->current_frame_host()->GetRenderWidgetHost()->GetView());
+
+  // Wait for OnSwapCompositorFrame message.
+  while (rwhv_base->RendererFrameNumber() <= 0) {
+    // TODO(lazyboy): Find a better way to avoid sleeping like this. See
+    // http://crbug.com/405282 for details.
+    base::RunLoop run_loop;
+    base::MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(),
+        base::TimeDelta::FromMilliseconds(10));
+    run_loop.Run();
+  }
+}
+
 // Disabled for flaky crashing: crbug.com/446575
 IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
-                       DISABLED_NavigateRemoteFrame) {
+                       NavigateRemoteFrame) {
   GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
   NavigateToURL(shell(), main_url);
 
@@ -335,6 +375,77 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
   EXPECT_TRUE(observer.last_navigation_succeeded());
   EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
             child->current_frame_host()->GetSiteInstance());
+}
+
+#if defined(OS_WIN)
+// http://crbug.com/446575
+#define MAYBE_NavigateRemoteFrameToBlankAndDataURLs \
+    DISABLED_NavigateRemoteFrameToBlankAndDataURLs
+#else
+#define MAYBE_NavigateRemoteFrameToBlankAndDataURLs \
+    NavigateRemoteFrameToBlankAndDataURLs
+#endif
+
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       MAYBE_NavigateRemoteFrameToBlankAndDataURLs) {
+  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
+  NavigateToURL(shell(), main_url);
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root =
+      static_cast<WebContentsImpl*>(shell()->web_contents())->
+          GetFrameTree()->root();
+
+  TestNavigationObserver observer(shell()->web_contents());
+
+  // Load same-site page into iframe.
+  FrameTreeNode* child = root->child_at(0);
+  GURL http_url(embedded_test_server()->GetURL("/title1.html"));
+  NavigateFrameToURL(child, http_url);
+  EXPECT_EQ(http_url, observer.last_navigation_url());
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+
+  // Load cross-site page into iframe.
+  GURL url = embedded_test_server()->GetURL("foo.com", "/title2.html");
+  NavigateFrameToURL(root->child_at(0), url);
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+  EXPECT_EQ(url, observer.last_navigation_url());
+  ASSERT_EQ(2U, root->child_count());
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+
+  // Navigate iframe to a data URL. The navigation happens from a script in the
+  // parent frame, so the data URL should be committed in the same SiteInstance
+  // as the parent frame.
+  GURL data_url("data:text/html,dataurl");
+  NavigateIframeToURL(shell()->web_contents(), "test", data_url);
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+  EXPECT_EQ(data_url, observer.last_navigation_url());
+
+  // Ensure that we have navigated using the top level process.
+  EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+
+  // Load cross-site page into iframe.
+  url = embedded_test_server()->GetURL("bar.com", "/title2.html");
+  NavigateFrameToURL(root->child_at(0), url);
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+  EXPECT_EQ(url, observer.last_navigation_url());
+  ASSERT_EQ(2U, root->child_count());
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+
+  // Navigate iframe to about:blank. The navigation happens from a script in the
+  // parent frame, so it should be committed in the same SiteInstance as the
+  // parent frame.
+  GURL about_blank_url("about:blank");
+  NavigateIframeToURL(shell()->web_contents(), "test", about_blank_url);
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+  EXPECT_EQ(about_blank_url, observer.last_navigation_url());
+
+  // Ensure that we have navigated using the top level process.
+  EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
 }
 
 // This test checks that killing a renderer process of a remote frame
@@ -638,6 +749,40 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrashSubframe) {
   }
   EXPECT_EQ(0U, root->child_count());
   EXPECT_EQ(GURL(), root->current_url());
+}
+
+// When a new subframe is added, related SiteInstances that can reach the
+// subframe should create proxies for it (https://crbug.com/423587).  This test
+// checks that if A embeds B and later adds a new subframe A2, A2 gets a proxy
+// in B's process.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CreateProxiesForNewFrames) {
+  GURL main_url(
+      embedded_test_server()->GetURL("/frame_tree/page_with_one_frame.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+  ASSERT_EQ(1U, root->child_count());
+
+  // Make sure the frame starts out at the correct cross-site URL.
+  EXPECT_EQ(embedded_test_server()->GetURL("baz.com", "/title1.html"),
+            root->child_at(0)->current_url());
+
+  // Add a new child frame to the top-level frame.
+  RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 1);
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
+                            "window.domAutomationController.send("
+                            "    addFrame('data:text/html,foo'));"));
+  frame_observer.Wait();
+  ASSERT_EQ(2U, root->child_count());
+
+  // The new child frame should now have a proxy in first frame's process.
+  RenderFrameProxyHost* proxy =
+      root->child_at(1)->render_manager()->GetRenderFrameProxyHost(
+          root->child_at(0)->current_frame_host()->GetSiteInstance());
+  EXPECT_TRUE(proxy);
 }
 
 // TODO(nasko): Disable this test until out-of-process iframes is ready and the
@@ -1092,7 +1237,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, SandboxFlagsReplication) {
                                   "!window.open('data:text/html,dataurl'));",
                                   &success));
   EXPECT_TRUE(success);
-  EXPECT_EQ(Shell::windows().size(), 1u);
+  EXPECT_EQ(1u, Shell::windows().size());
 
   // Opening a popup in a frame whose parent is sandboxed should also fail.
   // Here, bar.com frame's sandboxed parent frame is a remote frame in
@@ -1104,7 +1249,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, SandboxFlagsReplication) {
       "!window.open('data:text/html,dataurl'));",
       &success));
   EXPECT_TRUE(success);
-  EXPECT_EQ(Shell::windows().size(), 1u);
+  EXPECT_EQ(1u, Shell::windows().size());
 
   // Same, but now try the case where bar.com frame's sandboxed parent is a
   // local frame in bar.com's process.
@@ -1115,7 +1260,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, SandboxFlagsReplication) {
       "!window.open('data:text/html,dataurl'));",
       &success));
   EXPECT_TRUE(success);
-  EXPECT_EQ(Shell::windows().size(), 1u);
+  EXPECT_EQ(1u, Shell::windows().size());
 
   // Check that foo.com frame's location.ancestorOrigins contains the correct
   // origin for the parent, which should be unaffected by sandboxing.
@@ -1145,12 +1290,252 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, SandboxFlagsReplication) {
       bottom_child->current_frame_host(),
       "window.domAutomationController.send(location.ancestorOrigins[0]);",
       &result));
-  EXPECT_EQ(result, "null");
+  EXPECT_EQ("null", result);
   EXPECT_TRUE(ExecuteScriptAndExtractString(
       bottom_child->current_frame_host(),
       "window.domAutomationController.send(location.ancestorOrigins[1]);",
       &result));
-  EXPECT_EQ(result + "/", main_url.GetOrigin().spec());
+  EXPECT_EQ(main_url.GetOrigin().spec(), result + "/");
+}
+
+// Check that dynamic updates to iframe sandbox flags are propagated correctly.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DynamicSandboxFlags) {
+  GURL main_url(
+      embedded_test_server()->GetURL("/frame_tree/page_with_two_frames.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  TestNavigationObserver observer(shell()->web_contents());
+  ASSERT_EQ(2U, root->child_count());
+
+  // Make sure first frame starts out at the correct cross-site page.
+  EXPECT_EQ(embedded_test_server()->GetURL("bar.com", "/title1.html"),
+            root->child_at(0)->current_url());
+
+  // Navigate second frame to another cross-site page.
+  GURL baz_url(embedded_test_server()->GetURL("baz.com", "/title1.html"));
+  NavigateFrameToURL(root->child_at(1), baz_url);
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+  EXPECT_EQ(baz_url, observer.last_navigation_url());
+
+  // Both frames should not be sandboxed to start with.
+  EXPECT_EQ(SandboxFlags::NONE,
+            root->child_at(0)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(SandboxFlags::NONE, root->child_at(0)->effective_sandbox_flags());
+  EXPECT_EQ(SandboxFlags::NONE,
+            root->child_at(1)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(SandboxFlags::NONE, root->child_at(1)->effective_sandbox_flags());
+
+  // Dynamically update sandbox flags for the first frame.
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
+                            "window.domAutomationController.send("
+                            "document.querySelector('iframe').sandbox="
+                            "'allow-scripts');"));
+
+  // Check that updated sandbox flags are propagated to browser process.
+  // The new flags should be set in current_replication_state(), while
+  // effective_sandbox_flags() should still reflect the old flags, because
+  // sandbox flag updates take place only after navigations. "allow-scripts"
+  // resets both SandboxFlags::Scripts and SandboxFlags::AutomaticFeatures bits
+  // per blink::parseSandboxPolicy().
+  SandboxFlags expected_flags = SandboxFlags::ALL & ~SandboxFlags::SCRIPTS &
+                                ~SandboxFlags::AUTOMATIC_FEATURES;
+  EXPECT_EQ(expected_flags,
+            root->child_at(0)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(SandboxFlags::NONE, root->child_at(0)->effective_sandbox_flags());
+
+  // Navigate the first frame to a page on the same site.  The new sandbox
+  // flags should take effect. The new page has a child frame, so use
+  // TestFrameNavigationObserver to wait for it to be loaded.
+  TestFrameNavigationObserver frame_observer(root->child_at(0), 2);
+  GURL bar_url(
+      embedded_test_server()->GetURL("bar.com", "/frame_tree/2-4.html"));
+  NavigateFrameToURL(root->child_at(0), bar_url);
+  frame_observer.Wait();
+  EXPECT_EQ(bar_url, root->child_at(0)->current_url());
+  ASSERT_EQ(1U, root->child_at(0)->child_count());
+
+  // Confirm that the browser process has updated the frame's current sandbox
+  // flags.
+  EXPECT_EQ(expected_flags,
+            root->child_at(0)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(expected_flags, root->child_at(0)->effective_sandbox_flags());
+
+  // Opening a popup in the now-sandboxed frame should fail.
+  bool success = false;
+  EXPECT_TRUE(
+      ExecuteScriptAndExtractBool(root->child_at(0)->current_frame_host(),
+                                  "window.domAutomationController.send("
+                                  "!window.open('data:text/html,dataurl'));",
+                                  &success));
+  EXPECT_TRUE(success);
+  EXPECT_EQ(1u, Shell::windows().size());
+
+  // Navigate the child of the now-sandboxed frame to a page on baz.com.  The
+  // child should inherit the latest sandbox flags from its parent frame, which
+  // is currently a proxy in baz.com's renderer process.  This checks that the
+  // proxies of |root->child_at(0)| were also updated with the latest sandbox
+  // flags.
+  GURL baz_child_url(embedded_test_server()->GetURL("baz.com", "/title2.html"));
+  NavigateFrameToURL(root->child_at(0)->child_at(0), baz_child_url);
+  EXPECT_TRUE(observer.last_navigation_succeeded());
+  EXPECT_EQ(baz_child_url, observer.last_navigation_url());
+
+  // Opening a popup in the child of a sandboxed frame should fail.
+  success = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      root->child_at(0)->child_at(0)->current_frame_host(),
+      "window.domAutomationController.send("
+      "!window.open('data:text/html,dataurl'));",
+      &success));
+  EXPECT_TRUE(success);
+  EXPECT_EQ(1u, Shell::windows().size());
+}
+
+// Check that dynamic updates to iframe sandbox flags are propagated correctly.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       DynamicSandboxFlagsRemoteToLocal) {
+  GURL main_url(
+      embedded_test_server()->GetURL("/frame_tree/page_with_two_frames.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  TestNavigationObserver observer(shell()->web_contents());
+  ASSERT_EQ(2U, root->child_count());
+
+  // Make sure the two frames starts out at correct URLs.
+  EXPECT_EQ(embedded_test_server()->GetURL("bar.com", "/title1.html"),
+            root->child_at(0)->current_url());
+  EXPECT_EQ(embedded_test_server()->GetURL("/title1.html"),
+            root->child_at(1)->current_url());
+
+  // Update the second frame's sandbox flags.
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
+                            "window.domAutomationController.send("
+                            "document.querySelectorAll('iframe')[1].sandbox="
+                            "'allow-scripts');"));
+
+  // Check that the current sandbox flags are updated but the effective
+  // sandbox flags are not.
+  SandboxFlags expected_flags = SandboxFlags::ALL & ~SandboxFlags::SCRIPTS &
+                                ~SandboxFlags::AUTOMATIC_FEATURES;
+  EXPECT_EQ(expected_flags,
+            root->child_at(1)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(SandboxFlags::NONE, root->child_at(1)->effective_sandbox_flags());
+
+  // Navigate the second subframe to a page on bar.com.  This will trigger a
+  // remote-to-local frame swap in bar.com's process.  The target page has
+  // another frame, so use TestFrameNavigationObserver to wait for all frames
+  // to be loaded.
+  TestFrameNavigationObserver frame_observer(root->child_at(1), 2);
+  GURL bar_url(embedded_test_server()->GetURL(
+      "bar.com", "/frame_tree/page_with_one_frame.html"));
+  NavigateFrameToURL(root->child_at(1), bar_url);
+  frame_observer.Wait();
+  EXPECT_EQ(bar_url, root->child_at(1)->current_url());
+  ASSERT_EQ(1U, root->child_at(1)->child_count());
+
+  // Confirm that the browser process has updated the current sandbox flags.
+  EXPECT_EQ(expected_flags,
+            root->child_at(1)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(expected_flags, root->child_at(1)->effective_sandbox_flags());
+
+  // Opening a popup in the sandboxed second frame should fail.
+  bool success = false;
+  EXPECT_TRUE(
+      ExecuteScriptAndExtractBool(root->child_at(1)->current_frame_host(),
+                                  "window.domAutomationController.send("
+                                  "!window.open('data:text/html,dataurl'));",
+                                  &success));
+  EXPECT_TRUE(success);
+  EXPECT_EQ(1u, Shell::windows().size());
+
+  // Make sure that the child frame inherits the sandbox flags of its
+  // now-sandboxed parent frame.
+  success = false;
+  EXPECT_TRUE(ExecuteScriptAndExtractBool(
+      root->child_at(1)->child_at(0)->current_frame_host(),
+      "window.domAutomationController.send("
+      "!window.open('data:text/html,dataurl'));",
+      &success));
+  EXPECT_TRUE(success);
+  EXPECT_EQ(1u, Shell::windows().size());
+}
+
+// Check that dynamic updates to iframe sandbox flags are propagated correctly.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       DynamicSandboxFlagsRendererInitiatedNavigation) {
+  GURL main_url(
+      embedded_test_server()->GetURL("/frame_tree/page_with_one_frame.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  TestNavigationObserver observer(shell()->web_contents());
+  ASSERT_EQ(1U, root->child_count());
+
+  // Make sure the frame starts out at the correct cross-site page.
+  EXPECT_EQ(embedded_test_server()->GetURL("baz.com", "/title1.html"),
+            root->child_at(0)->current_url());
+
+  // The frame should not be sandboxed to start with.
+  EXPECT_EQ(SandboxFlags::NONE,
+            root->child_at(0)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(SandboxFlags::NONE, root->child_at(0)->effective_sandbox_flags());
+
+  // Dynamically update the frame's sandbox flags.
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
+                            "window.domAutomationController.send("
+                            "document.querySelector('iframe').sandbox="
+                            "'allow-scripts');"));
+
+  // Check that updated sandbox flags are propagated to browser process.
+  // The new flags should be set in current_replication_state(), while
+  // effective_sandbox_flags() should still reflect the old flags, because
+  // sandbox flag updates take place only after navigations. "allow-scripts"
+  // resets both SandboxFlags::Scripts and SandboxFlags::AutomaticFeatures bits
+  // per blink::parseSandboxPolicy().
+  SandboxFlags expected_flags = SandboxFlags::ALL & ~SandboxFlags::SCRIPTS &
+                                ~SandboxFlags::AUTOMATIC_FEATURES;
+  EXPECT_EQ(expected_flags,
+            root->child_at(0)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(SandboxFlags::NONE, root->child_at(0)->effective_sandbox_flags());
+
+  // Perform a renderer-initiated same-site navigation in the first frame. The
+  // new sandbox flags should take effect.
+  TestFrameNavigationObserver frame_observer(root->child_at(0));
+  ASSERT_TRUE(ExecuteScript(root->child_at(0)->current_frame_host(),
+                            "window.location.href='/title2.html'"));
+  frame_observer.Wait();
+  EXPECT_EQ(embedded_test_server()->GetURL("baz.com", "/title2.html"),
+            root->child_at(0)->current_url());
+
+  // Confirm that the browser process has updated the frame's current sandbox
+  // flags.
+  EXPECT_EQ(expected_flags,
+            root->child_at(0)->current_replication_state().sandbox_flags);
+  EXPECT_EQ(expected_flags, root->child_at(0)->effective_sandbox_flags());
+
+  // Opening a popup in the now-sandboxed frame should fail.
+  bool success = false;
+  EXPECT_TRUE(
+      ExecuteScriptAndExtractBool(root->child_at(0)->current_frame_host(),
+                                  "window.domAutomationController.send("
+                                  "!window.open('data:text/html,dataurl'));",
+                                  &success));
+  EXPECT_TRUE(success);
+  EXPECT_EQ(1u, Shell::windows().size());
 }
 
 // Verify that a child frame can retrieve the name property set by its parent.
@@ -1182,106 +1567,65 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, WindowNameReplication) {
   EXPECT_TRUE(ExecuteScriptAndExtractString(
       root->child_at(0)->current_frame_host(),
       "window.domAutomationController.send(window.name);", &result));
-  EXPECT_EQ(result, "3-1-name");
+  EXPECT_EQ("3-1-name", result);
 }
 
-// TODO(lfg): Merge the test below with NavigateRemoteFrame test.
-// TODO(lfg): Disabled because this triggers http://crbug.com/433012, and since
-// the renderer process crashes, it causes the title watcher to never return.
-// Alternatively, this could also be fixed if we could use NavigateIframeToURL
-// and classified the navigation as MANUAL_SUBFRAME (http://crbug.com/441863) or
-// if we waited for DidStopLoading (currently broken -- see comment in
-// NavigateIframeToURL).
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
-                       DISABLED_NavigateRemoteToDataURL) {
-  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
-  NavigateToURL(shell(), main_url);
+// Verify that dynamic updates to a frame's window.name propagate to the
+// frame's proxies, so that the latest frame names can be used in navigations.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DynamicWindowName) {
+  GURL main_url(embedded_test_server()->GetURL("/frame_tree/2-4.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
                             ->GetFrameTree()
                             ->root();
-
   TestNavigationObserver observer(shell()->web_contents());
 
   // Load cross-site page into iframe.
-  GURL url = embedded_test_server()->GetURL("foo.com", "/title1.html");
-  NavigateFrameToURL(root->child_at(0), url);
+  GURL frame_url =
+      embedded_test_server()->GetURL("foo.com", "/frame_tree/3-1.html");
+  NavigateFrameToURL(root->child_at(0), frame_url);
   EXPECT_TRUE(observer.last_navigation_succeeded());
-  EXPECT_EQ(url, observer.last_navigation_url());
+  EXPECT_EQ(frame_url, observer.last_navigation_url());
 
-  // Ensure that we have created a new process for the subframe.
-  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
-            root->child_at(0)->current_frame_host()->GetSiteInstance());
+  // Browser process should know the child frame's original window.name
+  // specified in the iframe element.
+  EXPECT_EQ(root->child_at(0)->frame_name(), "3-1-name");
 
-  // Navigate iframe to a data URL. The navigation happens from a script in the
-  // parent frame, so the data URL should be committed in the same SiteInstance
-  // as the parent frame.
-  GURL data_url("data:text/html,dataurl");
+  // Update the child frame's window.name.
+  EXPECT_TRUE(ExecuteScript(root->child_at(0)->current_frame_host(),
+                            "window.domAutomationController.send("
+                            "window.name = 'updated-name');"));
+
+  // The change should propagate to the browser process.
+  EXPECT_EQ(root->child_at(0)->frame_name(), "updated-name");
+
+  // The proxy in the parent process should also receive the updated name.
+  // Check that it can reference the child frame by its new name.
+  bool success = false;
+  EXPECT_TRUE(
+      ExecuteScriptAndExtractBool(shell()->web_contents(),
+                                  "window.domAutomationController.send("
+                                  "frames['updated-name'] == frames[0]);",
+                                  &success));
+  EXPECT_TRUE(success);
+
+  // Issue a renderer-initiated navigation from the root frame to the child
+  // frame using the frame's name. Make sure correct frame is navigated.
+  //
+  // TODO(alexmos): When blink::createWindow is refactored to handle
+  // RemoteFrames, this should also be tested via window.open(url, frame_name)
+  // and a more complicated frame hierarchy (https://crbug.com/463742)
+  TestFrameNavigationObserver frame_observer(root->child_at(0));
+  GURL foo_url(embedded_test_server()->GetURL("foo.com", "/title1.html"));
   std::string script = base::StringPrintf(
-      "setTimeout(function() {"
-      "var iframe = document.getElementById('test');"
-      "iframe.onload = function() { document.title = 'LOADED'; };"
-      "iframe.src=\"%s\";"
-      "},0);",
-      data_url.spec().c_str());
-  base::string16 passed_string(base::UTF8ToUTF16("LOADED"));
-  TitleWatcher title_watcher(shell()->web_contents(), passed_string);
+      "window.domAutomationController.send("
+      "frames['updated-name'].location.href = '%s');",
+      foo_url.spec().c_str());
   EXPECT_TRUE(ExecuteScript(shell()->web_contents(), script));
-  EXPECT_EQ(title_watcher.WaitAndGetTitle(), passed_string);
-  EXPECT_TRUE(observer.last_navigation_succeeded());
-  EXPECT_EQ(data_url, observer.last_navigation_url());
-
-  // Ensure that we have navigated using the top level process.
-  EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
-            root->child_at(0)->current_frame_host()->GetSiteInstance());
-}
-
-// TODO(lfg): Merge the test below with NavigateRemoteFrame test.
-// Disabled due to the same reason as NavigateRemoteToDataURL.
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
-                       DISABLED_NavigateRemoteToBlankURL) {
-  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
-  NavigateToURL(shell(), main_url);
-
-  // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
-
-  TestNavigationObserver observer(shell()->web_contents());
-
-  // Load cross-site page into iframe.
-  GURL url = embedded_test_server()->GetURL("foo.com", "/title1.html");
-  NavigateFrameToURL(root->child_at(0), url);
-  EXPECT_TRUE(observer.last_navigation_succeeded());
-  EXPECT_EQ(url, observer.last_navigation_url());
-
-  // Ensure that we have created a new process for the subframe.
-  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
-            root->child_at(0)->current_frame_host()->GetSiteInstance());
-
-  // Navigate iframe to about:blank. The navigation happens from a script in the
-  // parent frame, so it should be committed in the same SiteInstance as the
-  // parent frame.
-  GURL about_blank_url("about:blank");
-  std::string script = base::StringPrintf(
-      "setTimeout(function() {"
-      "var iframe = document.getElementById('test');"
-      "iframe.onload = function() { document.title = 'LOADED'; };"
-      "iframe.src=\"%s\";"
-      "},0);",
-      about_blank_url.spec().c_str());
-  base::string16 passed_string(base::UTF8ToUTF16("LOADED"));
-  TitleWatcher title_watcher(shell()->web_contents(), passed_string);
-  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), script));
-  EXPECT_EQ(title_watcher.WaitAndGetTitle(), passed_string);
-  EXPECT_TRUE(observer.last_navigation_succeeded());
-  EXPECT_EQ(about_blank_url, observer.last_navigation_url());
-
-  // Ensure that we have navigated using the top level process.
-  EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
-            root->child_at(0)->current_frame_host()->GetSiteInstance());
+  frame_observer.Wait();
+  EXPECT_EQ(foo_url, root->child_at(0)->current_url());
 }
 
 // Ensure that navigating subframes in --site-per-process mode properly fires
@@ -1351,6 +1695,40 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
   EXPECT_EQ(root->current_frame_host()->GetSiteInstance(),
             node3->current_frame_host()->GetSiteInstance());
   EXPECT_TRUE(node3->current_frame_host()->IsRenderFrameLive());
+}
+
+// Verify that load events for iframe elements work when the child frame is
+// out-of-process.  In such cases, the load event is forwarded from the child
+// frame to the parent frame via the browser process.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, LoadEventForwarding) {
+  // Load a page with a cross-site frame.  The parent page has an onload
+  // handler in the iframe element that appends "LOADED" to the document title.
+  {
+    GURL main_url(
+        embedded_test_server()->GetURL("/frame_with_load_event.html"));
+    base::string16 expected_title(base::UTF8ToUTF16("LOADED"));
+    TitleWatcher title_watcher(shell()->web_contents(), expected_title);
+    EXPECT_TRUE(NavigateToURL(shell(), main_url));
+    EXPECT_EQ(title_watcher.WaitAndGetTitle(), expected_title);
+  }
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  // Load another cross-site page into the iframe and check that the load event
+  // is fired.
+  {
+    GURL foo_url(embedded_test_server()->GetURL("foo.com", "/title1.html"));
+    base::string16 expected_title(base::UTF8ToUTF16("LOADEDLOADED"));
+    TitleWatcher title_watcher(shell()->web_contents(), expected_title);
+    TestNavigationObserver observer(shell()->web_contents());
+    NavigateFrameToURL(root->child_at(0), foo_url);
+    EXPECT_TRUE(observer.last_navigation_succeeded());
+    EXPECT_EQ(foo_url, observer.last_navigation_url());
+    EXPECT_EQ(title_watcher.WaitAndGetTitle(), expected_title);
+  }
 }
 
 }  // namespace content

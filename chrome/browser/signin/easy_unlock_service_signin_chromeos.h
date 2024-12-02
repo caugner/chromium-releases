@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_types.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
@@ -24,6 +25,10 @@ class EasyUnlockServiceSignin : public EasyUnlockService,
  public:
   explicit EasyUnlockServiceSignin(Profile* profile);
   ~EasyUnlockServiceSignin() override;
+
+  // Sets |user_id| as the current user of the service. Note this does
+  // not change the focused user on the login screen.
+  void SetCurrentUser(const std::string& user_id);
 
  private:
   // The load state of a user's cryptohome key data.
@@ -78,6 +83,7 @@ class EasyUnlockServiceSignin : public EasyUnlockService,
   void ShutdownInternal() override;
   bool IsAllowedInternal() const override;
   void OnWillFinalizeUnlock(bool success) override;
+  void OnSuspendDone() override;
 
   // ScreenlockBridge::Observer implementation:
   void OnScreenDidLock(
@@ -118,6 +124,9 @@ class EasyUnlockServiceSignin : public EasyUnlockService,
   // Whether the service has been successfully initialized, and has not been
   // shut down.
   bool service_active_;
+
+  // The timestamp for the most recent time when a user pod was focused.
+  base::TimeTicks user_pod_last_focused_timestamp_;
 
   base::WeakPtrFactory<EasyUnlockServiceSignin> weak_ptr_factory_;
 

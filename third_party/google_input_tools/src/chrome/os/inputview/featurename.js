@@ -20,7 +20,8 @@ goog.provide('i18n.input.chrome.inputview.FeatureName');
  */
 i18n.input.chrome.inputview.FeatureName = {
   // List all features.
-  GESTURE_EDITTING: 'gesture-editting',
+  GESTURE_SELECTION: 'gestureselection',
+  GESTURE_DELETION: 'gesturedeletion',
   GESTURE_TYPING: 'gesturetyping',
   OPTIMIZED_LAYOUTS: 'optimized-layouts',
   EXPERIMENTAL: 'experimental'

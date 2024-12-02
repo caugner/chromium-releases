@@ -503,7 +503,9 @@ class TestAudioObserver : public chromeos::CrasAudioHandler::AudioObserver {
 
  protected:
   // chromeos::CrasAudioHandler::AudioObserver overrides.
-  void OnOutputMuteChanged() override { ++output_mute_changed_count_; }
+  void OnOutputMuteChanged(bool /* mute_on */) override {
+    ++output_mute_changed_count_;
+  }
 
  private:
   int output_mute_changed_count_;
@@ -525,7 +527,7 @@ class WebContentsLoadedOrDestroyedWatcher
 
   // Overridden WebContentsObserver methods.
   void WebContentsDestroyed() override;
-  void DidStopLoading(content::RenderViewHost* render_view_host) override;
+  void DidStopLoading() override;
 
  private:
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
@@ -549,8 +551,7 @@ void WebContentsLoadedOrDestroyedWatcher::WebContentsDestroyed() {
   message_loop_runner_->Quit();
 }
 
-void WebContentsLoadedOrDestroyedWatcher::DidStopLoading(
-    content::RenderViewHost* render_view_host) {
+void WebContentsLoadedOrDestroyedWatcher::DidStopLoading() {
   message_loop_runner_->Quit();
 }
 
@@ -739,26 +740,32 @@ class PolicyTest : public InProcessBrowserTest {
   }
 
   void UninstallExtension(const std::string& id, bool expect_success) {
-    content::WindowedNotificationObserver observer(
-        expect_success
-            ? extensions::NOTIFICATION_EXTENSION_UNINSTALLED_DEPRECATED
-            : extensions::NOTIFICATION_EXTENSION_UNINSTALL_NOT_ALLOWED,
-        content::NotificationService::AllSources());
-    extension_service()->UninstallExtension(
-        id,
-        extensions::UNINSTALL_REASON_FOR_TESTING,
-        base::Bind(&base::DoNothing),
-        NULL);
-    observer.Wait();
+    if (expect_success) {
+      extensions::TestExtensionRegistryObserver observer(
+          extensions::ExtensionRegistry::Get(browser()->profile()));
+      extension_service()->UninstallExtension(
+          id, extensions::UNINSTALL_REASON_FOR_TESTING,
+          base::Bind(&base::DoNothing), NULL);
+      observer.WaitForExtensionUninstalled();
+    } else {
+      content::WindowedNotificationObserver observer(
+          extensions::NOTIFICATION_EXTENSION_UNINSTALL_NOT_ALLOWED,
+          content::NotificationService::AllSources());
+      extension_service()->UninstallExtension(
+          id,
+          extensions::UNINSTALL_REASON_FOR_TESTING,
+          base::Bind(&base::DoNothing),
+          NULL);
+      observer.Wait();
+    }
   }
 
   void DisableExtension(const std::string& id) {
-    content::WindowedNotificationObserver observer(
-        extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
-        content::NotificationService::AllSources());
+    extensions::TestExtensionRegistryObserver observer(
+        extensions::ExtensionRegistry::Get(browser()->profile()));
     extension_service()->DisableExtension(id,
                                           extensions::Extension::DISABLE_NONE);
-    observer.Wait();
+    observer.WaitForExtensionUnloaded();
   }
 
   void UpdateProviderPolicy(const PolicyMap& policy) {
@@ -1795,23 +1802,23 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallForcelist) {
   // have been loaded.
   extensions::ProcessManager* manager =
       extensions::ProcessManager::Get(browser()->profile());
-  extensions::ProcessManager::ViewSet all_views = manager->GetAllViews();
-  for (extensions::ProcessManager::ViewSet::const_iterator iter =
-           all_views.begin();
-       iter != all_views.end();) {
-    if (!(*iter)->IsLoading()) {
+  extensions::ProcessManager::FrameSet all_frames = manager->GetAllFrames();
+  for (extensions::ProcessManager::FrameSet::const_iterator iter =
+           all_frames.begin();
+       iter != all_frames.end();) {
+    content::WebContents* web_contents =
+        content::WebContents::FromRenderFrameHost(*iter);
+    ASSERT_TRUE(web_contents);
+    if (!web_contents->IsLoading()) {
       ++iter;
     } else {
-      content::WebContents* web_contents =
-          content::WebContents::FromRenderViewHost(*iter);
-      ASSERT_TRUE(web_contents);
       WebContentsLoadedOrDestroyedWatcher(web_contents).Wait();
 
       // Test activity may have modified the set of extension processes during
       // message processing, so re-start the iteration to catch added/removed
       // processes.
-      all_views = manager->GetAllViews();
-      iter = all_views.begin();
+      all_frames = manager->GetAllFrames();
+      iter = all_frames.begin();
     }
   }
 
@@ -3600,31 +3607,6 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, NativeMessagingWhitelist) {
       prefs, "host.name"));
   EXPECT_FALSE(extensions::MessageService::IsNativeMessagingHostAllowed(
       prefs, "other.host.name"));
-}
-
-IN_PROC_BROWSER_TEST_F(PolicyTest,
-                       EnableDeprecatedWebPlatformFeatures_ShowModalDialog) {
-  base::ListValue enabled_features;
-  enabled_features.Append(new base::StringValue(
-      "ShowModalDialog_EffectiveUntil20150430"));
-  PolicyMap policies;
-  policies.Set(key::kEnableDeprecatedWebPlatformFeatures,
-               POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER,
-               enabled_features.DeepCopy(),
-               NULL);
-  UpdateProviderPolicy(policies);
-
-  // Policy only takes effect on new browsers, not existing browsers, so create
-  // a new browser.
-  Browser* browser2 = CreateBrowser(browser()->profile());
-  ui_test_utils::NavigateToURL(browser2, GURL(url::kAboutBlankURL));
-  bool result = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      browser2->tab_strip_model()->GetActiveWebContents(),
-      "domAutomationController.send(window.showModalDialog !== undefined);",
-      &result));
-  EXPECT_TRUE(result);
 }
 
 #endif  // !defined(CHROME_OS)

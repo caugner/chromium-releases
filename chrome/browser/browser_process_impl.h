@@ -86,6 +86,7 @@ class BrowserProcessImpl : public BrowserProcess,
   PrefService* local_state() override;
   net::URLRequestContextGetter* system_request_context() override;
   chrome_variations::VariationsService* variations_service() override;
+  PromoResourceService* promo_resource_service() override;
   BrowserProcessPlatformPart* platform_part() override;
   extensions::EventRouterForwarder* extension_event_router_forwarder() override;
   NotificationUIManager* notification_ui_manager() override;
@@ -124,7 +125,6 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   ChromeNetLog* net_log() override;
-  prerender::PrerenderTracker* prerender_tracker() override;
   component_updater::ComponentUpdateService* component_updater() override;
   CRLSetFetcher* crl_set_fetcher() override;
   component_updater::PnaclComponentInstaller* pnacl_component_installer()
@@ -252,10 +252,6 @@ class BrowserProcessImpl : public BrowserProcess,
 
   // Lives here so can safely log events on shutdown.
   scoped_ptr<ChromeNetLog> net_log_;
-
-  // Ordered before resource_dispatcher_host_delegate_ due to destruction
-  // ordering.
-  scoped_ptr<prerender::PrerenderTracker> prerender_tracker_;
 
   scoped_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;

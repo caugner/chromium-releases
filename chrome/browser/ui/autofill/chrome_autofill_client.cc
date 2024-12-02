@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
@@ -106,7 +107,8 @@ PrefService* ChromeAutofillClient::GetPrefs() {
 IdentityProvider* ChromeAutofillClient::GetIdentityProvider() {
   if (!identity_provider_) {
     Profile* profile =
-        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+        Profile::FromBrowserContext(web_contents()->GetBrowserContext())
+            ->GetOriginalProfile();
     LoginUIService* login_service = nullptr;
 #if !defined(OS_ANDROID)
     login_service = LoginUIServiceFactory::GetForProfile(profile);
@@ -118,6 +120,10 @@ IdentityProvider* ChromeAutofillClient::GetIdentityProvider() {
   }
 
   return identity_provider_.get();
+}
+
+rappor::RapporService* ChromeAutofillClient::GetRapporService() {
+  return g_browser_process->rappor_service();
 }
 
 void ChromeAutofillClient::ShowAutofillSettings() {
@@ -136,8 +142,8 @@ void ChromeAutofillClient::ShowUnmaskPrompt(
   unmask_controller_.ShowPrompt(card, delegate);
 }
 
-void ChromeAutofillClient::OnUnmaskVerificationResult(bool success) {
-  unmask_controller_.OnVerificationResult(success);
+void ChromeAutofillClient::OnUnmaskVerificationResult(GetRealPanResult result) {
+  unmask_controller_.OnVerificationResult(result);
 }
 
 void ChromeAutofillClient::ConfirmSaveCreditCard(
@@ -259,14 +265,16 @@ void ChromeAutofillClient::OnZoomChanged(
   HideAutofillPopup();
 }
 
-void ChromeAutofillClient::DetectAccountCreationForms(
+void ChromeAutofillClient::PropagateAutofillPredictions(
     content::RenderFrameHost* rfh,
     const std::vector<autofill::FormStructure*>& forms) {
   password_manager::ContentPasswordManagerDriver* driver =
       password_manager::ContentPasswordManagerDriver::GetForRenderFrameHost(
           rfh);
-  if (driver)
+  if (driver) {
     driver->GetPasswordGenerationManager()->DetectAccountCreationForms(forms);
+    driver->GetPasswordManager()->ProcessAutofillPredictions(driver, forms);
+  }
 }
 
 void ChromeAutofillClient::DidFillOrPreviewField(

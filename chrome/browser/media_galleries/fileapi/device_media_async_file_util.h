@@ -115,6 +115,10 @@ class DeviceMediaAsyncFileUtil : public storage::AsyncFileUtil {
   DeviceMediaAsyncFileUtil(const base::FilePath& profile_path,
                            MediaFileValidationType validation_type);
 
+  // Called when CreateDirectory method call succeeds. |callback| is invoked to
+  // complete the CreateDirectory request.
+  void OnDidCreateDirectory(const StatusCallback& callback);
+
   // Called when GetFileInfo method call succeeds. |file_info| contains the
   // file details of the requested url. |callback| is invoked to complete the
   // GetFileInfo request.
@@ -140,6 +144,26 @@ class DeviceMediaAsyncFileUtil : public storage::AsyncFileUtil {
       const ReadDirectoryCallback& callback,
       const EntryList& file_list,
       bool has_more);
+
+  // Called when MoveFileLocal method call succeeds. |callback| is invoked to
+  // complete the MoveFileLocal request.
+  void OnDidMoveFileLocal(const StatusCallback& callback);
+
+  // Called when CopyFileLocal method call succeeds. |callback| is invoked to
+  // complete the CopyFileLocal request.
+  void OnDidCopyFileLocal(const StatusCallback& callback);
+
+  // Called when CopyInForeignFile method call succeeds. |callback| is invoked
+  // to complete the CopyInForeignFile request.
+  void OnDidCopyInForeignFile(const StatusCallback& callback);
+
+  // Called when DeleteFile method call succeeeds. |callback| is invoked to
+  // complete the DeleteFile request.
+  void OnDidDeleteFile(const StatusCallback& callback);
+
+  // Called when DeleteDirectory method call succeeds. |callback| is invoked to
+  // complete the DeleteDirectory request.
+  void OnDidDeleteDirectory(const StatusCallback& callback);
 
   bool validate_media_files() const;
 

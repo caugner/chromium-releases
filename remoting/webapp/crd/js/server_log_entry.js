@@ -47,8 +47,8 @@ remoting.ServerLogEntry.KEY_SIGNAL_STRATEGY_TYPE_ = 'signal-strategy-type';
 remoting.ServerLogEntry.KEY_SIGNAL_STRATEGY_PROGRESS_ =
     'signal-strategy-progress';
 /** @private */
-remoting.ServerLogEntry.KEY_SIGNAL_STRATEGY_ELAPSED_TIME_ =
-    'signal-strategy-elapsed-time';
+remoting.ServerLogEntry.KEY_SESSION_DURATION_SECONDS_ = 'session-duration';
+
 
 /**
  * @private
@@ -59,12 +59,12 @@ remoting.ServerLogEntry.getValueForSessionState_ = function(state) {
   switch(state) {
     case remoting.ClientSession.State.UNKNOWN:
       return 'unknown';
-    case remoting.ClientSession.State.CREATED:
-      return 'created';
-    case remoting.ClientSession.State.CONNECTING:
-      return 'connecting';
     case remoting.ClientSession.State.INITIALIZING:
       return 'initializing';
+    case remoting.ClientSession.State.CONNECTING:
+      return 'connecting';
+    case remoting.ClientSession.State.AUTHENTICATED:
+      return 'authenticated';
     case remoting.ClientSession.State.CONNECTED:
       return 'connected';
     case remoting.ClientSession.State.CLOSED:
@@ -85,42 +85,39 @@ remoting.ServerLogEntry.KEY_CONNECTION_ERROR_ = 'connection-error';
 
 /**
  * @private
- * @param {remoting.Error} connectionError
+ * @param {!remoting.Error} connectionError
  * @return {string}
  */
 remoting.ServerLogEntry.getValueForError_ = function(connectionError) {
   // Directory service should be updated if a new string is added here as
   // otherwise the error code will be ignored (i.e. recorded as 0 instead).
-  switch(connectionError) {
-    case remoting.Error.NONE:
+  switch (connectionError.getTag()) {
+    case remoting.Error.Tag.NONE:
       return 'none';
-    case remoting.Error.INVALID_ACCESS_CODE:
+    case remoting.Error.Tag.INVALID_ACCESS_CODE:
       return 'invalid-access-code';
-    case remoting.Error.MISSING_PLUGIN:
+    case remoting.Error.Tag.MISSING_PLUGIN:
       return 'missing_plugin';
-    case remoting.Error.AUTHENTICATION_FAILED:
+    case remoting.Error.Tag.AUTHENTICATION_FAILED:
       return 'authentication-failed';
-    case remoting.Error.HOST_IS_OFFLINE:
+    case remoting.Error.Tag.HOST_IS_OFFLINE:
       return 'host-is-offline';
-    case remoting.Error.INCOMPATIBLE_PROTOCOL:
+    case remoting.Error.Tag.INCOMPATIBLE_PROTOCOL:
       return 'incompatible-protocol';
-    case remoting.Error.BAD_PLUGIN_VERSION:
+    case remoting.Error.Tag.BAD_PLUGIN_VERSION:
       return 'bad-plugin-version';
-    case remoting.Error.NETWORK_FAILURE:
+    case remoting.Error.Tag.NETWORK_FAILURE:
       return 'network-failure';
-    case remoting.Error.HOST_OVERLOAD:
+    case remoting.Error.Tag.HOST_OVERLOAD:
       return 'host-overload';
-    case remoting.Error.P2P_FAILURE:
+    case remoting.Error.Tag.P2P_FAILURE:
       return 'p2p-failure';
-    case remoting.Error.UNEXPECTED:
+    case remoting.Error.Tag.UNEXPECTED:
       return 'unexpected';
     default:
-      return 'unknown-' + connectionError;
+      return 'unknown-' + connectionError.getTag();
   }
 };
-
-/** @private */
-remoting.ServerLogEntry.KEY_SESSION_DURATION_ = 'session-duration';
 
 /** @private */
 remoting.ServerLogEntry.VALUE_EVENT_NAME_CONNECTION_STATISTICS_ =
@@ -220,12 +217,11 @@ remoting.ServerLogEntry.prototype.toDebugLog = function(indentLevel) {
  * Makes a log entry for a change of client session state.
  *
  * @param {remoting.ClientSession.State} state
- * @param {remoting.Error} connectionError
- * @param {remoting.DesktopConnectedView.Mode} mode
+ * @param {!remoting.Error} connectionError
  * @return {remoting.ServerLogEntry}
  */
 remoting.ServerLogEntry.makeClientSessionStateChange = function(state,
-    connectionError, mode) {
+    connectionError) {
   var entry = new remoting.ServerLogEntry();
   entry.set_(remoting.ServerLogEntry.KEY_ROLE_,
              remoting.ServerLogEntry.VALUE_ROLE_CLIENT_);
@@ -233,23 +229,12 @@ remoting.ServerLogEntry.makeClientSessionStateChange = function(state,
              remoting.ServerLogEntry.VALUE_EVENT_NAME_SESSION_STATE_);
   entry.set_(remoting.ServerLogEntry.KEY_SESSION_STATE_,
              remoting.ServerLogEntry.getValueForSessionState_(state));
-  if (connectionError != remoting.Error.NONE) {
+  if (!connectionError.isNone()) {
     entry.set_(remoting.ServerLogEntry.KEY_CONNECTION_ERROR_,
                remoting.ServerLogEntry.getValueForError_(connectionError));
   }
-  entry.addModeField(mode);
+  entry.addModeField();
   return entry;
-};
-
-/**
- * Adds a session duration to a log entry.
- *
- * @param {number} sessionDuration
- */
-remoting.ServerLogEntry.prototype.addSessionDurationField = function(
-    sessionDuration) {
-  this.set_(remoting.ServerLogEntry.KEY_SESSION_DURATION_,
-            sessionDuration.toString());
 };
 
 /**
@@ -258,12 +243,10 @@ remoting.ServerLogEntry.prototype.addSessionDurationField = function(
  *
  * @param {remoting.StatsAccumulator} statsAccumulator
  * @param {string} connectionType
- * @param {remoting.DesktopConnectedView.Mode} mode
  * @return {?remoting.ServerLogEntry}
  */
 remoting.ServerLogEntry.makeStats = function(statsAccumulator,
-                                             connectionType,
-                                             mode) {
+                                             connectionType) {
   var entry = new remoting.ServerLogEntry();
   entry.set_(remoting.ServerLogEntry.KEY_ROLE_,
              remoting.ServerLogEntry.VALUE_ROLE_CLIENT_);
@@ -273,7 +256,7 @@ remoting.ServerLogEntry.makeStats = function(statsAccumulator,
     entry.set_(remoting.ServerLogEntry.KEY_CONNECTION_TYPE_,
                connectionType);
   }
-  entry.addModeField(mode);
+  entry.addModeField();
   var nonZero = false;
   nonZero |= entry.addStatsField_(
       remoting.ServerLogEntry.KEY_VIDEO_BANDWIDTH_,
@@ -319,17 +302,16 @@ remoting.ServerLogEntry.prototype.addStatsField_ = function(
  * Makes a log entry for a "this session ID is old" event.
  *
  * @param {string} sessionId
- * @param {remoting.DesktopConnectedView.Mode} mode
  * @return {remoting.ServerLogEntry}
  */
-remoting.ServerLogEntry.makeSessionIdOld = function(sessionId, mode) {
+remoting.ServerLogEntry.makeSessionIdOld = function(sessionId) {
   var entry = new remoting.ServerLogEntry();
   entry.set_(remoting.ServerLogEntry.KEY_ROLE_,
              remoting.ServerLogEntry.VALUE_ROLE_CLIENT_);
   entry.set_(remoting.ServerLogEntry.KEY_EVENT_NAME_,
              remoting.ServerLogEntry.VALUE_EVENT_NAME_SESSION_ID_OLD_);
   entry.addSessionIdField(sessionId);
-  entry.addModeField(mode);
+  entry.addModeField();
   return entry;
 };
 
@@ -337,17 +319,16 @@ remoting.ServerLogEntry.makeSessionIdOld = function(sessionId, mode) {
  * Makes a log entry for a "this session ID is new" event.
  *
  * @param {string} sessionId
- * @param {remoting.DesktopConnectedView.Mode} mode
  * @return {remoting.ServerLogEntry}
  */
-remoting.ServerLogEntry.makeSessionIdNew = function(sessionId, mode) {
+remoting.ServerLogEntry.makeSessionIdNew = function(sessionId) {
   var entry = new remoting.ServerLogEntry();
   entry.set_(remoting.ServerLogEntry.KEY_ROLE_,
              remoting.ServerLogEntry.VALUE_ROLE_CLIENT_);
   entry.set_(remoting.ServerLogEntry.KEY_EVENT_NAME_,
              remoting.ServerLogEntry.VALUE_EVENT_NAME_SESSION_ID_NEW_);
   entry.addSessionIdField(sessionId);
-  entry.addModeField(mode);
+  entry.addModeField();
   return entry;
 };
 
@@ -357,11 +338,10 @@ remoting.ServerLogEntry.makeSessionIdNew = function(sessionId, mode) {
  * @param {string} sessionId
  * @param {remoting.SignalStrategy.Type} strategyType
  * @param {remoting.FallbackSignalStrategy.Progress} progress
- * @param {number} elapsedTimeInMs
  * @return {remoting.ServerLogEntry}
  */
 remoting.ServerLogEntry.makeSignalStrategyProgress =
-    function(sessionId, strategyType, progress, elapsedTimeInMs) {
+    function(sessionId, strategyType, progress) {
   var entry = new remoting.ServerLogEntry();
   entry.set_(remoting.ServerLogEntry.KEY_ROLE_,
              remoting.ServerLogEntry.VALUE_ROLE_CLIENT_);
@@ -371,8 +351,6 @@ remoting.ServerLogEntry.makeSignalStrategyProgress =
   entry.addSessionIdField(sessionId);
   entry.set_(remoting.ServerLogEntry.KEY_SIGNAL_STRATEGY_TYPE_, strategyType);
   entry.set_(remoting.ServerLogEntry.KEY_SIGNAL_STRATEGY_PROGRESS_, progress);
-  entry.set_(remoting.ServerLogEntry.KEY_SIGNAL_STRATEGY_ELAPSED_TIME_,
-             String(elapsedTimeInMs));
 
   return entry;
 };
@@ -467,6 +445,18 @@ remoting.ServerLogEntry.extractHostDataFrom_ = function(s) {
 };
 
 /**
+ * Adds a field to this log entry specifying the time in seconds since the start
+ * of the session to the current event.
+ * @param {number} sessionDurationInSeconds
+ */
+remoting.ServerLogEntry.prototype.addSessionDuration =
+    function(sessionDurationInSeconds) {
+  this.set_(remoting.ServerLogEntry.KEY_SESSION_DURATION_SECONDS_,
+            String(sessionDurationInSeconds));
+};
+
+
+/**
  * Adds a field specifying the browser version to this log entry.
  */
 remoting.ServerLogEntry.prototype.addChromeVersionField = function() {
@@ -488,28 +478,25 @@ remoting.ServerLogEntry.prototype.addWebappVersionField = function() {
 
 /**
  * Adds a field specifying the mode to this log entry.
- *
- * @param {remoting.DesktopConnectedView.Mode} mode
  */
-remoting.ServerLogEntry.prototype.addModeField = function(mode) {
+remoting.ServerLogEntry.prototype.addModeField = function() {
   this.set_(remoting.ServerLogEntry.KEY_MODE_,
-            remoting.ServerLogEntry.getModeField_(mode));
+            remoting.ServerLogEntry.getModeField_());
 };
 
 /**
  * Gets the value of the mode field to be put in a log entry.
  *
  * @private
- * @param {remoting.DesktopConnectedView.Mode} mode
  * @return {string}
  */
-remoting.ServerLogEntry.getModeField_ = function(mode) {
-  switch(mode) {
-    case remoting.DesktopConnectedView.Mode.IT2ME:
+remoting.ServerLogEntry.getModeField_ = function() {
+  switch(remoting.app.getConnectionMode()) {
+    case remoting.Application.Mode.IT2ME:
       return remoting.ServerLogEntry.VALUE_MODE_IT2ME_;
-    case remoting.DesktopConnectedView.Mode.ME2ME:
+    case remoting.Application.Mode.ME2ME:
       return remoting.ServerLogEntry.VALUE_MODE_ME2ME_;
-    case remoting.DesktopConnectedView.Mode.APP_REMOTING:
+    case remoting.Application.Mode.APP_REMOTING:
       return remoting.ServerLogEntry.VALUE_MODE_APP_REMOTING_;
     default:
       return remoting.ServerLogEntry.VALUE_MODE_UNKNOWN_;

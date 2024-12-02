@@ -18,12 +18,13 @@
 #include "extensions/browser/api/api_resource_manager.h"
 #include "extensions/browser/api/cast_channel/cast_socket.h"
 #include "extensions/browser/api/cast_channel/cast_transport.h"
+#include "extensions/browser/api/cast_channel/logger_util.h"
 #include "extensions/common/api/cast_channel.h"
 #include "extensions/common/api/cast_channel/logging.pb.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
-#include "net/base/net_log.h"
+#include "net/log/net_log.h"
 
 namespace net {
 class AddressList;
@@ -103,15 +104,22 @@ class CastSocket : public ApiResource {
   // True when keep-alive signaling is handled for this socket.
   virtual bool keep_alive() const = 0;
 
-  // Marks a socket as invalid due to an error. Errors close the socket
-  // and any further socket operations will return the error code
-  // net::SOCKET_NOT_CORRECTED.
+  // Marks a socket as invalid due to an error, and sends an OnError
+  // event to |delegate_|.
+  // The OnError event receipient is responsible for closing the socket in the
+  // event of an error.
   // Setting the error state does not close the socket if it is open.
   virtual void SetErrorState(ChannelError error_state) = 0;
 
   // Returns a pointer to the socket's message transport layer. Can be used to
   // send and receive CastMessages over the socket.
   virtual CastTransport* transport() const = 0;
+
+  // Tells the ApiResourceManager to retain CastSocket objects even
+  // if their corresponding extension is suspended.
+  // (CastSockets are still deleted if the extension is removed entirely from
+  // the browser.)
+  bool IsPersistent() const override;
 };
 
 // This class implements a channel between Chrome and a Cast device using a TCP
@@ -140,7 +148,7 @@ class CastSocketImpl : public CastSocket {
                  const base::TimeDelta& connect_timeout,
                  bool keep_alive,
                  const scoped_refptr<Logger>& logger,
-                 long device_capabilities);
+                 uint64 device_capabilities);
 
   // Ensures that the socket is closed.
   ~CastSocketImpl() override;
@@ -166,16 +174,24 @@ class CastSocketImpl : public CastSocket {
   // CastTransport::Delegate methods for receiving handshake messages.
   class AuthTransportDelegate : public CastTransport::Delegate {
    public:
-    AuthTransportDelegate(CastSocketImpl* socket);
+    explicit AuthTransportDelegate(CastSocketImpl* socket);
+
+    // Gets the error state of the channel.
+    // Returns CHANNEL_ERROR_NONE if no errors are present.
+    ChannelError error_state() const;
+
+    // Gets recorded error details.
+    LastErrors last_errors() const;
 
     // CastTransport::Delegate interface.
-    void OnError(ChannelError error_state,
-                 const LastErrors& last_errors) override;
+    void OnError(ChannelError error_state) override;
     void OnMessage(const CastMessage& message) override;
     void Start() override;
 
    private:
     CastSocketImpl* socket_;
+    ChannelError error_state_;
+    LastErrors last_errors_;
   };
 
   // Replaces the internally-constructed transport object with one provided
@@ -186,9 +202,6 @@ class CastSocketImpl : public CastSocket {
   // Audio only channel policy mandates that a device declaring a video out
   // capability must not have a certificate with audio only policy.
   bool VerifyChannelPolicy(const AuthResult& result);
-
-  // Delegate for receiving handshake messages/errors.
-  AuthTransportDelegate auth_delegate_;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(CastSocketTest, TestConnectAuthMessageCorrupted);
@@ -319,7 +332,7 @@ class CastSocketImpl : public CastSocket {
   bool is_canceled_;
 
   // Capabilities declared by the cast device.
-  long device_capabilities_;
+  uint64 device_capabilities_;
 
   // Connection flow state machine state.
   proto::ConnectionState connect_state_;
@@ -348,7 +361,11 @@ class CastSocketImpl : public CastSocket {
   scoped_ptr<CastTransport> transport_;
 
   // Caller's message read and error handling delegate.
-  scoped_ptr<CastTransport::Delegate> read_delegate_;
+  scoped_ptr<CastTransport::Delegate> delegate_;
+
+  // Raw pointer to the auth handshake delegate. Used to get detailed error
+  // information.
+  AuthTransportDelegate* auth_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(CastSocketImpl);
 };

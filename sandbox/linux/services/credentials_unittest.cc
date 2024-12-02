@@ -7,21 +7,37 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <sys/capability.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "sandbox/linux/services/proc_util.h"
+#include "sandbox/linux/services/syscall_wrappers.h"
+#include "sandbox/linux/system_headers/capability.h"
 #include "sandbox/linux/tests/unit_tests.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sandbox {
 
 namespace {
+
+struct CapFreeDeleter {
+  inline void operator()(cap_t cap) const {
+    int ret = cap_free(cap);
+    CHECK_EQ(0, ret);
+  }
+};
+
+// Wrapper to manage libcap2's cap_t type.
+typedef scoped_ptr<typeof(*((cap_t)0)), CapFreeDeleter> ScopedCap;
 
 bool WorkingDirectoryIsRoot() {
   char current_dir[PATH_MAX];
@@ -45,12 +61,6 @@ bool WorkingDirectoryIsRoot() {
 SANDBOX_TEST(Credentials, DropAllCaps) {
   CHECK(Credentials::DropAllCapabilities());
   CHECK(!Credentials::HasAnyCapability());
-}
-
-SANDBOX_TEST(Credentials, GetCurrentCapString) {
-  CHECK(Credentials::DropAllCapabilities());
-  const char kNoCapabilityText[] = "=";
-  CHECK(*Credentials::GetCurrentCapString() == kNoCapabilityText);
 }
 
 SANDBOX_TEST(Credentials, MoveToNewUserNS) {
@@ -135,7 +145,7 @@ SANDBOX_TEST(Credentials, DISABLE_ON_ASAN(DropFileSystemAccessIsSafe)) {
   CHECK(Credentials::DropAllCapabilities());
   // Probably missing kernel support.
   if (!Credentials::MoveToNewUserNS()) return;
-  CHECK(Credentials::DropFileSystemAccess());
+  CHECK(Credentials::DropFileSystemAccess(ProcUtil::OpenProc().get()));
   CHECK(!base::DirectoryExists(base::FilePath("/proc")));
   CHECK(WorkingDirectoryIsRoot());
   CHECK(base::IsDirectoryEmpty(base::FilePath("/")));
@@ -147,16 +157,84 @@ SANDBOX_TEST(Credentials, DISABLE_ON_ASAN(DropFileSystemAccessIsSafe)) {
 // Check that after dropping filesystem access and dropping privileges
 // it is not possible to regain capabilities.
 SANDBOX_TEST(Credentials, DISABLE_ON_ASAN(CannotRegainPrivileges)) {
-  CHECK(Credentials::DropAllCapabilities());
+  base::ScopedFD proc_fd(ProcUtil::OpenProc());
+  CHECK(Credentials::DropAllCapabilities(proc_fd.get()));
   // Probably missing kernel support.
   if (!Credentials::MoveToNewUserNS()) return;
-  CHECK(Credentials::DropFileSystemAccess());
-  CHECK(Credentials::DropAllCapabilities());
+  CHECK(Credentials::DropFileSystemAccess(proc_fd.get()));
+  CHECK(Credentials::DropAllCapabilities(proc_fd.get()));
 
   // The kernel should now prevent us from regaining capabilities because we
   // are in a chroot.
   CHECK(!Credentials::CanCreateProcessInNewUserNS());
   CHECK(!Credentials::MoveToNewUserNS());
+}
+
+SANDBOX_TEST(Credentials, SetCapabilities) {
+  // Probably missing kernel support.
+  if (!Credentials::MoveToNewUserNS())
+    return;
+
+  base::ScopedFD proc_fd(ProcUtil::OpenProc());
+
+  CHECK(Credentials::HasCapability(Credentials::Capability::SYS_ADMIN));
+  CHECK(Credentials::HasCapability(Credentials::Capability::SYS_CHROOT));
+
+  std::vector<Credentials::Capability> caps;
+  caps.push_back(Credentials::Capability::SYS_CHROOT);
+  CHECK(Credentials::SetCapabilities(proc_fd.get(), caps));
+
+  CHECK(!Credentials::HasCapability(Credentials::Capability::SYS_ADMIN));
+  CHECK(Credentials::HasCapability(Credentials::Capability::SYS_CHROOT));
+
+  const std::vector<Credentials::Capability> no_caps;
+  CHECK(Credentials::SetCapabilities(proc_fd.get(), no_caps));
+  CHECK(!Credentials::HasAnyCapability());
+}
+
+SANDBOX_TEST(Credentials, SetCapabilitiesAndChroot) {
+  // Probably missing kernel support.
+  if (!Credentials::MoveToNewUserNS())
+    return;
+
+  base::ScopedFD proc_fd(ProcUtil::OpenProc());
+
+  CHECK(Credentials::HasCapability(Credentials::Capability::SYS_CHROOT));
+  PCHECK(chroot("/") == 0);
+
+  std::vector<Credentials::Capability> caps;
+  caps.push_back(Credentials::Capability::SYS_CHROOT);
+  CHECK(Credentials::SetCapabilities(proc_fd.get(), caps));
+  PCHECK(chroot("/") == 0);
+
+  CHECK(Credentials::DropAllCapabilities());
+  PCHECK(chroot("/") == -1 && errno == EPERM);
+}
+
+SANDBOX_TEST(Credentials, SetCapabilitiesMatchesLibCap2) {
+  // Probably missing kernel support.
+  if (!Credentials::MoveToNewUserNS())
+    return;
+
+  base::ScopedFD proc_fd(ProcUtil::OpenProc());
+
+  std::vector<Credentials::Capability> caps;
+  caps.push_back(Credentials::Capability::SYS_CHROOT);
+  CHECK(Credentials::SetCapabilities(proc_fd.get(), caps));
+
+  ScopedCap actual_cap(cap_get_proc());
+  PCHECK(actual_cap != nullptr);
+
+  ScopedCap expected_cap(cap_init());
+  PCHECK(expected_cap != nullptr);
+
+  const cap_value_t allowed_cap = CAP_SYS_CHROOT;
+  for (const cap_flag_t flag : {CAP_EFFECTIVE, CAP_PERMITTED}) {
+    PCHECK(cap_set_flag(expected_cap.get(), flag, 1, &allowed_cap, CAP_SET) ==
+           0);
+  }
+
+  CHECK_EQ(0, cap_compare(expected_cap.get(), actual_cap.get()));
 }
 
 }  // namespace.

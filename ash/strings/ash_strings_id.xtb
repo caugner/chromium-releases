@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">Tambahkan akun untuk <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">Keyboard di layar dinonaktifkan</translation>
 <translation id="1057289296854808272">Rotasi aktif (Ketuk di sini untuk mengubah)</translation>
+<translation id="5548285847212963613">Ekstensi &quot;<ph name="EXTENSION_NAME"/>&quot; dapat membantu menyambungkan ke jaringan ini.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> dan <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Tombol Luapan</translation>
 <translation id="7904094684485781019">Administrator untuk akun ini menonaktifkan fitur masuk banyak akun.</translation>
@@ -61,6 +62,7 @@ Tekan Shift + Alt untuk beralih.</translation>
 <translation id="1723752762323179280">Keluar dari Sesi</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Ya</translation>
+<translation id="4804818685124855865">Putuskan</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Keluar</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@ Tekan Shift + Alt untuk beralih.</translation>
 <translation id="2761704814324807722">Baki status, waktu <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Kunci</translation>
 <translation id="2805756323405976993">Apl</translation>
-<translation id="2313845391432982560">Ekstensi &quot;<ph name="EXTENSION_NAME"/>&quot; dapat mengonfigurasi jaringan ini.</translation>
 <translation id="2872961005593481000">Matikan</translation>
 <translation id="3433830597744061105">Kelola akun</translation>
 <translation id="742594950370306541">Kamera sedang digunakan.</translation>

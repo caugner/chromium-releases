@@ -22,6 +22,7 @@
 #include "ui/app_list/views/app_list_view_observer.h"
 #include "ui/app_list/views/apps_container_view.h"
 #include "ui/app_list/views/contents_view.h"
+#include "ui/app_list/views/custom_launcher_page_view.h"
 #include "ui/app_list/views/search_box_view.h"
 #include "ui/app_list/views/speech_view.h"
 #include "ui/app_list/views/start_page_view.h"
@@ -329,6 +330,8 @@ void AppListView::SetAppListOverlayVisible(bool visible) {
     search_box_widget_->GetLayer()->SetOpacity(visible ? kSearchBoxWidgetOpacity
                                                        : 1.0f);
     search_box_view_->SetEnabled(!visible);
+    if (!visible)
+      search_box_view_->search_box()->RequestFocus();
   }
 }
 
@@ -340,8 +343,8 @@ gfx::Size AppListView::GetPreferredSize() const {
   return app_list_main_view_->GetPreferredSize();
 }
 
-void AppListView::Paint(gfx::Canvas* canvas, const views::CullSet& cull_set) {
-  views::BubbleDelegateView::Paint(canvas, cull_set);
+void AppListView::OnPaint(gfx::Canvas* canvas) {
+  views::BubbleDelegateView::OnPaint(canvas);
   if (!next_paint_callback_.is_null()) {
     next_paint_callback_.Run();
     next_paint_callback_.Reset();
@@ -364,8 +367,11 @@ bool AppListView::ShouldDescendIntoChildForEventHandling(
   // While on the start page, don't descend into the custom launcher page. Since
   // the only valid action is to open it.
   ContentsView* contents_view = app_list_main_view_->contents_view();
-  if (contents_view->GetActiveState() == AppListModel::STATE_START)
-    return !contents_view->GetCustomPageCollapsedBounds().Contains(location);
+  if (contents_view->custom_page_view() &&
+      contents_view->GetActiveState() == AppListModel::STATE_START)
+    return !contents_view->custom_page_view()
+                ->GetCollapsedLauncherPageBounds()
+                .Contains(location);
 
   return views::BubbleDelegateView::ShouldDescendIntoChildForEventHandling(
       child, location);
@@ -799,7 +805,11 @@ void AppListView::OnSpeechRecognitionStateChanged(
     speech_view_->SetVisible(true);
   } else {
     app_list_main_view_->SetVisible(true);
-    search_box_view_->search_box()->RequestFocus();
+    // Refocus the search box. However, if the app list widget does not have
+    // focus, it means another window has already taken focus, and we *must not*
+    // focus the search box (or we would steal focus back into the app list).
+    if (GetWidget()->IsActive())
+      search_box_view_->search_box()->RequestFocus();
   }
 }
 

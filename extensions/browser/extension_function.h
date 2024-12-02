@@ -100,9 +100,11 @@ class ExtensionFunction
     BAD_MESSAGE
   };
 
-  typedef base::Callback<void(ResponseType type,
-                              const base::ListValue& results,
-                              const std::string& error)> ResponseCallback;
+  using ResponseCallback = base::Callback<void(
+      ResponseType type,
+      const base::ListValue& results,
+      const std::string& error,
+      extensions::functions::HistogramValue histogram_value)>;
 
   ExtensionFunction();
 
@@ -321,18 +323,26 @@ class ExtensionFunction
 
   // ResponseActions.
   //
+  // These are exclusively used as return values from Run(). Call Respond(...)
+  // to respond at any other time - but as described below, only after Run()
+  // has already executed, and only if it returned RespondLater().
+  //
   // Respond to the extension immediately with |result|.
-  ResponseAction RespondNow(ResponseValue result);
+  ResponseAction RespondNow(ResponseValue result) WARN_UNUSED_RESULT;
   // Don't respond now, but promise to call Respond(...) later.
-  ResponseAction RespondLater();
+  ResponseAction RespondLater() WARN_UNUSED_RESULT;
 
   // This is the return value of the EXTENSION_FUNCTION_VALIDATE macro, which
   // needs to work from Run(), RunAsync(), and RunSync(). The former of those
   // has a different return type (ResponseAction) than the latter two (bool).
-  static ResponseAction ValidationFailure(ExtensionFunction* function);
+  static ResponseAction ValidationFailure(ExtensionFunction* function)
+      WARN_UNUSED_RESULT;
 
-  // If RespondLater() was used, functions must at some point call Respond()
-  // with |result| as their result.
+  // If RespondLater() was returned from Run(), functions must at some point
+  // call Respond() with |result| as their result.
+  //
+  // More specifically: call this iff Run() has already executed, it returned
+  // RespondLater(), and Respond(...) hasn't already been called.
   void Respond(ResponseValue result);
 
   virtual ~ExtensionFunction();
@@ -468,7 +478,13 @@ class UIThreadExtensionFunction : public ExtensionFunction {
 
   // Gets the "current" web contents if any. If there is no associated web
   // contents then defaults to the foremost one.
+  // NOTE: "current" can mean different things in different contexts. You
+  // probably want to use GetSenderWebContents().
   virtual content::WebContents* GetAssociatedWebContents();
+
+  // Returns the web contents associated with the sending |render_view_host_|.
+  // This can be null.
+  content::WebContents* GetSenderWebContents();
 
  protected:
   // Emits a message to the extension's devtools console.
@@ -588,7 +604,10 @@ class AsyncExtensionFunction : public UIThreadExtensionFunction {
   static bool ValidationFailure(AsyncExtensionFunction* function);
 
  private:
-  ResponseAction Run() override;
+  // If you're hitting a compile error here due to "final" - great! You're
+  // doing the right thing, you just need to extend UIThreadExtensionFunction
+  // instead of AsyncExtensionFunction.
+  ResponseAction Run() final;
 };
 
 // A SyncExtensionFunction is an ExtensionFunction that runs synchronously
@@ -615,7 +634,10 @@ class SyncExtensionFunction : public UIThreadExtensionFunction {
   static bool ValidationFailure(SyncExtensionFunction* function);
 
  private:
-  ResponseAction Run() override;
+  // If you're hitting a compile error here due to "final" - great! You're
+  // doing the right thing, you just need to extend UIThreadExtensionFunction
+  // instead of SyncExtensionFunction.
+  ResponseAction Run() final;
 };
 
 class SyncIOThreadExtensionFunction : public IOThreadExtensionFunction {
@@ -636,7 +658,10 @@ class SyncIOThreadExtensionFunction : public IOThreadExtensionFunction {
   static bool ValidationFailure(SyncIOThreadExtensionFunction* function);
 
  private:
-  ResponseAction Run() override;
+  // If you're hitting a compile error here due to "final" - great! You're
+  // doing the right thing, you just need to extend IOThreadExtensionFunction
+  // instead of SyncIOExtensionFunction.
+  ResponseAction Run() final;
 };
 
 #endif  // EXTENSIONS_BROWSER_EXTENSION_FUNCTION_H_

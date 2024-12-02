@@ -7,23 +7,37 @@
 
 #include "base/basictypes.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
 #include "extensions/common/user_script.h"
+#include "extensions/renderer/injection_host.h"
 #include "extensions/renderer/script_injector.h"
 
-class InjectionHost;
 struct HostID;
 
 namespace blink {
 class WebLocalFrame;
+template<typename T> class WebVector;
+}
+
+namespace v8 {
+class Value;
+template <class T> class Local;
 }
 
 namespace extensions {
+class ScriptInjectionManager;
 struct ScriptsRunInfo;
 
 // A script wrapper which is aware of whether or not it is allowed to execute,
 // and contains the implementation to do so.
 class ScriptInjection {
  public:
+  enum InjectionResult {
+    INJECTION_FINISHED,
+    INJECTION_BLOCKED,
+    INJECTION_WAITING
+  };
+
   // Return the id of the injection host associated with the given world.
   static std::string GetHostIdForIsolatedWorld(int world_id);
 
@@ -32,28 +46,37 @@ class ScriptInjection {
 
   ScriptInjection(scoped_ptr<ScriptInjector> injector,
                   blink::WebLocalFrame* web_frame,
-                  const HostID& host_id,
+                  scoped_ptr<const InjectionHost> injection_host,
                   UserScript::RunLocation run_location,
                   int tab_id);
   ~ScriptInjection();
 
-  // Try to inject the script at the |current_location|. This returns true if
-  // the script has either injected or will never inject (i.e., if the object
-  // is done), and false if injection is delayed (either for permission purposes
-  // or because |current_location| is not the designated |run_location_|).
-  // NOTE: |injection_host| may be NULL, if the injection_host is removed!
-  bool TryToInject(UserScript::RunLocation current_location,
-                   const InjectionHost* injection_host,
-                   ScriptsRunInfo* scripts_run_info);
+  // Try to inject the script at the |current_location|. This returns
+  // INJECTION_FINISHED if injection has injected or will never inject, returns
+  // INJECTION_BLOCKED if injection is running asynchronously and has not
+  // finished yet, returns INJECTION_WAITING if injections is delayed (either
+  // for permission purposes or because |current_location| is not the designated
+  // |run_location_|).
+  InjectionResult TryToInject(UserScript::RunLocation current_location,
+                              ScriptsRunInfo* scripts_run_info,
+                              ScriptInjectionManager* manager);
 
   // Called when permission for the given injection has been granted.
-  // Returns true if the injection ran.
-  bool OnPermissionGranted(const InjectionHost* injection_host,
-                           ScriptsRunInfo* scripts_run_info);
+  // Returns INJECTION_FINISHED if injection has injected or will never inject,
+  // returns INJECTION_BLOCKED if injection is ran asynchronously.
+  InjectionResult OnPermissionGranted(ScriptsRunInfo* scripts_run_info);
+
+  // Resets the pointer of the injection host when the host is gone.
+  void OnHostRemoved();
+
+  // Called when JS injection for the given frame has been completed.
+  void OnJsInjectionCompleted(
+      blink::WebLocalFrame* frame,
+      const blink::WebVector<v8::Local<v8::Value> >& results);
 
   // Accessors.
   blink::WebLocalFrame* web_frame() const { return web_frame_; }
-  const HostID& host_id() const { return host_id_; }
+  const HostID& host_id() const { return injection_host_->id(); }
   int64 request_id() const { return request_id_; }
 
  private:
@@ -61,15 +84,15 @@ class ScriptInjection {
   // like to inject, or to notify the browser that it is currently injecting.
   void SendInjectionMessage(bool request_permission);
 
-  // Injects the script, optionally populating |scripts_run_info|.
-  void Inject(const InjectionHost* injection_host,
-              ScriptsRunInfo* scripts_run_info);
+  // Injects the script. Returns INJECTION_FINISHED if injection has finished,
+  // otherwise INJECTION_BLOCKED.
+  InjectionResult Inject(ScriptsRunInfo* scripts_run_info);
 
-  // Inject any JS scripts into the |frame|, optionally populating
-  // |execution_results|.
-  void InjectJs(const InjectionHost* injection_host,
-                blink::WebLocalFrame* frame,
-                base::ListValue* execution_results);
+  // Inject any JS scripts into the |frame|.
+  void InjectJs(blink::WebLocalFrame* frame);
+
+  // Checks if all scripts have been injected and finished.
+  void TryToFinish();
 
   // Inject any CSS source into the |frame|.
   void InjectCss(blink::WebLocalFrame* frame);
@@ -83,8 +106,8 @@ class ScriptInjection {
   // The (main) WebFrame into which this should inject the script.
   blink::WebLocalFrame* web_frame_;
 
-  // The id of the associated injection_host.
-  HostID host_id_;
+  // The associated injection host.
+  scoped_ptr<const InjectionHost> injection_host_;
 
   // The location in the document load at which we inject the script.
   UserScript::RunLocation run_location_;
@@ -99,6 +122,19 @@ class ScriptInjection {
   // Whether or not the injection is complete, either via injecting the script
   // or because it will never complete.
   bool complete_;
+
+  // Number of frames in which the injection is running.
+  int running_frames_;
+
+  // Results storage.
+  scoped_ptr<base::ListValue> execution_results_;
+
+  // Flag is true when injections for each frame started.
+  bool all_injections_started_;
+
+  // ScriptInjectionManager::OnInjectionFinished will be called after injection
+  // finished.
+  ScriptInjectionManager* script_injection_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ScriptInjection);
 };

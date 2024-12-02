@@ -8,6 +8,8 @@ import("//build/config/ui.gni")
 import("//build/module_args/v8.gni")
 import("//url/config.gni")
 import("//testing/test.gni")
+import("//third_party/icu/config.gni")
+import("//third_party/protobuf/proto_library.gni")
 
 # TODO(cjhopman): //build/config/android/rules.gni also imports grit_rule.gni.
 # Currently, that file can't be imported multiple times.  Make this always
@@ -88,13 +90,13 @@ component("net") {
   ]
   deps = [
     ":net_resources",
+    ":net_quic_proto",
     "//base",
-    "//base:i18n",
     "//base:prefs",
     "//base/third_party/dynamic_annotations",
     "//net/base/registry_controlled_domains",
     "//sdch",
-    "//third_party/icu",
+    "//third_party/protobuf:protobuf_lite",
     "//third_party/zlib",
     "//url",
   ]
@@ -512,18 +514,19 @@ component("net") {
   }
 
   if (use_icu_alternatives_on_android) {
-    deps -= [
-      "//base:i18n",
-      "//third_party/icu",
-    ]
-    sources -= [
-      "base/filename_util_icu.cc",
-      "base/net_string_util_icu.cc",
-      "base/net_util_icu.cc",
-    ]
     sources += [
       "base/net_string_util_icu_alternatives_android.cc",
       "base/net_string_util_icu_alternatives_android.h",
+    ]
+  } else {
+    deps += [
+      "//base:i18n",
+      "//third_party/icu",
+    ]
+    sources += [
+      "base/filename_util_icu.cc",
+      "base/net_string_util_icu.cc",
+      "base/net_util_icu.cc",
     ]
   }
 }
@@ -536,6 +539,19 @@ grit("net_resources") {
     "net_resources.pak",
     "net_resources.rc",
   ]
+}
+
+proto_library("net_quic_proto") {
+  sources = [
+    "quic/proto/cached_network_parameters.proto",
+    "quic/proto/source_address_token.proto",
+  ]
+  cc_generator_options = "dllexport_decl=NET_EXPORT_PRIVATE:"
+  cc_include = "net/base/net_export.h"
+
+  defines = [ "NET_IMPLEMENTATION" ]
+
+  extra_configs = [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
 static_library("extras") {
@@ -602,12 +618,6 @@ executable("dump_cache") {
 source_set("test_support") {
   testonly = true
   sources = [
-    "base/captured_net_log_entry.cc",
-    "base/captured_net_log_entry.h",
-    "base/capturing_net_log.cc",
-    "base/capturing_net_log.h",
-    "base/capturing_net_log_observer.cc",
-    "base/capturing_net_log_observer.h",
     "base/load_timing_info_test_util.cc",
     "base/load_timing_info_test_util.h",
     "base/mock_file_stream.cc",
@@ -636,6 +646,12 @@ source_set("test_support") {
     "dns/mock_mdns_socket_factory.h",
     "http/http_transaction_test_util.cc",
     "http/http_transaction_test_util.h",
+    "log/captured_net_log_entry.cc",
+    "log/captured_net_log_entry.h",
+    "log/capturing_net_log.cc",
+    "log/capturing_net_log.h",
+    "log/capturing_net_log_observer.cc",
+    "log/capturing_net_log_observer.h",
     "proxy/mock_proxy_resolver.cc",
     "proxy/mock_proxy_resolver.h",
     "proxy/mock_proxy_script_fetcher.cc",
@@ -657,6 +673,7 @@ source_set("test_support") {
     "test/embedded_test_server/http_request.h",
     "test/embedded_test_server/http_response.cc",
     "test/embedded_test_server/http_response.h",
+    "test/event_waiter.h",
     "test/net_test_suite.cc",
     "test/net_test_suite.h",
     "test/python_utils.cc",
@@ -701,6 +718,10 @@ source_set("test_support") {
     "//testing/gtest",
     "//url",
   ]
+
+  if (!is_ios) {
+    public_deps += [ "//third_party/protobuf:py_proto" ]
+  }
 
   if (!use_openssl && (use_nss_certs || is_ios)) {
     public_deps += [ "//crypto:platform" ]
@@ -793,25 +814,62 @@ if (use_v8_in_net && !is_android) {
     sources = [
       "dns/mojo_host_resolver_impl.cc",
       "dns/mojo_host_resolver_impl.h",
+      "proxy/in_process_mojo_proxy_resolver_factory.cc",
+      "proxy/in_process_mojo_proxy_resolver_factory.h",
+      "proxy/mojo_proxy_resolver_factory.h",
+      "proxy/proxy_resolver_mojo.cc",
+      "proxy/proxy_resolver_mojo.h",
+      "proxy/proxy_service_mojo.cc",
+      "proxy/proxy_service_mojo.h",
     ]
 
     public_deps = [
       ":mojo_type_converters",
       ":net",
       "//base",
+      "//mojo/common",
       "//net/interfaces",
       "//third_party/mojo/src/mojo/public/cpp/bindings",
+
+      # NOTE(amistry): As long as we support in-process Mojo v8 PAC, we need
+      # this dependency since in_process_mojo_proxy_resolver_factory creates
+      # the utility process side Mojo services in the browser process.
+      # Ultimately, this will go away when we only support out-of-process.
+      ":net_utility_services",
     ]
   }
 
   source_set("mojo_type_converters") {
     sources = [
-      "dns/mojo_type_converters.cc",
-      "dns/mojo_type_converters.h",
+      "dns/mojo_host_type_converters.cc",
+      "dns/mojo_host_type_converters.h",
+      "proxy/mojo_proxy_type_converters.cc",
+      "proxy/mojo_proxy_type_converters.h",
     ]
 
     public_deps = [
       ":net",
+      "//net/interfaces",
+      "//third_party/mojo/src/mojo/public/cpp/bindings",
+    ]
+  }
+
+  source_set("net_utility_services") {
+    sources = [
+      "dns/host_resolver_mojo.cc",
+      "dns/host_resolver_mojo.h",
+      "proxy/load_state_change_coalescer.cc",
+      "proxy/load_state_change_coalescer.h",
+      "proxy/mojo_proxy_resolver_factory_impl.cc",
+      "proxy/mojo_proxy_resolver_factory_impl.h",
+      "proxy/mojo_proxy_resolver_impl.cc",
+      "proxy/mojo_proxy_resolver_impl.h",
+    ]
+
+    public_deps = [
+      ":mojo_type_converters",
+      ":net",
+      "//mojo/common",
       "//net/interfaces",
       "//third_party/mojo/src/mojo/public/cpp/bindings",
     ]
@@ -890,6 +948,48 @@ if (!is_ios && !is_android) {
     ]
   }
 
+  executable("hpack_example_generator") {
+    testonly = true
+    sources = [
+      "spdy/fuzzing/hpack_example_generator.cc",
+    ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+    deps = [
+      "//base",
+      ":net",
+    ]
+  }
+
+  executable("hpack_fuzz_mutator") {
+    testonly = true
+    sources = [
+      "spdy/fuzzing/hpack_fuzz_mutator.cc",
+    ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+    deps = [
+      "//base",
+      ":net",
+    ]
+  }
+
+  executable("hpack_fuzz_wrapper") {
+    testonly = true
+    sources = [
+      "spdy/fuzzing/hpack_fuzz_wrapper.cc",
+    ]
+
+    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+    deps = [
+      "//base",
+      ":net",
+    ]
+  }
+
   if (use_v8_in_net) {
     executable("net_watcher") {
       testonly = true
@@ -920,6 +1020,7 @@ if (!is_ios && !is_android) {
     deps = [
       ":net",  # TODO(brettw) bug 363749: this shouldn't be necessary. It's not
                # in the GYP build, and can be removed when the bug is fixed.
+
       ":test_support",
       "//base",
       "//base/test:test_support",
@@ -930,7 +1031,7 @@ if (!is_ios && !is_android) {
   executable("stress_cache") {
     testonly = true
     sources = [
-      "disk_cache/blockfile/stress_cache.cc",
+      "tools/stress_cache/stress_cache.cc",
     ]
 
     # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -1047,43 +1148,30 @@ if (is_linux) {
     ]
   }
 
-  source_set("quic_base") {
+  source_set("epoll_quic_tools") {
     sources = [
       "tools/quic/quic_client.cc",
       "tools/quic/quic_client.h",
-      "tools/quic/quic_client_session.cc",
-      "tools/quic/quic_client_session.h",
       "tools/quic/quic_default_packet_writer.cc",
       "tools/quic/quic_default_packet_writer.h",
-      "tools/quic/quic_dispatcher.cc",
-      "tools/quic/quic_dispatcher.h",
       "tools/quic/quic_epoll_clock.cc",
       "tools/quic/quic_epoll_clock.h",
       "tools/quic/quic_epoll_connection_helper.cc",
       "tools/quic/quic_epoll_connection_helper.h",
-      "tools/quic/quic_in_memory_cache.cc",
-      "tools/quic/quic_in_memory_cache.h",
+      "tools/quic/quic_packet_reader.cc",
+      "tools/quic/quic_packet_reader.h",
       "tools/quic/quic_packet_writer_wrapper.cc",
       "tools/quic/quic_packet_writer_wrapper.h",
-      "tools/quic/quic_per_connection_packet_writer.cc",
-      "tools/quic/quic_per_connection_packet_writer.h",
       "tools/quic/quic_server.cc",
       "tools/quic/quic_server.h",
-      "tools/quic/quic_server_session.cc",
-      "tools/quic/quic_server_session.h",
       "tools/quic/quic_socket_utils.cc",
       "tools/quic/quic_socket_utils.h",
-      "tools/quic/quic_spdy_client_stream.cc",
-      "tools/quic/quic_spdy_client_stream.h",
-      "tools/quic/quic_spdy_server_stream.cc",
-      "tools/quic/quic_spdy_server_stream.h",
-      "tools/quic/quic_time_wait_list_manager.cc",
-      "tools/quic/quic_time_wait_list_manager.h",
     ]
     deps = [
       ":balsa",
       ":epoll_server",
       ":net",
+      ":net_quic_proto",
       "//base",
       "//base/third_party/dynamic_annotations",
       "//crypto",
@@ -1092,15 +1180,32 @@ if (is_linux) {
     ]
   }
 
-  executable("quic_client") {
+  executable("epoll_quic_client") {
     sources = [
       "tools/quic/quic_client_bin.cc",
     ]
     deps = [
       ":balsa",
       ":epoll_server",
-      ":quic_base",
+      ":epoll_quic_tools",
       ":net",
+      ":simple_quic_tools",
+      "//base",
+      "//third_party/boringssl",
+    ]
+  }
+
+  executable("epoll_quic_server") {
+    sources = [
+      "tools/quic/quic_server_bin.cc",
+    ]
+    deps = [
+      ":balsa",
+      ":epoll_server",
+      ":epoll_quic_tools",
+      ":net",
+      ":net_quic_proto",
+      ":simple_quic_tools",
       "//base",
       "//third_party/boringssl",
     ]
@@ -1142,37 +1247,73 @@ if (is_android || is_linux) {
   }
 }
 
+source_set("simple_quic_tools") {
+  sources = [
+    "tools/quic/quic_client_session.cc",
+    "tools/quic/quic_client_session.h",
+    "tools/quic/quic_dispatcher.cc",
+    "tools/quic/quic_dispatcher.h",
+    "tools/quic/quic_in_memory_cache.cc",
+    "tools/quic/quic_in_memory_cache.h",
+    "tools/quic/quic_per_connection_packet_writer.cc",
+    "tools/quic/quic_per_connection_packet_writer.h",
+    "tools/quic/quic_server_session.cc",
+    "tools/quic/quic_server_session.h",
+    "tools/quic/quic_simple_client.cc",
+    "tools/quic/quic_simple_client.h",
+    "tools/quic/quic_simple_per_connection_packet_writer.cc",
+    "tools/quic/quic_simple_per_connection_packet_writer.h",
+    "tools/quic/quic_simple_server.cc",
+    "tools/quic/quic_simple_server.h",
+    "tools/quic/quic_simple_server_packet_writer.cc",
+    "tools/quic/quic_simple_server_packet_writer.h",
+    "tools/quic/quic_spdy_client_stream.cc",
+    "tools/quic/quic_spdy_client_stream.h",
+    "tools/quic/quic_spdy_server_stream.cc",
+    "tools/quic/quic_spdy_server_stream.h",
+    "tools/quic/quic_time_wait_list_manager.cc",
+    "tools/quic/quic_time_wait_list_manager.h",
+    "tools/quic/synchronous_host_resolver.cc",
+    "tools/quic/synchronous_host_resolver.h",
+  ]
+  deps = [
+    ":net",
+    ":net_quic_proto",
+    "//base",
+    "//base/third_party/dynamic_annotations",
+    "//url",
+  ]
+}
+
+executable("quic_client") {
+  sources = [
+    "tools/quic/quic_simple_client_bin.cc",
+  ]
+  deps = [
+    ":net",
+    ":simple_quic_tools",
+    "//base",
+    "//url",
+  ]
+}
+
+executable("quic_server") {
+  sources = [
+    "tools/quic/quic_simple_server_bin.cc",
+  ]
+  deps = [
+    ":net",
+    ":net_quic_proto",
+    ":simple_quic_tools",
+    "//base",
+    "//third_party/boringssl",
+  ]
+}
+
 # TODO(GYP) make this compile on Android, we need some native test deps done.
 # TODO(GYP) Also doesn't work on Windows; dependency on boringssl is wrong.
 # TODO(GYP) Also doesn't work on Mac, need to figure out why not.
 if (!is_android && !is_win && !is_mac) {
-  source_set("quic_tools") {
-    sources = [
-      "quic/quic_dispatcher.cc",
-      "quic/quic_dispatcher.h",
-      "quic/quic_in_memory_cache.cc",
-      "quic/quic_in_memory_cache.h",
-      "quic/quic_per_connection_packet_writer.cc",
-      "quic/quic_per_connection_packet_writer.h",
-      "quic/quic_server.cc",
-      "quic/quic_server.h",
-      "quic/quic_server_packet_writer.cc",
-      "quic/quic_server_packet_writer.h",
-      "quic/quic_server_session.cc",
-      "quic/quic_server_session.h",
-      "quic/quic_spdy_server_stream.cc",
-      "quic/quic_spdy_server_stream.h",
-      "quic/quic_time_wait_list_manager.cc",
-      "quic/quic_time_wait_list_manager.h",
-    ]
-    deps = [
-      ":net",
-      "//base",
-      "//base/third_party/dynamic_annotations",
-      "//url",
-    ]
-  }
-
   test("net_unittests") {
     sources = gypi_values.net_test_sources
 
@@ -1184,7 +1325,9 @@ if (!is_android && !is_win && !is_mac) {
       ":extras",
       ":http_server",
       ":net",
-      ":quic_tools",
+      ":net_quic_proto",
+      ":epoll_quic_tools",
+      ":simple_quic_tools",
       ":test_support",
       "//base",
       "//base:i18n",
@@ -1209,7 +1352,7 @@ if (!is_android && !is_win && !is_mac) {
         ":balsa",
         ":epoll_server",
         ":flip_in_mem_edsm_server_base",
-        ":quic_base",
+        ":epoll_quic_tools",
       ]
     }
 
@@ -1369,11 +1512,20 @@ if (!is_android && !is_win && !is_mac) {
     if (use_v8_in_net && !is_android) {
       deps += [
         ":net_browser_services",
+        ":net_utility_services",
         "//mojo/environment:chromium",
         "//third_party/mojo/src/mojo/edk/system",
       ]
     } else {
-      sources -= [ "dns/mojo_host_resolver_impl_unittest.cc" ]
+      sources -= [
+        "dns/host_resolver_mojo_unittest.cc",
+        "dns/mojo_host_resolver_impl_unittest.cc",
+        "proxy/load_state_change_coalescer_unittest.cc",
+        "proxy/mojo_proxy_resolver_factory_impl_unittest.cc",
+        "proxy/mojo_proxy_resolver_impl_unittest.cc",
+        "proxy/proxy_resolver_mojo_unittest.cc",
+        "proxy/proxy_service_mojo_unittest.cc",
+      ]
     }
 
     if (!enable_mdns) {
@@ -1458,16 +1610,42 @@ if (!is_android && !is_win && !is_mac) {
       deps -= [ "//base:i18n" ]
     }
   }
-
-  executable("quic_server") {
-    sources = [
-      "quic/quic_server_bin.cc",
-    ]
-    deps = [
-      ":quic_tools",
-      ":net",
-      "//base",
-      "//third_party/boringssl",
-    ]
-  }
 }  # !is_android && !is_win && !is_mac
+
+executable("net_perftests") {
+  testonly = true
+  sources = [
+    "cookies/cookie_monster_perftest.cc",
+    "disk_cache/blockfile/disk_cache_perftest.cc",
+    "proxy/proxy_resolver_perftest.cc",
+    "udp/udp_socket_perftest.cc",
+  ]
+
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+  deps = [
+    "//base",
+    "//base:i18n",
+    "//base/test:test_support_perf",
+    "//testing/gtest",
+    "//url",
+    ":net",
+    ":test_support",
+  ]
+
+  if (enable_websockets) {
+    sources += [ "websockets/websocket_frame_perftest.cc" ]
+  }
+
+  if (use_v8_in_net) {
+    deps += [ ":net_with_v8" ]
+  } else {
+    sources -= [ "proxy/proxy_resolver_perftest.cc" ]
+  }
+
+  if (is_win && icu_use_data_file) {
+    # This is needed to trigger the dll copy step on windows.
+    # TODO(mark): Specifying this here shouldn't be necessary.
+    deps += [ "//third_party/icu:icudata" ]
+  }
+}

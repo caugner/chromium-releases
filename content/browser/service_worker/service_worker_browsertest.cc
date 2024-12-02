@@ -62,13 +62,19 @@ void RunAndQuit(const base::Closure& closure,
   original_message_loop->PostTask(FROM_HERE, quit);
 }
 
-void RunOnIOThread(const base::Closure& closure) {
+void RunOnIOThreadWithDelay(const base::Closure& closure,
+                            base::TimeDelta delay) {
   base::RunLoop run_loop;
-  BrowserThread::PostTask(
+  BrowserThread::PostDelayedTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&RunAndQuit, closure, run_loop.QuitClosure(),
-                 base::MessageLoopProxy::current()));
+                 base::MessageLoopProxy::current()),
+      delay);
   run_loop.Run();
+}
+
+void RunOnIOThread(const base::Closure& closure) {
+  RunOnIOThreadWithDelay(closure, base::TimeDelta());
 }
 
 void RunOnIOThread(
@@ -125,6 +131,25 @@ ServiceWorkerVersion::FetchCallback CreateResponseReceiver(
                     result);
 }
 
+void ReceiveFindRegistrationStatus(
+    BrowserThread::ID run_quit_thread,
+    const base::Closure& quit,
+    ServiceWorkerStatusCode* out_status,
+    ServiceWorkerStatusCode status,
+    const scoped_refptr<ServiceWorkerRegistration>& registration) {
+  *out_status = status;
+  if (!quit.is_null())
+    BrowserThread::PostTask(run_quit_thread, FROM_HERE, quit);
+}
+
+ServiceWorkerStorage::FindRegistrationCallback CreateFindRegistrationReceiver(
+    BrowserThread::ID run_quit_thread,
+    const base::Closure& quit,
+    ServiceWorkerStatusCode* status) {
+  return base::Bind(&ReceiveFindRegistrationStatus, run_quit_thread, quit,
+                    status);
+}
+
 void ReadResponseBody(std::string* body,
                       storage::BlobDataHandle* blob_data_handle) {
   ASSERT_TRUE(blob_data_handle);
@@ -151,7 +176,8 @@ class WorkerActivatedObserver
     RunOnIOThread(base::Bind(&WorkerActivatedObserver::InitOnIOThread, this));
   }
   // ServiceWorkerContextObserver overrides.
-  void OnVersionStateChanged(int64 version_id) override {
+  void OnVersionStateChanged(int64 version_id,
+                             ServiceWorkerVersion::Status) override {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     const ServiceWorkerVersion* version =
         context_->context()->GetLiveVersion(version_id);
@@ -221,7 +247,7 @@ class LongLivedResourceInterceptor : public net::URLRequestInterceptor {
 
 void CreateLongLivedResourceInterceptors(
     const GURL& worker_url, const GURL& import_url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
   scoped_ptr<net::URLRequestInterceptor> interceptor;
 
   interceptor.reset(new LongLivedResourceInterceptor(
@@ -269,7 +295,7 @@ void CountScriptResources(
 
 class ServiceWorkerBrowserTest : public ContentBrowserTest {
  protected:
-  typedef ServiceWorkerBrowserTest self;
+  using self = ServiceWorkerBrowserTest;
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
@@ -315,7 +341,7 @@ class ServiceWorkerBrowserTest : public ContentBrowserTest {
 class EmbeddedWorkerBrowserTest : public ServiceWorkerBrowserTest,
                                   public EmbeddedWorkerInstance::Listener {
  public:
-  typedef EmbeddedWorkerBrowserTest self;
+  using self = EmbeddedWorkerBrowserTest;
 
   EmbeddedWorkerBrowserTest()
       : last_worker_status_(EmbeddedWorkerInstance::STOPPED),
@@ -334,7 +360,6 @@ class EmbeddedWorkerBrowserTest : public ServiceWorkerBrowserTest,
     worker_ = wrapper()->context()->embedded_worker_registry()->CreateWorker();
     EXPECT_EQ(EmbeddedWorkerInstance::STOPPED, worker_->status());
     worker_->AddListener(this);
-
 
     const int64 service_worker_version_id = 33L;
     const GURL pattern = embedded_test_server()->GetURL("/");
@@ -423,7 +448,7 @@ class EmbeddedWorkerBrowserTest : public ServiceWorkerBrowserTest,
 
 class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
  public:
-  typedef ServiceWorkerVersionBrowserTest self;
+  using self = ServiceWorkerVersionBrowserTest;
 
   ~ServiceWorkerVersionBrowserTest() override {}
 
@@ -509,6 +534,7 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
   }
 
   void SetUpRegistrationOnIOThread(const std::string& worker_url) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
     const GURL pattern = embedded_test_server()->GetURL("/service_worker/");
     registration_ = new ServiceWorkerRegistration(
         pattern,
@@ -527,6 +553,114 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
     AssociateRendererProcessToPattern(pattern);
   }
 
+  void TimeoutWorkerOnIOThread() {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    version_->PingWorker();
+    version_->OnPingTimeout();
+  }
+
+  void AddControlleeOnIOThread() {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
+        33 /* dummy render process id */,
+        MSG_ROUTING_NONE /* render_frame_id */, 1 /* dummy provider_id */,
+        SERVICE_WORKER_PROVIDER_FOR_WINDOW, wrapper()->context()->AsWeakPtr(),
+        NULL));
+    host->SetDocumentUrl(
+        embedded_test_server()->GetURL("/service_worker/host"));
+    host->AssociateRegistration(registration_.get(),
+                                false /* notify_controllerchange */);
+    wrapper()->context()->AddProviderHost(host.Pass());
+  }
+
+  void AddWaitingWorkerOnIOThread(const std::string& worker_url) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    scoped_refptr<ServiceWorkerVersion> waiting_version(
+        new ServiceWorkerVersion(
+            registration_.get(), embedded_test_server()->GetURL(worker_url),
+            wrapper()->context()->storage()->NewVersionId(),
+            wrapper()->context()->AsWeakPtr()));
+    waiting_version->SetStatus(ServiceWorkerVersion::INSTALLED);
+    registration_->SetWaitingVersion(waiting_version.get());
+    registration_->ActivateWaitingVersionWhenReady();
+  }
+
+  void StartWorker(ServiceWorkerStatusCode expected_status) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+    base::RunLoop start_run_loop;
+    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                            base::Bind(&self::StartOnIOThread, this,
+                                       start_run_loop.QuitClosure(),
+                                       &status));
+    start_run_loop.Run();
+    ASSERT_EQ(expected_status, status);
+  }
+
+  void StopWorker(ServiceWorkerStatusCode expected_status) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+    base::RunLoop stop_run_loop;
+    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                            base::Bind(&self::StopOnIOThread, this,
+                                       stop_run_loop.QuitClosure(),
+                                       &status));
+    stop_run_loop.Run();
+    ASSERT_EQ(expected_status, status);
+  }
+
+  void StoreRegistration(int64 version_id,
+                         ServiceWorkerStatusCode expected_status) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+    base::RunLoop store_run_loop;
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&self::StoreOnIOThread, this, store_run_loop.QuitClosure(),
+                   &status, version_id));
+    store_run_loop.Run();
+    ASSERT_EQ(expected_status, status);
+
+    RunOnIOThread(base::Bind(&self::NotifyDoneInstallingRegistrationOnIOThread,
+                             this, status));
+  }
+
+  void FindRegistrationForId(int64 id,
+                             const GURL& origin,
+                             ServiceWorkerStatusCode expected_status) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+    base::RunLoop run_loop;
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&self::FindRegistrationForIdOnIOThread, this,
+                   run_loop.QuitClosure(), &status, id, origin));
+    run_loop.Run();
+    ASSERT_EQ(expected_status, status);
+  }
+
+  void FindRegistrationForIdOnIOThread(const base::Closure& done,
+                                       ServiceWorkerStatusCode* result,
+                                       int64 id,
+                                       const GURL& origin) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    wrapper()->context()->storage()->FindRegistrationForId(
+        id, origin,
+        CreateFindRegistrationReceiver(BrowserThread::UI, done, result));
+  }
+
+  void NotifyDoneInstallingRegistrationOnIOThread(
+      ServiceWorkerStatusCode status) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    wrapper()->context()->storage()->NotifyDoneInstallingRegistration(
+        registration_.get(), version_.get(), status);
+  }
+
+  void RemoveLiveRegistrationOnIOThread(int64 id) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    wrapper()->context()->RemoveLiveRegistration(id);
+  }
+
   void StartOnIOThread(const base::Closure& done,
                        ServiceWorkerStatusCode* result) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -538,13 +672,25 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
     version_->SetStatus(ServiceWorkerVersion::INSTALLING);
     version_->DispatchInstallEvent(
-        -1, CreateReceiver(BrowserThread::UI, done, result));
+        CreateReceiver(BrowserThread::UI, done, result));
+  }
+
+  void StoreOnIOThread(const base::Closure& done,
+                       ServiceWorkerStatusCode* result,
+                       int64 version_id) {
+    ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    ServiceWorkerVersion* version =
+        wrapper()->context()->GetLiveVersion(version_id);
+    wrapper()->context()->storage()->StoreRegistration(
+        registration_.get(), version,
+        CreateReceiver(BrowserThread::UI, done, result));
   }
 
   void ActivateOnIOThread(const base::Closure& done,
                           ServiceWorkerStatusCode* result) {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
     version_->SetStatus(ServiceWorkerVersion::ACTIVATING);
+    registration_->SetActiveVersion(version_.get());
     version_->DispatchActivateEvent(
         CreateReceiver(BrowserThread::UI, done, result));
   }
@@ -658,14 +804,77 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, StartNotFound) {
                            "/service_worker/nonexistent.js"));
 
   // Start a worker for nonexistent URL.
+  StartWorker(SERVICE_WORKER_ERROR_NETWORK);
+}
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, ReadResourceFailure) {
+  // Create and store a registration.
+  RunOnIOThread(base::Bind(&self::SetUpRegistrationOnIOThread, this,
+                           "/service_worker/worker.js"));
+  version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
+  StoreRegistration(version_->version_id(), SERVICE_WORKER_OK);
+
+  // Add a non-existent resource to the version.
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records;
+  records.push_back(
+      ServiceWorkerDatabase::ResourceRecord(30, version_->script_url(), 100));
+  version_->script_cache_map()->SetResources(records);
+
+  // Start the worker. We'll fail to read the resource.
+  StartWorker(SERVICE_WORKER_ERROR_START_WORKER_FAILED);
+  EXPECT_EQ(ServiceWorkerVersion::REDUNDANT, version_->status());
+
+  // The registration should be deleted from storage since the broken worker was
+  // the stored one.
+  RunOnIOThread(base::Bind(&self::RemoveLiveRegistrationOnIOThread, this,
+                           registration_->id()));
+  FindRegistrationForId(registration_->id(),
+                        registration_->pattern().GetOrigin(),
+                        SERVICE_WORKER_ERROR_NOT_FOUND);
+}
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest,
+                       ReadResourceFailure_WaitingWorker) {
+  // Create a registration and active version.
+  RunOnIOThread(base::Bind(&self::SetUpRegistrationOnIOThread, this,
+                           "/service_worker/worker.js"));
+  base::RunLoop activate_run_loop;
   ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
-  base::RunLoop start_run_loop;
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(&self::StartOnIOThread, this,
-                                     start_run_loop.QuitClosure(),
-                                     &status));
-  start_run_loop.Run();
-  ASSERT_EQ(SERVICE_WORKER_ERROR_START_WORKER_FAILED, status);
+                          base::Bind(&self::ActivateOnIOThread, this,
+                                     activate_run_loop.QuitClosure(), &status));
+  activate_run_loop.Run();
+  EXPECT_EQ(SERVICE_WORKER_OK, status);
+  ASSERT_TRUE(registration_->active_version());
+
+  // Give the version a controllee.
+  RunOnIOThread(base::Bind(&self::AddControlleeOnIOThread, this));
+
+  // Add a non-existent resource to the version.
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records;
+  records.push_back(
+      ServiceWorkerDatabase::ResourceRecord(30, version_->script_url(), 100));
+  version_->script_cache_map()->SetResources(records);
+
+  // Make a waiting version and store it.
+  RunOnIOThread(base::Bind(&self::AddWaitingWorkerOnIOThread, this,
+                           "/service_worker/worker.js"));
+  StoreRegistration(registration_->waiting_version()->version_id(),
+                    SERVICE_WORKER_OK);
+
+  // Start the broken worker. We'll fail to read from disk and the worker should
+  // be doomed.
+  StopWorker(SERVICE_WORKER_OK);  // in case it's already running
+  StartWorker(SERVICE_WORKER_ERROR_START_WORKER_FAILED);
+  EXPECT_EQ(ServiceWorkerVersion::REDUNDANT, version_->status());
+
+  // The registration should still be in storage since the waiting worker was
+  // the stored one.
+  RunOnIOThread(base::Bind(&self::RemoveLiveRegistrationOnIOThread, this,
+                           registration_->id()));
+  FindRegistrationForId(registration_->id(),
+                        registration_->pattern().GetOrigin(),
+                        SERVICE_WORKER_OK);
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, Install) {
@@ -702,6 +911,78 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest,
                        InstallWithWaitUntil_Rejected) {
   InstallTestHelper("/service_worker/worker_install_rejected.js",
                     SERVICE_WORKER_ERROR_INSTALL_WORKER_FAILED);
+}
+
+class WaitForLoaded : public EmbeddedWorkerInstance::Listener {
+ public:
+  WaitForLoaded(const base::Closure& quit) : quit_(quit) {}
+
+  void OnScriptLoaded() override {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, quit_);
+  }
+  bool OnMessageReceived(const IPC::Message& message) override { return false; }
+
+ private:
+  base::Closure quit_;
+};
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, TimeoutStartingWorker) {
+  RunOnIOThread(base::Bind(&self::SetUpRegistrationOnIOThread, this,
+                           "/service_worker/while_true_worker.js"));
+
+  // Start a worker, waiting until the script is loaded.
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+  base::RunLoop start_run_loop;
+  base::RunLoop load_run_loop;
+  WaitForLoaded wait_for_load(load_run_loop.QuitClosure());
+  version_->embedded_worker()->AddListener(&wait_for_load);
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&self::StartOnIOThread, this,
+                                     start_run_loop.QuitClosure(), &status));
+  load_run_loop.Run();
+  version_->embedded_worker()->RemoveListener(&wait_for_load);
+
+  // The script has loaded but start has not completed yet.
+  ASSERT_EQ(SERVICE_WORKER_ERROR_FAILED, status);
+  EXPECT_EQ(ServiceWorkerVersion::STARTING, version_->running_status());
+
+  // Simulate execution timeout. Use a delay to prevent killing the worker
+  // before it's started execution.
+  EXPECT_TRUE(version_->timeout_timer_.IsRunning());
+  RunOnIOThreadWithDelay(base::Bind(&self::TimeoutWorkerOnIOThread, this),
+                         base::TimeDelta::FromMilliseconds(100));
+  start_run_loop.Run();
+
+  EXPECT_EQ(SERVICE_WORKER_ERROR_TIMEOUT, status);
+}
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, TimeoutWorkerInEvent) {
+  RunOnIOThread(base::Bind(&self::SetUpRegistrationOnIOThread, this,
+                           "/service_worker/while_true_in_install_worker.js"));
+
+  // Start a worker.
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+  base::RunLoop start_run_loop;
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&self::StartOnIOThread, this,
+                                     start_run_loop.QuitClosure(), &status));
+  start_run_loop.Run();
+  ASSERT_EQ(SERVICE_WORKER_OK, status);
+
+  // Dispatch an event.
+  base::RunLoop install_run_loop;
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&self::InstallOnIOThread, this,
+                                     install_run_loop.QuitClosure(), &status));
+
+  // Simulate execution timeout. Use a delay to prevent killing the worker
+  // before it's started execution.
+  EXPECT_TRUE(version_->timeout_timer_.IsRunning());
+  RunOnIOThreadWithDelay(base::Bind(&self::TimeoutWorkerOnIOThread, this),
+                         base::TimeDelta::FromMilliseconds(100));
+  install_run_loop.Run();
+
+  EXPECT_EQ(SERVICE_WORKER_ERROR_INSTALL_WORKER_FAILED, status);
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, FetchEvent_Response) {
@@ -905,7 +1186,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest, ImportsBustMemcache) {
 
 class ServiceWorkerBlackBoxBrowserTest : public ServiceWorkerBrowserTest {
  public:
-  typedef ServiceWorkerBlackBoxBrowserTest self;
+  using self = ServiceWorkerBlackBoxBrowserTest;
 
   void FindRegistrationOnIO(const GURL& document_url,
                             ServiceWorkerStatusCode* status,
@@ -1049,6 +1330,64 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest, CrossSiteTransfer) {
 
   NavigateToURL(shell(), embedded_test_server()->GetURL(kConfirmPageUrl));
   EXPECT_EQ(kOKTitle2, title_watcher2.WaitAndGetTitle());
+}
+
+class ServiceWorkerVersionBrowserV8CacheTest
+    : public ServiceWorkerVersionBrowserTest,
+      public ServiceWorkerVersion::Listener {
+ public:
+  using self = ServiceWorkerVersionBrowserV8CacheTest;
+  ~ServiceWorkerVersionBrowserV8CacheTest() override {
+    if (version_)
+      version_->RemoveListener(this);
+  }
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ServiceWorkerBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(switches::kV8CacheOptions, "code");
+  }
+  void SetUpRegistrationAndListenerOnIOThread(const std::string& worker_url) {
+    SetUpRegistrationOnIOThread(worker_url);
+    version_->AddListener(this);
+  }
+
+ protected:
+  // ServiceWorkerVersion::Listener overrides
+  void OnCachedMetadataUpdated(ServiceWorkerVersion* version) override {
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            cache_updated_closure_);
+  }
+
+  base::Closure cache_updated_closure_;
+};
+
+IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserV8CacheTest, Restart) {
+  RunOnIOThread(base::Bind(&self::SetUpRegistrationAndListenerOnIOThread, this,
+                           "/service_worker/worker.js"));
+
+  base::RunLoop cached_metadata_run_loop;
+  cache_updated_closure_ = cached_metadata_run_loop.QuitClosure();
+
+  // Start a worker.
+  StartWorker(SERVICE_WORKER_OK);
+
+  // Wait for the matadata is stored. This run loop should finish when
+  // OnCachedMetadataUpdated() is called.
+  cached_metadata_run_loop.Run();
+
+  // Activate the worker.
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_FAILED;
+  base::RunLoop activate_run_loop;
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&self::ActivateOnIOThread, this,
+                                     activate_run_loop.QuitClosure(), &status));
+  activate_run_loop.Run();
+  ASSERT_EQ(SERVICE_WORKER_OK, status);
+  // Stop the worker.
+  StopWorker(SERVICE_WORKER_OK);
+  // Restart the worker.
+  StartWorker(SERVICE_WORKER_OK);
+  // Stop the worker.
+  StopWorker(SERVICE_WORKER_OK);
 }
 
 }  // namespace content

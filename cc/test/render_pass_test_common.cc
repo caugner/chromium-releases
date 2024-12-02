@@ -94,7 +94,7 @@ void TestRenderPass::AppendOneOfEveryQuadType(
 
   CheckerboardDrawQuad* checkerboard_quad =
       this->CreateAndAppendDrawQuad<CheckerboardDrawQuad>();
-  checkerboard_quad->SetNew(shared_state, rect, visible_rect, SK_ColorRED);
+  checkerboard_quad->SetNew(shared_state, rect, visible_rect, SK_ColorRED, 1.f);
 
   DebugBorderDrawQuad* debug_border_quad =
       this->CreateAndAppendDrawQuad<DebugBorderDrawQuad>();
@@ -246,8 +246,8 @@ void TestRenderPass::AppendOneOfEveryQuadType(
       this->CreateAndAppendDrawQuad<YUVVideoDrawQuad>();
   yuv_quad->SetNew(shared_state2, rect, opaque_rect, visible_rect,
                    gfx::RectF(0, 0, 100, 100), gfx::Size(100, 100),
-                   plane_resources[0], plane_resources[1], plane_resources[2],
-                   plane_resources[3], color_space);
+                   gfx::Size(50, 50), plane_resources[0], plane_resources[1],
+                   plane_resources[2], plane_resources[3], color_space);
 }
 
 }  // namespace cc

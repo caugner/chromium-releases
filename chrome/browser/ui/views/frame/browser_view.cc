@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
@@ -765,9 +766,19 @@ namespace {
 }
 
 void BrowserView::UpdateTitleBar() {
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("467185 BrowserView::UpdateTitleBar1"));
   frame_->UpdateWindowTitle();
-  if (ShouldShowWindowIcon() && !loading_animation_timer_.IsRunning())
+  if (ShouldShowWindowIcon() && !loading_animation_timer_.IsRunning()) {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/467185
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "467185 BrowserView::UpdateTitleBar2"));
     frame_->UpdateWindowIcon();
+  }
 }
 
 void BrowserView::BookmarkBarStateChanged(
@@ -954,7 +965,7 @@ void BrowserView::ExitFullscreen() {
                     EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE);
 }
 
-void BrowserView::UpdateFullscreenExitBubbleContent(
+void BrowserView::UpdateExclusiveAccessExitBubbleContent(
     const GURL& url,
     ExclusiveAccessBubbleType bubble_type) {
   // Immersive mode has no exit bubble because it has a visible strip at the
@@ -1341,11 +1352,6 @@ void BrowserView::ConfirmBrowserCloseWithPendingDownloads(
 
 void BrowserView::UserChangedTheme() {
   frame_->FrameTypeChanged();
-}
-
-int BrowserView::GetExtraRenderViewHeight() const {
-  // Currently this is only used on linux.
-  return 0;
 }
 
 void BrowserView::WebContentsFocused(WebContents* contents) {
@@ -1901,17 +1907,16 @@ void BrowserView::Layout() {
   toolbar_->location_bar()->omnibox_view()->SetFocusable(IsToolbarVisible());
 }
 
-void BrowserView::PaintChildren(gfx::Canvas* canvas,
-                                const views::CullSet& cull_set) {
+void BrowserView::PaintChildren(const ui::PaintContext& context) {
   // Paint the |infobar_container_| last so that it may paint its
   // overlapping tabs.
   for (int i = 0; i < child_count(); ++i) {
     View* child = child_at(i);
     if (child != infobar_container_ && !child->layer())
-      child->Paint(canvas, cull_set);
+      child->Paint(context);
   }
 
-  infobar_container_->Paint(canvas, cull_set);
+  infobar_container_->Paint(context);
 }
 
 void BrowserView::ViewHierarchyChanged(
@@ -2287,7 +2292,7 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
 
   if (fullscreen && !chrome::IsRunningInAppMode() &&
       mode != METRO_SNAP_FULLSCREEN) {
-    UpdateFullscreenExitBubbleContent(url, bubble_type);
+    UpdateExclusiveAccessExitBubbleContent(url, bubble_type);
   }
 
   // Undo our anti-jankiness hacks and force a re-layout. We also need to
@@ -2512,6 +2517,10 @@ void BrowserView::ExecuteExtensionCommand(
   toolbar_->ExecuteExtensionCommand(extension, command);
 }
 
+ExclusiveAccessContext* BrowserView::GetExclusiveAccessContext() {
+  return this;
+}
+
 void BrowserView::DoCutCopyPaste(void (WebContents::*method)(),
                                  int command_id) {
   WebContents* contents = browser_->tab_strip_model()->GetActiveWebContents();
@@ -2577,4 +2586,43 @@ int BrowserView::GetMaxTopInfoBarArrowHeight() {
     top_arrow_height = infobar_top.y() - icon_bottom.y();
   }
   return top_arrow_height;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// BrowserView, ExclusiveAccessContext overrides
+Profile* BrowserView::GetProfile() {
+  return browser_->profile();
+}
+
+WebContents* BrowserView::GetActiveWebContents() {
+  return browser_->tab_strip_model()->GetActiveWebContents();
+}
+
+void BrowserView::UnhideDownloadShelf() {
+  GetDownloadShelf()->Unhide();
+}
+
+void BrowserView::HideDownloadShelf() {
+  GetDownloadShelf()->Hide();
+  StatusBubble* statusBubble = GetStatusBubble();
+  if (statusBubble)
+    statusBubble->Hide();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// BrowserView, ExclusiveAccessBubbleViewsContext overrides
+ExclusiveAccessManager* BrowserView::GetExclusiveAccessManager() {
+  return browser_->exclusive_access_manager();
+}
+
+bool BrowserView::IsImmersiveModeEnabled() {
+  return immersive_mode_controller()->IsEnabled();
+}
+
+views::Widget* BrowserView::GetBubbleAssociatedWidget() {
+  return GetWidget();
+}
+
+gfx::Rect BrowserView::GetTopContainerBoundsInScreen() {
+  return top_container_->GetBoundsInScreen();
 }

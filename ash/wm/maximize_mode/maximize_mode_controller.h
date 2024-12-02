@@ -11,6 +11,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/accelerometer/accelerometer_reader.h"
@@ -64,7 +65,7 @@ class ASH_EXPORT MaximizeModeController :
   // unittests; the event blocker prevents keyboard input when running ChromeOS
   // on linux. http://crbug.com/362881
   // Turn the always maximize mode window manager on or off.
-  void EnableMaximizeModeWindowManager(bool enable);
+  void EnableMaximizeModeWindowManager(bool should_enable);
 
   // Test if the MaximizeModeWindowManager is enabled or not.
   bool IsMaximizeModeWindowManagerEnabled() const;
@@ -83,7 +84,7 @@ class ASH_EXPORT MaximizeModeController :
 #if defined(OS_CHROMEOS)
   // chromeos::AccelerometerReader::Observer:
   void OnAccelerometerUpdated(
-      const chromeos::AccelerometerUpdate& update) override;
+      scoped_refptr<const chromeos::AccelerometerUpdate> update) override;
 
   // PowerManagerClient::Observer:
   void LidEventReceived(bool open, const base::TimeTicks& time) override;
@@ -111,7 +112,8 @@ class ASH_EXPORT MaximizeModeController :
 #if defined(OS_CHROMEOS)
   // Detect hinge rotation from base and lid accelerometers and automatically
   // start / stop maximize mode.
-  void HandleHingeRotation(const chromeos::AccelerometerUpdate& update);
+  void HandleHingeRotation(
+      scoped_refptr<const chromeos::AccelerometerUpdate> update);
 #endif
 
   // Returns true if the lid was recently opened.
@@ -164,6 +166,12 @@ class ASH_EXPORT MaximizeModeController :
 
   // Tracks when the lid is closed. Used to prevent entering maximize mode.
   bool lid_is_closed_;
+
+  // Tracks smoothed accelerometer data over time. This is done when the hinge
+  // is approaching vertical to remove abrupt acceleration that can lead to
+  // incorrect calculations of hinge angles.
+  gfx::Vector3dF base_smoothed_;
+  gfx::Vector3dF lid_smoothed_;
 
   DISALLOW_COPY_AND_ASSIGN(MaximizeModeController);
 };

@@ -12,10 +12,10 @@
 #include "base/test/histogram_tester.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
-#include "net/base/net_log_unittest.h"
 #include "net/base/request_priority.h"
 #include "net/base/test_data_directory.h"
 #include "net/base/test_data_stream.h"
+#include "net/log/net_log_unittest.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
@@ -178,10 +178,11 @@ class SpdySessionTest : public PlatformTest,
   SpdySessionKey key_;
 };
 
-INSTANTIATE_TEST_CASE_P(
-    NextProto,
-    SpdySessionTest,
-    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
+INSTANTIATE_TEST_CASE_P(NextProto,
+                        SpdySessionTest,
+                        testing::Values(kProtoSPDY31,
+                                        kProtoSPDY4_14,
+                                        kProtoSPDY4));
 
 // Try to create a SPDY session that will fail during
 // initialization. Nothing should blow up.
@@ -1651,10 +1652,9 @@ TEST_P(SpdySessionTest, Initialize) {
   log.GetEntries(&entries);
   EXPECT_LT(0u, entries.size());
 
-  // Check that we logged TYPE_SPDY_SESSION_INITIALIZED correctly.
+  // Check that we logged TYPE_HTTP2_SESSION_INITIALIZED correctly.
   int pos = net::ExpectLogContainsSomewhere(
-      entries, 0,
-      net::NetLog::TYPE_SPDY_SESSION_INITIALIZED,
+      entries, 0, net::NetLog::TYPE_HTTP2_SESSION_INITIALIZED,
       net::NetLog::PHASE_NONE);
   EXPECT_LT(0, pos);
 
@@ -1700,8 +1700,7 @@ TEST_P(SpdySessionTest, NetLogOnSessionGoaway) {
 
   // Check that we logged SPDY_SESSION_CLOSE correctly.
   int pos = net::ExpectLogContainsSomewhere(
-      entries, 0,
-      net::NetLog::TYPE_SPDY_SESSION_CLOSE,
+      entries, 0, net::NetLog::TYPE_HTTP2_SESSION_CLOSE,
       net::NetLog::PHASE_NONE);
 
   if (pos < static_cast<int>(entries.size())) {
@@ -1745,11 +1744,9 @@ TEST_P(SpdySessionTest, NetLogOnSessionEOF) {
   EXPECT_LT(0u, entries.size());
 
   // Check that we logged SPDY_SESSION_CLOSE correctly.
-  int pos =
-      net::ExpectLogContainsSomewhere(entries,
-                                      0,
-                                      net::NetLog::TYPE_SPDY_SESSION_CLOSE,
-                                      net::NetLog::PHASE_NONE);
+  int pos = net::ExpectLogContainsSomewhere(
+      entries, 0, net::NetLog::TYPE_HTTP2_SESSION_CLOSE,
+      net::NetLog::PHASE_NONE);
 
   if (pos < static_cast<int>(entries.size())) {
     CapturingNetLog::CapturedEntry entry = entries[pos];

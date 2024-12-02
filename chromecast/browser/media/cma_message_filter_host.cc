@@ -12,6 +12,7 @@
 #include "chromecast/browser/media/cma_message_loop.h"
 #include "chromecast/browser/media/media_pipeline_host.h"
 #include "chromecast/common/media/cma_messages.h"
+#include "chromecast/media/cdm/browser_cdm_cast.h"
 #include "chromecast/media/cma/backend/video_plane.h"
 #include "chromecast/media/cma/pipeline/av_pipeline_client.h"
 #include "chromecast/media/cma/pipeline/media_pipeline_client.h"
@@ -96,7 +97,7 @@ bool CmaMessageFilterHost::OnMessageReceived(const IPC::Message& message) {
 }
 
 void CmaMessageFilterHost::DeleteEntries() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   for (MediaPipelineMap::iterator it = media_pipelines_.begin();
        it != media_pipelines_.end(); ) {
@@ -119,7 +120,7 @@ MediaPipelineHost* CmaMessageFilterHost::LookupById(int media_id) {
 // *** Handle incoming messages ***
 
 void CmaMessageFilterHost::CreateMedia(int media_id, LoadType load_type) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   scoped_ptr<MediaPipelineHost> media_pipeline_host(new MediaPipelineHost());
   MediaPipelineClient client;
@@ -144,7 +145,7 @@ void CmaMessageFilterHost::CreateMedia(int media_id, LoadType load_type) {
 }
 
 void CmaMessageFilterHost::DestroyMedia(int media_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   MediaPipelineMap::iterator it = media_pipelines_.find(media_id);
   if (it == media_pipelines_.end())
@@ -160,7 +161,7 @@ void CmaMessageFilterHost::DestroyMedia(int media_id) {
 void CmaMessageFilterHost::SetCdm(int media_id,
                                   int render_frame_id,
                                   int cdm_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline)
     return;
@@ -190,12 +191,15 @@ void CmaMessageFilterHost::SetCdmOnUiThread(
                << cdm_id << ")";
     return;
   }
-  FORWARD_CALL(media_pipeline, SetCdm, cdm);
+
+  BrowserCdmCast* browser_cdm_cast =
+      static_cast<BrowserCdmCastUi*>(cdm)->browser_cdm_cast();
+  FORWARD_CALL(media_pipeline, SetCdm, browser_cdm_cast);
 }
 
 void CmaMessageFilterHost::CreateAvPipe(
     int media_id, TrackId track_id, size_t shared_mem_size) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
   base::FileDescriptor foreign_socket_handle;
   base::SharedMemoryHandle foreign_memory_handle;
@@ -275,7 +279,7 @@ void CmaMessageFilterHost::OnAvPipeSet(
 
 void CmaMessageFilterHost::AudioInitialize(
     int media_id, TrackId track_id, const ::media::AudioDecoderConfig& config) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline) {
     Send(new CmaMsg_TrackStateChanged(
@@ -304,7 +308,7 @@ void CmaMessageFilterHost::AudioInitialize(
 
 void CmaMessageFilterHost::VideoInitialize(
     int media_id, TrackId track_id, const ::media::VideoDecoderConfig& config) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline) {
     Send(new CmaMsg_TrackStateChanged(
@@ -338,7 +342,7 @@ void CmaMessageFilterHost::VideoInitialize(
 
 void CmaMessageFilterHost::StartPlayingFrom(
     int media_id, base::TimeDelta time) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline)
     return;
@@ -346,7 +350,7 @@ void CmaMessageFilterHost::StartPlayingFrom(
 }
 
 void CmaMessageFilterHost::Flush(int media_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline) {
     Send(new CmaMsg_MediaStateChanged(
@@ -360,7 +364,7 @@ void CmaMessageFilterHost::Flush(int media_id) {
 }
 
 void CmaMessageFilterHost::Stop(int media_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline)
     return;
@@ -372,7 +376,7 @@ void CmaMessageFilterHost::Stop(int media_id) {
 
 void CmaMessageFilterHost::SetPlaybackRate(
     int media_id, float playback_rate) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline)
     return;
@@ -381,7 +385,7 @@ void CmaMessageFilterHost::SetPlaybackRate(
 
 void CmaMessageFilterHost::SetVolume(
     int media_id, TrackId track_id, float volume) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline)
     return;
@@ -389,7 +393,7 @@ void CmaMessageFilterHost::SetVolume(
 }
 
 void CmaMessageFilterHost::NotifyPipeWrite(int media_id, TrackId track_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MediaPipelineHost* media_pipeline = LookupById(media_id);
   if (!media_pipeline)
     return;
@@ -400,7 +404,7 @@ void CmaMessageFilterHost::NotifyExternalSurface(
     int surface_id,
     const gfx::PointF& p0, const gfx::PointF& p1,
     const gfx::PointF& p2, const gfx::PointF& p3) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&UpdateVideoSurfaceHost, surface_id,
@@ -411,18 +415,18 @@ void CmaMessageFilterHost::NotifyExternalSurface(
 
 void CmaMessageFilterHost::OnMediaStateChanged(
     int media_id, ::media::PipelineStatus status) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_MediaStateChanged(media_id, status));
 }
 
 void CmaMessageFilterHost::OnTrackStateChanged(
     int media_id, TrackId track_id, ::media::PipelineStatus status) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_TrackStateChanged(media_id, track_id, status));
 }
 
 void CmaMessageFilterHost::OnPipeReadActivity(int media_id, TrackId track_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_NotifyPipeRead(media_id, track_id));
 }
 
@@ -431,37 +435,37 @@ void CmaMessageFilterHost::OnTimeUpdate(
     base::TimeDelta media_time,
     base::TimeDelta max_media_time,
     base::TimeTicks stc) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_TimeUpdate(media_id,
                              media_time, max_media_time, stc));
 }
 
 void CmaMessageFilterHost::OnBufferingNotification(
     int media_id, ::media::BufferingState state) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_BufferingNotification(media_id, state));
 }
 
 void CmaMessageFilterHost::OnEos(int media_id, TrackId track_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_Eos(media_id, track_id));
 }
 
 void CmaMessageFilterHost::OnPlaybackError(
     int media_id, TrackId track_id, ::media::PipelineStatus status) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_PlaybackError(media_id, track_id, status));
 }
 
 void CmaMessageFilterHost::OnStatisticsUpdated(
     int media_id, TrackId track_id, const ::media::PipelineStatistics& stats) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_PlaybackStatistics(media_id, track_id, stats));
 }
 
 void CmaMessageFilterHost::OnNaturalSizeChanged(
     int media_id, TrackId track_id, const gfx::Size& size) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   Send(new CmaMsg_NaturalSizeChanged(media_id, track_id, size));
 }
 

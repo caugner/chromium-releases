@@ -48,6 +48,13 @@ declare_args() {
   # http://gcc.gnu.org/wiki/DebugFission
   use_debug_fission =
       !is_win && use_gold && linux_use_bundled_binutils && !use_ccache
+
+  if (is_win) {
+    # Whether the VS xtree header has been patched to disable warning 4702. If
+    # it has, then we don't need to disable 4702 (unreachable code warning).
+    # The patch is preapplied to the internal toolchain and hence all bots.
+    msvs_xtree_patched = false
+  }
 }
 
 # default_include_dirs ---------------------------------------------------------
@@ -71,7 +78,7 @@ if (!is_win) {
 #
 # Base compiler configuration.
 #
-# See also "runtime_library" below for related stuff and a discusison about
+# See also "runtime_library" below for related stuff and a discussion about
 # where stuff should go. Put warning related stuff in the "warnings" config.
 
 config("compiler") {
@@ -93,10 +100,6 @@ config("compiler") {
       "/GS",  # Enable buffer security checking.
       "/FS",  # Preserve previous PDB behavior.
     ]
-    if (is_component_build) {
-      cflags += [ "/EHsc" ]  # Assume C functions can't throw exceptions and don't catch
-                             # structured exceptions (only C++ ones).
-    }
   } else {
     # Common GCC compiler flags setup.
     # --------------------------------
@@ -154,7 +157,7 @@ config("compiler") {
     ]
   }
 
-  if (is_clang && !is_win) {
+  if (is_clang && !is_win && !is_nacl) {
     # This is here so that all files get recompiled after a clang roll and
     # when turning clang on or off. (defines are passed via the command line,
     # and build system rebuild things when their commandline changes). Nothing
@@ -162,7 +165,7 @@ config("compiler") {
     defines += [ "CR_CLANG_REVISION=" +
                  exec_script("//tools/clang/scripts/posix-print-revision.py",
                              [],
-                             "value") ]
+                             "trim string") ]
   }
 
   # Mac-specific compiler flags setup.
@@ -243,86 +246,92 @@ config("compiler") {
         ]
       }
     } else if (current_cpu == "arm") {
-      # Don't set the compiler flags for the WebView build. These will come
-      # from the Android build system.
-      if (!is_android_webview_build) {
+      cflags += [
+        "-march=$arm_arch",
+        "-mfloat-abi=$arm_float_abi",
+      ]
+      if (arm_tune != "") {
+        cflags += [ "-mtune=$arm_tune" ]
+      }
+      if (arm_use_thumb) {
+        cflags += [ "-mthumb" ]
+        if (is_android && !is_clang) {  # Clang doesn't support this option.
+          cflags += [ "-mthumb-interwork" ]
+        }
+      }
+      if (!is_clang) {
+        # Clang doesn't support these flags.
         cflags += [
-          "-march=$arm_arch",
-          "-mfloat-abi=$arm_float_abi",
-        ]
-        if (arm_tune != "") {
-          cflags += [ "-mtune=$arm_tune" ]
-        }
-        if (arm_use_thumb) {
-          cflags += [ "-mthumb" ]
-          if (is_android && !is_clang) {  # Clang doesn't support this option.
-            cflags += [ "-mthumb-interwork" ]
-          }
-        }
-        if (!is_clang) {
-          # Clang doesn't support these flags.
-          cflags += [
-            # The tree-sra optimization (scalar replacement for
-            # aggregates enabling subsequent optimizations) leads to
-            # invalid code generation when using the Android NDK's
-            # compiler (r5-r7). This can be verified using
-            # webkit_unit_tests' WTF.Checked_int8_t test.
-            "-fno-tree-sra",
+          # The tree-sra optimization (scalar replacement for
+          # aggregates enabling subsequent optimizations) leads to
+          # invalid code generation when using the Android NDK's
+          # compiler (r5-r7). This can be verified using
+          # webkit_unit_tests' WTF.Checked_int8_t test.
+          "-fno-tree-sra",
 
-            # The following option is disabled to improve binary
-            # size and performance in gcc 4.9.
-            "-fno-caller-saves",
-          ]
-        }
+          # The following option is disabled to improve binary
+          # size and performance in gcc 4.9.
+          "-fno-caller-saves",
+        ]
       }
     } else if (current_cpu == "mipsel") {
-      # Don't set the compiler flags for the WebView build. These will come
-      # from the Android build system.
-      if (!is_android_webview_build) {
-        if (mips_arch_variant == "r6") {
-          cflags += [
+      if (mips_arch_variant == "r6") {
+        cflags += [
+          "-mips32r6",
+          "-Wa,-mips32r6",
+        ]
+        if (is_android) {
+          ldflags += [
             "-mips32r6",
-            "-Wa,-mips32r6",
-          ]
-          if (is_android) {
-            ldflags += [
-              "-mips32r6",
-              "-Wl,-melf32ltsmip",
-            ]
-          }
-        } else if (mips_arch_variant == "r2") {
-          cflags += [
-            "-mips32r2",
-            "-Wa,-mips32r2",
-          ]
-        } else if (mips_arch_variant == "r1") {
-          cflags += [
-            "-mips32",
-            "-Wa,-mips32",
+            "-Wl,-melf32ltsmip",
           ]
         }
+      } else if (mips_arch_variant == "r2") {
+        cflags += [
+          "-mips32r2",
+          "-Wa,-mips32r2",
+        ]
+        if (mips_float_abi == "hard" && mips_fpu_mode != "") {
+          cflags += [ "-m$mips_fpu_mode" ]
+        }
+      } else if (mips_arch_variant == "r1") {
+        cflags += [
+          "-mips32",
+          "-Wa,-mips32",
+        ]
       }
+
+      if (mips_dsp_rev == 1) {
+        cflags += [ "-mdsp" ]
+      } else if (mips_dsp_rev == 2) {
+        cflags += [ "-mdspr2" ]
+      }
+
+      cflags += [ "-m${mips_float_abi}-float" ]
     } else if (current_cpu == "mips64el") {
-      # Don't set the compiler flags for the WebView build. These will come
-      # from the Android build system.
-      if (!is_android_webview_build) {
-        if (mips_arch_variant == "r6") {
-          cflags += [
-            "-mips64r6",
-            "-Wa,-mips64r6",
-          ]
-          ldflags += [ "-mips64r6" ]
-        } else if (mips_arch_variant == "r2") {
-          cflags += [
-            "-mips64r2",
-            "-Wa,-mips64r2",
-          ]
-          ldflags += [ "-mips64r2" ]
-        }
+      if (mips_arch_variant == "r6") {
+        cflags += [
+          "-mips64r6",
+          "-Wa,-mips64r6",
+        ]
+        ldflags += [ "-mips64r6" ]
+      } else if (mips_arch_variant == "r2") {
+        cflags += [
+          "-mips64r2",
+          "-Wa,-mips64r2",
+        ]
+        ldflags += [ "-mips64r2" ]
       }
     }
 
     defines += [ "_FILE_OFFSET_BITS=64" ]
+
+    if (!is_android) {
+      defines += [
+        "_LARGEFILE_SOURCE",
+        "_LARGEFILE64_SOURCE",
+      ]
+    }
 
     # Omit unwind support in official builds to save space. We can use breakpad
     # for these builds.
@@ -385,6 +394,13 @@ config("compiler") {
       #"-Wl,--threads",
       #"-Wl,--thread-count=4",
     ]
+
+    # TODO(thestig): Make this flag work with GN.
+    #if (!is_official_build && !is_chromeos && !(is_asan || is_lsan || is_tsan || is_msan)) {
+    #  ldflags += [
+    #    "-Wl,--detect-odr-violations",
+    #  ]
+    #}
   }
 
   if (linux_use_bundled_binutils) {
@@ -412,15 +428,6 @@ config("compiler") {
       # Clang doesn't support these flags.
       cflags += [ "-finline-limit=64" ]
     }
-    if (is_android_webview_build) {
-      # Android predefines this as 1; undefine it here so Chromium can redefine
-      # it later to be 2 for chromium code and unset for third party code. This
-      # works because cflags are added before defines.
-      # TODO(brettw) the above comment seems incorrect. We specify defines
-      # before cflags on our compiler command lines.
-      cflags += [ "-U_FORTIFY_SOURCE" ]
-    }
-
     if (is_asan) {
       # Android build relies on -Wl,--gc-sections removing unreachable code.
       # ASan instrumentation for globals inhibits this and results in a library
@@ -430,11 +437,10 @@ config("compiler") {
     }
 
     defines += [ "ANDROID" ]
-    if (!is_android_webview_build) {
-      # The NDK has these things, but doesn't define the constants
-      # to say that it does. Define them here instead.
-      defines += [ "HAVE_SYS_UIO_H" ]
-    }
+
+    # The NDK has these things, but doesn't define the constants
+    # to say that it does. Define them here instead.
+    defines += [ "HAVE_SYS_UIO_H" ]
 
     # Use gold for Android for most CPU architectures.
     if (current_cpu == "x86" || current_cpu == "x64" || current_cpu == "arm") {
@@ -479,7 +485,7 @@ config("compiler") {
 }
 
 config("compiler_arm_fpu") {
-  if (current_cpu == "arm" && !is_android_webview_build) {
+  if (current_cpu == "arm") {
     cflags = [ "-mfpu=$arm_fpu" ]
   }
 }
@@ -516,9 +522,6 @@ config("runtime_library") {
   } else {
     # Static CRT.
     if (is_win) {
-      # We don't use exceptions, and when we link statically we can just get
-      # rid of them entirely.
-      defines += [ "_HAS_EXCEPTIONS=0" ]
       if (is_debug) {
         cflags += [ "/MTd" ]
       } else {
@@ -530,10 +533,9 @@ config("runtime_library") {
   if (is_win) {
     defines += [
       "__STD_C",
-      "__STDC_CONSTANT_MACROS",
-      "__STDC_FORMAT_MACROS",
       "_CRT_RAND_S",
       "_CRT_SECURE_NO_DEPRECATE",
+      "_HAS_EXCEPTIONS=0",
       "_SCL_SECURE_NO_DEPRECATE",
     ]
   }
@@ -554,10 +556,12 @@ config("runtime_library") {
       "__GNU_SOURCE=1",  # Necessary for clone().
     ]
 
-    ldflags += [
-      "-Wl,--warn-shared-textrel",
-      "-nostdlib",
-    ]
+    # TODO(jdduke) Re-enable on mips after resolving linking
+    # issues with libc++ (crbug.com/456380).
+    if (current_cpu != "mipsel" && current_cpu != "mips64el") {
+      ldflags += [ "-Wl,--warn-shared-textrel" ]
+    }
+    ldflags += [ "-nostdlib" ]
 
     # NOTE: The stlport header include paths below are specified in cflags
     # rather than include_dirs because they need to come after include_dirs.
@@ -665,20 +669,6 @@ config("no_chromium_code") {
       "-Wno-deprecated",
     ]
   }
-
-  if (is_android_webview_build) {
-    # There is a class of warning which:
-    #  1) Android always enables and also treats as errors
-    #  2) Chromium ignores in third party code
-    # So we re-enable those warnings when building Android.
-    cflags += [
-      "-Wno-address",
-      "-Wno-format-security",
-      "-Wno-return-type",
-      "-Wno-sequence-point",
-    ]
-    cflags_cc += [ "-Wno-non-virtual-dtor" ]
-  }
 }
 
 # rtti ------------------------------------------------------------------------
@@ -707,6 +697,7 @@ config("default_warnings") {
   if (is_win) {
     cflags = [
       "/WX",  # Treat warnings as errors.
+
       # Warnings permanently disabled:
 
       # TODO(GYP) The GYP build doesn't have this globally enabled but disabled
@@ -761,6 +752,7 @@ config("default_warnings") {
       # have to turn off this warning (and be careful about how object
       # destruction happens in such cases).
       "/wd4611",
+
       # Warnings to evaluate and possibly fix/reenable later:
 
       "/wd4100",  # Unreferenced formal function parameter.
@@ -773,6 +765,14 @@ config("default_warnings") {
       "/wd4610",  # Class can never be instantiated, constructor required.
       "/wd4996",  # Deprecated function warning.
     ]
+
+    # VS xtree header file needs to be patched or 4702 (unreachable code
+    # warning) is reported if _HAS_EXCEPTIONS=0. Disable the warning if xtree is
+    # not patched.
+    if (!msvs_xtree_patched &&
+        exec_script("../../win_is_xtree_patched.py", [], "value") == 0) {
+      cflags += [ "/wd4702" ]  # Unreachable code.
+    }
   } else {
     # Common GCC warning setup.
     cflags = [
@@ -896,6 +896,8 @@ config("wexit_time_destructors") {
 #
 # Note that this can be applied regardless of platform and architecture to
 # clean up the call sites. This will only apply the flag when necessary.
+#
+# TODO(jschuh): crbug.com/167187 fix this and delete this config.
 config("no_size_t_to_int_warning") {
   if (is_win && current_cpu == "x64") {
     cflags = [ "/wd4267" ]
@@ -949,10 +951,15 @@ if (is_win) {
     if (!using_sanitizer) {
       common_optimize_on_cflags += [ "-fomit-frame-pointer" ]
     }
-    common_optimize_on_ldflags += [
-      # Warn in case of text relocations.
-      "-Wl,--warn-shared-textrel",
-    ]
+
+    # TODO(jdduke) Re-enable on mips after resolving linking
+    # issues with libc++ (crbug.com/456380).
+    if (current_cpu != "mipsel" && current_cpu != "mips64el") {
+      common_optimize_on_ldflags += [
+        # Warn in case of text relocations.
+        "-Wl,--warn-shared-textrel",
+      ]
+    }
   }
 
   if (is_mac) {

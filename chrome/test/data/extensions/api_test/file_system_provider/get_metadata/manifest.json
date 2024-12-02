@@ -8,8 +8,10 @@
       "Test for chrome.fileSystemProvider.onGetMetadataRequested().",
   "permissions": [
     "fileSystemProvider",
-    "fileManagerPrivate",
-    "fileBrowserHandler"
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
+    "fileManagerPrivate"
   ],
   "app": {
     "background": {

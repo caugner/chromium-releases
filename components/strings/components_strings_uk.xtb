@@ -52,6 +52,7 @@
 <translation id="7441627299479586546">Неправильна тема правила</translation>
 <translation id="3885155851504623709">Община</translation>
 <translation id="6973656660372572881">Указано фіксовані проксі-сервери та URL-адреса сценарію .pac.</translation>
+<translation id="1426410128494586442">так</translation>
 <translation id="4506176782989081258">Помилка перевірки: <ph name="VALIDATION_ERROR"/></translation>
 <translation id="7108649287766967076">Помилка перекладу такою мовою: <ph name="TARGET_LANGUAGE"/>.</translation>
 <translation id="4103249731201008433">Недійсний серійний номер пристрою</translation>
@@ -70,11 +71,13 @@
 <translation id="1132774398110320017">Налаштування автозаповнення Chrome…</translation>
 <translation id="6458467102616083041">Ігнорується, оскільки пошук за умовчанням вимкнено правилом.</translation>
 <translation id="1227224963052638717">Невідоме правило</translation>
+<translation id="4250680216510889253">ні</translation>
 <translation id="9207861905230894330">Не вдалося додати статтю.</translation>
 <translation id="5872918882028971132">Поради для батьків</translation>
 <translation id="337363190475750230">Деініціалізовано</translation>
 <translation id="2367567093518048410">Рівень</translation>
 <translation id="7977590112176369853">&lt;уведіть запит&gt;</translation>
+<translation id="552553974213252141">Текст отримано правильно?</translation>
 <translation id="7610193165460212391">Значення за межами діапазону <ph name="VALUE"/>.</translation>
 <translation id="3739623965217189342">Скопійоване посилання</translation>
 <translation id="8311778656528046050">Дійсно перезавантажити цю сторінку?</translation>
@@ -84,7 +87,6 @@
 <translation id="3024663005179499861">Неправильний тип правила</translation>
 <translation id="2030481566774242610">Можливо, ви мали на увазі <ph name="LINK"/>?</translation>
 <translation id="3450660100078934250">MasterCard</translation>
-<translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, діє до: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">American Express</translation>
 <translation id="225207911366869382">Дію цього значення припинено для цього правила</translation>
 <translation id="3145945101586104090">Помилка декодування відповіді</translation>

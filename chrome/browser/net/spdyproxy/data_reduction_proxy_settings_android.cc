@@ -11,8 +11,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "jni/DataReductionProxySettings_jni.h"
 #include "net/proxy/proxy_server.h"
@@ -42,12 +42,6 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyPromoAllowed(
 jboolean DataReductionProxySettingsAndroid::IsIncludedInAltFieldTrial(
     JNIEnv* env, jobject obj) {
   return DataReductionProxyParams::IsIncludedInAlternativeFieldTrial();
-}
-
-ScopedJavaLocalRef<jstring>
-DataReductionProxySettingsAndroid::GetDataReductionProxyOrigin(
-    JNIEnv* env, jobject obj) {
-  return ConvertUTF8ToJavaString(env, Settings()->PrimaryOrigin());
 }
 
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyEnabled(

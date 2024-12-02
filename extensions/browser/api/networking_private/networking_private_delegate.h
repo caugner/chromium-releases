@@ -28,7 +28,7 @@ struct VerificationProperties;
 
 // Base class for platform dependent networkingPrivate API implementations.
 // All inputs and results for this class use ONC values. See
-// networking_private.json for descriptions of the expected inputs and results.
+// networking_private.idl for descriptions of the expected inputs and results.
 class NetworkingPrivateDelegate : public KeyedService {
  public:
   typedef base::Callback<void(scoped_ptr<base::DictionaryValue>)>
@@ -99,6 +99,9 @@ class NetworkingPrivateDelegate : public KeyedService {
                              scoped_ptr<base::DictionaryValue> properties,
                              const StringCallback& success_callback,
                              const FailureCallback& failure_callback) = 0;
+  virtual void ForgetNetwork(const std::string& guid,
+                             const VoidCallback& success_callback,
+                             const FailureCallback& failure_callback) = 0;
   virtual void GetNetworks(const std::string& network_type,
                            bool configured_only,
                            bool visible_only,
@@ -111,6 +114,10 @@ class NetworkingPrivateDelegate : public KeyedService {
   virtual void StartDisconnect(const std::string& guid,
                                const VoidCallback& success_callback,
                                const FailureCallback& failure_callback) = 0;
+  virtual void StartActivate(const std::string& guid,
+                             const std::string& carrier,
+                             const VoidCallback& success_callback,
+                             const FailureCallback& failure_callback);
   virtual void SetWifiTDLSEnabledState(
       const std::string& ip_or_mac_address,
       bool enabled,

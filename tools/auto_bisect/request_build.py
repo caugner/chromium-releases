@@ -11,15 +11,8 @@ This module can be either run as a stand-alone script to send a request to a
 builder, or imported and used by calling the public functions below.
 """
 
-import getpass
 import json
-import optparse
-import os
-import sys
-import urllib
 import urllib2
-
-import fetch_build
 
 # URL template for fetching JSON data about builds.
 BUILDER_JSON_URL = ('%(server_url)s/json/builders/%(bot_name)s/builds/'
@@ -27,10 +20,6 @@ BUILDER_JSON_URL = ('%(server_url)s/json/builders/%(bot_name)s/builds/'
 
 # URL template for displaying build steps.
 BUILDER_HTML_URL = '%(server_url)s/builders/%(bot_name)s/builds/%(build_num)s'
-
-# Try server status page URLs, used to get build status.
-PERF_TRY_SERVER_URL = 'http://build.chromium.org/p/tryserver.chromium.perf'
-LINUX_TRY_SERVER_URL = 'http://build.chromium.org/p/tryserver.chromium.linux'
 
 # Status codes that can be returned by the GetBuildStatus method
 # From buildbot.status.builder.
@@ -113,13 +102,13 @@ def _IsBuildSuccessful(build_data):
 
 
 def _FetchBuilderData(builder_url):
-  """Fetches JSON data for the all the builds from the tryserver.
+  """Fetches JSON data for the all the builds from the try server.
 
   Args:
-    builder_url: A tryserver URL to fetch builds information.
+    builder_url: A try server URL to fetch builds information.
 
   Returns:
-    A dictionary with information of all build on the tryserver.
+    A dictionary with information of all build on the try server.
   """
   data = None
   try:
@@ -137,10 +126,10 @@ def _FetchBuilderData(builder_url):
 
 
 def _GetBuildData(buildbot_url):
-  """Gets build information for the given build id from the tryserver.
+  """Gets build information for the given build id from the try server.
 
   Args:
-    buildbot_url: A tryserver URL to fetch build information.
+    buildbot_url: A try server URL to fetch build information.
 
   Returns:
     A dictionary with build information if build exists, otherwise None.
@@ -151,44 +140,21 @@ def _GetBuildData(buildbot_url):
   return None
 
 
-def _GetBuildBotUrl(builder_type):
-  """Gets build bot URL for fetching build info.
-
-  Bisect builder bots are hosted on tryserver.chromium.perf, though we cannot
-  access this tryserver using host and port number directly, so we use another
-  tryserver URL for the perf tryserver.
-
-  Args:
-    builder_type: Determines what type of builder is used, e.g. "perf".
-
-  Returns:
-    URL of the buildbot as a string.
-  """
-  if builder_type == fetch_build.PERF_BUILDER:
-    return PERF_TRY_SERVER_URL
-  if builder_type == fetch_build.FULL_BUILDER:
-    return LINUX_TRY_SERVER_URL
-  raise NotImplementedError('Unsupported builder type "%s".' % builder_type)
-
-
-def GetBuildStatus(build_num, bot_name, builder_type):
+def GetBuildStatus(build_num, bot_name, server_url):
   """Gets build status from the buildbot status page for a given build number.
 
   Args:
-    build_num: A build number on tryserver to determine its status.
+    build_num: A build number on try server to determine its status.
     bot_name: Name of the bot where the build information is scanned.
-    builder_type: Type of builder, e.g. "perf".
+    server_url: URL of the buildbot.
 
   Returns:
     A pair which consists of build status (SUCCESS, FAILED or PENDING) and a
     link to build status page on the waterfall.
   """
-  # TODO(prasadv, qyearsley): Make this a method of BuildArchive
-  # (which may be renamed to BuilderTryBot or Builder).
   results_url = None
   if build_num:
     # Get the URL for requesting JSON data with status information.
-    server_url = _GetBuildBotUrl(builder_type)
     buildbot_url = BUILDER_JSON_URL % {
         'server_url': server_url,
         'bot_name': bot_name,
@@ -210,28 +176,24 @@ def GetBuildStatus(build_num, bot_name, builder_type):
   return (PENDING, results_url)
 
 
-def GetBuildNumFromBuilder(build_reason, bot_name, builder_type):
+def GetBuildNumFromBuilder(build_reason, bot_name, server_url):
   """Gets build number on build status page for a given 'build reason'.
 
   This function parses the JSON data from buildbot page and collects basic
   information about the all the builds, and then uniquely identifies the build
-  based on the 'reason' attribute in builds's JSON data.
+  based on the 'reason' attribute in the JSON data about the build.
 
   The 'reason' attribute set is when a build request is posted, and it is used
   to identify the build on status page.
 
   Args:
-    build_reason: A unique build name set to build on tryserver.
+    build_reason: A unique build name set to build on try server.
     bot_name: Name of the bot where the build information is scanned.
-    builder_type: Type of builder, e.g. "perf".
+    server_url: URL of the buildbot.
 
   Returns:
     A build number as a string if found, otherwise None.
   """
-  # TODO(prasadv, qyearsley): Make this a method of BuildArchive
-  # (which may be renamed to BuilderTryBot or Builder).
-  # Gets the buildbot url for the given host and port.
-  server_url = _GetBuildBotUrl(builder_type)
   buildbot_url = BUILDER_JSON_URL % {
       'server_url': server_url,
       'bot_name': bot_name,

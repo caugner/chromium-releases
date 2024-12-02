@@ -4,22 +4,23 @@
 
 package org.chromium.media;
 
+import android.annotation.TargetApi;
 import android.media.MediaCrypto;
 import android.media.MediaDrm;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Handler;
 import android.util.Log;
 
-import org.apache.http.HttpResponse;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.impl.client.DefaultHttpClient;
-import org.apache.http.util.EntityUtils;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
@@ -32,6 +33,7 @@ import java.util.UUID;
  * sessions for a single MediaSourcePlayer.
  */
 @JNINamespace("media")
+@TargetApi(Build.VERSION_CODES.KITKAT)
 public class MediaDrmBridge {
     // Implementation Notes:
     // - A media crypto session (mMediaCryptoSession) is opened after MediaDrm
@@ -62,6 +64,7 @@ public class MediaDrmBridge {
     private static final String ENABLE = "enable";
     private static final int INVALID_SESSION_ID = 0;
     private static final char[] HEX_CHAR_LOOKUP = "0123456789ABCDEF".toCharArray();
+    private static final long INVALID_NATIVE_MEDIA_DRM_BRIDGE = 0;
 
     // KeyStatus for CDM key information. MUST keep this value in sync with
     // CdmKeyInformation::KeyStatus.
@@ -153,11 +156,18 @@ public class MediaDrmBridge {
         return hexString.toString();
     }
 
+    private boolean isNativeMediaDrmBridgeValid() {
+        return mNativeMediaDrmBridge != INVALID_NATIVE_MEDIA_DRM_BRIDGE;
+    }
+
     private MediaDrmBridge(UUID schemeUUID, long nativeMediaDrmBridge)
             throws android.media.UnsupportedSchemeException {
         mSchemeUUID = schemeUUID;
         mMediaDrm = new MediaDrm(schemeUUID);
+
         mNativeMediaDrmBridge = nativeMediaDrmBridge;
+        assert isNativeMediaDrmBridgeValid();
+
         mHandler = new Handler();
         mSessionIds = new HashMap<ByteBuffer, String>();
         mPendingCreateSessionDataQueue = new ArrayDeque<PendingCreateSessionData>();
@@ -198,11 +208,12 @@ public class MediaDrmBridge {
 
         // Create MediaCrypto object.
         try {
+            // TODO: This requires KitKat. Is this class used on pre-KK devices?
             if (MediaCrypto.isCryptoSchemeSupported(mSchemeUUID)) {
                 mMediaCrypto = new MediaCrypto(mSchemeUUID, mMediaCryptoSession);
                 Log.d(TAG, "MediaCrypto successfully created!");
                 // Notify the native code that MediaCrypto is ready.
-                nativeOnMediaCryptoReady(mNativeMediaDrmBridge);
+                onMediaCryptoReady();
                 return true;
             } else {
                 Log.e(TAG, "Cannot create MediaCrypto for unsupported scheme.");
@@ -345,12 +356,20 @@ public class MediaDrmBridge {
     }
 
     /**
-     * Release the MediaDrmBridge object.
+     * Destroy the MediaDrmBridge object.
      */
     @CalledByNative
+    private void destroy() {
+        mNativeMediaDrmBridge = INVALID_NATIVE_MEDIA_DRM_BRIDGE;
+        release();
+    }
+
+    /**
+     * Release all allocated resources and finish all pending operations.
+     */
     private void release() {
-        // Do not reset mHandler and mNativeMediaDrmBridge so that we can still
-        // post KeyError back to native code.
+        // Do not reset mHandler so that we can still post tasks back to native code.
+        // Note that mNativeMediaDrmBridge may have already been reset (see destroy()).
 
         for (PendingCreateSessionData data : mPendingCreateSessionDataQueue) {
             onPromiseRejected(data.promiseId(), "Create session aborted.");
@@ -642,7 +661,7 @@ public class MediaDrmBridge {
         boolean success = provideProvisionResponse(response);
 
         if (mResetDeviceCredentialsPending) {
-            nativeOnResetDeviceCredentialsCompleted(mNativeMediaDrmBridge, success);
+            onResetDeviceCredentialsCompleted(success);
             mResetDeviceCredentialsPending = false;
         }
 
@@ -675,11 +694,24 @@ public class MediaDrmBridge {
 
     // Helper functions to post native calls to prevent reentrancy.
 
+    private void onMediaCryptoReady() {
+        mHandler.post(new Runnable(){
+            @Override
+            public void run() {
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnMediaCryptoReady(mNativeMediaDrmBridge);
+                }
+            }
+        });
+    }
+
     private void onPromiseResolved(final long promiseId) {
         mHandler.post(new Runnable(){
             @Override
             public void run() {
-                nativeOnPromiseResolved(mNativeMediaDrmBridge, promiseId);
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnPromiseResolved(mNativeMediaDrmBridge, promiseId);
+                }
             }
         });
     }
@@ -688,7 +720,9 @@ public class MediaDrmBridge {
         mHandler.post(new Runnable(){
             @Override
             public void run() {
-                nativeOnPromiseResolvedWithSession(mNativeMediaDrmBridge, promiseId, sessionId);
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnPromiseResolvedWithSession(mNativeMediaDrmBridge, promiseId, sessionId);
+                }
             }
         });
     }
@@ -698,7 +732,9 @@ public class MediaDrmBridge {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                nativeOnPromiseRejected(mNativeMediaDrmBridge, promiseId, errorMessage);
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnPromiseRejected(mNativeMediaDrmBridge, promiseId, errorMessage);
+                }
             }
         });
     }
@@ -707,8 +743,10 @@ public class MediaDrmBridge {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                nativeOnSessionMessage(mNativeMediaDrmBridge, sessionId, request.getData(),
-                        request.getDefaultUrl());
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnSessionMessage(mNativeMediaDrmBridge, sessionId, request.getData(),
+                            request.getDefaultUrl());
+                }
             }
         });
     }
@@ -717,7 +755,9 @@ public class MediaDrmBridge {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                nativeOnSessionClosed(mNativeMediaDrmBridge, sessionId);
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnSessionClosed(mNativeMediaDrmBridge, sessionId);
+                }
             }
         });
     }
@@ -727,8 +767,10 @@ public class MediaDrmBridge {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                nativeOnSessionKeysChange(
-                        mNativeMediaDrmBridge, sessionId, hasAdditionalUsableKey, keyStatus);
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnSessionKeysChange(
+                            mNativeMediaDrmBridge, sessionId, hasAdditionalUsableKey, keyStatus);
+                }
             }
         });
     }
@@ -738,7 +780,20 @@ public class MediaDrmBridge {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
-                nativeOnLegacySessionError(mNativeMediaDrmBridge, sessionId, errorMessage);
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnLegacySessionError(mNativeMediaDrmBridge, sessionId, errorMessage);
+                }
+            }
+        });
+    }
+
+    private void onResetDeviceCredentialsCompleted(final boolean success) {
+        mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnResetDeviceCredentialsCompleted(mNativeMediaDrmBridge, success);
+                }
             }
         });
     }
@@ -817,32 +872,47 @@ public class MediaDrmBridge {
         }
 
         private byte[] postRequest(String url, byte[] drmRequest) {
-            HttpClient httpClient = new DefaultHttpClient();
-            HttpPost httpPost = new HttpPost(url + "&signedRequest=" + new String(drmRequest));
-
-            Log.d(TAG, "PostRequest:" + httpPost.getRequestLine());
+            HttpURLConnection urlConnection = null;
             try {
-                // Add data
-                httpPost.setHeader("Accept", "*/*");
-                httpPost.setHeader("User-Agent", "Widevine CDM v1.0");
-                httpPost.setHeader("Content-Type", "application/json");
+                URL request = new URL(url + "&signedRequest=" + new String(drmRequest));
+                urlConnection = (HttpURLConnection) request.openConnection();
+                urlConnection.setDoOutput(true);
+                urlConnection.setDoInput(true);
+                urlConnection.setUseCaches(false);
+                urlConnection.setRequestMethod("POST");
+                urlConnection.setRequestProperty("User-Agent", "Widevine CDM v1.0");
+                urlConnection.setRequestProperty("Content-Type", "application/json");
 
-                // Execute HTTP Post Request
-                HttpResponse response = httpClient.execute(httpPost);
-
-                byte[] responseBody;
-                int responseCode = response.getStatusLine().getStatusCode();
+                int responseCode = urlConnection.getResponseCode();
                 if (responseCode == 200) {
-                    responseBody = EntityUtils.toByteArray(response.getEntity());
+                    BufferedInputStream bis =
+                            new BufferedInputStream(urlConnection.getInputStream());
+                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    int read = 0;
+                    int bufferSize = 512;
+                    byte[] buffer = new byte[bufferSize];
+                    try {
+                        while (true) {
+                            read = bis.read(buffer);
+                            if (read == -1) break;
+                            bos.write(buffer, 0, read);
+                        }
+                    } finally {
+                        bis.close();
+                    }
+                    return bos.toByteArray();
                 } else {
                     Log.d(TAG, "Server returned HTTP error code " + responseCode);
                     return null;
                 }
-                return responseBody;
-            } catch (ClientProtocolException e) {
+            } catch (MalformedURLException e) {
                 e.printStackTrace();
             } catch (IOException e) {
                 e.printStackTrace();
+            } catch (IllegalStateException e) {
+                e.printStackTrace();
+            } finally {
+                if (urlConnection != null) urlConnection.disconnect();
             }
             return null;
         }

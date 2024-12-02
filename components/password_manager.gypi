@@ -12,6 +12,7 @@
         '../base/base.gyp:base',
         '../net/net.gyp:net',
         '../sql/sql.gyp:sql',
+        '../sync/sync.gyp:sync',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../url/url.gyp:url_lib',
         'autofill_core_common',
@@ -27,6 +28,8 @@
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
+        'password_manager/core/browser/affiliated_match_helper.cc',
+        'password_manager/core/browser/affiliated_match_helper.h',
         'password_manager/core/browser/affiliation_backend.cc',
         'password_manager/core/browser/affiliation_backend.h',
         'password_manager/core/browser/affiliation_database.cc',
@@ -74,8 +77,6 @@
         'password_manager/core/browser/password_manager_internals_service.h',
         'password_manager/core/browser/password_manager_metrics_util.cc',
         'password_manager/core/browser/password_manager_metrics_util.h',
-        'password_manager/core/browser/password_manager_url_collection_experiment.cc',
-        'password_manager/core/browser/password_manager_url_collection_experiment.h',
         'password_manager/core/browser/password_store.cc',
         'password_manager/core/browser/password_store.h',
         'password_manager/core/browser/password_store_change.h',
@@ -85,6 +86,8 @@
         'password_manager/core/browser/password_store_default.h',
         'password_manager/core/browser/password_store_sync.cc',
         'password_manager/core/browser/password_store_sync.h',
+        'password_manager/core/browser/password_syncable_service.cc',
+        'password_manager/core/browser/password_syncable_service.h',
         'password_manager/core/browser/psl_matching_helper.cc',
         'password_manager/core/browser/psl_matching_helper.h',
         'password_manager/core/browser/test_affiliation_fetcher_factory.h',
@@ -94,40 +97,12 @@
         'password_manager/core/browser/webdata/password_web_data_service_win.cc',
         'password_manager/core/browser/webdata/password_web_data_service_win.h',
       ],
-      'variables': {
-        'conditions': [
-          ['android_webview_build == 1', {
-            # Android WebView doesn't support sync.
-            'password_manager_enable_sync%': 0,
-          }, {
-            'password_manager_enable_sync%': 1,
-          }],
-        ],
-      },
       'conditions': [
         ['OS=="mac"', {
           'sources!': [
             # TODO(blundell): Provide the iOS login DB implementation and then
             # also exclude the POSIX one from iOS. http://crbug.com/341429
             'password_manager/core/browser/login_database_posix.cc',
-          ],
-        }],
-        ['password_manager_enable_sync == 1', {
-          'defines': [
-            'PASSWORD_MANAGER_ENABLE_SYNC',
-          ],
-          'dependencies': [
-            '../sync/sync.gyp:sync',
-          ],
-          'direct_dependent_settings': {
-            'defines': [
-              'PASSWORD_MANAGER_ENABLE_SYNC',
-            ],
-          },
-          'sources': [
-            # Note: sources list duplicated in GN build.
-            'password_manager/core/browser/password_syncable_service.cc',
-            'password_manager/core/browser/password_syncable_service.h',
           ],
         }],
       ],
@@ -192,13 +167,14 @@
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
+        'password_manager/core/common/credential_manager_types.cc',
+        'password_manager/core/common/credential_manager_types.h',
         'password_manager/core/common/experiments.cc',
         'password_manager/core/common/experiments.h',
         'password_manager/core/common/password_manager_pref_names.cc',
         'password_manager/core/common/password_manager_pref_names.h',
         'password_manager/core/common/password_manager_switches.cc',
         'password_manager/core/common/password_manager_switches.h',
-        'password_manager/core/common/password_manager_ui.cc',
         'password_manager/core/common/password_manager_ui.h',
       ],
     },
@@ -221,11 +197,11 @@
             '..',
           ],
           'sources': [
+            'password_manager/content/common/credential_manager_content_utils.cc',
+            'password_manager/content/common/credential_manager_content_utils.h',
             'password_manager/content/common/credential_manager_message_generator.cc',
             'password_manager/content/common/credential_manager_message_generator.h',
             'password_manager/content/common/credential_manager_messages.h',
-            'password_manager/content/common/credential_manager_types.cc',
-            'password_manager/content/common/credential_manager_types.h',
           ],
         },
         {

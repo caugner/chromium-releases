@@ -8,8 +8,10 @@
       "Test for chrome.fileSystemProvider.onReadFileRequested(). Testing evil behavior of providing extensions.",
   "permissions": [
     "fileSystemProvider",
-    "fileManagerPrivate",
-    "fileBrowserHandler"
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
+    "fileManagerPrivate"
   ],
   "app": {
     "background": {
