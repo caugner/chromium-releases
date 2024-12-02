@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 cr.define('options.browser_options', function() {
-  const DeletableItem = options.DeletableItem;
-  const DeletableItemList = options.DeletableItemList;
-  const ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
+  /** @const */ var DeletableItem = options.DeletableItem;
+  /** @const */ var DeletableItemList = options.DeletableItemList;
+  /** @const */ var ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
 
   var localStrings = new LocalStrings();
 
@@ -35,9 +35,8 @@ cr.define('options.browser_options', function() {
     __proto__: DeletableItem.prototype,
 
     /**
-      * Get the filepath for this profile list item.
-      * @return the file path of this item.
-      */
+     * @type {string} the file path of this profile list item.
+     */
     get profilePath() {
       return this.profileInfo_.filePath;
     },
@@ -62,7 +61,7 @@ cr.define('options.browser_options', function() {
       if (profileInfo.isCurrentProfile)
         displayName = localStrings.getStringF(
             'profilesListItemCurrent',
-            profileInfo.name)
+            profileInfo.name);
       nameEl.textContent = displayName;
     },
   };

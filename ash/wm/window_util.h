@@ -6,8 +6,6 @@
 #define ASH_WM_WINDOW_UTIL_H_
 #pragma once
 
-#include <set>
-
 #include "ash/ash_export.h"
 
 namespace aura {
@@ -15,8 +13,7 @@ class Window;
 }
 
 namespace ash {
-
-// TODO(jamescook): Put all these functions in namespace window_util.
+namespace wm {
 
 // Convenience setters/getters for |aura::client::kRootWindowActiveWindow|.
 ASH_EXPORT void ActivateWindow(aura::Window* window);
@@ -31,10 +28,14 @@ ASH_EXPORT aura::Window* GetActiveWindow();
 // this is probably what you're looking for.
 ASH_EXPORT aura::Window* GetActivatableWindow(aura::Window* window);
 
-namespace window_util {
+// Returns true if |window| is normal or default.
+ASH_EXPORT bool IsWindowNormal(aura::Window* window);
 
 // Returns true if |window| is in the maximized state.
 ASH_EXPORT bool IsWindowMaximized(aura::Window* window);
+
+// Returns true if |window| is minimized.
+ASH_EXPORT bool IsWindowMinimized(aura::Window* window);
 
 // Returns true if |window| is in the fullscreen state.
 ASH_EXPORT bool IsWindowFullscreen(aura::Window* window);
@@ -42,19 +43,18 @@ ASH_EXPORT bool IsWindowFullscreen(aura::Window* window);
 // Maximizes |window|, which must not be NULL.
 ASH_EXPORT void MaximizeWindow(aura::Window* window);
 
+// Minimizes |window|, which must not be NULL.
+ASH_EXPORT void MinimizeWindow(aura::Window* window);
+
 // Restores |window|, which must not be NULL.
 ASH_EXPORT void RestoreWindow(aura::Window* window);
-
-// Returns true if the set of |windows| contains a full-screen window.
-typedef std::set<aura::Window*> WindowSet;
-ASH_EXPORT bool HasFullscreenWindow(const WindowSet& windows);
 
 // Sets whether the window should be open in a split mode. Only applicable when
 // workspaces are used.
 ASH_EXPORT void SetOpenWindowSplit(aura::Window* window, bool value);
 ASH_EXPORT bool GetOpenWindowSplit(aura::Window* window);
 
-}  // namespace window_util
+}  // namespace wm
 }  // namespace ash
 
 #endif  // ASH_WM_WINDOW_UTIL_H_

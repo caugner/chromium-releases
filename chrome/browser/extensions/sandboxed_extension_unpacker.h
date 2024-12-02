@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/scoped_temp_dir.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/utility_process_host.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/utility_process_host_client.h"
 
 class Extension;
-class ResourceDispatcherHost;
 
 namespace base {
 class DictionaryValue;
@@ -67,7 +67,7 @@ class SandboxedExtensionUnpackerClient
 //
 //
 // NOTE: This class should only be used on the file thread.
-class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
+class SandboxedExtensionUnpacker : public content::UtilityProcessHostClient {
  public:
   // The size of the magic character sequence at the beginning of each crx
   // file, in bytes. This should be a multiple of 4.
@@ -98,10 +98,10 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   static const uint32 kCurrentVersion = 2;
 
   // Unpacks the extension in |crx_path| into a temporary directory and calls
-  // |client| with the result. If |rdh| is provided, unpacking is done in a
-  // sandboxed subprocess. Otherwise, it is done in-process.
+  // |client| with the result. If |run_out_of_process| is provided, unpacking
+  // is done in a sandboxed subprocess. Otherwise, it is done in-process.
   SandboxedExtensionUnpacker(const FilePath& crx_path,
-                             ResourceDispatcherHost* rdh,
+                             bool run_out_of_process,
                              Extension::Location location,
                              int creation_flags,
                              SandboxedExtensionUnpackerClient* client);
@@ -193,7 +193,7 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   // Starts the utility process that unpacks our extension.
   void StartProcessOnIOThread(const FilePath& temp_crx_path);
 
-  // UtilityProcessHost::Client
+  // UtilityProcessHostClient
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void OnProcessCrashed(int exit_code) OVERRIDE;
 
@@ -220,8 +220,8 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   // Our client's thread. This is the thread we respond on.
   content::BrowserThread::ID thread_identifier_;
 
-  // ResourceDispatcherHost to pass to the utility process.
-  ResourceDispatcherHost* rdh_;
+  // True if unpacking should be done by the utility process.
+  bool run_out_of_process_;
 
   // Our client.
   scoped_refptr<SandboxedExtensionUnpackerClient> client_;
@@ -240,6 +240,10 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
 
   // The public key that was extracted from the CRX header.
   std::string public_key_;
+
+  // The extension's ID. This will be calculated from the public key in the crx
+  // header.
+  std::string extension_id_;
 
   // Time at which unpacking started. Used to compute the time unpacking takes.
   base::TimeTicks unpack_start_time_;

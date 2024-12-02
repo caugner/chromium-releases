@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,12 +12,13 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/net/http_return.h"
+#include "chrome/common/cloud_print/cloud_print_helpers.h"
 #include "chrome/service/cloud_print/cloud_print_consts.h"
 #include "chrome/service/cloud_print/cloud_print_helpers.h"
 #include "chrome/service/cloud_print/job_status_updater.h"
 #include "googleurl/src/gurl.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_status_code.h"
 
 PrinterJobHandler::JobDetails::JobDetails() {}
 
@@ -185,7 +186,7 @@ void PrinterJobHandler::OnReceivePrinterCaps(
 
   std::string post_data;
   std::string mime_boundary;
-  CloudPrintHelpers::CreateMimeBoundaryForUpload(&mime_boundary);
+  cloud_print::CreateMimeBoundaryForUpload(&mime_boundary);
 
   if (succeeded) {
     std::string caps_hash =
@@ -194,16 +195,14 @@ void PrinterJobHandler::OnReceivePrinterCaps(
       // Hashes don't match, we need to upload new capabilities (the defaults
       // go for free along with the capabilities)
       printer_info_cloud_.caps_hash = caps_hash;
-      CloudPrintHelpers::AddMultipartValueForUpload(
-          kPrinterCapsValue, caps_and_defaults.printer_capabilities,
-          mime_boundary, caps_and_defaults.caps_mime_type, &post_data);
-      CloudPrintHelpers::AddMultipartValueForUpload(
-          kPrinterDefaultsValue, caps_and_defaults.printer_defaults,
-          mime_boundary, caps_and_defaults.defaults_mime_type,
-          &post_data);
-      CloudPrintHelpers::AddMultipartValueForUpload(
-          kPrinterCapsHashValue, caps_hash, mime_boundary, std::string(),
-          &post_data);
+      cloud_print::AddMultipartValueForUpload(kPrinterCapsValue,
+          caps_and_defaults.printer_capabilities, mime_boundary,
+          caps_and_defaults.caps_mime_type, &post_data);
+      cloud_print::AddMultipartValueForUpload(kPrinterDefaultsValue,
+          caps_and_defaults.printer_defaults, mime_boundary,
+          caps_and_defaults.defaults_mime_type, &post_data);
+      cloud_print::AddMultipartValueForUpload(kPrinterCapsHashValue,
+          caps_hash, mime_boundary, std::string(), &post_data);
     }
   } else {
     LOG(ERROR) << "Failed to get printer caps and defaults for printer: "
@@ -219,29 +218,23 @@ void PrinterJobHandler::OnReceivePrinterCaps(
     // Remove all the exising proxy tags.
     std::string cp_tag_wildcard(kProxyTagPrefix);
     cp_tag_wildcard += ".*";
-    CloudPrintHelpers::AddMultipartValueForUpload(
-        kPrinterRemoveTagValue, cp_tag_wildcard, mime_boundary, std::string(),
-        &post_data);
+    cloud_print::AddMultipartValueForUpload(kPrinterRemoveTagValue,
+        cp_tag_wildcard, mime_boundary, std::string(), &post_data);
   }
 
   if (printer_info.printer_name != printer_info_.printer_name) {
-    CloudPrintHelpers::AddMultipartValueForUpload(kPrinterNameValue,
-                                                  printer_info.printer_name,
-                                                  mime_boundary,
-                                                  std::string(), &post_data);
+    cloud_print::AddMultipartValueForUpload(kPrinterNameValue,
+        printer_info.printer_name, mime_boundary, std::string(), &post_data);
   }
   if (printer_info.printer_description != printer_info_.printer_description) {
-    CloudPrintHelpers::AddMultipartValueForUpload(
-        kPrinterDescValue, printer_info.printer_description, mime_boundary,
-        std::string() , &post_data);
+    cloud_print::AddMultipartValueForUpload(kPrinterDescValue,
+      printer_info.printer_description, mime_boundary,
+      std::string(), &post_data);
   }
   if (printer_info.printer_status != printer_info_.printer_status) {
-    CloudPrintHelpers::AddMultipartValueForUpload(
-        kPrinterStatusValue,
-        base::StringPrintf("%d", printer_info.printer_status),
-        mime_boundary,
-        std::string(),
-        &post_data);
+    cloud_print::AddMultipartValueForUpload(kPrinterStatusValue,
+        base::StringPrintf("%d", printer_info.printer_status), mime_boundary,
+        std::string(), &post_data);
   }
   printer_info_ = printer_info;
   if (!post_data.empty()) {
@@ -277,7 +270,7 @@ CloudPrintURLFetcher::ResponseAction PrinterJobHandler::HandleRawResponse(
   // 415 (Unsupported media type) error while fetching data from the server
   // means data conversion error. Stop fetching process and mark job as error.
   if (next_data_handler_ == (&PrinterJobHandler::HandlePrintDataResponse) &&
-      response_code == RC_UNSUPPORTED_MEDIA_TYPE) {
+      response_code == net::HTTP_UNSUPPORTED_MEDIA_TYPE) {
     MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&PrinterJobHandler::JobFailed, this, JOB_DOWNLOAD_FAILED));

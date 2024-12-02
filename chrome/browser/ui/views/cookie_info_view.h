@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/string16.h"
-#include "net/base/cookie_monster.h"
+#include "net/cookies/cookie_monster.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/view.h"
@@ -74,7 +74,7 @@ class CookieInfoView : public views::View,
                            int new_index) OVERRIDE;
 
   // ui::ComboboxModel:
-  virtual int GetItemCount() OVERRIDE;
+  virtual int GetItemCount() const OVERRIDE;
   virtual string16 GetItemAt(int index) OVERRIDE;
 
  private:

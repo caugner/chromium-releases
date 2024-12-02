@@ -8,6 +8,7 @@
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
 struct PP_NetAddress_Private;
+namespace webkit_glue { class ClipboardClient; }
 
 namespace webkit {
 namespace ppapi {
@@ -21,6 +22,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void PluginTextInputTypeChanged(PluginInstance* instance);
   virtual void PluginCaretPositionChanged(PluginInstance* instance);
   virtual void PluginRequestedCancelComposition(PluginInstance* instance);
+  virtual void PluginSelectionChanged(PluginInstance* instance);
   virtual void PluginCrashed(PluginInstance* instance);
   virtual void InstanceCreated(PluginInstance* instance);
   virtual void InstanceDeleted(PluginInstance* instance);
@@ -31,15 +33,20 @@ class MockPluginDelegate : public PluginDelegate {
       media::VideoDecodeAccelerator::Client* client,
       int32 command_buffer_route_id);
   virtual PlatformVideoCapture* CreateVideoCapture(
-      media::VideoCapture::EventHandler* handler);
-  virtual PlatformAudio* CreateAudio(uint32_t sample_rate,
-                                     uint32_t sample_count,
-                                     PlatformAudioCommonClient* client);
-  virtual PlatformAudioInput* CreateAudioInput(
+      const std::string& device_id,
+      PlatformVideoCaptureEventHandler* handler);
+  virtual uint32_t GetAudioHardwareOutputSampleRate();
+  virtual uint32_t GetAudioHardwareOutputBufferSize();
+  virtual PlatformAudioOutput* CreateAudioOutput(
       uint32_t sample_rate,
       uint32_t sample_count,
-      PlatformAudioCommonClient* client);
-  virtual PpapiBroker* ConnectToPpapiBroker(PPB_Broker_Impl* client);
+      PlatformAudioOutputClient* client);
+  virtual PlatformAudioInput* CreateAudioInput(
+      const std::string& device_id,
+      uint32_t sample_rate,
+      uint32_t sample_count,
+      PlatformAudioInputClient* client);
+  virtual Broker* ConnectToBroker(PPB_Broker_Impl* client);
   virtual void NumberOfFindResultsChanged(int identifier,
                                           int total,
                                           bool final_result);
@@ -119,6 +126,8 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void TCPSocketRead(uint32 socket_id, int32_t bytes_to_read);
   virtual void TCPSocketWrite(uint32 socket_id, const std::string& buffer);
   virtual void TCPSocketDisconnect(uint32 socket_id);
+  virtual void RegisterTCPSocket(PPB_TCPSocket_Private_Impl* socket,
+                                 uint32 socket_id);
   virtual uint32 UDPSocketCreate();
   virtual void UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
                              uint32 socket_id,
@@ -128,6 +137,25 @@ class MockPluginDelegate : public PluginDelegate {
                                const std::string& buffer,
                                const PP_NetAddress_Private& addr);
   virtual void UDPSocketClose(uint32 socket_id);
+  virtual void TCPServerSocketListen(PP_Resource socket_resource,
+                                     const PP_NetAddress_Private& addr,
+                                     int32_t backlog);
+  virtual void TCPServerSocketAccept(uint32 server_socket_id);
+  virtual void TCPServerSocketStopListening(PP_Resource socket_resource,
+                                            uint32 socket_id);
+  virtual void RegisterHostResolver(
+      ::ppapi::PPB_HostResolver_Shared* host_resolver,
+      uint32 host_resolver_id);
+  virtual void HostResolverResolve(
+      uint32 host_resolver_id,
+      const ::ppapi::HostPortPair& host_port,
+      const PP_HostResolver_Private_Hint* hint);
+  virtual void UnregisterHostResolver(uint32 host_resolver_id);
+  // Add/remove a network list observer.
+  virtual bool AddNetworkListObserver(
+      webkit_glue::NetworkListObserver* observer) OVERRIDE;
+  virtual void RemoveNetworkListObserver(
+      webkit_glue::NetworkListObserver* observer) OVERRIDE;
   virtual int32_t ShowContextMenu(
       PluginInstance* instance,
       webkit::ppapi::PPB_Flash_Menu_Impl* menu,
@@ -157,6 +185,9 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void SampleGamepads(WebKit::WebGamepads* data) OVERRIDE;
   virtual bool IsInFullscreenMode();
   virtual bool IsPageVisible() const;
+  virtual int EnumerateDevices(PP_DeviceType_Dev type,
+                               const EnumerateDevicesCallback& callback);
+  virtual webkit_glue::ClipboardClient* CreateClipboardClient() const;
 };
 
 }  // namespace ppapi

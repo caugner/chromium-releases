@@ -4,21 +4,21 @@
 
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
+#include "ash/wm/window_animations.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "content/public/browser/web_ui.h"
-#include "ui/views/widget/widget.h"
-
-#if defined(USE_AURA)
-#include "ash/shell.h"
-#include "ash/shell_window_ids.h"
 #include "ui/aura/window.h"
-#endif
+#include "ui/views/widget/widget.h"
 
 namespace chromeos {
 
@@ -28,6 +28,9 @@ namespace {
 const char kLoginURL[] = "chrome://oobe/login";
 // URL which corresponds to the OOBE WebUI.
 const char kOobeURL[] = "chrome://oobe";
+
+// Duration of sign-in transition animation.
+const int kLoginFadeoutTransitionDurationMs = 700;
 
 }  // namespace
 
@@ -42,7 +45,8 @@ WebUILoginDisplayHost::WebUILoginDisplayHost(const gfx::Rect& background_bounds)
 }
 
 WebUILoginDisplayHost::~WebUILoginDisplayHost() {
-  CloseWindow();
+  if (login_window_)
+    login_window_->Close();
 }
 
 // LoginDisplayHost implementation ---------------------------------------------
@@ -126,6 +130,8 @@ void WebUILoginDisplayHost::StartSignInScreen() {
   BaseLoginDisplayHost::StartSignInScreen();
   CHECK(webui_login_display_);
   GetOobeUI()->ShowSigninScreen(webui_login_display_);
+  if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
+    SetStatusAreaVisible(false);
 }
 
 void WebUILoginDisplayHost::OnPreferencesChanged() {
@@ -133,7 +139,8 @@ void WebUILoginDisplayHost::OnPreferencesChanged() {
     webui_login_display_->OnPreferencesChanged();
 }
 
-void WebUILoginDisplayHost::CloseWindow() {
+void WebUILoginDisplayHost::OnBrowserCreated() {
+  // Close lock window now so that the launched browser can receive focus.
   if (login_window_) {
     login_window_->Close();
     login_window_ = NULL;
@@ -146,9 +153,10 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
     views::Widget::InitParams params(
         views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.bounds = background_bounds();
-#if defined(USE_AURA)
     params.show_state = ui::SHOW_STATE_FULLSCREEN;
-#endif
+    params.parent =
+        ash::Shell::GetInstance()->GetContainer(
+            ash::internal::kShellWindowId_LockScreenContainer);
 
     login_window_ = new views::Widget;
     login_window_->Init(params);
@@ -156,19 +164,18 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
 
     login_view_->Init(login_window_);
 
-#if defined(USE_AURA)
-    ash::Shell::GetInstance()->GetContainer(
-        ash::internal::kShellWindowId_LockScreenContainer)->
-        AddChild(login_window_->GetNativeView());
-#endif
+    ash::SetWindowVisibilityAnimationDuration(
+        login_window_->GetNativeView(),
+        base::TimeDelta::FromMilliseconds(kLoginFadeoutTransitionDurationMs));
+    ash::SetWindowVisibilityAnimationTransition(
+        login_window_->GetNativeView(),
+        ash::ANIMATE_HIDE);
 
     login_window_->SetContentsView(login_view_);
     login_view_->UpdateWindowType();
 
     login_window_->Show();
-#if defined(USE_AURA)
     login_window_->GetNativeView()->SetName("WebUILoginView");
-#endif
     login_view_->OnWindowCreated();
   }
   login_view_->LoadURL(url);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -129,7 +129,6 @@ const FilePath::CharType kCRLSetFilename[] =
 const FilePath::CharType kMediaCacheDirname[] = FPL("Media Cache");
 const FilePath::CharType kOffTheRecordMediaCacheDirname[] =
     FPL("Incognito Media Cache");
-const FilePath::CharType kAppCacheDirname[] = FPL("Application Cache");
 const FilePath::CharType kThemePackFilename[] = FPL("Cached Theme.pak");
 const FilePath::CharType kCookieFilename[] = FPL("Cookies");
 const FilePath::CharType kOBCertFilename[] = FPL("Origin Bound Certs");
@@ -157,6 +156,21 @@ const FilePath::CharType kLoginDataFileName[] = FPL("Login Data");
 const FilePath::CharType kJumpListIconDirname[] = FPL("JumpListIcons");
 const FilePath::CharType kWebAppDirname[] = FPL("Web Applications");
 const FilePath::CharType kServiceStateFileName[] = FPL("Service State");
+const FilePath::CharType kReadmeFilename[] = FPL("README");
+
+#if defined(OS_CHROMEOS)
+const FilePath::CharType kGDataCacheDirname[] = FPL("GCache");
+#endif  // defined(OS_CHROMEOS)
+
+// File name of the Pepper Flash plugin on different platforms.
+const FilePath::CharType kPepperFlashPluginFilename[] =
+#if defined(OS_MACOSX)
+    FPL("PepperFlashPlayer.plugin");
+#elif defined(OS_WIN)
+    FPL("pepflashplayer.dll");
+#else  // OS_LINUX, etc.
+    FPL("libpepflashplayer.so");
+#endif
 
 // We don't enable record mode in the released product because users could
 // potentially be tricked into running a product in record mode without
@@ -175,6 +189,8 @@ const char* const kUnknownLanguageCode = "und";
 const int kJavascriptMessageExpectedDelay = 1000;
 
 const bool kEnableTouchIcon = false;
+
+const float kMaxShareOfExtensionProcesses = 0.30f;
 
 #if defined(OS_LINUX)
 extern const int kLowestRendererOomScore = 300;

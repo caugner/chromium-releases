@@ -24,6 +24,7 @@
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
@@ -81,6 +82,7 @@ static const SessionCommand::id_type kCommandWindow = 3;
 static const SessionCommand::id_type kCommandSelectedNavigationInTab = 4;
 static const SessionCommand::id_type kCommandPinnedState = 5;
 static const SessionCommand::id_type kCommandSetExtensionAppID = 6;
+static const SessionCommand::id_type kCommandSetWindowAppName = 7;
 
 // Number of entries (not commands) before we clobber the file and write
 // everything.
@@ -165,9 +167,8 @@ void RecordAppLaunch(Profile* profile, const TabRestoreService::Tab& tab) {
   if (!profile->GetExtensionService()->IsInstalledApp(url))
     return;
 
-  UMA_HISTOGRAM_ENUMERATION(extension_misc::kAppLaunchHistogram,
-                            extension_misc::APP_LAUNCH_NTP_RECENTLY_CLOSED,
-                            extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
+  AppLauncherHandler::RecordAppLaunchType(
+      extension_misc::APP_LAUNCH_NTP_RECENTLY_CLOSED);
 }
 
 }  // namespace
@@ -240,6 +241,8 @@ void TabRestoreService::BrowserClosing(TabRestoreServiceDelegate* delegate) {
   scoped_ptr<Window> window(new Window());
   window->selected_tab_index = delegate->GetSelectedIndex();
   window->timestamp = TimeNow();
+  window->app_name = delegate->GetAppName();
+
   // Don't use std::vector::resize() because it will push copies of an empty tab
   // into the vector, which will give all tabs in a window the same ID.
   for (int i = 0; i < delegate->GetTabCount(); ++i) {
@@ -258,7 +261,7 @@ void TabRestoreService::BrowserClosing(TabRestoreServiceDelegate* delegate) {
       entry_index++;
     }
   }
-  if (window->tabs.size() == 1) {
+  if (window->tabs.size() == 1 && window->app_name.empty()) {
     // Short-circuit creating a Window if only 1 tab was present. This fixes
     // http://crbug.com/56744. Copy the Tab because it's owned by an object on
     // the stack.
@@ -349,7 +352,7 @@ void TabRestoreService::RestoreEntryById(TabRestoreServiceDelegate* delegate,
     // single tab within it. If the entry's ID matches the one to restore, then
     // the entire window will be restored.
     if (!restoring_tab_in_window) {
-      delegate = TabRestoreServiceDelegate::Create(profile());
+      delegate = TabRestoreServiceDelegate::Create(profile(), window->app_name);
       for (size_t tab_i = 0; tab_i < window->tabs.size(); ++tab_i) {
         const Tab& tab = window->tabs[tab_i];
         WebContents* restored_tab =
@@ -611,6 +614,13 @@ void TabRestoreService::ScheduleCommandsForWindow(const Window& window) {
                           std::min(real_selected_tab, valid_tab_count - 1),
                           valid_tab_count,
                           window.timestamp));
+
+  if (!window.app_name.empty()) {
+    ScheduleCommand(
+        CreateSetWindowAppNameCommand(kCommandSetWindowAppName,
+                                      window.id,
+                                      window.app_name));
+  }
 
   for (size_t i = 0; i < window.tabs.size(); ++i) {
     int selected_index = GetSelectedNavigationIndexToPersist(window.tabs[i]);
@@ -886,6 +896,22 @@ void TabRestoreService::CreateEntriesFromCommands(
         break;
       }
 
+      case kCommandSetWindowAppName: {
+        if (!current_window) {
+          // We should have created a window already.
+          NOTREACHED();
+          return;
+        }
+
+        SessionID::id_type window_id;
+        std::string app_name;
+        if (!RestoreSetWindowAppNameCommand(command, &window_id, &app_name))
+          return;
+
+        current_window->app_name.swap(app_name);
+        break;
+      }
+
       case kCommandSetExtensionAppID: {
         if (!current_tab) {
           // Should be in a tab when we get this.
@@ -936,7 +962,7 @@ TabRestoreServiceDelegate* TabRestoreService::RestoreTab(
     if (delegate && disposition != NEW_WINDOW) {
       tab_index = tab.tabstrip_index;
     } else {
-      delegate = TabRestoreServiceDelegate::Create(profile());
+      delegate = TabRestoreServiceDelegate::Create(profile(), std::string());
       if (tab.has_browser())
         UpdateTabBrowserIDs(tab.browser_id, delegate->GetSessionID().id());
     }
@@ -948,14 +974,16 @@ TabRestoreServiceDelegate* TabRestoreService::RestoreTab(
       tab_index = delegate->GetTabCount();
     }
 
-    delegate->AddRestoredTab(tab.navigations,
-                             tab_index,
-                             tab.current_navigation_index,
-                             tab.extension_app_id,
-                             disposition != NEW_BACKGROUND_TAB,
-                             tab.pinned,
-                             tab.from_last_session,
-                             tab.session_storage_namespace);
+    WebContents* web_contents = delegate->AddRestoredTab(
+        tab.navigations,
+        tab_index,
+        tab.current_navigation_index,
+        tab.extension_app_id,
+        disposition != NEW_BACKGROUND_TAB,
+        tab.pinned,
+        tab.from_last_session,
+        tab.session_storage_namespace);
+    web_contents->GetController().LoadIfNecessary();
   }
   RecordAppLaunch(profile(), tab);
   return delegate;

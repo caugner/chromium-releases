@@ -8,9 +8,9 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
+#include "content/browser/renderer_host/resource_request_info_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/render_view_host_delegate.h"
@@ -25,10 +25,10 @@ namespace {
 void OnCrossSiteResponseHelper(int render_process_id,
                                int render_view_id,
                                int request_id) {
-  RenderViewHost* rvh = RenderViewHost::FromID(render_process_id,
-                                               render_view_id);
-  if (rvh && rvh->delegate()->GetRendererManagementDelegate()) {
-    rvh->delegate()->GetRendererManagementDelegate()->OnCrossSiteResponse(
+  RenderViewHostImpl* rvh = RenderViewHostImpl::FromID(render_process_id,
+                                                       render_view_id);
+  if (rvh && rvh->GetDelegate()->GetRendererManagementDelegate()) {
+    rvh->GetDelegate()->GetRendererManagementDelegate()->OnCrossSiteResponse(
         render_process_id, request_id);
   }
 }
@@ -39,7 +39,7 @@ CrossSiteResourceHandler::CrossSiteResourceHandler(
     ResourceHandler* handler,
     int render_process_host_id,
     int render_view_id,
-    ResourceDispatcherHost* resource_dispatcher_host)
+    ResourceDispatcherHostImpl* rdh)
     : LayeredResourceHandler(handler),
       render_process_host_id_(render_process_host_id),
       render_view_id_(render_view_id),
@@ -49,7 +49,7 @@ CrossSiteResourceHandler::CrossSiteResourceHandler(
       completed_during_transition_(false),
       completed_status_(),
       response_(NULL),
-      rdh_(resource_dispatcher_host) {
+      rdh_(rdh) {
 }
 
 bool CrossSiteResourceHandler::OnRequestRedirected(
@@ -80,8 +80,7 @@ bool CrossSiteResourceHandler::OnResponseStarted(
     DLOG(WARNING) << "Request wasn't found";
     return false;
   }
-  ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(request);
+  ResourceRequestInfoImpl* info = ResourceRequestInfoImpl::ForRequest(request);
 
   // If this is a download, just pass the response through without doing a
   // cross-site check.  The renderer will see it is a download and abort the
@@ -170,8 +169,8 @@ void CrossSiteResourceHandler::ResumeResponse() {
   }
 
   // Remove ourselves from the ExtraRequestInfo.
-  ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(request);
+  ResourceRequestInfoImpl* info =
+      ResourceRequestInfoImpl::ForRequest(request);
   info->set_cross_site_handler(NULL);
 
   // If the response completed during the transition, notify the next
@@ -202,8 +201,8 @@ void CrossSiteResourceHandler::StartCrossSiteTransition(
     DLOG(WARNING) << "Cross site response for a request that wasn't found";
     return;
   }
-  ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(request);
+  ResourceRequestInfoImpl* info =
+      ResourceRequestInfoImpl::ForRequest(request);
   info->set_cross_site_handler(this);
 
   if (has_started_response_) {

@@ -95,7 +95,7 @@
 //
 class CONTENT_EXPORT WebRtcAudioDeviceImpl
     : NON_EXPORTED_BASE(public webrtc::AudioDeviceModule),
-      public AudioDevice::RenderCallback,
+      public media::AudioRendererSink::RenderCallback,
       public AudioInputDevice::CaptureCallback,
       public AudioInputDevice::CaptureEventHandler {
  public:
@@ -115,12 +115,13 @@ class CONTENT_EXPORT WebRtcAudioDeviceImpl
   virtual size_t Render(const std::vector<float*>& audio_data,
                         size_t number_of_frames,
                         size_t audio_delay_milliseconds) OVERRIDE;
-  virtual void OnError() OVERRIDE;
+  virtual void OnRenderError() OVERRIDE;
 
   // AudioInputDevice::CaptureCallback implementation.
   virtual void Capture(const std::vector<float*>& audio_data,
                        size_t number_of_frames,
                        size_t audio_delay_milliseconds) OVERRIDE;
+  virtual void OnCaptureError() OVERRIDE;
 
   // AudioInputDevice::CaptureEventHandler implementation.
   virtual void OnDeviceStarted(const std::string& device_id) OVERRIDE;
@@ -253,13 +254,23 @@ class CONTENT_EXPORT WebRtcAudioDeviceImpl
   void SetSessionId(int session_id);
 
   // Accessors.
-  size_t input_buffer_size() const { return input_buffer_size_; }
-  size_t output_buffer_size() const { return output_buffer_size_; }
-  int input_channels() const { return input_channels_; }
-  int output_channels() const { return output_channels_; }
-  int input_sample_rate() const { return static_cast<int>(input_sample_rate_); }
+  size_t input_buffer_size() const {
+    return input_audio_parameters_.frames_per_buffer();
+  }
+  size_t output_buffer_size() const {
+    return output_audio_parameters_.frames_per_buffer();
+  }
+  int input_channels() const {
+    return input_audio_parameters_.channels();
+  }
+  int output_channels() const {
+    return output_audio_parameters_.channels();
+  }
+  int input_sample_rate() const {
+    return input_audio_parameters_.sample_rate();
+  }
   int output_sample_rate() const {
-    return static_cast<int>(output_sample_rate_);
+    return output_audio_parameters_.sample_rate();
   }
   int input_delay_ms() const { return input_delay_ms_; }
   int output_delay_ms() const { return output_delay_ms_; }
@@ -294,12 +305,8 @@ class CONTENT_EXPORT WebRtcAudioDeviceImpl
   webrtc::AudioTransport* audio_transport_callback_;
 
   // Cached values of utilized audio parameters. Platform dependent.
-  size_t input_buffer_size_;
-  size_t output_buffer_size_;
-  int input_channels_;
-  int output_channels_;
-  double input_sample_rate_;
-  double output_sample_rate_;
+  AudioParameters input_audio_parameters_;
+  AudioParameters output_audio_parameters_;
 
   // Cached value of the current audio delay on the input/capture side.
   int input_delay_ms_;

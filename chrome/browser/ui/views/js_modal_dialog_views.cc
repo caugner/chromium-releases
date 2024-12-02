@@ -20,7 +20,7 @@
 
 JSModalDialogViews::JSModalDialogViews(JavaScriptAppModalDialog* parent)
     : parent_(parent) {
-  int options = views::MessageBoxView::DETECT_ALIGNMENT;
+  int options = views::MessageBoxView::DETECT_DIRECTIONALITY;
   if (parent->javascript_message_type() == ui::JAVASCRIPT_MESSAGE_TYPE_PROMPT)
     options |= views::MessageBoxView::HAS_PROMPT_FIELD;
 
@@ -121,9 +121,13 @@ string16 JSModalDialogViews::GetDialogButtonLabel(
   if (parent_->is_before_unload_dialog()) {
     if (button == ui::DIALOG_BUTTON_OK) {
       return l10n_util::GetStringUTF16(
+          parent_->is_reload() ?
+          IDS_BEFORERELOAD_MESSAGEBOX_OK_BUTTON_LABEL :
           IDS_BEFOREUNLOAD_MESSAGEBOX_OK_BUTTON_LABEL);
     } else if (button == ui::DIALOG_BUTTON_CANCEL) {
       return l10n_util::GetStringUTF16(
+          parent_->is_reload() ?
+          IDS_BEFORERELOAD_MESSAGEBOX_CANCEL_BUTTON_LABEL :
           IDS_BEFOREUNLOAD_MESSAGEBOX_CANCEL_BUTTON_LABEL);
     }
   }
@@ -155,7 +159,6 @@ NativeAppModalDialog* NativeAppModalDialog::CreateNativeJavaScriptPrompt(
     JavaScriptAppModalDialog* dialog,
     gfx::NativeWindow parent_window) {
   JSModalDialogViews* d = new JSModalDialogViews(dialog);
-
-  browser::CreateViewsWindow(parent_window, d, STYLE_GENERIC);
+  views::Widget::CreateWindowWithParent(d, parent_window);
   return d;
 }

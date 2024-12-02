@@ -4,28 +4,49 @@
 
 #include "chrome/browser/signin/signin_manager.h"
 
+#include <string>
+#include <vector>
+
 #include "base/command_line.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/util/oauth.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
+#include "net/cookies/cookie_monster.h"
+
+namespace {
 
 const char kGetInfoEmailKey[] = "email";
+const char kGetInfoServicesKey[] = "allServices";
+const char kGooglePlusServiceKey[] = "googleme";
 
 const char kGoogleAccountsUrl[] = "https://accounts.google.com";
 
+}  // namespace
+
+
+// static
+bool SigninManager::AreSigninCookiesAllowed(Profile* profile) {
+  CookieSettings* cookie_settings =
+      CookieSettings::Factory::GetForProfile(profile);
+  return cookie_settings &&
+      cookie_settings->IsSettingCookieAllowed(GURL(kGoogleAccountsUrl),
+                                              GURL(kGoogleAccountsUrl));
+}
+
 SigninManager::SigninManager()
     : profile_(NULL),
-      had_two_factor_error_(false),
-      last_login_auth_error_(GoogleServiceAuthError::None()) {
+      had_two_factor_error_(false) {
 }
 
 SigninManager::~SigninManager() {}
@@ -40,7 +61,7 @@ void SigninManager::Initialize(Profile* profile) {
   if (!user.empty())
     SetAuthenticatedUsername(user);
   // TokenService can be null for unit tests.
-  TokenService* token_service = profile_->GetTokenService();
+  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
   if (token_service) {
     token_service->Initialize(GaiaConstants::kChromeSource, profile_);
     if (!authenticated_username_.empty()) {
@@ -55,7 +76,8 @@ bool SigninManager::IsInitialized() const {
 
 void SigninManager::CleanupNotificationRegistration() {
 #if !defined(OS_CHROMEOS)
-  content::Source<TokenService> token_service(profile_->GetTokenService());
+  content::Source<TokenService> token_service(
+      TokenServiceFactory::GetForProfile(profile_));
   if (registrar_.IsRegistered(this,
                               chrome::NOTIFICATION_TOKEN_AVAILABLE,
                               token_service)) {
@@ -71,8 +93,12 @@ const std::string& SigninManager::GetAuthenticatedUsername() {
 }
 
 void SigninManager::SetAuthenticatedUsername(const std::string& username) {
-  DCHECK(authenticated_username_.empty() ||
-         username == authenticated_username_);
+  if (!authenticated_username_.empty()) {
+    DLOG_IF(ERROR, username != authenticated_username_) <<
+        "Tried to change the authenticated username to something different: " <<
+        "Current: " << authenticated_username_ << ", New: " << username;
+    return;
+  }
   authenticated_username_ = username;
   // TODO(tim): We could go further in ensuring kGoogleServicesUsername and
   // authenticated_username_ are consistent once established (e.g. remove
@@ -80,7 +106,6 @@ void SigninManager::SetAuthenticatedUsername(const std::string& username) {
 }
 
 void SigninManager::PrepareForSignin() {
-  DCHECK(!browser_sync::IsUsingOAuth());
   DCHECK(possibly_invalid_username_.empty());
   // This attempt is either 1) the user trying to establish initial sync, or
   // 2) trying to refresh credentials for an existing username.  If it is 2, we
@@ -90,34 +115,11 @@ void SigninManager::PrepareForSignin() {
   ClearTransientSigninData();
 }
 
-void SigninManager::PrepareForOAuthSignin() {
-  DCHECK(browser_sync::IsUsingOAuth());
-#if !defined(OS_CHROMEOS)
-  // The Sign out should clear the token service credentials.
-  // Note: In CHROMEOS we might have valid credentials but still need to
-  // set up 2-factor authentication.
-  DCHECK(!profile_->GetTokenService()->HasOAuthCredentials());
-#endif
-  ClearTransientSigninData();
-}
-
-// Users must always sign out before they sign in again.
-void SigninManager::StartOAuthSignIn(const std::string& oauth1_request_token,
-                                     GaiaOAuthFetcher* fetcher) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  PrepareForOAuthSignin();
-  oauth1_request_token_.assign(oauth1_request_token);
-  oauth_login_.reset(fetcher);
-  oauth_login_->StartOAuthGetAccessToken(oauth1_request_token_);
-  // TODO(rogerta?): Bug 92325: Expand Autologin to include OAuth signin
-}
-
 // Users must always sign out before they sign in again.
 void SigninManager::StartSignIn(const std::string& username,
                                 const std::string& password,
                                 const std::string& login_token,
                                 const std::string& login_captcha) {
-  DCHECK(!browser_sync::IsUsingOAuth());
   DCHECK(authenticated_username_.empty() ||
          username == authenticated_username_);
   PrepareForSignin();
@@ -139,20 +141,17 @@ void SigninManager::StartSignIn(const std::string& username,
   // are not running in ChomiumOS, since it handles pre-login itself, and if
   // cookies are not disabled for Google accounts.
 #if !defined(OS_CHROMEOS)
-  CookieSettings* cookie_settings = CookieSettings::GetForProfile(profile_);
-  if (cookie_settings &&
-      cookie_settings->IsSettingCookieAllowed(GURL(kGoogleAccountsUrl),
-                                              GURL(kGoogleAccountsUrl))) {
+  if (AreSigninCookiesAllowed(profile_)) {
+    TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
     registrar_.Add(this,
                    chrome::NOTIFICATION_TOKEN_AVAILABLE,
-                   content::Source<TokenService>(profile_->GetTokenService()));
+                   content::Source<TokenService>(token_service));
   }
 #endif
 }
 
 void SigninManager::ProvideSecondFactorAccessCode(
     const std::string& access_code) {
-  DCHECK(!browser_sync::IsUsingOAuth());
   DCHECK(!possibly_invalid_username_.empty() && !password_.empty() &&
       last_result_.data.empty());
 
@@ -167,6 +166,34 @@ void SigninManager::ProvideSecondFactorAccessCode(
                                   GaiaAuthFetcher::HostedAccountsNotAllowed);
 }
 
+void SigninManager::StartSignInWithCredentials(const std::string& session_index,
+                                               const std::string& username,
+                                               const std::string& password) {
+  DCHECK(authenticated_username_.empty());
+  PrepareForSignin();
+  possibly_invalid_username_.assign(username);
+  password_.assign(password);
+
+  client_login_.reset(new GaiaAuthFetcher(this,
+                                          GaiaConstants::kChromeSource,
+                                          profile_->GetRequestContext()));
+
+  // This function starts with the current state of the web session's cookie
+  // jar and mints a new ClientLogin-style SID/LSID pair.  This involves going
+  // throug the follow process or requests to GAIA and LSO:
+  //
+  // - call /o/oauth2/programmatic_auth with the returned token to get oauth2
+  //   access and refresh tokens
+  // - call /accounts/OAuthLogin with the oauth2 access token and get an uber
+  //   auth token
+  // - call /TokenAuth with the uber auth token to get a SID/LSID pair for use
+  //   by the token service
+  //
+  // The resulting SID/LSID can then be used just as if
+  // client_login_->StartClientLogin() had completed successfully.
+  client_login_->StartOAuthLoginTokenFetchWithCookies(session_index);
+}
+
 void SigninManager::ClearTransientSigninData() {
   DCHECK(IsInitialized());
 
@@ -178,11 +205,18 @@ void SigninManager::ClearTransientSigninData() {
   had_two_factor_error_ = false;
 }
 
+void SigninManager::HandleAuthError(const GoogleServiceAuthError& error) {
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
+      content::Source<Profile>(profile_),
+      content::Details<const GoogleServiceAuthError>(&error));
+
+  ClearTransientSigninData();
+}
+
 void SigninManager::SignOut() {
   DCHECK(IsInitialized());
-  if (authenticated_username_.empty() &&
-      !client_login_.get() &&
-      !oauth_login_.get()) {
+  if (authenticated_username_.empty() && !client_login_.get()) {
     // Just exit if we aren't signed in (or in the process of signing in).
     // This avoids a perf regression because SignOut() is invoked on startup to
     // clean up any incomplete previous signin attempts.
@@ -192,36 +226,97 @@ void SigninManager::SignOut() {
   ClearTransientSigninData();
   authenticated_username_.clear();
   profile_->GetPrefs()->ClearPref(prefs::kGoogleServicesUsername);
-  profile_->GetPrefs()->ClearPref(prefs::kSyncUsingOAuth);
-  profile_->GetTokenService()->ResetCredentialsInMemory();
-  profile_->GetTokenService()->EraseTokensFromDB();
+  profile_->GetPrefs()->ClearPref(prefs::kIsGooglePlusUser);
+  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
+  token_service->ResetCredentialsInMemory();
+  token_service->EraseTokensFromDB();
 }
 
-const GoogleServiceAuthError& SigninManager::GetLoginAuthError() const {
-  return last_login_auth_error_;
+bool SigninManager::AuthInProgress() const {
+  return !possibly_invalid_username_.empty();
+}
+
+void SigninManager::OnGetUserInfoKeyNotFound(const std::string& key) {
+  DCHECK(key == kGetInfoEmailKey);
+  LOG(ERROR) << "Account is not associated with a valid email address. "
+             << "Login failed.";
+  OnClientLoginFailure(GoogleServiceAuthError(
+      GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
 }
 
 void SigninManager::OnClientLoginSuccess(const ClientLoginResult& result) {
-  DCHECK(!browser_sync::IsUsingOAuth());
   last_result_ = result;
-  // Make a request for the canonical email address.
-  client_login_->StartGetUserInfo(result.lsid, kGetInfoEmailKey);
+  // Make a request for the canonical email address and services.
+  client_login_->StartGetUserInfo(result.lsid);
 }
 
-// NOTE: GetUserInfo is a ClientLogin request similar to OAuth's userinfo
-void SigninManager::OnGetUserInfoSuccess(const std::string& key,
-                                         const std::string& value) {
-  DCHECK(!browser_sync::IsUsingOAuth());
-  DCHECK(key == kGetInfoEmailKey);
-  DCHECK(authenticated_username_.empty() || authenticated_username_ == value);
+void SigninManager::OnClientLoginFailure(const GoogleServiceAuthError& error) {
+  // If we got a bad ASP, prompt for an ASP again by forcing another TWO_FACTOR
+  // error.  This function does not call HandleAuthError() because dealing
+  // with TWO_FACTOR errors neds special handling: we don't want to clear the
+  // transient signin data in such error cases.
+  bool invalid_gaia = error.state() ==
+      GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS;
 
-  last_login_auth_error_ = GoogleServiceAuthError::None();
-  authenticated_username_ = value;
-  possibly_invalid_username_.clear();
-  profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
-                                  authenticated_username_);
-  profile_->GetPrefs()->SetBoolean(prefs::kSyncUsingOAuth, false);
+  GoogleServiceAuthError current_error =
+      (invalid_gaia && had_two_factor_error_) ?
+      GoogleServiceAuthError(GoogleServiceAuthError::TWO_FACTOR) : error;
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
+      content::Source<Profile>(profile_),
+      content::Details<const GoogleServiceAuthError>(&current_error));
 
+  // We don't sign-out if the password was valid and we're just dealing with
+  // a second factor error, and we don't sign out if we're dealing with
+  // an invalid access code (again, because the password was valid).
+  if (current_error.state() == GoogleServiceAuthError::TWO_FACTOR) {
+    had_two_factor_error_ = true;
+    return;
+  }
+
+  ClearTransientSigninData();
+}
+
+void SigninManager::OnOAuthLoginTokenSuccess(const std::string& refresh_token,
+                                             const std::string& access_token,
+                                             int expires_in_secs) {
+  DVLOG(1) << "SigninManager::OnOAuthLoginTokenSuccess access_token="
+           << access_token;
+  client_login_->StartUberAuthTokenFetch(access_token);
+}
+
+void SigninManager::OnOAuthLoginTokenFailure(
+    const GoogleServiceAuthError& error) {
+  LOG(WARNING) << "SigninManager::OnOAuthLoginTokenFailure";
+  HandleAuthError(error);
+}
+
+void SigninManager::OnGetUserInfoSuccess(const UserInfoMap& data) {
+  UserInfoMap::const_iterator email_iter = data.find(kGetInfoEmailKey);
+  if (email_iter == data.end()) {
+    OnGetUserInfoKeyNotFound(kGetInfoEmailKey);
+    return;
+  } else {
+    DCHECK(email_iter->first == kGetInfoEmailKey);
+    SetAuthenticatedUsername(email_iter->second);
+    possibly_invalid_username_.clear();
+    profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
+                                    authenticated_username_);
+
+  }
+  UserInfoMap::const_iterator service_iter = data.find(kGetInfoServicesKey);
+  if (service_iter == data.end()) {
+    DLOG(WARNING) << "Could not retrieve services for account with email: "
+             << authenticated_username_ <<".";
+  } else {
+    DCHECK(service_iter->first == kGetInfoServicesKey);
+    std::vector<std::string> services;
+    base::SplitStringUsingSubstr(service_iter->second, ", ", &services);
+    std::vector<std::string>::const_iterator iter =
+        std::find(services.begin(), services.end(), kGooglePlusServiceKey);
+    bool isGPlusUser = (iter != services.end());
+    profile_->GetPrefs()->SetBoolean(prefs::kIsGooglePlusUser, isGPlusUser);
+  }
   GoogleServiceSigninSuccessDetails details(authenticated_username_,
                                             password_);
   content::NotificationService::current()->Notify(
@@ -231,117 +326,59 @@ void SigninManager::OnGetUserInfoSuccess(const std::string& key,
 
   password_.clear();  // Don't need it anymore.
 
-  profile_->GetTokenService()->UpdateCredentials(last_result_);
-  DCHECK(profile_->GetTokenService()->AreCredentialsValid());
-  profile_->GetTokenService()->StartFetchingTokens();
-}
-
-void SigninManager::OnGetUserInfoKeyNotFound(const std::string& key) {
-  DCHECK(!browser_sync::IsUsingOAuth());
-  DCHECK(key == kGetInfoEmailKey);
-  LOG(ERROR) << "Account is not associated with a valid email address. "
-             << "Login failed.";
-  OnClientLoginFailure(GoogleServiceAuthError(
-      GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
+  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
+  token_service->UpdateCredentials(last_result_);
+  DCHECK(token_service->AreCredentialsValid());
+  token_service->StartFetchingTokens();
 }
 
 void SigninManager::OnGetUserInfoFailure(const GoogleServiceAuthError& error) {
-  DCHECK(!browser_sync::IsUsingOAuth());
   LOG(ERROR) << "Unable to retreive the canonical email address. Login failed.";
+  // REVIEW: why does this call OnClientLoginFailure?
   OnClientLoginFailure(error);
 }
 
-void SigninManager::OnTokenAuthFailure(const GoogleServiceAuthError& error) {
-  DCHECK(!browser_sync::IsUsingOAuth());
-#if !defined(OS_CHROMEOS)
-  DVLOG(1) << "Unable to retrieve the token auth.";
-  CleanupNotificationRegistration();
-#endif
-}
+void SigninManager::OnTokenAuthSuccess(const net::ResponseCookies& cookies,
+                                       const std::string& data) {
+  DVLOG(1) << "SigninManager::OnTokenAuthSuccess";
 
-void SigninManager::OnClientLoginFailure(const GoogleServiceAuthError& error) {
-  DCHECK(!browser_sync::IsUsingOAuth());
-  last_login_auth_error_ = error;
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
-      content::Source<Profile>(profile_),
-      content::Details<const GoogleServiceAuthError>(&error));
-
-  // We don't sign-out if the password was valid and we're just dealing with
-  // a second factor error, and we don't sign out if we're dealing with
-  // an invalid access code (again, because the password was valid).
-  bool invalid_gaia = error.state() ==
-      GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS;
-  if (error.state() == GoogleServiceAuthError::TWO_FACTOR ||
-      (had_two_factor_error_ && invalid_gaia)) {
-    had_two_factor_error_ = true;
-    return;
+  // The SID and LSID from this request is equivalent the pair returned by
+  // ClientLogin.
+  std::string sid;
+  std::string lsid;
+  for (net::ResponseCookies::const_iterator i = cookies.begin();
+       i != cookies.end(); ++i) {
+    net::CookieMonster::ParsedCookie parsed(*i);
+    if (parsed.Name() == "SID") {
+      sid = parsed.Value();
+    } else if (parsed.Name() == "LSID") {
+      lsid = parsed.Value();
+    }
   }
 
-  ClearTransientSigninData();
+  if (!sid.empty() && !lsid.empty()) {
+    OnClientLoginSuccess(
+        GaiaAuthConsumer::ClientLoginResult(sid, lsid, "", data));
+  } else {
+    OnTokenAuthFailure(
+        GoogleServiceAuthError(GoogleServiceAuthError::SERVICE_UNAVAILABLE));
+  }
 }
 
-void SigninManager::OnOAuthGetAccessTokenSuccess(const std::string& token,
-                                                 const std::string& secret) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  DVLOG(1) << "SigninManager::OnOAuthGetAccessTokenSuccess";
-  profile_->GetTokenService()->UpdateOAuthCredentials(token, secret);
+void SigninManager::OnTokenAuthFailure(const GoogleServiceAuthError& error) {
+  DVLOG(1) << "Unable to retrieve the token auth.";
+  HandleAuthError(error);
 }
 
-void SigninManager::OnOAuthGetAccessTokenFailure(
+void SigninManager::OnUberAuthTokenSuccess(const std::string& token) {
+  DVLOG(1) << "SigninManager::OnUberAuthTokenSuccess token=" << token;
+  client_login_->StartTokenAuth(token);
+}
+
+void SigninManager::OnUberAuthTokenFailure(
     const GoogleServiceAuthError& error) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  LOG(WARNING) << "SigninManager::OnOAuthGetAccessTokenFailure";
-}
-
-void SigninManager::OnOAuthWrapBridgeSuccess(const std::string& service_name,
-                                             const std::string& token,
-                                             const std::string& expires_in) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  DVLOG(1) << "SigninManager::OnOAuthWrapBridgeSuccess";
-}
-
-void SigninManager::OnOAuthWrapBridgeFailure(
-    const std::string& service_scope,
-    const GoogleServiceAuthError& error) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  LOG(WARNING) << "SigninManager::OnOAuthWrapBridgeFailure";
-}
-
-// NOTE: userinfo is an OAuth request similar to ClientLogin's GetUserInfo
-void SigninManager::OnUserInfoSuccess(const std::string& email) {
-  DCHECK(browser_sync::IsUsingOAuth());
-
-  TokenService* token_service = profile_->GetTokenService();
-  CHECK(token_service);
-
-  // If |SignOut()| was called between the login start and |OnUserInfoSucess()|,
-  // then the OAuth credentials would have been cleared.
-  if (!token_service->HasOAuthCredentials())
-    return;
-
-  DVLOG(1) << "Sync signin for " << email << " is complete.";
-  last_login_auth_error_ = GoogleServiceAuthError::None();
-
-  authenticated_username_ = email;
-  profile_->GetPrefs()->SetString(
-      prefs::kGoogleServicesUsername, authenticated_username_);
-  profile_->GetPrefs()->SetBoolean(prefs::kSyncUsingOAuth, true);
-
-  DCHECK(password_.empty());
-  GoogleServiceSigninSuccessDetails details(authenticated_username_, "");
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
-      content::Source<Profile>(profile_),
-      content::Details<const GoogleServiceSigninSuccessDetails>(&details));
-
-  DCHECK(token_service->HasOAuthCredentials());
-  token_service->StartFetchingOAuthTokens();
-}
-
-void SigninManager::OnUserInfoFailure(const GoogleServiceAuthError& error) {
-  DCHECK(browser_sync::IsUsingOAuth());
-  LOG(WARNING) << "SigninManager::OnUserInfoFailure";
+  LOG(WARNING) << "SigninManager::OnUberAuthTokenFailure";
+  HandleAuthError(error);
 }
 
 void SigninManager::Observe(int type,
@@ -355,7 +392,6 @@ void SigninManager::Observe(int type,
   // If a GAIA service token has become available, use it to pre-login the
   // user to other services that depend on GAIA credentials.
   if (tok_details->service() == GaiaConstants::kGaiaService) {
-    DCHECK(!browser_sync::IsUsingOAuth());
     if (client_login_.get() == NULL) {
       client_login_.reset(new GaiaAuthFetcher(this,
                                               GaiaConstants::kChromeSource,

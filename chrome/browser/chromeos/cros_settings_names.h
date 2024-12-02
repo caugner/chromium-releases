@@ -14,6 +14,7 @@ extern const char kAccountsPrefAllowGuest[];
 extern const char kAccountsPrefAllowNewUser[];
 extern const char kAccountsPrefShowUserNamesOnSignIn[];
 extern const char kAccountsPrefUsers[];
+extern const char kAccountsPrefEphemeralUsersEnabled[];
 
 extern const char kSettingProxyEverywhere[];
 
@@ -26,10 +27,23 @@ extern const char kDeviceOwner[];
 extern const char kStatsReportingPref[];
 
 extern const char kReleaseChannel[];
+extern const char kReleaseChannelDelegated[];
 
 extern const char kReportDeviceVersionInfo[];
 extern const char kReportDeviceActivityTimes[];
 extern const char kReportDeviceBootMode[];
+
+extern const char kAppPack[];
+
+extern const char kScreenSaverExtensionId[];
+extern const char kScreenSaverTimeout[];
+
+extern const char kIdleLogoutTimeout[];
+extern const char kIdleLogoutWarningDuration[];
+
+extern const char kStartUpUrls[];
+
+extern const char kPolicyMissingMitigationMode[];
 
 }  // namespace chromeos
 

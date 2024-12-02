@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/panels/panel_browser_window_cocoa.h"
 
+#include "base/auto_reset.h"
 #include "base/logging.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
@@ -13,9 +14,12 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #import "chrome/browser/ui/panels/panel_titlebar_view_cocoa.h"
+#import "chrome/browser/ui/panels/panel_utils_cocoa.h"
 #import "chrome/browser/ui/panels/panel_window_controller_cocoa.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_source.h"
 
 using content::WebContents;
 
@@ -25,19 +29,6 @@ namespace {
 // closing animations, since OSX window manager does not like 0-sized windows
 // (according to avi@).
 const int kMinimumWindowSize = 1;
-
-// TODO(dcheng): Move elsewhere so BrowserWindowCocoa can use them too.
-// Converts global screen coordinates in platfrom-independent coordinates
-// (with the (0,0) in the top-left corner of the primary screen) to the Cocoa
-// screen coordinates (with (0,0) in the low-left corner).
-NSRect ConvertCoordinatesToCocoa(const gfx::Rect& bounds) {
-  // Flip coordinates based on the primary screen.
-  NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
-
-  return NSMakeRect(
-      bounds.x(), NSHeight([screen frame]) - bounds.height() - bounds.y(),
-      bounds.width(), bounds.height());
-}
 
 }  // namespace
 
@@ -57,9 +48,15 @@ PanelBrowserWindowCocoa::PanelBrowserWindowCocoa(Browser* browser,
     panel_(panel),
     bounds_(bounds),
     is_shown_(false),
-    has_find_bar_(false) {
+    has_find_bar_(false),
+    attention_request_id_(0),
+    activation_requested_by_browser_(false) {
   controller_ = [[PanelWindowControllerCocoa alloc] initWithBrowserWindow:this];
   browser_->tabstrip_model()->AddObserver(this);
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
+      content::Source<Panel>(panel_.get()));
 }
 
 PanelBrowserWindowCocoa::~PanelBrowserWindowCocoa() {
@@ -92,9 +89,12 @@ void PanelBrowserWindowCocoa::ShowPanelInactive() {
   if (is_shown_) {
     return;
   }
+  // A call to SetPanelBounds() before showing it is required to set
+  // the panel frame properly.
+  SetPanelBoundsInstantly(bounds_);
   is_shown_ = true;
 
-  NSRect finalFrame = ConvertCoordinatesToCocoa(bounds_);
+  NSRect finalFrame = cocoa_utils::ConvertRectToCocoaCoordinates(bounds_);
   [controller_ revealAnimatedWithFrame:finalFrame];
 }
 
@@ -114,12 +114,14 @@ void PanelBrowserWindowCocoa::SetPanelBoundsInstantly(const gfx::Rect& bounds) {
 
 void PanelBrowserWindowCocoa::setBoundsInternal(const gfx::Rect& bounds,
                                                 bool animate) {
-  if (bounds_ == bounds)
+  // We will call SetPanelBoundsInstantly() once before showing the panel
+  // and it should set the panel frame correctly.
+  if (bounds_ == bounds && is_shown_)
     return;
 
   bounds_ = bounds;
 
-  NSRect frame = ConvertCoordinatesToCocoa(bounds);
+  NSRect frame = cocoa_utils::ConvertRectToCocoaCoordinates(bounds);
   [controller_ setPanelFrame:frame animate:animate];
 }
 
@@ -134,6 +136,8 @@ void PanelBrowserWindowCocoa::ClosePanel() {
 void PanelBrowserWindowCocoa::ActivatePanel() {
   if (!is_shown_)
     return;
+
+  AutoReset<bool> pin(&activation_requested_by_browser_, true);
   [BrowserWindowUtils activateWindowForController:controller_];
 }
 
@@ -149,6 +153,11 @@ bool PanelBrowserWindowCocoa::IsPanelActive() const {
   if (!is_shown_)
     return false;
   return [[controller_ window] isMainWindow];
+}
+
+void PanelBrowserWindowCocoa::PreventActivationByOS(bool prevent_activation) {
+  [controller_ preventBecomingKeyWindow:prevent_activation];
+  return;
 }
 
 gfx::NativeWindow PanelBrowserWindowCocoa::GetNativePanelHandle() {
@@ -201,11 +210,24 @@ void PanelBrowserWindowCocoa::PanelPaste() {
 }
 
 void PanelBrowserWindowCocoa::DrawAttention(bool draw_attention) {
+  DCHECK((panel_->attention_mode() & Panel::USE_PANEL_ATTENTION) != 0);
+
   PanelTitlebarViewCocoa* titlebar = [controller_ titlebarView];
   if (draw_attention)
     [titlebar drawAttention];
   else
     [titlebar stopDrawingAttention];
+
+  if ((panel_->attention_mode() & Panel::USE_SYSTEM_ATTENTION) != 0) {
+    if (draw_attention) {
+      DCHECK(!attention_request_id_);
+      attention_request_id_ =
+          [NSApp requestUserAttention:NSInformationalRequest];
+    } else {
+      [NSApp cancelUserAttentionRequest:attention_request_id_];
+      attention_request_id_ = 0;
+    }
+  }
 }
 
 bool PanelBrowserWindowCocoa::IsDrawingAttention() const {
@@ -254,16 +276,24 @@ void PanelBrowserWindowCocoa::DestroyPanelBrowser() {
 }
 
 gfx::Size PanelBrowserWindowCocoa::IconOnlySize() const {
-  // TODO(dimich): to be implemented.
-  return gfx::Size();
+  return gfx::Size([controller_ titlebarIconOnlyWidthInScreenCoordinates],
+                   [controller_ titlebarHeightInScreenCoordinates]);
 }
 
 void PanelBrowserWindowCocoa::EnsurePanelFullyVisible() {
-  // TODO(dimich): to be implemented.
+  [controller_ ensureFullyVisible];
 }
 
 void PanelBrowserWindowCocoa::SetPanelAppIconVisibility(bool visible) {
   // TODO(dimich): to be implemented.
+}
+
+void PanelBrowserWindowCocoa::SetPanelAlwaysOnTop(bool on_top) {
+  [controller_ updateWindowLevel];
+}
+
+void PanelBrowserWindowCocoa::EnableResizeByMouse(bool enable) {
+  [controller_ enableResizeByMouse:enable];
 }
 
 void PanelBrowserWindowCocoa::DidCloseNativeWindow() {
@@ -304,15 +334,25 @@ void PanelBrowserWindowCocoa::TabDetachedAt(TabContentsWrapper* contents,
   [controller_ tabDetached:contents->web_contents()];
 }
 
+void PanelBrowserWindowCocoa::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK_EQ(chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE, type);
+  [controller_ updateWindowLevel];
+}
+
 // NativePanelTesting implementation.
 class NativePanelTestingCocoa : public NativePanelTesting {
  public:
   NativePanelTestingCocoa(NativePanel* native_panel);
   virtual ~NativePanelTestingCocoa() { }
   // Overridden from NativePanelTesting
-  virtual void PressLeftMouseButtonTitlebar(const gfx::Point& point) OVERRIDE;
-  virtual void ReleaseMouseButtonTitlebar() OVERRIDE;
-  virtual void DragTitlebar(int delta_x, int delta_y) OVERRIDE;
+  virtual void PressLeftMouseButtonTitlebar(
+      const gfx::Point& mouse_location, panel::ClickModifier modifier) OVERRIDE;
+  virtual void ReleaseMouseButtonTitlebar(
+      panel::ClickModifier modifier) OVERRIDE;
+  virtual void DragTitlebar(const gfx::Point& mouse_location) OVERRIDE;
   virtual void CancelDragTitlebar() OVERRIDE;
   virtual void FinishDragTitlebar() OVERRIDE;
   virtual bool VerifyDrawingAttention() const OVERRIDE;
@@ -340,16 +380,30 @@ PanelTitlebarViewCocoa* NativePanelTestingCocoa::titlebar() const {
 }
 
 void NativePanelTestingCocoa::PressLeftMouseButtonTitlebar(
-  const gfx::Point& point) {
-  [titlebar() pressLeftMouseButtonTitlebar];
+    const gfx::Point& mouse_location, panel::ClickModifier modifier) {
+  // Convert from platform-indepedent screen coordinates to Cocoa's screen
+  // coordinates because PanelTitlebarViewCocoa method takes Cocoa's screen
+  // coordinates.
+  int modifierFlags =
+      (modifier == panel::APPLY_TO_ALL ? NSAlternateKeyMask : 0);
+  [titlebar() pressLeftMouseButtonTitlebar:
+      cocoa_utils::ConvertPointToCocoaCoordinates(mouse_location)
+           modifiers:modifierFlags];
 }
 
-void NativePanelTestingCocoa::ReleaseMouseButtonTitlebar() {
-  [titlebar() releaseLeftMouseButtonTitlebar];
+void NativePanelTestingCocoa::ReleaseMouseButtonTitlebar(
+    panel::ClickModifier modifier) {
+  int modifierFlags =
+      (modifier == panel::APPLY_TO_ALL ? NSAlternateKeyMask : 0);
+  [titlebar() releaseLeftMouseButtonTitlebar:modifierFlags];
 }
 
-void NativePanelTestingCocoa::DragTitlebar(int delta_x, int delta_y) {
-  [titlebar() dragTitlebarDeltaX:delta_x deltaY:delta_y];
+void NativePanelTestingCocoa::DragTitlebar(const gfx::Point& mouse_location) {
+  // Convert from platform-indepedent screen coordinates to Cocoa's screen
+  // coordinates because PanelTitlebarViewCocoa method takes Cocoa's screen
+  // coordinates.
+  [titlebar() dragTitlebar:
+      cocoa_utils::ConvertPointToCocoaCoordinates(mouse_location)];
 }
 
 void NativePanelTestingCocoa::CancelDragTitlebar() {

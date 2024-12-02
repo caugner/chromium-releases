@@ -1,15 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/glue/generic_change_processor.h"
 
 #include "base/location.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/api/syncable_service.h"
-#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler.h"
 #include "chrome/browser/sync/internal_api/base_node.h"
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
@@ -17,13 +17,14 @@
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/util/unrecoverable_error_handler.h"
 
 using content::BrowserThread;
 
 namespace browser_sync {
 
 GenericChangeProcessor::GenericChangeProcessor(
-    UnrecoverableErrorHandler* error_handler,
+    DataTypeErrorHandler* error_handler,
     const base::WeakPtr<SyncableService>& local_service,
     sync_api::UserShare* user_share)
     : ChangeProcessor(error_handler),
@@ -55,8 +56,10 @@ void GenericChangeProcessor::ApplyChangesFromSyncModel(
       // Need to load specifics from node.
       sync_api::ReadNode read_node(trans);
       if (!read_node.InitByIdLookup(it->id)) {
-        error_handler()->OnUnrecoverableError(FROM_HERE, "Failed to look up "
-            " data for received change with id " + it->id);
+        error_handler()->OnUnrecoverableError(
+            FROM_HERE,
+            "Failed to look up data for received change with id " +
+                base::Int64ToString(it->id));
         return;
       }
       syncer_changes_.push_back(
@@ -82,7 +85,8 @@ void GenericChangeProcessor::CommitChangesFromSyncModel() {
                                                        syncer_changes_);
   syncer_changes_.clear();
   if (error.IsSet()) {
-    error_handler()->OnUnrecoverableError(error.location(), error.message());
+    error_handler()->OnSingleDatatypeUnrecoverableError(
+        error.location(), error.message());
   }
 }
 
@@ -164,8 +168,8 @@ SyncError GenericChangeProcessor::ProcessSyncChanges(
         SyncError error(FROM_HERE,
                         "Failed to delete " + type_str + " node.",
                         type);
-        error_handler()->OnUnrecoverableError(error.location(),
-                                              error.message());
+        error_handler()->OnSingleDatatypeUnrecoverableError(error.location(),
+                                                            error.message());
         return error;
       }
     } else if (change.change_type() == SyncChange::ACTION_ADD) {
@@ -178,8 +182,8 @@ SyncError GenericChangeProcessor::ProcessSyncChanges(
         SyncError error(FROM_HERE,
                         "Failed to look up root node for type " + type_str,
                         type);
-        error_handler()->OnUnrecoverableError(error.location(),
-                                              error.message());
+        error_handler()->OnSingleDatatypeUnrecoverableError(error.location(),
+                                                            error.message());
         return error;
       }
       if (!sync_node.InitUniqueByCreation(change.sync_data().GetDataType(),
@@ -189,8 +193,8 @@ SyncError GenericChangeProcessor::ProcessSyncChanges(
         SyncError error(FROM_HERE,
                         "Failed to create " + type_str + " node.",
                         type);
-        error_handler()->OnUnrecoverableError(error.location(),
-                                              error.message());
+        error_handler()->OnSingleDatatypeUnrecoverableError(error.location(),
+                                                            error.message());
         return error;
       }
       sync_node.SetTitle(UTF8ToWide(change.sync_data().GetTitle()));
@@ -203,8 +207,8 @@ SyncError GenericChangeProcessor::ProcessSyncChanges(
         SyncError error(FROM_HERE,
                         "Failed to update " + type_str + " node.",
                         type);
-        error_handler()->OnUnrecoverableError(error.location(),
-                                              error.message());
+        error_handler()->OnSingleDatatypeUnrecoverableError(error.location(),
+                                                            error.message());
         return error;
       }
       sync_node.SetTitle(UTF8ToWide(change.sync_data().GetTitle()));
@@ -216,8 +220,8 @@ SyncError GenericChangeProcessor::ProcessSyncChanges(
       SyncError error(FROM_HERE,
                       "Received unset SyncChange in the change processor.",
                       type);
-      error_handler()->OnUnrecoverableError(error.location(),
-                                            error.message());
+      error_handler()->OnSingleDatatypeUnrecoverableError(error.location(),
+                                                          error.message());
       return error;
     }
   }

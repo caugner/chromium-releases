@@ -76,8 +76,8 @@ class DownloadShelfView : public views::AccessiblePaneView,
   virtual bool IsClosing() const OVERRIDE;
   virtual Browser* browser() const OVERRIDE;
 
-  // Implementation of MouseWatcherDelegate OVERRIDE.
-  virtual void MouseMovedOutOfView();
+  // Implementation of MouseWatcherListener OVERRIDE.
+  virtual void MouseMovedOutOfHost() OVERRIDE;
 
   // Override views::FocusChangeListener method from AccessiblePaneView.
   virtual void OnWillChangeFocus(View* focused_before,
@@ -114,7 +114,7 @@ class DownloadShelfView : public views::AccessiblePaneView,
   void UpdateButtonColors();
 
   // Overridden from views::View.
-  virtual void OnThemeChanged();
+  virtual void OnThemeChanged() OVERRIDE;
 
   // Called when the "close shelf" animation ended.
   void Closed();

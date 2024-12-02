@@ -30,6 +30,11 @@
 #include "base/android/jni_android.h"
 #endif
 
+// TODO(bbudge) Use time.h when NaCl toolchain supports _POSIX_TIMERS
+#if defined(OS_NACL)
+#include <sys/nacl_syscalls.h>
+#endif
+
 namespace base {
 
 #if defined(OS_MACOSX)
@@ -243,12 +248,11 @@ void PlatformThread::Join(PlatformThreadHandle thread_handle) {
 }
 
 #if !defined(OS_MACOSX)
-// Mac OS X uses lower-level mach APIs
+// Mac OS X uses lower-level mach APIs.
 
 // static
 void PlatformThread::SetThreadPriority(PlatformThreadHandle, ThreadPriority) {
-  // TODO(crogers): implement
-  NOTIMPLEMENTED();
+  // TODO(crogers): Implement, see http://crbug.com/116172
 }
 #endif
 

@@ -29,9 +29,9 @@
 #include "base/utf_string_conversions.h"
 #include "content/browser/renderer_host/backing_store_gtk.h"
 #include "content/browser/renderer_host/gtk_im_context_wrapper.h"
+#include "content/browser/renderer_host/gtk_key_bindings_handler.h"
 #include "content/browser/renderer_host/gtk_window_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_view_host_delegate.h"
@@ -49,27 +49,14 @@
 #include "webkit/glue/webcursor_gtk_data.h"
 #include "webkit/plugins/npapi/webplugin.h"
 
-#if defined(OS_CHROMEOS)
-#include "ui/base/gtk/tooltip_window_gtk.h"
-#else
-#include "content/browser/renderer_host/gtk_key_bindings_handler.h"
-#endif  // defined(OS_CHROMEOS)
-
 namespace {
 
 const int kMaxWindowWidth = 4000;
 const int kMaxWindowHeight = 4000;
 
-#if defined(OS_CHROMEOS)
-// TODO(davemoore) Under Chromeos we are increasing the rate that the trackpad
-// generates events to get better precisions. Eventually we will coordinate the
-// driver and this setting to ensure they match.
-const float kDefaultScrollPixelsPerTick = 20;
-#else
 // See WebInputEventFactor.cpp for a reason for this being the default
 // scroll size for linux.
 const float kDefaultScrollPixelsPerTick = 160.0f / 3.0f;
-#endif
 
 const GdkColor kBGColor =
 #if defined(NDEBUG)
@@ -104,6 +91,9 @@ bool MovedToCenter(const WebKit::WebMouseEvent& mouse_event,
 
 }  // namespace
 
+using content::RenderWidgetHostImpl;
+using content::RenderWidgetHostView;
+using content::RenderWidgetHostViewPort;
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseWheelEvent;
 
@@ -211,6 +201,9 @@ class RenderWidgetHostViewGtkWidget {
         host_view->is_fullscreen_;
     if (should_close_on_escape && GDK_Escape == event->keyval) {
       host_view->host_->Shutdown();
+    } else if (host_view->host_ &&
+               host_view->host_->KeyPressListenersHandleEvent(event)) {
+      return TRUE;
     } else {
       // Send key event to input method.
       host_view->im_context_->ProcessKeyEvent(event);
@@ -226,8 +219,10 @@ class RenderWidgetHostViewGtkWidget {
                             GdkEventFocus* focus,
                             RenderWidgetHostViewGtk* host_view) {
     host_view->ShowCurrentCursor();
-    host_view->GetRenderWidgetHost()->GotFocus();
-    host_view->GetRenderWidgetHost()->SetActive(true);
+    RenderWidgetHostImpl* host =
+        RenderWidgetHostImpl::From(host_view->GetRenderWidgetHost());
+    host->GotFocus();
+    host->SetActive(true);
 
     // The only way to enable a GtkIMContext object is to call its focus in
     // handler.
@@ -244,9 +239,11 @@ class RenderWidgetHostViewGtkWidget {
     gdk_window_set_cursor(gtk_widget_get_window(widget), NULL);
     // If we are showing a context menu, maintain the illusion that webkit has
     // focus.
-    if (!host_view->is_showing_context_menu_) {
-      host_view->GetRenderWidgetHost()->SetActive(false);
-      host_view->GetRenderWidgetHost()->Blur();
+    if (!host_view->IsShowingContextMenu()) {
+      RenderWidgetHostImpl* host =
+          RenderWidgetHostImpl::From(host_view->GetRenderWidgetHost());
+      host->SetActive(false);
+      host->Blur();
     }
 
     // Prevents us from stealing input context focus in OnGrabNotify() handler.
@@ -254,6 +251,8 @@ class RenderWidgetHostViewGtkWidget {
 
     // Disable the GtkIMContext object.
     host_view->im_context_->OnFocusOut();
+
+    host_view->set_last_mouse_down(NULL);
 
     return TRUE;
   }
@@ -281,37 +280,6 @@ class RenderWidgetHostViewGtkWidget {
       GtkWidget* widget,
       GdkEventButton* event,
       RenderWidgetHostViewGtk* host_view) {
-#if defined (OS_CHROMEOS)
-    // We support buttons 8 & 9 for scrolling with an attached USB mouse
-    // in ChromeOS. We do this separately from the builtin scrolling support
-    // because we want to support the user's expectations about the amount
-    // scrolled on each event. xorg.conf on chromeos specifies buttons
-    // 8 & 9 for the scroll wheel for the attached USB mouse.
-    if (event->type == GDK_BUTTON_RELEASE &&
-        (event->button == 8 || event->button == 9)) {
-      GdkEventScroll scroll_event;
-      scroll_event.type = GDK_SCROLL;
-      scroll_event.window = event->window;
-      scroll_event.send_event = event->send_event;
-      scroll_event.time = event->time;
-      scroll_event.x = event->x;
-      scroll_event.y = event->y;
-      scroll_event.state = event->state;
-      if (event->state & GDK_SHIFT_MASK) {
-        scroll_event.direction =
-            event->button == 8 ? GDK_SCROLL_LEFT : GDK_SCROLL_RIGHT;
-      } else {
-        scroll_event.direction =
-            event->button == 8 ? GDK_SCROLL_UP : GDK_SCROLL_DOWN;
-      }
-      scroll_event.device = event->device;
-      scroll_event.x_root = event->x_root;
-      scroll_event.y_root = event->y_root;
-      WebMouseWheelEvent web_event =
-          WebInputEventFactory::mouseWheelEvent(&scroll_event);
-      host_view->GetRenderWidgetHost()->ForwardWheelEvent(web_event);
-    }
-#endif
 
     if (event->type != GDK_BUTTON_RELEASE)
       host_view->set_last_mouse_down(event);
@@ -363,7 +331,8 @@ class RenderWidgetHostViewGtkWidget {
       gtk_widget_grab_focus(widget);
 
     host_view->is_popup_first_mouse_release_ = false;
-    RenderWidgetHost* widget_host = host_view->GetRenderWidgetHost();
+    RenderWidgetHostImpl* widget_host =
+        RenderWidgetHostImpl::From(host_view->GetRenderWidgetHost());
     if (widget_host)
       widget_host->ForwardMouseEvent(WebInputEventFactory::mouseEvent(event));
 
@@ -407,11 +376,13 @@ class RenderWidgetHostViewGtkWidget {
         GdkScreen* screen = gtk_widget_get_screen(widget);
         gdk_display_warp_pointer(display, screen, center.x(), center.y());
         if (host_view->mouse_has_been_warped_to_new_center_)
-          host_view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
+          RenderWidgetHostImpl::From(
+              host_view->GetRenderWidgetHost())->ForwardMouseEvent(mouse_event);
       }
     } else {  // Mouse is not locked.
       host_view->ModifyEventMovementAndCoords(&mouse_event);
-      host_view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
+      RenderWidgetHostImpl::From(
+          host_view->GetRenderWidgetHost())->ForwardMouseEvent(mouse_event);
     }
     return FALSE;
   }
@@ -440,7 +411,8 @@ class RenderWidgetHostViewGtkWidget {
       // from the exit to re-entry point.
       mouse_event.movementX = 0;
       mouse_event.movementY = 0;
-      host_view->GetRenderWidgetHost()->ForwardMouseEvent(mouse_event);
+      RenderWidgetHostImpl::From(
+          host_view->GetRenderWidgetHost())->ForwardMouseEvent(mouse_event);
     }
 
     return FALSE;
@@ -554,19 +526,20 @@ class RenderWidgetHostViewGtkWidget {
         web_event.deltaX = -GetScrollPixelsPerTick();
       web_event.deltaX += GetPendingScrollDelta(false, event->state);
     }
-    host_view->GetRenderWidgetHost()->ForwardWheelEvent(web_event);
+    RenderWidgetHostImpl::From(
+        host_view->GetRenderWidgetHost())->ForwardWheelEvent(web_event);
     return FALSE;
   }
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(RenderWidgetHostViewGtkWidget);
 };
 
-RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(RenderWidgetHost* widget_host)
-    : host_(widget_host),
+RenderWidgetHostViewGtk::RenderWidgetHostViewGtk(
+    content::RenderWidgetHost* widget_host)
+    : host_(RenderWidgetHostImpl::From(widget_host)),
       about_to_validate_and_paint_(false),
       is_hidden_(false),
       is_loading_(false),
-      is_showing_context_menu_(false),
       parent_(NULL),
       is_popup_first_mouse_release_(true),
       was_imcontext_focused_before_grab_(false),
@@ -662,7 +635,8 @@ void RenderWidgetHostViewGtk::InitAsFullscreen(
   DoPopupOrFullscreenInit(window, bounds);
 }
 
-RenderWidgetHost* RenderWidgetHostViewGtk::GetRenderWidgetHost() const {
+content::RenderWidgetHost*
+RenderWidgetHostViewGtk::GetRenderWidgetHost() const {
   return host_;
 }
 
@@ -687,7 +661,7 @@ void RenderWidgetHostViewGtk::WasHidden() {
 
   // If we have a renderer, then inform it that we are being hidden so it can
   // reduce its resource utilization.
-  GetRenderWidgetHost()->WasHidden();
+  host_->WasHidden();
 }
 
 void RenderWidgetHostViewGtk::SetSize(const gfx::Size& size) {
@@ -696,13 +670,6 @@ void RenderWidgetHostViewGtk::SetSize(const gfx::Size& size) {
   if (IsPopup()) {
     // We're a popup, honor the size request.
     gtk_widget_set_size_request(view_.get(), width, height);
-  } else {
-#if defined(TOOLKIT_VIEWS)
-    // TOOLKIT_VIEWS' resize logic flow matches windows. so we go ahead and
-    // size the widget.  In GTK+, the size of the widget is determined by its
-    // children.
-    gtk_widget_set_size_request(view_.get(), width, height);
-#endif
   }
 
   // Update the size of the RWH.
@@ -899,16 +866,13 @@ void RenderWidgetHostViewGtk::SetTooltipText(const string16& tooltip_text) {
   } else {
     gtk_widget_set_tooltip_text(view_.get(),
                                 UTF16ToUTF8(clamped_tooltip).c_str());
-#if defined(OS_CHROMEOS)
-    tooltip_window_->SetTooltipText(clamped_tooltip);
-#endif  // defined(OS_CHROMEOS)
   }
 }
 
 void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
                                                size_t offset,
                                                const ui::Range& range) {
-  RenderWidgetHostView::SelectionChanged(text, offset, range);
+  content::RenderWidgetHostViewBase::SelectionChanged(text, offset, range);
 
   if (text.empty() || range.is_empty())
     return;
@@ -933,15 +897,13 @@ void RenderWidgetHostViewGtk::SelectionBoundsChanged(
   im_context_->UpdateCaretBounds(start_rect.Union(end_rect));
 }
 
-void RenderWidgetHostViewGtk::ShowingContextMenu(bool showing) {
-  is_showing_context_menu_ = showing;
+GdkEventButton* RenderWidgetHostViewGtk::GetLastMouseDown() {
+  return last_mouse_down_;
 }
 
-#if !defined(TOOLKIT_VIEWS)
-GtkWidget* RenderWidgetHostViewGtk::BuildInputMethodsGtkMenu() {
+gfx::NativeView RenderWidgetHostViewGtk::BuildInputMethodsGtkMenu() {
   return im_context_->BuildInputMethodsGtkMenu();
 }
-#endif
 
 gboolean RenderWidgetHostViewGtk::OnWindowStateEvent(
     GtkWidget* widget,
@@ -978,11 +940,7 @@ void RenderWidgetHostViewGtk::DoSharedInit() {
   view_.Own(RenderWidgetHostViewGtkWidget::CreateNewWidget(this));
   im_context_.reset(new GtkIMContextWrapper(this));
   plugin_container_manager_.set_host_widget(view_.get());
-#if defined(OS_CHROMEOS)
-  tooltip_window_.reset(new ui::TooltipWindowGtk(view_.get()));
-#else
   key_bindings_handler_.reset(new GtkKeyBindingsHandler(view_.get()));
-#endif
 }
 
 void RenderWidgetHostViewGtk::DoPopupOrFullscreenInit(GtkWindow* window,
@@ -1014,18 +972,30 @@ BackingStore* RenderWidgetHostViewGtk::AllocBackingStore(
 void RenderWidgetHostViewGtk::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
-  RenderWidgetHost::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
+  RenderWidgetHostImpl::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
     int gpu_host_id) {
-  RenderWidgetHost::AcknowledgePostSubBuffer(params.route_id, gpu_host_id);
+  RenderWidgetHostImpl::AcknowledgePostSubBuffer(params.route_id, gpu_host_id);
 }
 
+void RenderWidgetHostViewGtk::AcceleratedSurfaceSuspend() {
+}
+
+
 void RenderWidgetHostViewGtk::SetBackground(const SkBitmap& background) {
-  RenderWidgetHostView::SetBackground(background);
-  host_->Send(new ViewMsg_SetBackground(host_->routing_id(), background));
+  content::RenderWidgetHostViewBase::SetBackground(background);
+  host_->Send(new ViewMsg_SetBackground(host_->GetRoutingID(), background));
+}
+
+bool RenderWidgetHostViewGtk::CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) {
+  // TODO(mazda): Implement this.
+  NOTIMPLEMENTED();
+  return false;
 }
 
 void RenderWidgetHostViewGtk::ModifyEventForEdgeDragging(
@@ -1086,7 +1056,8 @@ void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
 
   // If the GPU process is rendering directly into the View,
   // call the compositor directly.
-  RenderWidgetHost* render_widget_host = GetRenderWidgetHost();
+  RenderWidgetHostImpl* render_widget_host =
+      RenderWidgetHostImpl::From(GetRenderWidgetHost());
   if (render_widget_host->is_accelerated_compositing_active()) {
     host_->ScheduleComposite();
     return;
@@ -1173,11 +1144,8 @@ void RenderWidgetHostViewGtk::DestroyPluginContainer(
   plugin_container_manager_.DestroyPluginContainer(id);
 }
 
-void RenderWidgetHostViewGtk::UnhandledWheelEvent(
-    const WebKit::WebMouseWheelEvent& event) {
-}
-
-void RenderWidgetHostViewGtk::ProcessTouchAck(bool processed) {
+void RenderWidgetHostViewGtk::ProcessTouchAck(
+    WebKit::WebInputEvent::Type type, bool processed) {
 }
 
 void RenderWidgetHostViewGtk::SetHasHorizontalScrollbar(
@@ -1222,7 +1190,7 @@ gfx::Rect RenderWidgetHostViewGtk::GetRootWindowBounds() {
                    frame_extents.width, frame_extents.height);
 }
 
-gfx::PluginWindowHandle RenderWidgetHostViewGtk::GetCompositingSurface() {
+gfx::GLSurfaceHandle RenderWidgetHostViewGtk::GetCompositingSurface() {
   if (compositing_surface_ == gfx::kNullPluginWindow) {
     GtkNativeViewManager* manager = GtkNativeViewManager::GetInstance();
     gfx::NativeViewId view_id = GetNativeViewId();
@@ -1231,7 +1199,7 @@ gfx::PluginWindowHandle RenderWidgetHostViewGtk::GetCompositingSurface() {
       DLOG(ERROR) << "Can't find XID for view id " << view_id;
     }
   }
-  return compositing_surface_;
+  return gfx::GLSurfaceHandle(compositing_surface_, true);
 }
 
 bool RenderWidgetHostViewGtk::LockMouse() {
@@ -1299,18 +1267,16 @@ void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
   if (!host_)
     return;
 
-#if !defined(OS_CHROMEOS)
   EditCommands edit_commands;
   if (!event.skip_in_browser &&
       key_bindings_handler_->Match(event, &edit_commands)) {
     host_->Send(new ViewMsg_SetEditCommandsForNextKeyEvent(
-        host_->routing_id(), edit_commands));
+        host_->GetRoutingID(), edit_commands));
     NativeWebKeyboardEvent copy_event(event);
     copy_event.match_edit_command = true;
     host_->ForwardKeyboardEvent(copy_event);
     return;
   }
-#endif
 
   host_->ForwardKeyboardEvent(event);
 }
@@ -1401,12 +1367,12 @@ void RenderWidgetHostViewGtk::ModifyEventMovementAndCoords(
 
 // static
 RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
-    RenderWidgetHost* widget) {
+    content::RenderWidgetHost* widget) {
   return new RenderWidgetHostViewGtk(widget);
 }
 
 // static
-void RenderWidgetHostView::GetDefaultScreenInfo(
+void content::RenderWidgetHostViewPort::GetDefaultScreenInfo(
     WebKit::WebScreenInfo* results) {
   GdkWindow* gdk_window =
       gdk_display_get_default_group(gdk_display_get_default());

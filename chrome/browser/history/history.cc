@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "chrome/browser/history/history.h"
 
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -37,18 +38,21 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
+#include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/visit_filter.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/profile_error_dialog.h"
 #include "chrome/browser/visitedlink/visitedlink_master.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/download/download_persistent_store_info.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_persistent_store_info.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -181,6 +185,10 @@ void HistoryService::UnloadBackend() {
   // Get rid of the in-memory backend.
   in_memory_backend_.reset();
 
+  // Give the InMemoryURLIndex a chance to shutdown.
+  if (in_memory_url_index_.get())
+    in_memory_url_index_->ShutDown();
+
   // The backend's destructor must run on the history thread since it is not
   // threadsafe. So this thread must not be the last thread holding a reference
   // to the backend, or a crash could happen.
@@ -240,16 +248,6 @@ history::URLDatabase* HistoryService::InMemoryDatabase() {
   LoadBackendIfNecessary();
   if (in_memory_backend_.get())
     return in_memory_backend_->db();
-  return NULL;
-}
-
-history::InMemoryURLIndex* HistoryService::InMemoryIndex() {
-  // NOTE: See comments in BackendLoaded() as to why we call
-  // LoadBackendIfNecessary() here even though it won't affect the return value
-  // for this call.
-  LoadBackendIfNecessary();
-  if (in_memory_backend_.get())
-    return in_memory_backend_->InMemoryIndex();
   return NULL;
 }
 
@@ -410,24 +408,22 @@ void HistoryService::AddPageWithDetails(const GURL& url,
   row.set_last_visit(last_visit);
   row.set_hidden(hidden);
 
-  std::vector<history::URLRow> rows;
+  history::URLRows rows;
   rows.push_back(row);
 
   ScheduleAndForget(PRIORITY_NORMAL,
                     &HistoryBackend::AddPagesWithDetails, rows, visit_source);
 }
 
-void HistoryService::AddPagesWithDetails(
-    const std::vector<history::URLRow>& info,
-    history::VisitSource visit_source) {
+void HistoryService::AddPagesWithDetails(const history::URLRows& info,
+                                         history::VisitSource visit_source) {
 
   // Add to the visited links system.
   VisitedLinkMaster* visited_links;
   if (profile_ && (visited_links = profile_->GetVisitedLinkMaster())) {
     std::vector<GURL> urls;
     urls.reserve(info.size());
-    for (std::vector<history::URLRow>::const_iterator i = info.begin();
-         i != info.end();
+    for (history::URLRows::const_iterator i = info.begin(); i != info.end();
          ++i)
       urls.push_back(i->url());
 
@@ -528,7 +524,7 @@ HistoryService::Handle HistoryService::QueryURL(
 // 'downloads' table.
 HistoryService::Handle HistoryService::CreateDownload(
     int32 id,
-    const DownloadPersistentStoreInfo& create_info,
+    const content::DownloadPersistentStoreInfo& create_info,
     CancelableRequestConsumerBase* consumer,
     const HistoryService::DownloadCreateCallback& callback) {
   return Schedule(PRIORITY_NORMAL, &HistoryBackend::CreateDownload, consumer,
@@ -561,7 +557,8 @@ void HistoryService::CleanUpInProgressEntries() {
 
 // Handle updates for a particular download. This is a 'fire and forget'
 // operation, so we don't need to be called back.
-void HistoryService::UpdateDownload(const DownloadPersistentStoreInfo& data) {
+void HistoryService::UpdateDownload(
+    const content::DownloadPersistentStoreInfo& data) {
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::UpdateDownload, data);
 }
 
@@ -638,6 +635,18 @@ HistoryService::Handle HistoryService::QueryMostVisitedURLs(
                   result_count, days_back);
 }
 
+HistoryService::Handle HistoryService::QueryFilteredURLs(
+    int result_count,
+    const history::VisitFilter& filter,
+    CancelableRequestConsumerBase* consumer,
+    const QueryMostVisitedURLsCallback& callback) {
+  return Schedule(PRIORITY_NORMAL,
+                  &HistoryBackend::QueryFilteredURLs,
+                  consumer,
+                  new history::QueryMostVisitedURLsRequest(callback),
+                  result_count, filter);
+}
+
 void HistoryService::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
@@ -689,6 +698,15 @@ bool HistoryService::Init(const FilePath& history_dir,
   history_dir_ = history_dir;
   bookmark_service_ = bookmark_service;
   no_db_ = no_db;
+
+  if (profile_ && !CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableHistoryQuickProvider)) {
+    std::string languages =
+        profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
+    in_memory_url_index_.reset(
+        new history::InMemoryURLIndex(profile_, history_dir_, languages));
+    in_memory_url_index_->Init();
+  }
 
   // Create the history backend.
   LoadBackendIfNecessary();

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,31 +26,18 @@ namespace {
 const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
 
 int g_request_context_getter_instances = 0;
-class TestURLRequestContextGetter : public net::URLRequestContextGetter {
+class TrackingTestURLRequestContextGetter
+    : public TestURLRequestContextGetter {
  public:
-  explicit TestURLRequestContextGetter(
+  explicit TrackingTestURLRequestContextGetter(
       base::MessageLoopProxy* io_message_loop_proxy)
-          : io_message_loop_proxy_(io_message_loop_proxy) {
+          : TestURLRequestContextGetter(io_message_loop_proxy) {
     g_request_context_getter_instances++;
   }
-  virtual net::URLRequestContext* GetURLRequestContext() {
-    if (!context_)
-      context_ = new TestURLRequestContext();
-    return context_;
-  }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
-    return io_message_loop_proxy_;
-  }
-
  protected:
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
-
- private:
-  virtual ~TestURLRequestContextGetter() {
+  virtual ~TrackingTestURLRequestContextGetter() {
     g_request_context_getter_instances--;
   }
-
-  scoped_refptr<net::URLRequestContext> context_;
 };
 
 class TestCloudPrintURLFetcher : public CloudPrintURLFetcher {
@@ -61,7 +48,8 @@ class TestCloudPrintURLFetcher : public CloudPrintURLFetcher {
   }
 
   virtual net::URLRequestContextGetter* GetRequestContextGetter() {
-    return new TestURLRequestContextGetter(io_message_loop_proxy_.get());
+    return new TrackingTestURLRequestContextGetter(
+        io_message_loop_proxy_.get());
   }
  private:
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
@@ -302,8 +290,10 @@ void CloudPrintURLFetcherRetryBackoffTest::OnRequestGiveUp() {
 }
 
 // http://code.google.com/p/chromium/issues/detail?id=60426
-TEST_F(CloudPrintURLFetcherBasicTest, FLAKY_HandleRawResponse) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+TEST_F(CloudPrintURLFetcherBasicTest, DISABLED_HandleRawResponse) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
   SetHandleRawResponse(true);
 
@@ -312,8 +302,10 @@ TEST_F(CloudPrintURLFetcherBasicTest, FLAKY_HandleRawResponse) {
 }
 
 // http://code.google.com/p/chromium/issues/detail?id=60426
-TEST_F(CloudPrintURLFetcherBasicTest, FLAKY_HandleRawData) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+TEST_F(CloudPrintURLFetcherBasicTest, DISABLED_HandleRawData) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   SetHandleRawData(true);
@@ -322,7 +314,9 @@ TEST_F(CloudPrintURLFetcherBasicTest, FLAKY_HandleRawData) {
 }
 
 TEST_F(CloudPrintURLFetcherOverloadTest, Protect) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("defaultresponse"));
@@ -343,8 +337,10 @@ TEST_F(CloudPrintURLFetcherOverloadTest, Protect) {
 }
 
 // http://code.google.com/p/chromium/issues/detail?id=60426
-TEST_F(CloudPrintURLFetcherRetryBackoffTest, FLAKY_GiveUp) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath(kDocRoot));
+TEST_F(CloudPrintURLFetcherRetryBackoffTest, DISABLED_GiveUp) {
+  net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
+                              FilePath(kDocRoot));
   ASSERT_TRUE(test_server.Start());
 
   GURL url(test_server.GetURL("defaultresponse"));

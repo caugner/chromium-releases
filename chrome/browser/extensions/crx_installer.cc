@@ -25,6 +25,7 @@
 #include "chrome/browser/extensions/convert_web_app.h"
 #include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/shell_integration.h"
@@ -33,9 +34,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -50,9 +51,9 @@ using extensions::PermissionsUpdater;
 
 namespace {
 
+// TODO(jstritar): this whitelist is not profile aware.
 struct Whitelist {
   Whitelist() {}
-  std::set<std::string> ids;
   std::map<std::string, linked_ptr<CrxInstaller::WhitelistEntry> > entries;
 };
 
@@ -71,12 +72,6 @@ scoped_refptr<CrxInstaller> CrxInstaller::Create(
     ExtensionService* frontend,
     ExtensionInstallUI* client) {
   return new CrxInstaller(frontend->AsWeakPtr(), client);
-}
-
-// static
-void CrxInstaller::SetWhitelistedInstallId(const std::string& id) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  g_whitelisted_install_data.Get().ids.insert(id);
 }
 
 // static
@@ -109,24 +104,6 @@ CrxInstaller::WhitelistEntry* CrxInstaller::RemoveWhitelistEntry(
     return entry;
   }
   return NULL;
-}
-
-// static
-bool CrxInstaller::IsIdWhitelisted(const std::string& id) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::set<std::string>& ids = g_whitelisted_install_data.Get().ids;
-  return ContainsKey(ids, id);
-}
-
-// static
-bool CrxInstaller::ClearWhitelistedInstallId(const std::string& id) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::set<std::string>& ids = g_whitelisted_install_data.Get().ids;
-  if (ContainsKey(ids, id)) {
-    ids.erase(id);
-    return true;
-  }
-  return false;
 }
 
 CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
@@ -170,7 +147,7 @@ void CrxInstaller::InstallCrx(const FilePath& source_file) {
   scoped_refptr<SandboxedExtensionUnpacker> unpacker(
       new SandboxedExtensionUnpacker(
           source_file,
-          ResourceDispatcherHost::Get(),
+          content::ResourceDispatcherHost::Get() != NULL,
           install_source_,
           creation_flags_,
           this));
@@ -360,7 +337,9 @@ void CrxInstaller::OnUnpackSuccess(const FilePath& temp_dir,
   }
 
   if (client_) {
-    Extension::DecodeIcon(extension_.get(), Extension::EXTENSION_ICON_LARGE,
+    Extension::DecodeIcon(extension_.get(),
+                          ExtensionIconSet::EXTENSION_ICON_LARGE,
+                          ExtensionIconSet::MATCH_BIGGER,
                           &install_icon_);
   }
 
@@ -406,23 +385,21 @@ void CrxInstaller::ConfirmInstall() {
   current_version_ =
       frontend_weak_->extension_prefs()->GetVersionString(extension_->id());
 
-  // TODO(asargent) - remove this when we fully deprecate the old install api.
-  ClearWhitelistedInstallId(extension_->id());
-
   bool whitelisted = false;
   scoped_ptr<CrxInstaller::WhitelistEntry> entry(
       RemoveWhitelistEntry(extension_->id()));
   if (is_gallery_install() && entry.get() && original_manifest_.get()) {
-    if (!(original_manifest_->Equals(entry->parsed_manifest.get()))) {
-      ReportFailureFromUIThread(
-          l10n_util::GetStringUTF16(IDS_EXTENSION_MANIFEST_INVALID));
-      return;
-    }
     whitelisted = true;
     if (entry->use_app_installed_bubble)
       client_->set_use_app_installed_bubble(true);
     if (entry->skip_post_install_ui)
       client_->set_skip_post_install_ui(true);
+
+    if (!(original_manifest_->Equals(entry->parsed_manifest.get()))) {
+      ReportFailureFromUIThread(
+          l10n_util::GetStringUTF16(IDS_EXTENSION_MANIFEST_INVALID));
+      return;
+    }
   }
 
   if (client_ &&

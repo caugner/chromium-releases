@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image.h"
 
 class CommandLine;
-class FilePath;
 
 #if defined(USE_X11)
 namespace base {
@@ -76,8 +76,12 @@ class ShellIntegration {
     std::string extension_id;
     string16 title;
     string16 description;
-    SkBitmap favicon;
+    FilePath extension_path;
+    gfx::Image favicon;
 
+    // Shortcuts to platform apps are created differently. They start up with
+    // their own user data directory and load the app from |extension_path|.
+    bool is_platform_app;
     bool create_on_desktop;
     bool create_in_applications_menu;
 
@@ -88,6 +92,15 @@ class ShellIntegration {
     bool create_in_quick_launch_bar;
   };
 
+  // Data that needs to be passed between the app launcher stub and Chrome.
+  struct AppModeInfo {
+  };
+  static void SetAppModeInfo(const AppModeInfo* info);
+  static const AppModeInfo* AppModeInfo();
+
+  // Is the current instance of Chrome running in App mode.
+  bool IsRunningInAppMode();
+
   // Set up command line arguments for launching a URL or an app.
   // The new command line reuses the current process's user data directory (and
   // login profile, for ChromeOS).
@@ -96,6 +109,15 @@ class ShellIntegration {
   static CommandLine CommandLineArgsForLauncher(
       const GURL& url,
       const std::string& extension_app_id);
+
+  // Set up command line arguments for launching a platform app.
+  // The command line will have the switches --app-id, --user-data-dir and
+  // --load-extension, using values |extension_app_id|, |user_data_dir| and
+  // |extension_path| respectively.
+  static CommandLine CommandLineArgsForPlatformApp(
+      const std::string& extension_app_id,
+      const FilePath& user_data_dir,
+      const FilePath& extension_path);
 
 #if defined(USE_X11)
   // Returns filename of the desktop shortcut used to launch the browser.
@@ -126,12 +148,12 @@ class ShellIntegration {
   // Generates Win7 app id for given app name and profile path. The returned app
   // id is in the format of "|app_name|[.<profile_id>]". "profile_id" is
   // appended when user override the default value.
-  static std::wstring GetAppId(const std::wstring& app_name,
-                               const FilePath& profile_path);
+  static string16 GetAppId(const string16& app_name,
+                           const FilePath& profile_path);
 
   // Generates Win7 app id for Chromium by calling GetAppId with
   // chrome::kBrowserAppID as app_name.
-  static std::wstring GetChromiumAppId(const FilePath& profile_path);
+  static string16 GetChromiumAppId(const FilePath& profile_path);
 
   // Returns the path to the Chromium icon. This is used to specify the icon
   // to use for the taskbar group on Win 7.

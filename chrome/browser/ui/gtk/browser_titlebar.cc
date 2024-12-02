@@ -30,11 +30,11 @@
 #if defined(USE_GCONF)
 #include "chrome/browser/ui/gtk/gconf_titlebar_listener.h"
 #endif
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/gtk/unity_service.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
@@ -47,6 +47,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -237,7 +238,6 @@ BrowserTitlebar::BrowserTitlebar(BrowserWindowGtk* browser_window,
       app_mode_title_(NULL),
       using_custom_frame_(false),
       window_has_focus_(false),
-      window_has_mouse_(false),
       display_avatar_on_left_(false),
       theme_service_(NULL) {
   Init();
@@ -303,13 +303,6 @@ void BrowserTitlebar::Init() {
 
   g_signal_connect(window_, "window-state-event",
                    G_CALLBACK(OnWindowStateChangedThunk), this);
-
-  if (IsTypePanel()) {
-    g_signal_connect(window_, "enter-notify-event",
-                     G_CALLBACK(OnEnterNotifyThunk), this);
-    g_signal_connect(window_, "leave-notify-event",
-                     G_CALLBACK(OnLeaveNotifyThunk), this);
-  }
 
   // Allocate the two button boxes on the left and right parts of the bar. These
   // are always allocated, but only displayed in incognito mode or when using
@@ -408,7 +401,7 @@ void BrowserTitlebar::Init() {
     UpdateTitleAndIcon();
   }
 
-  theme_service_ = GtkThemeService::GetFrom(
+  theme_service_ = ThemeServiceGtk::GetFrom(
       browser_window_->browser()->profile());
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(theme_service_));
@@ -613,12 +606,13 @@ void BrowserTitlebar::UpdateTitleAndIcon() {
         // Update the system app icon.  We don't need to update the icon in the
         // top left of the custom frame, that will get updated when the
         // throbber is updated.
+        Profile* profile = browser_window_->browser()->profile();
         SkBitmap icon = browser_window_->browser()->GetCurrentPageIcon();
         if (icon.empty()) {
-          gtk_util::SetWindowIcon(window_);
+          gtk_util::SetWindowIcon(window_, profile);
         } else {
           GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
-          gtk_window_set_icon(window_, icon_pixbuf);
+          gtk_util::SetWindowIcon(window_, profile, icon_pixbuf);
           g_object_unref(icon_pixbuf);
         }
         break;
@@ -645,13 +639,14 @@ void BrowserTitlebar::UpdateThrobber(WebContents* web_contents) {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
     // Note: we want to exclude the application popup window.
-    if (browser_window_->browser()->is_app() &&
-        browser_window_->browser()->is_type_popup()) {
+    if ((browser_window_->browser()->is_app() &&
+        browser_window_->browser()->is_type_popup()) ||
+        IsTypePanel()) {
       SkBitmap icon = browser_window_->browser()->GetCurrentPageIcon();
       if (icon.empty()) {
         // Fallback to the Chromium icon if the page has no icon.
         gtk_image_set_from_pixbuf(GTK_IMAGE(app_mode_favicon_),
-            rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16));
+            rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16).ToGdkPixbuf());
       } else {
         GdkPixbuf* icon_pixbuf = gfx::GdkPixbufFromSkBitmap(&icon);
         gtk_image_set_from_pixbuf(GTK_IMAGE(app_mode_favicon_), icon_pixbuf);
@@ -659,7 +654,7 @@ void BrowserTitlebar::UpdateThrobber(WebContents* web_contents) {
       }
     } else {
       gtk_image_set_from_pixbuf(GTK_IMAGE(app_mode_favicon_),
-          rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16));
+          rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16).ToGdkPixbuf());
     }
     throbber_.Reset();
   }
@@ -723,9 +718,13 @@ void BrowserTitlebar::UpdateTitlebarAlignment() {
       gtk_widget_show(top_padding_right_);
   }
   if (close_button_.get()) {
-    gtk_widget_set_size_request(close_button_->widget(),
-                                close_button_req.width,
-                                close_button_req.height);
+    if (browser_window_->ShouldShowCloseButton()) {
+      gtk_widget_set_size_request(close_button_->widget(),
+                                  close_button_req.width,
+                                  close_button_req.height);
+    } else {
+      gtk_widget_hide(close_button_->widget());
+    }
   }
   if (minimize_button_.get()) {
     gtk_widget_set_size_request(minimize_button_->widget(),
@@ -903,32 +902,6 @@ gboolean BrowserTitlebar::OnScroll(GtkWidget* widget, GdkEventScroll* event) {
   return TRUE;
 }
 
-gboolean BrowserTitlebar::OnEnterNotify(GtkWidget* widget,
-                                        GdkEventCrossing* event) {
-  // Ignore if entered from a child widget.
-  if (event->detail == GDK_NOTIFY_INFERIOR)
-    return FALSE;
-
-  if (window_ && panel_wrench_button_.get())
-    gtk_widget_show(panel_wrench_button_->widget());
-
-  window_has_mouse_ = TRUE;
-  return FALSE;
-}
-
-gboolean BrowserTitlebar::OnLeaveNotify(GtkWidget* widget,
-                                        GdkEventCrossing* event) {
-  // Ignore if left towards a child widget.
-  if (event->detail == GDK_NOTIFY_INFERIOR)
-    return FALSE;
-
-  if (window_ && panel_wrench_button_.get() && !window_has_focus_)
-    gtk_widget_hide(panel_wrench_button_->widget());
-
-  window_has_mouse_ = FALSE;
-  return FALSE;
-}
-
 // static
 void BrowserTitlebar::OnButtonClicked(GtkWidget* button) {
   if (close_button_.get() && close_button_->widget() == button) {
@@ -944,7 +917,7 @@ void BrowserTitlebar::OnButtonClicked(GtkWidget* button) {
 
 gboolean BrowserTitlebar::OnFaviconMenuButtonPressed(GtkWidget* widget,
                                                      GdkEventButton* event) {
-  if (event->button != 1)
+  if (event->button != 1 || IsTypePanel())
     return FALSE;
 
   ShowFaviconMenu(event);
@@ -989,9 +962,10 @@ void BrowserTitlebar::SendEnterNotifyToCloseButtonIfUnderMouse() {
   g_value_set_boolean(&return_value, false);
 
   GdkEvent* event = gdk_event_new(GDK_ENTER_NOTIFY);
-  event->crossing.window = GTK_BUTTON(close_button_->widget())->event_window;
+  event->crossing.window =
+      gtk_button_get_event_window(GTK_BUTTON(close_button_->widget()));
   event->crossing.send_event = FALSE;
-  event->crossing.subwindow = close_button_->widget()->window;
+  event->crossing.subwindow = gtk_widget_get_window(close_button_->widget());
   event->crossing.time = gtk_util::XTimeNow();
   event->crossing.x = x;
   event->crossing.y = y;
@@ -1005,6 +979,22 @@ void BrowserTitlebar::SendEnterNotifyToCloseButtonIfUnderMouse() {
   g_signal_emit_by_name(GTK_OBJECT(close_button_->widget()),
                         "enter-notify-event", event,
                         &return_value);
+}
+
+int BrowserTitlebar::IconOnlyWidth() {
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(app_mode_favicon_, &allocation);
+  return 2 * kFrameBorderThickness + allocation.width;
+}
+
+void BrowserTitlebar::ShowPanelWrenchButton() {
+  if (panel_wrench_button_.get())
+    gtk_widget_show(panel_wrench_button_->widget());
+}
+
+void BrowserTitlebar::HidePanelWrenchButton() {
+  if (panel_wrench_button_.get())
+    gtk_widget_hide(panel_wrench_button_->widget());
 }
 
 bool BrowserTitlebar::IsCommandIdEnabled(int command_id) const {
@@ -1094,12 +1084,6 @@ void BrowserTitlebar::ActiveWindowChanged(GdkWindow* active_window) {
 
   window_has_focus_ =
       gtk_widget_get_window(GTK_WIDGET(window_)) == active_window;
-  if (IsTypePanel()) {
-    if (window_has_focus_ || window_has_mouse_)
-      gtk_widget_show(panel_wrench_button_->widget());
-    else
-      gtk_widget_hide(panel_wrench_button_->widget());
-  }
   UpdateTextColor();
 }
 

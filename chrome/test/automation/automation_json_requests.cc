@@ -8,7 +8,7 @@
 #include "base/file_path.h"
 #include "base/format_macros.h"
 #include "base/json/json_reader.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stringprintf.h"
@@ -30,7 +30,7 @@ bool SendAutomationJSONRequest(AutomationMessageSender* sender,
                                DictionaryValue* reply_dict,
                                Error* error) {
   std::string request, reply;
-  base::JSONWriter::Write(&request_dict, false, &request);
+  base::JSONWriter::Write(&request_dict, &request);
   std::string command;
   request_dict.GetString("command", &command);
   LOG(INFO) << "Sending '" << command << "' command.";

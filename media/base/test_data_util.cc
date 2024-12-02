@@ -7,6 +7,8 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "media/base/buffers.h"
+#include "media/base/data_buffer.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 
 namespace media {
@@ -40,7 +42,9 @@ void ReadTestDataFile(const std::string& name, scoped_array<uint8>* buffer,
   // padded. Since most of our test data is passed to FFmpeg, it makes sense
   // to do the padding here instead of scattering it around test code.
   int file_size = static_cast<int>(tmp);
-  buffer->reset(new uint8[file_size + FF_INPUT_BUFFER_PADDING_SIZE]);
+  int padded_size = file_size + FF_INPUT_BUFFER_PADDING_SIZE;
+  buffer->reset(reinterpret_cast<uint8_t*>(new uint8[padded_size]));
+  memset(buffer->get(), 0, padded_size);
 
   CHECK(file_size == file_util::ReadFile(file_path,
                                          reinterpret_cast<char*>(buffer->get()),
@@ -49,11 +53,19 @@ void ReadTestDataFile(const std::string& name, scoped_array<uint8>* buffer,
   *size = file_size;
 }
 
-void ReadTestDataFile(const std::string& name, scoped_refptr<Buffer>* buffer) {
+void ReadTestDataFile(const std::string& name,
+                      scoped_refptr<DataBuffer>* buffer) {
   scoped_array<uint8> buf;
   int buf_size;
   ReadTestDataFile(name, &buf, &buf_size);
   *buffer = new DataBuffer(buf.Pass(), buf_size);
+}
+
+void ReadTestDataFile(const std::string& name,
+                      scoped_refptr<Buffer>* buffer) {
+  scoped_refptr<DataBuffer> data_buffer;
+  ReadTestDataFile(name, &data_buffer);
+  *buffer = data_buffer;
 }
 
 }  // namespace media

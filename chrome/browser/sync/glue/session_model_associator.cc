@@ -11,11 +11,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/sys_info.h"
-#include "chrome/browser/browser_process.h"
+#include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/synced_session.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
@@ -25,22 +24,26 @@
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/protocol/session_specifics.pb.h"
-#include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/get_session_name_task.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
+#include "sync/protocol/session_specifics.pb.h"
+#include "sync/syncable/syncable.h"
+#include "sync/util/get_session_name.h"
 #if defined(OS_LINUX)
 #include "base/linux_util.h"
 #elif defined(OS_WIN)
 #include <windows.h>
+#elif defined(OS_ANDROID)
+#include "sync/util/session_utils_android.h"
 #endif
 
 using content::BrowserThread;
 using content::NavigationEntry;
+using prefs::kSyncSessionsGUID;
 using syncable::SESSIONS;
 
 namespace browser_sync {
@@ -56,6 +59,27 @@ static const int kMaxSyncNavigationCount = 6;
 // Default number of days without activity after which a session is considered
 // stale and becomes a candidate for garbage collection.
 static const size_t kDefaultStaleSessionThresholdDays = 14;  // 2 weeks.
+
+sync_pb::SessionHeader::DeviceType GetLocalDeviceType() {
+  // TODO(yfriedman): Refactor/combine with "DeviceInformation" code in
+  // sync_manager.cc[1060]
+#if defined(OS_CHROMEOS)
+  return sync_pb::SessionHeader_DeviceType_TYPE_CROS;
+#elif defined(OS_LINUX)
+  return sync_pb::SessionHeader_DeviceType_TYPE_LINUX;
+#elif defined(OS_MACOSX)
+  return sync_pb::SessionHeader_DeviceType_TYPE_MAC;
+#elif defined(OS_WIN)
+  return sync_pb::SessionHeader_DeviceType_TYPE_WIN;
+#elif defined(OS_ANDROID)
+  return internal::IsTabletUi() ?
+      sync_pb::SessionHeader_DeviceType_TYPE_TABLET :
+      sync_pb::SessionHeader_DeviceType_TYPE_PHONE;
+#else
+  return sync_pb::SessionHeader_DeviceType_TYPE_OTHER;
+#endif
+}
+
 }  // namespace
 
 SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service)
@@ -66,10 +90,16 @@ SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service)
       setup_for_test_(false),
       waiting_for_change_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(test_weak_factory_(this)),
-      profile_(sync_service->profile()) {
+      profile_(sync_service->profile()),
+      pref_service_(profile_->GetPrefs()) {
   DCHECK(CalledOnValidThread());
   DCHECK(sync_service_);
   DCHECK(profile_);
+  if (pref_service_->FindPreference(kSyncSessionsGUID) == NULL) {
+    pref_service_->RegisterStringPref(kSyncSessionsGUID,
+                                      std::string(),
+                                      PrefService::UNSYNCABLE_PREF);
+  }
 }
 
 SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service,
@@ -81,10 +111,12 @@ SessionModelAssociator::SessionModelAssociator(ProfileSyncService* sync_service,
       setup_for_test_(setup_for_test),
       waiting_for_change_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(test_weak_factory_(this)),
-      profile_(sync_service->profile()) {
+      profile_(sync_service->profile()),
+      pref_service_(NULL)  {
   DCHECK(CalledOnValidThread());
   DCHECK(sync_service_);
   DCHECK(profile_);
+  DCHECK(setup_for_test);
 }
 
 SessionModelAssociator::~SessionModelAssociator() {
@@ -141,7 +173,8 @@ bool SessionModelAssociator::InitSyncNodeFromChromeId(
   return false;
 }
 
-bool SessionModelAssociator::AssociateWindows(bool reload_tabs) {
+bool SessionModelAssociator::AssociateWindows(bool reload_tabs,
+                                              SyncError* error) {
   DCHECK(CalledOnValidThread());
   std::string local_tag = GetCurrentMachineTag();
   sync_pb::SessionSpecifics specifics;
@@ -151,19 +184,8 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs) {
       synced_session_tracker_.GetSession(local_tag);
   current_session->modified_time = base::Time::Now();
   header_s->set_client_name(current_session_name_);
-#if defined(OS_CHROMEOS)
-  header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_CROS);
-#elif defined(OS_LINUX)
-  header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_LINUX);
-#elif defined(OS_MACOSX)
-  header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_MAC);
-#elif defined(OS_WIN)
-  header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_WIN);
-#else
-  header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_OTHER);
-#endif
+  header_s->set_device_type(GetLocalDeviceType());
 
-  bool failed_association = false;
   synced_session_tracker_.ResetSessionTracking(local_tag);
   std::set<SyncedWindowDelegate*> windows =
       SyncedWindowDelegate::GetSyncedWindowDelegates();
@@ -204,9 +226,10 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs) {
           // It's possible for GetTabAt to return a null tab if it's not in
           // memory. We can assume this means the tab already existed but hasn't
           // changed, so no need to reassociate.
-          if (tab && !AssociateTab(*tab)) {
-            failed_association = true;
-            break;
+          if (tab && !AssociateTab(*tab, error)) {
+            // Association failed. Either we need to re-associate, or this is an
+            // unrecoverable error.
+            return false;
           }
         }
 
@@ -239,15 +262,12 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs) {
   // Free memory for closed windows and tabs.
   synced_session_tracker_.CleanupSession(local_tag);
 
-  if (failed_association)
-    return false;
-
   sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
   sync_api::WriteNode header_node(&trans);
   if (!header_node.InitByIdLookup(local_session_syncid_)) {
-    LOG(ERROR) << "Failed to load local session header node. This is likely "
-               << "due to a remote session deleting the local one. "
-               << "Reassociation needed.";
+    error->Reset(FROM_HERE,
+                 "Failed to load local session header node.",
+                 model_type());
     return false;
   }
   header_node.SetSessionSpecifics(specifics);
@@ -264,19 +284,21 @@ bool SessionModelAssociator::ShouldSyncWindow(
 }
 
 bool SessionModelAssociator::AssociateTabs(
-    const std::vector<SyncedTabDelegate*>& tabs) {
+    const std::vector<SyncedTabDelegate*>& tabs,
+    SyncError* error) {
   DCHECK(CalledOnValidThread());
   for (std::vector<SyncedTabDelegate*>::const_iterator i = tabs.begin();
        i != tabs.end();
        ++i) {
-    if (!AssociateTab(**i))
+    if (!AssociateTab(**i, error))
       return false;
   }
   if (waiting_for_change_) QuitLoopForSubtleTesting();
   return true;
 }
 
-bool SessionModelAssociator::AssociateTab(const SyncedTabDelegate& tab) {
+bool SessionModelAssociator::AssociateTab(const SyncedTabDelegate& tab,
+                                          SyncError* error) {
   DCHECK(CalledOnValidThread());
   int64 sync_id;
   SessionID::id_type id = tab.GetSessionId();
@@ -300,8 +322,10 @@ bool SessionModelAssociator::AssociateTab(const SyncedTabDelegate& tab) {
     // This is a new tab, get a sync node for it.
     sync_id = tab_pool_.GetFreeTabNode();
     if (sync_id == sync_api::kInvalidId) {
-      LOG(ERROR) << "Received invalid tab node from tab pool. Reassociation "
-                 << "needed.";
+      error->Reset(FROM_HERE,
+                   "Received invalid tab node from tab pool. Reassociation "
+                       "needed.",
+                    model_type());
       return false;
     }
   } else {
@@ -316,13 +340,14 @@ bool SessionModelAssociator::AssociateTab(const SyncedTabDelegate& tab) {
   DCHECK(window);
   TabLinks t(sync_id, &tab);
   tab_map_[id] = t;
-  return WriteTabContentsToSyncModel(*window, tab, sync_id);
+  return WriteTabContentsToSyncModel(*window, tab, sync_id, error);
 }
 
 bool SessionModelAssociator::WriteTabContentsToSyncModel(
     const SyncedWindowDelegate& window,
     const SyncedTabDelegate& tab,
-    int64 sync_id) {
+    int64 sync_id,
+    SyncError* error) {
   DCHECK(CalledOnValidThread());
   sync_pb::SessionSpecifics session_s;
   session_s.set_session_tag(GetCurrentMachineTag());
@@ -373,9 +398,7 @@ bool SessionModelAssociator::WriteTabContentsToSyncModel(
   sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
   sync_api::WriteNode tab_node(&trans);
   if (!tab_node.InitByIdLookup(sync_id)) {
-    LOG(ERROR) << "Failed to look up local tab node " << sync_id << ". "
-               << "This is likely because the local session was deleted by a "
-               << "remote session. Reassociation needed.";
+    error->Reset(FROM_HERE, "Failed to look up local tab node", model_type());
     return false;
   }
   tab_node.SetSessionSpecifics(session_s);
@@ -485,7 +508,7 @@ bool SessionModelAssociator::AssociateModels(SyncError* error) {
     sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
 
     sync_api::ReadNode root(&trans);
-    if (!root.InitByTagLookup(kSessionsTag)) {
+    if (!root.InitByTagLookup(syncable::ModelTypeToRootTag(model_type()))) {
       error->Reset(FROM_HERE, kNoSessionsFolderError, model_type());
       return false;
     }
@@ -499,12 +522,8 @@ bool SessionModelAssociator::AssociateModels(SyncError* error) {
       InitializeCurrentSessionName();
     }
     synced_session_tracker_.SetLocalSessionTag(current_machine_tag_);
-    if (!UpdateAssociationsFromSyncModel(root, &trans)) {
-      error->Reset(FROM_HERE,
-                   "Failed to update associations from sync",
-                   model_type());
+    if (!UpdateAssociationsFromSyncModel(root, &trans, error))
       return false;
-    }
 
     if (local_session_syncid_ == sync_api::kInvalidId) {
       // The sync db didn't have a header node for us, we need to create one.
@@ -522,15 +541,10 @@ bool SessionModelAssociator::AssociateModels(SyncError* error) {
   }
 
   // Check if anything has changed on the client side.
-  if (!UpdateSyncModelDataFromClient()) {
-    error->Reset(FROM_HERE,
-                 "Failed to update sync model from client.",
-                 model_type());
+  if (!UpdateSyncModelDataFromClient(error))
     return false;
-  }
 
   DVLOG(1) << "Session models associated.";
-
   return true;
 }
 
@@ -556,10 +570,23 @@ bool SessionModelAssociator::DisassociateModels(SyncError* error) {
 void SessionModelAssociator::InitializeCurrentMachineTag(
     sync_api::WriteTransaction* trans) {
   DCHECK(CalledOnValidThread());
-  syncable::Directory* dir = trans->GetWrappedWriteTrans()->directory();
-  current_machine_tag_ = "session_sync";
-  current_machine_tag_.append(dir->cache_guid());
-  DVLOG(1) << "Creating machine tag: " << current_machine_tag_;
+  DCHECK(current_machine_tag_.empty());
+  std::string persisted_guid;
+  if (pref_service_)
+    persisted_guid = pref_service_->GetString(kSyncSessionsGUID);
+  if (!persisted_guid.empty()) {
+    current_machine_tag_ = persisted_guid;
+    DVLOG(1) << "Restoring persisted session sync guid: "
+             << persisted_guid;
+  } else {
+    syncable::Directory* dir = trans->GetWrappedWriteTrans()->directory();
+    current_machine_tag_ = "session_sync";
+    current_machine_tag_.append(dir->cache_guid());
+    DVLOG(1) << "Creating session sync guid: " << current_machine_tag_;
+    if (pref_service_)
+      pref_service_->SetString(kSyncSessionsGUID, current_machine_tag_);
+  }
+
   tab_pool_.set_machine_tag(current_machine_tag_);
 }
 
@@ -576,19 +603,17 @@ void SessionModelAssociator::InitializeCurrentSessionName() {
   if (setup_for_test_) {
     OnSessionNameInitialized("TestSessionName");
   } else {
-    scoped_refptr<GetSessionNameTask> task = new GetSessionNameTask(
+    browser_sync::GetSessionName(
+        BrowserThread::GetBlockingPool(),
         base::Bind(&SessionModelAssociator::OnSessionNameInitialized,
                    AsWeakPtr()));
-    BrowserThread::PostTask(
-        BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&GetSessionNameTask::GetSessionNameAsync, task.get()));
   }
 }
 
 bool SessionModelAssociator::UpdateAssociationsFromSyncModel(
     const sync_api::ReadNode& root,
-    const sync_api::BaseTransaction* trans) {
+    const sync_api::BaseTransaction* trans,
+    SyncError* error) {
   DCHECK(CalledOnValidThread());
   DCHECK(tab_pool_.empty());
 
@@ -597,7 +622,7 @@ bool SessionModelAssociator::UpdateAssociationsFromSyncModel(
   while (id != sync_api::kInvalidId) {
     sync_api::ReadNode sync_node(trans);
     if (!sync_node.InitByIdLookup(id)) {
-      LOG(ERROR) << "Failed to fetch sync node for id " << id;
+      error->Reset(FROM_HERE, "Failed to load sync node", model_type());
       return false;
     }
 
@@ -605,26 +630,22 @@ bool SessionModelAssociator::UpdateAssociationsFromSyncModel(
         sync_node.GetSessionSpecifics();
     const base::Time& modification_time = sync_node.GetModificationTime();
     if (specifics.session_tag() != GetCurrentMachineTag()) {
-      if (!AssociateForeignSpecifics(specifics, modification_time)) {
-        return false;
-      }
+      AssociateForeignSpecifics(specifics, modification_time);
     } else if (id != local_session_syncid_) {
       // This is previously stored local session information.
-      if (specifics.has_header()) {
-        if (sync_api::kInvalidId != local_session_syncid_) {
-          NOTREACHED();
-          return false;
-        }
-
+      if (specifics.has_header() &&
+          local_session_syncid_ == sync_api::kInvalidId) {
         // This is our previous header node, reuse it.
         local_session_syncid_ = id;
         if (specifics.header().has_client_name()) {
           current_session_name_ = specifics.header().client_name();
         }
       } else {
-        if (!specifics.has_tab()) {
-          NOTREACHED();
-          return false;
+        if (specifics.has_header()) {
+          LOG(WARNING) << "Found more than one session header node with local "
+                     << " tag.";
+        } else if (!specifics.has_tab()) {
+          LOG(WARNING) << "Found local node with no header or tag field.";
         }
 
         // This is a tab node. We want to track these to reuse them in our free
@@ -638,21 +659,17 @@ bool SessionModelAssociator::UpdateAssociationsFromSyncModel(
   }
 
   // After updating from sync model all tabid's should be free.
-  if (!tab_pool_.full()) {
-    NOTREACHED();
-    return false;
-  }
-
+  DCHECK(tab_pool_.full());
   return true;
 }
 
-bool SessionModelAssociator::AssociateForeignSpecifics(
+void SessionModelAssociator::AssociateForeignSpecifics(
     const sync_pb::SessionSpecifics& specifics,
     const base::Time& modification_time) {
   DCHECK(CalledOnValidThread());
   std::string foreign_session_tag = specifics.session_tag();
   if (foreign_session_tag == GetCurrentMachineTag() && !setup_for_test_)
-    return false;
+    return;
 
   SyncedSession* foreign_session =
       synced_session_tracker_.GetSession(foreign_session_tag);
@@ -699,11 +716,9 @@ bool SessionModelAssociator::AssociateForeignSpecifics(
     if (foreign_session->modified_time < modification_time)
       foreign_session->modified_time = modification_time;
   } else {
-    NOTREACHED();
-    return false;
+    LOG(WARNING) << "Ignoring foreign session node with missing header/tab "
+                 << "fields and tag " << foreign_session_tag << ".";
   }
-
-  return true;
 }
 
 bool SessionModelAssociator::DisassociateForeignSession(
@@ -739,6 +754,12 @@ void SessionModelAssociator::PopulateSessionHeaderFromSpecifics(
         break;
       case sync_pb::SessionHeader_DeviceType_TYPE_CROS:
         session_header->device_type = SyncedSession::TYPE_CHROMEOS;
+        break;
+      case sync_pb::SessionHeader_DeviceType_TYPE_PHONE:
+        session_header->device_type = SyncedSession::TYPE_PHONE;
+        break;
+      case sync_pb::SessionHeader_DeviceType_TYPE_TABLET:
+        session_header->device_type = SyncedSession::TYPE_TABLET;
         break;
       case sync_pb::SessionHeader_DeviceType_TYPE_OTHER:
         // Intentionally fall-through
@@ -893,17 +914,11 @@ void SessionModelAssociator::AppendSessionTabNavigation(
   navigations->insert(navigations->end(), tab_navigation);
 }
 
-bool SessionModelAssociator::UpdateSyncModelDataFromClient() {
+bool SessionModelAssociator::UpdateSyncModelDataFromClient(SyncError* error) {
   DCHECK(CalledOnValidThread());
-  // TODO(zea): the logic for determining if we want to sync and the loading of
-  // the previous session should go here. We can probably reuse the code for
-  // loading the current session from the old session implementation.
-  // SessionService::SessionCallback callback =
-  //     base::Bind(&SessionModelAssociator::OnGotSession, this);
-  // GetSessionService()->GetCurrentSession(&consumer_, callback);
 
   // Associate all open windows and their tabs.
-  return AssociateWindows(true);
+  return AssociateWindows(true, error);
 }
 
 SessionModelAssociator::TabNodePool::TabNodePool(
@@ -937,7 +952,12 @@ int64 SessionModelAssociator::TabNodePool::GetFreeTabNode() {
                  << tab_node_tag << "!";
       return sync_api::kInvalidId;
     }
+    // We fill the new node with just enough data so that in case of a crash/bug
+    // we can identify the node as our own on re-association and reuse it.
     tab_node.SetTitle(UTF8ToWide(tab_node_tag));
+    sync_pb::SessionSpecifics specifics;
+    specifics.set_session_tag(machine_tag_);
+    tab_node.SetSessionSpecifics(specifics);
 
     // Grow the pool by 1 since we created a new node. We don't actually need
     // to put the node's id in the pool now, since the pool is still empty.

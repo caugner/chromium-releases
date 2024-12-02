@@ -78,9 +78,12 @@ TEST_F(AutomatedUITestBase, RestoreTab) {
   ASSERT_EQ(2, tab_count);
 }
 
-// crbug.com/96049
 #if defined(OS_WIN)
-#define MAYBE_CloseTab FLAKY_CloseTab
+// crbug.com/96049
+#define MAYBE_CloseTab DISABLED_CloseTab
+#elif defined(OS_MACOSX)
+// crbug.com/112821
+#define MAYBE_CloseTab DISABLED_CloseTab
 #else
 #define MAYBE_CloseTab CloseTab
 #endif
@@ -130,7 +133,7 @@ TEST_F(AutomatedUITestBase, MAYBE_CloseTab) {
 }
 
 // Flakiness tracked there: http://crbug.com/96049.
-TEST_F(AutomatedUITestBase, FLAKY_OpenBrowserWindow) {
+TEST_F(AutomatedUITestBase, DISABLED_OpenBrowserWindow) {
   int num_browser_windows;
   int tab_count;
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&num_browser_windows));
@@ -177,8 +180,8 @@ TEST_F(AutomatedUITestBase, FLAKY_OpenBrowserWindow) {
 }
 
 // Flaky, see http://crbug.com/96039.
-#if defined(OS_WIN)
-#define MAYBE_CloseBrowserWindow FLAKY_CloseBrowserWindow
+#if defined(OS_WIN) || defined(OS_MACOSX)
+#define MAYBE_CloseBrowserWindow DISABLED_CloseBrowserWindow
 #else
 #define MAYBE_CloseBrowserWindow CloseBrowserWindow
 #endif
@@ -219,7 +222,14 @@ TEST_F(AutomatedUITestBase, MAYBE_CloseBrowserWindow) {
   ASSERT_FALSE(CloseActiveWindow());
 }
 
-TEST_F(AutomatedUITestBase, IncognitoWindow) {
+// Flaky, see http://crbug.com/113046.
+#if defined(OS_MACOSX)
+#define MAYBE_IncognitoWindow DISABLED_IncognitoWindow
+#else
+#define MAYBE_IncognitoWindow IncognitoWindow
+#endif
+
+TEST_F(AutomatedUITestBase, MAYBE_IncognitoWindow) {
   int num_browser_windows;
   int num_normal_browser_windows;
   ASSERT_TRUE(automation()->GetBrowserWindowCount(&num_browser_windows));
@@ -255,7 +265,7 @@ TEST_F(AutomatedUITestBase, IncognitoWindow) {
 // Flaky, see http://crbug.com/96039.
 #if defined(OS_WIN)
 #define MAYBE_OpenCloseBrowserWindowWithAccelerator \
-        FLAKY_OpenCloseBrowserWindowWithAccelerator
+        DISABLED_OpenCloseBrowserWindowWithAccelerator
 #else
 #define MAYBE_OpenCloseBrowserWindowWithAccelerator \
         OpenCloseBrowserWindowWithAccelerator
@@ -297,7 +307,14 @@ TEST_F(AutomatedUITestBase, MAYBE_OpenCloseBrowserWindowWithAccelerator) {
   ASSERT_EQ(1, num_browser_windows);
 }
 
-TEST_F(AutomatedUITestBase, Navigate) {
+// Flaky, see http://crbug.com/96039.
+#if defined(OS_MACOSX)
+#define MAYBE_Navigate DISABLED_Navigate
+#else
+#define MAYBE_Navigate Navigate
+#endif
+
+TEST_F(AutomatedUITestBase, MAYBE_Navigate) {
   FilePath path_prefix(test_data_directory_.AppendASCII("session_history"));
   GURL url1(net::FilePathToFileURL(path_prefix.AppendASCII("bot1.html")));
   GURL url2(net::FilePathToFileURL(path_prefix.AppendASCII("bot2.html")));
@@ -328,7 +345,7 @@ TEST_F(AutomatedUITestBase, Navigate) {
 
 // Flaky, see http://crbug.com/81050.
 #if defined(OS_MACOSX)
-#define MAYBE_SelectTab FLAKY_SelectTab
+#define MAYBE_SelectTab DISABLED_SelectTab
 #else
 #define MAYBE_SelectTab SelectTab
 #endif
@@ -402,7 +419,7 @@ TEST_F(AutomatedUITestBase, ShowDownloads) {
 
 // Flaky, see http://crbug.com/81050.
 #if defined(OS_MACOSX)
-#define MAYBE_ShowHistory FLAKY_ShowHistory
+#define MAYBE_ShowHistory DISABLED_ShowHistory
 #else
 #define MAYBE_ShowHistory ShowHistory
 #endif
@@ -411,5 +428,8 @@ TEST_F(AutomatedUITestBase, MAYBE_ShowHistory) {
   ASSERT_TRUE(ShowHistory());
   GURL url;
   ASSERT_TRUE(GetActiveTab()->GetCurrentURL(&url));
-  ASSERT_EQ(GURL(chrome::kChromeUIHistoryURL), url);
+  ASSERT_EQ(
+      GURL(std::string(chrome::kChromeUIUberURL) +
+          chrome::kChromeUIHistoryHost + "/"),
+      url);
 }

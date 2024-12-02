@@ -4,10 +4,6 @@
 
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include <gtk/gtk.h>
-#endif
-
 #include <algorithm>
 #include <map>
 
@@ -17,6 +13,8 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
+#include "chrome/browser/chrome_to_mobile_service.h"
+#include "chrome/browser/chrome_to_mobile_service_factory.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -30,6 +28,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
+#include "chrome/browser/ui/views/location_bar/chrome_to_mobile_view.h"
 #include "chrome/browser/ui/views/location_bar/content_setting_image_view.h"
 #include "chrome/browser/ui/views/location_bar/ev_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/keyword_hint_view.h"
@@ -42,8 +41,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -53,12 +52,12 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/views/button_drag_utils.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/drag_utils.h"
 
 #if !defined(OS_CHROMEOS)
 #include "chrome/browser/ui/views/first_run_bubble.h"
@@ -84,11 +83,37 @@ OmniboxViewViews* AsViews(OmniboxView* view) {
   return static_cast<OmniboxViewViews*>(view);
 }
 
+// Height of the location bar's round corner region.
+// TODO(jamescook): Update all Chrome platforms to use the new art and metrics
+// from Ash, crbug.com/118228
+#if defined(USE_ASH)
+const int kBorderRoundCornerHeight = 5;
+#else
+const int kBorderRoundCornerHeight = 6;
+#endif
+
+// Width of location bar's round corner region.
+#if defined(USE_ASH)
+const int kBorderRoundCornerWidth = 4;
+#else
+const int kBorderRoundCornerWidth = 5;
+#endif
+
+// Radius of the round corners inside the location bar.
+#if defined(USE_ASH)
+const int kBorderCornerRadius = 2;
+#endif
+
 }  // namespace
 
 // static
+#if defined(USE_ASH)
+const int LocationBarView::kNormalHorizontalEdgeThickness = 2;
+const int LocationBarView::kVerticalEdgeThickness = 3;
+#else
 const int LocationBarView::kNormalHorizontalEdgeThickness = 1;
 const int LocationBarView::kVerticalEdgeThickness = 2;
+#endif  // defined(USE_ASH)
 const int LocationBarView::kItemPadding = 3;
 const int LocationBarView::kIconInternalPadding = 2;
 const int LocationBarView::kEdgeItemPadding = kItemPadding;
@@ -108,18 +133,15 @@ static const int kSelectedKeywordBackgroundImages[] = {
   IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_R,
 };
 
-// Height of the location bar's round corner region.
-static const int kBorderRoundCornerHeight = 6;
-// Width of location bar's round corner region.
-static const int kBorderRoundCornerWidth = 5;
-
 // LocationBarView -----------------------------------------------------------
 
-LocationBarView::LocationBarView(Browser* browser,
+LocationBarView::LocationBarView(Profile* profile,
+                                 CommandUpdater* command_updater,
                                  ToolbarModel* model,
                                  Delegate* delegate,
                                  Mode mode)
-    : browser_(browser),
+    : profile_(profile),
+      command_updater_(command_updater),
       model_(model),
       delegate_(delegate),
       disposition_(CURRENT_TAB),
@@ -135,6 +157,7 @@ LocationBarView::LocationBarView(Browser* browser,
 #endif
       keyword_hint_view_(NULL),
       star_view_(NULL),
+      chrome_to_mobile_view_(NULL),
       mode_(mode),
       show_focus_rect_(false),
       template_url_service_(NULL),
@@ -152,7 +175,7 @@ LocationBarView::LocationBarView(Browser* browser,
   }
 
   edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
-                               browser_->profile()->GetPrefs(), this);
+                               profile_->GetPrefs(), this);
 }
 
 LocationBarView::~LocationBarView() {
@@ -190,12 +213,11 @@ void LocationBarView::Init() {
 
   // URL edit field.
   // View container for URL edit field.
-  Profile* profile = browser_->profile();
   location_entry_.reset(OmniboxView::CreateOmniboxView(
       this,
       model_,
-      profile,
-      browser_->command_updater(),
+      profile_,
+      command_updater_,
       mode_ == POPUP,
       this));
   SetLocationEntryFocusable(true);
@@ -205,12 +227,12 @@ void LocationBarView::Init() {
 
   selected_keyword_view_ = new SelectedKeywordView(
       kSelectedKeywordBackgroundImages, IDR_KEYWORD_SEARCH_MAGNIFIER,
-      GetColor(ToolbarModel::NONE, TEXT), profile);
+      GetColor(ToolbarModel::NONE, TEXT), profile_);
   AddChildView(selected_keyword_view_);
   selected_keyword_view_->SetFont(font_);
   selected_keyword_view_->SetVisible(false);
 
-  keyword_hint_view_ = new KeywordHintView(profile);
+  keyword_hint_view_ = new KeywordHintView(profile_);
   AddChildView(keyword_hint_view_);
   keyword_hint_view_->SetVisible(false);
   keyword_hint_view_->SetFont(font_);
@@ -223,11 +245,23 @@ void LocationBarView::Init() {
     content_blocked_view->SetVisible(false);
   }
 
-  // The star is not visible in popups and in the app launcher.
+  // Hide the star and Chrome To Mobile icons in popups and in the app launcher.
   if (browser_defaults::bookmarks_enabled && (mode_ == NORMAL)) {
-    star_view_ = new StarView(browser_->command_updater());
+    star_view_ = new StarView(command_updater_);
     AddChildView(star_view_);
     star_view_->SetVisible(true);
+
+    // Also disable Chrome To Mobile for off-the-record and non-synced profiles,
+    // or if the feature is disabled by a command line flag or chrome://flags.
+    if (!profile_->IsOffTheRecord() && profile_->IsSyncAccessible() &&
+        ChromeToMobileService::IsChromeToMobileEnabled()) {
+      chrome_to_mobile_view_ = new ChromeToMobileView(this, command_updater_);
+      AddChildView(chrome_to_mobile_view_);
+      ChromeToMobileService* service =
+          ChromeToMobileServiceFactory::GetForProfile(profile_);
+      service->RequestMobileListUpdate();
+      chrome_to_mobile_view_->SetVisible(!service->mobiles().empty());
+    }
   }
 
   // Initialize the location entry. We do this to avoid a black flash which is
@@ -302,10 +336,16 @@ void LocationBarView::SetAnimationOffset(int offset) {
 void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
   bool star_enabled = star_view_ && !model_->input_in_progress() &&
                       edit_bookmarks_enabled_.GetValue();
-  browser_->command_updater()->UpdateCommandEnabled(
-      IDC_BOOKMARK_PAGE, star_enabled);
+  command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
   if (star_view_)
     star_view_->SetVisible(star_enabled);
+
+  bool chrome_to_mobile_enabled = chrome_to_mobile_view_ &&
+      !model_->input_in_progress() && profile_->IsSyncAccessible() &&
+      !ChromeToMobileServiceFactory::GetForProfile(profile_)->mobiles().empty();
+  command_updater_->UpdateCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE,
+                                         chrome_to_mobile_enabled);
+
   RefreshContentSettingViews();
   RefreshPageActionViews();
   // Don't Update in app launcher mode so that the location entry does not show
@@ -398,8 +438,15 @@ void LocationBarView::SetStarToggled(bool on) {
 }
 
 void LocationBarView::ShowStarBubble(const GURL& url, bool newly_bookmarked) {
-  browser::ShowBookmarkBubbleView(star_view_, browser_->profile(), url,
+  browser::ShowBookmarkBubbleView(star_view_, profile_, url,
                                   newly_bookmarked);
+}
+
+void LocationBarView::ShowChromeToMobileBubble() {
+  ChromeToMobileServiceFactory::GetForProfile(profile_)->
+      RequestMobileListUpdate();
+  browser::ShowChromeToMobileBubbleView(chrome_to_mobile_view_,
+                                        profile_);
 }
 
 gfx::Point LocationBarView::GetLocationEntryOrigin() const {
@@ -428,7 +475,7 @@ void LocationBarView::SetInstantSuggestion(const string16& text,
         suggested_text_view_->SetFont(GetOmniboxViewWin()->GetFont());
 #endif
       AddChildView(suggested_text_view_);
-    } else if (suggested_text_view_->GetText() != text) {
+    } else if (suggested_text_view_->text() != text) {
       suggested_text_view_->SetText(text);
     }
     if (animate_to_complete && !location_entry_->IsImeComposing())
@@ -445,7 +492,7 @@ void LocationBarView::SetInstantSuggestion(const string16& text,
 }
 
 string16 LocationBarView::GetInstantSuggestion() const {
-  return HasValidSuggestText() ? suggested_text_view_->GetText() : string16();
+  return HasValidSuggestText() ? suggested_text_view_->text() : string16();
 }
 #endif
 
@@ -526,6 +573,9 @@ void LocationBarView::Layout() {
 
   if (star_view_ && star_view_->visible())
     entry_width -= star_view_->GetPreferredSize().width() + kItemPadding;
+  if (chrome_to_mobile_view_ && chrome_to_mobile_view_->visible())
+    entry_width -= chrome_to_mobile_view_->GetPreferredSize().width() +
+                   kItemPadding;
   for (PageActionViews::const_iterator i(page_action_views_.begin());
        i != page_action_views_.end(); ++i) {
     if ((*i)->visible())
@@ -539,7 +589,7 @@ void LocationBarView::Layout() {
   // The gap between the edit and whatever is to its right is shortened.
   entry_width += kEditInternalSpace;
 
-  // Size the EV bubble.  We do this after taking the star/page actions/content
+  // Size the EV bubble after taking star/ChromeToMobile/page actions/content
   // settings out of |entry_width| so we won't take too much space.
   if (ev_bubble_width) {
     // Try to elide the bubble to be no larger than half the total available
@@ -564,13 +614,13 @@ void LocationBarView::Layout() {
   if (show_selected_keyword) {
     if (selected_keyword_view_->keyword() != keyword) {
       selected_keyword_view_->SetKeyword(keyword);
-      Profile* profile = browser_->profile();
       const TemplateURL* template_url =
-          TemplateURLServiceFactory::GetForProfile(profile)->
+          TemplateURLServiceFactory::GetForProfile(profile_)->
           GetTemplateURLForKeyword(keyword);
       if (template_url && template_url->IsExtensionKeyword()) {
-        const SkBitmap& bitmap = profile->GetExtensionService()->GetOmniboxIcon(
-            template_url->GetExtensionId());
+        const SkBitmap& bitmap =
+            profile_->GetExtensionService()->GetOmniboxIcon(
+                template_url->GetExtensionId());
         selected_keyword_view_->SetImage(bitmap);
         selected_keyword_view_->set_is_extension_icon(true);
       } else {
@@ -590,6 +640,14 @@ void LocationBarView::Layout() {
     int star_width = star_view_->GetPreferredSize().width();
     offset -= star_width;
     star_view_->SetBounds(offset, location_y, star_width, location_height);
+    offset -= kItemPadding;
+  }
+
+  if (chrome_to_mobile_view_ && chrome_to_mobile_view_->visible()) {
+    int icon_width = chrome_to_mobile_view_->GetPreferredSize().width();
+    offset -= icon_width;
+    chrome_to_mobile_view_->SetBounds(offset, location_y,
+                                      icon_width, location_height);
     offset -= kItemPadding;
   }
 
@@ -703,7 +761,7 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
 
   if (painter_.get()) {
-    painter_->Paint(width(), height(), canvas);
+    painter_->Paint(canvas, size());
   } else if (mode_ == POPUP) {
     canvas->TileImageInt(*GetThemeProvider()->GetBitmapNamed(
         IDR_LOCATIONBG_POPUPMODE_CENTER), 0, 0, 0, 0, width(), height());
@@ -726,15 +784,20 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
     paint.setColor(color);
     paint.setStyle(SkPaint::kFill_Style);
     paint.setAntiAlias(true);
+#if defined(USE_ASH)
+    // On Ash the omnibox uses smaller corners.
+    const SkScalar radius(SkIntToScalar(kBorderCornerRadius));
+#else
     // The round corners of the omnibox match the round corners of the dropdown
     // below, and all our other bubbles.
     const SkScalar radius(SkIntToScalar(
         views::BubbleBorder::GetCornerRadius()));
+#endif
     bounds.Inset(kNormalHorizontalEdgeThickness, 0);
-    canvas->GetSkCanvas()->drawRoundRect(gfx::RectToSkRect(bounds), radius,
-                                         radius, paint);
+    canvas->sk_canvas()->drawRoundRect(gfx::RectToSkRect(bounds), radius,
+                                       radius, paint);
   } else {
-    canvas->FillRect(color, bounds);
+    canvas->FillRect(bounds, color);
   }
 
   if (show_focus_rect_ && HasFocus()) {
@@ -818,16 +881,16 @@ void LocationBarView::OnAutocompleteAccept(
     transition_ = content::PageTransitionFromInt(
         transition | content::PAGE_TRANSITION_FROM_ADDRESS_BAR);
 
-    if (browser_->command_updater()) {
+    if (command_updater_) {
       if (!alternate_nav_url.is_valid()) {
-        browser_->command_updater()->ExecuteCommand(IDC_OPEN_CURRENT_URL);
+        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
       } else {
         AlternateNavURLFetcher* fetcher =
             new AlternateNavURLFetcher(alternate_nav_url);
         // The AlternateNavURLFetcher will listen for the pending navigation
         // notification that will be issued as a result of the "open URL." It
         // will automatically install itself into that navigation controller.
-        browser_->command_updater()->ExecuteCommand(IDC_OPEN_CURRENT_URL);
+        command_updater_->ExecuteCommand(IDC_OPEN_CURRENT_URL);
         if (fetcher->state() == AlternateNavURLFetcher::NOT_STARTED) {
           // I'm not sure this should be reachable, but I'm not also sure enough
           // that it shouldn't to stick in a NOTREACHED().  In any case, this is
@@ -934,7 +997,7 @@ void LocationBarView::RefreshPageActionViews() {
   if (mode_ != NORMAL)
     return;
 
-  ExtensionService* service = browser_->profile()->GetExtensionService();
+  ExtensionService* service = profile_->GetExtensionService();
   if (!service)
     return;
 
@@ -958,20 +1021,24 @@ void LocationBarView::RefreshPageActionViews() {
     DeletePageActionViews();  // Delete the old views (if any).
 
     page_action_views_.resize(page_actions.size());
+    View* view = chrome_to_mobile_view_ ? chrome_to_mobile_view_ :
+                                          static_cast<View*>(star_view_);
 
     // Add the page actions in reverse order, so that the child views are
     // inserted in left-to-right order for accessibility.
     for (int i = page_actions.size() - 1; i >= 0; --i) {
       page_action_views_[i] = new PageActionWithBadgeView(
-          new PageActionImageView(this, page_actions[i]));
+          delegate_->CreatePageActionImageView(this, page_actions[i]));
       page_action_views_[i]->SetVisible(false);
-      AddChildViewAt(page_action_views_[i], GetIndexOf(star_view_));
+      AddChildViewAt(page_action_views_[i], GetIndexOf(view));
     }
   }
 
   WebContents* contents = GetWebContentsFromDelegate(delegate_);
   if (!page_action_views_.empty() && contents) {
-    GURL url = GURL(model_->GetText());
+    Browser* browser =
+        Browser::GetBrowserForController(&contents->GetController(), NULL);
+    GURL url = browser->GetSelectedWebContents()->GetURL();
 
     for (PageActionViews::const_iterator i(page_action_views_.begin());
          i != page_action_views_.end(); ++i) {
@@ -1006,7 +1073,7 @@ void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
 void LocationBarView::ShowFirstRunBubbleInternal() {
 #if !defined(OS_CHROMEOS)
   // First run bubble doesn't make sense for Chrome OS.
-  FirstRunBubble::ShowBubble(browser_->profile(), location_icon_view_);
+  FirstRunBubble::ShowBubble(profile_, location_icon_view_);
 #endif
 }
 
@@ -1017,22 +1084,15 @@ std::string LocationBarView::GetClassName() const {
 bool LocationBarView::SkipDefaultKeyEventProcessing(
     const views::KeyEvent& event) {
 #if defined(OS_WIN)
-  bool views_omnibox = views::Widget::IsPureViews();
   if (views::FocusManager::IsTabTraversalKeyEvent(event)) {
-    if (HasValidSuggestText()) {
-      // Return true so that the edit sees the tab and commits the suggestion.
+    if (location_entry_->model()->popup_model()->IsOpen()) {
+      // Return true so that the edit sees the tab and moves the selection.
       return true;
     }
     if (keyword_hint_view_->visible() && !event.IsShiftDown()) {
       // Return true so the edit gets the tab event and enters keyword mode.
       return true;
     }
-
-#if !defined(USE_AURA)
-    // If the caret is not at the end, then tab moves the caret to the end.
-    if (!views_omnibox && !GetOmniboxViewWin()->IsCaretAtEnd())
-      return true;
-#endif
 
     // Tab while showing instant commits instant immediately.
     // Return true so that focus traversal isn't attempted. The edit ends
@@ -1042,7 +1102,7 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(
   }
 
 #if !defined(USE_AURA)
-  if (!views_omnibox)
+  if (!views::Widget::IsPureViews())
     return GetOmniboxViewWin()->SkipDefaultKeyEventProcessing(event);
 #endif
   NOTIMPLEMENTED();
@@ -1074,7 +1134,7 @@ void LocationBarView::WriteDragDataForView(views::View* sender,
 
   TabContentsWrapper* tab_contents = delegate_->GetTabContentsWrapper();
   DCHECK(tab_contents);
-  drag_utils::SetURLAndDragImage(
+  button_drag_utils::SetURLAndDragImage(
       tab_contents->web_contents()->GetURL(),
       tab_contents->web_contents()->GetTitle(),
       tab_contents->favicon_tab_helper()->GetFavicon(),
@@ -1103,7 +1163,7 @@ bool LocationBarView::CanStartDragForView(View* sender,
 void LocationBarView::ShowFirstRunBubble() {
   // Wait until search engines have loaded to show the first run bubble.
   TemplateURLService* url_service =
-      TemplateURLServiceFactory::GetForProfile(browser_->profile());
+      TemplateURLServiceFactory::GetForProfile(profile_);
   if (!url_service->loaded()) {
     template_url_service_ = url_service;
     template_url_service_->AddObserver(this);
@@ -1240,7 +1300,7 @@ void LocationBarView::Observe(int type,
 #if defined(OS_WIN) || defined(USE_AURA)
 bool LocationBarView::HasValidSuggestText() const {
   return suggested_text_view_ && !suggested_text_view_->size().IsEmpty() &&
-      !suggested_text_view_->GetText().empty();
+      !suggested_text_view_->text().empty();
 }
 
 #if !defined(USE_AURA)

@@ -111,6 +111,33 @@ cr.define('tracing', function() {
     }
   };
 
+  function addControlButtonElements(el, canCollapse) {
+    var closeEl = document.createElement('div');
+    closeEl.classList.add('timeline-track-button');
+    closeEl.classList.add('timeline-track-close-button');
+    closeEl.textContent = String.fromCharCode(215); // &times;
+    closeEl.addEventListener('click', function() {
+      el.style.display = 'None';
+    });
+    el.appendChild(closeEl);
+
+    if (canCollapse) {
+      var collapseEl = document.createElement('div');
+      collapseEl.classList.add('timeline-track-button');
+      collapseEl.classList.add('timeline-track-collapse-button');
+      var minus = "\u2212"; // minus sign;
+      var plus = "\u002b"; // plus sign;
+      collapseEl.textContent = minus;
+      var collapsed = false;
+      collapseEl.addEventListener('click', function() {
+        collapsed = !collapsed;
+        el.collapsedDidChange(collapsed);
+        collapseEl.textContent = collapsed ? plus : minus;
+      });
+      el.appendChild(collapseEl);
+    }
+  }
+
   /**
    * Visualizes a TimelineThread using a series of of TimelineSliceTracks.
    * @constructor
@@ -123,7 +150,7 @@ cr.define('tracing', function() {
       this.classList.add('timeline-thread-track');
     },
 
-    get thread(thread) {
+    get thread() {
       return this.thread_;
     },
 
@@ -181,12 +208,18 @@ cr.define('tracing', function() {
           track.height = '4px';
         }
 
-        for (var srI = 0; srI < this.thread_.nonNestedSubRows.length; ++srI) {
-          this.addTrack_(this.thread_.nonNestedSubRows[srI]);
+        if (this.thread_.asyncSlices.length) {
+          var subRows = this.thread_.asyncSlices.subRows;
+          for (var srI = 0; srI < subRows.length; srI++) {
+            var track = this.addTrack_(subRows[srI]);
+            track.asyncStyle = true;
+          }
         }
-        for (var srI = 0; srI < this.thread_.subRows.length; ++srI) {
+
+        for (var srI = 0; srI < this.thread_.subRows.length; srI++) {
           this.addTrack_(this.thread_.subRows[srI]);
         }
+
         if (this.tracks_.length > 0) {
           if (this.thread_.cpuSlices) {
             this.tracks_[1].heading = this.heading_;
@@ -195,6 +228,26 @@ cr.define('tracing', function() {
             this.tracks_[0].heading = this.heading_;
             this.tracks_[0].tooltip = this.tooltip_;
           }
+        }
+      }
+      addControlButtonElements(this, this.tracks_.length >= 4);
+    },
+
+    collapsedDidChange: function(collapsed) {
+      if (collapsed) {
+        var h = parseInt(this.tracks_[0].height);
+        for (var i = 0; i < this.tracks_.length; ++i) {
+          if (h > 2) {
+            this.tracks_[i].height = Math.floor(h) + 'px';
+          } else {
+            this.tracks_[i].style.display = 'None';
+          }
+          h = h * 0.5;
+        }
+      } else {
+        for (var i = 0; i < this.tracks_.length; ++i) {
+          this.tracks_[i].height = this.tracks_[0].height;
+          this.tracks_[i].style.display = "";
         }
       }
     }
@@ -212,7 +265,7 @@ cr.define('tracing', function() {
       this.classList.add('timeline-thread-track');
     },
 
-    get cpu(cpu) {
+    get cpu() {
       return this.cpu_;
     },
 
@@ -264,6 +317,7 @@ cr.define('tracing', function() {
         this.tracks_[0].heading = this.heading_;
         this.tracks_[0].tooltip = this.tooltip_;
       }
+      addControlButtonElements(this, false);
     }
   };
 
@@ -350,10 +404,13 @@ cr.define('tracing', function() {
         if (!this.viewport_)
           return;
 
-        if (this.canvas_.width != this.canvasContainer_.clientWidth)
-          this.canvas_.width = this.canvasContainer_.clientWidth;
-        if (this.canvas_.height != this.canvasContainer_.clientHeight)
-          this.canvas_.height = this.canvasContainer_.clientHeight;
+        var style = window.getComputedStyle(this.canvasContainer_);
+        var style_width = parseInt(style.width);
+        var style_height = parseInt(style.height);
+        if (this.canvas_.width != style_width)
+          this.canvas_.width = style_width;
+        if (this.canvas_.height != style_height)
+          this.canvas_.height = style_height;
 
         this.redraw();
       }.bind(this), this);
@@ -366,58 +423,63 @@ cr.define('tracing', function() {
 
   };
 
-   /**
-     * A pair representing an elided string and world-coordinate width
-     * to draw it.
-     * @constructor
+  /**
+   * A pair representing an elided string and world-coordinate width
+   * to draw it.
+   * @constructor
      */
-   function ElidedStringWidthPair(string, width) {
-     this.string = string;
-     this.width = width;
-   }
+  function ElidedStringWidthPair(string, width) {
+    this.string = string;
+    this.width = width;
+  }
 
+  /**
+   * A cache for elided strings.
+   * @constructor
+   */
+  function ElidedTitleCache() {
+  }
+
+  ElidedTitleCache.prototype = {
     /**
-    * A cache for elided strings.
-    * @constructor
-    */
-   function ElidedTitleCache() {
-   }
-
-   ElidedTitleCache.prototype = {
-     /**
-      * Return elided text.
-      * @param {track} A timeline slice track or other object that defines
-      *                functions labelWidth() and labelWidthWorld().
-      * @param {pixWidth} Pixel width.
-      * @param {title} Original title text.
-      * @param {width} Drawn width in world coords.
-      * @param {sliceDuration} Where the title must fit (in world coords).
-      * @return {ElidedStringWidthPair} Elided string and width.
-      */
-     get: function(track, pixWidth, title, width, sliceDuration) {
-       var elidedDict = elidedTitleCacheDict[title];
-       if (!elidedDict) {
-         elidedDict = {};
-         elidedTitleCacheDict[title] = elidedDict;
-       }
-       var stringWidthPair = elidedDict[sliceDuration];
-       if (stringWidthPair === undefined) {
-          var newtitle = title;
-          var elided = false;
-          while (track.labelWidthWorld(newtitle, pixWidth) > sliceDuration) {
-            newtitle = newtitle.substring(0, newtitle.length * 0.75);
-            elided = true;
-          }
-          if (elided && newtitle.length > 3)
-            newtitle = newtitle.substring(0, newtitle.length - 3) + '...';
-         stringWidthPair = new ElidedStringWidthPair(
-                             newtitle,
-                             track.labelWidth(newtitle));
-         elidedDict[sliceDuration] = stringWidthPair;
-       }
-       return stringWidthPair;
-     },
-   };
+     * Return elided text.
+     * @param {track} A timeline slice track or other object that defines
+     *                functions labelWidth() and labelWidthWorld().
+     * @param {pixWidth} Pixel width.
+     * @param {title} Original title text.
+     * @param {width} Drawn width in world coords.
+     * @param {sliceDuration} Where the title must fit (in world coords).
+     * @return {ElidedStringWidthPair} Elided string and width.
+     */
+    get: function(track, pixWidth, title, width, sliceDuration) {
+      var elidedDict = elidedTitleCacheDict[title];
+      if (!elidedDict) {
+        elidedDict = {};
+        elidedTitleCacheDict[title] = elidedDict;
+      }
+      var elidedDictForPixWidth = elidedDict[pixWidth];
+      if (!elidedDictForPixWidth) {
+        elidedDict[pixWidth] = {};
+        elidedDictForPixWidth = elidedDict[pixWidth];
+      }
+      var stringWidthPair = elidedDictForPixWidth[sliceDuration];
+      if (stringWidthPair === undefined) {
+        var newtitle = title;
+        var elided = false;
+        while (track.labelWidthWorld(newtitle, pixWidth) > sliceDuration) {
+          newtitle = newtitle.substring(0, newtitle.length * 0.75);
+          elided = true;
+        }
+        if (elided && newtitle.length > 3)
+          newtitle = newtitle.substring(0, newtitle.length - 3) + '...';
+        stringWidthPair = new ElidedStringWidthPair(
+            newtitle,
+            track.labelWidth(newtitle));
+        elidedDictForPixWidth[sliceDuration] = stringWidthPair;
+      }
+      return stringWidthPair;
+    }
+  };
 
   /**
    * A track that displays an array of TimelineSlice objects.
@@ -431,18 +493,28 @@ cr.define('tracing', function() {
 
     __proto__: CanvasBasedTrack.prototype,
 
-   /**
-    * Should we elide text on trace labels?
-    * Without eliding, text that is too wide isn't drawn at all.
-    * Disable if you feel this causes a performance problem.
-    * This is a default value that can be overridden in tracks for testing.
-    * @const
-    */
+    /**
+     * Should we elide text on trace labels?
+     * Without eliding, text that is too wide isn't drawn at all.
+     * Disable if you feel this causes a performance problem.
+     * This is a default value that can be overridden in tracks for testing.
+     * @const
+     */
     SHOULD_ELIDE_TEXT: true,
 
     decorate: function() {
       this.classList.add('timeline-slice-track');
       this.elidedTitleCache = new ElidedTitleCache();
+      this.asyncStyle_ = false;
+    },
+
+    get asyncStyle() {
+      return this.asyncStyle_;
+    },
+
+    set asyncStyle(v) {
+      this.asyncStyle_ = !!v;
+      this.invalidate();
     },
 
     get slices() {
@@ -454,8 +526,13 @@ cr.define('tracing', function() {
       this.invalidate();
     },
 
+    get height() {
+      return window.getComputedStyle(this).height;
+    },
+
     set height(height) {
       this.style.height = height;
+      this.invalidate();
     },
 
     labelWidth: function(title) {
@@ -503,6 +580,8 @@ cr.define('tracing', function() {
       vp.applyTransformToCanavs(ctx);
 
       // Slices.
+      if (this.asyncStyle_)
+        ctx.globalAlpha = 0.25;
       var tr = new tracing.FastRectRenderer(ctx, viewLWorld, 2 * pixWidth,
                                             2 * pixWidth, viewRWorld, pallette);
       tr.setYandH(0, canvasH);
@@ -560,12 +639,12 @@ cr.define('tracing', function() {
             var drawnWidth = this.labelWidth(drawnTitle);
             if (shouldElide &&
                 this.labelWidthWorld(drawnTitle, pixWidth) > slice.duration) {
-                var elidedValues = this.elidedTitleCache.get(
-                    this, pixWidth,
-                    drawnTitle, drawnWidth,
-                    slice.duration);
-                drawnTitle = elidedValues.string;
-                drawnWidth = elidedValues.width;
+              var elidedValues = this.elidedTitleCache.get(
+                  this, pixWidth,
+                  drawnTitle, drawnWidth,
+                  slice.duration);
+              drawnTitle = elidedValues.string;
+              drawnWidth = elidedValues.width;
             }
             if (drawnWidth * pixWidth < slice.duration) {
               var cX = vp.xWorldToView(slice.start + 0.5 * slice.duration);
@@ -691,7 +770,7 @@ cr.define('tracing', function() {
 
   const logOf10 = Math.log(10);
   function log10(x) {
-    return Math.log(x) / logOf10;;
+    return Math.log(x) / logOf10;
   }
 
   TimelineViewportTrack.prototype = {
@@ -729,10 +808,10 @@ cr.define('tracing', function() {
       // exceeds the ideal mark distance.
       var divisors = [10, 5, 2, 1];
       for (var i = 0; i < divisors.length; ++i) {
-        var tightenedGuess = conservativeGuess / divisors[i]
+        var tightenedGuess = conservativeGuess / divisors[i];
         if (vp.xWorldVectorToView(tightenedGuess) < idealMajorMarkDistancePix)
           continue;
-        majorMarkDistanceWorld = conservativeGuess / divisors[i-1];
+        majorMarkDistanceWorld = conservativeGuess / divisors[i - 1];
         break;
       }
       if (majorMarkDistanceWorld < 100) {
@@ -748,8 +827,8 @@ cr.define('tracing', function() {
       var minorMarkDistancePx = vp.xWorldVectorToView(minorMarkDistanceWorld);
 
       var firstMajorMark =
-        Math.floor(viewLWorld / majorMarkDistanceWorld) *
-        majorMarkDistanceWorld;
+          Math.floor(viewLWorld / majorMarkDistanceWorld) *
+              majorMarkDistanceWorld;
 
       var minorTickH = Math.floor(canvasH * 0.25);
 
@@ -841,6 +920,7 @@ cr.define('tracing', function() {
 
     decorate: function() {
       this.classList.add('timeline-counter-track');
+      addControlButtonElements(this, false);
     },
 
     get counter() {

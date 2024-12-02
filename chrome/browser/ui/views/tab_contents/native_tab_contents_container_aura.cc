@@ -7,7 +7,6 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
-#include "content/browser/tab_contents/interstitial_page.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/aura/window.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -15,6 +14,7 @@
 #include "ui/views/focus/widget_focus_manager.h"
 #include "ui/views/views_delegate.h"
 
+using content::RenderViewHost;
 using content::WebContents;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -42,9 +42,6 @@ void NativeTabContentsContainerAura::AttachContents(WebContents* contents) {
 }
 
 void NativeTabContentsContainerAura::DetachContents(WebContents* contents) {
-  // Detach the TabContents.  Do this before we unparent the
-  // TabContentsViewViews so that the window hierarchy is intact for any
-  // cleanup during Detach().
   Detach();
 }
 

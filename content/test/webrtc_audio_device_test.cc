@@ -16,7 +16,6 @@
 #include "content/browser/renderer_host/media/audio_renderer_host.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
-#include "content/browser/resource_context.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_paths.h"
@@ -24,6 +23,7 @@
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread_impl.h"
+#include "content/test/mock_resource_context.h"
 #include "content/test/test_browser_thread.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -53,6 +53,8 @@ class WebRTCMockRenderProcess : public RenderProcess {
   }
   virtual void ReleaseTransportDIB(TransportDIB* memory) {}
   virtual bool UseInProcessPlugins() const { return false; }
+  virtual void AddBindings(int bindings) {}
+  virtual int GetEnabledBindings() const { return 0; }
   virtual bool HasInitializedMediaLibrary() const { return false; }
 
  private:
@@ -79,16 +81,6 @@ class ReplaceContentClientRenderer {
 
 namespace {
 
-class WebRTCMockResourceContext : public content::ResourceContext {
- public:
-  WebRTCMockResourceContext() {}
-  virtual ~WebRTCMockResourceContext() {}
-  virtual void EnsureInitialized() const OVERRIDE {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebRTCMockResourceContext);
-};
-
 ACTION_P(QuitMessageLoop, loop_or_proxy) {
   loop_or_proxy->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
@@ -113,7 +105,7 @@ void WebRTCAudioDeviceTest::SetUp() {
                                                   MessageLoop::current()));
 
   // Construct the resource context on the UI thread.
-  resource_context_.reset(new WebRTCMockResourceContext());
+  resource_context_.reset(new content::MockResourceContext(NULL));
 
   static const char kThreadName[] = "RenderThread";
   ChildProcess::current()->io_message_loop()->PostTask(FROM_HERE,
@@ -122,11 +114,13 @@ void WebRTCAudioDeviceTest::SetUp() {
   WaitForIOThreadCompletion();
 
   render_thread_ = new RenderThreadImpl(kThreadName);
-  mock_process_->set_main_thread(render_thread_);
 }
 
 void WebRTCAudioDeviceTest::TearDown() {
   SetAudioUtilCallback(NULL);
+
+  // Run any pending cleanup tasks that may have been posted to the main thread.
+  ChildProcess::current()->main_thread()->message_loop()->RunAllPending();
 
   // Kick of the cleanup process by closing the channel. This queues up
   // OnStreamClosed calls to be executed on the audio thread.
@@ -170,17 +164,12 @@ void WebRTCAudioDeviceTest::InitializeIOThread(const char* thread_name) {
   io_thread_.reset(new content::TestBrowserThread(content::BrowserThread::IO,
                                                   MessageLoop::current()));
 
-  audio_manager_ = AudioManager::Create();
+  audio_manager_.reset(AudioManager::Create());
 
   // Populate our resource context.
   test_request_context_ = new TestURLRequestContext();
   resource_context_->set_request_context(test_request_context_.get());
   media_observer_.reset(new MockMediaObserver());
-  resource_context_->set_media_observer(media_observer_.get());
-  media_stream_manager_.reset(new media_stream::MediaStreamManager(
-      audio_manager_));
-  resource_context_->set_media_stream_manager(media_stream_manager_.get());
-  resource_context_->set_audio_manager(audio_manager_);
 
   // Create an IPC channel that handles incoming messages on the IO thread.
   CreateChannel(thread_name);
@@ -188,21 +177,20 @@ void WebRTCAudioDeviceTest::InitializeIOThread(const char* thread_name) {
 
 void WebRTCAudioDeviceTest::UninitializeIOThread() {
   resource_context_.reset();
-  media_stream_manager_.reset();
 
-  EXPECT_TRUE(audio_manager_->HasOneRef());
-  audio_manager_ = NULL;
+  audio_manager_.reset();
   test_request_context_ = NULL;
   initialize_com_.reset();
 }
 
 void WebRTCAudioDeviceTest::CreateChannel(const char* name) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-  audio_render_host_ = new AudioRendererHost(resource_context_.get());
+  audio_render_host_ = new AudioRendererHost(
+      audio_manager_.get(), media_observer_.get());
   audio_render_host_->OnChannelConnected(base::GetCurrentProcId());
 
   audio_input_renderer_host_ = new AudioInputRendererHost(
-      resource_context_.get());
+      resource_context_.get(), audio_manager_.get());
   audio_input_renderer_host_->OnChannelConnected(base::GetCurrentProcId());
 
   channel_.reset(new IPC::Channel(name, IPC::Channel::MODE_SERVER, this));
@@ -223,22 +211,25 @@ void WebRTCAudioDeviceTest::DestroyChannel() {
   audio_input_renderer_host_ = NULL;
 }
 
-void WebRTCAudioDeviceTest::OnGetHardwareSampleRate(double* sample_rate) {
+void WebRTCAudioDeviceTest::OnGetHardwareSampleRate(int* sample_rate) {
   EXPECT_TRUE(audio_util_callback_);
   *sample_rate = audio_util_callback_ ?
-      audio_util_callback_->GetAudioHardwareSampleRate() : 0.0;
+      audio_util_callback_->GetAudioHardwareSampleRate() : 0;
 }
 
-void WebRTCAudioDeviceTest::OnGetHardwareInputSampleRate(double* sample_rate) {
+void WebRTCAudioDeviceTest::OnGetHardwareInputSampleRate(int* sample_rate) {
   EXPECT_TRUE(audio_util_callback_);
   *sample_rate = audio_util_callback_ ?
-      audio_util_callback_->GetAudioInputHardwareSampleRate() : 0.0;
+      audio_util_callback_->GetAudioInputHardwareSampleRate(
+          AudioManagerBase::kDefaultDeviceId) : 0;
 }
 
-void WebRTCAudioDeviceTest::OnGetHardwareInputChannelCount(uint32* channels) {
+void WebRTCAudioDeviceTest::OnGetHardwareInputChannelLayout(
+    ChannelLayout* layout) {
   EXPECT_TRUE(audio_util_callback_);
-  *channels = audio_util_callback_ ?
-      audio_util_callback_->GetAudioInputHardwareChannelCount() : 0;
+  *layout = audio_util_callback_ ?
+      audio_util_callback_->GetAudioInputHardwareChannelLayout(
+          AudioManagerBase::kDefaultDeviceId) : CHANNEL_LAYOUT_NONE;
 }
 
 // IPC::Channel::Listener implementation.
@@ -273,8 +264,8 @@ bool WebRTCAudioDeviceTest::OnMessageReceived(const IPC::Message& message) {
                         OnGetHardwareSampleRate)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareInputSampleRate,
                         OnGetHardwareInputSampleRate)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareInputChannelCount,
-                        OnGetHardwareInputChannelCount)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareInputChannelLayout,
+                        OnGetHardwareInputChannelLayout)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
 
@@ -290,7 +281,7 @@ void WebRTCAudioDeviceTest::WaitForIOThreadCompletion() {
 }
 
 void WebRTCAudioDeviceTest::WaitForAudioManagerCompletion() {
-  if (audio_manager_)
+  if (audio_manager_.get())
     WaitForMessageLoopCompletion(audio_manager_->GetMessageLoop());
 }
 

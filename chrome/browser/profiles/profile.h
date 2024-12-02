@@ -34,15 +34,13 @@ class FaviconService;
 class GAIAInfoUpdateService;
 class HistoryService;
 class HostContentSettingsMap;
+class LazyBackgroundTaskQueue;
 class PasswordStore;
 class PrefService;
-class ProfileSyncService;
 class PromoCounter;
 class ProtocolHandlerRegistry;
-class SpeechInputPreferences;
 class TemplateURLFetcher;
 class TestingProfile;
-class TokenService;
 class UserScriptMaster;
 class UserStyleSheetWatcher;
 class VisitedLinkMaster;
@@ -62,6 +60,7 @@ class Predictor;
 }
 
 namespace content {
+class SpeechRecognitionPreferences;
 class WebUI;
 }
 
@@ -81,14 +80,6 @@ class ShortcutsBackend;
 namespace net {
 class SSLConfigService;
 }
-
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
-// Local profile ids are used to associate resources stored outside the profile
-// directory, like saved passwords in GNOME Keyring / KWallet, with a profile.
-// With high probability, they are unique on the local machine. They are almost
-// certainly not unique globally, by design. Do not send them over the network.
-typedef int LocalProfileId;
-#endif
 
 class Profile : public content::BrowserContext {
  public:
@@ -126,10 +117,17 @@ class Profile : public content::BrowserContext {
     CREATE_STATUS_INITIALIZED,
   };
 
+  enum CreateMode {
+    CREATE_MODE_SYNCHRONOUS,
+    CREATE_MODE_ASYNCHRONOUS
+  };
+
   class Delegate {
    public:
     // Called when creation of the profile is finished.
-    virtual void OnProfileCreated(Profile* profile, bool success) = 0;
+    virtual void OnProfileCreated(Profile* profile,
+                                  bool success,
+                                  bool is_new_profile) = 0;
   };
 
   // Whitelist access to deprecated API in order to prevent new regressions.
@@ -141,8 +139,6 @@ class Profile : public content::BrowserContext {
     friend class BrowserListTabContentsProvider;
     friend class MetricsService;
     friend class SafeBrowsingServiceTestHelper;
-    friend class SdchDictionaryFetcher;
-    friend class SyncTest;
     friend class Toolbar5Importer;
     friend class TranslateManager;
     friend class android::TabContentsProvider;
@@ -157,11 +153,6 @@ class Profile : public content::BrowserContext {
   // Key used to bind profile to the widget with which it is associated.
   static const char* const kProfileKey;
 
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
-  // Value that represents no local profile id.
-  static const LocalProfileId kInvalidLocalProfileId;
-#endif
-
   Profile();
   virtual ~Profile() {}
 
@@ -169,12 +160,11 @@ class Profile : public content::BrowserContext {
   // time.
   static void RegisterUserPrefs(PrefService* prefs);
 
-  // Create a new profile given a path.
-  static Profile* CreateProfile(const FilePath& path);
-
-  // Same as above, but uses async initialization.
-  static Profile* CreateProfileAsync(const FilePath& path,
-                                     Delegate* delegate);
+  // Create a new profile given a path. If |async| is true then the profile is
+  // initialized asynchronously.
+  static Profile* CreateProfile(const FilePath& path,
+                                Delegate* delegate,
+                                CreateMode create_mode);
 
   // Returns the profile corresponding to the given browser context.
   static Profile* FromBrowserContext(content::BrowserContext* browser_context);
@@ -184,36 +174,12 @@ class Profile : public content::BrowserContext {
 
   // content::BrowserContext implementation ------------------------------------
 
-  virtual FilePath GetPath() = 0;
-  virtual SSLHostState* GetSSLHostState() = 0;
-  virtual content::DownloadManager* GetDownloadManager() = 0;
-  virtual net::URLRequestContextGetter* GetRequestContext() = 0;
-  virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
-      int renderer_child_id) = 0;
-  virtual net::URLRequestContextGetter* GetRequestContextForMedia() = 0;
-  virtual const content::ResourceContext& GetResourceContext() = 0;
-  virtual content::HostZoomMap* GetHostZoomMap() = 0;
-  virtual content::GeolocationPermissionContext*
-      GetGeolocationPermissionContext() = 0;
-  virtual SpeechInputPreferences* GetSpeechInputPreferences() = 0;
-  virtual quota::QuotaManager* GetQuotaManager() = 0;
-  virtual webkit_database::DatabaseTracker* GetDatabaseTracker() = 0;
-  virtual WebKitContext* GetWebKitContext() = 0;
-  virtual ChromeAppCacheService* GetAppCacheService() = 0;
-  virtual ChromeBlobStorageContext* GetBlobStorageContext() = 0;
-  virtual fileapi::FileSystemContext* GetFileSystemContext() = 0;
-
-  // content::BrowserContext implementation ------------------------------------
-
   // Typesafe upcast.
   virtual TestingProfile* AsTestingProfile();
 
   // Returns the name associated with this profile. This name is displayed in
   // the browser frame.
   virtual std::string GetProfileName() = 0;
-
-  // Return whether this profile is incognito. Default is false.
-  virtual bool IsOffTheRecord() = 0;
 
   // Return the incognito version of this profile. The returned pointer
   // is owned by the receiving profile. If the receiving profile is off the
@@ -274,6 +240,10 @@ class Profile : public content::BrowserContext {
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() = 0;
 
+  // Accessor. The instance is created at startup.
+  // TODO(yoz): this belongs with the ExtensionSystem.
+  virtual LazyBackgroundTaskQueue* GetLazyBackgroundTaskQueue() = 0;
+
   // Retrieves a pointer to the FaviconService associated with this
   // profile.  The FaviconService is lazily created the first time
   // that this method is called.
@@ -329,11 +299,6 @@ class Profile : public content::BrowserContext {
   // doesn't already exist.
   virtual WebDataService* GetWebDataServiceWithoutCreating() = 0;
 
-  // Returns the PasswordStore for this profile. This is owned by the Profile.
-  // This may return NULL if the implementation is unable to create a
-  // password store (e.g. a corrupt database).
-  virtual PasswordStore* GetPasswordStore(ServiceAccessType access) = 0;
-
   // Retrieves a pointer to the PrefService that manages the preferences
   // for this user profile.  The PrefService is lazily created the first
   // time that this method is called.
@@ -381,25 +346,11 @@ class Profile : public content::BrowserContext {
   // Returns the user style sheet watcher.
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() = 0;
 
-  // Returns true if this profile has a profile sync service.
-  // TODO(tim): Bug 93922 - remove this.
-  virtual bool HasProfileSyncService() = 0;
-
-  // Returns true if the last time this profile was open it was exited cleanly.
-  virtual bool DidLastSessionExitCleanly() = 0;
-
   // Returns the BookmarkModel, creating if not yet created.
   virtual BookmarkModel* GetBookmarkModel() = 0;
 
   // Returns the ProtocolHandlerRegistry, creating if not yet created.
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() = 0;
-
-  // Returns the Gaia Token Service, creating if not yet created.
-  virtual TokenService* GetTokenService() = 0;
-
-  // Returns the ProfileSyncService, creating if not yet created.
-  // TODO(tim): Bug 93922 - remove this.
-  virtual ProfileSyncService* GetProfileSyncService() = 0;
 
   // Return whether 2 profiles are the same. 2 profiles are the same if they
   // represent the same profile. This can happen if there is pointer equality
@@ -486,8 +437,9 @@ class Profile : public content::BrowserContext {
   // Returns the home page for this profile.
   virtual GURL GetHomePage() = 0;
 
-  // Makes the session state, e.g., cookies, persistent across the next restart.
-  virtual void SaveSessionState() {}
+  // Returns whether or not the profile was created by a version of Chrome
+  // more recent (or equal to) the one specified.
+  virtual bool WasCreatedByVersionOrLater(const std::string& version) = 0;
 
   std::string GetDebugName();
 

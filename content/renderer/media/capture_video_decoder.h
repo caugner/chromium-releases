@@ -34,7 +34,7 @@ class CONTENT_EXPORT CaptureVideoDecoder
   // Filter implementation.
   virtual void Play(const base::Closure& callback) OVERRIDE;
   virtual void Seek(base::TimeDelta time,
-                    const media::FilterStatusCB& cb) OVERRIDE;
+                    const media::PipelineStatusCB& cb) OVERRIDE;
   virtual void Pause(const base::Closure& callback) OVERRIDE;
   virtual void Flush(const base::Closure& callback) OVERRIDE;
   virtual void Stop(const base::Closure& callback) OVERRIDE;
@@ -42,8 +42,8 @@ class CONTENT_EXPORT CaptureVideoDecoder
   // Decoder implementation.
   virtual void Initialize(
       media::DemuxerStream* demuxer_stream,
-      const media::PipelineStatusCB& filter_callback,
-      const media::StatisticsCallback& stat_callback) OVERRIDE;
+      const media::PipelineStatusCB& status_cb,
+      const media::StatisticsCB& statistics_cb) OVERRIDE;
   virtual void Read(const ReadCB& callback) OVERRIDE;
   virtual const gfx::Size& natural_size() OVERRIDE;
 
@@ -72,15 +72,15 @@ class CONTENT_EXPORT CaptureVideoDecoder
 
   void PlayOnDecoderThread(const base::Closure& callback);
   void SeekOnDecoderThread(base::TimeDelta time,
-                           const media::FilterStatusCB& cb);
+                           const media::PipelineStatusCB& cb);
   void PauseOnDecoderThread(const base::Closure& callback);
   void FlushOnDecoderThread(const base::Closure& callback);
   void StopOnDecoderThread(const base::Closure& callback);
 
   void InitializeOnDecoderThread(
       media::DemuxerStream* demuxer_stream,
-      const media::PipelineStatusCB& filter_callback,
-      const media::StatisticsCallback& stat_callback);
+      const media::PipelineStatusCB& status_cb,
+      const media::StatisticsCB& statistics_cb);
   void ReadOnDecoderThread(const ReadCB& callback);
 
   void OnStoppedOnDecoderThread(media::VideoCapture* capture);
@@ -102,7 +102,7 @@ class CONTENT_EXPORT CaptureVideoDecoder
   bool got_first_frame_;
   ReadCB read_cb_;
   base::Closure pending_stop_cb_;
-  media::StatisticsCallback statistics_callback_;
+  media::StatisticsCB statistics_cb_;
 
   media::VideoCaptureSessionId video_stream_id_;
   media::VideoCapture* capture_engine_;

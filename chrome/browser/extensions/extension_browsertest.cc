@@ -12,6 +12,7 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
+#include "chrome/browser/extensions/app_shortcut_manager.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_creator.h"
@@ -35,9 +36,15 @@ ExtensionBrowserTest::ExtensionBrowserTest()
     : loaded_(false),
       installed_(false),
       extension_installs_observed_(0),
+      extension_load_errors_observed_(0),
       target_page_action_count_(-1),
       target_visible_page_action_count_(-1) {
   EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
+  AppShortcutManager::SetShortcutCreationDisabledForTesting(true);
+}
+
+ExtensionBrowserTest::~ExtensionBrowserTest() {
+  AppShortcutManager::SetShortcutCreationDisabledForTesting(false);
 }
 
 void ExtensionBrowserTest::SetUpCommandLine(CommandLine* command_line) {
@@ -419,6 +426,14 @@ void ExtensionBrowserTest::WaitForExtensionLoad() {
   WaitForExtensionHostsToLoad();
 }
 
+bool ExtensionBrowserTest::WaitForExtensionLoadError() {
+  int before = extension_load_errors_observed_;
+  ui_test_utils::RegisterAndWait(this,
+                                 chrome::NOTIFICATION_EXTENSION_LOAD_ERROR,
+                                 content::NotificationService::AllSources());
+  return extension_load_errors_observed_ != before;
+}
+
 bool ExtensionBrowserTest::WaitForExtensionCrash(
     const std::string& extension_id) {
   ExtensionService* service = browser()->profile()->GetExtensionService();
@@ -476,6 +491,12 @@ void ExtensionBrowserTest::Observe(
 
     case chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED:
       VLOG(1) << "Got EXTENSION_PROCESS_TERMINATED notification.";
+      MessageLoopForUI::current()->Quit();
+      break;
+
+    case chrome::NOTIFICATION_EXTENSION_LOAD_ERROR:
+      VLOG(1) << "Got EXTENSION_LOAD_ERROR notification.";
+      ++extension_load_errors_observed_;
       MessageLoopForUI::current()->Quit();
       break;
 

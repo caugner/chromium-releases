@@ -21,7 +21,7 @@
 #include "ui/gfx/rect.h"
 
 class BubbleGtk;
-class GtkThemeService;
+class ThemeServiceGtk;
 
 namespace gfx {
 class Rect;
@@ -73,7 +73,7 @@ class BubbleGtk : public content::NotificationObserver {
                          ArrowLocationGtk arrow_location,
                          bool match_system_theme,
                          bool grab_input,
-                         GtkThemeService* provider,
+                         ThemeServiceGtk* provider,
                          BubbleDelegateGtk* delegate);
 
   // Close the bubble if it's open.  This will delete the widgets and object,
@@ -95,6 +95,12 @@ class BubbleGtk : public content::NotificationObserver {
   // in them.
   void HandlePointerAndKeyboardUngrabbedByContent();
 
+  // Change an input-grabbing bubble into a non-input-grabbing bubble. This
+  // allows a window to change from auto closing when it loses to focus to being
+  // a window that does not auto close, and is useful if an auto closing window
+  // starts being inspected.
+  void StopGrabbingInput();
+
  private:
   FRIEND_TEST_ALL_PREFIXES(BubbleGtkTest, ArrowLocation);
   FRIEND_TEST_ALL_PREFIXES(BubbleGtkTest, NoArrow);
@@ -104,7 +110,7 @@ class BubbleGtk : public content::NotificationObserver {
     FRAME_STROKE,
   };
 
-  BubbleGtk(GtkThemeService* provider, bool match_system_theme);
+  BubbleGtk(ThemeServiceGtk* provider, bool match_system_theme);
   virtual ~BubbleGtk();
 
   // Creates the Bubble.
@@ -178,7 +184,7 @@ class BubbleGtk : public content::NotificationObserver {
   GtkWidget* window_;
 
   // Provides colors and stuff.
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
 
   // The accel group attached to |window_|, to handle closing with escape.
   GtkAccelGroup* accel_group_;

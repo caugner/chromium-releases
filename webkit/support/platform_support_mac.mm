@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/support/platform_support.h"
 
 #import <AppKit/AppKit.h>
+#include <AvailabilityMacros.h>
 #import <Foundation/Foundation.h>
 #import <objc/objc-runtime.h>
 
@@ -17,7 +18,6 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "grit/webkit_resources.h"
-#include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 #include "ui/base/resource/data_pack.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/support/test_webkit_platform_support.h"
@@ -32,10 +32,8 @@ static NSAutoreleasePool* autorelease_pool;
 
 void BeforeInitialize(bool unit_test_mode) {
   [CrDrtApplication sharedApplication];
-  // Need to initialize NSAutoreleasePool before InitWebCoreSystemInterface().
   autorelease_pool = [[NSAutoreleasePool alloc] init];
   DCHECK(autorelease_pool);
-  InitWebCoreSystemInterface();
 }
 
 #if OBJC_API_VERSION == 2
@@ -121,6 +119,25 @@ void AfterInitialize(bool unit_test_mode) {
       // webkit.org/b/50709.
   };
 
+#if defined(MAC_OS_X_VERSION_10_6) && \
+    MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_6
+  NSMutableArray* font_urls = [NSMutableArray array];
+  NSURL* resources_directory = [[NSBundle mainBundle] resourceURL];
+  for (unsigned i = 0; i < arraysize(fontFileNames); ++i) {
+    NSURL* font_url = [resources_directory
+        URLByAppendingPathComponent:[NSString
+            stringWithUTF8String:fontFileNames[i]]];
+    [font_urls addObject:[font_url absoluteURL]];
+  }
+
+  CFArrayRef errors = 0;
+  if (!CTFontManagerRegisterFontsForURLs((CFArrayRef)font_urls,
+                                         kCTFontManagerScopeProcess,
+                                         &errors)) {
+    DLOG(FATAL) << "Fail to activate fonts.";
+    CFRelease(errors);
+  }
+#else
   NSString* resources = [[NSBundle mainBundle] resourcePath];
   for (unsigned i = 0; i < arraysize(fontFileNames); ++i) {
     const char* resource_path = [[resources stringByAppendingPathComponent:
@@ -136,6 +153,7 @@ void AfterInitialize(bool unit_test_mode) {
       DLOG(FATAL) << "Fail to activate font: " << resource_path;
     }
   }
+#endif
 
   SwizzleNSPasteboard();
 
@@ -159,6 +177,10 @@ void AfterShutdown() {
 }  // namespace webkit_support
 
 string16 TestWebKitPlatformSupport::GetLocalizedString(int message_id) {
+  // |g_resource_data_pack| is null on unit tests.
+  // But som unit tests reach GetLocalizedString().
+  if (!g_resource_data_pack)
+    return string16();
   base::StringPiece res;
   if (!g_resource_data_pack->GetStringPiece(message_id, &res)) {
     LOG(FATAL) << "failed to load webkit string with id " << message_id;

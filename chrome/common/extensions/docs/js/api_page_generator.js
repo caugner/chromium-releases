@@ -22,6 +22,7 @@ var API_TEMPLATE = 'template/api_template.html';
 var MODULE_SCHEMAS = [
   '../api/bookmarks.json',
   '../api/browserAction.json',
+  '../api/browsingData.json',
   '../api/chromeAuthPrivate.json',
   '../api/chromePrivate.json',
   '../api/chromeosInfoPrivate.json',
@@ -33,18 +34,22 @@ var MODULE_SCHEMAS = [
   '../api/experimental.accessibility.json',
   '../api/experimental.app.json',
   '../api/experimental.bookmarkManager.json',
-  '../api/experimental.clear.json',
-  '../api/experimental.dns.json',
   '../api/experimental.downloads.json',
+  '../api/experimental.extension.json',
+  '../api/experimental.fontSettings.json',
+  '../api/experimental.identity.json',
   '../api/experimental.infobars.json',
   '../api/experimental.input.ui.json',
   '../api/experimental.input.virtualKeyboard.json',
+  '../api/experimental.keybinding.json',
+  '../api/experimental.managedMode.json',
+  '../api/experimental.offscreenTabs.json',
   '../api/experimental.processes.json',
   '../api/experimental.rlz.json',
   '../api/experimental.serial.json',
   '../api/experimental.socket.json',
   '../api/experimental.speechInput.json',
-  '../api/experimental.topSites.json',
+  '../api/experimental.webRequest.json',
   '../api/extension.json',
   '../api/fileBrowserHandler.json',
   '../api/fileBrowserPrivate.json',
@@ -63,16 +68,18 @@ var MODULE_SCHEMAS = [
   '../api/permissions.json',
   '../api/privacy.json',
   '../api/proxy.json',
-  '../api/experimental.storage.json',
+  '../api/storage.json',
   '../api/systemPrivate.json',
   '../api/tabs.json',
   '../api/test.json',
+  '../api/topSites.json',
   '../api/tts.json',
   '../api/ttsEngine.json',
   '../api/types.json',
   '../api/webNavigation.json',
   '../api/webRequest.json',
   '../api/webSocketProxyPrivate.json',
+  '../api/webstore.json',
   '../api/webstorePrivate.json',
   '../api/windows.json',
 ]
@@ -181,7 +188,7 @@ function fetchSchema() {
   schema = [];
 
   function onSchemaContent(content) {
-    schema = schema.concat(JSON.parse(content));
+    schema = schema.concat(JSON.parse(JSON.minify(content)));
     if (++schemas_retrieved < schemas_to_retrieve.length)
       return;
     if (pageName.toLowerCase() == 'samples') {
@@ -202,7 +209,7 @@ function fetchSchema() {
 function fetchSamples() {
   // If we're rendering the samples directory, fetch the samples manifest.
   fetchContent(SAMPLES, function(sampleManifest) {
-    var data = JSON.parse(sampleManifest);
+    var data = JSON.parse(JSON.minify(sampleManifest));
     samples = data.samples;
     apiMapping = data.api;
     renderTemplate();
@@ -240,7 +247,7 @@ function fetchContent(url, onSuccess, onError) {
           window.clearTimeout(abortTimerId);
           onSuccess(xhr.responseText);
         } else {
-          handleError('Failure to fetch content');
+          handleError('Failure to fetch content: ' + xhr.status);
         }
       }
     }
@@ -259,10 +266,9 @@ function fetchContent(url, onSuccess, onError) {
 function renderTemplate() {
   schema.forEach(function(mod) {
     if (mod.namespace == pageBase) {
-      // Do not render page for modules which are marked as "nodoc": true.
-      if (mod.nodoc) {
+      // Do not render page for modules which have documentation disabled.
+      if (disableDocs(mod))
         return;
-      }
       // This page is an api page. Setup types and apiDefinition.
       module = mod;
       apiModuleName = API_MODULE_PREFIX + module.namespace;
@@ -297,10 +303,10 @@ function renderTemplate() {
    * in the final rendered template.
    */
   var preRender = document.querySelectorAll('script[type="text/prerenderjs"]');
-  for (var i = 0; i < preRender.length; i++) {
-    preRender[i].parentElement.removeChild(preRender[i]);
-    eval(preRender[i].innerText);
-  }
+  Array.prototype.slice.call(preRender).forEach(function(element) {
+    element.parentElement.removeChild(element);
+    eval(element.innerText);
+  });
 
   // Render to template
   var input = new JsEvalContext(pageData);
@@ -331,24 +337,55 @@ function renderTemplate() {
     parent.done();
 }
 
-function removeJsTemplateAttributes(root) {
+function cleanupJstemplateMess(root) {
   var jsattributes = ['jscontent', 'jsselect', 'jsdisplay', 'transclude',
                       'jsvalues', 'jsvars', 'jseval', 'jsskip', 'jstcache',
                       'jsinstance'];
 
   var nodes = root.getElementsByTagName('*');
+  var displayNone = [];
+
   for (var i = 0; i < nodes.length; i++) {
     var n = nodes[i]
+
+    // Delete nodes which are hidden. There are lots of these since jsdisplay
+    // just hides nodes, not deletes them.
+    if (n.style && n.style.display === 'none') {
+      displayNone.push(n);
+      continue;
+    }
+
+    // Delete empty style attributes (this can happen when jsdisplay causes
+    // display values other than 'none').
+    var styleAttribute = n.getAttribute('style');
+    if (typeof(styleAttribute) === 'string' && styleAttribute.trim() === '') {
+      n.removeAttribute('style');
+    }
+
+    // Remove jstemplate attributes from nodes that stick around.
     jsattributes.forEach(function(attributeName) {
       n.removeAttribute(attributeName);
     });
   }
+
+  displayNone.forEach(function(element) {
+    element.parentElement.removeChild(element);
+  });
+}
+
+// Strip empty lines, primarily so that elements which are jsdisplay=false and
+// removed leave no whitespace-trace.
+function stripEmptyLines(string) {
+  function notEmpty(s) {
+    return s.trim().length > 0;
+  }
+  return string.split('\n').filter(notEmpty).join('\n');
 }
 
 function serializePage() {
- removeJsTemplateAttributes(document);
+ cleanupJstemplateMess(document);
  var s = new XMLSerializer();
- return s.serializeToString(document);
+ return stripEmptyLines(s.serializeToString(document));
 }
 
 function evalXPathFromNode(expression, node) {
@@ -398,9 +435,16 @@ function selectCurrentPageOnLeftNav() {
  * template
  */
 
+function filterDocumented(things) {
+  return !things ? [] : things.filter(function(thing) {
+    return !disableDocs(thing);
+  });
+}
+
 function stableAPIs() {
   return schema.filter(function(module) {
-    return !module.nodoc && module.namespace.indexOf('experimental') < 0;
+    return !disableDocs(module) &&
+           module.namespace.indexOf('experimental') < 0;
   }).map(function(module) {
     return module.namespace;
   }).sort();
@@ -408,15 +452,8 @@ function stableAPIs() {
 
 function experimentalAPIs() {
   return schema.filter(function(module) {
-    return !module.nodoc && module.namespace.indexOf('experimental') == 0;
-  }).map(function(module) {
-    return module.namespace;
-  }).sort();
-}
-
-function devtoolsAPIs() {
-  return schema.filter(function(module) {
-    return !module.nodoc && module.namespace.indexOf('devtools.') === 0;
+    return !disableDocs(module) &&
+           module.namespace.indexOf('experimental') == 0;
   }).map(function(module) {
     return module.namespace;
   }).sort();
@@ -566,8 +603,8 @@ function getAnchorName(type, name, scope) {
 }
 
 function shouldExpandObject(object) {
-  return (object.type == 'object' && object.properties) ||
-         (object.type == 'array' && object.items && object.items.properties);
+  return object.properties ||
+         (object.items && object.items.properties);
 }
 
 function getPropertyListFromObject(object) {
@@ -578,8 +615,8 @@ function getPropertyListFromObject(object) {
   }
   for (var p in properties) {
     var prop = properties[p];
-    // Do not render properties marked as "nodoc": true.
-    if (prop.nodoc) {
+    // Do not render properties with documentation disabled.
+    if (disableDocs(prop)) {
       continue;
     }
     prop.name = p;
@@ -610,6 +647,17 @@ function getTypeName(schema) {
   return schema.type;
 }
 
+function hasPrimitiveValue(schema) {
+  return typeof(schema.value) === 'string';
+}
+
+function getPrimitiveValue(schema) {
+  if (schema.type === 'string')
+    return '"' + schema.value + '"';
+  else
+    return schema.value;
+}
+
 function getSignatureString(parameters) {
   if (!parameters)
     return '';
@@ -635,4 +683,8 @@ function sortByName(a, b) {
     return 1;
   }
   return 0;
+}
+
+function disableDocs(obj) {
+  return !!obj.nodoc || !!obj.internal;
 }

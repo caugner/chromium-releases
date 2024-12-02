@@ -3,43 +3,43 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const DeletableItemList = options.DeletableItemList;
-  const DeletableItem = options.DeletableItem;
-  const ArrayDataModel = cr.ui.ArrayDataModel;
-  const ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
+  /** @const */ var DeletableItemList = options.DeletableItemList;
+  /** @const */ var DeletableItem = options.DeletableItem;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var ListSingleSelectionModel = cr.ui.ListSingleSelectionModel;
 
   // This structure maps the various cookie type names from C++ (hence the
   // underscores) to arrays of the different types of data each has, along with
   // the i18n name for the description of that data type.
-  const cookieInfo = {
-    'cookie': [ ['name', 'label_cookie_name'],
-                ['content', 'label_cookie_content'],
-                ['domain', 'label_cookie_domain'],
-                ['path', 'label_cookie_path'],
-                ['sendfor', 'label_cookie_send_for'],
-                ['accessibleToScript', 'label_cookie_accessible_to_script'],
-                ['created', 'label_cookie_created'],
-                ['expires', 'label_cookie_expires'] ],
-    'app_cache': [ ['manifest', 'label_app_cache_manifest'],
-                   ['size', 'label_local_storage_size'],
-                   ['created', 'label_cookie_created'],
-                   ['accessed', 'label_cookie_last_accessed'] ],
-    'database': [ ['name', 'label_cookie_name'],
-                  ['desc', 'label_webdb_desc'],
+  /** @const */ var cookieInfo = {
+    'cookie': [['name', 'label_cookie_name'],
+               ['content', 'label_cookie_content'],
+               ['domain', 'label_cookie_domain'],
+               ['path', 'label_cookie_path'],
+               ['sendfor', 'label_cookie_send_for'],
+               ['accessibleToScript', 'label_cookie_accessible_to_script'],
+               ['created', 'label_cookie_created'],
+               ['expires', 'label_cookie_expires']],
+    'app_cache': [['manifest', 'label_app_cache_manifest'],
                   ['size', 'label_local_storage_size'],
-                  ['modified', 'label_local_storage_last_modified'] ],
-    'local_storage': [ ['origin', 'label_local_storage_origin'],
-                       ['size', 'label_local_storage_size'],
-                       ['modified', 'label_local_storage_last_modified'] ],
-    'indexed_db': [ ['origin', 'label_indexed_db_origin'],
-                    ['size', 'label_indexed_db_size'],
-                    ['modified', 'label_indexed_db_last_modified'] ],
-    'file_system': [ ['origin', 'label_file_system_origin'],
-                     ['persistent', 'label_file_system_persistent_usage' ],
-                     ['temporary', 'label_file_system_temporary_usage' ] ],
+                  ['created', 'label_cookie_created'],
+                  ['accessed', 'label_cookie_last_accessed']],
+    'database': [['name', 'label_cookie_name'],
+                 ['desc', 'label_webdb_desc'],
+                 ['size', 'label_local_storage_size'],
+                 ['modified', 'label_local_storage_last_modified']],
+    'local_storage': [['origin', 'label_local_storage_origin'],
+                      ['size', 'label_local_storage_size'],
+                      ['modified', 'label_local_storage_last_modified']],
+    'indexed_db': [['origin', 'label_indexed_db_origin'],
+                   ['size', 'label_indexed_db_size'],
+                   ['modified', 'label_indexed_db_last_modified']],
+    'file_system': [['origin', 'label_file_system_origin'],
+                    ['persistent', 'label_file_system_persistent_usage'],
+                    ['temporary', 'label_file_system_temporary_usage']],
   };
 
-  const localStrings = new LocalStrings();
+  /** @const */ var localStrings = new LocalStrings();
 
   /**
    * Returns the item's height, like offsetHeight but such that it works better
@@ -534,7 +534,7 @@ cr.define('options', function() {
      * The parent of this cookie tree node.
      * @type {?CookieTreeNode|CookieListItem}
      */
-    get parent(parent) {
+    get parent() {
       // See below for an explanation of this special case.
       if (typeof this.parent_ == 'number')
         return this.list_.getListItemByIndex(this.parent_);

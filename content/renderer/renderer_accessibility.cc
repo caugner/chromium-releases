@@ -4,7 +4,8 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "content/common/view_messages.h"
+#include "base/message_loop.h"
+#include "content/common/accessibility_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_accessibility.h"
@@ -27,54 +28,54 @@ using WebKit::WebSize;
 using WebKit::WebView;
 using webkit_glue::WebAccessibility;
 
-bool WebAccessibilityNotificationToViewHostMsg(
+bool WebAccessibilityNotificationToAccessibilityNotification(
     WebAccessibilityNotification notification,
-    ViewHostMsg_AccEvent::Value* type) {
+    AccessibilityNotification* type) {
   switch (notification) {
     case WebKit::WebAccessibilityNotificationActiveDescendantChanged:
-      *type = ViewHostMsg_AccEvent::ACTIVE_DESCENDANT_CHANGED;
+      *type = AccessibilityNotificationActiveDescendantChanged;
       break;
     case WebKit::WebAccessibilityNotificationCheckedStateChanged:
-      *type = ViewHostMsg_AccEvent::CHECK_STATE_CHANGED;
+      *type = AccessibilityNotificationCheckStateChanged;
       break;
     case WebKit::WebAccessibilityNotificationChildrenChanged:
-      *type = ViewHostMsg_AccEvent::CHILDREN_CHANGED;
+      *type = AccessibilityNotificationChildrenChanged;
       break;
     case WebKit::WebAccessibilityNotificationFocusedUIElementChanged:
-      *type = ViewHostMsg_AccEvent::FOCUS_CHANGED;
+      *type = AccessibilityNotificationFocusChanged;
       break;
     case WebKit::WebAccessibilityNotificationLayoutComplete:
-      *type = ViewHostMsg_AccEvent::LAYOUT_COMPLETE;
+      *type = AccessibilityNotificationLayoutComplete;
       break;
     case WebKit::WebAccessibilityNotificationLiveRegionChanged:
-      *type = ViewHostMsg_AccEvent::LIVE_REGION_CHANGED;
+      *type = AccessibilityNotificationLiveRegionChanged;
       break;
     case WebKit::WebAccessibilityNotificationLoadComplete:
-      *type = ViewHostMsg_AccEvent::LOAD_COMPLETE;
+      *type = AccessibilityNotificationLoadComplete;
       break;
     case WebKit::WebAccessibilityNotificationMenuListValueChanged:
-      *type = ViewHostMsg_AccEvent::MENU_LIST_VALUE_CHANGED;
+      *type = AccessibilityNotificationMenuListValueChanged;
       break;
     case WebKit::WebAccessibilityNotificationRowCollapsed:
-      *type = ViewHostMsg_AccEvent::ROW_COLLAPSED;
+      *type = AccessibilityNotificationRowCollapsed;
       break;
     case WebKit::WebAccessibilityNotificationRowCountChanged:
-      *type = ViewHostMsg_AccEvent::ROW_COUNT_CHANGED;
+      *type = AccessibilityNotificationRowCountChanged;
       break;
     case WebKit::WebAccessibilityNotificationRowExpanded:
-      *type = ViewHostMsg_AccEvent::ROW_EXPANDED;
+      *type = AccessibilityNotificationRowExpanded;
       break;
     case WebKit::WebAccessibilityNotificationScrolledToAnchor:
-      *type = ViewHostMsg_AccEvent::SCROLLED_TO_ANCHOR;
+      *type = AccessibilityNotificationScrolledToAnchor;
       break;
     case WebKit::WebAccessibilityNotificationSelectedChildrenChanged:
-      *type = ViewHostMsg_AccEvent::SELECTED_CHILDREN_CHANGED;
+      *type = AccessibilityNotificationSelectedChildrenChanged;
       break;
     case WebKit::WebAccessibilityNotificationSelectedTextChanged:
-      *type = ViewHostMsg_AccEvent::SELECTED_TEXT_CHANGED;
+      *type = AccessibilityNotificationSelectedTextChanged;
       break;
     case WebKit::WebAccessibilityNotificationValueChanged:
-      *type = ViewHostMsg_AccEvent::VALUE_CHANGED;
+      *type = AccessibilityNotificationValueChangedD;
       break;
     default:
       NOTREACHED();
@@ -103,17 +104,17 @@ RendererAccessibility::~RendererAccessibility() {
 bool RendererAccessibility::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RendererAccessibility, message)
-    IPC_MESSAGE_HANDLER(ViewMsg_EnableAccessibility, OnEnableAccessibility)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetAccessibilityFocus, OnSetAccessibilityFocus)
-    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityDoDefaultAction,
-                        OnAccessibilityDoDefaultAction)
-    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityNotifications_ACK,
-                        OnAccessibilityNotificationsAck)
-    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityScrollToMakeVisible,
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_Enable, OnEnable)
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_SetFocus, OnSetFocus)
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_DoDefaultAction,
+                        OnDoDefaultAction)
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_Notifications_ACK,
+                        OnNotificationsAck)
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_ScrollToMakeVisible,
                         OnScrollToMakeVisible)
-    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityScrollToPoint,
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_ScrollToPoint,
                         OnScrollToPoint)
-    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilitySetTextSelection,
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_SetTextSelection,
                         OnSetTextSelection)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -187,9 +188,11 @@ void RendererAccessibility::PostAccessibilityNotification(
   acc_notification.id = obj.axID();
   acc_notification.type = notification;
 
-  ViewHostMsg_AccEvent::Value temp;
-  if (!WebAccessibilityNotificationToViewHostMsg(notification, &temp))
+  AccessibilityNotification temp;
+  if (!WebAccessibilityNotificationToAccessibilityNotification(
+      notification, &temp)) {
     return;
+  }
 
   // Discard duplicate accessibility notifications.
   for (uint32 i = 0; i < pending_notifications_.size(); ++i) {
@@ -220,10 +223,21 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
   if (pending_notifications_.empty())
     return;
 
-  // Send all pending accessibility notifications.
-  std::vector<ViewHostMsg_AccessibilityNotification_Params> notifications;
-  for (size_t i = 0; i < pending_notifications_.size(); ++i) {
-    Notification& notification = pending_notifications_[i];
+  ack_pending_ = true;
+
+  // Make a copy of the notifications, because it's possible that
+  // actions inside this loop will cause more notifications to be
+  // queued up.
+  std::vector<Notification> src_notifications = pending_notifications_;
+  pending_notifications_.clear();
+
+  // Generate a notification message from each WebKit notification.
+  std::vector<AccessibilityHostMsg_NotificationParams> notification_msgs;
+
+  // Loop over each WebKit notification and generate a notification message
+  // from it.
+  for (size_t i = 0; i < src_notifications.size(); ++i) {
+    Notification& notification = src_notifications[i];
 
     // TODO(dtseng): Come up with a cleaner way of deciding to include children.
     int root_id = document.accessibilityObject().axID();
@@ -288,33 +302,33 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
       }
     }
 
-    ViewHostMsg_AccessibilityNotification_Params param;
-    WebAccessibilityNotificationToViewHostMsg(
-        notification.type, &param.notification_type);
-    param.id = notification.id;
-    param.includes_children = includes_children;
-    param.acc_tree = WebAccessibility(obj, includes_children);
+    AccessibilityHostMsg_NotificationParams notification_msg;
+    WebAccessibilityNotificationToAccessibilityNotification(
+        notification.type, &notification_msg.notification_type);
+    notification_msg.id = notification.id;
+    notification_msg.includes_children = includes_children;
+    notification_msg.acc_tree = WebAccessibility(obj, includes_children);
     if (obj.axID() == root_id) {
-      DCHECK_EQ(param.acc_tree.role, WebAccessibility::ROLE_WEB_AREA);
-      param.acc_tree.role = WebAccessibility::ROLE_ROOT_WEB_AREA;
+      DCHECK_EQ(notification_msg.acc_tree.role,
+                WebAccessibility::ROLE_WEB_AREA);
+      notification_msg.acc_tree.role = WebAccessibility::ROLE_ROOT_WEB_AREA;
     }
-    notifications.push_back(param);
+    notification_msgs.push_back(notification_msg);
 
     if (includes_children)
-      UpdateBrowserTree(param.acc_tree);
+      UpdateBrowserTree(notification_msg.acc_tree);
 
 #ifndef NDEBUG
     if (logging_) {
       LOG(INFO) << "Accessibility update: "
-                << param.acc_tree.DebugString(true,
-                                              routing_id(),
-                                              notification.type);
+                << notification_msg.acc_tree.DebugString(true,
+                                                         routing_id(),
+                                                         notification.type);
     }
 #endif
   }
-  pending_notifications_.clear();
-  Send(new ViewHostMsg_AccessibilityNotifications(routing_id(), notifications));
-  ack_pending_ = true;
+
+  Send(new AccessibilityHostMsg_Notifications(routing_id(), notification_msgs));
 }
 
 void RendererAccessibility::UpdateBrowserTree(
@@ -357,7 +371,7 @@ void RendererAccessibility::ClearBrowserTreeNode(
   browser_node->children.clear();
 }
 
-void RendererAccessibility::OnAccessibilityDoDefaultAction(int acc_obj_id) {
+void RendererAccessibility::OnDoDefaultAction(int acc_obj_id) {
   if (!WebAccessibilityObject::accessibilityEnabled())
     return;
 
@@ -466,13 +480,13 @@ void RendererAccessibility::OnSetTextSelection(
   }
 }
 
-void RendererAccessibility::OnAccessibilityNotificationsAck() {
+void RendererAccessibility::OnNotificationsAck() {
   DCHECK(ack_pending_);
   ack_pending_ = false;
   SendPendingAccessibilityNotifications();
 }
 
-void RendererAccessibility::OnEnableAccessibility() {
+void RendererAccessibility::OnEnable() {
   if (WebAccessibilityObject::accessibilityEnabled())
     return;
 
@@ -489,7 +503,7 @@ void RendererAccessibility::OnEnableAccessibility() {
   }
 }
 
-void RendererAccessibility::OnSetAccessibilityFocus(int acc_obj_id) {
+void RendererAccessibility::OnSetFocus(int acc_obj_id) {
   if (!WebAccessibilityObject::accessibilityEnabled())
     return;
 

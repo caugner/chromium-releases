@@ -6,6 +6,7 @@
 #define PPAPI_CPP_DEV_PRINTING_DEV_H_
 
 #include "ppapi/c/dev/ppp_printing_dev.h"
+#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/resource.h"
 
 namespace pp {
@@ -30,7 +31,7 @@ class Printing_Dev {
   virtual bool IsPrintScalingDisabled() = 0;
 
  private:
-  Instance* associated_instance_;
+  InstanceHandle associated_instance_;
 };
 
 }  // namespace pp

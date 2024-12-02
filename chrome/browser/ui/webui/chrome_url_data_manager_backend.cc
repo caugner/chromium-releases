@@ -18,13 +18,10 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/net/view_blob_internals_job_factory.h"
-#include "chrome/browser/net/view_http_cache_job_factory.h"
 #include "chrome/browser/ui/webui/shared_resources_data_source.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "googleurl/src/url_util.h"
 #include "grit/platform_locale_settings.h"
@@ -35,7 +32,6 @@
 #include "net/url_request/url_request_file_job.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_factory.h"
-#include "webkit/appcache/view_appcache_internals_job.h"
 
 using content::BrowserThread;
 
@@ -47,10 +43,13 @@ namespace {
 // TODO(tsepez) chrome-extension: permits the ChromeVox screen reader
 //     extension to function on these pages.  Remove it when the extension
 //     is updated to stop injecting script into the pages.
-const char kChromeURLContentSecurityPolicyHeader[] =
-    "X-WebKit-CSP: object-src 'self'; script-src chrome://resources "
+const char kChromeURLContentSecurityPolicyHeaderBase[] =
+    "X-WebKit-CSP: script-src chrome://resources "
     "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief "
-    "'self' 'unsafe-eval'";
+    "'self' 'unsafe-eval'; ";
+
+// TODO(tsepez) The following should be replaced with a centralized table.
+// See crbug.com/104631.
 
 // If you are inserting new exemptions into this list, then you have a bug.
 // It is not acceptable to disable content-security-policy on chrome:// pages
@@ -69,7 +68,6 @@ class ChromeURLContentSecurityPolicyExceptionSet
     insert(chrome::kChromeUIDialogHost);
     insert(chrome::kChromeUIInputWindowDialogHost);
     insert(chrome::kChromeUINewTabHost);
-    insert(chrome::kChromeUITaskManagerHost);
 #if defined(OS_CHROMEOS)
     insert(chrome::kChromeUIMobileSetupHost);
     insert(chrome::kChromeUIOobeHost);
@@ -90,8 +88,43 @@ class ChromeURLContentSecurityPolicyExceptionSet
   }
 };
 
+// It is OK to add URLs to this set which slightly reduces the CSP for them.
+class ChromeURLContentSecurityPolicyObjectTagSet
+    : public std::set<std::string> {
+ public:
+  ChromeURLContentSecurityPolicyObjectTagSet() : std::set<std::string>() {
+    insert(chrome::kChromeUIPrintHost);
+  }
+};
+
 base::LazyInstance<ChromeURLContentSecurityPolicyExceptionSet>
-    g_chrome_url_content_security_policy_exceptions = LAZY_INSTANCE_INITIALIZER;
+    g_chrome_url_content_security_policy_exception_set =
+        LAZY_INSTANCE_INITIALIZER;
+
+base::LazyInstance<ChromeURLContentSecurityPolicyObjectTagSet>
+    g_chrome_url_content_security_policy_object_tag_set =
+        LAZY_INSTANCE_INITIALIZER;
+
+// Determine the least-privileged content security policy header, if any,
+// that is compatible with a given WebUI URL, and append it to the existing
+// response headers.
+void AddContentSecurityPolicyHeader(
+    const GURL& url, net::HttpResponseHeaders* headers) {
+  ChromeURLContentSecurityPolicyExceptionSet* exceptions =
+      g_chrome_url_content_security_policy_exception_set.Pointer();
+
+  if (exceptions->find(url.host()) == exceptions->end()) {
+    std::string base = kChromeURLContentSecurityPolicyHeaderBase;
+    ChromeURLContentSecurityPolicyObjectTagSet* object_tag_set =
+        g_chrome_url_content_security_policy_object_tag_set.Pointer();
+
+    base.append(object_tag_set->find(url.host()) == object_tag_set->end() ?
+                "object-src 'none';" :
+                "object-src 'self';");
+
+    headers->AddHeader(base);
+  }
+}
 
 // Parse a URL into the components used to resolve its request. |source_name|
 // is the hostname and |path| is the remaining portion of the URL.
@@ -216,10 +249,7 @@ void URLRequestChromeJob::GetResponseInfo(net::HttpResponseInfo* info) {
   // status code of 200. Without this they return a 0, which makes the status
   // indistiguishable from other error types. Instant relies on getting a 200.
   info->headers = new net::HttpResponseHeaders("HTTP/1.1 200 OK");
-  ChromeURLContentSecurityPolicyExceptionSet* exceptions =
-      g_chrome_url_content_security_policy_exceptions.Pointer();
-  if (exceptions->find(request_->url().host()) == exceptions->end())
-    info->headers->AddHeader(kChromeURLContentSecurityPolicyHeader);
+  AddContentSecurityPolicyHeader(request_->url(), info->headers);
 }
 
 void URLRequestChromeJob::DataAvailable(RefCountedMemory* bytes) {
@@ -285,18 +315,10 @@ void URLRequestChromeJob::StartAsync() {
 
 namespace {
 
-bool IsViewAppCacheInternalsURL(const GURL& url) {
-  return url.SchemeIs(chrome::kChromeUIScheme) &&
-         url.host() == chrome::kChromeUIAppCacheInternalsHost;
-}
-
 class ChromeProtocolHandler
     : public net::URLRequestJobFactory::ProtocolHandler {
  public:
-  ChromeProtocolHandler(
-      ChromeURLDataManagerBackend* backend,
-      ChromeAppCacheService* appcache_service,
-      webkit_blob::BlobStorageController* blob_storage_controller);
+  explicit ChromeProtocolHandler(ChromeURLDataManagerBackend* backend);
   ~ChromeProtocolHandler();
 
   virtual net::URLRequestJob* MaybeCreateJob(
@@ -305,39 +327,19 @@ class ChromeProtocolHandler
  private:
   // These members are owned by ProfileIOData, which owns this ProtocolHandler.
   ChromeURLDataManagerBackend* const backend_;
-  ChromeAppCacheService* const appcache_service_;
-  webkit_blob::BlobStorageController* const blob_storage_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeProtocolHandler);
 };
 
 ChromeProtocolHandler::ChromeProtocolHandler(
-    ChromeURLDataManagerBackend* backend,
-    ChromeAppCacheService* appcache_service,
-    webkit_blob::BlobStorageController* blob_storage_controller)
-    : backend_(backend),
-      appcache_service_(appcache_service),
-      blob_storage_controller_(blob_storage_controller) {}
+    ChromeURLDataManagerBackend* backend)
+    : backend_(backend) {}
 
 ChromeProtocolHandler::~ChromeProtocolHandler() {}
 
 net::URLRequestJob* ChromeProtocolHandler::MaybeCreateJob(
     net::URLRequest* request) const {
   DCHECK(request);
-
-  // Next check for chrome://view-http-cache/*, which uses its own job type.
-  if (ViewHttpCacheJobFactory::IsSupportedURL(request->url()))
-    return ViewHttpCacheJobFactory::CreateJobForRequest(request);
-
-  // Next check for chrome://appcache-internals/, which uses its own job type.
-  if (IsViewAppCacheInternalsURL(request->url()))
-    return appcache::ViewAppCacheInternalsJobFactory::CreateJobForRequest(
-        request, appcache_service_);
-
-  // Next check for chrome://blob-internals/, which uses its own job type.
-  if (ViewBlobInternalsJobFactory::IsSupportedURL(request->url()))
-    return ViewBlobInternalsJobFactory::CreateJobForRequest(
-        request, blob_storage_controller_);
 
   // Fall back to using a custom handler
   return new URLRequestChromeJob(request, backend_);
@@ -361,14 +363,9 @@ ChromeURLDataManagerBackend::~ChromeURLDataManagerBackend() {
 // static
 net::URLRequestJobFactory::ProtocolHandler*
 ChromeURLDataManagerBackend::CreateProtocolHandler(
-    ChromeURLDataManagerBackend* backend,
-    ChromeAppCacheService* appcache_service,
-    webkit_blob::BlobStorageController* blob_storage_controller) {
-  DCHECK(appcache_service);
-  DCHECK(blob_storage_controller);
+    ChromeURLDataManagerBackend* backend) {
   DCHECK(backend);
-  return new ChromeProtocolHandler(
-      backend, appcache_service, blob_storage_controller);
+  return new ChromeProtocolHandler(backend);
 }
 
 void ChromeURLDataManagerBackend::AddDataSource(

@@ -59,6 +59,11 @@ class ProfileManager : public base::NonThreadSafe,
   // Same as instance method but provides the default user_data_dir as well.
   static Profile* GetDefaultProfile();
 
+  // DEPRECATED: DO NOT USE unless in ChromeOS.
+  // Same as GetDefaultProfile() but returns OffTheRecord profile
+  // if guest login.
+  static Profile* GetDefaultProfileOrOffTheRecord();
+
   // Returns a profile for a specific profile directory within the user data
   // dir. This will return an existing profile it had already been created,
   // otherwise it will create and manage it.
@@ -139,17 +144,21 @@ class ProfileManager : public base::NonThreadSafe,
   // otherwise return NULL.
   Profile* GetProfileByPath(const FilePath& path) const;
 
-  // Opens a new window with the given profile. This launches a new browser for
-  // the profile or activates an existing one; it is the static equivalent of
-  // the instance method Browser::NewWindow(), used for the creation of a
-  // Window from the multi-profile dropdown menu.
-  static void NewWindowWithProfile(
+  // Activates a window for |profile|.  If no such window yet exists, or if
+  // |always_create| is true, this first creates a new window, then activates
+  // that. If activating an exiting window and multiple windows exists then the
+  // window that was most recently active is activated. This is used for
+  // creation of a window from the multi-profile dropdown menu.
+  static void FindOrCreateNewWindowForProfile(
       Profile* profile,
       BrowserInit::IsProcessStartup process_startup,
-      BrowserInit::IsFirstRun is_first_run);
+      BrowserInit::IsFirstRun is_first_run,
+      bool always_create);
 
   // Profile::Delegate implementation:
-  virtual void OnProfileCreated(Profile* profile, bool success) OVERRIDE;
+  virtual void OnProfileCreated(Profile* profile,
+                                bool success,
+                                bool is_new_profile) OVERRIDE;
 
   // Add or remove a profile launcher to/from the list of launchers waiting for
   // new profiles to be created from the multi-profile menu.

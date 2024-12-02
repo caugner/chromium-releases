@@ -17,11 +17,11 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/session_manager_client.h"
@@ -29,7 +29,6 @@
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/google/google_util.h"
@@ -82,16 +81,19 @@ const char kGetStartedOwnerParam[] = "first";
 const char kCreateAccountURL[] =
     "https://www.google.com/accounts/NewAccount?service=mail";
 
-// ChromeVox tutorial URL.
-const char kChromeVoxTutorialURL[] =
-    "http://google-axs-chrome.googlecode.com/"
-    "svn/trunk/chromevox_tutorial/interactive_tutorial_start.html";
+// ChromeVox tutorial URL (used in place of "getting started" url when
+// accessibility is enabled).
+const char kChromeVoxTutorialURLPattern[] =
+    "http://www.chromevox.com/tutorial/index.html?lang=%s";
 
 // Landing URL when launching Guest mode to fix captive portal.
 const char kCaptivePortalLaunchURL[] = "http://www.google.com/";
 
 // Delay for transferring the auth cache to the system profile.
 const long int kAuthCacheTransferDelayMs = 2000;
+
+// Delay for restarting the ui if safe-mode login has failed.
+const long int kSafeModeRestartUiDelayMs = 30000;
 
 // Makes a call to the policy subsystem to reload the policy when we detect
 // authentication change.
@@ -318,9 +320,6 @@ void ExistingUserController::CompleteLoginInternal(std::string username,
                                                    std::string password) {
   resume_login_callback_.Reset();
 
-  SetOwnerUserInCryptohome();
-
-  GaiaAuthConsumer::ClientLoginResult credentials;
   if (!login_performer_.get()) {
     LoginPerformer::Delegate* delegate = this;
     if (login_performer_delegate_.get())
@@ -335,9 +334,8 @@ void ExistingUserController::CompleteLoginInternal(std::string username,
 
   is_login_in_progress_ = true;
   login_performer_->CompleteLogin(username, password);
-  WizardAccessibilityHelper::GetInstance()->MaybeSpeak(
-      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN).c_str(),
-      false, true);
+  accessibility::MaybeSpeak(
+      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN));
 }
 
 void ExistingUserController::Login(const std::string& username,
@@ -375,24 +373,38 @@ void ExistingUserController::Login(const std::string& username,
   }
   is_login_in_progress_ = true;
   login_performer_->Login(username, password);
-  WizardAccessibilityHelper::GetInstance()->MaybeSpeak(
-      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN).c_str(),
-      false, true);
+  accessibility::MaybeSpeak(
+      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNING_IN));
 }
+
+void ExistingUserController::LoginAsDemoUser() {
+  SetStatusAreaEnabled(false);
+  // Disable clicking on other windows.
+  login_display_->SetUIEnabled(false);
+  // TODO(rkc): Add a CHECK to make sure demo logins are allowed once
+  // the enterprise policy wiring is done for kiosk mode.
+
+  // Only one instance of LoginPerformer should exist at a time.
+  login_performer_.reset(NULL);
+  login_performer_.reset(new LoginPerformer(this));
+  is_login_in_progress_ = true;
+  login_performer_->LoginDemoUser();
+  accessibility::MaybeSpeak(
+      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_DEMOUSER));
+}
+
+
 
 void ExistingUserController::LoginAsGuest() {
   SetStatusAreaEnabled(false);
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
-  SetOwnerUserInCryptohome();
 
   // Check allow_guest in case this call is fired from key accelerator.
   // Must not proceed without signature verification.
-  bool trusted_setting_available = cros_settings_->GetTrusted(
-      kAccountsPrefAllowGuest,
+  if (!cros_settings_->PrepareTrustedValues(
       base::Bind(&ExistingUserController::LoginAsGuest,
-                 weak_factory_.GetWeakPtr()));
-  if (!trusted_setting_available) {
+                 weak_factory_.GetWeakPtr()))) {
     // Value of AllowGuest setting is still not verified.
     // Another attempt will be invoked again after verification completion.
     return;
@@ -409,9 +421,12 @@ void ExistingUserController::LoginAsGuest() {
   login_performer_.reset(new LoginPerformer(this));
   is_login_in_progress_ = true;
   login_performer_->LoginOffTheRecord();
-  WizardAccessibilityHelper::GetInstance()->MaybeSpeak(
-      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_OFFRECORD).c_str(),
-      false, true);
+  accessibility::MaybeSpeak(
+      l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_OFFRECORD));
+}
+
+void ExistingUserController::Signout() {
+  NOTREACHED();
 }
 
 void ExistingUserController::OnUserSelected(const std::string& username) {
@@ -460,7 +475,15 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
   guest_mode_url_ = GURL::EmptyGURL();
   std::string error = failure.GetErrorString();
 
-  if (!online_succeeded_for_.empty()) {
+  if (failure.reason() == LoginFailure::OWNER_REQUIRED) {
+    ShowError(IDS_LOGIN_ERROR_OWNER_REQUIRED, error);
+    content::BrowserThread::PostDelayedTask(
+        content::BrowserThread::UI, FROM_HERE,
+        base::Bind(&SessionManagerClient::StopSession,
+                   base::Unretained(DBusThreadManager::Get()->
+                                    GetSessionManagerClient())),
+        kSafeModeRestartUiDelayMs);
+  } else if (!online_succeeded_for_.empty()) {
     ShowGaiaPasswordChanged(online_succeeded_for_);
   } else {
     // Check networking after trying to login in case user is
@@ -521,7 +544,6 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
 void ExistingUserController::OnLoginSuccess(
     const std::string& username,
     const std::string& password,
-    const GaiaAuthConsumer::ClientLoginResult& credentials,
     bool pending_requests,
     bool using_oauth) {
   is_login_in_progress_ = false;
@@ -531,8 +553,6 @@ void ExistingUserController::OnLoginSuccess(
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kLoginScreen) == WizardController::kLoginScreenName;
   ready_for_browser_launch_ = known_user || login_only;
-
-  two_factor_credentials_ = credentials.two_factor;
 
   bool has_cookies =
       login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION;
@@ -549,7 +569,6 @@ void ExistingUserController::OnLoginSuccess(
   LoginUtils::Get()->PrepareProfile(username,
                                     display_email_,
                                     password,
-                                    credentials,
                                     pending_requests,
                                     using_oauth,
                                     has_cookies,
@@ -571,7 +590,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
     if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kOobeSkipPostLogin)) {
       ready_for_browser_launch_ = true;
-      LoginUtils::DoBrowserLaunch(profile, host_);
+      LoginUtils::Get()->DoBrowserLaunch(profile, host_);
       host_ = NULL;
     } else {
 #endif
@@ -582,12 +601,11 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
     }
 #endif
   } else {
-    LoginUtils::DoBrowserLaunch(profile, host_);
+    LoginUtils::Get()->DoBrowserLaunch(profile, host_);
     // Inform |login_status_consumer_| about successful login after
     // browser launch.  Set most params to empty since they're not needed.
     if (login_status_consumer_)
-      login_status_consumer_->OnLoginSuccess(
-          "", "", GaiaAuthConsumer::ClientLoginResult(), false, false);
+      login_status_consumer_->OnLoginSuccess("", "", false, false);
     host_ = NULL;
   }
   login_display_->OnFadeOut();
@@ -612,15 +630,11 @@ void ExistingUserController::OnOffTheRecordLoginSuccess() {
     login_status_consumer_->OnOffTheRecordLoginSuccess();
 }
 
-void ExistingUserController::OnPasswordChangeDetected(
-    const GaiaAuthConsumer::ClientLoginResult& credentials) {
+void ExistingUserController::OnPasswordChangeDetected() {
   // Must not proceed without signature verification.
-  bool trusted_setting_available = cros_settings_->GetTrusted(
-      kDeviceOwner,
+  if (!cros_settings_->PrepareTrustedValues(
       base::Bind(&ExistingUserController::OnPasswordChangeDetected,
-                 weak_factory_.GetWeakPtr(), credentials));
-
-  if (!trusted_setting_available) {
+                 weak_factory_.GetWeakPtr()))) {
     // Value of owner email is still not verified.
     // Another attempt will be invoked after verification completion.
     return;
@@ -632,14 +646,13 @@ void ExistingUserController::OnPasswordChangeDetected(
   // TODO(gspencer): We shouldn't have to erase stateful data when
   // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
   PasswordChangedView* view = new PasswordChangedView(this, false);
-  views::Widget* window = browser::CreateViewsWindow(GetNativeWindow(),
-                                                     view,
-                                                     STYLE_GENERIC);
+  views::Widget* window = views::Widget::CreateWindowWithParent(
+      view, GetNativeWindow());
   window->SetAlwaysOnTop(true);
   window->Show();
 
   if (login_status_consumer_)
-    login_status_consumer_->OnPasswordChangeDetected(credentials);
+    login_status_consumer_->OnPasswordChangeDetected();
 
   display_email_.clear();
 }
@@ -703,33 +716,46 @@ void ExistingUserController::InitializeStartUrls() const {
   const std::string current_locale =
       StringToLowerASCII(prefs->GetString(prefs::kApplicationLocale));
   std::string start_url;
-  if (prefs->GetBoolean(prefs::kSpokenFeedbackEnabled) &&
-      current_locale.find("en") != std::string::npos) {
-    start_url = kChromeVoxTutorialURL;
+  const base::ListValue *urls;
+  if (UserManager::Get()->IsLoggedInAsDemoUser() &&
+      CrosSettings::Get()->GetList(kStartUpUrls, &urls)) {
+    // the demo user will get its start urls from the special policy if it is
+    // set.
+    for (base::ListValue::const_iterator it = urls->begin();
+         it != urls->end(); ++it) {
+      std::string url;
+      if ((*it)->GetAsString(&url))
+        start_urls.push_back(url);
+    }
   } else {
-    const char* url = kGetStartedURLPattern;
-    start_url = base::StringPrintf(url, current_locale.c_str());
-    std::string params_str;
+    if (prefs->GetBoolean(prefs::kSpokenFeedbackEnabled)) {
+      const char* url = kChromeVoxTutorialURLPattern;
+      start_url = base::StringPrintf(url, current_locale.c_str());
+    } else {
+      const char* url = kGetStartedURLPattern;
+      start_url = base::StringPrintf(url, current_locale.c_str());
+      std::string params_str;
 #if 0
-    const char kMachineInfoBoard[] = "CHROMEOS_RELEASE_BOARD";
-    std::string board;
-    system::StatisticsProvider* provider =
-        system::StatisticsProvider::GetInstance();
-    if (!provider->GetMachineStatistic(kMachineInfoBoard, &board))
-      LOG(ERROR) << "Failed to get board information";
-    if (!board.empty()) {
-      params_str.append(base::StringPrintf(kGetStartedBoardParam,
-                                           board.c_str()));
-    }
+      const char kMachineInfoBoard[] = "CHROMEOS_RELEASE_BOARD";
+      std::string board;
+      system::StatisticsProvider* provider =
+          system::StatisticsProvider::GetInstance();
+      if (!provider->GetMachineStatistic(kMachineInfoBoard, &board))
+        LOG(ERROR) << "Failed to get board information";
+      if (!board.empty()) {
+        params_str.append(base::StringPrintf(kGetStartedBoardParam,
+                                             board.c_str()));
+      }
 #endif
-    if (is_owner_login_)
-      params_str.append(kGetStartedOwnerParam);
-    if (!params_str.empty()) {
-      params_str.insert(0, kGetStartedParamsStartMark);
-      start_url.append(params_str);
+      if (is_owner_login_)
+        params_str.append(kGetStartedOwnerParam);
+      if (!params_str.empty()) {
+        params_str.insert(0, kGetStartedParamsStartMark);
+        start_url.append(params_str);
+      }
     }
+    start_urls.push_back(start_url);
   }
-  start_urls.push_back(start_url);
 
   ServicesCustomizationDocument* customization =
       ServicesCustomizationDocument::GetInstance();
@@ -741,13 +767,6 @@ void ExistingUserController::InitializeStartUrls() const {
     if (!initial_start_page.empty())
       start_urls.push_back(initial_start_page);
     customization->ApplyCustomization();
-  }
-
-  if (two_factor_credentials_) {
-    // If we have a two factor error and and this is a new user,
-    // load the personal settings page.
-    // TODO(stevenjb): direct the user to a lightweight sync login page.
-    start_urls.push_back(kSettingsSyncLoginURL);
   }
 
   for (size_t i = 0; i < start_urls.size(); ++i)
@@ -786,26 +805,6 @@ void ExistingUserController::ShowError(int error_id,
   }
 
   login_display_->ShowError(error_id, num_login_attempts_, help_topic_id);
-}
-
-void ExistingUserController::SetOwnerUserInCryptohome() {
-  bool trusted_owner_available = cros_settings_->GetTrusted(
-      kDeviceOwner,
-      base::Bind(&ExistingUserController::SetOwnerUserInCryptohome,
-                 weak_factory_.GetWeakPtr()));
-  if (!trusted_owner_available) {
-    // Value of owner email is still not verified.
-    // Another attempt will be invoked after verification completion.
-    return;
-  }
-  CryptohomeLibrary* cryptohomed = CrosLibrary::Get()->GetCryptohomeLibrary();
-  std::string owner;
-  cros_settings_->GetString(kDeviceOwner, &owner);
-  cryptohomed->AsyncSetOwnerUser(owner, NULL);
-
-  // Do not invoke AsyncDoAutomaticFreeDiskSpaceControl(NULL) here
-  // so it does not delay the following mount. Cleanup will be
-  // started in Cryptohomed by timer.
 }
 
 void ExistingUserController::ShowGaiaPasswordChanged(

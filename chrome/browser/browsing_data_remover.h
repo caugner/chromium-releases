@@ -8,6 +8,7 @@
 
 #include <set>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop_helpers.h"
 #include "base/observer_list.h"
@@ -15,9 +16,9 @@
 #include "base/time.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "googleurl/src/gurl.h"
 #include "webkit/quota/quota_types.h"
 
 class ExtensionSpecialStoragePolicy;
@@ -25,6 +26,7 @@ class IOThread;
 class Profile;
 
 namespace content {
+class DOMStorageContext;
 class PluginDataRemover;
 }
 
@@ -70,14 +72,14 @@ class BrowsingDataRemover : public content::NotificationObserver,
     REMOVE_PLUGIN_DATA = 1 << 9,
     REMOVE_PASSWORDS = 1 << 10,
     REMOVE_WEBSQL = 1 << 11,
-    REMOVE_ORIGIN_BOUND_CERTS = 1 << 12,
+    REMOVE_SERVER_BOUND_CERTS = 1 << 12,
 
     // "Site data" includes cookies, appcache, file systems, indexedDBs, local
     // storage, webSQL, and plugin data.
     REMOVE_SITE_DATA = REMOVE_APPCACHE | REMOVE_COOKIES | REMOVE_FILE_SYSTEMS |
                        REMOVE_INDEXEDDB | REMOVE_LOCAL_STORAGE |
                        REMOVE_PLUGIN_DATA | REMOVE_WEBSQL |
-                       REMOVE_ORIGIN_BOUND_CERTS
+                       REMOVE_SERVER_BOUND_CERTS
   };
 
   // When BrowsingDataRemover successfully removes data, a notification of type
@@ -117,7 +119,7 @@ class BrowsingDataRemover : public content::NotificationObserver,
   BrowsingDataRemover(Profile* profile, TimePeriod time_period,
                       base::Time delete_end);
 
-  // Removes the specified items related to browsing.
+  // Removes the specified items related to browsing for all origins.
   void Remove(int remove_mask);
 
   void AddObserver(Observer* observer);
@@ -126,12 +128,27 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // Called when history deletion is done.
   void OnHistoryDeletionDone();
 
+  // Quota managed data uses a different bitmask for types than
+  // BrowsingDataRemover uses. This method generates that mask.
+  static int GenerateQuotaClientMask(int remove_mask);
+
+  // Used for testing.
+  void OverrideQuotaManagerForTesting(quota::QuotaManager* quota_manager);
+
   static bool is_removing() { return removing_; }
 
  private:
   // The clear API needs to be able to toggle removing_ in order to test that
   // only one BrowsingDataRemover instance can be called at a time.
-  FRIEND_TEST_ALL_PREFIXES(ExtensionClearTest, OneAtATime);
+  FRIEND_TEST_ALL_PREFIXES(ExtensionBrowsingDataTest, OneAtATime);
+
+  // The BrowsingDataRemover tests need to be able to access the implementation
+  // of Remove(), as it exposes details that aren't yet available in the public
+  // API. As soon as those details are exposed via new methods, this should be
+  // removed.
+  //
+  // TODO(mkwst): See http://crbug.com/113621
+  friend class BrowsingDataRemoverTest;
 
   enum CacheState {
     STATE_NONE,
@@ -160,6 +177,14 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // Called when plug-in data has been cleared. Invokes NotifyAndDeleteIfDone.
   virtual void OnWaitableEventSignaled(
       base::WaitableEvent* waitable_event) OVERRIDE;
+
+  // Removes the specified items related to browsing for a specific host. If the
+  // provided |origin| is empty, data is removed for all origins. If
+  // |remove_protected_origins| is true, then data is removed even if the origin
+  // is otherwise protected (e.g. as an installed application).
+  void RemoveImpl(int remove_mask,
+                  const GURL& origin,
+                  bool remove_protected_origins);
 
   // If we're not waiting on anything, notifies observers and deletes this
   // object.
@@ -210,13 +235,13 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // Invoked on the IO thread to delete cookies.
   void ClearCookiesOnIOThread(net::URLRequestContextGetter* rq_context);
 
-  // Invoked on the IO thread to delete origin bound certs.
-  void ClearOriginBoundCertsOnIOThread(
+  // Invoked on the IO thread to delete server bound certs.
+  void ClearServerBoundCertsOnIOThread(
       net::URLRequestContextGetter* rq_context);
 
-  // Callback when origin bound certs have been deleted. Invokes
+  // Callback when server bound certs have been deleted. Invokes
   // NotifyAndDeleteIfDone.
-  void OnClearedOriginBoundCerts();
+  void OnClearedServerBoundCerts();
 
   // Calculate the begin time for the deletion range specified by |time_period|.
   base::Time CalculateBeginDeleteTime(TimePeriod time_period);
@@ -224,10 +249,10 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // Returns true if we're all done.
   bool all_done() {
     return registrar_.IsEmpty() && !waiting_for_clear_cache_ &&
-           !waiting_for_clear_cookies_&&
+           !waiting_for_clear_cookies_count_&&
            !waiting_for_clear_history_ &&
            !waiting_for_clear_networking_history_ &&
-           !waiting_for_clear_origin_bound_certs_ &&
+           !waiting_for_clear_server_bound_certs_ &&
            !waiting_for_clear_plugin_data_ &&
            !waiting_for_clear_quota_managed_data_;
   }
@@ -271,10 +296,11 @@ class BrowsingDataRemover : public content::NotificationObserver,
   // True if we're waiting for various data to be deleted.
   // These may only be accessed from UI thread in order to avoid races!
   bool waiting_for_clear_cache_;
-  bool waiting_for_clear_cookies_;
+  // Non-zero if waiting for cookies to be cleared.
+  int waiting_for_clear_cookies_count_;
   bool waiting_for_clear_history_;
   bool waiting_for_clear_networking_history_;
-  bool waiting_for_clear_origin_bound_certs_;
+  bool waiting_for_clear_server_bound_certs_;
   bool waiting_for_clear_plugin_data_;
   bool waiting_for_clear_quota_managed_data_;
 
@@ -285,6 +311,12 @@ class BrowsingDataRemover : public content::NotificationObserver,
 
   // The removal mask for the current removal operation.
   int remove_mask_;
+
+  // The origin for the current removal operation.
+  GURL remove_origin_;
+
+  // Should data for protected origins be removed?
+  bool remove_protected_;
 
   ObserverList<Observer> observer_list_;
 

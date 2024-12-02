@@ -7,10 +7,10 @@
 
 #include <vector>
 
+#include "ash/ash_export.h"
+#include "ash/wm/workspace/workspace.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "ash/ash_export.h"
-#include "ui/aura/window_observer.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/size.h"
 
@@ -25,15 +25,26 @@ class Rect;
 
 namespace ash {
 namespace internal {
-class Workspace;
+
+class ShelfLayoutManager;
 class WorkspaceManagerTest;
 
 // WorkspaceManager manages multiple workspaces in the desktop.
-class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
+class ASH_EXPORT WorkspaceManager {
  public:
-  // If open_new_windows_maximized() is true and the size of the viewport is
-  // smaller than this value, newly created windows are forced maximized.
-  static const int kOpenMaximizedThreshold;
+  enum WindowState {
+    // There's a full screen window.
+    WINDOW_STATE_FULL_SCREEN,
+
+    // There's a maximized window.
+    WINDOW_STATE_MAXIMIZED,
+
+    // At least one window overlaps the shelf.
+    WINDOW_STATE_WINDOW_OVERLAPS_SHELF,
+
+    // None of the windows are fullscreen, maximized or touch the shelf.
+    WINDOW_STATE_DEFAULT,
+  };
 
   explicit WorkspaceManager(aura::Window* viewport);
   virtual ~WorkspaceManager();
@@ -41,8 +52,8 @@ class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
   // Returns true if |window| should be managed by the WorkspaceManager.
   bool IsManagedWindow(aura::Window* window) const;
 
-  // Returns true if |window| should be maximized.
-  bool ShouldMaximize(aura::Window* window) const;
+  // Returns true if the |window| is managed by the WorkspaceManager.
+  bool IsManagingWindow(aura::Window* window) const;
 
   // Adds/removes a window creating/destroying workspace as necessary.
   void AddWindow(aura::Window* window);
@@ -66,22 +77,9 @@ class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
   void SetOverview(bool overview);
   bool is_overview() const { return is_overview_; }
 
-  // Sets the size of a single workspace (all workspaces have the same size).
-  void SetWorkspaceSize(const gfx::Size& workspace_size);
-
   // Returns the window the layout manager should allow the size to be set for.
   // TODO: maybe this should be set on WorkspaceLayoutManager.
   aura::Window* ignored_window() { return ignored_window_; }
-
-  // Sets whether newly added windows open maximized. This is only applicable if
-  // the size of the root window is less than kOpenMaximizedThreshold. Default
-  // is true.
-  void set_open_new_windows_maximized(bool value) {
-    open_new_windows_maximized_ = value;
-  }
-  bool open_new_windows_maximized() const {
-    return open_new_windows_maximized_;
-  }
 
   // Sets the size of the grid. Newly added windows are forced to align to the
   // size of the grid.
@@ -91,12 +89,24 @@ class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
   // Returns a bounds aligned to the grid. Returns |bounds| if grid_size is 0.
   gfx::Rect AlignBoundsToGrid(const gfx::Rect& bounds);
 
-  // Overriden from aura::WindowObserver:
-  virtual void OnWindowPropertyChanged(aura::Window* window,
-                                       const char* name,
-                                       void* old) OVERRIDE;
+  void set_shelf(ShelfLayoutManager* shelf) { shelf_ = shelf; }
+
+  // Updates the visibility and whether any windows overlap the shelf.
+  void UpdateShelfVisibility();
+
+  // Returns the current window state.
+  WindowState GetWindowState();
+
+  // Invoked when the show state of the specified window changes.
+  void ShowStateChanged(aura::Window* window);
 
  private:
+  // Enumeration of whether windows should animate or not.
+  enum AnimateChangeType {
+    ANIMATE,
+    DONT_ANIMATE
+  };
+
   friend class Workspace;
   friend class WorkspaceManagerTest;
 
@@ -108,6 +118,16 @@ class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
   void AddWorkspace(Workspace* workspace);
   void RemoveWorkspace(Workspace* workspace);
 
+  // Sets the visibility of the windows in |workspace|.
+  void SetVisibilityOfWorkspaceWindows(Workspace* workspace,
+                                       AnimateChangeType change_type,
+                                       bool value);
+
+  // Implementation of SetVisibilityOfWorkspaceWindows().
+  void SetWindowLayerVisibility(const std::vector<aura::Window*>& windows,
+                                AnimateChangeType change_type,
+                                bool value);
+
   // Returns the active workspace.
   Workspace* GetActiveWorkspace() const;
 
@@ -118,7 +138,7 @@ class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
   void SetActiveWorkspace(Workspace* workspace);
 
   // Returns the bounds of the work area.
-  gfx::Rect GetWorkAreaBounds();
+  gfx::Rect GetWorkAreaBounds() const;
 
   // Returns the index of the workspace that contains the |window|.
   int GetWorkspaceIndexContaining(aura::Window* window) const;
@@ -127,29 +147,24 @@ class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
   // that the bounds change is allowed through.
   void SetWindowBounds(aura::Window* window, const gfx::Rect& bounds);
 
-  // Resets the bounds of |window| to its restored bounds (if set), ensuring
-  // it fits in the the windows current workspace.
-  void SetWindowBoundsFromRestoreBounds(aura::Window* window);
-
-  // Reset the bounds of |window|. Use when |window| is fullscreen or maximized.
-  void SetFullScreenOrMaximizedBounds(aura::Window* window);
-
   // Invoked when the type of workspace needed for |window| changes.
   void OnTypeOfWorkspacedNeededChanged(aura::Window* window);
 
-  // Returns the Workspace whose type is TYPE_NORMAL, or NULL if there isn't
+  // Returns the Workspace whose type is TYPE_MANAGED, or NULL if there isn't
   // one.
-  Workspace* GetNormalWorkspace();
+  Workspace* GetManagedWorkspace();
+
+  // Creates a new workspace of the specified type.
+  Workspace* CreateWorkspace(Workspace::Type type);
+
+  // Deletes workspaces of TYPE_MAXIMIZED when they become empty.
+  void CleanupWorkspace(Workspace* workspace);
 
   aura::Window* contents_view_;
 
   Workspace* active_workspace_;
 
   std::vector<Workspace*> workspaces_;
-
-  // The size of a single workspace. This is generally the same as the size of
-  // monitor.
-  gfx::Size workspace_size_;
 
   // True if the workspace manager is in overview mode.
   bool is_overview_;
@@ -160,8 +175,8 @@ class ASH_EXPORT WorkspaceManager : public aura::WindowObserver{
   // See description above setter.
   int grid_size_;
 
-  // See description above setter.
-  bool open_new_windows_maximized_;
+  // Owned by the Shell container window LauncherContainer. May be NULL.
+  ShelfLayoutManager* shelf_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkspaceManager);
 };

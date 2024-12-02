@@ -9,6 +9,7 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/process_util.h"
+#include "base/rand_util.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
@@ -28,28 +29,26 @@
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "unicode/coll.h"
 
-#if defined(OS_MACOSX)
-#include "content/browser/mach_broker_mac.h"
-#endif
-
 using content::BrowserThread;
 using content::OpenURLParams;
 using content::Referrer;
+using content::ResourceRequestInfo;
 
 namespace {
 
@@ -85,7 +84,7 @@ string16 FormatStatsSize(const WebKit::WebCache::ResourceTypeStat& stat) {
 TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
     : update_requests_(0),
       update_state_(IDLE),
-      goat_salt_(rand()),
+      goat_salt_(base::RandUint64()),
       last_unique_id_(0) {
   AddResourceProvider(
       new TaskManagerBrowserProcessResourceProvider(task_manager));
@@ -97,10 +96,12 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
   AddResourceProvider(
       new TaskManagerExtensionProcessResourceProvider(task_manager));
 
+#if defined(ENABLE_NOTIFICATIONS)
   TaskManager::ResourceProvider* provider =
       TaskManagerNotificationResourceProvider::Create(task_manager);
   if (provider)
     AddResourceProvider(provider);
+#endif
 
   AddResourceProvider(new TaskManagerWorkerResourceProvider(task_manager));
 }
@@ -309,8 +310,8 @@ SkBitmap TaskManagerModel::GetResourceIcon(int index) const {
   return *default_icon;
 }
 
-std::pair<int, int> TaskManagerModel::GetGroupRangeForResource(int index)
-    const {
+TaskManagerModel::GroupRange
+TaskManagerModel::GetGroupRangeForResource(int index) const {
   CHECK_LT(index, ResourceCount());
   TaskManager::Resource* resource = resources_[index];
   GroupMap::const_iterator group_iter =
@@ -337,7 +338,7 @@ int TaskManagerModel::GetGroupIndexForResource(int index) const {
         group_index++;
   }
 
-  DCHECK(group_index != -1);
+  DCHECK_NE(group_index, -1);
   return group_index;
 }
 
@@ -498,7 +499,7 @@ bool TaskManagerModel::GetPrivateMemory(int index, size_t* result) const {
   base::ProcessHandle handle = resources_[index]->GetProcess();
   MemoryUsageMap::const_iterator iter = memory_usage_map_.find(handle);
   if (iter == memory_usage_map_.end()) {
-    std::pair<size_t, size_t> usage;
+    MemoryUsageEntry usage;
     if (!GetAndCacheMemoryMetrics(handle, &usage))
       return false;
 
@@ -514,7 +515,7 @@ bool TaskManagerModel::GetSharedMemory(int index, size_t* result) const {
   base::ProcessHandle handle = resources_[index]->GetProcess();
   MemoryUsageMap::const_iterator iter = memory_usage_map_.find(handle);
   if (iter == memory_usage_map_.end()) {
-    std::pair<size_t, size_t> usage;
+    MemoryUsageEntry usage;
     if (!GetAndCacheMemoryMetrics(handle, &usage))
       return false;
 
@@ -626,10 +627,9 @@ void TaskManagerModel::StartUpdating() {
   // If update_state_ is STOPPING, it means a task is still pending.  Setting
   // it to TASK_PENDING ensures the tasks keep being posted (by Refresh()).
   if (update_state_ == IDLE) {
-      MessageLoop::current()->PostDelayedTask(
+      MessageLoop::current()->PostTask(
           FROM_HERE,
-          base::Bind(&TaskManagerModel::Refresh, this),
-          base::TimeDelta::FromMilliseconds(kUpdateTimeMs));
+          base::Bind(&TaskManagerModel::Refresh, this));
   }
   update_state_ = TASK_PENDING;
 
@@ -637,6 +637,11 @@ void TaskManagerModel::StartUpdating() {
   for (ResourceProviderList::iterator iter = providers_.begin();
        iter != providers_.end(); ++iter) {
     (*iter)->StartUpdating();
+  }
+
+  if (!resources_.empty()) {
+    FOR_EACH_OBSERVER(TaskManagerModelObserver, observer_list_,
+                      OnReadyPeriodicalUpdate());
   }
 }
 
@@ -703,8 +708,8 @@ void TaskManagerModel::AddResource(TaskManager::Resource* resource) {
 #if !defined(OS_MACOSX)
         base::ProcessMetrics::CreateProcessMetrics(process);
 #else
-        base::ProcessMetrics::CreateProcessMetrics(process,
-                                                   MachBroker::GetInstance());
+        base::ProcessMetrics::CreateProcessMetrics(
+            process, content::BrowserChildProcessHost::GetPortProvider());
 #endif
 
     metrics_map_[process] = pm;
@@ -820,7 +825,7 @@ void TaskManagerModel::NotifyFPS(base::ProcessId renderer_id,
   for (ResourceList::iterator it = resources_.begin();
        it != resources_.end(); ++it) {
     if (base::GetProcId((*it)->GetProcess()) == renderer_id &&
-        (*it)->GetRoutingId() == routing_id) {
+        (*it)->GetRoutingID() == routing_id) {
       (*it)->NotifyFPS(fps);
     }
   }
@@ -846,7 +851,7 @@ void TaskManagerModel::Refresh() {
     return;
   }
 
-  goat_salt_ = rand();
+  goat_salt_ = base::RandUint64();
 
   // Compute the CPU usage values.
   // Note that we compute the CPU usage for all resources (instead of doing it
@@ -967,22 +972,22 @@ void TaskManagerModel::BytesRead(BytesReadParam param) {
 void TaskManagerModel::NotifyBytesRead(const net::URLRequest& request,
                                        int byte_count) {
   // Only net::URLRequestJob instances created by the ResourceDispatcherHost
+  // have an associated ResourceRequestInfo.
+  const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(&request);
+
   // have a render view associated.  All other jobs will have -1 returned for
   // the render process child and routing ids - the jobs may still match a
   // resource based on their origin id, otherwise BytesRead() will attribute
   // the activity to the Browser resource.
   int render_process_host_child_id = -1, routing_id = -1;
-  ResourceDispatcherHost::RenderViewForRequest(&request,
-                                               &render_process_host_child_id,
-                                               &routing_id);
+  if (info)
+    info->GetAssociatedRenderView(&render_process_host_child_id, &routing_id);
 
   // Get the origin PID of the request's originator.  This will only be set for
   // plugins - for renderer or browser initiated requests it will be zero.
   int origin_pid = 0;
-  const ResourceDispatcherHostRequestInfo* info =
-      ResourceDispatcherHost::InfoForRequest(&request);
   if (info)
-    origin_pid = info->origin_pid();
+    origin_pid = info->GetOriginPID();
 
   // This happens in the IO thread, post it to the UI thread.
   BrowserThread::PostTask(
@@ -1043,7 +1048,7 @@ void TaskManager::ActivateProcess(int index) {
   TabContentsWrapper* chosen_tab_contents =
       model_->GetResourceTabContents(index);
   if (chosen_tab_contents) {
-    chosen_tab_contents->web_contents()->GetRenderViewHost()->delegate()->
+    chosen_tab_contents->web_contents()->GetRenderViewHost()->GetDelegate()->
         Activate();
   }
 }
@@ -1100,9 +1105,8 @@ void TaskManager::OpenAboutMemory() {
   browser->window()->Show();
 }
 
-bool TaskManagerModel::GetAndCacheMemoryMetrics(
-    base::ProcessHandle handle,
-    std::pair<size_t, size_t>* usage) const {
+bool TaskManagerModel::GetAndCacheMemoryMetrics(base::ProcessHandle handle,
+                                                MemoryUsageEntry* usage) const {
   MetricsMap::const_iterator iter = metrics_map_.find(handle);
   if (iter == metrics_map_.end())
     return false;

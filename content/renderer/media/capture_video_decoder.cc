@@ -5,6 +5,7 @@
 #include "content/renderer/media/capture_video_decoder.h"
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
 #include "media/base/filter_host.h"
 #include "media/base/limits.h"
@@ -34,20 +35,20 @@ CaptureVideoDecoder::~CaptureVideoDecoder() {}
 
 void CaptureVideoDecoder::Initialize(
     media::DemuxerStream* demuxer_stream,
-    const media::PipelineStatusCB& filter_callback,
-    const media::StatisticsCallback& stat_callback) {
+    const media::PipelineStatusCB& status_cb,
+    const media::StatisticsCB& statistics_cb) {
   message_loop_proxy_->PostTask(
       FROM_HERE,
       base::Bind(&CaptureVideoDecoder::InitializeOnDecoderThread,
                  this, make_scoped_refptr(demuxer_stream),
-                 filter_callback, stat_callback));
+                 status_cb, statistics_cb));
 }
 
-void CaptureVideoDecoder::Read(const ReadCB& callback) {
+void CaptureVideoDecoder::Read(const ReadCB& read_cb) {
   message_loop_proxy_->PostTask(
       FROM_HERE,
       base::Bind(&CaptureVideoDecoder::ReadOnDecoderThread,
-                 this, callback));
+                 this, read_cb));
 }
 
 const gfx::Size& CaptureVideoDecoder::natural_size() {
@@ -83,7 +84,7 @@ void CaptureVideoDecoder::Stop(const base::Closure& callback) {
 }
 
 void CaptureVideoDecoder::Seek(base::TimeDelta time,
-                               const media::FilterStatusCB& cb) {
+                               const media::PipelineStatusCB& cb) {
   message_loop_proxy_->PostTask(
       FROM_HERE,
       base::Bind(&CaptureVideoDecoder::SeekOnDecoderThread,
@@ -135,22 +136,23 @@ void CaptureVideoDecoder::OnDeviceInfoReceived(
 
 void CaptureVideoDecoder::InitializeOnDecoderThread(
     media::DemuxerStream* demuxer_stream,
-    const media::PipelineStatusCB& filter_callback,
-    const media::StatisticsCallback& stat_callback) {
+    const media::PipelineStatusCB& status_cb,
+    const media::StatisticsCB& statistics_cb) {
   DVLOG(1) << "InitializeOnDecoderThread";
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
 
   capture_engine_ = vc_manager_->AddDevice(video_stream_id_, this);
 
-  statistics_callback_ = stat_callback;
-  filter_callback.Run(media::PIPELINE_OK);
+  statistics_cb_ = statistics_cb;
+  status_cb.Run(media::PIPELINE_OK);
   state_ = kNormal;
+  capture_engine_->StartCapture(this, capability_);
 }
 
-void CaptureVideoDecoder::ReadOnDecoderThread(const ReadCB& callback) {
+void CaptureVideoDecoder::ReadOnDecoderThread(const ReadCB& read_cb) {
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
   CHECK(read_cb_.is_null());
-  read_cb_ = callback;
+  read_cb_ = read_cb;
 }
 
 void CaptureVideoDecoder::PlayOnDecoderThread(const base::Closure& callback) {
@@ -163,7 +165,7 @@ void CaptureVideoDecoder::PauseOnDecoderThread(const base::Closure& callback) {
   DVLOG(1) << "PauseOnDecoderThread";
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
   state_ = kPaused;
-  media::VideoDecoder::Pause(callback);
+  callback.Run();
 }
 
 void CaptureVideoDecoder::FlushOnDecoderThread(const base::Closure& callback) {
@@ -186,14 +188,14 @@ void CaptureVideoDecoder::StopOnDecoderThread(const base::Closure& callback) {
   capture_engine_->StopCapture(this);
 }
 
-void CaptureVideoDecoder::SeekOnDecoderThread(base::TimeDelta time,
-                                              const media::FilterStatusCB& cb) {
+void CaptureVideoDecoder::SeekOnDecoderThread(
+    base::TimeDelta time,
+    const media::PipelineStatusCB& cb) {
   DVLOG(1) << "SeekOnDecoderThread";
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
 
   cb.Run(media::PIPELINE_OK);
   state_ = kNormal;
-  capture_engine_->StartCapture(this, capability_);
 }
 
 void CaptureVideoDecoder::OnStoppedOnDecoderThread(
@@ -201,7 +203,7 @@ void CaptureVideoDecoder::OnStoppedOnDecoderThread(
   DVLOG(1) << "OnStoppedOnDecoderThread";
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
   if (!pending_stop_cb_.is_null())
-    media::ResetAndRunCB(&pending_stop_cb_);
+    base::ResetAndReturn(&pending_stop_cb_).Run();
   vc_manager_->RemoveDevice(video_stream_id_, this);
 }
 
@@ -212,7 +214,6 @@ void CaptureVideoDecoder::OnDeviceInfoReceivedOnDecoderThread(
   if (device_info.width != natural_size_.width() ||
       device_info.height != natural_size_.height()) {
     natural_size_.SetSize(device_info.width, device_info.height);
-    host()->SetNaturalVideoSize(natural_size_);
   }
 }
 
@@ -237,7 +238,6 @@ void CaptureVideoDecoder::OnBufferReadyOnDecoderThread(
   if (buf->width != natural_size_.width() ||
       buf->height != natural_size_.height()) {
     natural_size_.SetSize(buf->width, buf->height);
-    host()->SetNaturalVideoSize(natural_size_);
   }
 
   // Need to rebase timestamp with zero as starting point.

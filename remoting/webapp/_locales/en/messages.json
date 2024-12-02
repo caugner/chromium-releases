@@ -13,9 +13,33 @@
       }
     }
   },
+  "ALL_CONNECTIONS": {
+    "message": "All connections",
+    "description": "In the connection history dialog, clicking this button shows all recent connections unfiltered."
+  },
+  "ASK_PIN_DIALOG_DESCRIPTION": {
+    "message": "To protect access to this computer, please choose a PIN. This PIN will be required when connecting from another location.",
+    "description": "Explanatory text displayed when the user enables remote access or changes the PIN."
+  },
+  "ASK_PIN_DIALOG_LABEL": {
+    "message": "PIN",
+    "description": "Label next to the PIN entry edit box. The user must enter a PIN before enabling remote access to their computer."
+  },
+  "ASK_PIN_DIALOG_CONFIRM_LABEL": {
+    "message": "Re-type PIN",
+    "description": "Label next to the PIN confirmation edit box. The user must enter a PIN before enabling remote access to their computer."
+  },
   "CANCEL": {
     "message": "Cancel",
     "description": "Label for general-purpose Cancel buttons."
+  },
+  "CLEAR_HISTORY": {
+    "message": "Clear history",
+    "description": "In the connection history dialog, clicking this button will delete the connection history."
+  },
+  "CLOSE": {
+    "message": "Close",
+    "description": "Label for general-purpose Close buttons."
   },
   "CLOSE_PROMPT": {
     "message": "Leaving this page will end your Chromoting session.",
@@ -24,6 +48,33 @@
   "CONNECT_BUTTON": {
     "message": "Connect",
     "description": "Label for the connect button. Clicking this button will start the Chromoting session if the access code is correct."
+  },
+  "CONFIRM_HOST_DELETE": {
+    "message": "Are you sure you want to disable remote connections to $hostname$? If you change your mind, you'll need to visit that computer to re-enable connections.",
+    "description": "Confirmation prompt shown when a user attempts to delete a Me2Me host from their host list.",
+    "placeholders": {
+      "hostname": {
+        "content": "$1",
+        "example": "My Linux desktop"
+      }
+    }
+
+  },
+  "CONNECTION_FROM_HEADER": {
+    "message": "From",
+    "description": "Column header in the connection history table showing the email address of the client end of the connection (the initiator) which may be this or another computer."
+  },
+  "CONNECTION_HISTORY_BUTTON": {
+    "message": "Connection history",
+    "description": "Label for the connection history button. Clicking this button opens a dialog showing recent connections."
+  },
+  "CONNECTION_HISTORY_TITLE": {
+    "message": "Connection History",
+    "description": "Title for the connection history dialog. This dialog shows recent connections made to and from this computer"
+  },
+  "CONNECTION_TO_HEADER": {
+    "message": "To",
+    "description": "Column header in the connection history table showing the email address of the host end of the connection (the connectee) which may be this or another computer."
   },
   "CONTINUE_BUTTON": {
     "message": "Continue",
@@ -51,6 +102,10 @@
       }
     }
   },
+  "DISABLE_HOST": {
+    "message": "Disable",
+    "description": "Label for the 'yes' response to the dialog asking the user to confirm whether or not they want to disable remote access to a host."
+  },
   "DISCONNECT_BUTTON_PLUS_SHORTCUT_LINUX": {
     "message": "Disconnect (Ctrl+Alt+Esc)",
     "description": "Label for the disconnect button including the Linux keyboard shortcut. Clicking this button disconnects the remote user."
@@ -71,6 +126,10 @@
     "message": "Disconnect",
     "description": "Label for the host-side disconnect button, without keyboard shortcuts. Only used in case we aren't able to enable hot-key support. Clicking this button disconnects the remote user."
   },
+  "DURATION_HEADER": {
+    "message": "Duration",
+    "description": "Column header in the connection history table showing the length of time for which a connection was active, if available."
+  },
   "ERROR_AUTHENTICATION_FAILED": {
     "message": "Authentication failed. Please sign out of Chromoting and try again.",
     "description": "Error displayed if authentication fails. This can be caused by stale credentials, in which logging out of the web-app and retrying can fix the problem."
@@ -83,6 +142,10 @@
     "message": "An unknown error occurred. Please sign out of Chromoting and try again.",
     "description": "Generic error message, displayed if something went wrong, but we aren't able to determine what, or the cause is too technical to be of use to a typical user."
   },
+  "ERROR_HOST_OVERLOAD": {
+    "message": "Connections to the remote computer are temporarily blocked because somebody was trying to connect to it with invalid PIN. Please try again later.",
+    "description": "Error that is shown on the client side when the host is blocking all connections due to failed authentication attempts."
+  },
   "ERROR_HOST_IS_OFFLINE": {
     "message": "The remote computer is not responding to connection requests. Please verify that it is online and try again.",
     "description": "Error that is shown on the client side when we don't get a response from the host."
@@ -94,6 +157,10 @@
   "ERROR_INVALID_ACCESS_CODE": {
     "message": "The access code is invalid. Please try again.",
     "description": "Error displayed if an invalid access code is entered."
+  },
+  "ERROR_NETWORK_FAILURE": {
+    "message": "Unable to reach the host. This is probably due to the configuration of the network you are using.",
+    "description": "Error displayed when the host is online, but we are unable to connect to it due to network configuration."
   },
   "ERROR_MISSING_PLUGIN": {
     "message": "Some components required for Chromoting are missing. Please make sure you're running the latest version of Chromium and try again.",
@@ -120,19 +187,35 @@
     "description": "Help link, displayed in the top-left (assuming ltr layout) corner of the main screen. Clicking this takes the user to our FAQ."
   },
   "HOME_ACCESS_BUTTON": {
-    "message": "Access Now",
+    "message": "Access",
     "description": "Clicking this button starts the desktop access process."
   },
   "HOME_ACCESS_DESCRIPTION": {
     "message": "See and control a shared computer.",
     "description": "Description of the 'access' or 'client' functionality, displayed next to a button that instigates an access operation."
   },
-  "HOME_MY_COMPUTERS_TITLE": {
-    "message": "My Computers",
-    "description": "Title for the portion of the home page showing the list of hosts the user has previously registered for remote access at any time."
+  "HOME_DAEMON_ACTIVE_MESSAGE": {
+    "message": "You may securely access this computer from anywhere you sign in to Chromoting.",
+    "description": "Message displayed when the current computer is accepting remote connections."
+  },
+  "HOME_DAEMON_CHANGE_PIN_LINK": {
+    "message": "Change PIN",
+    "description": "Hyperlink displayed immediately after the message indicating that the current computer is accepting remote connectins. Clicking this link allows the user to change the PIN (personal identification number) for accessing this host."
+  },
+  "HOME_DAEMON_STOP_BUTTON": {
+    "message": "Disable remote connections",
+    "description": "Button displayed when the current computer is accepting remote connections. Clicking this button causes it to stop accepting remote connections."
+  },
+  "HOME_DAEMON_START_BUTTON": {
+    "message": "Enable remote connections",
+    "description": "Button displayed when the current computer is not accepting remote connections. Clicking this button causes it to start accepting remote connections."
+  },
+  "HOME_DAEMON_START_MESSAGE": {
+    "message": "To securely access this computer from anywhere you sign in to Chromoting, you must first enable remote connections.",
+    "description": "Message displayed when the current computer is not accepting remote connections, instructing the user how to enable them."
   },
   "HOME_SHARE_BUTTON": {
-    "message": "Share Now",
+    "message": "Share",
     "description": "Clicking this button starts the desktop sharing process."
   },
   "HOME_SHARE_DESCRIPTION": {
@@ -142,6 +225,10 @@
   "HOME_SHARE_DESCRIPTION_CHROME_OS": {
     "message": "(this feature is not yet available for Chromebooks\u2026 stay tuned)",
     "description": "Text displayed below the description of the 'share' or 'host' functionality on ChromeOS devices, where it is not yet supported."
+  },
+  "INCOMING_CONNECTIONS": {
+    "message": "To this computer",
+    "description": "In the connection history dialog, clicking this button shows only recent connections to this computer."
   },
   "INSTRUCTIONS_SHARE_ABOVE": {
     "message": "To begin sharing your desktop, give the access code below to the person who will be assisting you.",
@@ -154,10 +241,6 @@
   "LABEL_CONNECTED": {
     "message": "Connected:",
     "description": "String displayed in front of the host when a connection is active informing the client user who they are connected to."
-  },
-  "MESSAGE_CONNECTING": {
-    "message": "Connecting\u2026",
-    "description": "Message displayed on the client while a connection to the host is being established."
   },
   "MESSAGE_GENERATING": {
     "message": "Generating access code\u2026",
@@ -181,25 +264,45 @@
     "message": "Authorize",
     "description": "Sub-title for the one-time authorization step. Displayed after the product name and separated by a chevron."
   },
-  "MODE_CONNECT": {
-    "message": "Connect",
-    "description": "Sub-title for the client app. Displayed after the product name and separated by a chevron."
+  "MODE_IT2ME": {
+    "message": "Remote Assistance",
+    "description": "Sub-title for the remote assistance section of the UI, which contains buttons to share this computer or to connect to another computer, both on a one-off basis."
   },
-  "MODE_SHARE": {
-    "message": "Share",
-    "description": "Sub-title for the host app. Displayed after the product name and separated by a chevron."
+  "MODE_ME2ME": {
+    "message": "My Computers",
+    "description": "Sub-title for the remote access section of the UI, which contains a list of currently-shared hosts and a button to enable this computer for long-term sharing."
   },
   "OK": {
     "message": "OK",
     "description": "Label for general-purpose OK buttons."
   },
   "OFFLINE": {
-    "message": "Offline",
-    "description": "Label indicating that a host in the list is not currently available for remote access."
+    "message": "$hostname$ (offline)",
+    "description": "Modified version of the host name shown for hosts that are not currently accessible.",
+    "placeholders": {
+      "hostname": {
+        "content": "$1",
+        "example": "My Linux desktop"
+      }
+    }
+  },
+  "OUTGOING_CONNECTIONS": {
+    "message": "From this computer",
+    "description": "In the connection history dialog, clicking this button shows only recent connections from this computer."
   },
   "PIN": {
     "message": "PIN",
     "description": "Label for the PIN entry box."
+  },
+  "PIN_MESSAGE": {
+    "message": "Please enter your PIN for $hostname$.",
+    "description": "Message displayed to the user asking them to enter a PIN for the host they are connecting to.",
+    "placeholders": {
+      "hostname": {
+        "content": "$1",
+        "example": "My Linux desktop"
+      }
+    }
   },
   "PRODUCT_DESCRIPTION": {
     "message": "Access other computers or allow another user to access your computer securely over the Internet.",
@@ -213,6 +316,10 @@
     "message": "Reconnect",
     "description": "Label for button to reconnect to the previous Me2Me host. This button appears on the 'session-finished' page."
   },
+  "RETRY": {
+    "message": "Retry",
+    "description": "Label for button to retry connecting to a Me2Me host, after failing to connect to that host. This button appears on the 'session-finished' page."
+  },
   "SIGN_OUT_BUTTON": {
     "message": "Sign out",
     "description": "Sign out button, visible if the user has authenticated. Clicking this clears authentication credentials and returns the web-app to the initial 'unauthenticated' state."
@@ -221,9 +328,31 @@
     "message": "Stop Sharing",
     "description": "Label for the 'stop sharing' button on the host-side. Clicking this button disconnects the client."
   },
+  "TIME_HEADER": {
+    "message": "Time",
+    "description": "Column header in the connection history table showing the time and date of a connection."
+  },
+  "TOOLTIP_CONNECT": {
+    "message": "Connect to $hostname$",
+    "description": "The tool-tip shown when the user hovers over an on-line host. Clicking the host will initiate a connection to it.",
+    "placeholders": {
+      "hostname": {
+        "content": "$1",
+        "example": "My Linux desktop"
+      }
+    }
+  },
+  "TOOLTIP_DELETE": {
+    "message": "Disable remote connections to this computer",
+    "description": "The tool-tip shown when the user hovers over the 'delete host' button. Clicking this button removes the host from the list and disables connections to it."
+  },
   "TOOLTIP_SCALING": {
     "message": "Scale to fit",
     "description": "The tool-tip shown when the user hovers over the scale to fit button. Clicking this button toggles between scaling down the remote desktop to fit it inside the Chromium browser window and displaying it at 1:1 scale."
+  },
+  "TOOLTIP_RENAME": {
+    "message": "Edit computer name",
+    "description": "The tool-tip shown when the user hovers over the 'rename host' button. Clicking this button allows the host name to be edited in-place."
   },
   "WARNING_NAT_DISABLED": {
     "message": "NOTE: Policy settings permit connections only between computers within your network.",

@@ -8,7 +8,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/navigation_controller.h"
@@ -21,6 +21,7 @@
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 
+using content::RenderViewHost;
 using content::SiteInstance;
 
 class RenderViewHostManagerTest : public InProcessBrowserTest {
@@ -41,6 +42,84 @@ class RenderViewHostManagerTest : public InProcessBrowserTest {
   }
 };
 
+// Web pages should not have script access to the swapped out page.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, NoScriptAccessAfterSwapOut) {
+  // Start two servers with different sites.
+  ASSERT_TRUE(test_server()->Start());
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
+      FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server.Start());
+
+  // Load a page with links that open in a new window.
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/click-noreferrer-links.html",
+      https_server.host_port_pair(),
+      &replacement_path));
+  ui_test_utils::NavigateToURL(browser(),
+                               test_server()->GetURL(replacement_path));
+
+  // Get the original SiteInstance for later comparison.
+  scoped_refptr<SiteInstance> orig_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_TRUE(orig_site_instance != NULL);
+
+  // Open a same-site link in a new tab.
+  ui_test_utils::WindowedNotificationObserver new_tab_observer(
+      content::NOTIFICATION_TAB_ADDED,
+      content::Source<content::WebContentsDelegate>(browser()));
+  bool success = false;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+      &success));
+  EXPECT_TRUE(success);
+  new_tab_observer.Wait();
+
+  // Opens in new tab.
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Wait for the navigation in the new tab to finish, if it hasn't.
+  ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
+  EXPECT_EQ("/files/navigate_opener.html",
+            browser()->GetSelectedWebContents()->GetURL().path());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Should have the same SiteInstance.
+  scoped_refptr<SiteInstance> blank_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance, blank_site_instance);
+
+  // We should have access to the opened tab's location.
+  browser()->ActivateTabAt(0, true);
+  success = false;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(testScriptAccessToWindow());",
+      &success));
+  EXPECT_TRUE(success);
+
+  // Now navigate the new tab to a different site.
+  browser()->ActivateTabAt(1, true);
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server.GetURL("files/title1.html"));
+  scoped_refptr<SiteInstance> new_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_NE(orig_site_instance, new_site_instance);
+
+  // We should no longer have script access to the opened tab's location.
+  browser()->ActivateTabAt(0, true);
+  success = false;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(testScriptAccessToWindow());",
+      &success));
+  EXPECT_FALSE(success);
+}
+
 // Test for crbug.com/24447.  Following a cross-site link with rel=noreferrer
 // and target=_blank should create a new SiteInstance.
 IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
@@ -49,6 +128,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
@@ -97,6 +177,64 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_NE(orig_site_instance, noref_blank_site_instance);
 }
 
+// As of crbug.com/69267, we create a new BrowsingInstance (and SiteInstance)
+// for rel=noreferrer links in new windows, even to same site pages and named
+// targets.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
+                       SwapProcessWithSameSiteRelNoreferrer) {
+  // Start two servers with different sites.
+  ASSERT_TRUE(test_server()->Start());
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
+      FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server.Start());
+
+  // Load a page with links that open in a new window.
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/click-noreferrer-links.html",
+      https_server.host_port_pair(),
+      &replacement_path));
+  ui_test_utils::NavigateToURL(browser(),
+                               test_server()->GetURL(replacement_path));
+
+  // Get the original SiteInstance for later comparison.
+  scoped_refptr<SiteInstance> orig_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_TRUE(orig_site_instance != NULL);
+
+  // Test clicking a same-site rel=noreferrer + target=foo link.
+  bool success = false;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(clickSameSiteNoRefTargetedLink());",
+      &success));
+  EXPECT_TRUE(success);
+
+  // Wait for the tab to open.
+  if (browser()->tab_count() < 2)
+    ui_test_utils::WaitForNewTab(browser());
+
+  // Opens in new tab.
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, browser()->active_index());
+  EXPECT_EQ("/files/title2.html",
+            browser()->GetSelectedWebContents()->GetURL().path());
+
+  // Wait for the cross-site transition in the new tab to finish.
+  ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
+  TabContents* tab_contents = static_cast<TabContents*>(
+      browser()->GetSelectedWebContents());
+  EXPECT_FALSE(tab_contents->GetRenderManagerForTesting()->
+      pending_render_view_host());
+
+  // Should have a new SiteInstance (in a new BrowsingInstance).
+  scoped_refptr<SiteInstance> noref_blank_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_NE(orig_site_instance, noref_blank_site_instance);
+}
+
 // Test for crbug.com/24447.  Following a cross-site link with just
 // target=_blank should not create a new SiteInstance.
 IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
@@ -105,6 +243,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
@@ -157,6 +296,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
@@ -197,6 +337,173 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
   EXPECT_EQ(orig_site_instance, noref_site_instance);
 }
 
+// Test for crbug.com/116192.  Targeted links should still work after the
+// named target window has swapped processes.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
+                       AllowTargetedNavigationsAfterSwap) {
+  // Start two servers with different sites.
+  ASSERT_TRUE(test_server()->Start());
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
+      FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server.Start());
+
+  // Load a page with links that open in a new window.
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/click-noreferrer-links.html",
+      https_server.host_port_pair(),
+      &replacement_path));
+  ui_test_utils::NavigateToURL(browser(),
+                               test_server()->GetURL(replacement_path));
+
+  // Get the original SiteInstance for later comparison.
+  scoped_refptr<SiteInstance> orig_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_TRUE(orig_site_instance != NULL);
+
+  // Test clicking a target=foo link.
+  ui_test_utils::WindowedNotificationObserver new_tab_observer(
+      content::NOTIFICATION_TAB_ADDED,
+      content::Source<content::WebContentsDelegate>(browser()));
+  bool success = false;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+      &success));
+  EXPECT_TRUE(success);
+  new_tab_observer.Wait();
+
+  // Opens in new tab.
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Wait for the navigation in the new tab to finish, if it hasn't.
+  ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
+  EXPECT_EQ("/files/navigate_opener.html",
+            browser()->GetSelectedWebContents()->GetURL().path());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Should have the same SiteInstance.
+  scoped_refptr<SiteInstance> blank_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance, blank_site_instance);
+
+  // Now navigate the new tab to a different site.
+  //browser()->ActivateTabAt(1, true);
+  content::WebContents* new_contents = browser()->GetSelectedWebContents();
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server.GetURL("files/title1.html"));
+  scoped_refptr<SiteInstance> new_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_NE(orig_site_instance, new_site_instance);
+
+  // Clicking the original link in the first tab should cause us to swap back.
+  browser()->ActivateTabAt(0, true);
+  ui_test_utils::WindowedNotificationObserver navigation_observer(
+        content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+        content::Source<content::NavigationController>(
+            &new_contents->GetController()));
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+      &success));
+  EXPECT_TRUE(success);
+  navigation_observer.Wait();
+
+  // Should have swapped back and shown the new tab again.
+  EXPECT_EQ(1, browser()->active_index());
+  scoped_refptr<SiteInstance> revisit_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance, revisit_site_instance);
+}
+
+// Test for crbug.com/116192.  Navigations to a window's opener should
+// still work after a process swap.
+IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest,
+                       AllowTargetedNavigationsInOpenerAfterSwap) {
+  // Start two servers with different sites.
+  ASSERT_TRUE(test_server()->Start());
+  net::TestServer https_server(
+      net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
+      FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server.Start());
+
+  // Load a page with links that open in a new window.
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/click-noreferrer-links.html",
+      https_server.host_port_pair(),
+      &replacement_path));
+  ui_test_utils::NavigateToURL(browser(),
+                               test_server()->GetURL(replacement_path));
+
+  // Get the original tab and SiteInstance for later comparison.
+  content::WebContents* orig_contents = browser()->GetSelectedWebContents();
+  scoped_refptr<SiteInstance> orig_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_TRUE(orig_site_instance != NULL);
+
+  // Test clicking a target=foo link.
+  ui_test_utils::WindowedNotificationObserver new_tab_observer(
+      content::NOTIFICATION_TAB_ADDED,
+      content::Source<content::WebContentsDelegate>(browser()));
+  bool success = false;
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(clickSameSiteTargetedLink());",
+      &success));
+  EXPECT_TRUE(success);
+  new_tab_observer.Wait();
+
+  // Opens in new tab.
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Wait for the navigation in the new tab to finish, if it hasn't.
+  ui_test_utils::WaitForLoadStop(browser()->GetSelectedWebContents());
+  EXPECT_EQ("/files/navigate_opener.html",
+            browser()->GetSelectedWebContents()->GetURL().path());
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Should have the same SiteInstance.
+  scoped_refptr<SiteInstance> blank_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance, blank_site_instance);
+
+  // Now navigate the original (opener) tab to a different site.
+  browser()->ActivateTabAt(0, true);
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server.GetURL("files/title1.html"));
+  scoped_refptr<SiteInstance> new_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_NE(orig_site_instance, new_site_instance);
+
+  // The opened tab should be able to navigate the opener back to its process.
+  browser()->ActivateTabAt(1, true);
+  ui_test_utils::WindowedNotificationObserver navigation_observer(
+        content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+        content::Source<content::NavigationController>(
+            &orig_contents->GetController()));
+  EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
+      L"window.domAutomationController.send(navigateOpener());",
+      &success));
+  EXPECT_TRUE(success);
+  navigation_observer.Wait();
+
+  // Active tab should not have changed.
+  EXPECT_EQ(1, browser()->active_index());
+
+  // Should have swapped back into this process.
+  browser()->ActivateTabAt(0, true);
+  scoped_refptr<SiteInstance> revisit_site_instance(
+      browser()->GetSelectedWebContents()->GetSiteInstance());
+  EXPECT_EQ(orig_site_instance, revisit_site_instance);
+}
+
 // Test for crbug.com/76666.  A cross-site navigation that fails with a 204
 // error should not make us ignore future renderer-initiated navigations.
 IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, ClickLinkAfter204Error) {
@@ -204,6 +511,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, ClickLinkAfter204Error) {
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
@@ -263,6 +571,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, BackForwardNotStale) {
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(
       net::TestServer::TYPE_HTTPS,
+      net::TestServer::kLocalhost,
       FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 
@@ -432,6 +741,7 @@ IN_PROC_BROWSER_TEST_F(RenderViewHostManagerTest, LeakingRenderViewHosts) {
   // Start two servers with different sites.
   ASSERT_TRUE(test_server()->Start());
   net::TestServer https_server(net::TestServer::TYPE_HTTPS,
+                               net::TestServer::kLocalhost,
                                FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(https_server.Start());
 

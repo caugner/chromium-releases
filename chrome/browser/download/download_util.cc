@@ -32,13 +32,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/time_format.h"
-#include "content/browser/download/download_create_info.h"
-#include "content/browser/download/download_file.h"
-#include "content/browser/download/download_types.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -51,13 +48,18 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/bytes_formatting.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
 
 #if defined(TOOLKIT_VIEWS)
+#include "ui/base/dragdrop/drag_utils.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "ui/views/drag_utils.h"
+#if !defined(TOOLKIT_USES_GTK)
+#include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/gfx/screen.h"
+#include "ui/views/widget/widget.h"
+#endif
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
@@ -82,15 +84,14 @@
 // the same value on all platforms.
 static const double PI = 3.141592653589793;
 
-using content::DownloadFile;
 using content::DownloadItem;
 
 namespace {
 
 // Returns a string constant to be used as the |danger_type| value in
 // CreateDownloadItemValue().  We only return strings for DANGEROUS_FILE,
-// DANGEROUS_URL and DANGEROUS_CONTENT because the |danger_type| value is only
-// defined if the value of |state| is |DANGEROUS|.
+// DANGEROUS_URL, DANGEROUS_CONTENT, and UNCOMMON_CONTENT because the
+// |danger_type| value is only defined if the value of |state| is |DANGEROUS|.
 const char* GetDangerTypeString(content::DownloadDangerType danger_type) {
   switch (danger_type) {
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
@@ -99,6 +100,8 @@ const char* GetDangerTypeString(content::DownloadDangerType danger_type) {
       return "DANGEROUS_URL";
     case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
       return "DANGEROUS_CONTENT";
+    case content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT:
+      return "UNCOMMON_CONTENT";
     default:
       // We shouldn't be returning a danger type string if it is
       // NOT_DANGEROUS or MAYBE_DANGEROUS_CONTENT.
@@ -263,7 +266,7 @@ void PaintDownloadProgress(gfx::Canvas* canvas,
     foreground_paint.setShader(shader);
     foreground_paint.setAntiAlias(true);
     shader->unref();
-    canvas->GetSkCanvas()->drawPath(path, foreground_paint);
+    canvas->sk_canvas()->drawPath(path, foreground_paint);
     return;
   }
 
@@ -303,7 +306,7 @@ void PaintDownloadComplete(gfx::Canvas* canvas,
                    PI/2) / 2 + 0.5;
 
   canvas->SaveLayerAlpha(static_cast<int>(255.0 * opacity), complete_bounds);
-  canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
+  canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
   canvas->DrawBitmapInt(*complete, complete_bounds.x(), complete_bounds.y());
   canvas->Restore();
 }
@@ -339,7 +342,7 @@ void PaintDownloadInterrupted(gfx::Canvas* canvas,
           0.5;
 
   canvas->SaveLayerAlpha(static_cast<int>(255.0 * opacity), complete_bounds);
-  canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
+  canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
   canvas->DrawBitmapInt(*complete, complete_bounds.x(), complete_bounds.y());
   canvas->Restore();
 }
@@ -377,7 +380,7 @@ void DragDownload(const DownloadItem* download,
 
   if (icon) {
     drag_utils::CreateDragImageForFile(
-        download->GetFileNameToReportUser(), *icon, &data);
+        download->GetFileNameToReportUser(), icon->ToSkBitmap(), &data);
   }
 
   const FilePath full_path = download->GetFullPath();
@@ -393,17 +396,20 @@ void DragDownload(const DownloadItem* download,
                 download->GetFileNameToReportUser().LossyDisplayName());
   }
 
-#if defined(USE_AURA)
-  // TODO(beng):
-  NOTIMPLEMENTED();
-#elif defined(OS_WIN)
-  scoped_refptr<ui::DragSource> drag_source(new ui::DragSource);
+#if !defined(TOOLKIT_USES_GTK)
+  views::Widget* widget = views::Widget::GetWidgetForNativeView(view);
+  // TODO(varunjain): Widget should not be NULL here. But its causing the crash
+  // in http://code.google.com/p/chromium/issues/detail?id=120430 Find out why.
+  if (!widget || !widget->native_widget())
+    return;
 
-  // Run the drag and drop loop
-  DWORD effects;
-  DoDragDrop(ui::OSExchangeDataProviderWin::GetIDataObject(data),
-             drag_source.get(), DROPEFFECT_COPY | DROPEFFECT_LINK, &effects);
-#elif defined(TOOLKIT_USES_GTK)
+  gfx::Point location = gfx::Screen::GetCursorScreenPoint();
+  // We do not care about notifying the DragItemView on completion of drag. So
+  // we pass NULL to RunShellDrag for the source view.
+  widget->RunShellDrag(NULL, data, location,
+      ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK);
+
+#else
   GtkWidget* root = gtk_widget_get_toplevel(view);
   if (!root)
     return;
@@ -415,7 +421,7 @@ void DragDownload(const DownloadItem* download,
 
   widget->DoDrag(data,
                  ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK);
-#endif  // OS_WIN
+#endif  // TOOLKIT_USES_GTK
 }
 #elif defined(USE_X11)
 void DragDownload(const DownloadItem* download,
@@ -461,7 +467,9 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
              download->GetDangerType() ==
                  content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
              download->GetDangerType() ==
-                 content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
+                 content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT ||
+             download->GetDangerType() ==
+                 content::DOWNLOAD_DANGER_TYPE_UNCOMMON_CONTENT);
       const char* danger_type_value =
           GetDangerTypeString(download->GetDangerType());
       file_value->SetString("danger_type", danger_type_value);
@@ -593,18 +601,17 @@ void UpdateAppIconDownloadProgress(int download_count,
 #endif
 
 int GetUniquePathNumberWithCrDownload(const FilePath& path) {
-  return DownloadFile::GetUniquePathNumberWithSuffix(
+  return file_util::GetUniquePathNumber(
       path, FILE_PATH_LITERAL(".crdownload"));
 }
 
 FilePath GetCrDownloadPath(const FilePath& suggested_path) {
-  return DownloadFile::AppendSuffixToPath(
-      suggested_path, FILE_PATH_LITERAL(".crdownload"));
+  return FilePath(suggested_path.value() + FILE_PATH_LITERAL(".crdownload"));
 }
 
 bool IsSavableURL(const GURL& url) {
-  for (int i = 0; chrome::GetSavableSchemes()[i] != NULL; ++i) {
-    if (url.SchemeIs(chrome::GetSavableSchemes()[i])) {
+  for (int i = 0; content::GetSavableSchemes()[i] != NULL; ++i) {
+    if (url.SchemeIs(content::GetSavableSchemes()[i])) {
       return true;
     }
   }
@@ -632,7 +639,12 @@ void RecordShelfClose(int size, int in_progress, bool autoclose) {
 
 void RecordDownloadCount(ChromeDownloadCountTypes type) {
   UMA_HISTOGRAM_ENUMERATION(
-      "Download.CountsChrome", type, DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
+      "Download.CountsChrome", type, CHROME_DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
+}
+
+void RecordDownloadSource(ChromeDownloadSource source) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Download.SourcesChrome", source, CHROME_DOWNLOAD_SOURCE_LAST_ENTRY);
 }
 
 }  // namespace download_util

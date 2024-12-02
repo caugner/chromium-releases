@@ -31,7 +31,6 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_field_trial.h"
-#include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
@@ -40,10 +39,12 @@
 #include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extensions_startup.h"
-#include "chrome/browser/first_run/first_run_browser_process.h"
 #include "chrome/browser/first_run/upgrade_util.h"
+#include "chrome/browser/google/google_search_counter.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/gpu_blacklist.h"
+#include "chrome/browser/gpu_util.h"
 #include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/jankometer.h"
 #include "chrome/browser/language_usage_metrics.h"
@@ -55,23 +56,25 @@
 #include "chrome/browser/metrics/tracking_synchronizer.h"
 #include "chrome/browser/nacl_host/nacl_process_host.h"
 #include "chrome/browser/net/chrome_net_log.h"
+#include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/predictor.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
+#include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
+#include "chrome/browser/printing/cloud_print/cloud_print_proxy_service_factory.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/search_engine_type.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/translate/translate_manager.h"
@@ -79,7 +82,6 @@
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_trial.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -94,9 +96,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "content/browser/gpu/gpu_blacklist.h"
-#include "content/browser/gpu/gpu_data_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/main_function_params.h"
 #include "grit/app_locale_settings.h"
@@ -104,9 +105,9 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/platform_locale_settings.h"
-#include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
 #include "net/base/sdch_manager.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/http/http_basic_stream.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_stream_factory.h"
@@ -149,7 +150,6 @@
 #include "chrome/browser/first_run/try_chrome_dialog_view.h"
 #include "chrome/browser/first_run/upgrade_util_win.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/ui/views/user_data_dir_dialog.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
@@ -163,8 +163,11 @@
 #include <Security/Security.h>
 
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "chrome/browser/mac/install_from_dmg.h"
 #include "chrome/browser/mac/keystone_glue.h"
+#endif
+
+#if defined(ENABLE_RLZ)
+#include "chrome/browser/rlz/rlz.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -181,6 +184,7 @@
 #endif
 
 #if defined(USE_AURA)
+#include "ash/shell.h"
 #include "ui/aura/root_window.h"
 #endif
 
@@ -236,9 +240,6 @@ void InitializeNetworkOptions(const CommandLine& parsed_command_line) {
     // Profile (and therefore the first CookieMonster) is created.
     net::CookieMonster::EnableFileScheme();
   }
-
-  if (parsed_command_line.HasSwitch(switches::kEnableMacCookies))
-    net::URLRequest::EnableMacCookies();
 
   if (parsed_command_line.HasSwitch(switches::kIgnoreCertificateErrors))
     net::HttpStreamFactory::set_ignore_certificate_errors(true);
@@ -452,22 +453,19 @@ Profile* CreateProfile(const content::MainFunctionParams& parameters,
 // Load GPU Blacklist, collect preliminary gpu info, and compute preliminary
 // gpu feature flags.
 void InitializeGpuDataManager(const CommandLine& parsed_command_line) {
-  GpuDataManager::GetInstance();
-
-  if (parsed_command_line.HasSwitch(switches::kSkipGpuDataLoading))
+  content::GpuDataManager::GetInstance();
+  if (parsed_command_line.HasSwitch(switches::kSkipGpuDataLoading) ||
+      parsed_command_line.HasSwitch(switches::kIgnoreGpuBlacklist))
     return;
 
   const base::StringPiece gpu_blacklist_json(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_GPU_BLACKLIST));
-  chrome::VersionInfo version_info;
-  std::string chrome_version_string =
-      version_info.is_valid() ? version_info.Version() : "0";
-  GpuBlacklist* gpu_blacklist = new GpuBlacklist(chrome_version_string);
+  GpuBlacklist* gpu_blacklist = GpuBlacklist::GetInstance();
   bool succeed = gpu_blacklist->LoadGpuBlacklist(
       gpu_blacklist_json.as_string(), GpuBlacklist::kCurrentOsOnly);
   DCHECK(succeed);
-  GpuDataManager::GetInstance()->SetGpuBlacklist(gpu_blacklist);
+  gpu_blacklist->UpdateGpuDataManager();
 }
 
 #if defined(OS_MACOSX)
@@ -476,33 +474,6 @@ OSStatus KeychainCallback(SecKeychainEvent keychain_event,
   return noErr;
 }
 #endif
-
-#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
-void RegisterTranslateableItems(void) {
-  struct {
-    const char* stock_id;
-    int resource_id;
-  } translations[] = {
-    { GTK_STOCK_COPY, IDS_COPY },
-    { GTK_STOCK_CUT, IDS_CUT },
-    { GTK_STOCK_PASTE, IDS_PASTE },
-    { GTK_STOCK_DELETE, IDS_DELETE },
-    { GTK_STOCK_SELECT_ALL, IDS_SELECT_ALL },
-    { NULL, -1 }
-  }, *trans;
-
-  for (trans = translations; trans->stock_id; trans++) {
-    GtkStockItem stock_item;
-    if (gtk_stock_lookup(trans->stock_id, &stock_item)) {
-      std::string trans_label = gfx::ConvertAcceleratorsFromWindowsStyle(
-          l10n_util::GetStringUTF8(trans->resource_id));
-      stock_item.label = g_strdup(trans_label.c_str());
-      gtk_stock_add(&stock_item, 1);
-      g_free(stock_item.label);
-    }
-  }
-}
-#endif  // defined(OS_CHROMEOS)
 
 void SetSocketReusePolicy(int warmest_socket_trial_group,
                           const int socket_policy[],
@@ -664,19 +635,22 @@ void ChromeBrowserMainParts::ConnectionFieldTrial() {
 
   const int connect_trial_group = connect_trial->group();
 
+  int max_sockets = 0;
   if (connect_trial_group == connect_5) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(5);
+    max_sockets = 5;
   } else if (connect_trial_group == connect_6) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(6);
+    max_sockets = 6;
   } else if (connect_trial_group == connect_7) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(7);
+    max_sockets = 7;
   } else if (connect_trial_group == connect_8) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(8);
+    max_sockets = 8;
   } else if (connect_trial_group == connect_9) {
-    net::ClientSocketPoolManager::set_max_sockets_per_group(9);
+    max_sockets = 9;
   } else {
     NOTREACHED();
   }
+  net::ClientSocketPoolManager::set_max_sockets_per_group(
+      net::HttpNetworkSession::NORMAL_SOCKET_POOL, max_sockets);
 }
 
 // A/B test for determining a value for unused socket timeout. Currently the
@@ -749,15 +723,18 @@ void ChromeBrowserMainParts::ProxyConnectionsFieldTrial() {
 
   const int proxy_connections_trial_group = proxy_connection_trial->group();
 
+  int max_sockets = 0;
   if (proxy_connections_trial_group == proxy_connections_16) {
-    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(16);
+    max_sockets = 16;
   } else if (proxy_connections_trial_group == proxy_connections_32) {
-    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(32);
+    max_sockets = 32;
   } else if (proxy_connections_trial_group == proxy_connections_64) {
-    net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(64);
+    max_sockets = 64;
   } else {
     NOTREACHED();
   }
+  net::ClientSocketPoolManager::set_max_sockets_per_proxy_server(
+      net::HttpNetworkSession::NORMAL_SOCKET_POOL, max_sockets);
 }
 
 // When --use-spdy not set, users will be in A/B test for spdy.
@@ -772,36 +749,61 @@ void ChromeBrowserMainParts::SpdyFieldTrial() {
     std::string spdy_mode =
         parsed_command_line().GetSwitchValueASCII(switches::kUseSpdy);
     net::HttpNetworkLayer::EnableSpdy(spdy_mode);
+  }
+  if (parsed_command_line().HasSwitch(switches::kEnableSpdy3)) {
+    net::HttpStreamFactory::EnableNpnSpdy3();
+  } else if (parsed_command_line().HasSwitch(
+             switches::kEnableSpdyFlowControl)) {
+    net::HttpStreamFactory::EnableFlowControl();
+  } else if (parsed_command_line().HasSwitch(switches::kEnableNpn)) {
+    net::HttpStreamFactory::EnableNpnSpdy();
+  } else if (parsed_command_line().HasSwitch(switches::kEnableNpnHttpOnly)) {
+    net::HttpStreamFactory::EnableNpnHttpOnly();
   } else {
 #if !defined(OS_CHROMEOS)
     bool is_spdy_trial = false;
     const base::FieldTrial::Probability kSpdyDivisor = 100;
     base::FieldTrial::Probability npnhttp_probability = 5;
+    base::FieldTrial::Probability flow_control_probability = 5;
+    base::FieldTrial::Probability spdy3_probability = 0;
 
     // After June 30, 2013 builds, it will always be in default group.
     scoped_refptr<base::FieldTrial> trial(
         new base::FieldTrial(
             "SpdyImpact", kSpdyDivisor, "npn_with_spdy", 2013, 6, 30));
 
-    // npn with spdy support is the default.
+    // NPN with spdy support is the default.
     int npn_spdy_grp = trial->kDefaultGroupNumber;
 
-    // npn with only http support, no spdy.
+    // NPN with only http support, no spdy.
     int npn_http_grp = trial->AppendGroup("npn_with_http", npnhttp_probability);
 
+    // NPN with http/1.1, spdy/2, spdy/2.1 and spdy/3 support.
+    int spdy3_grp = trial->AppendGroup("spdy3", spdy3_probability);
+
+    // NPN with http/1.1, spdy/2 and spdy/2.1 support.
+    int flow_control_grp = trial->AppendGroup(
+        "flow_control", flow_control_probability);
+
     int trial_grp = trial->group();
-    if (trial_grp == npn_http_grp) {
+    if (trial_grp == npn_spdy_grp) {
       is_spdy_trial = true;
-      net::HttpNetworkLayer::EnableSpdy("npn-http");
-    } else if (trial_grp == npn_spdy_grp) {
+      net::HttpStreamFactory::EnableNpnSpdy();
+    } else if (trial_grp == npn_http_grp) {
       is_spdy_trial = true;
-      net::HttpNetworkLayer::EnableSpdy("npn");
+      net::HttpStreamFactory::EnableNpnHttpOnly();
+    } else if (trial_grp == spdy3_grp) {
+      is_spdy_trial = true;
+      net::HttpStreamFactory::EnableNpnSpdy3();
+    } else if (trial_grp == flow_control_grp) {
+      is_spdy_trial = true;
+      net::HttpStreamFactory::EnableFlowControl();
     } else {
       CHECK(!is_spdy_trial);
     }
 #else
     // Always enable SPDY on Chrome OS
-    net::HttpNetworkLayer::EnableSpdy("npn");
+    net::HttpStreamFactory::EnableNpnSpdy();
 #endif  // !defined(OS_CHROMEOS)
   }
 
@@ -1012,6 +1014,22 @@ void ChromeBrowserMainParts::AutoLaunchChromeFieldTrial() {
   }
 }
 
+void ChromeBrowserMainParts::ComodoDNSExperimentFieldTrial() {
+  // 100% probability of being in the experiment group until the timeout.
+  const base::FieldTrial::Probability kDivisor = 1;
+  const base::FieldTrial::Probability kProbability = 1;
+
+  // After April 15, 2012 builds, it will always be in default group.
+  scoped_refptr<base::FieldTrial> trial(
+      new base::FieldTrial("ComodoDNSExperiment", kDivisor,
+          "inactive", 2012, 4, 15));
+
+  const int active = trial->AppendGroup("active", kProbability);
+
+  if (trial->group() == active)
+    ChromeNetworkDelegate::EnableComodoDNSExperiment();
+}
+
 // ChromeBrowserMainParts: |SetupMetricsAndFieldTrials()| related --------------
 
 void ChromeBrowserMainParts::SetupFieldTrials(bool metrics_recording_enabled,
@@ -1032,8 +1050,8 @@ void ChromeBrowserMainParts::SetupFieldTrials(bool metrics_recording_enabled,
   PredictorFieldTrial();
   DefaultAppsFieldTrial();
   AutoLaunchChromeFieldTrial();
+  ComodoDNSExperimentFieldTrial();
   AutocompleteFieldTrial::Activate();
-  sync_promo_trial::Activate();
   NewTabUI::SetupFieldTrials();
 }
 
@@ -1109,6 +1127,10 @@ void ChromeBrowserMainParts::PreMainMessageLoopStart() {
     chrome_extra_parts_[i]->PreMainMessageLoopStart();
 }
 
+MessageLoop* ChromeBrowserMainParts::GetMainMessageLoop() {
+  return NULL;
+}
+
 void ChromeBrowserMainParts::PostMainMessageLoopStart() {
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostMainMessageLoopStart();
@@ -1137,27 +1159,35 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 #endif
 
   process_singleton_.reset(new ProcessSingleton(user_data_dir_));
+  // Ensure ProcessSingleton won't process messages too early. It will be
+  // unlocked in PostBrowserStart().
+  process_singleton_->Lock(NULL);
 
-  is_first_run_ = first_run::IsChromeFirstRun() ||
-      parsed_command_line().HasSwitch(switches::kFirstRun);
-
-  if (parsed_command_line().HasSwitch(switches::kImport) ||
-      parsed_command_line().HasSwitch(switches::kImportFromFile)) {
-    // We use different BrowserProcess when importing so no GoogleURLTracker is
-    // instantiated (as it makes a net::URLRequest and we don't have an IO
-    // thread, see bug #1292702).
-    browser_process_.reset(new FirstRunBrowserProcess(parsed_command_line()));
-    is_first_run_ = false;
-  } else {
-    browser_process_.reset(new BrowserProcessImpl(parsed_command_line()));
-  }
+  is_first_run_ =
+      (first_run::IsChromeFirstRun() ||
+          parsed_command_line().HasSwitch(switches::kFirstRun)) &&
+      !parsed_command_line().HasSwitch(switches::kImport) &&
+      !parsed_command_line().HasSwitch(switches::kImportFromFile);
+  browser_process_.reset(new BrowserProcessImpl(parsed_command_line()));
 
   if (parsed_command_line().HasSwitch(switches::kEnableProfiling)) {
     // User wants to override default tracking status.
     std::string flag =
       parsed_command_line().GetSwitchValueASCII(switches::kEnableProfiling);
-    bool enabled = flag.compare("0") != 0;
-    tracked_objects::ThreadData::InitializeAndSetTrackingStatus(enabled);
+    // Default to basic profiling (no parent child support).
+    tracked_objects::ThreadData::Status status =
+          tracked_objects::ThreadData::PROFILING_ACTIVE;
+    if (flag.compare("0") != 0)
+      status = tracked_objects::ThreadData::DEACTIVATED;
+    else if (flag.compare("child") != 0)
+      status = tracked_objects::ThreadData::PROFILING_CHILDREN_ACTIVE;
+    tracked_objects::ThreadData::InitializeAndSetTrackingStatus(status);
+  }
+
+  if (parsed_command_line().HasSwitch(switches::kProfilingOutputFile)) {
+    tracking_objects_.set_output_file_path(
+        parsed_command_line().GetSwitchValuePath(
+            switches::kProfilingOutputFile));
   }
 
   // This forces the TabCloseableStateWatcher to be created and, on chromeos,
@@ -1233,17 +1263,12 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 #endif  // defined(OS_WIN)
   }
 
-#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
-  // This needs to be called after the locale has been set.
-  RegisterTranslateableItems();
-#endif
-
   // On first run, we need to process the predictor preferences before the
   // browser's profile_manager object is created, but after ResourceBundle
   // is initialized.
   first_run_ui_bypass_ = false;  // True to skip first run UI.
   if (is_first_run_) {
-    first_run_ui_bypass_ = !FirstRun::ProcessMasterPreferences(
+    first_run_ui_bypass_ = !first_run::ProcessMasterPreferences(
         user_data_dir_, master_prefs_.get());
     AddFirstRunNewTabs(browser_init_.get(), master_prefs_->new_tabs);
 
@@ -1273,7 +1298,7 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   // just changed it to include experiments.
   child_process_logging::SetCommandLine(CommandLine::ForCurrentProcess());
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#if defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_MACOSX)
   // Set the product channel for crash reports.
   child_process_logging::SetChannel(
       chrome::VersionInfo::GetVersionStringModifier());
@@ -1356,6 +1381,8 @@ void ChromeBrowserMainParts::PreBrowserStart() {
 void ChromeBrowserMainParts::PostBrowserStart() {
   for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
     chrome_extra_parts_[i]->PostBrowserStart();
+  // Allow ProcessSingleton to process messages.
+  process_singleton_->Unlock();
 }
 
 int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
@@ -1482,10 +1509,8 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   // Autoload any profiles which are running background apps.
   // TODO(rlp): Do this on a separate thread. See http://crbug.com/99075.
-  if (!BackgroundModeManager::IsBackgroundModePermanentlyDisabled(
-      &parsed_command_line())) {
-    browser_process_->profile_manager()->AutoloadProfiles();
-  }
+  browser_process_->profile_manager()->AutoloadProfiles();
+
   // Post-profile init ---------------------------------------------------------
 
 #if !defined(OS_MACOSX)
@@ -1522,18 +1547,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   translate_manager_ = TranslateManager::GetInstance();
   DCHECK(translate_manager_ != NULL);
 
-#if defined(OS_MACOSX)
-  if (!parsed_command_line().HasSwitch(switches::kNoFirstRun)) {
-    // Disk image installation is sort of a first-run task, so it shares the
-    // kNoFirstRun switch.
-    if (MaybeInstallFromDiskImage()) {
-      // The application was installed and the installed copy has been
-      // launched.  This process is now obsolete.  Exit.
-      return content::RESULT_CODE_NORMAL_EXIT;
-    }
-  }
-#endif
-
   // TODO(stevenjb): Move WIN and MACOSX specific code to apprpriate Parts.
   // (requires supporting early exit).
   PostProfileInit();
@@ -1551,7 +1564,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
                             master_prefs_->dont_import_items,
                             master_prefs_->make_chrome_default,
                             process_singleton_.get());
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_CHROMEOS)
       // On Windows, the download is tagged with enable/disable stats so there
       // is no need for this code.
 
@@ -1559,7 +1572,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
       // the pref.
       if (GoogleUpdateSettings::GetCollectStatsConsent())
         local_state_->SetBoolean(prefs::kMetricsReportingEnabled, true);
-#endif  // OS_POSIX
+#endif  // OS_POSIX && !OS_CHROMEOS
     }  // if (!first_run_ui_bypass_)
 
     Browser::SetNewHomePagePrefs(profile_->GetPrefs());
@@ -1582,8 +1595,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     ChromeBrowserMainPartsWin::RegisterApplicationRestart(
         parsed_command_line());
   }
+#endif  // OS_WIN
 
-#if defined(GOOGLE_CHROME_BUILD)
+#if defined(ENABLE_RLZ)
   // Init the RLZ library. This just binds the dll and schedules a task on the
   // file thread to be run sometime later. If this is the first run we record
   // the installation event.
@@ -1615,8 +1629,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // for the startup page if needed (i.e., when the startup page is set to
   // the home page).
   RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, NULL);
-#endif  // GOOGLE_CHROME_BUILD
-#endif  // OS_WIN
+#endif  // defined(ENABLE_RLZ)
 
   // Configure modules that need access to resources.
   net::NetModule::SetResourceProvider(chrome_common_net::NetResourceProvider);
@@ -1635,6 +1648,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // need to read prefs that get set after that runs.
   browser_process_->google_url_tracker();
   browser_process_->intranet_redirect_detector();
+  GoogleSearchCounter::RegisterForNotifications();
 
   // Disable SDCH filtering if switches::kEnableSdch is 0.
   int sdch_enabled = 1;
@@ -1710,7 +1724,9 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // might have shutdown because an update was available.
   // TODO(torne): this should maybe be done with
   // ProfileKeyedServiceFactory::ServiceIsCreatedWithProfile() instead?
+#if !defined(OS_ANDROID)
   CloudPrintProxyServiceFactory::GetForProfile(profile_);
+#endif
 
   // Load GPU Blacklist.
   InitializeGpuDataManager(parsed_command_line());
@@ -1793,11 +1809,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
       // If we're running tests (ui_task is non-null), then we don't want to
       // call FetchLanguageListFromTranslateServer
       if (parameters().ui_task == NULL && translate_manager_ != NULL) {
-        // TODO(willchan): Get rid of this after TranslateManager doesn't use
-        // the default request context. http://crbug.com/89396.
-        // This is necessary to force |default_request_context_| to be
-        // initialized.
-        profile_->GetRequestContext();
         translate_manager_->FetchLanguageListFromTranslateServer(
             profile_->GetPrefs());
       }
@@ -1828,7 +1839,8 @@ bool ChromeBrowserMainParts::MainMessageLoopRun(int* result_code) {
   RecordBrowserStartupTime();
 
 #if defined(USE_AURA)
-  aura::RootWindow::GetInstance()->Run();
+  ash::Shell::GetRootWindow()->ShowRootWindow();
+  MessageLoopForUI::current()->Run();
 #elif defined(TOOLKIT_VIEWS)
   views::AcceleratorHandler accelerator_handler;
   MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
@@ -1863,11 +1875,11 @@ void ChromeBrowserMainParts::PostMainMessageLoopRun() {
     // The default engine can be NULL if the administrator has disabled
     // default search.
     SearchEngineType search_engine_type =
-        default_search_engine ? default_search_engine->search_engine_type() :
-                                SEARCH_ENGINE_OTHER;
+        TemplateURLPrepopulateData::GetEngineType(
+            (default_search_engine && default_search_engine->url()) ?
+            default_search_engine->url()->url() : std::string());
     // Record the search engine chosen.
-    UMA_HISTOGRAM_ENUMERATION("Chrome.SearchSelectExempt",
-                              search_engine_type,
+    UMA_HISTOGRAM_ENUMERATION("Chrome.SearchSelectExempt", search_engine_type,
                               SEARCH_ENGINE_MAX);
   }
 #endif
@@ -1931,9 +1943,8 @@ void RecordPreReadExperimentTime(const char* name, base::TimeDelta time) {
 
   // Only record the sub-histogram result if the experiment is running
   // (environment variable is set, and valid).
-  std::string pre_read;
-  if (env->GetVar(chrome::kPreReadEnvironmentVariable, &pre_read) &&
-      (pre_read == "0" || pre_read == "1")) {
+  std::string pre_read_percentage;
+  if (env->GetVar(chrome::kPreReadEnvironmentVariable, &pre_read_percentage)) {
     std::string uma_name(name);
 
     // We want XP to record a separate histogram, as the loader on XP
@@ -1941,8 +1952,8 @@ void RecordPreReadExperimentTime(const char* name, base::TimeDelta time) {
     if (base::win::GetVersion() <= base::win::VERSION_XP)
       uma_name += "_XP";
 
-    uma_name += "_PreRead";
-    uma_name += pre_read == "1" ? "Enabled" : "Disabled";
+    uma_name += "_PreRead_";
+    uma_name += pre_read_percentage;
     AddPreReadHistogramTime(uma_name.c_str(), time);
   }
 #endif

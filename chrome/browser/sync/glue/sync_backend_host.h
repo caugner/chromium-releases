@@ -8,24 +8,28 @@
 
 #include <string>
 
+#include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
-#include "chrome/browser/sync/engine/model_safe_worker.h"
-#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler.h"
+#include "chrome/browser/sync/glue/backend_data_type_configurer.h"
+#include "chrome/browser/sync/glue/chrome_extensions_activity_monitor.h"
+#include "chrome/browser/sync/glue/chrome_sync_notification_bridge.h"
 #include "chrome/browser/sync/internal_api/configure_reason.h"
 #include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/notifier/sync_notifier_factory.h"
-#include "chrome/browser/sync/protocol/encryption.pb.h"
-#include "chrome/browser/sync/protocol/sync_protocol_error.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/util/weak_handle.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "googleurl/src/gurl.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "sync/engine/model_safe_worker.h"
+#include "sync/protocol/encryption.pb.h"
+#include "sync/protocol/sync_protocol_error.h"
+#include "sync/syncable/model_type.h"
+#include "sync/util/report_unrecoverable_error_function.h"
+#include "sync/util/unrecoverable_error_handler.h"
+#include "sync/util/weak_handle.h"
 
 class MessageLoop;
 class Profile;
@@ -68,9 +72,9 @@ class SyncFrontend {
   // retried.
   virtual void OnSyncConfigureRetry() = 0;
 
-  // The backend encountered an authentication problem and requests new
-  // credentials to be provided. See SyncBackendHost::Authenticate for details.
-  virtual void OnAuthError() = 0;
+  // The status of the connection to the sync server has changed.
+  virtual void OnConnectionStatusChange(
+      sync_api::ConnectionStatus status) = 0;
 
   // We are no longer permitted to communicate with the server. Sync should
   // be disabled and state cleaned up at once.
@@ -138,9 +142,8 @@ class SyncFrontend {
 // syncapi element, the SyncManager, on its own thread. This class handles
 // dispatch of potentially blocking calls to appropriate threads and ensures
 // that the SyncFrontend is only accessed on the UI loop.
-class SyncBackendHost {
+class SyncBackendHost : public BackendDataTypeConfigurer {
  public:
-  typedef sync_api::SyncManager::Status::Summary StatusSummary;
   typedef sync_api::SyncManager::Status Status;
 
   // Create a SyncBackendHost with a reference to the |frontend| that
@@ -152,21 +155,24 @@ class SyncBackendHost {
                   const base::WeakPtr<SyncPrefs>& sync_prefs);
   // For testing.
   // TODO(skrul): Extract an interface so this is not needed.
-  SyncBackendHost();
+  explicit SyncBackendHost(Profile* profile);
   virtual ~SyncBackendHost();
 
   // Called on |frontend_loop_| to kick off asynchronous initialization.
   // As a fallback when no cached auth information is available, try to
   // bootstrap authentication using |lsid|, if it isn't empty.
   // Optionally delete the Sync Data folder (if it's corrupt).
-  // Note: |unrecoverable_error_handler| caould be invoked from any thread.
+  // |report_unrecoverable_error_function| can be NULL.
+  // Note: |unrecoverable_error_handler| may be invoked from any thread.
   void Initialize(SyncFrontend* frontend,
                   const WeakHandle<JsEventHandler>& event_handler,
                   const GURL& service_url,
                   syncable::ModelTypeSet initial_types,
                   const sync_api::SyncCredentials& credentials,
                   bool delete_sync_data_folder,
-                  UnrecoverableErrorHandler* unrecoverable_error_handler);
+                  UnrecoverableErrorHandler* unrecoverable_error_handler,
+                  ReportUnrecoverableErrorFunction
+                      report_unrecoverable_error_function);
 
   // Called from |frontend_loop| to update SyncCredentials.
   void UpdateCredentials(const sync_api::SyncCredentials& credentials);
@@ -177,19 +183,27 @@ class SyncBackendHost {
   // Called on |frontend_loop_|.
   virtual void StartSyncingWithServer();
 
-  // Called on |frontend_loop_| to asynchronously set the passphrase.
-  // |is_explicit| is true if the call is in response to the user setting a
-  // custom explicit passphrase as opposed to implicitly (from the users'
-  // perspective) using their Google Account password. An implicit SetPassphrase
-  // will *not* override an explicit passphrase set previously. Note that
-  // if the data is encrypted with an old Google Account password, the user
-  // may still have to provide a "implicit" passphrase.
-  // |user_provided| corresponds to the user having manually provided this
-  // passphrase. It should only be false for passphrases intercepted from the
-  // Google Sign-in Success notification and true otherwise.
-  void SetPassphrase(const std::string& passphrase,
-                     bool is_explicit,
-                     bool user_provided);
+  // Called on |frontend_loop_| to asynchronously set a new passphrase for
+  // encryption. Note that it is an error to call SetEncryptionPassphrase under
+  // the following circumstances:
+  // - An explicit passphrase has already been set
+  // - |is_explicit| is true and we have pending keys.
+  // When |is_explicit| is false, a couple of things could happen:
+  // - If there are pending keys, we try to decrypt them. If decryption works,
+  //   this acts like a call to SetDecryptionPassphrase. If not, the GAIA
+  //   passphrase passed in is cached so we can re-encrypt with it in future.
+  // - If there are no pending keys, data is encrypted with |passphrase| (this
+  //   is a no-op if data was already encrypted with |passphrase|.)
+  void SetEncryptionPassphrase(const std::string& passphrase, bool is_explicit);
+
+  // Called on |frontend_loop_| to use the provided passphrase to asynchronously
+  // attempt decryption. Returns false immediately if the passphrase could not
+  // be used to decrypt a locally cached copy of encrypted keys; returns true
+  // otherwise. If new encrypted keys arrive during the asynchronous call,
+  // OnPassphraseRequired may be triggered at a later time. It is an error to
+  // call this when there are no pending keys.
+  bool SetDecryptionPassphrase(const std::string& passphrase)
+      WARN_UNUSED_RESULT;
 
   // Called on |frontend_loop_| to kick off shutdown procedure. After this,
   // no further sync activity will occur with the sync server and no further
@@ -207,12 +221,12 @@ class SyncBackendHost {
   // set of all types that failed configuration (i.e., if its argument
   // is non-empty, then an error was encountered).
   virtual void ConfigureDataTypes(
+      sync_api::ConfigureReason reason,
       syncable::ModelTypeSet types_to_add,
       syncable::ModelTypeSet types_to_remove,
-      sync_api::ConfigureReason reason,
+      NigoriState nigori_state,
       base::Callback<void(syncable::ModelTypeSet)> ready_task,
-      base::Callback<void()> retry_callback,
-      bool enable_nigori);
+      base::Callback<void()> retry_callback) OVERRIDE;
 
   // Makes an asynchronous call to syncer to switch to config mode. When done
   // syncer will call us back on FinishConfigureDataTypes.
@@ -242,8 +256,6 @@ class SyncBackendHost {
   // Called from any thread to obtain current status information in detailed or
   // summarized form.
   Status GetDetailedStatus();
-  StatusSummary GetStatusSummary();
-  const GoogleServiceAuthError& GetAuthError() const;
   const sessions::SyncSessionSnapshot* GetLastSessionSnapshot() const;
 
   // Determines if the underlying sync engine has made any local changes to
@@ -278,30 +290,36 @@ class SyncBackendHost {
     DoInitializeOptions(
         MessageLoop* sync_loop,
         SyncBackendRegistrar* registrar,
+        ExtensionsActivityMonitor* extensions_activity_monitor,
         const WeakHandle<JsEventHandler>& event_handler,
         const GURL& service_url,
         MakeHttpBridgeFactoryFn make_http_bridge_factory_fn,
         const sync_api::SyncCredentials& credentials,
+        ChromeSyncNotificationBridge* chrome_sync_notification_bridge,
         sync_notifier::SyncNotifierFactory* sync_notifier_factory,
         bool delete_sync_data_folder,
         const std::string& restored_key_for_bootstrapping,
-        bool setup_for_test_mode,
-        UnrecoverableErrorHandler* unrecoverable_error_handler);
+        sync_api::SyncManager::TestingMode testing_mode,
+        UnrecoverableErrorHandler* unrecoverable_error_handler,
+        ReportUnrecoverableErrorFunction report_unrecoverable_error_function);
     ~DoInitializeOptions();
 
     MessageLoop* sync_loop;
     SyncBackendRegistrar* registrar;
+    ExtensionsActivityMonitor* extensions_activity_monitor;
     WeakHandle<JsEventHandler> event_handler;
     GURL service_url;
     // Overridden by tests.
     MakeHttpBridgeFactoryFn make_http_bridge_factory_fn;
     sync_api::SyncCredentials credentials;
+    ChromeSyncNotificationBridge* const chrome_sync_notification_bridge;
     sync_notifier::SyncNotifierFactory* const sync_notifier_factory;
     std::string lsid;
     bool delete_sync_data_folder;
     std::string restored_key_for_bootstrapping;
-    bool setup_for_test_mode;
+    sync_api::SyncManager::TestingMode testing_mode;
     UnrecoverableErrorHandler* unrecoverable_error_handler;
+    ReportUnrecoverableErrorFunction report_unrecoverable_error_function;
   };
 
   // Allows tests to perform alternate core initialization work.
@@ -397,9 +415,6 @@ class SyncBackendHost {
   // keys that were cached during NotifyPassphraseRequired. Returns true if
   // decryption was successful. Returns false otherwise. Must be called with a
   // non-empty pending keys cache.
-  // TODO(sync): Have the UI layer first call this method before calling
-  // SetPassphrase, and if the result is false, directly bubble up an error to
-  // the user.
   bool CheckPassphraseAgainstCachedPendingKeys(
       const std::string& passphrase) const;
 
@@ -433,10 +448,10 @@ class SyncBackendHost {
   void HandleClearServerDataSucceededOnFrontendLoop();
   void HandleClearServerDataFailedOnFrontendLoop();
 
-  // Dispatched to from OnAuthError to handle updating frontend UI
-  // components.
-  void HandleAuthErrorEventOnFrontendLoop(
-      const GoogleServiceAuthError& new_auth_error);
+  // Dispatched to from OnConnectionStatusChange to handle updating
+  // frontend UI components.
+  void HandleConnectionStatusChangeOnFrontendLoop(
+      sync_api::ConnectionStatus status);
 
   // Called when configuration of the Nigori node has completed as
   // part of the initialization process.
@@ -473,7 +488,13 @@ class SyncBackendHost {
 
   const base::WeakPtr<SyncPrefs> sync_prefs_;
 
+  // A thread-safe listener for handling notifications triggered by
+  // chrome events.
+  ChromeSyncNotificationBridge chrome_sync_notification_bridge_;
+
   sync_notifier::SyncNotifierFactory sync_notifier_factory_;
+
+  ChromeExtensionsActivityMonitor extensions_activity_monitor_;
 
   scoped_ptr<SyncBackendRegistrar> registrar_;
 
@@ -484,14 +505,14 @@ class SyncBackendHost {
   scoped_ptr<PendingConfigureDataTypesState> pending_config_mode_state_;
 
   // We cache the cryptographer's pending keys whenever NotifyPassphraseRequired
-  // is called. This way, before the UI calls SetPassphrase on the frontend, it
-  // can avoid the overhead of an asynchronous decryption call and give the user
-  // immediate feedback about the passphrase entered by first trying to decrypt
-  // the cached pending keys on the UI thread.
+  // is called. This way, before the UI calls SetDecryptionPassphrase on the
+  // syncer, it can avoid the overhead of an asynchronous decryption call and
+  // give the user immediate feedback about the passphrase entered by first
+  // trying to decrypt the cached pending keys on the UI thread. Note that
+  // SetDecryptionPassphrase can still fail after the cached pending keys are
+  // successfully decrypted if the pending keys have changed since the time they
+  // were cached.
   sync_pb::EncryptedData cached_pending_keys_;
-
-  // UI-thread cache of the last AuthErrorState received from syncapi.
-  GoogleServiceAuthError last_auth_error_;
 
   // UI-thread cache of the last SyncSessionSnapshot received from syncapi.
   scoped_ptr<sessions::SyncSessionSnapshot> last_snapshot_;

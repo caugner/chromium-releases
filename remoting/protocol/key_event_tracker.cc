@@ -4,11 +4,8 @@
 
 #include "remoting/protocol/key_event_tracker.h"
 
-#include <sstream>
-
 #include "base/logging.h"
 #include "remoting/proto/event.pb.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 
 namespace remoting {
 namespace protocol {
@@ -18,7 +15,6 @@ KeyEventTracker::KeyEventTracker(InputStub* input_stub)
 }
 
 KeyEventTracker::~KeyEventTracker() {
-  DCHECK(pressed_keys_.empty());
 }
 
 void KeyEventTracker::InjectKeyEvent(const KeyEvent& event) {
@@ -28,23 +24,6 @@ void KeyEventTracker::InjectKeyEvent(const KeyEvent& event) {
     pressed_keys_.insert(event.keycode());
   } else {
     pressed_keys_.erase(event.keycode());
-
-    // Dump the list of currently pressed keys every time ESC is released
-    // to facilitate debugging of lost key events issues.
-    if (event.keycode() == ui::VKEY_ESCAPE) {
-      std::ostringstream keys;
-      std::set<int>::const_iterator i = pressed_keys_.begin();
-      if (i == pressed_keys_.end()) {
-        keys << "<none>";
-      } else {
-        keys << *i++;
-        for (; i != pressed_keys_.end(); ++i) {
-          keys << ", " << *i;
-        }
-      }
-
-      LOG(INFO) << "ESC released: pressed keys=" << keys.str();
-    }
   }
   input_stub_->InjectKeyEvent(event);
 }

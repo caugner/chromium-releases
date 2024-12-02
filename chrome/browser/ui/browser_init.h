@@ -66,10 +66,11 @@ class BrowserInit {
                                        Profile* profile,
                                        size_t expected_tabs);
 
-  // Returns true if the browser is coming up.
-  static bool InProcessStartup();
-
   static void RegisterUserPrefs(PrefService* prefs);
+
+  // Returns true if we're launching a profile synchronously. In that case, the
+  // opened window should not cause a session restore.
+  static bool InSynchronousProfileLaunch();
 
   // Launches a browser window associated with |profile|. |command_line| should
   // be the command line passed to this process. |cur_dir| can be empty, which
@@ -209,7 +210,8 @@ class BrowserInit {
                        std::vector<Tab>* tabs);
 
     // Adds any startup infobars to the selected tab of the given browser.
-    void AddInfoBarsIfNecessary(Browser* browser);
+    void AddInfoBarsIfNecessary(Browser* browser,
+                                IsProcessStartup is_process_startup);
 
     // If the last session didn't exit cleanly and tab is a web contents tab,
     // an infobar is added allowing the user to restore the last session.
@@ -219,11 +221,6 @@ class BrowserInit {
     // If we have been started with unsupported flags like --single-process,
     // politely nag the user about it.
     void AddBadFlagsInfoBarIfNecessary(TabContentsWrapper* tab);
-
-    // If DNS based certificate checking has been enabled then we show a
-    // warning infobar.
-    void AddDNSCertProvenanceCheckingWarningInfoBarIfNecessary(
-        TabContentsWrapper* tab);
 
     // If the user is using an operating system that we have deprecated
     // support for and will no longer provide updates, warn the user
@@ -241,15 +238,9 @@ class BrowserInit {
     // Returns true if so.
     bool CheckIfAutoLaunched(Profile* profile);
 
-    // Shows a sync promo dialog if necessary. When called |browser| should be
-    // the browser that's being used for startup. On return |browser| is set
-    // to the browser spawned from the sync promo dialog (if any). On input
-    // |tabs| should be the set of tabs to show on startup.  On return |tabs|
-    // will contain the new set of tabs to show on startup. Returns the index
-    // of the tab to activate.
-    size_t ShowSyncPromoDialog(bool process_startup,
-                               Browser** browser,
-                               std::vector<Tab>* tabs);
+    // Checks whether the Preferences backup is invalid and notifies user in
+    // that case.
+    void CheckPreferencesBackup(Profile* profile);
 
     const FilePath cur_dir_;
     const CommandLine& command_line_;

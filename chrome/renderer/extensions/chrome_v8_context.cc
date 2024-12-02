@@ -4,6 +4,7 @@
 
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/string_split.h"
 #include "base/values.h"
@@ -14,26 +15,43 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "v8/include/v8.h"
 
+using extensions::Feature;
+
 namespace {
 
 const char kChromeHidden[] = "chromeHidden";
 
 #ifndef NDEBUG
 const char kValidateCallbacks[] = "validateCallbacks";
+const char kValidateAPI[] = "validateAPI";
 #endif
+
+std::string GetContextTypeDescription(Feature::Context context_type) {
+  switch (context_type) {
+    case Feature::UNSPECIFIED_CONTEXT:         return "unspecified";
+    case Feature::BLESSED_EXTENSION_CONTEXT:   return "blessed extension";
+    case Feature::UNBLESSED_EXTENSION_CONTEXT: return "unblessed extension";
+    case Feature::CONTENT_SCRIPT_CONTEXT:      return "content script";
+    case Feature::WEB_PAGE_CONTEXT:            return "web page";
+  }
+  NOTREACHED();
+  return "";
+}
 
 }  // namespace
 
-
 ChromeV8Context::ChromeV8Context(v8::Handle<v8::Context> v8_context,
                                  WebKit::WebFrame* web_frame,
-                                 const std::string& extension_id)
+                                 const std::string& extension_id,
+                                 Feature::Context context_type)
     : v8_context_(v8::Persistent<v8::Context>::New(v8_context)),
       web_frame_(web_frame),
-      extension_id_(extension_id) {
+      extension_id_(extension_id),
+      context_type_(context_type) {
   VLOG(1) << "Created context for extension\n"
-          << "  id:    " << extension_id << "\n"
-          << "  frame: " << web_frame_;
+          << "  id:           " << extension_id << "\n"
+          << "  frame:        " << web_frame_ << "\n"
+          << "  context type: " << GetContextTypeDescription(context_type);
 }
 
 ChromeV8Context::~ChromeV8Context() {
@@ -56,8 +74,11 @@ v8::Handle<v8::Value> ChromeV8Context::GetOrCreateChromeHidden(
 #ifndef NDEBUG
     // Tell schema_generated_bindings.js to validate callbacks and events
     // against their schema definitions.
-    v8::Local<v8::Object>::Cast(hidden)
-        ->Set(v8::String::New(kValidateCallbacks), v8::True());
+    v8::Local<v8::Object>::Cast(hidden)->Set(
+        v8::String::New(kValidateCallbacks), v8::True());
+    // Tell schema_generated_bindings.js to validate API for ambiguity.
+    v8::Local<v8::Object>::Cast(hidden)->Set(
+        v8::String::New(kValidateAPI), v8::True());
 #endif
   }
 
@@ -103,6 +124,9 @@ bool ChromeV8Context::CallChromeHiddenMethod(
     VLOG(1) << "Could not execute chrome hidden method: " << function_name;
     return false;
   }
+
+  TRACE_EVENT1("v8", "v8.callChromeHiddenMethod",
+               "function_name", function_name);
 
   v8::Handle<v8::Value> result_temp =
       v8::Local<v8::Function>::Cast(value)->Call(v8::Object::New(), argc, argv);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,8 +40,9 @@ class HostContentSettingsMap
       public base::RefCountedThreadSafe<HostContentSettingsMap> {
  public:
   enum ProviderType {
-    POLICY_PROVIDER = 0,
-    EXTENSION_PROVIDER = 1,
+    PLATFORM_APP_PROVIDER = 0,
+    POLICY_PROVIDER,
+    EXTENSION_PROVIDER,
     PREF_PROVIDER,
     DEFAULT_PROVIDER,
     NUM_PROVIDER_TYPES,
@@ -166,8 +167,8 @@ class HostContentSettingsMap
 
   // content_settings::Observer implementation.
   virtual void OnContentSettingChanged(
-      ContentSettingsPattern primary_pattern,
-      ContentSettingsPattern secondary_pattern,
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       std::string resource_identifier) OVERRIDE;
 

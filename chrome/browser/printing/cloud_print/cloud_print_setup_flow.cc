@@ -28,8 +28,8 @@
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/locale_settings.h"
@@ -76,7 +76,7 @@ CloudPrintSetupFlow* CloudPrintSetupFlow::OpenDialog(
   args.SetString("pageToShow", setup_done ? "setupdone" : "cloudprintsetup");
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
 
   CloudPrintSetupFlow* flow = new CloudPrintSetupFlow(json_args, profile,
                                                       delegate, setup_done);
@@ -200,7 +200,7 @@ bool CloudPrintSetupFlow::ShouldShowDialogTitle() const {
 }
 
 bool CloudPrintSetupFlow::HandleContextMenu(
-    const ContextMenuParams& params) {
+    const content::ContextMenuParams& params) {
   return true;
 }
 
@@ -280,7 +280,7 @@ void CloudPrintSetupFlow::ShowGaiaLogin(const DictionaryValue& args) {
     web_ui_->CallJavascriptFunction("cloudprint.showSetupLogin");
 
   std::string json;
-  base::JSONWriter::Write(&args, false, &json);
+  base::JSONWriter::Write(&args, &json);
   string16 javascript = UTF8ToUTF16("cloudprint.showGaiaLogin(" + json + ");");
 
   ExecuteJavascriptInIFrame(SetupIframeXPath(), javascript);
@@ -336,7 +336,8 @@ void CloudPrintSetupFlow::ExecuteJavascriptInIFrame(
     const string16& iframe_xpath,
     const string16& js) {
   if (web_ui_) {
-    RenderViewHost* rvh = web_ui_->GetWebContents()->GetRenderViewHost();
+    content::RenderViewHost* rvh =
+        web_ui_->GetWebContents()->GetRenderViewHost();
     rvh->ExecuteJavascriptInWebFrame(iframe_xpath, js);
   }
 }

@@ -81,9 +81,10 @@ class MockChromotingHostContext : public ChromotingHostContext {
   MockChromotingHostContext();
   virtual ~MockChromotingHostContext();
 
-  MOCK_METHOD0(Start, void());
+  MOCK_METHOD0(Start, bool());
   MOCK_METHOD0(Stop, void());
   MOCK_METHOD0(jingle_thread, JingleThread*());
+  MOCK_METHOD0(io_message_loop, base::MessageLoopProxy*());
   MOCK_METHOD0(ui_message_loop, base::MessageLoopProxy*());
   MOCK_METHOD0(main_message_loop, MessageLoop*());
   MOCK_METHOD0(encode_message_loop, MessageLoop*());
@@ -99,14 +100,15 @@ class MockClientSessionEventHandler : public ClientSession::EventHandler {
   virtual ~MockClientSessionEventHandler();
 
   MOCK_METHOD1(OnSessionAuthenticated, void(ClientSession* client));
+  MOCK_METHOD1(OnSessionChannelsConnected, void(ClientSession* client));
   MOCK_METHOD1(OnSessionAuthenticationFailed, void(ClientSession* client));
   MOCK_METHOD1(OnSessionClosed, void(ClientSession* client));
-  MOCK_METHOD1(OnSessionFailed, void(ClientSession* client));
   MOCK_METHOD2(OnSessionSequenceNumber, void(ClientSession* client,
                                              int64 sequence_number));
-  MOCK_METHOD3(OnSessionIpAddress, void(ClientSession* client,
-                                        const std::string& channel_name,
-                                        const net::IPEndPoint& end_point));
+  MOCK_METHOD3(OnSessionRouteChange, void(
+      ClientSession* client,
+      const std::string& channel_name,
+      const protocol::TransportRoute& route));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockClientSessionEventHandler);
@@ -117,6 +119,8 @@ class MockEventExecutor : public EventExecutor {
   MockEventExecutor();
   virtual ~MockEventExecutor();
 
+  MOCK_METHOD1(InjectClipboardEvent,
+               void(const protocol::ClipboardEvent& event));
   MOCK_METHOD1(InjectKeyEvent, void(const protocol::KeyEvent& event));
   MOCK_METHOD1(InjectMouseEvent, void(const protocol::MouseEvent& event));
 

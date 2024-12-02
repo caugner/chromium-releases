@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "chrome/common/extensions/extension_error_utils.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_groups.h"
@@ -107,7 +108,7 @@ void UserScriptIdleScheduler::ExecuteCodeImpl(
   // be out of sync. We just ignore this situation.
   if (!extension) {
     render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
-        render_view->GetRoutingId(), params.request_id, true, ""));
+        render_view->GetRoutingID(), params.request_id, true, ""));
     return;
   }
 
@@ -136,7 +137,7 @@ void UserScriptIdleScheduler::ExecuteCodeImpl(
           continue;
         } else {
           render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
-              render_view->GetRoutingId(), params.request_id, false,
+              render_view->GetRoutingID(), params.request_id, false,
               ExtensionErrorUtils::FormatErrorMessage(
                   extension_manifest_errors::kCannotAccessPage,
                   frame->document().url().spec())));
@@ -164,7 +165,7 @@ void UserScriptIdleScheduler::ExecuteCodeImpl(
   }
 
   render_view->Send(new ExtensionHostMsg_ExecuteCodeFinished(
-      render_view->GetRoutingId(), params.request_id, true, ""));
+      render_view->GetRoutingID(), params.request_id, true, ""));
 }
 
 bool UserScriptIdleScheduler::GetAllChildFrames(

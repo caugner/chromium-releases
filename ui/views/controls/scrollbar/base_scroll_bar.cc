@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -184,6 +184,15 @@ bool BaseScrollBar::OnKeyPressed(const KeyEvent& event) {
   return false;
 }
 
+ui::GestureStatus BaseScrollBar::OnGestureEvent(const GestureEvent& event) {
+  if (event.type() == ui::ET_GESTURE_SCROLL_UPDATE) {
+    ScrollByContentsOffset(IsHorizontal() ? event.delta_x() : event.delta_y());
+    return ui::GESTURE_STATUS_CONSUMED;
+  }
+
+  return ui::GESTURE_STATUS_UNKNOWN;
+}
+
 bool BaseScrollBar::OnMouseWheel(const MouseWheelEvent& event) {
   ScrollByContentsOffset(event.offset());
   return true;
@@ -202,9 +211,7 @@ enum ScrollBarContextMenuCommands {
   ScrollBarContextMenuCommand_ScrollNext
 };
 
-void BaseScrollBar::ShowContextMenuForView(View* source,
-                                             const gfx::Point& p,
-                                             bool is_mouse_gesture) {
+void BaseScrollBar::ShowContextMenuForView(View* source, const gfx::Point& p) {
   Widget* widget = GetWidget();
   gfx::Rect widget_bounds = widget->GetWindowScreenBounds();
   gfx::Point temp_pt(p.x() - widget_bounds.x(), p.y() - widget_bounds.y());
@@ -224,8 +231,8 @@ void BaseScrollBar::ShowContextMenuForView(View* source,
   menu->AppendSeparator();
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollPrev);
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollNext);
-  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(p, gfx::Size(0, 0)),
-      MenuItemView::TOPLEFT, MenuRunner::HAS_MNEMONICS) ==
+  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(p, gfx::Size()),
+          MenuItemView::TOPLEFT, MenuRunner::HAS_MNEMONICS) ==
       MenuRunner::MENU_DELETED)
     return;
 }

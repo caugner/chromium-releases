@@ -25,7 +25,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/test/test_browser_thread.h"
@@ -35,6 +34,7 @@
 using base::Histogram;
 using base::StatisticsRecorder;
 using content::BrowserThread;
+using content::InterstitialPage;
 using content::WebContents;
 using ::testing::_;
 using ::testing::Mock;
@@ -221,7 +221,7 @@ class TestProtocolManager :  public SafeBrowsingProtocolManager {
         BrowserThread::IO, FROM_HERE,
         base::Bind(&SafeBrowsingService::HandleGetHashResults,
                    sb_service_, check, full_hashes_, cancache),
-        delay_ms_);
+        base::TimeDelta::FromMilliseconds(delay_ms_));
   }
 
   // Prepare the GetFullHash results for the next request.
@@ -470,15 +470,15 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, Prefetch) {
   class SetPrefetchForTest {
    public:
     explicit SetPrefetchForTest(bool prefetch)
-        : old_prefetch_state_(ResourceDispatcherHost::is_prefetch_enabled()),
+        : old_prefetch_state_(prerender::PrerenderManager::IsPrefetchEnabled()),
           old_prerender_mode_(prerender::PrerenderManager::GetMode()) {
-      ResourceDispatcherHost::set_is_prefetch_enabled(prefetch);
+      prerender::PrerenderManager::SetIsPrefetchEnabled(prefetch);
       prerender::PrerenderManager::SetMode(
           prerender::PrerenderManager::PRERENDER_MODE_DISABLED);
     }
 
     ~SetPrefetchForTest() {
-      ResourceDispatcherHost::set_is_prefetch_enabled(old_prefetch_state_);
+      prerender::PrerenderManager::SetIsPrefetchEnabled(old_prefetch_state_);
       prerender::PrerenderManager::SetMode(old_prerender_mode_);
     }
    private:
@@ -734,7 +734,8 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, StartAndStop) {
   // Add a new Profile. SBS should keep running.
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  scoped_ptr<Profile> profile2(Profile::CreateProfile(temp_dir.path()));
+  scoped_ptr<Profile> profile2(Profile::CreateProfile(
+      temp_dir.path(), NULL, Profile::CREATE_MODE_SYNCHRONOUS));
   ASSERT_TRUE(profile2.get() != NULL);
   PrefService* pref_service2 = profile2->GetPrefs();
   EXPECT_TRUE(pref_service2->GetBoolean(prefs::kSafeBrowsingEnabled));

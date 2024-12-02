@@ -35,7 +35,8 @@ class TrackedObjectsTest : public testing::Test {
 
 TEST_F(TrackedObjectsTest, MinimalStartupShutdown) {
   // Minimal test doesn't even create any tasks.
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   EXPECT_FALSE(ThreadData::first());  // No activity even on this thread.
@@ -55,7 +56,8 @@ TEST_F(TrackedObjectsTest, MinimalStartupShutdown) {
   ShutdownSingleThreadedCleanup(false);
 
   // Do it again, just to be sure we reset state completely.
-  ThreadData::InitializeAndSetTrackingStatus(true);
+  ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE);
   EXPECT_FALSE(ThreadData::first());  // No activity even on this thread.
   data = ThreadData::Get();
   EXPECT_TRUE(ThreadData::first());  // Now class was constructed.
@@ -71,7 +73,8 @@ TEST_F(TrackedObjectsTest, MinimalStartupShutdown) {
 }
 
 TEST_F(TrackedObjectsTest, TinyStartupShutdown) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   // Instigate tracking on a single tracked object, on our thread.
@@ -113,7 +116,7 @@ TEST_F(TrackedObjectsTest, TinyStartupShutdown) {
   EXPECT_EQ(2, birth_map.begin()->second->birth_count());  // 2 births.
   EXPECT_EQ(1u, death_map.size());                         // 1 location.
   EXPECT_EQ(1, death_map.begin()->second.count());         // 1 death.
-  if (ThreadData::tracking_parent_child_status()) {
+  if (ThreadData::TrackingParentChildStatus()) {
     EXPECT_EQ(1u, parent_child_set.size());                  // 1 child.
     EXPECT_EQ(parent_child_set.begin()->first,
               parent_child_set.begin()->second);
@@ -126,9 +129,10 @@ TEST_F(TrackedObjectsTest, TinyStartupShutdown) {
 }
 
 TEST_F(TrackedObjectsTest, ParentChildTest) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
-  if (!ThreadData::tracking_parent_child_status())
+  if (!ThreadData::TrackingParentChildStatus())
     return;   // Feature not compiled in.
 
   // Instigate tracking on a single tracked object, on our thread.
@@ -168,7 +172,7 @@ TEST_F(TrackedObjectsTest, ParentChildTest) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string birth_only_result = "{"
       "\"descendants\":["
         "{"
@@ -211,7 +215,8 @@ TEST_F(TrackedObjectsTest, ParentChildTest) {
 }
 
 TEST_F(TrackedObjectsTest, DeathDataTest) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   scoped_ptr<DeathData> data(new DeathData());
@@ -222,8 +227,8 @@ TEST_F(TrackedObjectsTest, DeathDataTest) {
   EXPECT_EQ(data->queue_duration_sample(), 0);
   EXPECT_EQ(data->count(), 0);
 
-  DurationInt run_ms = 42;
-  DurationInt queue_ms = 8;
+  int32 run_ms = 42;
+  int32 queue_ms = 8;
 
   const int kUnrandomInt = 0;  // Fake random int that ensure we sample data.
   data->RecordDeath(queue_ms, run_ms, kUnrandomInt);
@@ -255,7 +260,7 @@ TEST_F(TrackedObjectsTest, DeathDataTest) {
 
   scoped_ptr<base::Value> value(data->ToValue());
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string birth_only_result = "{"
       "\"count\":2,"
       "\"queue_ms\":16,"
@@ -270,7 +275,7 @@ TEST_F(TrackedObjectsTest, DeathDataTest) {
 
 TEST_F(TrackedObjectsTest, DeactivatedBirthOnlyToValueWorkerThread) {
   // Transition to Deactivated state before doing anything.
-  if (!ThreadData::InitializeAndSetTrackingStatus(false))
+  if (!ThreadData::InitializeAndSetTrackingStatus(ThreadData::DEACTIVATED))
     return;
   // We don't initialize system with a thread name, so we're viewed as a worker
   // thread.
@@ -284,7 +289,7 @@ TEST_F(TrackedObjectsTest, DeactivatedBirthOnlyToValueWorkerThread) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string birth_only_result = "{"
       "\"descendants\":["
       "],"
@@ -296,7 +301,7 @@ TEST_F(TrackedObjectsTest, DeactivatedBirthOnlyToValueWorkerThread) {
 
 TEST_F(TrackedObjectsTest, DeactivatedBirthOnlyToValueMainThread) {
   // Start in the deactivated state.
-  if (!ThreadData::InitializeAndSetTrackingStatus(false))
+  if (!ThreadData::InitializeAndSetTrackingStatus(ThreadData::DEACTIVATED))
     return;
 
   // Use a well named thread.
@@ -312,7 +317,7 @@ TEST_F(TrackedObjectsTest, DeactivatedBirthOnlyToValueMainThread) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string birth_only_result = "{"
       "\"descendants\":["
       "],"
@@ -323,7 +328,8 @@ TEST_F(TrackedObjectsTest, DeactivatedBirthOnlyToValueMainThread) {
 }
 
 TEST_F(TrackedObjectsTest, BirthOnlyToValueWorkerThread) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
   // We don't initialize system with a thread name, so we're viewed as a worker
   // thread.
@@ -336,7 +342,7 @@ TEST_F(TrackedObjectsTest, BirthOnlyToValueWorkerThread) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string birth_only_result = "{"
       "\"descendants\":["
       "],"
@@ -365,7 +371,8 @@ TEST_F(TrackedObjectsTest, BirthOnlyToValueWorkerThread) {
 }
 
 TEST_F(TrackedObjectsTest, BirthOnlyToValueMainThread) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   // Use a well named thread.
@@ -380,7 +387,7 @@ TEST_F(TrackedObjectsTest, BirthOnlyToValueMainThread) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string birth_only_result = "{"
       "\"descendants\":["
       "],"
@@ -409,7 +416,8 @@ TEST_F(TrackedObjectsTest, BirthOnlyToValueMainThread) {
 }
 
 TEST_F(TrackedObjectsTest, LifeCycleToValueMainThread) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   // Use a well named thread.
@@ -437,7 +445,7 @@ TEST_F(TrackedObjectsTest, LifeCycleToValueMainThread) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string one_line_result = "{"
       "\"descendants\":["
       "],"
@@ -470,7 +478,8 @@ TEST_F(TrackedObjectsTest, LifeCycleToValueMainThread) {
 // our tallied births are matched by tallied deaths (except for when the
 // task is still running, or is queued).
 TEST_F(TrackedObjectsTest, LifeCycleMidDeactivatedToValueMainThread) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   // Use a well named thread.
@@ -491,7 +500,8 @@ TEST_F(TrackedObjectsTest, LifeCycleMidDeactivatedToValueMainThread) {
   pending_task.time_posted = kTimePosted;  // Overwrite implied Now().
 
   // Turn off tracking now that we have births.
-  EXPECT_TRUE(ThreadData::InitializeAndSetTrackingStatus(false));
+  EXPECT_TRUE(ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::DEACTIVATED));
 
   const TrackedTime kStartOfRun = TrackedTime() +
       Duration::FromMilliseconds(5);
@@ -501,7 +511,7 @@ TEST_F(TrackedObjectsTest, LifeCycleMidDeactivatedToValueMainThread) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string one_line_result = "{"
       "\"descendants\":["
       "],"
@@ -532,7 +542,7 @@ TEST_F(TrackedObjectsTest, LifeCycleMidDeactivatedToValueMainThread) {
 // We will deactivate tracking before starting a life cycle, and neither
 // the birth nor the death will be recorded.
 TEST_F(TrackedObjectsTest, LifeCyclePreDeactivatedToValueMainThread) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(false))
+  if (!ThreadData::InitializeAndSetTrackingStatus(ThreadData::DEACTIVATED))
     return;
 
   // Use a well named thread.
@@ -560,7 +570,7 @@ TEST_F(TrackedObjectsTest, LifeCyclePreDeactivatedToValueMainThread) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string one_line_result = "{"
       "\"descendants\":["
       "],"
@@ -571,7 +581,8 @@ TEST_F(TrackedObjectsTest, LifeCyclePreDeactivatedToValueMainThread) {
 }
 
 TEST_F(TrackedObjectsTest, LifeCycleToValueWorkerThread) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   // Don't initialize thread, so that we appear as a worker thread.
@@ -595,7 +606,7 @@ TEST_F(TrackedObjectsTest, LifeCycleToValueWorkerThread) {
   // Call for the ToValue, but tell it to not the maxes after scanning.
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string one_line_result = "{"
       "\"descendants\":["
       "],"
@@ -626,14 +637,14 @@ TEST_F(TrackedObjectsTest, LifeCycleToValueWorkerThread) {
   // We'll still get the same values, but the data will be reset (which we'll
   // see in a moment).
   value.reset(ThreadData::ToValue(true));
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   // Result should be unchanged.
   EXPECT_EQ(one_line_result, json);
 
   // Call for the ToValue, and now we'll see the result of the last translation,
   // as the max will have been pushed back to zero.
   value.reset(ThreadData::ToValue(false));
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string one_line_result_with_zeros = "{"
       "\"descendants\":["
       "],"
@@ -662,7 +673,8 @@ TEST_F(TrackedObjectsTest, LifeCycleToValueWorkerThread) {
 }
 
 TEST_F(TrackedObjectsTest, TwoLives) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   // Use a well named thread.
@@ -698,7 +710,7 @@ TEST_F(TrackedObjectsTest, TwoLives) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string one_line_result = "{"
       "\"descendants\":["
       "],"
@@ -727,7 +739,8 @@ TEST_F(TrackedObjectsTest, TwoLives) {
 }
 
 TEST_F(TrackedObjectsTest, DifferentLives) {
-  if (!ThreadData::InitializeAndSetTrackingStatus(true))
+  if (!ThreadData::InitializeAndSetTrackingStatus(
+      ThreadData::PROFILING_CHILDREN_ACTIVE))
     return;
 
   // Use a well named thread.
@@ -759,7 +772,7 @@ TEST_F(TrackedObjectsTest, DifferentLives) {
 
   scoped_ptr<base::Value> value(ThreadData::ToValue(false));
   std::string json;
-  base::JSONWriter::Write(value.get(), false, &json);
+  base::JSONWriter::Write(value.get(), &json);
   std::string one_line_result = "{"
       "\"descendants\":["
       "],"

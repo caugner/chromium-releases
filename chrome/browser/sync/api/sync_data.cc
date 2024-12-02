@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/sync/internal_api/base_node.h"
-#include "chrome/browser/sync/protocol/proto_value_conversions.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/syncable/model_type.h"
+#include "sync/protocol/proto_value_conversions.h"
+#include "sync/protocol/sync.pb.h"
+#include "sync/syncable/model_type.h"
 
 void SyncData::ImmutableSyncEntityTraits::InitializeWrapper(
     Wrapper* wrapper) {
@@ -56,7 +56,7 @@ SyncData SyncData::CreateLocalDelete(
     const std::string& sync_tag,
     syncable::ModelType datatype) {
   sync_pb::EntitySpecifics specifics;
-  syncable::AddDefaultExtensionValue(datatype, &specifics);
+  syncable::AddDefaultFieldValue(datatype, &specifics);
   return CreateLocalData(sync_tag, "", specifics);
 }
 
@@ -121,7 +121,9 @@ std::string SyncData::ToString() const {
   std::string specifics;
   scoped_ptr<DictionaryValue> value(
       browser_sync::EntitySpecificsToValue(GetSpecifics()));
-  base::JSONWriter::Write(value.get(), true, &specifics);
+  base::JSONWriter::WriteWithOptions(value.get(),
+                                     base::JSONWriter::OPTIONS_PRETTY_PRINT,
+                                     &specifics);
 
   if (IsLocal()) {
     return "{ isLocal: true, type: " + type + ", tag: " + GetTag() +

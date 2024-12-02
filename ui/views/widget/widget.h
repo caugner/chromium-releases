@@ -14,6 +14,7 @@
 #include "base/observer_list.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/compositor/layer_type.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/focus/focus_manager.h"
@@ -131,6 +132,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
       TYPE_TOOLTIP,
       TYPE_BUBBLE,
     };
+
     enum Ownership {
       // Default. Creator is not responsible for managing the lifetime of the
       // Widget, it is destroyed when the corresponding NativeWidget is
@@ -155,7 +157,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     bool transient;
     // If true, the widget may be fully or partially transparent.  If false,
     // we can perform optimizations based on the widget being fully opaque.
-    // Defaults to false.
+    // For window widgets, defaults to ViewsDelegate::UseTransparentWindows().
+    // Defaults to false for non-window widgets.
     bool transparent;
     bool accept_events;
     bool can_activate;
@@ -163,6 +166,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     Ownership ownership;
     bool mirror_origin_in_rtl;
     bool has_dropshadow;
+    // Only used by NativeWidgetWin. Specifies that the system default caption
+    // and icon should not be rendered, and that the client area should be
+    // equivalent to the window area.
+    bool remove_standard_frame;
     // Whether the widget should be maximized or minimized.
     ui::WindowShowState show_state;
     // Should the widget be double buffered? Default is false.
@@ -176,9 +183,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // The Widget will not construct a default one. Default is NULL.
     NativeWidget* native_widget;
     bool top_level;
-    // Only used by NativeWidgetAura. Specifies whether the Layer created by
-    // aura::Window has a texture. The default is true.
-    bool create_texture_for_layer;
+    // Only used by NativeWidgetAura. Specifies the type of layer for the
+    // aura::Window. Default is LAYER_TEXTURED.
+    ui::LayerType layer_type;
   };
 
   Widget();
@@ -196,6 +203,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Enumerates all windows pertaining to us and notifies their
   // view hierarchies that the locale has changed.
+  // TODO(beng): remove post-Aurafication of ChromeOS.
   static void NotifyLocaleChanged();
 
   // Closes all Widgets that aren't identified as "secondary widgets". Called
@@ -310,6 +318,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void SetBounds(const gfx::Rect& bounds);
   void SetSize(const gfx::Size& size);
 
+  // Sizes the window to the specified size and centerizes it.
+  void CenterWindow(const gfx::Size& size);
+
   // Like SetBounds(), but ensures the Widget is fully visible on screen,
   // resizing and/or repositioning as necessary. This is only useful for
   // non-child widgets.
@@ -331,6 +342,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void StackAboveWidget(Widget* widget);
   void StackAbove(gfx::NativeView native_view);
   void StackAtTop();
+
+  // Places the widget below the specified NativeView.
+  void StackBelow(gfx::NativeView native_view);
 
   // Sets a shape on the widget. This takes ownership of shape.
   void SetShape(gfx::NativeRegion shape);
@@ -393,6 +407,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // frame" - slightly transparent and without the standard window controls.
   void SetUseDragFrame(bool use_drag_frame);
 
+  // Flashes the frame of the window to draw attention to it. Currently only
+  // implemented on Windows for non-Aura.
+  void FlashFrame(bool flash);
+
   // Returns the View at the root of the View hierarchy contained by this
   // Widget.
   View* GetRootView();
@@ -419,9 +437,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Returns the FocusManager for this widget.
   // Note that all widgets in a widget hierarchy share the same focus manager.
-  // TODO(beng): remove virtual.
-  virtual FocusManager* GetFocusManager();
-  virtual const FocusManager* GetFocusManager() const;
+  FocusManager* GetFocusManager();
+  const FocusManager* GetFocusManager() const;
 
   // Returns the InputMethod for this widget.
   // Note that all widgets in a widget hierarchy share the same input method.
@@ -431,8 +448,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // operation completes. |view| can be NULL.
   // If the view is non-NULL it can be accessed during the drag by calling
   // dragged_view(). If the view has not been deleted during the drag,
-  // OnDragDone() is called on it.
-  void RunShellDrag(View* view, const ui::OSExchangeData& data, int operation);
+  // OnDragDone() is called on it. |location| is in the widget's coordinate
+  // system.
+  void RunShellDrag(View* view,
+                    const ui::OSExchangeData& data,
+                    const gfx::Point& location,
+                    int operation);
 
   // Returns the view that requested the current drag operation via
   // RunShellDrag(), or NULL if there is no such view or drag operation.
@@ -607,6 +628,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual void OnNativeWidgetDestroying() OVERRIDE;
   virtual void OnNativeWidgetDestroyed() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
+  virtual gfx::Size GetMaximumSize() OVERRIDE;
   virtual void OnNativeWidgetSizeChanged(const gfx::Size& new_size) OVERRIDE;
   virtual void OnNativeWidgetBeginUserBoundsChange() OVERRIDE;
   virtual void OnNativeWidgetEndUserBoundsChange() OVERRIDE;
@@ -642,9 +664,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void DestroyRootView();
 
  private:
-  // TODO(beng): Remove NativeWidgetGtk's dependence on the mouse state flags.
-  friend class NativeWidgetGtk;
-
   friend class NativeTextfieldViewsTest;
   friend class NativeComboboxViewsTest;
   friend class ScopedEvent;
@@ -662,6 +681,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Sizes and positions the window just after it is created.
   void SetInitialBounds(const gfx::Rect& bounds);
+
+  // Sizes and positions the frameless window just after it is created.
+  void SetInitialBoundsForFramelessWindow(const gfx::Rect& bounds);
 
   // Returns the bounds and "show" state from the delegate. Returns true if
   // the delegate wants to use a specified bounds.
@@ -745,6 +767,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Tracks whether native widget has been initialized.
   bool native_widget_initialized_;
+
+  // Whether native widget has been destroyed.
+  bool native_widget_destroyed_;
 
   // TODO(beng): Remove NativeWidgetGtk's dependence on these:
   // If true, the mouse is currently down.

@@ -14,7 +14,6 @@
 #include "content/public/browser/web_contents_view.h"
 #include "ui/views/widget/widget.h"
 
-class ConstrainedWindowGtk;
 class NativeTabContentsView;
 class RenderViewContextMenuViews;
 class SkBitmap;
@@ -26,6 +25,10 @@ class Size;
 namespace views {
 class Widget;
 }
+namespace content {
+class WebContentsViewDelegate;
+class WebDragDestDelegate;
+}
 
 // Views-specific implementation of the WebContentsView.
 class TabContentsViewViews : public views::Widget,
@@ -35,17 +38,9 @@ class TabContentsViewViews : public views::Widget,
   // The corresponding WebContents is passed in the constructor, and manages our
   // lifetime. This doesn't need to be the case, but is this way currently
   // because that's what was easiest when they were split.
-  explicit TabContentsViewViews(content::WebContents* web_contents);
+  explicit TabContentsViewViews(content::WebContents* web_contents,
+                                content::WebContentsViewDelegate* delegate);
   virtual ~TabContentsViewViews();
-
-  // Intermediate code to pass comiplation. This will be removed as a
-  // part of ConstraintWindow change (http://codereview.chromium.org/7631049).
-  void AttachConstrainedWindow(ConstrainedWindowGtk* constrained_window);
-  void RemoveConstrainedWindow(ConstrainedWindowGtk* constrained_window);
-
-  // Reset the native parent of this view to NULL.  Unparented windows should
-  // not receive any messages.
-  virtual void Unparent();
 
   NativeTabContentsView* native_tab_contents_view() const {
     return native_tab_contents_view_;
@@ -53,8 +48,8 @@ class TabContentsViewViews : public views::Widget,
 
   // Overridden from WebContentsView:
   virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
-  virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
+  virtual content::RenderWidgetHostView* CreateViewForWidget(
+      content::RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
@@ -63,7 +58,7 @@ class TabContentsViewViews : public views::Widget,
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
+  virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
@@ -73,8 +68,6 @@ class TabContentsViewViews : public views::Widget,
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
   virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
-  virtual void InstallOverlayView(gfx::NativeView view) OVERRIDE;
-  virtual void RemoveOverlayView() OVERRIDE;
 
   // Implementation of RenderViewHostDelegate::View.
   virtual void CreateNewWindow(
@@ -90,7 +83,8 @@ class TabContentsViewViews : public views::Widget,
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos) OVERRIDE;
   virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowContextMenu(const ContextMenuParams& params) OVERRIDE;
+  virtual void ShowContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -108,7 +102,6 @@ class TabContentsViewViews : public views::Widget,
  private:
   // Overridden from internal::NativeTabContentsViewDelegate:
   virtual content::WebContents* GetWebContents() OVERRIDE;
-  virtual bool IsShowingSadTab() const OVERRIDE;
   virtual void OnNativeTabContentsViewShown() OVERRIDE;
   virtual void OnNativeTabContentsViewHidden() OVERRIDE;
   virtual void OnNativeTabContentsViewSized(const gfx::Size& size) OVERRIDE;
@@ -118,29 +111,16 @@ class TabContentsViewViews : public views::Widget,
   virtual void OnNativeTabContentsViewDraggingEnded() OVERRIDE;
   virtual views::internal::NativeWidgetDelegate*
       AsNativeWidgetDelegate() OVERRIDE;
+  virtual content::WebDragDestDelegate* GetDragDestDelegate() OVERRIDE;
 
   // Overridden from views::Widget:
-  virtual views::FocusManager* GetFocusManager() OVERRIDE;
-  virtual const views::FocusManager* GetFocusManager() const OVERRIDE;
   virtual void OnNativeWidgetVisibilityChanged(bool visible) OVERRIDE;
   virtual void OnNativeWidgetSizeChanged(const gfx::Size& new_size) OVERRIDE;
 
   // A helper method for closing the tab.
   void CloseTab();
 
-  // Windows events ------------------------------------------------------------
-
-  // Handles notifying the TabContents and other operations when the window was
-  // shown or hidden.
-  void WasHidden();
-  void WasShown();
-
-  // Handles resizing of the contents. This will notify the RenderWidgetHostView
-  // of the change, reposition popups, and the find in page bar.
-  void WasSized(const gfx::Size& size);
-
-  // TODO(brettw) comment these. They're confusing.
-  void WheelZoom(int distance);
+  views::Widget* GetSadTab() const;
 
   // ---------------------------------------------------------------------------
 
@@ -165,13 +145,9 @@ class TabContentsViewViews : public views::Widget,
   // Used to close the tab after the stack has unwound.
   base::OneShotTimer<TabContentsViewViews> close_tab_timer_;
 
-  // The FocusManager associated with this tab.  Stored as it is not directly
-  // accessible when un-parented.
-  mutable const views::FocusManager* focus_manager_;
-
-  // The overlaid view. Owned by the caller of |InstallOverlayView|; this is a
-  // weak reference.
-  views::Widget* overlaid_view_;
+  // Chrome specific functionality (to make it easier for this class to
+  // eventually move to content).
+  scoped_ptr<content::WebContentsViewDelegate> delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsViewViews);
 };

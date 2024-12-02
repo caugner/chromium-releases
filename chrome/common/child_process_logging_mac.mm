@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
@@ -36,6 +37,7 @@ const char *kGPUGLVersionParamName = "gpu-glver";
 const char *kNumberOfViews = "num-views";
 NSString* const kNumExtensionsName = @"num-extensions";
 NSString* const kExtensionNameFormat = @"extension-%d";
+NSString* const kPrinterInfoNameFormat = @"prn-info-%zu";
 
 // Account for the terminating null character.
 static const size_t kClientIdSize = 32 + 1;
@@ -163,6 +165,19 @@ void SetGpuInfo(const content::GPUInfo& gpu_info) {
     SetGpuInfoImpl(gpu_info, SetCrashKeyValue);
 }
 
+void SetPrinterInfo(const char* printer_info) {
+  std::vector<std::string> info;
+  base::SplitString(printer_info, L';', &info);
+  info.resize(kMaxReportedPrinterRecords);
+  for (size_t i = 0; i < info.size(); ++i) {
+    NSString* key = [NSString stringWithFormat:kPrinterInfoNameFormat, i];
+    ClearCrashKey(key);
+    if (!info[i].empty()) {
+      NSString *value = [NSString stringWithUTF8String:info[i].c_str()];
+      SetCrashKeyValue(key, value);
+    }
+  }
+}
 
 void SetNumberOfViewsImpl(int number_of_views,
                           SetCrashKeyValueFuncPtr set_key_func) {
@@ -182,7 +197,7 @@ void SetCommandLine(const CommandLine* command_line) {
 
   // These should match the corresponding strings in breakpad_win.cc.
   NSString* const kNumSwitchesKey = @"num-switches";
-  NSString* const kSwitchKeyFormat = @"switch-%d";  // 1-based.
+  NSString* const kSwitchKeyFormat = @"switch-%zu";  // 1-based.
 
   // Note the total number of switches, not including the exec path.
   const CommandLine::StringVector& argv = command_line->argv();
@@ -203,6 +218,13 @@ void SetCommandLine(const CommandLine* command_line) {
     NSString* key = [NSString stringWithFormat:kSwitchKeyFormat, (key_i + 1)];
     ClearCrashKey(key);
   }
+}
+
+void SetChannel(const std::string& channel) {
+  // This should match the corresponding string in breakpad_win.cc.
+  NSString* const kChannelKey = @"channel";
+
+  SetCrashKeyValue(kChannelKey, base::SysUTF8ToNSString(channel));
 }
 
 }  // namespace child_process_logging

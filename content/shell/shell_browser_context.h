@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,6 @@
 #include "content/public/browser/browser_context.h"
 
 class DownloadManager;
-class DownloadStatusUpdater;
-class SSLHostState;
 
 namespace content {
 
@@ -30,45 +28,29 @@ class ShellBrowserContext : public BrowserContext {
 
   // BrowserContext implementation.
   virtual FilePath GetPath() OVERRIDE;
-  virtual bool IsOffTheRecord() OVERRIDE;
-  virtual SSLHostState* GetSSLHostState() OVERRIDE;
+  virtual bool IsOffTheRecord() const OVERRIDE;
   virtual DownloadManager* GetDownloadManager() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
-  virtual const ResourceContext& GetResourceContext() OVERRIDE;
-  virtual HostZoomMap* GetHostZoomMap() OVERRIDE;
+  virtual ResourceContext* GetResourceContext() OVERRIDE;
   virtual GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
-  virtual SpeechInputPreferences* GetSpeechInputPreferences() OVERRIDE;
+  virtual SpeechRecognitionPreferences*
+      GetSpeechRecognitionPreferences() OVERRIDE;
   virtual bool DidLastSessionExitCleanly() OVERRIDE;
-  virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
-  virtual WebKitContext* GetWebKitContext() OVERRIDE;
-  virtual webkit_database::DatabaseTracker* GetDatabaseTracker() OVERRIDE;
-  virtual ChromeBlobStorageContext* GetBlobStorageContext() OVERRIDE;
-  virtual ChromeAppCacheService* GetAppCacheService() OVERRIDE;
-  virtual fileapi::FileSystemContext* GetFileSystemContext() OVERRIDE;
+  virtual quota::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
 
  private:
-  void CreateQuotaManagerAndClients();
 
   FilePath path_;
   scoped_ptr<ResourceContext> resource_context_;
-  scoped_ptr<SSLHostState> ssl_host_state_;
-  scoped_ptr<DownloadStatusUpdater> download_status_updater_;
   scoped_refptr<ShellDownloadManagerDelegate> download_manager_delegate_;
   scoped_refptr<DownloadManager> download_manager_;
   scoped_refptr<net::URLRequestContextGetter> url_request_getter_;
-  scoped_refptr<HostZoomMap> host_zoom_map_;
   scoped_refptr<GeolocationPermissionContext> geolocation_permission_context_;
-  scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
-  scoped_refptr<WebKitContext> webkit_context_;
-  scoped_refptr<ChromeAppCacheService> appcache_service_;
-  scoped_refptr<webkit_database::DatabaseTracker> db_tracker_;
-  scoped_refptr<fileapi::FileSystemContext> file_system_context_;
-  scoped_refptr<quota::QuotaManager> quota_manager_;
-  scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
+  scoped_refptr<SpeechRecognitionPreferences> speech_recognition_preferences_;
 
   ShellBrowserMainParts* shell_main_parts_;
 

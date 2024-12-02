@@ -8,13 +8,17 @@
 #include "base/file_path.h"
 #include "base/path_service.h"
 #include "content/public/common/content_switches.h"
+#include "content/shell/shell_browser_main.h"
 #include "content/shell/shell_content_browser_client.h"
 #include "content/shell/shell_content_plugin_client.h"
 #include "content/shell/shell_content_renderer_client.h"
 #include "content/shell/shell_content_utility_client.h"
-#include "content/shell/shell_render_process_observer.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
+
+#if defined(OS_MACOSX)
+#include "content/shell/paths_mac.h"
+#endif  // OS_MACOSX
 
 ShellMainDelegate::ShellMainDelegate() {
 }
@@ -23,10 +27,17 @@ ShellMainDelegate::~ShellMainDelegate() {
 }
 
 bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
+#if defined(OS_MACOSX)
+  OverrideFrameworkBundlePath();
+#endif
   return false;
 }
 
 void ShellMainDelegate::PreSandboxStartup() {
+#if defined(OS_MACOSX)
+  OverrideChildProcessPath();
+#endif  // OS_MACOSX
+
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
@@ -43,8 +54,10 @@ void ShellMainDelegate::SandboxInitialized(const std::string& process_type) {
 int ShellMainDelegate::RunProcess(
     const std::string& process_type,
     const content::MainFunctionParams& main_function_params) {
-  NOTREACHED();
-  return -1;
+  if (process_type != "")
+    return -1;
+
+  return ShellBrowserMain(main_function_params);
 }
 
 void ShellMainDelegate::ProcessExiting(const std::string& process_type) {
@@ -57,7 +70,8 @@ bool ShellMainDelegate::ProcessRegistersWithSystemProcess(
 }
 
 bool ShellMainDelegate::ShouldSendMachPort(const std::string& process_type) {
-  return false;
+  // There are no auxiliary-type processes.
+  return true;
 }
 
 bool ShellMainDelegate::DelaySandboxInitialization(
@@ -96,9 +110,13 @@ void ShellMainDelegate::InitializeShellContentClient(
 }
 
 void ShellMainDelegate::InitializeResourceBundle() {
+  FilePath pak_file;
+#if defined(OS_MACOSX)
+  pak_file = GetResourcesPakFilePath();
+#else
   FilePath pak_dir;
   PathService::Get(base::DIR_MODULE, &pak_dir);
-
-  FilePath pak_file = pak_dir.Append(FILE_PATH_LITERAL("content_shell.pak"));
+  pak_file = pak_dir.Append(FILE_PATH_LITERAL("content_shell.pak"));
+#endif
   ui::ResourceBundle::InitSharedInstanceWithPakFile(pak_file);
 }

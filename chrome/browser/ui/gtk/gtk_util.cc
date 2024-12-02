@@ -19,13 +19,16 @@
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/event_disposition.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/gtk/gtk_theme_service.h"
-#include "content/browser/disposition_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/ui/gtk/browser_window_gtk.h"
+#include "chrome/browser/ui/gtk/theme_service_gtk.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
 #include "googleurl/src/gurl.h"
@@ -34,25 +37,20 @@
 #include "ui/base/events.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/gtk/gtk_screen_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/base/x/x11_util.h"
-#include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/frame/browser_view.h"
-#include "chrome/browser/chromeos/native_dialog_window.h"
-#else
-#include "chrome/browser/ui/gtk/browser_window_gtk.h"
-#endif
+#include "ui/gfx/linux_util.h"
 
 // These conflict with base/tracked_objects.h, so need to come last.
 #include <gdk/gdkx.h>  // NOLINT
 #include <gtk/gtk.h>   // NOLINT
 
+using content::RenderWidgetHost;
 using content::WebContents;
 
 namespace {
@@ -135,9 +133,134 @@ GList* GetIconList() {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   GList* icon_list = NULL;
   icon_list = g_list_append(icon_list,
-                            rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_32));
+      rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_32).ToGdkPixbuf());
   icon_list = g_list_append(icon_list,
-                            rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16));
+      rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_16).ToGdkPixbuf());
+  return icon_list;
+}
+
+// Returns the avatar icon for |profile|.
+//
+// Returns NULL if there is only one profile; always returns an icon for
+// Incognito profiles.
+//
+// The returned pixbuf must not be unreferenced or freed because it's owned by
+// either the resource bundle or the profile info cache.
+GdkPixbuf* GetAvatarIcon(Profile* profile) {
+  if (profile->IsOffTheRecord()) {
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    return rb.GetNativeImageNamed(IDR_OTR_ICON).ToGdkPixbuf();
+  }
+
+  const ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
+
+  if (!ProfileManager::IsMultipleProfilesEnabled() ||
+      cache.GetNumberOfProfiles() < 2)
+    return NULL;
+
+  const size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+
+  return (index != std::string::npos ?
+          cache.GetAvatarIconOfProfileAtIndex(index).ToGdkPixbuf() :
+          static_cast<GdkPixbuf*>(NULL));
+}
+
+// Gets the Chrome product icon.
+//
+// If it doesn't find the icon in |theme|, it looks among the icons packaged
+// with Chrome.
+//
+// Supported values of |size| are 16, 32, and 64. If the Chrome icon is found
+// in |theme|, the returned icon may not be of the requested size if |size|
+// has an unsupported value (GTK might scale it). If the Chrome icon is not
+// found in |theme|, and |size| has an unsupported value, the program will be
+// aborted with CHECK(false).
+//
+// The caller is responsible for calling g_object_unref() on the returned
+// pixbuf.
+GdkPixbuf* GetChromeIcon(GtkIconTheme* theme, const int size) {
+  if (gtk_icon_theme_has_icon(theme, kIconName)) {
+    GdkPixbuf* icon =
+        gtk_icon_theme_load_icon(theme,
+                                 kIconName,
+                                 size,
+                                 static_cast<GtkIconLookupFlags>(0),
+                                 0);
+    GdkPixbuf* icon_copy = gdk_pixbuf_copy(icon);
+    g_object_unref(icon);
+    return icon_copy;
+  }
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  int id = 0;
+
+  switch (size) {
+    case 16: id = IDR_PRODUCT_LOGO_16; break;
+    case 32: id = IDR_PRODUCT_LOGO_32; break;
+    case 64: id = IDR_PRODUCT_LOGO_64; break;
+    default: CHECK(false); break;
+  }
+
+  return gdk_pixbuf_copy(rb.GetNativeImageNamed(id).ToGdkPixbuf());
+}
+
+// Adds |emblem| to the bottom-right corner of |icon|.
+//
+// Taking the ceiling of the scaled destination rect's dimensions (|dest_w|
+// and |dest_h|) because, if the destination rect is larger than the scaled
+// emblem, gdk_pixbuf_composite() will replicate the edge pixels of the emblem
+// to fill the gap, which is better than a cropped emblem, I think.
+void AddEmblem(const GdkPixbuf* emblem, GdkPixbuf* icon) {
+  const int iw = gdk_pixbuf_get_width(icon);
+  const int ih = gdk_pixbuf_get_height(icon);
+  const int ew = gdk_pixbuf_get_width(emblem);
+  const int eh = gdk_pixbuf_get_height(emblem);
+
+  const double emblem_scale =
+      (static_cast<double>(ih) / static_cast<double>(eh)) * 0.5;
+  const int dest_w = ::ceil(ew * emblem_scale);
+  const int dest_h = ::ceil(eh * emblem_scale);
+  const int x = iw - dest_w;  // Used for offset_x and dest_x.
+  const int y = ih - dest_h;  // Used for offset_y and dest_y.
+
+  gdk_pixbuf_composite(emblem, icon,
+                       x, y,
+                       dest_w, dest_h,
+                       x, y,
+                       emblem_scale, emblem_scale,
+                       GDK_INTERP_BILINEAR, 255);
+}
+
+// Returns a list containing Chrome icons of various sizes emblemed with the
+// |profile|'s avatar.
+//
+// If there is only one profile, no emblem is added, but icons for Incognito
+// profiles will always get the Incognito emblem.
+//
+// The caller owns the list and all the icons it contains will have had their
+// reference counts incremented. Therefore the caller should unreference each
+// element before freeing the list.
+GList* GetIconListWithAvatars(GtkWindow* window, Profile* profile) {
+  GtkIconTheme* theme =
+      gtk_icon_theme_get_for_screen(gtk_widget_get_screen(GTK_WIDGET(window)));
+
+  GdkPixbuf* icon_16 = GetChromeIcon(theme, 16);
+  GdkPixbuf* icon_32 = GetChromeIcon(theme, 32);
+  GdkPixbuf* icon_64 = GetChromeIcon(theme, 64);
+
+  const GdkPixbuf* avatar = GetAvatarIcon(profile);
+  if (avatar) {
+    AddEmblem(avatar, icon_16);
+    AddEmblem(avatar, icon_32);
+    AddEmblem(avatar, icon_64);
+  }
+
+  GList* icon_list = NULL;
+  icon_list = g_list_append(icon_list, icon_64);
+  icon_list = g_list_append(icon_list, icon_32);
+  icon_list = g_list_append(icon_list, icon_16);
+
   return icon_list;
 }
 
@@ -157,28 +280,6 @@ gboolean PaintNoBackground(GtkWidget* widget,
   return TRUE;
 }
 
-#if defined(OS_CHROMEOS)
-
-WebContents* GetBrowserWindowSelectedWebContents(BrowserWindow* window) {
-  chromeos::BrowserView* browser_view = static_cast<chromeos::BrowserView*>(
-      window);
-  return browser_view->GetSelectedWebContents();
-}
-
-GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
-  gfx::NativeView widget = gtk_window_get_focus(window->GetNativeHandle());
-
-  if (widget == NULL) {
-    chromeos::BrowserView* browser_view = static_cast<chromeos::BrowserView*>(
-        window);
-    widget = browser_view->saved_focused_widget();
-  }
-
-  return widget;
-}
-
-#else
-
 WebContents* GetBrowserWindowSelectedWebContents(BrowserWindow* window) {
   BrowserWindowGtk* browser_window = static_cast<BrowserWindowGtk*>(
       window);
@@ -188,8 +289,6 @@ WebContents* GetBrowserWindowSelectedWebContents(BrowserWindow* window) {
 GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
   return gtk_window_get_focus(window->GetNativeHandle());
 }
-
-#endif
 
 }  // namespace
 
@@ -336,7 +435,7 @@ void SetWindowSizeFromResources(GtkWindow* window,
     // controls, we should allow that too, so be careful to pick the
     // wider of the resources size and the natural window size.
 
-    gtk_widget_show_all(GTK_BIN(window)->child);
+    gtk_widget_show_all(gtk_bin_get_child(GTK_BIN(window)));
     GtkRequisition requisition;
     gtk_widget_size_request(GTK_WIDGET(window), &requisition);
     gtk_widget_set_size_request(
@@ -416,37 +515,6 @@ void UndoForceFontSize(GtkWidget* widget) {
   gtk_widget_modify_font(widget, NULL);
 }
 
-gfx::Point GetWidgetScreenPosition(GtkWidget* widget) {
-  GdkWindow* window = gtk_widget_get_window(widget);
-
-  if (!window) {
-    NOTREACHED() << "Must only be called on realized widgets.";
-    return gfx::Point(0, 0);
-  }
-
-  gint x, y;
-  gdk_window_get_origin(window, &x, &y);
-
-  if (!gtk_widget_get_has_window(widget)) {
-    GtkAllocation allocation;
-    gtk_widget_get_allocation(widget, &allocation);
-    x += allocation.x;
-    y += allocation.y;
-  }
-
-  return gfx::Point(x, y);
-}
-
-gfx::Rect GetWidgetScreenBounds(GtkWidget* widget) {
-  gfx::Point position = GetWidgetScreenPosition(widget);
-
-  GtkAllocation allocation;
-  gtk_widget_get_allocation(widget, &allocation);
-
-  return gfx::Rect(position.x(), position.y(),
-                   allocation.width, allocation.height);
-}
-
 gfx::Size GetWidgetSize(GtkWidget* widget) {
   GtkRequisition size;
   gtk_widget_size_request(widget, &size);
@@ -457,7 +525,7 @@ void ConvertWidgetPointToScreen(GtkWidget* widget, gfx::Point* p) {
   DCHECK(widget);
   DCHECK(p);
 
-  gfx::Point position = GetWidgetScreenPosition(widget);
+  gfx::Point position = ui::GetWidgetScreenPosition(widget);
   p->SetPoint(p->x() + position.x(), p->y() + position.y());
 }
 
@@ -547,12 +615,6 @@ bool WidgetContainsCursor(GtkWidget* widget) {
   return WidgetBounds(widget).Contains(x, y);
 }
 
-void SetWindowIcon(GtkWindow* window) {
-  GList* icon_list = GetIconList();
-  gtk_window_set_icon_list(window, icon_list);
-  g_list_free(icon_list);
-}
-
 void SetDefaultWindowIcon(GtkWindow* window) {
   GtkIconTheme* theme =
       gtk_icon_theme_get_for_screen(gtk_widget_get_screen(GTK_WIDGET(window)));
@@ -571,6 +633,19 @@ void SetDefaultWindowIcon(GtkWindow* window) {
     gtk_window_set_icon_list(window, icon_list);
     g_list_free(icon_list);
   }
+}
+
+void SetWindowIcon(GtkWindow* window, Profile* profile) {
+  GList* icon_list = GetIconListWithAvatars(window, profile);
+  gtk_window_set_icon_list(window, icon_list);
+  g_list_foreach(icon_list, reinterpret_cast<GFunc>(g_object_unref), NULL);
+  g_list_free(icon_list);
+}
+
+void SetWindowIcon(GtkWindow* window, Profile* profile, GdkPixbuf* icon) {
+  const GdkPixbuf* avatar = GetAvatarIcon(profile);
+  if (avatar) AddEmblem(avatar, icon);
+  gtk_window_set_icon(window, icon);
 }
 
 GtkWidget* AddButtonToDialog(GtkWidget* dialog, const gchar* text,
@@ -780,7 +855,7 @@ void DrawThemedToolbarBackground(GtkWidget* widget,
                                  cairo_t* cr,
                                  GdkEventExpose* event,
                                  const gfx::Point& tabstrip_origin,
-                                 GtkThemeService* theme_service) {
+                                 ThemeServiceGtk* theme_service) {
   // Fill the entire region with the toolbar color.
   GdkColor color = theme_service->GetGdkColor(
       ThemeService::COLOR_TOOLBAR);
@@ -954,105 +1029,6 @@ void GetTextColors(GdkColor* normal_base,
   g_object_unref(fake_entry);
 }
 
-#if defined(OS_CHROMEOS)
-
-GtkWindow* GetLastActiveBrowserWindow() {
-  if (Browser* b = BrowserList::GetLastActive()) {
-    if (!b->is_type_tabbed()) {
-      b = BrowserList::FindTabbedBrowser(b->profile(), true);
-    }
-
-    if (b)
-      return GTK_WINDOW(b->window()->GetNativeHandle());
-  }
-
-  return NULL;
-}
-
-int GetNativeDialogFlags(GtkWindow* dialog) {
-  int flags = chromeos::DIALOG_FLAG_DEFAULT;
-
-  if (gtk_window_get_resizable(dialog))
-    flags |= chromeos::DIALOG_FLAG_RESIZEABLE;
-  if (gtk_window_get_modal(dialog))
-    flags |= chromeos::DIALOG_FLAG_MODAL;
-
-  return flags;
-}
-
-GtkWindow* GetDialogTransientParent(GtkWindow* dialog) {
-  GtkWindow* parent = gtk_window_get_transient_for(dialog);
-  if (!parent)
-    parent = GetLastActiveBrowserWindow();
-
-  return parent;
-}
-
-void ShowDialog(GtkWidget* dialog) {
-  // Make sure all controls are visible so that we get correct size.
-  gtk_widget_show_all(GTK_DIALOG(dialog)->vbox);
-
-  // Get dialog window size.
-  gint width = 0;
-  gint height = 0;
-  gtk_window_get_size(GTK_WINDOW(dialog), &width, &height);
-
-  chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
-      dialog,
-      GetNativeDialogFlags(GTK_WINDOW(dialog)),
-      gfx::Size(width, height),
-      gfx::Size());
-}
-
-void ShowDialogWithLocalizedSize(GtkWidget* dialog,
-                                 int width_id,
-                                 int height_id,
-                                 bool resizeable) {
-  int width = (width_id == -1) ? 0 :
-      views::Widget::GetLocalizedContentsWidth(width_id);
-  int height = (height_id == -1) ? 0 :
-      views::Widget::GetLocalizedContentsHeight(height_id);
-
-  chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
-      dialog,
-      resizeable ? chromeos::DIALOG_FLAG_RESIZEABLE :
-                   chromeos::DIALOG_FLAG_DEFAULT,
-      gfx::Size(width, height),
-      gfx::Size());
-}
-
-void ShowDialogWithMinLocalizedWidth(GtkWidget* dialog,
-                                     int width_id) {
-  int width = (width_id == -1) ? 0 :
-      views::Widget::GetLocalizedContentsWidth(width_id);
-
-  chromeos::ShowNativeDialog(GetDialogTransientParent(GTK_WINDOW(dialog)),
-      dialog,
-      GetNativeDialogFlags(GTK_WINDOW(dialog)),
-      gfx::Size(),
-      gfx::Size(width, 0));
-}
-
-void PresentWindow(GtkWidget* window, int timestamp) {
-  GtkWindow* host_window = chromeos::GetNativeDialogWindow(window);
-  if (!host_window)
-      host_window = GTK_WINDOW(window);
-  if (timestamp)
-    gtk_window_present_with_time(host_window, timestamp);
-  else
-    gtk_window_present(host_window);
-}
-
-GtkWindow* GetDialogWindow(GtkWidget* dialog) {
-  return chromeos::GetNativeDialogWindow(dialog);
-}
-
-gfx::Rect GetDialogBounds(GtkWidget* dialog) {
-  return chromeos::GetNativeDialogContentsBounds(dialog);
-}
-
-#else
-
 void ShowDialog(GtkWidget* dialog) {
   gtk_widget_show_all(dialog);
 }
@@ -1101,8 +1077,6 @@ gfx::Rect GetDialogBounds(GtkWidget* dialog) {
   return gfx::Rect(x, y, width, height);
 }
 
-#endif
-
 string16 GetStockPreferencesMenuLabel() {
   GtkStockItem stock_item;
   string16 preferences;
@@ -1116,7 +1090,7 @@ string16 GetStockPreferencesMenuLabel() {
 bool IsWidgetAncestryVisible(GtkWidget* widget) {
   GtkWidget* parent = widget;
   while (parent && gtk_widget_get_visible(parent))
-    parent = parent->parent;
+    parent = gtk_widget_get_parent(parent);
   return !parent;
 }
 
@@ -1165,7 +1139,7 @@ void ApplyMessageDialogQuirks(GtkWidget* dialog) {
 // against the focused widget.
 // TODO(suzhe): This approach does not work for plugins.
 void DoCutCopyPaste(BrowserWindow* window,
-                    void (RenderViewHost::*method)(),
+                    void (RenderWidgetHost::*method)(),
                     const char* signal) {
   GtkWidget* widget = GetBrowserWindowFocusedWidget(window);
   if (widget == NULL)
@@ -1182,15 +1156,15 @@ void DoCutCopyPaste(BrowserWindow* window,
 }
 
 void DoCut(BrowserWindow* window) {
-  DoCutCopyPaste(window, &RenderViewHost::Cut, "cut-clipboard");
+  DoCutCopyPaste(window, &RenderWidgetHost::Cut, "cut-clipboard");
 }
 
 void DoCopy(BrowserWindow* window) {
-  DoCutCopyPaste(window, &RenderViewHost::Copy, "copy-clipboard");
+  DoCutCopyPaste(window, &RenderWidgetHost::Copy, "copy-clipboard");
 }
 
 void DoPaste(BrowserWindow* window) {
-  DoCutCopyPaste(window, &RenderViewHost::Paste, "paste-clipboard");
+  DoCutCopyPaste(window, &RenderWidgetHost::Paste, "paste-clipboard");
 }
 
 }  // namespace gtk_util

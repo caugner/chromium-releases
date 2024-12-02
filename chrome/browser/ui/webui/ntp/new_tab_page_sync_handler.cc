@@ -15,13 +15,19 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
-#include "net/base/cookie_monster.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -116,19 +122,22 @@ void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
   DCHECK(sync_service_);
   if (!sync_service_->IsSyncEnabled())
     return;
+  Browser* browser =
+      BrowserList::FindBrowserWithWebContents(web_ui()->GetWebContents());
+  if (!browser || browser->IsAttemptingToCloseBrowser())
+    return;
+  browser->ShowSyncSetup(SyncPromoUI::SOURCE_NTP_LINK);
+
   if (sync_service_->HasSyncSetupCompleted()) {
-    sync_service_->ShowErrorUI();
-    string16 user = UTF8ToUTF16(sync_service_->profile()->GetPrefs()->GetString(
-        prefs::kGoogleServicesUsername));
+    string16 user = UTF8ToUTF16(SigninManagerFactory::GetForProfile(
+        Profile::FromWebUI(web_ui()))->GetAuthenticatedUsername());
     DictionaryValue value;
     value.SetString("syncEnabledMessage",
                     l10n_util::GetStringFUTF16(IDS_SYNC_NTP_SYNCED_TO,
                     user));
-    web_ui()->CallJavascriptFunction("syncAlreadyEnabled", value);
+    web_ui()->CallJavascriptFunction("ntp.syncAlreadyEnabled", value);
   } else {
-    // User clicked the 'Start now' link to begin syncing.
     ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_NTP);
-    sync_service_->ShowLoginDialog();
   }
 }
 
@@ -179,5 +188,5 @@ void NewTabPageSyncHandler::SendSyncMessageToPage(
       }
     }
   }
-  web_ui()->CallJavascriptFunction("syncMessageChanged", value);
+  web_ui()->CallJavascriptFunction("ntp.syncMessageChanged", value);
 }

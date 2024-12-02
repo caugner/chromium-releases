@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/memory/scoped_handle.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -20,12 +20,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_unpacker.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/utility_process_host.h"
 #include "crypto/signature_verifier.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -33,6 +33,7 @@
 #include "ui/gfx/codec/png_codec.h"
 
 using content::BrowserThread;
+using content::UtilityProcessHost;
 
 // The following macro makes histograms that record the length of paths
 // in this file much easier to read.
@@ -163,14 +164,17 @@ bool FindWritableTempLocation(FilePath* temp_dir) {
 
 SandboxedExtensionUnpacker::SandboxedExtensionUnpacker(
     const FilePath& crx_path,
-    ResourceDispatcherHost* rdh,
+    bool run_out_of_process,
     Extension::Location location,
     int creation_flags,
     SandboxedExtensionUnpackerClient* client)
     : crx_path_(crx_path),
       thread_identifier_(BrowserThread::ID_COUNT),
-      rdh_(rdh), client_(client), got_response_(false),
-      location_(location), creation_flags_(creation_flags) {
+      run_out_of_process_(run_out_of_process),
+      client_(client),
+      got_response_(false),
+      location_(location),
+      creation_flags_(creation_flags) {
 }
 
 bool SandboxedExtensionUnpacker::CreateTempDirectory() {
@@ -239,7 +243,7 @@ void SandboxedExtensionUnpacker::Start() {
   //
   // TODO(asargent) we shouldn't need to do this branch here - instead
   // UtilityProcessHost should handle it for us. (http://crbug.com/19192)
-  bool use_utility_process = rdh_ &&
+  bool use_utility_process = run_out_of_process_ &&
       !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
   if (use_utility_process) {
     // The utility process will have access to the directory passed to
@@ -267,7 +271,8 @@ void SandboxedExtensionUnpacker::Start() {
             link_free_crx_path));
   } else {
     // Otherwise, unpack the extension in this process.
-    ExtensionUnpacker unpacker(temp_crx_path, location_, creation_flags_);
+    ExtensionUnpacker unpacker(
+        temp_crx_path, extension_id_, location_, creation_flags_);
     if (unpacker.Run() && unpacker.DumpImagesToFile() &&
         unpacker.DumpMessageCatalogsToFile()) {
       OnUnpackExtensionSucceeded(*unpacker.parsed_manifest());
@@ -311,13 +316,14 @@ void SandboxedExtensionUnpacker::OnProcessCrashed(int exit_code) {
 
 void SandboxedExtensionUnpacker::StartProcessOnIOThread(
     const FilePath& temp_crx_path) {
-  UtilityProcessHost* host = new UtilityProcessHost(this, thread_identifier_);
+  UtilityProcessHost* host = UtilityProcessHost::Create(
+      this, thread_identifier_);
   // Grant the subprocess access to the entire subdir the extension file is
   // in, so that it can unpack to that dir.
-  host->set_exposed_dir(temp_crx_path.DirName());
+  host->SetExposedDir(temp_crx_path.DirName());
   host->Send(
       new ChromeUtilityMsg_UnpackExtension(
-          temp_crx_path, location_, creation_flags_));
+          temp_crx_path, extension_id_, location_, creation_flags_));
 }
 
 void SandboxedExtensionUnpacker::OnUnpackExtensionSucceeded(
@@ -541,8 +547,13 @@ bool SandboxedExtensionUnpacker::ValidateSignature() {
     return false;
   }
 
-  base::Base64Encode(std::string(reinterpret_cast<char*>(&key.front()),
-      key.size()), &public_key_);
+  std::string public_key =
+      std::string(reinterpret_cast<char*>(&key.front()), key.size());
+  base::Base64Encode(public_key, &public_key_);
+
+  if (!Extension::GenerateId(public_key, &extension_id_))
+    return false;
+
   return true;
 }
 

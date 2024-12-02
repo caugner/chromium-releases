@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,12 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/api/sync_change_processor.h"
 #include "chrome/browser/sync/api/sync_data.h"
 #include "chrome/browser/sync/api/sync_error.h"
-
-class SyncData;
+#include "sync/syncable/model_type.h"
 
 typedef std::vector<SyncData> SyncDataList;
 
@@ -37,7 +36,7 @@ class SyncableService : public SyncChangeProcessor,
   virtual SyncError MergeDataAndStartSyncing(
       syncable::ModelType type,
       const SyncDataList& initial_sync_data,
-      SyncChangeProcessor* sync_processor) = 0;
+      scoped_ptr<SyncChangeProcessor> sync_processor) = 0;
 
   // Stop syncing the specified type and reset state.
   virtual void StopSyncing(syncable::ModelType type) = 0;

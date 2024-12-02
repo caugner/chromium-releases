@@ -23,27 +23,35 @@ class URLRequestContextGetter;
 class CWSIntentsRegistry : public ProfileKeyedService,
                            public content::URLFetcherDelegate {
  public:
-  // Data returned from CWS for a single intent.
+  // Data returned from CWS for a single service.
   struct IntentExtensionInfo {
+    IntentExtensionInfo();
+    ~IntentExtensionInfo();
+
+    string16 id;  // The id of the extension.
+    string16 name;  // The name of the extension.
     int num_ratings;  // Number of ratings in CWS store.
     double average_rating;  // The average CWS rating.
     string16 manifest;  // The containing extension's manifest info.
-    GURL icon_url;  // Where to retrieve an icon for this intent.
+    GURL icon_url;  // Where to retrieve an icon for this service.
   };
 
-  // List of Intent extensions, as returned by GetIntentProviders's |callback|
+  // List of Intent extensions, as returned by GetIntentServices's |callback|
   typedef std::vector<IntentExtensionInfo> IntentExtensionList;
-  // Callback to return results from GetIntentProviders upon completion.
+  // Callback to return results from GetIntentServices upon completion.
   typedef base::Callback<void(const IntentExtensionList&)> ResultsCallback;
 
-  // Requests all intent providers matching |action| and |mimetype|.
+  // Requests all intent services matching |action| and |mimetype|.
   // |mimetype| must conform to definition as outlined for
-  // WebIntentsRegistry::GetIntentProviders.
+  // WebIntentsRegistry::GetIntentServices.
   // |callback| will be invoked upon retrieving results from CWS, returning
   // a list of matching Intent extensions.
-  void GetIntentProviders(const string16& action,
-                          const string16& mimetype,
-                          const ResultsCallback& callback);
+  void GetIntentServices(const string16& action,
+                         const string16& mimetype,
+                         const ResultsCallback& callback);
+
+  // Build a REST query URL to retrieve intent info from CWS.
+  static GURL BuildQueryURL(const string16& action, const string16& type);
 
  private:
   // Make sure that only CWSIntentsRegistryFactory can create an instance of
@@ -52,20 +60,20 @@ class CWSIntentsRegistry : public ProfileKeyedService,
   FRIEND_TEST_ALL_PREFIXES(CWSIntentsRegistryTest, ValidQuery);
   FRIEND_TEST_ALL_PREFIXES(CWSIntentsRegistryTest, InvalidQuery);
 
-  // content::URLFetcherDelegate implementation.
-  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
-
-  // |context| is a profile-dependent URL request context. Must not be NULL.
-  explicit CWSIntentsRegistry(net::URLRequestContextGetter* context);
-  virtual ~CWSIntentsRegistry();
-
   struct IntentsQuery;
 
   // This is an opaque version of URLFetcher*, so we can use it as a hash key.
   typedef intptr_t URLFetcherHandle;
 
-  // Maps URL fetchers to queries.
+  // Maps URL fetchers to queries. IntentsQuery objects are owned by the map.
   typedef base::hash_map<URLFetcherHandle, IntentsQuery*> QueryMap;
+
+  // |context| is a profile-dependent URL request context. Must not be NULL.
+  explicit CWSIntentsRegistry(net::URLRequestContextGetter* context);
+  virtual ~CWSIntentsRegistry();
+
+  // content::URLFetcherDelegate implementation.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Map for all in-flight web data requests/intent queries.
   QueryMap queries_;

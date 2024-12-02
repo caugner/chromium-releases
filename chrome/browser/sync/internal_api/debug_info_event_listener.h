@@ -10,12 +10,11 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/internal_api/sync_manager.h"
-#include "chrome/browser/sync/js/js_backend.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/sessions/debug_info_getter.h"
-#include "chrome/browser/sync/sessions/session_state.h"
-#include "chrome/browser/sync/util/weak_handle.h"
-#include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "sync/js/js_backend.h"
+#include "sync/protocol/sync.pb.h"
+#include "sync/sessions/debug_info_getter.h"
+#include "sync/sessions/session_state.h"
+#include "sync/util/weak_handle.h"
 
 namespace sync_api {
 
@@ -35,8 +34,8 @@ class DebugInfoEventListener : public sync_api::SyncManager::Observer,
   virtual void OnInitializationComplete(
     const browser_sync::WeakHandle<browser_sync::JsBackend>& js_backend,
       bool success) OVERRIDE;
-  virtual void OnAuthError(
-      const GoogleServiceAuthError& auth_error) OVERRIDE;
+  virtual void OnConnectionStatusChange(
+      sync_api::ConnectionStatus connection_status) OVERRIDE;
   virtual void OnPassphraseRequired(
       sync_api::PassphraseRequiredReason reason,
       const sync_pb::EncryptedData& pending_keys) OVERRIDE;

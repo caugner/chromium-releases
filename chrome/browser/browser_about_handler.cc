@@ -12,14 +12,12 @@
 #include "base/string_util.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/common/about_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/gpu/gpu_process_host_ui_shim.h"
-#include "content/browser/sensors/sensors_provider.h"
+#include "content/public/browser/sensors_provider.h"
 
 #if defined(USE_TCMALLOC)
-#include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
+#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
 #endif
 
 namespace {
@@ -43,6 +41,7 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIHistogramsHost,
   chrome::kChromeUIHistoryHost,
   chrome::kChromeUIIPCHost,
+  chrome::kChromeUIInspectHost,
   chrome::kChromeUIMediaInternalsHost,
   chrome::kChromeUIMemoryHost,
   chrome::kChromeUINetInternalsHost,
@@ -51,6 +50,7 @@ const char* const kChromePaths[] = {
   chrome::kChromeUINewTabHost,
   chrome::kChromeUIOmniboxHost,
   chrome::kChromeUIPluginsHost,
+  chrome::kChromeUIPolicyHost,
   chrome::kChromeUIPrintHost,
   chrome::kChromeUIProfilerHost,
   chrome::kChromeUIQuotaInternalsHost,
@@ -63,7 +63,6 @@ const char* const kChromePaths[] = {
   chrome::kChromeUITermsHost,
   chrome::kChromeUITracingHost,
   chrome::kChromeUIVersionHost,
-  chrome::kChromeUIWorkersHost,
 #if defined(OS_WIN)
   chrome::kChromeUIConflictsHost,
 #endif
@@ -104,13 +103,6 @@ bool WillHandleBrowserAboutURL(GURL* url,
   if (!url->SchemeIs(chrome::kChromeUIScheme))
     return false;
 
-  // Circumvent processing URLs that the renderer process will handle.
-  if (chrome_about_handler::WillHandle(*url))
-    return false;
-
-  CommandLine* cl = CommandLine::ForCurrentProcess();
-  bool enableUberPage = cl->HasSwitch(switches::kEnableUberPage);
-
   std::string host(url->host());
   std::string path;
   // Replace about with chrome-urls.
@@ -127,22 +119,20 @@ bool WillHandleBrowserAboutURL(GURL* url,
     host = chrome::kChromeUISyncInternalsHost;
   // Redirect chrome://extensions.
   } else if (host == chrome::kChromeUIExtensionsHost) {
-    if (enableUberPage) {
-      host = chrome::kChromeUIUberHost;
-      path = chrome::kChromeUIExtensionsHost + url->path();
-    } else {
-      host = chrome::kChromeUISettingsHost;
-      path = chrome::kExtensionsSubPage;
-    }
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIExtensionsHost + url->path();
+  } else if (host == chrome::kChromeUIHistoryHost) {
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIHistoryHost + url->path();
   // Redirect chrome://settings/extensions.
   // TODO(csilv): Fix all code paths for this page once Uber page is enabled
   // permanently.
-  } else if (enableUberPage && host == chrome::kChromeUISettingsHost &&
+  } else if (host == chrome::kChromeUISettingsHost &&
       url->path() == std::string("/") + chrome::kExtensionsSubPage) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUIExtensionsHost;
   // Redirect chrome://settings
-  } else if (enableUberPage && host == chrome::kChromeUISettingsHost) {
+  } else if (host == chrome::kChromeUISettingsHost) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUISettingsHost + url->path();
   }
@@ -172,33 +162,6 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
 
 #endif  // OFFICIAL_BUILD
 
-  // Handle URLs to crash the browser or wreck the gpu process.
-  if (host == chrome::kChromeUIBrowserCrashHost) {
-    // Induce an intentional crash in the browser process.
-    CHECK(false);
-  }
-
-  if (host == chrome::kChromeUIGpuCleanHost) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateRemoveAllContext();
-    return true;
-  }
-
-  if (host == chrome::kChromeUIGpuCrashHost) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateCrash();
-    return true;
-  }
-
-  if (host == chrome::kChromeUIGpuHangHost) {
-    GpuProcessHostUIShim* shim = GpuProcessHostUIShim::GetOneInstance();
-    if (shim)
-      shim->SimulateHang();
-    return true;
-  }
-
 #if defined(OS_CHROMEOS)
   if (host == chrome::kChromeUIRotateHost) {
     content::ScreenOrientation change = content::SCREEN_ORIENTATION_TOP;
@@ -214,7 +177,7 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
     } else {
       NOTREACHED() << "Unknown orientation";
     }
-    sensors::Provider::GetInstance()->ScreenOrientationChanged(change);
+    content::SensorsProvider::GetInstance()->ScreenOrientationChanged(change);
     return true;
   }
 #endif

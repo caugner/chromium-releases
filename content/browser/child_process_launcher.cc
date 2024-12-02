@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,7 @@
 #elif defined(OS_POSIX)
 #include "base/memory/singleton.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
-#include "content/browser/zygote_host_linux.h"
+#include "content/browser/zygote_host_impl_linux.h"
 #endif
 
 #if defined(OS_POSIX)
@@ -50,7 +50,7 @@ class ChildProcessLauncher::Context
         exit_code_(content::RESULT_CODE_NORMAL_EXIT),
         starting_(true),
         terminate_child_on_shutdown_(true)
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
         , zygote_(false)
 #endif
         {
@@ -61,7 +61,7 @@ class ChildProcessLauncher::Context
       const FilePath& exposed_dir,
 #elif defined(OS_POSIX)
       bool use_zygote,
-      const base::environment_vector& environ,
+      const base::EnvironmentVector& environ,
       int ipcfd,
 #endif
       CommandLine* cmd_line,
@@ -113,7 +113,7 @@ class ChildProcessLauncher::Context
       const FilePath& exposed_dir,
 #elif defined(OS_POSIX)
       bool use_zygote,
-      const base::environment_vector& env,
+      const base::EnvironmentVector& env,
       int ipcfd,
 #endif
       CommandLine* cmd_line) {
@@ -127,7 +127,7 @@ class ChildProcessLauncher::Context
     // to reliably detect child termination.
     file_util::ScopedFD ipcfd_closer(&ipcfd);
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
     // On Linux, we need to add some extra file descriptors for crash handling.
     std::string process_type =
         cmd_line->GetSwitchValueASCII(switches::kProcessType);
@@ -140,19 +140,19 @@ class ChildProcessLauncher::Context
         mapping.push_back(std::pair<uint32_t, int>(kCrashDumpSignal,
                                                    crash_signal_fd));
       }
-      handle = ZygoteHost::GetInstance()->ForkRequest(cmd_line->argv(),
-                                                      mapping,
-                                                      process_type);
+      handle = ZygoteHostImpl::GetInstance()->ForkRequest(cmd_line->argv(),
+                                                          mapping,
+                                                          process_type);
     } else
     // Fall through to the normal posix case below when we're not zygoting.
 #endif
     {
-      base::file_handle_mapping_vector fds_to_map;
+      base::FileHandleMappingVector fds_to_map;
       fds_to_map.push_back(std::make_pair(
           ipcfd,
           kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
       if (crash_signal_fd >= 0) {
         fds_to_map.push_back(std::make_pair(
             crash_signal_fd,
@@ -209,14 +209,14 @@ class ChildProcessLauncher::Context
         base::Bind(
             &Context::Notify,
             this_object.get(),
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
             use_zygote,
 #endif
             handle));
   }
 
   void Notify(
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
       bool zygote,
 #endif
       base::ProcessHandle handle) {
@@ -225,7 +225,7 @@ class ChildProcessLauncher::Context
     if (!handle)
       LOG(ERROR) << "Failed to launch child process";
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
     zygote_ = zygote;
 #endif
     if (client_) {
@@ -248,7 +248,7 @@ class ChildProcessLauncher::Context
         BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
         base::Bind(
             &Context::TerminateInternal,
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
             zygote_,
 #endif
             process_.handle()));
@@ -262,7 +262,7 @@ class ChildProcessLauncher::Context
   }
 
   static void TerminateInternal(
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
       bool zygote,
 #endif
       base::ProcessHandle handle) {
@@ -272,11 +272,11 @@ class ChildProcessLauncher::Context
     process.Terminate(content::RESULT_CODE_NORMAL_EXIT);
     // On POSIX, we must additionally reap the child.
 #if defined(OS_POSIX)
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
     if (zygote) {
       // If the renderer was created via a zygote, we have to proxy the reaping
       // through the zygote process.
-      ZygoteHost::GetInstance()->EnsureProcessTerminated(handle);
+      ZygoteHostImpl::GetInstance()->EnsureProcessTerminated(handle);
     } else
 #endif  // !OS_MACOSX
     {
@@ -296,7 +296,7 @@ class ChildProcessLauncher::Context
   // shutdown. Default behavior is to terminate the child.
   bool terminate_child_on_shutdown_;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   bool zygote_;
 #endif
 };
@@ -307,7 +307,7 @@ ChildProcessLauncher::ChildProcessLauncher(
     const FilePath& exposed_dir,
 #elif defined(OS_POSIX)
     bool use_zygote,
-    const base::environment_vector& environ,
+    const base::EnvironmentVector& environ,
     int ipcfd,
 #endif
     CommandLine* cmd_line,
@@ -347,9 +347,9 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
       *exit_code = context_->exit_code_;
     return context_->termination_status_;
   }
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   if (context_->zygote_) {
-    context_->termination_status_ = ZygoteHost::GetInstance()->
+    context_->termination_status_ = ZygoteHostImpl::GetInstance()->
         GetTerminationStatus(handle, &context_->exit_code_);
   } else
 #endif

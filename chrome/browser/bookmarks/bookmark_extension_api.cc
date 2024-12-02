@@ -180,7 +180,7 @@ void BookmarkExtensionEventRouter::BookmarkNodeMoved(
   args.Append(object_args);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkMoved, json_args);
 }
 
@@ -195,7 +195,7 @@ void BookmarkExtensionEventRouter::BookmarkNodeAdded(BookmarkModel* model,
   args.Append(obj);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkCreated, json_args);
 }
 
@@ -213,7 +213,7 @@ void BookmarkExtensionEventRouter::BookmarkNodeRemoved(
   args.Append(object_args);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkRemoved, json_args);
 }
 
@@ -234,7 +234,7 @@ void BookmarkExtensionEventRouter::BookmarkNodeChanged(
   args.Append(object_args);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(model->profile(), keys::kOnBookmarkChanged, json_args);
 }
 
@@ -259,26 +259,27 @@ void BookmarkExtensionEventRouter::BookmarkNodeChildrenReordered(
   args.Append(reorder_info);
 
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(model->profile(),
                 keys::kOnBookmarkChildrenReordered,
                 json_args);
 }
 
 void BookmarkExtensionEventRouter::
-    BookmarkImportBeginning(BookmarkModel* model) {
+    ExtensiveBookmarkChangesBeginning(BookmarkModel* model) {
   ListValue args;
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(model->profile(),
                 keys::kOnBookmarkImportBegan,
                 json_args);
 }
 
-void BookmarkExtensionEventRouter::BookmarkImportEnding(BookmarkModel* model) {
+void BookmarkExtensionEventRouter::ExtensiveBookmarkChangesEnded(
+    BookmarkModel* model) {
   ListValue args;
   std::string json_args;
-  base::JSONWriter::Write(&args, false, &json_args);
+  base::JSONWriter::Write(&args, &json_args);
   DispatchEvent(model->profile(),
                 keys::kOnBookmarkImportEnded,
                 json_args);
@@ -915,6 +916,10 @@ bool ImportBookmarksFunction::RunImpl() {
 void ImportBookmarksFunction::FileSelected(const FilePath& path,
                                            int index,
                                            void* params) {
+#if !defined(OS_ANDROID)
+  // Android does not have support for the standard importers.
+  // TODO(jgreenwald): remove ifdef once extensions are no longer built on
+  // Android.
   scoped_refptr<ImporterHost> importer_host(new ImporterHost);
   importer::SourceProfile source_profile;
   source_profile.importer_type = importer::TYPE_BOOKMARKS_FILE;
@@ -924,6 +929,7 @@ void ImportBookmarksFunction::FileSelected(const FilePath& path,
                                      importer::FAVORITES,
                                      new ProfileWriter(profile()),
                                      true);
+#endif
   Release();  // Balanced in BookmarksIOFunction::SelectFile()
 }
 
@@ -935,6 +941,11 @@ bool ExportBookmarksFunction::RunImpl() {
 void ExportBookmarksFunction::FileSelected(const FilePath& path,
                                            int index,
                                            void* params) {
+#if !defined(OS_ANDROID)
+  // Android does not have support for the standard exporter.
+  // TODO(jgreenwald): remove ifdef once extensions are no longer built on
+  // Android.
   bookmark_html_writer::WriteBookmarks(profile(), path, NULL);
+#endif
   Release();  // Balanced in BookmarksIOFunction::SelectFile()
 }

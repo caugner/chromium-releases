@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,190 +18,14 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "chrome/browser/chromeos/input_method/ibus_input_methods.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "chrome/browser/chromeos/input_method/input_method_whitelist.h"
+#include "chrome/browser/chromeos/input_method/input_methods.h"
 
 namespace chromeos {
 namespace input_method {
-
-namespace {
-
-const char kFallbackLayout[] = "us";
-
-InputMethodDescriptors* GetSupportedInputMethodsInternal(
-    const InputMethodWhitelist& whitelist) {
-  InputMethodDescriptors* input_methods = new InputMethodDescriptors;
-  input_methods->reserve(arraysize(kIBusEngines));
-  for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
-    input_methods->push_back(InputMethodDescriptor(
-        whitelist,
-        kIBusEngines[i].input_method_id,
-        "",
-        kIBusEngines[i].xkb_layout_id,
-        kIBusEngines[i].language_code));
-  }
-  return input_methods;
-}
-
-}  // namespace
-
-class InputMethodWhitelist {
- public:
-  InputMethodWhitelist() {
-    for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
-      supported_input_methods_.insert(kIBusEngines[i].input_method_id);
-    }
-    for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
-      supported_layouts_.insert(kIBusEngines[i].xkb_layout_id);
-    }
-  }
-
-  // Returns true if |input_method_id| is whitelisted.
-  bool InputMethodIdIsWhitelisted(const std::string& input_method_id) const {
-    return (supported_input_methods_.count(input_method_id) > 0);
-  }
-
-  // Returns true if |xkb_layout| is supported.
-  bool XkbLayoutIsSupported(const std::string& xkb_layout) const {
-    return (supported_layouts_.count(xkb_layout) > 0);
-  }
-
- private:
-  std::set<std::string> supported_input_methods_;
-  std::set<std::string> supported_layouts_;
-
-  DISALLOW_COPY_AND_ASSIGN(InputMethodWhitelist);
-};
-
-InputMethodDescriptor::InputMethodDescriptor(
-    const InputMethodWhitelist& whitelist,
-    const std::string& id,
-    const std::string& name,
-    const std::string& raw_layout,
-    const std::string& language_code)
-    : id_(id),
-      name_(name),
-      language_code_(language_code) {
-  keyboard_layout_ = kFallbackLayout;
-  base::SplitString(raw_layout, ',', &virtual_keyboard_layouts_);
-
-  // Find a valid XKB layout name from the comma-separated list, |raw_layout|.
-  // Only the first acceptable XKB layout name in the list is used as the
-  // |keyboard_layout| value of the InputMethodDescriptor object to be created
-  for (size_t i = 0; i < virtual_keyboard_layouts_.size(); ++i) {
-    if (whitelist.XkbLayoutIsSupported(virtual_keyboard_layouts_[i])) {
-      keyboard_layout_ = virtual_keyboard_layouts_[i];
-      DCHECK(keyboard_layout_.find(",") == std::string::npos);
-      break;
-    }
-  }
-}
-
-InputMethodDescriptor::InputMethodDescriptor() {
-}
-
-InputMethodDescriptor::~InputMethodDescriptor() {
-}
-
-InputMethodDescriptor::InputMethodDescriptor(
-    const std::string& in_id,
-    const std::string& in_name,
-    const std::string& in_keyboard_layout,
-    const std::string& in_virtual_keyboard_layouts,
-    const std::string& in_language_code)
-    : id_(in_id),
-      name_(in_name),
-      keyboard_layout_(in_keyboard_layout),
-      language_code_(in_language_code) {
-  DCHECK(keyboard_layout_.find(",") == std::string::npos);
-  base::SplitString(
-      in_virtual_keyboard_layouts, ',', &virtual_keyboard_layouts_);
-}
-
-// static
-InputMethodDescriptor
-InputMethodDescriptor::GetFallbackInputMethodDescriptor() {
-  return InputMethodDescriptor(
-      "xkb:us::eng", "", kFallbackLayout, kFallbackLayout, "eng");
-}
-
-std::string InputMethodDescriptor::ToString() const {
-  std::stringstream stream;
-  stream << "id=" << id()
-         << ", name=" << name()
-         << ", keyboard_layout=" << keyboard_layout()
-         << ", virtual_keyboard_layouts=" << virtual_keyboard_layouts_.size()
-         << ", language_code=" << language_code();
-  return stream.str();
-}
-
-ImeProperty::ImeProperty(const std::string& in_key,
-                         const std::string& in_label,
-                         bool in_is_selection_item,
-                         bool in_is_selection_item_checked,
-                         int in_selection_item_id)
-    : key(in_key),
-      label(in_label),
-      is_selection_item(in_is_selection_item),
-      is_selection_item_checked(in_is_selection_item_checked),
-      selection_item_id(in_selection_item_id) {
-  DCHECK(!key.empty());
-}
-
-ImeProperty::ImeProperty()
-    : is_selection_item(false),
-      is_selection_item_checked(false),
-      selection_item_id(kInvalidSelectionItemId) {
-}
-
-ImeProperty::~ImeProperty() {
-}
-
-std::string ImeProperty::ToString() const {
-  std::stringstream stream;
-  stream << "key=" << key
-         << ", label=" << label
-         << ", is_selection_item=" << is_selection_item
-         << ", is_selection_item_checked=" << is_selection_item_checked
-         << ", selection_item_id=" << selection_item_id;
-  return stream.str();
-}
-
-ImeConfigValue::ImeConfigValue()
-    : type(kValueTypeString),
-      int_value(0),
-      bool_value(false) {
-}
-
-ImeConfigValue::~ImeConfigValue() {
-}
-
-std::string ImeConfigValue::ToString() const {
-  std::stringstream stream;
-  stream << "type=" << type;
-  switch (type) {
-    case kValueTypeString:
-      stream << ", string_value=" << string_value;
-      break;
-    case kValueTypeInt:
-      stream << ", int_value=" << int_value;
-      break;
-    case kValueTypeBool:
-      stream << ", bool_value=" << (bool_value ? "true" : "false");
-      break;
-    case kValueTypeStringList:
-      stream << ", string_list_value=";
-      for (size_t i = 0; i < string_list_value.size(); ++i) {
-        if (i) {
-          stream << ",";
-        }
-        stream << string_list_value[i];
-      }
-      break;
-  }
-  return stream.str();
-}
 
 #if defined(HAVE_IBUS)
 const char kPanelObjectKey[] = "panel-object";
@@ -261,7 +85,7 @@ bool PropertyHasChildren(IBusProperty* prop) {
 // returns false if sanity checks for |ibus_prop| fail.
 bool ConvertProperty(IBusProperty* ibus_prop,
                      int selection_item_id,
-                     ImePropertyList* out_prop_list) {
+                     InputMethodPropertyList* out_prop_list) {
   DCHECK(ibus_prop);
   DCHECK(ibus_prop->key);
   DCHECK(out_prop_list);
@@ -286,7 +110,7 @@ bool ConvertProperty(IBusProperty* ibus_prop,
 
   const bool is_selection_item = (ibus_prop->type == PROP_TYPE_RADIO);
   selection_item_id = is_selection_item ?
-      selection_item_id : ImeProperty::kInvalidSelectionItemId;
+      selection_item_id : InputMethodProperty::kInvalidSelectionItemId;
 
   bool is_selection_item_checked = false;
   if (ibus_prop->state == PROP_STATE_INCONSISTENT) {
@@ -327,7 +151,7 @@ bool ConvertProperty(IBusProperty* ibus_prop,
     label = Or(ibus_prop->key, "");
   }
 
-  out_prop_list->push_back(ImeProperty(ibus_prop->key,
+  out_prop_list->push_back(InputMethodProperty(ibus_prop->key,
                                        label,
                                        is_selection_item,
                                        is_selection_item_checked,
@@ -339,7 +163,8 @@ bool ConvertProperty(IBusProperty* ibus_prop,
 // may or may not have children. See the comment for FlattenPropertyList
 // for details. Returns true if no error is found.
 // TODO(yusukes): Write unittest.
-bool FlattenProperty(IBusProperty* ibus_prop, ImePropertyList* out_prop_list) {
+bool FlattenProperty(IBusProperty* ibus_prop,
+                     InputMethodPropertyList* out_prop_list) {
   DCHECK(ibus_prop);
   DCHECK(out_prop_list);
 
@@ -357,7 +182,7 @@ bool FlattenProperty(IBusProperty* ibus_prop, ImePropertyList* out_prop_list) {
       continue;
     }
 
-    // Convert |prop| to ImeProperty and push it to |out_prop_list|.
+    // Convert |prop| to InputMethodProperty and push it to |out_prop_list|.
     if (!ConvertProperty(prop, current_selection_item_id, out_prop_list)) {
       return false;
     }
@@ -406,7 +231,7 @@ bool FlattenProperty(IBusProperty* ibus_prop, ImePropertyList* out_prop_list) {
 // ======================================================================
 // TODO(yusukes): Write unittest.
 bool FlattenPropertyList(
-    IBusPropList* ibus_prop_list, ImePropertyList* out_prop_list) {
+    IBusPropList* ibus_prop_list, InputMethodPropertyList* out_prop_list) {
   DCHECK(ibus_prop_list);
   DCHECK(out_prop_list);
 
@@ -540,11 +365,6 @@ class IBusControllerImpl : public IBusController {
           this);
       g_signal_handlers_disconnect_by_func(
           ibus_,
-          reinterpret_cast<gpointer>(
-              G_CALLBACK(IBusBusGlobalEngineChangedThunk)),
-          this);
-      g_signal_handlers_disconnect_by_func(
-          ibus_,
           reinterpret_cast<gpointer>(G_CALLBACK(IBusBusNameOwnerChangedThunk)),
           this);
 
@@ -630,6 +450,8 @@ class IBusControllerImpl : public IBusController {
 
   // IBusController override.
   virtual bool ChangeInputMethod(const std::string& name) {
+    DCHECK(!InputMethodUtil::IsKeyboardLayout(name));
+
     if (!IBusConnectionsAreAlive()) {
       LOG(ERROR) << "ChangeInputMethod: IBus connection is not alive";
       return false;
@@ -658,16 +480,18 @@ class IBusControllerImpl : public IBusController {
                                      NULL,  // cancellable
                                      NULL,  // callback
                                      NULL);  // user_data
+
+    UpdateUI(name.c_str());
     return true;
   }
 
   // IBusController override.
-  virtual bool SetImeConfig(const std::string& section,
-                            const std::string& config_name,
-                            const ImeConfigValue& value) {
+  virtual bool SetInputMethodConfig(const std::string& section,
+                                    const std::string& config_name,
+                                    const InputMethodConfigValue& value) {
     // See comments in GetImeConfig() where ibus_config_get_value() is used.
     if (!IBusConnectionsAreAlive()) {
-      LOG(ERROR) << "SetImeConfig: IBus connection is not alive";
+      LOG(ERROR) << "SetInputMethodConfig: IBus connection is not alive";
       return false;
     }
 
@@ -675,10 +499,13 @@ class IBusControllerImpl : public IBusController {
 
     // Sanity check: do not preload unknown/unsupported input methods.
     std::vector<std::string> string_list;
-    if ((value.type == ImeConfigValue::kValueTypeStringList) &&
+    if ((value.type == InputMethodConfigValue::kValueTypeStringList) &&
         (section == kGeneralSectionName) &&
         (config_name == kPreloadEnginesConfigName)) {
       FilterInputMethods(value.string_list_value, &string_list);
+      if (string_list.empty()) {
+        return true;
+      }
       is_preload_engines = true;
     } else {
       string_list = value.string_list_value;
@@ -687,18 +514,19 @@ class IBusControllerImpl : public IBusController {
     // Convert the type of |value| from our structure to GVariant.
     GVariant* variant = NULL;
     switch (value.type) {
-      case ImeConfigValue::kValueTypeString:
+      case InputMethodConfigValue::kValueTypeString:
         variant = g_variant_new_string(value.string_value.c_str());
         break;
-      case ImeConfigValue::kValueTypeInt:
+      case InputMethodConfigValue::kValueTypeInt:
         variant = g_variant_new_int32(value.int_value);
         break;
-      case ImeConfigValue::kValueTypeBool:
+      case InputMethodConfigValue::kValueTypeBool:
         variant = g_variant_new_boolean(value.bool_value);
         break;
-      case ImeConfigValue::kValueTypeStringList:
+      case InputMethodConfigValue::kValueTypeStringList:
         GVariantBuilder variant_builder;
         g_variant_builder_init(&variant_builder, G_VARIANT_TYPE("as"));
+        DCHECK(!string_list.empty());
         const size_t size = string_list.size();  // don't use string_list_value.
         for (size_t i = 0; i < size; ++i) {
           g_variant_builder_add(&variant_builder, "s", string_list[i].c_str());
@@ -708,7 +536,7 @@ class IBusControllerImpl : public IBusController {
     }
 
     if (!variant) {
-      LOG(ERROR) << "SetImeConfig: variant is NULL";
+      LOG(ERROR) << "SetInputMethodConfig: variant is NULL";
       return false;
     }
     DCHECK(g_variant_is_floating(variant));
@@ -720,14 +548,14 @@ class IBusControllerImpl : public IBusController {
                                 variant,
                                 -1,  // use the default ibus timeout
                                 NULL,  // cancellable
-                                SetImeConfigCallback,
+                                SetInputMethodConfigCallback,
                                 g_object_ref(ibus_config_));
 
     // Since |variant| is floating, ibus_config_set_value_async consumes
     // (takes ownership of) the variable.
 
     if (is_preload_engines) {
-      VLOG(1) << "SetImeConfig: " << section << "/" << config_name
+      VLOG(1) << "SetInputMethodConfig: " << section << "/" << config_name
               << ": " << value.ToString();
     }
     return true;
@@ -783,10 +611,6 @@ class IBusControllerImpl : public IBusController {
                                  language_code);
   }
 
-  virtual InputMethodDescriptors* GetSupportedInputMethods() {
-    return GetSupportedInputMethodsInternal(whitelist_);
-  }
-
   // IBusController override.
   virtual void AddObserver(Observer* observer) {
     observers_.AddObserver(observer);
@@ -814,12 +638,7 @@ class IBusControllerImpl : public IBusController {
     return reinterpret_cast<IBusControllerImpl*>(userdata)
         ->IBusBusDisconnected(sender);
   }
-  static void IBusBusGlobalEngineChangedThunk(IBusBus* sender,
-                                              const gchar* engine_name,
-                                              gpointer userdata) {
-    return reinterpret_cast<IBusControllerImpl*>(userdata)
-        ->IBusBusGlobalEngineChanged(sender, engine_name);
-  }
+
   static void IBusBusNameOwnerChangedThunk(IBusBus* sender,
                                            const gchar* name,
                                            const gchar* old_name,
@@ -890,8 +709,6 @@ class IBusControllerImpl : public IBusController {
 
     // Ask libibus to watch the NameOwnerChanged signal *asynchronously*.
     ibus_bus_set_watch_dbus_signal(ibus_, TRUE);
-    // Ask libibus to watch the GlobalEngineChanged signal *asynchronously*.
-    ibus_bus_set_watch_ibus_signal(ibus_, TRUE);
 
     if (ibus_bus_is_connected(ibus_)) {
       VLOG(1) << "IBus connection is ready.";
@@ -964,7 +781,7 @@ class IBusControllerImpl : public IBusController {
   void DoRegisterProperties(IBusPropList* ibus_prop_list) {
     VLOG(1) << "RegisterProperties" << (ibus_prop_list ? "" : " (clear)");
 
-    ImePropertyList prop_list;  // our representation.
+    InputMethodPropertyList prop_list;  // our representation.
     if (ibus_prop_list) {
       // You can call
       //   LOG(INFO) << "\n" << PrintPropList(ibus_prop_list, 0);
@@ -989,11 +806,11 @@ class IBusControllerImpl : public IBusController {
   void UpdateUI(const char* current_global_engine_id) {
     DCHECK(current_global_engine_id);
 
-    const IBusEngineInfo* engine_info = NULL;
-    for (size_t i = 0; i < arraysize(kIBusEngines); ++i) {
-      if (kIBusEngines[i].input_method_id ==
+    const InputMethodsInfo* engine_info = NULL;
+    for (size_t i = 0; i < arraysize(kInputMethods); ++i) {
+      if (kInputMethods[i].input_method_id ==
           std::string(current_global_engine_id)) {
-        engine_info = &kIBusEngines[i];
+        engine_info = &kInputMethods[i];
         break;
       }
     }
@@ -1042,10 +859,7 @@ class IBusControllerImpl : public IBusController {
                      "disconnected",
                      G_CALLBACK(IBusBusDisconnectedThunk),
                      this);
-    g_signal_connect(ibus_,
-                     "global-engine-changed",
-                     G_CALLBACK(IBusBusGlobalEngineChangedThunk),
-                     this);
+
     g_signal_connect(ibus_,
                      "name-owner-changed",
                      G_CALLBACK(IBusBusNameOwnerChangedThunk),
@@ -1096,13 +910,6 @@ class IBusControllerImpl : public IBusController {
     MaybeDestroyIBusConfig();
     VLOG(1) << "Notifying Chrome that IBus is terminated.";
     FOR_EACH_OBSERVER(Observer, observers_, OnConnectionChange(false));
-  }
-
-  // Handles "global-engine-changed" signal from ibus-daemon.
-  void IBusBusGlobalEngineChanged(IBusBus* bus, const gchar* engine_name) {
-    DCHECK(engine_name);
-    VLOG(1) << "Global engine is changed to " << engine_name;
-    UpdateUI(engine_name);
   }
 
   // Handles "name-owner-changed" signal from ibus-daemon. The signal is sent
@@ -1169,7 +976,7 @@ class IBusControllerImpl : public IBusController {
     //   LOG(INFO) << "\n" << PrintProp(ibus_prop, 0);
     // here to dump |ibus_prop|.
 
-    ImePropertyList prop_list;  // our representation.
+    InputMethodPropertyList prop_list;  // our representation.
     if (!FlattenProperty(ibus_prop, &prop_list)) {
       // Don't update the UI on errors.
       LOG(ERROR) << "Malformed properties are detected";
@@ -1192,7 +999,9 @@ class IBusControllerImpl : public IBusController {
     for (size_t i = 0; i < requested_input_methods.size(); ++i) {
       const std::string& input_method = requested_input_methods[i];
       if (whitelist_.InputMethodIdIsWhitelisted(input_method.c_str())) {
-        out_filtered_input_methods->push_back(input_method);
+        if (!InputMethodUtil::IsKeyboardLayout(input_method)) {
+          out_filtered_input_methods->push_back(input_method);
+        }
       } else {
         LOG(ERROR) << "Unsupported input method: " << input_method;
       }
@@ -1228,9 +1037,9 @@ class IBusControllerImpl : public IBusController {
 
   // A callback function that will be called when ibus_config_set_value_async()
   // request is finished.
-  static void SetImeConfigCallback(GObject* source_object,
-                                   GAsyncResult* res,
-                                   gpointer user_data) {
+  static void SetInputMethodConfigCallback(GObject* source_object,
+                                           GAsyncResult* res,
+                                           gpointer user_data) {
     IBusConfig* config = IBUS_CONFIG(user_data);
     g_return_if_fail(config);
 
@@ -1301,9 +1110,9 @@ class IBusControllerStubImpl : public IBusController {
                                        bool activated) {
   }
 
-  virtual bool SetImeConfig(const std::string& section,
-                            const std::string& config_name,
-                            const ImeConfigValue& value) {
+  virtual bool SetInputMethodConfig(const std::string& section,
+                                    const std::string& config_name,
+                                    const InputMethodConfigValue& value) {
     return true;
   }
 
@@ -1333,11 +1142,6 @@ class IBusControllerStubImpl : public IBusController {
       const std::string& language_code) {
     return InputMethodDescriptor(whitelist_, id, name, raw_layout,
                                  language_code);
-  }
-  // See the comment above. We have to keep the implementation the same as
-  // IBusControllerImpl.
-  virtual InputMethodDescriptors* GetSupportedInputMethods() {
-    return GetSupportedInputMethodsInternal(whitelist_);
   }
 
  private:

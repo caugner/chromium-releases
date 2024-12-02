@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,8 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/windows_version.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/install_worker.h"
 #include "chrome/installer/util/auto_launch_util.h"
@@ -36,7 +38,6 @@
 #include "chrome/installer/util/work_item_list.h"
 
 // Build-time generated include file.
-#include "installer_util_strings.h"  // NOLINT
 #include "registered_dlls.h"  // NOLINT
 
 using installer::InstallerState;
@@ -48,7 +49,8 @@ namespace {
 void AddChromeToMediaPlayerList() {
   std::wstring reg_path(installer::kMediaPlayerRegPath);
   // registry paths can also be appended like file system path
-  file_util::AppendToPath(&reg_path, installer::kChromeExe);
+  reg_path.push_back(FilePath::kSeparators[0]);
+  reg_path.append(installer::kChromeExe);
   VLOG(1) << "Adding Chrome to Media player list at " << reg_path;
   scoped_ptr<WorkItem> work_item(WorkItem::CreateCreateRegKeyWorkItem(
       HKEY_LOCAL_MACHINE, reg_path));
@@ -92,6 +94,10 @@ bool CreateOrUpdateChromeShortcuts(const InstallerState& installer_state,
                                    const Product& product,
                                    bool create_all_shortcut,
                                    bool alt_shortcut) {
+  // TODO(benwells): Don't make any shortcut creation in this function
+  // contingent on earlier shortcut creation operations succeeding (except
+  // where necessary e.g. pinning the start menu shortcut requires the
+  // start menu to be created successfully).
   // TODO(tommi): Change this function to use WorkItemList.
   DCHECK(product.is_chrome());
 
@@ -134,6 +140,14 @@ bool CreateOrUpdateChromeShortcuts(const InstallerState& installer_state,
     ret = ShellUtil::UpdateChromeShortcut(browser_dist, chrome_exe.value(),
         chrome_link.value(), L"", product_desc, chrome_exe.value(),
         browser_dist->GetIconIndex(), true);
+
+    if (ret && base::win::GetVersion() >= base::win::VERSION_WIN7) {
+      VLOG(1) << "Pinning new shortcut at " << chrome_link.value()
+              << " to taskbar";
+      // Ignore the return value of pinning, as we don't want later shortcut
+      // creation dependent on this.
+      file_util::TaskbarPinShortcutLink(chrome_link.value().c_str());
+    }
   } else if (file_util::PathExists(chrome_link)) {
     VLOG(1) << "Updating shortcut at " << chrome_link.value()
             << " to point to " << chrome_exe.value();
@@ -423,7 +437,9 @@ InstallStatus InstallOrUpdateProduct(
             &auto_launch_chrome);
         if (auto_launch_chrome) {
           auto_launch_util::SetWillLaunchAtLogin(
-              true, installer_state.target_path());
+              true,
+              installer_state.target_path(),
+              ASCIIToUTF16(chrome::kInitialProfile));
         }
       }
     }

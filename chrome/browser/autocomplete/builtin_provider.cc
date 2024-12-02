@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,25 +13,19 @@
 namespace {
 
 // This list should be kept in sync with chrome/common/url_constants.h.
+// Only include useful sub-pages, confirmation alerts are not useful.
 const char* kChromeSettingsSubPages[] = {
-  chrome::kAdvancedOptionsSubPage,
   chrome::kAutofillSubPage,
-  chrome::kBrowserOptionsSubPage,
   chrome::kClearBrowserDataSubPage,
   chrome::kContentSettingsSubPage,
   chrome::kContentSettingsExceptionsSubPage,
-  chrome::kExtensionsSubPage,
   chrome::kImportDataSubPage,
-  chrome::kInstantConfirmPage,
   chrome::kLanguageOptionsSubPage,
-  chrome::kPersonalOptionsSubPage,
   chrome::kPasswordManagerSubPage,
   chrome::kSearchEnginesSubPage,
   chrome::kSyncSetupSubPage,
 #if defined(OS_CHROMEOS)
-  chrome::kAboutOptionsSubPage,
   chrome::kInternetOptionsSubPage,
-  chrome::kSystemOptionsSubPage,
 #endif
 };
 

@@ -8,6 +8,7 @@
 
 #include <vector>
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/ui/panels/panel_mouse_watcher_observer.h"
 #include "ui/base/animation/animation_delegate.h"
 
@@ -19,7 +20,8 @@ class SlideAnimation;
 }
 
 // Manipulates all the panels that are placed on the left-most overflow area.
-class OverflowPanelStrip : public PanelMouseWatcherObserver,
+class OverflowPanelStrip : public PanelStrip,
+                           public PanelMouseWatcherObserver,
                            public ui::AnimationDelegate {
  public:
   typedef std::vector<Panel*> Panels;
@@ -27,25 +29,39 @@ class OverflowPanelStrip : public PanelMouseWatcherObserver,
   explicit OverflowPanelStrip(PanelManager* panel_manager);
   virtual ~OverflowPanelStrip();
 
-  // Sets the display area of the overflow strip.
-  // |display_area| is in screen coordinates.
-  void SetDisplayArea(const gfx::Rect& display_area);
+  // PanelStrip OVERRIDES:
+  virtual void SetDisplayArea(const gfx::Rect& display_area) OVERRIDE;
+  virtual void RefreshLayout() OVERRIDE;
+  virtual void AddPanel(Panel* panel,
+                        PositioningMask positioning_mask) OVERRIDE;
+  virtual void RemovePanel(Panel* panel) OVERRIDE;
+  virtual void CloseAll() OVERRIDE;
+  virtual void ResizePanelWindow(
+      Panel* panel,
+      const gfx::Size& preferred_window_size) OVERRIDE;
+  virtual void OnPanelAttentionStateChanged(Panel* panel) OVERRIDE;
+  virtual void OnPanelTitlebarClicked(Panel* panel,
+                                      panel::ClickModifier modifier) OVERRIDE;
+  virtual void ActivatePanel(Panel* panel) OVERRIDE;
+  virtual void MinimizePanel(Panel* panel) OVERRIDE;
+  virtual void RestorePanel(Panel* panel) OVERRIDE;
+  virtual bool IsPanelMinimized(const Panel* panel) const OVERRIDE;
+  virtual bool CanShowPanelAsActive(const Panel* panel) const OVERRIDE;
+  virtual void SavePanelPlacement(Panel* panel) OVERRIDE;
+  virtual void RestorePanelToSavedPlacement() OVERRIDE;
+  virtual void DiscardSavedPanelPlacement()  OVERRIDE;
+  virtual bool CanDragPanel(const Panel* panel) const OVERRIDE;
+  virtual void StartDraggingPanelWithinStrip(Panel* panel) OVERRIDE;
+  virtual void DragPanelWithinStrip(Panel* panel,
+                                    int delta_x,
+                                    int delta_y) OVERRIDE;
+  virtual void EndDraggingPanelWithinStrip(Panel* panel,
+                                           bool aborted) OVERRIDE;
+  virtual bool CanResizePanel(const Panel* panel) const OVERRIDE;
+  virtual void SetPanelBounds(Panel* panel,
+                              const gfx::Rect& new_bounds) OVERRIDE;
 
-  // Adds a panel to the strip.
-  void AddPanel(Panel* panel);
-
-  // Returns |false| if the panel is not in the strip.
-  bool Remove(Panel* panel);
-  void RemoveAll();
-
-  // Called when a panel's expansion state changes.
-  void OnPanelExpansionStateChanged(Panel* panel);
-
-  // Called when a panel is starting/stopping drawing an attention.
-  void OnPanelAttentionStateChanged(Panel* panel);
-
-  // Refreshes the layouts for all panels to reflect any possible changes.
-  void Refresh();
+  virtual void UpdatePanelOnStripChange(Panel* panel) OVERRIDE;
 
   void OnFullScreenModeChanged(bool is_full_screen);
 

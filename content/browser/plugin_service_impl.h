@@ -47,10 +47,9 @@ class MessageLoopProxy;
 
 namespace content {
 class BrowserContext;
+class PluginServiceFilter;
 class ResourceContext;
 struct PepperPluginInfo;
-class PluginServiceFilter;
-struct PluginServiceFilterParams;
 }
 
 namespace webkit {
@@ -59,6 +58,15 @@ class PluginGroup;
 class PluginList;
 }
 }
+
+// base::Bind() has limited arity, and the filter-related methods tend to
+// surpass that limit.
+struct PluginServiceFilterParams {
+  int render_process_id;
+  int render_view_id;
+  GURL page_url;
+  content::ResourceContext* resource_context;
+};
 
 class CONTENT_EXPORT PluginServiceImpl
     : NON_EXPORTED_BASE(public content::PluginService),
@@ -71,8 +79,6 @@ class CONTENT_EXPORT PluginServiceImpl
   // content::PluginService implementation:
   virtual void Init() OVERRIDE;
   virtual void StartWatchingPlugins() OVERRIDE;
-  virtual PluginProcessHost* FindNpapiPluginProcess(
-      const FilePath& plugin_path) OVERRIDE;
   virtual bool GetPluginInfoArray(
       const GURL& url,
       const std::string& mime_type,
@@ -81,7 +87,7 @@ class CONTENT_EXPORT PluginServiceImpl
       std::vector<std::string>* actual_mime_types) OVERRIDE;
   virtual bool GetPluginInfo(int render_process_id,
                              int render_view_id,
-                             const content::ResourceContext& context,
+                             content::ResourceContext* context,
                              const GURL& url,
                              const GURL& page_url,
                              const std::string& mime_type,
@@ -98,6 +104,7 @@ class CONTENT_EXPORT PluginServiceImpl
       const FilePath& plugin_path) OVERRIDE;
   virtual void SetFilter(content::PluginServiceFilter* filter) OVERRIDE;
   virtual content::PluginServiceFilter* GetFilter() OVERRIDE;
+  virtual void ForcePluginShutdown(const FilePath& plugin_path) OVERRIDE;
   virtual bool IsPluginUnstable(const FilePath& plugin_path) OVERRIDE;
   virtual void RefreshPlugins() OVERRIDE;
   virtual void AddExtraPluginPath(const FilePath& path) OVERRIDE;
@@ -110,10 +117,6 @@ class CONTENT_EXPORT PluginServiceImpl
   virtual webkit::npapi::PluginList* GetPluginList() OVERRIDE;
   virtual void SetPluginListForTesting(
       webkit::npapi::PluginList* plugin_list) OVERRIDE;
-
-  // Like FindNpapiPluginProcess but for Pepper.
-  PpapiPluginProcessHost* FindPpapiPluginProcess(const FilePath& plugin_path);
-  PpapiPluginProcessHost* FindPpapiBrokerProcess(const FilePath& broker_path);
 
   // Returns the plugin process host corresponding to the plugin process that
   // has been started by this service. This will start a process to host the
@@ -164,6 +167,13 @@ class CONTENT_EXPORT PluginServiceImpl
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Returns the plugin process host corresponding to the plugin process that
+  // has been started by this service. Returns NULL if no process has been
+  // started.
+  PluginProcessHost* FindNpapiPluginProcess(const FilePath& plugin_path);
+  PpapiPluginProcessHost* FindPpapiPluginProcess(const FilePath& plugin_path);
+  PpapiPluginProcessHost* FindPpapiBrokerProcess(const FilePath& broker_path);
+
   void RegisterPepperPlugins();
 
   // Function that is run on the FILE thread to load the plugins synchronously.
@@ -173,7 +183,7 @@ class CONTENT_EXPORT PluginServiceImpl
   // Binding directly to GetAllowedPluginForOpenChannelToPlugin() isn't possible
   // because more arity is needed <http://crbug.com/98542>. This just forwards.
   void ForwardGetAllowedPluginForOpenChannelToPlugin(
-      const content::PluginServiceFilterParams& params,
+      const PluginServiceFilterParams& params,
       const GURL& url,
       const std::string& mime_type,
       PluginProcessHost::Client* client,
@@ -186,7 +196,7 @@ class CONTENT_EXPORT PluginServiceImpl
       const GURL& page_url,
       const std::string& mime_type,
       PluginProcessHost::Client* client,
-      const content::ResourceContext* resource_context);
+      content::ResourceContext* resource_context);
 
   // Helper so we can finish opening the channel after looking up the
   // plugin.

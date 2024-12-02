@@ -4,17 +4,16 @@
 
 // Custom bindings for the experimental.socket API.
 
-(function() {
-  native function GetChromeHidden();
-  native function GetNextSocketEventId();
+  var experimentalSocketNatives = requireNative('experimental_socket');
+  var GetNextSocketEventId = experimentalSocketNatives.GetNextSocketEventId;
 
-  var chromeHidden = GetChromeHidden();
+  var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+  var sendRequest = require('sendRequest').sendRequest;
 
   chromeHidden.registerCustomHook('experimental.socket', function(api) {
       var apiFunctions = api.apiFunctions;
-      var sendRequest = api.sendRequest;
 
-      apiFunctions.setHandleRequest("experimental.socket.create", function() {
+      apiFunctions.setHandleRequest('create', function() {
           var args = arguments;
           if (args.length > 3 && args[3] && args[3].onEvent) {
             var id = GetNextSocketEventId();
@@ -32,14 +31,14 @@
           var eventHandler = chromeHidden.socket.handlers[event.srcId];
           if (eventHandler) {
             switch (event.type) {
-              case "writeComplete":
-              case "connectComplete":
+              case 'writeComplete':
+              case 'connectComplete':
                 eventHandler({
                  type: event.type,
                         resultCode: event.resultCode,
                         });
               break;
-              case "dataRead":
+              case 'dataRead':
                 eventHandler({
                  type: event.type,
                         resultCode: event.resultCode,
@@ -47,7 +46,7 @@
                         });
                 break;
               default:
-                console.error("Unexpected SocketEvent, type " + event.type);
+                console.error('Unexpected SocketEvent, type ' + event.type);
               break;
             }
             if (event.isFinalEvent) {
@@ -56,5 +55,3 @@
           }
         });
     });
-
-})();

@@ -5,6 +5,10 @@
 // This file implements a standalone host process for Me2Me, which is currently
 // used for the Linux-only Virtual Me2Me build.
 
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
+
 #include <string>
 
 #include "base/at_exit.h"
@@ -14,7 +18,9 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
@@ -30,6 +36,8 @@
 #include "remoting/host/host_event_logger.h"
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/log_to_server.h"
+#include "remoting/host/oauth_client.h"
+#include "remoting/host/policy_hack/nat_policy.h"
 #include "remoting/host/signaling_connector.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/protocol/me2me_host_authenticator_factory.h"
@@ -48,8 +56,19 @@ const char kApplicationName[] = "remoting_me2me_host";
 const char kAuthConfigSwitchName[] = "auth-config";
 const char kHostConfigSwitchName[] = "host-config";
 
+// TODO(lambroslambrou): The default locations should depend on whether Chrome
+// branding is enabled - this means also modifying the Python daemon script.
+// The actual location of the files is ultimately determined by the service
+// daemon and NPAPI implementation - these defaults are only used in case the
+// command-line switches are absent.
+#if defined(OS_WIN) || defined(OS_MACOSX)
 const FilePath::CharType kDefaultConfigDir[] =
-    FILE_PATH_LITERAL(".config/chrome-remote-desktop");
+    FILE_PATH_LITERAL("Chrome Remote Desktop");
+#else
+const FilePath::CharType kDefaultConfigDir[] =
+    FILE_PATH_LITERAL("chrome-remote-desktop");
+#endif
+
 const FilePath::CharType kDefaultAuthConfigFile[] =
     FILE_PATH_LITERAL("auth.json");
 const FilePath::CharType kDefaultHostConfigFile[] =
@@ -58,25 +77,44 @@ const FilePath::CharType kDefaultHostConfigFile[] =
 const int kMinPortNumber = 12400;
 const int kMaxPortNumber = 12409;
 
+FilePath GetDefaultConfigDir() {
+  FilePath default_config_dir;
+
+#if defined(OS_WIN)
+  PathService::Get(base::DIR_LOCAL_APP_DATA, &default_config_dir);
+#elif defined(OS_MACOSX)
+  PathService::Get(base::DIR_APP_DATA, &default_config_dir);
+#else
+  default_config_dir = file_util::GetHomeDir().Append(FILE_PATH_LITERAL(
+      ".config"));
+#endif
+
+  return default_config_dir.Append(kDefaultConfigDir);
+}
+
 }  // namespace
 
 namespace remoting {
 
-class HostProcess {
+class HostProcess : public OAuthClient::Delegate {
  public:
   HostProcess()
       : message_loop_(MessageLoop::TYPE_UI),
         file_io_thread_("FileIO"),
-        context_(message_loop_.message_loop_proxy()) {
-    context_.Start();
-    file_io_thread_.Start();
+        allow_nat_traversal_(true),
+        restarting_(false) {
+    file_io_thread_.StartWithOptions(
+        base::Thread::Options(MessageLoop::TYPE_IO, 0));
+
+    context_.reset(new ChromotingHostContext(
+                           file_io_thread_.message_loop_proxy(),
+                           message_loop_.message_loop_proxy()));
+    context_->Start();
     network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
   }
 
   void InitWithCommandLine(const CommandLine* cmd_line) {
-    FilePath default_config_dir =
-        file_util::GetHomeDir().Append(kDefaultConfigDir);
-
+    FilePath default_config_dir = GetDefaultConfigDir();
     if (cmd_line->HasSwitch(kAuthConfigSwitchName)) {
       auth_config_path_ = cmd_line->GetSwitchValuePath(kAuthConfigSwitchName);
     } else {
@@ -95,34 +133,69 @@ class HostProcess {
   }
 
   int Run() {
-    if (!LoadConfig(file_io_thread_.message_loop_proxy())) {
+    bool tokens_pending = false;
+    if (!LoadConfig(file_io_thread_.message_loop_proxy(), &tokens_pending)) {
       return 1;
     }
-
-    context_.network_message_loop()->PostTask(FROM_HERE, base::Bind(
-        &HostProcess::StartHost, base::Unretained(this)));
+    if (tokens_pending) {
+      // If we have an OAuth refresh token, then XmppSignalStrategy can't
+      // handle it directly, so refresh it asynchronously. A task will be
+      // posted on the message loop to start watching the NAT policy when
+      // the access token is available.
+      oauth_client_.Start(oauth_refresh_token_, this,
+                          message_loop_.message_loop_proxy());
+    } else {
+      StartWatchingNatPolicy();
+    }
 
     message_loop_.Run();
 
     return 0;
   }
 
+  // Overridden from OAuthClient::Delegate
+  virtual void OnRefreshTokenResponse(const std::string& access_token,
+                                      int expires) OVERRIDE {
+    xmpp_auth_token_ = access_token;
+    // If there's already a signal strategy object, update it ready for the
+    // next time it calls Connect. If not, then this is the initial token
+    // exchange, so proceed to the next stage of connection.
+    if (signal_strategy_.get()) {
+      signal_strategy_->SetAuthInfo(xmpp_login_, xmpp_auth_token_,
+                                    xmpp_auth_service_);
+    } else {
+      StartWatchingNatPolicy();
+    }
+  }
+
+  virtual void OnOAuthError() OVERRIDE {
+    LOG(ERROR) << "OAuth: invalid credentials.";
+  }
+
  private:
+  void StartWatchingNatPolicy() {
+    nat_policy_.reset(
+        policy_hack::NatPolicy::Create(file_io_thread_.message_loop_proxy()));
+    nat_policy_->StartWatching(
+        base::Bind(&HostProcess::OnNatPolicyUpdate, base::Unretained(this)));
+  }
+
   // Read Host config from disk, returning true if successful.
-  bool LoadConfig(base::MessageLoopProxy* io_message_loop) {
+  bool LoadConfig(base::MessageLoopProxy* io_message_loop,
+                  bool* tokens_pending) {
     scoped_refptr<JsonHostConfig> host_config =
         new JsonHostConfig(host_config_path_, io_message_loop);
     scoped_refptr<JsonHostConfig> auth_config =
         new JsonHostConfig(auth_config_path_, io_message_loop);
 
-    std::string failed_path;
+    FilePath failed_path;
     if (!host_config->Read()) {
-      failed_path = host_config_path_.value();
+      failed_path = host_config_path_;
     } else if (!auth_config->Read()) {
-      failed_path = auth_config_path_.value();
+      failed_path = auth_config_path_;
     }
     if (!failed_path.empty()) {
-      LOG(ERROR) << "Failed to read configuration file " << failed_path;
+      LOG(ERROR) << "Failed to read configuration file " << failed_path.value();
       return false;
     }
 
@@ -148,40 +221,74 @@ class HostProcess {
 
     // Use an XMPP connection to the Talk network for session signalling.
     if (!auth_config->GetString(kXmppLoginConfigPath, &xmpp_login_) ||
-        !auth_config->GetString(kXmppAuthTokenConfigPath, &xmpp_auth_token_)) {
+        !(auth_config->GetString(kXmppAuthTokenConfigPath, &xmpp_auth_token_) ||
+          auth_config->GetString(kOAuthRefreshTokenConfigPath,
+                                 &oauth_refresh_token_))) {
       LOG(ERROR) << "XMPP credentials are not defined in the config.";
       return false;
     }
 
-    if (!auth_config->GetString(kXmppAuthServiceConfigPath,
+    *tokens_pending = oauth_refresh_token_ != "";
+    if (*tokens_pending) {
+      xmpp_auth_token_ = "";  // This will be set to the access token later.
+      xmpp_auth_service_ = "oauth2";
+    } else if (!auth_config->GetString(kXmppAuthServiceConfigPath,
                                 &xmpp_auth_service_)) {
-      // For the me2me host, we assume we use the ClientLogin token for
-      // chromiumsync because we do not have an HTTP stack with which we can
-      // easily request an OAuth2 access token even if we had a RefreshToken for
-      // the account.
+      // For the me2me host, we default to ClientLogin token for chromiumsync
+      // because earlier versions of the host had no HTTP stack with which to
+      // request an OAuth2 access token.
       xmpp_auth_service_ = kChromotingTokenDefaultServiceName;
     }
-
     return true;
   }
 
+  void OnNatPolicyUpdate(bool nat_traversal_enabled) {
+    if (!context_->network_message_loop()->BelongsToCurrentThread()) {
+      context_->network_message_loop()->PostTask(FROM_HERE, base::Bind(
+          &HostProcess::OnNatPolicyUpdate, base::Unretained(this),
+          nat_traversal_enabled));
+      return;
+    }
+
+    bool policy_changed = allow_nat_traversal_ != nat_traversal_enabled;
+    allow_nat_traversal_ = nat_traversal_enabled;
+
+    if (host_) {
+      // Restart the host if the policy has changed while the host was
+      // online.
+      if (policy_changed)
+        RestartHost();
+    } else {
+      // Just start the host otherwise.
+      StartHost();
+    }
+  }
+
   void StartHost() {
-    DCHECK(context_.network_message_loop()->BelongsToCurrentThread());
+    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+    DCHECK(!host_);
 
-    signal_strategy_.reset(
-        new XmppSignalStrategy(context_.jingle_thread(), xmpp_login_,
-                               xmpp_auth_token_, xmpp_auth_service_));
-    signaling_connector_.reset(new SignalingConnector(signal_strategy_.get()));
+    if (!signal_strategy_.get()) {
+      signal_strategy_.reset(
+          new XmppSignalStrategy(context_->jingle_thread(), xmpp_login_,
+                                 xmpp_auth_token_, xmpp_auth_service_));
+      signaling_connector_.reset(
+          new SignalingConnector(signal_strategy_.get()));
+    }
 
-    desktop_environment_.reset(DesktopEnvironment::Create(&context_));
+    if (!desktop_environment_.get()) {
+      desktop_environment_ =
+          DesktopEnvironment::CreateForService(context_.get());
+    }
 
-    protocol::NetworkSettings network_settings;
-    network_settings.allow_nat_traversal = false;
-    network_settings.min_port = kMinPortNumber;
-    network_settings.max_port = kMaxPortNumber;
+    protocol::NetworkSettings network_settings(allow_nat_traversal_);
+    if (!allow_nat_traversal_) {
+      network_settings.min_port = kMinPortNumber;
+      network_settings.max_port = kMaxPortNumber;
+    }
 
     host_ = new ChromotingHost(
-        &context_, signal_strategy_.get(), desktop_environment_.get(),
+        context_.get(), signal_strategy_.get(), desktop_environment_.get(),
         network_settings);
 
     heartbeat_sender_.reset(
@@ -189,7 +296,7 @@ class HostProcess {
 
     log_to_server_.reset(
         new LogToServer(host_, ServerLogEntry::ME2ME, signal_strategy_.get()));
-    host_event_logger_.reset(new HostEventLogger(host_, kApplicationName));
+    host_event_logger_ = HostEventLogger::Create(host_, kApplicationName);
 
     host_->Start();
 
@@ -201,9 +308,33 @@ class HostProcess {
     host_->SetAuthenticatorFactory(factory.Pass());
   }
 
+  void RestartHost() {
+    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+
+    if (restarting_)
+      return;
+
+    restarting_ = true;
+    host_->Shutdown(base::Bind(
+        &HostProcess::RestartOnHostShutdown, base::Unretained(this)));
+  }
+
+  void RestartOnHostShutdown() {
+    DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+
+    restarting_ = false;
+
+    host_ = NULL;
+    log_to_server_.reset();
+    host_event_logger_.reset();
+    heartbeat_sender_.reset();
+
+    StartHost();
+  }
+
   MessageLoop message_loop_;
   base::Thread file_io_thread_;
-  ChromotingHostContext context_;
+  scoped_ptr<ChromotingHostContext> context_;
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   FilePath auth_config_path_;
@@ -216,7 +347,15 @@ class HostProcess {
   std::string xmpp_auth_token_;
   std::string xmpp_auth_service_;
 
-  scoped_ptr<SignalStrategy> signal_strategy_;
+  std::string oauth_refresh_token_;
+  OAuthClient oauth_client_;
+
+  scoped_ptr<policy_hack::NatPolicy> nat_policy_;
+  bool allow_nat_traversal_;
+
+  bool restarting_;
+
+  scoped_ptr<XmppSignalStrategy> signal_strategy_;
   scoped_ptr<SignalingConnector> signaling_connector_;
   scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_ptr<HeartbeatSender> heartbeat_sender_;
@@ -248,3 +387,16 @@ int main(int argc, char** argv) {
 
   return me2me_host.Run();
 }
+
+#if defined(OS_WIN)
+
+int CALLBACK WinMain(HINSTANCE instance,
+                     HINSTANCE previous_instance,
+                     LPSTR command_line,
+                     int show_command) {
+  // CommandLine::Init() ignores the passed |argc| and |argv| on Windows getting
+  // the command line from GetCommandLineW(), so we can safely pass NULL here.
+  return main(0, NULL);
+}
+
+#endif

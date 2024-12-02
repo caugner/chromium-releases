@@ -15,6 +15,7 @@
 using base::StringPrintf;
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
+using base::android::GetClass;
 using base::android::GetMethodIDFromClassName;
 using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
@@ -167,8 +168,7 @@ NPVariant CallJNIMethod(jobject object, const JavaType& return_type,
         VOID_TO_NPVARIANT(result);
         break;
       }
-      std::string str =
-          base::android::ConvertJavaStringToUTF8(env, java_string.obj());
+      std::string str = base::android::ConvertJavaStringToUTF8(java_string);
       // Take a copy and pass ownership to the variant. We must allocate using
       // NPN_MemAlloc, to match NPN_ReleaseVariant, which uses NPN_MemFree.
       size_t length = str.length();
@@ -241,7 +241,8 @@ jvalue CoerceJavaScriptNumberToJavaValue(const NPVariant& variant,
           ConvertUTF8ToJavaString(
               AttachCurrentThread(),
               is_double ? StringPrintf("%.6lg", NPVARIANT_TO_DOUBLE(variant)) :
-                          base::Int64ToString(NPVARIANT_TO_INT32(variant))) :
+                          base::Int64ToString(NPVARIANT_TO_INT32(variant))).
+                              Release() :
           NULL;
       break;
     case JavaType::TypeBoolean:
@@ -281,7 +282,7 @@ jvalue CoerceJavaScriptBooleanToJavaValue(const NPVariant& variant,
     case JavaType::TypeString:
       result.l = coerce_to_string ?
           ConvertUTF8ToJavaString(AttachCurrentThread(),
-                                  boolean_value ? "true" : "false") :
+                                  boolean_value ? "true" : "false").Release() :
           NULL;
       break;
     case JavaType::TypeByte:
@@ -320,7 +321,7 @@ jvalue CoerceJavaScriptStringToJavaValue(const NPVariant& variant,
       result.l = ConvertUTF8ToJavaString(
           AttachCurrentThread(),
           base::StringPiece(NPVARIANT_TO_STRING(variant).UTF8Characters,
-                            NPVARIANT_TO_STRING(variant).UTF8Length));
+                            NPVARIANT_TO_STRING(variant).UTF8Length)).Release();
       break;
     case JavaType::TypeObject:
       // LIVECONNECT_COMPLIANCE: Existing behavior is to convert to NULL. Spec
@@ -383,7 +384,7 @@ jobject CreateJavaArray(const JavaType& type, jsize length) {
     case JavaType::TypeDouble:
       return env->NewDoubleArray(length);
     case JavaType::TypeString: {
-      ScopedJavaLocalRef<jclass> clazz(env, env->FindClass("java/lang/String"));
+      ScopedJavaLocalRef<jclass> clazz(GetClass(env, "java/lang/String"));
       return env->NewObjectArray(length, clazz.obj(), NULL);
     }
     case JavaType::TypeVoid:
@@ -396,7 +397,10 @@ jobject CreateJavaArray(const JavaType& type, jsize length) {
   return NULL;
 }
 
-// Note that this only handles primitive types and strings.
+// Sets the specified element of the supplied array to the value of the
+// supplied jvalue. Requires that the type of the array matches that of the
+// jvalue. Handles only primitive types and strings. Note that in the case of a
+// string, the array takes a new reference to the string object.
 void SetArrayElement(jobject array,
                      const JavaType& type,
                      jsize index,
@@ -449,10 +453,22 @@ void SetArrayElement(jobject array,
   base::android::CheckException(env);
 }
 
+void ReleaseJavaValueIfRequired(JNIEnv* env,
+                                jvalue* value,
+                                const JavaType& type) {
+  if (type.type == JavaType::TypeString ||
+      type.type == JavaType::TypeObject ||
+      type.type == JavaType::TypeArray) {
+    env->DeleteLocalRef(value->l);
+    value->l = NULL;
+  }
+}
+
 jvalue CoerceJavaScriptValueToJavaValue(const NPVariant& variant,
                                         const JavaType& target_type,
                                         bool coerce_to_string);
 
+// Returns a new local reference to a Java array.
 jobject CoerceJavaScriptObjectToArray(const NPVariant& variant,
                                       const JavaType& target_type) {
   DCHECK_EQ(JavaType::TypeArray, target_type.type);
@@ -497,11 +513,11 @@ jobject CoerceJavaScriptObjectToArray(const NPVariant& variant,
     return NULL;
   }
 
-  // Create the Java array. Note that we don't explicitly release the local
-  // ref to the result or any of its elements.
+  // Create the Java array.
   // TODO(steveblock): Handle failure to create the array.
   jobject result = CreateJavaArray(target_inner_type, length);
   NPVariant value_variant;
+  JNIEnv* env = AttachCurrentThread();
   for (jsize i = 0; i < length; ++i) {
     // It seems that getProperty() will set the variant to type void on failure,
     // but this doesn't seem to be documented, so do it explicitly here for
@@ -511,10 +527,17 @@ jobject CoerceJavaScriptObjectToArray(const NPVariant& variant,
     // value as JavaScript undefined.
     WebBindings::getProperty(0, object, WebBindings::getIntIdentifier(i),
                              &value_variant);
-    SetArrayElement(result, target_inner_type, i,
-                    CoerceJavaScriptValueToJavaValue(value_variant,
-                                                     target_inner_type,
-                                                     false));
+    jvalue element = CoerceJavaScriptValueToJavaValue(value_variant,
+                                                      target_inner_type,
+                                                      false);
+    SetArrayElement(result, target_inner_type, i, element);
+    // CoerceJavaScriptValueToJavaValue() creates new local references to
+    // strings, objects and arrays. Of these, only strings can occur here.
+    // SetArrayElement() causes the array to take its own reference to the
+    // string, so we can now release the local reference.
+    DCHECK_NE(JavaType::TypeObject, target_inner_type.type);
+    DCHECK_NE(JavaType::TypeArray, target_inner_type.type);
+    ReleaseJavaValueIfRequired(env, &element, target_inner_type);
     WebBindings::releaseVariantValue(&value_variant);
   }
 
@@ -554,7 +577,8 @@ jvalue CoerceJavaScriptObjectToJavaValue(const NPVariant& variant,
       // LIVECONNECT_COMPLIANCE: Existing behavior is to convert to
       // "undefined". Spec requires calling toString() on the Java object.
       result.l = coerce_to_string ?
-          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined") :
+          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined").
+              Release() :
           NULL;
       break;
     case JavaType::TypeByte:
@@ -607,7 +631,8 @@ jvalue CoerceJavaScriptNullOrUndefinedToJavaValue(const NPVariant& variant,
       // LIVECONNECT_COMPLIANCE: Existing behavior is to convert undefined to
       // "undefined". Spec requires converting undefined to NULL.
       result.l = (coerce_to_string && variant.type == NPVariantType_Void) ?
-          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined") :
+          ConvertUTF8ToJavaString(AttachCurrentThread(), "undefined").
+              Release() :
           NULL;
       break;
     case JavaType::TypeByte:
@@ -641,15 +666,16 @@ jvalue CoerceJavaScriptNullOrUndefinedToJavaValue(const NPVariant& variant,
 // strings when required, rather than simply converting to NULL. This is used
 // to maintain current behaviour, which differs slightly depending upon whether
 // or not the coercion in question is for an array element.
+//
+// Note that the jvalue returned by this method may contain a new local
+// reference to an object (string, object or array). This must be released by
+// the caller.
 jvalue CoerceJavaScriptValueToJavaValue(const NPVariant& variant,
                                         const JavaType& target_type,
                                         bool coerce_to_string) {
   // Note that in all these conversions, the relevant field of the jvalue must
   // always be explicitly set, as jvalue does not initialize its fields.
 
-  // Some of these methods create new Java Strings. Note that we don't
-  // explicitly release the local ref to these new objects, as there's no simple
-  // way to do so.
   switch (variant.type) {
     case NPVariantType_Int32:
     case NPVariantType_Double:
@@ -688,21 +714,18 @@ NPObject* JavaBoundObject::Create(const JavaRef<jobject>& object) {
 }
 
 JavaBoundObject::JavaBoundObject(const JavaRef<jobject>& object)
-    : java_object_(object.env()->NewGlobalRef(object.obj())) {
+    : java_object_(object) {
   // We don't do anything with our Java object when first created. We do it all
   // lazily when a method is first invoked.
 }
 
 JavaBoundObject::~JavaBoundObject() {
-  // Use the current thread's JNI env to release our global ref to the Java
-  // object.
-  AttachCurrentThread()->DeleteGlobalRef(java_object_);
 }
 
 jobject JavaBoundObject::GetJavaObject(NPObject* object) {
   DCHECK_EQ(&JavaNPObject::kNPClass, object->_class);
   JavaBoundObject* jbo = reinterpret_cast<JavaNPObject*>(object)->bound_object;
-  return jbo->java_object_;
+  return jbo->java_object_.obj();
 }
 
 bool JavaBoundObject::HasMethod(const std::string& name) const {
@@ -743,8 +766,16 @@ bool JavaBoundObject::Invoke(const std::string& name, const NPVariant* args,
   }
 
   // Call
-  *result = CallJNIMethod(java_object_, method->return_type(), method->id(),
-                          &parameters[0]);
+  *result = CallJNIMethod(java_object_.obj(), method->return_type(),
+                          method->id(), &parameters[0]);
+
+  // Now that we're done with the jvalue, release any local references created
+  // by CoerceJavaScriptValueToJavaValue().
+  JNIEnv* env = AttachCurrentThread();
+  for (size_t i = 0; i < arg_count; ++i) {
+    ReleaseJavaValueIfRequired(env, &parameters[i], method->parameter_type(i));
+  }
+
   return true;
 }
 
@@ -755,7 +786,7 @@ void JavaBoundObject::EnsureMethodsAreSetUp() const {
 
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jclass> clazz(env, static_cast<jclass>(
-      env->CallObjectMethod(java_object_,  GetMethodIDFromClassName(
+      env->CallObjectMethod(java_object_.obj(),  GetMethodIDFromClassName(
           env,
           kJavaLangObject,
           kGetClass,

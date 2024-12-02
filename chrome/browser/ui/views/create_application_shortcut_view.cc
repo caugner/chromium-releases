@@ -21,8 +21,8 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
@@ -33,7 +33,7 @@
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/image_view.h"
@@ -57,7 +57,7 @@ class AppInfoView : public views::View {
   void UpdateText(const string16& title, const string16& description);
 
   // Updates the icon of the web app.
-  void UpdateIcon(const SkBitmap& new_icon);
+  void UpdateIcon(const gfx::Image& image);
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas);
@@ -159,8 +159,9 @@ void AppInfoView::UpdateText(const string16& title,
   SetupLayout();
 }
 
-void AppInfoView::UpdateIcon(const SkBitmap& new_icon) {
-  icon_->SetImage(new_icon);
+void AppInfoView::UpdateIcon(const gfx::Image& image) {
+  if (!image.IsEmpty())
+    icon_->SetImage(image.ToSkBitmap());
 }
 
 void AppInfoView::OnPaint(gfx::Canvas* canvas) {
@@ -177,8 +178,8 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
   border_paint.setAntiAlias(true);
   border_paint.setARGB(0xFF, 0xC8, 0xC8, 0xC8);
 
-  canvas->GetSkCanvas()->drawRoundRect(
-      border_rect, SkIntToScalar(2), SkIntToScalar(2), border_paint);
+  canvas->sk_canvas()->drawRoundRect(border_rect, SkIntToScalar(2),
+                                     SkIntToScalar(2), border_paint);
 
   SkRect inner_rect = {
     border_rect.fLeft + SkDoubleToScalar(0.5),
@@ -190,8 +191,8 @@ void AppInfoView::OnPaint(gfx::Canvas* canvas) {
   SkPaint inner_paint;
   inner_paint.setAntiAlias(true);
   inner_paint.setARGB(0xFF, 0xF8, 0xF8, 0xF8);
-  canvas->GetSkCanvas()->drawRoundRect(
-      inner_rect, SkDoubleToScalar(1.5), SkDoubleToScalar(1.5), inner_paint);
+  canvas->sk_canvas()->drawRoundRect(inner_rect, SkDoubleToScalar(1.5),
+                                     SkDoubleToScalar(1.5), inner_paint);
 }
 
 }  // namespace
@@ -248,7 +249,8 @@ CreateApplicationShortcutView::~CreateApplicationShortcutView() {}
 void CreateApplicationShortcutView::InitControls() {
   // Create controls
   app_info_ = new AppInfoView(shortcut_info_.title, shortcut_info_.description,
-                              shortcut_info_.favicon);
+      shortcut_info_.favicon.IsEmpty() ? SkBitmap() :
+                                         *shortcut_info_.favicon.ToSkBitmap());
   create_shortcuts_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_LABEL));
   create_shortcuts_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -435,7 +437,9 @@ bool CreateUrlApplicationShortcutView::Accept() {
   if (!CreateApplicationShortcutView::Accept())
     return false;
 
-  tab_contents_->extension_tab_helper()->SetAppIcon(shortcut_info_.favicon);
+  tab_contents_->extension_tab_helper()->SetAppIcon(
+      shortcut_info_.favicon.IsEmpty() ? SkBitmap() :
+                                         *shortcut_info_.favicon.ToSkBitmap());
   if (tab_contents_->web_contents()->GetDelegate()) {
     tab_contents_->web_contents()->GetDelegate()->ConvertContentsToApplication(
         tab_contents_->web_contents());
@@ -469,7 +473,7 @@ void CreateUrlApplicationShortcutView::OnIconDownloaded(bool errored,
   pending_download_ = NULL;
 
   if (!errored && !image.isNull()) {
-    shortcut_info_.favicon = image;
+    shortcut_info_.favicon = gfx::Image(image);
     static_cast<AppInfoView*>(app_info_)->UpdateIcon(shortcut_info_.favicon);
   } else {
     FetchIcon();
@@ -486,6 +490,8 @@ CreateChromeApplicationShortcutView::CreateChromeApplicationShortcutView(
   shortcut_info_.url = GURL(app_->launch_web_url());
   shortcut_info_.title = UTF8ToUTF16(app_->name());
   shortcut_info_.description = UTF8ToUTF16(app_->description());
+  shortcut_info_.is_platform_app = app_->is_platform_app();
+  shortcut_info_.extension_path = app_->path();
 
   // The icon will be resized to |max_size|.
   const gfx::Size max_size(kAppIconSize, kAppIconSize);
@@ -522,11 +528,16 @@ CreateChromeApplicationShortcutView::~CreateChromeApplicationShortcutView() {}
 
 // Called by tracker_ when the app's icon is loaded.
 void CreateChromeApplicationShortcutView::OnImageLoaded(
-    SkBitmap* image, const ExtensionResource& resource, int index) {
-  if (!image || image->isNull())
-    image = ExtensionIconSource::LoadImageByResourceId(IDR_APP_DEFAULT_ICON);
+    const gfx::Image& image,
+    const std::string& extension_id,
+    int index) {
+  if (image.IsEmpty()) {
+    shortcut_info_.favicon = ui::ResourceBundle::GetSharedInstance().
+        GetImageNamed(IDR_APP_DEFAULT_ICON);
+  } else {
+    shortcut_info_.favicon = image;
+  }
 
-  shortcut_info_.favicon = *image;
   CHECK(app_info_);
   static_cast<AppInfoView*>(app_info_)->UpdateIcon(shortcut_info_.favicon);
 }

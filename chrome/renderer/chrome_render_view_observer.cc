@@ -14,11 +14,10 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/icon_messages.h"
+#include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/about_handler.h"
-#include "chrome/renderer/automation/dom_automation_controller.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/content_settings_observer.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
@@ -179,7 +178,7 @@ static bool PaintViewIntoCanvas(WebView* view,
 // bitmap are all the same brightness.
 static double CalculateBoringScore(SkBitmap* bitmap) {
   int histogram[256] = {0};
-  color_utils::BuildLumaHistogram(bitmap, histogram);
+  color_utils::BuildLumaHistogram(*bitmap, histogram);
 
   int color_count = *std::max_element(histogram, histogram + 256);
   int pixel_count = bitmap->width() * bitmap->height();
@@ -232,11 +231,6 @@ ChromeRenderViewObserver::ChromeRenderViewObserver(
       allow_running_insecure_content_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (command_line.HasSwitch(switches::kDomAutomationController)) {
-    int old_bindings = render_view->GetEnabledBindings();
-    render_view->SetEnabledBindings(
-        old_bindings |= content::BINDINGS_POLICY_DOM_AUTOMATION);
-  }
   render_view->GetWebView()->setPermissionClient(this);
   if (!command_line.HasSwitch(switches::kDisableClientSidePhishingDetection))
     OnSetClientSidePhishingDetection(true);
@@ -269,13 +263,12 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetFPS, OnGetFPS)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_AddStrictSecurityHost,
                         OnAddStrictSecurityHost)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetAsInterstitial, OnSetAsInterstitial)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
   // Filter only.
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewObserver, message)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetIsPrerendering, OnSetIsPrerendering);
+    IPC_MESSAGE_HANDLER(PrerenderMsg_SetIsPrerendering, OnSetIsPrerendering);
   IPC_END_MESSAGE_MAP()
 
   return handled;
@@ -367,16 +360,11 @@ void ChromeRenderViewObserver::OnAddStrictSecurityHost(
   strict_security_hosts_.insert(host);
 }
 
-void ChromeRenderViewObserver::OnSetAsInterstitial() {
-  content_settings_->SetAsInterstitial();
-}
-
 void ChromeRenderViewObserver::Navigate(const GURL& url) {
   // Execute cache clear operations that were postponed until a navigation
   // event (including tab reload).
   if (chrome_render_process_observer_)
     chrome_render_process_observer_->ExecutePendingClearCache();
-  AboutHandler::MaybeHandle(url);
 }
 
 void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
@@ -561,7 +549,7 @@ bool ChromeRenderViewObserver::allowRunningInsecureContent(
     const WebKit::WebURL& resource_url) {
   // Single value to control permissive mixed content behaviour.  We flip
   // this at the present between beta / stable releases.
-  const bool block_insecure_content_on_all_domains = false;
+  const bool block_insecure_content_on_all_domains = true;
 
   std::string origin_host(origin.host().utf8());
   GURL frame_gurl(frame->document().url());
@@ -728,11 +716,6 @@ void ChromeRenderViewObserver::DidCommitProvisionalLoad(
 
 void ChromeRenderViewObserver::DidClearWindowObject(WebFrame* frame) {
   if (render_view()->GetEnabledBindings() &
-          content::BINDINGS_POLICY_DOM_AUTOMATION) {
-    BindDOMAutomationController(frame);
-  }
-
-  if (render_view()->GetEnabledBindings() &
           content::BINDINGS_POLICY_EXTERNAL_HOST) {
     GetExternalHostBindings()->BindToJavascript(frame, "externalHost");
   }
@@ -764,7 +747,7 @@ void ChromeRenderViewObserver::DidHandleTouchEvent(const WebTouchEvent& event) {
     return;
   if (accessibility.node() == node)
     render_view()->Send(new ChromeViewHostMsg_FocusedEditableNodeTouched(
-    render_view()->GetRoutingId()));
+    render_view()->GetRoutingID()));
 }
 
 void ChromeRenderViewObserver::CapturePageInfo(int load_id,
@@ -955,7 +938,8 @@ bool ChromeRenderViewObserver::CaptureFrameThumbnail(WebView* view,
       S16CPU new_width = static_cast<S16CPU>(src_bmp.height() * dest_aspect);
       S16CPU x_offset = (src_bmp_width - new_width) / 2;
       src_rect.set(x_offset, 0, new_width + x_offset, src_bmp.height());
-      score->good_clipping = false;
+      score->good_clipping =
+          (src_aspect >= ThumbnailScore::kTooWideAspectRatio) ? false : true;
     } else {
       src_rect.set(0, 0, src_bmp_width,
                    static_cast<S16CPU>(src_bmp_width / dest_aspect));
@@ -1009,16 +993,6 @@ bool ChromeRenderViewObserver::CaptureSnapshot(WebView* view,
   HISTOGRAM_TIMES("Renderer4.Snapshot",
                   base::TimeTicks::Now() - beginning_time);
   return true;
-}
-
-void ChromeRenderViewObserver::BindDOMAutomationController(WebFrame* frame) {
-  if (!dom_automation_controller_.get()) {
-    dom_automation_controller_.reset(new DomAutomationController());
-  }
-  dom_automation_controller_->set_message_sender(this);
-  dom_automation_controller_->set_routing_id(routing_id());
-  dom_automation_controller_->BindToJavascript(frame,
-                                               "domAutomationController");
 }
 
 ExternalHostBindings* ChromeRenderViewObserver::GetExternalHostBindings() {

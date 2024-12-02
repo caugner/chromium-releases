@@ -4,10 +4,6 @@
 
 #include "chrome/browser/ui/views/frame/browser_view.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include <gtk/gtk.h>
-#endif
-
 #include <algorithm>
 
 #include "base/auto_reset.h"
@@ -18,14 +14,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/accessibility/invert_bubble_views.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
-#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
-#include "chrome/browser/extensions/extension_tts_api.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/native_window_notification_source.h"
 #include "chrome/browser/ntp_background_util.h"
@@ -36,6 +31,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/speech/extension_api/tts_extension_api.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
@@ -45,13 +41,11 @@
 #include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
-#include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/avatar_menu_bubble_view.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
-#include "chrome/browser/ui/views/default_search_view.h"
 #include "chrome/browser/ui/views/download/download_in_progress_dialog_view.h"
 #include "chrome/browser/ui/views/frame/browser_view_layout.h"
 #include "chrome/browser/ui/views/frame/browser_window_move_observer.h"
@@ -59,6 +53,7 @@
 #include "chrome/browser/ui/views/fullscreen_exit_bubble_views.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
+#include "chrome/browser/ui/views/password_generation_bubble_view.h"
 #include "chrome/browser/ui/views/status_bubble_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
@@ -66,18 +61,17 @@
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/browser/ui/views/update_recommended_message_box.h"
 #include "chrome/browser/ui/views/window.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/browser/ui/webui/feedback_ui.h"
-#include "chrome/browser/ui/webui/task_manager_dialog.h"
+#include "chrome/browser/ui/webui/task_manager/task_manager_dialog.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -94,7 +88,10 @@
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/color_utils.h"
+#include "ui/gfx/sys_color_change_listener.h"
+#include "ui/ui_controls/ui_controls.h"
 #include "ui/views/controls/single_split_view.h"
 #include "ui/views/events/event.h"
 #include "ui/views/focus/external_focus_tracker.h"
@@ -110,21 +107,23 @@
 #include "ash/launcher/launcher_model.h"
 #include "ash/shell.h"
 #include "chrome/browser/ui/views/accelerator_table.h"
-#include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
-#include "chrome/browser/ui/views/aura/launcher_icon_updater.h"
+#include "chrome/browser/ui/views/ash/chrome_shell_delegate.h"
+#include "chrome/browser/ui/views/ash/launcher/launcher_updater.h"
+#include "chrome/browser/ui/views/ash/window_positioner.h"
 #include "ui/gfx/screen.h"
 #elif defined(OS_WIN)
 #include "chrome/browser/aeropeek_manager.h"
 #include "chrome/browser/jumplist_win.h"
-#include "ui/base/message_box_win.h"
 #include "ui/views/widget/native_widget_win.h"
-#elif defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/ui/views/accelerator_table.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/views/keyboard_overlay_dialog_view.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_dialog.h"
+#endif
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+#include "chrome/browser/ui/views/sync/one_click_signin_bubble_view.h"
 #endif
 
 #if !defined(OS_CHROMEOS) || defined(USE_AURA)
@@ -267,7 +266,7 @@ class ResizeCorner : public views::View {
     if (!widget || (widget->IsMaximized() || widget->IsFullscreen()))
       return;
 
-    SkBitmap* bitmap = ResourceBundle::GetSharedInstance().GetBitmapNamed(
+    SkBitmap* bitmap = ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
         IDR_TEXTAREA_RESIZER);
     bitmap->buildMipMap(false);
     canvas->DrawBitmapInt(*bitmap, width() - bitmap->width(),
@@ -328,14 +327,15 @@ BrowserView::BrowserView(Browser* browser)
       ticker_(0),
 #endif
       force_location_bar_focus_(false),
-      move_observer_(NULL) {
+      move_observer_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(color_change_listener_(this)) {
   browser_->tabstrip_model()->AddObserver(this);
 }
 
 BrowserView::~BrowserView() {
 #if defined(USE_AURA)
-  // Destroy LauncherIconUpdater early on as it listens to the TabstripModel,
-  // which is destroyed by the browser.
+  // Destroy LauncherUpdater early on as it listens to the TabstripModel, which
+  // is destroyed by the browser.
   icon_updater_.reset();
 #endif
 
@@ -535,7 +535,7 @@ SkBitmap BrowserView::GetOTRAvatarIcon() const {
   static SkBitmap* otr_avatar_ = new SkBitmap();
 
   if (otr_avatar_->isNull()) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     *otr_avatar_ = *rb.GetBitmapNamed(IDR_OTR_ICON);
   }
   return *otr_avatar_;
@@ -546,7 +546,7 @@ SkBitmap BrowserView::GetGuestAvatarIcon() const {
   static SkBitmap* guest_avatar_ = new SkBitmap();
 
   if (guest_avatar_->isNull()) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     *guest_avatar_ = *rb.GetBitmapNamed(IDR_GUEST_ICON);
   }
   return *guest_avatar_;
@@ -555,12 +555,6 @@ SkBitmap BrowserView::GetGuestAvatarIcon() const {
   return SkBitmap();
 #endif
 }
-
-#if defined(OS_WIN) && !defined(USE_AURA)
-void BrowserView::PrepareToRunSystemMenu(HMENU menu) {
-  system_menu_->UpdateStates();
-}
-#endif
 
 // static
 void BrowserView::RegisterBrowserViewPrefs(PrefService* prefs) {
@@ -593,10 +587,7 @@ void BrowserView::Show() {
     return;
   }
 
-#if defined(USE_AURA)
-  if (!icon_updater_.get())
-    icon_updater_.reset(LauncherIconUpdater::Create(browser_.get()));
-#endif  // defined(USE_AURA)
+  CreateLauncherIcon();
 
   // Showing the window doesn't make the browser window active right away.
   // This can cause SetFocusToLocationBar() to skip setting focus to the
@@ -621,11 +612,15 @@ void BrowserView::Show() {
   force_location_bar_focus_ = false;
 
   browser()->OnWindowDidShow();
+
+  InvertBubble::MaybeShowInvertBubble(browser_->profile(), contents_);
 }
 
 void BrowserView::ShowInactive() {
-  if (!frame_->IsVisible())
-    frame_->ShowInactive();
+  if (frame_->IsVisible())
+    return;
+  CreateLauncherIcon();
+  frame_->ShowInactive();
 }
 
 void BrowserView::SetBounds(const gfx::Rect& bounds) {
@@ -650,21 +645,11 @@ bool BrowserView::IsActive() const {
 }
 
 void BrowserView::FlashFrame(bool flash) {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  FLASHWINFO fwi;
-  fwi.cbSize = sizeof(fwi);
-  fwi.hwnd = frame_->GetNativeWindow();
-  if (flash) {
-    fwi.dwFlags = FLASHW_ALL;
-    fwi.uCount = 4;
-    fwi.dwTimeout = 0;
-  } else {
-    fwi.dwFlags = FLASHW_STOP;
-  }
-  FlashWindowEx(&fwi);
-#else
-  // Doesn't matter for chrome os.
-#endif
+  frame_->FlashFrame(flash);
+}
+
+bool BrowserView::IsAlwaysOnTop() const {
+  return false;
 }
 
 gfx::NativeWindow BrowserView::GetNativeHandle() {
@@ -961,6 +946,7 @@ void BrowserView::RotatePaneFocus(bool forwards) {
   std::vector<views::AccessiblePaneView*> accessible_panes;
   GetAccessiblePanes(&accessible_panes);
   int pane_count = static_cast<int>(accessible_panes.size());
+  int special_index = -1;
 
   std::vector<views::View*> accessible_views(
       accessible_panes.begin(), accessible_panes.end());
@@ -987,6 +973,12 @@ void BrowserView::RotatePaneFocus(bool forwards) {
   if (focused_view && index >= pane_count)
     GetFocusManager()->StoreFocusedView();
 
+#if defined(OS_CHROMEOS) && defined(USE_AURA)
+  // Add the special panes to the rotation.
+  special_index = count;
+  ++count;
+#endif
+
   // Try to focus the next pane; if SetPaneFocusAndFocusDefault returns
   // false it means the pane didn't have any focusable controls, so skip
   // it and try the next one.
@@ -996,7 +988,13 @@ void BrowserView::RotatePaneFocus(bool forwards) {
     else
       index = ((index - 1) + count) % count;
 
-    if (index < pane_count) {
+    if (index == special_index) {
+#if defined(OS_CHROMEOS) && defined(USE_AURA)
+      ash::Shell::GetInstance()->RotateFocus(
+          forwards ? ash::Shell::FORWARD : ash::Shell::BACKWARD);
+      break;
+#endif
+    } else if (index < pane_count) {
       if (accessible_panes[index]->SetPaneFocusAndFocusDefault())
         break;
     } else {
@@ -1064,17 +1062,6 @@ void BrowserView::DisableInactiveFrame() {
 #endif  // No tricks are needed to get the right behavior on Linux.
 }
 
-void BrowserView::ConfirmSetDefaultSearchProvider(WebContents* web_contents,
-                                                  TemplateURL* template_url,
-                                                  Profile* profile) {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  DefaultSearchView::Show(web_contents, template_url, profile);
-#else
-  // TODO(levin): Implement for other platforms. Right now this is behind
-  // a command line flag which is off. http://crbug.com/38475
-#endif
-}
-
 void BrowserView::ConfirmAddSearchProvider(const TemplateURL* template_url,
                                            Profile* profile) {
   browser::EditSearchEngine(GetWidget()->GetNativeWindow(), template_url, NULL,
@@ -1103,7 +1090,7 @@ void BrowserView::ShowTaskManager() {
   TaskManagerDialog::Show();
 #else
   // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (chrome_web_ui::IsMoreWebUI()) {
+  if (TaskManagerDialog::UseWebUITaskManager()) {
     TaskManagerDialog::Show();
   } else {
     browser::ShowTaskManager();
@@ -1116,7 +1103,7 @@ void BrowserView::ShowBackgroundPages() {
   TaskManagerDialog::ShowBackgroundPages();
 #else
   // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (chrome_web_ui::IsMoreWebUI()) {
+  if (TaskManagerDialog::UseWebUITaskManager()) {
     TaskManagerDialog::ShowBackgroundPages();
   } else {
     browser::ShowBackgroundPages();
@@ -1127,6 +1114,16 @@ void BrowserView::ShowBackgroundPages() {
 void BrowserView::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
   GetLocationBarView()->ShowStarBubble(url, !already_bookmarked);
 }
+
+void BrowserView::ShowChromeToMobileBubble() {
+  GetLocationBarView()->ShowChromeToMobileBubble();
+}
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+void BrowserView::ShowOneClickSigninBubble() {
+  OneClickSigninBubbleView::ShowBubble(toolbar_->app_menu(), browser_.get());
+}
+#endif
 
 void BrowserView::SetDownloadShelfVisible(bool visible) {
   // This can be called from the superclass destructor, when it destroys our
@@ -1169,14 +1166,10 @@ DownloadShelf* BrowserView::GetDownloadShelf() {
 #endif
 }
 
-void BrowserView::ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) {
-  browser::ShowCollectedCookiesDialog(GetNativeHandle(), wrapper);
-}
-
 void BrowserView::ConfirmBrowserCloseWithPendingDownloads() {
   DownloadInProgressDialogView* view =
       new DownloadInProgressDialogView(browser_.get());
-  browser::CreateViewsWindow(GetNativeHandle(), view, STYLE_GENERIC)->Show();
+  views::Widget::CreateWindowWithParent(view, GetNativeHandle())->Show();
 }
 
 void BrowserView::ShowCreateWebAppShortcutsDialog(
@@ -1210,6 +1203,13 @@ void BrowserView::ShowPageInfo(Profile* profile,
                               profile, url, ssl, show_history);
 }
 
+void BrowserView::ShowWebsiteSettings(Profile* profile,
+                                      TabContentsWrapper* tab_contents_wrapper,
+                                      const GURL& url,
+                                      const content::SSLStatus& ssl,
+                                      bool show_history) {
+}
+
 void BrowserView::ShowAppMenu() {
   toolbar_->app_menu()->Activate();
 }
@@ -1233,19 +1233,6 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
   views::FocusManager* focus_manager = GetFocusManager();
   DCHECK(focus_manager);
 
-#if defined(TOOLKIT_USES_GTK)
-  // Views and WebKit use different tables for GdkEventKey -> views::KeyEvent
-  // conversion. We need to use View's conversion table here to keep consistent
-  // behavior with views::FocusManager::OnKeyEvent() method.
-  // TODO(suzhe): We need to check if Windows code also has this issue, and
-  // it'll be best if we can unify these conversion tables.
-  // See http://crbug.com/54315
-  views::KeyEvent views_event(reinterpret_cast<GdkEvent*>(event.os_event));
-  ui::Accelerator accelerator(views_event.key_code(),
-                              views_event.IsShiftDown(),
-                              views_event.IsControlDown(),
-                              views_event.IsAltDown());
-#else
   ui::Accelerator accelerator(
       static_cast<ui::KeyboardCode>(event.windowsKeyCode),
       (event.modifiers & NativeWebKeyboardEvent::ShiftKey) ==
@@ -1254,7 +1241,6 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
           NativeWebKeyboardEvent::ControlKey,
       (event.modifiers & NativeWebKeyboardEvent::AltKey) ==
           NativeWebKeyboardEvent::AltKey);
-#endif
 
   // We first find out the browser command associated to the |event|.
   // Then if the command is a reserved one, and should be processed
@@ -1280,12 +1266,7 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
     return false;
 
   // Executing the command may cause |this| object to be destroyed.
-#if defined(TOOLKIT_USES_GTK)
-  if (browser_->IsReservedCommandOrKey(id, event) &&
-      !event.match_edit_command) {
-#else
   if (browser_->IsReservedCommandOrKey(id, event)) {
-#endif
     UpdateAcceleratorMetrics(accelerator, id);
     return browser_->ExecuteCommandIfEnabled(id);
   }
@@ -1367,12 +1348,7 @@ void BrowserView::ShowMobileSetup() {
 }
 
 void BrowserView::ShowKeyboardOverlay(gfx::NativeWindow owning_window) {
-#if defined(TOOLKIT_USES_GTK)
   KeyboardOverlayDialogView::ShowDialog(owning_window, this);
-#else
-  // TODO(saintlou): Add Keyboard Overlay for Aura: crbug.com/99858.
-  NOTIMPLEMENTED();
-#endif
 }
 #endif
 
@@ -1402,7 +1378,7 @@ void BrowserView::TabDetachedAt(TabContentsWrapper* contents, int index) {
   // We use index here rather than comparing |contents| because by this time
   // the model has already removed |contents| from its list, so
   // browser_->GetSelectedWebContents() will return NULL or something else.
-  if (index == browser_->tabstrip_model()->active_index()) {
+  if (index == browser_->active_index()) {
     // We need to reset the current tab contents to NULL before it gets
     // freed. This is because the focus manager performs some operations
     // on the selected TabContents when it is removed.
@@ -1456,43 +1432,12 @@ void BrowserView::TabStripEmpty() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// BrowserView, ui::SimpleMenuModel::Delegate implementation:
-
-bool BrowserView::IsCommandIdChecked(int command_id) const {
-  // TODO(beng): encoding menu.
-  // No items in our system menu are check-able.
-  return false;
-}
-
-bool BrowserView::IsCommandIdEnabled(int command_id) const {
-  return browser_->command_updater()->IsCommandEnabled(command_id);
-}
+// BrowserView, ui::AcceleratorProvider implementation:
 
 bool BrowserView::GetAcceleratorForCommandId(int command_id,
                                              ui::Accelerator* accelerator) {
   // Let's let the ToolbarView own the canonical implementation of this method.
   return toolbar_->GetAcceleratorForCommandId(command_id, accelerator);
-}
-
-bool BrowserView::IsItemForCommandIdDynamic(int command_id) const {
-  return command_id == IDC_RESTORE_TAB;
-}
-
-string16 BrowserView::GetLabelForCommandId(int command_id) const {
-  DCHECK(command_id == IDC_RESTORE_TAB);
-
-  int string_id = IDS_RESTORE_TAB;
-  if (IsCommandIdEnabled(command_id)) {
-    TabRestoreService* trs =
-        TabRestoreServiceFactory::GetForProfile(browser_->profile());
-    if (trs && trs->entries().front()->type == TabRestoreService::WINDOW)
-      string_id = IDS_RESTORE_WINDOW;
-  }
-  return l10n_util::GetStringUTF16(string_id);
-}
-
-void BrowserView::ExecuteCommand(int command_id) {
-  browser_->ExecuteCommandIfEnabled(command_id);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1530,6 +1475,12 @@ views::View* BrowserView::GetInitiallyFocusedView() {
 }
 
 bool BrowserView::ShouldShowWindowTitle() const {
+#if defined(USE_ASH)
+  // For Ash only, app host windows do not show an icon, crbug.com/119411.
+  // Child windows (e.g. extension panels, popups) do show an icon.
+  if (browser_->is_app() && browser_->app_type() == Browser::APP_TYPE_HOST)
+    return false;
+#endif
   return browser_->SupportsWindowFeature(Browser::FEATURE_TITLEBAR);
 }
 
@@ -1550,6 +1501,12 @@ SkBitmap BrowserView::GetWindowIcon() {
 }
 
 bool BrowserView::ShouldShowWindowIcon() const {
+#if defined(USE_ASH)
+  // For Ash only, app host windows do not show an icon, crbug.com/119411.
+  // Child windows (e.g. extension panels, popups) do show an icon.
+  if (browser_->is_app() && browser_->app_type() == Browser::APP_TYPE_HOST)
+    return false;
+#endif
   return browser_->SupportsWindowFeature(Browser::FEATURE_TITLEBAR);
 }
 
@@ -1589,6 +1546,18 @@ bool BrowserView::GetSavedWindowPlacement(
     ui::WindowShowState* show_state) const {
   *bounds = browser_->GetSavedWindowBounds();
   *show_state = browser_->GetSavedWindowShowState();
+
+#if defined(USE_ASH)
+  if (browser_->is_type_popup() || browser_->is_type_panel()) {
+    // In case of a popup or panel with an 'unspecified' location we are looking
+    // for a good screen location. We are interpreting (0,0) as an unspecified
+    // location.
+    if (bounds->x() == 0 && bounds->y() == 0) {
+      *bounds = ChromeShellDelegate::instance()->window_positioner()->
+          GetPopupPosition(*bounds);
+    }
+  }
+#endif
 
   if ((browser_->is_type_popup() || browser_->is_type_panel())
       && !browser_->is_devtools() && !browser_->is_app()) {
@@ -1639,6 +1608,11 @@ views::ClientView* BrowserView::CreateClientView(views::Widget* widget) {
 
 void BrowserView::OnWidgetActivationChanged(views::Widget* widget,
                                             bool active) {
+#if defined(USE_AURA)
+  if (icon_updater_.get())
+    icon_updater_->BrowserActivationStateChanged();
+#endif
+
   if (active) {
     BrowserList::SetLastActive(browser_.get());
     browser_->OnWindowActivated();
@@ -1707,7 +1681,7 @@ bool BrowserView::CanClose() {
     // down. When the tab strip is empty we'll be called back again.
     frame_->Hide();
     browser_->OnWindowClosing();
-    return false;
+   return false;
   }
 
   // Empty TabStripModel, it's now safe to allow the Window to be closed.
@@ -1830,7 +1804,8 @@ void BrowserView::GetAccessibleState(ui::AccessibleViewState* state) {
 SkColor BrowserView::GetInfoBarSeparatorColor() const {
   // NOTE: Keep this in sync with ToolbarView::OnPaint()!
   return (IsTabStripVisible() || !frame_->ShouldUseNativeFrame()) ?
-      ResourceBundle::toolbar_separator_color : SK_ColorBLACK;
+      ThemeService::GetDefaultColor(ThemeService::COLOR_TOOLBAR_SEPARATOR) :
+      SK_ColorBLACK;
 }
 
 void BrowserView::InfoBarContainerStateChanged(bool is_animating) {
@@ -1854,6 +1829,10 @@ bool BrowserView::SplitHandleMoved(views::SingleSplitView* sender) {
   SchedulePaint();
   Layout();
   return false;
+}
+
+void BrowserView::OnSysColorChange() {
+  InvertBubble::MaybeShowInvertBubble(browser_->profile(), contents_);
 }
 
 views::LayoutManager* BrowserView::CreateLayoutManager() const {
@@ -1934,8 +1913,6 @@ void BrowserView::Init() {
 #endif
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-  InitSystemMenu();
-
   // Create a custom JumpList and add it to an observer of TabRestoreService
   // so we can update the custom JumpList when a tab is added or removed.
   if (JumpList::Enabled()) {
@@ -1981,22 +1958,6 @@ void BrowserView::LoadingAnimationCallback() {
 
 // BrowserView, private --------------------------------------------------------
 
-#if defined(OS_WIN) && !defined(USE_AURA)
-void BrowserView::InitSystemMenu() {
-  system_menu_contents_.reset(new views::SystemMenuModel(this));
-  // We add the menu items in reverse order so that insertion_index never needs
-  // to change.
-  if (IsBrowserTypeNormal())
-    BuildSystemMenuForBrowserWindow();
-  else
-    BuildSystemMenuForAppOrPopupWindow();
-  system_menu_.reset(
-      new views::NativeMenuWin(system_menu_contents_.get(),
-                               frame_->GetNativeWindow()));
-  system_menu_->Rebuild();
-}
-#endif
-
 BrowserViewLayout* BrowserView::GetBrowserViewLayout() const {
   return static_cast<BrowserViewLayout*>(GetLayoutManager());
 }
@@ -2004,8 +1965,13 @@ BrowserViewLayout* BrowserView::GetBrowserViewLayout() const {
 void BrowserView::LayoutStatusBubble() {
   // In restored mode, the client area has a client edge between it and the
   // frame.
-  int overlap = StatusBubbleViews::kShadowThickness +
-      (IsMaximized() ? 0 : views::NonClientFrameView::kClientEdgeThickness);
+  int overlap = StatusBubbleViews::kShadowThickness;
+  // The extra pixels defined by kClientEdgeThickness is only drawn in frame
+  // content border on windows for non-aura build.
+#if !defined(USE_ASH)
+  overlap +=
+      IsMaximized() ? 0 : views::NonClientFrameView::kClientEdgeThickness;
+#endif
   int height = status_bubble_->GetPreferredSize().height();
   int contents_height = status_bubble_->base_view()->bounds().height();
   gfx::Point origin(-overlap, contents_height - height + overlap);
@@ -2076,7 +2042,8 @@ void BrowserView::ShowDevToolsContainer() {
 
   // Restore split offset.
   int split_offset = browser_->profile()->GetPrefs()->
-      GetInteger(prefs::kDevToolsSplitLocation);
+      GetInteger(dock_to_right ? prefs::kDevToolsVSplitLocation :
+                                 prefs::kDevToolsHSplitLocation);
 
   if (split_offset == -1)
     split_offset = contents_size * 1 / 3;
@@ -2102,7 +2069,9 @@ void BrowserView::HideDevToolsContainer() {
   int contents_size = dock_to_right ? contents_split_->width() :
       contents_split_->height();
 
-  browser_->profile()->GetPrefs()->SetInteger(prefs::kDevToolsSplitLocation,
+  browser_->profile()->GetPrefs()->SetInteger(
+      dock_to_right ? prefs::kDevToolsVSplitLocation :
+                      prefs::kDevToolsHSplitLocation,
       contents_size - contents_split_->divider_offset());
 
   // Restore focus to the last focused view when hiding devtools window.
@@ -2267,7 +2236,8 @@ void BrowserView::LoadAccelerators() {
     accelerator_table_[accelerator] = accelerators[i].cmd;
 
     // Also register with the focus manager.
-    focus_manager->RegisterAccelerator(accelerator, this);
+    focus_manager->RegisterAccelerator(
+        accelerator, ui::AcceleratorManager::kNormalPriority, this);
   }
 
   // We don't need the Windows accelerator table anymore.
@@ -2284,72 +2254,11 @@ void BrowserView::LoadAccelerators() {
     accelerator_table_[accelerator] = browser::kAcceleratorMap[i].command_id;
 
     // Also register with the focus manager.
-    focus_manager->RegisterAccelerator(accelerator, this);
+    focus_manager->RegisterAccelerator(
+        accelerator, ui::AcceleratorManager::kNormalPriority, this);
   }
 #endif
 }
-
-#if defined(OS_WIN) && !defined(USE_AURA)
-void BrowserView::BuildSystemMenuForBrowserWindow() {
-  system_menu_contents_->AddSeparator();
-  system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
-                                             IDS_TASK_MANAGER);
-  system_menu_contents_->AddSeparator();
-  system_menu_contents_->AddItemWithStringId(IDC_RESTORE_TAB, IDS_RESTORE_TAB);
-  system_menu_contents_->AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
-  AddFrameToggleItems();
-  // If it's a regular browser window with tabs, we don't add any more items,
-  // since it already has menus (Page, Chrome).
-}
-
-void BrowserView::BuildSystemMenuForAppOrPopupWindow() {
-  if (browser_->is_app()) {
-    system_menu_contents_->AddSeparator();
-    system_menu_contents_->AddItemWithStringId(IDC_TASK_MANAGER,
-                                               IDS_TASK_MANAGER);
-  }
-  system_menu_contents_->AddSeparator();
-  encoding_menu_contents_.reset(new EncodingMenuModel(browser_.get()));
-  system_menu_contents_->AddSubMenuWithStringId(IDC_ENCODING_MENU,
-                                                IDS_ENCODING_MENU,
-                                                encoding_menu_contents_.get());
-  zoom_menu_contents_.reset(new ZoomMenuModel(this));
-  system_menu_contents_->AddSubMenuWithStringId(IDC_ZOOM_MENU, IDS_ZOOM_MENU,
-                                                zoom_menu_contents_.get());
-  system_menu_contents_->AddItemWithStringId(IDC_PRINT, IDS_PRINT);
-  system_menu_contents_->AddItemWithStringId(IDC_FIND, IDS_FIND);
-  system_menu_contents_->AddSeparator();
-  system_menu_contents_->AddItemWithStringId(IDC_PASTE, IDS_PASTE);
-  system_menu_contents_->AddItemWithStringId(IDC_COPY, IDS_COPY);
-  system_menu_contents_->AddItemWithStringId(IDC_CUT, IDS_CUT);
-  system_menu_contents_->AddSeparator();
-  if (browser_->is_app()) {
-    system_menu_contents_->AddItemWithStringId(IDC_NEW_TAB,
-                                               IDS_APP_MENU_NEW_WEB_PAGE);
-  } else {
-    system_menu_contents_->AddItemWithStringId(IDC_SHOW_AS_TAB,
-                                               IDS_SHOW_AS_TAB);
-  }
-  system_menu_contents_->AddItemWithStringId(IDC_COPY_URL,
-                                             IDS_APP_MENU_COPY_URL);
-  system_menu_contents_->AddSeparator();
-  system_menu_contents_->AddItemWithStringId(IDC_RELOAD, IDS_APP_MENU_RELOAD);
-  system_menu_contents_->AddItemWithStringId(IDC_FORWARD,
-                                             IDS_CONTENT_CONTEXT_FORWARD);
-  system_menu_contents_->AddItemWithStringId(IDC_BACK,
-                                             IDS_CONTENT_CONTEXT_BACK);
-  AddFrameToggleItems();
-}
-
-void BrowserView::AddFrameToggleItems() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDebugEnableFrameToggle)) {
-    system_menu_contents_->AddSeparator();
-    system_menu_contents_->AddItem(IDC_DEBUG_FRAME_TOGGLE,
-                                   L"Toggle Frame Type");
-  }
-}
-#endif
 
 int BrowserView::GetCommandIDForAppCommandID(int app_command_id) const {
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -2535,6 +2444,13 @@ void BrowserView::SetToolbar(ToolbarView* toolbar) {
   }
 }
 
+void BrowserView::CreateLauncherIcon() {
+#if defined(USE_AURA)
+  if (!icon_updater_.get())
+    icon_updater_.reset(LauncherUpdater::Create(browser_.get()));
+#endif  // defined(USE_AURA)
+}
+
 #if !defined(OS_CHROMEOS) || defined(USE_AURA)
 // static
 BrowserWindow* BrowserWindow::CreateBrowserWindow(Browser* browser) {
@@ -2565,4 +2481,24 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton() {
   AvatarMenuButton* button = frame_->GetAvatarMenuButton();
   if (button)
     button->ShowAvatarBubble();
+}
+
+void BrowserView::ShowPasswordGenerationBubble(const gfx::Rect& rect) {
+  // Create a rect in the content bounds that the bubble will point to.
+  gfx::Point origin(rect.origin());
+  views::View::ConvertPointToScreen(GetTabContentsContainerView(), &origin);
+  gfx::Rect bounds(origin, rect.size());
+
+  // Create the bubble.
+  WebContents* web_contents = GetSelectedWebContents();
+  if (!web_contents)
+    return;
+
+  PasswordGenerationBubbleView* bubble =
+      new PasswordGenerationBubbleView(bounds,
+                                       this,
+                                       web_contents->GetRenderViewHost());
+  browser::CreateViewsBubble(bubble);
+  bubble->SetAlignment(views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE);
+  bubble->Show();
 }

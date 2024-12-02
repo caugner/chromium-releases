@@ -25,10 +25,9 @@
 class AvatarMenuButtonGtk;
 class BrowserWindowGtk;
 class CustomDrawButton;
-class GtkThemeService;
+class ThemeServiceGtk;
 class MenuGtk;
 class PopupPageMenuModel;
-class TabContents;
 
 namespace content {
 class WebContents;
@@ -86,6 +85,12 @@ class BrowserTitlebar : public content::NotificationObserver,
   // Opened a gtk bug for this -
   //   https://bugzilla.gnome.org/show_bug.cgi?id=667841
   void SendEnterNotifyToCloseButtonIfUnderMouse();
+
+  // Returns the window width to display just the icon.
+  int IconOnlyWidth();
+
+  void ShowPanelWrenchButton();
+  void HidePanelWrenchButton();
 
   AvatarMenuButtonGtk* avatar_button() { return avatar_button_.get(); }
 
@@ -163,12 +168,6 @@ class BrowserTitlebar : public content::NotificationObserver,
   // Callback for mousewheel events.
   CHROMEGTK_CALLBACK_1(BrowserTitlebar, gboolean, OnScroll,
                        GdkEventScroll*);
-
-  // Callbacks for mouse enter leave events.
-  CHROMEGTK_CALLBACK_1(BrowserTitlebar, gboolean, OnEnterNotify,
-                       GdkEventCrossing*);
-  CHROMEGTK_CALLBACK_1(BrowserTitlebar, gboolean, OnLeaveNotify,
-                       GdkEventCrossing*);
 
   // Callback for min/max/close buttons.
   CHROMEGTK_CALLBACK_0(BrowserTitlebar, void, OnButtonClicked);
@@ -261,10 +260,6 @@ class BrowserTitlebar : public content::NotificationObserver,
   // value, so manually track the focus-in and focus-out events.)
   bool window_has_focus_;
 
-  // Whether mouse is in the window. We show the wrench icon when a panel
-  // window has focus or mouse is in a panel window.
-  bool window_has_mouse_;
-
   // Whether to display the avatar image on the left or right of the titlebar.
   bool display_avatar_on_left_;
 
@@ -295,7 +290,7 @@ class BrowserTitlebar : public content::NotificationObserver,
   scoped_ptr<AvatarMenuButtonGtk> avatar_button_;
 
   // Theme provider for building buttons.
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
 
   content::NotificationRegistrar registrar_;
 };

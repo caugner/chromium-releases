@@ -23,9 +23,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/worker_host/worker_process_host.h"
-#include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
@@ -33,6 +30,7 @@
 #include "content/public/browser/devtools_manager.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/worker_service.h"
@@ -44,6 +42,7 @@ using content::DevToolsManager;
 using content::DevToolsAgentHost;
 using content::DevToolsAgentHostRegistry;
 using content::NavigationController;
+using content::RenderViewHost;
 using content::WebContents;
 using content::WorkerService;
 using content::WorkerServiceObserver;
@@ -205,7 +204,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
       base::CancelableClosure timeout(
           base::Bind(&TimeoutCallback, "Extension load timed out."));
       MessageLoop::current()->PostDelayedTask(
-          FROM_HERE, timeout.callback(), 4 * 1000);
+          FROM_HERE, timeout.callback(), base::TimeDelta::FromSeconds(4));
       extensions::UnpackedInstaller::Create(service)->Load(path);
       ui_test_utils::RunMessageLoop();
       timeout.Cancel();
@@ -228,7 +227,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     base::CancelableClosure timeout(
         base::Bind(&TimeoutCallback, "Extension host load timed out."));
     MessageLoop::current()->PostDelayedTask(
-        FROM_HERE, timeout.callback(), 4 * 1000);
+        FROM_HERE, timeout.callback(), base::TimeDelta::FromSeconds(4));
 
     ExtensionProcessManager* manager =
           browser()->profile()->GetExtensionProcessManager();
@@ -292,21 +291,17 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
     virtual ~WorkerCreationObserver() {}
 
     virtual void WorkerCreated (
-        WorkerProcessHost* process,
-        const WorkerProcessHost::WorkerInstance& instance) OVERRIDE {
-      worker_data_->worker_process_id = process->GetData().id;
-      worker_data_->worker_route_id = instance.worker_route_id();
+        const GURL& url,
+        const string16& name,
+        int process_id,
+        int route_id) OVERRIDE {
+      worker_data_->worker_process_id = process_id;
+      worker_data_->worker_route_id = route_id;
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
           MessageLoop::QuitClosure());
       delete this;
     }
-    virtual void WorkerDestroyed(
-        WorkerProcessHost*,
-        int worker_route_id) OVERRIDE {}
-    virtual void WorkerContextStarted(
-        WorkerProcessHost*,
-        int worker_route_id) OVERRIDE {}
     scoped_refptr<WorkerData> worker_data_;
   };
 
@@ -319,22 +314,14 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
    private:
     virtual ~WorkerTerminationObserver() {}
 
-    virtual void WorkerCreated (
-        WorkerProcessHost* process,
-        const WorkerProcessHost::WorkerInstance& instance) OVERRIDE {}
-    virtual void WorkerDestroyed(
-        WorkerProcessHost* process,
-        int worker_route_id) OVERRIDE {
-      ASSERT_EQ(worker_data_->worker_process_id, process->GetData().id);
-      ASSERT_EQ(worker_data_->worker_route_id, worker_route_id);
+    virtual void WorkerDestroyed(int process_id, int route_id) OVERRIDE {
+      ASSERT_EQ(worker_data_->worker_process_id, process_id);
+      ASSERT_EQ(worker_data_->worker_route_id, route_id);
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
           MessageLoop::QuitClosure());
       delete this;
     }
-    virtual void WorkerContextStarted(
-        WorkerProcessHost*,
-        int worker_route_id) OVERRIDE {}
     scoped_refptr<WorkerData> worker_data_;
   };
 
@@ -349,15 +336,12 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
     CloseDevToolsWindow();
   }
 
-  static void TerminateWorkerOnIOThread(
-      scoped_refptr<WorkerData> worker_data) {
-    for (WorkerProcessHostIterator iter; !iter.Done(); ++iter) {
-      if (iter.GetData().id == worker_data->worker_process_id) {
-        iter->TerminateWorker(worker_data->worker_route_id);
-        WorkerService::GetInstance()->AddObserver(
-            new WorkerTerminationObserver(worker_data));
-        return;
-      }
+  static void TerminateWorkerOnIOThread(scoped_refptr<WorkerData> worker_data) {
+    if (WorkerService::GetInstance()->TerminateWorker(
+            worker_data->worker_process_id, worker_data->worker_route_id)) {
+      WorkerService::GetInstance()->AddObserver(
+          new WorkerTerminationObserver(worker_data));
+      return;
     }
     FAIL() << "Failed to terminate worker.\n";
   }
@@ -371,17 +355,14 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
 
   static void WaitForFirstSharedWorkerOnIOThread(
       scoped_refptr<WorkerData> worker_data) {
-    for (WorkerProcessHostIterator iter; !iter.Done(); ++iter) {
-      const WorkerProcessHost::Instances& instances = iter->instances();
-      for (WorkerProcessHost::Instances::const_iterator i = instances.begin();
-           i != instances.end(); ++i) {
-
-        worker_data->worker_process_id = iter.GetData().id;
-        worker_data->worker_route_id = i->worker_route_id();
-        BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-            MessageLoop::QuitClosure());
-        return;
-      }
+    std::vector<WorkerService::WorkerInfo> worker_info =
+        WorkerService::GetInstance()->GetWorkers();
+    if (!worker_info.empty()) {
+      worker_data->worker_process_id = worker_info[0].process_id;
+      worker_data->worker_route_id = worker_info[0].route_id;
+      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+          MessageLoop::QuitClosure());
+      return;
     }
 
     WorkerService::GetInstance()->AddObserver(
@@ -409,7 +390,8 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
         agent_host,
         window_->devtools_client_host());
     RenderViewHost* client_rvh = window_->GetRenderViewHost();
-    WebContents* client_contents = client_rvh->delegate()->GetAsWebContents();
+    WebContents* client_contents =
+        client_rvh->GetDelegate()->GetAsWebContents();
     if (client_contents->IsLoading()) {
       ui_test_utils::WindowedNotificationObserver observer(
           content::NOTIFICATION_LOAD_STOP,
@@ -455,6 +437,14 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
   RunTest("waitForTestResultsInConsole", "");
 }
 
+// Tests that chrome.devtools extension can communicate with background page
+// using extension messaging.
+IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
+                       TestDevToolsExtensionMessaging) {
+  LoadExtension("devtools_messaging");
+  RunTest("waitForTestResultsInConsole", "");
+}
+
 // Tests that chrome.experimental.devtools extension is correctly exposed
 // when the extension has experimental permission.
 IN_PROC_BROWSER_TEST_F(DevToolsExperimentalExtensionTest,
@@ -464,8 +454,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsExperimentalExtensionTest,
 }
 
 // Tests that a content script is in the scripts list.
+// http://crbug.com/114104
 IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
-                       TestContentScriptIsPresent) {
+                       DISABLED_TestContentScriptIsPresent) {
   LoadExtension("simple_content_script");
   RunTest("testContentScriptIsPresent", kPageWithContentScript);
 }
@@ -495,18 +486,29 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestNetworkTiming) {
   RunTest("testNetworkTiming", kSlowTestPage);
 }
 
+// crbug.com/118165
+#if defined(OS_MACOSX)
+#define MAYBE_TestNetworkSize FAILS_TestNetworkSize
+#define MAYBE_TestNetworkSyncSize FAILS_TestNetworkSyncSize
+#define MAYBE_TestNetworkRawHeadersText FAILS_TestNetworkRawHeadersText
+#else
+#define MAYBE_TestNetworkSize TestNetworkSize
+#define MAYBE_TestNetworkSyncSize TestNetworkSyncSize
+#define MAYBE_TestNetworkRawHeadersText TestNetworkRawHeadersText
+#endif
+
 // Tests network size.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestNetworkSize) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestNetworkSize) {
   RunTest("testNetworkSize", kChunkedTestPage);
 }
 
 // Tests raw headers text.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestNetworkSyncSize) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestNetworkSyncSize) {
   RunTest("testNetworkSyncSize", kChunkedTestPage);
 }
 
 // Tests raw headers text.
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestNetworkRawHeadersText) {
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, MAYBE_TestNetworkRawHeadersText) {
   RunTest("testNetworkRawHeadersText", kChunkedTestPage);
 }
 
@@ -517,7 +519,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleOnNavigateBack) {
 
 #if defined(OS_LINUX) || defined(OS_MACOSX)
 // http://crbug.com/103539
-#define TestReattachAfterCrash FLAKY_TestReattachAfterCrash
+#define TestReattachAfterCrash DISABLED_TestReattachAfterCrash
 #endif
 // Tests that inspector will reattach to inspected page when it is reloaded
 // after a crash. See http://crbug.com/101952
@@ -553,6 +555,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestPageWithNoJavaScript) {
 
 #if defined(OS_MACOSX)
 #define MAYBE_InspectSharedWorker DISABLED_InspectSharedWorker
+#elif !defined(NDEBUG)
+// Now fails consistently on Windows and Linux debug, http://crbug.com/115192
+#define MAYBE_InspectSharedWorker DISABLED_InspectSharedWorker
 #else
 #define MAYBE_InspectSharedWorker InspectSharedWorker
 #endif
@@ -562,35 +567,48 @@ IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest, MAYBE_InspectSharedWorker) {
 }
 
 // http://crbug.com/100538
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_WIN)
 #define MAYBE_PauseInSharedWorkerInitialization DISABLED_PauseInSharedWorkerInitialization
-#elif defined(OS_WIN)
-#define MAYBE_PauseInSharedWorkerInitialization FLAKY_PauseInSharedWorkerInitialization
 #else
 #define MAYBE_PauseInSharedWorkerInitialization PauseInSharedWorkerInitialization
 #endif
-// See http://crbug.com/100538
 
 // http://crbug.com/106114 is masking
 // MAYBE_PauseInSharedWorkerInitialization into
 // DISABLED_PauseInSharedWorkerInitialization
 IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest,
                        DISABLED_PauseInSharedWorkerInitialization) {
-    ASSERT_TRUE(test_server()->Start());
-    GURL url = test_server()->GetURL(kReloadSharedWorkerTestPage);
-    ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(test_server()->Start());
+  GURL url = test_server()->GetURL(kReloadSharedWorkerTestPage);
+  ui_test_utils::NavigateToURL(browser(), url);
 
-    scoped_refptr<WorkerData> worker_data = WaitForFirstSharedWorker();
-    OpenDevToolsWindowForSharedWorker(worker_data.get());
+  scoped_refptr<WorkerData> worker_data = WaitForFirstSharedWorker();
+  OpenDevToolsWindowForSharedWorker(worker_data.get());
 
-    TerminateWorker(worker_data);
+  TerminateWorker(worker_data);
 
-    // Reload page to restart the worker.
-    ui_test_utils::NavigateToURL(browser(), url);
+  // Reload page to restart the worker.
+  ui_test_utils::NavigateToURL(browser(), url);
 
-    // Wait until worker script is paused on the debugger statement.
-    RunTestFunction(window_, "testPauseInSharedWorkerInitialization");
-    CloseDevToolsWindow();
+  // Wait until worker script is paused on the debugger statement.
+  RunTestFunction(window_, "testPauseInSharedWorkerInitialization");
+  CloseDevToolsWindow();
+}
+
+// Tests DevToolsAgentHost::AddMessageToConsole.
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestAddMessageToConsole) {
+  OpenDevToolsWindow("about:blank");
+  DevToolsManager* devtools_manager = DevToolsManager::GetInstance();
+  DevToolsAgentHost* agent_host =
+      DevToolsAgentHostRegistry::GetDevToolsAgentHost(inspected_rvh_);
+  devtools_manager->AddMessageToConsole(agent_host,
+                                        content::CONSOLE_MESSAGE_LEVEL_LOG,
+                                        "log");
+  devtools_manager->AddMessageToConsole(agent_host,
+                                        content::CONSOLE_MESSAGE_LEVEL_ERROR,
+                                        "error");
+  RunTestFunction(window_, "checkLogAndErrorMessages");
+  CloseDevToolsWindow();
 }
 
 }  // namespace

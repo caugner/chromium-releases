@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,15 +24,17 @@ enum MountType {
   MOUNT_TYPE_INVALID,
   MOUNT_TYPE_DEVICE,
   MOUNT_TYPE_ARCHIVE,
+  MOUNT_TYPE_GDATA,
   MOUNT_TYPE_NETWORK_STORAGE,
 };
 
 // Type of device.
 enum DeviceType {
-  FLASH,
-  HDD,
-  OPTICAL,
-  UNDEFINED,
+  DEVICE_TYPE_UNKNOWN,
+  DEVICE_TYPE_USB,  // USB stick.
+  DEVICE_TYPE_SD,  // SD card.
+  DEVICE_TYPE_OPTICAL_DISC,  // e.g. DVD.
+  DEVICE_TYPE_MOBILE  // Storage on a mobile device (e.g. Android).
 };
 
 // Mount error code used by cros-disks.
@@ -44,6 +46,8 @@ enum MountError {
   MOUNT_ERROR_UNSUPORTED_FILESYSTEM = 102,
   MOUNT_ERROR_INVALID_ARCHIVE = 201,
   MOUNT_ERROR_LIBRARY_NOT_LOADED = 501,
+  MOUNT_ERROR_NOT_AUTHENTICATED = 601,
+  MOUNT_ERROR_NETWORK_ERROR = 602,
   MOUNT_ERROR_PATH_UNMOUNTED = 901,
   // TODO(tbarzic): Add more error codes as they get added to cros-disks and
   // consider doing explicit translation from cros-disks error_types.

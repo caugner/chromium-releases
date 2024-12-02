@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -61,6 +61,8 @@ class GoogleChromeDistribution : public BrowserDistribution {
 
   virtual std::string GetNetworkStatsServer() const OVERRIDE;
 
+  virtual std::string GetHttpPipeliningTestServer() const OVERRIDE;
+
   // This method reads data from the Google Update ClientState key for
   // potential use in the uninstall survey. It must be called before the
   // key returned by GetVersionKey() is deleted.
@@ -84,7 +86,7 @@ class GoogleChromeDistribution : public BrowserDistribution {
       const FilePath& setup_path,
       installer::InstallStatus status,
       const Version& version,
-      const installer::Product& installation,
+      const installer::Product& product,
       bool system_level) OVERRIDE;
 
   // Assuming that the user qualifies, this function performs the inactive user

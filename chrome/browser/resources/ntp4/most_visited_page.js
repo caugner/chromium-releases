@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-cr.define('ntp4', function() {
+cr.define('ntp', function() {
   'use strict';
 
-  var TilePage = ntp4.TilePage;
+  var TilePage = ntp.TilePage;
 
   /**
    * A counter for generating unique tile IDs.
@@ -137,10 +137,10 @@ cr.define('ntp4', function() {
         // recorded. Can this be fixed?
         chrome.send('recordAppLaunchByURL',
                     [encodeURIComponent(this.href),
-                     ntp4.APP_LAUNCH.NTP_MOST_VISITED]);
+                     ntp.APP_LAUNCH.NTP_MOST_VISITED]);
         // Records the index of this tile.
         chrome.send('metricsHandler:recordInHistogram',
-                    ['NTP_MostVisited', this.index, 8]);
+                    ['NewTabPage.MostVisited', this.index, 8]);
       }
     },
 
@@ -168,7 +168,7 @@ cr.define('ntp4', function() {
     showUndoNotification_: function() {
       var data = this.data_;
       var self = this;
-      var doUndo = function () {
+      var doUndo = function() {
         chrome.send('removeURLsFromMostVisitedBlacklist', [data.url]);
         self.updateForData(data);
       }
@@ -176,16 +176,16 @@ cr.define('ntp4', function() {
       var undo = {
         action: doUndo,
         text: templateData.undothumbnailremove,
-      }
+      };
 
       var undoAll = {
         action: function() {
-          chrome.send('clearMostVisitedURLsBlacklist', []);
+          chrome.send('clearMostVisitedURLsBlacklist');
         },
         text: templateData.restoreThumbnailsShort,
-      }
+      };
 
-      ntp4.showNotification(templateData.thumbnailremovednotification,
+      ntp.showNotification(templateData.thumbnailremovednotification,
                             [undo, undoAll]);
     },
 
@@ -351,9 +351,10 @@ cr.define('ntp4', function() {
    * We've gotten additional Most Visited data. Update our old data with the
    * new data. The ordering of the new data is not important, except when a
    * page is pinned. Thus we try to minimize re-ordering.
-   * @param {Object} oldData The current Most Visited page list.
-   * @param {Object} newData The new Most Visited page list.
-   * @return The merged page list that should replace the current page list.
+   * @param {Array} oldData The current Most Visited page list.
+   * @param {Array} newData The new Most Visited page list.
+   * @return {Array} The merged page list that should replace the current page
+   *     list.
    */
   function refreshData(oldData, newData) {
     oldData = oldData.slice(0, THUMBNAIL_COUNT);

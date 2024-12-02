@@ -6,30 +6,50 @@
 #define CONTENT_BROWSER_TAB_CONTENTS_TAB_CONTENTS_VIEW_WIN_H_
 #pragma once
 
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/timer.h"
+#include "base/win/win_util.h"
 #include "content/browser/tab_contents/tab_contents_view_helper.h"
+#include "content/common/content_export.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/base/win/window_impl.h"
 
 class RenderWidgetHostViewWin;
+class WebDragDest;
+class WebContentsDragWin;
+
+namespace content {
+class WebContentsViewDelegate;
+}
 
 // An implementation of WebContentsView for Windows.
-class TabContentsViewWin : public content::WebContentsView,
-                           public ui::WindowImpl {
+class CONTENT_EXPORT TabContentsViewWin : public content::WebContentsView,
+                                          public ui::WindowImpl {
  public:
-  // TODO(jam): make this take a WebContents once it's created from content.
-  explicit TabContentsViewWin(content::WebContents* web_contents);
+  TabContentsViewWin(TabContents* tab_contents,
+                     content::WebContentsViewDelegate* delegate);
   virtual ~TabContentsViewWin();
 
-  void SetParent(HWND parent);
-
   BEGIN_MSG_MAP_EX(TabContentsViewWin)
+    MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
     MESSAGE_HANDLER(WM_WINDOWPOSCHANGED, OnWindowPosChanged)
+    MESSAGE_HANDLER(WM_LBUTTONDOWN, OnMouseDown)
+    MESSAGE_HANDLER(WM_MBUTTONDOWN, OnMouseDown)
+    MESSAGE_HANDLER(WM_RBUTTONDOWN, OnMouseDown)
+    MESSAGE_HANDLER(WM_MOUSEMOVE, OnMouseMove)
+    MESSAGE_HANDLER(base::win::kReflectedMessage, OnReflectedMessage)
+    // Hacks for old ThinkPad touchpads/scroll points.
+    MESSAGE_HANDLER(WM_NCCALCSIZE, OnNCCalcSize)
+    MESSAGE_HANDLER(WM_HSCROLL, OnScroll)
+    MESSAGE_HANDLER(WM_VSCROLL, OnScroll)
+    MESSAGE_HANDLER(WM_SIZE, OnSize)
   END_MSG_MAP()
 
   // Overridden from WebContentsView:
   virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
-  virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
+  virtual content::RenderWidgetHostView* CreateViewForWidget(
+      content::RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
@@ -38,7 +58,7 @@ class TabContentsViewWin : public content::WebContentsView,
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
+  virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
@@ -48,8 +68,6 @@ class TabContentsViewWin : public content::WebContentsView,
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
   virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
-  virtual void InstallOverlayView(gfx::NativeView view) OVERRIDE;
-  virtual void RemoveOverlayView() OVERRIDE;
 
   // Implementation of RenderViewHostDelegate::View.
   virtual void CreateNewWindow(
@@ -65,7 +83,8 @@ class TabContentsViewWin : public content::WebContentsView,
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos) OVERRIDE;
   virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowContextMenu(const ContextMenuParams& params) OVERRIDE;
+  virtual void ShowContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -83,10 +102,25 @@ class TabContentsViewWin : public content::WebContentsView,
   TabContents* tab_contents() const { return tab_contents_; }
 
  private:
+  void EndDragging();
+  void CloseTab();
+
+  LRESULT OnDestroy(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
   LRESULT OnWindowPosChanged(
       UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
-
-  HWND parent_;
+  LRESULT OnMouseDown(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+  LRESULT OnMouseMove(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+  LRESULT OnReflectedMessage(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+  LRESULT OnNCCalcSize(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+  LRESULT OnScroll(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
+  LRESULT OnSize(
+      UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled);
 
   gfx::Size initial_size_;
 
@@ -94,6 +128,22 @@ class TabContentsViewWin : public content::WebContentsView,
   TabContents* tab_contents_;
 
   RenderWidgetHostViewWin* view_;
+
+  scoped_ptr<content::WebContentsViewDelegate> delegate_;
+
+  // The helper object that handles drag destination related interactions with
+  // Windows.
+  scoped_refptr<WebDragDest> drag_dest_;
+
+  // Used to handle the drag-and-drop.
+  scoped_refptr<WebContentsDragWin> drag_handler_;
+
+  // Set to true if we want to close the tab after the system drag operation
+  // has finished.
+  bool close_tab_after_drag_ends_;
+
+  // Used to close the tab after the stack has unwound.
+  base::OneShotTimer<TabContentsViewWin> close_tab_timer_;
 
   // Common implementations of some WebContentsView methods.
   TabContentsViewHelper tab_contents_view_helper_;

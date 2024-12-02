@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@ class DropTargetEvent;
 
 namespace content {
 class WebContents;
+class WebDragDestDelegate;
 }
 
 namespace ui {
@@ -34,9 +35,8 @@ class NativeTabContentsViewAura : public views::NativeWidgetAura,
  private:
   // Overridden from NativeTabContentsView:
   virtual void InitNativeTabContentsView() OVERRIDE;
-  virtual void Unparent() OVERRIDE;
-  virtual RenderWidgetHostView* CreateRenderWidgetHostView(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
+  virtual content::RenderWidgetHostView* CreateRenderWidgetHostView(
+      content::RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
   virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
@@ -64,6 +64,8 @@ class NativeTabContentsViewAura : public views::NativeWidgetAura,
   internal::NativeTabContentsViewDelegate* delegate_;
 
   WebKit::WebDragOperationsMask current_drag_op_;
+
+  content::WebDragDestDelegate* drag_dest_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTabContentsViewAura);
 };

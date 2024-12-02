@@ -20,8 +20,6 @@
 #include "content/public/common/referrer.h"
 
 class Profile;
-class RenderViewHost;
-class SessionStorageNamespace;
 class TabContentsWrapper;
 struct FaviconURL;
 
@@ -30,7 +28,9 @@ class ProcessMetrics;
 }
 
 namespace content {
+class RenderViewHost;
 class RenderViewHostDelegate;
+class SessionStorageNamespace;
 }
 
 namespace prerender {
@@ -107,21 +107,22 @@ class PrerenderContents : public content::NotificationObserver,
   // |source_render_view_host| is the RenderViewHost that initiated
   // prerendering.
   virtual void StartPrerendering(
-      const RenderViewHost* source_render_view_host,
-      SessionStorageNamespace* session_storage_namespace);
+      const content::RenderViewHost* source_render_view_host,
+      content::SessionStorageNamespace* session_storage_namespace);
 
   // Verifies that the prerendering is not using too many resources, and kills
   // it if not.
   void DestroyWhenUsingTooManyResources();
 
-  RenderViewHost* render_view_host_mutable();
-  const RenderViewHost* render_view_host() const;
+  content::RenderViewHost* render_view_host_mutable();
+  const content::RenderViewHost* render_view_host() const;
   string16 title() const { return title_; }
   int32 page_id() const { return page_id_; }
   GURL icon_url() const { return icon_url_; }
   const GURL& prerender_url() const { return prerender_url_; }
   const content::Referrer& referrer() const { return referrer_; }
   bool has_stopped_loading() const { return has_stopped_loading_; }
+  bool has_finished_loading() const { return has_finished_loading_; }
   bool prerendering_has_started() const { return prerendering_has_started_; }
   MatchCompleteStatus match_complete_status() const {
     return match_complete_status_;
@@ -164,7 +165,11 @@ class PrerenderContents : public content::NotificationObserver,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
-      RenderViewHost* render_view_host) OVERRIDE;
+      content::RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidFinishLoad(int64 frame_id,
+                             const GURL& validated_url,
+                             bool is_main_frame) OVERRIDE;
+
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
 
   // content::NotificationObserver
@@ -226,7 +231,8 @@ class PrerenderContents : public content::NotificationObserver,
 
   // Called whenever a RenderViewHost is created for prerendering.  Only called
   // once the RenderViewHost has a RenderView and RenderWidgetHostView.
-  virtual void OnRenderViewHostCreated(RenderViewHost* new_render_view_host);
+  virtual void OnRenderViewHostCreated(
+      content::RenderViewHost* new_render_view_host);
 
   content::NotificationRegistrar& notification_registrar() {
     return notification_registrar_;
@@ -286,6 +292,9 @@ class PrerenderContents : public content::NotificationObserver,
 
   bool has_stopped_loading_;
 
+  // True when the main frame has finished loading.
+  bool has_finished_loading_;
+
   // This must be the same value as the PrerenderTracker has recorded for
   // |this|, when |this| has a RenderView.
   FinalStatus final_status_;
@@ -329,6 +338,9 @@ class PrerenderContents : public content::NotificationObserver,
 
   // List of all pages the prerendered page has tried to prerender.
   PendingPrerenderList pending_prerender_list_;
+
+  // The process that created the child id.
+  int creator_child_id_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderContents);
 };

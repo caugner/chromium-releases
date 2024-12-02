@@ -22,7 +22,8 @@ cr.define('login', function() {
     PROXY_AUTH_CANCELLED: 'frame error:111',
     PROXY_CONNECTION_FAILED: 'frame error:130',
     PROXY_CONFIG_CHANGED: 'proxy changed',
-    LOADING_TIMEOUT: 'loading timeout'
+    LOADING_TIMEOUT: 'loading timeout',
+    PORTAL_DETECTED: 'portal detected'
   };
 
   // Frame loading errors.
@@ -79,7 +80,7 @@ cr.define('login', function() {
         '<a id="' + FIX_CAPTIVE_PORTAL_ID + '" class="signin-link" href="#">',
         '</a>');
       $(FIX_CAPTIVE_PORTAL_ID).onclick = function() {
-        chrome.send('fixCaptivePortal');
+        chrome.send('showCaptivePortal');
       };
 
       $('proxy-message-text').innerHTML = localStrings.getStringF(
@@ -146,6 +147,7 @@ cr.define('login', function() {
           reason == ERROR_REASONS.PROXY_CONNECTION_FAILED;
       var shouldOverlay = MANAGED_SCREENS.indexOf(currentScreen.id) != -1 &&
           !currentScreen.isLocal;
+      var isTimeout = false;
 
       if (reason == ERROR_REASONS.PROXY_CONFIG_CHANGED && shouldOverlay &&
           !offlineMessage.classList.contains('hidden') &&
@@ -159,13 +161,36 @@ cr.define('login', function() {
       if (reason == ERROR_REASONS.LOADING_TIMEOUT) {
         isOnline = false;
         isUnderCaptivePortal = true;
+        isTimeout = true;
+      }
+
+      // Portal was detected via generate_204 redirect on Chrome side.
+      // Subsequent call to show dialog if it's already shown does nothing.
+      if (reason == ERROR_REASONS.PORTAL_DETECTED) {
+        isOnline = false;
+        isUnderCaptivePortal = true;
       }
 
       if (!isOnline && shouldOverlay) {
         console.log('Show offline message: state=' + state +
-                    ', network=' + network +
+                    ', network=' + network + ', reason=' + reason,
                     ', isUnderCaptivePortal=' + isUnderCaptivePortal);
+
+
         offlineMessage.onBeforeShow(lastNetworkType);
+
+        if (isUnderCaptivePortal && !isProxyError) {
+          // In case of timeout we're suspecting that network might be
+          // a captive portal but would like to check that first.
+          // Otherwise (signal from flimflam / generate_204 got redirected)
+          // show dialog right away.
+          if (isTimeout)
+            chrome.send('fixCaptivePortal');
+          else
+            chrome.send('showCaptivePortal');
+        } else {
+          chrome.send('hideCaptivePortal');
+        }
 
         if (isUnderCaptivePortal) {
           if (isProxyError) {
@@ -196,7 +221,10 @@ cr.define('login', function() {
                 currentScreen.classList.add('hidden');
             });
         }
+        chrome.send('networkErrorShown');
       } else {
+        chrome.send('hideCaptivePortal');
+
         if (!offlineMessage.classList.contains('faded')) {
           console.log('Hide offline message.');
           offlineMessage.onBeforeHide();
@@ -212,8 +240,8 @@ cr.define('login', function() {
           currentScreen.classList.remove('hidden');
           currentScreen.classList.remove('faded');
 
-          // Ensures 'loading' state really means loading for Gaia screen.
-          if (currentScreen.id == 'gaia-signin' && currentScreen.loading)
+          // Forces a reload for Gaia screen on hiding error message.
+          if (currentScreen.id == 'gaia-signin')
             currentScreen.doReload();
         }
       }

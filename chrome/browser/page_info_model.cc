@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,8 @@
 #include "chrome/browser/page_info_model_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
-#include "content/browser/cert_store.h"
-#include "content/browser/ssl/ssl_manager.h"
-#include "content/public/browser/ssl_status.h"
+#include "content/public/browser/cert_store.h"
+#include "content/public/common/ssl_status.h"
 #include "content/public/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -64,7 +63,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
   }
 
   if (ssl.cert_id &&
-      CertStore::GetInstance()->RetrieveCert(ssl.cert_id, &cert) &&
+      content::CertStore::GetInstance()->RetrieveCert(ssl.cert_id, &cert) &&
       (!net::IsCertStatusError(ssl.cert_status) ||
        net::IsCertStatusMinorError(ssl.cert_status))) {
     // There are no major errors. Check for minor errors.
@@ -288,6 +287,11 @@ PageInfoModel::PageInfoModel(Profile* profile,
         base::Bind(&PageInfoModel::OnGotVisitCountToHost,
                    base::Unretained(this)));
   }
+
+  if (ssl.cert_id) {
+    certificate_label_ = l10n_util::GetStringUTF16(
+        IDS_PAGEINFO_CERT_INFO_BUTTON);
+  }
 }
 
 PageInfoModel::~PageInfoModel() {}
@@ -343,6 +347,10 @@ void PageInfoModel::OnGotVisitCountToHost(HistoryService::Handle handle,
         SECTION_INFO_FIRST_VISIT));
   }
   observer_->OnPageInfoModelChanged();
+}
+
+string16 PageInfoModel::GetCertificateLabel() const {
+  return certificate_label_;
 }
 
 PageInfoModel::PageInfoModel() : observer_(NULL) {

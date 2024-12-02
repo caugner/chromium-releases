@@ -30,8 +30,8 @@
 
 #if defined(OS_WIN)
 #include "base/synchronization/waitable_event.h"
-#else
-#include "base/bind.h"
+#elif defined(OS_MACOSX)
+#include "content/browser/mach_broker_mac.h"
 #endif
 
 using content::BrowserChildProcessHostDelegate;
@@ -64,6 +64,12 @@ BrowserChildProcessHost* BrowserChildProcessHost::Create(
   return new BrowserChildProcessHostImpl(type, delegate);
 }
 
+#if defined(OS_MACOSX)
+base::ProcessMetrics::PortProvider* BrowserChildProcessHost::GetPortProvider() {
+  return MachBroker::GetInstance();
+}
+#endif
+
 }  // namespace content
 
 BrowserChildProcessHostImpl::BrowserChildProcessList*
@@ -87,6 +93,7 @@ BrowserChildProcessHostImpl::BrowserChildProcessHostImpl(
   child_process_host_->AddFilter(new ProfilerMessageFilter);
 
   g_child_process_list.Get().push_back(this);
+  content::GetContentClient()->browser()->BrowserChildProcessHostCreated(this);
 }
 
 BrowserChildProcessHostImpl::~BrowserChildProcessHostImpl() {
@@ -99,7 +106,10 @@ void BrowserChildProcessHostImpl::TerminateAll() {
   // Make a copy since the BrowserChildProcessHost dtor mutates the original
   // list.
   BrowserChildProcessList copy = g_child_process_list.Get();
-  STLDeleteElements(&copy);
+  for (BrowserChildProcessList::iterator it = copy.begin();
+       it != copy.end(); ++it) {
+    delete (*it)->delegate();  // ~*HostDelegate deletes *HostImpl.
+  }
 }
 
 void BrowserChildProcessHostImpl::Launch(
@@ -107,7 +117,7 @@ void BrowserChildProcessHostImpl::Launch(
     const FilePath& exposed_dir,
 #elif defined(OS_POSIX)
     bool use_zygote,
-    const base::environment_vector& environ,
+    const base::EnvironmentVector& environ,
 #endif
     CommandLine* cmd_line) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));

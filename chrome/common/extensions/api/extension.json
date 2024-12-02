@@ -1,6 +1,11 @@
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 [
   {
     "namespace": "extension",
+    "nocompile": true,
     "dependencies": [ "tabs" ],
     "types": [
       {
@@ -84,6 +89,7 @@
       {
         "name": "sendRequest",
         "type": "function",
+        "allowAmbiguousOptionalArguments": true,
         "unprivileged": true,
         "description": "Sends a single request to other listeners within the extension. Similar to chrome.extension.connect, but only sends a single request with an optional response. The <a href='extension.html#event-onRequest'>chrome.extension.onRequest</a> event is fired in each page of the extension.",
         "parameters": [
@@ -147,7 +153,7 @@
         "returns": {
           "type": "array",
           "description": "Array of global objects",
-          "items": { "type": "object", "isInstanceOf": "DOMWindow", "properties": {}, "additionalProperties": { "type": "any" } }
+          "items": { "type": "object", "isInstanceOf": "global", "additionalProperties": { "type": "any" } }
         }
       },
       {
@@ -156,7 +162,7 @@
         "description": "Returns the JavaScript 'window' object for the background page running inside the current extension. Returns null if the extension has no background page.",
         "parameters": [],
         "returns": {
-          "type": "object", "isInstanceOf": "DOMWindow", "properties": {}, "additionalProperties": { "type": "any" }
+          "type": "object", "isInstanceOf": "global", "additionalProperties": { "type": "any" }
          }
       },
       {
@@ -171,7 +177,7 @@
         "returns": {
           "type": "array",
           "description": "Array of global window objects",
-          "items": { "type": "object", "isInstanceOf": "DOMWindow", "properties": {}, "additionalProperties": { "type": "any" } }
+          "items": { "type": "object", "isInstanceOf": "global", "additionalProperties": { "type": "any" } }
         }
       },
       {
@@ -226,6 +232,7 @@
         "name": "onConnect",
         "type": "function",
         "unprivileged": true,
+        "anonymous": true,
         "description": "Fired when a connection is made from either an extension process or a content script.",
         "parameters": [
           {"$ref": "Port", "name": "port"}
@@ -234,6 +241,7 @@
       {
         "name": "onConnectExternal",
         "type": "function",
+        "anonymous": true,
         "description": "Fired when a connection is made from another extension.",
         "parameters": [
           {"$ref": "Port", "name": "port"}
@@ -242,6 +250,7 @@
       {
         "name": "onRequest",
         "type": "function",
+        "anonymous": true,
         "unprivileged": true,
         "description": "Fired when a request is sent from either an extension process or a content script.",
         "parameters": [
@@ -253,6 +262,7 @@
       {
         "name": "onRequestExternal",
         "type": "function",
+        "anonymous": true,
         "description": "Fired when a request is sent from another extension.",
         "parameters": [
           {"name": "request", "type": "any", "description": "The request sent by the calling script."},

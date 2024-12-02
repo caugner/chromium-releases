@@ -67,14 +67,15 @@ class PortAllocator(object):
     # an issue a per-port based lock system can be used instead.
     self._port_lock = threading.Lock()
 
-  def Get(self, key, **kwargs):
+  def Get(self, key, new_port=False, **kwargs):
     """Sets up a constrained port using the requested parameters.
 
     Requests for the same key and constraints will result in a cached port being
-    returned if possible.
+    returned if possible, subject to new_port.
 
     Args:
       key: Used to cache ports with the given constraints.
+      new_port: Whether to create a new port or use an existing one if possible.
       **kwargs: Constraints to pass into traffic control.
 
     Returns:
@@ -85,14 +86,16 @@ class PortAllocator(object):
       # cache time and return the port if so. Performance isn't a concern here,
       # so just iterate over ports dict for simplicity.
       full_key = (key,) + tuple(kwargs.values())
-      for port, status in self._ports.iteritems():
-        if full_key == status['key']:
-          self._ports[port]['last_update'] = time.time()
-          return port
+      if not new_port:
+        for port, status in self._ports.iteritems():
+          if full_key == status['key']:
+            self._ports[port]['last_update'] = time.time()
+            return port
 
       # Cleanup ports on new port requests. Do it after the cache check though
       # so we don't erase and then setup the same port.
-      self._CleanupLocked(all_ports=False)
+      if self._expiry_time_secs > 0:
+        self._CleanupLocked(all_ports=False)
 
       # Performance isn't really an issue here, so just iterate over the port
       # range to find an unused port. If no port is found, None is returned.
@@ -122,7 +125,7 @@ class PortAllocator(object):
       traffic_control.CreateConstrainedPort(kwargs)
       return True
     except traffic_control.TrafficControlError as e:
-      cherrypy.log('Error: %s\nOutput: %s', e.msg, e.error)
+      cherrypy.log('Error: %s\nOutput: %s' % (e.msg, e.error))
       return False
 
   def _CleanupLocked(self, all_ports):
@@ -151,7 +154,7 @@ class PortAllocator(object):
     try:
       traffic_control.DeleteConstrainedPort(self._ports[port]['config'])
     except traffic_control.TrafficControlError as e:
-      cherrypy.log('Error: %s\nOutput: %s', e.msg, e.error)
+      cherrypy.log('Error: %s\nOutput: %s' % (e.msg, e.error))
 
   def Cleanup(self, interface, all_ports=False):
     """Cleans up expired ports, or if all_ports=True, all allocated ports.
@@ -181,12 +184,13 @@ class ConstrainedNetworkServer(object):
     self._port_allocator = port_allocator
 
   @cherrypy.expose
-  def ServeConstrained(self, f=None, bandwidth=None, latency=None, loss=None):
+  def ServeConstrained(self, f=None, bandwidth=None, latency=None, loss=None,
+                       new_port=False):
     """Serves the requested file with the requested constraints.
 
     Subsequent requests for the same constraints from the same IP will share the
-    previously created port. If no constraints are provided the file is served
-    as is.
+    previously created port unless new_port equals True. If no constraints
+    are provided the file is served as is.
 
     Args:
       f: path relative to http root of file to serve.
@@ -194,7 +198,10 @@ class ConstrainedNetworkServer(object):
           in kbit/s).
       latency: time to add to each packet (integer in ms).
       loss: percentage of packets to drop (integer, 0-100).
+      new_port: whether to use a new port for this request or not.
     """
+    cherrypy.log('Got request for %s, bandwidth=%s, latency=%s, loss=%s, '
+                 'new_port=%s' % (f, bandwidth, latency, loss, new_port))
     # CherryPy is a bit wonky at detecting parameters, so just make them all
     # optional and validate them ourselves.
     if not f:
@@ -226,13 +233,18 @@ class ConstrainedNetworkServer(object):
     #
     # TODO(dalecurtis): The key cherrypy.request.remote.ip might not be unique
     # if build slaves are sharing the same VM.
+    start_time = time.time()
     constrained_port = self._port_allocator.Get(
         cherrypy.request.remote.ip, server_port=self._options.port,
         interface=self._options.interface, bandwidth=bandwidth, latency=latency,
-        loss=loss)
+        loss=loss, new_port=new_port)
+    end_time = time.time()
 
     if not constrained_port:
       raise cherrypy.HTTPError(503, 'Service unavailable. Out of ports.')
+
+    cherrypy.log('Time to set up port %d = %ssec.' %
+                 (constrained_port, end_time - start_time))
 
     # Build constrained URL. Only pass on the file parameter.
     constrained_url = '%s?f=%s' % (
@@ -275,7 +287,7 @@ def ParseArgs():
   parser.add_option('--expiry-time', type='int',
                     default=_DEFAULT_PORT_EXPIRY_TIME_SECS,
                     help=('Number of seconds before constrained ports expire '
-                          'and are cleaned up. Default: %default'))
+                          'and are cleaned up. 0=Disabled. Default: %default'))
   parser.add_option('--port', type='int', default=_DEFAULT_SERVING_PORT,
                     help='Port to serve the API on. Default: %default')
   parser.add_option('--port-range', default=_DEFAULT_CNS_PORT_RANGE,
@@ -291,8 +303,8 @@ def ParseArgs():
   parser.add_option('--www-root', default=os.getcwd(),
                     help=('Directory root to serve files from. Defaults to the '
                           'current directory: %default'))
-  parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
-                    default=False, help='Turn on verbose output.')
+  parser.add_option('-v', '--verbose', action='store_true', default=False,
+                    help='Turn on verbose output.')
 
   options = parser.parse_args()[0]
 
@@ -302,6 +314,9 @@ def ParseArgs():
       options.port_range = [int(port) for port in options.port_range.split(',')]
   except ValueError:
     parser.error('Invalid port range specified.')
+
+  if options.expiry_time < 0:
+    parser.error('Invalid expiry time specified.')
 
   # Convert the path to an absolute to remove any . or ..
   options.www_root = os.path.abspath(options.www_root)

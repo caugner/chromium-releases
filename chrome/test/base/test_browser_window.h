@@ -29,6 +29,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void Deactivate() OVERRIDE {}
   virtual bool IsActive() const OVERRIDE;
   virtual void FlashFrame(bool flash) OVERRIDE {}
+  virtual bool IsAlwaysOnTop() const OVERRIDE;
   virtual gfx::NativeWindow GetNativeHandle() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
@@ -91,10 +92,12 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowBackgroundPages() OVERRIDE {}
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE {}
+  virtual void ShowChromeToMobileBubble() OVERRIDE {}
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  virtual void ShowOneClickSigninBubble() OVERRIDE {}
+#endif
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
-  virtual void ShowCollectedCookiesDialog(
-      TabContentsWrapper* wrapper) OVERRIDE {}
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE {}
   virtual void UserChangedTheme() OVERRIDE {}
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
@@ -103,6 +106,11 @@ class TestBrowserWindow : public BrowserWindow {
                             const GURL& url,
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE {}
+  virtual void ShowWebsiteSettings(Profile* profile,
+                                   TabContentsWrapper* wrapper,
+                                   const GURL& url,
+                                   const content::SSLStatus& ssl,
+                                   bool show_history) OVERRIDE {}
   virtual void Cut() OVERRIDE {}
   virtual void Copy() OVERRIDE {}
   virtual void Paste() OVERRIDE {}

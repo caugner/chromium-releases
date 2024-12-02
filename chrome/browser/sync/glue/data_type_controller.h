@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,11 @@
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/message_loop_helpers.h"
-#include "chrome/browser/sync/engine/model_safe_worker.h"
-#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler.h"
-#include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/browser/sync/glue/data_type_error_handler.h"
 #include "content/public/browser/browser_thread.h"
+#include "sync/engine/model_safe_worker.h"
+#include "sync/syncable/model_type.h"
+#include "sync/util/unrecoverable_error_handler.h"
 
 class SyncError;
 
@@ -26,7 +27,7 @@ namespace browser_sync {
 class DataTypeController
     : public base::RefCountedThreadSafe<
           DataTypeController, content::BrowserThread::DeleteOnUIThread>,
-      public UnrecoverableErrorHandler {
+      public DataTypeErrorHandler {
  public:
   enum State {
     NOT_RUNNING,    // The controller has never been started or has
@@ -64,6 +65,10 @@ class DataTypeController
                    scoped_refptr<DataTypeController> > TypeMap;
   typedef std::map<syncable::ModelType, DataTypeController::State> StateMap;
 
+  // Returns true if the start result should trigger an unrecoverable error.
+  // Public so unit tests can use this function as well.
+  static bool IsUnrecoverableResult(StartResult result);
+
   // Begins asynchronous start up of this data type.  Start up will
   // wait for all other dependent services to be available, then
   // proceed with model association and then change processor
@@ -93,6 +98,13 @@ class DataTypeController
   virtual State state() const = 0;
 
  protected:
+  // Handles the reporting of unrecoverable error. It records stuff in
+  // UMA and reports to breakpad.
+  // Virtual for testing purpose.
+  virtual void RecordUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message);
+
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<DataTypeController>;

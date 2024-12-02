@@ -4,19 +4,16 @@
 
 // Custom bindings for the fileBrowserPrivate API.
 
-(function() {
+var fileBrowserPrivateNatives = requireNative('file_browser_private');
+var GetLocalFileSystem = fileBrowserPrivateNatives.GetLocalFileSystem;
 
-native function GetChromeHidden();
-native function GetLocalFileSystem(name, path);
-
-var chromeHidden = GetChromeHidden();
+var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
 
 chromeHidden.registerCustomHook('fileBrowserPrivate', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
 
-  apiFunctions.setCustomCallback(
-      "fileBrowserPrivate.requestLocalFileSystem",
-      function(name, request, response) {
+  apiFunctions.setCustomCallback('requestLocalFileSystem',
+                                 function(name, request, response) {
     var resp = response ? [chromeHidden.JSON.parse(response)] : [];
     var fs = null;
     if (!resp[0].error)
@@ -26,5 +23,3 @@ chromeHidden.registerCustomHook('fileBrowserPrivate', function(bindingsAPI) {
     request.callback = null;
   });
 });
-
-})();

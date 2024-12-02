@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "base/string16.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "ui/gfx/native_widget_types.h"
 
-class BookmarkNode;
 class GURL;
 class Profile;
 class Browser;
@@ -30,6 +30,13 @@ class BookmarkEditor {
   // Describes what the user is editing.
   class EditDetails {
    public:
+    // Returns the type of the existing or new node.
+    BookmarkNode::Type GetNodeType() const;
+
+    // Returns the resource id for the string resource to use on the window
+    // title for this edit operation.
+    int GetWindowTitleId() const;
+
     // Returns an EditDetails instance for the user editing the given bookmark.
     static EditDetails EditNode(const BookmarkNode* node);
 
@@ -96,19 +103,6 @@ class BookmarkEditor {
 
   // Shows the bookmark all tabs dialog.
   static void ShowBookmarkAllTabsDialog(Browser* browser);
-
- private:
-  // Shows the native bookmark editor.
-  // TODO(flackr): Remove parent argument.
-  static void ShowNative(gfx::NativeWindow parent_window,
-                         Profile* profile,
-                         const BookmarkNode* parent,
-                         const EditDetails& details,
-                         Configuration configuration);
-
-  // Shows the WebUI bookmark editor.
-  static void ShowWebUI(Profile* profile,
-                        const EditDetails& details);
 };
 
 #endif  // CHROME_BROWSER_BOOKMARKS_BOOKMARK_EDITOR_H_

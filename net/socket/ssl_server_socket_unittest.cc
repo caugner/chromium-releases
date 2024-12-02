@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -245,7 +245,8 @@ TEST(FakeSocketTest, DataTransfer) {
 class SSLServerSocketTest : public PlatformTest {
  public:
   SSLServerSocketTest()
-      : socket_factory_(net::ClientSocketFactory::GetDefaultFactory()) {
+      : socket_factory_(net::ClientSocketFactory::GetDefaultFactory()),
+        cert_verifier_(net::CertVerifier::CreateDefault()) {
   }
 
  protected:
@@ -281,7 +282,7 @@ class SSLServerSocketTest : public PlatformTest {
     net::SSLConfig ssl_config;
     ssl_config.cached_info_enabled = false;
     ssl_config.false_start_enabled = false;
-    ssl_config.origin_bound_certs_enabled = false;
+    ssl_config.domain_bound_certs_enabled = false;
     ssl_config.ssl3_enabled = true;
     ssl_config.tls1_enabled = true;
 
@@ -293,7 +294,7 @@ class SSLServerSocketTest : public PlatformTest {
 
     net::HostPortPair host_and_pair("unittest", 0);
     net::SSLClientSocketContext context;
-    context.cert_verifier = &cert_verifier_;
+    context.cert_verifier = cert_verifier_.get();
     client_socket_.reset(
         socket_factory_->CreateSSLClientSocket(
             fake_client_socket, host_and_pair, ssl_config, NULL, context));
@@ -307,7 +308,7 @@ class SSLServerSocketTest : public PlatformTest {
   scoped_ptr<net::SSLClientSocket> client_socket_;
   scoped_ptr<net::SSLServerSocket> server_socket_;
   net::ClientSocketFactory* socket_factory_;
-  net::CertVerifier cert_verifier_;
+  scoped_ptr<net::CertVerifier> cert_verifier_;
 };
 
 // SSLServerSocket is only implemented using NSS.
@@ -455,19 +456,22 @@ TEST_F(SSLServerSocketTest, ExportKeyingMaterial) {
   const char* kKeyingLabel = "EXPERIMENTAL-server-socket-test";
   const char* kKeyingContext = "";
   unsigned char server_out[kKeyingMaterialSize];
-  int rv = server_socket_->ExportKeyingMaterial(kKeyingLabel, kKeyingContext,
+  int rv = server_socket_->ExportKeyingMaterial(kKeyingLabel,
+                                                false, kKeyingContext,
                                                 server_out, sizeof(server_out));
   ASSERT_EQ(rv, net::OK);
 
   unsigned char client_out[kKeyingMaterialSize];
-  rv = client_socket_->ExportKeyingMaterial(kKeyingLabel, kKeyingContext,
+  rv = client_socket_->ExportKeyingMaterial(kKeyingLabel,
+                                            false, kKeyingContext,
                                             client_out, sizeof(client_out));
   ASSERT_EQ(rv, net::OK);
   EXPECT_TRUE(memcmp(server_out, client_out, sizeof(server_out)) == 0);
 
   const char* kKeyingLabelBad = "EXPERIMENTAL-server-socket-test-bad";
   unsigned char client_bad[kKeyingMaterialSize];
-  rv = client_socket_->ExportKeyingMaterial(kKeyingLabelBad, kKeyingContext,
+  rv = client_socket_->ExportKeyingMaterial(kKeyingLabelBad,
+                                            false, kKeyingContext,
                                             client_bad, sizeof(client_bad));
   ASSERT_EQ(rv, net::OK);
   EXPECT_TRUE(memcmp(server_out, client_bad, sizeof(server_out)) != 0);

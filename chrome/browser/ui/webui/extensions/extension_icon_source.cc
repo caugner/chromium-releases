@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,9 +37,9 @@ scoped_refptr<RefCountedMemory> BitmapToMemory(const SkBitmap* image) {
   return image_bytes;
 }
 
-void DesaturateImage(SkBitmap* image) {
+SkBitmap DesaturateImage(const SkBitmap* image) {
   color_utils::HSL shift = {-1, 0, 0.6};
-  *image = SkBitmapOperations::CreateHSLShiftedBitmap(*image, shift);
+  return SkBitmapOperations::CreateHSLShiftedBitmap(*image, shift);
 }
 
 SkBitmap* ToBitmap(const unsigned char* data, size_t size) {
@@ -62,7 +62,7 @@ struct ExtensionIconSource::ExtensionIconRequest {
   int request_id;
   const Extension* extension;
   bool grayscale;
-  Extension::Icons size;
+  int size;
   ExtensionIconSet::MatchType match;
 };
 
@@ -73,7 +73,7 @@ ExtensionIconSource::~ExtensionIconSource() {
 
 // static
 GURL ExtensionIconSource::GetIconURL(const Extension* extension,
-                                     Extension::Icons icon_size,
+                                     int icon_size,
                                      ExtensionIconSet::MatchType match,
                                      bool grayscale,
                                      bool* exists) {
@@ -139,7 +139,7 @@ void ExtensionIconSource::LoadIconFailed(int request_id) {
   ExtensionResource icon =
       request->extension->GetIconResource(request->size, request->match);
 
-  if (request->size == Extension::EXTENSION_ICON_BITTY)
+  if (request->size == ExtensionIconSet::EXTENSION_ICON_BITTY)
     LoadFaviconImage(request_id);
   else
     LoadDefaultImage(request_id);
@@ -168,13 +168,16 @@ const SkBitmap* ExtensionIconSource::GetDefaultExtensionImage() {
   return default_extension_data_.get();
 }
 
-void ExtensionIconSource::FinalizeImage(SkBitmap* image,
+void ExtensionIconSource::FinalizeImage(const SkBitmap* image,
                                         int request_id) {
+  SkBitmap bitmap;
   if (GetData(request_id)->grayscale)
-    DesaturateImage(image);
+    bitmap = DesaturateImage(image);
+  else
+    bitmap = *image;
 
   ClearData(request_id);
-  SendResponse(request_id, BitmapToMemory(image));
+  SendResponse(request_id, BitmapToMemory(&bitmap));
 }
 
 void ExtensionIconSource::LoadDefaultImage(int request_id) {
@@ -210,9 +213,7 @@ bool ExtensionIconSource::TryLoadingComponentExtensionImage(
   for (size_t i = 0; i < kComponentExtensionResourcesSize; ++i) {
     FilePath bm_resource_path =
         FilePath().AppendASCII(kComponentExtensionResources[i].name);
-#if defined(OS_WIN)
-    bm_resource_path = bm_resource_path.NormalizeWindowsPathSeparators();
-#endif
+    bm_resource_path = bm_resource_path.NormalizePathSeparators();
     if (relative_path == bm_resource_path) {
       scoped_ptr<SkBitmap> decoded(LoadImageByResourceId(
           kComponentExtensionResources[i].value));
@@ -276,16 +277,16 @@ void ExtensionIconSource::OnFaviconDataAvailable(
   }
 }
 
-void ExtensionIconSource::OnImageLoaded(SkBitmap* image,
-                                        const ExtensionResource& resource,
+void ExtensionIconSource::OnImageLoaded(const gfx::Image& image,
+                                        const std::string& extension_id,
                                         int index) {
   int request_id = tracker_map_[index];
   tracker_map_.erase(tracker_map_.find(index));
 
-  if (!image || image->empty())
+  if (image.IsEmpty())
     LoadIconFailed(request_id);
   else
-    FinalizeImage(image, request_id);
+    FinalizeImage(image.ToSkBitmap(), request_id);
 }
 
 bool ExtensionIconSource::ParseData(const std::string& path,
@@ -302,14 +303,9 @@ bool ExtensionIconSource::ParseData(const std::string& path,
   std::string match_param = path_parts.at(2);
   match_param = match_param.substr(0, match_param.find('?'));
 
-  // The icon size and match types are encoded as string representations of
-  // their enum values, so to get the enum back, we read the string as an int
-  // and then cast to the enum.
-  Extension::Icons size;
-  int size_num;
-  if (!base::StringToInt(size_param, &size_num))
+  int size;
+  if (!base::StringToInt(size_param, &size))
     return false;
-  size = static_cast<Extension::Icons>(size_num);
   if (size <= 0)
     return false;
 
@@ -346,7 +342,7 @@ void ExtensionIconSource::SendDefaultResponse(int request_id) {
 void ExtensionIconSource::SetData(int request_id,
                                   const Extension* extension,
                                   bool grayscale,
-                                  Extension::Icons size,
+                                  int size,
                                   ExtensionIconSet::MatchType match) {
   ExtensionIconRequest* request = new ExtensionIconRequest();
   request->request_id = request_id;

@@ -130,7 +130,7 @@ MockFilterCollection::~MockFilterCollection() {}
 
 scoped_ptr<FilterCollection> MockFilterCollection::filter_collection(
     bool include_demuxer,
-    bool run_build_callback,
+    bool run_build_cb,
     bool run_build,
     PipelineStatus build_status) const {
   scoped_ptr<FilterCollection> collection(new FilterCollection());
@@ -141,7 +141,7 @@ scoped_ptr<FilterCollection> MockFilterCollection::filter_collection(
   if (build_status != PIPELINE_OK)
     demuxer_factory->SetError(build_status);
 
-  if (run_build_callback) {
+  if (run_build_cb) {
     ON_CALL(*demuxer_factory, Build(_, _)).WillByDefault(Invoke(
         demuxer_factory.get(), &MockDemuxerFactory::RunBuildCallback));
   }  // else ignore Build calls.
@@ -149,8 +149,7 @@ scoped_ptr<FilterCollection> MockFilterCollection::filter_collection(
   if (run_build)
     EXPECT_CALL(*demuxer_factory, Build(_, _));
 
-  collection->SetDemuxerFactory(scoped_ptr<DemuxerFactory>(
-      demuxer_factory.release()));
+  collection->SetDemuxerFactory(demuxer_factory.PassAs<DemuxerFactory>());
   collection->AddVideoDecoder(video_decoder_);
   collection->AddAudioDecoder(audio_decoder_);
   collection->AddVideoRenderer(video_renderer_);
@@ -158,27 +157,26 @@ scoped_ptr<FilterCollection> MockFilterCollection::filter_collection(
   return collection.Pass();
 }
 
-void RunFilterCallback(::testing::Unused, const base::Closure& callback) {
-  callback.Run();
-
+void RunFilterCallback(::testing::Unused, const base::Closure& closure) {
+  closure.Run();
 }
 
-void RunFilterStatusCB(::testing::Unused, const FilterStatusCB& cb) {
-  cb.Run(PIPELINE_OK);
+void RunPipelineStatusCB(::testing::Unused, const PipelineStatusCB& status_cb) {
+  status_cb.Run(PIPELINE_OK);
 }
 
-void RunPipelineStatusCB(PipelineStatus status, const PipelineStatusCB& cb) {
-  cb.Run(status);
+void RunPipelineStatusCB3(::testing::Unused, const PipelineStatusCB& status_cb,
+                          ::testing::Unused) {
+  status_cb.Run(PIPELINE_OK);
 }
 
-void RunFilterCallback3(::testing::Unused, const base::Closure& callback,
-                        ::testing::Unused) {
-  callback.Run();
-
+void RunPipelineStatusCB4(::testing::Unused, const PipelineStatusCB& status_cb,
+                          ::testing::Unused, ::testing::Unused) {
+  status_cb.Run(PIPELINE_OK);
 }
 
-void RunStopFilterCallback(const base::Closure& callback) {
-  callback.Run();
+void RunStopFilterCallback(const base::Closure& closure) {
+  closure.Run();
 }
 
 MockFilter::MockFilter() {
@@ -186,8 +184,8 @@ MockFilter::MockFilter() {
 
 MockFilter::~MockFilter() {}
 
-MockStatisticsCallback::MockStatisticsCallback() {}
+MockStatisticsCB::MockStatisticsCB() {}
 
-MockStatisticsCallback::~MockStatisticsCallback() {}
+MockStatisticsCB::~MockStatisticsCB() {}
 
 }  // namespace media

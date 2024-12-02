@@ -29,7 +29,6 @@
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/renderer/content_renderer_client.h"
-#include "content/renderer/gpu/command_buffer_proxy.h"
 #include "content/renderer/plugin_channel_host.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
@@ -39,18 +38,18 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebDragData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebDragData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "ui/gfx/blit.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/webplugin.h"
 #include "webkit/plugins/sad_plugin.h"
-#include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_POSIX)
 #include "ipc/ipc_channel_posix.h"
@@ -284,25 +283,31 @@ bool WebPluginDelegateProxy::Initialize(
     // plugin crashed on initialization.
     if (!info_.path.empty()) {
       render_view_->PluginCrashed(info_.path);
+      LOG(ERROR) << "Plug-in crashed on start";
 
       // Return true so that the plugin widget is created and we can paint the
       // crashed plugin there.
       return true;
     }
+    LOG(ERROR) << "Plug-in couldn't be found";
     return false;
   }
 
   scoped_refptr<PluginChannelHost> channel_host(
       PluginChannelHost::GetPluginChannelHost(
           channel_handle, ChildProcess::current()->io_message_loop_proxy()));
-  if (!channel_host.get())
+  if (!channel_host.get()) {
+    LOG(ERROR) << "Couldn't get PluginChannelHost";
     return false;
+  }
 
   int instance_id;
   bool result = channel_host->Send(new PluginMsg_CreateInstance(
       mime_type_, &instance_id));
-  if (!result)
+  if (!result) {
+    LOG(ERROR) << "Couldn't send PluginMsg_CreateInstance";
     return false;
+  }
 
   channel_host_ = channel_host;
   instance_id_ = instance_id;
@@ -337,6 +342,9 @@ bool WebPluginDelegateProxy::Initialize(
   result = false;
   IPC::Message* msg = new PluginMsg_Init(instance_id_, params, &result);
   Send(msg);
+
+  if (!result)
+    LOG(ERROR) << "PluginMsg_Init returned false";
 
   render_view_->RegisterPluginDelegate(this);
 
@@ -1309,7 +1317,7 @@ void WebPluginDelegateProxy::OnBindFakePluginWindowHandle(bool opaque) {
 // the plug-in. Returns true if it successfully sets the window handle on the
 // plug-in.
 bool WebPluginDelegateProxy::BindFakePluginWindowHandle(bool opaque) {
-  gfx::PluginWindowHandle fake_window = NULL;
+  gfx::PluginWindowHandle fake_window = gfx::kNullPluginWindow;
   if (render_view_)
     fake_window = render_view_->AllocateFakePluginWindowHandle(opaque, false);
   // If we aren't running on 10.6, this allocation will fail.
@@ -1400,14 +1408,14 @@ void WebPluginDelegateProxy::OnAcceleratedSurfaceFreeTransportDIB(
 }
 
 void WebPluginDelegateProxy::OnAcceleratedSurfaceBuffersSwapped(
-    gfx::PluginWindowHandle window, uint64 surface_id) {
+    gfx::PluginWindowHandle window, uint64 surface_handle) {
   if (render_view_)
-    render_view_->AcceleratedSurfaceBuffersSwapped(window, surface_id);
+    render_view_->AcceleratedSurfaceBuffersSwapped(window, surface_handle);
 }
 
 void WebPluginDelegateProxy::OnAcceleratedPluginEnabledRendering() {
   uses_compositor_ = true;
-  OnSetWindow(NULL);
+  OnSetWindow(gfx::kNullPluginWindow);
 }
 
 void WebPluginDelegateProxy::OnAcceleratedPluginAllocatedIOSurface(

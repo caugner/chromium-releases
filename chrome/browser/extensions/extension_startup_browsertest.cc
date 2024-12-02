@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -213,13 +213,9 @@ class ExtensionsLoadTest : public ExtensionStartupTestBase {
 };
 
 // Fails inconsistently on Linux x64. http://crbug.com/80961
-#if defined(OS_LINUX) && defined(ARCH_CPU_64_BITS)
-#define Maybe_Test FLAKY_Test
-#else
-#define Maybe_Test Test
-#endif
-
-IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, Maybe_Test) {
+// TODO(dpapad): Has not failed since October 2011, let's reenable, monitor
+// and act accordingly.
+IN_PROC_BROWSER_TEST_F(ExtensionsLoadTest, Test) {
   WaitForServicesToStart(1, true);
   TestInjection(true, true);
 }

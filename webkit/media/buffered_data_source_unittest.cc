@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/message_loop.h"
 #include "media/base/media_log.h"
 #include "media/base/mock_callback.h"
 #include "media/base/mock_data_source_host.h"
@@ -21,6 +22,7 @@ using ::testing::StrictMock;
 using ::testing::NiceMock;
 
 using WebKit::WebFrame;
+using WebKit::WebString;
 using WebKit::WebURLLoader;
 using WebKit::WebURLResponse;
 using WebKit::WebView;
@@ -71,7 +73,7 @@ class MockBufferedDataSource : public BufferedDataSource {
 
 static const int64 kFileSize = 5000000;
 static const int64 kFarReadPosition = 4000000;
-static const size_t kDataSize = 1024;
+static const int kDataSize = 1024;
 
 class BufferedDataSourceTest : public testing::Test {
  public:
@@ -143,7 +145,7 @@ class BufferedDataSourceTest : public testing::Test {
     message_loop_->RunAllPending();
   }
 
-  MOCK_METHOD1(ReadCallback, void(size_t size));
+  MOCK_METHOD1(ReadCallback, void(int size));
 
   void ReadAt(int64 position) {
     data_source_->Read(position, kDataSize, buffer_,
@@ -197,19 +199,24 @@ TEST_F(BufferedDataSourceTest, Range_Supported) {
   Respond(response_generator_.Generate206(0));
 
   EXPECT_TRUE(data_source_->loading());
+  EXPECT_FALSE(data_source_->IsStreaming());
+  Stop();
+}
+
+TEST_F(BufferedDataSourceTest, Range_InstanceSizeUnknown) {
+  Initialize(media::PIPELINE_OK);
+
+  EXPECT_CALL(host_, SetBufferedBytes(0));
+  Respond(response_generator_.Generate206(
+      0, TestResponseGenerator::kNoContentRangeInstanceSize));
+
+  EXPECT_TRUE(data_source_->loading());
+  EXPECT_TRUE(data_source_->IsStreaming());
   Stop();
 }
 
 TEST_F(BufferedDataSourceTest, Range_NotFound) {
   Initialize(media::PIPELINE_ERROR_NETWORK);
-
-  // It'll try again.
-  //
-  // TODO(scherkus): don't try again on errors http://crbug.com/105230
-  ExpectCreateResourceLoader();
-  Respond(response_generator_.Generate404());
-
-  // Now it's done and will fail.
   Respond(response_generator_.Generate404());
 
   EXPECT_FALSE(data_source_->loading());
@@ -218,14 +225,6 @@ TEST_F(BufferedDataSourceTest, Range_NotFound) {
 
 TEST_F(BufferedDataSourceTest, Range_NotSupported) {
   Initialize(media::PIPELINE_OK);
-
-  // It'll try again.
-  //
-  // TODO(scherkus): try to reuse existing connection http://crbug.com/104783
-  ExpectCreateResourceLoader();
-  Respond(response_generator_.Generate200());
-
-  // Now it'll succeed.
   EXPECT_CALL(host_, SetTotalBytes(response_generator_.content_length()));
   EXPECT_CALL(host_, SetBufferedBytes(0));
   Respond(response_generator_.Generate200());
@@ -235,17 +234,24 @@ TEST_F(BufferedDataSourceTest, Range_NotSupported) {
   Stop();
 }
 
+// Special carve-out for Apache versions that choose to return a 200 for
+// Range:0- ("because it's more efficient" than a 206)
+TEST_F(BufferedDataSourceTest, Range_SupportedButReturned200) {
+  Initialize(media::PIPELINE_OK);
+  EXPECT_CALL(host_, SetTotalBytes(response_generator_.content_length()));
+  EXPECT_CALL(host_, SetBufferedBytes(0));
+  WebURLResponse response = response_generator_.Generate200();
+  response.setHTTPHeaderField(WebString::fromUTF8("Accept-Ranges"),
+                              WebString::fromUTF8("bytes"));
+  Respond(response);
+
+  EXPECT_TRUE(data_source_->loading());
+  EXPECT_FALSE(data_source_->IsStreaming());
+  Stop();
+}
+
 TEST_F(BufferedDataSourceTest, Range_MissingContentRange) {
   Initialize(media::PIPELINE_ERROR_NETWORK);
-
-  // It'll try again.
-  //
-  // TODO(scherkus): don't try again on errors http://crbug.com/105230
-  ExpectCreateResourceLoader();
-  Respond(response_generator_.Generate206(
-      0, TestResponseGenerator::kNoContentRange));
-
-  // Now it's done and will fail.
   Respond(response_generator_.Generate206(
       0, TestResponseGenerator::kNoContentRange));
 
@@ -263,17 +269,12 @@ TEST_F(BufferedDataSourceTest, Range_MissingContentLength) {
       0, TestResponseGenerator::kNoContentLength));
 
   EXPECT_TRUE(data_source_->loading());
+  EXPECT_FALSE(data_source_->IsStreaming());
   Stop();
 }
 
 TEST_F(BufferedDataSourceTest, Range_WrongContentRange) {
   Initialize(media::PIPELINE_ERROR_NETWORK);
-
-  // It'll try again.
-  //
-  // TODO(scherkus): don't try again on errors http://crbug.com/105230
-  ExpectCreateResourceLoader();
-  Respond(response_generator_.Generate206(1337));
 
   // Now it's done and will fail.
   Respond(response_generator_.Generate206(1337));

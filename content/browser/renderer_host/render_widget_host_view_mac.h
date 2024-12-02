@@ -14,17 +14,22 @@
 #include "base/time.h"
 #include "content/browser/accessibility/browser_accessibility_delegate_mac.h"
 #include "content/browser/renderer_host/accelerated_surface_container_manager_mac.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/edit_command.h"
+#import "content/public/browser/render_widget_host_view_mac_base.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "ui/base/cocoa/base_view.h"
 #include "webkit/glue/webcursor.h"
 
 @class AcceleratedPluginView;
 class RenderWidgetHostViewMac;
-@class RenderWidgetHostViewMacDelegate;
+@protocol RenderWidgetHostViewMacDelegate;
 class RenderWidgetHostViewMacEditCommandHelper;
 @class ToolTip;
+
+namespace content {
+class RenderWidgetHostImpl;
+}
 
 @protocol RenderWidgetHostViewMacOwner
 - (RenderWidgetHostViewMac*)renderWidgetHostViewMac;
@@ -35,12 +40,13 @@ class RenderWidgetHostViewMacEditCommandHelper;
 // but that means that the view needs to own the delegate and will dispose of it
 // when it's removed from the view system.
 @interface RenderWidgetHostViewCocoa
-    : BaseView <RenderWidgetHostViewMacOwner,
+    : BaseView <RenderWidgetHostViewMacBase,
+                RenderWidgetHostViewMacOwner,
                 NSTextInputClient,
                 BrowserAccessibilityDelegateCocoa> {
  @private
   scoped_ptr<RenderWidgetHostViewMac> renderWidgetHostView_;
-  RenderWidgetHostViewMacDelegate* delegate_;  // weak
+  NSObject<RenderWidgetHostViewMacDelegate>* delegate_;  // weak
   BOOL canBeKeyView_;
   BOOL takesFocusOnlyOnMouseDown_;
   BOOL closeOnDeactivate_;
@@ -158,41 +164,48 @@ class RenderWidgetHostViewMacEditCommandHelper;
 //     If the render process dies, the RenderWidgetHost* goes away and all
 //     references to it must become NULL."
 //
-class RenderWidgetHostViewMac : public RenderWidgetHostView {
+class RenderWidgetHostViewMac : public content::RenderWidgetHostViewBase {
  public:
-  // The view will associate itself with the given widget. The native view must
-  // be hooked up immediately to the view hierarchy, or else when it is
-  // deleted it will delete this out from under the caller.
-  explicit RenderWidgetHostViewMac(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewMac();
 
   RenderWidgetHostViewCocoa* cocoa_view() const { return cocoa_view_; }
 
-  void SetDelegate(RenderWidgetHostViewMacDelegate* delegate);
+  void SetDelegate(NSObject<RenderWidgetHostViewMacDelegate>* delegate);
 
-  // Implementation of RenderWidgetHostView:
+  // RenderWidgetHostView implementation.
   virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
-  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                           const gfx::Rect& pos) OVERRIDE;
-  virtual void InitAsFullscreen(
-      RenderWidgetHostView* reference_host_view) OVERRIDE;
-  virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
-  virtual void DidBecomeSelected() OVERRIDE;
-  virtual void WasHidden() OVERRIDE;
+  virtual content::RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
-  virtual void MovePluginWindows(
-      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void Blur() OVERRIDE;
   virtual bool HasFocus() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
+  virtual void SetShowingContextMenu(bool showing) OVERRIDE;
+  virtual void SetActive(bool active) OVERRIDE;
+  virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE;
+  virtual void SetWindowVisibility(bool visible) OVERRIDE;
+  virtual void WindowFrameChanged() OVERRIDE;
+  virtual void SetBackground(const SkBitmap& background) OVERRIDE;
+  virtual bool CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) OVERRIDE;
+
+  // Implementation of RenderWidgetHostViewPort.
+  virtual void InitAsPopup(content::RenderWidgetHostView* parent_host_view,
+                           const gfx::Rect& pos) OVERRIDE;
+  virtual void InitAsFullscreen(
+      content::RenderWidgetHostView* reference_host_view) OVERRIDE;
+  virtual void DidBecomeSelected() OVERRIDE;
+  virtual void WasHidden() OVERRIDE;
+  virtual void MovePluginWindows(
+      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
+  virtual void Focus() OVERRIDE;
+  virtual void Blur() OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void TextInputStateChanged(ui::TextInputType state,
@@ -211,19 +224,13 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void SelectionChanged(const string16& text,
                                 size_t offset,
                                 const ui::Range& range) OVERRIDE;
-  virtual void ShowingContextMenu(bool showing) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
-  virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE;
   // See comment in RenderWidgetHostView!
   virtual gfx::Rect GetViewCocoaBounds() const OVERRIDE;
-  virtual void SetActive(bool active) OVERRIDE;
-  virtual void SetWindowVisibility(bool visible) OVERRIDE;
-  virtual void WindowFrameChanged() OVERRIDE;
-  virtual void SetBackground(const SkBitmap& background) OVERRIDE;
 
   virtual void OnAccessibilityNotifications(
-      const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params
+      const std::vector<AccessibilityHostMsg_NotificationParams>& params
       ) OVERRIDE;
 
   virtual void PluginFocusChanged(bool focused, int plugin_id) OVERRIDE;
@@ -239,7 +246,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
       gfx::PluginWindowHandle window) OVERRIDE;
 
   // Exposed for testing.
-  AcceleratedPluginView* ViewForPluginWindowHandle(
+  CONTENT_EXPORT AcceleratedPluginView* ViewForPluginWindowHandle(
       gfx::PluginWindowHandle window);
 
   // Helper to do the actual cleanup after a plugin handle has been destroyed.
@@ -264,12 +271,10 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void AcceleratedSurfacePostSubBuffer(
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
+  virtual void AcceleratedSurfaceSuspend() OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
-  virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
-
-  // Returns |true| if a context menu is currently being shown.
-  bool is_showing_context_menu() const { return is_showing_context_menu_; }
+  virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
 
   void DrawAcceleratedSurfaceInstance(
       CGLContextObj context,
@@ -279,16 +284,19 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // to be reloaded.
   void ForceTextureReload();
 
-  virtual void UnhandledWheelEvent(
-      const WebKit::WebMouseWheelEvent& event) OVERRIDE;
-  virtual void ProcessTouchAck(bool processed) OVERRIDE;
+  virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
+                               bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE;
-
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
+  virtual void UnhandledWheelEvent(
+      const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+
+  // Forwards the mouse event to the renderer.
+  void ForwardMouseEvent(const WebKit::WebMouseEvent& event);
 
   void KillSelf();
 
@@ -312,7 +320,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
 
   // The associated Model.  Can be NULL if Destroy() is called when
   // someone (other than superview) has retained |cocoa_view_|.
-  RenderWidgetHost* render_widget_host_;
+  content::RenderWidgetHostImpl* render_widget_host_;
 
   // This is true when we are currently painting and thus should handle extra
   // paint requests by expanding the invalid rect rather than actually painting.
@@ -341,6 +349,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
 
   // Current text input type.
   ui::TextInputType text_input_type_;
+  bool can_compose_inline_;
 
   typedef std::map<gfx::PluginWindowHandle, AcceleratedPluginView*>
       PluginViewMap;
@@ -350,6 +359,13 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   AcceleratedSurfaceContainerManagerMac plugin_container_manager_;
 
  private:
+  friend class content::RenderWidgetHostView;
+
+  // The view will associate itself with the given widget. The native view must
+  // be hooked up immediately to the view hierarchy, or else when it is
+  // deleted it will delete this out from under the caller.
+  explicit RenderWidgetHostViewMac(content::RenderWidgetHost* widget);
+
   // If the window is at the root of the plugin container hierachy,
   // we need to update the geometry manually.
   void UpdatePluginGeometry(gfx::PluginWindowHandle window,
@@ -378,9 +394,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
 
   // true if the View is not visible.
   bool is_hidden_;
-
-  // Whether we are showing a context menu.
-  bool is_showing_context_menu_;
 
   // The text to be shown in the tooltip, supplied by the renderer.
   string16 tooltip_text_;

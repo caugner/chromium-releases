@@ -4,7 +4,7 @@
 
 {
   'variables': {
-    'lastchange_path': '<(SHARED_INTERMEDIATE_DIR)/build/LASTCHANGE',
+    'lastchange_path': '<(DEPTH)/build/util/LASTCHANGE',
     # 'branding_dir' is set in the 'conditions' section at the bottom.
   },
   'conditions': [
@@ -25,6 +25,10 @@
             'installer/gcapi/gcapi.cc',
             'installer/gcapi/gcapi.def',
             'installer/gcapi/gcapi.h',
+            'installer/gcapi/gcapi_omaha_experiment.cc',
+            'installer/gcapi/gcapi_omaha_experiment.h',
+            'installer/gcapi/gcapi_reactivation.cc',
+            'installer/gcapi/gcapi_reactivation.h',
           ],
         },
         {
@@ -41,6 +45,10 @@
           'sources': [
             'installer/gcapi/gcapi.cc',
             'installer/gcapi/gcapi.h',
+            'installer/gcapi/gcapi_omaha_experiment.cc',
+            'installer/gcapi/gcapi_omaha_experiment.h',
+            'installer/gcapi/gcapi_reactivation.cc',
+            'installer/gcapi/gcapi_reactivation.h',
           ],
         },
         {
@@ -60,6 +68,7 @@
           ],
           'sources': [
             'installer/gcapi/gcapi_last_run_test.cc',
+            'installer/gcapi/gcapi_reactivation_test.cc',
             'installer/gcapi/gcapi_test.cc',
             'installer/gcapi/gcapi_test.rc',
             'installer/gcapi/resource.h',
@@ -429,6 +438,8 @@
           '<(PRODUCT_DIR)/locales/en-US.pak',
           '<(PRODUCT_DIR)/nacl_helper',
           '<(PRODUCT_DIR)/nacl_helper_bootstrap',
+          '<(PRODUCT_DIR)/PepperFlash/libpepflashplayer.so',
+          '<(PRODUCT_DIR)/PepperFlash/manifest.json',
           '<@(default_apps_list_linux_dest)',
         ],
         'flock_bash': ['flock', '--', '/tmp/linux_package_lock', 'bash'],
@@ -442,10 +453,7 @@
           ['target_arch=="ia32"', {
             'deb_arch': 'i386',
             'rpm_arch': 'i386',
-            # Flash Player for Linux is currently only available for ia32.
             'packaging_files_binaries': [
-              '<(PRODUCT_DIR)/libgcflashplayer.so',
-              '<(PRODUCT_DIR)/plugin.vch',
               '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
             ],
           }],

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,7 @@ class TestingOmniboxView : public OmniboxView {
   virtual void OpenMatch(const AutocompleteMatch& match,
                          WindowOpenDisposition disposition,
                          const GURL& alternate_nav_url,
-                         size_t selected_line,
-                         const string16& keyword) OVERRIDE {}
+                         size_t selected_line) OVERRIDE {}
   virtual string16 GetText() const OVERRIDE { return string16(); }
   virtual bool IsEditingOrEmpty() const OVERRIDE { return true; }
   virtual int GetIcon() const OVERRIDE { return 0; }
@@ -35,7 +34,9 @@ class TestingOmniboxView : public OmniboxView {
                            const string16& display_text,
                            bool update_popup) OVERRIDE {}
   virtual void SetWindowTextAndCaretPos(const string16& text,
-                                        size_t caret_pos) OVERRIDE {}
+                                        size_t caret_pos,
+                                        bool update_popup,
+                                        bool notify_text_changed) OVERRIDE {}
   virtual void SetForcedQuery() OVERRIDE {}
   virtual bool IsSelectAll() OVERRIDE { return false; }
   virtual bool DeleteAtEndPressed() OVERRIDE { return false; }
@@ -105,10 +106,10 @@ class TestingAutocompleteEditController : public AutocompleteEditController {
 
 }  // namespace
 
-typedef testing::Test AutocompleteEditTest;
+class AutocompleteEditTest : public ::testing::Test {};
 
 // Tests various permutations of AutocompleteModel::AdjustTextForCopy.
-TEST(AutocompleteEditTest, AdjustTextForCopy) {
+TEST_F(AutocompleteEditTest, AdjustTextForCopy) {
   struct Data {
     const char* perm_text;
     const int sel_start;
@@ -155,9 +156,9 @@ TEST(AutocompleteEditTest, AdjustTextForCopy) {
   TestingOmniboxView view;
   TestingAutocompleteEditController controller;
   TestingProfile profile;
-  AutocompleteEditModel model(&view, &controller, &profile);
-  profile.CreateAutocompleteClassifier();
   profile.CreateTemplateURLService();
+  profile.CreateAutocompleteClassifier();
+  AutocompleteEditModel model(&view, &controller, &profile);
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input); ++i) {
     model.UpdatePermanentText(ASCIIToUTF16(input[i].perm_text));

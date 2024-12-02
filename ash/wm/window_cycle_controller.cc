@@ -14,6 +14,8 @@
 
 namespace ash {
 
+namespace {
+
 // Filter to watch for the termination of a keyboard gesture to cycle through
 // multiple windows.
 class WindowCycleEventFilter : public aura::EventFilter {
@@ -36,8 +38,7 @@ class WindowCycleEventFilter : public aura::EventFilter {
 };
 
 // Watch for all keyboard events by filtering the root window.
-WindowCycleEventFilter::WindowCycleEventFilter()
-    : aura::EventFilter(aura::RootWindow::GetInstance()) {
+WindowCycleEventFilter::WindowCycleEventFilter() {
 }
 
 WindowCycleEventFilter::~WindowCycleEventFilter() {
@@ -72,6 +73,8 @@ ui::GestureStatus WindowCycleEventFilter::PreHandleGestureEvent(
     aura::GestureEvent* event) {
   return ui::GESTURE_STATUS_UNKNOWN;  // Not handled.
 }
+
+}  // namespace
 
 //////////////////////////////////////////////////////////////////////////////
 // WindowCycleController, public:
@@ -123,19 +126,15 @@ void WindowCycleController::AltKeyReleased() {
 // WindowCycleController, private:
 
 void WindowCycleController::StartCycling() {
-  // Most-recently-used cycling is confusing in compact window mode because
-  // you can't see all the windows.
   windows_.reset(new WindowCycleList(
       ash::Shell::GetInstance()->delegate()->GetCycleWindowList(
-          ShellDelegate::SOURCE_KEYBOARD,
-          Shell::GetInstance()->IsWindowModeCompact() ?
-          ShellDelegate::ORDER_LINEAR : ShellDelegate::ORDER_MRU)));
+          ShellDelegate::SOURCE_KEYBOARD)));
 }
 
 void WindowCycleController::Step(Direction direction) {
-    DCHECK(windows_.get());
-    windows_->Step(direction == FORWARD ? WindowCycleList::FORWARD :
-                   WindowCycleList::BACKWARD);
+  DCHECK(windows_.get());
+  windows_->Step(direction == FORWARD ? WindowCycleList::FORWARD :
+                 WindowCycleList::BACKWARD);
 }
 
 void WindowCycleController::StopCycling() {

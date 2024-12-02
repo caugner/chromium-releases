@@ -4,19 +4,22 @@
 
 #include "ash/launcher/launcher_view.h"
 
-#include "ash/launcher/app_launcher_button.h"
+#include "ash/launcher/launcher_button.h"
+#include "ash/launcher/launcher_delegate.h"
 #include "ash/launcher/launcher_model.h"
-#include "ash/launcher/launcher_window_cycler.h"
 #include "ash/launcher/tabbed_launcher_button.h"
 #include "ash/launcher/view_model.h"
 #include "ash/launcher/view_model_utils.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
+#include "base/auto_reset.h"
 #include "base/utf_string_conversions.h"
+#include "grit/ash_strings.h"
 #include "grit/ui_resources.h"
 #include "ui/aura/window.h"
 #include "ui/base/animation/animation.h"
 #include "ui/base/animation/throb_animation.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/compositor/layer.h"
@@ -25,6 +28,7 @@
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 
 using ui::Animation;
@@ -36,16 +40,13 @@ namespace internal {
 // Amount content is inset on the left edge.
 static const int kLeadingInset = 8;
 
-// Height of the LauncherView. Hard coded to avoid resizing as items are
-// added/removed.
-static const int kPreferredHeight = 48;
-
 // Minimum distance before drag starts.
 static const int kMinimumDragDistance = 8;
 
 // Size given to the buttons on the launcher.
-static const int kButtonWidth = 60;
+static const int kButtonWidth = 48;
 static const int kButtonHeight = 48;
+static const int kButtonSpacing = 4;
 
 namespace {
 
@@ -123,6 +124,23 @@ class FadeInAnimationDelegate :
   DISALLOW_COPY_AND_ASSIGN(FadeInAnimationDelegate);
 };
 
+void ReflectItemStatus(const ash::LauncherItem& item,
+                       LauncherButton* button) {
+  switch (item.status) {
+    case STATUS_CLOSED:
+      button->ClearState(LauncherButton::STATE_ACTIVE);
+      button->ClearState(LauncherButton::STATE_RUNNING);
+      break;
+    case STATUS_RUNNING:
+      button->ClearState(LauncherButton::STATE_ACTIVE);
+      button->AddState(LauncherButton::STATE_RUNNING);
+      break;
+    case STATUS_ACTIVE:
+      button->AddState(LauncherButton::STATE_ACTIVE);
+      button->ClearState(LauncherButton::STATE_RUNNING);
+      break;
+  }
+}
 }  // namespace
 
 // AnimationDelegate used when inserting a new item. This steadily decreased the
@@ -181,16 +199,31 @@ class LauncherView::StartFadeAnimationDelegate :
   DISALLOW_COPY_AND_ASSIGN(StartFadeAnimationDelegate);
 };
 
-LauncherView::LauncherView(LauncherModel* model)
+int LauncherView::TestAPI::GetButtonCount() {
+  return launcher_view_->view_model_->view_size();
+}
+
+LauncherButton* LauncherView::TestAPI::GetButton(int index) {
+  if (index == 0)
+    return NULL;
+
+  return static_cast<LauncherButton*>(
+      launcher_view_->view_model_->view_at(index));
+}
+
+LauncherView::LauncherView(LauncherModel* model, LauncherDelegate* delegate)
     : model_(model),
+      delegate_(delegate),
       view_model_(new ViewModel),
       overflow_button_(NULL),
       dragging_(NULL),
       drag_view_(NULL),
       drag_offset_(0),
-      start_drag_index_(-1) {
+      start_drag_index_(-1),
+      context_menu_id_(0) {
   DCHECK(model_);
   bounds_animator_.reset(new views::BoundsAnimator(this));
+  set_context_menu_controller(this);
 }
 
 LauncherView::~LauncherView() {
@@ -210,7 +243,7 @@ void LauncherView::Init() {
   }
 
   overflow_button_ = new views::ImageButton(this);
-  overflow_button_->set_focusable(true);
+  overflow_button_->set_accessibility_focusable(true);
   overflow_button_->SetImage(
       views::CustomButton::BS_NORMAL,
       rb.GetImageNamed(IDR_AURA_LAUNCHER_OVERFLOW).ToSkBitmap());
@@ -220,10 +253,37 @@ void LauncherView::Init() {
   overflow_button_->SetImage(
       views::CustomButton::BS_PUSHED,
       rb.GetImageNamed(IDR_AURA_LAUNCHER_OVERFLOW_PUSHED).ToSkBitmap());
+  overflow_button_->SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_AURA_LAUNCHER_OVERFLOW_NAME));
+  overflow_button_->set_context_menu_controller(this);
   ConfigureChildView(overflow_button_);
   AddChildView(overflow_button_);
 
   // We'll layout when our bounds change.
+}
+
+gfx::Rect LauncherView::GetIdealBoundsOfItemIcon(LauncherID id) {
+  int index = model_->ItemIndexByID(id);
+  if (index == -1 || !view_model_->view_at(index)->visible())
+    return gfx::Rect();
+  const gfx::Rect& ideal_bounds(view_model_->ideal_bounds(index));
+  DCHECK_NE(TYPE_APP_LIST, model_->items()[index].type);
+  LauncherButton* button =
+      static_cast<LauncherButton*>(view_model_->view_at(index));
+  gfx::Rect icon_bounds = button->GetIconBounds();
+  return gfx::Rect(ideal_bounds.x() + icon_bounds.x(),
+                   ideal_bounds.y() + icon_bounds.y(),
+                   icon_bounds.width(), icon_bounds.height());
+}
+
+bool LauncherView::IsShowingMenu() const {
+#if !defined(OS_MACOSX)
+  return (overflow_menu_runner_.get() &&
+          overflow_menu_runner_->IsRunning()) ||
+      (launcher_menu_runner_.get() &&
+       launcher_menu_runner_->IsRunning());
+#endif
+  return false;
 }
 
 void LauncherView::LayoutToIdealBounds() {
@@ -242,34 +302,42 @@ void LauncherView::CalculateIdealBounds(IdealBounds* bounds) {
   for (int i = 0; i < view_model_->view_size(); ++i) {
     gfx::Size pref(kButtonWidth, kButtonHeight);
     view_model_->set_ideal_bounds(i, gfx::Rect(
-        x, (kPreferredHeight - pref.height()) / 2, pref.width(),
+        x, (kLauncherPreferredHeight - pref.height()) / 2, pref.width(),
         pref.height()));
-    x += pref.width();
+    x += pref.width() + kButtonSpacing;
   }
 
   bounds->overflow_bounds.set_size(gfx::Size(kButtonWidth, kButtonHeight));
   int last_visible_index = DetermineLastVisibleIndex(
-      available_width - kLeadingInset - bounds->overflow_bounds.width());
+      available_width - kLeadingInset - bounds->overflow_bounds.width() -
+      kButtonSpacing - kButtonWidth);
   bool show_overflow =
       (last_visible_index + 1 != view_model_->view_size());
+  int app_list_index = view_model_->view_size() - 1;
   if (overflow_button_->visible() != show_overflow) {
     // Only change visibility of the views if the visibility of the overflow
     // button changes. Otherwise we'll effect the insertion animation, which
     // changes the visibility.
     for (int i = 0; i <= last_visible_index; ++i)
       view_model_->view_at(i)->SetVisible(true);
-    for (int i = last_visible_index + 1; i < view_model_->view_size(); ++i)
-      view_model_->view_at(i)->SetVisible(false);
+    for (int i = last_visible_index + 1; i < view_model_->view_size(); ++i) {
+      if (i != app_list_index)
+        view_model_->view_at(i)->SetVisible(false);
+    }
   }
   overflow_button_->SetVisible(show_overflow);
   if (show_overflow) {
     DCHECK_NE(0, view_model_->view_size());
+    // We always want the app list visible.
+    gfx::Rect app_list_bounds = view_model_->ideal_bounds(app_list_index);
     x = last_visible_index == -1 ?
         kLeadingInset : view_model_->ideal_bounds(last_visible_index).right();
+    app_list_bounds.set_x(x);
+    view_model_->set_ideal_bounds(app_list_index, app_list_bounds);
+    x = app_list_bounds.right() + kButtonSpacing;
     bounds->overflow_bounds.set_x(x);
     bounds->overflow_bounds.set_y(
-        (kPreferredHeight - bounds->overflow_bounds.height()) / 2);
-    x = bounds->overflow_bounds.right();
+        (kLauncherPreferredHeight - bounds->overflow_bounds.height()) / 2);
   }
 }
 
@@ -294,22 +362,32 @@ views::View* LauncherView::CreateViewForItem(const LauncherItem& item) {
   views::View* view = NULL;
   switch (item.type) {
     case TYPE_TABBED: {
-      TabbedLauncherButton* button = new TabbedLauncherButton(this, this);
-      button->SetTabImage(item.image, item.num_tabs);
+      TabbedLauncherButton* button =
+          TabbedLauncherButton::Create(
+              this,
+              this,
+              item.is_incognito ?
+                  TabbedLauncherButton::STATE_INCOGNITO :
+                  TabbedLauncherButton::STATE_NOT_INCOGNITO);
+      button->SetTabImage(item.image);
+      ReflectItemStatus(item, button);
       view = button;
       break;
     }
 
-    case TYPE_APP: {
-      AppLauncherButton* button = new AppLauncherButton(this, this);
-      button->SetAppImage(item.image);
+    case TYPE_APP_SHORTCUT:
+    case TYPE_APP_PANEL: {
+      LauncherButton* button = LauncherButton::Create(this, this);
+      button->SetImage(item.image);
+      ReflectItemStatus(item, button);
       view = button;
       break;
     }
 
     case TYPE_APP_LIST: {
+      // TODO[dave] turn this into a LauncherButton too.
       ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-      views::ImageButton* button = new AppLauncherButton(this, this);
+      views::ImageButton* button = new views::ImageButton(this);
       button->SetImage(
           views::CustomButton::BS_NORMAL,
           rb.GetImageNamed(IDR_AURA_LAUNCHER_ICON_APPLIST).ToSkBitmap());
@@ -319,27 +397,27 @@ views::View* LauncherView::CreateViewForItem(const LauncherItem& item) {
       button->SetImage(
           views::CustomButton::BS_PUSHED,
           rb.GetImageNamed(IDR_AURA_LAUNCHER_ICON_APPLIST_PUSHED).ToSkBitmap());
+      button->SetTooltipText(
+          l10n_util::GetStringUTF16(IDS_AURA_APP_LIST_TITLE));
       view = button;
       break;
     }
 
     case TYPE_BROWSER_SHORTCUT: {
       ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-      views::ImageButton* button = new AppLauncherButton(this, this);
-      ShellDelegate* delegate = Shell::GetInstance()->delegate();
-      int image_id = delegate ?
-          delegate->GetBrowserShortcutResourceId() :
+      LauncherButton* button = LauncherButton::Create(this, this);
+      int image_id = delegate_ ?
+          delegate_->GetBrowserShortcutResourceId() :
           IDR_AURA_LAUNCHER_BROWSER_SHORTCUT;
-      button->SetImage(views::CustomButton::BS_NORMAL,
-                       rb.GetImageNamed(image_id).ToSkBitmap());
+      button->SetImage(*rb.GetImageNamed(image_id).ToSkBitmap());
       view = button;
-      cycler_.reset(new LauncherWindowCycler);
       break;
     }
 
     default:
       break;
   }
+  view->set_context_menu_controller(this);
 
   DCHECK(view);
   ConfigureChildView(view);
@@ -370,18 +448,30 @@ void LauncherView::ContinueDrag(const views::MouseEvent& event) {
   int current_index = view_model_->GetIndexOfView(drag_view_);
   DCHECK_NE(-1, current_index);
 
-  // Constrain the x location so that it doesn't overlap the two buttons.
-  int x = std::max(view_model_->ideal_bounds(0).x(),
+  // Constrain the x location to the range of valid indices for the type.
+  std::pair<int,int> indices(GetDragRange(current_index));
+  int x = std::max(view_model_->ideal_bounds(indices.first).x(),
                    drag_point.x() - drag_offset_);
-  x = std::min(view_model_->ideal_bounds(view_model_->view_size() - 1).right() -
-               view_model_->ideal_bounds(current_index).width(),
-               x);
+  if (view_model_->view_at(indices.second)->visible()) {
+    x = std::min(view_model_->ideal_bounds(indices.second).right() -
+                 view_model_->ideal_bounds(current_index).width(),
+                 x);
+  } else {
+    // If the last index isn't valid, we're overflowing. Constrain to the app
+    // list (which is the last visible item).
+    x = std::min(
+        view_model_->ideal_bounds(view_model_->view_size() - 1).right() -
+        view_model_->ideal_bounds(current_index).width(),
+        x);
+  }
   if (drag_view_->x() == x)
     return;
 
   drag_view_->SetX(x);
   int target_index =
       ViewModelUtils::DetermineMoveIndex(*view_model_, drag_view_, x);
+  target_index =
+      std::min(indices.second, std::max(target_index, indices.first));
   if (target_index == current_index)
     return;
 
@@ -393,6 +483,35 @@ void LauncherView::ContinueDrag(const views::MouseEvent& event) {
   view_model_->Move(current_index, target_index);
   AnimateToIdealBounds();
   bounds_animator_->StopAnimatingView(drag_view_);
+}
+
+bool LauncherView::SameDragType(LauncherItemType typea,
+                                LauncherItemType typeb) const {
+  switch(typea) {
+    case TYPE_TABBED:
+    case TYPE_APP_PANEL:
+      return (typeb == TYPE_TABBED || typeb == TYPE_APP_PANEL);
+    case TYPE_APP_SHORTCUT:
+    case TYPE_APP_LIST:
+    case TYPE_BROWSER_SHORTCUT:
+      return typeb == typea;
+  }
+  NOTREACHED();
+  return false;
+}
+
+std::pair<int,int> LauncherView::GetDragRange(int index) {
+  int min_index = -1;
+  int max_index = -1;
+  LauncherItemType type = model_->items()[index].type;
+  for (int i = 0; i < model_->item_count(); ++i) {
+    if (SameDragType(model_->items()[i].type, type)) {
+      if (min_index == -1)
+        min_index = i;
+      max_index = i;
+    }
+  }
+  return std::pair<int,int>(min_index, max_index);
 }
 
 void LauncherView::ConfigureChildView(views::View* view) {
@@ -408,7 +527,9 @@ void LauncherView::GetOverflowItems(std::vector<LauncherItem>* items) {
   }
   while (index < view_model_->view_size()) {
     const LauncherItem& item = model_->items()[index];
-    if (item.type == TYPE_TABBED || item.type == TYPE_APP)
+    if (item.type == TYPE_TABBED ||
+        item.type == TYPE_APP_PANEL ||
+        item.type == TYPE_APP_SHORTCUT)
       items->push_back(item);
     index++;
   }
@@ -416,8 +537,7 @@ void LauncherView::GetOverflowItems(std::vector<LauncherItem>* items) {
 
 void LauncherView::ShowOverflowMenu() {
 #if !defined(OS_MACOSX)
-  ShellDelegate* delegate = Shell::GetInstance()->delegate();
-  if (!delegate)
+  if (!delegate_)
     return;
 
   std::vector<LauncherItem> items;
@@ -427,10 +547,8 @@ void LauncherView::ShowOverflowMenu() {
 
   MenuDelegateImpl menu_delegate;
   ui::SimpleMenuModel menu_model(&menu_delegate);
-  for (size_t i = 0; i < items.size(); ++i) {
-    menu_model.AddItem(static_cast<int>(i),
-                       delegate->GetLauncherItemTitle(items[i]));
-  }
+  for (size_t i = 0; i < items.size(); ++i)
+    menu_model.AddItem(static_cast<int>(i), delegate_->GetTitle(items[i]));
   views::MenuModelAdapter menu_adapter(&menu_model);
   overflow_menu_runner_.reset(new views::MenuRunner(menu_adapter.CreateMenu()));
   gfx::Rect bounds(overflow_button_->size());
@@ -438,17 +556,19 @@ void LauncherView::ShowOverflowMenu() {
   ConvertPointToScreen(overflow_button_, &origin);
   if (overflow_menu_runner_->RunMenuAt(GetWidget(), NULL,
           gfx::Rect(origin, size()), views::MenuItemView::TOPLEFT, 0) ==
-      views::MenuRunner::MENU_DELETED ||
-      menu_delegate.activated_command_id() == -1)
+      views::MenuRunner::MENU_DELETED)
+    return;
+
+  Shell::GetInstance()->UpdateShelfVisibility();
+
+  if (menu_delegate.activated_command_id() == -1)
     return;
 
   LauncherID activated_id = items[menu_delegate.activated_command_id()].id;
   LauncherItems::const_iterator window_iter = model_->ItemByID(activated_id);
   if (window_iter == model_->items().end())
     return;  // Window was deleted while menu was up.
-  if (!delegate)
-    return;
-  delegate->LauncherItemClicked(*window_iter);
+  delegate_->ItemClicked(*window_iter);
 #endif  // !defined(OS_MACOSX)
 }
 
@@ -470,23 +590,16 @@ void LauncherView::CancelDrag(views::View* deleted_view) {
   AnimateToIdealBounds();
 }
 
-void LauncherView::MaybeResetWindowCycler(views::View* view) {
-  int view_index = view_model_->GetIndexOfView(view);
-  if (view_index != -1 &&
-      model_->items()[view_index].type == TYPE_BROWSER_SHORTCUT) {
-    cycler_->Reset();
-  }
-}
-
 gfx::Size LauncherView::GetPreferredSize() {
   IdealBounds ideal_bounds;
   CalculateIdealBounds(&ideal_bounds);
   if (view_model_->view_size() >= 2) {
     // Should always have two items.
     return gfx::Size(view_model_->ideal_bounds(1).right() + kLeadingInset,
-                     kPreferredHeight);
+                     kLauncherPreferredHeight);
   }
-  return gfx::Size(kButtonWidth * 2 + kLeadingInset * 2, kPreferredHeight);
+  return gfx::Size(kButtonWidth * 2 + kLeadingInset * 2,
+                   kLauncherPreferredHeight);
 }
 
 void LauncherView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
@@ -502,6 +615,14 @@ void LauncherView::LauncherItemAdded(int model_index) {
   view->SetVisible(false);
   view_model_->Add(view, model_index);
 
+  // Give the button it's ideal bounds. That way if we end up animating the
+  // button before this animation completes it doesn't appear at some random
+  // spot (because it was in the middle of animating from 0,0 0x0 to its
+  // target).
+  IdealBounds ideal_bounds;
+  CalculateIdealBounds(&ideal_bounds);
+  view->SetBoundsRect(view_model_->ideal_bounds(model_index));
+
   // The first animation moves all the views to their target position. |view| is
   // hidden, so it visually appears as though we are providing space for
   // it. When done we'll fade the view in.
@@ -512,7 +633,11 @@ void LauncherView::LauncherItemAdded(int model_index) {
   }
 }
 
-void LauncherView::LauncherItemRemoved(int model_index) {
+void LauncherView::LauncherItemRemoved(int model_index, LauncherID id) {
+#if !defined(OS_MACOSX)
+  if (id == context_menu_id_)
+    launcher_menu_runner_.reset();
+#endif
   views::View* view = view_model_->view_at(model_index);
   CancelDrag(view);
   view_model_->Remove(model_index);
@@ -544,17 +669,20 @@ void LauncherView::LauncherItemChanged(int model_index,
     case TYPE_TABBED: {
       TabbedLauncherButton* button = static_cast<TabbedLauncherButton*>(view);
       gfx::Size pref = button->GetPreferredSize();
-      button->SetTabImage(item.image, item.num_tabs);
+      button->SetTabImage(item.image);
       if (pref != button->GetPreferredSize())
         AnimateToIdealBounds();
       else
         button->SchedulePaint();
+      ReflectItemStatus(item, button);
       break;
     }
 
-    case TYPE_APP: {
-      AppLauncherButton* button = static_cast<AppLauncherButton*>(view);
-      button->SetAppImage(item.image);
+    case TYPE_APP_SHORTCUT:
+    case TYPE_APP_PANEL: {
+      LauncherButton* button = static_cast<LauncherButton*>(view);
+      ReflectItemStatus(item, button);
+      button->SetImage(item.image);
       button->SchedulePaint();
       break;
     }
@@ -592,8 +720,6 @@ void LauncherView::MouseDraggedOnButton(views::View* view,
     PrepareForDrag(event);
   if (dragging_)
     ContinueDrag(event);
-  if (!view->GetLocalBounds().Contains(event.location()))
-    MaybeResetWindowCycler(view);
 }
 
 void LauncherView::MouseReleasedOnButton(views::View* view,
@@ -608,16 +734,42 @@ void LauncherView::MouseReleasedOnButton(views::View* view,
 }
 
 void LauncherView::MouseExitedButton(views::View* view) {
-  MaybeResetWindowCycler(view);
+}
+
+string16 LauncherView::GetAccessibleName(const views::View* view) {
+  if (!delegate_)
+    return string16();
+  int view_index = view_model_->GetIndexOfView(view);
+  // May be -1 while in the process of animating closed.
+  if (view_index == -1)
+    return string16();
+
+  switch (model_->items()[view_index].type) {
+    case TYPE_TABBED:
+    case TYPE_APP_PANEL:
+    case TYPE_APP_SHORTCUT:
+      return delegate_->GetTitle(model_->items()[view_index]);
+
+    case TYPE_APP_LIST:
+      return l10n_util::GetStringUTF16(IDS_AURA_APP_LIST_TITLE);
+
+    case TYPE_BROWSER_SHORTCUT:
+      return l10n_util::GetStringUTF16(IDS_AURA_NEW_TAB);
+
+  }
+  return string16();
 }
 
 void LauncherView::ButtonPressed(views::Button* sender,
                                  const views::Event& event) {
+  // Do not handle mouse release during drag.
+  if (dragging_)
+    return;
+
   if (sender == overflow_button_)
     ShowOverflowMenu();
 
-  ShellDelegate* delegate = Shell::GetInstance()->delegate();
-  if (!delegate)
+  if (!delegate_)
     return;
   int view_index = view_model_->GetIndexOfView(sender);
   // May be -1 while in the process of animating closed.
@@ -626,8 +778,9 @@ void LauncherView::ButtonPressed(views::Button* sender,
 
   switch (model_->items()[view_index].type) {
     case TYPE_TABBED:
-    case TYPE_APP:
-      delegate->LauncherItemClicked(model_->items()[view_index]);
+    case TYPE_APP_PANEL:
+    case TYPE_APP_SHORTCUT:
+      delegate_->ItemClicked(model_->items()[view_index]);
       break;
 
     case TYPE_APP_LIST:
@@ -635,12 +788,47 @@ void LauncherView::ButtonPressed(views::Button* sender,
       break;
 
     case TYPE_BROWSER_SHORTCUT:
-      cycler_->Cycle();
+      if (event.flags() & ui::EF_CONTROL_DOWN)
+        delegate_->CreateNewWindow();
+      else
+        delegate_->CreateNewTab();
       break;
-
-    default:
-      NOTREACHED();
   }
+}
+
+void LauncherView::ShowContextMenuForView(views::View* source,
+                                          const gfx::Point& point) {
+  if (!delegate_)
+    return;
+
+  int view_index = view_model_->GetIndexOfView(source);
+  if (view_index != -1 &&
+      (model_->items()[view_index].type == TYPE_BROWSER_SHORTCUT ||
+       model_->items()[view_index].type == TYPE_APP_LIST)) {
+    view_index = -1;
+  }
+#if !defined(OS_MACOSX)
+  scoped_ptr<ui::MenuModel> menu_model(
+      view_index == -1 ?
+          delegate_->CreateContextMenuForLauncher() :
+          delegate_->CreateContextMenu(model_->items()[view_index]));
+  if (!menu_model.get())
+    return;
+  AutoReset<LauncherID> reseter(
+      &context_menu_id_,
+      view_index == -1 ? 0 : model_->items()[view_index].id);
+  views::MenuModelAdapter menu_model_adapter(menu_model.get());
+  launcher_menu_runner_.reset(
+      new views::MenuRunner(menu_model_adapter.CreateMenu()));
+  // NOTE: if you convert to HAS_MNEMONICS be sure and update menu building
+  // code.
+  if (launcher_menu_runner_->RunMenuAt(
+          source->GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
+          views::MenuItemView::TOPLEFT, 0) == views::MenuRunner::MENU_DELETED)
+    return;
+
+  Shell::GetInstance()->UpdateShelfVisibility();
+#endif
 }
 
 }  // namespace internal

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,19 @@
 #include "base/mac/bundle_locations.h"
 #import "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/browsing_data_appcache_helper.h"
+#include "chrome/browser/browsing_data_cookie_helper.h"
+#include "chrome/browser/browsing_data_database_helper.h"
+#include "chrome/browser/browsing_data_file_system_helper.h"
+#include "chrome/browser/browsing_data_indexed_db_helper.h"
+#include "chrome/browser/browsing_data_local_storage_helper.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #import "chrome/browser/ui/cocoa/content_settings/cookie_details_view_controller.h"
 #import "chrome/browser/ui/cocoa/vertical_gradient_view.h"
@@ -48,6 +56,17 @@ enum TabViewItemIndices {
 };
 
 } // namespace
+
+namespace browser {
+
+// Declared in browser_dialogs.h so others don't have to depend on our header.
+void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
+                                TabContentsWrapper* wrapper) {
+  // Deletes itself on close.
+  new CollectedCookiesMac(parent_window, wrapper);
+}
+
+}  // namespace browser
 
 #pragma mark Bridge between the constrained window delegate and the sheet
 
@@ -246,8 +265,8 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
     Profile* profile = wrapper_->profile();
     CookieTreeOriginNode* origin_node =
         static_cast<CookieTreeOriginNode*>(cookie);
-    origin_node->CreateContentException(CookieSettings::GetForProfile(profile),
-                                        setting);
+    origin_node->CreateContentException(
+        CookieSettings::Factory::GetForProfile(profile), setting);
     if (!lastDomain.empty())
       multipleDomainsChanged = YES;
     lastDomain = origin_node->GetTitle();
@@ -358,8 +377,31 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
 // the |cocoaAllowedTreeModel_| and |cocoaBlockedTreeModel_|.
 - (void)loadTreeModelFromTabContentsWrapper {
   TabSpecificContentSettings* content_settings = wrapper_->content_settings();
-  allowedTreeModel_.reset(content_settings->GetAllowedCookiesTreeModel());
-  blockedTreeModel_.reset(content_settings->GetBlockedCookiesTreeModel());
+
+  const LocalSharedObjectsContainer& allowed_lsos =
+      content_settings->allowed_local_shared_objects();
+  allowedTreeModel_.reset(
+      new CookiesTreeModel(allowed_lsos.cookies()->Clone(),
+                           allowed_lsos.databases()->Clone(),
+                           allowed_lsos.local_storages()->Clone(),
+                           allowed_lsos.session_storages()->Clone(),
+                           allowed_lsos.appcaches()->Clone(),
+                           allowed_lsos.indexed_dbs()->Clone(),
+                           allowed_lsos.file_systems()->Clone(),
+                           NULL,
+                           true));
+  const LocalSharedObjectsContainer& blocked_lsos =
+      content_settings->blocked_local_shared_objects();
+  blockedTreeModel_.reset(
+      new CookiesTreeModel(blocked_lsos.cookies()->Clone(),
+                           blocked_lsos.databases()->Clone(),
+                           blocked_lsos.local_storages()->Clone(),
+                           blocked_lsos.session_storages()->Clone(),
+                           blocked_lsos.appcaches()->Clone(),
+                           blocked_lsos.indexed_dbs()->Clone(),
+                           blocked_lsos.file_systems()->Clone(),
+                           NULL,
+                           true));
 
   // Convert the model's icons from Skia to Cocoa.
   std::vector<SkBitmap> skiaIcons;

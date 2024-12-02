@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -31,6 +31,9 @@
           'nacl/nacl_main_platform_delegate_win.cc',
           'nacl/nacl_listener.cc',
           'nacl/nacl_listener.h',
+          'nacl/nacl_validation_db.h',
+          'nacl/nacl_validation_query.cc',
+          'nacl/nacl_validation_query.h',
         ],
         # TODO(gregoryd): consider switching NaCl to use Chrome OS defines
         'conditions': [
@@ -124,7 +127,7 @@
             },
           ],
         }],
-        ['OS=="linux" and coverage==0', {
+        ['OS=="linux"', {
           'targets': [
             {
               'target_name': 'nacl_helper',
@@ -133,6 +136,7 @@
                 '..',
               ],
               'dependencies': [
+                '../crypto/crypto.gyp:crypto',
                 'nacl',
               ],
               'sources': [

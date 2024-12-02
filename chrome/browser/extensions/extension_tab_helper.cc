@@ -17,15 +17,22 @@
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/gfx/image/image.h"
 
 using content::WebContents;
+
+namespace {
+
+const char kPermissionError[] = "permission_error";
+
+}  // namespace
 
 ExtensionTabHelper::ExtensionTabHelper(TabContentsWrapper* wrapper)
     : content::WebContentsObserver(wrapper->web_contents()),
@@ -67,19 +74,16 @@ void ExtensionTabHelper::SetExtensionApp(const Extension* extension) {
 
 void ExtensionTabHelper::SetExtensionAppById(
     const std::string& extension_app_id) {
-  if (extension_app_id.empty())
-    return;
-
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  ExtensionService* extension_service = profile->GetExtensionService();
-  if (!extension_service || !extension_service->is_ready())
-    return;
-
-  const Extension* extension =
-      extension_service->GetExtensionById(extension_app_id, false);
+  const Extension* extension = GetExtension(extension_app_id);
   if (extension)
     SetExtensionApp(extension);
+}
+
+void ExtensionTabHelper::SetExtensionAppIconById(
+    const std::string& extension_app_id) {
+  const Extension* extension = GetExtension(extension_app_id);
+  if (extension)
+    UpdateExtensionAppIcon(extension);
 }
 
 SkBitmap* ExtensionTabHelper::GetExtensionAppIcon() {
@@ -154,10 +158,16 @@ void ExtensionTabHelper::OnInstallApplication(const WebApplicationInfo& info) {
 
 void ExtensionTabHelper::OnInlineWebstoreInstall(
     int install_id,
+    int return_route_id,
     const std::string& webstore_item_id,
     const GURL& requestor_url) {
   scoped_refptr<WebstoreInlineInstaller> installer(new WebstoreInlineInstaller(
-      web_contents(), install_id, webstore_item_id, requestor_url, this));
+      web_contents(),
+      install_id,
+      return_route_id,
+      webstore_item_id,
+      requestor_url,
+      this));
   installer->BeginInstall();
 }
 
@@ -176,19 +186,29 @@ void ExtensionTabHelper::OnGetAppNotifyChannel(
       tab_contents_wrapper()->web_contents()->GetRenderProcessHost();
   const Extension* extension =
       extension_service->GetInstalledApp(requestor_url);
-  bool allowed =
-      extension &&
-      extension->HasAPIPermission(
-          ExtensionAPIPermission::kAppNotifications) &&
-      process_map->Contains(extension->id(), process->GetID());
-  if (!allowed) {
+
+  std::string error;
+  if (!extension ||
+      !extension->HasAPIPermission(
+          ExtensionAPIPermission::kAppNotifications) ||
+      !process_map->Contains(extension->id(), process->GetID()))
+    error = kPermissionError;
+
+  // Make sure the extension can cross to the main profile, if called from an
+  // an incognito window.
+  if (profile->IsOffTheRecord() &&
+      !extension_service->CanCrossIncognito(extension))
+    error = extension_misc::kAppNotificationsIncognitoError;
+
+  if (!error.empty()) {
     Send(new ExtensionMsg_GetAppNotifyChannelResponse(
-        return_route_id, "", "permission_error", callback_id));
+        return_route_id, "", error, callback_id));
     return;
   }
 
   AppNotifyChannelUI* ui = new AppNotifyChannelUIImpl(
-      GetBrowser(), tab_contents_wrapper(), extension->name());
+      profile, tab_contents_wrapper(), extension->name(),
+      AppNotifyChannelUI::NOTIFICATION_INFOBAR);
 
   scoped_refptr<AppNotifyChannelSetup> channel_setup(
       new AppNotifyChannelSetup(profile,
@@ -229,6 +249,22 @@ void ExtensionTabHelper::OnRequest(
                                           web_contents()->GetRenderViewHost());
 }
 
+const Extension* ExtensionTabHelper::GetExtension(
+    const std::string& extension_app_id) {
+  if (extension_app_id.empty())
+    return NULL;
+
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  ExtensionService* extension_service = profile->GetExtensionService();
+  if (!extension_service || !extension_service->is_ready())
+    return NULL;
+
+  const Extension* extension =
+      extension_service->GetExtensionById(extension_app_id, false);
+  return extension;
+}
+
 void ExtensionTabHelper::UpdateExtensionAppIcon(const Extension* extension) {
   extension_app_icon_.reset();
 
@@ -236,10 +272,10 @@ void ExtensionTabHelper::UpdateExtensionAppIcon(const Extension* extension) {
     extension_app_image_loader_.reset(new ImageLoadingTracker(this));
     extension_app_image_loader_->LoadImage(
         extension,
-        extension->GetIconResource(Extension::EXTENSION_ICON_SMALLISH,
+        extension->GetIconResource(ExtensionIconSet::EXTENSION_ICON_SMALLISH,
                                    ExtensionIconSet::MATCH_EXACTLY),
-        gfx::Size(Extension::EXTENSION_ICON_SMALLISH,
-                  Extension::EXTENSION_ICON_SMALLISH),
+        gfx::Size(ExtensionIconSet::EXTENSION_ICON_SMALLISH,
+                  ExtensionIconSet::EXTENSION_ICON_SMALLISH),
         ImageLoadingTracker::CACHE);
   } else {
     extension_app_image_loader_.reset(NULL);
@@ -251,11 +287,11 @@ void ExtensionTabHelper::SetAppIcon(const SkBitmap& app_icon) {
   web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TITLE);
 }
 
-void ExtensionTabHelper::OnImageLoaded(SkBitmap* image,
-                                       const ExtensionResource& resource,
+void ExtensionTabHelper::OnImageLoaded(const gfx::Image& image,
+                                       const std::string& extension_id,
                                        int index) {
-  if (image) {
-    extension_app_icon_ = *image;
+  if (!image.IsEmpty()) {
+    extension_app_icon_ = *image.ToSkBitmap();
     web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
   }
 }
@@ -271,15 +307,17 @@ Browser* ExtensionTabHelper::GetBrowser() {
   return NULL;
 }
 
-void ExtensionTabHelper::OnInlineInstallSuccess(int install_id) {
+void ExtensionTabHelper::OnInlineInstallSuccess(int install_id,
+                                                int return_route_id) {
   Send(new ExtensionMsg_InlineWebstoreInstallResponse(
-      routing_id(), install_id, true, ""));
+      return_route_id, install_id, true, ""));
 }
 
 void ExtensionTabHelper::OnInlineInstallFailure(int install_id,
+                                                int return_route_id,
                                                 const std::string& error) {
   Send(new ExtensionMsg_InlineWebstoreInstallResponse(
-      routing_id(), install_id, false, error));
+      return_route_id, install_id, false, error));
 }
 
 WebContents* ExtensionTabHelper::GetAssociatedWebContents() const {

@@ -8,16 +8,55 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
+#include "ui/gfx/gl/gl_switches.h"
 
 ImageTransportSurface::ImageTransportSurface() {
 }
 
 ImageTransportSurface::~ImageTransportSurface() {
+}
+
+void ImageTransportSurface::GetRegionsToCopy(
+    const gfx::Rect& previous_damage_rect,
+    const gfx::Rect& new_damage_rect,
+    std::vector<gfx::Rect>* regions) {
+  gfx::Rect intersection = previous_damage_rect.Intersect(new_damage_rect);
+
+  if (intersection.IsEmpty()) {
+    regions->push_back(previous_damage_rect);
+    return;
+  }
+
+  // Top (above the intersection).
+  regions->push_back(gfx::Rect(previous_damage_rect.x(),
+      previous_damage_rect.y(),
+      previous_damage_rect.width(),
+      intersection.y() - previous_damage_rect.y()));
+
+  // Left (of the intersection).
+  regions->push_back(gfx::Rect(previous_damage_rect.x(),
+      intersection.y(),
+      intersection.x() - previous_damage_rect.x(),
+      intersection.height()));
+
+  // Right (of the intersection).
+  regions->push_back(gfx::Rect(intersection.right(),
+      intersection.y(),
+      previous_damage_rect.right() - intersection.right(),
+      intersection.height()));
+
+  // Bottom (below the intersection).
+  regions->push_back(gfx::Rect(previous_damage_rect.x(),
+      intersection.bottom(),
+      previous_damage_rect.width(),
+      previous_damage_rect.bottom() - intersection.bottom()));
 }
 
 ImageTransportHelper::ImageTransportHelper(ImageTransportSurface* surface,
@@ -114,6 +153,11 @@ void ImageTransportHelper::SetScheduled(bool is_scheduled) {
   if (!scheduler)
     return;
 
+  if (is_scheduled) {
+    TRACE_EVENT_ASYNC_END0("gpu", "Descheduled", this);
+  } else {
+    TRACE_EVENT_ASYNC_BEGIN0("gpu", "Descheduled", this);
+  }
   scheduler->SetScheduled(is_scheduled);
 }
 
@@ -160,9 +204,10 @@ void ImageTransportHelper::Resize(gfx::Size size) {
 }
 
 void ImageTransportHelper::SetSwapInterval() {
-  if (!stub_.get())
-    return;
-  stub_->SetSwapInterval();
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableGpuVsync))
+    Decoder()->GetGLContext()->SetSwapInterval(0);
+  else
+    Decoder()->GetGLContext()->SetSwapInterval(1);
 }
 
 bool ImageTransportHelper::MakeCurrent() {
@@ -170,6 +215,10 @@ bool ImageTransportHelper::MakeCurrent() {
   if (!decoder)
     return false;
   return decoder->MakeCurrent();
+}
+
+void ImageTransportHelper::Suspend() {
+  manager_->Send(new GpuHostMsg_AcceleratedSurfaceSuspend(stub_->surface_id()));
 }
 
 gpu::GpuScheduler* ImageTransportHelper::Scheduler() {
@@ -187,7 +236,11 @@ gpu::gles2::GLES2Decoder* ImageTransportHelper::Decoder() {
 PassThroughImageTransportSurface::PassThroughImageTransportSurface(
     GpuChannelManager* manager,
     GpuCommandBufferStub* stub,
-    gfx::GLSurface* surface) : GLSurfaceAdapter(surface) {
+    gfx::GLSurface* surface,
+    bool transport)
+    : GLSurfaceAdapter(surface),
+      transport_(transport),
+      did_set_swap_interval_(false) {
   helper_.reset(new ImageTransportHelper(this,
                                          manager,
                                          stub,
@@ -214,16 +267,18 @@ void PassThroughImageTransportSurface::OnNewSurfaceACK(
 bool PassThroughImageTransportSurface::SwapBuffers() {
   bool result = gfx::GLSurfaceAdapter::SwapBuffers();
 
-  // Round trip to the browser UI thread, for throttling, by sending a dummy
-  // SwapBuffers message.
-  GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
-  params.surface_handle = 0;
+  if (transport_) {
+    // Round trip to the browser UI thread, for throttling, by sending a dummy
+    // SwapBuffers message.
+    GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
+    params.surface_handle = 0;
 #if defined(OS_WIN)
-  params.size = GetSize();
+    params.size = GetSize();
 #endif
-  helper_->SendAcceleratedSurfaceBuffersSwapped(params);
+    helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
-  helper_->SetScheduled(false);
+    helper_->SetScheduled(false);
+  }
   return result;
 }
 
@@ -231,29 +286,42 @@ bool PassThroughImageTransportSurface::PostSubBuffer(
     int x, int y, int width, int height) {
   bool result = gfx::GLSurfaceAdapter::PostSubBuffer(x, y, width, height);
 
-  // Round trip to the browser UI thread, for throttling, by sending a dummy
-  // PostSubBuffer message.
-  GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params;
-  params.surface_handle = 0;
-  params.x = x;
-  params.y = y;
-  params.width = width;
-  params.height = height;
-  helper_->SendAcceleratedSurfacePostSubBuffer(params);
+  if (transport_) {
+    // Round trip to the browser UI thread, for throttling, by sending a dummy
+    // PostSubBuffer message.
+    GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params;
+    params.surface_handle = 0;
+    params.x = x;
+    params.y = y;
+    params.width = width;
+    params.height = height;
+    helper_->SendAcceleratedSurfacePostSubBuffer(params);
 
-  helper_->SetScheduled(false);
+    helper_->SetScheduled(false);
+  }
   return result;
 }
 
+bool PassThroughImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
+  if (!did_set_swap_interval_) {
+    helper_->SetSwapInterval();
+    did_set_swap_interval_ = true;
+  }
+  return true;
+}
+
 void PassThroughImageTransportSurface::OnBuffersSwappedACK() {
+  DCHECK(transport_);
   helper_->SetScheduled(true);
 }
 
 void PassThroughImageTransportSurface::OnPostSubBufferACK() {
+  DCHECK(transport_);
   helper_->SetScheduled(true);
 }
 
 void PassThroughImageTransportSurface::OnResizeViewACK() {
+  DCHECK(transport_);
   Resize(new_size_);
 
   helper_->SetScheduled(true);
@@ -262,8 +330,12 @@ void PassThroughImageTransportSurface::OnResizeViewACK() {
 void PassThroughImageTransportSurface::OnResize(gfx::Size size) {
   new_size_ = size;
 
-  helper_->SendResizeView(size);
-  helper_->SetScheduled(false);
+  if (transport_) {
+    helper_->SendResizeView(size);
+    helper_->SetScheduled(false);
+  } else {
+    Resize(new_size_);
+  }
 }
 
 #endif  // defined(ENABLE_GPU)

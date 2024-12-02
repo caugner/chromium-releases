@@ -32,13 +32,6 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
         {
-          'action_name': 'options_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/options_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
           'action_name': 'options2_resources',
           'variables': {
             'grit_grd_file': 'browser/resources/options2_resources.grd',
@@ -63,13 +56,6 @@
           'action_name': 'sync_internals_resources',
           'variables': {
             'grit_grd_file': 'browser/resources/sync_internals_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'workers_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/workers_resources.grd',
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
@@ -211,9 +197,9 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
         {
-          'action_name': 'theme_resources_large',
+          'action_name': 'theme_resources_2x',
           'variables': {
-            'grit_grd_file': 'app/theme/theme_resources_large.grd',
+            'grit_grd_file': 'app/theme/theme_resources_2x.grd',
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
@@ -269,12 +255,14 @@
         'chrome_strings',
         'platform_locale_settings',
         'theme_resources',
+        # TODO(zork): Protect this with if use_aura==1
+        '<(DEPTH)/ash/ash_strings.gyp:ash_strings',
         '<(DEPTH)/content/content_resources.gyp:content_resources',
         '<(DEPTH)/net/net.gyp:net_resources',
         '<(DEPTH)/ui/base/strings/ui_strings.gyp:ui_strings',
         '<(DEPTH)/ui/ui.gyp:gfx_resources',
         '<(DEPTH)/ui/ui.gyp:ui_resources',
-        '<(DEPTH)/ui/ui.gyp:ui_resources_large',
+        '<(DEPTH)/ui/ui.gyp:ui_resources_2x',
         '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',

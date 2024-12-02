@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,14 +15,18 @@
 #include "ui/views/controls/combobox/native_combobox_views.h"
 #include "ui/views/widget/widget.h"
 
-namespace views {
+namespace {
 
 // Limit how small a combobox can be.
-static const int kMinComboboxWidth = 148;
+const int kMinComboboxWidth = 148;
 
 // Add a couple extra pixels to the widths of comboboxes and combobox
 // dropdowns so that text isn't too crowded.
-static const int kComboboxExtraPaddingX = 6;
+const int kComboboxExtraPaddingX = 6;
+
+}  // namespace
+
+namespace views {
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeComboboxWin, public:
@@ -44,8 +48,7 @@ NativeComboboxWin::~NativeComboboxWin() {
 
 void NativeComboboxWin::UpdateFromModel() {
   SendMessage(native_view(), CB_RESETCONTENT, 0, 0);
-  gfx::Font font = ResourceBundle::GetSharedInstance().GetFont(
-      ResourceBundle::BaseFont);
+  const gfx::Font& font = Combobox::GetFont();
   int max_width = 0;
   int num_items = combobox_->model()->GetItemCount();
   for (int i = 0; i < num_items; ++i) {
@@ -188,16 +191,13 @@ void NativeComboboxWin::NativeControlCreated(HWND native_control) {
   NativeControlWin::NativeControlCreated(native_control);
 
   UpdateFont();
-  UpdateFromModel();
-  UpdateSelectedItem();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeComboboxWin, private:
 
 void NativeComboboxWin::UpdateFont() {
-  HFONT font = ResourceBundle::GetSharedInstance().
-      GetFont(ResourceBundle::BaseFont).GetNativeFont();
+  HFONT font = Combobox::GetFont().GetNativeFont();
   SendMessage(native_view(), WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
 }
 

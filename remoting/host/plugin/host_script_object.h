@@ -31,6 +31,7 @@
 namespace remoting {
 
 class ChromotingHost;
+class DaemonController;
 class DesktopEnvironment;
 class It2MeHostUserInterface;
 class MutableHostConfig;
@@ -106,6 +107,21 @@ class HostNPScriptObject : public HostStatusObserver {
   // No result.
   bool Localize(const NPVariant* args, uint32_t argCount, NPVariant* result);
 
+  // Set the PIN for Me2Me. Args are:
+  //   string pin
+  // Returns true if the PIN was updated successfully.
+  bool SetDaemonPin(const NPVariant* args, uint32_t argCount,
+                    NPVariant* result);
+
+  // Start the daemon process or change the PIN if it is running. No args.
+  // Returns true if the download/start mechanism was initiated successfully
+  // (poll daemonState to wait for completion) or false if an error occurred.
+  bool StartDaemon(const NPVariant* args, uint32_t argCount, NPVariant* result);
+
+  // Start the daemon process or change the PIN if it is running. No arguments.
+  // Returns true if the daemon was stopped successfully or false on error.
+  bool StopDaemon(const NPVariant* args, uint32_t argCount, NPVariant* result);
+
   // Updates state of the host. Can be called only on the main thread.
   void SetState(State state);
 
@@ -178,7 +194,7 @@ class HostNPScriptObject : public HostStatusObserver {
   base::PlatformThreadId np_thread_id_;
   scoped_refptr<PluginMessageLoopProxy> plugin_message_loop_proxy_;
 
-  ChromotingHostContext host_context_;
+  scoped_ptr<ChromotingHostContext> host_context_;
   HostKeyPair host_key_pair_;
   scoped_ptr<SignalStrategy> signal_strategy_;
   scoped_ptr<RegisterSupportHostRequest> register_request_;
@@ -191,6 +207,8 @@ class HostNPScriptObject : public HostStatusObserver {
 
   UiStrings ui_strings_;
   base::Lock ui_strings_lock_;
+
+  scoped_ptr<DaemonController> daemon_controller_;
 
   base::WaitableEvent disconnected_event_;
 

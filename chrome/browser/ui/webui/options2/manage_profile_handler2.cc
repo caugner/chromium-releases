@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,16 @@
 #include "base/value_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/gaia_info_update_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
@@ -35,7 +38,6 @@ void ManageProfileHandler::GetLocalizedValues(
   DCHECK(localized_strings);
 
   static OptionsStringResource resources[] = {
-    { "manageProfilesTitle", IDS_PROFILES_MANAGE_TITLE },
     { "manageProfilesNameLabel", IDS_PROFILES_MANAGE_NAME_LABEL },
     { "manageProfilesDuplicateNameError",
         IDS_PROFILES_MANAGE_DUPLICATE_NAME_ERROR },
@@ -46,11 +48,16 @@ void ManageProfileHandler::GetLocalizedValues(
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
+  RegisterTitle(localized_strings, "manageProfile",
+                IDS_PROFILES_MANAGE_TITLE);
 }
 
-void ManageProfileHandler::Initialize() {
+void ManageProfileHandler::InitializeHandler() {
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
                  content::NotificationService::AllSources());
+}
+
+void ManageProfileHandler::InitializePage() {
   SendProfileNames();
 }
 
@@ -101,7 +108,7 @@ void ManageProfileHandler::SendProfileIcons() {
         cache.GetGAIAPictureOfProfileAtIndex(profile_index);
     if (icon) {
       gfx::Image icon2 = profiles::GetAvatarIconForWebUI(*icon, true);
-      gaia_picture_url_ = web_ui_util::GetImageDataUrl(icon2);
+      gaia_picture_url_ = web_ui_util::GetImageDataUrl(*icon2.ToSkBitmap());
       image_url_list.Append(Value::CreateStringValue(gaia_picture_url_));
     }
   }
@@ -144,6 +151,11 @@ void ManageProfileHandler::SetProfileNameAndIcon(const ListValue* args) {
   if (profile_index == std::string::npos)
     return;
 
+  Profile* profile =
+      g_browser_process->profile_manager()->GetProfile(profile_file_path);
+  if (!profile)
+    return;
+
   string16 new_profile_name;
   if (!args->GetString(1, &new_profile_name))
     return;
@@ -158,7 +170,11 @@ void ManageProfileHandler::SetProfileNameAndIcon(const ListValue* args) {
     if (profile_index == std::string::npos)
       return;
   } else {
-    cache.SetNameOfProfileAtIndex(profile_index, new_profile_name);
+    PrefService* pref_service = profile->GetPrefs();
+    // Updating the profile preference will cause the cache to be updated for
+    // this preference.
+    pref_service->SetString(prefs::kProfileName, UTF16ToUTF8(new_profile_name));
+
     // Changing the profile name can invalidate the profile index.
     profile_index = cache.GetIndexOfProfileWithPath(profile_file_path);
     if (profile_index == std::string::npos)
@@ -191,7 +207,10 @@ void ManageProfileHandler::SetProfileNameAndIcon(const ListValue* args) {
     }
   } else if (cache.IsDefaultAvatarIconUrl(icon_url, &new_icon_index)) {
     ProfileMetrics::LogProfileAvatarSelection(new_icon_index);
-    cache.SetAvatarIconOfProfileAtIndex(profile_index, new_icon_index);
+    PrefService* pref_service = profile->GetPrefs();
+    // Updating the profile preference will cause the cache to be updated for
+    // this preference.
+    pref_service->SetInteger(prefs::kProfileAvatarIndex, new_icon_index);
     cache.SetIsUsingGAIAPictureOfProfileAtIndex(profile_index, false);
   }
 
@@ -200,6 +219,10 @@ void ManageProfileHandler::SetProfileNameAndIcon(const ListValue* args) {
 
 void ManageProfileHandler::DeleteProfile(const ListValue* args) {
   DCHECK(args);
+  // This handler could have been called in managed mode, for example because
+  // the user fiddled with the web inspector. Silently return in this case.
+  if (!ProfileManager::IsMultipleProfilesEnabled())
+    return;
 
   ProfileMetrics::LogProfileDeleteUser(ProfileMetrics::PROFILE_DELETED);
 
@@ -244,7 +267,8 @@ void ManageProfileHandler::RequestProfileInfo(const ListValue* args) {
   if (is_gaia_picture) {
     gfx::Image icon = profiles::GetAvatarIconForWebUI(
         cache.GetAvatarIconOfProfileAtIndex(index), true);
-    profile_value.SetString("iconURL", web_ui_util::GetImageDataUrl(icon));
+    profile_value.SetString("iconURL",
+        web_ui_util::GetImageDataUrl(*icon.ToSkBitmap()));
   } else {
     size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(index);
     profile_value.SetString("iconURL",

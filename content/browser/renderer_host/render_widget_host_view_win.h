@@ -20,7 +20,7 @@
 #include "base/time.h"
 #include "base/win/scoped_comptr.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -28,10 +28,15 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/surface/accelerated_surface_win.h"
+#include "ui/gfx/sys_color_change_listener.h"
 #include "webkit/glue/webcursor.h"
 
 class BackingStore;
+class SkRegion;
+
+namespace content {
 class RenderWidgetHost;
+}
 
 namespace gfx {
 class Size;
@@ -85,9 +90,10 @@ class RenderWidgetHostViewWin
     : public CWindowImpl<RenderWidgetHostViewWin,
                          CWindow,
                          RenderWidgetHostHWNDTraits>,
-      public RenderWidgetHostView,
+      public content::RenderWidgetHostViewBase,
       public content::NotificationObserver,
-      public BrowserAccessibilityDelegate {
+      public BrowserAccessibilityDelegate,
+      public gfx::SysColorChangeListener {
  public:
   virtual ~RenderWidgetHostViewWin();
 
@@ -103,6 +109,7 @@ class RenderWidgetHostViewWin
     MSG_WM_DESTROY(OnDestroy)
     MSG_WM_PAINT(OnPaint)
     MSG_WM_NCPAINT(OnNCPaint)
+    MSG_WM_NCHITTEST(OnNCHitTest)
     MSG_WM_ERASEBKGND(OnEraseBkgnd)
     MSG_WM_SETCURSOR(OnSetCursor)
     MSG_WM_SETFOCUS(OnSetFocus)
@@ -148,29 +155,35 @@ class RenderWidgetHostViewWin
     MESSAGE_HANDLER(WM_GESTURE, OnGestureEvent)
   END_MSG_MAP()
 
-  // Implementation of RenderWidgetHostView:
+  // RenderWidgetHostView implementation.
   virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
-  virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                           const gfx::Rect& pos) OVERRIDE;
-  virtual void InitAsFullscreen(
-      RenderWidgetHostView* reference_host_view) OVERRIDE;
-  virtual RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
-  virtual void DidBecomeSelected() OVERRIDE;
-  virtual void WasHidden() OVERRIDE;
+  virtual content::RenderWidgetHost* GetRenderWidgetHost() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
   virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
-  virtual void MovePluginWindows(
-      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
-  virtual void Focus() OVERRIDE;
-  virtual void Blur() OVERRIDE;
   virtual bool HasFocus() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual bool IsShowing() OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
+  virtual void SetBackground(const SkBitmap& background) OVERRIDE;
+  virtual bool CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) OVERRIDE;
+
+  // Implementation of RenderWidgetHostViewPort.
+  virtual void InitAsPopup(content::RenderWidgetHostView* parent_host_view,
+                           const gfx::Rect& pos) OVERRIDE;
+  virtual void InitAsFullscreen(
+      content::RenderWidgetHostView* reference_host_view) OVERRIDE;
+  virtual void DidBecomeSelected() OVERRIDE;
+  virtual void WasHidden() OVERRIDE;
+  virtual void MovePluginWindows(
+      const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
+  virtual void Focus() OVERRIDE;
+  virtual void Blur() OVERRIDE;
   virtual void UpdateCursor(const WebCursor& cursor) OVERRIDE;
   virtual void SetIsLoading(bool is_loading) OVERRIDE;
   virtual void TextInputStateChanged(ui::TextInputType type,
@@ -190,26 +203,26 @@ class RenderWidgetHostViewWin
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
-  virtual void SetBackground(const SkBitmap& background) OVERRIDE;
-  virtual void UnhandledWheelEvent(
-      const WebKit::WebMouseWheelEvent& event) OVERRIDE;
-  virtual void ProcessTouchAck(bool processed) OVERRIDE;
+  virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
+                               bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE;
-  virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
+  virtual gfx::GLSurfaceHandle GetCompositingSurface() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
       int gpu_host_id) OVERRIDE;
   virtual void AcceleratedSurfacePostSubBuffer(
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
       int gpu_host_id) OVERRIDE;
+  virtual void AcceleratedSurfaceSuspend() OVERRIDE;
   virtual void OnAccessibilityNotifications(
-      const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params
+      const std::vector<AccessibilityHostMsg_NotificationParams>& params
       ) OVERRIDE;
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
+  virtual void SetClickthroughRegion(SkRegion* region) OVERRIDE;
 
   // Implementation of content::NotificationObserver:
   virtual void Observe(int type,
@@ -226,13 +239,16 @@ class RenderWidgetHostViewWin
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
 
+  // Implementation of SysColorChangeListener:
+  virtual void OnSysColorChange() OVERRIDE;
+
  protected:
-  friend class RenderWidgetHostView;
+  friend class content::RenderWidgetHostView;
 
   // Should construct only via RenderWidgetHostView::CreateViewForWidget.
   //
   // The view will associate itself with the given widget.
-  explicit RenderWidgetHostViewWin(RenderWidgetHost* widget);
+  explicit RenderWidgetHostViewWin(content::RenderWidgetHost* widget);
 
   // Windows Message Handlers
   LRESULT OnCreate(CREATESTRUCT* create_struct);
@@ -240,6 +256,7 @@ class RenderWidgetHostViewWin
   void OnDestroy();
   void OnPaint(HDC unused_dc);
   void OnNCPaint(HRGN update_region);
+  LRESULT OnNCHitTest(const CPoint& pt);
   LRESULT OnEraseBkgnd(HDC dc);
   LRESULT OnSetCursor(HWND window, UINT hittest_code, UINT mouse_message_id);
   void OnSetFocus(HWND window);
@@ -361,10 +378,20 @@ class RenderWidgetHostViewWin
   // a WM_POINTERDOWN message.
   void ResetPointerDownContext();
 
+  // Switches between raw-touches mode and gesture mode. Currently touch mode
+  // will only take effect when kEnableTouchEvents is in effect.
+  void UpdateDesiredTouchMode(bool touch);
+
+  // Set window to receive gestures.
+  void SetToGestureMode();
+
+  // Set window to raw touch events. Returns whether registering was successful.
+  bool SetToTouchMode();
+
   // The associated Model.  While |this| is being Destroyed,
   // |render_widget_host_| is NULL and the Windows message loop is run one last
   // time. Message handlers must check for a NULL |render_widget_host_|.
-  RenderWidgetHost* render_widget_host_;
+  content::RenderWidgetHostImpl* render_widget_host_;
 
   // When we are doing accelerated compositing
   HWND compositor_host_window_;
@@ -517,20 +544,11 @@ class RenderWidgetHostViewWin
 
   ui::Range composition_range_;
 
-  // Set to true if the next lbutton down message is to be ignored. Set by the
-  // WM_POINTERXX handler. We do this to ensure that we don't send out
-  // duplicate lbutton down messages to the renderer.
-  bool ignore_next_lbutton_message_at_same_location;
-
   // TODO(ananta)
   // The WM_POINTERDOWN and on screen keyboard handling related members should
   // be moved to an independent class to reduce the clutter. This includes all
-  // members starting from last_pointer_down_location_ to the
+  // members starting from virtual_keyboard_ to
   // received_focus_change_after_pointer_down_.
-
-  // The location of the last WM_POINTERDOWN message. We ignore the subsequent
-  // lbutton down only if the locations match.
-  LPARAM last_pointer_down_location_;
 
   // IPenInputPanel to allow us to show the Windows virtual keyboard when a
   // user touches an editable field on the page.
@@ -544,6 +562,14 @@ class RenderWidgetHostViewWin
 
   // Set to true if we received a focus change after a WM_POINTERDOWN message.
   bool received_focus_change_after_pointer_down_;
+
+  // Region in which the view will be transparent to clicks.
+  scoped_ptr<SkRegion> transparent_region_;
+
+  // Are touch events currently enabled?
+  bool touch_events_enabled_;
+
+  gfx::ScopedSysColorChangeListener sys_color_change_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

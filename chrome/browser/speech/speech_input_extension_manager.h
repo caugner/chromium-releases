@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,25 @@
 #define CHROME_BROWSER_SPEECH_SPEECH_INPUT_EXTENSION_MANAGER_H_
 #pragma once
 
-#include "base/synchronization/lock.h"
-#include "content/browser/speech/speech_recognizer.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include <string>
+
+#include "base/callback_forward.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/synchronization/lock.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/speech_recognition_event_listener.h"
 
 class Extension;
 class Profile;
 class SpeechInputExtensionNotification;
+
+namespace content {
+class NotificationRegistrar;
+struct SpeechRecognitionError;
+struct SpeechRecognitionResult;
+class SpeechRecognizer;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -28,7 +38,7 @@ class SpeechInputExtensionInterface {
 
   // Called from the IO thread.
   virtual void StartRecording(
-      speech_input::SpeechRecognizerDelegate* delegate,
+      content::SpeechRecognitionEventListener* listener,
       net::URLRequestContextGetter* context_getter,
       int caller_id,
       const std::string& language,
@@ -37,22 +47,17 @@ class SpeechInputExtensionInterface {
 
   virtual void StopRecording(bool recognition_failed) = 0;
   virtual bool HasAudioInputDevices() = 0;
+  virtual bool IsCapturingAudio() = 0;
 
   // Called from the UI thread.
   virtual bool HasValidRecognizer() = 0;
-
-  // Called from both IO and UI threads.
-  virtual bool IsRecordingInProcess() = 0;
-
- protected:
-  scoped_refptr<speech_input::SpeechRecognizer> recognizer_;
 };
 
 // Manages the speech input requests and responses from the extensions
 // associated to the given profile.
 class SpeechInputExtensionManager
     : public base::RefCountedThreadSafe<SpeechInputExtensionManager>,
-      public speech_input::SpeechRecognizerDelegate,
+      public content::SpeechRecognitionEventListener,
       public content::NotificationObserver,
       private SpeechInputExtensionInterface {
  public:
@@ -72,6 +77,8 @@ class SpeechInputExtensionManager
     ExtensionError(const std::string& extension_id, const std::string& error)
         : extension_id_(extension_id), error_(error) {}
   };
+
+  typedef base::Callback<void(bool)> IsRecordingCallback;
 
   // Should not be used directly. Managed by a ProfileKeyedServiceFactory.
   explicit SpeechInputExtensionManager(Profile* profile);
@@ -97,7 +104,9 @@ class SpeechInputExtensionManager
   State state() const { return state_; }
 
   // Check if recording is currently ongoing in Chrome.
-  bool IsRecording();
+  // This method is expected to be called from the UI thread.
+  // The callback will be invoked with the result on this same thread.
+  void IsRecording(const IsRecordingCallback& callback);
 
   // Called by internal ProfileKeyedService class.
   void ShutdownOnUIThread();
@@ -107,22 +116,20 @@ class SpeechInputExtensionManager
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  // Methods from SpeechRecognizerDelegate.
-  virtual void SetRecognitionResult(
-      int caller_id,
-      const content::SpeechInputResult& result) OVERRIDE;
-
-  virtual void DidStartReceivingAudio(int caller_id) OVERRIDE;
-  virtual void DidCompleteRecording(int caller_id) OVERRIDE;
-  virtual void DidCompleteRecognition(int caller_id) OVERRIDE;
-  virtual void DidStartReceivingSpeech(int caller_id) OVERRIDE;
-  virtual void DidStopReceivingSpeech(int caller_id) OVERRIDE;
-  virtual void OnRecognizerError(int caller_id,
-                                 content::SpeechInputError error)
-                                 OVERRIDE;
-  virtual void DidCompleteEnvironmentEstimation(int caller_id) OVERRIDE;
-  virtual void SetInputVolume(int caller_id, float volume,
-                              float noise_volume) OVERRIDE;
+  // Methods from SpeechRecognitionEventListener.
+  virtual void OnRecognitionStart(int caller_id) OVERRIDE;
+  virtual void OnAudioStart(int caller_id) OVERRIDE;
+  virtual void OnEnvironmentEstimationComplete(int caller_id) OVERRIDE;
+  virtual void OnSoundStart(int caller_id) OVERRIDE;
+  virtual void OnSoundEnd(int caller_id) OVERRIDE;
+  virtual void OnAudioEnd(int caller_id) OVERRIDE;
+  virtual void OnRecognitionResult(
+      int caller_id, const content::SpeechRecognitionResult& result) OVERRIDE;
+  virtual void OnRecognitionError(
+      int caller_id, const content::SpeechRecognitionError& error) OVERRIDE;
+  virtual void OnAudioLevelsChange(int caller_id, float volume,
+                                   float noise_volume) OVERRIDE;
+  virtual void OnRecognitionEnd(int caller_id) OVERRIDE;
 
   // Methods for API testing.
   void SetSpeechInputExtensionInterface(
@@ -131,12 +138,11 @@ class SpeechInputExtensionManager
 
  private:
   // SpeechInputExtensionInterface methods:
-  virtual bool IsRecordingInProcess() OVERRIDE;
+  virtual bool IsCapturingAudio() OVERRIDE;
   virtual bool HasAudioInputDevices() OVERRIDE;
   virtual bool HasValidRecognizer() OVERRIDE;
-
   virtual void StartRecording(
-      speech_input::SpeechRecognizerDelegate* delegate,
+      content::SpeechRecognitionEventListener* listener,
       net::URLRequestContextGetter* context_getter,
       int caller_id,
       const std::string& language,
@@ -152,12 +158,14 @@ class SpeechInputExtensionManager
       const std::string& grammar,
       bool filter_profanities);
   void ForceStopOnIOThread();
+  void IsRecordingOnIOThread(const IsRecordingCallback& callback);
 
   void SetRecognitionResultOnUIThread(
-      const content::SpeechInputResult& result,
+      const content::SpeechRecognitionResult& result,
       const std::string& extension_id);
   void DidStartReceivingAudioOnUIThread();
   void StopSucceededOnUIThread();
+  void IsRecordingOnUIThread(const IsRecordingCallback& callback, bool result);
 
   void DispatchError(const std::string& error, bool dispatch_event);
   void DispatchEventToExtension(const std::string& extension_id,
@@ -187,9 +195,12 @@ class SpeechInputExtensionManager
   std::string extension_id_in_use_;
 
   // Used in the UI thread.
-  content::NotificationRegistrar registrar_;
+  scoped_ptr<content::NotificationRegistrar> registrar_;
   SpeechInputExtensionInterface* speech_interface_;
   scoped_ptr<SpeechInputExtensionNotification> notification_;
+
+  // Used in the IO thread.
+  scoped_refptr<content::SpeechRecognizer> recognizer_;
 };
 
 #endif  // CHROME_BROWSER_SPEECH_SPEECH_INPUT_EXTENSION_MANAGER_H_

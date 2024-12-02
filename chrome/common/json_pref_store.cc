@@ -9,7 +9,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop_proxy.h"
 #include "base/values.h"
@@ -143,7 +144,8 @@ JsonPrefStore::JsonPrefStore(const FilePath& filename,
       read_only_(false),
       writer_(filename, file_message_loop_proxy),
       error_delegate_(NULL),
-      initialized_(false) {
+      initialized_(false),
+      read_error_(PREF_READ_ERROR_OTHER) {
 }
 
 JsonPrefStore::~JsonPrefStore() {
@@ -214,11 +216,16 @@ bool JsonPrefStore::ReadOnly() const {
   return read_only_;
 }
 
+PersistentPrefStore::PrefReadError JsonPrefStore::GetReadError() const {
+  return read_error_;
+}
+
 void JsonPrefStore::OnFileRead(Value* value_owned,
                                PersistentPrefStore::PrefReadError error,
                                bool no_dir) {
   scoped_ptr<Value> value(value_owned);
   initialized_ = true;
+  read_error_ = error;
 
   if (no_dir) {
     FOR_EACH_OBSERVER(PrefStore::Observer,

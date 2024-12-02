@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,34 +13,30 @@
 namespace remoting {
 
 ChromotingHostContext::ChromotingHostContext(
+    base::MessageLoopProxy* io_message_loop,
     base::MessageLoopProxy* ui_message_loop)
     : main_thread_("ChromotingMainThread"),
       encode_thread_("ChromotingEncodeThread"),
       desktop_thread_("ChromotingDesktopThread"),
+      io_message_loop_(io_message_loop),
       ui_message_loop_(ui_message_loop) {
 }
 
 ChromotingHostContext::~ChromotingHostContext() {
 }
 
-void ChromotingHostContext::Start() {
+bool ChromotingHostContext::Start() {
   // Start all the threads.
-  main_thread_.Start();
-  encode_thread_.Start();
-  jingle_thread_.Start();
-  desktop_thread_.Start();
-}
-
-void ChromotingHostContext::Stop() {
-  // Stop all the threads.
-  jingle_thread_.Stop();
-  encode_thread_.Stop();
-  main_thread_.Stop();
-  desktop_thread_.Stop();
+  return main_thread_.Start() && encode_thread_.Start() &&
+      jingle_thread_.Start() && desktop_thread_.Start();
 }
 
 JingleThread* ChromotingHostContext::jingle_thread() {
   return &jingle_thread_;
+}
+
+base::MessageLoopProxy* ChromotingHostContext::io_message_loop() {
+  return io_message_loop_;
 }
 
 base::MessageLoopProxy* ChromotingHostContext::ui_message_loop() {

@@ -4,23 +4,21 @@
 
 #include "chrome/test/base/view_event_test_base.h"
 
-#if defined(OS_WIN)
-#include <ole2.h>
-#endif
-
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
-#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/gfx/compositor/test/compositor_test_support.h"
+#include "ui/ui_controls/ui_controls.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
 #include "ash/shell.h"
+#include "ui/aura/client/event_client.h"
+#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #endif
 
@@ -67,7 +65,7 @@ ViewEventTestBase::ViewEventTestBase()
 void ViewEventTestBase::Done() {
   MessageLoop::current()->Quit();
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // We need to post a message to tickle the Dispatcher getting called and
   // exiting out of the nested loop. Without this the quit never runs.
   PostMessage(window_->GetNativeWindow(), WM_USER, 0, 0);
@@ -81,20 +79,20 @@ void ViewEventTestBase::Done() {
 }
 
 void ViewEventTestBase::SetUp() {
-#if defined(OS_WIN)
-  OleInitialize(NULL);
-#endif
   ui::CompositorTestSupport::Initialize();
 #if defined(USE_AURA)
-  aura::RootWindow::GetInstance();
   ash::Shell::CreateInstance(NULL);
+  // The shell runs with a locked screen in tests, so we must clear the event
+  // client so it doesn't interfere with event propagation.
+  aura::client::SetEventClient(ash::Shell::GetInstance()->GetRootWindow(),
+                               NULL);
 #endif
   window_ = views::Widget::CreateWindow(this);
 }
 
 void ViewEventTestBase::TearDown() {
   if (window_) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     DestroyWindow(window_->GetNativeWindow());
 #else
     window_->Close();
@@ -104,12 +102,9 @@ void ViewEventTestBase::TearDown() {
   }
 #if defined(USE_AURA)
   ash::Shell::DeleteInstance();
-  aura::RootWindow::DeleteInstance();
+  aura::Env::DeleteInstance();
 #endif
   ui::CompositorTestSupport::Terminate();
-#if defined(OS_WIN)
-  OleUninitialize();
-#endif
 }
 
 bool ViewEventTestBase::CanResize() const {
@@ -143,7 +138,7 @@ void ViewEventTestBase::StartMessageLoopAndRunTest() {
   window_->Show();
   // Make sure the window is the foreground window, otherwise none of the
   // mouse events are going to be targeted correctly.
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   SetForegroundWindow(window_->GetNativeWindow());
 #endif
 

@@ -11,8 +11,8 @@
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/resource_util.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view_win.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/shell/resource.h"
 #include "googleurl/src/gurl.h"
 #include "grit/webkit_resources.h"
@@ -144,16 +144,14 @@ void Shell::PlatformCreateWindow(int width, int height) {
 
   ShowWindow(window_, SW_SHOW);
 
-  PlatformSizeTo(width, height);
+  SizeTo(width, height);
 }
 
 void Shell::PlatformSetContents() {
-  TabContentsViewWin* view =
-      static_cast<TabContentsViewWin*>(tab_contents_->GetView());
-  view->SetParent(window_);
+  SetParent(web_contents_->GetView()->GetNativeView(), window_);
 }
 
-void Shell::PlatformSizeTo(int width, int height) {
+void Shell::SizeTo(int width, int height) {
   RECT rc, rw;
   GetClientRect(window_, &rc);
   GetWindowRect(window_, &rw);
@@ -212,7 +210,7 @@ LRESULT CALLBACK Shell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
       switch (id) {
         case IDM_NEW_WINDOW:
           CreateNewWindow(
-              shell->tab_contents()->GetBrowserContext(),
+              shell->web_contents()->GetBrowserContext(),
               GURL(), NULL, MSG_ROUTING_NONE, NULL);
           break;
         case IDM_CLOSE_WINDOW:

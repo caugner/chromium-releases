@@ -45,6 +45,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/confirm_quit.h"
 #import "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
 #import "chrome/browser/ui/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/history_menu_bridge.h"
@@ -96,7 +97,7 @@ NSString* NSPopoverDidShowNotification = @"NSPopoverDidShowNotification";
 NSString* NSPopoverDidCloseNotification = @"NSPopoverDidCloseNotification";
 #endif
 
-// True while AppController is calling Browser::OpenEmptyWindow(). We need a
+// True while AppController is calling Browser::NewEmptyWindow(). We need a
 // global flag here, analogue to BrowserInit::InProcessStartup() because
 // otherwise the SessionService will try to restore sessions when we make a new
 // window while there are no other active windows.
@@ -118,7 +119,7 @@ Browser* ActivateBrowser(Profile* profile) {
 Browser* CreateBrowser(Profile* profile) {
   {
     AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
-    Browser::OpenEmptyWindow(profile);
+    Browser::NewEmptyWindow(profile);
   }
 
   Browser* browser = BrowserList::GetLastActive();
@@ -158,9 +159,10 @@ void RecordLastRunAppBundlePath() {
   // or a unit test.)
   FilePath appBundlePath =
       chrome::GetVersionedDirectory().DirName().DirName().DirName();
-  CFPreferencesSetAppValue(app_mode::kLastRunAppBundlePathPrefsKey,
-                           base::SysUTF8ToCFStringRef(appBundlePath.value()),
-                           BaseBundleID_CFString());
+  CFPreferencesSetAppValue(
+      base::mac::NSToCFCast(app_mode::kLastRunAppBundlePathPrefsKey),
+      base::SysUTF8ToCFStringRef(appBundlePath.value()),
+      BaseBundleID_CFString());
 
   // Sync after a delay avoid I/O contention on startup; 1500 ms is plenty.
   BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
@@ -341,7 +343,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)app {
   // Check if the preference is turned on.
-  const PrefService* prefs = [self lastProfile]->GetPrefs();
+  const PrefService* prefs = g_browser_process->local_state();
   if (!prefs->GetBoolean(prefs::kConfirmToQuitEnabled)) {
     confirm_quit::RecordHistogram(confirm_quit::kNoConfirm);
     return NSTerminateNow;
@@ -388,7 +390,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
 // If the window has a tab controller, make "close window" be cmd-shift-w,
 // otherwise leave it as the normal cmd-w. Capitalization of the key equivalent
-// affects whether the shift modifer is used.
+// affects whether the shift modifier is used.
 - (void)adjustCloseWindowMenuItemKeyEquivalent:(BOOL)enableCloseTabShortcut {
   [closeWindowMenuItem_ setKeyEquivalent:(enableCloseTabShortcut ? @"W" :
                                                                    @"w")];
@@ -614,6 +616,9 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   if (!parsed_command_line.HasSwitch(switches::kEnableExposeForTabs)) {
     [tabposeMenuItem_ setHidden:YES];
   }
+
+  // TODO(rsesek): Remove from trunk when Mstone-20 goes to stable.
+  confirm_quit::MigratePrefToLocalState();
 }
 
 // This is called after profiles have been loaded and preferences registered.
@@ -766,7 +771,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
           // dialog.
           enable = [self keyWindowIsNotModal] || ([NSApp modalWindow] == nil);
           break;
-        case IDC_SYNC_BOOKMARKS: {
+        case IDC_SHOW_SYNC_SETUP: {
           Profile* lastProfile = [self lastProfile];
           // The profile may be NULL during shutdown -- see
           // http://code.google.com/p/chromium/issues/detail?id=43048 .
@@ -846,7 +851,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       ActivateOrCreateBrowser(lastProfile)->ExecuteCommand(IDC_FOCUS_SEARCH);
       break;
     case IDC_NEW_INCOGNITO_WINDOW:
-      Browser::OpenEmptyWindow(lastProfile->GetOffTheRecordProfile());
+      CreateBrowser(lastProfile->GetOffTheRecordProfile());
       break;
     case IDC_RESTORE_TAB:
       Browser::OpenWindowWithRestoredTabs(lastProfile);
@@ -905,21 +910,11 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       else
         Browser::OpenHelpWindow(lastProfile);
       break;
-    case IDC_SYNC_BOOKMARKS:
-      // The profile may be NULL during shutdown -- see
-      // http://code.google.com/p/chromium/issues/detail?id=43048 .
-      //
-      // TODO(akalin,viettrungluu): Figure out whether this method can
-      // be prevented from being called if lastProfile is NULL.
-      if (!lastProfile) {
-        LOG(WARNING) << "NULL lastProfile detected -- not doing anything";
-        break;
-      }
-      // TODO(akalin): Add a constant to denote starting sync from the
-      // main menu and use that instead of START_FROM_WRENCH.
-      sync_ui_util::OpenSyncMyBookmarksDialog(
-          lastProfile, ActivateBrowser(lastProfile),
-          ProfileSyncService::START_FROM_WRENCH);
+    case IDC_SHOW_SYNC_SETUP:
+      if (Browser* browser = ActivateBrowser(lastProfile))
+        browser->ShowSyncSetup(SyncPromoUI::SOURCE_MENU);
+      else
+        Browser::OpenSyncSetupWindow(lastProfile, SyncPromoUI::SOURCE_MENU);
       break;
     case IDC_TASK_MANAGER:
       content::RecordAction(UserMetricsAction("TaskManager"));
@@ -989,26 +984,37 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   }
 
   // If launched as a hidden login item (due to installation of a persistent app
-  // or by the user, for example in System Preferenecs->Accounts->Login Items),
+  // or by the user, for example in System Preferences->Accounts->Login Items),
   // allow session to be restored first time the user clicks on a Dock icon.
   // Normally, it'd just open a new empty page.
   {
-      static BOOL doneOnce = NO;
-      if (!doneOnce) {
-        doneOnce = YES;
-        if (base::mac::WasLaunchedAsHiddenLoginItem()) {
-          SessionService* sessionService =
-              SessionServiceFactory::GetForProfile([self lastProfile]);
-          if (sessionService &&
-              sessionService->RestoreIfNecessary(std::vector<GURL>()))
-            return NO;
-        }
+    static BOOL doneOnce = NO;
+    if (!doneOnce) {
+      doneOnce = YES;
+      if (base::mac::WasLaunchedAsHiddenLoginItem()) {
+        SessionService* sessionService =
+            SessionServiceFactory::GetForProfile([self lastProfile]);
+        if (sessionService &&
+            sessionService->RestoreIfNecessary(std::vector<GURL>()))
+          return NO;
       }
+    }
   }
+
+  // Platform apps don't use browser windows so don't do anything if there are
+  // visible windows.
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (flag && command_line.HasSwitch(switches::kAppId))
+    return YES;
+
   // Otherwise open a new window.
   {
     AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
-    Browser::OpenEmptyWindow([self lastProfile]);
+    int return_code;
+    BrowserInit browser_init;
+    browser_init.LaunchBrowser(command_line, [self lastProfile], FilePath(),
+                               BrowserInit::IS_NOT_PROCESS_STARTUP,
+                               BrowserInit::IS_NOT_FIRST_RUN, &return_code);
   }
 
   // We've handled the reopen event, so return NO to tell AppKit not
@@ -1033,7 +1039,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   menuState_->UpdateCommandEnabled(IDC_HELP_PAGE, true);
   menuState_->UpdateCommandEnabled(IDC_IMPORT_SETTINGS, true);
   menuState_->UpdateCommandEnabled(IDC_FEEDBACK, true);
-  menuState_->UpdateCommandEnabled(IDC_SYNC_BOOKMARKS, true);
+  menuState_->UpdateCommandEnabled(IDC_SHOW_SYNC_SETUP, true);
   menuState_->UpdateCommandEnabled(IDC_TASK_MANAGER, true);
 }
 
@@ -1069,7 +1075,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       base::SysNSStringToUTF16(acceleratorString));
   [item setTitle:title];
 
-  const PrefService* prefService = [self lastProfile]->GetPrefs();
+  const PrefService* prefService = g_browser_process->local_state();
   bool enabled = prefService->GetBoolean(prefs::kConfirmToQuitEnabled);
   [item setState:enabled ? NSOnState : NSOffState];
 }
@@ -1208,24 +1214,17 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 }
 
 - (IBAction)orderFrontStandardAboutPanel:(id)sender {
-  if (!aboutController_) {
-    aboutController_ =
-        [[AboutWindowController alloc] initWithProfile:[self lastProfile]];
-
-    // Watch for a notification of when it goes away so that we can destroy
-    // the controller.
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(aboutWindowClosed:)
-               name:NSWindowWillCloseNotification
-             object:[aboutController_ window]];
+  if (Browser* browser = ActivateBrowser([self lastProfile])) {
+    // Show about tab in the active browser window.
+    browser->OpenAboutChromeDialog();
+  } else {
+    // No browser window, so create one for the about tab.
+    Browser::OpenAboutWindow([self lastProfile]);
   }
-
-  [aboutController_ showWindow:self];
 }
 
 - (IBAction)toggleConfirmToQuit:(id)sender {
-  PrefService* prefService = [self lastProfile]->GetPrefs();
+  PrefService* prefService = g_browser_process->local_state();
   bool enabled = prefService->GetBoolean(prefs::kConfirmToQuitEnabled);
   prefService->SetBoolean(prefs::kConfirmToQuitEnabled, !enabled);
 }

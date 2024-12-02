@@ -4,7 +4,6 @@
 
 #include "content/browser/renderer_host/media/media_stream_dispatcher_host.h"
 
-#include "content/browser/resource_context.h"
 #include "content/common/media/media_stream_messages.h"
 #include "content/common/media/media_stream_options.h"
 
@@ -25,16 +24,20 @@ struct MediaStreamDispatcherHost::StreamRequest {
 };
 
 MediaStreamDispatcherHost::MediaStreamDispatcherHost(
-    const content::ResourceContext* resource_context, int render_process_id)
+    content::ResourceContext* resource_context,
+    int render_process_id,
+    AudioManager* audio_manager)
     : resource_context_(resource_context),
-      render_process_id_(render_process_id) {
+      render_process_id_(render_process_id),
+      audio_manager_(audio_manager) {
 }
 
 MediaStreamDispatcherHost::~MediaStreamDispatcherHost() {
 }
 
 MediaStreamManager* MediaStreamDispatcherHost::manager() {
-  return resource_context_->media_stream_manager();
+  return MediaStreamManager::GetForResourceContext(
+      resource_context_, audio_manager_);
 }
 
 bool MediaStreamDispatcherHost::OnMessageReceived(
@@ -57,17 +60,15 @@ void MediaStreamDispatcherHost::OnChannelClosing() {
   BrowserMessageFilter::OnChannelClosing();
   DVLOG(1) << "MediaStreamDispatcherHost::OnChannelClosing";
 
-  // TODO(mflodman) Remove this temporary solution when shut-down issue is
-  // resolved, i.e. uncomment the code below.
-  // Since the IPC channel is gone, close all requested VideCaptureDevices and
-  // cancel pending requests.
-//  manager()->CancelRequests(this);
-//  for (StreamMap::iterator it = streams_.begin();
-//       it != streams_.end();
-//       it++) {
-//    std::string label = it->first;
-//    manager()->StopGeneratedStream(label);
-//  }
+  // Since the IPC channel is gone, cancel pending requests and close all
+  // requested VideCaptureDevices.
+  manager()->CancelRequests(this);
+  for (StreamMap::iterator it = streams_.begin();
+       it != streams_.end();
+       it++) {
+    std::string label = it->first;
+    manager()->StopGeneratedStream(label);
+  }
 }
 
 void MediaStreamDispatcherHost::OnGenerateStream(

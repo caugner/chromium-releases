@@ -78,6 +78,13 @@ void AutofillProfileDataTypeController::Observe(
   DoStartAssociationAsync();
 }
 
+bool AutofillProfileDataTypeController::PostTaskOnBackendThread(
+    const tracked_objects::Location& from_here,
+    const base::Closure& task) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return BrowserThread::PostTask(BrowserThread::DB, from_here, task);
+}
+
 void AutofillProfileDataTypeController::DoStartAssociationAsync() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(state(), MODEL_STARTING);
@@ -90,21 +97,6 @@ void AutofillProfileDataTypeController::DoStartAssociationAsync() {
   }
 }
 
-bool AutofillProfileDataTypeController::StartAssociationAsync() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK_EQ(state(), ASSOCIATING);
-  return BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::Bind(&AutofillProfileDataTypeController::StartAssociation,
-                 this));
-}
-
-base::WeakPtr<SyncableService>
-    AutofillProfileDataTypeController::GetWeakPtrToSyncableService() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  return profile_sync_factory()->GetAutofillProfileSyncableService(
-      web_data_service_.get());
-}
-
 void AutofillProfileDataTypeController::StopModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(state() == STOPPING || state() == NOT_RUNNING);
@@ -112,11 +104,6 @@ void AutofillProfileDataTypeController::StopModels() {
   personal_data_->RemoveObserver(this);
 }
 
-void AutofillProfileDataTypeController::StopLocalServiceAsync() {
-  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::Bind(&AutofillProfileDataTypeController::StopLocalService,
-                 this));
-}
 syncable::ModelType AutofillProfileDataTypeController::type() const {
   return syncable::AUTOFILL_PROFILE;
 }
@@ -124,26 +111,6 @@ syncable::ModelType AutofillProfileDataTypeController::type() const {
 browser_sync::ModelSafeGroup
     AutofillProfileDataTypeController::model_safe_group() const {
   return browser_sync::GROUP_DB;
-}
-
-void AutofillProfileDataTypeController::RecordUnrecoverableError(
-    const tracked_objects::Location& from_here,
-    const std::string& message) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  UMA_HISTOGRAM_COUNTS("Sync.AutofillProfileRunFailures", 1);
-}
-
-void AutofillProfileDataTypeController::RecordAssociationTime(
-    base::TimeDelta time) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  UMA_HISTOGRAM_TIMES("Sync.AutofillProfileAssociationTime", time);
-}
-
-void AutofillProfileDataTypeController::RecordStartFailure(StartResult result) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  UMA_HISTOGRAM_ENUMERATION("Sync.AutofillProfileStartFailures",
-                            result,
-                            MAX_START_RESULT);
 }
 
 }  // namepsace browser_sync

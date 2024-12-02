@@ -8,8 +8,9 @@
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/favicon_size.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/native_theme.h"
 #include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/menu_image_util.h"
@@ -38,13 +39,13 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   if (render_selection) {
     SkColor bg_color = gfx::NativeTheme::instance()->GetSystemColor(
         gfx::NativeTheme::kColorId_FocusedMenuItemBackgroundColor);
-    canvas->GetSkCanvas()->drawColor(bg_color, SkXfermode::kSrc_Mode);
+    canvas->sk_canvas()->drawColor(bg_color, SkXfermode::kSrc_Mode);
   }
 
   // Render the check.
   if (type_ == CHECKBOX && GetDelegate()->IsItemChecked(GetCommand())) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    SkBitmap* check = rb.GetBitmapNamed(IDR_MENU_CHECK);
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    const SkBitmap* check = rb.GetImageNamed(IDR_MENU_CHECK).ToSkBitmap();
     // Don't use config.check_width here as it's padded to force more padding.
     gfx::Rect check_bounds(icon_x, icon_y, check->width(), icon_height);
     AdjustBoundsForRTLUI(&check_bounds);
@@ -71,7 +72,7 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
   int accel_width = parent_menu_item_->GetSubmenu()->max_accelerator_width();
   int width = this->width() - item_right_margin_ - label_start_ - accel_width;
   gfx::Rect text_bounds(label_start_, top_margin +
-                        (available_height - font.GetHeight()) / 2, width,
+                        (available_height - font.GetHeight() + 1) / 2, width,
                         font.GetHeight());
   text_bounds.set_x(GetMirroredXForRect(text_bounds));
   canvas->DrawStringInt(title(), font, fg_color,

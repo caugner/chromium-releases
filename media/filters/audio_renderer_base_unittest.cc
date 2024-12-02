@@ -80,7 +80,7 @@ class AudioRendererBaseTest : public ::testing::Test {
   }
 
   MOCK_METHOD1(OnSeekComplete, void(PipelineStatus));
-  FilterStatusCB NewSeekCB() {
+  PipelineStatusCB NewSeekCB() {
     return base::Bind(&AudioRendererBaseTest::OnSeekComplete,
                       base::Unretained(this));
   }
@@ -91,11 +91,22 @@ class AudioRendererBaseTest : public ::testing::Test {
                       base::Unretained(this));
   }
 
+  void OnAudioTimeCallback(
+      base::TimeDelta current_time, base::TimeDelta max_time) {
+    CHECK(current_time <= max_time);
+  }
+
+  AudioRenderer::TimeCB NewAudioTimeClosure() {
+    return base::Bind(&AudioRendererBaseTest::OnAudioTimeCallback,
+                      base::Unretained(this));
+  }
+
   void Initialize() {
     EXPECT_CALL(*renderer_, OnInitialize(_, _, _))
         .WillOnce(Return(true));
     renderer_->Initialize(
-        decoder_, NewExpectedClosure(), NewUnderflowClosure());
+        decoder_, NewExpectedStatusCB(PIPELINE_OK), NewUnderflowClosure(),
+        NewAudioTimeClosure());
   }
 
   void Preroll() {
@@ -173,12 +184,16 @@ class AudioRendererBaseTest : public ::testing::Test {
   // the consumed data is muted audio.
   bool ConsumeBufferedData(uint32 size, bool* muted) {
     scoped_array<uint8> buffer(new uint8[size]);
-    uint32 bytes_read = renderer_->FillBuffer(buffer.get(), size,
-                                              base::TimeDelta());
-    if (bytes_read > 0 && muted) {
+    uint32 bytes_per_frame = (decoder_->bits_per_channel() / 8) *
+        ChannelLayoutToChannelCount(decoder_->channel_layout());
+    uint32 requested_frames = size / bytes_per_frame;
+    uint32 frames_read = renderer_->FillBuffer(
+        buffer.get(), requested_frames, base::TimeDelta());
+
+    if (frames_read > 0 && muted) {
       *muted = (buffer[0] == kMutedAudio);
     }
-    return (bytes_read == size);
+    return (frames_read == requested_frames);
   }
 
   uint32 bytes_buffered() {
@@ -221,8 +236,10 @@ class AudioRendererBaseTest : public ::testing::Test {
 TEST_F(AudioRendererBaseTest, Initialize_Failed) {
   EXPECT_CALL(*renderer_, OnInitialize(_, _, _))
       .WillOnce(Return(false));
-  EXPECT_CALL(host_, SetError(PIPELINE_ERROR_INITIALIZATION_FAILED));
-  renderer_->Initialize(decoder_, NewExpectedClosure(), NewUnderflowClosure());
+  renderer_->Initialize(
+      decoder_,
+      NewExpectedStatusCB(PIPELINE_ERROR_INITIALIZATION_FAILED),
+      NewUnderflowClosure(), NewAudioTimeClosure());
 
   // We should have no reads.
   EXPECT_TRUE(read_cb_.is_null());
@@ -231,7 +248,8 @@ TEST_F(AudioRendererBaseTest, Initialize_Failed) {
 TEST_F(AudioRendererBaseTest, Initialize_Successful) {
   EXPECT_CALL(*renderer_, OnInitialize(_, _, _))
       .WillOnce(Return(true));
-  renderer_->Initialize(decoder_, NewExpectedClosure(), NewUnderflowClosure());
+  renderer_->Initialize(decoder_, NewExpectedStatusCB(PIPELINE_OK),
+                        NewUnderflowClosure(), NewAudioTimeClosure());
 
   // We should have no reads.
   EXPECT_TRUE(read_cb_.is_null());
@@ -354,7 +372,6 @@ TEST_F(AudioRendererBaseTest, Underflow_EndOfStream) {
   EXPECT_CALL(host_, NotifyEnded());
 
   EXPECT_CALL(host_, GetTime()).WillOnce(Return(base::TimeDelta()));
-  EXPECT_CALL(host_, SetTime(_));
   EXPECT_FALSE(ConsumeBufferedData(kDataSize, &muted));
   EXPECT_FALSE(muted);
 }

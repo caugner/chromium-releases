@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,11 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/test/test_browser_thread.h"
+#include "content/test/test_renderer_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::RenderViewHostTester;
 
 class WebApplicationTest : public TabContentsWrapperTestHarness {
  public:
@@ -34,7 +36,8 @@ TEST_F(WebApplicationTest, GetShortcutInfoForTab) {
   web_app_info.description = description;
   web_app_info.app_url = url;
 
-  rvh()->TestOnMessageReceived(
+  RenderViewHostTester::TestOnMessageReceived(
+      rvh(),
       ExtensionHostMsg_DidGetApplicationInfo(0, 0, web_app_info));
   ShellIntegration::ShortcutInfo info;
   web_app::GetShortcutInfoForTab(contents_wrapper(), &info);
@@ -44,9 +47,20 @@ TEST_F(WebApplicationTest, GetShortcutInfoForTab) {
   EXPECT_EQ(url, info.url);
 }
 
-TEST_F(WebApplicationTest, GetDataDir) {
-  FilePath test_path(FILE_PATH_LITERAL("/path/to/test"));
-  FilePath result = web_app::GetDataDir(test_path);
-  test_path = test_path.AppendASCII("Web Applications");
-  EXPECT_EQ(test_path.value(), result.value());
+TEST_F(WebApplicationTest, AppDirWithId) {
+  FilePath profile_path(FILE_PATH_LITERAL("profile"));
+  FilePath result(web_app::GetWebAppDataDirectory(profile_path, "123", GURL()));
+  FilePath expected = profile_path.AppendASCII("Web Applications")
+                                  .AppendASCII("_crx_123");
+  EXPECT_EQ(expected, result);
+}
+
+TEST_F(WebApplicationTest, AppDirWithUrl) {
+  FilePath profile_path(FILE_PATH_LITERAL("profile"));
+  FilePath result(web_app::GetWebAppDataDirectory(
+      profile_path, "", GURL("http://example.com")));
+  FilePath expected = profile_path.AppendASCII("Web Applications")
+                                  .AppendASCII("example.com")
+                                  .AppendASCII("http_80");
+  EXPECT_EQ(expected, result);
 }

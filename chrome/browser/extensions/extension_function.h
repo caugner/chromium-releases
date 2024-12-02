@@ -31,11 +31,14 @@ class UIThreadExtensionFunction;
 class IOThreadExtensionFunction;
 class Profile;
 class QuotaLimitHeuristic;
-class RenderViewHost;
 
 namespace base {
 class ListValue;
 class Value;
+}
+
+namespace content {
+class RenderViewHost;
 }
 
 #define EXTENSION_FUNCTION_VALIDATE(test) do { \
@@ -81,7 +84,9 @@ class ExtensionFunction
   // NULL-check.
   virtual void Run();
 
-  // Returns a quota limit heuristic suitable for this function.
+  // Optionally adds one or multiple QuotaLimitHeuristic instances suitable for
+  // this function to |heuristics|. The ownership of the new QuotaLimitHeuristic
+  // instances is passed to the owner of |heuristics|.
   // No quota limiting by default.
   virtual void GetQuotaLimitHeuristics(
       QuotaLimitHeuristics* heuristics) const {}
@@ -237,8 +242,10 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   void set_profile(Profile* profile) { profile_ = profile; }
   Profile* profile() const { return profile_; }
 
-  void SetRenderViewHost(RenderViewHost* render_view_host);
-  RenderViewHost* render_view_host() const { return render_view_host_; }
+  void SetRenderViewHost(content::RenderViewHost* render_view_host);
+  content::RenderViewHost* render_view_host() const {
+    return render_view_host_;
+  }
 
   void set_dispatcher(
       const base::WeakPtr<ExtensionFunctionDispatcher>& dispatcher) {
@@ -279,7 +286,7 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   base::WeakPtr<ExtensionFunctionDispatcher> dispatcher_;
 
   // The RenderViewHost we will send responses too.
-  RenderViewHost* render_view_host_;
+  content::RenderViewHost* render_view_host_;
 
   // The Profile of this function's extension.
   Profile* profile_;
@@ -287,7 +294,7 @@ class UIThreadExtensionFunction : public ExtensionFunction {
  private:
   // Helper class to track the lifetime of ExtensionFunction's RenderViewHost
   // pointer and NULL it out when it dies. It also allows us to filter IPC
-  // messages comming from the RenderViewHost. We use this separate class
+  // messages coming from the RenderViewHost. We use this separate class
   // (instead of implementing NotificationObserver on ExtensionFunction) because
   // it is/ common for subclasses of ExtensionFunction to be
   // NotificationObservers, and it would be an easy error to forget to call the
@@ -296,14 +303,14 @@ class UIThreadExtensionFunction : public ExtensionFunction {
                                 public content::RenderViewHostObserver {
    public:
     RenderViewHostTracker(UIThreadExtensionFunction* function,
-                          RenderViewHost* render_view_host);
+                          content::RenderViewHost* render_view_host);
    private:
     virtual void Observe(int type,
                          const content::NotificationSource& source,
                          const content::NotificationDetails& details) OVERRIDE;
 
     virtual void RenderViewHostDestroyed(
-        RenderViewHost* render_view_host) OVERRIDE;
+        content::RenderViewHost* render_view_host) OVERRIDE;
     virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
     UIThreadExtensionFunction* function_;

@@ -17,9 +17,10 @@
 #include "ui/base/events.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/client/window_types.h"
-#include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/layer_animator.h"
 #include "ui/gfx/compositor/layer_delegate.h"
+#include "ui/gfx/compositor/layer_type.h"
+#include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 
@@ -42,6 +43,10 @@ class WindowObserver;
 namespace internal {
 class FocusManager;
 }
+
+// Defined in window_property.h (which we do not include)
+template<typename T>
+struct WindowProperty;
 
 // Aura window implementation. Interesting events are sent to the
 // WindowDelegate.
@@ -67,7 +72,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   explicit Window(WindowDelegate* delegate);
   virtual ~Window();
 
-  void Init(ui::Layer::LayerType layer_type);
+  void Init(ui::LayerType layer_type);
 
   // A type is used to identify a class of Windows and customize behavior such
   // as event handling and parenting.  This field should only be consumed by the
@@ -105,6 +110,11 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   Window* parent() { return parent_; }
   const Window* parent() const { return parent_; }
 
+  // Returns the RootWindow that contains this Window or NULL if the Window is
+  // not contained by a RootWindow.
+  virtual RootWindow* GetRootWindow();
+  virtual const RootWindow* GetRootWindow() const;
+
   // The Window does not own this object.
   void set_user_data(void* user_data) { user_data_ = user_data; }
   void* user_data() const { return user_data_; }
@@ -114,12 +124,13 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   void Hide();
   // Returns true if this window and all its ancestors are visible.
   bool IsVisible() const;
+  // Returns the visibility requested by this window. IsVisible() takes into
+  // account the visibility of the layer and ancestors, where as this tracks
+  // whether Show() without a Hide() has been invoked.
+  bool TargetVisibility() const { return visible_; }
 
   // Returns the window's bounds in screen coordinates.
   gfx::Rect GetScreenBounds() const;
-
-  // Returns true if this window is active.
-  bool IsActive() const;
 
   virtual void SetTransform(const ui::Transform& transform);
 
@@ -149,9 +160,14 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   // Stacks the specified child of this Window at the front of the z-order.
   void StackChildAtTop(Window* child);
 
-  // Stacks |child| above |other|.  Does nothing if |child| is already above
-  // |other|.
-  void StackChildAbove(Window* child, Window* other);
+  // Stacks |child| above |target|.  Does nothing if |child| is already above
+  // |target|.  Does not stack on top of windows with NULL layer delegates,
+  // see WindowTest.StackingMadrigal for details.
+  void StackChildAbove(Window* child, Window* target);
+
+  // Stacks |child| below |target|. Does nothing if |child| is already below
+  // |target|.
+  void StackChildBelow(Window* child, Window* target);
 
   // Tree operations.
   // TODO(beng): Child windows are currently not owned by the hierarchy. We
@@ -170,7 +186,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   //   destroyed. This means a transient child is destroyed if either its parent
   //   or transient parent is destroyed.
   // . If a transient child and its transient parent share the same parent, then
-  //   transient children are always ordered above the trasient parent.
+  //   transient children are always ordered above the transient parent.
   // Transient windows are typically used for popups and menus.
   void AddTransientChild(Window* child);
   void RemoveTransientChild(Window* child);
@@ -203,16 +219,28 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   void AddObserver(WindowObserver* observer);
   void RemoveObserver(WindowObserver* observer);
 
-  // When set to true, this Window will stop propagation of all events targeted
-  // at Windows below it in the z-order, but only if this Window has children.
-  // This is used to implement lock-screen type functionality where we do not
-  // want events to be sent to running logged-in windows when the lock screen is
-  // displayed.
-  void set_stops_event_propagation(bool stops_event_propagation) {
-    stops_event_propagation_ = stops_event_propagation;
+  void set_ignore_events(bool ignore_events) { ignore_events_ = ignore_events; }
+
+  // Sets the window to grab hits for an area extending -|insets| pixels outside
+  // its bounds. This can be used to create an invisible non- client area, for
+  // example if your windows have no visible frames but still need to have
+  // resize edges.
+  void set_hit_test_bounds_override_outer(const gfx::Insets& insets) {
+    hit_test_bounds_override_outer_ = insets;
+  }
+  gfx::Insets hit_test_bounds_override_outer() const {
+    return hit_test_bounds_override_outer_;
   }
 
-  void set_ignore_events(bool ignore_events) { ignore_events_ = ignore_events; }
+  // Sets the window to grab hits for an area extending |insets| pixels inside
+  // its bounds (even if that inner region overlaps a child window). This can be
+  // used to create an invisible non-client area that overlaps the client area.
+  void set_hit_test_bounds_override_inner(const gfx::Insets& insets) {
+    hit_test_bounds_override_inner_ = insets;
+  }
+  gfx::Insets hit_test_bounds_override_inner() const {
+    return hit_test_bounds_override_inner_;
+  }
 
   // Returns true if the |point_in_root| in root window's coordinate falls
   // within this window's bounds. Returns false if the window is detached
@@ -269,41 +297,51 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   // Returns true if this window has a mouse capture.
   bool HasCapture();
 
-  // Sets the window property |value| for given |name|. Setting NULL or 0
-  // removes the property. It uses |ui::ViewProp| to store the property.
-  // Please see the description of |prop_map_| for more details. The caller is
-  // responsible for the lifetime of any object set as a property on the Window.
-  void SetProperty(const char* name, void* value);
-  void SetIntProperty(const char* name, int value);
+  // Suppresses painting window content by disgarding damaged rect and ignoring
+  // new paint requests.
+  void SuppressPaint();
 
-  // Returns the window property for given |name|.  Returns NULL or 0 if
-  // the property does not exist.
-  // TODO(oshima): Returning 0 for non existing property is problematic.
-  // Fix ViewProp to be able to tell if the property exists and
-  // change it to -1.
-  void* GetProperty(const char* name) const;
-  int GetIntProperty(const char* name) const;
+  // Sets the |value| of the given window |property|. Setting to the default
+  // value (e.g., NULL) removes the property. The caller is responsible for the
+  // lifetime of any object set as a property on the Window.
+  template<typename T>
+  void SetProperty(const WindowProperty<T>* property, T value);
 
-  // Returns true if this window is currently stopping event
-  // propagation for any windows behind it in the z-order.
-  bool StopsEventPropagation() const;
+  // Returns the value of the given window |property|.  Returns the
+  // property-specific default value if the property was not previously set.
+  template<typename T>
+  T GetProperty(const WindowProperty<T>* property) const;
 
- protected:
-  // Returns the root window or NULL if we aren't yet attached to the root
-  // window.
-  virtual RootWindow* GetRootWindow();
+  // Sets the |property| to its default value. Useful for avoiding a cast when
+  // setting to NULL.
+  template<typename T>
+  void ClearProperty(const WindowProperty<T>* property);
 
-  // Called when the |window| is being detached from the root window
-  // by being removed from its parent. It is called before |parent_| is
-  // set to NULL.
-  virtual void OnWindowDetachingFromRootWindow(aura::Window* window);
+  // NativeWidget::[GS]etNativeWindowProperty use strings as keys, and this is
+  // difficult to change while retaining compatibility with other platforms.
+  // TODO(benrg): Find a better solution.
+  void SetNativeWindowProperty(const char* key, void* value);
+  void* GetNativeWindowProperty(const char* key) const;
 
-  // Called when the |window| is attached to the root window by being added
-  // to its parent.
-  virtual void OnWindowAttachedToRootWindow(aura::Window* window);
+  // Type of a function to delete a property that this window owns.
+  typedef void (*PropertyDeallocator)(intptr_t value);
 
  private:
   friend class LayoutManager;
+
+  // Used when stacking windows.
+  enum StackDirection {
+    STACK_ABOVE,
+    STACK_BELOW
+  };
+
+  // Called by the public {Set,Get,Clear}Property functions.
+  intptr_t SetPropertyInternal(const void* key,
+                               const char* name,
+                               PropertyDeallocator deallocator,
+                               intptr_t value,
+                               intptr_t default_value);
+  intptr_t GetPropertyInternal(const void* key, intptr_t default_value) const;
 
   // Changes the bounds of the window without condition.
   void SetBoundsInternal(const gfx::Rect& new_bounds);
@@ -319,8 +357,7 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   // If |return_tightest| is true, returns the tightest-containing (i.e.
   // furthest down the hierarchy) Window containing the point; otherwise,
   // returns the loosest.  If |for_event_handling| is true, then hit-test masks
-  // and StopsEventPropagation() are honored; otherwise, only bounds checks are
-  // performed.
+  // are honored; otherwise, only bounds checks are performed.
   Window* GetWindowForPoint(const gfx::Point& local_point,
                             bool return_tightest,
                             bool for_event_handling);
@@ -328,18 +365,30 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
   // Called when this window's parent has changed.
   void OnParentChanged();
 
+  // Determines the real location for stacking |child| and invokes
+  // StackChildRelativeToImpl().
+  void StackChildRelativeTo(Window* child,
+                            Window* target,
+                            StackDirection direction);
+
+  // Implementation of StackChildRelativeTo().
+  void StackChildRelativeToImpl(Window* child,
+                                Window* target,
+                                StackDirection direction);
+
   // Called when this window's stacking order among its siblings is changed.
   void OnStackingChanged();
+
+  // Notifies observers registered with this Window (and its subtree) when the
+  // Window has been added or is about to be removed from a RootWindow.
+  void NotifyAddedToRootWindow();
+  void NotifyRemovingFromRootWindow();
 
   // Overridden from ui::LayerDelegate:
   virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE;
 
   // Updates the layer name with a name based on the window's name and id.
   void UpdateLayerName(const std::string& name);
-
-  // Returns true if this window is behind a window that stops event
-  // propagation.
-  bool IsBehindStopEventsWindow() const;
 
   client::WindowType type_;
 
@@ -382,21 +431,25 @@ class AURA_EXPORT Window : public ui::LayerDelegate {
 
   void* user_data_;
 
-  // When true, events are not sent to windows behind this one in the z-order,
-  // provided this window has children. See set_stops_event_propagation().
-  bool stops_event_propagation_;
-
   // Makes the window pass all events through to any windows behind it.
   bool ignore_events_;
 
+  // See set_hit_test_outer_override().
+  gfx::Insets hit_test_bounds_override_outer_;
+  gfx::Insets hit_test_bounds_override_inner_;
+
   ObserverList<WindowObserver> observers_;
 
-  // We're using ViewProp to store the property (for now) instead of
-  // just using std::map because chrome is still using |ViewProp| class
-  // to create and access property.
-  // TODO(oshima): Consolidcate ViewProp and aura::window property
-  // implementation.
-  std::map<const char*, void*> prop_map_;
+  // Value struct to keep the name and deallocator for this property.
+  // Key cannot be used for this purpose because it can be char* or
+  // WindowProperty<>.
+  struct Value {
+    const char* name;
+    intptr_t value;
+    PropertyDeallocator deallocator;
+  };
+
+  std::map<const void*, Value> prop_map_;
 
   DISALLOW_COPY_AND_ASSIGN(Window);
 };

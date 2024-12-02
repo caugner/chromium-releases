@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,27 @@
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/extensions/file_browser_notifications.h"
+#include "chrome/browser/chromeos/extensions/file_manager_util.h"
+#include "chrome/browser/chromeos/gdata/gdata_system_service.h"
+#include "chrome/browser/chromeos/gdata/gdata_util.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/file_manager_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
 
+using chromeos::disks::DiskMountManager;
+using chromeos::disks::DiskMountManagerEventType;
 using content::BrowserThread;
+using gdata::GDataFileSystem;
+using gdata::GDataSystemService;
+using gdata::GDataSystemServiceFactory;
 
 namespace {
   const char kDiskAddedEventType[] = "added";
@@ -29,27 +39,14 @@ namespace {
   const char kPathChanged[] = "changed";
   const char kPathWatchError[] = "error";
 
-  const char* DeviceTypeToString(chromeos::DeviceType type) {
-    switch (type) {
-      case chromeos::FLASH:
-        return "flash";
-      case chromeos::HDD:
-        return "hdd";
-      case chromeos::OPTICAL:
-        return "optical";
-      default:
-        break;
-    }
-    return "undefined";
-  }
-
   DictionaryValue* DiskToDictionaryValue(
-      const chromeos::disks::DiskMountManager::Disk* disk) {
+      const DiskMountManager::Disk* disk) {
     DictionaryValue* result = new DictionaryValue();
     result->SetString("mountPath", disk->mount_path());
     result->SetString("devicePath", disk->device_path());
     result->SetString("label", disk->device_label());
-    result->SetString("deviceType", DeviceTypeToString(disk->device_type()));
+    result->SetString("deviceType",
+        DiskMountManager::DeviceTypeToString(disk->device_type()));
     result->SetInteger("totalSizeKB", disk->total_size_in_bytes() / 1024);
     result->SetBoolean("readOnly", disk->is_read_only());
     return result;
@@ -72,58 +69,95 @@ const char* MountErrorToString(chromeos::MountError error) {
       return "error_invalid_archive";
     case chromeos::MOUNT_ERROR_LIBRARY_NOT_LOADED:
       return "error_libcros_missing";
+    case chromeos::MOUNT_ERROR_NOT_AUTHENTICATED:
+      return "error_authentication";
+    case chromeos::MOUNT_ERROR_NETWORK_ERROR:
+      return "error_libcros_missing";
+    case chromeos::MOUNT_ERROR_PATH_UNMOUNTED:
+      return "error_path_unmounted";
     default:
       NOTREACHED();
   }
   return "";
 }
 
-ExtensionFileBrowserEventRouter::ExtensionFileBrowserEventRouter(
+FileBrowserEventRouter::FileBrowserEventRouter(
     Profile* profile)
-    : delegate_(new ExtensionFileBrowserEventRouter::FileWatcherDelegate(this)),
+    : delegate_(new FileBrowserEventRouter::FileWatcherDelegate(this)),
       notifications_(new FileBrowserNotifications(profile)),
       profile_(profile) {
 }
 
-ExtensionFileBrowserEventRouter::~ExtensionFileBrowserEventRouter() {
-  DCHECK(file_watchers_.empty());
-  STLDeleteValues(&file_watchers_);
-
-  if (!profile_) {
-    NOTREACHED();
-    return;
-  }
-  profile_ = NULL;
-  chromeos::disks::DiskMountManager::GetInstance()->RemoveObserver(this);
+FileBrowserEventRouter::~FileBrowserEventRouter() {
 }
 
-void ExtensionFileBrowserEventRouter::ObserveFileSystemEvents() {
+void FileBrowserEventRouter::ShutdownOnUIThread() {
+  DCHECK(file_watchers_.empty());
+  STLDeleteValues(&file_watchers_);
   if (!profile_) {
     NOTREACHED();
     return;
   }
-  if (chromeos::UserManager::Get()->user_is_logged_in()) {
-    chromeos::disks::DiskMountManager* disk_mount_manager =
-        chromeos::disks::DiskMountManager::GetInstance();
-    disk_mount_manager->RemoveObserver(this);
-    disk_mount_manager->AddObserver(this);
-    disk_mount_manager->RequestMountInfoRefresh();
+  DiskMountManager::GetInstance()->RemoveObserver(this);
+
+  GDataSystemService* system_service =
+      GDataSystemServiceFactory::FindForProfile(profile_);
+  if (system_service) {
+    system_service->file_system()->RemoveObserver(this);
+    system_service->file_system()->RemoveOperationObserver(this);
   }
+
+  profile_ = NULL;
+}
+
+void FileBrowserEventRouter::ObserveFileSystemEvents() {
+  if (!profile_) {
+    NOTREACHED();
+    return;
+  }
+  if (!chromeos::UserManager::Get()->IsUserLoggedIn())
+    return;
+
+  DiskMountManager* disk_mount_manager = DiskMountManager::GetInstance();
+  disk_mount_manager->RemoveObserver(this);
+  disk_mount_manager->AddObserver(this);
+  disk_mount_manager->RequestMountInfoRefresh();
+
+  GDataSystemService* system_service =
+      GDataSystemServiceFactory::GetForProfile(profile_);
+  if (!system_service) {
+    NOTREACHED();
+    return;
+  }
+  system_service->file_system()->AddOperationObserver(this);
+  system_service->file_system()->AddObserver(this);
 }
 
 // File watch setup routines.
-bool ExtensionFileBrowserEventRouter::AddFileWatch(
+bool FileBrowserEventRouter::AddFileWatch(
     const FilePath& local_path,
     const FilePath& virtual_path,
     const std::string& extension_id) {
   base::AutoLock lock(lock_);
-  WatcherMap::iterator iter = file_watchers_.find(local_path);
+  FilePath watch_path = local_path;
+  bool is_remote_watch = false;
+  // Tweak watch path for remote sources - we need to drop leading /special
+  // directory from there in order to be able to pair these events with
+  // their change notifications.
+  if (gdata::util::GetSpecialRemoteRootPath().IsParent(watch_path)) {
+    watch_path = gdata::util::ExtractGDataPath(watch_path);
+    is_remote_watch = true;
+  }
+
+  WatcherMap::iterator iter = file_watchers_.find(watch_path);
   if (iter == file_watchers_.end()) {
     scoped_ptr<FileWatcherExtensions>
-        watch(new FileWatcherExtensions(virtual_path, extension_id));
+        watch(new FileWatcherExtensions(virtual_path,
+                                        extension_id,
+                                        is_remote_watch));
 
-    if (watch->Watch(local_path, delegate_.get()))
-      file_watchers_[local_path] = watch.release();
+    if (watch->Watch(watch_path, delegate_.get()))
+      file_watchers_[watch_path] = watch.release();
     else
       return false;
   } else {
@@ -132,7 +166,7 @@ bool ExtensionFileBrowserEventRouter::AddFileWatch(
   return true;
 }
 
-void ExtensionFileBrowserEventRouter::RemoveFileWatch(
+void FileBrowserEventRouter::RemoveFileWatch(
     const FilePath& local_path,
     const std::string& extension_id) {
   base::AutoLock lock(lock_);
@@ -147,9 +181,9 @@ void ExtensionFileBrowserEventRouter::RemoveFileWatch(
   }
 }
 
-void ExtensionFileBrowserEventRouter::DiskChanged(
-    chromeos::disks::DiskMountManagerEventType event,
-    const chromeos::disks::DiskMountManager::Disk* disk) {
+void FileBrowserEventRouter::DiskChanged(
+    DiskMountManagerEventType event,
+    const DiskMountManager::Disk* disk) {
   // Disregard hidden devices.
   if (disk->is_hidden())
     return;
@@ -160,8 +194,8 @@ void ExtensionFileBrowserEventRouter::DiskChanged(
   }
 }
 
-void ExtensionFileBrowserEventRouter::DeviceChanged(
-    chromeos::disks::DiskMountManagerEventType event,
+void FileBrowserEventRouter::DeviceChanged(
+    DiskMountManagerEventType event,
     const std::string& device_path) {
   if (event == chromeos::disks::MOUNT_DEVICE_ADDED) {
     OnDeviceAdded(device_path);
@@ -185,22 +219,21 @@ void ExtensionFileBrowserEventRouter::DeviceChanged(
   }
 }
 
-void ExtensionFileBrowserEventRouter::MountCompleted(
-    chromeos::disks::DiskMountManager::MountEvent event_type,
+void FileBrowserEventRouter::MountCompleted(
+    DiskMountManager::MountEvent event_type,
     chromeos::MountError error_code,
-    const chromeos::disks::DiskMountManager::MountPointInfo& mount_info) {
+    const DiskMountManager::MountPointInfo& mount_info) {
   DispatchMountCompletedEvent(event_type, error_code, mount_info);
 
   if (mount_info.mount_type == chromeos::MOUNT_TYPE_DEVICE &&
-      event_type == chromeos::disks::DiskMountManager::MOUNTING) {
-    chromeos::disks::DiskMountManager* disk_mount_manager =
-        chromeos::disks::DiskMountManager::GetInstance();
-    chromeos::disks::DiskMountManager::DiskMap::const_iterator disk_it =
+      event_type == DiskMountManager::MOUNTING) {
+    DiskMountManager* disk_mount_manager = DiskMountManager::GetInstance();
+    DiskMountManager::DiskMap::const_iterator disk_it =
         disk_mount_manager->disks().find(mount_info.source_path);
     if (disk_it == disk_mount_manager->disks().end()) {
       return;
     }
-    chromeos::disks::DiskMountManager::Disk* disk = disk_it->second;
+    DiskMountManager::Disk* disk = disk_it->second;
 
      notifications_->ManageNotificationsOnMountCompleted(
         disk->system_path_prefix(), disk->drive_label(), disk->is_parent(),
@@ -209,21 +242,47 @@ void ExtensionFileBrowserEventRouter::MountCompleted(
   }
 }
 
-void ExtensionFileBrowserEventRouter::HandleFileWatchNotification(
+void FileBrowserEventRouter::OnProgressUpdate(
+    const std::vector<gdata::GDataOperationRegistry::ProgressStatus>& list) {
+  scoped_ptr<ListValue> event_list(
+      file_manager_util::ProgressStatusVectorToListValue(
+          profile_,
+          file_manager_util::GetFileBrowserExtensionUrl().GetOrigin(),
+          list));
+
+  ListValue args;
+  args.Append(event_list.release());
+
+  std::string args_json;
+  base::JSONWriter::Write(&args,
+                          &args_json);
+
+  profile_->GetExtensionEventRouter()->DispatchEventToExtension(
+      std::string(kFileBrowserDomain),
+      extension_event_names::kOnFileTransfersUpdated, args_json,
+      NULL, GURL());
+}
+
+void FileBrowserEventRouter::OnDirectoryChanged(
+    const FilePath& directory_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  HandleFileWatchNotification(directory_path, false);
+}
+
+void FileBrowserEventRouter::HandleFileWatchNotification(
     const FilePath& local_path, bool got_error) {
   base::AutoLock lock(lock_);
   WatcherMap::const_iterator iter = file_watchers_.find(local_path);
   if (iter == file_watchers_.end()) {
-    NOTREACHED();
     return;
   }
   DispatchFolderChangeEvent(iter->second->GetVirtualPath(), got_error,
                             iter->second->GetExtensions());
 }
 
-void ExtensionFileBrowserEventRouter::DispatchFolderChangeEvent(
+void FileBrowserEventRouter::DispatchFolderChangeEvent(
     const FilePath& virtual_path, bool got_error,
-    const ExtensionFileBrowserEventRouter::ExtensionUsageRegistry& extensions) {
+    const FileBrowserEventRouter::ExtensionUsageRegistry& extensions) {
   if (!profile_) {
     NOTREACHED();
     return;
@@ -244,7 +303,7 @@ void ExtensionFileBrowserEventRouter::DispatchFolderChangeEvent(
                           got_error ? kPathWatchError : kPathChanged);
 
     std::string args_json;
-    base::JSONWriter::Write(&args, false /* pretty_print */, &args_json);
+    base::JSONWriter::Write(&args, &args_json);
 
     profile_->GetExtensionEventRouter()->DispatchEventToExtension(
         iter->first, extension_event_names::kOnFileChanged, args_json,
@@ -252,8 +311,8 @@ void ExtensionFileBrowserEventRouter::DispatchFolderChangeEvent(
   }
 }
 
-void ExtensionFileBrowserEventRouter::DispatchDiskEvent(
-    const chromeos::disks::DiskMountManager::Disk* disk, bool added) {
+void FileBrowserEventRouter::DispatchDiskEvent(
+    const DiskMountManager::Disk* disk, bool added) {
   if (!profile_) {
     NOTREACHED();
     return;
@@ -268,16 +327,16 @@ void ExtensionFileBrowserEventRouter::DispatchDiskEvent(
   mount_info->Set("volumeInfo", disk_info);
 
   std::string args_json;
-  base::JSONWriter::Write(&args, false /* pretty_print */, &args_json);
+  base::JSONWriter::Write(&args, &args_json);
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       extension_event_names::kOnFileBrowserDiskChanged, args_json, NULL,
       GURL());
 }
 
-void ExtensionFileBrowserEventRouter::DispatchMountCompletedEvent(
-    chromeos::disks::DiskMountManager::MountEvent event,
+void FileBrowserEventRouter::DispatchMountCompletedEvent(
+    DiskMountManager::MountEvent event,
     chromeos::MountError error_code,
-    const chromeos::disks::DiskMountManager::MountPointInfo& mount_info) {
+    const DiskMountManager::MountPointInfo& mount_info) {
   if (!profile_ || mount_info.mount_type == chromeos::MOUNT_TYPE_INVALID) {
     NOTREACHED();
     return;
@@ -286,24 +345,27 @@ void ExtensionFileBrowserEventRouter::DispatchMountCompletedEvent(
   ListValue args;
   DictionaryValue* mount_info_value = new DictionaryValue();
   args.Append(mount_info_value);
-  if (event == chromeos::disks::DiskMountManager::MOUNTING) {
-    mount_info_value->SetString("eventType", "mount");
-  } else {
-    mount_info_value->SetString("eventType", "unmount");
-  }
+  mount_info_value->SetString("eventType",
+      event == DiskMountManager::MOUNTING ? "mount" : "unmount");
   mount_info_value->SetString("status", MountErrorToString(error_code));
   mount_info_value->SetString(
       "mountType",
-      chromeos::disks::DiskMountManager::MountTypeToString(
-          mount_info.mount_type));
+      DiskMountManager::MountTypeToString(mount_info.mount_type));
 
-  if (mount_info.mount_type == chromeos::MOUNT_TYPE_ARCHIVE) {
+  if (mount_info.mount_type == chromeos::MOUNT_TYPE_ARCHIVE ||
+      mount_info.mount_type == chromeos::MOUNT_TYPE_GDATA) {
     GURL source_url;
     if (file_manager_util::ConvertFileToFileSystemUrl(profile_,
             FilePath(mount_info.source_path),
             file_manager_util::GetFileBrowserExtensionUrl().GetOrigin(),
             &source_url)) {
       mount_info_value->SetString("sourceUrl", source_url.spec());
+    } else {
+      // If mounting of gdata moutn point failed, we may not be able to convert
+      // source path to source url, so let just send empty string.
+      DCHECK(mount_info.mount_type == chromeos::MOUNT_TYPE_GDATA &&
+             error_code != chromeos::MOUNT_ERROR_NONE);
+      mount_info_value->SetString("sourceUrl", "");
     }
   } else {
     mount_info_value->SetString("sourceUrl", mount_info.source_path);
@@ -328,7 +390,7 @@ void ExtensionFileBrowserEventRouter::DispatchMountCompletedEvent(
   }
 
   std::string args_json;
-  base::JSONWriter::Write(&args, false /* pretty_print */, &args_json);
+  base::JSONWriter::Write(&args, &args_json);
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       extension_event_names::kOnFileBrowserMountCompleted, args_json, NULL,
       GURL());
@@ -336,13 +398,13 @@ void ExtensionFileBrowserEventRouter::DispatchMountCompletedEvent(
   if (relative_mount_path_set &&
       mount_info.mount_type == chromeos::MOUNT_TYPE_DEVICE &&
       !mount_info.mount_condition &&
-      event == chromeos::disks::DiskMountManager::MOUNTING) {
-    file_manager_util::ViewFolder(FilePath(mount_info.mount_path));
+      event == DiskMountManager::MOUNTING) {
+    file_manager_util::ViewRemovableDrive(FilePath(mount_info.mount_path));
   }
 }
 
-void ExtensionFileBrowserEventRouter::OnDiskAdded(
-    const chromeos::disks::DiskMountManager::Disk* disk) {
+void FileBrowserEventRouter::OnDiskAdded(
+    const DiskMountManager::Disk* disk) {
   VLOG(1) << "Disk added: " << disk->device_path();
   if (disk->device_path().empty()) {
     VLOG(1) << "Empty system path for " << disk->device_path();
@@ -352,24 +414,23 @@ void ExtensionFileBrowserEventRouter::OnDiskAdded(
   // If disk is not mounted yet, give it a try.
   if (disk->mount_path().empty()) {
     // Initiate disk mount operation.
-    chromeos::disks::DiskMountManager::GetInstance()->MountPath(
+    DiskMountManager::GetInstance()->MountPath(
         disk->device_path(), chromeos::MOUNT_TYPE_DEVICE);
   }
   DispatchDiskEvent(disk, true);
 }
 
-void ExtensionFileBrowserEventRouter::OnDiskRemoved(
-    const chromeos::disks::DiskMountManager::Disk* disk) {
+void FileBrowserEventRouter::OnDiskRemoved(
+    const DiskMountManager::Disk* disk) {
   VLOG(1) << "Disk removed: " << disk->device_path();
 
   if (!disk->mount_path().empty()) {
-    chromeos::disks::DiskMountManager::GetInstance()->UnmountPath(
-        disk->mount_path());
+    DiskMountManager::GetInstance()->UnmountPath(disk->mount_path());
   }
   DispatchDiskEvent(disk, false);
 }
 
-void ExtensionFileBrowserEventRouter::OnDeviceAdded(
+void FileBrowserEventRouter::OnDeviceAdded(
     const std::string& device_path) {
   VLOG(1) << "Device added : " << device_path;
 
@@ -379,7 +440,7 @@ void ExtensionFileBrowserEventRouter::OnDeviceAdded(
                                           4000);
 }
 
-void ExtensionFileBrowserEventRouter::OnDeviceRemoved(
+void FileBrowserEventRouter::OnDeviceRemoved(
     const std::string& device_path) {
   VLOG(1) << "Device removed : " << device_path;
   notifications_->HideNotification(FileBrowserNotifications::DEVICE,
@@ -389,12 +450,12 @@ void ExtensionFileBrowserEventRouter::OnDeviceRemoved(
   notifications_->UnregisterDevice(device_path);
 }
 
-void ExtensionFileBrowserEventRouter::OnDeviceScanned(
+void FileBrowserEventRouter::OnDeviceScanned(
     const std::string& device_path) {
   VLOG(1) << "Device scanned : " << device_path;
 }
 
-void ExtensionFileBrowserEventRouter::OnFormattingStarted(
+void FileBrowserEventRouter::OnFormattingStarted(
     const std::string& device_path, bool success) {
   if (success) {
     notifications_->ShowNotification(FileBrowserNotifications::FORMAT_START,
@@ -405,7 +466,7 @@ void ExtensionFileBrowserEventRouter::OnFormattingStarted(
   }
 }
 
-void ExtensionFileBrowserEventRouter::OnFormattingFinished(
+void FileBrowserEventRouter::OnFormattingFinished(
     const std::string& device_path, bool success) {
   if (success) {
     notifications_->HideNotification(FileBrowserNotifications::FORMAT_START,
@@ -416,8 +477,8 @@ void ExtensionFileBrowserEventRouter::OnFormattingFinished(
     notifications_->HideNotificationDelayed(
         FileBrowserNotifications::FORMAT_SUCCESS, device_path, 4000);
 
-    chromeos::disks::DiskMountManager::GetInstance()->MountPath(
-        device_path, chromeos::MOUNT_TYPE_DEVICE);
+    DiskMountManager::GetInstance()->MountPath(device_path,
+                                               chromeos::MOUNT_TYPE_DEVICE);
   } else {
     notifications_->HideNotification(FileBrowserNotifications::FORMAT_START,
                                      device_path);
@@ -426,12 +487,12 @@ void ExtensionFileBrowserEventRouter::OnFormattingFinished(
   }
 }
 
-// ExtensionFileBrowserEventRouter::WatcherDelegate methods.
-ExtensionFileBrowserEventRouter::FileWatcherDelegate::FileWatcherDelegate(
-    ExtensionFileBrowserEventRouter* router) : router_(router) {
+// FileBrowserEventRouter::WatcherDelegate methods.
+FileBrowserEventRouter::FileWatcherDelegate::FileWatcherDelegate(
+    FileBrowserEventRouter* router) : router_(router) {
 }
 
-void ExtensionFileBrowserEventRouter::FileWatcherDelegate::OnFilePathChanged(
+void FileBrowserEventRouter::FileWatcherDelegate::OnFilePathChanged(
     const FilePath& local_path) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -439,7 +500,7 @@ void ExtensionFileBrowserEventRouter::FileWatcherDelegate::OnFilePathChanged(
                  this, local_path, false));
 }
 
-void ExtensionFileBrowserEventRouter::FileWatcherDelegate::OnFilePathError(
+void FileBrowserEventRouter::FileWatcherDelegate::OnFilePathError(
     const FilePath& local_path) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -448,70 +509,112 @@ void ExtensionFileBrowserEventRouter::FileWatcherDelegate::OnFilePathError(
 }
 
 void
-ExtensionFileBrowserEventRouter::FileWatcherDelegate::HandleFileWatchOnUIThread(
+FileBrowserEventRouter::FileWatcherDelegate::HandleFileWatchOnUIThread(
      const FilePath& local_path, bool got_error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   router_->HandleFileWatchNotification(local_path, got_error);
 }
 
 
-ExtensionFileBrowserEventRouter::FileWatcherExtensions::FileWatcherExtensions(
-    const FilePath& path, const std::string& extension_id)
-    : ref_count(0) {
-  file_watcher.reset(new base::files::FilePathWatcher());
-  virtual_path = path;
+FileBrowserEventRouter::FileWatcherExtensions::FileWatcherExtensions(
+    const FilePath& path, const std::string& extension_id,
+    bool is_remote_file_system)
+    : ref_count_(0),
+      is_remote_file_system_(is_remote_file_system) {
+  if (!is_remote_file_system_)
+    file_watcher_.reset(new base::files::FilePathWatcher());
+
+  virtual_path_ = path;
   AddExtension(extension_id);
 }
 
-void ExtensionFileBrowserEventRouter::FileWatcherExtensions::AddExtension(
+void FileBrowserEventRouter::FileWatcherExtensions::AddExtension(
     const std::string& extension_id) {
-  ExtensionUsageRegistry::iterator it = extensions.find(extension_id);
-  if (it != extensions.end()) {
+  ExtensionUsageRegistry::iterator it = extensions_.find(extension_id);
+  if (it != extensions_.end()) {
     it->second++;
   } else {
-    extensions.insert(ExtensionUsageRegistry::value_type(extension_id, 1));
+    extensions_.insert(ExtensionUsageRegistry::value_type(extension_id, 1));
   }
 
-  ref_count++;
+  ref_count_++;
 }
 
-void ExtensionFileBrowserEventRouter::FileWatcherExtensions::RemoveExtension(
+void FileBrowserEventRouter::FileWatcherExtensions::RemoveExtension(
     const std::string& extension_id) {
-  ExtensionUsageRegistry::iterator it = extensions.find(extension_id);
+  ExtensionUsageRegistry::iterator it = extensions_.find(extension_id);
 
-  if (it != extensions.end()) {
+  if (it != extensions_.end()) {
     // If entry found - decrease it's count and remove if necessary
     if (0 == it->second--) {
-      extensions.erase(it);
+      extensions_.erase(it);
     }
 
-    ref_count--;
+    ref_count_--;
   } else {
     // Might be reference counting problem - e.g. if some component of
     // extension subscribes/unsubscribes correctly, but other component
     // only unsubscribes, developer of first one might receive this message
     LOG(FATAL) << " Extension [" << extension_id
-        << "] tries to unsubscribe from folder [" << local_path.value()
+        << "] tries to unsubscribe from folder [" << local_path_.value()
         << "] it isn't subscribed";
   }
 }
 
-const ExtensionFileBrowserEventRouter::ExtensionUsageRegistry&
-ExtensionFileBrowserEventRouter::FileWatcherExtensions::GetExtensions() const {
-  return extensions;
+const FileBrowserEventRouter::ExtensionUsageRegistry&
+FileBrowserEventRouter::FileWatcherExtensions::GetExtensions() const {
+  return extensions_;
 }
 
 unsigned int
-ExtensionFileBrowserEventRouter::FileWatcherExtensions::GetRefCount() const {
-  return ref_count;
+FileBrowserEventRouter::FileWatcherExtensions::GetRefCount() const {
+  return ref_count_;
 }
 
 const FilePath&
-ExtensionFileBrowserEventRouter::FileWatcherExtensions::GetVirtualPath() const {
-  return virtual_path;
+FileBrowserEventRouter::FileWatcherExtensions::GetVirtualPath() const {
+  return virtual_path_;
 }
 
-bool ExtensionFileBrowserEventRouter::FileWatcherExtensions::Watch
+bool FileBrowserEventRouter::FileWatcherExtensions::Watch
     (const FilePath& path, FileWatcherDelegate* delegate) {
-  return file_watcher->Watch(path, delegate);
+  if (is_remote_file_system_)
+    return true;
+
+  return file_watcher_->Watch(path, delegate);
+}
+
+// static
+scoped_refptr<FileBrowserEventRouter>
+FileBrowserEventRouterFactory::GetForProfile(Profile* profile) {
+  return static_cast<FileBrowserEventRouter*>(
+      GetInstance()->GetServiceForProfile(profile, true).get());
+}
+
+// static
+FileBrowserEventRouterFactory*
+FileBrowserEventRouterFactory::GetInstance() {
+  return Singleton<FileBrowserEventRouterFactory>::get();
+}
+
+FileBrowserEventRouterFactory::FileBrowserEventRouterFactory()
+    : RefcountedProfileKeyedServiceFactory("FileBrowserEventRouter",
+          ProfileDependencyManager::GetInstance()) {
+  DependsOn(GDataSystemServiceFactory::GetInstance());
+}
+
+FileBrowserEventRouterFactory::~FileBrowserEventRouterFactory() {
+}
+
+scoped_refptr<RefcountedProfileKeyedService>
+FileBrowserEventRouterFactory::BuildServiceInstanceFor(Profile* profile) const {
+  return scoped_refptr<RefcountedProfileKeyedService>(
+      new FileBrowserEventRouter(profile));
+}
+
+bool FileBrowserEventRouterFactory::ServiceHasOwnInstanceInIncognito() {
+  // Explicitly and always allow this router in guest login mode.   see
+  // chrome/browser/profiles/profile_keyed_base_factory.h comment
+  // for the details.
+  return true;
 }

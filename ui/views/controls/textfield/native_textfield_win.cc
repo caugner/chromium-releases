@@ -247,6 +247,11 @@ void NativeTextfieldWin::UpdateBackgroundColor() {
   CRichEditCtrl::SetBackgroundColor(bg_color_);
 }
 
+void NativeTextfieldWin::UpdateCursorColor() {
+  if (!textfield_->use_default_cursor_color())
+    NOTIMPLEMENTED();
+}
+
 void NativeTextfieldWin::UpdateReadOnly() {
   SendMessage(m_hWnd, EM_SETREADONLY, textfield_->read_only(), 0);
   UpdateAccessibleState(STATE_SYSTEM_READONLY, textfield_->read_only());
@@ -532,7 +537,8 @@ void NativeTextfieldWin::OnCopy() {
   const string16 text(GetSelectedText());
   if (!text.empty() && ViewsDelegate::views_delegate) {
     ui::ScopedClipboardWriter scw(
-        ViewsDelegate::views_delegate->GetClipboard());
+        ViewsDelegate::views_delegate->GetClipboard(),
+        ui::Clipboard::BUFFER_STANDARD);
     scw.WriteText(text);
   }
 }

@@ -9,6 +9,7 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/models/combobox_model.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/widget/widget.h"
@@ -30,6 +31,12 @@ Combobox::Combobox(ui::ComboboxModel* model)
 }
 
 Combobox::~Combobox() {
+}
+
+// static
+const gfx::Font& Combobox::GetFont() {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return rb.GetFont(ui::ResourceBundle::BaseFont);
 }
 
 void Combobox::ModelChanged() {
@@ -132,8 +139,13 @@ void Combobox::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     // The native wrapper's lifetime will be managed by the view hierarchy after
     // we call AddChildView.
     native_wrapper_ = NativeComboboxWrapper::CreateWrapper(this);
-    native_wrapper_->UpdateEnabled();
     AddChildView(native_wrapper_->GetView());
+    // The underlying native widget may not be created until the wrapper is
+    // parented. For this reason the wrapper is only updated after adding its
+    // view.
+    native_wrapper_->UpdateFromModel();
+    native_wrapper_->UpdateSelectedItem();
+    native_wrapper_->UpdateEnabled();
   }
 }
 

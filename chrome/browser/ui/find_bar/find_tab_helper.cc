@@ -9,9 +9,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/stop_find_action.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
@@ -140,7 +140,9 @@ void FindTabHelper::HandleFindReply(int request_id,
       active_match_ordinal = last_search_result_.active_match_ordinal();
 
     gfx::Rect selection = selection_rect;
-    if (selection.IsEmpty())
+    if (final_update && active_match_ordinal == 0)
+      selection = gfx::Rect();
+    else if (selection_rect.IsEmpty())
       selection = last_search_result_.selection_rect();
 
     // Notify the UI, automation and any other observers that a find result was

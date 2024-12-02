@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,14 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_MACOSX)
+namespace base {
+namespace mac {
+class ScopedNSAutoreleasePool;
+}  // namespace mac
+}  // namespace base
+#endif  // OS_MACOSX
 
 class Browser;
 class CommandLine;
@@ -91,7 +99,7 @@ class InProcessBrowserTest : public BrowserTestBase {
 
   // Returns the ResourceContext from browser_. Needed because tests in content
   // don't have access to Profile.
-  const content::ResourceContext& GetResourceContext();
+  content::ResourceContext* GetResourceContext();
 
   // Convenience methods for adding tabs to a Browser.
   void AddTabAtIndexToBrowser(Browser* browser,
@@ -142,6 +150,10 @@ class InProcessBrowserTest : public BrowserTestBase {
   // for the tab to finish loading, and shows the browser.
   Browser* CreateBrowserForPopup(Profile* profile);
 
+  // Creates a browser for an application and waits for it to load and shows
+  // the browser.
+  Browser* CreateBrowserForApp(const std::string& app_name, Profile* profile);
+
   // Called from the various CreateBrowser methods to add a blank tab, wait for
   // the navigation to complete, and show the browser's window.
   void AddBlankTabAndShow(Browser* browser);
@@ -155,10 +167,20 @@ class InProcessBrowserTest : public BrowserTestBase {
   // Sets some test states (see below for comments).  Call this in your test
   // constructor.
   void set_show_window(bool show) { show_window_ = show; }
+  void set_initial_window_required(bool flag) {
+    initial_window_required_= flag;
+  }
   void EnableDOMAutomation() { dom_automation_enabled_ = true; }
   void EnableTabCloseableStateWatcher() {
     tab_closeable_state_watcher_enabled_ = true;
   }
+
+#if defined(OS_MACOSX)
+  // Returns the autorelease pool in use inside RunTestOnMainThreadLoop().
+  base::mac::ScopedNSAutoreleasePool* AutoreleasePool() const {
+    return autorelease_pool_;
+  }
+#endif  // OS_MACOSX
 
  private:
   // Creates a user data directory for the test if one is needed. Returns true
@@ -185,6 +207,9 @@ class InProcessBrowserTest : public BrowserTestBase {
   // tests for example need the windows shown).
   bool show_window_;
 
+  // Whether this test requires an initial window.
+  bool initial_window_required_;
+
   // Whether the JavaScript can access the DOMAutomationController (a JS object
   // that can send messages back to the browser).
   bool dom_automation_enabled_;
@@ -202,6 +227,10 @@ class InProcessBrowserTest : public BrowserTestBase {
 #if defined(OS_CHROMEOS)
   chromeos::ScopedStubCrosEnabler stub_cros_enabler_;
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_MACOSX)
+  base::mac::ScopedNSAutoreleasePool* autorelease_pool_;
+#endif  // OS_MACOSX
 };
 
 #endif  // CHROME_TEST_BASE_IN_PROCESS_BROWSER_TEST_H_

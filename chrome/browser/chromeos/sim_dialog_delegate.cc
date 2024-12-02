@@ -48,19 +48,13 @@ namespace chromeos {
 // static
 void SimDialogDelegate::ShowDialog(gfx::NativeWindow owning_window,
                                    SimDialogMode mode) {
-  Profile* profile;
-  Browser* browser = NULL;
-  if (UserManager::Get()->user_is_logged_in()) {
-    browser = BrowserList::GetLastActive();
-    DCHECK(browser);
-    profile = browser->profile();
-  } else {
-    profile = ProfileManager::GetDefaultProfile();
-  }
+  Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
   HtmlDialogView* html_view =
-      new HtmlDialogView(profile, browser, new SimDialogDelegate(mode));
+      new HtmlDialogView(profile,
+                         BrowserList::GetLastActive(),
+                         new SimDialogDelegate(mode));
   html_view->InitDialog();
-  browser::CreateViewsWindow(owning_window, html_view, STYLE_FLUSH);
+  views::Widget::CreateWindowWithParent(html_view, owning_window);
   html_view->GetWidget()->Show();
 }
 
@@ -125,7 +119,8 @@ bool SimDialogDelegate::ShouldShowDialogTitle() const {
   return false;
 }
 
-bool SimDialogDelegate::HandleContextMenu(const ContextMenuParams& params) {
+bool SimDialogDelegate::HandleContextMenu(
+    const content::ContextMenuParams& params) {
   // Disable context menu.
   return true;
 }

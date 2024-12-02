@@ -20,13 +20,13 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/rand_util.h"
 #include "base/string_number_conversions.h"
+#include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
@@ -43,35 +43,42 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
 #include "chrome/test/base/bookmark_load_observer.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/test/test_navigation_observer.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
+#include "net/test/python_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/size.h"
+#include "ui/ui_controls/ui_controls.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/views/focus/accelerator_handler.h"
 #endif
 
 #if defined(USE_AURA)
+#include "ash/shell.h"
 #include "ui/aura/root_window.h"
 #endif
 
+using content::DomOperationNotificationDetails;
 using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
+using content::RenderViewHost;
+using content::RenderWidgetHost;
 using content::Referrer;
 using content::WebContents;
 
@@ -86,9 +93,9 @@ class DOMOperationObserver : public content::NotificationObserver,
  public:
   explicit DOMOperationObserver(RenderViewHost* render_view_host)
       : content::WebContentsObserver(
-            render_view_host->delegate()->GetAsWebContents()),
+            render_view_host->GetDelegate()->GetAsWebContents()),
         did_respond_(false) {
-    registrar_.Add(this, chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
+    registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
                    content::Source<RenderViewHost>(render_view_host));
     ui_test_utils::RunMessageLoop();
   }
@@ -96,9 +103,9 @@ class DOMOperationObserver : public content::NotificationObserver,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE {
-    DCHECK(type == chrome::NOTIFICATION_DOM_OPERATION_RESPONSE);
+    DCHECK(type == content::NOTIFICATION_DOM_OPERATION_RESPONSE);
     content::Details<DomOperationNotificationDetails> dom_op_details(details);
-    response_ = dom_op_details->json();
+    response_ = dom_op_details->json;
     did_respond_ = true;
     MessageLoopForUI::current()->Quit();
   }
@@ -225,8 +232,10 @@ bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
                                                 WideToUTF16Hack(script));
   DOMOperationObserver dom_op_observer(render_view_host);
   std::string json;
-  if (!dom_op_observer.GetResponse(&json))
+  if (!dom_op_observer.GetResponse(&json)) {
+    DLOG(ERROR) << "Cannot communicate with DOMOperationObserver.";
     return false;
+  }
 
   // Nothing more to do for callers that ignore the returned JS value.
   if (!result)
@@ -238,14 +247,19 @@ bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
   json.append("]");
 
   scoped_ptr<Value> root_val(base::JSONReader::Read(json, true));
-  if (!root_val->IsType(Value::TYPE_LIST))
+  if (!root_val->IsType(Value::TYPE_LIST)) {
+    DLOG(ERROR) << "JSON result is not a list.";
     return false;
+  }
 
   ListValue* list = static_cast<ListValue*>(root_val.get());
   Value* result_val;
   if (!list || !list->GetSize() ||
-      !list->Remove(0, &result_val))  // Remove gives us ownership of the value.
+      // Remove gives us ownership of the value.
+      !list->Remove(0, &result_val)) {
+    DLOG(ERROR) << "JSON result list is empty.";
     return false;
+  }
 
   result->reset(result_val);
   return true;
@@ -265,11 +279,10 @@ void RunMessageLoop() {
   MessageLoopForUI* ui_loop =
       content::BrowserThread::CurrentlyOn(content::BrowserThread::UI) ?
           MessageLoopForUI::current() : NULL;
-  bool did_allow_task_nesting = loop->NestableTasksAllowed();
-  loop->SetNestableTasksAllowed(true);
+  MessageLoop::ScopedNestableTaskAllower allow(loop);
   if (ui_loop) {
 #if defined(USE_AURA)
-    aura::RootWindow::GetInstance()->Run();
+    ui_loop->Run();
 #elif defined(TOOLKIT_VIEWS)
     views::AcceleratorHandler handler;
     ui_loop->RunWithDispatcher(&handler);
@@ -281,7 +294,6 @@ void RunMessageLoop() {
   } else {
     loop->Run();
   }
-  loop->SetNestableTasksAllowed(did_allow_task_nesting);
 }
 
 void RunAllPendingInMessageLoop() {
@@ -662,12 +674,20 @@ bool SendKeyPressSync(const Browser* browser,
   if (!GetNativeWindow(browser, &window))
     return false;
 
-  if (!ui_controls::SendKeyPressNotifyWhenDone(
-          window, key, control, shift, alt, command,
-          MessageLoop::QuitClosure())) {
+  bool result;
+  result = ui_controls::SendKeyPressNotifyWhenDone(
+      window, key, control, shift, alt, command, MessageLoop::QuitClosure());
+#if defined(OS_WIN)
+  if (!result && BringBrowserWindowToFront(browser)) {
+    result = ui_controls::SendKeyPressNotifyWhenDone(
+        window, key, control, shift, alt, command, MessageLoop::QuitClosure());
+  }
+#endif
+  if (!result) {
     LOG(ERROR) << "ui_controls::SendKeyPressNotifyWhenDone failed";
     return false;
   }
+
   // Run the message loop. It'll stop running when either the key was received
   // or the test timed out (in which case testing::Test::HasFatalFailure should
   // be set).
@@ -740,42 +760,16 @@ void TimedMessageLoopRunner::QuitAfter(int ms) {
       base::TimeDelta::FromMilliseconds(ms));
 }
 
-namespace {
-
-void AppendToPythonPath(const FilePath& dir) {
-#if defined(OS_WIN)
-  const wchar_t kPythonPath[] = L"PYTHONPATH";
-  // TODO(ukai): handle longer PYTHONPATH variables.
-  wchar_t oldpath[4096];
-  if (::GetEnvironmentVariable(kPythonPath, oldpath, arraysize(oldpath)) == 0) {
-    ::SetEnvironmentVariableW(kPythonPath, dir.value().c_str());
-  } else if (!wcsstr(oldpath, dir.value().c_str())) {
-    std::wstring newpath(oldpath);
-    newpath.append(L";");
-    newpath.append(dir.value());
-    SetEnvironmentVariableW(kPythonPath, newpath.c_str());
-  }
-#elif defined(OS_POSIX)
-  const char kPythonPath[] = "PYTHONPATH";
-  const char* oldpath = getenv(kPythonPath);
-  if (!oldpath) {
-    setenv(kPythonPath, dir.value().c_str(), 1);
-  } else if (!strstr(oldpath, dir.value().c_str())) {
-    std::string newpath(oldpath);
-    newpath.append(":");
-    newpath.append(dir.value());
-    setenv(kPythonPath, newpath.c_str(), 1);
-  }
+TestWebSocketServer::TestWebSocketServer()
+    : started_(false), port_(kDefaultWsPort) {
+#if defined(OS_POSIX)
+  process_group_id_ = base::kNullProcessHandle;
 #endif
 }
 
-}  // anonymous namespace
-
-TestWebSocketServer::TestWebSocketServer()
-    : started_(false) {
-#if defined(OS_POSIX)
-  process_handle_ = base::kNullProcessHandle;
-#endif
+int TestWebSocketServer::UseRandomPort() {
+  port_ = base::RandInt(1024, 65535);
+  return port_;
 }
 
 bool TestWebSocketServer::Start(const FilePath& root_directory) {
@@ -788,7 +782,7 @@ bool TestWebSocketServer::Start(const FilePath& root_directory) {
   cmd_line->AppendArg("--register_cygwin");
   cmd_line->AppendArgNative(FILE_PATH_LITERAL("--root=") +
                             root_directory.value());
-  cmd_line->AppendArg("--port=" + base::IntToString(kDefaultWsPort));
+  cmd_line->AppendArg("--port=" + base::IntToString(port_));
   if (!temp_dir_.CreateUniqueTempDir()) {
     LOG(ERROR) << "Unable to create a temporary directory.";
     return false;
@@ -799,11 +793,10 @@ bool TestWebSocketServer::Start(const FilePath& root_directory) {
   SetPythonPath();
 
   base::LaunchOptions options;
-  base::ProcessHandle* process_handle = NULL;
+  base::ProcessHandle process_handle;
 
 #if defined(OS_POSIX)
   options.new_process_group = true;
-  process_handle = &process_handle_;
 #elif defined(OS_WIN)
   job_handle_.Set(CreateJobObject(NULL, NULL));
   if (!job_handle_.IsValid()) {
@@ -821,11 +814,27 @@ bool TestWebSocketServer::Start(const FilePath& root_directory) {
 #endif
 
   // Launch a new WebSocket server process.
-  options.wait = true;
-  if (!base::LaunchProcess(*cmd_line.get(), options, process_handle)) {
+  if (!base::LaunchProcess(*cmd_line.get(), options, &process_handle)) {
     LOG(ERROR) << "Unable to launch websocket server.";
     return false;
   }
+#if defined(OS_POSIX)
+  process_group_id_ = process_handle;
+#endif
+  int exit_code;
+  bool wait_success = base::WaitForExitCodeWithTimeout(
+      process_handle,
+      &exit_code,
+      TestTimeouts::action_max_timeout_ms());
+  base::CloseProcessHandle(process_handle);
+
+  if (!wait_success || exit_code != 0) {
+    LOG(ERROR) << "Failed to run new-run-webkit-websocketserver: "
+               << "wait_success = " << wait_success << ", "
+               << "exit_code = " << exit_code;
+    return false;
+  }
+
   started_ = true;
   return true;
 }
@@ -833,7 +842,9 @@ bool TestWebSocketServer::Start(const FilePath& root_directory) {
 CommandLine* TestWebSocketServer::CreatePythonCommandLine() {
   // Note: Python's first argument must be the script; do not append CommandLine
   // switches, as they would precede the script path and break this CommandLine.
-  return new CommandLine(FilePath(FILE_PATH_LITERAL("python")));
+  FilePath path;
+  CHECK(GetPythonRunTime(&path));
+  return new CommandLine(path);
 }
 
 void TestWebSocketServer::SetPythonPath() {
@@ -880,7 +891,8 @@ TestWebSocketServer::~TestWebSocketServer() {
 
 #if defined(OS_POSIX)
   // Just to make sure that the server process terminates certainly.
-  base::KillProcessGroup(process_handle_);
+  if (process_group_id_ != base::kNullProcessHandle)
+    base::KillProcessGroup(process_group_id_);
 #endif
 }
 
@@ -918,6 +930,7 @@ void WindowedNotificationObserver::Wait() {
 
   running_ = true;
   ui_test_utils::RunMessageLoop();
+  running_ = false;
 }
 
 void WindowedNotificationObserver::Observe(
@@ -963,6 +976,23 @@ void TitleWatcher::AlsoWaitForTitle(const string16& expected_title) {
 TitleWatcher::~TitleWatcher() {
 }
 
+BrowserAddedObserver::BrowserAddedObserver()
+    : notification_observer_(
+          chrome::NOTIFICATION_BROWSER_OPENED,
+          content::NotificationService::AllSources()) {
+  original_browsers_.insert(BrowserList::begin(), BrowserList::end());
+}
+
+BrowserAddedObserver::~BrowserAddedObserver() {
+}
+
+Browser* BrowserAddedObserver::WaitForSingleNewBrowser() {
+  notification_observer_.Wait();
+  // Ensure that only a single new browser has appeared.
+  EXPECT_EQ(original_browsers_.size() + 1, BrowserList::size());
+  return GetBrowserNotInSet(original_browsers_);
+}
+
 const string16& TitleWatcher::WaitAndGetTitle() {
   if (expected_title_observed_)
     return observed_title_;
@@ -998,7 +1028,7 @@ void TitleWatcher::Observe(int type,
 }
 
 DOMMessageQueue::DOMMessageQueue() {
-  registrar_.Add(this, chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
+  registrar_.Add(this, content::NOTIFICATION_DOM_OPERATION_RESPONSE,
                  content::NotificationService::AllSources());
 }
 
@@ -1009,11 +1039,15 @@ void DOMMessageQueue::Observe(int type,
                               const content::NotificationDetails& details) {
   content::Details<DomOperationNotificationDetails> dom_op_details(details);
   content::Source<RenderViewHost> sender(source);
-  message_queue_.push(dom_op_details->json());
+  message_queue_.push(dom_op_details->json);
   if (waiting_for_message_) {
     waiting_for_message_ = false;
     MessageLoopForUI::current()->Quit();
   }
+}
+
+void DOMMessageQueue::ClearQueue() {
+  message_queue_ = std::queue<std::string>();
 }
 
 bool DOMMessageQueue::WaitForMessage(std::string* message) {
@@ -1108,4 +1142,16 @@ bool TakeEntirePageSnapshot(RenderViewHost* rvh, SkBitmap* bitmap) {
   return taker.TakeEntirePageSnapshot(rvh, bitmap);
 }
 
+namespace internal {
+
+void ClickTask(ui_controls::MouseButton button,
+               int state,
+               const base::Closure& followup) {
+  if (!followup.is_null())
+    ui_controls::SendMouseEventsNotifyWhenDone(button, state, followup);
+  else
+    ui_controls::SendMouseEvents(button, state);
+}
+
+}  // namespace internal
 }  // namespace ui_test_utils

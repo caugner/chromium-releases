@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -135,9 +135,10 @@ void NetworkManagerApi::Init() {
     system_bus_ = new dbus::Bus(options);
   }
 
-  dbus::ObjectProxy* proxy =
-      system_bus_->GetObjectProxy(kNetworkManagerServiceName,
-                                  kNetworkManagerPath);
+  // Ignore ServiceUnknown errors to avoid log spam: http://crbug.com/109696.
+  dbus::ObjectProxy* proxy = system_bus_->GetObjectProxyWithOptions(
+      kNetworkManagerServiceName, dbus::ObjectPath(kNetworkManagerPath),
+      dbus::ObjectProxy::IGNORE_SERVICE_UNKNOWN_ERRORS);
 
   // Get the initial state asynchronously.
   dbus::MethodCall method_call(DBUS_INTERFACE_PROPERTIES, "Get");
@@ -282,18 +283,6 @@ class NetworkChangeNotifierLinux::Thread
   virtual void CleanUp();
 
  private:
-  void NotifyObserversOfIPAddressChange() {
-    NetworkChangeNotifier::NotifyObserversOfIPAddressChange();
-  }
-
-  static void NotifyObserversOfDNSChange() {
-    NetworkChangeNotifier::NotifyObserversOfDNSChange();
-  }
-
-  static void NotifyObserversOfOnlineStateChange() {
-    NetworkChangeNotifier::NotifyObserversOfOnlineStateChange();
-  }
-
   // Starts listening for netlink messages.  Also handles the messages if there
   // are any available on the netlink socket.
   void ListenForNotifications();
@@ -313,7 +302,8 @@ class NetworkChangeNotifierLinux::Thread
   // Used to watch for changes to /etc/resolv.conf and /etc/hosts.
   scoped_ptr<base::files::FilePathWatcher> resolv_file_watcher_;
   scoped_ptr<base::files::FilePathWatcher> hosts_file_watcher_;
-  scoped_refptr<DNSWatchDelegate> file_watcher_delegate_;
+  scoped_refptr<DNSWatchDelegate> resolv_watcher_delegate_;
+  scoped_refptr<DNSWatchDelegate> hosts_watcher_delegate_;
 
   // Used to detect online/offline state changes.
   NetworkManagerApi network_manager_api_;
@@ -326,7 +316,7 @@ NetworkChangeNotifierLinux::Thread::Thread(dbus::Bus* bus)
       netlink_fd_(kInvalidSocket),
       ALLOW_THIS_IN_INITIALIZER_LIST(ptr_factory_(this)),
       network_manager_api_(
-          base::Bind(&NetworkChangeNotifierLinux::Thread
+          base::Bind(&NetworkChangeNotifier
                      ::NotifyObserversOfOnlineStateChange),
           bus) {
 }
@@ -338,15 +328,19 @@ NetworkChangeNotifierLinux::Thread::~Thread() {
 void NetworkChangeNotifierLinux::Thread::Init() {
   resolv_file_watcher_.reset(new FilePathWatcher);
   hosts_file_watcher_.reset(new FilePathWatcher);
-  file_watcher_delegate_ = new DNSWatchDelegate(base::Bind(
-      &NetworkChangeNotifierLinux::Thread::NotifyObserversOfDNSChange));
+  resolv_watcher_delegate_ = new DNSWatchDelegate(base::Bind(
+      &NetworkChangeNotifier::NotifyObserversOfDNSChange,
+      static_cast<unsigned>(CHANGE_DNS_SETTINGS)));
+  hosts_watcher_delegate_ = new DNSWatchDelegate(base::Bind(
+      &NetworkChangeNotifier::NotifyObserversOfDNSChange,
+      static_cast<unsigned>(CHANGE_DNS_HOSTS)));
   if (!resolv_file_watcher_->Watch(
           FilePath(FILE_PATH_LITERAL("/etc/resolv.conf")),
-          file_watcher_delegate_.get())) {
+          resolv_watcher_delegate_.get())) {
     LOG(ERROR) << "Failed to setup watch for /etc/resolv.conf";
   }
   if (!hosts_file_watcher_->Watch(FilePath(FILE_PATH_LITERAL("/etc/hosts")),
-          file_watcher_delegate_.get())) {
+          hosts_watcher_delegate_.get())) {
     LOG(ERROR) << "Failed to setup watch for /etc/hosts";
   }
   netlink_fd_ = InitializeNetlinkSocket();
@@ -398,9 +392,7 @@ void NetworkChangeNotifierLinux::Thread::ListenForNotifications() {
       const int kObserverNotificationDelayMS = 200;
       message_loop()->PostDelayedTask(
           FROM_HERE,
-          base::Bind(
-              &Thread::NotifyObserversOfIPAddressChange,
-              ptr_factory_.GetWeakPtr()),
+          base::Bind(&NetworkChangeNotifier::NotifyObserversOfIPAddressChange),
           kObserverNotificationDelayMS);
 #else
       NotifyObserversOfIPAddressChange();

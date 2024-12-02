@@ -21,12 +21,11 @@
 #include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/download_request_handle.h"
-#include "content/browser/download/download_status_updater.h"
-#include "content/browser/download/interrupt_reasons.h"
 #include "content/browser/download/mock_download_file.h"
-#include "content/browser/download/mock_download_manager.h"
+#include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager_delegate.h"
+#include "content/test/mock_download_manager.h"
 #include "content/test/test_browser_context.h"
 #include "content/test/test_browser_thread.h"
 #include "net/base/io_buffer.h"
@@ -67,8 +66,7 @@ using ::testing::Return;
 namespace {
 
 FilePath GetTempDownloadPath(const FilePath& suggested_path) {
-  return DownloadFile::AppendSuffixToPath(
-      suggested_path, FILE_PATH_LITERAL(".temp"));
+  return FilePath(suggested_path.value() + FILE_PATH_LITERAL(".temp"));
 }
 
 class MockDownloadFileFactory
@@ -76,17 +74,20 @@ class MockDownloadFileFactory
  public:
   MockDownloadFileFactory() {}
 
-  virtual DownloadFile* CreateFile(DownloadCreateInfo* info,
-                                   const DownloadRequestHandle& request_handle,
-                                   DownloadManager* download_manager,
-                                   bool calculate_hash) OVERRIDE;
+  virtual DownloadFile* CreateFile(
+      DownloadCreateInfo* info,
+      const DownloadRequestHandle& request_handle,
+      DownloadManager* download_manager,
+      bool calculate_hash,
+      const net::BoundNetLog& bound_net_log) OVERRIDE;
 };
 
 DownloadFile* MockDownloadFileFactory::CreateFile(
     DownloadCreateInfo* info,
     const DownloadRequestHandle& request_handle,
     DownloadManager* download_manager,
-    bool calculate_hash) {
+    bool calculate_hash,
+    const net::BoundNetLog& bound_net_log) {
   NOTREACHED();
   return NULL;
 }
@@ -131,7 +132,7 @@ class TestDownloadManagerDelegate : public content::DownloadManagerDelegate {
 
   virtual void ChooseDownloadPath(WebContents* web_contents,
                                   const FilePath& suggested_path,
-                                  void* data) OVERRIDE {
+                                  int32 download_id) OVERRIDE {
     if (!expected_suggested_path_.empty()) {
       EXPECT_STREQ(expected_suggested_path_.value().c_str(),
                    suggested_path.value().c_str());
@@ -141,14 +142,14 @@ class TestDownloadManagerDelegate : public content::DownloadManagerDelegate {
           BrowserThread::UI, FROM_HERE,
           base::Bind(&DownloadManager::FileSelectionCanceled,
                      download_manager_,
-                     base::Unretained(data)));
+                     download_id));
     } else {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           base::Bind(&DownloadManager::FileSelected,
                      download_manager_,
                      file_selection_response_,
-                     base::Unretained(data)));
+                     download_id));
     }
     expected_suggested_path_.clear();
     file_selection_response_.clear();
@@ -191,7 +192,7 @@ class TestDownloadManagerDelegate : public content::DownloadManagerDelegate {
     DownloadItem* item = download_manager_->GetActiveDownloadItem(download_id);
     if (!item)
       return;
-    item->MarkContentDangerous();
+    item->SetDangerType(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
     item->MaybeCompleteDownload();
   }
 
@@ -212,8 +213,8 @@ class DownloadManagerTest : public testing::Test {
   DownloadManagerTest()
       : browser_context(new TestBrowserContext()),
         download_manager_delegate_(new TestDownloadManagerDelegate()),
-        download_manager_(DownloadManager::Create(
-            download_manager_delegate_.get(), &download_status_updater_)),
+        download_manager_(new DownloadManagerImpl(
+            download_manager_delegate_.get(), NULL)),
         ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_),
         download_buffer_(new content::DownloadBuffer) {
@@ -247,8 +248,8 @@ class DownloadManagerTest : public testing::Test {
     download_manager_->OnResponseCompleted(download_id, size, hash);
   }
 
-  void FileSelected(const FilePath& path, void* params) {
-    download_manager_->FileSelected(path, params);
+  void FileSelected(const FilePath& path, int32 download_id) {
+    download_manager_->FileSelected(path, download_id);
   }
 
   void ContinueDownloadWithPath(DownloadItem* download, const FilePath& path) {
@@ -274,7 +275,7 @@ class DownloadManagerTest : public testing::Test {
 
   void OnDownloadInterrupted(int32 download_id, int64 size,
                              const std::string& hash_state,
-                             InterruptReason reason) {
+                             content::DownloadInterruptReason reason) {
     download_manager_->OnDownloadInterrupted(download_id, size,
                                              hash_state, reason);
   }
@@ -285,10 +286,9 @@ class DownloadManagerTest : public testing::Test {
   }
 
  protected:
-  DownloadStatusUpdater download_status_updater_;
   scoped_ptr<TestBrowserContext> browser_context;
   scoped_ptr<TestDownloadManagerDelegate> download_manager_delegate_;
-  scoped_refptr<DownloadManager> download_manager_;
+  scoped_refptr<DownloadManagerImpl> download_manager_;
   scoped_refptr<DownloadFileManager> file_manager_;
   MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
@@ -297,9 +297,8 @@ class DownloadManagerTest : public testing::Test {
 
   DownloadFileManager* file_manager() {
     if (!file_manager_) {
-      file_manager_ = new DownloadFileManager(NULL,
-                                              new MockDownloadFileFactory);
-      download_manager_->SetFileManager(file_manager_);
+      file_manager_ = new DownloadFileManager(new MockDownloadFileFactory);
+      download_manager_->SetFileManagerForTesting(file_manager_);
     }
     return file_manager_;
   }
@@ -348,7 +347,8 @@ DownloadFileWithErrors::DownloadFileWithErrors(DownloadCreateInfo* info,
     : DownloadFileImpl(info,
                        new DownloadRequestHandle(),
                        manager,
-                       calculate_hash),
+                       calculate_hash,
+                       net::BoundNetLog()),
       forced_error_(net::OK) {
 }
 
@@ -447,7 +447,7 @@ const struct {
 
 // This is an observer that records what download IDs have opened a select
 // file dialog.
-class SelectFileObserver : public content::DownloadManager::Observer {
+class SelectFileObserver : public DownloadManager::Observer {
  public:
   explicit SelectFileObserver(DownloadManager* download_manager)
       : download_manager_(download_manager) {
@@ -460,9 +460,10 @@ class SelectFileObserver : public content::DownloadManager::Observer {
   }
 
   // Downloadmanager::Observer functions.
-  virtual void ModelChanged() {}
-  virtual void ManagerGoingDown() {}
-  virtual void SelectFileDialogDisplayed(int32 id) {
+  virtual void ModelChanged(DownloadManager* manager) OVERRIDE {}
+  virtual void ManagerGoingDown(DownloadManager* manager) OVERRIDE {}
+  virtual void SelectFileDialogDisplayed(
+      DownloadManager* manager, int32 id) OVERRIDE {
     file_dialog_ids_.insert(id);
   }
 
@@ -537,7 +538,7 @@ TEST_F(DownloadManagerTest, MAYBE_StartDownload) {
 
     DownloadFile* download_file(
         new DownloadFileImpl(info.get(), new DownloadRequestHandle(),
-                             download_manager_, false));
+                             download_manager_, false, net::BoundNetLog()));
     AddDownloadToFileManager(info->download_id.local(), download_file);
     download_file->Initialize();
     download_manager_->StartDownload(info->download_id.local());
@@ -779,11 +780,7 @@ FilePath ExpandFilenameTestPath(const FilePath::CharType* template_path,
                                downloads_dir.value());
   ReplaceSubstringsAfterOffset(&path, 0, FILE_PATH_LITERAL("$alt"),
                                alternate_dir.value());
-  FilePath file_path(path);
-#if defined(FILE_PATH_USES_WIN_SEPARATORS)
-  file_path = file_path.NormalizeWindowsPathSeparators();
-#endif
-  return file_path;
+  return FilePath(path).NormalizePathSeparators();
 }
 
 } // namespace
@@ -913,14 +910,12 @@ TEST_F(DownloadManagerTest, DownloadRenameTest) {
     state.danger = kDownloadRenameCases[i].danger;
     download->SetFileCheckResults(state);
 
-    int32* id_ptr = new int32;
-    *id_ptr = i;  // Deleted in FileSelected().
     if (kDownloadRenameCases[i].finish_before_rename) {
       OnResponseCompleted(i, 1024, std::string("fake_hash"));
       message_loop_.RunAllPending();
-      FileSelected(new_path, id_ptr);
+      FileSelected(new_path, i);
     } else {
-      FileSelected(new_path, id_ptr);
+      FileSelected(new_path, i);
       message_loop_.RunAllPending();
       OnResponseCompleted(i, 1024, std::string("fake_hash"));
     }
@@ -974,7 +969,7 @@ TEST_F(DownloadManagerTest, DownloadInterruptTest) {
 
   int64 error_size = 3;
   OnDownloadInterrupted(0, error_size, "",
-                        DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED);
+                        content::DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED);
   message_loop_.RunAllPending();
 
   EXPECT_TRUE(GetActiveDownloadItem(0) == NULL);
@@ -1011,8 +1006,8 @@ TEST_F(DownloadManagerTest, MAYBE_DownloadFileErrorTest) {
   ASSERT_TRUE(file_util::CreateTemporaryFile(&path));
 
   // This file stream will be used, until the first rename occurs.
-  net::FileStream* stream = new net::FileStream;
-  ASSERT_EQ(0, stream->Open(
+  net::FileStream* stream = new net::FileStream(NULL);
+  ASSERT_EQ(0, stream->OpenSync(
       path,
       base::PLATFORM_FILE_OPEN_ALWAYS | base::PLATFORM_FILE_WRITE));
 
@@ -1159,10 +1154,12 @@ TEST_F(DownloadManagerTest, MAYBE_DownloadOverwriteTest) {
 
   // Construct the unique file name that normally would be created, but
   // which we will override.
-  int uniquifier = DownloadFile::GetUniquePathNumber(new_path);
+  int uniquifier =
+      file_util::GetUniquePathNumber(new_path, FILE_PATH_LITERAL(""));
   FilePath unique_new_path = new_path;
   EXPECT_NE(0, uniquifier);
-  DownloadFile::AppendNumberToPath(&unique_new_path, uniquifier);
+  unique_new_path = unique_new_path.InsertBeforeExtensionASCII(
+            StringPrintf(" (%d)", uniquifier));
 
   // Normally, the download system takes ownership of info, and is
   // responsible for deleting it.  In these unit tests, however, we
@@ -1186,7 +1183,7 @@ TEST_F(DownloadManagerTest, MAYBE_DownloadOverwriteTest) {
   // properly.
   DownloadFile* download_file(
       new DownloadFileImpl(info.get(), new DownloadRequestHandle(),
-                           download_manager_, false));
+                           download_manager_, false, net::BoundNetLog()));
   download_file->Rename(cr_path);
   // This creates the .temp version of the file.
   download_file->Initialize();
@@ -1260,7 +1257,7 @@ TEST_F(DownloadManagerTest, MAYBE_DownloadRemoveTest) {
   // properly.
   DownloadFile* download_file(
       new DownloadFileImpl(info.get(), new DownloadRequestHandle(),
-                           download_manager_, false));
+                           download_manager_, false, net::BoundNetLog()));
   download_file->Rename(cr_path);
   // This creates the .temp version of the file.
   download_file->Initialize();

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,12 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
+#include "chrome/browser/ui/base_shell_dialog.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
 class WebContents;
+struct SelectedFileInfo;
 }
 
 // This function is declared extern such that it is accessible for unit tests
@@ -23,21 +25,6 @@ class WebContents;
 extern std::wstring AppendExtensionIfNeeded(const std::wstring& filename,
                                             const std::wstring& filter_selected,
                                             const std::wstring& suggested_ext);
-
-// A base class for shell dialogs.
-class BaseShellDialog {
- public:
-  // Returns true if a shell dialog box is currently being shown modally
-  // to the specified owner.
-  virtual bool IsRunning(gfx::NativeWindow owning_window) const = 0;
-
-  // Notifies the dialog box that the listener has been destroyed and it should
-  // no longer be sent notifications.
-  virtual void ListenerDestroyed() = 0;
-
- protected:
-  virtual ~BaseShellDialog() {}
-};
 
 // Shows a dialog box for selecting a file or a folder.
 class SelectFileDialog
@@ -64,10 +51,27 @@ class SelectFileDialog
     virtual void FileSelected(const FilePath& path,
                               int index, void* params) = 0;
 
+    // Similar to FileSelected() but takes SelectedFileInfo instead of
+    // FilePath. Used for passing extra information (ex. display name).
+    //
+    // If not overridden, calls FileSelected() with path from |file|.
+    virtual void FileSelectedWithExtraInfo(
+        const content::SelectedFileInfo& file,
+        int index,
+        void* params);
+
     // Notifies the Listener that many files have been selected. The
     // files are in |files|. |params| is contextual passed to SelectFile.
     virtual void MultiFilesSelected(
       const std::vector<FilePath>& files, void* params) {}
+
+    // Similar to MultiFilesSelected() but takes SelectedFileInfo instead of
+    // FilePath. Used for passing extra information (ex. display name).
+    //
+    // If not overridden, calls MultiFilesSelected() with paths from |files|.
+    virtual void MultiFilesSelectedWithExtraInfo(
+      const std::vector<content::SelectedFileInfo>& files,
+      void* params);
 
     // Notifies the Listener that the file/folder selection was aborted (via
     // the  user canceling or closing the selection dialog box, for example).
@@ -115,7 +119,7 @@ class SelectFileDialog
   // |default_path| is the default path and suggested file name to be shown in
   //   the dialog. This only works for SELECT_SAVEAS_FILE and SELECT_OPEN_FILE.
   //   Can be an empty string to indicate the platform default.
-  // |file_types| holds the infomation about the file types allowed. Pass NULL
+  // |file_types| holds the information about the file types allowed. Pass NULL
   //   to get no special behavior
   // |file_type_index| is the 1-based index into the file type list in
   //   |file_types|. Specify 0 if you don't need to specify extension behavior.

@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -27,10 +26,11 @@
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/visit_filter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/download/download_persistent_store_info.h"
+#include "content/public/browser/download_persistent_store_info.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -481,7 +481,7 @@ void HistoryBackend::AddPage(scoped_refptr<HistoryAddPageArgs> request) {
         VisitRow visit_row;
         if (request->did_replace_entry &&
             db_->GetRowForVisit(last_ids.second, &visit_row) &&
-            visit_row.transition | content::PAGE_TRANSITION_CHAIN_END) {
+            visit_row.transition & content::PAGE_TRANSITION_CHAIN_END) {
           visit_row.transition = content::PageTransitionFromInt(
               visit_row.transition & ~content::PAGE_TRANSITION_CHAIN_END);
           db_->UpdateVisitRow(visit_row);
@@ -580,7 +580,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   // Fill the in-memory database and send it back to the history service on the
   // main thread.
   InMemoryHistoryBackend* mem_backend = new InMemoryHistoryBackend;
-  if (mem_backend->Init(history_name, history_dir_, db_.get(), languages))
+  if (mem_backend->Init(history_name, db_.get()))
     delegate_->SetInMemoryBackend(id_, mem_backend);  // Takes ownership of
                                                       // pointer.
   else
@@ -762,14 +762,13 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
   return std::make_pair(url_id, visit_id);
 }
 
-void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls,
+void HistoryBackend::AddPagesWithDetails(const URLRows& urls,
                                          VisitSource visit_source) {
   if (!db_.get())
     return;
 
   scoped_ptr<URLsModifiedDetails> modified(new URLsModifiedDetails);
-  for (std::vector<URLRow>::const_iterator i = urls.begin();
-       i != urls.end(); ++i) {
+  for (URLRows::const_iterator i = urls.begin(); i != urls.end(); ++i) {
     DCHECK(!i->last_visit().is_null());
 
     // We will add to either the archived database or the main one depending on
@@ -796,8 +795,10 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls,
         return;
       }
 
-      if (i->typed_count() > 0)
+      if (i->typed_count() > 0) {
         modified->changed_urls.push_back(*i);
+        modified->changed_urls.back().set_id(url_id);  // *i likely has |id_| 0.
+      }
     }
 
     // Add the page to the full text index. This function is also used for
@@ -879,7 +880,7 @@ void HistoryBackend::SetPageTitle(const GURL& url,
   }
 
   bool typed_url_changed = false;
-  std::vector<URLRow> changed_urls;
+  URLRows changed_urls;
   for (size_t i = 0; i < redirects->size(); i++) {
     URLRow row;
     URLID row_id = db_->GetRowForURL(redirects->at(i), &row);
@@ -949,7 +950,7 @@ void HistoryBackend::IterateURLs(HistoryService::URLEnumerator* iterator) {
   iterator->OnComplete(false);  // Failure.
 }
 
-bool HistoryBackend::GetAllTypedURLs(std::vector<history::URLRow>* urls) {
+bool HistoryBackend::GetAllTypedURLs(URLRows* urls) {
   if (db_.get())
     return db_->GetAllTypedUrls(urls);
   return false;
@@ -1161,7 +1162,8 @@ void HistoryBackend::CleanUpInProgressEntries() {
 }
 
 // Update a particular download entry.
-void HistoryBackend::UpdateDownload(const DownloadPersistentStoreInfo& data) {
+void HistoryBackend::UpdateDownload(
+    const content::DownloadPersistentStoreInfo& data) {
   if (db_.get())
     db_->UpdateDownload(data);
 }
@@ -1177,7 +1179,7 @@ void HistoryBackend::UpdateDownloadPath(const FilePath& path,
 void HistoryBackend::CreateDownload(
     scoped_refptr<DownloadCreateRequest> request,
     int32 id,
-    const DownloadPersistentStoreInfo& history_info) {
+    const content::DownloadPersistentStoreInfo& history_info) {
   int64 db_handle = 0;
   if (!request->canceled()) {
     if (db_.get())
@@ -1410,6 +1412,127 @@ void HistoryBackend::QueryMostVisitedURLs(
   MostVisitedURLList* result = &request->value;
   QueryMostVisitedURLsImpl(result_count, days_back, result);
   request->ForwardResult(request->handle(), *result);
+}
+
+void HistoryBackend::QueryFilteredURLs(
+      scoped_refptr<QueryMostVisitedURLsRequest> request,
+      int result_count,
+      const history::VisitFilter& filter)  {
+  if (request->canceled())
+    return;
+
+  base::Time request_start = base::Time::Now();
+
+  if (!db_.get()) {
+    // No History Database - return an empty list.
+    request->ForwardResult(request->handle(), MostVisitedURLList());
+    return;
+  }
+
+  VisitVector visits;
+  db_->GetVisibleVisitsDuringTimes(filter, 0, &visits);
+
+  std::map<VisitID, std::pair<VisitID, URLID> > segment_ids;
+  for (size_t i = 0; i < visits.size(); ++i) {
+    segment_ids[visits[i].visit_id] =
+        std::make_pair(visits[i].referring_visit, visits[i].segment_id);
+  }
+
+  std::map<URLID, double> score_map;
+  const double kLn2 = 0.6931471805599453;
+  base::Time now = base::Time::Now();
+  for (size_t i = 0; i < visits.size(); ++i) {
+    URLID segment_id = visits[i].segment_id;
+    for (VisitID visit_id = visits[i].visit_id; !segment_id && visit_id;) {
+      std::map<VisitID, std::pair<VisitID, URLID> >::iterator vi =
+          segment_ids.find(visit_id);
+      if (vi == segment_ids.end()) {
+        VisitRow visit_row;
+        if (!db_->GetRowForVisit(visit_id, &visit_row))
+          break;
+        segment_ids[visit_id] =
+            std::make_pair(visit_row.referring_visit, visit_row.segment_id);
+        segment_id = visit_row.segment_id;
+        visit_id = visit_row.referring_visit;
+      } else {
+        visit_id = vi->second.first;
+        segment_id = vi->second.second;
+      }
+    }
+    if (!segment_id)
+      continue;
+    double score = 0.0;
+    switch (filter.sorting_order()) {
+      case VisitFilter::ORDER_BY_RECENCY: {
+        // Decay score by half each week.
+        base::TimeDelta time_passed = now - visits[i].visit_time;
+        // Clamp to 0 in case time jumps backwards (e.g. due to DST).
+        double decay_exponent = std::max(0.0, kLn2 * static_cast<double>(
+            time_passed.InMicroseconds()) / base::Time::kMicrosecondsPerWeek);
+        score = 1.0 / exp(decay_exponent);
+      } break;
+      case VisitFilter::ORDER_BY_VISIT_COUNT:
+        score = 1.0;  // Every visit counts the same.
+        break;
+      case VisitFilter::ORDER_BY_DURATION_SPENT:
+        NOTREACHED() << "Not implemented!";
+        break;
+    }
+
+    std::map<URLID, double>::iterator it = score_map.find(visits[i].segment_id);
+    if (it == score_map.end())
+      score_map[visits[i].segment_id] = score;
+    else
+      it->second += score;
+  }
+
+  // TODO(georgey): experiment with visit_segment database granularity (it is
+  // currently 24 hours) to use it directly instead of using visits database,
+  // which is considerably slower.
+  ScopedVector<PageUsageData> data;
+  data->reserve(score_map.size());
+  for (std::map<URLID, double>::iterator it = score_map.begin();
+       it != score_map.end(); ++it) {
+    PageUsageData* pud = new PageUsageData(it->first);
+    pud->SetScore(it->second);
+    data->push_back(pud);
+  }
+
+  // Limit to the top |result_count| results.
+  std::sort(data.begin(), data.end(), PageUsageData::Predicate);
+  if (result_count && static_cast<int>(data.size()) > result_count) {
+    STLDeleteContainerPointers(data.begin() + result_count, data.end());
+    data.resize(result_count);
+  }
+
+  // Get URL data.
+  for (size_t i = 0; i < data.size(); ++i) {
+    URLID url_id = db_->GetSegmentRepresentationURL(data[i]->GetID());
+    URLRow info;
+    if (db_->GetURLRow(url_id, &info)) {
+      data[i]->SetURL(info.url());
+      data[i]->SetTitle(info.title());
+    }
+  }
+
+  MostVisitedURLList& result = request->value;
+  for (size_t i = 0; i < data.size(); ++i) {
+    PageUsageData* current_data = data[i];
+    RedirectList redirects;
+    GetMostRecentRedirectsFrom(current_data->GetURL(), &redirects);
+    MostVisitedURL url = MakeMostVisitedURL(*current_data, redirects);
+    result.push_back(url);
+  }
+
+  int delta_time = std::max(1, std::min(999,
+      static_cast<int>((base::Time::Now() - request_start).InMilliseconds())));
+  STATIC_HISTOGRAM_POINTER_BLOCK(
+      "NewTabPage.SuggestedSitesLoadTime",
+      Add(delta_time),
+      base::LinearHistogram::FactoryGet("NewTabPage.SuggestedSitesLoadTime",
+          1, 1000, 100, base::Histogram::kUmaTargetedHistogramFlag));
+
+  request->ForwardResult(request->handle(), result);
 }
 
 void HistoryBackend::QueryMostVisitedURLsImpl(int result_count,
@@ -2113,7 +2236,7 @@ void HistoryBackend::DeleteAllHistory() {
   if (bookmark_service)
     bookmark_service_->GetBookmarks(&starred_urls);
 
-  std::vector<URLRow> kept_urls;
+  URLRows kept_urls;
   for (size_t i = 0; i < starred_urls.size(); i++) {
     URLRow row;
     if (!db_->GetRowForURL(starred_urls[i], &row))
@@ -2175,8 +2298,7 @@ void HistoryBackend::DeleteAllHistory() {
   BroadcastNotifications(chrome::NOTIFICATION_HISTORY_URLS_DELETED, details);
 }
 
-bool HistoryBackend::ClearAllThumbnailHistory(
-    std::vector<URLRow>* kept_urls) {
+bool HistoryBackend::ClearAllThumbnailHistory(URLRows* kept_urls) {
   if (!thumbnail_db_.get()) {
     // When we have no reference to the thumbnail database, maybe there was an
     // error opening it. In this case, we just try to blow it away to try to
@@ -2200,8 +2322,7 @@ bool HistoryBackend::ClearAllThumbnailHistory(
 
   // Copy all unique favicons to the temporary table, and update all the
   // URLs to have the new IDs.
-  for (std::vector<URLRow>::iterator i = kept_urls->begin();
-       i != kept_urls->end(); ++i) {
+  for (URLRows::iterator i = kept_urls->begin(); i != kept_urls->end(); ++i) {
     std::vector<IconMapping> icon_mappings;
     if (!thumbnail_db_->GetIconMappingsForPageURL(i->url(), &icon_mappings))
       continue;
@@ -2241,8 +2362,7 @@ bool HistoryBackend::ClearAllThumbnailHistory(
   return true;
 }
 
-bool HistoryBackend::ClearAllMainHistory(
-    const std::vector<URLRow>& kept_urls) {
+bool HistoryBackend::ClearAllMainHistory(const URLRows& kept_urls) {
   // Create the duplicate URL table. We will copy the kept URLs into this.
   if (!db_->CreateTemporaryURLTable())
     return false;
@@ -2251,8 +2371,7 @@ bool HistoryBackend::ClearAllMainHistory(
   // IDs since the ID will be different in the new table.
   typedef std::map<URLID, URLID> URLIDMap;
   URLIDMap old_to_new;  // Maps original ID to new one.
-  for (std::vector<URLRow>::const_iterator i = kept_urls.begin();
-       i != kept_urls.end();
+  for (URLRows::const_iterator i = kept_urls.begin(); i != kept_urls.end();
        ++i) {
     URLID new_id = db_->AddTemporaryURL(*i);
     old_to_new[i->id()] = new_id;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,14 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/views/views_export.h"
 
+class SkBitmap;
+
 namespace gfx {
 class Canvas;
 class Insets;
+class Rect;
+class Size;
 }
-class SkBitmap;
 
 namespace views {
 
@@ -26,8 +29,9 @@ class VIEWS_EXPORT Painter {
  public:
   // A convenience method for painting a Painter in a particular region.
   // This translates the canvas to x/y and paints the painter.
-  static void PaintPainterAt(int x, int y, int w, int h,
-                             gfx::Canvas* canvas, Painter* painter);
+  static void PaintPainterAt(gfx::Canvas* canvas,
+                             Painter* painter,
+                             const gfx::Rect& rect);
 
   // Creates a painter that draws a gradient between the two colors.
   static Painter* CreateHorizontalGradient(SkColor c1, SkColor c2);
@@ -46,7 +50,7 @@ class VIEWS_EXPORT Painter {
   virtual ~Painter() {}
 
   // Paints the painter in the specified region.
-  virtual void Paint(int w, int h, gfx::Canvas* canvas) = 0;
+  virtual void Paint(gfx::Canvas* canvas, const gfx::Size& size) = 0;
 };
 
 // HorizontalPainter paints 3 images into a box: left, center and right. The
@@ -62,7 +66,7 @@ class VIEWS_EXPORT HorizontalPainter : public Painter {
   virtual ~HorizontalPainter() {}
 
   // Paints the images.
-  virtual void Paint(int w, int h, gfx::Canvas* canvas) OVERRIDE;
+  virtual void Paint(gfx::Canvas* canvas, const gfx::Size& size) OVERRIDE;
 
   // Height of the images.
   int height() const { return height_; }
@@ -78,7 +82,7 @@ class VIEWS_EXPORT HorizontalPainter : public Painter {
   // The height.
   int height_;
   // NOTE: the images are owned by ResourceBundle. Don't free them.
-  SkBitmap* images_[3];
+  const SkBitmap* images_[3];
 
   DISALLOW_COPY_AND_ASSIGN(HorizontalPainter);
 };

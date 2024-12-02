@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,18 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "base/string_piece.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "dbus/message.h"
+#include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
 #include "dbus/scoped_dbus_error.h"
 
 namespace {
+
+const char kErrorServiceUnknown[] = "org.freedesktop.DBus.Error.ServiceUnknown";
 
 // Used for success ratio histograms. 1 for success, 0 for failure.
 const int kSuccessRatioHistogramMaxValue = 2;
@@ -39,11 +43,14 @@ namespace dbus {
 
 ObjectProxy::ObjectProxy(Bus* bus,
                          const std::string& service_name,
-                         const std::string& object_path)
+                         const ObjectPath& object_path,
+                         int options)
     : bus_(bus),
       service_name_(service_name),
       object_path_(object_path),
-      filter_added_(false) {
+      filter_added_(false),
+      ignore_service_unknown_errors_(
+          options & IGNORE_SERVICE_UNKNOWN_ERRORS) {
 }
 
 ObjectProxy::~ObjectProxy() {
@@ -75,8 +82,8 @@ Response* ObjectProxy::CallMethodAndBlock(MethodCall* method_call,
                             kSuccessRatioHistogramMaxValue);
 
   if (!response_message) {
-    LOG(ERROR) << "Failed to call method: "
-               << (error.is_set() ? error.message() : "");
+    LogMethodCallFailure(error.is_set() ? error.name() : "unknown error type",
+                         error.is_set() ? error.message() : "");
     return NULL;
   }
   // Record time spent for the method call. Don't include failures.
@@ -236,8 +243,7 @@ void ObjectProxy::RunResponseCallback(ResponseCallback response_callback,
     dbus::MessageReader reader(error_response.get());
     std::string error_message;
     reader.PopString(&error_message);
-    LOG(ERROR) << "Failed to call method: " << error_response->GetErrorName()
-               << ": " << error_message;
+    LogMethodCallFailure(error_response->GetErrorName(), error_message);
     // We don't give the error message to the callback.
     response_callback.Run(NULL);
   } else {
@@ -275,14 +281,8 @@ void ObjectProxy::ConnectToSignalInternal(
     OnConnectedCallback on_connected_callback) {
   bus_->AssertOnDBusThread();
 
-  // Check if the object is already connected to the signal.
   const std::string absolute_signal_name =
       GetAbsoluteSignalName(interface_name, signal_name);
-  if (method_table_.find(absolute_signal_name) != method_table_.end()) {
-    LOG(ERROR) << "The object proxy is already connected to "
-               << absolute_signal_name;
-    return;
-  }
 
   // Will become true, if everything is successful.
   bool success = false;
@@ -298,14 +298,10 @@ void ObjectProxy::ConnectToSignalInternal(
       }
     }
     // Add a match rule so the signal goes through HandleMessage().
-    //
-    // We don't restrict the sender object path to be |object_path_| here,
-    // to make it easy to test D-Bus signal handling with dbus-send, that
-    // uses "/" as the sender object path. We can make the object path
-    // restriction customizable when it becomes necessary.
     const std::string match_rule =
-        base::StringPrintf("type='signal', interface='%s'",
-                           interface_name.c_str());
+        base::StringPrintf("type='signal', interface='%s', path='%s'",
+                           interface_name.c_str(),
+                           object_path_.value().c_str());
 
     // Add the match rule if we don't have it.
     if (match_rules_.find(match_rule) == match_rules_.end()) {
@@ -359,6 +355,14 @@ DBusHandlerResult ObjectProxy::HandleMessage(
   dbus_message_ref(raw_message);
   scoped_ptr<Signal> signal(
       Signal::FromRawMessage(raw_message));
+
+  // Verify the signal comes from the object we're proxying for, this is
+  // our last chance to return DBUS_HANDLER_RESULT_NOT_YET_HANDLED and
+  // allow other object proxies to handle instead.
+  const dbus::ObjectPath path = signal->GetPath();
+  if (path != object_path_) {
+    return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+  }
 
   const std::string interface = signal->GetInterface();
   const std::string member = signal->GetMember();
@@ -414,6 +418,15 @@ DBusHandlerResult ObjectProxy::HandleMessageThunk(
     void* user_data) {
   ObjectProxy* self = reinterpret_cast<ObjectProxy*>(user_data);
   return self->HandleMessage(connection, raw_message);
+}
+
+void ObjectProxy::LogMethodCallFailure(
+    const base::StringPiece& error_name,
+    const base::StringPiece& error_message) const {
+  if (ignore_service_unknown_errors_ && error_name == kErrorServiceUnknown)
+    return;
+  LOG(ERROR) << "Failed to call method: " << error_name
+             << ": " << error_message;
 }
 
 }  // namespace dbus

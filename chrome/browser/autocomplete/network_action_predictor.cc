@@ -12,6 +12,7 @@
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -20,6 +21,8 @@
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
+#include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/guid.h"
@@ -42,23 +45,34 @@ COMPILE_ASSERT(arraysize(kConfidenceCutoff) ==
                NetworkActionPredictor::LAST_PREDICT_ACTION,
                ConfidenceCutoff_count_mismatch);
 
-bool GetURLRowForAutocompleteMatch(Profile* profile,
-                                   const AutocompleteMatch& match,
-                                   history::URLRow* url_row) {
-  DCHECK(url_row);
+enum DatabaseAction {
+  DATABASE_ACTION_ADD,
+  DATABASE_ACTION_UPDATE,
+  DATABASE_ACTION_DELETE_SOME,
+  DATABASE_ACTION_DELETE_ALL,
+  DATABASE_ACTION_COUNT
+};
 
-  HistoryService* history_service =
-      profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  if (!history_service)
-    return false;
+bool IsAutocompleteMatchSearchType(const AutocompleteMatch& match) {
+  switch (match.type) {
+    // Matches using the user's default search engine.
+    case AutocompleteMatch::SEARCH_WHAT_YOU_TYPED:
+    case AutocompleteMatch::SEARCH_HISTORY:
+    case AutocompleteMatch::SEARCH_SUGGEST:
+    // A match that uses a non-default search engine (e.g. for tab-to-search).
+    case AutocompleteMatch::SEARCH_OTHER_ENGINE:
+      return true;
 
-  history::URLDatabase* url_db = history_service->InMemoryDatabase();
-  return url_db && (url_db->GetRowForURL(match.destination_url, url_row) != 0);
+    default:
+      return false;
+  }
 }
 
 }
 
 const int NetworkActionPredictor::kMaximumDaysToKeepEntry = 14;
+
+double NetworkActionPredictor::hit_weight_ = 1.0;
 
 NetworkActionPredictor::NetworkActionPredictor(Profile* profile)
     : profile_(profile),
@@ -150,9 +164,16 @@ NetworkActionPredictor::Action NetworkActionPredictor::RecommendAction(
   }
 
   // Downgrade prerender to preconnect if this is a search match or if omnibox
-  // prerendering is disabled.
-  if (action == ACTION_PRERENDER && !prerender::IsOmniboxEnabled(profile_))
+  // prerendering is disabled. There are cases when Instant will not handle a
+  // search suggestion and in those cases it would be good to prerender the
+  // search results, however search engines have not been set up to correctly
+  // handle being prerendered and until they are we should avoid it.
+  // http://crbug.com/117495
+  if (action == ACTION_PRERENDER &&
+      (IsAutocompleteMatchSearchType(match) ||
+       !prerender::IsOmniboxEnabled(profile_))) {
     action = ACTION_PRECONNECT;
+  }
 
   return action;
 }
@@ -161,18 +182,7 @@ NetworkActionPredictor::Action NetworkActionPredictor::RecommendAction(
 // i.e., it is now quite likely that the user will select the related domain.
 // static
 bool NetworkActionPredictor::IsPreconnectable(const AutocompleteMatch& match) {
-  switch (match.type) {
-    // Matches using the user's default search engine.
-    case AutocompleteMatch::SEARCH_WHAT_YOU_TYPED:
-    case AutocompleteMatch::SEARCH_HISTORY:
-    case AutocompleteMatch::SEARCH_SUGGEST:
-    // A match that uses a non-default search engine (e.g. for tab-to-search).
-    case AutocompleteMatch::SEARCH_OTHER_ENGINE:
-      return true;
-
-    default:
-      return false;
-  }
+  return IsAutocompleteMatchSearchType(match);
 }
 
 void NetworkActionPredictor::Shutdown() {
@@ -230,10 +240,22 @@ void NetworkActionPredictor::OnOmniboxOpenedUrl(const AutocompleteLog& log) {
 
   const AutocompleteMatch& match = log.result.match_at(log.selected_index);
 
-  UMA_HISTOGRAM_BOOLEAN("Prerender.OmniboxNavigationsCouldPrerender",
-                        prerender::IsOmniboxEnabled(profile_));
+  UMA_HISTOGRAM_BOOLEAN(
+      StringPrintf("Prerender.OmniboxNavigationsCouldPrerender_%.1f%s",
+                   get_hit_weight(),
+                   prerender::PrerenderManager::GetModeString()).c_str(),
+      prerender::IsOmniboxEnabled(profile_));
 
   const GURL& opened_url = match.destination_url;
+
+  // If the Omnibox triggered a prerender but the URL doesn't match the one the
+  // user is navigating to, cancel the prerender.
+  prerender::PrerenderManager* prerender_manager =
+      prerender::PrerenderManagerFactory::GetForProfile(profile_);
+  // |prerender_manager| can be NULL in incognito mode or if prerendering is
+  // otherwise disabled.
+  if (prerender_manager && !prerender_manager->IsPrerendering(opened_url))
+    prerender_manager->CancelOmniboxPrerenders();
 
   const string16 lower_user_text(base::i18n::ToLower(log.text));
 
@@ -290,7 +312,6 @@ void NetworkActionPredictor::OnOmniboxOpenedUrl(const AutocompleteLog& log) {
   }
   tracked_urls_.clear();
 }
-
 
 void NetworkActionPredictor::DeleteOldIdsFromCaches(
     history::URLDatabase* url_db,
@@ -397,8 +418,8 @@ double NetworkActionPredictor::CalculateConfidenceForDbEntry(
   if (value.number_of_hits < kMinimumNumberOfHits)
     return 0.0;
 
-  return static_cast<double>(value.number_of_hits) /
-      (value.number_of_hits + value.number_of_misses);
+  const double number_of_hits = value.number_of_hits * hit_weight_;
+  return number_of_hits / (number_of_hits + value.number_of_misses);
 }
 
 void NetworkActionPredictor::AddRow(
@@ -412,6 +433,9 @@ void NetworkActionPredictor::AddRow(
   db_id_cache_[key] = row.id;
   content::BrowserThread::PostTask(content::BrowserThread::DB, FROM_HERE,
       base::Bind(&NetworkActionPredictorDatabase::AddRow, db_, row));
+
+  UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.DatabaseAction",
+                            DATABASE_ACTION_ADD, DATABASE_ACTION_COUNT);
 }
 
 void NetworkActionPredictor::UpdateRow(
@@ -425,6 +449,8 @@ void NetworkActionPredictor::UpdateRow(
   it->second.number_of_misses = row.number_of_misses;
   content::BrowserThread::PostTask(content::BrowserThread::DB, FROM_HERE,
       base::Bind(&NetworkActionPredictorDatabase::UpdateRow, db_, row));
+  UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.DatabaseAction",
+                            DATABASE_ACTION_UPDATE, DATABASE_ACTION_COUNT);
 }
 
 void NetworkActionPredictor::DeleteAllRows() {
@@ -435,6 +461,8 @@ void NetworkActionPredictor::DeleteAllRows() {
   db_id_cache_.clear();
   content::BrowserThread::PostTask(content::BrowserThread::DB, FROM_HERE,
       base::Bind(&NetworkActionPredictorDatabase::DeleteAllRows, db_));
+  UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.DatabaseAction",
+                            DATABASE_ACTION_DELETE_ALL, DATABASE_ACTION_COUNT);
 }
 
 void NetworkActionPredictor::DeleteRowsWithURLs(const std::set<GURL>& urls) {
@@ -457,6 +485,8 @@ void NetworkActionPredictor::DeleteRowsWithURLs(const std::set<GURL>& urls) {
 
   content::BrowserThread::PostTask(content::BrowserThread::DB, FROM_HERE,
       base::Bind(&NetworkActionPredictorDatabase::DeleteRows, db_, id_list));
+  UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.DatabaseAction",
+                            DATABASE_ACTION_DELETE_SOME, DATABASE_ACTION_COUNT);
 }
 
 void NetworkActionPredictor::BeginTransaction() {

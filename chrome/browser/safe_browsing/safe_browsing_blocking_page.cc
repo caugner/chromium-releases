@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -17,10 +17,10 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/safe_browsing/malware_details.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/tab_contents/tab_util.h"
@@ -29,6 +29,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -40,6 +41,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 using content::BrowserThread;
+using content::InterstitialPage;
 using content::OpenURLParams;
 using content::Referrer;
 using content::UserMetricsAction;
@@ -137,18 +139,19 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
     SafeBrowsingService* sb_service,
     WebContents* web_contents,
     const UnsafeResourceList& unsafe_resources)
-    : ChromeInterstitialPage(web_contents,
-                             IsMainPageLoadBlocked(unsafe_resources),
-                             unsafe_resources[0].url),
-      malware_details_proceed_delay_ms_(
+    : malware_details_proceed_delay_ms_(
           kMalwareDetailsProceedDelayMilliSeconds),
       sb_service_(sb_service),
+      report_loop_(NULL),
       is_main_frame_load_blocked_(IsMainPageLoadBlocked(unsafe_resources)),
-      unsafe_resources_(unsafe_resources) {
+      unsafe_resources_(unsafe_resources),
+      proceeded_(false),
+      web_contents_(web_contents),
+      url_(unsafe_resources[0].url) {
   RecordUserAction(SHOW);
   if (!is_main_frame_load_blocked_) {
     navigation_entry_index_to_remove_ =
-        tab()->GetController().GetLastCommittedEntryIndex();
+        web_contents->GetController().GetLastCommittedEntryIndex();
   } else {
     navigation_entry_index_to_remove_ = -1;
   }
@@ -163,13 +166,16 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
       malware_details_ == NULL &&
       CanShowMalwareDetailsOption()) {
     malware_details_ = MalwareDetails::NewMalwareDetails(
-        sb_service_, tab(), unsafe_resources[0]);
+        sb_service_, web_contents, unsafe_resources[0]);
   }
+
+  interstitial_page_ = InterstitialPage::Create(
+      web_contents, IsMainPageLoadBlocked(unsafe_resources), url_, this);
 }
 
 bool SafeBrowsingBlockingPage::CanShowMalwareDetailsOption() {
-  return (!tab()->GetBrowserContext()->IsOffTheRecord() &&
-          tab()->GetURL().SchemeIs(chrome::kHttpScheme));
+  return (!web_contents_->GetBrowserContext()->IsOffTheRecord() &&
+          web_contents_->GetURL().SchemeIs(chrome::kHttpScheme));
 }
 
 SafeBrowsingBlockingPage::~SafeBrowsingBlockingPage() {
@@ -269,7 +275,7 @@ void SafeBrowsingBlockingPage::PopulateMultipleThreatStringDictionary(
         l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MULTI_THREAT_TITLE),
         l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
         l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION1,
-                                   UTF8ToUTF16(tab()->GetURL().host())),
+                                   UTF8ToUTF16(web_contents_->GetURL().host())),
         l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION2),
         string16());
   } else if (malware) {
@@ -279,7 +285,7 @@ void SafeBrowsingBlockingPage::PopulateMultipleThreatStringDictionary(
         l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_TITLE),
         l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
         l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION1,
-                                   UTF8ToUTF16(tab()->GetURL().host())),
+                                   UTF8ToUTF16(web_contents_->GetURL().host())),
         l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION2),
         l10n_util::GetStringUTF16(
             IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION3));
@@ -291,7 +297,7 @@ void SafeBrowsingBlockingPage::PopulateMultipleThreatStringDictionary(
         l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_HEADLINE),
         l10n_util::GetStringFUTF16(
             IDS_SAFE_BROWSING_MULTI_PHISHING_DESCRIPTION1,
-            UTF8ToUTF16(tab()->GetURL().host())),
+            UTF8ToUTF16(web_contents_->GetURL().host())),
         string16(),
         string16());
   }
@@ -313,18 +319,18 @@ void SafeBrowsingBlockingPage::PopulateMalwareStringDictionary(
       l10n_util::GetStringUTF8(
         IDS_SAFE_BROWSING_MALWARE_DIAGNOSTIC_PAGE).c_str());
 
-  strings->SetString("badURL", url().host());
+  strings->SetString("badURL", url_.host());
   // Check to see if we're blocking the main page, or a sub-resource on the
   // main page.
   string16 description1, description3, description5;
   if (is_main_frame_load_blocked_) {
     description1 = l10n_util::GetStringFUTF16(
-        IDS_SAFE_BROWSING_MALWARE_DESCRIPTION1, UTF8ToUTF16(url().host()));
+        IDS_SAFE_BROWSING_MALWARE_DESCRIPTION1, UTF8ToUTF16(url_.host()));
   } else {
     description1 = l10n_util::GetStringFUTF16(
         IDS_SAFE_BROWSING_MALWARE_DESCRIPTION4,
-        UTF8ToUTF16(tab()->GetURL().host()),
-        UTF8ToUTF16(url().host()));
+        UTF8ToUTF16(web_contents_->GetURL().host()),
+        UTF8ToUTF16(url_.host()));
   }
 
   std::string proceed_link = base::StringPrintf(kPLinkHtml,
@@ -343,8 +349,8 @@ void SafeBrowsingBlockingPage::PopulateMalwareStringDictionary(
 
   description5 =
       l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION5,
-                                 UTF8ToUTF16(url().host()),
-                                 UTF8ToUTF16(url().host()),
+                                 UTF8ToUTF16(url_.host()),
+                                 UTF8ToUTF16(url_.host()),
                                  UTF8ToUTF16(diagnostic_link));
 
   strings->SetString("description5", description5);
@@ -371,7 +377,8 @@ void SafeBrowsingBlockingPage::PopulateMalwareStringDictionary(
                            IDS_SAFE_BROWSING_MALWARE_REPORTING_AGREE,
                            UTF8ToUTF16(privacy_link)));
 
-    Profile* profile = Profile::FromBrowserContext(tab()->GetBrowserContext());
+    Profile* profile = Profile::FromBrowserContext(
+        web_contents_->GetBrowserContext());
     const PrefService::Preference* pref =
         profile->GetPrefs()->FindPreference(
             prefs::kSafeBrowsingReportingEnabled);
@@ -400,7 +407,7 @@ void SafeBrowsingBlockingPage::PopulatePhishingStringDictionary(
       l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_TITLE),
       l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_HEADLINE),
       l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_PHISHING_DESCRIPTION1,
-                                 UTF8ToUTF16(url().host())),
+                                 UTF8ToUTF16(url_.host())),
       l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_DESCRIPTION2),
       description3);
 
@@ -444,7 +451,7 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
 
     OpenURLParams params(
         url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_LINK, false);
-    tab()->OpenURL(params);
+    web_contents_->OpenURL(params);
     return;
   }
 
@@ -453,12 +460,12 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     GURL url(kSbPrivacyPolicyUrl);
     OpenURLParams params(
         url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_LINK, false);
-    tab()->OpenURL(params);
+    web_contents_->OpenURL(params);
     return;
   }
 
   if (command == kProceedCommand) {
-    Proceed();
+    interstitial_page_->Proceed();
     // We are deleted after this.
     return;
   }
@@ -467,20 +474,21 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     if (is_main_frame_load_blocked_) {
       // If the load is blocked, we want to close the interstitial and discard
       // the pending entry.
-      DontProceed();
+      interstitial_page_->DontProceed();
       // We are deleted after this.
       return;
     }
 
     // Otherwise the offending entry has committed, and we need to go back or
     // to a safe page.  We will close the interstitial when that page commits.
-    if (tab()->GetController().CanGoBack()) {
-      tab()->GetController().GoBack();
+    if (web_contents_->GetController().CanGoBack()) {
+      web_contents_->GetController().GoBack();
     } else {
-      tab()->GetController().LoadURL(GURL(chrome::kChromeUINewTabURL),
-                                     content::Referrer(),
-                                     content::PAGE_TRANSITION_START_PAGE,
-                                     std::string());
+      web_contents_->GetController().LoadURL(
+          GURL(chrome::kChromeUINewTabURL),
+          content::Referrer(),
+          content::PAGE_TRANSITION_START_PAGE,
+          std::string());
     }
     return;
   }
@@ -521,7 +529,7 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     OpenURLParams params(
         report_url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_LINK,
         false);
-    tab()->OpenURL(params);
+    web_contents_->OpenURL(params);
     return;
   }
 
@@ -537,20 +545,29 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     OpenURLParams params(
         diagnostic_url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_LINK,
         false);
-    tab()->OpenURL(params);
+    web_contents_->OpenURL(params);
     return;
   }
 
   NOTREACHED() << "Unexpected command: " << command;
 }
 
+void SafeBrowsingBlockingPage::OverrideRendererPrefs(
+      content::RendererPreferences* prefs) {
+  Profile* profile = Profile::FromBrowserContext(
+      web_contents_->GetBrowserContext());
+  renderer_preferences_util::UpdateFromSystemSettings(prefs, profile);
+ }
+
 void SafeBrowsingBlockingPage::SetReportingPreference(bool report) {
-  Profile* profile = Profile::FromBrowserContext(tab()->GetBrowserContext());
+  Profile* profile = Profile::FromBrowserContext(
+      web_contents_->GetBrowserContext());
   PrefService* pref = profile->GetPrefs();
   pref->SetBoolean(prefs::kSafeBrowsingReportingEnabled, report);
 }
 
-void SafeBrowsingBlockingPage::Proceed() {
+void SafeBrowsingBlockingPage::OnProceed() {
+  proceeded_ = true;
   RecordUserAction(PROCEED);
   // Send the malware details, if we opted to.
   FinishMalwareDetails(malware_details_proceed_delay_ms_);
@@ -560,35 +577,27 @@ void SafeBrowsingBlockingPage::Proceed() {
   // Check to see if some new notifications of unsafe resources have been
   // received while we were showing the interstitial.
   UnsafeResourceMap* unsafe_resource_map = GetUnsafeResourcesMap();
-  UnsafeResourceMap::iterator iter = unsafe_resource_map->find(tab());
+  UnsafeResourceMap::iterator iter = unsafe_resource_map->find(web_contents_);
   SafeBrowsingBlockingPage* blocking_page = NULL;
   if (iter != unsafe_resource_map->end() && !iter->second.empty()) {
     // Build an interstitial for all the unsafe resources notifications.
     // Don't show it now as showing an interstitial while an interstitial is
     // already showing would cause DontProceed() to be invoked.
-    blocking_page = factory_->CreateSafeBrowsingPage(sb_service_, tab(),
+    blocking_page = factory_->CreateSafeBrowsingPage(sb_service_, web_contents_,
                                                      iter->second);
     unsafe_resource_map->erase(iter);
   }
 
-  InterstitialPage::Proceed();
-  // We are now deleted.
-
   // Now that this interstitial is gone, we can show the new one.
   if (blocking_page)
-    blocking_page->Show();
+    blocking_page->interstitial_page_->Show();
 }
 
-void SafeBrowsingBlockingPage::DontProceed() {
-  DCHECK(action_taken() != DONT_PROCEED_ACTION);
+void SafeBrowsingBlockingPage::OnDontProceed() {
   // We could have already called Proceed(), in which case we must not notify
   // the SafeBrowsingService again, as the client has been deleted.
-  if (action_taken() == PROCEED_ACTION) {
-    // We still want to hide the interstitial page.
-    InterstitialPage::DontProceed();
-    // We are now deleted.
+  if (proceeded_)
     return;
-  }
 
   RecordUserAction(DONT_PROCEED);
   // Send the malware details, if we opted to.
@@ -599,7 +608,7 @@ void SafeBrowsingBlockingPage::DontProceed() {
   // The user does not want to proceed, clear the queued unsafe resources
   // notifications we received while the interstitial was showing.
   UnsafeResourceMap* unsafe_resource_map = GetUnsafeResourcesMap();
-  UnsafeResourceMap::iterator iter = unsafe_resource_map->find(tab());
+  UnsafeResourceMap::iterator iter = unsafe_resource_map->find(web_contents_);
   if (iter != unsafe_resource_map->end() && !iter->second.empty()) {
     NotifySafeBrowsingService(sb_service_, iter->second, false);
     unsafe_resource_map->erase(iter);
@@ -611,16 +620,14 @@ void SafeBrowsingBlockingPage::DontProceed() {
   // current entry if it has been committed again, which is possible on a page
   // that had a subresource warning.
   int last_committed_index =
-      tab()->GetController().GetLastCommittedEntryIndex();
+      web_contents_->GetController().GetLastCommittedEntryIndex();
   if (navigation_entry_index_to_remove_ != -1 &&
       navigation_entry_index_to_remove_ != last_committed_index &&
-      !tab()->IsBeingDestroyed()) {
-    tab()->GetController().RemoveEntryAtIndex(
+      !web_contents_->IsBeingDestroyed()) {
+    web_contents_->GetController().RemoveEntryAtIndex(
         navigation_entry_index_to_remove_);
     navigation_entry_index_to_remove_ = -1;
   }
-  InterstitialPage::DontProceed();
-  // We are now deleted.
 }
 
 void SafeBrowsingBlockingPage::RecordUserAction(BlockingPageEvent event) {
@@ -669,7 +676,8 @@ void SafeBrowsingBlockingPage::FinishMalwareDetails(int64 delay_ms) {
   if (malware_details_ == NULL)
     return;  // Not all interstitials have malware details (eg phishing).
 
-  Profile* profile = Profile::FromBrowserContext(tab()->GetBrowserContext());
+  Profile* profile = Profile::FromBrowserContext(
+      web_contents_->GetBrowserContext());
   const PrefService::Preference* pref =
       profile->GetPrefs()->FindPreference(prefs::kSafeBrowsingReportingEnabled);
 
@@ -679,7 +687,7 @@ void SafeBrowsingBlockingPage::FinishMalwareDetails(int64 delay_ms) {
     BrowserThread::PostDelayedTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&MalwareDetails::FinishCollection, malware_details_.get()),
-        delay_ms);
+        base::TimeDelta::FromMilliseconds(delay_ms));
   }
 }
 
@@ -728,7 +736,7 @@ void SafeBrowsingBlockingPage::ShowBlockingPage(
       factory_ = g_safe_browsing_blocking_page_factory_impl.Pointer();
     SafeBrowsingBlockingPage* blocking_page =
         factory_->CreateSafeBrowsingPage(sb_service, web_contents, resources);
-    blocking_page->Show();
+    blocking_page->interstitial_page_->Show();
     return;
   }
 

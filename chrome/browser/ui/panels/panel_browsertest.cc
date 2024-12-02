@@ -31,15 +31,16 @@
 #include "chrome/browser/ui/panels/test_panel_mouse_watcher.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/net/url_request_mock_http_job.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/show_desktop_notification_params.h"
 #include "content/public/common/url_constants.h"
+#include "content/test/net/url_request_mock_http_job.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/screen.h"
@@ -78,27 +79,12 @@ class PanelBrowserTest : public BasePanelBrowserTest {
     }
   }
 
-  // This is a bit mask - a set of flags that controls the specific drag actions
-  // to be carried out by TestDragging function.
-  enum DragAction {
-    DRAG_ACTION_BEGIN = 1,
-    // Can only specify one of FINISH or CANCEL.
-    DRAG_ACTION_FINISH = 2,
-    DRAG_ACTION_CANCEL = 4
-  };
-
-  // This is called from tests that might change the order of panels, like
-  // dragging test.
-  std::vector<gfx::Rect> GetPanelBounds(
-      const std::vector<Panel*>& panels) {
+  std::vector<gfx::Rect> GetAllPanelBounds() {
+    std::vector<Panel*> panels = PanelManager::GetInstance()->panels();
     std::vector<gfx::Rect> bounds;
     for (size_t i = 0; i < panels.size(); i++)
       bounds.push_back(panels[i]->GetBounds());
     return bounds;
-  }
-
-  std::vector<gfx::Rect> GetAllPanelBounds() {
-    return GetPanelBounds(PanelManager::GetInstance()->panels());
   }
 
   std::vector<gfx::Rect> AddXDeltaToBounds(const std::vector<gfx::Rect>& bounds,
@@ -143,64 +129,6 @@ class PanelBrowserTest : public BasePanelBrowserTest {
         WaitForPanelActiveState(
             panels[i], new_states[i] ? SHOW_AS_ACTIVE : SHOW_AS_INACTIVE);
       }
-    }
-  }
-
-  void TestDragging(int delta_x,
-                    int delta_y,
-                    size_t drag_index,
-                    std::vector<int> expected_delta_x_after_drag,
-                    std::vector<int> expected_delta_x_after_finish,
-                    std::vector<gfx::Rect> expected_bounds_after_cancel,
-                    int drag_action) {
-    std::vector<Panel*> panels = PanelManager::GetInstance()->panels();
-
-    // These are bounds at the beginning of this test.  This would be different
-    // from expected_bounds_after_cancel in the case where we're testing for the
-    // case of multiple drags before finishing the drag.  Here is an example:
-    //
-    // Test 1 - Create three panels and drag a panel to the right but don't
-    //          finish or cancel the drag.
-    //          expected_bounds_after_cancel == test_begin_bounds
-    // Test 2 - Do another drag on the same panel.  There is no button press
-    //          in this case as its the same drag that's continuing, this is
-    //          simulating multiple drag events before button release.
-    //          expected_bounds_after_cancel is still the same as in Test1.
-    //          So in this case
-    //              expected_bounds_after_cancel != test_begin_bounds.
-    std::vector<gfx::Rect> test_begin_bounds = GetAllPanelBounds();
-
-    NativePanel* panel_to_drag = panels[drag_index]->native_panel();
-    scoped_ptr<NativePanelTesting> panel_testing_to_drag(
-        NativePanelTesting::Create(panel_to_drag));
-
-    if (drag_action & DRAG_ACTION_BEGIN) {
-      // Trigger the mouse-pressed event.
-      // All panels should remain in their original positions.
-      panel_testing_to_drag->PressLeftMouseButtonTitlebar(
-          panels[drag_index]->GetBounds().origin());
-      EXPECT_EQ(test_begin_bounds, GetPanelBounds(panels));
-    }
-
-    // Trigger the drag.
-    panel_testing_to_drag->DragTitlebar(delta_x, delta_y);
-
-    // Compare against expected bounds.
-    EXPECT_EQ(AddXDeltaToBounds(test_begin_bounds, expected_delta_x_after_drag),
-              GetPanelBounds(panels));
-
-    if (drag_action & DRAG_ACTION_CANCEL) {
-      // Cancel the drag.
-      // All panels should return to their initial positions.
-      panel_testing_to_drag->CancelDragTitlebar();
-      EXPECT_EQ(expected_bounds_after_cancel, GetAllPanelBounds());
-    } else if (drag_action & DRAG_ACTION_FINISH) {
-      // Finish the drag.
-      // Compare against expected bounds.
-      panel_testing_to_drag->FinishDragTitlebar();
-      EXPECT_EQ(
-          AddXDeltaToBounds(test_begin_bounds, expected_delta_x_after_finish),
-          GetPanelBounds(panels));
     }
   }
 
@@ -427,12 +355,13 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreatePanel) {
 }
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateBigPanel) {
-  Panel* panel = CreatePanelWithBounds("BigPanel", testing_work_area());
+  gfx::Rect work_area = GetTestingWorkArea();
+  Panel* panel = CreatePanelWithBounds("BigPanel", work_area);
   gfx::Rect bounds = panel->GetBounds();
   EXPECT_EQ(panel->max_size().width(), bounds.width());
-  EXPECT_LT(bounds.width(), testing_work_area().width());
+  EXPECT_LT(bounds.width(), work_area.width());
   EXPECT_EQ(panel->max_size().height(), bounds.height());
-  EXPECT_LT(bounds.height(), testing_work_area().height());
+  EXPECT_LT(bounds.height(), work_area.height());
   panel->Close();
 }
 
@@ -446,347 +375,6 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, FindBar) {
   panel->Close();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DragOnePanel) {
-  static const int num_panels = 1;
-  static const int zero_delta = 0;
-  static const int big_delta = 70;
-
-  static const std::vector<int> zero_deltas(num_panels, zero_delta);
-  std::vector<int> expected_delta_x_after_drag(num_panels, zero_delta);
-  std::vector<int> expected_delta_x_after_finish(num_panels, zero_delta);
-
-  Panel* panel1 =
-      CreatePanelWithBounds("PanelTest1", gfx::Rect(0, 0, 100, 100));
-
-  // Drag left.
-  expected_delta_x_after_drag[0] = -big_delta;
-  expected_delta_x_after_finish = zero_deltas;
-  TestDragging(-big_delta, zero_delta, 0, expected_delta_x_after_drag,
-               zero_deltas, GetAllPanelBounds(),
-               DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-
-  // Drag left and cancel.
-  expected_delta_x_after_drag[0] = -big_delta;
-  expected_delta_x_after_finish = zero_deltas;
-  TestDragging(-big_delta, zero_delta, 0, expected_delta_x_after_drag,
-               zero_deltas, GetAllPanelBounds(),
-               DRAG_ACTION_BEGIN | DRAG_ACTION_CANCEL);
-
-  // Drag right.
-  expected_delta_x_after_drag[0] = big_delta;
-  TestDragging(big_delta, zero_delta, 0, expected_delta_x_after_drag,
-               zero_deltas, GetAllPanelBounds(),
-               DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-
-  // Drag right and up.  Expect no vertical movement.
-  TestDragging(big_delta, big_delta, 0, expected_delta_x_after_drag,
-               zero_deltas, GetAllPanelBounds(),
-               DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-
-  // Drag up.  Expect no movement on drag.
-  TestDragging(0, -big_delta, 0, zero_deltas, zero_deltas,
-               GetAllPanelBounds(), DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-
-  // Drag down.  Expect no movement on drag.
-  TestDragging(0, big_delta, 0, zero_deltas, zero_deltas,
-               GetAllPanelBounds(), DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-
-  panel1->Close();
-}
-
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DragTwoPanels) {
-  static const int num_panels = 2;
-  static const int zero_delta = 0;
-  static const int small_delta = 10;
-  static const int big_delta = 70;
-
-  static const std::vector<int> zero_deltas(num_panels, zero_delta);
-  std::vector<int> expected_delta_x_after_drag(num_panels, zero_delta);
-  std::vector<int> expected_delta_x_after_finish(num_panels, zero_delta);
-  std::vector<gfx::Rect> initial_bounds;
-
-  Panel* panel1 =
-      CreatePanelWithBounds("PanelTest1", gfx::Rect(0, 0, 100, 100));
-  Panel* panel2 =
-      CreatePanelWithBounds("PanelTest2", gfx::Rect(0, 0, 120, 120));
-
-  int horizontal_spacing =
-      panel1->GetBounds().x() - panel2->GetBounds().right();
-
-  // Drag left, small delta, expect no shuffle.
-  {
-    expected_delta_x_after_drag = zero_deltas;
-    expected_delta_x_after_drag[0] = -small_delta;
-    TestDragging(-small_delta, zero_delta, 0, expected_delta_x_after_drag,
-                 zero_deltas, GetAllPanelBounds(),
-                 DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-
-    // Drag right panel i.e index 0, towards left, big delta, expect shuffle.
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-
-    // Deltas for panel being dragged.
-    expected_delta_x_after_drag[0] = -big_delta;
-    expected_delta_x_after_finish[0] =
-        -(initial_bounds[1].width() + horizontal_spacing);
-
-    // Deltas for panel being shuffled.
-    expected_delta_x_after_drag[1] =
-        initial_bounds[0].width() + horizontal_spacing;
-    expected_delta_x_after_finish[1] = expected_delta_x_after_drag[1];
-
-    TestDragging(-big_delta, zero_delta, 0, expected_delta_x_after_drag,
-                 expected_delta_x_after_finish, initial_bounds,
-                 DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-  }
-
-  // Drag left panel i.e index 1, towards right, big delta, expect shuffle.
-  {
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-    expected_delta_x_after_finish = zero_deltas;
-
-    // Deltas for panel being dragged.
-    expected_delta_x_after_drag[1] = big_delta;
-    expected_delta_x_after_finish[1] =
-        initial_bounds[0].width() + horizontal_spacing;
-
-    // Deltas for panel being shuffled.
-    expected_delta_x_after_drag[0] =
-        -(initial_bounds[1].width() + horizontal_spacing);
-    expected_delta_x_after_finish[0] = expected_delta_x_after_drag[0];
-
-    TestDragging(big_delta, zero_delta, 1, expected_delta_x_after_drag,
-                 expected_delta_x_after_finish, initial_bounds,
-                 DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-  }
-
-  // Drag left panel i.e index 1, towards right, big delta, expect shuffle.
-  // Cancel drag.
-  {
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-
-    // Delta for panel being dragged.
-    expected_delta_x_after_drag[1] = big_delta;
-
-    // Delta for panel being shuffled.
-    expected_delta_x_after_drag[0] =
-        -(initial_bounds[1].width() + horizontal_spacing);
-
-    // As the drag is being canceled, we don't need expected_delta_x_after
-    // finish.  Instead initial_bounds will be used.
-    TestDragging(big_delta, zero_delta, 1, expected_delta_x_after_drag,
-                 zero_deltas, initial_bounds,
-                 DRAG_ACTION_BEGIN | DRAG_ACTION_CANCEL);
-  }
-
-  panel1->Close();
-  panel2->Close();
-}
-
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DragThreePanels) {
-  static const int num_panels = 3;
-  static const int zero_delta = 0;
-  static const int big_delta = 70;
-  static const int bigger_delta = 120;
-  static const int biggest_delta = 200;
-
-  static const std::vector<int> zero_deltas(num_panels, zero_delta);
-  std::vector<int> expected_delta_x_after_drag(num_panels, zero_delta);
-  std::vector<int> expected_delta_x_after_finish(num_panels, zero_delta);
-  std::vector<gfx::Rect> current_bounds;
-  std::vector<gfx::Rect> initial_bounds;
-
-  Panel* panel1 =
-      CreatePanelWithBounds("PanelTest1", gfx::Rect(0, 0, 100, 100));
-  Panel* panel2 =
-      CreatePanelWithBounds("PanelTest2", gfx::Rect(0, 0, 120, 120));
-  Panel* panel3 =
-    CreatePanelWithBounds("PanelTest3", gfx::Rect(0, 0, 110, 110));
-
-  int horizontal_spacing =
-      panel1->GetBounds().x() - panel2->GetBounds().right();
-
-  // Drag leftmost panel to become rightmost with two shuffles.
-  // We test both shuffles.
-  {
-    // Drag the left-most panel towards right without ending or cancelling it.
-    // Expect shuffle.
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-
-    // Delta for panel being dragged.
-    expected_delta_x_after_drag[2] = big_delta;
-
-    // Delta for panel being shuffled.
-    expected_delta_x_after_drag[1] =
-        -(initial_bounds[2].width() + horizontal_spacing);
-
-    // There is no delta after finish as drag is not done yet.
-    TestDragging(big_delta, zero_delta, 2, expected_delta_x_after_drag,
-                 zero_deltas, initial_bounds, DRAG_ACTION_BEGIN);
-
-    // The drag index changes from 2 to 1 because of the first shuffle above.
-    // Drag the panel further enough to the right to trigger a another
-    // shuffle.  We finish the drag here.
-    current_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-    expected_delta_x_after_finish = zero_deltas;
-
-    // big_delta is not enough to cause the second shuffle as the panel being
-    // dragged is in the middle of a drag and big_delta won't go far enough.
-    // So we use bigger_delta.
-
-    // Deltas for panel being dragged.
-    expected_delta_x_after_drag[1] = bigger_delta;
-    int x_after_finish = current_bounds[0].x() +
-        (current_bounds[0].width() - current_bounds[1].width());
-    expected_delta_x_after_finish[1] = x_after_finish - current_bounds[1].x();
-
-    // Deltas for panel being shuffled.
-    expected_delta_x_after_drag[0] =
-        -(current_bounds[1].width() + horizontal_spacing);
-    expected_delta_x_after_finish[0] = expected_delta_x_after_drag[0];
-
-    TestDragging(bigger_delta, zero_delta, 1, expected_delta_x_after_drag,
-                 expected_delta_x_after_finish, initial_bounds,
-                 DRAG_ACTION_FINISH);
-  }
-
-  // Drag rightmost panel to become leftmost with two shuffles.
-  // And then cancel the drag.
-  {
-    // First drag and shuffle.
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-
-    // Delta for panel being dragged.
-    expected_delta_x_after_drag[0] = -big_delta;
-
-    // Delta for panel being shuffled.
-    expected_delta_x_after_drag[1] =
-        (initial_bounds[0].width() + horizontal_spacing);
-
-    // There is no delta after finish as drag is done yet.
-    TestDragging(-big_delta, zero_delta, 0, expected_delta_x_after_drag,
-                 zero_deltas, initial_bounds, DRAG_ACTION_BEGIN);
-
-    // Second drag and shuffle.  We cancel the drag here.  The drag index
-    // changes from 0 to 1 because of the first shuffle above.
-    current_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-
-    // Delta for panel being dragged.
-    expected_delta_x_after_drag[1] = -bigger_delta;
-
-    // Deltas for panel being shuffled.
-    int x_after_shuffle = current_bounds[0].x() - horizontal_spacing
-        - current_bounds[2].width();
-    expected_delta_x_after_drag[2] = x_after_shuffle - current_bounds[2].x();
-
-    // There is no delta after finish as drag canceled.
-    TestDragging(-bigger_delta, zero_delta, 1, expected_delta_x_after_drag,
-                 zero_deltas, initial_bounds, DRAG_ACTION_CANCEL);
-  }
-
-  // Drag leftmost panel to become the rightmost in a single drag.  This
-  // will shuffle middle panel to leftmost and rightmost to middle.
-  {
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-    expected_delta_x_after_finish = zero_deltas;
-
-    // Use a delta big enough to go across two panels.
-    // Deltas for panel being dragged.
-    expected_delta_x_after_drag[2] = biggest_delta;
-    expected_delta_x_after_finish[2] =
-        initial_bounds[1].width() + horizontal_spacing +
-        initial_bounds[0].width() + horizontal_spacing;
-
-    // Deltas for middle panels being shuffled.
-    expected_delta_x_after_drag[1] =
-        -(initial_bounds[2].width() + horizontal_spacing);
-    expected_delta_x_after_finish[1] = expected_delta_x_after_drag[1];
-
-    expected_delta_x_after_drag[0] = expected_delta_x_after_drag[1];
-    expected_delta_x_after_finish[0] = expected_delta_x_after_drag[0];
-
-    TestDragging(biggest_delta, zero_delta, 2, expected_delta_x_after_drag,
-                 expected_delta_x_after_finish, initial_bounds,
-                 DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-  }
-
-  // Drag rightmost panel to become the leftmost in a single drag.  This
-  // will shuffle middle panel to rightmost and leftmost to middle.
-  {
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-    expected_delta_x_after_finish = zero_deltas;
-
-    // Deltas for panel being dragged.
-    expected_delta_x_after_drag[0] = -biggest_delta;
-    expected_delta_x_after_finish[0] =
-        -(initial_bounds[1].width() + horizontal_spacing +
-          initial_bounds[2].width() + horizontal_spacing);
-
-    // Deltas for panels being shuffled.
-    expected_delta_x_after_drag[1] =
-        initial_bounds[0].width() + horizontal_spacing;
-    expected_delta_x_after_finish[1] = expected_delta_x_after_drag[1];
-
-    expected_delta_x_after_drag[2] = expected_delta_x_after_drag[1];
-    expected_delta_x_after_finish[2] = expected_delta_x_after_drag[2];
-
-    TestDragging(-biggest_delta, zero_delta, 0, expected_delta_x_after_drag,
-                 expected_delta_x_after_finish, initial_bounds,
-                 DRAG_ACTION_BEGIN | DRAG_ACTION_FINISH);
-  }
-
-  // Drag rightmost panel to become the leftmost in a single drag.  Then
-  // cancel the drag.
-  {
-    initial_bounds = GetAllPanelBounds();
-    expected_delta_x_after_drag = zero_deltas;
-
-    // Deltas for panel being dragged.
-    expected_delta_x_after_drag[0] = -biggest_delta;
-
-    // Deltas for panels being shuffled.
-    expected_delta_x_after_drag[1] =
-        initial_bounds[0].width() + horizontal_spacing;
-    expected_delta_x_after_drag[2] = expected_delta_x_after_drag[1];
-
-    // No delta after finish as drag is canceled.
-    TestDragging(-biggest_delta, zero_delta, 0, expected_delta_x_after_drag,
-                 zero_deltas, initial_bounds,
-                 DRAG_ACTION_BEGIN | DRAG_ACTION_CANCEL);
-  }
-
-  panel1->Close();
-  panel2->Close();
-  panel3->Close();
-}
-
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, NotDraggable) {
-  Panel* panel = CreatePanel("panel");
-  panel->set_draggable(false);
-  Panel* panel2 = CreatePanel("panel2");
-
-  scoped_ptr<NativePanelTesting> panel_testing(
-      NativePanelTesting::Create(panel->native_panel()));
-  gfx::Rect bounds = panel->GetBounds();
-  panel_testing->PressLeftMouseButtonTitlebar(bounds.origin());
-  EXPECT_EQ(bounds.x(), panel->GetBounds().x());
-  panel_testing->DragTitlebar(-50, 10);
-  EXPECT_EQ(bounds.x(), panel->GetBounds().x());
-  panel_testing->FinishDragTitlebar();
-  EXPECT_EQ(bounds.x(), panel->GetBounds().x());
-
-  panel->Close();
-  panel2->Close();
-}
-
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateSettingsMenu) {
   TestCreateSettingsMenuForExtension(
       FILE_PATH_LITERAL("extension1"), Extension::EXTERNAL_POLICY_DOWNLOAD,
@@ -797,10 +385,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateSettingsMenu) {
 }
 
 // Flaky: http://crbug.com/105445
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, FLAKY_AutoResize) {
-  PanelManager::GetInstance()->enable_auto_sizing(true);
-  PanelManager::GetInstance()->SetWorkAreaForTesting(
-      gfx::Rect(0, 0, 1200, 900));  // bigger space is needed by this test
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, DISABLED_AutoResize) {
+  PanelManager* panel_manager = PanelManager::GetInstance();
+  panel_manager->enable_auto_sizing(true);
+  // Bigger space is needed by this test.
+  SetTestingWorkArea(gfx::Rect(0, 0, 1200, 900));
 
   // Create a test panel with tab contents loaded.
   CreatePanelParams params("PanelTest1", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -838,6 +427,27 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, FLAKY_AutoResize) {
   EXPECT_GT(bounds_on_shrink.width(), initial_bounds.width());
   EXPECT_EQ(bounds_on_shrink.height(), initial_bounds.height());
 
+  // Verify resizing turns off auto-resizing and that it works.
+  gfx::Rect previous_bounds = panel->GetBounds();
+  // These should be identical because the panel is expanded.
+  EXPECT_EQ(previous_bounds.size(), panel->GetRestoredBounds().size());
+  gfx::Size new_size(previous_bounds.size());
+  new_size.Enlarge(5, 5);
+  panel_manager->ResizePanel(panel, new_size);
+  EXPECT_FALSE(panel->auto_resizable());
+  EXPECT_EQ(new_size, panel->GetBounds().size());
+  EXPECT_EQ(new_size, panel->GetRestoredBounds().size());
+
+  // Turn back on auto-resize and verify that it works.
+  ui_test_utils::WindowedNotificationObserver auto_resize_enabled(
+      chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
+      content::Source<Panel>(panel));
+  panel->SetAutoResizable(true);
+  auto_resize_enabled.Wait();
+  gfx::Rect bounds_auto_resize_enabled = panel->GetBounds();
+  EXPECT_EQ(bounds_on_shrink.width(), bounds_auto_resize_enabled.width());
+  EXPECT_EQ(bounds_on_shrink.height(), bounds_auto_resize_enabled.height());
+
   panel->Close();
 }
 
@@ -849,17 +459,12 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ResizePanel) {
   EXPECT_TRUE(panel->auto_resizable());
   EXPECT_EQ(Panel::EXPANDED, panel->expansion_state());
 
-  // Verify resizing an auto-resizable panel is a no-op for now.
-  // http://crbug.com/109343
+  // Verify resizing turns off auto-resizing and that it works.
   gfx::Rect original_bounds = panel->GetBounds();
-  gfx::Rect original_restored_bounds = panel->GetRestoredBounds();
-  gfx::Size new_size(150, 200);
-  panel_manager->ResizePanel(panel, new_size);
-  EXPECT_EQ(original_bounds, panel->GetBounds());
-  EXPECT_EQ(original_restored_bounds, panel->GetRestoredBounds());
-
-  // Verify resizing adjusts bounds correctly when not auto-resizable.
-  panel->SetAutoResizable(false);
+  // These should be identical because the panel is expanded.
+  EXPECT_EQ(original_bounds.size(), panel->GetRestoredBounds().size());
+  gfx::Size new_size(original_bounds.size());
+  new_size.Enlarge(5, 5);
   panel_manager->ResizePanel(panel, new_size);
   EXPECT_FALSE(panel->auto_resizable());
   EXPECT_EQ(new_size, panel->GetBounds().size());
@@ -968,7 +573,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestore) {
   CreatePanelWithBounds("PanelTest1", gfx::Rect(0, 0, 100, 100));
   TestMinimizeRestore();
 
-  PanelManager::GetInstance()->RemoveAll();
+  PanelManager::GetInstance()->CloseAll();
 }
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestoreTwoPanels) {
@@ -981,7 +586,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestoreTwoPanels) {
   CreatePanelWithBounds("PanelTest2", gfx::Rect(0, 0, 110, 110));
   TestMinimizeRestore();
 
-  PanelManager::GetInstance()->RemoveAll();
+  PanelManager::GetInstance()->CloseAll();
 }
 
 IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestoreThreePanels) {
@@ -995,10 +600,153 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MinimizeRestoreThreePanels) {
   CreatePanelWithBounds("PanelTest3", gfx::Rect(0, 0, 120, 120));
   TestMinimizeRestore();
 
-  PanelManager::GetInstance()->RemoveAll();
+  PanelManager::GetInstance()->CloseAll();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ActivatePanelOrTabbedWindow) {
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, ToggleMinimizeAll) {
+  // We'll simulate mouse movements for test.
+  PanelMouseWatcher* mouse_watcher = new TestPanelMouseWatcher();
+  PanelManager::GetInstance()->SetMouseWatcherForTesting(mouse_watcher);
+
+  // Test with three panels.
+  Panel* panel1 = CreatePanel("PanelTest1");
+  Panel* panel2 = CreatePanel("PanelTest2");
+  Panel* panel3 = CreatePanel("PanelTest3");
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  scoped_ptr<NativePanelTesting> test_panel1(
+      NativePanelTesting::Create(panel1->native_panel()));
+  scoped_ptr<NativePanelTesting> test_panel2(
+      NativePanelTesting::Create(panel2->native_panel()));
+  scoped_ptr<NativePanelTesting> test_panel3(
+      NativePanelTesting::Create(panel3->native_panel()));
+
+  // Press and release mouse button on one panel's titlebar using a modifier
+  // to minimize all panels. Nothing changes until mouse is released.
+  test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+  test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+
+  // Press and release on a panel titlebar to restore all panels.
+  // Nothing changes until mouse is released.
+  test_panel1->PressLeftMouseButtonTitlebar(panel1->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+  test_panel1->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Minimize a single panel. Then minimize all panels to verify that apply-all
+  // logic works even if not all panels have the same expansion state.
+  panel1->Minimize();
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+  test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+
+  // Expand a single panel. Then restore all panels.
+  panel3->Restore();
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+  test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Click on the single minimized panel. Verify all are restored.
+  panel1->Minimize();
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+  test_panel1->PressLeftMouseButtonTitlebar(panel1->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel1->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Click on the single expanded panel. Verify all are minimized.
+  panel1->Minimize();
+  panel3->Minimize();
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+  test_panel2->PressLeftMouseButtonTitlebar(panel2->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel2->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+
+  // Hover over a minimized panel and click on the titlebar while it is in
+  // title-only mode. Should restore all panels.
+  MoveMouseAndWaitForExpansionStateChange(panel2, panel2->GetBounds().origin());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel2->expansion_state());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel3->expansion_state());
+  test_panel3->PressLeftMouseButtonTitlebar(panel3->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel3->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+
+  // Draw attention to a panel. Verify minimize all applies without
+  // affecting draw attention state.
+  panel1->FlashFrame(true);
+  EXPECT_TRUE(panel1->IsDrawingAttention());
+  test_panel3->PressLeftMouseButtonTitlebar(panel3->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel3->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_TRUE(panel1->IsMinimized());
+  EXPECT_TRUE(panel2->IsMinimized());
+  EXPECT_TRUE(panel3->IsMinimized());
+  EXPECT_TRUE(panel1->IsDrawingAttention());
+  EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
+
+  // Restore all panels by clicking on the minimized panel that is drawing
+  // attention. Verify restore all applies without affecting draw attention
+  // state.
+  test_panel1->PressLeftMouseButtonTitlebar(panel1->GetBounds().origin(),
+                                            panel::APPLY_TO_ALL);
+  test_panel1->ReleaseMouseButtonTitlebar(panel::APPLY_TO_ALL);
+  EXPECT_FALSE(panel1->IsMinimized());
+  EXPECT_FALSE(panel2->IsMinimized());
+  EXPECT_FALSE(panel3->IsMinimized());
+  EXPECT_TRUE(panel1->IsDrawingAttention());
+
+  PanelManager::GetInstance()->CloseAll();
+}
+
+#if defined(OS_MACOSX)
+// This test doesn't pass on Snow Leopard (10.6), although it works just
+// fine on Lion (10.7). The problem is not having a real run loop around
+// the window close is at fault, given how window controllers in Chrome
+// autorelease themselves on a -performSelector:withObject:afterDelay:
+#define MAYBE_ActivatePanelOrTabbedWindow DISABLED_ActivatePanelOrTabbedWindow
+#else
+#define MAYBE_ActivatePanelOrTabbedWindow ActivatePanelOrTabbedWindow
+#endif
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_ActivatePanelOrTabbedWindow) {
   CreatePanelParams params1("Panel1", gfx::Rect(), SHOW_AS_ACTIVE);
   Panel* panel1 = CreatePanelWithParams(params1);
   CreatePanelParams params2("Panel2", gfx::Rect(), SHOW_AS_ACTIVE);
@@ -1373,16 +1121,11 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserTest, FocusLostOnMinimize) {
   panel->Close();
 }
 
-// TODO(prasadt): Enable on Linux. This actually passes just fine on the bots.
-// But disabling it on Linux because it fails on Gnome running compiz which is
-// the typical linux dev machine configuration.
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_CreateInactiveSwitchToActive CreateInactiveSwitchToActive
-#else
-#define MAYBE_CreateInactiveSwitchToActive DISABLED_CreateInactiveSwitchToActive
-#endif
+IN_PROC_BROWSER_TEST_F(PanelBrowserTest, CreateInactiveSwitchToActive) {
+  // Compiz will not activate initially inactive window.
+  if (SkipTestIfCompizWM())
+    return;
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserTest, MAYBE_CreateInactiveSwitchToActive) {
   CreatePanelParams params("Initially Inactive", gfx::Rect(), SHOW_AS_INACTIVE);
   Panel* panel = CreatePanelWithParams(params);
 
@@ -1718,7 +1461,9 @@ class DownloadObserver : public content::DownloadManager::Observer {
   }
 
   // DownloadManager::Observer
-  virtual void ModelChanged() {
+  virtual void ModelChanged(DownloadManager* manager) {
+    DCHECK_EQ(download_manager_, manager);
+
     std::vector<DownloadItem*> downloads;
     download_manager_->SearchDownloads(string16(), &downloads);
     if (downloads.empty())
@@ -1785,10 +1530,16 @@ IN_PROC_BROWSER_TEST_F(PanelDownloadTest, Download) {
   browser()->CloseWindow();
 }
 
+// See crbug 113779.
+#if defined(OS_MACOSX)
+#define MAYBE_DownloadNoTabbedBrowser DISABLED_DownloadNoTabbedBrowser
+#else
+#define MAYBE_DownloadNoTabbedBrowser DownloadNoTabbedBrowser
+#endif
 // Verify that a new tabbed browser is created to display a download
 // shelf when a download is started in a Panel and there is no existing
 // tabbed browser.
-IN_PROC_BROWSER_TEST_F(PanelDownloadTest, DownloadNoTabbedBrowser) {
+IN_PROC_BROWSER_TEST_F(PanelDownloadTest, MAYBE_DownloadNoTabbedBrowser) {
   Profile* profile = browser()->profile();
   ASSERT_TRUE(CreateDownloadDirectory(profile));
   Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
@@ -1842,15 +1593,18 @@ IN_PROC_BROWSER_TEST_F(PanelDownloadTest, DownloadNoTabbedBrowser) {
 class PanelAndNotificationTest : public PanelBrowserTest {
  public:
   PanelAndNotificationTest() : PanelBrowserTest() {
-    // Do not use our own testing work area since desktop notification code
-    // does not have the hook up for testing work area.
-    set_testing_work_area(gfx::Rect());
   }
 
   virtual ~PanelAndNotificationTest() {
   }
 
   virtual void SetUpOnMainThread() OVERRIDE {
+    PanelBrowserTest::SetUpOnMainThread();
+
+    // Do not use our own testing work area since desktop notification code
+    // does not have the hook up for testing work area.
+    SetTestingWorkArea(gfx::Rect());
+
     g_browser_process->local_state()->SetInteger(
         prefs::kDesktopNotificationPosition, BalloonCollection::LOWER_RIGHT);
     balloons_ = new BalloonCollectionImpl();
@@ -1858,8 +1612,6 @@ class PanelAndNotificationTest : public PanelBrowserTest {
         g_browser_process->local_state(), balloons_));
     service_.reset(new DesktopNotificationService(browser()->profile(),
                    ui_manager_.get()));
-
-    PanelBrowserTest::SetUpOnMainThread();
   }
 
   virtual void CleanUpOnMainThread() OVERRIDE {
@@ -1907,7 +1659,14 @@ class PanelAndNotificationTest : public PanelBrowserTest {
   scoped_ptr<DesktopNotificationService> service_;
 };
 
-IN_PROC_BROWSER_TEST_F(PanelAndNotificationTest, NoOverlapping) {
+// crbug.com/118168
+#if defined(OS_MACOSX)
+#define MAYBE_NoOverlapping FAILS_NoOverlapping
+#else
+#define MAYBE_NoOverlapping NoOverlapping
+#endif
+
+IN_PROC_BROWSER_TEST_F(PanelAndNotificationTest, MAYBE_NoOverlapping) {
   const int kPanelWidth = 200;
   const int kShortPanelHeight = 150;
   const int kTallPanelHeight = 200;

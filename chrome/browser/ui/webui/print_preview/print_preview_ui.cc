@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include "content/public/browser/web_contents.h"
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
+#include "ui/gfx/rect.h"
 
 using content::WebContents;
 using printing::PageSizeMargins;
@@ -200,14 +201,18 @@ void PrintPreviewUI::OnDidGetPreviewPageCount(
   DCHECK_GT(params.page_count, 0);
   base::FundamentalValue count(params.page_count);
   base::FundamentalValue request_id(params.preview_request_id);
-  web_ui()->CallJavascriptFunction("onDidGetPreviewPageCount", count, request_id);
+  web_ui()->CallJavascriptFunction("onDidGetPreviewPageCount",
+                                   count,
+                                   request_id);
 }
 
 void PrintPreviewUI::OnDidGetDefaultPageLayout(
-    const PageSizeMargins& page_layout, bool has_custom_page_size_style) {
+    const PageSizeMargins& page_layout, const gfx::Rect& printable_area,
+    bool has_custom_page_size_style) {
   if (page_layout.margin_top < 0 || page_layout.margin_left < 0 ||
       page_layout.margin_bottom < 0 || page_layout.margin_right < 0 ||
-      page_layout.content_width < 0 || page_layout.content_height < 0) {
+      page_layout.content_width < 0 || page_layout.content_height < 0 ||
+      printable_area.width() <= 0 || printable_area.height() <= 0) {
     NOTREACHED();
     return;
   }
@@ -219,6 +224,12 @@ void PrintPreviewUI::OnDidGetDefaultPageLayout(
   layout.SetDouble(printing::kSettingMarginRight, page_layout.margin_right);
   layout.SetDouble(printing::kSettingContentWidth, page_layout.content_width);
   layout.SetDouble(printing::kSettingContentHeight, page_layout.content_height);
+  layout.SetInteger(printing::kSettingPrintableAreaX, printable_area.x());
+  layout.SetInteger(printing::kSettingPrintableAreaY, printable_area.y());
+  layout.SetInteger(printing::kSettingPrintableAreaWidth,
+                    printable_area.width());
+  layout.SetInteger(printing::kSettingPrintableAreaHeight,
+                    printable_area.height());
 
   base::FundamentalValue has_page_size_style(has_custom_page_size_style);
   web_ui()->CallJavascriptFunction("onDidGetDefaultPageLayout", layout,
@@ -248,7 +259,7 @@ void PrintPreviewUI::OnPreviewDataIsAvailable(int expected_pages_count,
           << expected_pages_count << " pages";
 
   if (!initial_preview_start_time_.is_null()) {
-    UMA_HISTOGRAM_TIMES("PrintPreview.InitalDisplayTime",
+    UMA_HISTOGRAM_TIMES("PrintPreview.InitialDisplayTime",
                         base::TimeTicks::Now() - initial_preview_start_time_);
     UMA_HISTOGRAM_COUNTS("PrintPreview.PageCount.Initial",
                          expected_pages_count);

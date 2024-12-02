@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_fetcher.h"
-#include "net/base/cookie_monster.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_response_headers.h"
@@ -261,11 +261,22 @@ void HttpBridge::Abort() {
     return;
 
   fetch_state_.aborted = true;
-  BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
-                            fetch_state_.url_poster);
+  if (!BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(&HttpBridge::DestroyURLFetcherOnIOThread, this,
+                     fetch_state_.url_poster))) {
+    // Madness ensues.
+    NOTREACHED() << "Could not post task to delete URLFetcher";
+  }
+
   fetch_state_.url_poster = NULL;
   fetch_state_.error_code = net::ERR_ABORTED;
   http_post_completed_.Signal();
+}
+
+void HttpBridge::DestroyURLFetcherOnIOThread(content::URLFetcher* fetcher) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  delete fetcher;
 }
 
 void HttpBridge::OnURLFetchComplete(const content::URLFetcher *source) {

@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef BASE_MESSAGE_PUMP_X_H
 #define BASE_MESSAGE_PUMP_X_H
 
+#include "base/memory/scoped_ptr.h"
 #include "base/message_pump.h"
 #include "base/message_pump_glib.h"
 #include "base/message_pump_observer.h"
@@ -29,14 +30,12 @@ class MessagePumpDispatcher {
     EVENT_QUIT        // The event was processed and the message-loop should
                       // terminate.
   };
+  virtual ~MessagePumpDispatcher() {}
 
   // Dispatches the event. EVENT_IGNORED is returned if the event was ignored
   // (i.e. not processed). EVENT_PROCESSED is returned if the event was
   // processed. The nested loop exits immediately if EVENT_QUIT is returned.
   virtual DispatchStatus Dispatch(XEvent* xevent) = 0;
-
- protected:
-  virtual ~MessagePumpDispatcher() {}
 };
 
 // This class implements a message-pump for dispatching X events.
@@ -74,6 +73,9 @@ class BASE_EXPORT MessagePumpX : public MessagePumpGlib {
 
   // The event source for X events.
   GSource* x_source_;
+
+  // The poll attached to |x_source_|.
+  scoped_ptr<GPollFD> x_poll_;
 
   DISALLOW_COPY_AND_ASSIGN(MessagePumpX);
 };

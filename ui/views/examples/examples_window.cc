@@ -2,17 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ui/views/examples/examples_main.h"
+#include "ui/views/examples/examples_window.h"
 
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
+#include "base/memory/scoped_vector.h"
 #include "base/process_util.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/base/ui_base_paths.h"
 #include "ui/base/models/combobox_model.h"
+#include "ui/base/ui_base_paths.h"
 #include "ui/views/controls/button/text_button.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
@@ -22,6 +22,7 @@
 #include "ui/views/examples/combobox_example.h"
 #include "ui/views/examples/double_split_view_example.h"
 #include "ui/views/examples/link_example.h"
+#include "ui/views/examples/menu_example.h"
 #include "ui/views/examples/message_box_example.h"
 #include "ui/views/examples/native_theme_button_example.h"
 #include "ui/views/examples/native_theme_checkbox_example.h"
@@ -29,6 +30,7 @@
 #include "ui/views/examples/radio_button_example.h"
 #include "ui/views/examples/scroll_view_example.h"
 #include "ui/views/examples/single_split_view_example.h"
+#include "ui/views/examples/slider_example.h"
 #include "ui/views/examples/tabbed_pane_example.h"
 #include "ui/views/examples/table_example.h"
 #include "ui/views/examples/text_example.h"
@@ -40,57 +42,49 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
-
-#if !defined(USE_AURA)
-#include "ui/views/examples/menu_example.h"
-#endif
+#include "ui/views/widget/widget_delegate.h"
 
 namespace views {
 namespace examples {
 
-class ExampleBase;
-
-// Model for the examples that are being added via AddExample()
+// Model for the examples that are being added via AddExample().
 class ComboboxModelExampleList : public ui::ComboboxModel {
  public:
   ComboboxModelExampleList() {}
   virtual ~ComboboxModelExampleList() {}
 
   // Overridden from ui::ComboboxModel:
-  virtual int GetItemCount() OVERRIDE { return example_list.size(); }
+  virtual int GetItemCount() const OVERRIDE { return example_list_.size(); }
   virtual string16 GetItemAt(int index) OVERRIDE {
-    return UTF8ToUTF16(example_list[index]->example_title());
+    return UTF8ToUTF16(example_list_[index]->example_title());
   }
 
-  views::View* GetItemViewAt(int index) {
-    return example_list[index]->example_view();
+  View* GetItemViewAt(int index) {
+    return example_list_[index]->example_view();
   }
 
   void AddExample(ExampleBase* example) {
-    example_list.push_back(example);
+    example_list_.push_back(example);
   }
 
  private:
-  std::vector<ExampleBase*> example_list;
+  ScopedVector<ExampleBase> example_list_;
 
   DISALLOW_COPY_AND_ASSIGN(ComboboxModelExampleList);
 };
 
-class ExamplesWindowContents : public views::WidgetDelegateView,
-                               public views::ComboboxListener {
+class ExamplesWindowContents : public WidgetDelegateView,
+                               public ComboboxListener {
  public:
   explicit ExamplesWindowContents(bool quit_on_close)
-      : combobox_model_(new ComboboxModelExampleList),
-        combobox_(new views::Combobox(combobox_model_)),
-        example_shown_(new views::View),
-        status_label_(new views::Label),
+      : combobox_(new Combobox(&combobox_model_)),
+        example_shown_(new View),
+        status_label_(new Label),
         quit_on_close_(quit_on_close) {
     instance_ = this;
     combobox_->set_listener(this);
   }
-  virtual ~ExamplesWindowContents() {
-    delete combobox_model_;
-  }
+  virtual ~ExamplesWindowContents() {}
 
   // Prints a message in the status area, at the bottom of the window.
   void SetStatus(const std::string& status) {
@@ -106,7 +100,7 @@ class ExamplesWindowContents : public views::WidgetDelegateView,
   virtual string16 GetWindowTitle() const OVERRIDE {
     return ASCIIToUTF16("Views Examples");
   }
-  virtual views::View* GetContentsView() OVERRIDE { return this; }
+  virtual View* GetContentsView() OVERRIDE { return this; }
   virtual void WindowClosing() OVERRIDE {
     instance_ = NULL;
     if (quit_on_close_)
@@ -114,7 +108,9 @@ class ExamplesWindowContents : public views::WidgetDelegateView,
   }
 
   // Overridden from View:
-  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child) {
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE {
     if (is_add && child == this)
       InitExamplesWindow();
   }
@@ -124,10 +120,11 @@ class ExamplesWindowContents : public views::WidgetDelegateView,
                            int prev_index,
                            int new_index) OVERRIDE {
     DCHECK(combo_box && combo_box == combobox_);
-    DCHECK(new_index < combobox_model_->GetItemCount());
+    DCHECK(new_index < combobox_model_.GetItemCount());
     example_shown_->RemoveAllChildViews(false);
-    example_shown_->AddChildView(combobox_model_->GetItemViewAt(new_index));
+    example_shown_->AddChildView(combobox_model_.GetItemViewAt(new_index));
     example_shown_->RequestFocus();
+    SetStatus(std::string());
     Layout();
   }
 
@@ -135,22 +132,22 @@ class ExamplesWindowContents : public views::WidgetDelegateView,
   void InitExamplesWindow() {
     AddExamples();
 
-    set_background(views::Background::CreateStandardPanelBackground());
-    views::GridLayout* layout = new views::GridLayout(this);
+    set_background(Background::CreateStandardPanelBackground());
+    GridLayout* layout = new GridLayout(this);
     SetLayoutManager(layout);
-    views::ColumnSet* column_set = layout->AddColumnSet(0);
+    ColumnSet* column_set = layout->AddColumnSet(0);
     column_set->AddPaddingColumn(0, 5);
-    column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
-                          views::GridLayout::USE_PREF, 0, 0);
+    column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
+                          GridLayout::USE_PREF, 0, 0);
     column_set->AddPaddingColumn(0, 5);
     layout->AddPaddingRow(0, 5);
     layout->StartRow(0 /* no expand */, 0);
     layout->AddView(combobox_);
 
-    if (combobox_model_->GetItemCount() > 0) {
+    if (combobox_model_.GetItemCount() > 0) {
       layout->StartRow(1, 0);
-      example_shown_->SetLayoutManager(new views::FillLayout());
-      example_shown_->AddChildView(combobox_model_->GetItemViewAt(0));
+      example_shown_->SetLayoutManager(new FillLayout());
+      example_shown_->AddChildView(combobox_model_.GetItemViewAt(0));
       layout->AddView(example_shown_);
     }
 
@@ -161,35 +158,35 @@ class ExamplesWindowContents : public views::WidgetDelegateView,
 
   // Adds all the individual examples to the combobox model.
   void AddExamples() {
-    combobox_model_->AddExample(new TreeViewExample);
-    combobox_model_->AddExample(new TableExample);
-    combobox_model_->AddExample(new BubbleExample);
-    combobox_model_->AddExample(new ButtonExample);
-    combobox_model_->AddExample(new ComboboxExample);
-    combobox_model_->AddExample(new DoubleSplitViewExample);
-    combobox_model_->AddExample(new LinkExample);
-#if !defined(USE_AURA)
-    combobox_model_->AddExample(new MenuExample);
-#endif
-    combobox_model_->AddExample(new MessageBoxExample);
-    combobox_model_->AddExample(new NativeThemeButtonExample);
-    combobox_model_->AddExample(new NativeThemeCheckboxExample);
-    combobox_model_->AddExample(new ProgressBarExample);
-    combobox_model_->AddExample(new RadioButtonExample);
-    combobox_model_->AddExample(new ScrollViewExample);
-    combobox_model_->AddExample(new SingleSplitViewExample);
-    combobox_model_->AddExample(new TabbedPaneExample);
-    combobox_model_->AddExample(new TextExample);
-    combobox_model_->AddExample(new TextfieldExample);
-    combobox_model_->AddExample(new ThrobberExample);
-    combobox_model_->AddExample(new WidgetExample);
+    // Please keep this list in alphabetical order!
+    combobox_model_.AddExample(new BubbleExample);
+    combobox_model_.AddExample(new ButtonExample);
+    combobox_model_.AddExample(new ComboboxExample);
+    combobox_model_.AddExample(new DoubleSplitViewExample);
+    combobox_model_.AddExample(new LinkExample);
+    combobox_model_.AddExample(new MenuExample);
+    combobox_model_.AddExample(new MessageBoxExample);
+    combobox_model_.AddExample(new NativeThemeButtonExample);
+    combobox_model_.AddExample(new NativeThemeCheckboxExample);
+    combobox_model_.AddExample(new ProgressBarExample);
+    combobox_model_.AddExample(new RadioButtonExample);
+    combobox_model_.AddExample(new ScrollViewExample);
+    combobox_model_.AddExample(new SingleSplitViewExample);
+    combobox_model_.AddExample(new SliderExample);
+    combobox_model_.AddExample(new TabbedPaneExample);
+    combobox_model_.AddExample(new TableExample);
+    combobox_model_.AddExample(new TextExample);
+    combobox_model_.AddExample(new TextfieldExample);
+    combobox_model_.AddExample(new ThrobberExample);
+    combobox_model_.AddExample(new TreeViewExample);
+    combobox_model_.AddExample(new WidgetExample);
   }
 
   static ExamplesWindowContents* instance_;
-  ComboboxModelExampleList* combobox_model_;
-  views::Combobox* combobox_;
-  views::View* example_shown_;
-  views::Label* status_label_;
+  ComboboxModelExampleList combobox_model_;
+  Combobox* combobox_;
+  View* example_shown_;
+  Label* status_label_;
   bool quit_on_close_;
 
   DISALLOW_COPY_AND_ASSIGN(ExamplesWindowContents);

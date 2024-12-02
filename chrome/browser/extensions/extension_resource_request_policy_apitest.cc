@@ -104,7 +104,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest,
       "can_load_icons_from_hosted_apps.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Audio) {
+#if defined(OS_CHROMEOS)
+// http://crbug.com/114478 - Audio crashes occasionally on ChromeOS
+#define MAYBE_Audio FLAKY_Audio
+#else
+#define MAYBE_Audio Audio
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, MAYBE_Audio) {
   EXPECT_TRUE(RunExtensionSubtest(
       "extension_resource_request_policy/extension2",
       "audio.html"));
@@ -112,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionResourceRequestPolicyTest, Audio) {
 
 #if defined(OS_MACOSX)
 // http://crbug.com/95274 - Video is flaky on Mac.
-#define MAYBE_Video FLAKY_Video
+#define MAYBE_Video DISABLED_Video
 #else
 #define MAYBE_Video Video
 #endif

@@ -3,113 +3,170 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const OptionsPage = options.OptionsPage;
-  const ArrayDataModel = cr.ui.ArrayDataModel;
-  const RepeatingButton = cr.ui.RepeatingButton;
+  var OptionsPage = options.OptionsPage;
+  var ArrayDataModel = cr.ui.ArrayDataModel;
+  var RepeatingButton = cr.ui.RepeatingButton;
 
   //
   // BrowserOptions class
   // Encapsulated handling of browser options page.
   //
   function BrowserOptions() {
-    OptionsPage.call(this, 'browser',
-                     templateData.browserPageTabTitle,
-                     'browserPage');
+    OptionsPage.call(this, 'settings', templateData.settingsTitle,
+                     'settings');
   }
 
   cr.addSingletonGetter(BrowserOptions);
 
   BrowserOptions.prototype = {
-    // Inherit BrowserOptions from OptionsPage.
     __proto__: options.OptionsPage.prototype,
 
     // State variables.
-    syncEnabled: false,
     syncSetupCompleted: false,
 
     /**
-     * An autocomplete list that can be attached to the homepage URL text field
-     * during editing.
-     * @type {HTMLElement}
+     * The cached value of the instant.confirm_dialog_shown preference.
+     * @type {bool}
      * @private
      */
-    autocompleteList_: null,
-
-    // The cached value of the instant.confirm_dialog_shown preference.
     instantConfirmDialogShown_: false,
 
     /**
-     * Initialize BrowserOptions page.
+     * True if the default cookie settings is session only. Used for deciding
+     * whether to show the session restore info dialog. The value is undefined
+     * until the preference has been read.
+     * @type {bool}
+     * @private
+     */
+    sessionOnlyCookies_: undefined,
+
+    /**
+     * True if the "clear cookies and other site data on exit" setting is
+     * selected. Used for deciding whether to show the session restore info
+     * dialog. The value is undefined until the preference has been read.
+     * @type {bool}
+     * @private
+     */
+    clearCookiesOnExit_: undefined,
+
+    /**
+     * Keeps track of whether |onShowHomeButtonChanged_| has been called. See
+     * |onShowHomeButtonChanged_|.
+     * @type {bool}
+     * @private
+     */
+    onShowHomeButtonChangedCalled_: false,
+
+    /**
+     * @inheritDoc
      */
     initializePage: function() {
-      // Call base class implementation to start preference initialization.
       OptionsPage.prototype.initializePage.call(this);
-
       var self = this;
 
+      window.addEventListener('message', this.handleWindowMessage_.bind(this));
+
+      $('advanced-settings-expander').onclick = function() {
+        self.toggleSectionWithAnimation_(
+            $('advanced-settings'),
+            $('advanced-settings-container'));
+      }
+      $('advanced-settings').addEventListener('webkitTransitionEnd',
+          this.updateAdvancedSettingsExpander_.bind(this));
+
+      if (cr.isChromeOS)
+        AccountsOptions.applyGuestModeVisibility(document);
+
       // Sync (Sign in) section.
-      $('sync-action-link').addEventListener('click', function(event) {
+      this.updateSyncState_(templateData.syncData);
+
+      $('sync-action-link').onclick = function(event) {
         SyncSetupOverlay.showErrorUI();
-      });
-      $('start-stop-sync').addEventListener('click', function(event) {
+      };
+      $('start-stop-sync').onclick = function(event) {
         if (self.syncSetupCompleted)
           SyncSetupOverlay.showStopSyncingUI();
         else
           SyncSetupOverlay.showSetupUI();
-      });
-      $('customize-sync').addEventListener('click', function(event) {
+      };
+      $('customize-sync').onclick = function(event) {
         SyncSetupOverlay.showSetupUI();
-      });
+      };
 
       // Internet connection section (ChromeOS only).
       if (cr.isChromeOS) {
-        $('internet-options-button').addEventListener('click', function(event) {
-          OptionsPage.navigateToPage('internet');
-          chrome.send('coreOptionsUserMetricsAction',
-              ['Options_InternetOptions']);
-        });
+        options.network.NetworkList.decorate($('network-list'));
       }
 
       // On Startup section.
-      $('startupSetPages').addEventListener('click', function() {
+      Preferences.getInstance().addEventListener('session.restore_on_startup',
+         this.onRestoreOnStartupChanged_.bind(this));
+
+      $('startup-set-pages').onclick = function() {
         OptionsPage.navigateToPage('startup');
-      });
+      };
+
+      // Session restore.
+      // TODO(marja): clean up the options UI after the decision on the session
+      // restore changes has stabilized. For now, only the startup option is
+      // renamed to "continue where I left off", but the session related content
+      // settings are not disabled or overridden (because
+      // templateData.enable_restore_session_state is forced to false).
+      this.sessionRestoreEnabled_ = templateData.enable_restore_session_state;
+      if (this.sessionRestoreEnabled_) {
+        $('startup-restore-session').onchange = function(event) {
+          if (!BrowserOptions.getInstance().maybeShowSessionRestoreDialog_()) {
+            // The dialog is not shown; handle the event normally.
+            event.currentTarget.savePrefState();
+          }
+        };
+      }
 
       // Appearance section.
-      $('change-home-page').addEventListener('click', function(event) {
+      Preferences.getInstance().addEventListener('browser.show_home_button',
+          this.onShowHomeButtonChanged_.bind(this));
+
+      Preferences.getInstance().addEventListener('homepage',
+          this.onHomePageChanged_.bind(this));
+      Preferences.getInstance().addEventListener('homepage_is_newtabpage',
+          this.onHomePageIsNtpChanged_.bind(this));
+
+      $('change-home-page').onclick = function(event) {
         OptionsPage.navigateToPage('homePageOverlay');
-      });
-      $('themes-gallery').addEventListener('click', function(event) {
+      };
+
+      if ($('set-wallpaper')) {
+        $('set-wallpaper').onclick = function(event) {
+          OptionsPage.navigateToPage('setWallpaper');
+        };
+      }
+
+      $('themes-gallery').onclick = function(event) {
         window.open(localStrings.getString('themesGalleryURL'));
-      });
-      $('themes-reset').addEventListener('click', function(event) {
+      };
+      $('themes-reset').onclick = function(event) {
         chrome.send('themesReset');
-      });
+      };
 
       // Device section (ChromeOS only).
       if (cr.isChromeOS) {
-        $('keyboard-settings-button').addEventListener('click', function(evt) {
+        $('keyboard-settings-button').onclick = function(evt) {
           OptionsPage.navigateToPage('keyboard-overlay');
-        });
-        $('pointer-settings-button').addEventListener('click', function(evt) {
+        };
+        $('pointer-settings-button').onclick = function(evt) {
           OptionsPage.navigateToPage('pointer-overlay');
-        });
-        this.initBrightnessButton_('brightness-decrease-button',
-            'decreaseScreenBrightness');
-        this.initBrightnessButton_('brightness-increase-button',
-            'increaseScreenBrightness');
+        };
       }
 
       // Search section.
-      $('defaultSearchManageEnginesButton').addEventListener('click',
-          function(event) {
-            OptionsPage.navigateToPage('searchEngines');
-            chrome.send('coreOptionsUserMetricsAction',
-                        ['Options_ManageSearchEngines']);
-          });
-      $('defaultSearchEngine').addEventListener('change',
+      $('manage-default-search-engines').onclick = function(event) {
+        OptionsPage.navigateToPage('searchEngines');
+        chrome.send('coreOptionsUserMetricsAction',
+                    ['Options_ManageSearchEngines']);
+      };
+      $('default-search-engine').addEventListener('change',
           this.setDefaultSearchEngine_);
-      $('instantEnabledCheckbox').customChangeHandler = function(event) {
+      $('instant-enabled-control').customChangeHandler = function(event) {
         if (this.checked) {
           if (self.instantConfirmDialogShown_)
             chrome.send('enableInstant');
@@ -120,32 +177,25 @@ cr.define('options', function() {
         }
         return true;
       };
-      $('instantFieldTrialCheckbox').addEventListener('change', function(evt) {
+      $('instant-field-trial-control').onchange = function(evt) {
         this.checked = true;
         chrome.send('disableInstant');
-      });
+      };
       Preferences.getInstance().addEventListener('instant.confirm_dialog_shown',
           this.onInstantConfirmDialogShownChanged_.bind(this));
       Preferences.getInstance().addEventListener('instant.enabled',
           this.onInstantEnabledChanged_.bind(this));
-
-      // Text fields may change widths when the window changes size, so make
-      // sure the suggestion list stays in sync.
-      window.addEventListener('resize', function() {
-        self.autocompleteList_.syncWidthToInput();
-      });
-
-      if (cr.commandLine && cr.commandLine.options['--bwsi']) {
-        // Hide the startup section in Guest mode.
-        $('startupSection').hidden = true;
-      }
-
-      var suggestionList = new cr.ui.AutocompleteList();
-      suggestionList.autoExpands = true;
-      suggestionList.suggestionUpdateRequestCallback =
-          this.requestAutocompleteSuggestions_.bind(this);
-      $('main-content').appendChild(suggestionList);
-      this.autocompleteList_ = suggestionList;
+      Preferences.getInstance().addEventListener(
+          'restore_session_state.dialog_shown',
+          this.onSessionRestoreDialogShownChanged_.bind(this));
+      var self = this;
+      Preferences.getInstance().addEventListener(
+          'profile.clear_site_data_on_exit',
+          function(event) {
+            if (event.value && typeof event.value['value'] != 'undefined') {
+              self.clearCookiesOnExit_ = event.value['value'] == true;
+            }
+          });
 
       // Users section.
       var profilesList = $('profiles-list');
@@ -153,113 +203,440 @@ cr.define('options', function() {
       profilesList.autoExpands = true;
 
       profilesList.addEventListener('change',
-          self.setProfileViewButtonsStatus_);
-      $('profiles-create').addEventListener('click', function(event) {
+          this.setProfileViewButtonsStatus_);
+      $('profiles-create').onclick = function(event) {
         chrome.send('createProfile');
-      });
-      $('profiles-manage').addEventListener('click', function(event) {
+      };
+      $('profiles-manage').onclick = function(event) {
         var selectedProfile = self.getSelectedProfileItem_();
         if (selectedProfile)
           ManageProfileOverlay.showManageDialog(selectedProfile);
-      });
-      $('profiles-delete').addEventListener('click', function(event) {
+      };
+      $('profiles-delete').onclick = function(event) {
         var selectedProfile = self.getSelectedProfileItem_();
         if (selectedProfile)
           ManageProfileOverlay.showDeleteDialog(selectedProfile);
-      });
+      };
 
       if (cr.isChromeOS) {
+        if (!AccountsOptions.loggedInAsGuest()) {
+          $('account-picture-wrapper').onclick = function(event) {
+            OptionsPage.navigateToPage('changePicture');
+          };
+        }
+
         // Username (canonical email) of the currently logged in user or
         // |kGuestUser| if a guest session is active.
         this.username_ = localStrings.getString('username');
 
-        $('change-picture-button').addEventListener('click', function(event) {
-          OptionsPage.navigateToPage('changePicture');
-        });
         this.updateAccountPicture_();
 
-        if (cr.commandLine && cr.commandLine.options['--bwsi']) {
-          // Disable the screen lock checkbox and change-picture-button in
-          // guest mode.
-          $('enable-screen-lock').disabled = true;
-          $('change-picture-button').disabled = true;
-        }
-
-        $('manage-accounts-button').addEventListener('click', function(event) {
+        $('manage-accounts-button').onclick = function(event) {
           OptionsPage.navigateToPage('accounts');
           chrome.send('coreOptionsUserMetricsAction',
               ['Options_ManageAccounts']);
-        });
+        };
       } else {
-        $('import-data').addEventListener('click', function(event) {
-          // Make sure that any previous import success message is hidden, and
-          // we're showing the UI to import further data.
-          $('import-data-configure').hidden = false;
-          $('import-data-success').hidden = true;
-          OptionsPage.navigateToPage('importData');
+        $('import-data').onclick = function(event) {
+          ImportDataOverlay.show();
           chrome.send('coreOptionsUserMetricsAction', ['Import_ShowDlg']);
-        });
+        };
 
         if ($('themes-GTK-button')) {
-          $('themes-GTK-button').addEventListener('click', function(event) {
+          $('themes-GTK-button').onclick = function(event) {
             chrome.send('themesSetGTK');
-          });
+          };
         }
       }
 
       // Default browser section.
       if (!cr.isChromeOS) {
-        $('defaultBrowserUseAsDefaultButton').addEventListener('click',
-            function(event) {
-              chrome.send('becomeDefaultBrowser');
-            });
+        $('set-as-default-browser').onclick = function(event) {
+          chrome.send('becomeDefaultBrowser');
+        };
+
+        $('auto-launch').onclick = this.handleAutoLaunchChanged_;
       }
 
-      // Under the hood section.
-      $('advancedOptionsButton').addEventListener('click', function(event) {
-        OptionsPage.navigateToPage('advanced');
+      // Privacy section.
+      $('privacyContentSettingsButton').onclick = function(event) {
+        OptionsPage.navigateToPage('content');
+        OptionsPage.showTab($('cookies-nav-tab'));
         chrome.send('coreOptionsUserMetricsAction',
-            ['Options_OpenUnderTheHood']);
-      });
+            ['Options_ContentSettings']);
+      };
+      $('privacyClearDataButton').onclick = function(event) {
+        OptionsPage.navigateToPage('clearBrowserData');
+        chrome.send('coreOptionsUserMetricsAction', ['Options_ClearData']);
+      };
+      // 'metricsReportingEnabled' element is only present on Chrome branded
+      // builds.
+      if ($('metricsReportingEnabled')) {
+        $('metricsReportingEnabled').onclick = function(event) {
+          chrome.send('metricsReportingCheckboxAction',
+              [String(event.target.checked)]);
+        };
+      }
+
+      // Bluetooth (CrOS only).
+      if (cr.isChromeOS) {
+        options.system.bluetooth.BluetoothDeviceList.decorate(
+            $('bluetooth-paired-devices-list'));
+
+        $('bluetooth-add-device').onclick =
+            this.handleAddBluetoothDevice_.bind(this);
+
+        $('enable-bluetooth').onchange = function(event) {
+          var state = $('enable-bluetooth').checked;
+          chrome.send('bluetoothEnableChange', [Boolean(state)]);
+        };
+
+        $('bluetooth-reconnect-device').onclick = function(event) {
+          var device = $('bluetooth-paired-devices-list').selectedItem;
+          var address = device.address;
+          chrome.send('updateBluetoothDevice', [address, 'connect']);
+          OptionsPage.closeOverlay();
+        };
+
+        $('bluetooth-reconnect-device').onmousedown = function(event) {
+          // Prevent 'blur' event, which would reset the list selection,
+          // thereby disabling the apply button.
+          event.preventDefault();
+        };
+
+        $('bluetooth-paired-devices-list').addEventListener('change',
+            function() {
+          var item = $('bluetooth-paired-devices-list').selectedItem;
+          var disabled = !item || item.connected;
+          $('bluetooth-reconnect-device').disabled = disabled;
+        });
+      }
+
+      // Passwords and Forms section.
+      $('autofill-settings').onclick = function(event) {
+        OptionsPage.navigateToPage('autofill');
+        chrome.send('coreOptionsUserMetricsAction',
+            ['Options_ShowAutofillSettings']);
+      };
+      $('manage-passwords').onclick = function(event) {
+        OptionsPage.navigateToPage('passwords');
+        OptionsPage.showTab($('passwords-nav-tab'));
+        chrome.send('coreOptionsUserMetricsAction',
+            ['Options_ShowPasswordManager']);
+      };
+      if (cr.isChromeOS && AccountsOptions.loggedInAsGuest()) {
+        // Disable and turn off Autofill in guest mode.
+        var autofillEnabled = $('autofill-enabled');
+        autofillEnabled.disabled = true;
+        autofillEnabled.checked = false;
+        cr.dispatchSimpleEvent(autofillEnabled, 'change');
+        $('autofill-settings').disabled = true;
+
+        // Disable and turn off Password Manager in guest mode.
+        var passwordManagerEnabled = $('password-manager-enabled');
+        passwordManagerEnabled.disabled = true;
+        passwordManagerEnabled.checked = false;
+        cr.dispatchSimpleEvent(passwordManagerEnabled, 'change');
+        $('manage-passwords').disabled = true;
+      }
+
+      if (cr.isMac)
+        $('mac-passwords-warning').hidden = !templateData.multiple_profiles;
+
+      // Network section.
+      if (!cr.isChromeOS) {
+        $('proxiesConfigureButton').onclick = function(event) {
+          chrome.send('showNetworkProxySettings');
+        };
+      }
+
+      // Web Content section.
+      $('fontSettingsCustomizeFontsButton').onclick = function(event) {
+        OptionsPage.navigateToPage('fonts');
+        chrome.send('coreOptionsUserMetricsAction', ['Options_FontSettings']);
+      };
+      $('defaultFontSize').onchange = function(event) {
+        var value = event.target.options[event.target.selectedIndex].value;
+        Preferences.setIntegerPref(
+             'webkit.webprefs.global.default_fixed_font_size',
+             value - OptionsPage.SIZE_DIFFERENCE_FIXED_STANDARD, '');
+        chrome.send('defaultFontSizeAction', [String(value)]);
+      };
+      $('defaultZoomFactor').onchange = function(event) {
+        chrome.send('defaultZoomFactorAction',
+            [String(event.target.options[event.target.selectedIndex].value)]);
+      };
+
+      // Languages section.
+      $('language-button').onclick = function(event) {
+        OptionsPage.navigateToPage('languages');
+        chrome.send('coreOptionsUserMetricsAction',
+            ['Options_LanuageAndSpellCheckSettings']);
+      };
+
+      // Downloads section.
+      if (!cr.isChromeOS) {
+        $('downloadLocationChangeButton').onclick = function(event) {
+          chrome.send('selectDownloadLocation');
+        };
+        $('autoOpenFileTypesResetToDefault').onclick = function(event) {
+          chrome.send('autoOpenFileTypesAction');
+        };
+      }
+
+      // HTTPS/SSL section.
+      if (cr.isWindows || cr.isMac) {
+        $('certificatesManageButton').onclick = function(event) {
+          chrome.send('showManageSSLCertificates');
+        };
+      } else {
+        $('certificatesManageButton').onclick = function(event) {
+          OptionsPage.navigateToPage('certificates');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_ManageSSLCertificates']);
+        };
+      }
+      $('sslCheckRevocation').onclick = function(event) {
+        chrome.send('checkRevocationCheckboxAction',
+            [String($('sslCheckRevocation').checked)]);
+      };
+
+      // Cloud Print section.
+      // 'cloudPrintProxyEnabled' is true for Chrome branded builds on
+      // certain platforms, or could be enabled by a lab.
+      if (!cr.isChromeOS) {
+        $('cloudPrintConnectorSetupButton').onclick = function(event) {
+          if ($('cloudPrintManageButton').style.display == 'none') {
+            // Disable the button, set it's text to the intermediate state.
+            $('cloudPrintConnectorSetupButton').textContent =
+              localStrings.getString('cloudPrintConnectorEnablingButton');
+            $('cloudPrintConnectorSetupButton').disabled = true;
+            chrome.send('showCloudPrintSetupDialog');
+          } else {
+            chrome.send('disableCloudPrintConnector');
+          }
+        };
+      }
+      $('cloudPrintManageButton').onclick = function(event) {
+        chrome.send('showCloudPrintManagePage');
+      };
+
+      // Accessibility section (CrOS only).
+      if (cr.isChromeOS) {
+        $('accessibility-spoken-feedback-check').onchange = function(event) {
+          chrome.send('spokenFeedbackChange',
+          [$('accessibility-spoken-feedback-check').checked]);
+        };
+      }
+
+      // Background mode section.
+      if ($('backgroundModeCheckbox')) {
+        cr.defineProperty($('backgroundModeCheckbox'),
+            'controlledBy',
+            cr.PropertyKind.ATTR);
+        $('backgroundModeCheckbox').onclick = function(event) {
+          chrome.send('backgroundModeAction',
+              [String($('backgroundModeCheckbox').checked)]);
+        };
+      }
     },
 
     /**
-     * Initializes a button for controlling screen brightness.
-     * @param {string} id Button ID.
-     * @param {string} callback Name of the callback function.
+     * @inheritDoc
      */
-    initBrightnessButton_: function(id, callback) {
-      var button = $(id);
-      cr.ui.decorate(button, RepeatingButton);
-      button.repeatInterval = 300;
-      button.addEventListener(RepeatingButton.Event.BUTTON_HELD, function(e) {
-        chrome.send(callback);
-      });
+    didShowPage: function() {
+      $('search-field').focus();
     },
 
-    setSyncEnabled_: function(enabled) {
-      this.syncEnabled = enabled;
+    /**
+     * Event listener for the 'session.restore_on_startup' pref.
+     * @param {Event} event The preference change event.
+     * @private
+     */
+    onRestoreOnStartupChanged_: function(event) {
+      /** @const */ var showPagesValue = Number($('startup-show-pages').value);
+      /** @const */ var showHomePageValue = 0;
+
+      $('startup-set-pages').disabled = event.value['disabled'] &&
+                                        event.value['value'] != showPagesValue;
+
+      if (event.value['value'] == showHomePageValue) {
+        // If the user previously selected "Show the homepage", the
+        // preference will already be migrated to "Open a specific page". So
+        // the only way to reach this code is if the 'restore on startup'
+        // preference is managed.
+        assert(event.value['controlledBy']);
+
+        // Select "open the following pages" and lock down the list of URLs
+        // to reflect the intention of the policy.
+        $('startup-show-pages').checked = true;
+        StartupOverlay.getInstance().setControlsDisabled(true);
+      } else {
+        // Re-enable the controls in the startup overlay if necessary.
+        StartupOverlay.getInstance().updateControlStates();
+      }
     },
 
-    setAutoLoginVisible_: function(visible) {
-      $('enable-auto-login-checkbox').hidden = !visible;
+    /**
+     * Handler for messages sent from the main uber page.
+     * @param {Event} e The 'message' event from the uber page.
+     * @private
+     */
+    handleWindowMessage_: function(e) {
+      if (e.data.method == 'frameSelected')
+        $('search-field').focus();
     },
 
-    setSyncSetupCompleted_: function(completed) {
-      this.syncSetupCompleted = completed;
-      $('customize-sync').hidden = !completed;
+    /**
+     * Shows the given section, with animation.
+     * @param {HTMLElement} section The section to be shown.
+     * @param {HTMLElement} container The container for the section. Must be
+     *     inside of |section|.
+     * @private
+     */
+    showSectionWithAnimation_: function(section, container) {
+      this.addTransitionEndListener_(section);
+
+      // Unhide
+      section.hidden = false;
+
+      // Delay starting the transition so that hidden change will be
+      // processed.
+      setTimeout(function() {
+        // Reveal the section using a WebKit transition.
+        section.classList.add('sliding');
+        section.style.height =
+            container.offsetHeight + 'px';
+      }, 0);
     },
 
-    setSyncStatus_: function(status) {
-      var statusSet = status != '';
+    /**
+     * See showSectionWithAnimation_.
+     */
+    hideSectionWithAnimation_: function(section, container) {
+      this.addTransitionEndListener_(section);
+
+      // Before we start hiding the section, we need to set
+      // the height to a pixel value.
+      section.style.height = container.offsetHeight + 'px';
+
+      // Delay starting the transition so that the height change will be
+      // processed.
+      setTimeout(function() {
+        // Hide the section using a WebKit transition.
+        section.classList.add('sliding');
+        section.style.height = '';
+      }, 0);
+    },
+
+    /**
+     * See showSectionWithAnimation_.
+     */
+    toggleSectionWithAnimation_: function(section, container) {
+      if (section.style.height == '')
+        this.showSectionWithAnimation_(section, container);
+      else
+        this.hideSectionWithAnimation_(section, container);
+    },
+
+    /**
+     * Adds a |webkitTransitionEnd| listener to the given section so that
+     * it can be animated. The listener will only be added to a given section
+     * once, so this can be called as multiple times.
+     * @param {HTMLElement} section The section to be animated.
+     * @private
+     */
+    addTransitionEndListener_: function(section) {
+      if (section.hasTransitionEndListener_)
+        return;
+
+      section.addEventListener('webkitTransitionEnd',
+          this.onTransitionEnd_.bind(this));
+      section.hasTransitionEndListener_ = true;
+    },
+
+    /**
+     * Called after an animation transition has ended.
+     * @private
+     */
+    onTransitionEnd_: function(event) {
+      if (event.propertyName != 'height')
+        return;
+
+      var section = event.target;
+
+      // Disable WebKit transitions.
+      section.classList.remove('sliding');
+
+      if (section.style.height == '') {
+        // Hide the content so it can't get tab focus.
+        section.hidden = true;
+      } else {
+        // Set the section height to 'auto' to allow for size changes
+        // (due to font change or dynamic content).
+        section.style.height = 'auto';
+      }
+    },
+
+    updateAdvancedSettingsExpander_: function() {
+      var expander = $('advanced-settings-expander');
+      if ($('advanced-settings').style.height == '')
+        expander.textContent = localStrings.getString('showAdvancedSettings');
+      else
+        expander.textContent = localStrings.getString('hideAdvancedSettings');
+    },
+
+    /**
+     * Updates the sync section with the given state.
+     * @param {Object} syncData A bunch of data records that describe the status
+     *     of the sync system.
+     * @private
+     */
+    updateSyncState_: function(syncData) {
+      if (!syncData.syncSystemEnabled) {
+        $('sync-section').hidden = true;
+        return;
+      }
+
+      $('sync-section').hidden = false;
+      this.syncSetupCompleted = syncData.setupCompleted;
+      $('customize-sync').hidden = !syncData.setupCompleted;
+
+      var startStopButton = $('start-stop-sync');
+      startStopButton.disabled = syncData.managed ||
+          syncData.setupInProgress;
+      startStopButton.hidden =
+          syncData.setupCompleted && cr.isChromeOS;
+      startStopButton.textContent =
+          syncData.setupCompleted ?
+              localStrings.getString('syncButtonTextStop') :
+          syncData.setupInProgress ?
+              localStrings.getString('syncButtonTextInProgress') :
+              localStrings.getString('syncButtonTextStart');
+
+
+      // TODO(estade): can this just be textContent?
+      $('sync-status-text').innerHTML = syncData.statusText;
+      var statusSet = syncData.statusText.length != 0;
       $('sync-overview').hidden = statusSet;
       $('sync-status').hidden = !statusSet;
-      $('sync-status-text').innerHTML = status;
-    },
 
-    setSyncStatusErrorVisible_: function(visible) {
-      visible ? $('sync-status').classList.add('sync-error') :
-                $('sync-status').classList.remove('sync-error');
+      $('sync-action-link').textContent = syncData.actionLinkText;
+      $('sync-action-link').hidden = syncData.actionLinkText.length == 0;
+      $('sync-action-link').disabled = syncData.managed;
+
+      if (syncData.hasError)
+        $('sync-status').classList.add('sync-error');
+      else
+        $('sync-status').classList.remove('sync-error');
+
+      $('customize-sync').disabled = syncData.hasUnrecoverableError;
+      // Move #enable-auto-login-checkbox to a different location on CrOS.
+      if (cr.isChromeOs) {
+        $('sync-general').insertBefore($('sync-status').nextSibling,
+                                       $('enable-auto-login-checkbox'));
+      }
+      $('enable-auto-login-checkbox').hidden = !syncData.autoLoginVisible;
     },
 
     /**
@@ -272,40 +649,8 @@ cr.define('options', function() {
       $('profiles-section').hidden = !visible;
     },
 
-    setCustomizeSyncButtonEnabled_: function(enabled) {
-      $('customize-sync').disabled = !enabled;
-    },
-
-    setSyncActionLinkEnabled_: function(enabled) {
-      $('sync-action-link').disabled = !enabled;
-    },
-
-    setSyncActionLinkLabel_: function(status) {
-      $('sync-action-link').textContent = status;
-
-      // link-button does is not zero-area when the contents of the button are
-      // empty, so explicitly hide the element.
-      $('sync-action-link').hidden = !status.length;
-    },
-
-    setStartStopButtonVisible_: function(visible) {
-      $('start-stop-sync').hidden = !visible;
-    },
-
-    setStartStopButtonEnabled_: function(enabled) {
-      $('start-stop-sync').disabled = !enabled;
-    },
-
-    setStartStopButtonLabel_: function(label) {
-      $('start-stop-sync').textContent = label;
-    },
-
-    hideSyncSection_: function() {
-      $('sync-section').hidden = true;
-    },
-
     /**
-     * Get the start/stop sync button DOM element.
+     * Get the start/stop sync button DOM element. Used for testing.
      * @return {DOMElement} The start/stop sync button.
      * @private
      */
@@ -314,12 +659,62 @@ cr.define('options', function() {
     },
 
     /**
-     * Sets the label for the 'Show Home page' input.
-     * @param {string} label The HTML of the input label.
-     * @private
+     * Event listener for the 'show home button' preference. Shows/hides the
+     * UI for changing the home page with animation, unless this is the first
+     * time this function is called, in which case there is no animation.
+     * @param {Event} event The preference change event.
      */
-    updateHomePageLabel_: function(label) {
-      $('home-page-label').innerHTML = label;
+    onShowHomeButtonChanged_: function(event) {
+      var section = $('change-home-page-section');
+      if (this.onShowHomeButtonChangedCalled_) {
+        var container = $('change-home-page-section-container');
+        if (event.value['value'])
+          this.showSectionWithAnimation_(section, container);
+        else
+          this.hideSectionWithAnimation_(section, container);
+      } else {
+        section.hidden = !event.value['value'];
+        this.onShowHomeButtonChangedCalled_ = true;
+      }
+    },
+
+    /**
+     * Event listener for the 'homepage is NTP' preference. Updates the label
+     * next to the 'Change' button.
+     * @param {Event} event The preference change event.
+     */
+    onHomePageIsNtpChanged_: function(event) {
+      $('home-page-url').hidden = event.value['value'];
+      $('home-page-ntp').hidden = !event.value['value'];
+    },
+
+    /**
+     * Event listener for changes to the homepage preference. Updates the label
+     * next to the 'Change' button.
+     * @param {Event} event The preference change event.
+     */
+    onHomePageChanged_: function(event) {
+      $('home-page-url').textContent = this.stripHttp_(event.value['value']);
+    },
+
+    /**
+     * Removes the 'http://' from a URL, like the omnibox does. If the string
+     * doesn't start with 'http://' it is returned unchanged.
+     * @param {string} url The url to be processed
+     * @return {string} The url with the 'http://' removed.
+     */
+    stripHttp_: function(url) {
+      return url.replace(/^http:\/\//, '');
+    },
+
+   /**
+    * Shows the autoLaunch preference and initializes its checkbox value.
+    * @param {bool} enabled Whether autolaunch is enabled or or not.
+    * @private
+    */
+    updateAutoLaunchState_: function(enabled) {
+      $('auto-launch-option').hidden = false;
+      $('auto-launch').checked = enabled;
     },
 
     /**
@@ -348,10 +743,75 @@ cr.define('options', function() {
      * @private
      */
     setInstantFieldTrialStatus_: function(enabled) {
-      $('instantEnabledCheckbox').hidden = enabled;
-      $('instantFieldTrialCheckbox').hidden = !enabled;
-      $('instantLabel').htmlFor = enabled ? 'instantFieldTrialCheckbox'
-                                          : 'instantEnabledCheckbox';
+      $('instant-enabled-control').hidden = enabled;
+      $('instant-field-trial-control').hidden = !enabled;
+      $('instant-label').htmlFor = enabled ? 'instant-field-trial-control' :
+                                             'instant-enabled-control';
+    },
+
+    /**
+     * Called when the value of the restore_session_state.dialog_shown
+     * preference changes.
+     * @param {Event} event Change event.
+     * @private
+     */
+    onSessionRestoreDialogShownChanged_: function(event) {
+      this.sessionRestoreDialogShown_ = event.value['value'];
+    },
+
+    /**
+     * Displays the session restore info dialog if options depending on sessions
+     * (session only cookies or clearning data on exit) are selected, and the
+     * dialog has never been shown.
+     * @private
+     * @return {boolean} True if the dialog is shown, false otherwise.
+     */
+    maybeShowSessionRestoreDialog_: function() {
+      // Don't show this dialog in Guest mode.
+      if (cr.isChromeOS && AccountsOptions.loggedInAsGuest())
+        return false;
+      // If some of the needed preferences haven't been read yet, the
+      // corresponding member variable will be undefined and we won't display
+      // the dialog yet.
+      if (this.userHasSelectedSessionContentSettings_() &&
+          this.sessionRestoreDialogShown_ === false) {
+        OptionsPage.navigateToPage('sessionRestoreOverlay');
+        return true;
+      }
+      return false;
+    },
+
+    /**
+     * Called when the user clicks the "ok" button in the session restore
+     * dialog.
+     */
+    sessionRestoreDialogOk: function() {
+      // Set the preference.
+      $('startup-restore-session').savePrefState();
+      this.sessionRestoreDialogShown_ = true;
+      Preferences.setBooleanPref('restore_session_state.dialog_shown', true);
+    },
+
+    /**
+     * Called when the user clicks the "cancel" button in the session restore
+     * dialog.
+     */
+    sessionRestoreDialogCancel: function() {
+      // The preference was never set to "continue where I left off". Update the
+      // UI to reflect the preference.
+      $('startup-newtab').resetPrefState();
+      $('startup-restore-session').resetPrefState();
+      $('startup-show-pages').resetPrefState();
+    },
+
+    /**
+     * Returns true if the user has selected content settings which rely on
+     * sessions: clearning the browsing data on exit or defaulting the cookie
+     * content setting to session only.
+     * @private
+     */
+    userHasSelectedSessionContentSettings_: function() {
+      return this.clearCookiesOnExit_ || this.sessionOnlyCookies_;
     },
 
     /**
@@ -364,10 +824,12 @@ cr.define('options', function() {
      */
     updateDefaultBrowserState_: function(statusString, isDefault,
                                          canBeDefault) {
-      var label = $('defaultBrowserState');
-      label.textContent = statusString;
+      if (!cr.isChromeOS) {
+        var label = $('default-browser-state');
+        label.textContent = statusString;
 
-      $('defaultBrowserUseAsDefaultButton').hidden = !canBeDefault || isDefault;
+        $('set-as-default-browser').hidden = !canBeDefault || isDefault;
+      }
     },
 
     /**
@@ -375,7 +837,7 @@ cr.define('options', function() {
      * @private
      */
     clearSearchEngines_: function() {
-      $('defaultSearchEngine').textContent = '';
+      $('default-search-engine').textContent = '';
     },
 
     /**
@@ -388,7 +850,7 @@ cr.define('options', function() {
      */
     updateSearchEngines_: function(engines, defaultValue, defaultManaged) {
       this.clearSearchEngines_();
-      engineSelect = $('defaultSearchEngine');
+      engineSelect = $('default-search-engine');
       engineSelect.disabled = defaultManaged;
       engineCount = engines.length;
       var defaultIndex = -1;
@@ -404,39 +866,11 @@ cr.define('options', function() {
     },
 
     /**
-     * Returns true if the custom startup page control block should
-     * be enabled.
-     * @returns {boolean} Whether the startup page controls should be
-     *     enabled.
-     */
-    shouldEnableCustomStartupPageControls: function(pages) {
-      return $('startupShowPagesButton').checked &&
-          !this.startup_pages_pref_.disabled;
-    },
-
-    /**
-     * Sets the enabled state of the custom startup page list controls
-     * based on the current startup radio button selection.
-     * @private
-     */
-    updateCustomStartupPageControlStates_: function() {
-      var disable = !this.shouldEnableCustomStartupPageControls();
-      var startupPagesList = $('startupPagesList');
-      startupPagesList.disabled = disable;
-      startupPagesList.setAttribute('tabindex', disable ? -1 : 0);
-      // Explicitly set disabled state for input text elements.
-      var inputs = startupPagesList.querySelectorAll("input[type='text']");
-      for (var i = 0; i < inputs.length; i++)
-        inputs[i].disabled = disable;
-      $('startupUseCurrentButton').disabled = disable;
-    },
-
-    /**
      * Set the default search engine based on the popup selection.
      * @private
      */
     setDefaultSearchEngine_: function() {
-      var engineSelect = $('defaultSearchEngine');
+      var engineSelect = $('default-search-engine');
       var selectedIndex = engineSelect.selectedIndex;
       if (selectedIndex >= 0) {
         var selection = engineSelect.options[selectedIndex];
@@ -444,34 +878,12 @@ cr.define('options', function() {
       }
     },
 
-    /**
-     * Sends an asynchronous request for new autocompletion suggestions for the
-     * the given query. When new suggestions are available, the C++ handler will
-     * call updateAutocompleteSuggestions_.
-     * @param {string} query List of autocomplete suggestions.
+   /**
+     * Sets or clear whether Chrome should Auto-launch on computer startup.
      * @private
      */
-    requestAutocompleteSuggestions_: function(query) {
-      chrome.send('requestAutocompleteSuggestions', [query]);
-    },
-
-    /**
-     * Updates the autocomplete suggestion list with the given entries.
-     * @param {Array} pages List of autocomplete suggestions.
-     * @private
-     */
-    // This function is duplicated between here and startup_overlay.js. There is
-    // also some autocomplete-related duplication in the C++ handler code,
-    // browser_options_handler2.cc and startup_pages_handler2.cc.
-    // TODO(tbreisacher): remove the duplication by refactoring
-    updateAutocompleteSuggestions_: function(suggestions) {
-      var list = this.autocompleteList_;
-      // If the trigger for this update was a value being selected from the
-      // current list, do nothing.
-      if (list.targetInput && list.selectedItem &&
-          list.selectedItem['url'] == list.targetInput.value)
-        return;
-      list.suggestions = suggestions;
+    handleAutoLaunchChanged_: function() {
+      chrome.send('toggleAutoLaunch', [$('auto-launch').checked]);
     },
 
     /**
@@ -505,6 +917,11 @@ cr.define('options', function() {
       $('profiles-manage').disabled = !hasSelection ||
           !selectedProfile.isCurrentProfile;
       $('profiles-delete').disabled = !hasSelection && !hasSingleProfile;
+      var importData = $('import-data');
+      if (importData) {
+        importData.disabled = $('import-data').disabled = hasSelection &&
+          !selectedProfile.isCurrentProfile;
+      }
     },
 
     /**
@@ -525,7 +942,7 @@ cr.define('options', function() {
 
     /**
      * Adds all |profiles| to the list.
-     * @param {Array.<Object>} An array of profile info objects.
+     * @param {Array.<Object>} profiles An array of profile info objects.
      *     each object is of the form:
      *       profileInfo = {
      *         name: "Profile Name",
@@ -544,9 +961,8 @@ cr.define('options', function() {
     },
 
     setGtkThemeButtonEnabled_: function(enabled) {
-      if (!cr.isChromeOS && navigator.platform.match(/linux|BSD/i)) {
+      if (!cr.isChromeOS && navigator.platform.match(/linux|BSD/i))
         $('themes-GTK-button').disabled = !enabled;
-      }
     },
 
     setThemesResetButtonEnabled_: function(enabled) {
@@ -555,6 +971,7 @@ cr.define('options', function() {
 
     /**
      * (Re)loads IMG element with current user account picture.
+     * @private
      */
     updateAccountPicture_: function() {
       var picture = $('account-picture');
@@ -563,32 +980,336 @@ cr.define('options', function() {
             Date.now();
       }
     },
+
+    /**
+     * Handle the 'add device' button click.
+     * @private
+     */
+    handleAddBluetoothDevice_: function() {
+      $('bluetooth-unpaired-devices-list').clear();
+      chrome.send('findBluetoothDevices');
+      OptionsPage.showPageByName('bluetooth', false);
+    },
+
+    /**
+     * Set the checked state of the metrics reporting checkbox.
+     * @private
+     */
+    setMetricsReportingCheckboxState_: function(checked, disabled) {
+      $('metricsReportingEnabled').checked = checked;
+      $('metricsReportingEnabled').disabled = disabled;
+    },
+
+    /**
+     * @private
+     */
+    setMetricsReportingSettingVisibility_: function(visible) {
+      if (visible)
+        $('metricsReportingSetting').style.display = 'block';
+      else
+        $('metricsReportingSetting').style.display = 'none';
+    },
+
+    /**
+     * Set the font size selected item.
+     * @private
+     */
+    setFontSize_: function(font_size_value) {
+      var selectCtl = $('defaultFontSize');
+      for (var i = 0; i < selectCtl.options.length; i++) {
+        if (selectCtl.options[i].value == font_size_value) {
+          selectCtl.selectedIndex = i;
+          if ($('Custom'))
+            selectCtl.remove($('Custom').index);
+          return;
+        }
+      }
+
+      // Add/Select Custom Option in the font size label list.
+      if (!$('Custom')) {
+        var option = new Option(localStrings.getString('fontSizeLabelCustom'),
+                                -1, false, true);
+        option.setAttribute('id', 'Custom');
+        selectCtl.add(option);
+      }
+      $('Custom').selected = true;
+    },
+
+    /**
+     * Populate the page zoom selector with values received from the caller.
+     * @param {Array} items An array of items to populate the selector.
+     *     each object is an array with three elements as follows:
+     *       0: The title of the item (string).
+     *       1: The value of the item (number).
+     *       2: Whether the item should be selected (boolean).
+     * @private
+     */
+    setupPageZoomSelector_: function(items) {
+      var element = $('defaultZoomFactor');
+
+      // Remove any existing content.
+      element.textContent = '';
+
+      // Insert new child nodes into select element.
+      var value, title, selected;
+      for (var i = 0; i < items.length; i++) {
+        title = items[i][0];
+        value = items[i][1];
+        selected = items[i][2];
+        element.appendChild(new Option(title, value, false, selected));
+      }
+    },
+
+    /**
+     * Shows/hides the autoOpenFileTypesResetToDefault button and label, with
+     * animation.
+     * @param {boolean} display Whether to show the button and label or not.
+     * @private
+     */
+    setAutoOpenFileTypesDisplayed_: function(display) {
+      if (cr.isChromeOS)
+        return;
+
+      if ($('advanced-settings').hidden) {
+        // If the Advanced section is hidden, don't animate the transition.
+        $('auto-open-file-types-section').hidden = !display;
+      } else {
+        if (display) {
+          this.showSectionWithAnimation_(
+              $('auto-open-file-types-section'),
+              $('auto-open-file-types-container'));
+        } else {
+          this.hideSectionWithAnimation_(
+              $('auto-open-file-types-section'),
+              $('auto-open-file-types-container'));
+        }
+      }
+    },
+
+    /**
+     * Set the enabled state for the proxy settings button.
+     * @private
+     */
+    setupProxySettingsSection_: function(disabled, label) {
+      if (!cr.isChromeOS) {
+        $('proxiesConfigureButton').disabled = disabled;
+        $('proxiesLabel').textContent = label;
+      }
+    },
+
+    /**
+     * Set the checked state for the sslCheckRevocation checkbox.
+     * @private
+     */
+    setCheckRevocationCheckboxState_: function(checked, disabled) {
+      $('sslCheckRevocation').checked = checked;
+      $('sslCheckRevocation').disabled = disabled;
+    },
+
+    /**
+     * Set the checked state for the backgroundModeCheckbox element.
+     * @private
+     */
+    setBackgroundModeCheckboxState_: function(
+        checked, disabled, controlled_by) {
+      $('backgroundModeCheckbox').checked = checked;
+      $('backgroundModeCheckbox').disabled = disabled;
+      $('backgroundModeCheckbox').controlledBy = controlled_by;
+      OptionsPage.updateManagedBannerVisibility();
+    },
+
+    /**
+     * Set the Cloud Print proxy UI to enabled, disabled, or processing.
+     * @private
+     */
+    setupCloudPrintConnectorSection_: function(disabled, label, allowed) {
+      if (!cr.isChromeOS) {
+        $('cloudPrintConnectorLabel').textContent = label;
+        if (disabled || !allowed) {
+          $('cloudPrintConnectorSetupButton').textContent =
+            localStrings.getString('cloudPrintConnectorDisabledButton');
+          $('cloudPrintManageButton').style.display = 'none';
+        } else {
+          $('cloudPrintConnectorSetupButton').textContent =
+            localStrings.getString('cloudPrintConnectorEnabledButton');
+          $('cloudPrintManageButton').style.display = 'inline';
+        }
+        $('cloudPrintConnectorSetupButton').disabled = !allowed;
+      }
+    },
+
+    /**
+     * @private
+     */
+    removeCloudPrintConnectorSection_: function() {
+     if (!cr.isChromeOS) {
+        var connectorSectionElm = $('cloud-print-connector-section');
+        if (connectorSectionElm)
+          connectorSectionElm.parentNode.removeChild(connectorSectionElm);
+      }
+    },
+
+    /**
+     * Set the initial state of the spoken feedback checkbox.
+     * @private
+     */
+    setSpokenFeedbackCheckboxState_: function(checked) {
+      $('accessibility-spoken-feedback-check').checked = checked;
+    },
+
+    /**
+     * Set the initial state of the high contrast checkbox.
+     * @private
+     */
+    setHighContrastCheckboxState_: function(checked) {
+      // TODO(zork): Update UI
+    },
+
+    /**
+     * Set the initial state of the screen magnifier checkbox.
+     * @private
+     */
+    setScreenMagnifierCheckboxState_: function(checked) {
+      // TODO(zork): Update UI
+    },
+
+    /**
+     * Set the initial state of the virtual keyboard checkbox.
+     * @private
+     */
+    setVirtualKeyboardCheckboxState_: function(checked) {
+      // TODO(zork): Update UI
+    },
+
+    /**
+     * Activate the bluetooth settings section on the System settings page.
+     * @private
+     */
+    showBluetoothSettings_: function() {
+      $('bluetooth-devices').hidden = false;
+    },
+
+    /**
+     * Dectivates the bluetooth settings section from the System settings page.
+     * @private
+     */
+    hideBluetoothSettings_: function() {
+      $('bluetooth-devices').hidden = true;
+    },
+
+    /**
+     * Sets the state of the checkbox indicating if bluetooth is turned on. The
+     * state of the "Find devices" button and the list of discovered devices may
+     * also be affected by a change to the state.
+     * @param {boolean} checked Flag Indicating if Bluetooth is turned on.
+     * @private
+     */
+    setBluetoothState_: function(checked) {
+      $('enable-bluetooth').checked = checked;
+      $('bluetooth-paired-devices-list').parentNode.hidden = !checked;
+      $('bluetooth-add-device').hidden = !checked;
+      $('bluetooth-reconnect-device').hidden = !checked;
+      // Flush list of previously discovered devices if bluetooth is turned off.
+      if (!checked) {
+        $('bluetooth-paired-devices-list').clear();
+        $('bluetooth-unpaired-devices-list').clear();
+      } else {
+        chrome.send('getPairedBluetoothDevices');
+      }
+    },
+
+    /**
+     * Adds an element to the list of available bluetooth devices. If an element
+     * with a matching address is found, the existing element is updated.
+     * @param {{name: string,
+     *          address: string,
+     *          paired: boolean,
+     *          bonded: boolean,
+     *          connected: boolean}} device
+     *     Decription of the bluetooth device.
+     * @private
+     */
+    addBluetoothDevice_: function(device) {
+      var list = $('bluetooth-unpaired-devices-list');
+      if (device.paired) {
+        // Test to see if the device is currently in the unpaired list, in which
+        // case it should be removed from that list.
+        var index = $('bluetooth-unpaired-devices-list').find(device.address);
+        if (index != undefined)
+          $('bluetooth-unpaired-devices-list').deleteItemAtIndex(index);
+        list = $('bluetooth-paired-devices-list');
+      }
+      list.appendDevice(device);
+
+      // One device can be in the process of pairing.  If found, display
+      // the Bluetooth pairing overlay.
+      if (device.pairing)
+        BluetoothPairing.showDialog(device);
+    },
+
+    /**
+     * Removes an element from the list of available devices.
+     * @param {string} address Unique address of the device.
+     * @private
+     */
+    removeBluetoothDevice_: function(address) {
+      var index = $('bluetooth-unpaired-devices-list').find(address);
+      if (index != undefined) {
+        $('bluetooth-unpaired-devices-list').deleteItemAtIndex(index);
+      } else {
+        index = $('bluetooth-paired-devices-list').find(address);
+        if (index != undefined)
+          $('bluetooth-paired-devices-list').deleteItemAtIndex(index);
+      }
+    },
+
+    /**
+     * Called when the default content setting value for a content type changes.
+     * @param {Object} dict A mapping content setting types to the default
+     * value.
+     * @private
+     */
+    setContentFilterSettingsValue_: function(dict) {
+      if ('cookies' in dict && 'value' in dict['cookies'])
+        this.sessionOnlyCookies_ = dict['cookies']['value'] == 'session';
+    }
+
   };
 
   //Forward public APIs to private implementations.
   [
+    'addBluetoothDevice',
     'getStartStopSyncButton',
-    'hideSyncSection',
-    'setAutoLoginVisible',
-    'setCustomizeSyncButtonEnabled',
+    'hideBluetoothSettings',
+    'removeCloudPrintConnectorSection',
+    'removeBluetoothDevice',
+    'setAutoOpenFileTypesDisplayed',
+    'setBackgroundModeCheckboxState',
+    'setBluetoothState',
+    'setCheckRevocationCheckboxState',
+    'setContentFilterSettingsValue',
+    'setFontSize',
     'setGtkThemeButtonEnabled',
+    'setHighContrastCheckboxState',
     'setInstantFieldTrialStatus',
+    'setMetricsReportingCheckboxState',
+    'setMetricsReportingSettingVisibility',
     'setProfilesInfo',
     'setProfilesSectionVisible',
-    'setStartStopButtonEnabled',
-    'setStartStopButtonLabel',
-    'setStartStopButtonVisible',
-    'setSyncActionLinkEnabled',
-    'setSyncActionLinkLabel',
-    'setSyncEnabled',
-    'setSyncSetupCompleted',
-    'setSyncStatus',
-    'setSyncStatusErrorVisible',
+    'setScreenMagnifierCheckboxState',
+    'setSpokenFeedbackCheckboxState',
     'setThemesResetButtonEnabled',
+    'setupCloudPrintConnectorSection',
+    'setupPageZoomSelector',
+    'setupProxySettingsSection',
+    'setVirtualKeyboardCheckboxState',
+    'showBluetoothSettings',
     'updateAccountPicture',
-    'updateAutocompleteSuggestions',
-    'updateHomePageLabel',
+    'updateAutoLaunchState',
+    'updateDefaultBrowserState',
+    'updateManagedBannerVisibility',
     'updateSearchEngines',
+    'updateSyncState',
     'updateStartupPages',
   ].forEach(function(name) {
     BrowserOptions[name] = function() {
@@ -596,15 +1317,6 @@ cr.define('options', function() {
       return instance[name + '_'].apply(instance, arguments);
     };
   });
-
-  BrowserOptions.updateDefaultBrowserState = function(statusString, isDefault,
-                                                      canBeDefault) {
-    if (!cr.isChromeOS) {
-      BrowserOptions.getInstance().updateDefaultBrowserState_(statusString,
-                                                              isDefault,
-                                                              canBeDefault);
-    }
-  };
 
   if (cr.isChromeOS) {
     /**
@@ -621,5 +1333,4 @@ cr.define('options', function() {
   return {
     BrowserOptions: BrowserOptions
   };
-
 });

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,21 @@
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/web_apps.h"
 
+class Extension;
+
 namespace web_app {
+
+// Gets the user data directory for given web app. The path for the directory is
+// based on |extension_id|. If |extension_id| is empty then |url| is used
+// to construct a unique ID.
+FilePath GetWebAppDataDirectory(const FilePath& profile_path,
+                                const std::string& extension_id,
+                                const GURL& url);
+
+// Gets the user data directory to use for |extension| located inside
+// |profile_path|.
+FilePath GetWebAppDataDirectory(const FilePath& profile_path,
+                                const Extension& extension);
 
 // Compute a deterministic name based on data in the shortcut_info.
 std::string GenerateApplicationNameFromInfo(
@@ -40,14 +54,8 @@ void CreateShortcut(
     const FilePath& profile_path,
     const ShellIntegration::ShortcutInfo& shortcut_info);
 
-// Allow tests to disable shortcut creation.
-void SetDisableShortcutCreationForTests(bool disable);
-
 // Returns true if given url is a valid web app url.
 bool IsValidUrl(const GURL& url);
-
-// Returns data dir for web apps for given profile path.
-FilePath GetDataDir(const FilePath& profile_path);
 
 #if defined(TOOLKIT_VIEWS)
 // Extracts icons info from web app data. Take only square shaped icons and
@@ -67,13 +75,19 @@ std::string GetWMClassFromAppName(std::string app_name);
 namespace internals {
 
 #if defined(OS_WIN)
-FilePath GetSanitizedFileName(const string16& name);
-
 bool CheckAndSaveIcon(const FilePath& icon_file, const SkBitmap& image);
 #endif
 
-FilePath GetWebAppDataDirectory(const FilePath& root_dir,
-                                const ShellIntegration::ShortcutInfo& info);
+// Does the actual job of creating a shortcut (see CreateShortcut() above).
+// This must be called on the file thread.
+void CreateShortcutTask(const FilePath& web_app_path,
+                        const FilePath& profile_path,
+                        const ShellIntegration::ShortcutInfo& shortcut_info);
+
+// Sanitizes |name| and returns a version of it that is safe to use as an
+// on-disk file name .
+FilePath GetSanitizedFileName(const string16& name);
+
 }  // namespace internals
 
 }  // namespace web_app

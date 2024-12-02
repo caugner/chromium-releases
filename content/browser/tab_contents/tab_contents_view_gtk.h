@@ -20,7 +20,7 @@
 
 namespace content {
 
-class TabContentsViewWrapperGtk;
+class WebContentsViewDelegate;
 class WebDragDestDelegate;
 class WebDragDestGtk;
 class WebDragSourceGtk;
@@ -32,28 +32,19 @@ class CONTENT_EXPORT TabContentsViewGtk : public WebContentsView {
   // because that's what was easiest when they were split. We optionally take
   // |wrapper| which creates an intermediary widget layer for features from the
   // Embedding layer that lives with the WebContentsView.
-  // TODO(jam): make this take a WebContents once it's created from content.
-  explicit TabContentsViewGtk(content::WebContents* web_contents,
-                              TabContentsViewWrapperGtk* wrapper);
+  TabContentsViewGtk(TabContents* tab_contents,
+                     WebContentsViewDelegate* delegate);
   virtual ~TabContentsViewGtk();
 
-  // Override the stored focus widget. This call only makes sense when the
-  // tab contents is not focused.
-  void SetFocusedWidget(GtkWidget* widget);
-
-  TabContentsViewWrapperGtk* wrapper() const { return view_wrapper_.get(); }
+  WebContentsViewDelegate* delegate() const { return delegate_.get(); }
   TabContents* tab_contents() { return tab_contents_; }
-  GtkWidget* expanded_container() { return expanded_.get(); }
   WebContents* web_contents();
-
-  // Allows our embeder to intercept incoming drag messages.
-  void SetDragDestDelegate(WebDragDestDelegate* delegate);
 
   // WebContentsView implementation --------------------------------------------
 
   virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
-  virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
+  virtual content::RenderWidgetHostView* CreateViewForWidget(
+      content::RenderWidgetHost* render_widget_host) OVERRIDE;
 
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
@@ -63,7 +54,7 @@ class CONTENT_EXPORT TabContentsViewGtk : public WebContentsView {
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
+  virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
@@ -73,8 +64,6 @@ class CONTENT_EXPORT TabContentsViewGtk : public WebContentsView {
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
   virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
-  virtual void InstallOverlayView(gfx::NativeView view) OVERRIDE;
-  virtual void RemoveOverlayView() OVERRIDE;
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void CreateNewWindow(
@@ -90,7 +79,8 @@ class CONTENT_EXPORT TabContentsViewGtk : public WebContentsView {
   virtual void ShowCreatedWidget(int route_id,
                                  const gfx::Rect& initial_pos) OVERRIDE;
   virtual void ShowCreatedFullscreenWidget(int route_id) OVERRIDE;
-  virtual void ShowContextMenu(const ContextMenuParams& params) OVERRIDE;
+  virtual void ShowContextMenu(
+      const content::ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -148,15 +138,11 @@ class CONTENT_EXPORT TabContentsViewGtk : public WebContentsView {
   // Our optional views wrapper. If non-NULL, we return this widget as our
   // GetNativeView() and insert |expanded_| as its child in the GtkWidget
   // hierarchy.
-  scoped_ptr<TabContentsViewWrapperGtk> view_wrapper_;
+  scoped_ptr<WebContentsViewDelegate> delegate_;
 
   // The size we want the tab contents view to be.  We keep this in a separate
   // variable because resizing in GTK+ is async.
   gfx::Size requested_size_;
-
-  // The overlaid view. Owned by the caller of |InstallOverlayView|; this is a
-  // weak reference.
-  GtkWidget* overlaid_view_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsViewGtk);
 };

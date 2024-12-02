@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/menu/menu_item_view.h"
@@ -214,17 +213,12 @@ PowerMenuButton::PowerMenuButton(StatusAreaButton::Delegate* delegate)
   set_id(VIEW_ID_STATUS_BUTTON_POWER);
   UpdateIconAndLabelInfo();
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
-  DBusThreadManager::Get()->GetPowerManagerClient()->RequestStatusUpdate();
+  DBusThreadManager::Get()->GetPowerManagerClient()->RequestStatusUpdate(
+      PowerManagerClient::UPDATE_INITIAL);
 }
 
 PowerMenuButton::~PowerMenuButton() {
   DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
-}
-
-// PowerMenuButton, views::MenuDelegate implementation:
-
-string16 PowerMenuButton::GetLabel(int id) const {
-  return string16();
 }
 
 string16 PowerMenuButton::GetBatteryIsChargedText() const {
@@ -271,11 +265,13 @@ void PowerMenuButton::OnLocaleChanged() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// PowerMenuButton, views::ViewMenuDelegate implementation:
+// PowerMenuButton, views::MenuButtonListener implementation:
 
-void PowerMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
+void PowerMenuButton::OnMenuButtonClicked(views::View* source,
+                                          const gfx::Point& point) {
   // Explicitly query the power status.
-  DBusThreadManager::Get()->GetPowerManagerClient()->RequestStatusUpdate();
+  DBusThreadManager::Get()->GetPowerManagerClient()->RequestStatusUpdate(
+      PowerManagerClient::UPDATE_USER);
 
   views::MenuItemView* menu = new views::MenuItemView(this);
   // MenuRunner takes ownership of |menu|.

@@ -91,6 +91,12 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       return VKEY_HANJA;
     case XK_Kanji:
       return VKEY_KANJI;
+    case XK_Henkan:
+      return VKEY_CONVERT;
+    case XK_Muhenkan:
+      return VKEY_NONCONVERT;
+    case XK_Zenkaku_Hankaku:
+      return VKEY_DBE_DBCSCHAR;
     case XK_A:
     case XK_a:
       return VKEY_A;
@@ -267,6 +273,8 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_Control_L:
     case XK_Control_R:
       return VKEY_CONTROL;
+    case XK_Meta_L:
+    case XK_Meta_R:
     case XK_Alt_L:
     case XK_Alt_R:
       return VKEY_MENU;
@@ -341,6 +349,18 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       // also checks a Gdk keysym. http://crbug.com/109843
       return VKEY_UNKNOWN;
 #endif
+
+    // For supporting multimedia buttons on a USB keyboard.
+    case XF86XK_AudioMute:
+      return VKEY_VOLUME_MUTE;
+    case XF86XK_AudioLowerVolume:
+      return VKEY_VOLUME_DOWN;
+    case XF86XK_AudioRaiseVolume:
+      return VKEY_VOLUME_UP;
+    case XF86XK_MonBrightnessDown:
+      return VKEY_BRIGHTNESS_DOWN;
+    case XF86XK_MonBrightnessUp:
+      return VKEY_BRIGHTNESS_UP;
 
     // TODO(sad): some keycodes are still missing.
   }
@@ -504,6 +524,14 @@ int XKeysymForWindowsKeyCode(KeyboardCode keycode, bool shift) {
       return XK_Kana_Lock;
     case VKEY_HANJA:
       return XK_Hangul_Hanja;
+    case VKEY_CONVERT:
+      return XK_Henkan;
+    case VKEY_NONCONVERT:
+      return XK_Muhenkan;
+    case VKEY_DBE_SBCSCHAR:
+      return XK_Zenkaku_Hankaku;
+    case VKEY_DBE_DBCSCHAR:
+      return XK_Zenkaku_Hankaku;
     case VKEY_ESCAPE:
       return XK_Escape;
     case VKEY_SPACE:
@@ -644,6 +672,17 @@ int XKeysymForWindowsKeyCode(KeyboardCode keycode, bool shift) {
     case VKEY_F23:
     case VKEY_F24:
       return XK_F1 + (keycode - VKEY_F1);
+
+    case VKEY_VOLUME_MUTE:
+      return XF86XK_AudioMute;
+    case VKEY_VOLUME_DOWN:
+      return XF86XK_AudioLowerVolume;
+    case VKEY_VOLUME_UP:
+      return XF86XK_AudioRaiseVolume;
+    case VKEY_BRIGHTNESS_DOWN:
+      return XF86XK_MonBrightnessDown;
+    case VKEY_BRIGHTNESS_UP:
+      return XF86XK_MonBrightnessUp;
 
     default:
       LOG(WARNING) << "Unknown keycode:" << keycode;

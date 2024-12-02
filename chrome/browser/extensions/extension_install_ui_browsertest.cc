@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
@@ -37,16 +38,8 @@ class ExtensionInstallUIBrowserTest : public ExtensionBrowserTest {
   }
 };
 
-// Flaky on linux. See http://crbug.com/86105
-#if defined(OS_LINUX)
-#define MAYBE_TestThemeInstallUndoResetsToDefault \
-FLAKY_TestThemeInstallUndoResetsToDefault
-#else
-#define MAYBE_TestThemeInstallUndoResetsToDefault \
-TestThemeInstallUndoResetsToDefault
-#endif
 IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
-                       MAYBE_TestThemeInstallUndoResetsToDefault) {
+                       TestThemeInstallUndoResetsToDefault) {
   // Install theme once and undo to verify we go back to default theme.
   FilePath theme_crx = PackExtension(test_data_dir_.AppendASCII("theme"));
   ASSERT_TRUE(InstallExtensionWithUI(theme_crx, 1));
@@ -72,16 +65,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
   ASSERT_EQ(NULL, GetTheme());
 }
 
-// Flaky on linux. See http://crbug.com/86105
-#if defined(OS_LINUX)
-#define MAYBE_TestThemeInstallUndoResetsToPreviousTheme \
-FLAKY_TestThemeInstallUndoResetsToPreviousTheme
-#else
-#define MAYBE_TestThemeInstallUndoResetsToPreviousTheme \
-TestThemeInstallUndoResetsToPreviousTheme
-#endif
 IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
-                       MAYBE_TestThemeInstallUndoResetsToPreviousTheme) {
+                       TestThemeInstallUndoResetsToPreviousTheme) {
   // Install first theme.
   FilePath theme_path = test_data_dir_.AppendASCII("theme");
   ASSERT_TRUE(InstallExtensionWithUI(theme_path, 1));
@@ -109,11 +94,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
   ASSERT_TRUE(InstallExtensionWithUIAutoConfirm(app_dir, 1,
                                                 browser()->profile()));
 
-  EXPECT_EQ(num_tabs + 1, browser()->tab_count());
-  WebContents* web_contents = browser()->GetSelectedWebContents();
-  ASSERT_TRUE(web_contents);
-  EXPECT_TRUE(StartsWithASCII(web_contents->GetURL().spec(),
-                              "chrome://newtab/", false));
+  if (NewTabUI::ShouldShowApps()) {
+    EXPECT_EQ(num_tabs + 1, browser()->tab_count());
+    WebContents* web_contents = browser()->GetSelectedWebContents();
+    ASSERT_TRUE(web_contents);
+    EXPECT_TRUE(StartsWithASCII(web_contents->GetURL().spec(),
+                                "chrome://newtab/", false));
+  } else {
+    // TODO(xiyuan): Figure out how to test extension installed bubble?
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
@@ -130,9 +119,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallUIBrowserTest,
                                                 incognito_profile));
 
   EXPECT_EQ(num_incognito_tabs, incognito_browser->tab_count());
-  EXPECT_EQ(num_normal_tabs + 1, browser()->tab_count());
-  WebContents* web_contents = browser()->GetSelectedWebContents();
-  ASSERT_TRUE(web_contents);
-  EXPECT_TRUE(StartsWithASCII(web_contents->GetURL().spec(),
-                              "chrome://newtab/", false));
+  if (NewTabUI::ShouldShowApps()) {
+    EXPECT_EQ(num_normal_tabs + 1, browser()->tab_count());
+    WebContents* web_contents = browser()->GetSelectedWebContents();
+    ASSERT_TRUE(web_contents);
+    EXPECT_TRUE(StartsWithASCII(web_contents->GetURL().spec(),
+                                "chrome://newtab/", false));
+  } else {
+    // TODO(xiyuan): Figure out how to test extension installed bubble?
+  }
 }

@@ -12,12 +12,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/protocol/proto_enum_conversions.h"
-#include "chrome/browser/sync/protocol/sync_protocol_error.h"
-#include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/sessions/session_state.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -27,6 +26,10 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "sync/protocol/proto_enum_conversions.h"
+#include "sync/protocol/sync_protocol_error.h"
+#include "sync/sessions/session_state.h"
+#include "sync/syncable/model_type.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -48,8 +51,17 @@ void GetStatusLabelsForAuthError(const AuthError& auth_error,
   string16 username = UTF8ToUTF16(service.profile()->GetPrefs()->GetString(
       prefs::kGoogleServicesUsername));
   string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
+  // TODO(altimofeev): get rid of "if def" construction: use the same IDS
+  // names. The reason the suffix was used is that strings were submitted
+  // before the actual change.
+#if defined(OS_CHROMEOS)
+  if (link_label)
+    link_label->assign(
+        l10n_util::GetStringUTF16(IDS_SYNC_RELOGIN_LINK_LABEL_CHROMEOS));
+#else
   if (link_label)
     link_label->assign(l10n_util::GetStringUTF16(IDS_SYNC_RELOGIN_LINK_LABEL));
+#endif
 
   switch (auth_error.state()) {
     case AuthError::INVALID_GAIA_CREDENTIALS:
@@ -68,16 +80,32 @@ void GetStatusLabelsForAuthError(const AuthError& auth_error,
               l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_INFO_OUT_OF_DATE));
         }
         if (global_error_menu_label) {
+          // TODO(altimofeev): get rid of "if def" construction: use the same
+          // IDS names. The reason the suffix was used is that strings were
+          // submitted before the actual change.
+#if defined(OS_CHROMEOS)
+          global_error_menu_label->assign(l10n_util::GetStringUTF16(
+              IDS_SYNC_SIGN_IN_ERROR_WRENCH_MENU_ITEM_CHROMEOS));
+#else
           global_error_menu_label->assign(l10n_util::GetStringUTF16(
               IDS_SYNC_SIGN_IN_ERROR_WRENCH_MENU_ITEM));
+#endif
         }
         if (global_error_bubble_message) {
           global_error_bubble_message->assign(l10n_util::GetStringFUTF16(
               IDS_SYNC_SIGN_IN_ERROR_BUBBLE_VIEW_MESSAGE, product_name));
         }
         if (global_error_bubble_accept_label) {
+          // TODO(altimofeev): get rid of "if def" construction: use the same
+          // IDS names. The reason the suffix was used is that strings were
+          // submitted before the actual change.
+#if defined(OS_CHROMEOS)
+          global_error_bubble_accept_label->assign(l10n_util::GetStringUTF16(
+              IDS_SYNC_SIGN_IN_ERROR_BUBBLE_VIEW_ACCEPT_CHROMEOS));
+#else
           global_error_bubble_accept_label->assign(l10n_util::GetStringUTF16(
               IDS_SYNC_SIGN_IN_ERROR_BUBBLE_VIEW_ACCEPT));
+#endif
         }
       }
       break;
@@ -271,7 +299,7 @@ MessageType GetStatusInfo(ProfileSyncService* service,
     // Either show auth error information with a link to re-login, auth in prog,
     // or provide a link to continue with setup.
     result_type = PRE_SYNCED;
-    if (service->SetupInProgress()) {
+    if (service->FirstSetupInProgress()) {
       ProfileSyncService::Status status(service->QueryDetailedSyncStatus());
       const AuthError& auth_error = service->GetAuthError();
       if (status_label) {
@@ -291,11 +319,6 @@ MessageType GetStatusInfo(ProfileSyncService* service,
                                       NULL, NULL, NULL);
         }
         result_type = SYNC_ERROR;
-      } else if (!status.authenticated) {
-        if (status_label) {
-          status_label->assign(
-              l10n_util::GetStringUTF16(IDS_SYNC_ACCOUNT_DETAILS_NOT_ENTERED));
-        }
       }
     } else if (service->unrecoverable_error_detected()) {
       result_type = SYNC_ERROR;
@@ -423,29 +446,6 @@ string16 GetSyncMenuLabel(ProfileSyncService* service) {
     return l10n_util::GetStringUTF16(IDS_SYNC_START_SYNC_BUTTON_LABEL);
 }
 
-void OpenSyncMyBookmarksDialog(Profile* profile,
-                               Browser* browser,
-                               ProfileSyncService::SyncEventCodes code) {
-  ProfileSyncService* service =
-    profile->GetOriginalProfile()->GetProfileSyncService();
-  if (!service || !service->IsSyncEnabled()) {
-    LOG(DFATAL) << "OpenSyncMyBookmarksDialog called with sync disabled";
-    return;
-  }
-
-  if (service->HasSyncSetupCompleted()) {
-    bool create_window = browser == NULL;
-    if (create_window)
-      browser = Browser::Create(profile);
-    browser->ShowOptionsTab(chrome::kPersonalOptionsSubPage);
-    if (create_window)
-      browser->window()->Show();
-  } else {
-    service->ShowLoginDialog();
-    ProfileSyncService::SyncEvent(code);  // UMA stats
-  }
-}
-
 void AddBoolSyncDetail(ListValue* details,
                        const std::string& stat_name,
                        bool stat_value) {
@@ -501,19 +501,15 @@ void ConstructAboutInformation(ProfileSyncService* service,
                                DictionaryValue* strings) {
   CHECK(strings);
   if (!service) {
-    strings->SetString("summary", "SYNC DISABLED");
+    strings->SetString("summary", "Sync service does not exist");
   } else {
     sync_api::SyncManager::Status full_status(
         service->QueryDetailedSyncStatus());
 
     strings->SetString("service_url", service->sync_service_url().spec());
-    strings->SetString("summary",
-                       ProfileSyncService::BuildSyncStatusSummaryText(
-                       full_status.summary));
+    strings->SetString("summary", service->QuerySyncStatusSummary());
 
     strings->SetString("version", GetVersionString());
-    strings->Set("authenticated",
-                 new base::FundamentalValue(full_status.authenticated));
     strings->SetString("auth_problem",
                        sync_ui_util::MakeSyncAuthErrorText(
                        service->GetAuthError().state()));
@@ -531,26 +527,29 @@ void ConstructAboutInformation(ProfileSyncService* service,
         "Client ID",
         full_status.unique_id.empty() ? "none" : full_status.unique_id);
     sync_ui_util::AddBoolSyncDetail(details,
-                                    "Server Up",
-                                    full_status.server_up);
-    sync_ui_util::AddBoolSyncDetail(details,
-                                    "Server Reachable",
-                                    full_status.server_reachable);
-    sync_ui_util::AddBoolSyncDetail(details,
                                     "Notifications Enabled",
                                     full_status.notifications_enabled);
     sync_ui_util::AddIntSyncDetail(details,
                                    "Notifications Received",
                                    full_status.notifications_received);
     sync_ui_util::AddIntSyncDetail(details,
-                                   "Notifiable Commits",
-                                   full_status.notifiable_commits);
-    sync_ui_util::AddIntSyncDetail(details,
                                    "Unsynced Count",
                                    full_status.unsynced_count);
     sync_ui_util::AddIntSyncDetail(details,
-                                   "Conflicting Count",
-                                   full_status.conflicting_count);
+                                   "Encryption Conflicts Detected (this cycle)",
+                                   full_status.encryption_conflicts);
+    sync_ui_util::AddIntSyncDetail(details,
+                                   "Hierarchy Conflicts Detected (this cycle)",
+                                   full_status.hierarchy_conflicts);
+    sync_ui_util::AddIntSyncDetail(details,
+                                   "Simple Conflicts Detected (this cycle)",
+                                   full_status.simple_conflicts);
+    sync_ui_util::AddIntSyncDetail(details,
+                                   "Server Conflicts Detected (this cycle)",
+                                   full_status.server_conflicts);
+    sync_ui_util::AddIntSyncDetail(details,
+                                   "Committed Items (this session)",
+                                   full_status.committed_count);
     sync_ui_util::AddIntSyncDetail(details,
                                    "Local Overwrites",
                                    full_status.num_local_overwrites_total);
@@ -571,14 +570,20 @@ void ConstructAboutInformation(ProfileSyncService* service,
                                    "Updates Downloaded (Tombstones)",
                                    full_status.tombstone_updates_received);
     sync_ui_util::AddIntSyncDetail(details,
-                                   "Max Consecutive Errors",
-                                   full_status.max_consecutive_errors);
+                                   "Updates Downloaded (Reflections)",
+                                   full_status.reflected_updates_received);
     sync_ui_util::AddIntSyncDetail(details,
                                    "Empty GetUpdates",
                                    full_status.empty_get_updates);
     sync_ui_util::AddIntSyncDetail(details,
                                    "Nonempty GetUpdates",
                                    full_status.nonempty_get_updates);
+    sync_ui_util::AddIntSyncDetail(details,
+                                   "Sync Cycles with Successful Commits",
+                                   full_status.sync_cycles_with_commits);
+    sync_ui_util::AddIntSyncDetail(details,
+                                   "Sync Cycles without Successful Commits",
+                                   full_status.sync_cycles_without_commits);
     sync_ui_util::AddIntSyncDetail(details,
                                    "Useless Sync Cycles",
                                    full_status.useless_sync_cycles);
@@ -619,6 +624,16 @@ void ConstructAboutInformation(ProfileSyncService* service,
       sync_ui_util::AddStringSyncDetails(details, "Last Sync Source",
           browser_sync::GetUpdatesSourceString(
           snapshot->source.updates_source));
+      sync_ui_util::AddStringSyncDetails(
+          details, "Last Sync's GetUpdates Result",
+          GetSyncerErrorString(snapshot->errors.last_download_updates_result));
+      sync_ui_util::AddStringSyncDetails(
+          details, "Last Sync's Post Commit Result",
+          GetSyncerErrorString(snapshot->errors.last_post_commit_result));
+      sync_ui_util::AddStringSyncDetails(
+          details, "Last Sync's Process Commit Response Result",
+          GetSyncerErrorString(
+              snapshot->errors.last_process_commit_response_result));
 
       // Print the count of entries from snapshot. Warning: This might be
       // slightly out of date if there are client side changes that are yet
@@ -648,6 +663,8 @@ void ConstructAboutInformation(ProfileSyncService* service,
     const FailedDatatypesHandler& failed_datatypes_handler =
         service->failed_datatypes_handler();
     if (failed_datatypes_handler.AnyFailedDatatype()) {
+      strings->Set("failed_data_types_detected",
+                   new base::FundamentalValue(true));
       strings->SetString("failed_data_types",
           failed_datatypes_handler.GetErrorString());
     }

@@ -73,7 +73,6 @@ bool MockContentRendererClient::AllowPopup(const GURL& creator) {
 
 bool MockContentRendererClient::ShouldFork(WebKit::WebFrame* frame,
                                            const GURL& url,
-                                           bool is_content_initiated,
                                            bool is_initial_navigation,
                                            bool* send_referrer) {
   return false;
@@ -90,7 +89,8 @@ bool MockContentRendererClient::ShouldPumpEventsDuringCookieMessage() {
 }
 
 void MockContentRendererClient::DidCreateScriptContext(
-    WebKit::WebFrame* frame, v8::Handle<v8::Context> context, int world_id) {
+    WebKit::WebFrame* frame, v8::Handle<v8::Context> context,
+    int extension_group, int world_id) {
 }
 
 void MockContentRendererClient::WillReleaseScriptContext(

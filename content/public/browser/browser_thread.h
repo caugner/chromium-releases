@@ -6,12 +6,14 @@
 #define CONTENT_PUBLIC_BROWSER_BROWSER_THREAD_H_
 #pragma once
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/location.h"
 #include "base/message_loop_proxy.h"
-#include "base/tracked_objects.h"
+#include "base/time.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/browser_thread_delegate.h"
 
 #if defined(UNIT_TEST)
 #include "base/logging.h"
@@ -26,6 +28,7 @@ class Thread;
 
 namespace content {
 
+class BrowserThreadDelegate;
 class BrowserThreadImpl;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -107,6 +110,10 @@ class CONTENT_EXPORT BrowserThread {
                               const tracked_objects::Location& from_here,
                               const base::Closure& task,
                               int64 delay_ms);
+  static bool PostDelayedTask(ID identifier,
+                              const tracked_objects::Location& from_here,
+                              const base::Closure& task,
+                              base::TimeDelta delay);
   static bool PostNonNestableTask(ID identifier,
                                   const tracked_objects::Location& from_here,
                                   const base::Closure& task);
@@ -115,6 +122,11 @@ class CONTENT_EXPORT BrowserThread {
       const tracked_objects::Location& from_here,
       const base::Closure& task,
       int64 delay_ms);
+  static bool PostNonNestableDelayedTask(
+      ID identifier,
+      const tracked_objects::Location& from_here,
+      const base::Closure& task,
+      base::TimeDelta delay);
 
   static bool PostTaskAndReply(
       ID identifier,

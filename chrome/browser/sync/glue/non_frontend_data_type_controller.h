@@ -9,10 +9,13 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
+#include "chrome/browser/sync/glue/data_type_error_handler.h"
 
 class Profile;
 class ProfileSyncService;
@@ -32,12 +35,8 @@ class ChangeProcessor;
 // funtionality is implemented by default. Derived classes must implement:
 //    type()
 //    model_safe_group()
-//    StartAssociationAsync()
+//    PostTaskOnBackendThread()
 //    CreateSyncComponents()
-//    StopAssociationAsync()
-//    RecordUnrecoverableError(...)
-//    RecordAssociationTime(...);
-//    RecordStartFailure(...);
 class NonFrontendDataTypeController : public DataTypeController {
  public:
   NonFrontendDataTypeController(
@@ -54,10 +53,14 @@ class NonFrontendDataTypeController : public DataTypeController {
   virtual std::string name() const OVERRIDE;
   virtual State state() const OVERRIDE;
 
-  // UnrecoverableErrorHandler interface.
+  // DataTypeErrorHandler interface.
   // Note: this is performed on the datatype's thread.
   virtual void OnUnrecoverableError(const tracked_objects::Location& from_here,
                                     const std::string& message) OVERRIDE;
+  virtual void OnSingleDatatypeUnrecoverableError(
+      const tracked_objects::Location& from_here,
+      const std::string& message) OVERRIDE;
+
  protected:
   // For testing only.
   NonFrontendDataTypeController();
@@ -66,19 +69,17 @@ class NonFrontendDataTypeController : public DataTypeController {
   // associate models. The default implementation is a no-op.
   // Return value:
   //   True - if models are ready and association can proceed.
-  //   False - if models are not ready. KickOffAssociation should be called
-  //           when the models are ready. Refer to Start(_) implementation.
+  //   False - if models are not ready. StartAssociationAsync should be called
+  //           when the models are ready.
   // Note: this is performed on the frontend (UI) thread.
   virtual bool StartModels();
 
-  // Post the association task to the thread the datatype lives on.
-  // Note: this is performed on the frontend (UI) thread.
-  // Return value: True if task posted successfully, False otherwise.
-  virtual bool StartAssociationAsync() = 0;
-
-  // Build sync components and associate models.
-  // Note: this is performed on the datatype's thread.
-  virtual void StartAssociation();
+  // Posts the given task to the backend thread, i.e. the thread the
+  // datatype lives on.  Return value: True if task posted successfully,
+  // false otherwise.
+  virtual bool PostTaskOnBackendThread(
+      const tracked_objects::Location& from_here,
+      const base::Closure& task) = 0;
 
   // Datatype specific creation of sync components.
   // Note: this is performed on the datatype's thread.
@@ -105,31 +106,30 @@ class NonFrontendDataTypeController : public DataTypeController {
   // Note: this is performed on the frontend (UI) thread.
   virtual void StopModels();
 
-  // Post the StopAssociation task to the thread the datatype lives on.
-  // Note: this is performed on the frontend (UI) thread.
-  // Return value: True if task posted successfully, False otherwise.
-  virtual bool StopAssociationAsync() = 0;
-
-  // Disassociate the models and destroy the sync components.
-  // Note: this is performed on the datatype's thread.
-  virtual void StopAssociation();
-
   // Implementation of OnUnrecoverableError that lives on UI thread.
   virtual void OnUnrecoverableErrorImpl(
       const tracked_objects::Location& from_here,
       const std::string& message);
 
-  // DataType specific histogram methods. Because histograms use static's, the
-  // specific datatype controllers must implement this themselves.
-  // Important: calling them on other threads can lead to memory corruption!
-  // Record unrecoverable errors. Called on Datatype's thread.
-  virtual void RecordUnrecoverableError(
-      const tracked_objects::Location& from_here,
-      const std::string& message) = 0;
+  // The actual implementation of Disabling the datatype. This happens
+  // on the UI thread.
+  virtual void DisableImpl(const tracked_objects::Location& from_here,
+                           const std::string& message);
+
   // Record association time. Called on Datatype's thread.
-  virtual void RecordAssociationTime(base::TimeDelta time) = 0;
+  virtual void RecordAssociationTime(base::TimeDelta time);
   // Record causes of start failure. Called on UI thread.
-  virtual void RecordStartFailure(StartResult result) = 0;
+  virtual void RecordStartFailure(StartResult result);
+
+  // Post the association task to the thread the datatype lives on.
+  // Note: this is performed on the frontend (UI) thread.
+  // Return value: True if task posted successfully, False otherwise.
+  //
+  // TODO(akalin): Callers handle false return values inconsistently;
+  // some set the state to NOT_RUNNING, and some set the state to
+  // DISABLED.  Move the error handling inside this function to be
+  // consistent.
+  virtual bool StartAssociationAsync();
 
   // Accessors and mutators used by derived classes.
   ProfileSyncComponentsFactory* profile_sync_factory() const;
@@ -144,6 +144,19 @@ class NonFrontendDataTypeController : public DataTypeController {
   virtual void set_change_processor(ChangeProcessor* change_processor);
 
  private:
+  // Build sync components and associate models.
+  // Note: this is performed on the datatype's thread.
+  void StartAssociation();
+
+  // Post the StopAssociation task to the thread the datatype lives on.
+  // Note: this is performed on the frontend (UI) thread.
+  // Return value: True if task posted successfully, False otherwise.
+  bool StopAssociationAsync();
+
+  // Disassociate the models and destroy the sync components.
+  // Note: this is performed on the datatype's thread.
+  void StopAssociation();
+
   ProfileSyncComponentsFactory* const profile_sync_factory_;
   Profile* const profile_;
   ProfileSyncService* const profile_sync_service_;

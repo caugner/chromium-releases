@@ -42,8 +42,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
@@ -173,7 +173,8 @@ void AutocompleteEditModel::FinalizeInstantQuery(
   if (skip_inline_autocomplete) {
     const string16 final_text = input_text + suggest_text;
     view_->OnBeforePossibleChange();
-    view_->SetWindowTextAndCaretPos(final_text, final_text.length());
+    view_->SetWindowTextAndCaretPos(final_text, final_text.length(), false,
+        false);
     view_->OnAfterPossibleChange();
   } else if (popup_->IsOpen()) {
     SearchProvider* search_provider =
@@ -217,12 +218,16 @@ bool AutocompleteEditModel::AcceptCurrentInstantPreview() {
 }
 
 void AutocompleteEditModel::OnChanged() {
-  const AutocompleteMatch current_match = CurrentMatch();
+  // Don't call CurrentMatch() when there's no editing, as in this case we'll
+  // never actually use it.  This avoids running the autocomplete providers (and
+  // any systems they then spin up) during startup.
+  const AutocompleteMatch& current_match = user_input_in_progress_ ?
+      CurrentMatch() : AutocompleteMatch();
 
   NetworkActionPredictor::Action recommended_action =
       NetworkActionPredictor::ACTION_NONE;
   NetworkActionPredictor* network_action_predictor =
-      user_input_in_progress() ?
+      user_input_in_progress_ ?
       NetworkActionPredictorFactory::GetForProfile(profile_) : NULL;
   if (network_action_predictor) {
     network_action_predictor->RegisterTransitionalMatches(user_text_,
@@ -353,7 +358,7 @@ void AutocompleteEditModel::AdjustTextForCopy(int sel_min,
   if (sel_min != 0)
     return;
 
-  if (!user_input_in_progress() && is_all_selected) {
+  if (!user_input_in_progress_ && is_all_selected) {
     // The user selected all the text and has not edited it. Use the url as the
     // text so that if the scheme was stripped it's added back, and the url
     // is unescaped (we escape parts of the url for display).
@@ -406,7 +411,8 @@ void AutocompleteEditModel::Revert() {
   is_keyword_hint_ = false;
   has_temporary_text_ = false;
   view_->SetWindowTextAndCaretPos(permanent_text_,
-                                  has_focus_ ? permanent_text_.length() : 0);
+                                  has_focus_ ? permanent_text_.length() : 0,
+                                  false, true);
   NetworkActionPredictor* network_action_predictor =
       NetworkActionPredictorFactory::GetForProfile(profile_);
   if (network_action_predictor)
@@ -416,6 +422,8 @@ void AutocompleteEditModel::Revert() {
 void AutocompleteEditModel::StartAutocomplete(
     bool has_selected_text,
     bool prevent_inline_autocomplete) const {
+  ClearPopupKeywordMode();
+
   bool keyword_is_selected = KeywordIsSelected();
   popup_->SetHoveredLine(AutocompletePopupModel::kNoMatch);
   // We don't explicitly clear AutocompletePopupModel::manually_selected_match,
@@ -450,13 +458,9 @@ bool AutocompleteEditModel::CanPasteAndGo(const string16& text) const {
 }
 
 void AutocompleteEditModel::PasteAndGo() {
-  // The final parameter to OpenURL, keyword, is not quite correct here: it's
-  // possible to "paste and go" a string that contains a keyword.  This is
-  // enough of an edge case that we ignore this possibility.
   view_->RevertAll();
   view_->OpenMatch(paste_and_go_match_, CURRENT_TAB,
-      paste_and_go_alternate_nav_url_, AutocompletePopupModel::kNoMatch,
-      string16());
+      paste_and_go_alternate_nav_url_, AutocompletePopupModel::kNoMatch);
 }
 
 void AutocompleteEditModel::AcceptInput(WindowOpenDisposition disposition,
@@ -490,26 +494,25 @@ void AutocompleteEditModel::AcceptInput(WindowOpenDisposition disposition,
     match.transition = content::PAGE_TRANSITION_LINK;
   }
 
-  if (match.template_url && match.template_url->url() &&
-      match.template_url->url()->HasGoogleBaseURLs()) {
+  const TemplateURL* template_url = match.GetTemplateURL();
+  if (template_url && template_url->url() &&
+      template_url->url()->HasGoogleBaseURLs()) {
     GoogleURLTracker::GoogleURLSearchCommitted();
 #if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
     // TODO(pastarmovj): Remove these metrics once we have proven that (close
     // to) none searches that should have RLZ are sent out without one.
-    match.template_url->url()->CollectRLZMetrics();
+    template_url->url()->CollectRLZMetrics();
 #endif
   }
 
   view_->OpenMatch(match, disposition, alternate_nav_url,
-                   AutocompletePopupModel::kNoMatch,
-                   is_keyword_hint_ ? string16() : keyword_);
+                   AutocompletePopupModel::kNoMatch);
 }
 
 void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
                                       WindowOpenDisposition disposition,
                                       const GURL& alternate_nav_url,
-                                      size_t index,
-                                      const string16& keyword) {
+                                      size_t index) {
   // We only care about cases where there is a selection (i.e. the popup is
   // open).
   if (popup_->IsOpen()) {
@@ -518,31 +521,22 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
         autocomplete_controller_->input().type(),
         popup_->selected_line(),
         -1,  // don't yet know tab ID; set later if appropriate
-        base::TimeDelta::FromMilliseconds(-1),  // typing duration; usually
-                                                // over-written later
+        base::TimeTicks::Now() - time_user_first_modified_omnibox_,
         0,  // inline autocomplete length; possibly set later
         result());
+    DCHECK(user_input_in_progress_) << "We didn't get here through the "
+        "expected series of calls.  time_user_first_modified_omnibox_ is "
+        "not set correctly and other things may be wrong.";
     if (index != AutocompletePopupModel::kNoMatch)
       log.selected_index = index;
     else if (!has_temporary_text_)
       log.inline_autocompleted_length = inline_autocomplete_text_.length();
     if (disposition == CURRENT_TAB) {
-      // If we know the destination is being opened in the curren tab,
+      // If we know the destination is being opened in the current tab,
       // we can easily get the tab ID.  (If it's being opened in a new
       // tab, we don't know the tab ID yet.)
       log.tab_id = controller_->GetTabContentsWrapper()->
-                       restore_tab_helper()->session_id().id();
-    }
-    if (user_input_in_progress_) {
-      // This case should happen every time except possibly in unit tests.
-      // If we somehow got into OpenMatch() by selecting an autocomplete
-      // match without going through user_input_in_progress_, that
-      // means we never properly set time_user_first_modified_omnibox_
-      // (because we didn't know the user started typing!).  In that
-      // case, leave the elapsed_time_since_user_first_modified_omnibox
-      // set to -1 ms.
-      log.elapsed_time_since_user_first_modified_omnibox =
-          base::TimeTicks::Now() - time_user_first_modified_omnibox_;
+          restore_tab_helper()->session_id().id();
     }
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
@@ -550,56 +544,47 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
         content::Details<AutocompleteLog>(&log));
   }
 
-  TemplateURLService* template_url_service =
-      TemplateURLServiceFactory::GetForProfile(profile_);
-  if (template_url_service && !keyword.empty()) {
-    const TemplateURL* const template_url =
-        template_url_service->GetTemplateURLForKeyword(keyword);
+  const TemplateURL* template_url = match.GetTemplateURL();
+  if (template_url) {
+    if (match.transition == content::PAGE_TRANSITION_KEYWORD) {
+      // The user is using a non-substituting keyword or is explicitly in
+      // keyword mode.
 
-    // Special case for extension keywords. Don't increment usage count for
-    // these.
-    if (template_url && template_url->IsExtensionKeyword()) {
-      AutocompleteMatch current_match;
-      GetInfoForCurrentText(&current_match, NULL);
+      // Special case for extension keywords. Don't increment usage count for
+      // these.
+      if (template_url->IsExtensionKeyword()) {
+        AutocompleteMatch current_match;
+        GetInfoForCurrentText(&current_match, NULL);
 
-      const AutocompleteMatch& match =
-          index == AutocompletePopupModel::kNoMatch ?
-              current_match : result().match_at(index);
+        const AutocompleteMatch& match =
+            (index == AutocompletePopupModel::kNoMatch) ?
+                current_match : result().match_at(index);
 
-      // Strip the keyword + leading space off the input.
-      size_t prefix_length = match.template_url->keyword().length() + 1;
-      ExtensionOmniboxEventRouter::OnInputEntered(
-          profile_, match.template_url->GetExtensionId(),
-          UTF16ToUTF8(match.fill_into_edit.substr(prefix_length)));
-      view_->RevertAll();
-      return;
-    }
-
-    if (template_url) {
-      content::RecordAction(UserMetricsAction("AcceptedKeyword"));
-      template_url_service->IncrementUsageCount(template_url);
-
-      if (match.transition == content::PAGE_TRANSITION_KEYWORD ||
-          match.transition == content::PAGE_TRANSITION_KEYWORD_GENERATED) {
-        // NOTE: Non-prepopulated engines will all have ID 0, which is fine as
-        // the prepopulate IDs start at 1.  Distribution-specific engines will
-        // all have IDs above the maximum, and will be automatically lumped
-        // together in an "overflow" bucket in the histogram.
-        UMA_HISTOGRAM_ENUMERATION(
-            "Omnibox.SearchEngine", template_url->prepopulate_id(),
-            TemplateURLPrepopulateData::kMaxPrepopulatedEngineID);
+        // Strip the keyword + leading space off the input.
+        size_t prefix_length = match.template_url->keyword().length() + 1;
+        ExtensionOmniboxEventRouter::OnInputEntered(profile_,
+            template_url->GetExtensionId(),
+            UTF16ToUTF8(match.fill_into_edit.substr(prefix_length)));
+        view_->RevertAll();
+        return;
       }
+
+      content::RecordAction(UserMetricsAction("AcceptedKeyword"));
+      TemplateURLServiceFactory::GetForProfile(profile_)->IncrementUsageCount(
+          template_url);
+    } else {
+      DCHECK_EQ(content::PAGE_TRANSITION_GENERATED, match.transition);
+      // NOTE: We purposefully don't increment the usage count of the default
+      // search engine here like we do for explicit keywords above; see comments
+      // in template_url.h.
     }
 
-    // NOTE: We purposefully don't increment the usage count of the default
-    // search engine, if applicable; see comments in template_url.h.
-  }
-
-  if (match.transition == content::PAGE_TRANSITION_GENERATED &&
-      match.template_url) {
-    // See comment above.
-    UMA_HISTOGRAM_ENUMERATION(
-        "Omnibox.SearchEngine", match.template_url->prepopulate_id(),
+    // NOTE: Non-prepopulated engines will all have ID 0, which is fine as
+    // the prepopulate IDs start at 1.  Distribution-specific engines will
+    // all have IDs above the maximum, and will be automatically lumped
+    // together in an "overflow" bucket in the histogram.
+    UMA_HISTOGRAM_ENUMERATION("Omnibox.SearchEngine",
+        template_url->prepopulate_id(),
         TemplateURLPrepopulateData::kMaxPrepopulatedEngineID);
   }
 
@@ -627,28 +612,49 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
 bool AutocompleteEditModel::AcceptKeyword() {
   DCHECK(is_keyword_hint_ && !keyword_.empty());
 
-  view_->OnBeforePossibleChange();
-  view_->SetWindowTextAndCaretPos(string16(), 0);
+  autocomplete_controller_->Stop(false);
   is_keyword_hint_ = false;
-  view_->OnAfterPossibleChange();
-  just_deleted_text_ = false;  // OnAfterPossibleChange() erroneously sets this
-                               // since the edit contents have disappeared.  It
-                               // doesn't really matter, but we clear it to be
-                               // consistent.
+
+  if (popup_->IsOpen())
+    popup_->SetSelectedLineState(AutocompletePopupModel::KEYWORD);
+  else
+    StartAutocomplete(false, true);
+
+  // Ensure the current selection is saved before showing keyword mode
+  // so that moving to another line and then reverting the text will restore
+  // the current state properly.
+  view_->OnTemporaryTextMaybeChanged(
+      DisplayTextFromUserText(CurrentMatch().fill_into_edit),
+      !has_temporary_text_);
+  has_temporary_text_ = true;
+
   content::RecordAction(UserMetricsAction("AcceptedKeywordHint"));
   return true;
 }
 
 void AutocompleteEditModel::ClearKeyword(const string16& visible_text) {
-  view_->OnBeforePossibleChange();
+  autocomplete_controller_->Stop(false);
+  ClearPopupKeywordMode();
+
   const string16 window_text(keyword_ + visible_text);
-  view_->SetWindowTextAndCaretPos(window_text.c_str(), keyword_.length());
-  keyword_.clear();
-  is_keyword_hint_ = false;
-  view_->OnAfterPossibleChange();
-  just_deleted_text_ = true;  // OnAfterPossibleChange() fails to clear this
-                              // since the edit contents have actually grown
-                              // longer.
+
+  // Only reset the result if the edit text has changed since the
+  // keyword was accepted, or if the popup is closed.
+  if (just_deleted_text_ || !visible_text.empty() || !popup_->IsOpen()) {
+    view_->OnBeforePossibleChange();
+    view_->SetWindowTextAndCaretPos(window_text.c_str(), keyword_.length(),
+        false, false);
+    keyword_.clear();
+    is_keyword_hint_ = false;
+    view_->OnAfterPossibleChange();
+    just_deleted_text_ = true;  // OnAfterPossibleChange() fails to clear this
+                                // since the edit contents have actually grown
+                                // longer.
+  } else {
+    is_keyword_hint_ = true;
+    view_->SetWindowTextAndCaretPos(window_text.c_str(), keyword_.length(),
+        false, true);
+  }
 }
 
 const AutocompleteResult& AutocompleteEditModel::result() const {
@@ -816,6 +822,7 @@ void AutocompleteEditModel::OnPopupDataChanged(
 }
 
 bool AutocompleteEditModel::OnAfterPossibleChange(
+    const string16& old_text,
     const string16& new_text,
     size_t selection_start,
     size_t selection_end,
@@ -847,7 +854,6 @@ bool AutocompleteEditModel::OnAfterPossibleChange(
     return false;
   }
 
-  const string16 old_user_text = user_text_;
   // If the user text has not changed, we do not want to change the model's
   // state associated with the text.  Otherwise, we can get surprising behavior
   // where the autocompleted text unexpectedly reappears, e.g. crbug.com/55983
@@ -865,21 +871,29 @@ bool AutocompleteEditModel::OnAfterPossibleChange(
   // Update the popup for the change, in the process changing to keyword mode
   // if the user hit space in mid-string after a keyword.
   // |allow_exact_keyword_match_| will be used by StartAutocomplete() method,
-  // which will be called by |view_->UpdatePopup()|. So we can safely clear
-  // this flag afterwards.
-  allow_exact_keyword_match_ =
-      text_differs && allow_keyword_ui_change &&
+  // which will be called by |view_->UpdatePopup()|; so after that returns we
+  // can safely reset this flag.
+  allow_exact_keyword_match_ = text_differs && allow_keyword_ui_change &&
       !just_deleted_text && no_selection &&
-      ShouldAllowExactKeywordMatch(old_user_text, user_text_, selection_start);
+      CreatedKeywordSearchByInsertingSpaceInMiddle(old_text, user_text_,
+                                                   selection_start);
   view_->UpdatePopup();
   allow_exact_keyword_match_ = false;
 
-  // Change to keyword mode if the user has typed a keyword name and is now
-  // pressing space after the name. Accepting the keyword will update our
-  // state, so in that case there's no need to also return true here.
+  // Change to keyword mode if the user is now pressing space after a keyword
+  // name.  Note that if this is the case, then even if there was no keyword
+  // hint when we entered this function (e.g. if the user has used space to
+  // replace some selected text that was adjoined to this keyword), there will
+  // be one now because of the call to UpdatePopup() above; so it's safe for
+  // MaybeAcceptKeywordBySpace() to look at |keyword_| and |is_keyword_hint_| to
+  // determine what keyword, if any, is applicable.
+  //
+  // If MaybeAcceptKeywordBySpace() accepts the keyword and returns true, that
+  // will have updated our state already, so in that case we don't also return
+  // true from this function.
   return !(text_differs && allow_keyword_ui_change && !just_deleted_text &&
-           no_selection && selection_start == user_text_.length() &&
-           MaybeAcceptKeywordBySpace(old_user_text, user_text_));
+           no_selection && (selection_start == user_text_.length()) &&
+           MaybeAcceptKeywordBySpace(user_text_));
 }
 
 void AutocompleteEditModel::PopupBoundsChangedTo(const gfx::Rect& bounds) {
@@ -911,8 +925,9 @@ void AutocompleteEditModel::OnResultChanged(bool default_match_changed) {
       // can be many of these as a user types an initial series of characters,
       // the OS DNS cache could suffer eviction problems for minimal gain.
 
-      is_keyword_hint = popup_->GetKeywordForMatch(*match, &keyword);
+      match->GetKeywordUIState(&keyword, &is_keyword_hint);
     }
+
     popup_->OnResultChanged();
     OnPopupDataChanged(inline_autocomplete_text, NULL, keyword,
                        is_keyword_hint);
@@ -943,6 +958,12 @@ void AutocompleteEditModel::InternalSetUserText(const string16& text) {
 
 bool AutocompleteEditModel::KeywordIsSelected() const {
   return !is_keyword_hint_ && !keyword_.empty();
+}
+
+void AutocompleteEditModel::ClearPopupKeywordMode() const {
+  if (popup_->IsOpen() &&
+      popup_->selected_line_state() == AutocompletePopupModel::KEYWORD)
+    popup_->SetSelectedLineState(AutocompletePopupModel::NORMAL);
 }
 
 string16 AutocompleteEditModel::DisplayTextFromUserText(
@@ -1007,44 +1028,43 @@ void AutocompleteEditModel::RevertTemporaryText(bool revert_popup) {
 }
 
 bool AutocompleteEditModel::MaybeAcceptKeywordBySpace(
-    const string16& old_user_text,
-    const string16& new_user_text) {
+    const string16& new_text) {
+  size_t keyword_length = new_text.length() - 1;
   return (paste_state_ == NONE) && is_keyword_hint_ && !keyword_.empty() &&
-      inline_autocomplete_text_.empty() && new_user_text.length() >= 2 &&
-      IsSpaceCharForAcceptingKeyword(*new_user_text.rbegin()) &&
-      !IsWhitespace(*(new_user_text.rbegin() + 1)) &&
-      (old_user_text.length() + 1 >= new_user_text.length()) &&
-      !new_user_text.compare(0, new_user_text.length() - 1, old_user_text,
-                             0, new_user_text.length() - 1) &&
+      inline_autocomplete_text_.empty() &&
+      (keyword_.length() == keyword_length) &&
+      IsSpaceCharForAcceptingKeyword(new_text[keyword_length]) &&
+      !new_text.compare(0, keyword_length, keyword_, 0, keyword_length) &&
       AcceptKeyword();
 }
 
-bool AutocompleteEditModel::ShouldAllowExactKeywordMatch(
-    const string16& old_user_text,
-    const string16& new_user_text,
-    size_t caret_position) {
+bool AutocompleteEditModel::CreatedKeywordSearchByInsertingSpaceInMiddle(
+    const string16& old_text,
+    const string16& new_text,
+    size_t caret_position) const {
+  DCHECK_GE(new_text.length(), caret_position);
+
   // Check simple conditions first.
-  if (paste_state_ != NONE || caret_position < 2 ||
-      new_user_text.length() <= caret_position ||
-      old_user_text.length() < caret_position ||
-      !IsSpaceCharForAcceptingKeyword(new_user_text[caret_position - 1]) ||
-      IsSpaceCharForAcceptingKeyword(new_user_text[caret_position - 2]) ||
-      new_user_text.compare(0, caret_position - 1, old_user_text,
-                            0, caret_position - 1) ||
-      !new_user_text.compare(caret_position - 1,
-                             new_user_text.length() - caret_position + 1,
-                             old_user_text, caret_position - 1,
-                             old_user_text.length() - caret_position + 1)) {
+  if ((paste_state_ != NONE) || (caret_position < 2) ||
+      (old_text.length() < caret_position) ||
+      (new_text.length() == caret_position))
+    return false;
+  size_t space_position = caret_position - 1;
+  if (!IsSpaceCharForAcceptingKeyword(new_text[space_position]) ||
+      IsWhitespace(new_text[space_position - 1]) ||
+      new_text.compare(0, space_position, old_text, 0, space_position) ||
+      !new_text.compare(space_position, new_text.length() - space_position,
+                        old_text, space_position,
+                        old_text.length() - space_position)) {
     return false;
   }
 
   // Then check if the text before the inserted space matches a keyword.
   string16 keyword;
-  TrimWhitespace(new_user_text.substr(0, caret_position - 1),
-                 TRIM_LEADING, &keyword);
-
-  // Only allow exact keyword match if |keyword| represents a keyword hint.
-  return keyword.length() && popup_->GetKeywordForText(keyword, &keyword);
+  TrimWhitespace(new_text.substr(0, space_position), TRIM_LEADING, &keyword);
+  return !keyword.empty() &&
+      !autocomplete_controller_->keyword_provider()->
+          GetKeywordForText(keyword).empty();
 }
 
 bool AutocompleteEditModel::DoInstant(const AutocompleteMatch& match,
@@ -1066,7 +1086,7 @@ bool AutocompleteEditModel::DoInstant(const AutocompleteMatch& match,
   if (!tab)
     return false;
 
-  if (user_input_in_progress() && popup_->IsOpen()) {
+  if (user_input_in_progress_ && popup_->IsOpen()) {
     return instant->Update(tab, match, view_->GetText(), UseVerbatimInstant(),
                            suggested_text);
   }
@@ -1088,9 +1108,10 @@ void AutocompleteEditModel::DoPrerender(const AutocompleteMatch& match) {
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForProfile(tab->profile());
   if (prerender_manager) {
-    RenderViewHost* current_host = tab->web_contents()->GetRenderViewHost();
+    content::RenderViewHost* current_host =
+        tab->web_contents()->GetRenderViewHost();
     prerender_manager->AddPrerenderFromOmnibox(
-        match.destination_url, current_host->session_storage_namespace());
+        match.destination_url, current_host->GetSessionStorageNamespace());
   }
 }
 

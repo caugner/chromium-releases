@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "grit/ui_resources.h"
@@ -14,7 +15,7 @@
 namespace ash {
 namespace test {
 
-TestShellDelegate::TestShellDelegate() {
+TestShellDelegate::TestShellDelegate() : locked_(false) {
 }
 
 TestShellDelegate::~TestShellDelegate() {
@@ -24,15 +25,26 @@ views::Widget* TestShellDelegate::CreateStatusArea() {
   return NULL;
 }
 
-#if defined(OS_CHROMEOS)
-void TestShellDelegate::LockScreen() {
+bool TestShellDelegate::IsUserLoggedIn() {
+  return true;
 }
-#endif
+
+void TestShellDelegate::LockScreen() {
+  locked_ = true;
+}
+
+void TestShellDelegate::UnlockScreen() {
+  locked_ = false;
+}
+
+bool TestShellDelegate::IsScreenLocked() const {
+  return locked_;
+}
 
 void TestShellDelegate::Exit() {
 }
 
-void TestShellDelegate::BuildAppListModel(AppListModel* model) {
+void TestShellDelegate::NewWindow(bool incognito) {
 }
 
 AppListViewDelegate* TestShellDelegate::CreateAppListViewDelegate() {
@@ -40,8 +52,7 @@ AppListViewDelegate* TestShellDelegate::CreateAppListViewDelegate() {
 }
 
 std::vector<aura::Window*> TestShellDelegate::GetCycleWindowList(
-    CycleSource source,
-    CycleOrder order) const {
+    CycleSource source) const {
   // We just use the Shell's default container of windows, so tests can be
   // written with the usual CreateTestWindowWithId() calls. But window cycling
   // expects the topmost window at the front of the list, so reverse the order.
@@ -52,18 +63,24 @@ std::vector<aura::Window*> TestShellDelegate::GetCycleWindowList(
   return windows;
 }
 
-void TestShellDelegate::CreateNewWindow() {
+void TestShellDelegate::StartPartialScreenshot(
+    ScreenshotDelegate* screenshot_delegate) {
+  if (screenshot_delegate)
+    screenshot_delegate->HandleTakePartialScreenshot(NULL, gfx::Rect());
 }
 
-void TestShellDelegate::LauncherItemClicked(const LauncherItem& item) {
+LauncherDelegate* TestShellDelegate::CreateLauncherDelegate(
+    ash::LauncherModel* model) {
+  return NULL;
 }
 
-int TestShellDelegate::GetBrowserShortcutResourceId() {
-  return IDR_AURA_LAUNCHER_BROWSER_SHORTCUT;
+SystemTrayDelegate* TestShellDelegate::CreateSystemTrayDelegate(
+    SystemTray* tray) {
+  return NULL;
 }
 
-string16 TestShellDelegate::GetLauncherItemTitle(const LauncherItem& item) {
-  return string16();
+UserWallpaperDelegate* TestShellDelegate::CreateUserWallpaperDelegate() {
+  return NULL;
 }
 
 }  // namespace test

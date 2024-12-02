@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -430,9 +430,9 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
 
   int num_runnable_tests = 0;
   int test_run_count = 0;
-  int ignored_failure_count = 0;
   int timeout_count = 0;
   std::vector<std::string> failed_tests;
+  std::set<std::string> ignored_tests;
 
   ResultsPrinter printer(*command_line);
   for (int i = 0; i < unit_test->total_test_case_count(); ++i) {
@@ -505,7 +505,7 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
                           ignore_failure,
                           (base::Time::Now() - start_time).InMillisecondsF());
         if (ignore_failure)
-          ++ignored_failure_count;
+          ignored_tests.insert(test_name);
 
         if (was_timeout)
           ++timeout_count;
@@ -525,14 +525,16 @@ bool RunTests(TestLauncherDelegate* launcher_delegate,
   printf("%d test%s run\n", test_run_count, test_run_count > 1 ? "s" : "");
   printf("%d test%s failed (%d ignored)\n",
          static_cast<int>(failed_tests.size()),
-         failed_tests.size() > 1 ? "s" : "", ignored_failure_count);
-  if (failed_tests.size() - ignored_failure_count == 0)
+         failed_tests.size() != 1 ? "s" : "",
+         static_cast<int>(ignored_tests.size()));
+  if (failed_tests.size() == ignored_tests.size())
     return true;
 
   printf("Failing tests:\n");
   for (std::vector<std::string>::const_iterator iter = failed_tests.begin();
        iter != failed_tests.end(); ++iter) {
-    printf("%s\n", iter->c_str());
+    bool is_ignored = ignored_tests.find(*iter) != ignored_tests.end();
+    printf("%s%s\n", iter->c_str(), is_ignored ? " (ignored)" : "");
   }
 
   return false;
@@ -633,17 +635,23 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
 
   testing::InitGoogleTest(&argc, argv);
   TestTimeouts::Initialize();
+  int exit_code = 0;
 
   // Make sure the entire browser code is loaded into memory. Reading it
   // from disk may be slow on a busy bot, and can easily exceed the default
   // timeout causing flaky test failures. Use an empty test that only starts
   // and closes a browser with a long timeout to avoid those problems.
-  int exit_code = RunTest(launcher_delegate,
-                          kEmptyTestName,
-                          TestTimeouts::large_test_timeout_ms(),
-                          NULL);
-  if (exit_code != 0)
-    return exit_code;
+  // NOTE: we don't do this when specifying a filter because this slows down the
+  // common case of running one test locally, and also on trybots when sharding
+  // as this one test runs ~200 times and wastes a few minutes.
+  if (!should_shard && !command_line->HasSwitch(kGTestFilterFlag)) {
+    exit_code = RunTest(launcher_delegate,
+                        kEmptyTestName,
+                        TestTimeouts::large_test_timeout_ms(),
+                        NULL);
+    if (exit_code != 0)
+      return exit_code;
+  }
 
   int cycles = 1;
   if (command_line->HasSwitch(kGTestRepeatFlag)) {

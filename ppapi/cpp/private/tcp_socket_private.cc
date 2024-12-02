@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/cpp/completion_callback.h"
-#include "ppapi/cpp/instance.h"
+#include "ppapi/cpp/instance_handle.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
 
@@ -21,11 +21,15 @@ template <> const char* interface_name<PPB_TCPSocket_Private>() {
 
 }  // namespace
 
-TCPSocketPrivate::TCPSocketPrivate(Instance* instance) {
-  if (has_interface<PPB_TCPSocket_Private>() && instance) {
+TCPSocketPrivate::TCPSocketPrivate(const InstanceHandle& instance) {
+  if (has_interface<PPB_TCPSocket_Private>()) {
     PassRefFromConstructor(get_interface<PPB_TCPSocket_Private>()->Create(
-        instance->pp_instance()));
+        instance.pp_instance()));
   }
+}
+
+TCPSocketPrivate::TCPSocketPrivate(PassRef, PP_Resource resource)
+    : Resource(PASS_REF, resource) {
 }
 
 // static

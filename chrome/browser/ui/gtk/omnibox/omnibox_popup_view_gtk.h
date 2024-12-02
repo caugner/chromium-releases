@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,7 @@
 
 class AutocompleteEditModel;
 class AutocompletePopupModel;
-class GtkThemeService;
+class ThemeServiceGtk;
 class OmniboxView;
 class SkBitmap;
 
@@ -79,7 +79,15 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
   // Accept a line of the results, for example, when the user clicks a line.
   void AcceptLine(size_t line, WindowOpenDisposition disposition);
 
-  const gfx::Image* IconForMatch(const AutocompleteMatch& match, bool selected);
+  const gfx::Image* IconForMatch(const AutocompleteMatch& match,
+                                 bool selected,
+                                 bool is_selected_keyword);
+
+  // Returns the |index|th element of match, unless we're selected and showing
+  // the associated keyword match.
+  void GetVisibleMatchForInput(size_t index,
+                               const AutocompleteMatch** match,
+                               bool* is_selected_keyword);
 
   CHROMEGTK_CALLBACK_1(OmniboxPopupViewGtk, gboolean, HandleMotion,
                        GdkEventMotion*);
@@ -103,7 +111,7 @@ class OmniboxPopupViewGtk : public AutocompletePopupView,
   // The pango layout object created from the window, cached across exposes.
   PangoLayout* layout_;
 
-  GtkThemeService* theme_service_;
+  ThemeServiceGtk* theme_service_;
   content::NotificationRegistrar registrar_;
 
   // Font used for suggestions after being derived from the constructor's

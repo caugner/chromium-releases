@@ -85,6 +85,7 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
   virtual void StackAbove(gfx::NativeView native_view) OVERRIDE;
   virtual void StackAtTop() OVERRIDE;
+  virtual void StackBelow(gfx::NativeView native_view) OVERRIDE;
   virtual void SetShape(gfx::NativeRegion shape) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void CloseNow() OVERRIDE;
@@ -107,9 +108,11 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual bool IsFullscreen() const OVERRIDE;
   virtual void SetOpacity(unsigned char opacity) OVERRIDE;
   virtual void SetUseDragFrame(bool use_drag_frame) OVERRIDE;
+  virtual void FlashFrame(bool flash_frame) OVERRIDE;
   virtual bool IsAccessibleWidget() const OVERRIDE;
   virtual void RunShellDrag(View* view,
                             const ui::OSExchangeData& data,
+                            const gfx::Point& location,
                             int operation) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
@@ -144,7 +147,7 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
 
   // Overridden from aura::client::ActivationDelegate:
-  virtual bool ShouldActivate(aura::Event* event) OVERRIDE;
+  virtual bool ShouldActivate(const aura::Event* event) OVERRIDE;
   virtual void OnActivated() OVERRIDE;
   virtual void OnLostActive() OVERRIDE;
 
@@ -159,6 +162,8 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
 
  private:
   class ActiveWindowObserver;
+
+  void SetInitialFocus();
 
   internal::NativeWidgetDelegate* delegate_;
 
@@ -177,13 +182,14 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   gfx::NativeCursor cursor_;
 
   // The saved window state for exiting full screen state.
-  int saved_window_state_;
+  ui::WindowShowState saved_window_state_;
 
   scoped_ptr<TooltipManagerAura> tooltip_manager_;
 
   scoped_ptr<ActiveWindowObserver> active_window_observer_;
 
   scoped_ptr<DropHelper> drop_helper_;
+  int last_drop_operation_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetAura);
 };

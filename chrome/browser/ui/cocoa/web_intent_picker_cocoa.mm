@@ -12,8 +12,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
-#import "chrome/browser/ui/cocoa/web_intent_bubble_controller.h"
+#import "chrome/browser/ui/cocoa/web_intent_sheet_controller.h"
+#include "chrome/browser/ui/intents/web_intent_inline_disposition_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -23,24 +25,44 @@
 
 using content::WebContents;
 
-class InlineHtmlContentDelegate: public content::WebContentsDelegate {
- public:
-  InlineHtmlContentDelegate() {}
-  virtual ~InlineHtmlContentDelegate() {}
+namespace {
 
-  virtual bool IsPopupOrPanel(
-      const content::WebContents* source) const OVERRIDE {
-    return true;
-  }
-  virtual bool ShouldAddNavigationToHistory(
-      const history::HistoryAddPageArgs& add_page_args,
-      content::NavigationType navigation_type) OVERRIDE {
-    return false;
-  }
+// Since any delegates for constrained windows are tasked with deleting
+// themselves, and the WebIntentPicker needs to live longer than the
+// constrained window, we need this forwarding class.
+class ConstrainedPickerSheetDelegate :
+    public ConstrainedWindowMacDelegateCustomSheet {
+ public:
+  ConstrainedPickerSheetDelegate(
+      WebIntentPickerCocoa* picker,
+      WebIntentPickerSheetController* sheet_controller);
+  virtual ~ConstrainedPickerSheetDelegate() {}
+
+  // ConstrainedWindowMacDelegateCustomSheet interface
+  virtual void DeleteDelegate() OVERRIDE;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InlineHtmlContentDelegate);
+  WebIntentPickerCocoa* picker_; // Weak reference to picker
+
+  DISALLOW_COPY_AND_ASSIGN(ConstrainedPickerSheetDelegate);
 };
+
+ConstrainedPickerSheetDelegate::ConstrainedPickerSheetDelegate(
+    WebIntentPickerCocoa* picker,
+    WebIntentPickerSheetController* sheet_controller)
+    : picker_(picker) {
+  init([sheet_controller window], sheet_controller,
+      @selector(sheetDidEnd:returnCode:contextInfo:));
+}
+
+void ConstrainedPickerSheetDelegate::DeleteDelegate() {
+  if (is_sheet_open())
+    [NSApp endSheet:sheet()];
+
+  delete this;
+}
+
+}  // namespace
 
 // static
 WebIntentPicker* WebIntentPicker::Create(Browser* browser,
@@ -54,39 +76,32 @@ WebIntentPickerCocoa::WebIntentPickerCocoa()
     : delegate_(NULL),
       model_(NULL),
       browser_(NULL),
-      controller_(nil),
-      weak_ptr_factory_(this),
+      sheet_controller_(nil),
       service_invoked(false) {
 }
-
 
 WebIntentPickerCocoa::WebIntentPickerCocoa(Browser* browser,
                                            TabContentsWrapper* wrapper,
                                            WebIntentPickerDelegate* delegate,
                                            WebIntentPickerModel* model)
-   : delegate_(delegate),
-     model_(model),
-     browser_(browser),
-     controller_(nil),
-     weak_ptr_factory_(this),
-     service_invoked(false) {
+    : delegate_(delegate),
+      model_(model),
+      browser_(browser),
+      sheet_controller_(nil),
+      service_invoked(false) {
   model_->set_observer(this);
 
-  DCHECK(browser);
   DCHECK(delegate);
-  NSWindow* parentWindow = browser->window()->GetNativeHandle();
+  DCHECK(wrapper);
 
-  // Compute the anchor point, relative to location bar.
-  BrowserWindowController* controller = [parentWindow windowController];
-  LocationBarViewMac* locationBar = [controller locationBarBridge];
-  NSPoint anchor = locationBar->GetPageInfoBubblePoint();
-  anchor = [browser->window()->GetNativeHandle() convertBaseToScreen:anchor];
+  sheet_controller_ = [
+      [WebIntentPickerSheetController alloc] initWithPicker:this];
 
-  // The controller is deallocated when the window is closed, so no need to
-  // worry about it here.
-  [[WebIntentBubbleController alloc] initWithPicker:this
-                                       parentWindow:parentWindow
-                                         anchoredAt:anchor];
+  // Deleted when ConstrainedPickerSheetDelegate::DeleteDelegate() runs.
+  ConstrainedPickerSheetDelegate* constrained_delegate =
+      new ConstrainedPickerSheetDelegate(this, sheet_controller_);
+
+  window_ = new ConstrainedWindowMac(wrapper, constrained_delegate);
 }
 
 WebIntentPickerCocoa::~WebIntentPickerCocoa() {
@@ -94,73 +109,70 @@ WebIntentPickerCocoa::~WebIntentPickerCocoa() {
     model_->set_observer(NULL);
 }
 
+void WebIntentPickerCocoa::OnSheetDidEnd(NSWindow* sheet) {
+  [sheet orderOut:sheet_controller_];
+  if (window_)
+    window_->CloseConstrainedWindow();
+  delegate_->OnClosing();
+}
+
 void WebIntentPickerCocoa::Close() {
-  DCHECK(controller_);
-  [controller_ close];
+  DCHECK(sheet_controller_);
+  [sheet_controller_ closeSheet];
+
   if (inline_disposition_tab_contents_.get())
     inline_disposition_tab_contents_->web_contents()->OnCloseStarted();
 }
 
-void WebIntentPickerCocoa::PerformDelayedLayout() {
-  // Check to see if a layout has already been scheduled.
-  if (weak_ptr_factory_.HasWeakPtrs())
-    return;
-
-  // Delay performing layout by a second so that all the animations from
-  // InfoBubbleWindow and origin updates from BaseBubbleController finish, so
-  // that we don't all race trying to change the frame's origin.
-  //
-  // Using MessageLoop is superior here to |-performSelector:| because it will
-  // not retain its target; if the child outlives its parent, zombies get left
-  // behind (http://crbug.com/59619). This will cancel the scheduled task if
-  // the controller get destroyed before the message
-  // can be delivered.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      base::Bind(&WebIntentPickerCocoa::PerformLayout,
-                 weak_ptr_factory_.GetWeakPtr()),
-      100 /* milliseconds */);
-}
-
 void WebIntentPickerCocoa::PerformLayout() {
-  DCHECK(controller_);
+  DCHECK(sheet_controller_);
   // If the window is animating closed when this is called, the
   // animation could be holding the last reference to |controller_|
   // (and thus |this|).  Pin it until the task is completed.
-  scoped_nsobject<WebIntentBubbleController> keep_alive([controller_ retain]);
-  [controller_ performLayoutWithModel:model_];
+  scoped_nsobject<WebIntentPickerSheetController>
+      keep_alive([sheet_controller_ retain]);
+  [sheet_controller_ performLayoutWithModel:model_];
 }
 
 void WebIntentPickerCocoa::OnModelChanged(WebIntentPickerModel* model) {
-  PerformDelayedLayout();
+  PerformLayout();
 }
 
 void WebIntentPickerCocoa::OnFaviconChanged(WebIntentPickerModel* model,
                                             size_t index) {
   // We don't handle individual icon changes - just redo the whole model.
-  PerformDelayedLayout();
+  PerformLayout();
 }
 
-void WebIntentPickerCocoa::OnInlineDisposition(WebIntentPickerModel* model) {
-  const WebIntentPickerModel::Item& item = model->GetItemAt(
-      model->inline_disposition_index());
+void WebIntentPickerCocoa::OnExtensionIconChanged(
+    WebIntentPickerModel* model,
+    const string16& extension_id) {
+  // We don't handle individual icon changes - just redo the whole model.
+  PerformLayout();
+}
 
+void WebIntentPickerCocoa::OnInlineDisposition(WebIntentPickerModel* model,
+                                               const GURL& url) {
+  DCHECK(browser_);
   content::WebContents* web_contents = content::WebContents::Create(
       browser_->profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
   inline_disposition_tab_contents_.reset(new TabContentsWrapper(web_contents));
-  inline_disposition_delegate_.reset(new InlineHtmlContentDelegate);
+  inline_disposition_delegate_.reset(new WebIntentInlineDispositionDelegate);
   web_contents->SetDelegate(inline_disposition_delegate_.get());
 
+  // Must call this immediately after WebContents creation to avoid race
+  // with load.
+  delegate_->OnInlineDispositionWebContentsCreated(web_contents);
+
   inline_disposition_tab_contents_->web_contents()->GetController().LoadURL(
-      item.url,
+      url,
       content::Referrer(),
       content::PAGE_TRANSITION_START_PAGE,
       std::string());
 
-  [controller_ setInlineDispositionTabContents:
+  [sheet_controller_ setInlineDispositionTabContents:
       inline_disposition_tab_contents_.get()];
-  PerformDelayedLayout();
-
-  delegate_->OnInlineDispositionWebContentsCreated(web_contents);
+  PerformLayout();
 }
 
 void WebIntentPickerCocoa::OnCancelled() {
@@ -173,12 +185,21 @@ void WebIntentPickerCocoa::OnCancelled() {
 
 void WebIntentPickerCocoa::OnServiceChosen(size_t index) {
   DCHECK(delegate_);
-  const WebIntentPickerModel::Item& item = model_->GetItemAt(index);
+  const WebIntentPickerModel::InstalledService& installed_service =
+      model_->GetInstalledServiceAt(index);
   service_invoked = true;
-  delegate_->OnServiceChosen(index, item.disposition);
+  delegate_->OnServiceChosen(installed_service.url,
+                             installed_service.disposition);
 }
 
-void WebIntentPickerCocoa::set_controller(
-    WebIntentBubbleController* controller) {
-  controller_ = controller;
+void WebIntentPickerCocoa::OnExtensionInstallRequested(
+    const std::string& extension_id) {
+  delegate_->OnExtensionInstallRequested(extension_id);
+}
+
+void WebIntentPickerCocoa::OnExtensionInstallSuccess(const std::string& id) {
+}
+
+void WebIntentPickerCocoa::OnExtensionInstallFailure(const std::string& id) {
+  // TODO(groby): What to do on failure? (See also binji for views/gtk)
 }

@@ -18,7 +18,7 @@ class SpecialTabsTest(pyauto.PyUITest):
     """Get a dict of accelerators and corresponding tab titles."""
     ret = {
         pyauto.IDC_SHOW_HISTORY: 'History',
-        pyauto.IDC_MANAGE_EXTENSIONS: 'Settings - Extensions',
+        pyauto.IDC_MANAGE_EXTENSIONS: 'Extensions',
         pyauto.IDC_SHOW_DOWNLOADS: 'Downloads',
     }
     return ret
@@ -44,13 +44,14 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://feedback/#0': { 'title': 'Feedback' },
     'chrome://chrome-urls': { 'title': 'Chrome URLs' },
     'chrome://crashes': { 'title': 'Crashes' },
-    'chrome://credits': { 'title': 'Credits', 'CSP': False },
+    'chrome://credits': { 'title': 'Credits' },
     'chrome://downloads': { 'title': 'Downloads' },
     'chrome://dns': { 'title': 'About DNS' },
-    'chrome://settings/extensions': { 'title': 'Settings - Extensions' },
+    'chrome://extensions': { 'title': 'Extensions' },
     'chrome://flags': {},
     'chrome://flash': {},
     'chrome://gpu-internals': {},
+    'chrome://help': { 'title': 'Help' },
     'chrome://histograms': { 'title': 'About Histograms' },
     'chrome://history': { 'title': 'History' },
     'chrome://media-internals': { 'title': 'Media Internals' },
@@ -60,7 +61,14 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://newtab': { 'title': 'New Tab', 'CSP': False },
     'chrome://plugins': { 'title': 'Plug-ins' },
     'chrome://sessions': { 'title': 'Sessions' },
-    'chrome://settings': { 'title': 'Settings - Basics' },
+    'chrome://settings': { 'title': 'Settings' },
+    'chrome://settings/autofill': { 'title': 'Settings - Autofill Settings' },
+    'chrome://settings/clearBrowserData':
+      { 'title': 'Settings - Clear Browsing Data' },
+    'chrome://settings/content': { 'title': 'Settings - Content Settings' },
+    'chrome://settings/languages':
+      { 'title': 'Settings - Languages and Input' },
+    'chrome://settings/passwords': { 'title': 'Settings - Passwords' },
     'chrome://stats': {},
     'chrome://sync': { 'title': 'Sync Internals' },
     'chrome://sync-internals': { 'title': 'Sync Internals' },
@@ -102,22 +110,8 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://flags': { 'CSP': False },
 
     # OVERRIDE - title and page different on CrOS
-    'chrome://settings/about': { 'title': 'Settings - About' },
     'chrome://settings/accounts': { 'title': 'Settings - Users' },
-    'chrome://settings/advanced': { 'title': 'Settings - Under the Hood' },
-    'chrome://settings/autofill': { 'title': 'Settings - Autofill Settings' },
-    'chrome://settings/browser': { 'title': 'Settings - Basics' },
-    'chrome://settings/clearBrowserData':
-      { 'title': 'Settings - Clear Browsing Data' },
-    'chrome://settings/content': { 'title': 'Settings - Content Settings' },
-    'chrome://settings/extensions': { 'title': 'Settings - Extensions' },
-    'chrome://settings/internet': { 'title': 'Settings - Internet' },
-    'chrome://settings/languages':
-      { 'title': 'Settings - Languages and Input' },
-    'chrome://settings/passwords': { 'title': 'Settings - Passwords' },
-    'chrome://settings/personal': { 'title': 'Settings - Personal Stuff' },
     'chrome://settings/proxy': { 'title': 'Proxy' },
-    'chrome://settings/system': { 'title': 'Settings - System' },
   }
   broken_chromeos_special_url_tabs = {
     # returns "not available" page on chromeos=1 linux but has an URL constant.
@@ -149,7 +143,9 @@ class SpecialTabsTest(pyauto.PyUITest):
   }
   broken_linux_special_url_tabs = {}
 
-  mac_special_url_tabs = {}
+  mac_special_url_tabs = {
+    'chrome://settings/languages': { 'title': 'Settings - Languages' },
+  }
   broken_mac_special_url_tabs = {}
 
   win_special_url_tabs = {
@@ -322,13 +318,12 @@ class SpecialTabsTest(pyauto.PyUITest):
     self.assertEqual('About DNS', self.GetActiveTabTitle())
 
   def testSpecialAcceratorTabs(self):
-    """Test special tabs created by acclerators like IDC_SHOW_HISTORY,
-       IDC_SHOW_DOWNLOADS."""
+    """Test special tabs created by accelerators."""
     for accel, title in self.GetSpecialAcceleratorTabs().iteritems():
       self.RunCommand(accel)
       self.assertTrue(self.WaitUntil(
             self.GetActiveTabTitle, expect_retval=title),
-          msg='Expected "%s"' % title)
+          msg='Expected "%s", got "%s"' % (title, self.GetActiveTabTitle()))
 
 
 if __name__ == '__main__':

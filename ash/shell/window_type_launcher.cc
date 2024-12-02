@@ -4,11 +4,13 @@
 
 #include "ash/shell/window_type_launcher.h"
 
+#include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/shell/example_factory.h"
+#include "ash/shell/panel_window.h"
 #include "ash/shell/toplevel_window.h"
 #include "ash/wm/shadow_types.h"
-#include "ash/wm/toplevel_frame_view.h"
 #include "base/utf_string_conversions.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -58,7 +60,7 @@ class ModalWindow : public views::WidgetDelegateView,
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->FillRect(color_, GetLocalBounds());
+    canvas->FillRect(GetLocalBounds(), color_);
   }
   virtual gfx::Size GetPreferredSize() OVERRIDE {
     return gfx::Size(200, 200);
@@ -130,7 +132,7 @@ class NonModalTransient : public views::WidgetDelegateView {
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->FillRect(color_, GetLocalBounds());
+    canvas->FillRect(GetLocalBounds(), color_);
   }
   virtual gfx::Size GetPreferredSize() OVERRIDE {
     return gfx::Size(250, 250);
@@ -167,16 +169,18 @@ views::Widget* NonModalTransient::non_modal_transient_ = NULL;
 void InitWindowTypeLauncher() {
   views::Widget* widget =
       views::Widget::CreateWindowWithBounds(new WindowTypeLauncher,
-                                            gfx::Rect(120, 150, 400, 400));
+                                            gfx::Rect(120, 150, 300, 410));
   widget->GetNativeView()->SetName("WindowTypeLauncher");
   ash::internal::SetShadowType(widget->GetNativeView(),
-                               ash::internal::SHADOW_TYPE_NONE);
+                               ash::internal::SHADOW_TYPE_RECTANGULAR);
   widget->Show();
 }
 
 WindowTypeLauncher::WindowTypeLauncher()
     : ALLOW_THIS_IN_INITIALIZER_LIST(create_button_(
           new views::NativeTextButton(this, ASCIIToUTF16("Create Window")))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(panel_button_(
+          new views::NativeTextButton(this, ASCIIToUTF16("Create Panel")))),
       ALLOW_THIS_IN_INITIALIZER_LIST(create_nonresizable_button_(
           new views::NativeTextButton(
               this, ASCIIToUTF16("Create Non-Resizable Window")))),
@@ -204,6 +208,7 @@ WindowTypeLauncher::WindowTypeLauncher()
           new views::NativeTextButton(
               this, ASCIIToUTF16("Show/Hide a Window")))) {
   AddChildView(create_button_);
+  AddChildView(panel_button_);
   AddChildView(create_nonresizable_button_);
   AddChildView(bubble_button_);
   AddChildView(lock_button_);
@@ -222,7 +227,7 @@ WindowTypeLauncher::~WindowTypeLauncher() {
 }
 
 void WindowTypeLauncher::OnPaint(gfx::Canvas* canvas) {
-  canvas->FillRect(SK_ColorWHITE, GetLocalBounds());
+  canvas->FillRect(GetLocalBounds(), SK_ColorWHITE);
 }
 
 void WindowTypeLauncher::Layout() {
@@ -232,9 +237,14 @@ void WindowTypeLauncher::Layout() {
       5, local_bounds.bottom() - create_button_ps.height() - 5,
       create_button_ps.width(), create_button_ps.height());
 
+  gfx::Size panel_button_ps = panel_button_->GetPreferredSize();
+  panel_button_->SetBounds(
+      5, create_button_->y() - panel_button_ps.height() - 5,
+      panel_button_ps.width(), panel_button_ps.height());
+
   gfx::Size bubble_button_ps = bubble_button_->GetPreferredSize();
   bubble_button_->SetBounds(
-      5, create_button_->y() - bubble_button_ps.height() - 5,
+      5, panel_button_->y() - bubble_button_ps.height() - 5,
       bubble_button_ps.width(), bubble_button_ps.height());
 
   gfx::Size create_nr_button_ps =
@@ -297,8 +307,8 @@ string16 WindowTypeLauncher::GetWindowTitle() const {
   return ASCIIToUTF16("Examples: Window Builder");
 }
 
-views::NonClientFrameView* WindowTypeLauncher::CreateNonClientFrameView() {
-  return new ash::internal::ToplevelFrameView;
+bool WindowTypeLauncher::CanMaximize() const {
+  return true;
 }
 
 void WindowTypeLauncher::ButtonPressed(views::Button* sender,
@@ -306,13 +316,16 @@ void WindowTypeLauncher::ButtonPressed(views::Button* sender,
   if (sender == create_button_) {
     ToplevelWindow::CreateParams params;
     params.can_resize = true;
+    params.can_maximize = true;
     ToplevelWindow::CreateToplevelWindow(params);
+  } else if (sender == panel_button_) {
+    PanelWindow::CreatePanelWindow(gfx::Rect());
   } else if (sender == create_nonresizable_button_) {
     ToplevelWindow::CreateToplevelWindow(ToplevelWindow::CreateParams());
   } else if (sender == bubble_button_) {
     CreatePointyBubble(sender);
   } else if (sender == lock_button_) {
-    CreateLockScreen();
+    Shell::GetInstance()->delegate()->LockScreen();
   } else if (sender == widgets_button_) {
     CreateWidgetsWindow();
   } else if (sender == system_modal_button_) {
@@ -350,8 +363,7 @@ void WindowTypeLauncher::ExecuteCommand(int id) {
 
 #if !defined(OS_MACOSX)
 void WindowTypeLauncher::ShowContextMenuForView(views::View* source,
-                                                const gfx::Point& p,
-                                                bool is_mouse_gesture) {
+                                                const gfx::Point& point) {
   MenuItemView* root = new MenuItemView(this);
   root->AppendMenuItem(COMMAND_NEW_WINDOW,
                        ASCIIToUTF16("New Window"),
@@ -361,7 +373,7 @@ void WindowTypeLauncher::ShowContextMenuForView(views::View* source,
                        MenuItemView::NORMAL);
   // MenuRunner takes ownership of root.
   menu_runner_.reset(new MenuRunner(root));
-  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(p, gfx::Size(0, 0)),
+  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
         MenuItemView::TOPLEFT,
         MenuRunner::HAS_MNEMONICS) == MenuRunner::MENU_DELETED)
     return;

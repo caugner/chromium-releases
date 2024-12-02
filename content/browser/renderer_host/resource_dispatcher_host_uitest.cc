@@ -15,10 +15,11 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/browser/net/url_request_failed_dns_job.h"
-#include "content/browser/net/url_request_mock_http_job.h"
 #include "content/common/test_url_constants.h"
 #include "content/public/common/url_constants.h"
+#include "content/test/net/url_request_failed_job.h"
+#include "content/test/net/url_request_mock_http_job.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 
@@ -82,9 +83,9 @@ TEST_F(ResourceDispatcherTest, ContentDispositionInline) {
 }
 
 // Test for bug #1091358.
-// Flaky: http://crbug.com/62595
-TEST_F(ResourceDispatcherTest, FLAKY_SyncXMLHttpRequest) {
+TEST_F(ResourceDispatcherTest, SyncXMLHttpRequest) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -105,8 +106,9 @@ TEST_F(ResourceDispatcherTest, FLAKY_SyncXMLHttpRequest) {
 }
 
 // http://code.google.com/p/chromium/issues/detail?id=62776
-TEST_F(ResourceDispatcherTest, FLAKY_SyncXMLHttpRequest_Disallowed) {
+TEST_F(ResourceDispatcherTest, DISABLED_SyncXMLHttpRequest_Disallowed) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -132,6 +134,7 @@ TEST_F(ResourceDispatcherTest, FLAKY_SyncXMLHttpRequest_Disallowed) {
 // Disabled -- http://code.google.com/p/chromium/issues/detail?id=56264
 TEST_F(ResourceDispatcherTest, DISABLED_SyncXMLHttpRequest_DuringUnload) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -168,6 +171,7 @@ TEST_F(ResourceDispatcherTest, DISABLED_SyncXMLHttpRequest_DuringUnload) {
 // Tests that onunload is run for cross-site requests.  (Bug 1114994)
 TEST_F(ResourceDispatcherTest, CrossSiteOnunloadCookie) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -200,6 +204,7 @@ TEST_F(ResourceDispatcherTest, CrossSiteOnunloadCookie) {
 // without network loads (e.g., about:blank, data URLs).
 TEST_F(ResourceDispatcherTest, CrossSiteImmediateLoadOnunloadCookie) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -230,7 +235,7 @@ TEST_F(ResourceDispatcherTest, CrossSiteImmediateLoadOnunloadCookie) {
 
 #if defined(OS_WIN)
 // Seems to fail sometimes on Windows: http://crbug.com/80596
-#define MAYBE_CrossSiteNoUnloadOn204 FLAKY_CrossSiteNoUnloadOn204
+#define MAYBE_CrossSiteNoUnloadOn204 DISABLED_CrossSiteNoUnloadOn204
 #else
 #define MAYBE_CrossSiteNoUnloadOn204 CrossSiteNoUnloadOn204
 #endif
@@ -238,6 +243,7 @@ TEST_F(ResourceDispatcherTest, CrossSiteImmediateLoadOnunloadCookie) {
 // Tests that the unload handler is not run for 204 responses.
 TEST_F(ResourceDispatcherTest, MAYBE_CrossSiteNoUnloadOn204) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -285,7 +291,7 @@ TEST_F(ResourceDispatcherTest, FAILS_CrossSiteAfterCrash) {
 #if defined(OS_WIN) || defined(USE_LINUX_BREAKPAD)
   expected_crashes_ = 1;
 #endif
-  ASSERT_TRUE(tab->NavigateToURLAsync(GURL(chrome::kAboutCrashURL)));
+  ASSERT_TRUE(tab->NavigateToURLAsync(GURL(chrome::kChromeUICrashURL)));
   // Wait for browser to notice the renderer crash.
   base::PlatformThread::Sleep(TestTimeouts::action_timeout());
 
@@ -321,8 +327,9 @@ TEST_F(ResourceDispatcherTest, CrossSiteNavigationNonBuffered) {
 // doctor page) still runs the onunload handler and can support navigations
 // away from the link doctor page.  (Bug 1235537)
 // Flaky: http://crbug.com/100823
-TEST_F(ResourceDispatcherTest, FLAKY_CrossSiteNavigationErrorPage) {
+TEST_F(ResourceDispatcherTest, DISABLED_CrossSiteNavigationErrorPage) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP,
+                              net::TestServer::kLocalhost,
                               FilePath(FILE_PATH_LITERAL("chrome/test/data")));
   ASSERT_TRUE(test_server.Start());
 
@@ -345,7 +352,9 @@ TEST_F(ResourceDispatcherTest, FLAKY_CrossSiteNavigationErrorPage) {
   // http://crbug.com/22877.
   ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
             tab->NavigateToURLBlockUntilNavigationsComplete(
-                GURL(URLRequestFailedDnsJob::kTestUrl), 2));
+                GURL(URLRequestFailedJob::GetMockHttpUrl(
+                     net::ERR_NAME_NOT_RESOLVED)),
+                2));
   EXPECT_NE(L"set cookie on unload", GetActiveTabTitle());
 
   // Check that the cookie was set, meaning that the onunload handler ran.
@@ -388,7 +397,7 @@ TEST_F(ResourceDispatcherTest, CrossOriginRedirectBlocked) {
                  "Title Of More Awesomeness", 2);
 }
 
-// Tests that ResourceDispatcherHostRequestInfo is updated correctly on failed
+// Tests that ResourceRequestInfoImpl is updated correctly on failed
 // requests, to prevent calling Read on a request that has already failed.
 // See bug 40250.
 TEST_F(ResourceDispatcherTest, CrossSiteFailedRequest) {

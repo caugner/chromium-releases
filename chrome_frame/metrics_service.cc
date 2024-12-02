@@ -50,6 +50,7 @@
 #include "third_party/bzip2/bzlib.h"
 #endif
 
+#include "base/string16.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
@@ -80,6 +81,8 @@ static const int kMinMilliSecondsPerUMAUpload = 600000;
 
 base::LazyInstance<base::ThreadLocalPointer<MetricsService> >
     MetricsService::g_metrics_instance_ = LAZY_INSTANCE_INITIALIZER;
+
+std::string MetricsService::client_id_;
 
 base::Lock MetricsService::metrics_service_lock_;
 
@@ -295,12 +298,7 @@ void MetricsService::SetRecording(bool enabled) {
     return;
 
   if (enabled) {
-    if (client_id_.empty()) {
-      client_id_ = GenerateClientID();
-      // Save client id somewhere.
-    }
     StartRecording();
-
   } else {
     state_ = STOPPED;
   }
@@ -308,18 +306,24 @@ void MetricsService::SetRecording(bool enabled) {
 }
 
 // static
-std::string MetricsService::GenerateClientID() {
-  const int kGUIDSize = 39;
+const std::string& MetricsService::GetClientID() {
+  // TODO(robertshield): Chrome Frame shouldn't generate a new ID on every run
+  // as this apparently breaks some assumptions during metric analysis.
+  // See http://crbug.com/117188
+  if (client_id_.empty()) {
+    const int kGUIDSize = 39;
 
-  GUID guid;
-  HRESULT guid_result = CoCreateGuid(&guid);
-  DCHECK(SUCCEEDED(guid_result));
+    GUID guid;
+    HRESULT guid_result = CoCreateGuid(&guid);
+    DCHECK(SUCCEEDED(guid_result));
 
-  std::wstring guid_string;
-  int result = StringFromGUID2(guid,
-                               WriteInto(&guid_string, kGUIDSize), kGUIDSize);
-  DCHECK(result == kGUIDSize);
-  return WideToUTF8(guid_string.substr(1, guid_string.length() - 2));
+    string16 guid_string;
+    int result = StringFromGUID2(guid,
+                                 WriteInto(&guid_string, kGUIDSize), kGUIDSize);
+    DCHECK(result == kGUIDSize);
+    client_id_ = WideToUTF8(guid_string.substr(1, guid_string.length() - 2));
+  }
+  return client_id_;
 }
 
 // static
@@ -366,8 +370,12 @@ void MetricsService::StartRecording() {
   if (log_manager_.current_log())
     return;
 
-  log_manager_.BeginLoggingWithLog(new MetricsLogBase(client_id_, session_id_,
-                                                      GetVersionString()));
+  MetricsLogManager::LogType log_type = (state_ == INITIALIZED) ?
+      MetricsLogManager::INITIAL_LOG : MetricsLogManager::ONGOING_LOG;
+  log_manager_.BeginLoggingWithLog(new MetricsLogBase(GetClientID(),
+                                                      session_id_,
+                                                      GetVersionString()),
+                                   log_type);
   if (state_ == INITIALIZED)
     state_ = ACTIVE;
 }
@@ -384,10 +392,12 @@ void MetricsService::StopRecording(bool save_log) {
     RecordCurrentHistograms();
   }
 
-  if (save_log)
-    log_manager_.StageCurrentLogForUpload();
-  else
+  if (save_log) {
+    log_manager_.FinishCurrentLog();
+    log_manager_.StageNextLogForUpload();
+  } else {
     log_manager_.DiscardCurrentLog();
+  }
 }
 
 void MetricsService::MakePendingLog() {
@@ -409,8 +419,6 @@ void MetricsService::MakePendingLog() {
       DCHECK(false);
       return;
   }
-
-  DCHECK(log_manager_.has_staged_log());
 }
 
 bool MetricsService::TransmissionPermitted() const {
@@ -419,6 +427,8 @@ bool MetricsService::TransmissionPermitted() const {
   return user_permits_upload_;
 }
 
+// TODO(isherman): Update this to log to the protobuf server as well...
+// http://crbug.com/109817
 bool MetricsService::UploadData() {
   DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
 
@@ -432,19 +442,18 @@ bool MetricsService::UploadData() {
   }
 
   MakePendingLog();
-  DCHECK(log_manager_.has_staged_log());
 
   bool ret = true;
 
-  if (log_manager_.staged_log_text().empty()) {
-    NOTREACHED() << "Failed to compress log for transmission.";
-    ret = false;
-  } else {
+  if (log_manager_.has_staged_log()) {
     HRESULT hr = ChromeFrameMetricsDataUploader::UploadDataHelper(
-        log_manager_.staged_log_text());
+        log_manager_.staged_log_text().xml);
     DCHECK(SUCCEEDED(hr));
+    log_manager_.DiscardStagedLog();
+  } else {
+    NOTREACHED();
+    ret = false;
   }
-  log_manager_.DiscardStagedLog();
 
   currently_uploading = 0;
   return ret;

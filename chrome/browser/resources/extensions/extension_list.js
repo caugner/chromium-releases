@@ -25,51 +25,21 @@ cr.define('options', function() {
    */
   var ExtensionsList = cr.ui.define('div');
 
-  var handlersInstalled = false;
-
-  /**
-   * @type {Object.<string, boolean>} A map from extension id to a boolean
-   *     indicating whether its details section is expanded. This persists
-   *     between calls to decorate.
-   */
-  var showingDetails = {};
-
   /**
    * @type {Object.<string, boolean>} A map from extension id to a boolean
    *     indicating whether the incognito warning is showing. This persists
    *     between calls to decorate.
    */
-  var showingWarning = {};
+  var butterBarVisibility = {};
 
   ExtensionsList.prototype = {
     __proto__: HTMLDivElement.prototype,
 
     /** @inheritDoc */
     decorate: function() {
-      this.initControlsAndHandlers_();
-
       this.textContent = '';
 
       this.showExtensionNodes_();
-    },
-
-    /**
-     * Initializes the controls (toggle section and button) and installs
-     * handlers.
-     * @private
-     */
-    initControlsAndHandlers_: function() {
-      // Make sure developer mode section is set correctly as per saved setting.
-      var toggleButton = $('toggle-dev-on');
-      var toggleSection = $('dev');
-      if (this.data_.developerMode) {
-        toggleSection.classList.add('dev-open');
-        toggleSection.classList.remove('dev-closed');
-        toggleButton.checked = true;
-      } else {
-        toggleSection.classList.remove('dev-open');
-        toggleSection.classList.add('dev-closed');
-      }
     },
 
     /**
@@ -77,9 +47,14 @@ cr.define('options', function() {
      * @private
      */
      showExtensionNodes_: function() {
-      // Iterate over the extension data and add each item to the list.
-      var list = this;
-      this.data_.extensions.forEach(this.createNode_.bind(this));
+       // Iterate over the extension data and add each item to the list.
+       var list = this;
+       this.data_.extensions.forEach(this.createNode_.bind(this));
+
+       if (this.data_.extensions.length == 0)
+         this.classList.add('empty-extension-list');
+       else
+         this.classList.remove('empty-extension-list');
      },
 
      /**
@@ -96,6 +71,9 @@ cr.define('options', function() {
 
       if (!extension.enabled)
         node.classList.add('disabled-extension');
+
+      if (!extension.mayDisable)
+        node.classList.add('may-not-disable');
 
       var item = node.querySelector('.extension-list-item');
       item.style.backgroundImage = 'url(' + extension.icon + ')';
@@ -120,14 +98,16 @@ cr.define('options', function() {
 
       // The 'allow in incognito' checkbox.
       var incognito = node.querySelector('.incognito-control');
+      var butterBar = node.querySelector('.butter-bar');
       incognito.addEventListener('click', function(e) {
-        var butterBar = node.querySelector('.butter-bar');
         var checked = e.target.checked;
+        butterBarVisibility[extension.id] = checked;
         butterBar.hidden = !checked || extension.is_hosted_app;
         chrome.send('extensionSettingsEnableIncognito',
                     [extension.id, String(checked)]);
       });
       incognito.querySelector('input').checked = extension.enabledIncognito;
+      butterBar.hidden = !butterBarVisibility[extension.id];
 
       // The 'allow file:// access' checkbox.
       if (extension.wantsFileAccess) {
@@ -141,11 +121,21 @@ cr.define('options', function() {
       }
 
       // The 'Options' checkbox.
-      var options = node.querySelector('.options-link');
-      options.addEventListener('click', function(e) {
-        chrome.send('extensionSettingsOptions', [extension.id]);
-        e.preventDefault();
-      });
+      if (extension.options_url) {
+        var options = node.querySelector('.options-link');
+        options.addEventListener('click', function(e) {
+          chrome.send('extensionSettingsOptions', [extension.id]);
+          e.preventDefault();
+        });
+        options.hidden = false;
+      }
+
+      if (extension.allow_activity) {
+        var activity = node.querySelector('.activity-link');
+        activity.href = 'chrome://extension-activity?extensionId=' +
+            extension.id;
+        activity.hidden = false;
+      }
 
       // The 'View in Web Store' checkbox.
       if (extension.homepageUrl) {
@@ -167,11 +157,14 @@ cr.define('options', function() {
         // The 'Enabled' checkbox.
         var enable = node.querySelector('.enable-checkbox');
         enable.hidden = false;
-        enable.addEventListener('click', function(e) {
-          chrome.send('extensionSettingsEnable',
-                      [extension.id, e.target.checked ? 'true' : 'false']);
-          chrome.send('extensionSettingsRequestExtensionsData');
-        });
+        enable.querySelector('input').disabled = !extension.mayDisable;
+
+        if (extension.mayDisable) {
+          enable.addEventListener('click', function(e) {
+            chrome.send('extensionSettingsEnable',
+                        [extension.id, e.target.checked ? 'true' : 'false']);
+          });
+        }
         enable.querySelector('input').checked = extension.enabled;
 
         // Make sure the checkbox doesn't move around when its value changes.
@@ -190,57 +183,53 @@ cr.define('options', function() {
       // 'Remove' button.
       var trashTemplate = $('template-collection').querySelector('.trash');
       var trash = trashTemplate.cloneNode(true);
+      trash.title = templateData.extensionUninstall;
       trash.addEventListener('click', function(e) {
         chrome.send('extensionSettingsUninstall', [extension.id]);
       });
       node.querySelector('.enable-controls').appendChild(trash);
 
-      // Developer mode details.
-      if (this.data_.developerMode) {
-        // First we have the id.
-        var idLabel = node.querySelector('.extension-id');
-        idLabel.textContent = ' ' + extension.id;
+      // Developer mode ////////////////////////////////////////////////////////
 
-        // Then the path, if provided by unpacked extension.
-        if (extension.isUnpacked) {
-          var loadPath = node.querySelector('.load-path');
-          loadPath.hidden = false;
-          loadPath.querySelector('span:nth-of-type(2)').textContent =
-              ' ' + extension.path;
-        }
+      // First we have the id.
+      var idLabel = node.querySelector('.extension-id');
+      idLabel.textContent = ' ' + extension.id;
 
-        // Then the 'managed, cannot uninstall/disable' message.
-        if (!extension.mayDisable)
-          node.querySelector('.managed-message').hidden = false;
+      // Then the path, if provided by unpacked extension.
+      if (extension.isUnpacked) {
+        var loadPath = node.querySelector('.load-path');
+        loadPath.hidden = false;
+        loadPath.querySelector('span:nth-of-type(2)').textContent =
+            ' ' + extension.path;
+      }
 
-        // Then active views.
-        if (extension.views.length > 0) {
-          var activeViews = node.querySelector('.active-views');
-          activeViews.hidden = false;
-          var link = activeViews.querySelector('a');
+      // Then the 'managed, cannot uninstall/disable' message.
+      if (!extension.mayDisable)
+        node.querySelector('.managed-message').hidden = false;
 
-          for (var i = 0; i < extension.views.length; ++i) {
-            var view = extension.views[i];
+      // Then active views.
+      if (extension.views.length > 0) {
+        var activeViews = node.querySelector('.active-views');
+        activeViews.hidden = false;
+        var link = activeViews.querySelector('a');
 
-            var label = view.path + (view.incognito ?
-                ' ' + localStrings.getString('viewIncognito') : '');
-            link.textContent = label;
-            link.addEventListener('click', function(e) {
-              // TODO(estade): remove conversion to string?
-              chrome.send('extensionSettingsInspect', [
-                String(view.renderProcessId),
-                String(view.renderViewId)
-              ]);
-            });
+        extension.views.forEach(function(view, i) {
+          var label = view.path + (view.incognito ?
+              ' ' + localStrings.getString('viewIncognito') : '');
+          link.textContent = label;
+          link.addEventListener('click', function(e) {
+            // TODO(estade): remove conversion to string?
+            chrome.send('extensionSettingsInspect', [
+              String(view.renderProcessId),
+              String(view.renderViewId)
+            ]);
+          });
 
-            if (i < extension.views.length - 1) {
-              link = link.cloneNode(true);
-              activeViews.appendChild(link);
-            }
+          if (i < extension.views.length - 1) {
+            link = link.cloneNode(true);
+            activeViews.appendChild(link);
           }
-        }
-
-        node.querySelector('.developer-extras').hidden = false;
+        });
       }
 
       this.appendChild(node);

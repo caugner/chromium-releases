@@ -28,9 +28,6 @@
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::Time;
-using base::TimeDelta;
-
 using content::BrowserThread;
 
 namespace {
@@ -145,7 +142,7 @@ class ShortcutsProviderTest : public testing::Test,
   void TearDown();
 
   // Fills test data into the provider.
-  void FillData();
+  void FillData(TestShortcutInfo* db, size_t db_size);
 
   // Runs an autocomplete query on |text| and checks to see that the returned
   // results' destination URLs match those provided. |expected_urls| does not
@@ -181,30 +178,24 @@ void ShortcutsProviderTest::SetUp() {
   mock_backend_ = new history::ShortcutsBackend(FilePath(), profile_.get());
   mock_backend_->Init();
   provider_->set_shortcuts_backend(mock_backend_.get());
-  FillData();
+  FillData(shortcut_test_db, arraysize(shortcut_test_db));
 }
 
 void ShortcutsProviderTest::TearDown() {
   provider_ = NULL;
 }
 
-void ShortcutsProviderTest::FillData() {
+void ShortcutsProviderTest::FillData(TestShortcutInfo* db, size_t db_size) {
   DCHECK(provider_.get());
-  mock_backend_->DeleteAllShortcuts();
-  for (size_t i = 0; i < arraysize(shortcut_test_db); ++i) {
-    const TestShortcutInfo& cur = shortcut_test_db[i];
-    const GURL current_url(cur.url);
-    Time visit_time = Time::Now() - TimeDelta::FromDays(cur.days_from_now);
-    shortcuts_provider::Shortcut shortcut(
-        ASCIIToUTF16(cur.title),
-        current_url,
-        ASCIIToUTF16(cur.contents),
-        shortcuts_provider::SpansFromString(ASCIIToUTF16(cur.contents_class)),
+  for (size_t i = 0; i < db_size; ++i) {
+    const TestShortcutInfo& cur = db[i];
+    history::ShortcutsBackend::Shortcut shortcut(cur.guid,
+        ASCIIToUTF16(cur.title), GURL(cur.url), ASCIIToUTF16(cur.contents),
+        AutocompleteMatch::ClassificationsFromString(cur.contents_class),
         ASCIIToUTF16(cur.description),
-        shortcuts_provider::SpansFromString(
-            ASCIIToUTF16(cur.description_class)));
-    shortcut.last_access_time = visit_time;
-    shortcut.id = cur.guid;
+        AutocompleteMatch::ClassificationsFromString(cur.description_class),
+        base::Time::Now() - base::TimeDelta::FromDays(cur.days_from_now),
+        cur.typed_count);
     mock_backend_->AddShortcut(shortcut);
   }
 }
@@ -277,7 +268,7 @@ TEST_F(ShortcutsProviderTest, MultiMatch) {
   RunTest(text, expected_urls, "http://slashdot.org/");
 }
 
-TEST_F(ShortcutsProviderTest, VisitCountMatches) {
+TEST_F(ShortcutsProviderTest, TypedCountMatches) {
   string16 text(ASCIIToUTF16("just"));
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://www.testsite.com/b.html");
@@ -286,7 +277,7 @@ TEST_F(ShortcutsProviderTest, VisitCountMatches) {
   RunTest(text, expected_urls, "http://www.testsite.com/b.html");
 }
 
-TEST_F(ShortcutsProviderTest, TypedCountMatches) {
+TEST_F(ShortcutsProviderTest, FragmentLengthMatches) {
   string16 text(ASCIIToUTF16("just a"));
   std::vector<std::string> expected_urls;
   expected_urls.push_back("http://www.testsite.com/d.html");
@@ -507,6 +498,50 @@ TEST_F(ShortcutsProviderTest, ClassifyAllMatchesInString) {
                                                     string16(),
                                                     ACMatchClassifications());
   ASSERT_EQ(0U, spans_j.size());
+
+  // Matches which end at beginning of classification merge properly.
+  data = ASCIIToUTF16("html password example");
+  matches.clear();
+  matches.push_back(ACMatchClassification(0, ACMatchClassification::DIM));
+  matches.push_back(ACMatchClassification(9, ACMatchClassification::NONE));
+  ACMatchClassifications spans_k =
+      ShortcutsProvider::ClassifyAllMatchesInString(ASCIIToUTF16("html pass"),
+                                                    data,
+                                                    matches);
+  ASSERT_EQ(4U, spans_k.size());
+  EXPECT_EQ(0U, spans_k[0].offset);
+  EXPECT_EQ(ACMatchClassification::DIM | ACMatchClassification::MATCH,
+            spans_k[0].style);
+  EXPECT_EQ(4U, spans_k[1].offset);
+  EXPECT_EQ(ACMatchClassification::DIM, spans_k[1].style);
+  EXPECT_EQ(5U, spans_k[2].offset);
+  EXPECT_EQ(ACMatchClassification::DIM | ACMatchClassification::MATCH,
+            spans_k[2].style);
+  EXPECT_EQ(9U, spans_k[3].offset);
+  EXPECT_EQ(ACMatchClassification::NONE, spans_k[3].style);
+
+  // Multiple matches with both beginning and end at beginning of
+  // classifications merge properly.
+  data = ASCIIToUTF16("http://a.co is great");
+  matches.clear();
+  matches.push_back(ACMatchClassification(0, ACMatchClassification::URL));
+  matches.push_back(ACMatchClassification(11, ACMatchClassification::NONE));
+  ACMatchClassifications spans_l =
+      ShortcutsProvider::ClassifyAllMatchesInString(ASCIIToUTF16("ht co"),
+                                                    data,
+                                                    matches);
+  ASSERT_EQ(4U, spans_l.size());
+  EXPECT_EQ(0U, spans_l[0].offset);
+  EXPECT_EQ(ACMatchClassification::URL | ACMatchClassification::MATCH,
+            spans_l[0].style);
+  EXPECT_EQ(2U, spans_l[1].offset);
+  EXPECT_EQ(ACMatchClassification::URL, spans_l[1].style);
+  EXPECT_EQ(9U, spans_l[2].offset);
+  EXPECT_EQ(ACMatchClassification::URL | ACMatchClassification::MATCH,
+            spans_l[2].style);
+  EXPECT_EQ(11U, spans_l[3].offset);
+  EXPECT_EQ(ACMatchClassification::NONE, spans_l[3].style);
+
 }
 
 TEST_F(ShortcutsProviderTest, CalculateScore) {
@@ -520,15 +555,12 @@ TEST_F(ShortcutsProviderTest, CalculateScore) {
       ACMatchClassification(0, ACMatchClassification::NONE));
   spans_description.push_back(
       ACMatchClassification(2, ACMatchClassification::MATCH));
-  shortcuts_provider::Shortcut shortcut(ASCIIToUTF16("test"),
-                                        GURL("http://www.test.com"),
-                                        ASCIIToUTF16("www.test.com"),
-                                        spans_content,
-                                        ASCIIToUTF16("A test"),
-                                        spans_description);
+  history::ShortcutsBackend::Shortcut shortcut(std::string(),
+      ASCIIToUTF16("test"), GURL("http://www.test.com"),
+      ASCIIToUTF16("www.test.com"), spans_content, ASCIIToUTF16("A test"),
+      spans_description, base::Time::Now(), 1);
 
   // Maximal score.
-  shortcut.last_access_time = Time::Now();
   const int kMaxScore = ShortcutsProvider::CalculateScore(
       ASCIIToUTF16("test"), shortcut);
 
@@ -544,20 +576,20 @@ TEST_F(ShortcutsProviderTest, CalculateScore) {
   EXPECT_LT(score_one_quarter, score_one_half);
 
   // Should decay with time - one week.
-  shortcut.last_access_time = Time::Now() - TimeDelta::FromDays(7);
+  shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(7);
   int score_week_old =
       ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_week_old, kMaxScore);
 
   // Should decay more in two weeks.
-  shortcut.last_access_time = Time::Now() - TimeDelta::FromDays(14);
+  shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(14);
   int score_two_weeks_old =
       ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_two_weeks_old, score_week_old);
 
   // But not if it was activly clicked on. 2 hits slow decaying power.
   shortcut.number_of_hits = 2;
-  shortcut.last_access_time = Time::Now() - TimeDelta::FromDays(14);
+  shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(14);
   int score_popular_two_weeks_old =
       ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_two_weeks_old, score_popular_two_weeks_old);
@@ -566,7 +598,7 @@ TEST_F(ShortcutsProviderTest, CalculateScore) {
 
   // 3 hits slow decaying power even more.
   shortcut.number_of_hits = 3;
-  shortcut.last_access_time = Time::Now() - TimeDelta::FromDays(14);
+  shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(14);
   int score_more_popular_two_weeks_old =
       ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_two_weeks_old, score_more_popular_two_weeks_old);
@@ -594,22 +626,7 @@ TEST_F(ShortcutsProviderTest, DeleteMatch) {
   size_t original_shortcuts_count =
       provider_->shortcuts_backend_->shortcuts_map().size();
 
-  for (size_t i = 0; i < arraysize(shortcuts_to_test_delete); ++i) {
-    const TestShortcutInfo& cur = shortcuts_to_test_delete[i];
-    const GURL current_url(cur.url);
-    Time visit_time = Time::Now() - TimeDelta::FromDays(cur.days_from_now);
-    shortcuts_provider::Shortcut shortcut(
-        ASCIIToUTF16(cur.title),
-        current_url,
-        ASCIIToUTF16(cur.contents),
-        shortcuts_provider::SpansFromString(ASCIIToUTF16(cur.contents_class)),
-        ASCIIToUTF16(cur.description),
-        shortcuts_provider::SpansFromString(
-            ASCIIToUTF16(cur.description_class)));
-    shortcut.last_access_time = visit_time;
-    shortcut.id = cur.guid;
-    mock_backend_->AddShortcut(shortcut);
-  }
+  FillData(shortcuts_to_test_delete, arraysize(shortcuts_to_test_delete));
 
   EXPECT_EQ(original_shortcuts_count + 3,
             provider_->shortcuts_backend_->shortcuts_map().size());

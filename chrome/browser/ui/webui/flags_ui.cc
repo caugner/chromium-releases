@@ -30,6 +30,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "base/chromeos/chromeos_version.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif
@@ -67,7 +68,8 @@ ChromeWebUIDataSource* CreateFlagsUIHTMLSource() {
 
   int idr = IDR_FLAGS_HTML;
 #if defined (OS_CHROMEOS)
-  if (!chromeos::UserManager::Get()->current_user_is_owner())
+  if (!chromeos::UserManager::Get()->IsCurrentUserOwner() &&
+      base::chromeos::IsRunningOnChromeOS())
     idr = IDR_FLAGS_HTML_WARNING;
 #endif
   source->set_default_resource(idr);

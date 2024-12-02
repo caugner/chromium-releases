@@ -55,7 +55,7 @@ PrintPreviewWebUITest.prototype = {
             disableColorOption: true,
             setColorAsDefault: true,
             disableCopiesOption: true,
-            printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+            printerDefaultDuplexValue: print_preview.CopiesSettings.SIMPLEX,
           });
         }));
     var savedArgs = new SaveMockArguments();
@@ -259,7 +259,7 @@ TEST_F('PrintPreviewWebUITest', 'TestSectionsDisabled', function() {
           setColorAsDefault: true,
           disableCopiesOption: true,
           disableLandscapeOption: true,
-          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+          printerDefaultDuplexValue: print_preview.CopiesSettings.SIMPLEX,
         });
       }));
 
@@ -268,6 +268,51 @@ TEST_F('PrintPreviewWebUITest', 'TestSectionsDisabled', function() {
   checkSectionVisible(layoutSettings.layoutOption_, false);
   checkSectionVisible(colorSettings.colorOption_, false);
   checkSectionVisible(copiesSettings.copiesOption_, false);
+});
+
+// Page layout has zero margins. Hide header and footer option.
+TEST_F('PrintPreviewWebUITest', 'PageLayoutHasNoMarginsHideHeaderFooter',
+       function() {
+  setInitialSettings({previewModifiable: true});
+  onDidGetDefaultPageLayout({
+      contentWidth: 100, contentHeight: 200, marginLeft: 0, marginRight: 0,
+      marginTop: 0, marginBottom: 0, printableAreaX: 0, printableAreaY: 0,
+      printableAreaWidth: 100, printableAreaHeight: 200}, true);
+  checkSectionVisible(headerFooterSettings.headerFooterOption_, false);
+});
+
+// Page layout has non-zero margins. Show header and footer option.
+TEST_F('PrintPreviewWebUITest', 'PageLayoutHasMarginsShowHeaderFooter',
+       function() {
+  setInitialSettings({previewModifiable: true});
+  onDidGetDefaultPageLayout({
+      contentWidth: 100, contentHeight: 200, marginLeft: 3, marginRight: 2,
+      marginTop: 4, marginBottom: 1, printableAreaX: 1, printableAreaY: 1,
+      printableAreaWidth: 103, printableAreaHeight: 203}, true);
+  checkSectionVisible(headerFooterSettings.headerFooterOption_, true);
+});
+
+// Page layout has zero top and bottom margins. Hide header and footer option.
+TEST_F('PrintPreviewWebUITest', 'ZeroTopAndBottomMarginsHideHeaderFooter',
+       function() {
+  setInitialSettings({previewModifiable: true});
+  onDidGetDefaultPageLayout({
+      contentWidth: 100, contentHeight: 200, marginLeft: 3, marginRight: 2,
+      marginTop: 0, marginBottom: 0, printableAreaX: 1, printableAreaY: 1,
+      printableAreaWidth: 98, printableAreaHeight: 198}, false);
+  checkSectionVisible(headerFooterSettings.headerFooterOption_, false);
+});
+
+// Page layout has zero top and non-zero bottom margin. Show header and footer
+// option.
+TEST_F('PrintPreviewWebUITest', 'ZeroTopAndNonZeroBottomMarginShowHeaderFooter',
+       function() {
+  setInitialSettings({previewModifiable: true});
+  onDidGetDefaultPageLayout({
+      contentWidth: 100, contentHeight: 200, marginLeft: 6, marginRight: 4,
+      marginTop: 0, marginBottom: 3, printableAreaX: 1, printableAreaY: 1,
+      printableAreaWidth: 103, printableAreaHeight: 208}, false);
+  checkSectionVisible(headerFooterSettings.headerFooterOption_, true);
 });
 
 // Test that the color settings are set according to the printer capabilities.
@@ -279,7 +324,7 @@ TEST_F('PrintPreviewWebUITest', 'TestColorSettings', function() {
           setColorAsDefault: true,
           disableCopiesOption: false,
           disableLandscapeOption: false,
-          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+          printerDefaultDuplexValue: print_preview.CopiesSettings.SIMPLEX,
         });
       }));
 
@@ -294,7 +339,7 @@ TEST_F('PrintPreviewWebUITest', 'TestColorSettings', function() {
           setColorAsDefault: false,
           disableCopiesOption: false,
           disableLandscapeOption: false,
-          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+          printerDefaultDuplexValue: print_preview.CopiesSettings.SIMPLEX,
         });
       }));
 
@@ -313,11 +358,11 @@ TEST_F('PrintPreviewWebUITest', 'TestDuplexSettings', function() {
           setColorAsDefault: false,
           disableCopiesOption: false,
           disableLandscapeOption: false,
-          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+          printerDefaultDuplexValue: print_preview.CopiesSettings.SIMPLEX,
         });
       }));
   updateControlsWithSelectedPrinterCapabilities();
-  expectEquals(copiesSettings.duplexMode, copiesSettings.SIMPLEX);
+  expectEquals(copiesSettings.duplexMode, print_preview.CopiesSettings.SIMPLEX);
   expectEquals(copiesSettings.twoSidedOption_.hidden, false);
 
   // If the printer default duplex value is UNKNOWN_DUPLEX_MODE, hide the
@@ -329,11 +374,13 @@ TEST_F('PrintPreviewWebUITest', 'TestDuplexSettings', function() {
           setColorAsDefault: false,
           disableCopiesOption: false,
           disableLandscapeOption: false,
-          printerDefaultDuplexValue: copiesSettings.UNKNOWN_DUPLEX_MODE,
+          printerDefaultDuplexValue:
+            print_preview.CopiesSettings.UNKNOWN_DUPLEX_MODE,
         });
       }));
   updateControlsWithSelectedPrinterCapabilities();
-  expectEquals(copiesSettings.duplexMode, copiesSettings.UNKNOWN_DUPLEX_MODE);
+  expectEquals(copiesSettings.duplexMode,
+               print_preview.CopiesSettings.UNKNOWN_DUPLEX_MODE);
   expectEquals(copiesSettings.twoSidedOption_.hidden, true);
 
   this.mockHandler.expects(once()).getPrinterCapabilities('FooDevice').
@@ -343,14 +390,15 @@ TEST_F('PrintPreviewWebUITest', 'TestDuplexSettings', function() {
           setColorAsDefault: false,
           disableCopiesOption: false,
           disableLandscapeOption: false,
-          printerDefaultDuplexValue: copiesSettings.SIMPLEX,
+          printerDefaultDuplexValue: print_preview.CopiesSettings.SIMPLEX,
         });
       }));
   updateControlsWithSelectedPrinterCapabilities();
   expectEquals(copiesSettings.twoSidedOption_.hidden, false);
-  expectEquals(copiesSettings.duplexMode, copiesSettings.SIMPLEX);
+  expectEquals(copiesSettings.duplexMode, print_preview.CopiesSettings.SIMPLEX);
   copiesSettings.twoSidedCheckbox.checked = true;
-  expectEquals(copiesSettings.duplexMode, copiesSettings.LONG_EDGE);
+  expectEquals(
+      copiesSettings.duplexMode, print_preview.CopiesSettings.LONG_EDGE);
 });
 
 // Test that changing the selected printer updates the preview.

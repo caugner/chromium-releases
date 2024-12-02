@@ -22,6 +22,7 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/image_button.h"
@@ -96,9 +97,9 @@ views::Link* InfoBarView::CreateLink(const string16& text,
 // static
 views::MenuButton* InfoBarView::CreateMenuButton(
     const string16& text,
-    views::ViewMenuDelegate* menu_delegate) {
+    views::MenuButtonListener* menu_button_listener) {
   views::MenuButton* menu_button = new views::MenuButton(
-      NULL, text, menu_delegate, true);
+      NULL, text, menu_button_listener, true);
   menu_button->set_border(new InfoBarButtonBorder);
   menu_button->set_animate_on_state_change(false);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -249,8 +250,7 @@ void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
   // broken on non-Windows platforms (crbug.com/75154). For now, just clip to
   // the bar bounds.
   //
-  // gfx::CanvasSkia* canvas_skia = canvas->AsCanvasSkia();
-  // canvas_skia->clipPath(fill_path_);
+  // canvas->sk_canvas()->clipPath(fill_path_);
   DCHECK_EQ(total_height(), height())
       << "Infobar piecewise heights do not match overall height";
   canvas->ClipRect(gfx::Rect(0, arrow_height(), width(), bar_height()));

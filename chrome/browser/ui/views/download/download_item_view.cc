@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/text_button.h"
@@ -48,10 +48,6 @@ static const int kHorizontalTextPadding = 2;  // Pixels
 static const int kVerticalPadding = 3;        // Pixels
 static const int kVerticalTextSpacer = 2;     // Pixels
 static const int kVerticalTextPadding = 2;    // Pixels
-
-// The maximum number of characters we show in a file name when displaying the
-// dangerous download message.
-static const int kFileNameMaxLength = 20;
 
 // We add some padding before the left image so that the progress animation icon
 // hides the corners of the left image.
@@ -205,7 +201,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
 
   UpdateDropDownButtonPosition();
 
-  if (download->GetSafetyState() == DownloadItem::DANGEROUS)
+  if (model_->IsDangerous())
     ShowWarningDialog();
 
   UpdateAccessibleName();
@@ -252,15 +248,13 @@ void DownloadItemView::OnExtractIconComplete(IconManager::Handle handle,
 
 // Update the progress graphic on the icon and our text status label
 // to reflect our current bytes downloaded, time remaining.
-void DownloadItemView::OnDownloadUpdated(content::DownloadItem* download) {
+void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
   DCHECK(download == download_);
 
-  if (IsShowingWarningDialog() &&
-      download->GetSafetyState() == DownloadItem::DANGEROUS_BUT_VALIDATED) {
+  if (IsShowingWarningDialog() && !model_->IsDangerous()) {
     // We have been approved.
     ClearWarningDialog();
-  } else if (!IsShowingWarningDialog() &&
-             download->GetSafetyState() == DownloadItem::DANGEROUS) {
+  } else if (!IsShowingWarningDialog() && model_->IsDangerous()) {
     ShowWarningDialog();
     // Force the shelf to layout again as our size has changed.
     parent_->Layout();
@@ -315,7 +309,7 @@ void DownloadItemView::OnDownloadUpdated(content::DownloadItem* download) {
   parent()->SchedulePaint();
 }
 
-void DownloadItemView::OnDownloadOpened(content::DownloadItem* download) {
+void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
   disabled_while_opening_ = true;
   SetEnabled(false);
   MessageLoop::current()->PostDelayedTask(
@@ -573,7 +567,7 @@ void DownloadItemView::ShowContextMenu(const gfx::Point& p,
 void DownloadItemView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->name = accessible_name_;
   state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
-  if (download_->GetSafetyState() == DownloadItem::DANGEROUS) {
+  if (model_->IsDangerous()) {
     state->state = ui::AccessibilityTypes::STATE_UNAVAILABLE;
   } else {
     state->state = ui::AccessibilityTypes::STATE_HASPOPUP;
@@ -748,7 +742,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
       body_hover_animation_->GetCurrentValue() > 0) {
     canvas->SaveLayerAlpha(
         static_cast<int>(body_hover_animation_->GetCurrentValue() * 255));
-    canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
+    canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
     int x = kLeftPadding;
     PaintBitmaps(canvas,
@@ -782,8 +776,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
     if (drop_hover_animation_->GetCurrentValue() > 0) {
       canvas->SaveLayerAlpha(
           static_cast<int>(drop_hover_animation_->GetCurrentValue() * 255));
-      canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255,
-                                      SkXfermode::kClear_Mode);
+      canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
       PaintBitmaps(canvas,
                    drop_down_image_set->top, drop_down_image_set->center,
@@ -844,7 +837,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
   if (IsShowingWarningDialog())
     icon = warning_icon_;
   else if (image)
-    icon = *image;
+    icon = image->ToSkBitmap();
 
   // We count on the fact that the icon manager will cache the icons and if one
   // is available, it will be cached here. We *don't* want to request the icon
@@ -856,7 +849,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
       if (download_->IsInProgress()) {
         download_util::PaintDownloadProgress(canvas, this, 0, 0,
                                              progress_angle_,
-                                             download_->PercentComplete(),
+                                             model_->PercentComplete(),
                                              download_util::SMALL);
       } else if (download_->IsComplete() &&
                  complete_animation_.get() &&
@@ -1004,24 +997,14 @@ void DownloadItemView::ClearWarningDialog() {
 
 void DownloadItemView::ShowWarningDialog() {
   DCHECK(mode_ != DANGEROUS_MODE && mode_ != MALICIOUS_MODE);
-  if (download_->GetDangerType() ==
-          content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
-      download_->GetDangerType() ==
-          content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT) {
-    mode_ = MALICIOUS_MODE;
-  } else {
-    DCHECK(download_->GetDangerType() ==
-           content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
-    mode_ = DANGEROUS_MODE;
-  }
+  mode_ = ((model_->IsMalicious()) ? MALICIOUS_MODE : DANGEROUS_MODE);
+
   body_state_ = NORMAL;
   drop_down_state_ = NORMAL;
   tooltip_text_.clear();
   if (mode_ == DANGEROUS_MODE) {
-    save_button_ = new views::NativeTextButton(this,
-        l10n_util::GetStringUTF16(
-            ChromeDownloadManagerDelegate::IsExtensionDownload(download_) ?
-            IDS_CONTINUE_EXTENSION_DOWNLOAD : IDS_CONFIRM_DOWNLOAD));
+    save_button_ = new views::NativeTextButton(
+        this, model_->GetWarningConfirmButtonText());
     save_button_->set_ignore_minimum_size(true);
     AddChildView(save_button_);
   }
@@ -1030,74 +1013,16 @@ void DownloadItemView::ShowWarningDialog() {
   discard_button_->set_ignore_minimum_size(true);
   AddChildView(discard_button_);
 
-  // Ensure the file name is not too long.
-
-  // Extract the file extension (if any).
-  FilePath filename(download_->GetTargetName());
-#if defined(OS_POSIX)
-  string16 extension = WideToUTF16(base::SysNativeMBToWide(
-      filename.Extension()));
-#else
-  string16 extension = filename.Extension();
-#endif
-
-  // Remove leading '.'
-  if (extension.length() > 0)
-    extension = extension.substr(1);
-#if defined(OS_POSIX)
-  string16 rootname = WideToUTF16(base::SysNativeMBToWide(
-      filename.RemoveExtension().value()));
-#else
-  string16 rootname = filename.RemoveExtension().value();
-#endif
-
-  // Elide giant extensions (this shouldn't currently be hit, but might
-  // in future, should we ever notice unsafe giant extensions).
-  if (extension.length() > kFileNameMaxLength / 2)
-    ui::ElideString(extension, kFileNameMaxLength / 2, &extension);
-
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  // The dangerous download label text and icon are different
-  // under different cases.
+  // The dangerous download label text and icon are different under
+  // different cases.
   if (mode_ == MALICIOUS_MODE) {
     warning_icon_ = rb.GetBitmapNamed(IDR_SAFEBROWSING_WARNING);
   } else {
-    DCHECK(download_->GetDangerType() ==
-           content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE);
     // The download file has dangerous file type (e.g.: an executable).
     warning_icon_ = rb.GetBitmapNamed(IDR_WARNING);
   }
-  string16 dangerous_label;
-  if (download_->GetDangerType() ==
-          content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL) {
-    // Safebrowsing shows the download URL or content leads to malicious file.
-    dangerous_label = l10n_util::GetStringUTF16(
-        IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
-  } else if (download_->GetDangerType() ==
-                 content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE &&
-             ChromeDownloadManagerDelegate::IsExtensionDownload(download_)) {
-    dangerous_label =
-        l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
-  } else {
-    // The download file has dangerous file type (e.g.: an executable) or the
-    // file content is known to be malicious.
-    DCHECK(download_->GetDangerType() ==
-               content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
-           download_->GetDangerType() ==
-               content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
-    ui::ElideString(rootname,
-                    kFileNameMaxLength - extension.length(),
-                    &rootname);
-    string16 filename = rootname + ASCIIToUTF16(".") + extension;
-    filename = base::i18n::GetDisplayStringInLTRDirectionality(filename);
-    dangerous_label = l10n_util::GetStringFUTF16(
-        download_->GetDangerType() ==
-            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ?
-                IDS_PROMPT_DANGEROUS_DOWNLOAD :
-                IDS_PROMPT_MALICIOUS_DOWNLOAD_CONTENT,
-        filename);
-  }
-
+  string16 dangerous_label = model_->GetWarningText(font_, kTextWidth);
   dangerous_download_label_ = new views::Label(dangerous_label);
   dangerous_download_label_->SetMultiLine(true);
   dangerous_download_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -1138,23 +1063,26 @@ void DownloadItemView::SizeLabelToMinWidth() {
   if (dangerous_download_label_sized_)
     return;
 
-  string16 text = dangerous_download_label_->GetText();
-  TrimWhitespace(text, TRIM_ALL, &text);
-  DCHECK_EQ(string16::npos, text.find('\n'));
+  string16 label_text = dangerous_download_label_->text();
+  TrimWhitespace(label_text, TRIM_ALL, &label_text);
+  DCHECK_EQ(string16::npos, label_text.find('\n'));
 
   // Make the label big so that GetPreferredSize() is not constrained by the
   // current width.
   dangerous_download_label_->SetBounds(0, 0, 1000, 1000);
 
+  // Use a const string from here. BreakIterator requies that text.data() not
+  // change during its lifetime.
+  const string16 original_text(label_text);
   // Using BREAK_WORD can work in most cases, but it can also break
   // lines where it should not. Using BREAK_LINE is safer although
   // slower for Chinese/Japanese. This is not perf-critical at all, though.
-  base::i18n::BreakIterator iter(text, base::i18n::BreakIterator::BREAK_LINE);
+  base::i18n::BreakIterator iter(original_text,
+                                 base::i18n::BreakIterator::BREAK_LINE);
   bool status = iter.Init();
   DCHECK(status);
 
-  string16 current_text = text;
-  string16 prev_text = text;
+  string16 prev_text = original_text;
   gfx::Size size = dangerous_download_label_->GetPreferredSize();
   int min_width = size.width();
 
@@ -1165,12 +1093,13 @@ void DownloadItemView::SizeLabelToMinWidth() {
   // unnecessarily.
   while (iter.Advance() && min_width > kDangerousTextWidth) {
     size_t pos = iter.pos();
-    if (pos >= text.length())
+    if (pos >= original_text.length())
       break;
+    string16 current_text = original_text;
     // This can be a low surrogate codepoint, but u_isUWhiteSpace will
     // return false and inserting a new line after a surrogate pair
     // is perfectly ok.
-    char16 line_end_char = text[pos - 1];
+    char16 line_end_char = current_text[pos - 1];
     if (u_isUWhiteSpace(line_end_char))
       current_text.replace(pos - 1, 1, 1, char16('\n'));
     else
@@ -1185,10 +1114,7 @@ void DownloadItemView::SizeLabelToMinWidth() {
     } else {
       min_width = size.width();
     }
-
-    // Restore the string.
     prev_text = current_text;
-    current_text = text;
   }
 
   dangerous_download_label_->SetBounds(0, 0, size.width(), size.height());
@@ -1214,7 +1140,7 @@ bool DownloadItemView::InDropDownButtonXCoordinateRange(int x) {
 void DownloadItemView::UpdateAccessibleName() {
   string16 new_name;
   if (IsShowingWarningDialog()) {
-    new_name = dangerous_download_label_->GetText();
+    new_name = dangerous_download_label_->text();
   } else {
     new_name = status_text_ + char16(' ') +
         download_->GetFileNameToReportUser().LossyDisplayName();

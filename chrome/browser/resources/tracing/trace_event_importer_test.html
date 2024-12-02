@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <!--
-Copyright (c) 2011 The Chromium Authors. All rights reserved.
+Copyright (c) 2012 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
@@ -20,6 +20,11 @@ found in the LICENSE file.
 </head>
 <body>
 <script>
+
+function testCanImportEmpty() {
+  self.assertFalse(tracing.TraceEventImporter.canImport([]));
+  self.assertFalse(tracing.TraceEventImporter.canImport(''));
+}
 
 function testBasicSingleThreadNonnestedParsing() {
   var events = [
@@ -553,6 +558,190 @@ function testImportStringWithMissingCloseSquareBracketAndNewline() {
   var m = new tracing.TimelineModel(dropped + '\n');
   assertEquals(1, m.numProcesses);
 }
+
+function testStartFinishOneSliceOneThread() {
+  var events = [
+    // Time is intentionally out of order.
+    {name: 'a', args: {}, pid: 52, ts: 560, cat: 'foo', tid: 53,
+       ph: 'F', id: 72},
+    {name: 'a', args: {}, pid: 52, ts: 524, cat: 'foo', tid: 53,
+       ph: 'S', id: 72, args: {foo: 'bar'}}
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  var t = m.processes[52].threads[53];
+  assertNotUndefined(t);
+  assertEquals(1, t.asyncSlices.slices.length);
+  assertEquals('a', t.asyncSlices.slices[0].title);
+  assertEquals(72, t.asyncSlices.slices[0].id);
+  assertEquals('bar', t.asyncSlices.slices[0].args.foo);
+  assertEquals(0, t.asyncSlices.slices[0].start);
+  assertAlmostEquals((60 - 24) / 1000, t.asyncSlices.slices[0].duration);
+  assertEquals(t, t.asyncSlices.slices[0].startThread);
+  assertEquals(t, t.asyncSlices.slices[0].endThread);
+}
+
+function testEndArgsAddedToSlice() {
+  var events = [
+    {name: 'a', args: {x: 1}, pid: 52, ts: 520, cat: 'foo', tid: 53, ph: 'B'},
+    {name: 'a', args: {y: 2}, pid: 52, ts: 560, cat: 'foo', tid: 53, ph: 'E'},
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  assertEquals(1, m.numProcesses);
+  var p = m.processes[52];
+  assertNotUndefined(p);
+
+  assertEquals(1, p.numThreads);
+  var t = p.threads[53];
+  assertNotUndefined(t);
+  assertEquals(1, t.subRows.length);
+  assertEquals(53, t.tid);
+  var subRow = t.subRows[0];
+  assertEquals(1, subRow.length);
+  var slice = subRow[0];
+  assertEquals('a', slice.title);
+  assertEquals(0, slice.start);
+  assertEquals(0, slice.subSlices.length);
+  assertEquals(1, slice.args['x']);
+  assertEquals(2, slice.args['y']);
+}
+
+function testEndArgOverrwritesOriginalArgValueIfDuplicated() {
+  var events = [
+    {name: 'b', args: {z: 3}, pid: 52, ts: 629, cat: 'foo', tid: 53, ph: 'B'},
+    {name: 'b', args: {z: 4}, pid: 52, ts: 631, cat: 'foo', tid: 53, ph: 'E'}
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  assertEquals(1, m.numProcesses);
+  var p = m.processes[52];
+  assertNotUndefined(p);
+
+  assertEquals(1, p.numThreads);
+  var t = p.threads[53];
+  assertNotUndefined(t);
+  assertEquals(1, t.subRows.length);
+  assertEquals(53, t.tid);
+  var subRow = t.subRows[0];
+  assertEquals(1, subRow.length);
+  var slice = subRow[0];
+  assertEquals('b', slice.title);
+  assertEquals(0, slice.start);
+  assertEquals(0, slice.subSlices.length);
+  assertEquals(4, slice.args['z']);
+}
+
+function testAsyncEndArgsAddedToSlice() {
+  var events = [
+    // Time is intentionally out of order.
+    {name: 'c', args: {y: 2}, pid: 52, ts: 560, cat: 'foo', tid: 53,
+       ph: 'F', id: 72},
+    {name: 'c', args: {x: 1}, pid: 52, ts: 524, cat: 'foo', tid: 53,
+       ph: 'S', id: 72}
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  var t = m.processes[52].threads[53];
+  assertNotUndefined(t);
+  assertEquals(1, t.asyncSlices.slices.length);
+  var parentSlice = t.asyncSlices.slices[0];
+  assertEquals('c', parentSlice.title);
+
+  assertNotUndefined(parentSlice.subSlices);
+  assertEquals(1, parentSlice.subSlices.length);
+  var subSlice = parentSlice.subSlices[0];
+  assertEquals(1, subSlice.args['x']);
+  assertEquals(2, subSlice.args['y']);
+}
+
+function testAsyncEndArgOverrwritesOriginalArgValueIfDuplicated() {
+  var events = [
+    // Time is intentionally out of order.
+    {name: 'd', args: {z: 4}, pid: 52, ts: 560, cat: 'foo', tid: 53,
+       ph: 'F', id: 72},
+    {name: 'd', args: {z: 3}, pid: 52, ts: 524, cat: 'foo', tid: 53,
+       ph: 'S', id: 72}
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  var t = m.processes[52].threads[53];
+  assertNotUndefined(t);
+  assertEquals(1, t.asyncSlices.slices.length);
+  var parentSlice = t.asyncSlices.slices[0];
+  assertEquals('d', parentSlice.title);
+
+  assertNotUndefined(parentSlice.subSlices);
+  assertEquals(1, parentSlice.subSlices.length);
+  var subSlice = parentSlice.subSlices[0];
+  assertEquals(4, subSlice.args['z']);
+}
+
+function testAsyncStepsInOneThread() {
+  var events = [
+    // Time is intentionally out of order.
+    {name: 'a', args: {z: 3}, pid: 52, ts: 560, cat: 'foo', tid: 53,
+       ph: 'F', id: 72},
+    {name: 'a', args: {step: 's1', y: 2}, pid: 52, ts: 548, cat: 'foo', tid: 53,
+       ph: 'T', id: 72, },
+    {name: 'a', args: {x: 1}, pid: 52, ts: 524, cat: 'foo', tid: 53,
+       ph: 'S', id: 72}
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  var t = m.processes[52].threads[53];
+  assertNotUndefined(t);
+  assertEquals(1, t.asyncSlices.slices.length);
+  var parentSlice = t.asyncSlices.slices[0];
+  assertEquals('a', parentSlice.title);
+  assertEquals(0, parentSlice.start);
+
+  assertNotUndefined(parentSlice.subSlices);
+  assertEquals(2, parentSlice.subSlices.length);
+  var subSlice = parentSlice.subSlices[0];
+  assertEquals('a', subSlice.title);
+  assertEquals(0, subSlice.start);
+  assertAlmostEquals((548 - 524) / 1000, subSlice.duration);
+  assertEquals(1, subSlice.args['x']);
+
+  var subSlice = parentSlice.subSlices[1];
+  assertEquals('a:s1', subSlice.title);
+  assertAlmostEquals((548 - 524) / 1000, subSlice.start);
+  assertAlmostEquals((560 - 548) / 1000, subSlice.duration);
+  assertEquals(2, subSlice.args['y']);
+  assertEquals(3, subSlice.args['z']);
+}
+
+function testAsyncStepsMissingStart() {
+  var events = [
+    // Time is intentionally out of order.
+    {name: 'a', args: {z: 3}, pid: 52, ts: 560, cat: 'foo', tid: 53,
+       ph: 'F', id: 72},
+    {name: 'a', args: {step: 's1', y: 2}, pid: 52, ts: 548, cat: 'foo', tid: 53,
+       ph: 'T', id: 72, },
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  var t = m.processes[52].threads[53];
+  assertUndefined(t);
+}
+
+function testAsyncStepsMissingFinish() {
+  var events = [
+    // Time is intentionally out of order.
+    {name: 'a', args: {step: 's1', y: 2}, pid: 52, ts: 548, cat: 'foo', tid: 53,
+       ph: 'T', id: 72, },
+    {name: 'a', args: {z: 3}, pid: 52, ts: 560, cat: 'foo', tid: 53,
+       ph: 'S', id: 72},
+  ];
+
+  var m = new tracing.TimelineModel(events);
+  var t = m.processes[52].threads[53];
+  assertUndefined(t);
+}
+
+// TODO(nduca): one slice, two threads
+// TODO(nduca): one slice, two pids
 
 </script>
 </body>

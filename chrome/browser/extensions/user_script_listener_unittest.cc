@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
-#include "base/json/json_value_serializer.h"
 #include "chrome/browser/extensions/extension_service_unittest.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/user_script_listener.h"
@@ -13,18 +13,16 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/mock_resource_context.h"
-#include "content/browser/renderer_host/dummy_resource_handler.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/browser/renderer_host/resource_queue.h"
-#include "content/public/browser/global_request_id.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/resource_throttle.h"
+#include "content/public/browser/resource_throttle_controller.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::DummyResourceHandler;
+using content::ResourceThrottle;
+using content::ResourceThrottleController;
 
 namespace {
 
@@ -32,14 +30,27 @@ const char kMatchingUrl[] = "http://google.com/";
 const char kNotMatchingUrl[] = "http://example.com/";
 const char kTestData[] = "Hello, World!";
 
-ResourceDispatcherHostRequestInfo* CreateRequestInfo(int request_id) {
-  return new ResourceDispatcherHostRequestInfo(
-      new DummyResourceHandler(), content::PROCESS_TYPE_RENDERER, 0, 0, 0,
-      request_id, false, -1, false, -1, ResourceType::MAIN_FRAME,
-      content::PAGE_TRANSITION_LINK, 0, false, false, false,
-      WebKit::WebReferrerPolicyDefault,
-      content::MockResourceContext::GetInstance());
-}
+class ThrottleController : public base::SupportsUserData::Data,
+                           public ResourceThrottleController {
+ public:
+  ThrottleController(net::URLRequest* request, ResourceThrottle* throttle)
+      : request_(request),
+        throttle_(throttle) {
+    throttle_->set_controller_for_testing(this);
+  }
+
+  // ResourceThrottleController implementation:
+  virtual void Resume() {
+    request_->Start();
+  }
+  virtual void Cancel() {
+    NOTREACHED();
+  }
+
+ private:
+  net::URLRequest* request_;
+  scoped_ptr<ResourceThrottle> throttle_;
+};
 
 // A simple test net::URLRequestJob. We don't care what it does, only that
 // whether it starts and finishes.
@@ -95,14 +106,9 @@ class UserScriptListenerTest
     MessageLoop::current()->RunAllPending();
 
     listener_ = new UserScriptListener();
-
-    ResourceQueue::DelegateSet delegates;
-    delegates.insert(listener_.get());
-    resource_queue_.Initialize(delegates);
   }
 
   virtual void TearDown() {
-    resource_queue_.Shutdown();
     listener_ = NULL;
     MessageLoop::current()->RunAllPending();
   }
@@ -114,11 +120,23 @@ class UserScriptListenerTest
 
  protected:
   TestURLRequest* StartTestRequest(net::URLRequest::Delegate* delegate,
-                                   const std::string& url) {
-    TestURLRequest* request = new TestURLRequest(GURL(url), delegate);
-    scoped_ptr<ResourceDispatcherHostRequestInfo> rdh_info(
-        CreateRequestInfo(0));
-    resource_queue_.AddRequest(request, *rdh_info.get());
+                                   const std::string& url_string) {
+    GURL url(url_string);
+    TestURLRequest* request = new TestURLRequest(url, delegate);
+
+    ResourceThrottle* throttle =
+        listener_->CreateResourceThrottle(url, ResourceType::MAIN_FRAME);
+
+    bool defer = false;
+    if (throttle) {
+      request->SetUserData(NULL, new ThrottleController(request, throttle));
+
+      throttle->WillStartRequest(&defer);
+    }
+
+    if (!defer)
+      request->Start();
+
     return request;
   }
 
@@ -141,9 +159,6 @@ class UserScriptListenerTest
   }
 
   scoped_refptr<UserScriptListener> listener_;
-
- private:
-  ResourceQueue resource_queue_;
 };
 
 namespace {

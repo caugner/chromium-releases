@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,21 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/stringprintf.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 // static
 bool ExtensionResourceRequestPolicy::CanRequestResource(
     const GURL& resource_url,
-    const GURL& frame_url,
+    WebKit::WebFrame* frame,
     const ExtensionSet* loaded_extensions) {
   CHECK(resource_url.SchemeIs(chrome::kExtensionScheme));
 
@@ -43,16 +48,28 @@ bool ExtensionResourceRequestPolicy::CanRequestResource(
   // Disallow loading of extension resources which are not explicitely listed
   // as web accessible if the manifest version is 2 or greater.
 
+  GURL frame_url = frame->document().url();
+  GURL page_url = frame->top()->document().url();
   // Exceptions are:
   // - empty origin (needed for some edge cases when we have empty origins)
   // - chrome-extension:// (for legacy reasons -- some extensions interop)
+  // - devtools (chrome-extension:// URLs are loaded into frames of devtools
+  //     to support the devtools extension APIs)
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableExtensionsResourceWhitelist) &&
       !frame_url.is_empty() &&
       !frame_url.SchemeIs(chrome::kExtensionScheme) &&
+      !(page_url.SchemeIs(chrome::kChromeDevToolsScheme) &&
+          !extension->devtools_url().is_empty()) &&
       !extension->IsResourceWebAccessible(resource_url.path())) {
-    LOG(ERROR) << "Denying load of " << resource_url.spec() << " which "
-               << "is not a web accessible resource.";
+    std::string message = base::StringPrintf(
+        "Denying load of %s. Resources must be listed in the "
+        "web_accessible_resources manifest key in order to be loaded by web "
+        "pages.",
+        resource_url.spec().c_str());
+    frame->addMessageToConsole(
+        WebKit::WebConsoleMessage(WebKit::WebConsoleMessage::LevelError,
+                                  WebKit::WebString::fromUTF8(message)));
     return false;
   }
 

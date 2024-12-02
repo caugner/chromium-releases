@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -64,8 +64,8 @@ XIValuatorClassInfo* FindTPValuator(Display* display,
         reinterpret_cast<XIValuatorClassInfo*>(info->classes[i]);
 
     if (v->label) {
-      const char* atom = XGetAtomName(display, v->label);
-      if (atom && strcmp(atom, atom_tp) == 0)
+      ui::XScopedString atom(XGetAtomName(display, v->label));
+      if (atom.string() && strcmp(atom.string(), atom_tp) == 0)
         return v;
     }
   }
@@ -130,10 +130,13 @@ TouchFactory::~TouchFactory() {
     return;
 #endif
 
-  SetCursorVisible(true, false);
-  Display* display = ui::GetXDisplay();
-  XFreeCursor(display, invisible_cursor_);
-  XFreeCursor(display, arrow_cursor_);
+  // The XDisplay may be lost by the time we get destroyed.
+  if (ui::XDisplayExists()) {
+    SetCursorVisible(true, false);
+    Display* display = ui::GetXDisplay();
+    XFreeCursor(display, invisible_cursor_);
+    XFreeCursor(display, arrow_cursor_);
+  }
 }
 
 void TouchFactory::UpdateDeviceList(Display* display) {
@@ -151,8 +154,8 @@ void TouchFactory::UpdateDeviceList(Display* display) {
   XDeviceInfo* devlist = XListInputDevices(display, &count);
   for (int i = 0; i < count; i++) {
     if (devlist[i].type) {
-      const char* devtype = XGetAtomName(display, devlist[i].type);
-      if (devtype && !strcmp(devtype, XI_TOUCHSCREEN)) {
+      XScopedString devtype(XGetAtomName(display, devlist[i].type));
+      if (devtype.string() && !strcmp(devtype.string(), XI_TOUCHSCREEN)) {
         touch_device_lookup_[devlist[i].id] = true;
         touch_device_list_[devlist[i].id] = true;
         touch_device_available_ = true;
@@ -377,6 +380,10 @@ bool TouchFactory::UngrabTouchDevices(Display* display) {
 }
 
 void TouchFactory::SetCursorVisible(bool show, bool start_timer) {
+  // This function may get called after the display is terminated.
+  if (!ui::XDisplayExists())
+    return;
+
 #if defined(USE_AURA)
   if (!base::MessagePumpForUI::HasXInput2())
     return;
@@ -437,13 +444,14 @@ void TouchFactory::SetupValuator() {
     // In order to support multi-touch with XI2.0, we need both a slot_id and
     // tracking_id valuator.  Without these we'll treat the device as a
     // single-touch device (like a mouse).
-    if (valuator_lookup_[info->deviceid][TP_SLOT_ID] == -1 ||
-        valuator_lookup_[info->deviceid][TP_TRACKING_ID] == -1) {
+    // TODO(rbyers): Multi-touch is disabled: http://crbug.com/112329
+    //if (valuator_lookup_[info->deviceid][TP_SLOT_ID] == -1 ||
+    //    valuator_lookup_[info->deviceid][TP_TRACKING_ID] == -1) {
       DVLOG(1) << "Touch device " << info->deviceid <<
         " does not provide enough information for multi-touch, treating as "
         "a single-touch device.";
       touch_device_list_[info->deviceid] = false;
-    }
+    //}
 #endif
   }
 

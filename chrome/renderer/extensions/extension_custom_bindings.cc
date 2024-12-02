@@ -9,6 +9,7 @@
 #include "base/string_util.h"
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_helper.h"
@@ -20,9 +21,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "v8/include/v8.h"
 #include "webkit/glue/webkit_glue.h"
-
-using WebKit::WebFrame;
-using WebKit::WebView;
 
 namespace extensions {
 
@@ -110,15 +108,11 @@ class ExtensionViewAccumulator : public content::RenderViewVisitor {
 }  // namespace
 
 ExtensionCustomBindings::ExtensionCustomBindings(
-    int dependency_count,
-    const char** dependencies,
     ExtensionDispatcher* extension_dispatcher)
-    : ChromeV8Extension(
-          "extensions/extension_custom_bindings.js",
-          IDR_EXTENSION_CUSTOM_BINDINGS_JS,
-          dependency_count,
-          dependencies,
-          extension_dispatcher) {}
+    : ChromeV8Extension(extension_dispatcher) {
+  RouteStaticFunction("GetExtensionViews", &GetExtensionViews);
+  RouteStaticFunction("OpenChannelToExtension", &OpenChannelToExtension);
+}
 
 // static
 v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
@@ -152,6 +146,8 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
     view_type = chrome::VIEW_TYPE_EXTENSION_DIALOG;
   } else if (view_type_string == chrome::kViewTypeAppShell) {
     view_type = chrome::VIEW_TYPE_APP_SHELL;
+  } else if (view_type_string == chrome::kViewTypePanel) {
+    view_type = chrome::VIEW_TYPE_PANEL;
   } else if (view_type_string != chrome::kViewTypeAll) {
     return v8::Undefined();
   }
@@ -169,14 +165,32 @@ v8::Handle<v8::Value> ExtensionCustomBindings::GetExtensionViews(
   return accumulator.views();
 }
 
-v8::Handle<v8::FunctionTemplate> ExtensionCustomBindings::GetNativeFunction(
-    v8::Handle<v8::String> name) {
-  if (name->Equals(v8::String::New("GetExtensionViews"))) {
-    return v8::FunctionTemplate::New(GetExtensionViews,
-                                     v8::External::New(this));
-  }
+// static
+v8::Handle<v8::Value> ExtensionCustomBindings::OpenChannelToExtension(
+    const v8::Arguments& args) {
+  // Get the current RenderView so that we can send a routed IPC message from
+  // the correct source.
+  content::RenderView* renderview = GetCurrentRenderView();
+  if (!renderview)
+    return v8::Undefined();
 
-  return ChromeV8Extension::GetNativeFunction(name);
+  // The Javascript code should validate/fill the arguments.
+  CHECK(args.Length() >= 3 &&
+        args[0]->IsString() &&
+        args[1]->IsString() &&
+        args[2]->IsString());
+
+  std::string source_id = *v8::String::Utf8Value(args[0]->ToString());
+  std::string target_id = *v8::String::Utf8Value(args[1]->ToString());
+  std::string channel_name = *v8::String::Utf8Value(args[2]->ToString());
+  int port_id = -1;
+  renderview->Send(new ExtensionHostMsg_OpenChannelToExtension(
+      renderview->GetRoutingID(),
+      source_id,
+      target_id,
+      channel_name,
+      &port_id));
+  return v8::Integer::New(port_id);
 }
 
 }  // namespace extensions

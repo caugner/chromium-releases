@@ -23,6 +23,7 @@ namespace remoting {
 namespace protocol {
 
 class ClientStub;
+class ClipboardStub;
 class HostStub;
 class InputStub;
 class HostControlDispatcher;
@@ -37,15 +38,17 @@ class ConnectionToClient : public base::NonThreadSafe {
    public:
     virtual ~EventHandler() {}
 
-    // Called when the network connection is opened.
-    virtual void OnConnectionOpened(ConnectionToClient* connection) = 0;
+    // Called when the network connection is authenticated.
+    virtual void OnConnectionAuthenticated(ConnectionToClient* connection) = 0;
 
-    // Called when the network connection is closed.
-    virtual void OnConnectionClosed(ConnectionToClient* connection) = 0;
+    // Called when the network connection is authenticated and all
+    // channels are connected.
+    virtual void OnConnectionChannelsConnected(
+        ConnectionToClient* connection) = 0;
 
-    // Called when the network connection has failed.
-    virtual void OnConnectionFailed(ConnectionToClient* connection,
-                                    Session::Error error) = 0;
+    // Called when the network connection is closed or failed.
+    virtual void OnConnectionClosed(ConnectionToClient* connection,
+                                    ErrorCode error) = 0;
 
     // Called when sequence number is updated.
     virtual void OnSequenceNumberUpdated(ConnectionToClient* connection,
@@ -53,9 +56,9 @@ class ConnectionToClient : public base::NonThreadSafe {
 
     // Called on notification of a route change event, which happens when a
     // channel is connected.
-    virtual void OnClientIpAddress(ConnectionToClient* connection,
-                                   const std::string& channel_name,
-                                   const net::IPEndPoint& end_point) = 0;
+    virtual void OnRouteChange(ConnectionToClient* connection,
+                               const std::string& channel_name,
+                               const TransportRoute& route) = 0;
   };
 
   // Constructs a ConnectionToClient object for the |session|. Takes
@@ -83,7 +86,8 @@ class ConnectionToClient : public base::NonThreadSafe {
   // Return pointer to ClientStub.
   virtual ClientStub* client_stub();
 
-  // These two setters should be called before Init().
+  // These three setters should be called before Init().
+  virtual void set_clipboard_stub(ClipboardStub* clipboard_stub);
   virtual void set_host_stub(HostStub* host_stub);
   virtual void set_input_stub(InputStub* input_stub);
 
@@ -92,14 +96,14 @@ class ConnectionToClient : public base::NonThreadSafe {
   void OnSessionStateChange(Session::State state);
 
   void OnSessionRouteChange(const std::string& channel_name,
-                            const net::IPEndPoint& end_point);
+                            const TransportRoute& route);
 
   // Callback for channel initialization.
   void OnChannelInitialized(bool successful);
 
   void NotifyIfChannelsReady();
 
-  void CloseOnError();
+  void Close(ErrorCode error);
 
   // Stops writing in the channels.
   void CloseChannels();
@@ -108,6 +112,7 @@ class ConnectionToClient : public base::NonThreadSafe {
   EventHandler* handler_;
 
   // Stubs that are called for incoming messages.
+  ClipboardStub* clipboard_stub_;
   HostStub* host_stub_;
   InputStub* input_stub_;
 

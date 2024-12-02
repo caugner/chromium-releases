@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,6 +88,7 @@ var SourceEntry = (function() {
           break;
         case LogSourceType.HOST_RESOLVER_IMPL_REQUEST:
         case LogSourceType.HOST_RESOLVER_IMPL_JOB:
+        case LogSourceType.HOST_RESOLVER_IMPL_PROC_TASK:
           this.description_ = e.params.host;
           break;
         case LogSourceType.DISK_CACHE_ENTRY:
@@ -107,20 +108,21 @@ var SourceEntry = (function() {
           if (e.params.source_dependency != undefined) {
             var parentId = e.params.source_dependency.id;
             this.description_ =
-                g_browser.sourceTracker.getDescription(parentId);
+                SourceTracker.getInstance().getDescription(parentId);
           }
           break;
         case LogSourceType.UDP_SOCKET:
           if (e.params.address != undefined) {
             this.description_ = e.params.address;
-            // If the parent of |this| is a DNS_TRANSACTION, use
-            // '<DNS Server IP> [<DNS we're resolving>]'.
+            // If the parent of |this| is a HOST_RESOLVER_IMPL_JOB, use
+            // '<DNS Server IP> [<host we're resolving>]'.
             if (this.entries_[0].type == LogEventType.SOCKET_ALIVE &&
                 this.entries_[0].params.source_dependency != undefined) {
               var parentId = this.entries_[0].params.source_dependency.id;
-              var parent = g_browser.sourceTracker.getSourceEntry(parentId);
+              var parent = SourceTracker.getInstance().getSourceEntry(parentId);
               if (parent &&
-                  parent.getSourceType() == LogSourceType.DNS_TRANSACTION &&
+                  parent.getSourceType() ==
+                      LogSourceType.HOST_RESOLVER_IMPL_JOB &&
                   parent.getDescription().length > 0) {
                 this.description_ += ' [' + parent.getDescription() + ']';
               }
@@ -130,6 +132,22 @@ var SourceEntry = (function() {
         case LogSourceType.ASYNC_HOST_RESOLVER_REQUEST:
         case LogSourceType.DNS_TRANSACTION:
           this.description_ = e.params.hostname;
+          break;
+        case LogSourceType.DOWNLOAD:
+          switch (e.type) {
+            case LogEventType.DOWNLOAD_FILE_RENAMED:
+              this.description_ = e.params.new_filename;
+              break;
+            case LogEventType.DOWNLOAD_FILE_OPENED:
+              this.description_ = e.params.file_name;
+              break;
+            case LogEventType.DOWNLOAD_ITEM_ACTIVE:
+              this.description_ = e.params.file_name;
+              break;
+          }
+          break;
+        case LogSourceType.FILESTREAM:
+          this.description_ = e.params.file_name;
           break;
       }
 
@@ -155,6 +173,26 @@ var SourceEntry = (function() {
     getStartEntry_: function() {
       if (this.entries_.length < 1)
         return undefined;
+      if (this.entries_[0].source.type == LogSourceType.FILESTREAM) {
+        var e = this.findLogEntryByType_(LogEventType.FILE_STREAM_OPEN);
+        if (e != undefined)
+          return e;
+      }
+      if (this.entries_[0].source.type == LogSourceType.DOWNLOAD) {
+        // If any rename occurred, use the last name
+        e = this.findLastLogEntryStartByType_(
+            LogEventType.DOWNLOAD_FILE_RENAMED);
+        if (e != undefined)
+          return e;
+        // Otherwise, if the file was opened, use that name
+        e = this.findLogEntryByType_(LogEventType.DOWNLOAD_FILE_OPENED);
+        if (e != undefined)
+          return e;
+        // History items are never opened, so use the activation info
+        e = this.findLogEntryByType_(LogEventType.DOWNLOAD_ITEM_ACTIVE);
+        if (e != undefined)
+          return e;
+      }
       if (this.entries_.length >= 2) {
         if (this.entries_[0].type == LogEventType.REQUEST_ALIVE ||
             this.entries_[0].type == LogEventType.SOCKET_POOL_CONNECT_JOB ||
@@ -163,6 +201,33 @@ var SourceEntry = (function() {
         }
       }
       return this.entries_[0];
+    },
+
+    /**
+     * Returns the first entry with the specified type, or undefined if not
+     * found.
+     */
+    findLogEntryByType_: function(type) {
+      for (var i = 0; i < this.entries_.length; ++i) {
+        if (this.entries_[i].type == type) {
+          return this.entries_[i];
+        }
+      }
+      return undefined;
+    },
+
+    /**
+     * Returns the beginning of the last entry with the specified type, or
+     * undefined if not found.
+     */
+    findLastLogEntryStartByType_: function(type) {
+      for (var i = this.entries_.length - 1; i >= 0; --i) {
+        if (this.entries_[i].type == type) {
+          if (this.entries_[i].phase != LogEventPhase.PHASE_END)
+            return this.entries_[i];
+        }
+      }
+      return undefined;
     },
 
     getLogEntries: function() {

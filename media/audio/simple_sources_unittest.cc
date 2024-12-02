@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,22 +68,21 @@ TEST(SimpleSources, SineWaveAudio16MonoTest) {
   SineWaveAudioSource source(SineWaveAudioSource::FORMAT_16BIT_LINEAR_PCM, 1,
                              freq, AudioParameters::kTelephoneSampleRate);
 
-  scoped_refptr<AudioManager> audio_man(AudioManager::Create());
+  scoped_ptr<AudioManager> audio_man(AudioManager::Create());
   AudioParameters params(
       AudioParameters::AUDIO_MOCK, CHANNEL_LAYOUT_MONO,
-      AudioParameters::kTelephoneSampleRate, bytes_per_sample * 2, samples);
+      AudioParameters::kTelephoneSampleRate, bytes_per_sample * 8, samples);
   AudioOutputStream* oas = audio_man->MakeAudioOutputStream(params);
   ASSERT_TRUE(NULL != oas);
   EXPECT_TRUE(oas->Open());
 
   oas->Start(&source);
   oas->Stop();
-  oas->Close();
 
-  ASSERT_TRUE(FakeAudioOutputStream::GetLastFakeStream());
+  ASSERT_TRUE(FakeAudioOutputStream::GetCurrentFakeStream());
   const int16* last_buffer =
       reinterpret_cast<int16*>(
-          FakeAudioOutputStream::GetLastFakeStream()->buffer());
+          FakeAudioOutputStream::GetCurrentFakeStream()->buffer());
   ASSERT_TRUE(NULL != last_buffer);
 
   uint32 half_period = AudioParameters::kTelephoneSampleRate / (freq * 2);
@@ -98,4 +97,5 @@ TEST(SimpleSources, SineWaveAudio16MonoTest) {
   EXPECT_EQ(-5126, last_buffer[half_period + 1]);
   EXPECT_TRUE(last_buffer[half_period + 1] > last_buffer[half_period + 2]);
   EXPECT_TRUE(last_buffer[half_period + 2] > last_buffer[half_period + 3]);
+  oas->Close();
 }

@@ -104,7 +104,8 @@ gboolean OnEventBoxExpose(GtkWidget* event_box,
 
 void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  static GdkPixbuf* background = rb.GetNativeImageNamed(IDR_ABOUT_BACKGROUND);
+  static GdkPixbuf* background = rb.GetNativeImageNamed(
+      IDR_ABOUT_BACKGROUND).ToGdkPixbuf();
 
   // Build the dialog.
   GtkWidget* dialog = gtk_dialog_new_with_buttons(
@@ -175,7 +176,7 @@ void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
   gtk_misc_set_alignment(GTK_MISC(copyright_label), 0.0, 0.5);
   gtk_box_pack_start(GTK_BOX(vbox), copyright_label, FALSE, FALSE, 5);
 
-  std::string license = l10n_util::GetStringUTF8(IDS_ABOUT_VERSION_LICENSE);
+  std::string license = l10n_util::GetStringUTF8(IDS_ABOUT_OLD_VERSION_LICENSE);
   bool chromium_url_appears_first =
       license.find(kBeginLinkChr) < license.find(kBeginLinkOss);
   size_t link1 = license.find(kBeginLink);
@@ -246,7 +247,7 @@ void ShowAboutDialogForProfile(GtkWindow* parent, Profile* profile) {
   gtk_box_pack_start(GTK_BOX(vbox), gtk_label_new(""), FALSE, FALSE, 0);
 
   std::vector<size_t> url_offsets;
-  string16 text = l10n_util::GetStringFUTF16(IDS_ABOUT_TERMS_OF_SERVICE,
+  string16 text = l10n_util::GetStringFUTF16(IDS_ABOUT_OLD_TERMS_OF_SERVICE,
                                              string16(),
                                              string16(),
                                              &url_offsets);

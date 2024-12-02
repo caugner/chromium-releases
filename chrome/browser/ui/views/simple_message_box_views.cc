@@ -15,7 +15,10 @@
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
-#include "ui/views/focus/accelerator_handler.h"
+#include "ash/shell.h"
+#include "ui/aura/client/dispatcher_client.h"
+#include "ui/aura/env.h"
+#include "ui/aura/root_window.h"
 #endif
 
 namespace browser {
@@ -58,10 +61,15 @@ bool SimpleMessageBoxViews::ShowYesNoBox(gfx::NativeWindow parent_window,
   // Make sure Chrome doesn't attempt to shut down with the dialog up.
   g_browser_process->AddRefModule();
 
-  bool old_state = MessageLoopForUI::current()->NestableTasksAllowed();
-  MessageLoopForUI::current()->SetNestableTasksAllowed(true);
-  MessageLoopForUI::current()->RunWithDispatcher(dialog);
-  MessageLoopForUI::current()->SetNestableTasksAllowed(old_state);
+#if defined(USE_AURA)
+  aura::client::GetDispatcherClient(parent_window->GetRootWindow())->
+      RunWithDispatcher(dialog, parent_window, true);
+#else
+  {
+    MessageLoop::ScopedNestableTaskAllower allow(MessageLoopForUI::current());
+    MessageLoopForUI::current()->RunWithDispatcher(dialog);
+  }
+#endif
 
   g_browser_process->ReleaseModule();
 
@@ -132,7 +140,7 @@ SimpleMessageBoxViews::SimpleMessageBoxViews(gfx::NativeWindow parent_window,
       views::MessageBoxView::NO_OPTIONS,
       message,
       string16());
-  browser::CreateViewsWindow(parent_window, this, STYLE_GENERIC)->Show();
+  views::Widget::CreateWindowWithParent(this, parent_window)->Show();
 
   // Add reference to be released in DeleteDelegate().
   AddRef();
@@ -150,16 +158,11 @@ bool SimpleMessageBoxViews::Dispatch(const MSG& msg) {
 #elif defined(USE_AURA)
 base::MessagePumpDispatcher::DispatchStatus
     SimpleMessageBoxViews::Dispatch(XEvent* xev) {
-  if (!views::DispatchXEvent(xev))
+  if (!aura::Env::GetInstance()->GetDispatcher()->Dispatch(xev))
     return EVENT_IGNORED;
 
   if (disposition_ == DISPOSITION_UNKNOWN)
     return base::MessagePumpDispatcher::EVENT_PROCESSED;
   return base::MessagePumpDispatcher::EVENT_QUIT;
-}
-#else
-bool SimpleMessageBoxViews::Dispatch(GdkEvent* event) {
-  gtk_main_do_event(event);
-  return disposition_ == DISPOSITION_UNKNOWN;
 }
 #endif

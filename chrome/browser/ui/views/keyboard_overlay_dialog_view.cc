@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/views/keyboard_overlay_dialog_view.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/accelerator_table.h"
@@ -16,6 +15,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/events/event.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
@@ -37,7 +37,7 @@ KeyboardOverlayDialogView::KeyboardOverlayDialogView(
     Profile* profile,
     HtmlDialogUIDelegate* delegate,
     BrowserView* parent_view)
-    : HtmlDialogView(profile, NULL, delegate),
+    : HtmlDialogView(profile, parent_view->browser(), delegate),
       parent_view_(parent_view) {
 }
 
@@ -83,7 +83,7 @@ bool KeyboardOverlayDialogView::AcceleratorPressed(
 void KeyboardOverlayDialogView::ShowDialog(
     gfx::NativeWindow owning_window, BrowserView* parent_view) {
   // Temporarily disable Shift+Alt. crosbug.com/17208.
-  chromeos::input_method::InputMethodManager::GetInstance()->RemoveHotkeys();
+  chromeos::input_method::InputMethodManager::GetInstance()->DisableHotkeys();
 
   KeyboardOverlayDelegate* delegate = new KeyboardOverlayDelegate(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_KEYBOARD_OVERLAY_TITLE)));
@@ -93,9 +93,17 @@ void KeyboardOverlayDialogView::ShowDialog(
                                     parent_view);
   delegate->set_view(html_view);
   html_view->InitDialog();
-  chromeos::BubbleWindow::Create(owning_window,
-                                 STYLE_FLUSH,
-                                 html_view);
+  browser::CreateFramelessViewsWindow(owning_window, html_view);
+  // Show the widget at the bottom of the work area.
+  gfx::Size size;
+  delegate->GetDialogSize(&size);
+  gfx::Rect rect = gfx::Screen::GetMonitorWorkAreaNearestWindow(
+      html_view->native_view());
+  gfx::Rect bounds((rect.width() - size.width()) / 2,
+                   rect.height() - size.height(),
+                   size.width(),
+                   size.height());
+  html_view->GetWidget()->SetBounds(bounds);
   html_view->GetWidget()->Show();
 }
 

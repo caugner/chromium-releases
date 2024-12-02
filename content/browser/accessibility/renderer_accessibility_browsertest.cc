@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,10 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_widget_host.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_WIN)
@@ -23,6 +22,8 @@
 #endif
 
 using content::OpenURLParams;
+using content::RenderViewHostImpl;
+using content::RenderWidgetHostImpl;
 using content::Referrer;
 using webkit_glue::WebAccessibility;
 
@@ -38,10 +39,11 @@ class RendererAccessibilityBrowserTest : public InProcessBrowserTest {
     ui_test_utils::WindowedNotificationObserver tree_updated_observer(
         content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
         content::NotificationService::AllSources());
-    RenderWidgetHostView* host_view =
+    content::RenderWidgetHostView* host_view =
         browser()->GetSelectedWebContents()->GetRenderWidgetHostView();
-    RenderWidgetHost* host = host_view->GetRenderWidgetHost();
-    RenderViewHost* view_host = static_cast<RenderViewHost*>(host);
+    RenderWidgetHostImpl* host =
+        RenderWidgetHostImpl::From(host_view->GetRenderWidgetHost());
+    RenderViewHostImpl* view_host = static_cast<RenderViewHostImpl*>(host);
     view_host->set_save_accessibility_tree_for_testing(true);
     view_host->EnableRendererAccessibility();
     tree_updated_observer.Wait();
@@ -124,7 +126,7 @@ bool RendererAccessibilityBrowserTest::GetBoolAttr(
 
 // Marked flaky per http://crbug.com/101984
 IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
-                       FLAKY_CrossPlatformWebpageAccessibility) {
+                       DISABLED_CrossPlatformWebpageAccessibility) {
   // Create a data url and load it.
   const char url_str[] =
       "data:text/html,"

@@ -6,7 +6,6 @@
 
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/overlay_user_pref_store.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -17,9 +16,9 @@
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/locale_settings.h"
@@ -29,27 +28,6 @@
 using content::WebContents;
 
 namespace {
-
-const char* kPerTabPrefsToObserve[] = {
-  prefs::kDefaultCharset,
-  prefs::kWebKitJavascriptEnabled,
-  prefs::kWebKitJavascriptCanOpenWindowsAutomatically,
-  prefs::kWebKitLoadsImagesAutomatically,
-  prefs::kWebKitImagesEnabled,
-  prefs::kWebKitPluginsEnabled,
-  prefs::kWebKitCursiveFontFamily,
-  prefs::kWebKitFantasyFontFamily,
-  prefs::kWebKitFixedFontFamily,
-  prefs::kWebKitSansSerifFontFamily,
-  prefs::kWebKitSerifFontFamily,
-  prefs::kWebKitStandardFontFamily,
-  prefs::kWebKitDefaultFontSize,
-  prefs::kWebKitDefaultFixedFontSize,
-  prefs::kWebKitMinimumFontSize,
-  prefs::kWebKitMinimumLogicalFontSize
-};
-
-const int kPerTabPrefsToObserveLength = arraysize(kPerTabPrefsToObserve);
 
 static void RegisterFontsAndCharsetPrefs(PrefService* prefs) {
   WebPreferences pref_defaults;
@@ -87,28 +65,6 @@ static void RegisterFontsAndCharsetPrefs(PrefService* prefs) {
   prefs->RegisterLocalizedIntegerPref(prefs::kWebKitMinimumLogicalFontSize,
                                       IDS_MINIMUM_LOGICAL_FONT_SIZE,
                                       PrefService::UNSYNCABLE_PREF);
-}
-
-static void RegisterPerTabUserPrefs(PrefService* prefs) {
-  WebPreferences pref_defaults;
-
-  prefs->RegisterBooleanPref(prefs::kWebKitJavascriptEnabled,
-                             pref_defaults.javascript_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(
-      prefs::kWebKitJavascriptCanOpenWindowsAutomatically,
-      true,
-      PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitLoadsImagesAutomatically,
-                             pref_defaults.loads_images_automatically,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitImagesEnabled,
-                             pref_defaults.images_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kWebKitPluginsEnabled,
-                             pref_defaults.plugins_enabled,
-                             PrefService::UNSYNCABLE_PREF);
-  RegisterFontsAndCharsetPrefs(prefs);
 }
 
 // The list of prefs we want to observe.
@@ -319,6 +275,7 @@ static void MigratePreferences(PrefService* prefs) {
     if (!pref->IsDefaultValue()) {
       prefs->Set(kPrefNamesToMigrate[i].to, *pref->GetValue()->DeepCopy());
     }
+    prefs->ClearPref(kPrefNamesToMigrate[i].from);
     prefs->UnregisterPreference(kPrefNamesToMigrate[i].from);
   }
 }
@@ -326,7 +283,7 @@ static void MigratePreferences(PrefService* prefs) {
 }  // namespace
 
 PrefsTabHelper::PrefsTabHelper(WebContents* contents)
-    : content::WebContentsObserver(contents) {
+    : web_contents_(contents) {
   PrefService* prefs = GetProfile()->GetPrefs();
   pref_change_registrar_.Init(prefs);
   if (prefs) {
@@ -347,20 +304,12 @@ PrefsTabHelper::PrefsTabHelper(WebContents* contents)
                                   prefs::kWebKitFantasyFontFamilyMap, this);
   }
 
-  per_tab_prefs_.reset(
-      GetProfile()->GetPrefs()->CreatePrefServiceWithPerTabPrefStore());
-  RegisterPerTabUserPrefs(per_tab_prefs_.get());
-  per_tab_pref_change_registrar_.Init(per_tab_prefs_.get());
-  for (int i = 0; i < kPerTabPrefsToObserveLength; ++i) {
-      per_tab_pref_change_registrar_.Add(kPerTabPrefsToObserve[i], this);
-  }
-
   renderer_preferences_util::UpdateFromSystemSettings(
-      web_contents()->GetMutableRendererPrefs(), GetProfile());
+      web_contents_->GetMutableRendererPrefs(), GetProfile());
 
   registrar_.Add(this, chrome::NOTIFICATION_USER_STYLE_SHEET_UPDATED,
                  content::NotificationService::AllSources());
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(GetProfile())));
@@ -377,63 +326,6 @@ void PrefsTabHelper::InitIncognitoUserPrefStore(
   // profile.  All preferences that store information about the browsing history
   // or behavior of the user should have this property.
   pref_store->RegisterOverlayPref(prefs::kBrowserWindowPlacement);
-}
-
-// static
-void PrefsTabHelper::InitPerTabUserPrefStore(
-    OverlayUserPrefStore* pref_store) {
-  // List of keys that have per-tab and per-profile (Global) counterpart.
-  // Setting a per-profile preference affects all tabs sharing the profile,
-  // unless a tab has specified its own per-tab property value. Changing a
-  // per-profile preference on a per-tab pref store delegates to the underlying
-  // per-profile pref store.
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitJavascriptEnabled,
-      prefs::kWebKitGlobalJavascriptEnabled);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitJavascriptCanOpenWindowsAutomatically,
-      prefs::kWebKitGlobalJavascriptCanOpenWindowsAutomatically);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitLoadsImagesAutomatically,
-      prefs::kWebKitGlobalLoadsImagesAutomatically);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitImagesEnabled);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitPluginsEnabled,
-      prefs::kWebKitGlobalPluginsEnabled);
-  pref_store->RegisterOverlayPref(
-      prefs::kDefaultCharset,
-      prefs::kGlobalDefaultCharset);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitStandardFontFamily,
-      prefs::kWebKitGlobalStandardFontFamily);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitFixedFontFamily,
-      prefs::kWebKitGlobalFixedFontFamily);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitSerifFontFamily,
-      prefs::kWebKitGlobalSerifFontFamily);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitSansSerifFontFamily,
-      prefs::kWebKitGlobalSansSerifFontFamily);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitCursiveFontFamily,
-      prefs::kWebKitGlobalCursiveFontFamily);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitFantasyFontFamily,
-      prefs::kWebKitGlobalFantasyFontFamily);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitDefaultFontSize,
-      prefs::kWebKitGlobalDefaultFontSize);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitDefaultFixedFontSize,
-      prefs::kWebKitGlobalDefaultFixedFontSize);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitMinimumFontSize,
-      prefs::kWebKitGlobalMinimumFontSize);
-  pref_store->RegisterOverlayPref(
-      prefs::kWebKitMinimumLogicalFontSize,
-      prefs::kWebKitGlobalMinimumLogicalFontSize);
 }
 
 // static
@@ -563,14 +455,6 @@ void PrefsTabHelper::RegisterUserPrefs(PrefService* prefs) {
   MigratePreferences(prefs);
 }
 
-void PrefsTabHelper::RenderViewCreated(RenderViewHost* render_view_host) {
-  UpdateWebPreferences();
-}
-
-void PrefsTabHelper::WebContentsDestroyed(WebContents* tab) {
-  per_tab_pref_change_registrar_.RemoveAll();
-}
-
 void PrefsTabHelper::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
@@ -578,7 +462,7 @@ void PrefsTabHelper::Observe(int type,
     case chrome::NOTIFICATION_USER_STYLE_SHEET_UPDATED:
       UpdateWebPreferences();
       break;
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && defined(ENABLE_THEMES)
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
       UpdateRendererPreferences();
       break;
@@ -587,8 +471,7 @@ void PrefsTabHelper::Observe(int type,
     case chrome::NOTIFICATION_PREF_CHANGED: {
       std::string* pref_name_in = content::Details<std::string>(details).ptr();
       DCHECK(content::Source<PrefService>(source).ptr() ==
-                 GetProfile()->GetPrefs() ||
-             content::Source<PrefService>(source).ptr() == per_tab_prefs_);
+                 GetProfile()->GetPrefs());
       if ((*pref_name_in == prefs::kDefaultCharset ||
            *pref_name_in == prefs::kGlobalDefaultCharset) ||
           StartsWithASCII(*pref_name_in, "webkit.webprefs.", true)) {
@@ -608,51 +491,17 @@ void PrefsTabHelper::Observe(int type,
 
 void PrefsTabHelper::UpdateWebPreferences() {
   content::RenderViewHostDelegate* rvhd =
-      web_contents()->GetRenderViewHost()->delegate();
-  WebPreferences prefs = rvhd->GetWebkitPrefs();
-  prefs.javascript_enabled =
-      per_tab_prefs_->GetBoolean(prefs::kWebKitJavascriptEnabled);
-  prefs.javascript_can_open_windows_automatically =
-      per_tab_prefs_->GetBoolean(
-          prefs::kWebKitJavascriptCanOpenWindowsAutomatically);
-  prefs.loads_images_automatically =
-      per_tab_prefs_->GetBoolean(prefs::kWebKitLoadsImagesAutomatically);
-  prefs.images_enabled =
-      per_tab_prefs_->GetBoolean(prefs::kWebKitImagesEnabled);
-  prefs.plugins_enabled =
-      per_tab_prefs_->GetBoolean(prefs::kWebKitPluginsEnabled);
-  prefs.standard_font_family =
-      UTF8ToUTF16(per_tab_prefs_->GetString(prefs::kWebKitStandardFontFamily));
-  prefs.fixed_font_family =
-      UTF8ToUTF16(per_tab_prefs_->GetString(prefs::kWebKitFixedFontFamily));
-  prefs.serif_font_family =
-      UTF8ToUTF16(per_tab_prefs_->GetString(prefs::kWebKitSerifFontFamily));
-  prefs.sans_serif_font_family =
-      UTF8ToUTF16(per_tab_prefs_->GetString(prefs::kWebKitSansSerifFontFamily));
-  prefs.cursive_font_family =
-      UTF8ToUTF16(per_tab_prefs_->GetString(prefs::kWebKitCursiveFontFamily));
-  prefs.fantasy_font_family =
-      UTF8ToUTF16(per_tab_prefs_->GetString(prefs::kWebKitFantasyFontFamily));
-  prefs.default_font_size =
-      per_tab_prefs_->GetInteger(prefs::kWebKitDefaultFontSize);
-  prefs.default_fixed_font_size =
-      per_tab_prefs_->GetInteger(prefs::kWebKitDefaultFixedFontSize);
-  prefs.minimum_font_size =
-      per_tab_prefs_->GetInteger(prefs::kWebKitMinimumFontSize);
-  prefs.minimum_logical_font_size =
-      per_tab_prefs_->GetInteger(prefs::kWebKitMinimumLogicalFontSize);
-  prefs.default_encoding =
-      per_tab_prefs_->GetString(prefs::kDefaultCharset);
-
-  web_contents()->GetRenderViewHost()->UpdateWebkitPreferences(prefs);
+      web_contents_->GetRenderViewHost()->GetDelegate();
+  web_contents_->GetRenderViewHost()->UpdateWebkitPreferences(
+      rvhd->GetWebkitPrefs());
 }
 
 void PrefsTabHelper::UpdateRendererPreferences() {
   renderer_preferences_util::UpdateFromSystemSettings(
-      web_contents()->GetMutableRendererPrefs(), GetProfile());
-  web_contents()->GetRenderViewHost()->SyncRendererPrefs();
+      web_contents_->GetMutableRendererPrefs(), GetProfile());
+  web_contents_->GetRenderViewHost()->SyncRendererPrefs();
 }
 
 Profile* PrefsTabHelper::GetProfile() {
-  return Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  return Profile::FromBrowserContext(web_contents_->GetBrowserContext());
 }

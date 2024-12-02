@@ -36,6 +36,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/test/notification_observer_mock.h"
 #include "content/test/test_browser_thread.h"
@@ -140,7 +141,7 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
   TabContentsWrapper* CreateTabContentsWithSharedRPH(
       WebContents* web_contents) {
     TabContentsWrapper* retval = Browser::TabContentsFactory(profile(),
-        web_contents->GetRenderViewHost()->site_instance(), MSG_ROUTING_NONE,
+        web_contents->GetRenderViewHost()->GetSiteInstance(), MSG_ROUTING_NONE,
         NULL, NULL);
     EXPECT_EQ(retval->web_contents()->GetRenderProcessHost(),
               web_contents->GetRenderProcessHost());
@@ -1793,8 +1794,14 @@ TEST_F(TabStripModelTest, Apps) {
 #elif defined(OS_POSIX)
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-  scoped_refptr<Extension> extension_app(new Extension(path,
-                                                       Extension::INVALID));
+
+  DictionaryValue manifest;
+  manifest.SetString("name", "hi!");
+  manifest.SetString("version", "1");
+  std::string error;
+  scoped_refptr<Extension> extension_app(
+      Extension::Create(path, Extension::INVALID, manifest, Extension::NO_FLAGS,
+                        &error));
   extension_app->launch_web_url_ = "http://www.google.com";
   TabContentsWrapper* contents1 = CreateTabContents();
   contents1->extension_tab_helper()->SetExtensionApp(extension_app);
@@ -2307,6 +2314,30 @@ TEST_F(TabStripModelTest, MultipleSelection) {
   s2.src_contents = contents3;
   s2.src_index = 3;
   EXPECT_TRUE(observer.StateEquals(1, s2));
+  observer.ClearStates();
+
+  // Toggle the active tab, should make the next index active.
+  strip.ToggleSelectionAt(0);
+  EXPECT_EQ(1, strip.active_index());
+  EXPECT_EQ(3U, strip.selection_model().size());
+  EXPECT_EQ(4, strip.count());
+  ASSERT_EQ(2, observer.GetStateCount());
+  ASSERT_EQ(observer.GetStateAt(0)->action,
+            MockTabStripModelObserver::ACTIVATE);
+  ASSERT_EQ(observer.GetStateAt(1)->action,
+            MockTabStripModelObserver::SELECT);
+  observer.ClearStates();
+
+  // Toggle the first tab back to selected and active.
+  strip.ToggleSelectionAt(0);
+  EXPECT_EQ(0, strip.active_index());
+  EXPECT_EQ(4U, strip.selection_model().size());
+  EXPECT_EQ(4, strip.count());
+  ASSERT_EQ(2, observer.GetStateCount());
+  ASSERT_EQ(observer.GetStateAt(0)->action,
+            MockTabStripModelObserver::ACTIVATE);
+  ASSERT_EQ(observer.GetStateAt(1)->action,
+            MockTabStripModelObserver::SELECT);
   observer.ClearStates();
 
   // Closing one of the selected tabs, not the active one.

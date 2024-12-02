@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/net_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -69,14 +69,14 @@ class AutomationTabHelperBrowserTest : public InProcessBrowserTest {
       MockTabEventObserver* mock_tab_observer,
       MockNotificationObserver* mock_notification_observer) {
     mock_notification_observer->Register(
-        chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
+        content::NOTIFICATION_DOM_OPERATION_RESPONSE,
         content::NotificationService::AllSources());
 
     testing::InSequence expect_in_sequence;
     EXPECT_CALL(*mock_tab_observer, OnFirstPendingLoad(_));
     EXPECT_CALL(*mock_notification_observer, Observe(
         testing::Eq(
-            static_cast<int>(chrome::NOTIFICATION_DOM_OPERATION_RESPONSE)),
+            static_cast<int>(content::NOTIFICATION_DOM_OPERATION_RESPONSE)),
             _, _));
     EXPECT_CALL(*mock_tab_observer, OnNoMorePendingLoads(_))
         .WillOnce(testing::InvokeWithoutArgs(
@@ -90,7 +90,7 @@ class AutomationTabHelperBrowserTest : public InProcessBrowserTest {
   void RunTestCaseInJavaScript(int test_case_number, bool wait_for_response) {
     std::string script = base::StringPrintf("runTestCase(%d);",
                                             test_case_number);
-    RenderViewHost* host =
+    content::RenderViewHost* host =
         browser()->GetSelectedWebContents()->GetRenderViewHost();
     if (wait_for_response) {
       ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
@@ -185,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,
                        LoadStopComesAfterOnLoad) {
   MockNotificationObserver mock_notification_observer;
   mock_notification_observer.Register(
-      chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
+      content::NOTIFICATION_DOM_OPERATION_RESPONSE,
       content::NotificationService::AllSources());
   MockTabEventObserver mock_tab_observer(tab_helper());
 
@@ -194,7 +194,7 @@ IN_PROC_BROWSER_TEST_F(AutomationTabHelperBrowserTest,
     testing::InSequence expect_in_sequence;
     EXPECT_CALL(mock_notification_observer, Observe(
         testing::Eq(
-            static_cast<int>(chrome::NOTIFICATION_DOM_OPERATION_RESPONSE)),
+            static_cast<int>(content::NOTIFICATION_DOM_OPERATION_RESPONSE)),
             _, _));
     EXPECT_CALL(mock_tab_observer, OnNoMorePendingLoads(_));
   }

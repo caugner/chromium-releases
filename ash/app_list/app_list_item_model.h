@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,36 +13,47 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ash/ash_export.h"
 
+namespace ui {
+class MenuModel;
+}
+
 namespace ash {
 
 class AppListItemModelObserver;
 
-// AppListItemModel provides icon and title to be shown in a TileView and
-// action to be executed when the TileView is activated (clicked or enter
-// key it hit).
+// AppListItemModel provides icon and title to be shown in a AppListItemView
+// and action to be executed when the AppListItemView is activated.
 class ASH_EXPORT AppListItemModel {
  public:
   AppListItemModel();
   virtual ~AppListItemModel();
 
-  // Changes icon and title for the model.
   void SetIcon(const SkBitmap& icon);
-  void SetTitle(const std::string& title);
-
-  void AddObserver(AppListItemModelObserver* observer);
-  void RemoveObserver(AppListItemModelObserver* observer);
-
   const SkBitmap& icon() const {
     return icon_;
   }
 
+  void SetTitle(const std::string& title);
   const std::string& title() const {
     return title_;
   }
 
+  void SetHighlighted(bool highlighted);
+  bool highlighted() const {
+    return highlighted_;
+  }
+
+  void AddObserver(AppListItemModelObserver* observer);
+  void RemoveObserver(AppListItemModelObserver* observer);
+
+  // Returns the context menu model for this item.
+  // Note the menu model is owned by this item.
+  virtual ui::MenuModel* GetContextMenuModel();
+
  private:
   SkBitmap icon_;
   std::string title_;
+  bool highlighted_;
 
   ObserverList<AppListItemModelObserver> observers_;
 

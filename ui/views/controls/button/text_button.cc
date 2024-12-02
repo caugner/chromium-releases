@@ -10,7 +10,8 @@
 #include "grit/ui_resources.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
+#include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/events/event.h"
 #include "ui/views/widget/widget.h"
@@ -89,28 +90,28 @@ TextButtonBorder::TextButtonBorder()
   set_normal_set(normal_set);
 
   BorderImageSet hot_set = {
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_TOP_LEFT_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_TOP_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_TOP_RIGHT_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_LEFT_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_CENTER_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_RIGHT_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_BOTTOM_LEFT_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_BOTTOM_H),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_BOTTOM_RIGHT_H),
+    rb.GetImageNamed(IDR_TEXTBUTTON_TOP_LEFT_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_TOP_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_TOP_RIGHT_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_LEFT_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_CENTER_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_RIGHT_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_BOTTOM_LEFT_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_BOTTOM_H).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_BOTTOM_RIGHT_H).ToSkBitmap(),
   };
   set_hot_set(hot_set);
 
   BorderImageSet pushed_set = {
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_TOP_LEFT_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_TOP_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_TOP_RIGHT_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_LEFT_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_CENTER_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_RIGHT_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_BOTTOM_LEFT_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_BOTTOM_P),
-    rb.GetBitmapNamed(IDR_TEXTBUTTON_BOTTOM_RIGHT_P),
+    rb.GetImageNamed(IDR_TEXTBUTTON_TOP_LEFT_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_TOP_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_TOP_RIGHT_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_LEFT_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_CENTER_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_RIGHT_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_BOTTOM_LEFT_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_BOTTOM_P).ToSkBitmap(),
+    rb.GetImageNamed(IDR_TEXTBUTTON_BOTTOM_RIGHT_P).ToSkBitmap(),
   };
   set_pushed_set(pushed_set);
 }
@@ -138,8 +139,7 @@ void TextButtonBorder::Paint(const View& view, gfx::Canvas* canvas) const {
       // handle the case of having a non-NULL |normal_set_|.
       canvas->SaveLayerAlpha(static_cast<uint8>(
           button->GetAnimation()->CurrentValueBetween(0, 255)));
-      canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255,
-                                      SkXfermode::kClear_Mode);
+      canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
       Paint(view, canvas, *set);
       canvas->Restore();
     } else {
@@ -219,20 +219,20 @@ void TextButtonNativeThemeBorder::Paint(const View& view,
     gfx::NativeTheme::ExtraParams prev_extra;
     gfx::NativeTheme::State prev_state =
         delegate_->GetBackgroundThemeState(&prev_extra);
-    native_theme->Paint(
-        canvas->GetSkCanvas(), part, prev_state, rect, prev_extra);
+    native_theme->Paint(canvas->sk_canvas(), part, prev_state, rect,
+                        prev_extra);
 
     // Composite foreground state above it.
     gfx::NativeTheme::ExtraParams extra;
     gfx::NativeTheme::State state = delegate_->GetForegroundThemeState(&extra);
     int alpha = delegate_->GetThemeAnimation()->CurrentValueBetween(0, 255);
     canvas->SaveLayerAlpha(static_cast<uint8>(alpha));
-    native_theme->Paint(canvas->GetSkCanvas(), part, state, rect, extra);
+    native_theme->Paint(canvas->sk_canvas(), part, state, rect, extra);
     canvas->Restore();
   } else {
     gfx::NativeTheme::ExtraParams extra;
     gfx::NativeTheme::State state = delegate_->GetThemeState(&extra);
-    native_theme->Paint(canvas->GetSkCanvas(), part, state, rect, extra);
+    native_theme->Paint(canvas->sk_canvas(), part, state, rect, extra);
   }
 }
 
@@ -410,7 +410,7 @@ void TextButtonBase::CalculateTextSize(gfx::Size* text_size, int max_width) {
   if (!multi_line_)
     flags |= gfx::Canvas::NO_ELLIPSIS;
 
-  gfx::CanvasSkia::SizeStringInt(text_, font_, &w, &h, flags);
+  gfx::Canvas::SizeStringInt(text_, font_, &w, &h, flags);
 
   // Add 2 extra pixels to width and height when text halo is used.
   if (has_text_halo_) {
@@ -509,17 +509,19 @@ void TextButtonBase::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
     SkColor text_color = (show_multiple_icon_states_ &&
         (state() == BS_HOT || state() == BS_PUSHED)) ? color_hover_ : color_;
 
-    int draw_string_flags = gfx::CanvasSkia::DefaultCanvasTextAlignment() |
+    int draw_string_flags = gfx::Canvas::DefaultCanvasTextAlignment() |
         ComputeCanvasStringFlags();
 
     if (mode == PB_FOR_DRAG) {
+      // Disable sub-pixel rendering as background is transparent.
+      draw_string_flags |= gfx::Canvas::NO_SUBPIXEL_RENDERING;
+
 #if defined(OS_WIN)
       // TODO(erg): Either port DrawStringWithHalo to linux or find an
       // alternative here.
-      canvas->AsCanvasSkia()->DrawStringWithHalo(
-          text_, font_, text_color, color_highlight_, text_bounds.x(),
-          text_bounds.y(), text_bounds.width(), text_bounds.height(),
-          draw_string_flags);
+      canvas->DrawStringWithHalo(text_, font_, text_color, color_highlight_,
+          text_bounds.x(), text_bounds.y(), text_bounds.width(),
+          text_bounds.height(), draw_string_flags);
 #else
       canvas->DrawStringInt(text_,
                             font_,
@@ -531,8 +533,7 @@ void TextButtonBase::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
                             draw_string_flags);
 #endif
     } else if (has_text_halo_) {
-      canvas->AsCanvasSkia()->DrawStringWithHalo(
-          text_, font_, text_color, text_halo_color_,
+      canvas->DrawStringWithHalo(text_, font_, text_color, text_halo_color_,
           text_bounds.x(), text_bounds.y(), text_bounds.width(),
           text_bounds.height(), draw_string_flags);
     } else if (has_shadow_) {
@@ -694,8 +695,6 @@ gfx::Size TextButton::GetPreferredSize() {
         prefsize.height(),
         platform_font->vertical_dlus_to_pixels(kMinHeightDLUs)));
   }
-  // GTK returns a meaningful preferred size so that we don't need to adjust
-  // the preferred size as we do on windows.
 #endif
 
   return prefsize;

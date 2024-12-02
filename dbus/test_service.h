@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,6 +76,10 @@ class TestService : public base::Thread {
   // Helper function for ShutdownAndBlock().
   void ShutdownAndBlockInternal();
 
+  // Called when an ownership request is completed.
+  void OnOwnership(const std::string& service_name,
+                   bool success);
+
   // Called when a method is exported.
   void OnExported(const std::string& interface_name,
                   const std::string& method_name,
@@ -105,6 +109,24 @@ class TestService : public base::Thread {
   // Returns NULL, instead of a valid Response.
   void BrokenMethod(MethodCall* method_call,
                     dbus::ExportedObject::ResponseSender response_sender);
+
+  // Returns a set of property values for testing.
+  void GetAllProperties(MethodCall* method_call,
+                        dbus::ExportedObject::ResponseSender response_sender);
+
+  // Returns a new value of 20 for the Version property when called.
+  void GetProperty(MethodCall* method_call,
+                   dbus::ExportedObject::ResponseSender response_sender);
+
+  // Allows the name property to be changed, errors otherwise.
+  void SetProperty(MethodCall* method_call,
+                   dbus::ExportedObject::ResponseSender response_sender);
+
+  // Sends a property changed signal for the name property.
+  void SendPropertyChangedSignal(const std::string& name);
+
+  // Helper function for SendPropertyChangedSignal().
+  void SendPropertyChangedSignalInternal(const std::string& name);
 
   scoped_refptr<base::MessageLoopProxy> dbus_thread_message_loop_proxy_;
   base::WaitableEvent on_all_methods_exported_;

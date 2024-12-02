@@ -13,17 +13,18 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
+#include "chrome/browser/ui/gtk/constrained_window_gtk.h"
+#include "chrome/browser/ui/intents/web_intent_inline_disposition_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_model_observer.h"
-#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 
 class Browser;
 class CustomDrawButton;
 class GURL;
-class TabContents;
 class TabContentsContainerGtk;
 class TabContentsWrapper;
 class WebIntentPickerDelegate;
@@ -31,7 +32,8 @@ class WebIntentPickerDelegate;
 // Gtk implementation of WebIntentPicker.
 class WebIntentPickerGtk : public WebIntentPicker,
                            public WebIntentPickerModelObserver,
-                           public BubbleDelegateGtk {
+                           public ConstrainedWindowGtkDelegate,
+                           public content::NotificationObserver {
  public:
   WebIntentPickerGtk(Browser* browser,
                      TabContentsWrapper* tab_contents,
@@ -46,10 +48,20 @@ class WebIntentPickerGtk : public WebIntentPicker,
   virtual void OnModelChanged(WebIntentPickerModel* model) OVERRIDE;
   virtual void OnFaviconChanged(WebIntentPickerModel* model,
                                 size_t index) OVERRIDE;
-  virtual void OnInlineDisposition(WebIntentPickerModel* model) OVERRIDE;
+  virtual void OnExtensionIconChanged(WebIntentPickerModel* model,
+                                      const string16& extension_id) OVERRIDE;
+  virtual void OnInlineDisposition(WebIntentPickerModel* model,
+                                   const GURL& url) OVERRIDE;
 
-  // BubbleDelegateGtk implementation.
-  virtual void BubbleClosing(BubbleGtk* bubble, bool closed_by_escape) OVERRIDE;
+  // ConstrainedWindowGtkDelegate implementation.
+  virtual GtkWidget* GetWidgetRoot() OVERRIDE;
+  virtual GtkWidget* GetFocusWidget() OVERRIDE;
+  virtual void DeleteDelegate() OVERRIDE;
+
+   // content::NotificationObserver implementation.
+   virtual void Observe(int type,
+                        const content::NotificationSource& source,
+                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Callback when picker is destroyed.
@@ -58,27 +70,29 @@ class WebIntentPickerGtk : public WebIntentPicker,
   CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnServiceButtonClick);
   // Callback when close button is clicked.
   CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnCloseButtonClick);
+  // Callback when suggested extension title link is clicked.
+  CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnExtensionLinkClick);
+  // Callback when suggested extension install button is clicked.
+  CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnExtensionInstallButtonClick);
+  // Callback when "more suggestions" link is clicked.
+  CHROMEGTK_CALLBACK_0(WebIntentPickerGtk, void, OnMoreSuggestionsLinkClick);
 
-  // This class is the policy delegate for the rendered page in the intents
-  // inline disposition bubble.
-  // TODO(gbillock): Move up to WebIntentPicker?
-  class InlineDispositionDelegate : public content::WebContentsDelegate {
-   public:
-    InlineDispositionDelegate();
-    virtual ~InlineDispositionDelegate();
-    virtual bool IsPopupOrPanel(
-        const content::WebContents* source) const OVERRIDE;
-    virtual bool ShouldAddNavigationToHistory(
-      const history::HistoryAddPageArgs& add_page_args,
-      content::NavigationType navigation_type) OVERRIDE;
-  };
-
-  // Initialize the contents of the bubble. After this call, contents_ will be
+  // Initialize the contents of the picker. After this call, contents_ will be
   // non-NULL.
   void InitContents();
 
-  // Get the button widget at |index|.
-  GtkWidget* GetServiceButton(size_t index);
+  // Update the installed service buttons from |model_|.
+  void UpdateInstalledServices();
+
+  // Update the Chrome Web Store label from |model_|.
+  void UpdateCWSLabel();
+
+  // Update the suggested extension table from |model_|.
+  void UpdateSuggestedExtensions();
+
+  // Create a new widget displaying |rating| as 5 star images. Rating should be
+  // in the range [0, 5].
+  GtkWidget* CreateStarsWidget(double rating);
 
   // A weak pointer to the tab contents on which to display the picker UI.
   TabContentsWrapper* wrapper_;
@@ -91,18 +105,27 @@ class WebIntentPickerGtk : public WebIntentPicker,
   WebIntentPickerModel* model_;
 
   // A weak pointer to the widget that contains all other widgets in
-  // the bubble.
+  // the picker.
   GtkWidget* contents_;
+
+  // A weak pointer to the header label.
+  GtkWidget* header_label_;
 
   // A weak pointer to the vbox that contains the buttons used to choose the
   // service.
   GtkWidget* button_vbox_;
 
-  // A button to close the bubble.
+  // A weak pointer to the Chrome Web Store header label.
+  GtkWidget* cws_label_;
+
+  // A weak pointer to the suggested extensions vbox.
+  GtkWidget* extensions_vbox_;
+
+  // A button to close the picker.
   scoped_ptr<CustomDrawButton> close_button_;
 
-  // A weak pointer to the bubble widget.
-  BubbleGtk* bubble_;
+  // A weak pointer to the constrained window.
+  ConstrainedWindowGtk* window_;
 
   // The browser we're in.
   Browser* browser_;
@@ -114,7 +137,9 @@ class WebIntentPickerGtk : public WebIntentPicker,
   scoped_ptr<TabContentsContainerGtk> tab_contents_container_;
 
   // content::WebContentsDelegate for the inline disposition dialog.
-  scoped_ptr<InlineDispositionDelegate> inline_disposition_delegate_;
+  scoped_ptr<WebIntentInlineDispositionDelegate> inline_disposition_delegate_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WebIntentPickerGtk);
 };

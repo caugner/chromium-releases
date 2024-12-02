@@ -19,6 +19,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/common/pepper_plugin_info.h"
+#include "content/public/common/url_constants.h"
 #include "grit/common_resources.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -26,6 +27,8 @@
 #include "webkit/glue/user_agent.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/plugin_constants.h"
+
+#include "flapper_version.h"  // In <(SHARED_INTERMEDIATE_DIR).
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
@@ -68,7 +71,8 @@ const FilePath::CharType kRemotingViewerPluginPath[] =
 // Use a consistent MIME-type regardless of branding.
 const char kRemotingViewerPluginMimeType[] =
     "application/vnd.chromium.remoting-viewer";
-// TODO(wez): Remove the old MIME-type once client code no longer needs it.
+// TODO(garykac): Remove the old MIME-type once client code no longer needs it.
+// Tracked in crbug.com/112532.
 const char kRemotingViewerPluginOldMimeType[] =
     "pepper-application/x-chromoting";
 #endif
@@ -188,34 +192,59 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
 #endif
 }
 
-void AddOutOfProcessFlash(std::vector<content::PepperPluginInfo>* plugins) {
+void AddPepperFlash(std::vector<content::PepperPluginInfo>* plugins) {
+  content::PepperPluginInfo plugin;
+
   // Flash being out of process is handled separately than general plugins
   // for testing purposes.
-  bool flash_out_of_process = !CommandLine::ForCurrentProcess()->HasSwitch(
+  plugin.is_out_of_process = !CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kPpapiFlashInProcess);
+  plugin.name = kFlashPluginName;
 
-  // Handle any Pepper Flash first.
+  std::string flash_version;  // Should be something like 11.2 or 11.2.123.45.
+
+  // Prefer Pepper Flash specified from the command-line.
   const CommandLine::StringType flash_path =
       CommandLine::ForCurrentProcess()->GetSwitchValueNative(
           switches::kPpapiFlashPath);
-  if (flash_path.empty())
+  if (!flash_path.empty()) {
+    plugin.path = FilePath(flash_path);
+
+    // Also get the version from the command-line.
+    flash_version = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        switches::kPpapiFlashVersion);
+  } else {
+    // Use the bundled Pepper Flash if it's enabled and available.
+    // It's currently only enabled by default on Linux ia32 and x64.
+#if defined(FLAPPER_AVAILABLE) && defined(OS_LINUX) && \
+    (defined(ARCH_CPU_X86) || defined(ARCH_CPU_X86_64))
+    bool bundled_flapper_enabled = true;
+#else
+    bool bundled_flapper_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableBundledPpapiFlash);
+#endif
+    bundled_flapper_enabled &= !CommandLine::ForCurrentProcess()->HasSwitch(
+                                   switches::kDisableBundledPpapiFlash);
+    if (!bundled_flapper_enabled)
+      return;
+
+#if defined(FLAPPER_AVAILABLE)
+    if (!PathService::Get(chrome::FILE_PEPPER_FLASH_PLUGIN, &plugin.path))
+      return;
+    flash_version = FLAPPER_VERSION_STRING;
+#else
+    LOG(ERROR) << "PPAPI Flash not included at build time.";
     return;
+#endif  // FLAPPER_AVAILABLE
+  }
 
-  content::PepperPluginInfo plugin;
-  plugin.is_out_of_process = flash_out_of_process;
-  plugin.path = FilePath(flash_path);
-  plugin.name = kFlashPluginName;
-
-  const std::string flash_version =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-              switches::kPpapiFlashVersion);
   std::vector<std::string> flash_version_numbers;
   base::SplitString(flash_version, '.', &flash_version_numbers);
   if (flash_version_numbers.size() < 1)
-    flash_version_numbers.push_back("10");
+    flash_version_numbers.push_back("11");
   // |SplitString()| puts in an empty string given an empty string. :(
   else if (flash_version_numbers[0].empty())
-    flash_version_numbers[0] = "10";
+    flash_version_numbers[0] = "11";
   if (flash_version_numbers.size() < 2)
     flash_version_numbers.push_back("2");
   if (flash_version_numbers.size() < 3)
@@ -311,23 +340,17 @@ void ChromeContentClient::SetGpuInfo(const content::GPUInfo& gpu_info) {
 void ChromeContentClient::AddPepperPlugins(
     std::vector<content::PepperPluginInfo>* plugins) {
   ComputeBuiltInPlugins(plugins);
-  AddOutOfProcessFlash(plugins);
+  AddPepperFlash(plugins);
 }
 
 void ChromeContentClient::AddNPAPIPlugins(
     webkit::npapi::PluginList* plugin_list) {
 }
 
-bool ChromeContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
-  // Any Chrome-specific messages that must be allowed to be sent from swapped
-  // out renderers.
-  switch (msg->type()) {
-    case ChromeViewHostMsg_DomOperationResponse::ID:
-      return true;
-    default:
-      break;
-  }
-  return false;
+bool ChromeContentClient::HasWebUIScheme(const GURL& url) const {
+  return url.SchemeIs(chrome::kChromeDevToolsScheme) ||
+         url.SchemeIs(chrome::kChromeInternalScheme) ||
+         url.SchemeIs(chrome::kChromeUIScheme);
 }
 
 bool ChromeContentClient::CanHandleWhileSwappedOut(
@@ -418,6 +441,8 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
 
   // Spawn the flash broker and apply sandbox policy.
   if (LoadFlashBroker(plugin_path, command_line)) {
+    // UI job restrictions break windowless Flash, so just pick up single
+    // process limit for now.
     policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
     policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
                           sandbox::USER_INTERACTIVE);

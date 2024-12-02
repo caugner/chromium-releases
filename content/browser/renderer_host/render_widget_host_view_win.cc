@@ -19,7 +19,7 @@
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
-#include "content/browser/accessibility/browser_accessibility_state.h"
+#include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/accessibility/browser_accessibility_win.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
@@ -27,7 +27,8 @@
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/backing_store_win.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_widget_host.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/common/accessibility_messages.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
@@ -41,6 +42,7 @@
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/process_type.h"
 #include "skia/ext/skia_utils_win.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
@@ -51,7 +53,6 @@
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/gdi_util.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/screen.h"
@@ -64,6 +65,9 @@
 using base::TimeDelta;
 using base::TimeTicks;
 using content::BrowserThread;
+using content::RenderWidgetHost;
+using content::RenderWidgetHostImpl;
+using content::RenderWidgetHostView;
 using ui::ViewProp;
 using WebKit::WebInputEvent;
 using WebKit::WebInputEventFactory;
@@ -304,7 +308,7 @@ inline void SetTouchType(TOUCHINPUT* point, int type) {
 // RenderWidgetHostViewWin, public:
 
 RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
-    : render_widget_host_(widget),
+    : render_widget_host_(RenderWidgetHostImpl::From(widget)),
       compositor_host_window_(NULL),
       hide_compositor_window_at_next_paint_(false),
       track_mouse_leave_(false),
@@ -323,12 +327,12 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       is_fullscreen_(false),
       ignore_mouse_movement_(true),
       composition_range_(ui::Range::InvalidRange()),
-      ignore_next_lbutton_message_at_same_location(false),
-      last_pointer_down_location_(0),
       touch_state_(this),
       pointer_down_context_(false),
       focus_on_editable_field_(false),
-      received_focus_change_after_pointer_down_(false) {
+      received_focus_change_after_pointer_down_(false),
+      touch_events_enabled_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(sys_color_change_listener_(this)) {
   render_widget_host_->SetView(this);
   registrar_.Add(this,
                  content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
@@ -900,15 +904,81 @@ BackingStore* RenderWidgetHostViewWin::AllocBackingStore(
 }
 
 void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
-  RenderWidgetHostView::SetBackground(background);
+  content::RenderWidgetHostViewBase::SetBackground(background);
   render_widget_host_->SetBackground(background);
 }
 
-void RenderWidgetHostViewWin::UnhandledWheelEvent(
-    const WebKit::WebMouseWheelEvent& event) {
+bool RenderWidgetHostViewWin::CopyFromCompositingSurface(
+      const gfx::Size& size,
+      skia::PlatformCanvas* output) {
+  if (!accelerated_surface_.get())
+    return false;
+
+  if (size.IsEmpty())
+    return false;
+
+  if (!output->initialize(size.width(), size.height(), true))
+    return false;
+
+  return accelerated_surface_->CopyTo(
+      size, output->getTopDevice()->accessBitmap(true).getPixels());
 }
 
-void RenderWidgetHostViewWin::ProcessTouchAck(bool processed) {
+void RenderWidgetHostViewWin::ProcessTouchAck(
+    WebKit::WebInputEvent::Type type, bool processed) {
+  if (type == WebKit::WebInputEvent::TouchStart)
+    UpdateDesiredTouchMode(processed);
+}
+
+void RenderWidgetHostViewWin::SetToGestureMode() {
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return;
+  UnregisterTouchWindow(m_hWnd);
+  // Single finger panning is consistent with other windows applications.
+  const DWORD gesture_allow = GC_PAN_WITH_SINGLE_FINGER_VERTICALLY |
+                              GC_PAN_WITH_SINGLE_FINGER_HORIZONTALLY;
+  const DWORD gesture_block = GC_PAN_WITH_GUTTER;
+  GESTURECONFIG gc[] = {
+      { GID_ZOOM, GC_ZOOM, 0 },
+      { GID_PAN, gesture_allow , gesture_block},
+      { GID_TWOFINGERTAP, GC_TWOFINGERTAP , 0},
+      { GID_PRESSANDTAP, GC_PRESSANDTAP , 0}
+  };
+  if (!SetGestureConfig(m_hWnd, 0, arraysize(gc), gc,
+      sizeof(GESTURECONFIG))) {
+    NOTREACHED();
+  }
+  touch_events_enabled_ = false;
+}
+
+bool RenderWidgetHostViewWin::SetToTouchMode() {
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
+    return false;
+  bool touch_mode = RegisterTouchWindow(m_hWnd, TWF_WANTPALM) == TRUE;
+  touch_events_enabled_ = touch_mode;
+  return touch_mode;
+}
+
+void RenderWidgetHostViewWin::UpdateDesiredTouchMode(bool touch_mode) {
+  // Make sure that touch events even make sense.
+  bool touch_mode_valid = base::win::GetVersion() >= base::win::VERSION_WIN7 &&
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTouchEvents);
+  touch_mode = touch_mode && touch_mode_valid;
+
+  // Already in correct mode, nothing to do.
+  if ((touch_mode && touch_events_enabled_) ||
+      (!touch_mode && !touch_events_enabled_))
+    return;
+
+  // Now we know that the window's current state doesn't match the desired
+  // state. If we want touch mode, then we attempt to register for touch
+  // events, and otherwise to unregister.
+  if (touch_mode) {
+    touch_mode = SetToTouchMode();
+  }
+  if (!touch_mode) {
+    SetToGestureMode();
+  }
 }
 
 void RenderWidgetHostViewWin::SetHasHorizontalScrollbar(
@@ -930,27 +1000,8 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
   // scrolled when under the mouse pointer even if inactive.
   props_.push_back(ui::SetWindowSupportsRerouteMouseWheel(m_hWnd));
 
-  if (base::win::GetVersion() >= base::win::VERSION_WIN7) {
-    // Use gestures if touch event switch isn't present or registration fails.
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kEnableTouchEvents) ||
-        !RegisterTouchWindow(m_hWnd, 0)) {
-      // Single finger panning is consistent with other windows applications.
-      const DWORD gesture_allow = GC_PAN_WITH_SINGLE_FINGER_VERTICALLY |
-                                  GC_PAN_WITH_SINGLE_FINGER_HORIZONTALLY;
-      const DWORD gesture_block = GC_PAN_WITH_GUTTER;
-      GESTURECONFIG gc[] = {
-          { GID_ZOOM, GC_ZOOM, 0 },
-          { GID_PAN, gesture_allow , gesture_block},
-          { GID_TWOFINGERTAP, GC_TWOFINGERTAP , 0},
-          { GID_PRESSANDTAP, GC_PRESSANDTAP , 0}
-      };
-      if (!SetGestureConfig(m_hWnd, 0, arraysize(gc), gc,
-          sizeof(GESTURECONFIG))) {
-        NOTREACHED();
-      }
-    }
-  }
+  SetToGestureMode();
+
   return 0;
 }
 
@@ -998,7 +1049,7 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
   if (!render_widget_host_)
     return;
 
-  DCHECK(render_widget_host_->process()->HasConnection());
+  DCHECK(render_widget_host_->GetProcess()->HasConnection());
 
   // If the GPU process is rendering directly into the View, compositing is
   // already triggered by damage to compositor_host_window_, so all we need to
@@ -1136,7 +1187,7 @@ void RenderWidgetHostViewWin::DrawBackground(const RECT& dirty_rect,
                                              CPaintDC* dc) {
   if (!background_.empty()) {
     gfx::Rect dirty_area(dirty_rect);
-    gfx::CanvasSkia canvas(dirty_area.size(), true);
+    gfx::Canvas canvas(dirty_area.size(), true);
     canvas.Translate(gfx::Point().Subtract(dirty_area.origin()));
 
     gfx::Rect dc_rect(dc->m_ps.rcPaint);
@@ -1153,6 +1204,22 @@ void RenderWidgetHostViewWin::DrawBackground(const RECT& dirty_rect,
 void RenderWidgetHostViewWin::OnNCPaint(HRGN update_region) {
   // Do nothing.  This suppresses the resize corner that Windows would
   // otherwise draw for us.
+}
+
+void RenderWidgetHostViewWin::SetClickthroughRegion(SkRegion* region) {
+  transparent_region_.reset(region);
+}
+
+LRESULT RenderWidgetHostViewWin::OnNCHitTest(const CPoint& point) {
+  RECT rc;
+  GetWindowRect(&rc);
+  if (transparent_region_.get() &&
+      transparent_region_->contains(point.x - rc.left, point.y - rc.top)) {
+    SetMsgHandled(TRUE);
+    return HTTRANSPARENT;
+  }
+  SetMsgHandled(FALSE);
+  return 0;
 }
 
 LRESULT RenderWidgetHostViewWin::OnEraseBkgnd(HDC dc) {
@@ -1258,7 +1325,13 @@ void RenderWidgetHostViewWin::OnThemeChanged() {
   if (!render_widget_host_)
     return;
   render_widget_host_->Send(new ViewMsg_ThemeChanged(
-      render_widget_host_->routing_id()));
+      render_widget_host_->GetRoutingID()));
+}
+
+void RenderWidgetHostViewWin::OnSysColorChange() {
+  render_widget_host_->Send(new ViewMsg_InvertWebContent(
+      render_widget_host_->GetRoutingID(),
+      gfx::IsInvertedColorScheme()));
 }
 
 LRESULT RenderWidgetHostViewWin::OnNotify(int w_param, NMHDR* header) {
@@ -1426,15 +1499,6 @@ LRESULT RenderWidgetHostViewWin::OnImeRequest(
 LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
                                               LPARAM lparam, BOOL& handled) {
   handled = TRUE;
-
-  if (ignore_next_lbutton_message_at_same_location &&
-      message == WM_LBUTTONDOWN) {
-    ignore_next_lbutton_message_at_same_location = false;
-    LPARAM last_location = last_pointer_down_location_;
-    last_pointer_down_location_ = 0;
-    if (last_location == lparam)
-      return 0;
-  }
 
   if (message == WM_MOUSELEAVE)
     ignore_mouse_movement_ = true;
@@ -1884,7 +1948,7 @@ LRESULT RenderWidgetHostViewWin::OnGestureEvent(
     POINT zoom_center = {0};
     if (DecodeZoomGesture(m_hWnd, gi, &zoom, &zoom_center)) {
       handled = TRUE;
-      Send(new ViewMsg_ZoomFactor(render_widget_host_->routing_id(),
+      Send(new ViewMsg_ZoomFactor(render_widget_host_->GetRoutingID(),
                                   zoom, zoom_center.x, zoom_center.y));
     }
   } else if (gi.dwID == GID_PAN) {
@@ -1897,13 +1961,30 @@ LRESULT RenderWidgetHostViewWin::OnGestureEvent(
       render_widget_host_->ForwardWheelEvent(
           MakeFakeScrollWheelEvent(m_hWnd, start, delta));
     }
+  } else if (gi.dwID == GID_BEGIN) {
+    // Send a touch event at this location; if the touch start is handled
+    // then we switch to touch mode, rather than gesture mode (in the ACK).
+    TOUCHINPUT fake_touch;
+    fake_touch.x = gi.ptsLocation.x * 100;
+    fake_touch.y = gi.ptsLocation.y * 100;
+    fake_touch.cxContact = 100;
+    fake_touch.cyContact = 100;
+    fake_touch.dwMask = 0;
+    fake_touch.dwFlags = TOUCHEVENTF_DOWN | TOUCHEVENTF_PRIMARY;
+    fake_touch.dwID = gi.dwInstanceID;
+    touch_state_.UpdateTouchPoints(&fake_touch, 1);
+    if (touch_state_.is_changed())
+      render_widget_host_->ForwardTouchEvent(touch_state_.touch_event());
+  } else if (gi.dwID == GID_END) {
+    if (touch_state_.ReleaseTouchPoints())
+      render_widget_host_->ForwardTouchEvent(touch_state_.touch_event());
   }
   ::CloseGestureInfoHandle(gi_handle);
   return 0;
 }
 
 void RenderWidgetHostViewWin::OnAccessibilityNotifications(
-    const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
+    const std::vector<AccessibilityHostMsg_NotificationParams>& params) {
   if (!GetBrowserAccessibilityManager()) {
     SetBrowserAccessibilityManager(
         BrowserAccessibilityManager::CreateEmptyDocument(
@@ -1979,7 +2060,7 @@ void RenderWidgetHostViewWin::Observe(
         content::Source<content::RenderProcessHost>(source).ptr();
     DCHECK(render_process_host);
     if (!render_widget_host_ ||
-        render_process_host != render_widget_host_->process())
+        render_process_host != render_widget_host_->GetProcess())
       return;
 
     // If it was our RenderProcessHost that posted the notification,
@@ -2024,7 +2105,7 @@ void RenderWidgetHostViewWin::ScheduleComposite() {
   // If we have a previous frame then present it immediately. Otherwise request
   // a new frame be composited.
   if (!accelerated_surface_.get() ||
-      !accelerated_surface_->Present(compositor_host_window_)) {
+      !accelerated_surface_->Present()) {
     if (render_widget_host_)
       render_widget_host_->ScheduleComposite();
   }
@@ -2033,10 +2114,10 @@ void RenderWidgetHostViewWin::ScheduleComposite() {
 // Creates a HWND within the RenderWidgetHostView that will serve as a host
 // for a HWND that the GPU process will create. The host window is used
 // to Z-position the GPU's window relative to other plugin windows.
-gfx::PluginWindowHandle RenderWidgetHostViewWin::GetCompositingSurface() {
+gfx::GLSurfaceHandle RenderWidgetHostViewWin::GetCompositingSurface() {
   // If the window has been created, don't recreate it a second time
   if (compositor_host_window_)
-    return compositor_host_window_;
+    return gfx::GLSurfaceHandle(compositor_host_window_, true);
 
   static ATOM window_class = 0;
   if (!window_class) {
@@ -2077,7 +2158,14 @@ gfx::PluginWindowHandle RenderWidgetHostViewWin::GetCompositingSurface() {
 
   ui::SetWindowUserData(compositor_host_window_, this);
 
-  return static_cast<gfx::PluginWindowHandle>(compositor_host_window_);
+  gfx::GLSurfaceHandle surface_handle(compositor_host_window_, true);
+
+  base::win::OSInfo *os_info = base::win::OSInfo::GetInstance();
+  if (os_info->version() >= base::win::VERSION_VISTA) {
+    accelerated_surface_.reset(new AcceleratedSurface(compositor_host_window_));
+  }
+
+  return surface_handle;
 }
 
 void RenderWidgetHostViewWin::OnAcceleratedCompositingStateChange() {
@@ -2131,34 +2219,20 @@ void RenderWidgetHostViewWin::OnAcceleratedCompositingStateChange() {
 void RenderWidgetHostViewWin::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
-  if (params.surface_handle) {
-    if (!accelerated_surface_.get() && compositor_host_window_) {
-      accelerated_surface_.reset(new AcceleratedSurface);
-    }
-
-    scoped_ptr<IPC::Message> message(
-        new AcceleratedSurfaceMsg_BuffersSwappedACK(params.route_id));
-    base::Closure acknowledge_task = base::Bind(
-        SendToGpuProcessHost,
-        gpu_host_id,
-        base::Passed(&message));
-
-    accelerated_surface_->AsyncPresentAndAcknowledge(
-        compositor_host_window_,
-        params.size,
-        params.surface_handle,
-        base::Bind(PostTaskOnIOThread,
-                   FROM_HERE,
-                   acknowledge_task));
-  } else {
-    RenderWidgetHost::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
-  }
+  NOTREACHED();
 }
 
 void RenderWidgetHostViewWin::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
     int gpu_host_id) {
-  RenderWidgetHost::AcknowledgePostSubBuffer(params.route_id, gpu_host_id);
+  NOTREACHED();
+}
+
+void RenderWidgetHostViewWin::AcceleratedSurfaceSuspend() {
+    if (!accelerated_surface_.get())
+      return;
+
+    accelerated_surface_->Suspend();
 }
 
 void RenderWidgetHostViewWin::SetAccessibilityFocus(int acc_obj_id) {
@@ -2255,17 +2329,12 @@ LRESULT RenderWidgetHostViewWin::OnPointerMessage(
   lparam = MAKELPARAM(point.x, point.y);
 
   if (message == WM_POINTERDOWN) {
-    OnMouseEvent(WM_LBUTTONDOWN, MK_LBUTTON, lparam, handled);
-    ignore_next_lbutton_message_at_same_location = true;
-    last_pointer_down_location_ = lparam;
     SetFocus();
     pointer_down_context_ = true;
     received_focus_change_after_pointer_down_ = false;
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
         base::Bind(&RenderWidgetHostViewWin::ResetPointerDownContext,
                    weak_factory_.GetWeakPtr()), kPointerDownContextResetDelay);
-  } else if (message == WM_POINTERUP) {
-    OnMouseEvent(WM_LBUTTONUP, MK_LBUTTON, lparam, handled);
   }
   handled = FALSE;
   return 0;
@@ -2315,7 +2384,7 @@ bool RenderWidgetHostViewWin::Send(IPC::Message* message) {
 void RenderWidgetHostViewWin::EnsureTooltip() {
   UINT message = TTM_NEWTOOLRECT;
 
-  TOOLINFO ti;
+  TOOLINFO ti = {0};
   ti.cbSize = sizeof(ti);
   ti.hwnd = m_hWnd;
   ti.uId = 0;

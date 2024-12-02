@@ -7,7 +7,7 @@
 #include <set>
 
 #include "base/file_util.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/memory/scoped_handle.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
@@ -15,7 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/url_constants.h"
@@ -85,9 +85,12 @@ bool PathContainsParentDirectory(const FilePath& path) {
 }  // namespace
 
 ExtensionUnpacker::ExtensionUnpacker(const FilePath& extension_path,
+                                     const std::string& extension_id,
                                      Extension::Location location,
                                      int creation_flags)
-    : extension_path_(extension_path), location_(location),
+    : extension_path_(extension_path),
+      extension_id_(extension_id),
+      location_(location),
       creation_flags_(creation_flags) {
 }
 
@@ -174,16 +177,13 @@ bool ExtensionUnpacker::Run() {
   if (!parsed_manifest_.get())
     return false;  // Error was already reported.
 
-  // NOTE: Since the unpacker doesn't have the extension's public_id, the
-  // InitFromValue is allowed to generate a temporary id for the extension.
-  // ANY CODE THAT FOLLOWS SHOULD NOT DEPEND ON THE CORRECT ID OF THIS
-  // EXTENSION.
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
       temp_install_dir_,
       location_,
       *parsed_manifest_,
       creation_flags_,
+      extension_id_,
       &error));
   if (!extension.get()) {
     SetError(error);
@@ -252,7 +252,7 @@ bool ExtensionUnpacker::ReadImagesFromFile(const FilePath& extension_path,
     return false;
 
   IPC::Message pickle(file_str.data(), file_str.size());
-  void* iter = NULL;
+  PickleIterator iter(pickle);
   return IPC::ReadParam(&pickle, &iter, images);
 }
 
@@ -266,7 +266,7 @@ bool ExtensionUnpacker::ReadMessageCatalogsFromFile(
     return false;
 
   IPC::Message pickle(file_str.data(), file_str.size());
-  void* iter = NULL;
+  PickleIterator iter(pickle);
   return IPC::ReadParam(&pickle, &iter, catalogs);
 }
 

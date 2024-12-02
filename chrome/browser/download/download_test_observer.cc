@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,9 @@ using content::DownloadManager;
 // These functions take scoped_refptr's to DownloadManager because they
 // are posted to message queues, and hence may execute arbitrarily after
 // their actual posting.  Once posted, there is no connection between
-// these routines and the DownloadTestObserver class from which they came,
-// so the DownloadTestObserver's reference to the DownloadManager cannot
-// be counted on to keep the DownloadManager around.
+// these routines and the DownloadTestObserver class from which
+// they came, so the DownloadTestObserver's reference to the
+// DownloadManager cannot be counted on to keep the DownloadManager around.
 
 // Fake user click on "Accept".
 void AcceptDangerousDownload(scoped_refptr<DownloadManager> download_manager,
@@ -42,22 +42,16 @@ void DenyDangerousDownload(scoped_refptr<DownloadManager> download_manager,
 DownloadTestObserver::DownloadTestObserver(
     DownloadManager* download_manager,
     size_t wait_count,
-    DownloadItem::DownloadState download_finished_state,
     bool finish_on_select_file,
     DangerousDownloadAction dangerous_download_action)
     : download_manager_(download_manager),
       wait_count_(wait_count),
       finished_downloads_at_construction_(0),
       waiting_(false),
-      download_finished_state_(download_finished_state),
       finish_on_select_file_(finish_on_select_file),
       select_file_dialog_seen_(false),
       dangerous_download_action_(dangerous_download_action) {
-  download_manager_->AddObserver(this);  // Will call initial ModelChanged().
-  finished_downloads_at_construction_ = finished_downloads_.size();
-  EXPECT_NE(DownloadItem::REMOVING, download_finished_state)
-      << "Waiting for REMOVING is not supported.  Try COMPLETE.";
-      }
+}
 
 DownloadTestObserver::~DownloadTestObserver() {
   for (DownloadSet::iterator it = downloads_observed_.begin();
@@ -65,6 +59,12 @@ DownloadTestObserver::~DownloadTestObserver() {
     (*it)->RemoveObserver(this);
 
   download_manager_->RemoveObserver(this);
+}
+
+void DownloadTestObserver::Init() {
+  download_manager_->AddObserver(this);  // Will call initial ModelChanged().
+  finished_downloads_at_construction_ = finished_downloads_.size();
+  states_observed_.clear();
 }
 
 void DownloadTestObserver::WaitForFinished() {
@@ -82,7 +82,7 @@ bool DownloadTestObserver::IsFinished() const {
   return (finish_on_select_file_ && select_file_dialog_seen_);
 }
 
-void DownloadTestObserver::OnDownloadUpdated(content::DownloadItem* download) {
+void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
   // The REMOVING state indicates that the download is being destroyed.
   // Stop observing.  Do not do anything with it, as it is about to be gone.
   if (download->GetState() == DownloadItem::REMOVING) {
@@ -129,12 +129,13 @@ void DownloadTestObserver::OnDownloadUpdated(content::DownloadItem* download) {
     }
   }
 
-  if (download->GetState() == download_finished_state_) {
+  if (IsDownloadInFinalState(download))
     DownloadInFinalState(download);
-  }
 }
 
-void DownloadTestObserver::ModelChanged() {
+void DownloadTestObserver::ModelChanged(DownloadManager* manager) {
+  DCHECK_EQ(manager, download_manager_);
+
   // Regenerate DownloadItem observers.  If there are any download items
   // in our final state, note them in |finished_downloads_|
   // (done by |OnDownloadUpdated()|).
@@ -169,7 +170,9 @@ void DownloadTestObserver::ModelChanged() {
   }
 }
 
-void DownloadTestObserver::SelectFileDialogDisplayed(int32 /* id */) {
+void DownloadTestObserver::SelectFileDialogDisplayed(
+    DownloadManager* manager, int32 /* id */) {
+  DCHECK_EQ(manager, download_manager_);
   select_file_dialog_seen_ = true;
   SignalIfFinished();
 }
@@ -178,14 +181,27 @@ size_t DownloadTestObserver::NumDangerousDownloadsSeen() const {
   return dangerous_downloads_seen_.size();
 }
 
+size_t DownloadTestObserver::NumDownloadsSeenInState(
+    content::DownloadItem::DownloadState state) const {
+  StateMap::const_iterator it = states_observed_.find(state);
+
+  if (it == states_observed_.end())
+    return 0;
+
+  return it->second;
+}
+
 void DownloadTestObserver::DownloadInFinalState(DownloadItem* download) {
   if (finished_downloads_.find(download) != finished_downloads_.end()) {
-    // We've already seen terminal state on this download.
+    // We've already seen the final state on this download.
     return;
   }
 
   // Record the transition.
   finished_downloads_.insert(download);
+
+  // Record the state.
+  states_observed_[download->GetState()]++;  // Initializes to 0 the first time.
 
   SignalIfFinished();
 }
@@ -193,6 +209,55 @@ void DownloadTestObserver::DownloadInFinalState(DownloadItem* download) {
 void DownloadTestObserver::SignalIfFinished() {
   if (waiting_ && IsFinished())
     MessageLoopForUI::current()->Quit();
+}
+
+DownloadTestObserverTerminal::DownloadTestObserverTerminal(
+    content::DownloadManager* download_manager,
+    size_t wait_count,
+    bool finish_on_select_file,
+    DangerousDownloadAction dangerous_download_action)
+        : DownloadTestObserver(download_manager,
+                               wait_count,
+                               finish_on_select_file,
+                               dangerous_download_action) {
+  // You can't rely on overriden virtual functions in a base class constructor;
+  // the virtual function table hasn't been set up yet.  So, we have to do any
+  // work that depends on those functions in the derived class constructor
+  // instead.  In this case, it's because of |IsDownloadInFinalState()|.
+  Init();
+}
+
+DownloadTestObserverTerminal::~DownloadTestObserverTerminal() {
+}
+
+
+bool DownloadTestObserverTerminal::IsDownloadInFinalState(
+    content::DownloadItem* download) {
+  return (download->GetState() != DownloadItem::IN_PROGRESS);
+}
+
+DownloadTestObserverInProgress::DownloadTestObserverInProgress(
+    content::DownloadManager* download_manager,
+    size_t wait_count,
+    bool finish_on_select_file)
+        : DownloadTestObserver(download_manager,
+                               wait_count,
+                               finish_on_select_file,
+                               ON_DANGEROUS_DOWNLOAD_ACCEPT) {
+  // You can't override virtual functions in a base class constructor; the
+  // virtual function table hasn't been set up yet.  So, we have to do any
+  // work that depends on those functions in the derived class constructor
+  // instead.  In this case, it's because of |IsDownloadInFinalState()|.
+  Init();
+}
+
+DownloadTestObserverInProgress::~DownloadTestObserverInProgress() {
+}
+
+
+bool DownloadTestObserverInProgress::IsDownloadInFinalState(
+    content::DownloadItem* download) {
+  return (download->GetState() == DownloadItem::IN_PROGRESS);
 }
 
 DownloadTestFlushObserver::DownloadTestFlushObserver(
@@ -206,13 +271,12 @@ void DownloadTestFlushObserver::WaitForFlush() {
   ui_test_utils::RunMessageLoop();
 }
 
-void DownloadTestFlushObserver::ModelChanged() {
+void DownloadTestFlushObserver::ModelChanged(DownloadManager* manager) {
   // Model has changed, so there may be more DownloadItems to observe.
   CheckDownloadsInProgress(true);
 }
 
-void DownloadTestFlushObserver::OnDownloadUpdated(
-    content::DownloadItem* download) {
+void DownloadTestFlushObserver::OnDownloadUpdated(DownloadItem* download) {
   // The REMOVING state indicates that the download is being destroyed.
   // Stop observing.  Do not do anything with it, as it is about to be gone.
   if (download->GetState() == DownloadItem::REMOVING) {
@@ -296,3 +360,43 @@ void DownloadTestFlushObserver::PingIOThread(int cycle) {
         BrowserThread::UI, FROM_HERE, MessageLoop::QuitClosure());
   }
 }
+
+DownloadTestItemCreationObserver::DownloadTestItemCreationObserver()
+    : download_id_(content::DownloadId::Invalid()),
+      error_(net::OK),
+      called_back_count_(0),
+      waiting_(false) {
+}
+
+DownloadTestItemCreationObserver::~DownloadTestItemCreationObserver() {
+}
+
+void DownloadTestItemCreationObserver::WaitForDownloadItemCreation() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (called_back_count_ == 0) {
+    waiting_ = true;
+    ui_test_utils::RunMessageLoop();
+    waiting_ = false;
+  }
+}
+
+void DownloadTestItemCreationObserver::DownloadItemCreationCallback(
+    content::DownloadId download_id, net::Error error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  download_id_ = download_id;
+  error_ = error;
+  ++called_back_count_;
+  DCHECK_EQ(1u, called_back_count_);
+
+  if (waiting_)
+    MessageLoopForUI::current()->Quit();
+}
+
+const content::DownloadManager::OnStartedCallback
+    DownloadTestItemCreationObserver::callback() {
+  return base::Bind(
+      &DownloadTestItemCreationObserver::DownloadItemCreationCallback, this);
+}
+

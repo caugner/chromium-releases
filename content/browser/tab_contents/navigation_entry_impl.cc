@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,8 +43,10 @@ NavigationEntryImpl::NavigationEntryImpl()
       page_id_(-1),
       transition_type_(PAGE_TRANSITION_LINK),
       has_post_data_(false),
+      post_id_(-1),
       restore_type_(RESTORE_NONE),
-      is_renderer_initiated_(false) {
+      is_renderer_initiated_(false),
+      is_cross_site_reload_(false) {
 }
 
 NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
@@ -64,8 +66,10 @@ NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
       page_id_(page_id),
       transition_type_(transition_type),
       has_post_data_(false),
+      post_id_(-1),
       restore_type_(RESTORE_NONE),
-      is_renderer_initiated_(is_renderer_initiated) {
+      is_renderer_initiated_(is_renderer_initiated),
+      is_cross_site_reload_(false) {
 }
 
 NavigationEntryImpl::~NavigationEntryImpl() {
@@ -188,6 +192,14 @@ void NavigationEntryImpl::SetHasPostData(bool has_post_data) {
 
 bool NavigationEntryImpl::GetHasPostData() const {
   return has_post_data_;
+}
+
+void NavigationEntryImpl::SetPostID(int64 post_id) {
+  post_id_ = post_id;
+}
+
+int64 NavigationEntryImpl::GetPostID() const {
+  return post_id_;
 }
 
 const FaviconStatus& NavigationEntryImpl::GetFavicon() const {

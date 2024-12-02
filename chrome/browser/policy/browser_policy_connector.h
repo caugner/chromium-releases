@@ -21,11 +21,14 @@ class TokenService;
 
 namespace policy {
 
+class AppPackUpdater;
 class CloudPolicyDataStore;
 class CloudPolicyProvider;
 class CloudPolicySubsystem;
 class ConfigurationPolicyProvider;
 class NetworkConfigurationUpdater;
+class PolicyService;
+class PolicyServiceImpl;
 class UserPolicyTokenCache;
 
 // Manages the lifecycle of browser-global policy infrastructure, such as the
@@ -48,6 +51,8 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   ConfigurationPolicyProvider* GetManagedCloudProvider() const;
   ConfigurationPolicyProvider* GetRecommendedPlatformProvider() const;
   ConfigurationPolicyProvider* GetRecommendedCloudProvider() const;
+
+  PolicyService* GetPolicyService() const;
 
   // Returns a weak pointer to the CloudPolicySubsystem corresponding to the
   // device policy managed by this policy connector, or NULL if no such
@@ -89,6 +94,12 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   // Returns the enterprise domain if device is managed.
   std::string GetEnterpriseDomain();
 
+  // Returns the device mode. For ChromeOS this function will return the mode
+  // stored in the lockbox, or DEVICE_MODE_CONSUMER if the lockbox has been
+  // locked empty, or DEVICE_MODE_UNKNOWN if the device has not been owned yet.
+  // For other OSes the function will always return DEVICE_MODE_CONSUMER.
+  DeviceMode GetDeviceMode();
+
   // Reset the device policy machinery. This stops any automatic retry behavior
   // and clears the error flags, so potential retries have a chance to succeed.
   void ResetDevicePolicy();
@@ -120,14 +131,18 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   // isn't being used.
   void RegisterForUserPolicy(const std::string& oauth_token);
 
-  const CloudPolicyDataStore* GetDeviceCloudPolicyDataStore() const;
-  const CloudPolicyDataStore* GetUserCloudPolicyDataStore() const;
+  // The data stores should be considered read-only for everyone except for
+  // tests.
+  CloudPolicyDataStore* GetDeviceCloudPolicyDataStore();
+  CloudPolicyDataStore* GetUserCloudPolicyDataStore();
 
   const ConfigurationPolicyHandlerList* GetHandlerList() const;
 
   // Works out the user affiliation by checking the given |user_name| against
   // the installation attributes.
   UserAffiliation GetUserAffiliation(const std::string& user_name);
+
+  AppPackUpdater* GetAppPackUpdater();
 
  private:
   // content::NotificationObserver method overrides:
@@ -150,6 +165,8 @@ class BrowserPolicyConnector : public content::NotificationObserver {
 
   scoped_ptr<CloudPolicyProvider> managed_cloud_provider_;
   scoped_ptr<CloudPolicyProvider> recommended_cloud_provider_;
+
+  scoped_ptr<PolicyServiceImpl> policy_service_;
 
 #if defined(OS_CHROMEOS)
   scoped_ptr<CloudPolicyDataStore> device_data_store_;
@@ -176,6 +193,10 @@ class BrowserPolicyConnector : public content::NotificationObserver {
 
   // Used to convert policies to preferences.
   ConfigurationPolicyHandlerList handler_list_;
+
+#if defined(OS_CHROMEOS)
+  scoped_ptr<AppPackUpdater> app_pack_updater_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserPolicyConnector);
 };

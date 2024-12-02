@@ -15,30 +15,37 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/location.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer.h"
+#include "base/tracked_objects.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
+#include "chrome/browser/sync/glue/bridged_sync_notifier.h"
 #include "chrome/browser/sync/glue/change_processor.h"
+#include "chrome/browser/sync/glue/chrome_encryptor.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
 #include "chrome/browser/sync/internal_api/base_transaction.h"
 #include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/notifier/sync_notifier.h"
-#include "chrome/browser/sync/protocol/encryption.pb.h"
-#include "chrome/browser/sync/protocol/sync.pb.h"
-#include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/sync_prefs.h"
-// TODO(tim): Remove this! We should have a syncapi pass-thru instead.
-#include "chrome/browser/sync/syncable/directory_manager.h"  // Cryptographer.
-#include "chrome/browser/sync/util/nigori.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_client.h"
+#include "jingle/notifier/base/notification_method.h"
+#include "jingle/notifier/base/notifier_options.h"
+#include "net/base/host_port_pair.h"
+#include "net/url_request/url_request_context_getter.h"
+#include "sync/protocol/encryption.pb.h"
+#include "sync/protocol/sync.pb.h"
+#include "sync/sessions/session_state.h"
+#include "sync/util/nigori.h"
 
 static const int kSaveChangesIntervalSeconds = 10;
 static const FilePath::CharType kSyncDataFolderName[] =
@@ -77,8 +84,8 @@ class SyncBackendHost::Core
   virtual void OnInitializationComplete(
       const WeakHandle<JsBackend>& js_backend,
       bool success) OVERRIDE;
-  virtual void OnAuthError(
-      const GoogleServiceAuthError& auth_error) OVERRIDE;
+  virtual void OnConnectionStatusChange(
+      sync_api::ConnectionStatus status) OVERRIDE;
   virtual void OnPassphraseRequired(
       sync_api::PassphraseRequiredReason reason,
       const sync_pb::EncryptedData& pending_keys) OVERRIDE;
@@ -124,11 +131,12 @@ class SyncBackendHost::Core
   // Called to cleanup disabled types.
   void DoRequestCleanupDisabledTypes();
 
-  // Called to set the passphrase on behalf of
-  // SyncBackendHost::SupplyPassphrase.
-  void DoSetPassphrase(const std::string& passphrase,
-                       bool is_explicit,
-                       bool user_provided);
+  // Called to set the passphrase for encryption.
+  void DoSetEncryptionPassphrase(const std::string& passphrase,
+                                 bool is_explicit);
+
+  // Called to decrypt the pending keys.
+  void DoSetDecryptionPassphrase(const std::string& passphrase);
 
   // Called to turn on encryption of all sync data as well as
   // reencrypt everything.
@@ -214,11 +222,60 @@ class SyncBackendHost::Core
   // The timer used to periodically call SaveChanges.
   base::RepeatingTimer<Core> save_changes_timer_;
 
+  // Our encryptor, which uses Chrome's encryption functions.
+  ChromeEncryptor encryptor_;
+
   // The top-level syncapi entry point.  Lives on the sync thread.
   scoped_ptr<sync_api::SyncManager> sync_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
+
+namespace {
+
+// Parses the given command line for notifier options.
+notifier::NotifierOptions ParseNotifierOptions(
+    const CommandLine& command_line,
+    const scoped_refptr<net::URLRequestContextGetter>&
+        request_context_getter) {
+  notifier::NotifierOptions notifier_options;
+  notifier_options.request_context_getter = request_context_getter;
+
+  if (command_line.HasSwitch(switches::kSyncNotificationHostPort)) {
+    notifier_options.xmpp_host_port =
+        net::HostPortPair::FromString(
+            command_line.GetSwitchValueASCII(
+                switches::kSyncNotificationHostPort));
+    DVLOG(1) << "Using " << notifier_options.xmpp_host_port.ToString()
+             << " for test sync notification server.";
+  }
+
+  notifier_options.try_ssltcp_first =
+      command_line.HasSwitch(switches::kSyncTrySsltcpFirstForXmpp);
+  DVLOG_IF(1, notifier_options.try_ssltcp_first)
+      << "Trying SSL/TCP port before XMPP port for notifications.";
+
+  notifier_options.invalidate_xmpp_login =
+      command_line.HasSwitch(switches::kSyncInvalidateXmppLogin);
+  DVLOG_IF(1, notifier_options.invalidate_xmpp_login)
+      << "Invalidating sync XMPP login.";
+
+  notifier_options.allow_insecure_connection =
+      command_line.HasSwitch(switches::kSyncAllowInsecureXmppConnection);
+  DVLOG_IF(1, notifier_options.allow_insecure_connection)
+      << "Allowing insecure XMPP connections.";
+
+  if (command_line.HasSwitch(switches::kSyncNotificationMethod)) {
+    const std::string notification_method_str(
+        command_line.GetSwitchValueASCII(switches::kSyncNotificationMethod));
+    notifier_options.notification_method =
+        notifier::StringToNotificationMethod(notification_method_str);
+  }
+
+  return notifier_options;
+}
+
+}  // namespace
 
 SyncBackendHost::SyncBackendHost(const std::string& name,
                                  Profile* profile,
@@ -232,29 +289,29 @@ SyncBackendHost::SyncBackendHost(const std::string& name,
                      weak_ptr_factory_.GetWeakPtr())),
       initialization_state_(NOT_ATTEMPTED),
       sync_prefs_(sync_prefs),
+      chrome_sync_notification_bridge_(profile_),
       sync_notifier_factory_(
+          ParseNotifierOptions(*CommandLine::ForCurrentProcess(),
+                               profile_->GetRequestContext()),
           content::GetUserAgent(GURL()),
-          profile_->GetRequestContext(),
-          sync_prefs,
-          *CommandLine::ForCurrentProcess()),
-      frontend_(NULL),
-      last_auth_error_(AuthError::None()) {
+          sync_prefs),
+      frontend_(NULL) {
 }
 
-SyncBackendHost::SyncBackendHost()
+SyncBackendHost::SyncBackendHost(Profile* profile)
     : weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       sync_thread_("Chrome_SyncThread"),
       frontend_loop_(MessageLoop::current()),
-      profile_(NULL),
+      profile_(profile),
       name_("Unknown"),
       initialization_state_(NOT_ATTEMPTED),
+      chrome_sync_notification_bridge_(profile_),
       sync_notifier_factory_(
+          ParseNotifierOptions(*CommandLine::ForCurrentProcess(),
+                               profile_->GetRequestContext()),
           content::GetUserAgent(GURL()),
-          NULL,
-          base::WeakPtr<sync_notifier::InvalidationVersionTracker>(),
-          *CommandLine::ForCurrentProcess()),
-      frontend_(NULL),
-      last_auth_error_(AuthError::None()) {
+          base::WeakPtr<sync_notifier::InvalidationVersionTracker>()),
+      frontend_(NULL) {
 }
 
 SyncBackendHost::~SyncBackendHost() {
@@ -278,7 +335,8 @@ void SyncBackendHost::Initialize(
     syncable::ModelTypeSet initial_types,
     const SyncCredentials& credentials,
     bool delete_sync_data_folder,
-    UnrecoverableErrorHandler* unrecoverable_error_handler) {
+    UnrecoverableErrorHandler* unrecoverable_error_handler,
+    ReportUnrecoverableErrorFunction report_unrecoverable_error_function) {
   if (!sync_thread_.Start())
     return;
 
@@ -299,16 +357,19 @@ void SyncBackendHost::Initialize(
   InitCore(DoInitializeOptions(
       sync_thread_.message_loop(),
       registrar_.get(),
+      &extensions_activity_monitor_,
       event_handler,
       sync_service_url,
       base::Bind(&MakeHttpBridgeFactory,
                  make_scoped_refptr(profile_->GetRequestContext())),
       credentials,
+      &chrome_sync_notification_bridge_,
       &sync_notifier_factory_,
       delete_sync_data_folder,
       sync_prefs_->GetEncryptionBootstrapToken(),
-      false,
-      unrecoverable_error_handler));
+      sync_api::SyncManager::NON_TEST,
+      unrecoverable_error_handler,
+      report_unrecoverable_error_function));
 }
 
 void SyncBackendHost::UpdateCredentials(const SyncCredentials& credentials) {
@@ -323,21 +384,68 @@ void SyncBackendHost::StartSyncingWithServer() {
       base::Bind(&SyncBackendHost::Core::DoStartSyncing, core_.get()));
 }
 
-void SyncBackendHost::SetPassphrase(const std::string& passphrase,
-                                    bool is_explicit,
-                                    bool user_provided) {
+void SyncBackendHost::SetEncryptionPassphrase(const std::string& passphrase,
+                                              bool is_explicit) {
   if (!IsNigoriEnabled()) {
-    SLOG(WARNING) << "Silently dropping SetPassphrase request.";
+    NOTREACHED() << "SetEncryptionPassphrase must never be called when nigori"
+                    " is disabled.";
     return;
   }
+
+  // We should never be called with an empty passphrase.
+  DCHECK(!passphrase.empty());
 
   // This should only be called by the frontend.
   DCHECK_EQ(MessageLoop::current(), frontend_loop_);
 
-  // If encryption is enabled and we've got a SetPassphrase
+  // SetEncryptionPassphrase should never be called if we are currently
+  // encrypted with an explicit passphrase.
+  DCHECK(!IsUsingExplicitPassphrase());
+
+  // Post an encryption task on the syncer thread.
   sync_thread_.message_loop()->PostTask(FROM_HERE,
-      base::Bind(&SyncBackendHost::Core::DoSetPassphrase, core_.get(),
-                 passphrase, is_explicit, user_provided));
+      base::Bind(&SyncBackendHost::Core::DoSetEncryptionPassphrase, core_.get(),
+                 passphrase, is_explicit));
+}
+
+bool SyncBackendHost::SetDecryptionPassphrase(const std::string& passphrase) {
+  if (!IsNigoriEnabled()) {
+    NOTREACHED() << "SetDecryptionPassphrase must never be called when nigori"
+                    " is disabled.";
+    return false;
+  }
+
+  // We should never be called with an empty passphrase.
+  DCHECK(!passphrase.empty());
+
+  // This should only be called by the frontend.
+  DCHECK_EQ(MessageLoop::current(), frontend_loop_);
+
+  // This should only be called when we have cached pending keys.
+  DCHECK(cached_pending_keys_.has_blob());
+
+  // Check the passphrase that was provided against our local cache of the
+  // cryptographer's pending keys. If this was unsuccessful, the UI layer can
+  // immediately call OnPassphraseRequired without showing the user a spinner.
+  if (!CheckPassphraseAgainstCachedPendingKeys(passphrase))
+    return false;
+
+  // Post a decryption task on the syncer thread.
+  sync_thread_.message_loop()->PostTask(FROM_HERE,
+      base::Bind(&SyncBackendHost::Core::DoSetDecryptionPassphrase, core_.get(),
+                 passphrase));
+
+  // Since we were able to decrypt the cached pending keys with the passphrase
+  // provided, we immediately alert the UI layer that the passphrase was
+  // accepted. This will avoid the situation where a user enters a passphrase,
+  // clicks OK, immediately reopens the advanced settings dialog, and gets an
+  // unnecessary prompt for a passphrase.
+  // Note: It is not guaranteed that the passphrase will be accepted by the
+  // syncer thread, since we could receive a new nigori node while the task is
+  // pending. This scenario is a valid race, and SetDecryptionPassphrase can
+  // trigger a new OnPassphraseRequired if it needs to.
+  NotifyPassphraseAccepted();
+  return true;
 }
 
 void SyncBackendHost::StopSyncManagerForShutdown(
@@ -420,15 +528,15 @@ void SyncBackendHost::Shutdown(bool sync_disabled) {
 }
 
 void SyncBackendHost::ConfigureDataTypes(
+    sync_api::ConfigureReason reason,
     syncable::ModelTypeSet types_to_add,
     syncable::ModelTypeSet types_to_remove,
-    sync_api::ConfigureReason reason,
+    NigoriState nigori_state,
     base::Callback<void(syncable::ModelTypeSet)> ready_task,
-    base::Callback<void()> retry_callback,
-    bool enable_nigori) {
+    base::Callback<void()> retry_callback) {
   syncable::ModelTypeSet types_to_add_with_nigori = types_to_add;
   syncable::ModelTypeSet types_to_remove_with_nigori = types_to_remove;
-  if (enable_nigori) {
+  if (nigori_state == WITH_NIGORI) {
     types_to_add_with_nigori.Put(syncable::NIGORI);
     types_to_remove_with_nigori.Remove(syncable::NIGORI);
   } else {
@@ -505,15 +613,6 @@ SyncBackendHost::Status SyncBackendHost::GetDetailedStatus() {
   return core_->sync_manager()->GetDetailedStatus();
 }
 
-SyncBackendHost::StatusSummary SyncBackendHost::GetStatusSummary() {
-  DCHECK(initialized());
-  return core_->sync_manager()->GetStatusSummary();
-}
-
-const GoogleServiceAuthError& SyncBackendHost::GetAuthError() const {
-  return last_auth_error_;
-}
-
 const SyncSessionSnapshot* SyncBackendHost::GetLastSessionSnapshot() const {
   return last_snapshot_.get();
 }
@@ -528,14 +627,10 @@ bool SyncBackendHost::IsNigoriEnabled() const {
 }
 
 bool SyncBackendHost::IsUsingExplicitPassphrase() {
-  // This should only be called once we're initialized (and the nigori node has
-  // therefore been downloaded) as otherwise we have no idea what kind of
-  // passphrase we are using.
-  if (!initialized()) {
-    NOTREACHED() << "IsUsingExplicitPassphrase() should not be called "
-                 << "before the nigori node is downloaded";
-    return false;
-  }
+  // This should only be called once the nigori node has been downloaded, as
+  // otherwise we have no idea what kind of passphrase we are using. This will
+  // NOTREACH in sync_manager and return false if we fail to load the nigori
+  // node.
   return IsNigoriEnabled() &&
       core_->sync_manager()->IsUsingExplicitPassphrase();
 }
@@ -557,7 +652,7 @@ void SyncBackendHost::GetModelSafeRoutingInfo(
 
 void SyncBackendHost::InitCore(const DoInitializeOptions& options) {
   sync_thread_.message_loop()->PostTask(FROM_HERE,
-      base::Bind(&SyncBackendHost::Core::DoInitialize, core_.get(),options));
+      base::Bind(&SyncBackendHost::Core::DoInitialize, core_.get(), options));
 }
 
 void SyncBackendHost::HandleSyncCycleCompletedOnFrontendLoop(
@@ -710,26 +805,33 @@ bool SyncBackendHost::IsDownloadingNigoriForTest() const {
 SyncBackendHost::DoInitializeOptions::DoInitializeOptions(
     MessageLoop* sync_loop,
     SyncBackendRegistrar* registrar,
+    ExtensionsActivityMonitor* extensions_activity_monitor,
     const WeakHandle<JsEventHandler>& event_handler,
     const GURL& service_url,
     MakeHttpBridgeFactoryFn make_http_bridge_factory_fn,
     const sync_api::SyncCredentials& credentials,
+    ChromeSyncNotificationBridge* chrome_sync_notification_bridge,
     sync_notifier::SyncNotifierFactory* sync_notifier_factory,
     bool delete_sync_data_folder,
     const std::string& restored_key_for_bootstrapping,
-    bool setup_for_test_mode,
-    UnrecoverableErrorHandler* unrecoverable_error_handler)
+    sync_api::SyncManager::TestingMode testing_mode,
+    UnrecoverableErrorHandler* unrecoverable_error_handler,
+    ReportUnrecoverableErrorFunction report_unrecoverable_error_function)
     : sync_loop(sync_loop),
       registrar(registrar),
+      extensions_activity_monitor(extensions_activity_monitor),
       event_handler(event_handler),
       service_url(service_url),
       make_http_bridge_factory_fn(make_http_bridge_factory_fn),
       credentials(credentials),
+      chrome_sync_notification_bridge(chrome_sync_notification_bridge),
       sync_notifier_factory(sync_notifier_factory),
       delete_sync_data_folder(delete_sync_data_folder),
       restored_key_for_bootstrapping(restored_key_for_bootstrapping),
-      setup_for_test_mode(setup_for_test_mode),
-      unrecoverable_error_handler(unrecoverable_error_handler){
+      testing_mode(testing_mode),
+      unrecoverable_error_handler(unrecoverable_error_handler),
+      report_unrecoverable_error_function(
+          report_unrecoverable_error_function) {
 }
 
 SyncBackendHost::DoInitializeOptions::~DoInitializeOptions() {}
@@ -786,13 +888,14 @@ void SyncBackendHost::Core::OnInitializationComplete(
   }
 }
 
-void SyncBackendHost::Core::OnAuthError(const AuthError& auth_error) {
+void SyncBackendHost::Core::OnConnectionStatusChange(
+    sync_api::ConnectionStatus status) {
   if (!sync_loop_)
     return;
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   host_.Call(
       FROM_HERE,
-      &SyncBackendHost::HandleAuthErrorEventOnFrontendLoop, auth_error);
+      &SyncBackendHost::HandleConnectionStatusChangeOnFrontendLoop, status);
 }
 
 void SyncBackendHost::Core::OnPassphraseRequired(
@@ -953,16 +1056,34 @@ void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
       options.service_url.host() + options.service_url.path(),
       options.service_url.EffectiveIntPort(),
       options.service_url.SchemeIsSecure(),
+      BrowserThread::GetBlockingPool(),
       options.make_http_bridge_factory_fn.Run(),
       options.registrar /* as ModelSafeWorkerRegistrar */,
+      options.extensions_activity_monitor,
       options.registrar /* as SyncManager::ChangeDelegate */,
       MakeUserAgentForSyncApi(),
       options.credentials,
-      options.sync_notifier_factory->CreateSyncNotifier(),
+      true,
+      new BridgedSyncNotifier(
+          options.chrome_sync_notification_bridge,
+          options.sync_notifier_factory->CreateSyncNotifier()),
       options.restored_key_for_bootstrapping,
-      options.setup_for_test_mode,
-      options.unrecoverable_error_handler);
+      options.testing_mode,
+      &encryptor_,
+      options.unrecoverable_error_handler,
+      options.report_unrecoverable_error_function);
   LOG_IF(ERROR, !success) << "Syncapi initialization failed!";
+
+  // Now check the command line to see if we need to simulate an
+  // unrecoverable error for testing purpose. Note the error is thrown
+  // only if the initialization succeeded. Also it makes sense to use this
+  // flag only when restarting the browser with an account already setup. If
+  // you use this before setting up the setup would not succeed as an error
+  // would be encountered.
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSyncThrowUnrecoverableError)) {
+    sync_manager_->ThrowUnrecoverableError();
+  }
 }
 
 void SyncBackendHost::Core::DoUpdateCredentials(
@@ -991,11 +1112,17 @@ void SyncBackendHost::Core::DoRequestCleanupDisabledTypes() {
   sync_manager_->RequestCleanupDisabledTypes();
 }
 
-void SyncBackendHost::Core::DoSetPassphrase(const std::string& passphrase,
-                                            bool is_explicit,
-                                            bool user_provided) {
+void SyncBackendHost::Core::DoSetEncryptionPassphrase(
+    const std::string& passphrase,
+    bool is_explicit) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  sync_manager_->SetPassphrase(passphrase, is_explicit, user_provided);
+  sync_manager_->SetEncryptionPassphrase(passphrase, is_explicit);
+}
+
+void SyncBackendHost::Core::DoSetDecryptionPassphrase(
+    const std::string& passphrase) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  sync_manager_->SetDecryptionPassphrase(passphrase);
 }
 
 void SyncBackendHost::Core::DoEnableEncryptEverything() {
@@ -1006,7 +1133,9 @@ void SyncBackendHost::Core::DoEnableEncryptEverything() {
 void SyncBackendHost::Core::DoRefreshNigori(
     const base::Closure& done_callback) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  sync_manager_->RefreshNigori(done_callback);
+  chrome::VersionInfo version_info;
+  sync_manager_->RefreshNigori(version_info.CreateVersionString(),
+                               done_callback);
 }
 
 void SyncBackendHost::Core::DoStopSyncManagerForShutdown(
@@ -1123,17 +1252,17 @@ void SyncBackendHost::HandleInitializationCompletedOnFrontendLoop(
     case NOT_INITIALIZED:
       initialization_state_ = DOWNLOADING_NIGORI;
       ConfigureDataTypes(
-          syncable::ModelTypeSet(),
-          syncable::ModelTypeSet(),
           sync_api::CONFIGURE_REASON_NEW_CLIENT,
+          syncable::ModelTypeSet(),
+          syncable::ModelTypeSet(),
+          WITH_NIGORI,
           // Calls back into this function.
           base::Bind(
               &SyncBackendHost::
                   HandleNigoriConfigurationCompletedOnFrontendLoop,
               weak_ptr_factory_.GetWeakPtr(), js_backend),
           base::Bind(&SyncBackendHost::OnNigoriDownloadRetry,
-                     weak_ptr_factory_.GetWeakPtr()),
-          true);
+                     weak_ptr_factory_.GetWeakPtr()));
       break;
     case DOWNLOADING_NIGORI:
       initialization_state_ = REFRESHING_NIGORI;
@@ -1175,6 +1304,7 @@ void SyncBackendHost::HandleActionableErrorEventOnFrontendLoop(
 bool SyncBackendHost::CheckPassphraseAgainstCachedPendingKeys(
     const std::string& passphrase) const {
   DCHECK(cached_pending_keys_.has_blob());
+  DCHECK(!passphrase.empty());
   browser_sync::Nigori nigori;
   nigori.InitByDerivation("localhost", "dummy", passphrase);
   std::string plaintext;
@@ -1253,15 +1383,14 @@ void SyncBackendHost::HandleClearServerDataFailedOnFrontendLoop() {
   frontend_->OnClearServerDataFailed();
 }
 
-void SyncBackendHost::HandleAuthErrorEventOnFrontendLoop(
-    const GoogleServiceAuthError& new_auth_error) {
+void SyncBackendHost::HandleConnectionStatusChangeOnFrontendLoop(
+    sync_api::ConnectionStatus status) {
   if (!frontend_)
     return;
 
   DCHECK_EQ(MessageLoop::current(), frontend_loop_);
 
-  last_auth_error_ = new_auth_error;
-  frontend_->OnAuthError();
+  frontend_->OnConnectionStatusChange(status);
 }
 
 void SyncBackendHost::HandleNigoriConfigurationCompletedOnFrontendLoop(

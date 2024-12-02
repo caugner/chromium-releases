@@ -46,6 +46,7 @@ class NativePanel {
   virtual void ActivatePanel() = 0;
   virtual void DeactivatePanel() = 0;
   virtual bool IsPanelActive() const = 0;
+  virtual void PreventActivationByOS(bool prevent_activation) = 0;
   virtual gfx::NativeWindow GetNativePanelHandle() = 0;
   virtual void UpdatePanelTitleBar() = 0;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) = 0;
@@ -87,6 +88,12 @@ class NativePanel {
   // Sets whether the panel app icon is visible (usually refers to the app icons
   // in the desktop bar).
   virtual void SetPanelAppIconVisibility(bool visible) = 0;
+
+  // Sets whether the panel window is always on top.
+  virtual void SetPanelAlwaysOnTop(bool on_top) = 0;
+
+  // Enables resizing by dragging edges/corners.
+  virtual void EnableResizeByMouse(bool enable) = 0;
 };
 
 // A NativePanel utility interface used for accessing elements of the
@@ -96,9 +103,19 @@ class NativePanelTesting {
   static NativePanelTesting* Create(NativePanel* native_panel);
   virtual ~NativePanelTesting() {}
 
-  virtual void PressLeftMouseButtonTitlebar(const gfx::Point& point) = 0;
-  virtual void ReleaseMouseButtonTitlebar() = 0;
-  virtual void DragTitlebar(int delta_x, int delta_y) = 0;
+  // Wrappers for the common cases when no modifier is needed.
+  void PressLeftMouseButtonTitlebar(const gfx::Point& mouse_location) {
+    PressLeftMouseButtonTitlebar(mouse_location, panel::NO_MODIFIER);
+  }
+  void ReleaseMouseButtonTitlebar() {
+    ReleaseMouseButtonTitlebar(panel::NO_MODIFIER);
+  }
+
+  // |mouse_location| is in screen coordinates.
+  virtual void PressLeftMouseButtonTitlebar(
+      const gfx::Point& mouse_location, panel::ClickModifier modifier) = 0;
+  virtual void ReleaseMouseButtonTitlebar(panel::ClickModifier modifier) = 0;
+  virtual void DragTitlebar(const gfx::Point& mouse_location) = 0;
   virtual void CancelDragTitlebar() = 0;
   virtual void FinishDragTitlebar() = 0;
 

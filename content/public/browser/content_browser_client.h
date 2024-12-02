@@ -7,33 +7,30 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/media_stream_request.h"
 #include "content/public/common/window_container_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 
-class BrowserURLHandler;
 class CommandLine;
 class FilePath;
 class GURL;
-class MHTMLGenerationManager;
 class PluginProcessHost;
-class QuotaPermissionContext;
-class RenderViewHost;
 class ResourceDispatcherHost;
-class SSLCertErrorHandler;
-class SSLClientAuthHandler;
 class SkBitmap;
-class WorkerProcessHost;
 struct WebPreferences;
 
 namespace content {
 class AccessTokenStore;
 class BrowserMainParts;
+class BrowserURLHandler;
 class RenderProcessHost;
 class SiteInstance;
+class SpeechRecognitionManagerDelegate;
 class WebContents;
 class WebContentsView;
 struct MainFunctionParams;
@@ -47,14 +44,13 @@ class CryptoModuleBlockingPasswordDelegate;
 namespace net {
 class CookieList;
 class CookieOptions;
+class HttpNetworkSession;
 class NetLog;
+class SSLCertRequestInfo;
+class SSLInfo;
 class URLRequest;
 class URLRequestContext;
 class X509Certificate;
-}
-
-namespace speech_input {
-class SpeechInputManager;
 }
 
 namespace ui {
@@ -63,9 +59,26 @@ class Clipboard;
 
 namespace content {
 
+class AccessTokenStore;
+class BrowserChildProcessHost;
 class BrowserContext;
+class BrowserMainParts;
+class MediaObserver;
+class QuotaPermissionContext;
+class RenderProcessHost;
+class RenderViewHost;
 class ResourceContext;
+class SiteInstance;
+class SpeechInputManagerDelegate;
+class WebContents;
+class WebContentsView;
+class WebContentsViewDelegate;
 class WebUIControllerFactory;
+struct MainFunctionParams;
+struct ShowDesktopNotificationHostMsgParams;
+
+typedef base::Callback< void(const content::MediaStreamDevices&) >
+    MediaResponseCallback;
 
 // Embedder API (or SPI) for participating in browser logic, to be implemented
 // by the client of the content browser. See ChromeContentBrowserClient for the
@@ -85,16 +98,30 @@ class ContentBrowserClient {
   virtual BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) = 0;
 
-  virtual WebContentsView* CreateWebContentsView(WebContents* web_contents) = 0;
+  // Allows an embedder to return their own WebContentsView implementation.
+  // Return NULL to let the default one for the platform be created.
+  virtual WebContentsView* OverrideCreateWebContentsView(
+      WebContents* web_contents) = 0;
+
+  // If content creates the WebContentsView implementation, it will ask the
+  // embedder to return an (optional) delegate to customize it. The view will
+  // own the delegate.
+  virtual WebContentsViewDelegate* GetWebContentsViewDelegate(
+      WebContents* web_contents) = 0;
 
   // Notifies that a new RenderHostView has been created.
-  virtual void RenderViewHostCreated(RenderViewHost* render_view_host) = 0;
+  virtual void RenderViewHostCreated(
+      content::RenderViewHost* render_view_host) = 0;
 
   // Notifies that a RenderProcessHost has been created. This is called before
   // the content layer adds its own BrowserMessageFilters, so that the
   // embedder's IPC filters have priority.
   virtual void RenderProcessHostCreated(
       content::RenderProcessHost* host) = 0;
+
+  // Notifies that a BrowserChildProcessHost has been created.
+  virtual void BrowserChildProcessHostCreated(
+      content::BrowserChildProcessHost* host) {}
 
   // Gets the WebUIControllerFactory which will be responsible for generating
   // WebUIs. Can return NULL if the embedder doesn't need WebUI support.
@@ -110,10 +137,6 @@ class ContentBrowserClient {
   virtual bool ShouldUseProcessPerSite(BrowserContext* browser_context,
                                        const GURL& effective_url) = 0;
 
-  // Returns whether a specified URL is to be considered the same as any
-  // SiteInstance.
-  virtual bool IsURLSameAsAnySiteInstance(const GURL& url) = 0;
-
   // Returns whether a specified URL is handled by the embedder's internal
   // protocol handlers.
   virtual bool IsHandledURL(const GURL& url) = 0;
@@ -122,6 +145,12 @@ class ContentBrowserClient {
   // given |process_host|.
   virtual bool IsSuitableHost(content::RenderProcessHost* process_host,
                               const GURL& site_url) = 0;
+
+  // Returns whether a new process should be created or an existing one should
+  // be reused based on the URL we want to load. This should return false,
+  // unless there is a good reason otherwise.
+  virtual bool ShouldTryToUseExistingProcessHost(
+      BrowserContext* browser_context, const GURL& url) = 0;
 
   // Called when a site instance is first associated with a process.
   virtual void SiteInstanceGotProcess(
@@ -160,14 +189,14 @@ class ContentBrowserClient {
   // This is called on the IO thread.
   virtual bool AllowAppCache(const GURL& manifest_url,
                              const GURL& first_party,
-                             const content::ResourceContext& context) = 0;
+                             content::ResourceContext* context) = 0;
 
   // Allow the embedder to control if the given cookie can be read.
   // This is called on the IO thread.
   virtual bool AllowGetCookie(const GURL& url,
                               const GURL& first_party,
                               const net::CookieList& cookie_list,
-                              const content::ResourceContext& context,
+                              content::ResourceContext* context,
                               int render_process_id,
                               int render_view_id) = 0;
 
@@ -176,39 +205,49 @@ class ContentBrowserClient {
   virtual bool AllowSetCookie(const GURL& url,
                               const GURL& first_party,
                               const std::string& cookie_line,
-                              const content::ResourceContext& context,
+                              content::ResourceContext* context,
                               int render_process_id,
                               int render_view_id,
                               net::CookieOptions* options) = 0;
 
   // This is called on the IO thread.
-  virtual bool AllowSaveLocalState(
-      const content::ResourceContext& context) = 0;
+  virtual bool AllowSaveLocalState(content::ResourceContext* context) = 0;
 
-  // Allow the embedder to control if access to web database by a worker is
-  // allowed.
+  // Allow the embedder to control if access to web database by a shared worker
+  // is allowed. |render_views| is a vector of pairs of
+  // RenderProcessID/RenderViewID of RenderViews that are using this worker.
   // This is called on the IO thread.
-  virtual bool AllowWorkerDatabase(int worker_route_id,
-                                   const GURL& url,
-                                   const string16& name,
-                                   const string16& display_name,
-                                   unsigned long estimated_size,
-                                   WorkerProcessHost* worker_process_host) = 0;
+  virtual bool AllowWorkerDatabase(
+      const GURL& url,
+      const string16& name,
+      const string16& display_name,
+      unsigned long estimated_size,
+      content::ResourceContext* context,
+      const std::vector<std::pair<int, int> >& render_views) = 0;
 
-  // Allow the embedder to control if access to file system by a worker is
-  // allowed.
+  // Allow the embedder to control if access to file system by a shared worker
+  // is allowed.
   // This is called on the IO thread.
   virtual bool AllowWorkerFileSystem(
-      int worker_route_id,
       const GURL& url,
-      WorkerProcessHost* worker_process_host) = 0;
+      content::ResourceContext* context,
+      const std::vector<std::pair<int, int> >& render_views) = 0;
+
+  // Allow the embedder to control if access to IndexedDB by a shared worker
+  // is allowed.
+  // This is called on the IO thread.
+  virtual bool AllowWorkerIndexedDB(
+      const GURL& url,
+      const string16& name,
+      content::ResourceContext* context,
+      const std::vector<std::pair<int, int> >& render_views) = 0;
 
   // Allows the embedder to override the request context based on the URL for
   // certain operations, like cookie access. Returns NULL to indicate the
   // regular request context should be used.
   // This is called on the IO thread.
   virtual net::URLRequestContext* OverrideRequestContextForURL(
-      const GURL& url, const content::ResourceContext& context) = 0;
+      const GURL& url, content::ResourceContext* context) = 0;
 
   // Create and return a new quota permission context.
   virtual QuotaPermissionContext* CreateQuotaPermissionContext() = 0;
@@ -222,18 +261,27 @@ class ContentBrowserClient {
   // Informs the embedder that a certificate error has occured.  If overridable
   // is true, the user can ignore the error and continue.  If it's false, then
   // the certificate error is severe and the user isn't allowed to proceed.  The
-  // embedder can call the callback asynchronously.
+  // embedder can call the callback asynchronously. If |cancel_request| is set
+  // to true, the request will be cancelled immediately and the callback won't
+  // be run.
   virtual void AllowCertificateError(
-      SSLCertErrorHandler* handler,
+      int render_process_id,
+      int render_view_id,
+      int cert_error,
+      const net::SSLInfo& ssl_info,
+      const GURL& request_url,
       bool overridable,
-      const base::Callback<void(SSLCertErrorHandler*, bool)>& callback) = 0;
+      const base::Callback<void(bool)>& callback,
+      bool* cancel_request) = 0;
 
-  // Selects a SSL client certificate and returns it to the |handler|. If no
-  // certificate was selected NULL is returned to the |handler|.
+  // Selects a SSL client certificate and returns it to the |callback|. If no
+  // certificate was selected NULL is returned to the |callback|.
   virtual void SelectClientCertificate(
       int render_process_id,
       int render_view_id,
-      SSLClientAuthHandler* handler) = 0;
+      const net::HttpNetworkSession* network_session,
+      net::SSLCertRequestInfo* cert_request_info,
+      const base::Callback<void(net::X509Certificate*)>& callback) = 0;
 
   // Adds a downloaded client cert. The embedder should ensure that there's
   // a private key for the cert, displays the cert to the user, and adds it upon
@@ -244,6 +292,19 @@ class ContentBrowserClient {
       net::X509Certificate* cert,
       int render_process_id,
       int render_view_id) = 0;
+
+  // Returns a a class to get notifications about media event. The embedder can
+  // return NULL if they're not interested.
+  virtual MediaObserver* GetMediaObserver() = 0;
+
+  // Asks permission to use the camera and/or microphone. If permission is
+  // granted, a call should be made to |callback| with the devices. If the
+  // request is denied, a call should be made to |callback| with an empty list
+  // of devices. |request| has the details of the request (e.g. which of audio
+  // and/or video devices are requested, and lists of available devices).
+  virtual void RequestMediaAccessPermission(
+      const content::MediaStreamRequest* request,
+      const MediaResponseCallback& callback) = 0;
 
   // Asks permission to show desktop notifications.
   virtual void RequestDesktopNotificationPermission(
@@ -257,7 +318,7 @@ class ContentBrowserClient {
   virtual WebKit::WebNotificationPresenter::Permission
       CheckDesktopNotificationPermission(
           const GURL& source_url,
-          const content::ResourceContext& context,
+          content::ResourceContext* context,
           int render_process_id) = 0;
 
   // Show a desktop notification.  If |worker| is true, the request came from an
@@ -278,26 +339,30 @@ class ContentBrowserClient {
   // type.
   // This is called on the IO thread.
   virtual bool CanCreateWindow(
+      const GURL& opener_url,
       const GURL& source_origin,
       WindowContainerType container_type,
-      const content::ResourceContext& context,
+      content::ResourceContext* context,
       int render_process_id) = 0;
 
   // Returns a title string to use in the task manager for a process host with
   // the given URL, or the empty string to fall back to the default logic.
   // This is called on the IO thread.
   virtual std::string GetWorkerProcessTitle(
-      const GURL& url, const content::ResourceContext& context) = 0;
+      const GURL& url, content::ResourceContext* context) = 0;
 
   // Notifies the embedder that the ResourceDispatcherHost has been created.
   // This is when it can optionally add a delegate or ResourceQueueDelegates.
   virtual void ResourceDispatcherHostCreated() = 0;
 
+  // Allows the embedder to return a delegate for the SpeechRecognitionManager.
+  // The delegate will be owned by the manager. It's valid to return NULL.
+  virtual SpeechRecognitionManagerDelegate*
+      GetSpeechRecognitionManagerDelegate() = 0;
+
   // Getters for common objects.
   virtual ui::Clipboard* GetClipboard() = 0;
-  virtual MHTMLGenerationManager* GetMHTMLGenerationManager() = 0;
   virtual net::NetLog* GetNetLog() = 0;
-  virtual speech_input::SpeechInputManager* GetSpeechInputManager() = 0;
 
   // Creates a new AccessTokenStore for gelocation.
   virtual AccessTokenStore* CreateAccessTokenStore() = 0;
@@ -305,26 +370,30 @@ class ContentBrowserClient {
   // Returns true if fast shutdown is possible.
   virtual bool IsFastShutdownPossible() = 0;
 
-  // Returns the WebKit preferences that are used by the renderer.
-  virtual WebPreferences GetWebkitPrefs(RenderViewHost* render_view_host) = 0;
+  // Called by WebContents to override the WebKit preferences that are used by
+  // the renderer. The content layer will add its own settings, and then it's up
+  // to the embedder to update it if it wants.
+  virtual void OverrideWebkitPrefs(content::RenderViewHost* render_view_host,
+                                   const GURL& url,
+                                   WebPreferences* prefs) = 0;
 
   // Inspector setting was changed and should be persisted.
-  virtual void UpdateInspectorSetting(RenderViewHost* rvh,
+  virtual void UpdateInspectorSetting(content::RenderViewHost* rvh,
                                       const std::string& key,
                                       const std::string& value) = 0;
 
   // Clear the Inspector settings.
-  virtual void ClearInspectorSettings(RenderViewHost* rvh) = 0;
+  virtual void ClearInspectorSettings(content::RenderViewHost* rvh) = 0;
 
   // Notifies that BrowserURLHandler has been created, so that the embedder can
   // optionally add their own handlers.
   virtual void BrowserURLHandlerCreated(BrowserURLHandler* handler) = 0;
 
   // Clears browser cache.
-  virtual void ClearCache(RenderViewHost* rvh) = 0;
+  virtual void ClearCache(content::RenderViewHost* rvh) = 0;
 
   // Clears browser cookies.
-  virtual void ClearCookies(RenderViewHost* rvh) = 0;
+  virtual void ClearCookies(content::RenderViewHost* rvh) = 0;
 
   // Returns the default download directory.
   // This can be called on any thread.
@@ -335,7 +404,8 @@ class ContentBrowserClient {
   virtual std::string GetDefaultDownloadName() = 0;
 
   // Returns true if given origin can use TCP/UDP sockets.
-  virtual bool AllowSocketAPI(const GURL& url) = 0;
+  virtual bool AllowSocketAPI(BrowserContext* browser_context,
+                              const GURL& url) = 0;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Can return an optional fd for crash handling, otherwise returns -1. The

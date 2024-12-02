@@ -7,13 +7,13 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
-#include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/focus/widget_focus_manager.h"
 
+using content::RenderViewHost;
 using content::WebContents;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -41,22 +41,11 @@ void NativeTabContentsContainerWin::AttachContents(WebContents* contents) {
 }
 
 void NativeTabContentsContainerWin::DetachContents(WebContents* contents) {
-  // Detach the TabContents.  Do this before we unparent the
-  // TabContentsViewViews so that the window hierarchy is intact for any
-  // cleanup during Detach().
   Detach();
 
-  // TODO(brettw) should this move to NativeViewHost::Detach?  It
-  // needs cleanup regardless.
   HWND container_hwnd = contents->GetNativeView();
-  if (container_hwnd) {
-    // Hide the contents before adjusting its parent to avoid a full desktop
-    // flicker.
+  if (container_hwnd)
     ShowWindow(container_hwnd, SW_HIDE);
-
-    // Reset the parent to NULL to ensure hidden tabs don't receive messages.
-    static_cast<TabContentsViewViews*>(contents->GetView())->Unparent();
-  }
 }
 
 void NativeTabContentsContainerWin::SetFastResize(bool fast_resize) {
@@ -130,7 +119,9 @@ void NativeTabContentsContainerWin::RequestFocus() {
     // browser window.  Because this change of focus was not user requested,
     // don't send it to listeners.
     views::AutoNativeNotificationDisabler local_notification_disabler;
-    GetFocusManager()->ClearFocus();
+    views::FocusManager* focus_manager = GetFocusManager();
+    if (focus_manager)  // NULL in unittests when using TabContentsViewWin.
+      focus_manager->ClearFocus();
   }
   View::RequestFocus();
 }
@@ -149,7 +140,8 @@ gfx::NativeViewAccessible
     NativeTabContentsContainerWin::GetNativeViewAccessible() {
   WebContents* web_contents = container_->web_contents();
   if (web_contents) {
-    RenderWidgetHostView* host_view = web_contents->GetRenderWidgetHostView();
+    content::RenderWidgetHostView* host_view =
+        web_contents->GetRenderWidgetHostView();
     if (host_view)
       return host_view->GetNativeViewAccessible();
   }

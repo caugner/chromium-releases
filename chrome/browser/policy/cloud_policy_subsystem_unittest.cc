@@ -4,6 +4,7 @@
 
 #include <vector>
 
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
@@ -64,6 +65,8 @@ ACTION_P(CreateSuccessfulRegisterResponse, token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   em::DeviceManagementResponse response_data;
   response_data.mutable_register_response()->set_device_management_token(token);
+  response_data.mutable_register_response()->set_enrollment_type(
+      em::DeviceRegisterResponse::ENTERPRISE);
 
   arg3->response_data = response_data.SerializeAsString();
   arg3->response_code = 200;
@@ -389,6 +392,10 @@ class CloudPolicySubsystemPolicyReregisterTest
 };
 
 TEST_P(CloudPolicySubsystemPolicyReregisterTest, Policy) {
+  // This logs a lot of WARNINGs. Temporarily increase the logging threshold.
+  int prev_level = logging::GetMinLogLevel();
+  logging::SetMinLogLevel(logging::LOG_ERROR);
+
   InSequence s;
   for (int i = 0; i < 40; i++) {
     ExpectSuccessfulRegistration();
@@ -398,6 +405,8 @@ TEST_P(CloudPolicySubsystemPolicyReregisterTest, Policy) {
   ExpectSuccessfulPolicy(1, "http://www.youtube.com");
   ExecuteTest();
   VerifyTest("http://www.youtube.com");
+
+  logging::SetMinLogLevel(prev_level);
 }
 
 INSTANTIATE_TEST_CASE_P(

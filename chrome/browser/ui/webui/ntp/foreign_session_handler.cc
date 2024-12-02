@@ -18,6 +18,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_source.h"
@@ -67,7 +68,7 @@ void ForeignSessionHandler::Observe(
     case chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED:
       // Calling foreignSessions with empty list will automatically hide
       // foreign session section.
-      web_ui()->CallJavascriptFunction("foreignSessions", list_value);
+      web_ui()->CallJavascriptFunction("ntp.foreignSessions", list_value);
       break;
     default:
       NOTREACHED();
@@ -84,10 +85,8 @@ SessionModelAssociator* ForeignSessionHandler::GetModelAssociator() {
   // syncing sessions.
   SessionModelAssociator* model_associator =
       service->GetSessionModelAssociator();
-  if (model_associator == NULL ||
-      !service->ShouldPushChanges()) {
+  if (!service->ShouldPushChanges())
     return NULL;
-  }
   return model_associator;
 }
 
@@ -111,33 +110,36 @@ void ForeignSessionHandler::HandleGetForeignSessions(const ListValue* args) {
   for (std::vector<const SyncedSession*>::const_iterator i =
       sessions.begin(); i != sessions.end() &&
       added_count < kMaxSessionsToShow; ++i) {
-    const SyncedSession* foreign_session = *i;
+    const SyncedSession* session = *i;
+    scoped_ptr<DictionaryValue> session_data(new DictionaryValue());
+    session_data->SetString("tag", session->session_tag);
+    session_data->SetString("name", session->session_name);
     scoped_ptr<ListValue> window_list(new ListValue());
     for (SyncedSession::SyncedWindowMap::const_iterator it =
-        foreign_session->windows.begin(); it != foreign_session->windows.end();
-        ++it) {
+        session->windows.begin(); it != session->windows.end(); ++it) {
       SessionWindow* window = it->second;
       scoped_ptr<DictionaryValue> window_data(new DictionaryValue());
       if (SessionWindowToValue(*window, window_data.get())) {
-        window_data->SetString("sessionTag", foreign_session->session_tag);
-
-        // Give ownership to |list_value|.
         window_list->Append(window_data.release());
       }
     }
+    session_data->Set("windows", window_list.release());
+    session_list.Append(session_data.release());
     added_count++;
-
-    // Give ownership to |session_list|.
-    session_list.Append(window_list.release());
   }
-  web_ui()->CallJavascriptFunction("foreignSessions", session_list);
+  web_ui()->CallJavascriptFunction("ntp.foreignSessions", session_list);
 }
 
 void ForeignSessionHandler::HandleOpenForeignSession(
     const ListValue* args) {
   size_t num_args = args->GetSize();
-  if (num_args > 3U || num_args == 0) {
-    LOG(ERROR) << "openForeignWindow called with only " << args->GetSize()
+  // Expect either 2 or 8 args. For restoring an entire window, only
+  // two arguments are required -- the session tag and the window id.
+  // To restore a tab, the additional args required are the tab id,
+  // and 4 properties of the event object (button, altKey, ctrlKey,
+  // metaKey, shiftKey) for determining how to open the tab.
+  if (num_args != 8U && num_args != 2U) {
+    LOG(ERROR) << "openForeignSession called with " << args->GetSize()
                << " arguments.";
     return;
   }
@@ -149,7 +151,7 @@ void ForeignSessionHandler::HandleOpenForeignSession(
     return;
   }
 
-  // Extract window number.
+  // Extract window number (always provided).
   std::string window_num_str;
   int window_num = kInvalidId;
   if (num_args >= 2 && (!args->GetString(1, &window_num_str) ||
@@ -161,7 +163,7 @@ void ForeignSessionHandler::HandleOpenForeignSession(
   // Extract tab id.
   std::string tab_id_str;
   SessionID::id_type tab_id = kInvalidId;
-  if (num_args == 3 && (!args->GetString(2, &tab_id_str) ||
+  if (num_args >= 3 && (!args->GetString(2, &tab_id_str) ||
       !base::StringToInt(tab_id_str, &tab_id))) {
     LOG(ERROR) << "Failed to extract tab SessionID.";
     return;
@@ -178,7 +180,9 @@ void ForeignSessionHandler::HandleOpenForeignSession(
       LOG(ERROR) << "Failed to load foreign tab.";
       return;
     }
-    SessionRestore::RestoreForeignSessionTab(profile, *tab);
+    WindowOpenDisposition disposition =
+        web_ui_util::GetDispositionFromClick(args, 3);
+    SessionRestore::RestoreForeignSessionTab(profile, *tab, disposition);
   } else {
     std::vector<const SessionWindow*> windows;
     // Note: we don't own the ForeignSessions themselves.

@@ -8,6 +8,8 @@
 #include "content/common/child_thread.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/gpu/gpu_memory_manager.h"
+#include "ui/gfx/gl/gl_share_group.h"
 
 GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
                                      GpuWatchdog* watchdog,
@@ -17,6 +19,8 @@ GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
       io_message_loop_(io_message_loop),
       shutdown_event_(shutdown_event),
       gpu_child_thread_(gpu_child_thread),
+      ALLOW_THIS_IN_INITIALIZER_LIST(gpu_memory_manager_(this,
+          GpuMemoryManager::kDefaultMaxSurfacesWithFrontbufferSoftLimit)),
       watchdog_(watchdog) {
   DCHECK(gpu_child_thread);
   DCHECK(io_message_loop);
@@ -53,6 +57,15 @@ GpuChannel* GpuChannelManager::LookupChannel(int32 client_id) {
     return iter->second;
 }
 
+void GpuChannelManager::AppendAllCommandBufferStubs(
+    std::vector<GpuCommandBufferStubBase*>& stubs) {
+  for (GpuChannelMap::const_iterator it = gpu_channels_.begin();
+      it != gpu_channels_.end(); ++it ) {
+    it->second->AppendAllCommandBufferStubs(stubs);
+  }
+
+}
+
 bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
   bool msg_is_ok = true;
   bool handled = true;
@@ -70,14 +83,14 @@ bool GpuChannelManager::Send(IPC::Message* msg) {
   return gpu_child_thread_->Send(msg);
 }
 
-void GpuChannelManager::OnEstablishChannel(int client_id, int share_client_id) {
+void GpuChannelManager::OnEstablishChannel(int client_id, bool share_context) {
   IPC::ChannelHandle channel_handle;
 
   gfx::GLShareGroup* share_group = NULL;
-  if (share_client_id) {
-    GpuChannel* share_channel = gpu_channels_[share_client_id];
-    DCHECK(share_channel);
-    share_group = share_channel->share_group();
+  if (share_context) {
+    if (!share_group_)
+      share_group_ = new gfx::GLShareGroup;
+    share_group = share_group_;
   }
 
   scoped_refptr<GpuChannel> channel = new GpuChannel(this,
@@ -93,9 +106,7 @@ void GpuChannelManager::OnEstablishChannel(int client_id, int share_client_id) {
     // On POSIX, pass the renderer-side FD. Also mark it as auto-close so
     // that it gets closed after it has been sent.
     int renderer_fd = channel->TakeRendererFileDescriptor();
-    // Check the validity of |renderer_fd| for bug investigation.  Replace with
-    // normal error handling after bug fixed. See for details: crbug.com/95732.
-    CHECK_NE(-1, renderer_fd);
+    DCHECK_NE(-1, renderer_fd);
     channel_handle.socket = base::FileDescriptor(renderer_fd, true);
 #endif
   }
@@ -115,7 +126,7 @@ void GpuChannelManager::OnCloseChannel(
 }
 
 void GpuChannelManager::OnCreateViewCommandBuffer(
-    gfx::PluginWindowHandle window,
+    const gfx::GLSurfaceHandle& window,
     int32 surface_id,
     int32 client_id,
     const GPUCreateCommandBufferConfig& init_params) {

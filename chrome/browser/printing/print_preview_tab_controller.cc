@@ -28,7 +28,6 @@
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -36,6 +35,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -50,7 +50,7 @@ void EnableInternalPDFPluginForTab(TabContentsWrapper* preview_tab) {
   // Always enable the internal PDF plugin for the print preview page.
   ChromePluginServiceFilter::GetInstance()->OverridePluginForTab(
         preview_tab->web_contents()->GetRenderProcessHost()->GetID(),
-        preview_tab->web_contents()->GetRenderViewHost()->routing_id(),
+        preview_tab->web_contents()->GetRenderViewHost()->GetRoutingID(),
         GURL(),
         ASCIIToUTF16(chrome::ChromeContentClient::kPDFPluginName));
 }
@@ -215,7 +215,8 @@ void PrintPreviewTabController::PrintPreview(TabContentsWrapper* tab) {
   PrintPreviewTabController* tab_controller = GetInstance();
   if (!tab_controller)
     return;
-  tab_controller->GetOrCreatePreviewTab(tab);
+  if (!tab_controller->GetOrCreatePreviewTab(tab))
+    tab->print_view_manager()->PrintPreviewDone();
 }
 
 TabContentsWrapper* PrintPreviewTabController::GetOrCreatePreviewTab(
@@ -228,7 +229,7 @@ TabContentsWrapper* PrintPreviewTabController::GetOrCreatePreviewTab(
     return CreatePrintPreviewTab(initiator_tab);
 
   // Show the initiator tab holding the existing preview tab.
-  initiator_tab->web_contents()->GetRenderViewHost()->delegate()->Activate();
+  initiator_tab->web_contents()->GetRenderViewHost()->GetDelegate()->Activate();
   return preview_tab;
 }
 

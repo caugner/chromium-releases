@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "content/browser/browsing_instance.h"
-#include "content/browser/child_process_security_policy.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_service.h"
@@ -27,8 +27,10 @@ static bool IsURLSameAsAnySiteInstance(const GURL& url) {
   if (url.SchemeIs(chrome::kJavaScriptScheme))
     return true;
 
-  return
-      content::GetContentClient()->browser()->IsURLSameAsAnySiteInstance(url);
+  return url == GURL(chrome::kChromeUICrashURL) ||
+         url == GURL(chrome::kChromeUIKillURL) ||
+         url == GURL(chrome::kChromeUIHangURL) ||
+         url == GURL(chrome::kChromeUIShorthangURL);
 }
 
 int32 SiteInstanceImpl::next_site_instance_id_ = 1;
@@ -75,7 +77,8 @@ content::RenderProcessHost* SiteInstanceImpl::GetProcess() {
   // Create a new process if ours went away or was reused.
   if (!process_) {
     // See if we should reuse an old process
-    if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost())
+    if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost(
+            browsing_instance_->browser_context(), site_))
       process_ = content::RenderProcessHost::GetExistingProcessHost(
           browsing_instance_->browser_context(), site_);
 
@@ -261,8 +264,8 @@ void SiteInstanceImpl::Observe(int type,
 void SiteInstanceImpl::LockToOrigin() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kEnableStrictSiteIsolation)) {
-    ChildProcessSecurityPolicy* policy =
-        ChildProcessSecurityPolicy::GetInstance();
+    ChildProcessSecurityPolicyImpl* policy =
+        ChildProcessSecurityPolicyImpl::GetInstance();
     policy->LockToOrigin(process_->GetID(), site_);
   }
 }

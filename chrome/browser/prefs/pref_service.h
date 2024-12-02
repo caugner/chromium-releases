@@ -4,6 +4,10 @@
 
 // This provides a way to access the application's current preferences.
 
+// Chromium settings and storage represent user-selected preferences and
+// information and MUST not be extracted, overwritten or modified except
+// through Chromium defined APIs.
+
 #ifndef CHROME_BROWSER_PREFS_PREF_SERVICE_H_
 #define CHROME_BROWSER_PREFS_PREF_SERVICE_H_
 #pragma once
@@ -48,6 +52,13 @@ class PrefService : public base::NonThreadSafe {
   enum PrefSyncStatus {
     UNSYNCABLE_PREF,
     SYNCABLE_PREF
+  };
+
+  enum PrefInitializationStatus {
+    INITIALIZATION_STATUS_WAITING,
+    INITIALIZATION_STATUS_SUCCESS,
+    INITIALIZATION_STATUS_CREATED_NEW_PROFILE,
+    INITIALIZATION_STATUS_ERROR
   };
 
   // A helper class to store all the information associated with a preference.
@@ -150,10 +161,6 @@ class PrefService : public base::NonThreadSafe {
   // incognito windows).
   PrefService* CreateIncognitoPrefService(PrefStore* incognito_extension_prefs);
 
-  // Creates a per-tab copy of the pref service that shares most pref stores
-  // and allows WebKit-related preferences to be overridden on per-tab basis.
-  PrefService* CreatePrefServiceWithPerTabPrefStore();
-
   virtual ~PrefService();
 
   // Reloads the data from file. This should only be called when the importer
@@ -164,6 +171,10 @@ class PrefService : public base::NonThreadSafe {
   // Returns true if the preference for the given preference name is available
   // and is managed.
   bool IsManagedPreference(const char* pref_name) const;
+
+  // Returns |true| if a preference with the given name is available and its
+  // value can be changed by the user.
+  bool IsUserModifiablePreference(const char* pref_name) const;
 
   // Lands pending writes to disk. This should only be used if we need to save
   // immediately (basically, during shutdown).
@@ -292,6 +303,8 @@ class PrefService : public base::NonThreadSafe {
   const Preference* FindPreference(const char* pref_name) const;
 
   bool ReadOnly() const;
+
+  PrefInitializationStatus GetInitializationStatus() const;
 
   // SyncableService getter.
   // TODO(zea): Have PrefService implement SyncableService directly.

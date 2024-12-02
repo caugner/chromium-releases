@@ -10,6 +10,7 @@
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
+#include "ui/aura/window_observer.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/events.h"
 #include "ui/gfx/compositor/layer_animation_observer.h"
@@ -36,8 +37,9 @@ class DragImageView;
 class ASH_EXPORT DragDropController
     : public aura::client::DragDropClient,
       public aura::EventFilter,
-      public ui::LayerAnimationObserver {
- public:
+      public ui::ImplicitAnimationObserver,
+      public aura::WindowObserver {
+public:
   DragDropController();
   virtual ~DragDropController();
 
@@ -47,11 +49,12 @@ class ASH_EXPORT DragDropController
 
   // Overridden from aura::client::DragDropClient:
   virtual int StartDragAndDrop(const ui::OSExchangeData& data,
-                                int operation) OVERRIDE;
+                               const gfx::Point& root_location,
+                               int operation) OVERRIDE;
   virtual void DragUpdate(aura::Window* target,
-                          const aura::MouseEvent& event) OVERRIDE;
+                          const aura::LocatedEvent& event) OVERRIDE;
   virtual void Drop(aura::Window* target,
-                    const aura::MouseEvent& event) OVERRIDE;
+                    const aura::LocatedEvent& event) OVERRIDE;
   virtual void DragCancel() OVERRIDE;
   virtual bool IsDragDropInProgress() OVERRIDE;
 
@@ -66,16 +69,14 @@ class ASH_EXPORT DragDropController
       aura::Window* target,
       aura::GestureEvent* event) OVERRIDE;
 
+  // Overridden from aura::WindowObserver.
+  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE;
+
  private:
   friend class ash::test::DragDropControllerTest;
 
-  // Overridden from ui::LayerAnimationObserver:
-  virtual void OnLayerAnimationEnded(
-      const ui::LayerAnimationSequence* sequence) OVERRIDE;
-  virtual void OnLayerAnimationAborted(
-      const ui::LayerAnimationSequence* sequence) OVERRIDE;
-  virtual void OnLayerAnimationScheduled(
-      const ui::LayerAnimationSequence* sequence) OVERRIDE {}
+  // Implementation of ImplicitAnimationObserver
+  virtual void OnImplicitAnimationsCompleted() OVERRIDE;
 
   // Helper method to start drag widget flying back animation.
   void StartCanceledAnimation();
@@ -86,7 +87,9 @@ class ASH_EXPORT DragDropController
   scoped_ptr<DragImageView> drag_image_;
   const ui::OSExchangeData* drag_data_;
   int drag_operation_;
-  aura::Window* dragged_window_;
+
+  // Window that is currently under the drag cursor.
+  aura::Window* drag_window_;
   gfx::Point drag_start_location_;
 
   bool drag_drop_in_progress_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,15 @@
 #import "base/mac/cocoa_protocols.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/cocoa/info_bubble_view.h"
+#import "chrome/browser/ui/cocoa/base_bubble_controller.h"
+#import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #include "googleurl/src/gurl.h"
 
 
 class Browser;
 class DevtoolsNotificationBridge;
 class ExtensionHost;
-@class InfoBubbleWindow;
+class ExtensionPopupContainer;
 
 namespace content {
 class NotificationRegistrar;
@@ -31,17 +32,10 @@ class NotificationRegistrar;
 //
 // There can only be one browser action popup open at a time, so a static
 // variable holds a reference to the current popup.
-@interface ExtensionPopupController : NSWindowController<NSWindowDelegate> {
+@interface ExtensionPopupController : BaseBubbleController {
  @private
   // The native extension view retrieved from the extension host. Weak.
   NSView* extensionView_;
-
-  // The popup's parent window. Weak.
-  NSWindow* parentWindow_;
-
-  // Where the window is anchored. Right now it's the bottom center of the
-  // browser action button.
-  NSPoint anchor_;
 
   // The current frame of the extension view. Cached to prevent setting the
   // frame if the size hasn't changed.
@@ -52,9 +46,13 @@ class NotificationRegistrar;
 
   scoped_ptr<content::NotificationRegistrar> registrar_;
   scoped_ptr<DevtoolsNotificationBridge> notificationBridge_;
+  scoped_ptr<ExtensionPopupContainer> container_;
 
   // Whether the popup has a devtools window attached to it.
   BOOL beingInspected_;
+
+  // The size once the ExtensionView has loaded.
+  NSSize pendingSize_;
 }
 
 // Returns the ExtensionHost object associated with this popup.

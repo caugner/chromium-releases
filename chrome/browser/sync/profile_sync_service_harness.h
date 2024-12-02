@@ -15,7 +15,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/retry_verifier.h"
-#include "chrome/browser/sync/syncable/model_type.h"
+#include "sync/syncable/model_type.h"
 
 class Profile;
 
@@ -136,7 +136,7 @@ class ProfileSyncServiceHarness
   bool AwaitPassphraseRequired();
 
   // Blocks the caller until |service_| indicates that the passphrase set by
-  // calling SetPassphrase has been accepted.
+  // calling SetDecryptionPassphrase has been accepted.
   bool AwaitPassphraseAccepted();
 
   // Returns the ProfileSyncService member of the sync client.
@@ -193,6 +193,9 @@ class ProfileSyncServiceHarness
   // Get the number of sync datatypes registered (ignoring whatever state
   // they're in).
   size_t GetNumDatatypes() const;
+
+  // Gets the |auto_start_enabled_| variable from the |service_|.
+  bool AutoStartEnabled();
 
  private:
   friend class StateChangeTimeoutEvent;

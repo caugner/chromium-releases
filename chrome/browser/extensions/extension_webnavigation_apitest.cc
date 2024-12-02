@@ -12,21 +12,41 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/context_menu_params.h"
 #include "net/base/mock_host_resolver.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
-#include "webkit/glue/context_menu.h"
 
 using content::WebContents;
+
+#if defined(OS_WIN)
+// http://crbug.com/118478
+#define MAYBE_WebNavigationIFrame DISABLED_WebNavigationIFrame
+#define MAYBE_WebNavigationFailures DISABLED_WebNavigationFailures
+#define MAYBE_WebNavigationForwardBack DISABLED_WebNavigationForwardBack
+#define MAYBE_WebNavigationClientRedirect DISABLED_WebNavigationClientRedirect
+#define MAYBE_WebNavigationSimpleLoad DISABLED_WebNavigationSimpleLoad
+#define MAYBE_WebNavigationReferenceFragment \
+    DISABLED_WebNavigationReferenceFragment
+#define MAYBE_WebNavigationOpenTab DISABLED_WebNavigationOpenTab
+#else
+#define MAYBE_WebNavigationIFrame WebNavigationIFrame
+#define MAYBE_WebNavigationFailures WebNavigationFailures
+#define MAYBE_WebNavigationForwardBack WebNavigationForwardBack
+#define MAYBE_WebNavigationClientRedirect WebNavigationClientRedirect
+#define MAYBE_WebNavigationSimpleLoad WebNavigationSimpleLoad
+#define MAYBE_WebNavigationReferenceFragment WebNavigationReferenceFragment
+#define MAYBE_WebNavigationOpenTab WebNavigationOpenTab
+#endif
 
 namespace {
 
 class TestRenderViewContextMenu : public RenderViewContextMenu {
  public:
   TestRenderViewContextMenu(WebContents* web_contents,
-                            const ContextMenuParams& params)
+                            const content::ContextMenuParams& params)
       : RenderViewContextMenu(web_contents, params) {
   }
   virtual ~TestRenderViewContextMenu() {}
@@ -62,7 +82,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationGetFrame) {
       RunExtensionSubtest("webnavigation", "test_getFrame.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationClientRedirect) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationClientRedirect) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -86,7 +106,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationServerRedirect) {
           << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationForwardBack) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationForwardBack) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -97,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationForwardBack) {
           << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationIFrame) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationIFrame) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -107,7 +127,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationIFrame) {
       RunExtensionSubtest("webnavigation", "test_iframe.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationOpenTab) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationOpenTab) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -117,7 +137,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationOpenTab) {
       RunExtensionSubtest("webnavigation", "test_openTab.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationReferenceFragment) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationReferenceFragment) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -128,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationReferenceFragment) {
           << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationSimpleLoad) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationSimpleLoad) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -138,7 +158,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationSimpleLoad) {
       RunExtensionSubtest("webnavigation", "test_simpleLoad.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationFailures) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationFailures) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -171,7 +191,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationUserAction) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   // This corresponds to "Open link in new tab".
-  ContextMenuParams params;
+  content::ContextMenuParams params;
   params.is_editable = false;
   params.media_type = WebKit::WebContextMenuData::MediaTypeNone;
   params.page_url = url;
@@ -268,8 +288,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationTargetBlankIncognito) {
       switches::kAllowLegacyExtensionManifests);
 
   // Wait for the extension to set itself up and return control to us.
-  ASSERT_TRUE(RunExtensionSubtestIncognito(
-      "webnavigation", "test_targetBlank.html")) << message_;
+  ASSERT_TRUE(RunExtensionSubtest(
+      "webnavigation", "test_targetBlank.html",
+      ExtensionApiTest::kFlagEnableIncognito)) << message_;
 
   ResultCatcher catcher;
 

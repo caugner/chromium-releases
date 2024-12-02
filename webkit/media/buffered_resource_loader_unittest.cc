@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/format_macros.h"
+#include "base/message_loop.h"
 #include "base/stringprintf.h"
 #include "media/base/media_log.h"
 #include "net/base/net_errors.h"
@@ -89,7 +90,7 @@ class BufferedResourceLoaderTest : public testing::Test {
     loader_->SetURLLoaderForTest(scoped_ptr<WebKit::WebURLLoader>(url_loader_));
   }
 
-  void SetLoaderBuffer(size_t forward_capacity, size_t backward_capacity) {
+  void SetLoaderBuffer(int forward_capacity, int backward_capacity) {
     loader_->buffer_.reset(
         new media::SeekableBuffer(backward_capacity, forward_capacity));
   }
@@ -213,8 +214,8 @@ class BufferedResourceLoaderTest : public testing::Test {
   }
 
   void WriteUntilThreshold() {
-    size_t buffered = loader_->buffer_->forward_bytes();
-    size_t capacity = loader_->buffer_->forward_capacity();
+    int buffered = loader_->buffer_->forward_bytes();
+    int capacity = loader_->buffer_->forward_capacity();
     CHECK_LT(buffered, capacity);
 
     EXPECT_CALL(*this, NetworkCallback());
@@ -242,22 +243,22 @@ class BufferedResourceLoaderTest : public testing::Test {
     EXPECT_EQ(loader_->last_offset_, expected_last_offset);
   }
 
-  void ConfirmBufferState(size_t backward_bytes,
-                          size_t backward_capacity,
-                          size_t forward_bytes,
-                          size_t forward_capacity) {
+  void ConfirmBufferState(int backward_bytes,
+                          int backward_capacity,
+                          int forward_bytes,
+                          int forward_capacity) {
     EXPECT_EQ(backward_bytes, loader_->buffer_->backward_bytes());
     EXPECT_EQ(backward_capacity, loader_->buffer_->backward_capacity());
     EXPECT_EQ(forward_bytes, loader_->buffer_->forward_bytes());
     EXPECT_EQ(forward_capacity, loader_->buffer_->forward_capacity());
   }
 
-  void ConfirmLoaderBufferBackwardCapacity(size_t expected_backward_capacity) {
+  void ConfirmLoaderBufferBackwardCapacity(int expected_backward_capacity) {
     EXPECT_EQ(loader_->buffer_->backward_capacity(),
               expected_backward_capacity);
   }
 
-  void ConfirmLoaderBufferForwardCapacity(size_t expected_forward_capacity) {
+  void ConfirmLoaderBufferForwardCapacity(int expected_forward_capacity) {
     EXPECT_EQ(loader_->buffer_->forward_capacity(), expected_forward_capacity);
   }
 
@@ -268,12 +269,12 @@ class BufferedResourceLoaderTest : public testing::Test {
   // Makes sure the |loader_| buffer window is in a reasonable range.
   void CheckBufferWindowBounds() {
     // Corresponds to value defined in buffered_resource_loader.cc.
-    static const size_t kMinBufferCapacity = 2 * 1024 * 1024;
+    static const int kMinBufferCapacity = 2 * 1024 * 1024;
     EXPECT_GE(loader_->buffer_->forward_capacity(), kMinBufferCapacity);
     EXPECT_GE(loader_->buffer_->backward_capacity(), kMinBufferCapacity);
 
     // Corresponds to value defined in buffered_resource_loader.cc.
-    static const size_t kMaxBufferCapacity = 20 * 1024 * 1024;
+    static const int kMaxBufferCapacity = 20 * 1024 * 1024;
     EXPECT_LE(loader_->buffer_->forward_capacity(), kMaxBufferCapacity);
     EXPECT_LE(loader_->buffer_->backward_capacity(), kMaxBufferCapacity);
   }
@@ -283,8 +284,8 @@ class BufferedResourceLoaderTest : public testing::Test {
   MOCK_METHOD0(NetworkCallback, void());
 
   // Accessors for private variables on |loader_|.
-  size_t forward_bytes() { return loader_->buffer_->forward_bytes(); }
-  size_t forward_capacity() { return loader_->buffer_->forward_capacity(); }
+  int forward_bytes() { return loader_->buffer_->forward_bytes(); }
+  int forward_capacity() { return loader_->buffer_->forward_capacity(); }
 
  protected:
   GURL gurl_;
@@ -442,7 +443,7 @@ TEST_F(BufferedResourceLoaderTest, ReadExtendBuffer) {
   Initialize(kHttpUrl, 10, 0x014FFFFFF);
   SetLoaderBuffer(10, 20);
   Start();
-  PartialResponse(10, 0x014FFFFFF, 0x01500000);
+  PartialResponse(10, 0x014FFFFFF, 0x015000000);
 
   // Don't test for network callbacks (covered by *Strategy tests).
   EXPECT_CALL(*this, NetworkCallback())
@@ -943,8 +944,8 @@ TEST_F(BufferedResourceLoaderTest, Tricky_LargeReadBackwards) {
 }
 
 TEST_F(BufferedResourceLoaderTest, Tricky_ReadPastThreshold) {
-  const size_t kSize = 5 * 1024 * 1024;
-  const size_t kThreshold = 2 * 1024 * 1024;
+  const int kSize = 5 * 1024 * 1024;
+  const int kThreshold = 2 * 1024 * 1024;
 
   Initialize(kHttpUrl, 10, kSize);
   SetLoaderBuffer(10, 10);
@@ -980,9 +981,6 @@ TEST_F(BufferedResourceLoaderTest, Tricky_ReadPastThreshold) {
   StopWhenLoad();
 }
 
-// NOTE: This test will need to be reworked a little once
-// http://code.google.com/p/chromium/issues/detail?id=72578
-// is fixed.
 TEST_F(BufferedResourceLoaderTest, HasSingleOrigin) {
   // Make sure no redirect case works as expected.
   Initialize(kHttpUrl, -1, -1);
@@ -1012,6 +1010,7 @@ TEST_F(BufferedResourceLoaderTest, HasSingleOrigin) {
   Initialize(kHttpUrl, -1, -1);
   Start();
   Redirect(kHttpRedirectToDifferentDomainUrl1);
+  FullResponse(1024);
   EXPECT_FALSE(loader_->HasSingleOrigin());
   StopWhenLoad();
 
@@ -1020,6 +1019,7 @@ TEST_F(BufferedResourceLoaderTest, HasSingleOrigin) {
   Start();
   Redirect(kHttpRedirectToSameDomainUrl1);
   Redirect(kHttpRedirectToDifferentDomainUrl1);
+  FullResponse(1024);
   EXPECT_FALSE(loader_->HasSingleOrigin());
   StopWhenLoad();
 }
@@ -1110,6 +1110,47 @@ TEST_F(BufferedResourceLoaderTest, BufferWindow_PlaybackRate_AboveUpperBound) {
   loader_->SetPlaybackRate(100);
   CheckBufferWindowBounds();
   StopWhenLoad();
+}
+
+static void ExpectContentRange(
+    const std::string& str, bool expect_success,
+    int64 expected_first, int64 expected_last, int64 expected_size) {
+  int64 first, last, size;
+  ASSERT_EQ(expect_success, BufferedResourceLoader::ParseContentRange(
+      str, &first, &last, &size)) << str;
+  if (!expect_success)
+    return;
+  EXPECT_EQ(first, expected_first);
+  EXPECT_EQ(last, expected_last);
+  EXPECT_EQ(size, expected_size);
+}
+
+static void ExpectContentRangeFailure(const std::string& str) {
+  ExpectContentRange(str, false, 0, 0, 0);
+}
+
+static void ExpectContentRangeSuccess(
+    const std::string& str,
+    int64 expected_first, int64 expected_last, int64 expected_size) {
+  ExpectContentRange(str, true, expected_first, expected_last, expected_size);
+}
+
+TEST(BufferedResourceLoaderStandaloneTest, ParseContentRange) {
+  ExpectContentRangeFailure("cytes 0-499/500");
+  ExpectContentRangeFailure("bytes 0499/500");
+  ExpectContentRangeFailure("bytes 0-499500");
+  ExpectContentRangeFailure("bytes 0-499/500-blorg");
+  ExpectContentRangeFailure("bytes 0-499/500-1");
+  ExpectContentRangeFailure("bytes 0-499/400");
+  ExpectContentRangeFailure("bytes 0-/400");
+  ExpectContentRangeFailure("bytes -300/400");
+  ExpectContentRangeFailure("bytes 20-10/400");
+
+  ExpectContentRangeSuccess("bytes 0-499/500", 0, 499, 500);
+  ExpectContentRangeSuccess("bytes 0-0/500", 0, 0, 500);
+  ExpectContentRangeSuccess("bytes 10-11/50", 10, 11, 50);
+  ExpectContentRangeSuccess("bytes 10-11/*", 10, 11,
+                            kPositionNotSpecified);
 }
 
 }  // namespace webkit_media

@@ -138,7 +138,7 @@ var NetInternalsTest = (function() {
     if ($(ancestorId).nodeName == 'TBODY')
       return $(ancestorId);
     // The tbody element of the first styled table in |parentId|.
-    return document.querySelector('#' + ancestorId + ' .styledTable tbody');
+    return document.querySelector('#' + ancestorId + ' .styled-table tbody');
   };
 
   /**
@@ -664,12 +664,16 @@ var NetInternalsTest = (function() {
    * @param {string}: nodeId ID of the node that should be visible.
    */
   NetInternalsTest.expectStatusViewNodeVisible = function(nodeId) {
-    expectEquals(nodeId == StatusView.FOR_CAPTURE_ID,
-                 NetInternalsTest.nodeIsVisible($(StatusView.FOR_CAPTURE_ID)));
-    expectEquals(nodeId == StatusView.FOR_VIEW_ID,
-                 NetInternalsTest.nodeIsVisible($(StatusView.FOR_VIEW_ID)));
-    expectEquals(nodeId == StatusView.FOR_FILE_ID,
-                 NetInternalsTest.nodeIsVisible($(StatusView.FOR_FILE_ID)));
+    var allIds = [
+      CaptureStatusView.MAIN_BOX_ID,
+      LoadedStatusView.MAIN_BOX_ID,
+      HaltedStatusView.MAIN_BOX_ID
+    ];
+
+    for (var i = 0; i < allIds.length; ++i) {
+      var curId = allIds[i];
+      expectEquals(nodeId == curId, NetInternalsTest.nodeIsVisible($(curId)));
+    }
   };
 
   return NetInternalsTest;

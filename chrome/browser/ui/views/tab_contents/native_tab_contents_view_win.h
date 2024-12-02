@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,12 @@
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view.h"
 #include "ui/views/widget/native_widget_win.h"
 
-class WebDropTarget;
-class TabContentsDragWin;
+class WebDragBookmarkHandlerWin;
+class WebDragDest;
+class WebContentsDragWin;
 
 namespace content {
+class RenderWidgetHostView;
 class WebContents;
 }
 
@@ -23,18 +25,15 @@ class NativeTabContentsViewWin : public views::NativeWidgetWin,
       internal::NativeTabContentsViewDelegate* delegate);
   virtual ~NativeTabContentsViewWin();
 
-  WebDropTarget* drop_target() const { return drop_target_.get(); }
+  WebDragDest* drag_dest() const { return drag_dest_.get(); }
 
   content::WebContents* GetWebContents() const;
-
-  void EndDragging();
 
  private:
   // Overridden from NativeTabContentsView:
   virtual void InitNativeTabContentsView() OVERRIDE;
-  virtual void Unparent() OVERRIDE;
-  virtual RenderWidgetHostView* CreateRenderWidgetHostView(
-      RenderWidgetHost* render_widget_host) OVERRIDE;
+  virtual content::RenderWidgetHostView* CreateRenderWidgetHostView(
+      content::RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
   virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
@@ -64,20 +63,23 @@ class NativeTabContentsViewWin : public views::NativeWidgetWin,
   virtual void OnSize(UINT param, const WTL::CSize& size) OVERRIDE;
   virtual LRESULT OnNCCalcSize(BOOL w_param, LPARAM l_param) OVERRIDE;
   virtual void OnNCPaint(HRGN rgn) OVERRIDE;
+  virtual LRESULT OnNCHitTest(const CPoint& point) OVERRIDE;
 
   // Backend for all scroll messages, the |message| parameter indicates which
   // one it is.
   void ScrollCommon(UINT message, int scroll_type, short position,
                     HWND scrollbar);
-  bool ScrollZoom(int scroll_type);
+
+  void EndDragging();
 
   internal::NativeTabContentsViewDelegate* delegate_;
 
+  scoped_ptr<WebDragBookmarkHandlerWin> bookmark_handler_;
   // A drop target object that handles drags over this TabContents.
-  scoped_refptr<WebDropTarget> drop_target_;
+  scoped_refptr<WebDragDest> drag_dest_;
 
   // Used to handle the drag-and-drop.
-  scoped_refptr<TabContentsDragWin> drag_handler_;
+  scoped_refptr<WebContentsDragWin> drag_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTabContentsViewWin);
 };

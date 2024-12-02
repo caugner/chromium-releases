@@ -54,16 +54,19 @@ class VideoRendererBaseTest : public ::testing::Test {
     renderer_ = new VideoRendererBase(
         base::Bind(&VideoRendererBaseTest::Paint, base::Unretained(this)),
         base::Bind(&VideoRendererBaseTest::SetOpaqueCBWasCalled,
-                   base::Unretained(this)));
+                   base::Unretained(this)),
+        true);
     renderer_->set_host(&host_);
 
     EXPECT_CALL(*decoder_, natural_size())
         .WillRepeatedly(ReturnRef(kNaturalSize));
-
-    EXPECT_CALL(stats_callback_object_, OnStatistics(_))
+    EXPECT_CALL(statistics_cb_object_, OnStatistics(_))
         .Times(AnyNumber());
-
     EXPECT_CALL(*this, SetOpaqueCBWasCalled(_))
+        .WillRepeatedly(::testing::Return());
+    EXPECT_CALL(*decoder_, Stop(_))
+        .WillRepeatedly(OnStop());
+    EXPECT_CALL(*this, TimeCBWasCalled(_))
         .WillRepeatedly(::testing::Return());
   }
 
@@ -74,6 +77,8 @@ class VideoRendererBaseTest : public ::testing::Test {
       Stop();
     }
   }
+
+  MOCK_METHOD1(TimeCBWasCalled, void(base::TimeDelta));
 
   MOCK_CONST_METHOD1(SetOpaqueCBWasCalled, void(bool));
 
@@ -102,7 +107,9 @@ class VideoRendererBaseTest : public ::testing::Test {
 
     // Initialize, we shouldn't have any reads.
     renderer_->Initialize(decoder_,
-                          NewExpectedClosure(), NewStatisticsCallback());
+                          NewExpectedStatusCB(PIPELINE_OK),
+                          NewStatisticsCB(),
+                          NewTimeCB());
 
     // Now seek to trigger prerolling.
     Seek(0);
@@ -260,16 +267,21 @@ class VideoRendererBaseTest : public ::testing::Test {
   }
 
  protected:
-  StatisticsCallback NewStatisticsCallback() {
-    return base::Bind(&MockStatisticsCallback::OnStatistics,
-                      base::Unretained(&stats_callback_object_));
+  StatisticsCB NewStatisticsCB() {
+    return base::Bind(&MockStatisticsCB::OnStatistics,
+                      base::Unretained(&statistics_cb_object_));
+  }
+
+  VideoRenderer::TimeCB NewTimeCB() {
+    return base::Bind(&VideoRendererBaseTest::TimeCBWasCalled,
+                      base::Unretained(this));
   }
 
   // Fixture members.
   scoped_refptr<VideoRendererBase> renderer_;
   scoped_refptr<MockVideoDecoder> decoder_;
   StrictMock<MockFilterHost> host_;
-  MockStatisticsCallback stats_callback_object_;
+  MockStatisticsCB statistics_cb_object_;
 
   // Receives all the buffers that renderer had provided to |decoder_|.
   std::deque<scoped_refptr<VideoFrame> > read_queue_;
@@ -448,7 +460,7 @@ TEST_F(VideoRendererBaseTest, GetCurrentFrame_Flushed) {
 
 #if defined(OS_MACOSX)
 // http://crbug.com/109405
-#define MAYBE_GetCurrentFrame_EndOfStream FLAKY_GetCurrentFrame_EndOfStream
+#define MAYBE_GetCurrentFrame_EndOfStream DISABLED_GetCurrentFrame_EndOfStream
 #else
 #define MAYBE_GetCurrentFrame_EndOfStream GetCurrentFrame_EndOfStream
 #endif

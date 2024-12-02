@@ -1,18 +1,27 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ash/wm/property_util.h"
 
+#include "ash/wm/window_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_property.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
 
+DECLARE_WINDOW_PROPERTY_TYPE(bool)
+
 namespace ash {
 
+namespace {
+
+const aura::WindowProperty<bool> kWindowTrackedByWorkspaceSplitProp = {true};
+
+}  // namespace
+
 void SetRestoreBounds(aura::Window* window, const gfx::Rect& bounds) {
-  delete GetRestoreBounds(window);
   window->SetProperty(aura::client::kRestoreBoundsKey, new gfx::Rect(bounds));
 }
 
@@ -22,13 +31,28 @@ void SetRestoreBoundsIfNotSet(aura::Window* window) {
 }
 
 const gfx::Rect* GetRestoreBounds(aura::Window* window) {
-  return reinterpret_cast<gfx::Rect*>(
-      window->GetProperty(aura::client::kRestoreBoundsKey));
+  return window->GetProperty(aura::client::kRestoreBoundsKey);
 }
 
 void ClearRestoreBounds(aura::Window* window) {
-  delete GetRestoreBounds(window);
-  window->SetProperty(aura::client::kRestoreBoundsKey, NULL);
+  window->ClearProperty(aura::client::kRestoreBoundsKey);
+}
+
+void ToggleMaximizedState(aura::Window* window) {
+  window->SetProperty(aura::client::kShowStateKey,
+                      wm::IsWindowMaximized(window) ? ui::SHOW_STATE_NORMAL
+                                                    : ui::SHOW_STATE_MAXIMIZED);
+}
+
+const aura::WindowProperty<bool>* const
+    kWindowTrackedByWorkspaceSplitPropKey = &kWindowTrackedByWorkspaceSplitProp;
+
+void SetTrackedByWorkspace(aura::Window* window, bool value) {
+  window->SetProperty(kWindowTrackedByWorkspaceSplitPropKey, value);
+}
+
+bool GetTrackedByWorkspace(aura::Window* window) {
+  return window->GetProperty(kWindowTrackedByWorkspaceSplitPropKey);
 }
 
 }

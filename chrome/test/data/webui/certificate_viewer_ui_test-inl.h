@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/browser/ui/webui/web_ui_browsertest.h"
-#include "chrome/browser/certificate_viewer.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/test_html_dialog_observer.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "net/base/test_certificate_data.h"
@@ -27,9 +26,6 @@ class CertificateViewerUITest : public WebUIBrowserTest {
 };
 
 void CertificateViewerUITest::ShowCertificateViewer() {
-  // Enable more WebUI to use WebUI certificate viewer.
-  chrome_web_ui::OverrideMoreWebUI(true);
-
   scoped_refptr<net::X509Certificate> google_cert(
       net::X509Certificate::CreateFromBytes(
           reinterpret_cast<const char*>(google_der), sizeof(google_der)));

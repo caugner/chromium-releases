@@ -11,6 +11,8 @@
 #include "base/time.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/animation/animation_delegate.h"
 
 class Browser;
@@ -21,6 +23,7 @@ class PanelBrowserFrameView;
 
 // A browser view that implements Panel specific behavior.
 class PanelBrowserView : public BrowserView,
+                         public content::NotificationObserver,
                          public NativePanel,
                          public ui::AnimationDelegate {
  public:
@@ -35,8 +38,9 @@ class PanelBrowserView : public BrowserView,
 
   // Called from frame view when titlebar receives a mouse event.
   // Return true if the event is handled.
-  bool OnTitlebarMousePressed(const gfx::Point& location);
-  bool OnTitlebarMouseDragged(const gfx::Point& location);
+  // |mouse_location| is in screen coordinates.
+  bool OnTitlebarMousePressed(const gfx::Point& mouse_location);
+  bool OnTitlebarMouseDragged(const gfx::Point& mouse_location);
   bool OnTitlebarMouseReleased();
   bool OnTitlebarMouseCaptureLost();
 
@@ -66,10 +70,17 @@ class PanelBrowserView : public BrowserView,
       ui::WindowShowState* show_state) const OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
+  // Overridden from NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
   // Overridden from views::WidgetDelegate:
   virtual void OnDisplayChanged() OVERRIDE;
   virtual void OnWorkAreaChanged() OVERRIDE;
   virtual bool WillProcessWorkAreaChange() const OVERRIDE;
+  virtual void OnWindowBeginUserBoundsChange() OVERRIDE;
+  virtual void OnWindowEndUserBoundsChange() OVERRIDE;
 
   // Overridden from views::Widget::Observer
   virtual void OnWidgetActivationChanged(views::Widget* widget,
@@ -85,6 +96,7 @@ class PanelBrowserView : public BrowserView,
   virtual void ActivatePanel() OVERRIDE;
   virtual void DeactivatePanel() OVERRIDE;
   virtual bool IsPanelActive() const OVERRIDE;
+  virtual void PreventActivationByOS(bool prevent_activation) OVERRIDE;
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
@@ -113,6 +125,8 @@ class PanelBrowserView : public BrowserView,
   virtual gfx::Size IconOnlySize() const OVERRIDE;
   virtual void EnsurePanelFullyVisible() OVERRIDE;
   virtual void SetPanelAppIconVisibility(bool visible) OVERRIDE;
+  virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
+  virtual void EnableResizeByMouse(bool enable) OVERRIDE;
 
   // Overridden from AnimationDelegate:
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -123,6 +137,8 @@ class PanelBrowserView : public BrowserView,
   void SetBoundsInternal(const gfx::Rect& bounds, bool animate);
 
   void ShowOrHidePanelAppIcon(bool show);
+
+  bool IsAnimatingBounds() const;
 
   scoped_ptr<Panel> panel_;
   gfx::Rect bounds_;
@@ -136,9 +152,10 @@ class PanelBrowserView : public BrowserView,
   // Is the mouse button currently down?
   bool mouse_pressed_;
 
-  // Location the mouse was pressed at or dragged to. Used in drag-and-drop.
+  // Location the mouse was pressed at or dragged to last time when we process
+  // the mouse event. Used in drag-and-drop.
   // This point is represented in the screen coordinate system.
-  gfx::Point mouse_location_;
+  gfx::Point last_mouse_location_;
 
   // Timestamp when the mouse was pressed. Used to detect long click.
   base::TimeTicks mouse_pressed_time_;
@@ -161,6 +178,8 @@ class PanelBrowserView : public BrowserView,
   // The last view that had focus in the panel. This is saved so that focus can
   // be restored properly when a drag ends.
   views::View* old_focused_view_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserView);
 };

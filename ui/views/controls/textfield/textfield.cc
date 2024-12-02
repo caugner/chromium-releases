@@ -4,10 +4,6 @@
 
 #include "ui/views/controls/textfield/textfield.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdkkeysyms.h>
-#endif
-
 #include <string>
 
 #include "base/string_util.h"
@@ -23,9 +19,7 @@
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_LINUX)
-#include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
 #include "base/win/win_util.h"
 // TODO(beng): this should be removed when the OS_WIN hack from
 // ViewHierarchyChanged is removed.
@@ -52,6 +46,8 @@ Textfield::Textfield()
       use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
+      cursor_color_(SK_ColorBLACK),
+      use_default_cursor_color_(true),
       initialized_(false),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
@@ -70,6 +66,8 @@ Textfield::Textfield(StyleFlags style)
       use_default_text_color_(true),
       background_color_(SK_ColorWHITE),
       use_default_background_color_(true),
+      cursor_color_(SK_ColorBLACK),
+      use_default_cursor_color_(true),
       initialized_(false),
       horizontal_margins_were_set_(false),
       vertical_margins_were_set_(false),
@@ -97,6 +95,7 @@ void Textfield::SetReadOnly(bool read_only) {
     native_wrapper_->UpdateReadOnly();
     native_wrapper_->UpdateTextColor();
     native_wrapper_->UpdateBackgroundColor();
+    native_wrapper_->UpdateCursorColor();
   }
 }
 
@@ -191,6 +190,19 @@ void Textfield::UseDefaultBackgroundColor() {
     native_wrapper_->UpdateBackgroundColor();
 }
 
+void Textfield::SetCursorColor(SkColor color) {
+  cursor_color_ = color;
+  use_default_cursor_color_ = false;
+  if (native_wrapper_)
+    native_wrapper_->UpdateCursorColor();
+}
+
+void Textfield::UseDefaultCursorColor() {
+  use_default_cursor_color_ = true;
+  if (native_wrapper_)
+    native_wrapper_->UpdateCursorColor();
+}
+
 void Textfield::SetFont(const gfx::Font& font) {
   font_ = font;
   if (native_wrapper_)
@@ -244,6 +256,7 @@ void Textfield::UpdateAllProperties() {
     native_wrapper_->UpdateText();
     native_wrapper_->UpdateTextColor();
     native_wrapper_->UpdateBackgroundColor();
+    native_wrapper_->UpdateCursorColor();
     native_wrapper_->UpdateReadOnly();
     native_wrapper_->UpdateFont();
     native_wrapper_->UpdateEnabled();

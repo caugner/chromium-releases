@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -12,6 +12,7 @@ import re
 import hashlib
 import zipfile
 import simplejson as json
+import json_minify as minify
 
 # Make sure we get consistent string sorting behavior by explicitly using the
 # default C locale.
@@ -48,7 +49,8 @@ def parse_json_file(path, encoding="utf-8"):
     raise Exception("Failed to read the file at %s: %s" % (path, msg))
 
   try:
-    json_obj = json.load(json_file, encoding)
+    json_str = json_file.read()
+    json_obj = json.loads(minify.json_minify(json_str), encoding)
   except ValueError, msg:
     raise Exception("Failed to parse JSON out of file %s: %s" % (path, msg))
   finally:
@@ -58,9 +60,6 @@ def parse_json_file(path, encoding="utf-8"):
 
 class ApiManifest(object):
   """ Represents the list of API methods contained in the extension API JSON """
-
-  _MODULE_DOC_KEYS = ['functions', 'events']
-  """ Keys which may be passed to the _parseModuleDocLinksByKey method."""
 
   def __init__(self, manifest_paths):
     """ Read the supplied manifest file and parse its contents.
@@ -72,22 +71,48 @@ class ApiManifest(object):
     for path in manifest_paths:
       self._manifest.extend(parse_json_file(path))
 
-  def _getDocLink(self, method, hashprefix):
+  def _parseModuleDocLinksByKeyTypes(self, module, key):
     """
-    Given an API method, return a partial URL corresponding to the doc
-    file for that method.
+    Given a specific API module, returns a dict of methods mapped to
+    documentation URLs.
 
     Args:
-      method: A string like 'chrome.foo.bar' or 'chrome.experimental.foo.onBar'
-      hashprefix: The prefix to put in front of hash links - 'method' for
-          methods and 'event' for events.
+      module: The data in the extension API JSON for a single module.
+      key: A key belonging to _MODULE_DOC_KEYS to determine which set of
+          methods to parse, and what kind of documentation URL to generate.
 
     Returns:
-      A string like 'foo.html#method-bar' or 'experimental.foo.html#event-onBar'
+      A dict of extension methods mapped to file and hash URL parts for the
+      corresponding documentation links, like:
+        {
+          "chrome.types.clear": "types.html#method-ChromeSetting-clear",
+          "chrome.types.get": "types.html#method-ChromeSetting-get"
+        }
+
+      If the API namespace is defined "nodoc" or "internal" then an empty dict
+      is returned.
     """
-    urlpattern = '%%s.html#%s-%%s' % hashprefix
-    urlparts = tuple(method.replace('chrome.', '').rsplit('.', 1))
-    return urlpattern % urlparts
+    api_dict = {}
+    namespace = module['namespace']
+    if self._disableDocs(module):
+      return api_dict
+    if not module.has_key('types'):
+      return api_dict
+    module_types = module['types']
+    for module_type in module_types:
+      if not module_type.has_key(key):
+        continue
+      for method in module_type[key]:
+        if self._disableDocs(method):
+          continue
+        method_name = 'chrome.%s.%s.%s' %\
+            (namespace, module_type['id'], method['name'])
+        hashprefix = 'method'
+        if key == 'events':
+          hashprefix = 'event'
+        api_dict[method_name] = '%s.html#%s-%s-%s' %\
+            (namespace, hashprefix, module_type['id'], method['name'])
+    return api_dict
 
   def _parseModuleDocLinksByKey(self, module, key):
     """
@@ -107,7 +132,8 @@ class ApiManifest(object):
           "chrome.tabs.onDetached" : "tabs.html#event-onDetatched"
         }
 
-      If the API namespace is defined "nodoc" then an empty dict is returned.
+      If the API namespace is defined "nodoc" or "internal" then an empty dict
+      is returned.
 
     Raises:
       Exception: If the key supplied is not a member of _MODULE_DOC_KEYS.
@@ -115,18 +141,19 @@ class ApiManifest(object):
     methods = []
     api_dict = {}
     namespace = module['namespace']
-    if module.has_key('nodoc'):
+    if self._disableDocs(module):
       return api_dict
-    if key not in self._MODULE_DOC_KEYS:
-      raise Exception("key %s must be one of %s" % (key, self._MODULE_DOC_KEYS))
     if module.has_key(key):
       methods.extend(module[key])
     for method in methods:
+      if self._disableDocs(method):
+        continue
       method_name = 'chrome.%s.%s' % (namespace, method['name'])
       hashprefix = 'method'
       if key == 'events':
         hashprefix = 'event'
-      api_dict[method_name] = self._getDocLink(method_name, hashprefix)
+      api_dict[method_name] = '%s.html#%s-%s' %\
+          (namespace, hashprefix, method['name'])
     return api_dict
 
   def getModuleNames(self):
@@ -134,9 +161,15 @@ class ApiManifest(object):
 
     Returns:
       The namespace """
-    # Exclude modules with a "nodoc" property.
+    # Exclude modules with documentation disabled.
     return set(module['namespace'].encode() for module in self._manifest
-               if "nodoc" not in module)
+               if not self._disableDocs(module))
+
+  def _disableDocs(self, obj):
+    for key in ['nodoc', 'internal']:
+      if key in obj and obj[key]:
+        return True
+    return False
 
   def getDocumentationLinks(self):
     """ Parses the extension API JSON manifest and returns a dict of all
@@ -148,7 +181,9 @@ class ApiManifest(object):
     api_dict = {}
     for module in self._manifest:
       api_dict.update(self._parseModuleDocLinksByKey(module, 'functions'))
+      api_dict.update(self._parseModuleDocLinksByKeyTypes(module, 'functions'))
       api_dict.update(self._parseModuleDocLinksByKey(module, 'events'))
+      api_dict.update(self._parseModuleDocLinksByKeyTypes(module, 'events'))
     return api_dict
 
 class SamplesManifest(object):

@@ -26,8 +26,9 @@
 #include "chrome/browser/sync/glue/synced_session_tracker.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate.h"
 #include "chrome/browser/sync/glue/synced_window_delegate.h"
-#include "chrome/browser/sync/syncable/model_type.h"
+#include "sync/syncable/model_type.h"
 
+class Prefservice;
 class Profile;
 class ProfileSyncService;
 
@@ -106,25 +107,31 @@ class SessionModelAssociator
   //
   // If |reload_tabs| is true, will also resync all tabs (same as calling
   // AssociateTabs with a vector of all tabs).
+  // |error| gets set if any association error occurred.
   // Returns: false if the local session's sync nodes were deleted and
   // reassociation is necessary, true otherwise.
-  bool AssociateWindows(bool reload_tabs);
+  bool AssociateWindows(bool reload_tabs, SyncError* error);
 
   // Loads and reassociates the local tabs referenced in |tabs|.
+  // |error| gets set if any association error occurred.
   // Returns: false if the local session's sync nodes were deleted and
   // reassociation is necessary, true otherwise.
-  bool AssociateTabs(const std::vector<SyncedTabDelegate*>& tabs);
+  bool AssociateTabs(const std::vector<SyncedTabDelegate*>& tabs,
+                     SyncError* error);
 
   // Reassociates a single tab with the sync model. Will check if the tab
   // already is associated with a sync node and allocate one if necessary.
+  // |error| gets set if any association error occurred.
   // Returns: false if the local session's sync nodes were deleted and
   // reassociation is necessary, true otherwise.
-  bool AssociateTab(const SyncedTabDelegate& tab);
+  bool AssociateTab(const SyncedTabDelegate& tab,
+                    SyncError* error);
 
   // Load any foreign session info stored in sync db and update the sync db
   // with local client data. Processes/reuses any sync nodes owned by this
   // client and creates any further sync nodes needed to store local header and
   // tab info.
+  // |error| gets set if any association error occurred.
   virtual bool AssociateModels(SyncError* error) OVERRIDE;
 
   // Initializes the given sync node from the given chrome node id.
@@ -135,6 +142,7 @@ class SessionModelAssociator
 
   // Clear local sync data buffers. Does not delete sync nodes to avoid
   // tombstones. TODO(zea): way to eventually delete orphaned nodes.
+  // |error| gets set if any disassociation error occurred.
   virtual bool DisassociateModels(SyncError* error) OVERRIDE;
 
   // Returns the tag used to uniquely identify this machine's session in the
@@ -144,8 +152,8 @@ class SessionModelAssociator
     return current_machine_tag_;
   }
 
-  // Load and associate window and tab data for a foreign session
-  bool AssociateForeignSpecifics(const sync_pb::SessionSpecifics& specifics,
+  // Load and associate window and tab data for a foreign session.
+  void AssociateForeignSpecifics(const sync_pb::SessionSpecifics& specifics,
                                  const base::Time& modification_time);
 
   // Removes a foreign session from our internal bookkeeping.
@@ -219,12 +227,14 @@ class SessionModelAssociator
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, TabNodePoolNonEmpty);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, ValidTabs);
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceSessionTest, ExistingTabs);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionHeader);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionWindow);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest, PopulateSessionTab);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest,
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
+                           PopulateSessionHeader);
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
+                           PopulateSessionWindow);
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest, PopulateSessionTab);
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
                            InitializeCurrentSessionName);
-  FRIEND_TEST_ALL_PREFIXES(SessionModelAssociatorTest,
+  FRIEND_TEST_ALL_PREFIXES(SyncSessionModelAssociatorTest,
                            TabNodePool);
 
   // Keep all the links to local tab data in one place.
@@ -360,20 +370,22 @@ class SessionModelAssociator
   // Updates the server data based upon the current client session.  If no node
   // corresponding to this machine exists in the sync model, one is created.
   // Returns true on success, false if association failed.
-  bool UpdateSyncModelDataFromClient();
+  bool UpdateSyncModelDataFromClient(SyncError* error);
 
   // Pulls the current sync model from the sync database and returns true upon
   // update of the client model. Will associate any foreign sessions as well as
   // keep track of any local tab nodes, adding them to our free tab node pool.
   bool UpdateAssociationsFromSyncModel(const sync_api::ReadNode& root,
-                                       const sync_api::BaseTransaction* trans);
+                                       const sync_api::BaseTransaction* trans,
+                                       SyncError* error);
 
   // Fills a tab sync node with data from a TabContents object.
   // (from a local navigation event)
   // Returns true on success, false if we need to reassociate due to corruption.
   bool WriteTabContentsToSyncModel(const SyncedWindowDelegate& window,
                                    const SyncedTabDelegate& tab,
-                                   const int64 sync_id);
+                                   const int64 sync_id,
+                                   SyncError* error);
 
   // Used to populate a session header from the session specifics header
   // provided.
@@ -444,9 +456,6 @@ class SessionModelAssociator
   // stale and a candidate for garbage collection.
   size_t stale_session_threshold_days_;
 
-  // Consumer used to obtain the current session.
-  CancelableRequestConsumer consumer_;
-
   // To avoid certain checks not applicable to tests.
   bool setup_for_test_;
 
@@ -455,8 +464,11 @@ class SessionModelAssociator
   bool waiting_for_change_;
   base::WeakPtrFactory<SessionModelAssociator> test_weak_factory_;
 
-  // Profile being synced.
-  const Profile* const profile_;
+  // Profile being synced. Weak pointer.
+  Profile* const profile_;
+
+  // Pref service. Used to persist the session sync guid. Weak pointer.
+  PrefService* const pref_service_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionModelAssociator);
 };

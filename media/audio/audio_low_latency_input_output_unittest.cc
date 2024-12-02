@@ -22,6 +22,8 @@
 #include "media/audio/mac/audio_manager_mac.h"
 #elif defined(OS_WIN)
 #include "media/audio/win/audio_manager_win.h"
+#elif defined(OS_ANDROID)
+#include "media/audio/android/audio_manager_android.h"
 #endif
 #include "media/base/seekable_buffer.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -33,6 +35,8 @@ typedef AudioManagerLinux AudioManagerAnyPlatform;
 typedef AudioManagerMac AudioManagerAnyPlatform;
 #elif defined(OS_WIN)
 typedef AudioManagerWin AudioManagerAnyPlatform;
+#elif defined(OS_ANDROID)
+typedef AudioManagerAndroid AudioManagerAnyPlatform;
 #endif
 
 using base::win::ScopedCOMInitializer;
@@ -94,19 +98,12 @@ class MockAudioManager : public AudioManagerAnyPlatform {
 // Test fixture class.
 class AudioLowLatencyInputOutputTest : public testing::Test {
  protected:
-  AudioLowLatencyInputOutputTest()
-      : mock_audio_manager_(new MockAudioManager()) {
-  }
+  AudioLowLatencyInputOutputTest() {}
 
-  virtual ~AudioLowLatencyInputOutputTest() { }
+  virtual ~AudioLowLatencyInputOutputTest() {}
 
-  AudioManager* audio_manager() {
-    return mock_audio_manager_.get();
-  }
-
-  MessageLoopForUI* message_loop() {
-    return &message_loop_;
-  }
+  AudioManager* audio_manager() { return &mock_audio_manager_; }
+  MessageLoopForUI* message_loop() { return &message_loop_; }
 
   // Convenience method which ensures that we are not running on the build
   // bots and that at least one valid input and output device can be found.
@@ -120,7 +117,7 @@ class AudioLowLatencyInputOutputTest : public testing::Test {
 
  private:
   MessageLoopForUI message_loop_;
-  scoped_refptr<MockAudioManager> mock_audio_manager_;
+  MockAudioManager mock_audio_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioLowLatencyInputOutputTest);
 };
@@ -277,7 +274,8 @@ class AudioInputStreamTraits {
   typedef AudioInputStream StreamType;
 
   static int HardwareSampleRate() {
-    return static_cast<int>(media::GetAudioInputHardwareSampleRate());
+    return static_cast<int>(media::GetAudioInputHardwareSampleRate(
+        AudioManagerBase::kDefaultDeviceId));
   }
 
   static StreamType* CreateStream(AudioManager* audio_manager,
@@ -445,7 +443,7 @@ TEST_F(AudioLowLatencyInputOutputTest, DISABLED_FullDuplexDelayMeasurement) {
   // in loop back during this time. At the same time, delay recordings are
   // performed and stored in the output text file.
   message_loop()->PostDelayedTask(FROM_HERE,
-      MessageLoop::QuitClosure(), TestTimeouts::action_timeout_ms());
+      MessageLoop::QuitClosure(), TestTimeouts::action_timeout());
   message_loop()->Run();
 
   aos->Stop();

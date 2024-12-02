@@ -15,12 +15,12 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
-#include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
+#include "chrome/browser/autofill/test_autofill_external_delegate.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -30,7 +30,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/public/browser/web_contents.h"
+#include "content/test/mock_render_process_host.h"
 #include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
@@ -43,6 +44,7 @@
 #include "webkit/forms/form_field.h"
 
 using content::BrowserThread;
+using content::WebContents;
 using testing::_;
 using webkit::forms::FormData;
 using webkit::forms::FormField;
@@ -2862,11 +2864,11 @@ TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUpload) {
 
 namespace {
 
-class MockAutofillExternalDelegate : public AutofillExternalDelegate {
+class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
  public:
   explicit MockAutofillExternalDelegate(TabContentsWrapper* wrapper,
                                         AutofillManager* autofill_manager)
-      : AutofillExternalDelegate(wrapper, autofill_manager) {}
+      : TestAutofillExternalDelegate(wrapper, autofill_manager) {}
   virtual ~MockAutofillExternalDelegate() {}
 
   MOCK_METHOD5(OnQuery, void(int query_id,
@@ -2874,15 +2876,6 @@ class MockAutofillExternalDelegate : public AutofillExternalDelegate {
                              const webkit::forms::FormField& field,
                              const gfx::Rect& bounds,
                              bool display_warning));
-
-  virtual void HideAutofillPopup() OVERRIDE {}
-
-  virtual void ApplyAutofillSuggestions(
-      const std::vector<string16>& autofill_values,
-      const std::vector<string16>& autofill_labels,
-      const std::vector<string16>& autofill_icons,
-      const std::vector<int>& autofill_unique_ids,
-      int separator_index) OVERRIDE {}
 
   virtual void OnQueryPlatformSpecific(int query_id,
                                        const webkit::forms::FormData& form,
@@ -2924,7 +2917,7 @@ TEST_F(AutofillManagerTest, TestTabContentsWithExternalDelegate) {
       switches::kExternalAutofillPopup);
 
   // Setting the contents creates a new TabContentsWrapper.
-  TestTabContents* contents = CreateTestTabContents();
+  WebContents* contents = CreateTestWebContents();
   SetContents(contents);
 
   AutofillManager* autofill_manager = contents_wrapper()->autofill_manager();

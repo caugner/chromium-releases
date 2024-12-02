@@ -5,9 +5,8 @@
 // Custom bindings for the omnibox API. Only injected into the v8 contexts
 // for extensions which have permission for the omnibox API.
 
-(function() {
-
-native function GetChromeHidden();
+var chromeHidden = requireNative('chrome_hidden').GetChromeHidden();
+var sendRequest = require('sendRequest').sendRequest;
 
 // Remove invalid characters from |text| so that it is suitable to use
 // for |AutocompleteMatch::contents|.
@@ -79,18 +78,16 @@ function parseOmniboxDescription(input) {
   return result;
 }
 
-GetChromeHidden().registerCustomHook('omnibox', function(bindingsAPI) {
+chromeHidden.registerCustomHook('omnibox', function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
-  var sendRequest = bindingsAPI.sendRequest;
 
-  apiFunctions.setHandleRequest("omnibox.setDefaultSuggestion",
-      function(details) {
+  apiFunctions.setHandleRequest('setDefaultSuggestion', function(details) {
     var parseResult = parseOmniboxDescription(details.description);
     sendRequest(this.name, [parseResult], this.definition.parameters);
   });
 
-  apiFunctions.setUpdateArgumentsPostValidate("omnibox.sendSuggestions",
-      function(requestId, userSuggestions) {
+  apiFunctions.setUpdateArgumentsPostValidate(
+      'sendSuggestions', function(requestId, userSuggestions) {
     var suggestions = [];
     for (var i = 0; i < userSuggestions.length; i++) {
       var parseResult = parseOmniboxDescription(
@@ -109,5 +106,3 @@ GetChromeHidden().registerCustomHook('omnibox', function(bindingsAPI) {
     chrome.Event.prototype.dispatch.apply(this, [text, suggestCallback]);
   };
 });
-
-})();

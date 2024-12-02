@@ -4,88 +4,98 @@
 
 #include "ash/wm/base_layout_manager.h"
 
+#include "ash/screen_ash.h"
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
+#include "ash/test/ash_test_base.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/screen_aura.h"
-#include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/test/test_windows.h"
-#include "ui/base/ui_base_types.h"
 #include "ui/aura/window.h"
+#include "ui/base/ui_base_types.h"
+#include "ui/gfx/insets.h"
 
 namespace ash {
 
 namespace {
 
-class BaseLayoutManagerTest : public aura::test::AuraTestBase {
+class BaseLayoutManagerTest : public test::AshTestBase {
  public:
-  BaseLayoutManagerTest() : layout_manager_(NULL) {}
+  BaseLayoutManagerTest() {}
   virtual ~BaseLayoutManagerTest() {}
 
   virtual void SetUp() OVERRIDE {
-    aura::test::AuraTestBase::SetUp();
-    aura::RootWindow::GetInstance()->screen()->set_work_area_insets(
+    test::AshTestBase::SetUp();
+    Shell::GetInstance()->SetMonitorWorkAreaInsets(
+        Shell::GetRootWindow(),
         gfx::Insets(1, 2, 3, 4));
-    aura::RootWindow::GetInstance()->SetHostSize(gfx::Size(800, 600));
-    container_.reset(new aura::Window(NULL));
-    container_->Init(ui::Layer::LAYER_NOT_DRAWN);
-    container_->SetBounds(gfx::Rect(0, 0, 500, 500));
-    layout_manager_ = new internal::BaseLayoutManager();
-    container_->SetLayoutManager(layout_manager_);
+    Shell::GetRootWindow()->SetHostSize(gfx::Size(800, 600));
+    aura::Window* default_container = Shell::GetInstance()->GetContainer(
+        internal::kShellWindowId_DefaultContainer);
+    default_container->SetLayoutManager(new internal::BaseLayoutManager(
+        Shell::GetRootWindow()));
   }
 
   aura::Window* CreateTestWindow(const gfx::Rect& bounds) {
-    return aura::test::CreateTestWindowWithBounds(bounds, container_.get());
+    return aura::test::CreateTestWindowWithBounds(bounds, NULL);
   }
 
  private:
-  // Owned by |container_|.
-  internal::BaseLayoutManager* layout_manager_;
-
-  scoped_ptr<aura::Window> container_;
-
   DISALLOW_COPY_AND_ASSIGN(BaseLayoutManagerTest);
 };
-
-}  // namespace
 
 // Tests normal->maximize->normal.
 TEST_F(BaseLayoutManagerTest, Maximize) {
   gfx::Rect bounds(100, 100, 200, 200);
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
-  window->SetIntProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
   // Maximized window fills the work area, not the whole monitor.
-  EXPECT_EQ(gfx::Screen::GetMonitorWorkAreaNearestWindow(window.get()),
-            window->bounds());
-  window->SetIntProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
-  EXPECT_EQ(bounds, window->bounds());
+  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(window.get()).ToString(),
+            window->bounds().ToString());
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+  EXPECT_EQ(bounds.ToString(), window->bounds().ToString());
+}
+
+// Tests normal->minimize->normal.
+TEST_F(BaseLayoutManagerTest, Minimize) {
+  gfx::Rect bounds(100, 100, 200, 200);
+  scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
+  // Note: Currently minimize doesn't do anything except set the state.
+  // See crbug.com/104571.
+  EXPECT_EQ(bounds.ToString(), window->bounds().ToString());
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+  EXPECT_EQ(bounds.ToString(), window->bounds().ToString());
 }
 
 // Tests maximized window size during root window resize.
 TEST_F(BaseLayoutManagerTest, MaximizeRootWindowResize) {
   gfx::Rect bounds(100, 100, 200, 200);
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
-  window->SetIntProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
-  EXPECT_EQ(gfx::Screen::GetMonitorWorkAreaNearestWindow(window.get()),
-            window->bounds());
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  gfx::Rect initial_work_area_bounds =
+      ScreenAsh::GetMaximizedWindowBounds(window.get());
+  EXPECT_EQ(initial_work_area_bounds.ToString(), window->bounds().ToString());
   // Enlarge the root window.  We should still match the work area size.
-  aura::RootWindow::GetInstance()->SetHostSize(gfx::Size(800, 600));
-  EXPECT_EQ(gfx::Screen::GetMonitorWorkAreaNearestWindow(window.get()),
-            window->bounds());
+  Shell::GetRootWindow()->SetHostSize(gfx::Size(900, 700));
+  EXPECT_EQ(ScreenAsh::GetMaximizedWindowBounds(window.get()).ToString(),
+            window->bounds().ToString());
+  EXPECT_NE(initial_work_area_bounds.ToString(),
+            ScreenAsh::GetMaximizedWindowBounds(window.get()).ToString());
 }
 
 // Tests normal->fullscreen->normal.
 TEST_F(BaseLayoutManagerTest, Fullscreen) {
   gfx::Rect bounds(100, 100, 200, 200);
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
-  window->SetIntProperty(aura::client::kShowStateKey,
-                         ui::SHOW_STATE_FULLSCREEN);
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_FULLSCREEN);
   // Fullscreen window fills the whole monitor.
-  EXPECT_EQ(gfx::Screen::GetMonitorAreaNearestWindow(window.get()),
-            window->bounds());
-  window->SetIntProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
-  EXPECT_EQ(bounds, window->bounds());
+  EXPECT_EQ(gfx::Screen::GetMonitorAreaNearestWindow(window.get()).ToString(),
+            window->bounds().ToString());
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+  EXPECT_EQ(bounds.ToString(), window->bounds().ToString());
 }
 
 // Tests fullscreen window size during root window resize.
@@ -93,14 +103,13 @@ TEST_F(BaseLayoutManagerTest, FullscreenRootWindowResize) {
   gfx::Rect bounds(100, 100, 200, 200);
   scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
   // Fullscreen window fills the whole monitor.
-  window->SetIntProperty(aura::client::kShowStateKey,
-                         ui::SHOW_STATE_FULLSCREEN);
-  EXPECT_EQ(gfx::Screen::GetMonitorAreaNearestWindow(window.get()),
-            window->bounds());
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_FULLSCREEN);
+  EXPECT_EQ(gfx::Screen::GetMonitorAreaNearestWindow(window.get()).ToString(),
+            window->bounds().ToString());
   // Enlarge the root window.  We should still match the monitor size.
-  aura::RootWindow::GetInstance()->SetHostSize(gfx::Size(800, 600));
-  EXPECT_EQ(gfx::Screen::GetMonitorAreaNearestWindow(window.get()),
-            window->bounds());
+  Shell::GetRootWindow()->SetHostSize(gfx::Size(800, 600));
+  EXPECT_EQ(gfx::Screen::GetMonitorAreaNearestWindow(window.get()).ToString(),
+            window->bounds().ToString());
 }
 
 // Fails on Mac only.  Need to be implemented.  http://crbug.com/111279.
@@ -121,22 +130,41 @@ TEST_F(BaseLayoutManagerTest, MAYBE_RootWindowResizeShrinksWindows) {
   EXPECT_LE(window->bounds().height(), work_area.height());
 
   // Make the root window narrower than our window.
-  aura::RootWindow::GetInstance()->SetHostSize(gfx::Size(300, 400));
+  Shell::GetRootWindow()->SetHostSize(gfx::Size(300, 400));
   work_area = gfx::Screen::GetMonitorAreaNearestWindow(window.get());
   EXPECT_LE(window->bounds().width(), work_area.width());
   EXPECT_LE(window->bounds().height(), work_area.height());
 
   // Make the root window shorter than our window.
-  aura::RootWindow::GetInstance()->SetHostSize(gfx::Size(300, 200));
+  Shell::GetRootWindow()->SetHostSize(gfx::Size(300, 200));
   work_area = gfx::Screen::GetMonitorAreaNearestWindow(window.get());
   EXPECT_LE(window->bounds().width(), work_area.width());
   EXPECT_LE(window->bounds().height(), work_area.height());
 
   // Enlarging the root window does not change the window bounds.
   gfx::Rect old_bounds = window->bounds();
-  aura::RootWindow::GetInstance()->SetHostSize(gfx::Size(800, 600));
+  Shell::GetRootWindow()->SetHostSize(gfx::Size(800, 600));
   EXPECT_EQ(old_bounds.width(), window->bounds().width());
   EXPECT_EQ(old_bounds.height(), window->bounds().height());
 }
+
+// Tests that a maximized window with too-large restore bounds will be restored
+// to smaller than the full work area.
+TEST_F(BaseLayoutManagerTest, BoundsWithScreenEdgeVisible) {
+  // Create a window with bounds that fill the screen.
+  gfx::Rect bounds = gfx::Screen::GetPrimaryMonitorBounds();
+  scoped_ptr<aura::Window> window(CreateTestWindow(bounds));
+  // Maximize it, which writes the old bounds to restore bounds.
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  // Restore it.
+  window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
+  // It should have the default maximized window bounds, inset by the grid size.
+  int grid_size = ash::Shell::GetInstance()->GetGridSize();
+  gfx::Rect max_bounds = ash::ScreenAsh::GetMaximizedWindowBounds(window.get());
+  max_bounds.Inset(grid_size, grid_size);
+  EXPECT_EQ(max_bounds.ToString(), window->bounds().ToString());
+}
+
+}  // namespace
 
 }  // namespace ash

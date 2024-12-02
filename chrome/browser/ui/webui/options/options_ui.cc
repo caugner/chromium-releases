@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,9 +43,9 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -83,6 +83,7 @@
 #include "chrome/browser/ui/webui/options/certificate_manager_handler.h"
 #endif
 
+using content::RenderViewHost;
 using content::UserMetricsAction;
 using content::WebContents;
 using content::WebUIMessageHandler;
@@ -335,7 +336,7 @@ void OptionsUI::InitializeHandlers() {
   initialized_handlers_ = true;
 
   for (size_t i = 0; i < handlers_.size(); ++i)
-    handlers_[i]->Initialize();
+    handlers_[i]->InitializeHandler();
 }
 
 void OptionsUI::AddOptionsPageUIHandler(DictionaryValue* localized_strings,

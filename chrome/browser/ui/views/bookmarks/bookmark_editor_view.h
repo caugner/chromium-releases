@@ -25,7 +25,7 @@
 
 namespace views {
 class Label;
-class Menu2;
+class MenuRunner;
 class TextButton;
 class TreeView;
 }
@@ -65,10 +65,7 @@ class BookmarkEditorView : public BookmarkEditor,
         : ui::TreeNodeModel<EditorNode>(root) {}
 
     virtual void SetTitle(ui::TreeModelNode* node,
-                          const string16& title) {
-      if (!title.empty())
-        ui::TreeNodeModel<EditorNode>::SetTitle(node, title);
-    }
+                          const string16& title) OVERRIDE;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(EditorTreeModel);
@@ -105,11 +102,9 @@ class BookmarkEditorView : public BookmarkEditor,
 
   // views::TextfieldController:
   virtual void ContentsChanged(views::Textfield* sender,
-                               const string16& new_contents)  OVERRIDE;
+                               const string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const views::KeyEvent& key_event)  OVERRIDE {
-    return false;
-  }
+                              const views::KeyEvent& key_event) OVERRIDE;
 
   // views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -131,9 +126,8 @@ class BookmarkEditorView : public BookmarkEditor,
   void Close();
 
   // views::ContextMenuController:
-  virtual void ShowContextMenuForView(View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+  virtual void ShowContextMenuForView(views::View* source,
+                                      const gfx::Point& point) OVERRIDE;
 
  private:
   friend class BookmarkEditorViewTest;
@@ -230,6 +224,8 @@ class BookmarkEditorView : public BookmarkEditor,
   void UpdateExpandedNodes(EditorNode* editor_node,
                            BookmarkExpandedStateTracker::Nodes* expanded_nodes);
 
+  ui::SimpleMenuModel* GetMenuModel();
+
   // Profile the entry is from.
   Profile* profile_;
 
@@ -261,10 +257,8 @@ class BookmarkEditorView : public BookmarkEditor,
   const EditDetails details_;
 
   // The context menu.
-  scoped_ptr<ui::SimpleMenuModel> context_menu_contents_;
-#if !defined(USE_AURA)
-  scoped_ptr<views::Menu2> context_menu_;
-#endif
+  scoped_ptr<ui::SimpleMenuModel> context_menu_model_;
+  scoped_ptr<views::MenuRunner> context_menu_runner_;
 
   // Mode used to create nodes from.
   BookmarkModel* bb_model_;

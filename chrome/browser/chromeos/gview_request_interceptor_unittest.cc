@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,10 @@
 #include "chrome/browser/plugin_prefs_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_pref_service.h"
-#include "content/browser/mock_resource_context.h"
-#include "content/browser/renderer_host/dummy_resource_handler.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/browser/resource_request_info.h"
+#include "content/test/mock_resource_context.h"
 #include "content/test/test_browser_thread.h"
-#include "ipc/ipc_message.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
@@ -95,10 +93,8 @@ class GViewRequestInterceptorTest : public testing::Test {
         plugin_list_(NULL, 0) {}
 
   virtual void SetUp() {
-    content::ResourceContext* resource_context =
-        content::MockResourceContext::GetInstance();
     net::URLRequestContext* request_context =
-        resource_context->request_context();
+        resource_context_.GetRequestContext();
     old_factory_ = request_context->job_factory();
     job_factory_.SetProtocolHandler("http", new GViewRequestProtocolFactory);
     job_factory_.AddInterceptor(new GViewRequestInterceptor);
@@ -108,12 +104,10 @@ class GViewRequestInterceptorTest : public testing::Test {
     plugin_prefs_->SetPrefs(&prefs_);
     ChromePluginServiceFilter* filter =
         ChromePluginServiceFilter::GetInstance();
-    filter->RegisterResourceContext(plugin_prefs_, resource_context);
+    filter->RegisterResourceContext(plugin_prefs_, &resource_context_);
     PluginService::GetInstance()->SetFilter(filter);
 
     ASSERT_TRUE(PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path_));
-
-    handler_ = new content::DummyResourceHandler();
 
     PluginService::GetInstance()->SetPluginListForTesting(&plugin_list_);
     PluginService::GetInstance()->Init();
@@ -121,14 +115,12 @@ class GViewRequestInterceptorTest : public testing::Test {
 
   virtual void TearDown() {
     plugin_prefs_->ShutdownOnUIThread();
-    content::ResourceContext* resource_context =
-        content::MockResourceContext::GetInstance();
     net::URLRequestContext* request_context =
-        resource_context->request_context();
+        resource_context_.GetRequestContext();
     request_context->set_job_factory(old_factory_);
     ChromePluginServiceFilter* filter =
         ChromePluginServiceFilter::GetInstance();
-    filter->UnregisterResourceContext(resource_context);
+    filter->UnregisterResourceContext(&resource_context_);
     PluginService::GetInstance()->SetFilter(NULL);
   }
 
@@ -162,30 +154,10 @@ class GViewRequestInterceptorTest : public testing::Test {
   }
 
   void SetupRequest(net::URLRequest* request) {
-    content::ResourceContext* context =
-        content::MockResourceContext::GetInstance();
-    ResourceDispatcherHostRequestInfo* info =
-        new ResourceDispatcherHostRequestInfo(
-            handler_,
-            content::PROCESS_TYPE_RENDERER,
-            -1,          // child_id
-            MSG_ROUTING_NONE,
-            0,           // origin_pid
-            request->identifier(),
-            false,       // is_main_frame
-            -1,          // frame_id
-            false,       // parent_is_main_frame
-            -1,          // parent_frame_id
-            ResourceType::MAIN_FRAME,
-            content::PAGE_TRANSITION_LINK,
-            0,           // upload_size
-            false,       // is_download
-            true,        // allow_download
-            false,       // has_user_gesture
-            WebKit::WebReferrerPolicyDefault,
-            context);
-    request->SetUserData(NULL, info);
-    request->set_context(context->request_context());
+    content::ResourceRequestInfo::AllocateForTesting(request,
+                                                     ResourceType::MAIN_FRAME,
+                                                     &resource_context_);
+    request->set_context(resource_context_.GetRequestContext());
   }
 
  protected:
@@ -199,9 +171,9 @@ class GViewRequestInterceptorTest : public testing::Test {
   scoped_refptr<PluginPrefs> plugin_prefs_;
   net::URLRequestJobFactory job_factory_;
   const net::URLRequestJobFactory* old_factory_;
-  scoped_refptr<ResourceHandler> handler_;
   TestDelegate test_delegate_;
   FilePath pdf_path_;
+  content::MockResourceContext resource_context_;
 };
 
 TEST_F(GViewRequestInterceptorTest, DoNotInterceptHtml) {

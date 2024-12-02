@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/rect.h"
 
 // Assume that somewhere along the line, someone will do width * height * 4
@@ -18,7 +17,7 @@
 // Max height and width for layers
 static const int kMaxVideoLayerSize = 23170;
 
-BackingStoreSkia::BackingStoreSkia(RenderWidgetHost* widget,
+BackingStoreSkia::BackingStoreSkia(content::RenderWidgetHost* widget,
                                    const gfx::Size& size)
     : BackingStore(widget, size) {
   bitmap_.setConfig(SkBitmap::kARGB_8888_Config, size.width(), size.height());
@@ -31,7 +30,7 @@ BackingStoreSkia::~BackingStoreSkia() {
 
 void BackingStoreSkia::SkiaShowRect(const gfx::Point& point,
                                     gfx::Canvas* canvas) {
-  canvas->GetSkCanvas()->drawBitmap(bitmap_,
+  canvas->sk_canvas()->drawBitmap(bitmap_,
       SkIntToScalar(point.x()), SkIntToScalar(point.y()));
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,23 +20,11 @@
 #import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/browser/ui/cocoa/tracking_area.h"
+#include "chrome/browser/ui/panels/panel.h"
 
 @class FindBarCocoaController;
 class PanelBrowserWindowCocoa;
 @class PanelTitlebarViewCocoa;
-
-@interface PanelWindowCocoaImpl : ChromeBrowserWindow {
-}
-// The panels cannot be reduced to 3-px windows on the edge of the screen
-// active area (above Dock). Default constraining logic makes at least a height
-// of the titlebar visible, so the user could still grab it. We do 'restore'
-// differently, and minimize panels to 3 px. Hence the need to override the
-// constraining logic.
-- (NSRect)constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen;
-
-// Prevent panel window from becoming key - for example when it is minimized.
-- (BOOL)canBecomeKeyWindow;
-@end
 
 @interface PanelWindowControllerCocoa : NSWindowController
                                             <NSWindowDelegate,
@@ -54,6 +42,8 @@ class PanelBrowserWindowCocoa;
   BOOL throbberShouldSpin_;
   BOOL playingMinimizeAnimation_;
   float animationStopToShowTitlebarOnly_;
+  BOOL canBecomeKeyWindow_;
+  scoped_nsobject<NSView> overlayView_;
 }
 
 // Load the browser window nib and do any Cocoa-specific initialization.
@@ -97,10 +87,11 @@ class PanelBrowserWindowCocoa;
               animate:(BOOL)animate;
 
 // Used by PanelTitlebarViewCocoa when user rearranges the Panels by dragging.
+// |mouseLocation| is in Cocoa's screen coordinates.
 - (BOOL)isDraggable;
-- (void)startDrag;
+- (void)startDrag:(NSPoint)mouseLocation;
 - (void)endDrag:(BOOL)cancelled;
-- (void)dragWithDeltaX:(int)deltaX;
+- (void)drag:(NSPoint)mouseLocation;
 
 // Accessor for titlebar view.
 - (PanelTitlebarViewCocoa*)titlebarView;
@@ -110,7 +101,7 @@ class PanelBrowserWindowCocoa;
 
 // Invoked when user clicks on the titlebar. Attempts to flip the
 // Minimized/Restored states.
-- (void)onTitlebarMouseClicked;
+- (void)onTitlebarMouseClicked:(int)modifierFlags;
 
 // Executes the command in the context of the current browser.
 // |command| is an integer value containing one of the constants defined in the
@@ -130,6 +121,9 @@ class PanelBrowserWindowCocoa;
 // Removes the Key status from the panel to some other window.
 - (void)deactivate;
 
+// Changes the canBecomeKeyWindow state
+- (void)preventBecomingKeyWindow:(BOOL)prevent;
+
 // See Panel::FullScreenModeChanged.
 - (void)fullScreenModeChanged:(bool)isFullScreen;
 
@@ -137,6 +131,23 @@ class PanelBrowserWindowCocoa;
 // are not un-minimized when another panel is minimized.
 - (BOOL)canBecomeKeyWindow;
 
+// Returns true if browser window requested activation of the window.
+- (BOOL)activationRequestedByBrowser;
+
+// Returns width of titlebar when shown in "icon only" mode.
+- (int)titlebarIconOnlyWidthInScreenCoordinates;
+
+- (void)ensureFullyVisible;
+
+- (void)updateWindowLevel;
+
+// Turns on user-resizable corners/sides indications and enables live resize.
+- (void)enableResizeByMouse:(BOOL)enable;
+
+// In certain cases (when in a Docked strip for example) we want
+// the standard behavior of activating the app when clicking on the titlebar
+// to be disabled. This way, user can minimize the panel w/o activating it.
+- (BOOL)isActivationByClickingTitlebarEnabled;
 @end  // @interface PanelWindowController
 
 #endif  // CHROME_BROWSER_UI_PANELS_PANEL_WINDOW_CONTROLLER_COCOA_H_

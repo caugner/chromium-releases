@@ -8,8 +8,10 @@ namespace extension_tabs_module_constants {
 
 const char kActiveKey[] = "active";
 const char kAllFramesKey[] = "allFrames";
+const char kAlwaysOnTopKey[] = "alwaysOnTop";
 const char kBypassCache[] = "bypassCache";
 const char kCodeKey[] = "code";
+const char kCurrentWindowKey[] = "currentWindow";
 const char kDrawAttentionKey[] = "drawAttention";
 const char kFaviconUrlKey[] = "favIconUrl";
 const char kFileKey[] = "file";
@@ -20,6 +22,7 @@ const char kHeightKey[] = "height";
 const char kIdKey[] = "id";
 const char kIncognitoKey[] = "incognito";
 const char kIndexKey[] = "index";
+const char kLastFocusedWindowKey[] = "lastFocusedWindow";
 const char kLeftKey[] = "left";
 const char kNewPositionKey[] = "newPosition";
 const char kNewWindowIdKey[] = "newWindowId";
@@ -27,7 +30,6 @@ const char kOldPositionKey[] = "oldPosition";
 const char kOldWindowIdKey[] = "oldWindowId";
 const char kOpenerTabIdKey[] = "openerTabId";
 const char kPinnedKey[] = "pinned";
-const char kPopulateKey[] = "populate";
 const char kQualityKey[] = "quality";
 const char kHighlightedKey[] = "highlighted";
 const char kSelectedKey[] = "selected";
@@ -54,6 +56,7 @@ const char kMimeTypePng[] = "image/png";
 const char kShowStateValueNormal[] = "normal";
 const char kShowStateValueMinimized[] = "minimized";
 const char kShowStateValueMaximized[] = "maximized";
+const char kShowStateValueFullscreen[] = "fullscreen";
 const char kStatusValueComplete[] = "complete";
 const char kStatusValueLoading[] = "loading";
 
@@ -63,6 +66,7 @@ const char kWindowTypeValueNormal[] = "normal";
 const char kWindowTypeValuePopup[] = "popup";
 const char kWindowTypeValuePanel[] = "panel";
 const char kWindowTypeValueApp[] = "app";
+const char kWindowTypeValueShell[] = "shell";
 
 const char kCanOnlyMoveTabsWithinNormalWindowsError[] = "Tabs can only be "
     "moved to and from normal windows.";

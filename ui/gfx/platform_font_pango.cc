@@ -4,10 +4,11 @@
 
 #include "ui/gfx/platform_font_pango.h"
 
-#include <algorithm>
 #include <fontconfig/fontconfig.h>
-#include <map>
 #include <pango/pango.h>
+
+#include <algorithm>
+#include <map>
 #include <string>
 
 #include "base/logging.h"
@@ -15,12 +16,11 @@
 #include "base/string_split.h"
 #include "base/utf_string_conversions.h"
 #include "grit/app_locale_settings.h"
-#include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkTypeface.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/linux_util.h"
 #include "ui/gfx/pango_util.h"
 
 #if !defined(USE_WAYLAND) && defined(TOOLKIT_USES_GTK)
@@ -234,6 +234,11 @@ int PlatformFontPango::GetAverageCharacterWidth() const {
   return SkScalarRound(average_width_pixels_);
 }
 
+int PlatformFontPango::GetStringWidth(const string16& text) const {
+  return Canvas::GetStringWidth(text,
+                                Font(const_cast<PlatformFontPango*>(this)));
+}
+
 int PlatformFontPango::GetExpectedTextWidth(int length) const {
   double char_width = const_cast<PlatformFontPango*>(this)->GetAverageWidth();
   return round(static_cast<float>(length) * char_width);
@@ -393,9 +398,8 @@ void PlatformFontPango::InitPangoMetrics() {
 
     // Yes, this is how Microsoft recommends calculating the dialog unit
     // conversions.
-    const int text_width_pixels = CanvasSkia::GetStringWidth(
-        ASCIIToUTF16("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"),
-        Font(this));
+    const int text_width_pixels = GetStringWidth(
+        ASCIIToUTF16("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"));
     const double dialog_units_pixels = (text_width_pixels / 26 + 1) / 2;
     average_width_pixels_ = std::min(pango_width_pixels, dialog_units_pixels);
     pango_font_description_free(pango_desc);

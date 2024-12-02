@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,29 +6,28 @@
 
 #include "base/auto_reset.h"
 #include "base/json/json_reader.h"
-#include "base/json/json_value_serializer.h"
+#include "base/json/json_string_value_serializer.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/sync/api/sync_change.h"
-#include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "sync/protocol/preference_specifics.pb.h"
+#include "sync/protocol/sync.pb.h"
 
 using syncable::PREFERENCES;
 
 PrefModelAssociator::PrefModelAssociator()
     : models_associated_(false),
       processing_syncer_changes_(false),
-      pref_service_(NULL),
-      sync_processor_(NULL) {
+      pref_service_(NULL) {
   DCHECK(CalledOnValidThread());
 }
 
 PrefModelAssociator::~PrefModelAssociator() {
   DCHECK(CalledOnValidThread());
-  sync_processor_ = NULL;
   pref_service_ = NULL;
 }
 
@@ -46,7 +45,7 @@ void PrefModelAssociator::InitPrefAndAssociate(
     // The server has a value for the preference, we have to reconcile it with
     // ours.
     const sync_pb::PreferenceSpecifics& preference =
-        sync_pref.GetSpecifics().GetExtension(sync_pb::preference);
+        sync_pref.GetSpecifics().preference();
     DCHECK_EQ(pref->name(), preference.name());
 
     scoped_ptr<Value> value(
@@ -108,12 +107,13 @@ void PrefModelAssociator::InitPrefAndAssociate(
 SyncError PrefModelAssociator::MergeDataAndStartSyncing(
     syncable::ModelType type,
     const SyncDataList& initial_sync_data,
-    SyncChangeProcessor* sync_processor) {
+    scoped_ptr<SyncChangeProcessor> sync_processor) {
   DCHECK_EQ(type, PREFERENCES);
   DCHECK(CalledOnValidThread());
   DCHECK(pref_service_);
-  DCHECK(!sync_processor_);
-  sync_processor_ = sync_processor;
+  DCHECK(!sync_processor_.get());
+  DCHECK(sync_processor.get());
+  sync_processor_ = sync_processor.Pass();
 
   SyncChangeList new_changes;
   std::set<std::string> remaining_preferences = registered_preferences_;
@@ -124,8 +124,7 @@ SyncError PrefModelAssociator::MergeDataAndStartSyncing(
        sync_iter != initial_sync_data.end();
        ++sync_iter) {
     DCHECK_EQ(PREFERENCES, sync_iter->GetDataType());
-    std::string sync_pref_name = sync_iter->GetSpecifics().
-        GetExtension(sync_pb::preference).name();
+    std::string sync_pref_name = sync_iter->GetSpecifics().preference().name();
     if (remaining_preferences.count(sync_pref_name) == 0) {
       // We're not syncing this preference locally, ignore the sync data.
       // TODO(zea): Eventually we want to be able to have the syncable service
@@ -161,7 +160,7 @@ SyncError PrefModelAssociator::MergeDataAndStartSyncing(
 void PrefModelAssociator::StopSyncing(syncable::ModelType type) {
   DCHECK_EQ(type, PREFERENCES);
   models_associated_ = false;
-  sync_processor_ = NULL;
+  sync_processor_.reset();
 }
 
 Value* PrefModelAssociator::MergePreference(
@@ -198,8 +197,7 @@ bool PrefModelAssociator::CreatePrefSyncData(
   }
 
   sync_pb::EntitySpecifics specifics;
-  sync_pb::PreferenceSpecifics* pref_specifics = specifics.MutableExtension(
-      sync_pb::preference);
+  sync_pb::PreferenceSpecifics* pref_specifics = specifics.mutable_preference();
   pref_specifics->set_name(name);
   pref_specifics->set_value(serialized);
   *sync_data = SyncData::CreateLocalData(name, name, specifics);
@@ -306,7 +304,7 @@ SyncError PrefModelAssociator::ProcessSyncChanges(
 
     std::string name;
     sync_pb::PreferenceSpecifics pref_specifics =
-        iter->sync_data().GetSpecifics().GetExtension(sync_pb::preference);
+        iter->sync_data().GetSpecifics().preference();
     scoped_ptr<Value> value(ReadPreferenceSpecifics(pref_specifics,
                                                     &name));
 
@@ -426,8 +424,6 @@ void PrefModelAssociator::ProcessPrefChange(const std::string& name) {
 
   SyncError error =
       sync_processor_->ProcessSyncChanges(FROM_HERE, changes);
-  if (error.IsSet())
-    StopSyncing(PREFERENCES);
 }
 
 void PrefModelAssociator::SetPrefService(PrefService* pref_service) {

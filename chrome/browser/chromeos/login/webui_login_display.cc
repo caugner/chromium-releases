@@ -4,20 +4,16 @@
 
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
-#include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
-
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
-#endif
 
 namespace chromeos {
 
@@ -117,6 +113,11 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
         l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_CAPS_LOCK_HINT);
   }
 
+  // Display a hint to switch keyboards if there are other active input methods.
+  if (ime_manager->GetNumActiveInputMethods() > 1)
+    error_text += "\n" +
+        l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_KEYBOARD_SWITCH_HINT);
+
   std::string help_link;
   switch (error_msg_id) {
     case IDS_LOGIN_ERROR_CAPTIVE_PORTAL:
@@ -136,8 +137,7 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
 
   webui_handler_->ShowError(login_attempts, error_text, help_link,
                             help_topic_id);
-  WizardAccessibilityHelper::GetInstance()->MaybeSpeak(
-      error_text.c_str(), false, false);
+  accessibility::MaybeSpeak(error_text);
 }
 
 void WebUILoginDisplay::ShowGaiaPasswordChanged(const std::string& username) {
@@ -159,10 +159,20 @@ void WebUILoginDisplay::Login(const std::string& username,
     delegate_->Login(username, password);
 }
 
+void WebUILoginDisplay::LoginAsDemoUser() {
+  DCHECK(delegate_);
+  if (delegate_)
+    delegate_->LoginAsDemoUser();
+}
+
 void WebUILoginDisplay::LoginAsGuest() {
   DCHECK(delegate_);
   if (delegate_)
     delegate_->LoginAsGuest();
+}
+
+void WebUILoginDisplay::Signout() {
+  delegate_->Signout();
 }
 
 void WebUILoginDisplay::FixCaptivePortal() {

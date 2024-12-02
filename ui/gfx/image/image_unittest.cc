@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,25 @@ class ImageTest : public testing::Test {
 
 namespace gt = gfx::test;
 
+TEST_F(ImageTest, EmptyImage) {
+  // Test the default constructor.
+  gfx::Image image;
+  EXPECT_EQ(0U, image.RepresentationCount());
+  EXPECT_TRUE(image.IsEmpty());
+
+  // Test the copy constructor.
+  gfx::Image imageCopy(image);
+  EXPECT_TRUE(imageCopy.IsEmpty());
+
+  // Test calling SwapRepresentations() with an empty image.
+  gfx::Image image2(gt::CreateBitmap(25, 25));
+  EXPECT_FALSE(image2.IsEmpty());
+
+  image.SwapRepresentations(&image2);
+  EXPECT_FALSE(image.IsEmpty());
+  EXPECT_TRUE(image2.IsEmpty());
+}
+
 TEST_F(ImageTest, SkiaToSkia) {
   gfx::Image image(gt::CreateBitmap(25, 25));
   const SkBitmap* bitmap = image.ToSkBitmap();
@@ -47,11 +66,24 @@ TEST_F(ImageTest, SkiaToSkia) {
     EXPECT_FALSE(image.HasRepresentation(gt::GetPlatformRepresentationType()));
 }
 
+TEST_F(ImageTest, SkiaRefToSkia) {
+  scoped_ptr<SkBitmap> originalBitmap(gt::CreateBitmap(25, 25));
+  gfx::Image image(*originalBitmap.get());
+  const SkBitmap* bitmap = image.ToSkBitmap();
+  EXPECT_TRUE(bitmap);
+  EXPECT_FALSE(bitmap->isNull());
+  EXPECT_EQ(1U, image.RepresentationCount());
+
+  EXPECT_EQ(bitmap, image.ToSkBitmap());
+  if (!kUsesSkiaNatively)
+    EXPECT_FALSE(image.HasRepresentation(gt::GetPlatformRepresentationType()));
+}
+
 TEST_F(ImageTest, SkiaToSkiaRef) {
   gfx::Image image(gt::CreateBitmap(25, 25));
 
-  const SkBitmap& bitmap = static_cast<const SkBitmap&>(image);
-  EXPECT_FALSE(bitmap.isNull());
+  const SkBitmap* bitmap = image.ToSkBitmap();
+  EXPECT_FALSE(bitmap->isNull());
   EXPECT_EQ(1U, image.RepresentationCount());
 
   const SkBitmap* bitmap1 = image.ToSkBitmap();
@@ -74,8 +106,8 @@ TEST_F(ImageTest, SkiaToPlatform) {
   EXPECT_TRUE(gt::ToPlatformType(image));
   EXPECT_EQ(kRepCount, image.RepresentationCount());
 
-  const SkBitmap& bitmap = static_cast<const SkBitmap&>(image);
-  EXPECT_FALSE(bitmap.isNull());
+  const SkBitmap* bitmap = image.ToSkBitmap();
+  EXPECT_FALSE(bitmap->isNull());
   EXPECT_EQ(kRepCount, image.RepresentationCount());
 
   EXPECT_TRUE(image.HasRepresentation(gfx::Image::kImageRepSkia));
@@ -166,10 +198,10 @@ TEST_F(ImageTest, SkiaToCocoaCopy) {
 
 TEST_F(ImageTest, CheckSkiaColor) {
   gfx::Image image(gt::CreatePlatformImage());
-  const SkBitmap& bitmap(image);
+  const SkBitmap* bitmap = image.ToSkBitmap();
 
-  SkAutoLockPixels auto_lock(bitmap);
-  uint32_t* pixel = bitmap.getAddr32(10, 10);
+  SkAutoLockPixels auto_lock(*bitmap);
+  uint32_t* pixel = bitmap->getAddr32(10, 10);
   EXPECT_EQ(SK_ColorRED, *pixel);
 }
 
@@ -177,11 +209,11 @@ TEST_F(ImageTest, SwapRepresentations) {
   const size_t kRepCount = kUsesSkiaNatively ? 1U : 2U;
 
   gfx::Image image1(gt::CreateBitmap(25, 25));
-  const SkBitmap* bitmap1 = image1;
+  const SkBitmap* bitmap1 = image1.ToSkBitmap();
   EXPECT_EQ(1U, image1.RepresentationCount());
 
   gfx::Image image2(gt::CreatePlatformImage());
-  const SkBitmap* bitmap2 = image2;
+  const SkBitmap* bitmap2 = image2.ToSkBitmap();
   gt::PlatformImage platform_image = gt::ToPlatformType(image2);
   EXPECT_EQ(kRepCount, image2.RepresentationCount());
 

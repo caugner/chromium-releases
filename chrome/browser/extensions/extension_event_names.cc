@@ -31,6 +31,8 @@ const char kOnFileBrowserDiskChanged[] = "fileBrowserPrivate.onDiskChanged";
 const char kOnFileChanged[] = "fileBrowserPrivate.onFileChanged";
 const char kOnFileBrowserMountCompleted[] =
     "fileBrowserPrivate.onMountCompleted";
+const char kOnFileTransfersUpdated[] =
+    "fileBrowserPrivate.onFileTransfersUpdated";
 
 const char kOnInputMethodChanged[] = "inputMethodPrivate.onChanged";
 
@@ -38,8 +40,17 @@ const char kOnDownloadCreated[] = "experimental.downloads.onCreated";
 const char kOnDownloadChanged[] = "experimental.downloads.onChanged";
 const char kOnDownloadErased[] = "experimental.downloads.onErased";
 
-const char kOnSettingsChanged[] = "experimental.storage.onChanged";
+const char kOnSettingsChanged[] = "storage.onChanged";
 
 const char kOnTerminalProcessOutput[] = "terminalPrivate.onProcessOutput";
+
+const char kOnOffscreenTabUpdated[] = "experimental.offscreenTabs.onUpdated";
+
+#if defined(OS_CHROMEOS)
+const char kBluetoothOnAvailabilityChanged[] =
+    "experimental.bluetooth.onAvailabilityChanged";
+const char kBluetoothOnPowerChanged[] =
+    "experimental.bluetooth.onPowerChanged";
+#endif
 
 }  // namespace extension_event_names

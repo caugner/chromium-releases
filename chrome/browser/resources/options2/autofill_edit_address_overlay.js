@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 cr.define('options', function() {
-  const OptionsPage = options.OptionsPage;
-  const ArrayDataModel = cr.ui.ArrayDataModel;
+  /** @const */ var OptionsPage = options.OptionsPage;
+  /** @const */ var ArrayDataModel = cr.ui.ArrayDataModel;
 
   // The GUID of the loaded address.
   var guid;
@@ -239,7 +239,7 @@ cr.define('options', function() {
         countryCode: '',
         name: '---',
         disabled: true
-      }
+      };
       countries.unshift(emptyCountry, defaultCountry, separator);
 
       // Add the countries to the country <select> list.
@@ -247,7 +247,7 @@ cr.define('options', function() {
       for (var i = 0; i < countries.length; i++) {
         var country = new Option(countries[i].name, countries[i].countryCode);
         country.disabled = countries[i].disabled;
-        countryList.appendChild(country)
+        countryList.appendChild(country);
       }
     },
 

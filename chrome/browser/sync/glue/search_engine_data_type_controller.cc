@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,16 +22,13 @@ SearchEngineDataTypeController::SearchEngineDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* sync_service)
-    : FrontendDataTypeController(profile_sync_factory,
-                                 profile,
-                                 sync_service) {
+    : UIDataTypeController(syncable::SEARCH_ENGINES,
+                           profile_sync_factory,
+                           profile,
+                           sync_service) {
 }
 
 SearchEngineDataTypeController::~SearchEngineDataTypeController() {
-}
-
-syncable::ModelType SearchEngineDataTypeController::type() const {
-  return syncable::SEARCH_ENGINES;
 }
 
 void SearchEngineDataTypeController::Observe(
@@ -48,10 +45,14 @@ void SearchEngineDataTypeController::Observe(
 
 // We want to start the TemplateURLService before we begin associating.
 bool SearchEngineDataTypeController::StartModels() {
-  // If the TemplateURLService is loaded, continue with association.
+  // If the TemplateURLService is loaded, continue with association. We force
+  // a load here to prevent the rest of Sync from waiting on
+  // TemplateURLService's lazy load.
   TemplateURLService* turl_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
-  if (turl_service && turl_service->loaded()) {
+  DCHECK(turl_service);
+  turl_service->Load();
+  if (turl_service->loaded()) {
     return true;  // Continue to Associate().
   }
 
@@ -62,39 +63,8 @@ bool SearchEngineDataTypeController::StartModels() {
 }
 
 // Cleanup for our extra registrar usage.
-void SearchEngineDataTypeController::CleanUpState() {
+void SearchEngineDataTypeController::StopModels() {
   registrar_.RemoveAll();
-}
-
-void SearchEngineDataTypeController::CreateSyncComponents() {
-  ProfileSyncComponentsFactory::SyncComponents sync_components =
-      profile_sync_factory_->CreateSearchEngineSyncComponents(sync_service_,
-                                                              this);
-  set_model_associator(sync_components.model_associator);
-  generic_change_processor_.reset(static_cast<GenericChangeProcessor*>(
-      sync_components.change_processor));
-}
-
-GenericChangeProcessor* SearchEngineDataTypeController::change_processor()
-    const {
-  return generic_change_processor_.get();
-}
-
-void SearchEngineDataTypeController::RecordUnrecoverableError(
-    const tracked_objects::Location& from_here,
-    const std::string& message) {
-  UMA_HISTOGRAM_COUNTS("Sync.SearchEngineRunFailures", 1);
-}
-
-void SearchEngineDataTypeController::RecordAssociationTime(
-    base::TimeDelta time) {
-  UMA_HISTOGRAM_TIMES("Sync.SearchEngineAssociationTime", time);
-}
-
-void SearchEngineDataTypeController::RecordStartFailure(StartResult result) {
-  UMA_HISTOGRAM_ENUMERATION("Sync.SearchEngineStartFailures",
-                            result,
-                            MAX_START_RESULT);
 }
 
 }  // namespace browser_sync

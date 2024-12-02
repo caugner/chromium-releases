@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
-#include "ui/base/message_box_win.h"
+#include "ui/base/win/message_box_win.h"
 #include "ui/gfx/platform_font_win.h"
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/widget/widget.h"
@@ -77,9 +77,6 @@ int GetMinimumFontSize() {
 }  // namespace
 
 void RecordBreakpadStatusUMA(MetricsService* metrics) {
-  DWORD len = ::GetEnvironmentVariableW(
-      ASCIIToWide(env_vars::kNoOOBreakpad).c_str() , NULL, 0);
-  metrics->RecordBreakpadRegistration((len == 0));
   metrics->RecordBreakpadHasDebugger(TRUE == ::IsDebuggerPresent());
 }
 
@@ -233,17 +230,20 @@ void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
   command_line.AppendArguments(parsed_command_line, false);
   if (!command_line.HasSwitch(switches::kRestoreLastSession))
     command_line.AppendSwitch(switches::kRestoreLastSession);
-  if (command_line.GetCommandLineString().length() > RESTART_MAX_CMD_LINE) {
-    LOG(WARNING) << "Command line too long for RegisterApplicationRestart";
-    return;
-  }
 
   // Restart Chrome if the computer is restarted as the result of an update.
   // This could be extended to handle crashes, hangs, and patches.
   HRESULT hr = register_application_restart(
       command_line.GetCommandLineString().c_str(),
       RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_PATCH);
-  DCHECK(SUCCEEDED(hr)) << "RegisterApplicationRestart failed.";
+  if (FAILED(hr)) {
+    if (hr == E_INVALIDARG) {
+      LOG(WARNING) << "Command line too long for RegisterApplicationRestart";
+    } else {
+      NOTREACHED() << "RegisterApplicationRestart failed. hr: " << hr <<
+                      ", command_line: " << command_line.GetCommandLineString();
+    }
+  }
 }
 
 void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {

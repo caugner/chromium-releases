@@ -13,24 +13,26 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/border.h"
 
-#if defined(USE_AURA)
-#include "ui/views/widget/widget.h"
+#if defined(USE_ASH)
+#include "ash/focus_cycler.h"
+#include "ash/shell.h"
 #endif
 
 // Number of pixels to separate each icon.
 const int kSeparation = 0;
 
 StatusAreaView::StatusAreaView()
-    : need_return_focus_(false) {
+    : need_return_focus_(false),
+      skip_next_focus_return_(true) {
   set_id(VIEW_ID_STATUS_AREA);
 }
 
 StatusAreaView::~StatusAreaView() {
 }
 
-void StatusAreaView::AddButton(StatusAreaButton* button, bool bordered) {
+void StatusAreaView::AddButton(StatusAreaButton* button, ButtonBorder border) {
   buttons_.push_back(button);
-  if (bordered)
+  if (border == HAS_BORDER)
     button->set_border(views::Border::CreateEmptyBorder(0, 1, 0, 0));
   AddChildView(button);
   UpdateButtonVisibility();
@@ -87,10 +89,8 @@ void StatusAreaView::Layout() {
 }
 
 void StatusAreaView::PreferredSizeChanged() {
-#if defined(USE_AURA)
   if (GetWidget())
     GetWidget()->SetSize(GetPreferredSize());
-#endif
   views::AccessiblePaneView::PreferredSizeChanged();
 }
 
@@ -100,6 +100,41 @@ void StatusAreaView::ChildPreferredSizeChanged(View* child) {
   // BrowserView know to relayout, which will reset the bounds of this view.
   Layout();
   PreferredSizeChanged();
+}
+
+bool StatusAreaView::CanActivate() const {
+#if defined(USE_ASH)
+  // We don't want mouse clicks to activate us, but we need to allow
+  // activation when the user is using the keyboard, such as by the FocusCycler
+  // or on the Login screen.
+  ash::internal::FocusCycler* focus_cycler =
+      ash::Shell::GetInstance()->focus_cycler();
+  return focus_cycler->widget_activating() == GetWidget() ||
+      need_return_focus_;
+#else
+  return false;
+#endif
+}
+
+void StatusAreaView::DeleteDelegate() {
+#if defined(USE_ASH)
+  // If this is used as the content-view of the widget, then do nothing, since
+  // deleting the widget will end up deleting this. But if this is used only as
+  // the widget-delegate, then delete this now.
+  if (!GetWidget()) {
+    delete this;
+    return;
+  }
+#endif
+  WidgetDelegate::DeleteDelegate();
+}
+
+views::Widget* StatusAreaView::GetWidget() {
+  return View::GetWidget();
+}
+
+const views::Widget* StatusAreaView::GetWidget() const {
+  return View::GetWidget();
 }
 
 void StatusAreaView::MakeButtonsActive(bool active) {
@@ -125,32 +160,28 @@ void StatusAreaView::UpdateButtonTextStyle() {
 void StatusAreaView::TakeFocus(
     bool reverse,
     const ReturnFocusCallback& return_focus_cb) {
-  // Emulates focus receive by AccessiblePaneView::SetPaneFocus.
-  if (!focus_manager_)
-    focus_manager_ = GetFocusManager();
-  focus_manager_->SetFocusedView(
-      reverse ? GetLastFocusableChild() : GetFirstFocusableChild());
-  pane_has_focus_ = true;
+  SetPaneFocus(reverse ? GetLastFocusableChild() : GetFirstFocusableChild());
   need_return_focus_ = true;
   return_focus_cb_ = return_focus_cb;
-  focus_manager_->AddFocusChangeListener(this);
+  GetWidget()->AddObserver(this);
 }
 
 void StatusAreaView::ReturnFocus(bool reverse) {
-  // Emulates focus loss by AccessiblePaneView::RemovePaneFocus.
-  if (!focus_manager_)
-    focus_manager_ = GetFocusManager();
-  focus_manager_->RemoveFocusChangeListener(this);
-  pane_has_focus_ = false;
-  need_return_focus_ = false;
-  focus_manager_->ClearFocus();
+  ClearFocus();
   return_focus_cb_.Run(reverse);
+}
+
+void StatusAreaView::ClearFocus() {
+  GetWidget()->RemoveObserver(this);
+  RemovePaneFocus();
+  focus_manager_->ClearFocus();
+  need_return_focus_ = false;
 }
 
 void StatusAreaView::OnDidChangeFocus(views::View* focused_before,
                                       views::View* focused_now) {
   views::AccessiblePaneView::OnDidChangeFocus(focused_before, focused_now);
-  if (need_return_focus_) {
+  if (need_return_focus_ && !skip_next_focus_return_) {
     const views::View* first = GetFirstFocusableChild();
     const views::View* last = GetLastFocusableChild();
     const bool first_to_last = (focused_before == first && focused_now == last);
@@ -159,4 +190,24 @@ void StatusAreaView::OnDidChangeFocus(views::View* focused_before,
     if (first_to_last || last_to_first)
       ReturnFocus(first_to_last);
   }
+  skip_next_focus_return_ = false;
+}
+
+void StatusAreaView::OnWidgetActivationChanged(views::Widget* widget,
+                                               bool active) {
+  if (!active)
+    ClearFocus();
+}
+
+bool StatusAreaView::AcceleratorPressed(const ui::Accelerator& accelerator) {
+  if (need_return_focus_ && accelerator.key_code() == ui::VKEY_ESCAPE) {
+    // Override Escape handling to return focus back.
+    ReturnFocus(false);
+    return true;
+  } else if (accelerator.key_code() == ui::VKEY_HOME ||
+             accelerator.key_code() == ui::VKEY_END) {
+    // Do not return focus if it wraps right after pressing Home/End.
+    skip_next_focus_return_ = true;
+  }
+  return AccessiblePaneView::AcceleratorPressed(accelerator);
 }

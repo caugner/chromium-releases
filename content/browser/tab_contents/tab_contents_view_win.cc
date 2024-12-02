@@ -4,14 +4,22 @@
 
 #include "content/browser/tab_contents/tab_contents_view_win.h"
 
-#include "content/browser/renderer_host/render_view_host.h"
+#include "base/bind.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_win.h"
-#include "content/browser/tab_contents/interstitial_page.h"
+#include "content/browser/tab_contents/interstitial_page_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/web_contents_drag_win.h"
+#include "content/browser/tab_contents/web_drag_dest_win.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_view_delegate.h"
+#include "ui/gfx/screen.h"
 
+using content::RenderViewHost;
+using content::RenderWidgetHostView;
 using content::WebContents;
+using content::WebContentsViewDelegate;
 
 namespace {
 
@@ -48,20 +56,17 @@ class TempParent : public ui::WindowImpl {
 
 }  // namespace namespace
 
-TabContentsViewWin::TabContentsViewWin(WebContents* web_contents)
-    : parent_(NULL),
-      tab_contents_(static_cast<TabContents*>(web_contents)),
-      view_(NULL) {
+TabContentsViewWin::TabContentsViewWin(TabContents* tab_contents,
+                                       WebContentsViewDelegate* delegate)
+    : tab_contents_(tab_contents),
+      view_(NULL),
+      delegate_(delegate),
+      close_tab_after_drag_ends_(false) {
 }
 
 TabContentsViewWin::~TabContentsViewWin() {
-}
-
-void TabContentsViewWin::SetParent(HWND parent) {
-  DCHECK(!parent_);
-  parent_ = parent;
-
-  ::SetParent(hwnd(), parent_);
+  if (IsWindow(hwnd()))
+    DestroyWindow(hwnd());
 }
 
 void TabContentsViewWin::CreateView(const gfx::Size& initial_size) {
@@ -70,18 +75,27 @@ void TabContentsViewWin::CreateView(const gfx::Size& initial_size) {
   set_window_style(WS_VISIBLE | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
 
   Init(TempParent::Get()->hwnd(), gfx::Rect(initial_size_));
+
+  // Remove the root view drop target so we can register our own.
+  RevokeDragDrop(GetNativeView());
+  drag_dest_ = new WebDragDest(hwnd(), tab_contents_);
+  if (delegate_.get()) {
+    content::WebDragDestDelegate* delegate = delegate_->GetDragDestDelegate();
+    if (delegate)
+      drag_dest_->set_delegate(delegate);
+  }
 }
 
 RenderWidgetHostView* TabContentsViewWin::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host)  {
-  if (render_widget_host->view()) {
+    content::RenderWidgetHost* render_widget_host)  {
+  if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
     // this actually is happening (and somebody isn't accidentally creating the
     // view twice), we check for the RVH Factory, which will be set when we're
     // making special ones (which go along with the special views).
     DCHECK(RenderViewHostFactory::has_factory());
-    return render_widget_host->view();
+    return render_widget_host->GetView();
   }
 
   view_ = static_cast<RenderWidgetHostViewWin*>(
@@ -102,7 +116,7 @@ gfx::NativeView TabContentsViewWin::GetContentNativeView() const {
 }
 
 gfx::NativeWindow TabContentsViewWin::GetTopLevelNativeWindow() const {
-  return parent_;
+  return GetParent(GetNativeView());
 }
 
 void TabContentsViewWin::GetContainerBounds(gfx::Rect *out) const {
@@ -115,6 +129,9 @@ void TabContentsViewWin::GetContainerBounds(gfx::Rect *out) const {
 }
 
 void TabContentsViewWin::SetPageTitle(const string16& title) {
+  // It's possible to get this after the hwnd has been destroyed.
+  if (GetNativeView())
+    ::SetWindowText(GetNativeView(), title.c_str());
 }
 
 void TabContentsViewWin::OnTabCrashed(base::TerminationStatus status,
@@ -150,12 +167,12 @@ void TabContentsViewWin::Focus() {
     return;
   }
 
+  if (delegate_.get() && delegate_->Focus())
+    return;
+
   RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
-  if (rwhv) {
+  if (rwhv)
     rwhv->Focus();
-  } else {
-    SetFocus(hwnd());
-  }
 }
 
 void TabContentsViewWin::SetInitialFocus() {
@@ -166,19 +183,26 @@ void TabContentsViewWin::SetInitialFocus() {
 }
 
 void TabContentsViewWin::StoreFocus() {
-  // TODO(jam): why is this on WebContentsView?
-  NOTREACHED();
+  if (delegate_.get())
+    delegate_->StoreFocus();
 }
 
 void TabContentsViewWin::RestoreFocus() {
-  NOTREACHED();
+  if (delegate_.get())
+    delegate_->RestoreFocus();
 }
 
 bool TabContentsViewWin::IsDoingDrag() const {
-  return false;
+  return drag_handler_.get() != NULL;
 }
 
 void TabContentsViewWin::CancelDragAndCloseTab() {
+  DCHECK(IsDoingDrag());
+  // We can't close the tab while we're in the drag and
+  // |drag_handler_->CancelDrag()| is async.  Instead, set a flag to cancel
+  // the drag and when the drag nested message loop ends, close the tab.
+  drag_handler_->CancelDrag();
+  close_tab_after_drag_ends_ = true;
 }
 
 bool TabContentsViewWin::IsEventTracking() const {
@@ -192,14 +216,6 @@ void TabContentsViewWin::GetViewBounds(gfx::Rect* out) const {
   RECT r;
   GetWindowRect(hwnd(), &r);
   *out = gfx::Rect(r);
-}
-
-void TabContentsViewWin::InstallOverlayView(gfx::NativeView view) {
-  NOTREACHED();
-}
-
-void TabContentsViewWin::RemoveOverlayView() {
-  NOTREACHED();
 }
 
 void TabContentsViewWin::CreateNewWindow(
@@ -246,8 +262,16 @@ void TabContentsViewWin::ShowCreatedFullscreenWidget(int route_id) {
                                               gfx::Rect());
 }
 
-void TabContentsViewWin::ShowContextMenu(const ContextMenuParams& params) {
-  NOTIMPLEMENTED();
+void TabContentsViewWin::ShowContextMenu(
+    const content::ContextMenuParams& params) {
+  // Allow WebContentsDelegates to handle the context menu operation first.
+  if (tab_contents_->GetDelegate() &&
+      tab_contents_->GetDelegate()->HandleContextMenu(params)) {
+    return;
+  }
+
+  if (delegate_.get())
+    delegate_->ShowContextMenu(params);
 }
 
 void TabContentsViewWin::ShowPopupMenu(const gfx::Rect& bounds,
@@ -256,6 +280,7 @@ void TabContentsViewWin::ShowPopupMenu(const gfx::Rect& bounds,
                                        int selected_item,
                                        const std::vector<WebMenuItem>& items,
                                        bool right_aligned) {
+  // External popup menus are only used on Mac.
   NOTIMPLEMENTED();
 }
 
@@ -263,11 +288,16 @@ void TabContentsViewWin::StartDragging(const WebDropData& drop_data,
                                        WebKit::WebDragOperationsMask operations,
                                        const SkBitmap& image,
                                        const gfx::Point& image_offset) {
-  NOTIMPLEMENTED();
+  drag_handler_ = new WebContentsDragWin(
+      GetNativeView(),
+      tab_contents_,
+      drag_dest_,
+      base::Bind(&TabContentsViewWin::EndDragging, base::Unretained(this)));
+  drag_handler_->StartDragging(drop_data, operations, image, image_offset);
 }
 
 void TabContentsViewWin::UpdateDragCursor(WebKit::WebDragOperation operation) {
-  NOTIMPLEMENTED();
+  drag_dest_->set_drag_cursor(operation);
 }
 
 void TabContentsViewWin::GotFocus() {
@@ -276,13 +306,53 @@ void TabContentsViewWin::GotFocus() {
 }
 
 void TabContentsViewWin::TakeFocus(bool reverse) {
-  if (tab_contents_->GetDelegate())
-    tab_contents_->GetDelegate()->TakeFocus(reverse);
+  if (tab_contents_->GetDelegate() &&
+      !tab_contents_->GetDelegate()->TakeFocus(reverse) &&
+      delegate_.get()) {
+    delegate_->TakeFocus(reverse);
+  }
+}
+
+void TabContentsViewWin::EndDragging() {
+  drag_handler_ = NULL;
+  if (close_tab_after_drag_ends_) {
+    close_tab_timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(0),
+                           this, &TabContentsViewWin::CloseTab);
+  }
+  tab_contents_->SystemDragEnded();
+}
+
+void TabContentsViewWin::CloseTab() {
+  RenderViewHost* rvh = tab_contents_->GetRenderViewHost();
+  rvh->GetDelegate()->Close(rvh);
+}
+
+LRESULT TabContentsViewWin::OnDestroy(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  if (drag_dest_.get()) {
+    RevokeDragDrop(GetNativeView());
+    drag_dest_ = NULL;
+  }
+  return 0;
 }
 
 LRESULT TabContentsViewWin::OnWindowPosChanged(
     UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
   WINDOWPOS* window_pos = reinterpret_cast<WINDOWPOS*>(lparam);
+  if (window_pos->flags & SWP_HIDEWINDOW) {
+    tab_contents_->HideContents();
+    return 0;
+  }
+
+  // The TabContents was shown by a means other than the user selecting a
+  // Tab, e.g. the window was minimized then restored.
+  if (window_pos->flags & SWP_SHOWWINDOW)
+    tab_contents_->ShowContents();
+
+  // Unless we were specifically told not to size, cause the renderer to be
+  // sized to the new bounds, which forces a repaint. Not required for the
+  // simple minimize-restore case described above, for example, since the
+  // size hasn't changed.
   if (window_pos->flags & SWP_NOSIZE)
     return 0;
 
@@ -293,5 +363,117 @@ LRESULT TabContentsViewWin::OnWindowPosChanged(
   if (rwhv)
     rwhv->SetSize(size);
 
+  if (delegate_.get())
+    delegate_->SizeChanged(size);
+
   return 0;
+}
+
+LRESULT TabContentsViewWin::OnMouseDown(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  // Make sure this TabContents is activated when it is clicked on.
+  if (tab_contents_->GetDelegate())
+    tab_contents_->GetDelegate()->ActivateContents(tab_contents_);
+  return 0;
+}
+
+LRESULT TabContentsViewWin::OnMouseMove(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  // Let our delegate know that the mouse moved (useful for resetting status
+  // bubble state).
+  if (tab_contents_->GetDelegate()) {
+    tab_contents_->GetDelegate()->ContentsMouseEvent(
+        tab_contents_, gfx::Screen::GetCursorScreenPoint(), true);
+  }
+  return 0;
+}
+
+LRESULT TabContentsViewWin::OnReflectedMessage(
+    UINT msg, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  MSG* message = reinterpret_cast<MSG*>(lparam);
+  switch (message->message) {
+    case WM_MOUSEWHEEL:
+      // This message is reflected from the view() to this window.
+      if (GET_KEYSTATE_WPARAM(message->wParam) & MK_CONTROL) {
+        tab_contents_->GetDelegate()->ContentsZoomChange(
+            GET_WHEEL_DELTA_WPARAM(message->wParam) > 0);
+        return 1;
+      }
+    break;
+  }
+  return 0;
+}
+
+LRESULT TabContentsViewWin::OnNCCalcSize(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  // Hack for ThinkPad mouse wheel driver. We have set the fake scroll bars
+  // to receive scroll messages from ThinkPad touch-pad driver. Suppress
+  // painting of scrollbars by returning 0 size for them.
+  return 0;
+}
+
+LRESULT TabContentsViewWin::OnScroll(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  int scroll_type = LOWORD(wparam);
+  short position = HIWORD(wparam);
+  HWND scrollbar = reinterpret_cast<HWND>(lparam);
+  // This window can receive scroll events as a result of the ThinkPad's
+  // touch-pad scroll wheel emulation.
+  // If ctrl is held, zoom the UI.  There are three issues with this:
+  // 1) Should the event be eaten or forwarded to content?  We eat the event,
+  //    which is like Firefox and unlike IE.
+  // 2) Should wheel up zoom in or out?  We zoom in (increase font size), which
+  //    is like IE and Google maps, but unlike Firefox.
+  // 3) Should the mouse have to be over the content area?  We zoom as long as
+  //    content has focus, although FF and IE require that the mouse is over
+  //    content.  This is because all events get forwarded when content has
+  //    focus.
+  if (GetAsyncKeyState(VK_CONTROL) & 0x8000) {
+    int distance = 0;
+    switch (scroll_type) {
+      case SB_LINEUP:
+        distance = WHEEL_DELTA;
+        break;
+      case SB_LINEDOWN:
+        distance = -WHEEL_DELTA;
+        break;
+        // TODO(joshia): Handle SB_PAGEUP, SB_PAGEDOWN, SB_THUMBPOSITION,
+        // and SB_THUMBTRACK for completeness
+      default:
+        break;
+    }
+
+    tab_contents_->GetDelegate()->ContentsZoomChange(distance > 0);
+    return 0;
+  }
+
+  // Reflect scroll message to the view() to give it a chance
+  // to process scrolling.
+  SendMessage(GetContentNativeView(), message, wparam, lparam);
+  return 0;
+}
+
+LRESULT TabContentsViewWin::OnSize(
+    UINT message, WPARAM wparam, LPARAM lparam, BOOL& handled) {
+  // NOTE: Because we handle OnWindowPosChanged without calling DefWindowProc,
+  // OnSize is NOT called on window resize. This handler is called only once
+  // when the window is created.
+  // Don't call base class OnSize to avoid useless layout for 0x0 size.
+  // We will get OnWindowPosChanged later and layout root view in WasSized.
+
+  // Hack for ThinkPad touch-pad driver.
+  // Set fake scrollbars so that we can get scroll messages,
+  SCROLLINFO si = {0};
+  si.cbSize = sizeof(si);
+  si.fMask = SIF_ALL;
+
+  si.nMin = 1;
+  si.nMax = 100;
+  si.nPage = 10;
+  si.nPos = 50;
+
+  ::SetScrollInfo(hwnd(), SB_HORZ, &si, FALSE);
+  ::SetScrollInfo(hwnd(), SB_VERT, &si, FALSE);
+
+  return 1;
 }

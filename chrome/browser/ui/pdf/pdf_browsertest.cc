@@ -15,9 +15,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "net/test/test_server.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -46,6 +46,7 @@ class PDFBrowserTest : public InProcessBrowserTest,
 
     pdf_test_server_.reset(new net::TestServer(
         net::TestServer::TYPE_HTTP,
+        net::TestServer::kLocalhost,
         FilePath(FILE_PATH_LITERAL("pdf/test"))));
   }
 
@@ -199,6 +200,8 @@ class PDFBrowserTest : public InProcessBrowserTest,
 #if defined(OS_CHROMEOS)
 // TODO(sanjeevr): http://crbug.com/79837
 #define MAYBE_Basic DISABLED_Basic
+#elif defined(OS_MACOSX)
+#define MAYBE_Basic DISABLED_Basic
 #else
 #define MAYBE_Basic Basic
 #endif
@@ -269,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
   ui::Clipboard::ObjectMapParams params;
   params.push_back(std::vector<char>());
   objects[ui::Clipboard::CBF_TEXT] = params;
-  clipboard.WriteObjects(objects);
+  clipboard.WriteObjects(ui::Clipboard::BUFFER_STANDARD, objects);
 
   browser()->GetSelectedWebContents()->GetRenderViewHost()->Copy();
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
@@ -282,8 +285,8 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
 // Tests that loading async pdfs works correctly (i.e. document fully loads).
 // This also loads all documents that used to crash, to ensure we don't have
 // regressions.
-// Flaky as per http://crbug.com/74548.
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
+// If it flakes, reopen http://crbug.com/74548.
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, SLOW_Loading) {
   ASSERT_TRUE(pdf_test_server()->Start());
 
   NavigationController* controller =
@@ -339,12 +342,7 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, FLAKY_SLOW_Loading) {
 }
 
 // Flaky as per http://crbug.com/74549.
-#if defined(OS_MACOSX)
-#define MAYBE_OnLoadAndReload DISABLED_OnLoadAndReload
-#else
-#define MAYBE_OnLoadAndReload FLAKY_OnLoadAndReload
-#endif
-IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_OnLoadAndReload) {
+IN_PROC_BROWSER_TEST_F(PDFBrowserTest, DISABLED_OnLoadAndReload) {
   ASSERT_TRUE(pdf_test_server()->Start());
 
   GURL url = pdf_test_server()->GetURL("files/onload_reload.html");

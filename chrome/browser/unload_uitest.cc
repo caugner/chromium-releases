@@ -11,7 +11,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/browser/net/url_request_mock_http_job.h"
+#include "content/test/net/url_request_mock_http_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "ui/base/events.h"
 #include "ui/base/ui_base_types.h"
@@ -196,25 +196,13 @@ TEST_F(UnloadTest, CrossSiteInfiniteUnloadSync) {
   NavigateToNolistenersFileTwice();
 }
 
-// TODO(creis): This test is currently failing intermittently on Linux and
-// consistently on Mac and Vista.  http://crbug.com/38427
-#if defined(OS_MACOSX)
-#define MAYBE_CrossSiteInfiniteUnloadAsyncInputEvent \
-    DISABLED_CrossSiteInfiniteUnloadAsyncInputEvent
-#elif defined(OS_WIN)
-#define MAYBE_CrossSiteInfiniteUnloadAsyncInputEvent \
-    DISABLED_CrossSiteInfiniteUnloadAsyncInputEvent
-#else
-// Flaky on Linux.  http://crbug.com/38427
-#define MAYBE_CrossSiteInfiniteUnloadAsyncInputEvent \
-    FLAKY_CrossSiteInfiniteUnloadAsyncInputEvent
-#endif
-
 // Navigate to a page with an infinite unload handler.
 // Then an async crosssite request followed by an input event to ensure that
 // the short unload timeout (not the long input event timeout) is used.
+// TODO(creis): This test is currently failing intermittently on Linux and
+// consistently on Mac and Vista.  http://crbug.com/38427
 // See crbug.com/11007.
-TEST_F(UnloadTest, MAYBE_CrossSiteInfiniteUnloadAsyncInputEvent) {
+TEST_F(UnloadTest, DISABLED_CrossSiteInfiniteUnloadAsyncInputEvent) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -244,7 +232,7 @@ TEST_F(UnloadTest, MAYBE_CrossSiteInfiniteUnloadAsyncInputEvent) {
 // Then two two async crosssite requests to ensure
 // we don't get confused and think we're closing the tab.
 // This test is flaky on the valgrind UI bots. http://crbug.com/39057
-TEST_F(UnloadTest, FLAKY_CrossSiteInfiniteBeforeUnloadAsync) {
+TEST_F(UnloadTest, DISABLED_CrossSiteInfiniteBeforeUnloadAsync) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -254,10 +242,19 @@ TEST_F(UnloadTest, FLAKY_CrossSiteInfiniteBeforeUnloadAsync) {
   NavigateToNolistenersFileTwiceAsync();
 }
 
+#if defined(OS_LINUX)
+// Flaky 86469.
+#define MAYBE_CrossSiteInfiniteBeforeUnloadSync \
+    DISABLED_CrossSiteInfiniteBeforeUnloadSync
+#else
+#define MAYBE_CrossSiteInfiniteBeforeUnloadSync \
+    CrossSiteInfiniteBeforeUnloadSync
+#endif
+
 // Navigate to a page with an infinite beforeunload handler.
 // Then two two sync crosssite requests to ensure
 // we correctly nav to each one.
-TEST_F(UnloadTest, CrossSiteInfiniteBeforeUnloadSync) {
+TEST_F(UnloadTest, MAYBE_CrossSiteInfiniteBeforeUnloadSync) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -274,7 +271,7 @@ TEST_F(UnloadTest, BrowserCloseNoUnloadListeners) {
 
 // Tests closing the browser on a page with an unload listener registered.
 // Test marked as flaky in http://crbug.com/51698
-TEST_F(UnloadTest, FLAKY_BrowserCloseUnload) {
+TEST_F(UnloadTest, DISABLED_BrowserCloseUnload) {
   LoadUrlAndQuitBrowser(UNLOAD_HTML, L"unload");
 }
 
@@ -331,7 +328,7 @@ TEST_F(UnloadTest, BrowserTerminateBeforeUnload) {
 #if defined(OS_LINUX)
 // Fails sometimes on Linux valgrind. http://crbug.com/45675
 #define MAYBE_BrowserCloseWithInnerFocusedFrame \
-    FLAKY_BrowserCloseWithInnerFocusedFrame
+    DISABLED_BrowserCloseWithInnerFocusedFrame
 #else
 #define MAYBE_BrowserCloseWithInnerFocusedFrame \
     BrowserCloseWithInnerFocusedFrame
@@ -371,14 +368,11 @@ TEST_F(UnloadTest, BrowserCloseInfiniteUnload) {
   LoadUrlAndQuitBrowser(INFINITE_UNLOAD_HTML, L"infiniteunload");
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_LINUX)
 // Flakily fails, times out: http://crbug.com/78803
-#define MAYBE_BrowserCloseInfiniteBeforeUnload \
-    DISABLED_BrowserCloseInfiniteBeforeUnload
-#elif defined(OS_CHROMEOS)
 // Flakily fails: http://crbug.com/86469
 #define MAYBE_BrowserCloseInfiniteBeforeUnload \
-    FLAKY_BrowserCloseInfiniteBeforeUnload
+    DISABLED_BrowserCloseInfiniteBeforeUnload
 #else
 #define MAYBE_BrowserCloseInfiniteBeforeUnload BrowserCloseInfiniteBeforeUnload
 #endif
@@ -391,9 +385,16 @@ TEST_F(UnloadTest, MAYBE_BrowserCloseInfiniteBeforeUnload) {
   LoadUrlAndQuitBrowser(INFINITE_BEFORE_UNLOAD_HTML, L"infinitebeforeunload");
 }
 
+#if defined(OS_LINUX)
+// Flaky 86469.
+#define MAYBE_BrowserCloseInfiniteUnloadAlert \
+        DISABLED_BrowserCloseInfiniteUnloadAlert
+#else
+#define MAYBE_BrowserCloseInfiniteUnloadAlert BrowserCloseInfiniteUnloadAlert
+#endif
 // Tests closing the browser on a page with an unload listener registered where
 // the unload handler has an infinite loop followed by an alert.
-TEST_F(UnloadTest, BrowserCloseInfiniteUnloadAlert) {
+TEST_F(UnloadTest, MAYBE_BrowserCloseInfiniteUnloadAlert) {
   // Tests makes no sense in single-process mode since the renderer is hung.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
     return;
@@ -401,7 +402,7 @@ TEST_F(UnloadTest, BrowserCloseInfiniteUnloadAlert) {
   LoadUrlAndQuitBrowser(INFINITE_UNLOAD_ALERT_HTML, L"infiniteunloadalert");
 }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
 // Flakily fails, times out: http://crbug.com/78803
 #define MAYBE_BrowserCloseInfiniteBeforeUnloadAlert \
     DISABLED_BrowserCloseInfiniteBeforeUnloadAlert
@@ -444,7 +445,7 @@ TEST_F(UnloadTest, BrowserCloseTwoSecondBeforeUnloadAlert) {
 #elif defined(OS_CHROMEOS)
 // http://crbug.com/86769
 #define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
-    FLAKY_BrowserCloseTabWhenOtherTabHasListener
+    DISABLED_BrowserCloseTabWhenOtherTabHasListener
 #else
 #define MAYBE_BrowserCloseTabWhenOtherTabHasListener \
     BrowserCloseTabWhenOtherTabHasListener

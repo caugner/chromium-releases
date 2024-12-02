@@ -51,7 +51,7 @@ class WindowTypeLauncher : public views::WidgetDelegateView,
   virtual views::View* GetContentsView() OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
+  virtual bool CanMaximize() const OVERRIDE;
 
   // Overridden from views::ButtonListener:
   virtual void ButtonPressed(views::Button* sender,
@@ -63,11 +63,11 @@ class WindowTypeLauncher : public views::WidgetDelegateView,
 
   // Override from views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& p,
-                                      bool is_mouse_gesture) OVERRIDE;
+                                      const gfx::Point& point) OVERRIDE;
 #endif  // !defined(OS_MACOSX)
 
   views::NativeTextButton* create_button_;
+  views::NativeTextButton* panel_button_;
   views::NativeTextButton* create_nonresizable_button_;
   views::NativeTextButton* bubble_button_;
   views::NativeTextButton* lock_button_;

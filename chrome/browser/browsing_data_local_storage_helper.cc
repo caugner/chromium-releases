@@ -10,14 +10,16 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/dom_storage_context.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/glue/webkit_glue.h"
 
+using content::BrowserContext;
 using content::BrowserThread;
+using content::DOMStorageContext;
 using WebKit::WebSecurityOrigin;
 
 BrowsingDataLocalStorageHelper::LocalStorageInfo::LocalStorageInfo()
@@ -48,9 +50,9 @@ BrowsingDataLocalStorageHelper::LocalStorageInfo::~LocalStorageInfo() {}
 
 BrowsingDataLocalStorageHelper::BrowsingDataLocalStorageHelper(
     Profile* profile)
-    : profile_(profile),
+    : dom_storage_context_(BrowserContext::GetDOMStorageContext(profile)),
       is_fetching_(false) {
-  DCHECK(profile_);
+  DCHECK(dom_storage_context_);
 }
 
 BrowsingDataLocalStorageHelper::~BrowsingDataLocalStorageHelper() {
@@ -64,11 +66,9 @@ void BrowsingDataLocalStorageHelper::StartFetching(
 
   is_fetching_ = true;
   completion_callback_ = callback;
-  BrowserThread::PostTask(
-      BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
+  dom_storage_context_->GetAllStorageFiles(
       base::Bind(
-          &BrowsingDataLocalStorageHelper::FetchLocalStorageInfoInWebKitThread,
-          this));
+          &BrowsingDataLocalStorageHelper::GetAllStorageFilesCallback, this));
 }
 
 void BrowsingDataLocalStorageHelper::CancelNotification() {
@@ -79,43 +79,44 @@ void BrowsingDataLocalStorageHelper::CancelNotification() {
 void BrowsingDataLocalStorageHelper::DeleteLocalStorageFile(
     const FilePath& file_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BrowserThread::PostTask(
-      BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
-      base::Bind(
-          &BrowsingDataLocalStorageHelper::DeleteLocalStorageFileInWebKitThread,
-          this, file_path));
+  dom_storage_context_->DeleteLocalStorageFile(file_path);
 }
 
-void BrowsingDataLocalStorageHelper::FetchLocalStorageInfoInWebKitThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
-  file_util::FileEnumerator file_enumerator(
-      profile_->GetWebKitContext()->data_path().Append(
-          DOMStorageContext::kLocalStorageDirectory),
-      false, file_util::FileEnumerator::FILES);
-  for (FilePath file_path = file_enumerator.Next(); !file_path.empty();
-       file_path = file_enumerator.Next()) {
-    if (file_path.Extension() == DOMStorageContext::kLocalStorageExtension) {
-      WebSecurityOrigin web_security_origin =
-          WebSecurityOrigin::createFromDatabaseIdentifier(
-              webkit_glue::FilePathToWebString(file_path.BaseName()));
-      if (EqualsASCII(web_security_origin.protocol(),
-                      chrome::kExtensionScheme)) {
-        // Extension state is not considered browsing data.
-        continue;
-      }
-      base::PlatformFileInfo file_info;
-      bool ret = file_util::GetFileInfo(file_path, &file_info);
-      if (ret) {
-        local_storage_info_.push_back(LocalStorageInfo(
-            web_security_origin.protocol().utf8(),
-            web_security_origin.host().utf8(),
-            web_security_origin.port(),
-            web_security_origin.databaseIdentifier().utf8(),
-            web_security_origin.toString().utf8(),
-            file_path,
-            file_info.size,
-            file_info.last_modified));
-      }
+void BrowsingDataLocalStorageHelper::GetAllStorageFilesCallback(
+    const std::vector<FilePath>& files) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  BrowserThread::PostTask(
+      BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(
+          &BrowsingDataLocalStorageHelper::FetchLocalStorageInfo,
+          this, files));
+}
+
+void BrowsingDataLocalStorageHelper::FetchLocalStorageInfo(
+    const std::vector<FilePath>& files) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  for (size_t i = 0; i < files.size(); ++i) {
+    FilePath file_path = files[i];
+    WebSecurityOrigin web_security_origin =
+        WebSecurityOrigin::createFromDatabaseIdentifier(
+            webkit_glue::FilePathToWebString(file_path.BaseName()));
+    if (EqualsASCII(web_security_origin.protocol(), chrome::kExtensionScheme)) {
+      // Extension state is not considered browsing data.
+      continue;
+    }
+    base::PlatformFileInfo file_info;
+    bool ret = file_util::GetFileInfo(file_path, &file_info);
+    if (ret) {
+      local_storage_info_.push_back(LocalStorageInfo(
+          web_security_origin.protocol().utf8(),
+          web_security_origin.host().utf8(),
+          web_security_origin.port(),
+          web_security_origin.databaseIdentifier().utf8(),
+          web_security_origin.toString().utf8(),
+          file_path,
+          file_info.size,
+          file_info.last_modified));
     }
   }
 
@@ -136,12 +137,7 @@ void BrowsingDataLocalStorageHelper::NotifyInUIThread() {
   is_fetching_ = false;
 }
 
-void BrowsingDataLocalStorageHelper::DeleteLocalStorageFileInWebKitThread(
-    const FilePath& file_path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
-  profile_->GetWebKitContext()->dom_storage_context()->DeleteLocalStorageFile(
-      file_path);
-}
+//---------------------------------------------------------
 
 CannedBrowsingDataLocalStorageHelper::CannedBrowsingDataLocalStorageHelper(
     Profile* profile)
@@ -155,7 +151,6 @@ CannedBrowsingDataLocalStorageHelper::Clone() {
   CannedBrowsingDataLocalStorageHelper* clone =
       new CannedBrowsingDataLocalStorageHelper(profile_);
 
-  base::AutoLock auto_lock(lock_);
   clone->pending_local_storage_info_ = pending_local_storage_info_;
   clone->local_storage_info_ = local_storage_info_;
   return clone;
@@ -163,18 +158,15 @@ CannedBrowsingDataLocalStorageHelper::Clone() {
 
 void CannedBrowsingDataLocalStorageHelper::AddLocalStorage(
     const GURL& origin) {
-  base::AutoLock auto_lock(lock_);
   pending_local_storage_info_.insert(origin);
 }
 
 void CannedBrowsingDataLocalStorageHelper::Reset() {
-  base::AutoLock auto_lock(lock_);
   local_storage_info_.clear();
   pending_local_storage_info_.clear();
 }
 
 bool CannedBrowsingDataLocalStorageHelper::empty() const {
-  base::AutoLock auto_lock(lock_);
   return local_storage_info_.empty() && pending_local_storage_info_.empty();
 }
 
@@ -186,16 +178,17 @@ void CannedBrowsingDataLocalStorageHelper::StartFetching(
 
   is_fetching_ = true;
   completion_callback_ = callback;
-  BrowserThread::PostTask(
-      BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
+
+  // We post a task to emulate async fetching behavior.
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
       base::Bind(&CannedBrowsingDataLocalStorageHelper::
-          ConvertPendingInfoInWebKitThread, this));
+          ConvertPendingInfo, this));
 }
 
 CannedBrowsingDataLocalStorageHelper::~CannedBrowsingDataLocalStorageHelper() {}
 
-void CannedBrowsingDataLocalStorageHelper::ConvertPendingInfoInWebKitThread() {
-  base::AutoLock auto_lock(lock_);
+void CannedBrowsingDataLocalStorageHelper::ConvertPendingInfo() {
   for (std::set<GURL>::iterator info = pending_local_storage_info_.begin();
        info != pending_local_storage_info_.end(); ++info) {
     WebSecurityOrigin web_security_origin =
@@ -221,8 +214,8 @@ void CannedBrowsingDataLocalStorageHelper::ConvertPendingInfoInWebKitThread() {
         web_security_origin.port(),
         web_security_origin.databaseIdentifier().utf8(),
         security_origin,
-        profile_->GetWebKitContext()->dom_storage_context()->
-            GetLocalStorageFilePath(web_security_origin.databaseIdentifier()),
+        dom_storage_context_->
+            GetFilePath(web_security_origin.databaseIdentifier()),
         0,
         base::Time()));
   }

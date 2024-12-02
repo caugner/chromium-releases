@@ -5,8 +5,11 @@
 #include "content/browser/renderer_host/render_view_host_factory.h"
 
 #include "base/logging.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 
+using content::RenderViewHost;
+using content::RenderViewHostImpl;
+using content::SessionStorageNamespace;
 using content::SiteInstance;
 
 // static
@@ -22,8 +25,8 @@ RenderViewHost* RenderViewHostFactory::Create(
     return factory_->CreateRenderViewHost(instance, delegate, routing_id,
                                           session_storage_namespace);
   }
-  return new RenderViewHost(instance, delegate, routing_id,
-                            session_storage_namespace);
+  return new RenderViewHostImpl(instance, delegate, routing_id,
+                                session_storage_namespace);
 }
 
 // static

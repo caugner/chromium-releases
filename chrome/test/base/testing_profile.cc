@@ -32,11 +32,11 @@
 #include "chrome/browser/prefs/testing_pref_store.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "chrome/browser/protector/protector_service_factory.h"
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/signin/token_service.h"
-#include "chrome/browser/speech/chrome_speech_input_preferences.h"
+#include "chrome/browser/speech/chrome_speech_recognition_preferences.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_constants.h"
@@ -44,14 +44,12 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/bookmark_load_observer.h"
-#include "chrome/test/base/test_url_request_context_getter.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/in_process_webkit/webkit_context.h"
-#include "content/browser/mock_resource_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
-#include "net/base/cookie_monster.h"
+#include "content/test/mock_resource_context.h"
+#include "net/cookies/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
@@ -69,7 +67,6 @@
 using base::Time;
 using content::BrowserThread;
 using content::DownloadManager;
-using content::HostZoomMap;
 using testing::NiceMock;
 using testing::Return;
 
@@ -125,14 +122,6 @@ class TestExtensionURLRequestContextGetter
 
 ProfileKeyedService* CreateTestDesktopNotificationService(Profile* profile) {
   return new DesktopNotificationService(profile, NULL);
-}
-
-fileapi::FileSystemOptions CreateTestingFileSystemOptions(bool is_incognito) {
-  return fileapi::FileSystemOptions(
-      is_incognito
-          ? fileapi::FileSystemOptions::PROFILE_MODE_INCOGNITO
-          : fileapi::FileSystemOptions::PROFILE_MODE_NORMAL,
-      std::vector<std::string>());
 }
 
 }  // namespace
@@ -208,9 +197,11 @@ TestingProfile::TestingProfile(const FilePath& path,
 void TestingProfile::Init() {
   profile_dependency_manager_->CreateProfileServices(this, true);
 
+#if defined(ENABLE_NOTIFICATIONS)
   // Install profile keyed service factory hooks for dummy/test services
   DesktopNotificationServiceFactory::GetInstance()->SetTestingFactory(
       this, CreateTestDesktopNotificationService);
+#endif
 }
 
 void TestingProfile::FinishInit() {
@@ -221,7 +212,7 @@ void TestingProfile::FinishInit() {
       content::NotificationService::NoDetails());
 
   if (delegate_)
-    delegate_->OnProfileCreated(this, true);
+    delegate_->OnProfileCreated(this, true, false);
 }
 
 TestingProfile::~TestingProfile() {
@@ -244,9 +235,6 @@ TestingProfile::~TestingProfile() {
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
-
-  // Close the handles so that proper cleanup can be done.
-  db_tracker_ = NULL;
 }
 
 void TestingProfile::CreateFaviconService() {
@@ -450,7 +438,7 @@ std::string TestingProfile::GetProfileName() {
   return std::string("testing_profile");
 }
 
-bool TestingProfile::IsOffTheRecord() {
+bool TestingProfile::IsOffTheRecord() const {
   return incognito_;
 }
 
@@ -472,24 +460,6 @@ bool TestingProfile::HasOffTheRecordProfile() {
 
 Profile* TestingProfile::GetOriginalProfile() {
   return this;
-}
-
-void TestingProfile::SetAppCacheService(
-    ChromeAppCacheService* appcache_service) {
-  appcache_service_ = appcache_service;
-}
-
-ChromeAppCacheService* TestingProfile::GetAppCacheService() {
-  return appcache_service_.get();
-}
-
-webkit_database::DatabaseTracker* TestingProfile::GetDatabaseTracker() {
-  if (!db_tracker_) {
-    db_tracker_ = new webkit_database::DatabaseTracker(
-        GetPath(), false, false, GetExtensionSpecialStoragePolicy(),
-        NULL, NULL);
-  }
-  return db_tracker_;
 }
 
 VisitedLinkMaster* TestingProfile::GetVisitedLinkMaster() {
@@ -532,7 +502,7 @@ TestingProfile::GetExtensionSpecialStoragePolicy() {
   return extension_special_storage_policy_.get();
 }
 
-SSLHostState* TestingProfile::GetSSLHostState() {
+LazyBackgroundTaskQueue* TestingProfile::GetLazyBackgroundTaskQueue() {
   return NULL;
 }
 
@@ -571,11 +541,13 @@ WebDataService* TestingProfile::GetWebDataServiceWithoutCreating() {
   return web_data_service_.get();
 }
 
-PasswordStore* TestingProfile::GetPasswordStore(ServiceAccessType access) {
-  return NULL;
-}
-
 void TestingProfile::SetPrefService(PrefService* prefs) {
+  // ProtectorService binds itself very closely to the PrefService at the moment
+  // of Profile creation and watches pref changes to update their backup.
+  // For tests that replace the PrefService after TestingProfile creation,
+  // ProtectorService is disabled to prevent further invalid memory accesses.
+  protector::ProtectorServiceFactory::GetInstance()->
+      SetTestingFactory(this, NULL);
   prefs_.reset(prefs);
 }
 
@@ -610,27 +582,6 @@ DownloadManager* TestingProfile::GetDownloadManager() {
   return NULL;
 }
 
-fileapi::FileSystemContext* TestingProfile::GetFileSystemContext() {
-  if (!file_system_context_) {
-    file_system_context_ = new fileapi::FileSystemContext(
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
-      GetExtensionSpecialStoragePolicy(),
-      NULL,
-      GetPath(),
-      CreateTestingFileSystemOptions(IsOffTheRecord()));
-  }
-  return file_system_context_.get();
-}
-
-void TestingProfile::SetQuotaManager(quota::QuotaManager* manager) {
-  quota_manager_ = manager;
-}
-
-quota::QuotaManager* TestingProfile::GetQuotaManager() {
-  return quota_manager_.get();
-}
-
 net::URLRequestContextGetter* TestingProfile::GetRequestContext() {
   return request_context_.get();
 }
@@ -649,10 +600,16 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContextForRenderProcess(
 
 void TestingProfile::CreateRequestContext() {
   if (!request_context_)
-    request_context_ = new TestURLRequestContextGetter();
+    request_context_ =
+        new TestURLRequestContextGetter(
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
 }
 
 void TestingProfile::ResetRequestContext() {
+  // Any objects holding live URLFetchers should be deleted before the request
+  // context is shut down.
+  template_url_fetcher_.reset();
+
   request_context_ = NULL;
 }
 
@@ -681,8 +638,10 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContextForIsolatedApp(
   return GetRequestContext();
 }
 
-const content::ResourceContext& TestingProfile::GetResourceContext() {
-  return *content::MockResourceContext::GetInstance();
+content::ResourceContext* TestingProfile::GetResourceContext() {
+  if (!resource_context_.get())
+    resource_context_.reset(new content::MockResourceContext());
+  return resource_context_.get();
 }
 
 HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
@@ -702,18 +661,16 @@ TestingProfile::GetGeolocationPermissionContext() {
   return geolocation_permission_context_.get();
 }
 
-SpeechInputPreferences* TestingProfile::GetSpeechInputPreferences() {
-  if (!speech_input_preferences_.get())
-    speech_input_preferences_ = new ChromeSpeechInputPreferences(GetPrefs());
-  return speech_input_preferences_.get();
-}
-
-HostZoomMap* TestingProfile::GetHostZoomMap() {
+content::SpeechRecognitionPreferences*
+    TestingProfile::GetSpeechRecognitionPreferences() {
+#if defined(ENABLE_INPUT_SPEECH)
+  if (!speech_recognition_preferences_.get())
+    speech_recognition_preferences_ =
+        new ChromeSpeechRecognitionPreferences(GetPrefs());
+  return speech_recognition_preferences_.get();
+#else
   return NULL;
-}
-
-bool TestingProfile::HasProfileSyncService() {
-  return (profile_sync_service_.get() != NULL);
+#endif
 }
 
 std::wstring TestingProfile::GetName() {
@@ -748,20 +705,6 @@ ProtocolHandlerRegistry* TestingProfile::GetProtocolHandlerRegistry() {
   return protocol_handler_registry_.get();
 }
 
-WebKitContext* TestingProfile::GetWebKitContext() {
-  if (webkit_context_ == NULL) {
-    webkit_context_ = new WebKitContext(
-          IsOffTheRecord(), GetPath(),
-          GetExtensionSpecialStoragePolicy(),
-          false, NULL, NULL);
-  }
-  return webkit_context_;
-}
-
-WebKitContext* TestingProfile::GetOffTheRecordWebKitContext() {
-  return NULL;
-}
-
 FilePath TestingProfile::last_selected_directory() {
   return last_selected_directory_;
 }
@@ -785,28 +728,6 @@ void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   CancelableRequestConsumer consumer;
   history_service_->ScheduleDBTask(new QuittingHistoryDBTask(), &consumer);
   MessageLoop::current()->Run();
-}
-
-TokenService* TestingProfile::GetTokenService() {
-  if (!token_service_.get()) {
-    token_service_.reset(new TokenService());
-  }
-  return token_service_.get();
-}
-
-ProfileSyncService* TestingProfile::GetProfileSyncService() {
-  if (!profile_sync_service_.get()) {
-    // Use a NiceMock here since we are really using the mock as a
-    // fake.  Test cases that want to set expectations on a
-    // ProfileSyncService should use the ProfileMock and have this
-    // method return their own mock instance.
-    profile_sync_service_.reset(new NiceMock<ProfileSyncServiceMock>());
-  }
-  return profile_sync_service_.get();
-}
-
-ChromeBlobStorageContext* TestingProfile::GetBlobStorageContext() {
-  return NULL;
 }
 
 ExtensionInfoMap* TestingProfile::GetExtensionInfoMap() {
@@ -850,4 +771,8 @@ void TestingProfile::DestroyWebDataService() {
     return;
 
   web_data_service_->Shutdown();
+}
+
+bool TestingProfile::WasCreatedByVersionOrLater(const std::string& version) {
+  return true;
 }

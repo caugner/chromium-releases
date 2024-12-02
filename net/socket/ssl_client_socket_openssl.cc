@@ -18,6 +18,7 @@
 #include "net/base/cert_verifier.h"
 #include "net/base/net_errors.h"
 #include "net/base/openssl_private_key_store.h"
+#include "net/base/single_request_cert_verifier.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
@@ -581,13 +582,13 @@ void SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
   if (!server_cert_)
     return;
 
-  ssl_info->cert = server_cert_;
+  ssl_info->cert = server_cert_verify_result_.verified_cert;
   ssl_info->cert_status = server_cert_verify_result_.cert_status;
   ssl_info->is_issued_by_known_root =
       server_cert_verify_result_.is_issued_by_known_root;
   ssl_info->public_key_hashes =
     server_cert_verify_result_.public_key_hashes;
-  ssl_info->client_cert_sent = was_origin_bound_cert_sent() ||
+  ssl_info->client_cert_sent = WasDomainBoundCertSent() ||
       (ssl_config_.send_client_cert && ssl_config_.client_cert);
 
   const SSL_CIPHER* cipher = SSL_get_current_cipher(ssl_);
@@ -624,9 +625,26 @@ void SSLClientSocketOpenSSL::GetSSLCertRequestInfo(
 }
 
 int SSLClientSocketOpenSSL::ExportKeyingMaterial(
-    const base::StringPiece& label, const base::StringPiece& context,
-    unsigned char *out, unsigned int outlen) {
-  return ERR_NOT_IMPLEMENTED;
+    const base::StringPiece& label,
+    bool has_context, const base::StringPiece& context,
+    unsigned char* out, unsigned int outlen) {
+  crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
+
+  int rv = SSL_export_keying_material(
+      ssl_, out, outlen, const_cast<char*>(label.data()),
+      label.size(),
+      reinterpret_cast<unsigned char*>(const_cast<char*>(context.data())),
+      context.length(),
+      context.length() > 0);
+
+  if (rv != 1) {
+    int ssl_error = SSL_get_error(ssl_, rv);
+    LOG(ERROR) << "Failed to export keying material;"
+               << " returned " << rv
+               << ", SSL error code " << ssl_error;
+    return MapOpenSSLError(ssl_error, err_tracer);
+  }
+  return OK;
 }
 
 SSLClientSocket::NextProtoStatus SSLClientSocketOpenSSL::GetNextProto(
@@ -634,6 +652,11 @@ SSLClientSocket::NextProtoStatus SSLClientSocketOpenSSL::GetNextProto(
   *proto = npn_proto_;
   *server_protos = server_protos_;
   return npn_status_;
+}
+
+ServerBoundCertService*
+SSLClientSocketOpenSSL::GetServerBoundCertService() const {
+  return NULL;
 }
 
 void SSLClientSocketOpenSSL::DoReadCallback(int rv) {
@@ -786,11 +809,9 @@ int SSLClientSocketOpenSSL::DoHandshake() {
     // SSL handshake is completed.  Let's verify the certificate.
     const bool got_cert = !!UpdateServerCert();
     DCHECK(got_cert);
-    if (net_log_.IsLoggingBytes()) {
-      net_log_.AddEvent(
-          NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
-          make_scoped_refptr(new X509CertificateNetLogParam(server_cert_)));
-    }
+    net_log_.AddEvent(
+        NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
+        make_scoped_refptr(new X509CertificateNetLogParam(server_cert_)));
     GotoState(STATE_VERIFY_CERT);
   } else {
     int ssl_error = SSL_get_error(ssl_, rv);
@@ -886,6 +907,8 @@ int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
     flags |= X509Certificate::VERIFY_REV_CHECKING_ENABLED;
   if (ssl_config_.verify_ev_cert)
     flags |= X509Certificate::VERIFY_EV_CERT;
+  if (ssl_config_.cert_io_enabled)
+    flags |= X509Certificate::VERIFY_CERT_IO_ENABLED;
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
   return verifier_->Verify(
       server_cert_, host_and_port_.host(), flags,

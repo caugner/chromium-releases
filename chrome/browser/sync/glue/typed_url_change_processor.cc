@@ -16,9 +16,9 @@
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
+#include "sync/protocol/typed_url_specifics.pb.h"
 
 using content::BrowserThread;
 
@@ -36,7 +36,7 @@ TypedUrlChangeProcessor::TypedUrlChangeProcessor(
     Profile* profile,
     TypedUrlModelAssociator* model_associator,
     history::HistoryBackend* history_backend,
-    UnrecoverableErrorHandler* error_handler)
+    DataTypeErrorHandler* error_handler)
     : ChangeProcessor(error_handler),
       profile_(profile),
       model_associator_(model_associator),
@@ -87,9 +87,8 @@ void TypedUrlChangeProcessor::HandleURLsModified(
     history::URLsModifiedDetails* details) {
 
   sync_api::WriteTransaction trans(FROM_HERE, share_handle());
-  for (std::vector<history::URLRow>::iterator url =
-       details->changed_urls.begin(); url != details->changed_urls.end();
-       ++url) {
+  for (history::URLRows::iterator url = details->changed_urls.begin();
+       url != details->changed_urls.end(); ++url) {
     // Exit if we were unable to update the sync node.
     if (!CreateOrUpdateSyncNode(*url, &trans))
       return;
@@ -103,8 +102,8 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
   history::VisitVector visit_vector;
   if (!TypedUrlModelAssociator::FixupURLAndGetVisits(
           history_backend_, &url, &visit_vector)) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
-                                          "Could not get the url's visits.");
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+        "Could not get the url's visits.");
     return false;
   }
 
@@ -117,6 +116,10 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
   }
 
   std::string tag = url.url().spec();
+  // Ignore URLs with empty specs - these can happen through history import if
+  // the source history DB has errors.
+  if (tag.empty())
+    return true;
   DCHECK(!visit_vector.empty());
 
   sync_api::WriteNode update_node(trans);
@@ -126,14 +129,13 @@ bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
     sync_api::WriteNode create_node(trans);
     if (!create_node.InitUniqueByCreation(syncable::TYPED_URLS,
                                           typed_url_root, tag)) {
-      error_handler()->OnUnrecoverableError(
-          FROM_HERE, "Failed to create typed_url sync node.");
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          "Failed to create typed_url sync node.");
       return false;
     }
 
     create_node.SetTitle(UTF8ToWide(tag));
     model_associator_->WriteToSyncNode(url, visit_vector, &create_node);
-    model_associator_->Associate(&tag, create_node.GetId());
   }
   return true;
 }
@@ -144,23 +146,18 @@ void TypedUrlChangeProcessor::HandleURLsDeleted(
 
   if (details->all_history) {
     if (!model_associator_->DeleteAllNodes(&trans)) {
-      error_handler()->OnUnrecoverableError(FROM_HERE, std::string());
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          std::string());
       return;
     }
   } else {
     for (std::set<GURL>::iterator url = details->urls.begin();
          url != details->urls.end(); ++url) {
       sync_api::WriteNode sync_node(&trans);
-      int64 sync_id = model_associator_->GetSyncIdFromChromeId(url->spec());
-      if (sync_api::kInvalidId != sync_id) {
-        if (!sync_node.InitByIdLookup(sync_id)) {
-          error_handler()->OnUnrecoverableError(FROM_HERE,
-              "Typed url node lookup failed.");
-          return;
-        }
-        model_associator_->Disassociate(sync_node.GetId());
+      // The deleted URL could have been non-typed, so it might not be found
+      // in the sync DB.
+      if (sync_node.InitByClientTagLookup(syncable::TYPED_URLS, url->spec()))
         sync_node.Remove();
-      }
     }
   }
 }
@@ -215,20 +212,16 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
            changes.Get().begin(); it != changes.Get().end(); ++it) {
     if (sync_api::ChangeRecord::ACTION_DELETE ==
         it->action) {
-      DCHECK(it->specifics.HasExtension(sync_pb::typed_url)) <<
+      DCHECK(it->specifics.has_typed_url()) <<
           "Typed URL delete change does not have necessary specifics.";
-      GURL url(it->specifics.GetExtension(sync_pb::typed_url).url());
+      GURL url(it->specifics.typed_url().url());
       pending_deleted_urls_.push_back(url);
-      // It's OK to disassociate here (before the items are actually deleted)
-      // as we're guaranteed to either get a CommitChanges call or we'll hit
-      // an unrecoverable error which will blow away the model associator.
-      model_associator_->Disassociate(it->id);
       continue;
     }
 
     sync_api::ReadNode sync_node(trans);
     if (!sync_node.InitByIdLookup(it->id)) {
-      error_handler()->OnUnrecoverableError(FROM_HERE,
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "TypedUrl node lookup failed.");
       return;
     }
@@ -240,6 +233,10 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
     const sync_pb::TypedUrlSpecifics& typed_url(
         sync_node.GetTypedUrlSpecifics());
     DCHECK(typed_url.visits_size());
+    // Ignore blank URLs - these should never happen in practice, but they
+    // can sneak into the data via browser import.
+    if (typed_url.url().empty())
+      continue;
     sync_pb::TypedUrlSpecifics filtered_url =
         model_associator_->FilterExpiredVisits(typed_url);
     if (!filtered_url.visits_size()) {
@@ -249,13 +246,9 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
     if (!model_associator_->UpdateFromSyncDB(
             filtered_url, &pending_new_visits_, &pending_deleted_visits_,
             &pending_updated_urls_, &pending_new_urls_)) {
-      error_handler()->OnUnrecoverableError(
-          FROM_HERE, "Could not get existing url's visits.");
+      error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
+          "Could not get existing url's visits.");
       return;
-    }
-
-    if (it->action == sync_api::ChangeRecord::ACTION_ADD) {
-      model_associator_->Associate(&typed_url.url(), it->id);
     }
   }
 }
@@ -275,7 +268,7 @@ void TypedUrlChangeProcessor::CommitChangesFromSyncModel() {
                                                 &pending_updated_urls_,
                                                 &pending_new_visits_,
                                                 &pending_deleted_visits_)) {
-    error_handler()->OnUnrecoverableError(FROM_HERE,
+    error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
         "Could not write to the history backend.");
     return;
   }

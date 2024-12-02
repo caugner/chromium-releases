@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,13 +19,13 @@
 
 namespace net {
 
-bool SpdyHeadersToHttpResponse(const spdy::SpdyHeaderBlock& headers,
+bool SpdyHeadersToHttpResponse(const SpdyHeaderBlock& headers,
                                HttpResponseInfo* response) {
   std::string version;
   std::string status;
 
   // The "status" and "version" headers are required.
-  spdy::SpdyHeaderBlock::const_iterator it;
+  SpdyHeaderBlock::const_iterator it;
   it = headers.find("status");
   if (it == headers.end())
     return false;
@@ -77,7 +77,8 @@ bool SpdyHeadersToHttpResponse(const spdy::SpdyHeaderBlock& headers,
 
 void CreateSpdyHeadersFromHttpRequest(const HttpRequestInfo& info,
                                       const HttpRequestHeaders& request_headers,
-                                      spdy::SpdyHeaderBlock* headers,
+                                      SpdyHeaderBlock* headers,
+                                      int protocol_version,
                                       bool direct) {
 
   HttpRequestHeaders::Iterator it(request_headers);
@@ -98,14 +99,23 @@ void CreateSpdyHeadersFromHttpRequest(const HttpRequestInfo& info,
   }
   static const char kHttpProtocolVersion[] = "HTTP/1.1";
 
-  (*headers)["version"] = kHttpProtocolVersion;
-  (*headers)["method"] = info.method;
-  (*headers)["host"] = GetHostAndOptionalPort(info.url);
-  (*headers)["scheme"] = info.url.scheme();
-  if (direct)
-    (*headers)["url"] = HttpUtil::PathForRequest(info.url);
-  else
-    (*headers)["url"] = HttpUtil::SpecForRequest(info.url);
+  if (protocol_version < 3) {
+    (*headers)["version"] = kHttpProtocolVersion;
+    (*headers)["method"] = info.method;
+    (*headers)["host"] = GetHostAndOptionalPort(info.url);
+    (*headers)["scheme"] = info.url.scheme();
+    if (direct)
+      (*headers)["url"] = HttpUtil::PathForRequest(info.url);
+    else
+      (*headers)["url"] = HttpUtil::SpecForRequest(info.url);
+  } else {
+    (*headers)[":version"] = kHttpProtocolVersion;
+    (*headers)[":method"] = info.method;
+    (*headers)[":host"] = GetHostAndOptionalPort(info.url);
+    (*headers)[":scheme"] = info.url.scheme();
+    (*headers)[":path"] = HttpUtil::PathForRequest(info.url);
+    headers->erase("host"); // this is kinda insane, spdy 3 spec.
+  }
 
 }
 

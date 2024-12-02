@@ -21,11 +21,12 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/perf/browser_perf_test.h"
 #include "chrome/test/perf/perf_test.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
 // Run with --vmodule=latency_tests=1 to print verbose latency info.
 
@@ -538,7 +539,7 @@ void LatencyTest::GetMeanFrameTimeMicros(int* frame_time) const {
   // Search for compositor swaps (or UpdateRects in the software path).
   analyzer_->FindEvents(query_swaps_, &events);
   RateStats stats;
-  ASSERT_TRUE(GetRateStats(events, &stats));
+  ASSERT_TRUE(GetRateStats(events, &stats, NULL));
 
   // Check that the number of swaps is close to kNumFrames.
   EXPECT_LT(num_frames_ - num_frames_ / 4, static_cast<int>(events.size()));
@@ -546,7 +547,7 @@ void LatencyTest::GetMeanFrameTimeMicros(int* frame_time) const {
 }
 
 void LatencyTest::SendInput() {
-  RenderViewHost* rvh = browser()->GetSelectedTabContentsWrapper()->
+  content::RenderViewHost* rvh = browser()->GetSelectedTabContentsWrapper()->
       web_contents()->GetRenderViewHost();
   WebKit::WebMouseEvent mouse_event;
   mouse_event.movementX = 1;

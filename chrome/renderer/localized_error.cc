@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_set.h"
 #include "content/public/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
@@ -37,9 +38,6 @@ static const char kWeakDHKeyLearnMoreUrl[] =
     "err_ssl_weak_server_ephemeral_dh_key";
 static const char kESETLearnMoreUrl[] =
     "http://kb.eset.com/esetkb/index?page=content&id=SOLN2588";
-static const char kKasperskyLearnMoreUrl[] =
-    "http://support.kaspersky.com/kav2012/settings/options"
-    "?print=true&qid=208284701";
 #if defined(OS_CHROMEOS)
 static const char kAppWarningLearnMoreUrl[] =
     "chrome-extension://honijodknafkokifofgiaalefdiedpko/main.html"
@@ -248,13 +246,6 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
    SUGGEST_LEARNMORE,
   },
-  {net::ERR_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION,
-   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
-   IDS_ERRORPAGES_HEADING_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION,
-   IDS_ERRORPAGES_SUMMARY_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION,
-   IDS_ERRORPAGES_DETAILS_SSL_PROTOCOL_ERROR,
-   SUGGEST_LEARNMORE,
-  },
   {net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
    IDS_ERRORPAGES_HEADING_PINNING_FAILURE,
@@ -428,7 +419,7 @@ DictionaryValue* GetStandardMenuItemsText() {
   standard_menu_items_text->SetString("settingsTitle",
       l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
   standard_menu_items_text->SetString("advancedTitle",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_ADVANCED_TAB_LABEL));
+      l10n_util::GetStringUTF16(IDS_SETTINGS_SHOW_ADVANCED_SETTINGS));
   return standard_menu_items_text;
 }
 
@@ -628,9 +619,6 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
       case net::ERR_ESET_ANTI_VIRUS_SSL_INTERCEPTION:
         learn_more_url = GURL(kESETLearnMoreUrl);
         break;
-      case net::ERR_KASPERSKY_ANTI_VIRUS_SSL_INTERCEPTION:
-        learn_more_url = GURL(kKasperskyLearnMoreUrl);
-        break;
       default:
         break;
     }
@@ -707,7 +695,7 @@ void LocalizedError::GetAppErrorStrings(
 
   error_strings->SetString("title", app->name());
   error_strings->SetString("icon",
-      app->GetIconURL(Extension::EXTENSION_ICON_LARGE,
+      app->GetIconURL(ExtensionIconSet::EXTENSION_ICON_GIGANTOR,
                       ExtensionIconSet::MATCH_SMALLER).spec());
   error_strings->SetString("name", app->name());
   error_strings->SetString("msg",

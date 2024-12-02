@@ -17,10 +17,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/process_util.h"
-#include "chrome/browser/sync/protocol/sync_protocol_error.h"
-#include "chrome/browser/sync/syncable/model_type.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
+#include "sync/protocol/sync_protocol_error.h"
+#include "sync/syncable/model_type.h"
 
 class CommandLine;
 class Profile;
@@ -66,6 +66,21 @@ class SyncTest : public InProcessBrowserTest {
     EXTERNAL_LIVE_SERVER,  // A remote server that the test code has no control
                            // over whatsoever; cross your fingers that the
                            // account state is initially clean.
+  };
+
+  // NOTE: IMPORTANT the enum here should match with
+  // the enum defined on the chromiumsync.py test server impl.
+  enum SyncErrorFrequency {
+    // Uninitialized state.
+    ERROR_FREQUENCY_NONE,
+
+    // Server sends the error on all requests.
+    ERROR_FREQUENCY_ALWAYS,
+
+    // Server sends the error on two thirds of the request.
+    // Note this is not random. The server would send the
+    // error on the first 2 requests of every 3 requests.
+    ERROR_FREQUENCY_TWO_THIRDS
   };
 
   // A SyncTest must be associated with a particular test type.
@@ -122,6 +137,10 @@ class SyncTest : public InProcessBrowserTest {
   // Initializes sync clients and profiles if required and syncs each of them.
   virtual bool SetupSync() WARN_UNUSED_RESULT;
 
+  // Restarts the sync service for the profile at |index|. This is equivalent to
+  // closing and reopening all browser windows for the profile.
+  virtual void RestartSyncService(int index);
+
   // Enable outgoing network connections for the given profile.
   virtual void EnableNetwork(Profile* profile);
 
@@ -177,10 +196,16 @@ class SyncTest : public InProcessBrowserTest {
   void TriggerAuthError();
 
   // Triggers a sync error on the server.
-  void TriggerSyncError(const browser_sync::SyncProtocolError& error);
+  //   error: The error the server is expected to return.
+  //   frequency: Frequency with which the error is returned.
+  void TriggerSyncError(const browser_sync::SyncProtocolError& error,
+                        SyncErrorFrequency frequency);
 
   // Triggers setting the sync_tabs field of the nigori node.
   void TriggerSetSyncTabs();
+
+  // Triggers the creation the Synced Bookmarks folder on the server.
+  void TriggerCreateSyncedBookmarks();
 
   // Returns the number of default items that every client syncs.
   int NumberOfDefaultSyncItems() const;
@@ -204,6 +229,15 @@ class SyncTest : public InProcessBrowserTest {
   // InProcessBrowserTest override. Resets the host resolver its default
   // behavior.
   virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
+
+  // Creates Profile, Browser and ProfileSyncServiceHarness instances for
+  // |index|. Used by SetupClients().
+  virtual void InitializeInstance(int index);
+
+  // Implementations of the EnableNotifications() and DisableNotifications()
+  // functions defined above.
+  void DisableNotificationsImpl();
+  void EnableNotificationsImpl();
 
   // GAIA account used by the test case.
   std::string username_;
@@ -303,6 +337,10 @@ class SyncTest : public InProcessBrowserTest {
   // Indicates whether changes to a profile should also change the verifier
   // profile or not.
   bool use_verifier_;
+
+  // Indicates whether or not notifications were explicitly enabled/disabled.
+  // Defaults to true.
+  bool notifications_enabled_;
 
   // Sync integration tests need to make live DNS requests for access to
   // GAIA and sync server URLs under google.com. We use a scoped version

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,7 +23,6 @@ class Extension;
 class FindBar;
 class GURL;
 class Profile;
-class TabContents;
 class TabContentsWrapper;
 class TemplateURL;
 
@@ -49,6 +48,11 @@ void ShowBookmarkBubbleView(views::View* anchor_view,
                             bool newly_bookmarked);
 void HideBookmarkBubbleView();
 bool IsBookmarkBubbleViewShowing();
+
+// Shows or hides the Chrome To Mobile bubble anchored to the supplied view.
+void ShowChromeToMobileBubbleView(views::View* anchor_view, Profile* profile);
+void HideChromeToMobileBubbleView();
+bool IsChromeToMobileBubbleViewShowing();
 
 // Shows the page info bubble anchored to the supplied view.
 void ShowPageInfoBubble(views::View* anchor_view,
@@ -84,10 +88,6 @@ void EditSearchEngine(gfx::NativeWindow parent,
                       const TemplateURL* template_url,
                       EditSearchEngineControllerDelegate* delegate,
                       Profile* profile);
-
-// Shows the collected cookies dialog box.
-void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,
-                                TabContentsWrapper* tab_contents);
 
 // Shows the create web app shortcut dialog box.
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,

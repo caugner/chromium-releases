@@ -7,6 +7,7 @@
 
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
+#include "ppapi/c/pp_time.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
@@ -52,14 +53,19 @@ class PPB_Instance_Proxy : public InterfaceProxy,
   virtual PP_Var ExecuteScript(PP_Instance instance,
                                PP_Var script,
                                PP_Var* exception) OVERRIDE;
+  virtual uint32_t GetAudioHardwareOutputSampleRate(PP_Instance instance)
+      OVERRIDE;
+  virtual uint32_t GetAudioHardwareOutputBufferSize(PP_Instance instance)
+      OVERRIDE;
   virtual PP_Var GetDefaultCharSet(PP_Instance instance) OVERRIDE;
   virtual void NumberOfFindResultsChanged(PP_Instance instance,
                                           int32_t total,
                                           PP_Bool final_result) OVERRIDE;
   virtual void SelectedFindResultChanged(PP_Instance instance,
                                          int32_t index) OVERRIDE;
+  virtual PP_Var GetFontFamilies(PP_Instance instance) OVERRIDE;
   virtual PP_Bool SetFullscreen(PP_Instance instance,
-                                     PP_Bool fullscreen) OVERRIDE;
+                                PP_Bool fullscreen) OVERRIDE;
   virtual PP_Bool GetScreenSize(PP_Instance instance,
                                      PP_Size* size) OVERRIDE;
   virtual PP_Bool FlashIsFullscreen(PP_Instance instance) OVERRIDE;
@@ -67,14 +73,16 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                                     PP_Bool fullscreen) OVERRIDE;
   virtual PP_Bool FlashGetScreenSize(PP_Instance instance, PP_Size* size)
       OVERRIDE;
-  virtual void SampleGamepads(PP_Instance instance, PP_GamepadsData_Dev* data)
-      OVERRIDE;
+  virtual void SampleGamepads(PP_Instance instance,
+                              PP_GamepadsSampleData* data) OVERRIDE;
   virtual int32_t RequestInputEvents(PP_Instance instance,
                                      uint32_t event_classes) OVERRIDE;
   virtual int32_t RequestFilteringInputEvents(PP_Instance instance,
                                               uint32_t event_classes) OVERRIDE;
   virtual void ClearInputEventRequest(PP_Instance instance,
                                       uint32_t event_classes) OVERRIDE;
+  virtual void ClosePendingUserGesture(PP_Instance instance,
+                                       PP_TimeTicks timestamp) OVERRIDE;
   virtual void ZoomChanged(PP_Instance instance, double factor) OVERRIDE;
   virtual void ZoomLimitsChanged(PP_Instance instance,
                                  double minimum_factor,
@@ -112,6 +120,10 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                               SerializedVarReceiveInput script,
                               SerializedVarOutParam out_exception,
                               SerializedVarReturnValue result);
+  void OnHostMsgGetAudioHardwareOutputSampleRate(PP_Instance instance,
+                                                 uint32_t *result);
+  void OnHostMsgGetAudioHardwareOutputBufferSize(PP_Instance instance,
+                                                 uint32_t *result);
   void OnHostMsgGetDefaultCharSet(PP_Instance instance,
                                   SerializedVarReturnValue result);
   void OnHostMsgSetFullscreen(PP_Instance instance,
@@ -131,6 +143,8 @@ class PPB_Instance_Proxy : public InterfaceProxy,
                                    uint32_t event_classes);
   void OnHostMsgClearInputEvents(PP_Instance instance,
                                  uint32_t event_classes);
+  void OnMsgHandleInputEventAck(PP_Instance instance,
+                                PP_TimeTicks timestamp);
   void OnHostMsgPostMessage(PP_Instance instance,
                             SerializedVarReceiveInput message);
   void OnHostMsgLockMouse(PP_Instance instance);

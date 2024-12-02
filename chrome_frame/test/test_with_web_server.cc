@@ -20,6 +20,7 @@
 #include "chrome_frame/test/chrome_frame_test_utils.h"
 #include "chrome_frame/test/mock_ie_event_sink_actions.h"
 #include "chrome_frame/test/mock_ie_event_sink_test.h"
+#include "chrome_frame/test/test_scrubber.h"
 #include "net/base/mime_util.h"
 #include "net/http/http_util.h"
 
@@ -54,19 +55,25 @@ std::string GetMockHttpHeaders(const FilePath& mock_http_headers_path) {
   return headers;
 }
 
-}  // namespace
-
 class ChromeFrameTestEnvironment: public testing::Environment {
  public:
-  ~ChromeFrameTestEnvironment() {}
-  void SetUp() {
+  virtual ~ChromeFrameTestEnvironment() {}
+  virtual void SetUp() OVERRIDE {
     ScopedChromeFrameRegistrar::RegisterDefaults();
   }
-  void TearDown() {}
 };
 
 ::testing::Environment* const chrome_frame_env =
     ::testing::AddGlobalTestEnvironment(new ChromeFrameTestEnvironment);
+
+}  // namespace
+
+FilePath ChromeFrameTestWithWebServer::test_file_path_;
+FilePath ChromeFrameTestWithWebServer::results_dir_;
+FilePath ChromeFrameTestWithWebServer::CFInstall_path_;
+FilePath ChromeFrameTestWithWebServer::CFInstance_path_;
+ScopedTempDir ChromeFrameTestWithWebServer::temp_dir_;
+FilePath ChromeFrameTestWithWebServer::chrome_user_data_dir_;
 
 ChromeFrameTestWithWebServer::ChromeFrameTestWithWebServer()
     : loop_(),
@@ -74,38 +81,18 @@ ChromeFrameTestWithWebServer::ChromeFrameTestWithWebServer()
           chrome_frame_test::GetTestDataFolder()) {
 }
 
-void ChromeFrameTestWithWebServer::CloseAllBrowsers() {
-  // Web browsers tend to relaunch themselves in other processes, meaning the
-  // KillProcess stuff above might not have actually cleaned up all our browser
-  // instances, so make really sure browsers are dead.
-  base::KillProcesses(chrome_frame_test::kIEImageName, 0, NULL);
-  base::KillProcesses(chrome_frame_test::kIEBrokerImageName, 0, NULL);
-
-  // Endeavour to only kill off Chrome Frame derived Chrome processes.
-  KillAllNamedProcessesWithArgument(
-      UTF8ToWide(chrome_frame_test::kChromeImageName),
-      UTF8ToWide(switches::kChromeFrame));
-  base::KillProcesses(chrome_frame_test::kChromeLauncher, 0, NULL);
-}
-
-void ChromeFrameTestWithWebServer::SetUp() {
-  // Make sure our playground is clean before we start.
-  CloseAllBrowsers();
-
-  // Make sure that we are not accidentally enabling gcf protocol.
-  SetConfigBool(kAllowUnsafeURLs, false);
-
+// static
+void ChromeFrameTestWithWebServer::SetUpTestCase() {
   FilePath chrome_frame_source_path;
   PathService::Get(base::DIR_SOURCE_ROOT, &chrome_frame_source_path);
   chrome_frame_source_path = chrome_frame_source_path.Append(
       FILE_PATH_LITERAL("chrome_frame"));
 
-  test_file_path_ = chrome_frame_source_path;
-  test_file_path_ = test_file_path_.Append(FILE_PATH_LITERAL("test"))
+  test_file_path_ = chrome_frame_source_path
+      .Append(FILE_PATH_LITERAL("test"))
       .Append(FILE_PATH_LITERAL("data"));
 
-  results_dir_ = chrome_frame_test::GetTestDataFolder();
-  results_dir_.AppendASCII("dump");
+  results_dir_ = chrome_frame_test::GetTestDataFolder().AppendASCII("dump");
 
   // Copy the CFInstance.js and CFInstall.js files from src\chrome_frame to
   // src\chrome_frame\test\data.
@@ -121,6 +108,27 @@ void ChromeFrameTestWithWebServer::SetUp() {
   CFInstall_path_ = test_file_path_.AppendASCII("CFInstall.js");
 
   ASSERT_TRUE(file_util::CopyFile(CFInstall_src_path, CFInstall_path_));
+}
+
+// static
+void ChromeFrameTestWithWebServer::TearDownTestCase() {
+  file_util::Delete(CFInstall_path_, false);
+  file_util::Delete(CFInstance_path_, false);
+  EXPECT_TRUE(temp_dir_.Delete());
+}
+
+// static
+const FilePath& ChromeFrameTestWithWebServer::GetChromeUserDataDirectory() {
+  if (!temp_dir_.IsValid()) {
+    EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
+    chrome_user_data_dir_ = temp_dir_.path().AppendASCII("User Data");
+  }
+  return chrome_user_data_dir_;
+}
+
+void ChromeFrameTestWithWebServer::SetUp() {
+  // Make sure that we are not accidentally enabling gcf protocol.
+  SetConfigBool(kAllowUnsafeURLs, false);
 
   server_mock_.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
   server_mock_.set_expected_result("OK");
@@ -128,9 +136,6 @@ void ChromeFrameTestWithWebServer::SetUp() {
 
 void ChromeFrameTestWithWebServer::TearDown() {
   CloseBrowser();
-  CloseAllBrowsers();
-  file_util::Delete(CFInstall_path_, false);
-  file_util::Delete(CFInstance_path_, false);
 }
 
 bool ChromeFrameTestWithWebServer::LaunchBrowser(BrowserKind browser,
@@ -147,7 +152,9 @@ bool ChromeFrameTestWithWebServer::LaunchBrowser(BrowserKind browser,
   if (browser == IE) {
     browser_handle_.Set(chrome_frame_test::LaunchIE(url));
   } else if (browser == CHROME) {
-    browser_handle_.Set(chrome_frame_test::LaunchChrome(url));
+    const FilePath& user_data_dir = GetChromeUserDataDirectory();
+    chrome_frame_test::OverrideDataDirectoryForThisTest(user_data_dir.value());
+    browser_handle_.Set(chrome_frame_test::LaunchChrome(url, user_data_dir));
   } else {
     NOTREACHED();
   }
@@ -172,10 +179,10 @@ void ChromeFrameTestWithWebServer::CloseBrowser() {
     if (wait == WAIT_OBJECT_0) {
       browser_handle_.Close();
     } else {
-      DLOG(ERROR) << "WaitForSingleObject returned " << wait;
+      LOG(ERROR) << "WaitForSingleObject returned " << wait;
     }
   } else {
-    DLOG(ERROR) << "No attempts to close browser windows";
+    LOG(ERROR) << "No attempts to close browser windows";
   }
 
   if (browser_handle_.IsValid()) {
@@ -207,9 +214,9 @@ const wchar_t kPostedResultSubstring[] = L"/writefile/";
 
 void ChromeFrameTestWithWebServer::SimpleBrowserTestExpectedResult(
     BrowserKind browser, const wchar_t* page, const char* result) {
-  ASSERT_TRUE(LaunchBrowser(browser, page));
   server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
                                            kPostedResultSubstring);
+  ASSERT_TRUE(LaunchBrowser(browser, page));
   WaitForTestToComplete(TestTimeouts::action_max_timeout_ms());
   ASSERT_EQ(result, server_mock_.posted_result());
 }
@@ -254,9 +261,9 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
 
   EXPECT_TRUE(version_info);
   EXPECT_FALSE(version.empty());
-  EXPECT_TRUE(LaunchBrowser(browser, page));
   server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
                                            kPostedResultSubstring);
+  EXPECT_TRUE(LaunchBrowser(browser, page));
   WaitForTestToComplete(TestTimeouts::action_max_timeout_ms());
   ASSERT_EQ(version, UTF8ToWide(server_mock_.posted_result()));
 }
@@ -343,8 +350,8 @@ void MockWebServer::SendResponseHelper(
                                                              headers);
     } else {
       EXPECT_TRUE(net::GetMimeTypeFromFile(file_path, &content_type));
-      DVLOG(1) << "Going to send file (" << WideToUTF8(file_path.value())
-               << ") with content type (" << content_type << ")";
+      VLOG(1) << "Going to send file (" << WideToUTF8(file_path.value())
+              << ") with content type (" << content_type << ")";
       headers = CreateHttpHeaders(invocation, add_no_cache_header,
                                   content_type);
     }
@@ -359,8 +366,8 @@ void MockWebServer::SendResponseHelper(
           << "meta tag to HTML file.";
     }
   } else {
-    DVLOG(1) << "Going to send 404 for non-existent file ("
-             << WideToUTF8(file_path.value()) << ")";
+    VLOG(1) << "Going to send 404 for non-existent file ("
+            << WideToUTF8(file_path.value()) << ")";
     headers = "HTTP/1.1 404 Not Found";
     body = "";
   }
@@ -418,7 +425,7 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_iframeBasic) {
 
 const wchar_t kSrcPropertyTestPage[] = L"src_property_host.html";
 
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_SrcProperty) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeIE_SrcProperty) {
   SimpleBrowserTest(IE, kSrcPropertyTestPage);
 }
 
@@ -443,7 +450,7 @@ TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeIE_CFInstanceDelay) {
 const wchar_t kCFIFallbackPage[] = L"CFInstance_fallback_host.html";
 
 // http://crbug.com/37088
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_CFInstanceFallback) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeIE_CFInstanceFallback) {
   SimpleBrowserTest(IE, kCFIFallbackPage);
 }
 
@@ -470,7 +477,7 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_CFInstanceZeroSize) {
 const wchar_t kCFIIfrPostPage[] = L"CFInstance_iframe_post_host.html";
 
 // http://crbug.com/32321
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_CFInstanceIfrPost) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeIE_CFInstanceIfrPost) {
   SimpleBrowserTest(IE, kCFIIfrPostPage);
 }
 
@@ -495,7 +502,14 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeChrome_CFInstancePost) {
 
 const wchar_t kCFIRPCPage[] = L"CFInstance_rpc_host.html";
 
-TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_CFInstanceRPC) {
+// This test consistently times out in debug builds; see http://crbug.com/112599
+#ifndef NDEBUG
+#define MAYBE_WidgetModeIE_CFInstanceRPC DISABLED_WidgetModeIE_CFInstanceRPC
+#else
+#define MAYBE_WidgetModeIE_CFInstanceRPC WidgetModeIE_CFInstanceRPC
+#endif
+
+TEST_F(ChromeFrameTestWithWebServer, MAYBE_WidgetModeIE_CFInstanceRPC) {
   if (chrome_frame_test::GetInstalledIEVersion() == IE_9) {
     LOG(INFO) << "Not running test on Vista/Windows 7 with IE9";
     return;
@@ -779,7 +793,7 @@ const wchar_t kWindowCloseTestUrl[] =
     L"window_close.html";
 
 // http://code.google.com/p/chromium/issues/detail?id=111074
-TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_WindowClose) {
+TEST_F(ChromeFrameTestWithWebServer, DISABLED_FullTabModeIE_WindowClose) {
   SimpleBrowserTest(IE, kWindowCloseTestUrl);
 }
 

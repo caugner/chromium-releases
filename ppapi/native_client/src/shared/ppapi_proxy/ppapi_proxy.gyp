@@ -3,9 +3,26 @@
 # found in the LICENSE file.
 
 {
+  'variables': {
+    'chromium_code': 1,  # Use higher warning level.
+  },
   'includes': [
     '../../../../../native_client/build/common.gypi',
   ],
+  'target_defaults': {
+    'conditions': [
+      ['OS=="linux"', {
+        'cflags!': [
+          '-Wno-unused-parameter', # be a bit stricter to match NaCl flags.
+        ],
+      }],
+      ['OS=="mac"', {
+        'cflags!': [
+          '-Wno-unused-parameter', # be a bit stricter to match NaCl flags.
+        ],
+      }],
+    ],
+  },
   'targets': [
     {
       'target_name': 'nacl_ppapi_browser',
@@ -14,8 +31,8 @@
         'browser_callback.cc',
         'browser_globals.cc',
         'browser_nacl_file_rpc_server.cc',
-        'browser_ppb_audio_rpc_server.cc',
         'browser_ppb_audio_config_rpc_server.cc',
+        'browser_ppb_audio_rpc_server.cc',
         'browser_ppb_core_rpc_server.cc',
         'browser_ppb_cursor_control_rpc_server.cc',
         'browser_ppb_file_io_rpc_server.cc',
@@ -27,6 +44,7 @@
         'browser_ppb_gamepad_rpc_server.cc',
         'browser_ppb_graphics_2d_rpc_server.cc',
         'browser_ppb_graphics_3d_rpc_server.cc',
+        'browser_ppb_host_resolver_private_rpc_server.cc',
         'browser_ppb_image_data_rpc_server.cc',
         'browser_ppb_input_event_rpc_server.cc',
         'browser_ppb_instance_rpc_server.cc',
@@ -36,6 +54,7 @@
         'browser_ppb_pdf_rpc_server.cc',
         'browser_ppb_rpc_server.cc',
         'browser_ppb_scrollbar_rpc_server.cc',
+        'browser_ppb_tcp_server_socket_private_rpc_server.cc',
         'browser_ppb_tcp_socket_private_rpc_server.cc',
         'browser_ppb_testing_rpc_server.cc',
         'browser_ppb_udp_socket_private_rpc_server.cc',

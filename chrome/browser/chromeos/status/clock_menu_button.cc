@@ -100,9 +100,8 @@ void ClockMenuButton::UpdateText() {
       time,
       use_24hour_clock_ ? base::k24HourClock : base::k12HourClock,
       base::kDropAmPm));
-  string16 friendly_time_string(base::TimeFormatFriendlyDateAndTime(time));
-  SetTooltipText(friendly_time_string);
-  SetAccessibleName(friendly_time_string);
+  SetTooltipText(base::TimeFormatFriendlyDate(time));
+  SetAccessibleName(base::TimeFormatFriendlyDateAndTime(time));
   SchedulePaint();
 }
 
@@ -146,7 +145,7 @@ bool ClockMenuButton::IsCommandEnabled(int id) const {
 void ClockMenuButton::ExecuteCommand(int id) {
   DCHECK_EQ(CLOCK_OPEN_OPTIONS_ITEM, id);
   delegate()->ExecuteStatusAreaCommand(
-      this, StatusAreaButton::Delegate::SHOW_SYSTEM_OPTIONS);
+      this, StatusAreaButton::Delegate::SHOW_DATE_OPTIONS);
 }
 
 // StatusAreaButton implementation
@@ -161,9 +160,10 @@ int ClockMenuButton::horizontal_padding() {
   return 3;
 }
 
-// ClockMenuButton, views::ViewMenuDelegate implementation:
+// ClockMenuButton, views::MenuButtonListener implementation:
 
-void ClockMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
+void ClockMenuButton::OnMenuButtonClicked(views::View* source,
+                                          const gfx::Point& point) {
   // View passed in must be a views::MenuButton, i.e. the ClockMenuButton.
   DCHECK_EQ(source, this);
 
@@ -196,7 +196,7 @@ views::MenuRunner* ClockMenuButton::CreateMenu() {
 
   // If options UI is available, show a separator and configure menu item.
   if (delegate()->ShouldExecuteStatusAreaCommand(
-          this, StatusAreaButton::Delegate::SHOW_SYSTEM_OPTIONS)) {
+          this, StatusAreaButton::Delegate::SHOW_DATE_OPTIONS)) {
     menu->AppendSeparator();
 
     const string16 clock_open_options_label =

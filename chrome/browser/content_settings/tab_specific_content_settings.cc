@@ -23,11 +23,11 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -36,22 +36,13 @@
 using content::BrowserThread;
 using content::NavigationController;
 using content::NavigationEntry;
+using content::RenderViewHost;
 using content::WebContents;
 
 namespace {
 typedef std::list<TabSpecificContentSettings*> TabSpecificList;
 static base::LazyInstance<TabSpecificList> g_tab_specific =
     LAZY_INSTANCE_INITIALIZER;
-}
-
-bool TabSpecificContentSettings::LocalSharedObjectsContainer::empty() const {
-  return appcaches_->empty() &&
-      cookies_->empty() &&
-      databases_->empty() &&
-      file_systems_->empty() &&
-      indexed_dbs_->empty() &&
-      local_storages_->empty() &&
-      session_storages_->empty();
 }
 
 TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
@@ -86,7 +77,7 @@ TabSpecificContentSettings* TabSpecificContentSettings::Get(
   // latter will miss provisional RenderViewHosts.
   for (TabSpecificList::iterator i = g_tab_specific.Get().begin();
        i != g_tab_specific.Get().end(); ++i) {
-    if (view->delegate()->GetAsWebContents() == (*i)->web_contents())
+    if (view->GetDelegate()->GetAsWebContents() == (*i)->web_contents())
       return (*i);
   }
 
@@ -407,14 +398,6 @@ void TabSpecificContentSettings::ClearGeolocationContentSettings() {
   geolocation_settings_state_.ClearStateMap();
 }
 
-CookiesTreeModel* TabSpecificContentSettings::GetAllowedCookiesTreeModel() {
-  return allowed_local_shared_objects_.GetCookiesTreeModel();
-}
-
-CookiesTreeModel* TabSpecificContentSettings::GetBlockedCookiesTreeModel() {
-  return blocked_local_shared_objects_.GetCookiesTreeModel();
-}
-
 bool TabSpecificContentSettings::OnMessageReceived(
     const IPC::Message& message) {
   bool handled = true;
@@ -486,42 +469,4 @@ void TabSpecificContentSettings::Observe(
                                    &rules);
     Send(new ChromeViewMsg_SetContentSettingRules(rules));
   }
-}
-
-TabSpecificContentSettings::LocalSharedObjectsContainer::
-    LocalSharedObjectsContainer(Profile* profile)
-    : appcaches_(new CannedBrowsingDataAppCacheHelper(profile)),
-      cookies_(new CannedBrowsingDataCookieHelper(profile)),
-      databases_(new CannedBrowsingDataDatabaseHelper(profile)),
-      file_systems_(new CannedBrowsingDataFileSystemHelper(profile)),
-      indexed_dbs_(new CannedBrowsingDataIndexedDBHelper()),
-      local_storages_(new CannedBrowsingDataLocalStorageHelper(profile)),
-      session_storages_(new CannedBrowsingDataLocalStorageHelper(profile)) {
-}
-
-TabSpecificContentSettings::LocalSharedObjectsContainer::
-    ~LocalSharedObjectsContainer() {
-}
-
-void TabSpecificContentSettings::LocalSharedObjectsContainer::Reset() {
-  appcaches_->Reset();
-  cookies_->Reset();
-  databases_->Reset();
-  file_systems_->Reset();
-  indexed_dbs_->Reset();
-  local_storages_->Reset();
-  session_storages_->Reset();
-}
-
-CookiesTreeModel*
-TabSpecificContentSettings::LocalSharedObjectsContainer::GetCookiesTreeModel() {
-  return new CookiesTreeModel(cookies_->Clone(),
-                              databases_->Clone(),
-                              local_storages_->Clone(),
-                              session_storages_->Clone(),
-                              appcaches_->Clone(),
-                              indexed_dbs_->Clone(),
-                              file_systems_->Clone(),
-                              NULL,
-                              true);
 }

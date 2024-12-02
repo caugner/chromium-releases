@@ -30,6 +30,7 @@ class Browser;
 class BrowserTitlebar;
 class BrowserToolbarGtk;
 class DownloadShelfGtk;
+class ExtensionKeybindingRegistryGtk;
 class FindBarGtk;
 class FullscreenExitBubbleGtk;
 class GlobalMenuBar;
@@ -69,6 +70,10 @@ class BrowserWindowGtk : public BrowserWindow,
   // Returns the type of text used for title.
   virtual TitleDecoration GetWindowTitle(std::string* title) const;
 
+  // Gives a derived class a way to control visibility of close button.
+  // Returns true if close button should be visible.
+  virtual bool ShouldShowCloseButton() const;
+
   // Overridden from BrowserWindow:
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
@@ -78,6 +83,7 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void Deactivate() OVERRIDE;
   virtual bool IsActive() const OVERRIDE;
   virtual void FlashFrame(bool flash) OVERRIDE;
+  virtual bool IsAlwaysOnTop() const OVERRIDE;
   virtual gfx::NativeWindow GetNativeHandle() OVERRIDE;
   virtual BrowserWindowTesting* GetBrowserWindowTesting() OVERRIDE;
   virtual StatusBubble* GetStatusBubble() OVERRIDE;
@@ -129,10 +135,12 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void ShowBackgroundPages() OVERRIDE;
   virtual void ShowBookmarkBubble(const GURL& url,
                                   bool already_bookmarked) OVERRIDE;
+  virtual void ShowChromeToMobileBubble() OVERRIDE;
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+  virtual void ShowOneClickSigninBubble() OVERRIDE;
+#endif
   virtual bool IsDownloadShelfVisible() const OVERRIDE;
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
-  virtual void ShowCollectedCookiesDialog(
-      TabContentsWrapper* tab_contents) OVERRIDE;
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
@@ -141,6 +149,11 @@ class BrowserWindowGtk : public BrowserWindow,
                             const GURL& url,
                             const content::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
+  virtual void ShowWebsiteSettings(Profile* profile,
+                                   TabContentsWrapper* tab_contents_wrapper,
+                                   const GURL& url,
+                                   const content::SSLStatus& ssl,
+                                   bool show_history) OVERRIDE;
   virtual void ShowAppMenu() OVERRIDE;
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut) OVERRIDE;
@@ -286,6 +299,10 @@ class BrowserWindowGtk : public BrowserWindow,
   virtual void DrawCustomFrame(cairo_t* cr, GtkWidget* widget,
                                GdkEventExpose* event);
 
+  // Draws the tab image as the frame so we can write legible text.
+  virtual void DrawPopupFrame(cairo_t* cr, GtkWidget* widget,
+                              GdkEventExpose* event);
+
   // 'focus-in-event' handler.
   virtual void HandleFocusIn(GtkWidget* widget, GdkEventFocus* event);
 
@@ -361,9 +378,6 @@ class BrowserWindowGtk : public BrowserWindow,
   // A helper method that draws the shadow above the toolbar and in the frame
   // border during an expose.
   void DrawContentShadow(cairo_t* cr);
-
-  // Draws the tab image as the frame so we can write legible text.
-  void DrawPopupFrame(cairo_t* cr, GtkWidget* widget, GdkEventExpose* event);
 
   // The background frame image needs to be offset by the size of the top of
   // the window to the top of the tabs when the full skyline isn't displayed
@@ -454,6 +468,10 @@ class BrowserWindowGtk : public BrowserWindow,
   // The position and size of the current window.
   gfx::Rect bounds_;
 
+  // The configure bounds of the current window, used to figure out whether to
+  // ignore later configure events. See OnConfigure() for more information.
+  gfx::Rect configure_bounds_;
+
   // The position and size of the non-maximized, non-fullscreen window.
   gfx::Rect restored_bounds_;
 
@@ -487,6 +505,11 @@ class BrowserWindowGtk : public BrowserWindow,
   // A container that manages the GtkWidget*s of developer tools for the
   // selected tab contents.
   scoped_ptr<TabContentsContainerGtk> devtools_container_;
+
+  // The Extension Keybinding Registry responsible for registering listeners for
+  // accelerators that are sent to the window, that are destined to be turned
+  // into events and sent to the extension.
+  scoped_ptr<ExtensionKeybindingRegistryGtk> extension_keybinding_registry_;
 
   DevToolsDockSide devtools_dock_side_;
 
@@ -547,6 +570,8 @@ class BrowserWindowGtk : public BrowserWindow,
   // autocomplete popup before the results can be read) and the final window
   // position is unimportant.
   bool debounce_timer_disabled_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserWindowGtk);
 };

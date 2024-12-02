@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/preferences.h"
 
+#include "ash/ash_switches.h"
+#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram.h"
@@ -15,8 +17,9 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/system/screen_locker_settings.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
+#include "chrome/browser/chromeos/system/screen_locker_settings.h"
+#include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -26,9 +29,21 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
+#include "ui/base/events.h"
 #include "unicode/timezone.h"
 
 namespace chromeos {
+namespace {
+
+// TODO(achuith): Use a cmd-line flag + use flags for this instead.
+bool IsLumpy() {
+  std::string board;
+  system::StatisticsProvider::GetInstance()->GetMachineStatistic(
+      "CHROMEOS_RELEASE_BOARD", &board);
+  return StartsWithASCII(board, "lumpy", false);
+}
+
+}  // namespace
 
 static const char kFallbackInputMethodLocale[] = "en-US";
 
@@ -41,7 +56,11 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   input_method::InputMethodManager* manager =
       input_method::InputMethodManager::GetInstance();
 
+  const bool enable_tap_to_click_default = IsLumpy();
   prefs->RegisterBooleanPref(prefs::kTapToClickEnabled,
+                             enable_tap_to_click_default,
+                             PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kNaturalScroll,
                              false,
                              PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kPrimaryMouseButtonRight,
@@ -81,6 +100,15 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kUse24HourClock,
                              base::GetHourClockType() == base::k24HourClock,
+                             PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kDisableGData,
+                             false,
+                             PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kDisableGDataOverCellular,
+                             true,
+                             PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kDisableGDataHostedFiles,
+                             false,
                              PrefService::SYNCABLE_PREF);
   // We don't sync prefs::kLanguageCurrentInputMethod and PreviousInputMethod
   // because they're just used to track the logout state of the device.
@@ -223,68 +251,77 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
 
 void Preferences::Init(PrefService* prefs) {
   tap_to_click_enabled_.Init(prefs::kTapToClickEnabled, prefs, this);
+  natural_scroll_.Init(prefs::kNaturalScroll, prefs, this);
   accessibility_enabled_.Init(prefs::kSpokenFeedbackEnabled, prefs, this);
   sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, this);
   use_24hour_clock_.Init(prefs::kUse24HourClock, prefs, this);
+  disable_gdata_.Init(prefs::kDisableGData, prefs, this);
+  disable_gdata_over_cellular_.Init(prefs::kDisableGDataOverCellular,
+                                   prefs, this);
+  disable_gdata_hosted_files_.Init(prefs::kDisableGDataHostedFiles,
+                                   prefs, this);
   primary_mouse_button_right_.Init(prefs::kPrimaryMouseButtonRight,
                                    prefs, this);
-  language_hotkey_next_engine_in_menu_.Init(
+  hotkey_next_engine_in_menu_.Init(
       prefs::kLanguageHotkeyNextEngineInMenu, prefs, this);
-  language_hotkey_previous_engine_.Init(
+  hotkey_previous_engine_.Init(
       prefs::kLanguageHotkeyPreviousEngine, prefs, this);
-  language_preferred_languages_.Init(prefs::kLanguagePreferredLanguages,
-                                     prefs, this);
-  language_preload_engines_.Init(prefs::kLanguagePreloadEngines, prefs, this);
+  preferred_languages_.Init(prefs::kLanguagePreferredLanguages,
+                            prefs, this);
+  preload_engines_.Init(prefs::kLanguagePreloadEngines, prefs, this);
+  current_input_method_.Init(prefs::kLanguageCurrentInputMethod, prefs, this);
+  previous_input_method_.Init(prefs::kLanguagePreviousInputMethod, prefs, this);
+
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
-    language_chewing_boolean_prefs_[i].Init(
+    chewing_boolean_prefs_[i].Init(
         language_prefs::kChewingBooleanPrefs[i].pref_name, prefs, this);
   }
   for (size_t i = 0; i < language_prefs::kNumChewingMultipleChoicePrefs; ++i) {
-    language_chewing_multiple_choice_prefs_[i].Init(
+    chewing_multiple_choice_prefs_[i].Init(
         language_prefs::kChewingMultipleChoicePrefs[i].pref_name, prefs, this);
   }
-  language_chewing_hsu_sel_key_type_.Init(
+  chewing_hsu_sel_key_type_.Init(
       language_prefs::kChewingHsuSelKeyType.pref_name, prefs, this);
   for (size_t i = 0; i < language_prefs::kNumChewingIntegerPrefs; ++i) {
-    language_chewing_integer_prefs_[i].Init(
+    chewing_integer_prefs_[i].Init(
         language_prefs::kChewingIntegerPrefs[i].pref_name, prefs, this);
   }
-  language_hangul_keyboard_.Init(prefs::kLanguageHangulKeyboard, prefs, this);
-  language_hangul_hanja_binding_keys_.Init(
+  hangul_keyboard_.Init(prefs::kLanguageHangulKeyboard, prefs, this);
+  hangul_hanja_binding_keys_.Init(
       prefs::kLanguageHangulHanjaBindingKeys, prefs, this);
   for (size_t i = 0; i < language_prefs::kNumPinyinBooleanPrefs; ++i) {
-    language_pinyin_boolean_prefs_[i].Init(
+    pinyin_boolean_prefs_[i].Init(
         language_prefs::kPinyinBooleanPrefs[i].pref_name, prefs, this);
   }
   for (size_t i = 0; i < language_prefs::kNumPinyinIntegerPrefs; ++i) {
-    language_pinyin_int_prefs_[i].Init(
+    pinyin_int_prefs_[i].Init(
         language_prefs::kPinyinIntegerPrefs[i].pref_name, prefs, this);
   }
-  language_pinyin_double_pinyin_schema_.Init(
+  pinyin_double_pinyin_schema_.Init(
       language_prefs::kPinyinDoublePinyinSchema.pref_name, prefs, this);
   for (size_t i = 0; i < language_prefs::kNumMozcBooleanPrefs; ++i) {
-    language_mozc_boolean_prefs_[i].Init(
+    mozc_boolean_prefs_[i].Init(
         language_prefs::kMozcBooleanPrefs[i].pref_name, prefs, this);
   }
   for (size_t i = 0; i < language_prefs::kNumMozcMultipleChoicePrefs; ++i) {
-    language_mozc_multiple_choice_prefs_[i].Init(
+    mozc_multiple_choice_prefs_[i].Init(
         language_prefs::kMozcMultipleChoicePrefs[i].pref_name, prefs, this);
   }
   for (size_t i = 0; i < language_prefs::kNumMozcIntegerPrefs; ++i) {
-    language_mozc_integer_prefs_[i].Init(
+    mozc_integer_prefs_[i].Init(
         language_prefs::kMozcIntegerPrefs[i].pref_name, prefs, this);
   }
-  language_xkb_remap_search_key_to_.Init(
+  xkb_remap_search_key_to_.Init(
       prefs::kLanguageXkbRemapSearchKeyTo, prefs, this);
-  language_xkb_remap_control_key_to_.Init(
+  xkb_remap_control_key_to_.Init(
       prefs::kLanguageXkbRemapControlKeyTo, prefs, this);
-  language_xkb_remap_alt_key_to_.Init(
+  xkb_remap_alt_key_to_.Init(
       prefs::kLanguageXkbRemapAltKeyTo, prefs, this);
-  language_xkb_auto_repeat_enabled_.Init(
+  xkb_auto_repeat_enabled_.Init(
       prefs::kLanguageXkbAutoRepeatEnabled, prefs, this);
-  language_xkb_auto_repeat_delay_pref_.Init(
+  xkb_auto_repeat_delay_pref_.Init(
       prefs::kLanguageXkbAutoRepeatDelay, prefs, this);
-  language_xkb_auto_repeat_interval_pref_.Init(
+  xkb_auto_repeat_interval_pref_.Init(
       prefs::kLanguageXkbAutoRepeatInterval, prefs, this);
 
   enable_screen_lock_.Init(prefs::kEnableScreenLock, prefs, this);
@@ -311,15 +348,23 @@ void Preferences::Observe(int type,
 
 void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   if (!pref_name || *pref_name == prefs::kTapToClickEnabled) {
-    bool enabled = tap_to_click_enabled_.GetValue();
+    const bool enabled = tap_to_click_enabled_.GetValue();
     system::touchpad_settings::SetTapToClick(enabled);
     if (pref_name)
       UMA_HISTOGRAM_BOOLEAN("Touchpad.TapToClick.Changed", enabled);
     else
       UMA_HISTOGRAM_BOOLEAN("Touchpad.TapToClick.Started", enabled);
   }
+  if (!pref_name || *pref_name == prefs::kNaturalScroll) {
+    const bool enabled = natural_scroll_.GetValue();
+    ui::SetNaturalScroll(enabled);
+    if (pref_name)
+      UMA_HISTOGRAM_BOOLEAN("Touchpad.NaturalScroll.Changed", enabled);
+    else
+      UMA_HISTOGRAM_BOOLEAN("Touchpad.NaturalScroll.Started", enabled);
+  }
   if (!pref_name || *pref_name == prefs::kTouchpadSensitivity) {
-    int sensitivity = sensitivity_.GetValue();
+    const int sensitivity = sensitivity_.GetValue();
     system::pointer_settings::SetSensitivity(sensitivity);
     if (pref_name) {
       UMA_HISTOGRAM_CUSTOM_COUNTS(
@@ -345,13 +390,13 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     SetLanguageConfigStringListAsCSV(
         language_prefs::kHotKeySectionName,
         language_prefs::kNextEngineInMenuConfigName,
-        language_hotkey_next_engine_in_menu_.GetValue());
+        hotkey_next_engine_in_menu_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kLanguageHotkeyPreviousEngine) {
     SetLanguageConfigStringListAsCSV(
         language_prefs::kHotKeySectionName,
         language_prefs::kPreviousEngineConfigName,
-        language_hotkey_previous_engine_.GetValue());
+        hotkey_previous_engine_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kLanguagePreferredLanguages) {
     // Unlike kLanguagePreloadEngines and some other input method
@@ -369,7 +414,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     UpdateModifierKeyMapping();
   }
   if (!pref_name || *pref_name == prefs::kLanguageXkbAutoRepeatEnabled) {
-    const bool enabled = language_xkb_auto_repeat_enabled_.GetValue();
+    const bool enabled = xkb_auto_repeat_enabled_.GetValue();
     input_method::XKeyboard::SetAutoRepeatEnabled(enabled);
   }
   if (!pref_name || ((*pref_name == prefs::kLanguageXkbAutoRepeatDelay) ||
@@ -380,15 +425,36 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   if (!pref_name || *pref_name == prefs::kLanguagePreloadEngines) {
     SetLanguageConfigStringListAsCSV(language_prefs::kGeneralSectionName,
                                      language_prefs::kPreloadEnginesConfigName,
-                                     language_preload_engines_.GetValue());
+                                     preload_engines_.GetValue());
   }
+
+  // Do not check |*pref_name| for the two prefs. We're only interested in
+  // initial values of the prefs.
+  // TODO(yusukes): Remove the second condition on R20.
+  if (!pref_name && !CommandLine::ForCurrentProcess()->HasSwitch(
+          ash::switches::kDisableAshUberTray)) {
+    const std::string previous_input_method_id =
+        previous_input_method_.GetValue();
+    const std::string current_input_method_id =
+        current_input_method_.GetValue();
+    // NOTICE: ChangeInputMethod() has to be called AFTER the value of
+    // |preload_engines_| is sent to the InputMethodManager. Otherwise, the
+    // ChangeInputMethod request might be ignored as an invalid input method ID.
+    input_method::InputMethodManager* manager =
+        input_method::InputMethodManager::GetInstance();
+    if (!previous_input_method_id.empty())
+      manager->ChangeInputMethod(previous_input_method_id);
+    if (!current_input_method_id.empty())
+      manager->ChangeInputMethod(current_input_method_id);
+  }
+
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
     if (!pref_name ||
         *pref_name == language_prefs::kChewingBooleanPrefs[i].pref_name) {
       SetLanguageConfigBoolean(
           language_prefs::kChewingSectionName,
           language_prefs::kChewingBooleanPrefs[i].ibus_config_name,
-          language_chewing_boolean_prefs_[i].GetValue());
+          chewing_boolean_prefs_[i].GetValue());
     }
   }
   for (size_t i = 0; i < language_prefs::kNumChewingMultipleChoicePrefs; ++i) {
@@ -398,7 +464,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       SetLanguageConfigString(
           language_prefs::kChewingSectionName,
           language_prefs::kChewingMultipleChoicePrefs[i].ibus_config_name,
-          language_chewing_multiple_choice_prefs_[i].GetValue());
+          chewing_multiple_choice_prefs_[i].GetValue());
     }
   }
   if (!pref_name ||
@@ -406,7 +472,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     SetLanguageConfigInteger(
         language_prefs::kChewingSectionName,
         language_prefs::kChewingHsuSelKeyType.ibus_config_name,
-        language_chewing_hsu_sel_key_type_.GetValue());
+        chewing_hsu_sel_key_type_.GetValue());
   }
   for (size_t i = 0; i < language_prefs::kNumChewingIntegerPrefs; ++i) {
     if (!pref_name ||
@@ -414,19 +480,19 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       SetLanguageConfigInteger(
           language_prefs::kChewingSectionName,
           language_prefs::kChewingIntegerPrefs[i].ibus_config_name,
-          language_chewing_integer_prefs_[i].GetValue());
+          chewing_integer_prefs_[i].GetValue());
     }
   }
   if (!pref_name ||
       *pref_name == prefs::kLanguageHangulKeyboard) {
     SetLanguageConfigString(language_prefs::kHangulSectionName,
                             language_prefs::kHangulKeyboardConfigName,
-                            language_hangul_keyboard_.GetValue());
+                            hangul_keyboard_.GetValue());
   }
   if (!pref_name || *pref_name == prefs::kLanguageHangulHanjaBindingKeys) {
     SetLanguageConfigString(language_prefs::kHangulSectionName,
                             language_prefs::kHangulHanjaBindingKeysConfigName,
-                            language_hangul_hanja_binding_keys_.GetValue());
+                            hangul_hanja_binding_keys_.GetValue());
   }
   for (size_t i = 0; i < language_prefs::kNumPinyinBooleanPrefs; ++i) {
     if (!pref_name ||
@@ -434,7 +500,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       SetLanguageConfigBoolean(
           language_prefs::kPinyinSectionName,
           language_prefs::kPinyinBooleanPrefs[i].ibus_config_name,
-          language_pinyin_boolean_prefs_[i].GetValue());
+          pinyin_boolean_prefs_[i].GetValue());
     }
   }
   for (size_t i = 0; i < language_prefs::kNumPinyinIntegerPrefs; ++i) {
@@ -443,7 +509,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       SetLanguageConfigInteger(
           language_prefs::kPinyinSectionName,
           language_prefs::kPinyinIntegerPrefs[i].ibus_config_name,
-          language_pinyin_int_prefs_[i].GetValue());
+          pinyin_int_prefs_[i].GetValue());
     }
   }
   if (!pref_name ||
@@ -451,7 +517,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     SetLanguageConfigInteger(
         language_prefs::kPinyinSectionName,
         language_prefs::kPinyinDoublePinyinSchema.ibus_config_name,
-        language_pinyin_double_pinyin_schema_.GetValue());
+        pinyin_double_pinyin_schema_.GetValue());
   }
   for (size_t i = 0; i < language_prefs::kNumMozcBooleanPrefs; ++i) {
     if (!pref_name ||
@@ -459,7 +525,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       SetLanguageConfigBoolean(
           language_prefs::kMozcSectionName,
           language_prefs::kMozcBooleanPrefs[i].ibus_config_name,
-          language_mozc_boolean_prefs_[i].GetValue());
+          mozc_boolean_prefs_[i].GetValue());
     }
   }
   for (size_t i = 0; i < language_prefs::kNumMozcMultipleChoicePrefs; ++i) {
@@ -468,7 +534,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       SetLanguageConfigString(
           language_prefs::kMozcSectionName,
           language_prefs::kMozcMultipleChoicePrefs[i].ibus_config_name,
-          language_mozc_multiple_choice_prefs_[i].GetValue());
+          mozc_multiple_choice_prefs_[i].GetValue());
     }
   }
   for (size_t i = 0; i < language_prefs::kNumMozcIntegerPrefs; ++i) {
@@ -477,7 +543,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       SetLanguageConfigInteger(
           language_prefs::kMozcSectionName,
           language_prefs::kMozcIntegerPrefs[i].ibus_config_name,
-          language_mozc_integer_prefs_[i].GetValue());
+          mozc_integer_prefs_[i].GetValue());
     }
   }
 
@@ -491,44 +557,44 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
 void Preferences::SetLanguageConfigBoolean(const char* section,
                                            const char* name,
                                            bool value) {
-  input_method::ImeConfigValue config;
-  config.type = input_method::ImeConfigValue::kValueTypeBool;
+  input_method::InputMethodConfigValue config;
+  config.type = input_method::InputMethodConfigValue::kValueTypeBool;
   config.bool_value = value;
   input_method::InputMethodManager::GetInstance()->
-      SetImeConfig(section, name, config);
+      SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigInteger(const char* section,
                                            const char* name,
                                            int value) {
-  input_method::ImeConfigValue config;
-  config.type = input_method::ImeConfigValue::kValueTypeInt;
+  input_method::InputMethodConfigValue config;
+  config.type = input_method::InputMethodConfigValue::kValueTypeInt;
   config.int_value = value;
   input_method::InputMethodManager::GetInstance()->
-      SetImeConfig(section, name, config);
+      SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigString(const char* section,
                                           const char* name,
                                           const std::string& value) {
-  input_method::ImeConfigValue config;
-  config.type = input_method::ImeConfigValue::kValueTypeString;
+  input_method::InputMethodConfigValue config;
+  config.type = input_method::InputMethodConfigValue::kValueTypeString;
   config.string_value = value;
   input_method::InputMethodManager::GetInstance()->
-      SetImeConfig(section, name, config);
+      SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigStringList(
     const char* section,
     const char* name,
     const std::vector<std::string>& values) {
-  input_method::ImeConfigValue config;
-  config.type = input_method::ImeConfigValue::kValueTypeStringList;
+  input_method::InputMethodConfigValue config;
+  config.type = input_method::InputMethodConfigValue::kValueTypeStringList;
   for (size_t i = 0; i < values.size(); ++i)
     config.string_list_value.push_back(values[i]);
 
   input_method::InputMethodManager::GetInstance()->
-      SetImeConfig(section, name, config);
+      SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigStringListAsCSV(const char* section,
@@ -546,9 +612,9 @@ void Preferences::SetLanguageConfigStringListAsCSV(const char* section,
 }
 
 void Preferences::UpdateModifierKeyMapping() {
-  const int search_remap = language_xkb_remap_search_key_to_.GetValue();
-  const int control_remap = language_xkb_remap_control_key_to_.GetValue();
-  const int alt_remap = language_xkb_remap_alt_key_to_.GetValue();
+  const int search_remap = xkb_remap_search_key_to_.GetValue();
+  const int control_remap = xkb_remap_control_key_to_.GetValue();
+  const int alt_remap = xkb_remap_alt_key_to_.GetValue();
   if ((search_remap < input_method::kNumModifierKeys) && (search_remap >= 0) &&
       (control_remap < input_method::kNumModifierKeys) &&
       (control_remap >= 0) &&
@@ -575,10 +641,13 @@ void Preferences::UpdateModifierKeyMapping() {
 }
 
 void Preferences::UpdateAutoRepeatRate() {
+  // Avoid setting repeat rate on desktop dev environment.
+  if (!base::chromeos::IsRunningOnChromeOS())
+    return;
+
   input_method::AutoRepeatRate rate;
-  rate.initial_delay_in_ms = language_xkb_auto_repeat_delay_pref_.GetValue();
-  rate.repeat_interval_in_ms =
-      language_xkb_auto_repeat_interval_pref_.GetValue();
+  rate.initial_delay_in_ms = xkb_auto_repeat_delay_pref_.GetValue();
+  rate.repeat_interval_in_ms = xkb_auto_repeat_interval_pref_.GetValue();
   DCHECK(rate.initial_delay_in_ms > 0);
   DCHECK(rate.repeat_interval_in_ms > 0);
   input_method::XKeyboard::SetAutoRepeatRate(rate);

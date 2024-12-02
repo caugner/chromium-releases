@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -51,16 +51,19 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   virtual void AuthenticateToUnlock(const std::string& username,
                                     const std::string& password) = 0;
 
+  // Initiates demo user login.
+  virtual void LoginDemoUser() = 0;
+
   // Initiates incognito ("browse without signing in") login.
   virtual void LoginOffTheRecord() = 0;
 
-  // |credentials| are the tokens that we get back from the ClientLogin API.
+  // Initiates a demo user login.
+  virtual void OnDemoUserLoginSuccess() = 0;
+
   // |request_pending| is true if we still plan to call consumer_ with the
   // results of more requests.
   // Must be called on the UI thread.
-  virtual void OnLoginSuccess(
-      const GaiaAuthConsumer::ClientLoginResult& credentials,
-      bool request_pending) = 0;
+  virtual void OnLoginSuccess(bool request_pending) = 0;
 
   // Must be called on the UI thread.
   virtual void OnLoginFailure(const LoginFailure& error) = 0;
@@ -71,17 +74,13 @@ class Authenticator : public base::RefCountedThreadSafe<Authenticator> {
   // occurred.
   // Call this method to migrate the user's encrypted data
   // forward to use his new password.  |old_password| is the password
-  // his data was last encrypted with, |result| is the blob of auth
-  // data passed back through OnPasswordChangeDetected().
+  // his data was last encrypted with.
   virtual void RecoverEncryptedData(
-      const std::string& old_password,
-      const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
+      const std::string& old_password) = 0;
 
   // Call this method to erase the user's encrypted data
-  // and create a new cryptohome.  |result| is the blob of auth
-  // data passed back through OnPasswordChangeDetected().
-  virtual void ResyncEncryptedData(
-      const GaiaAuthConsumer::ClientLoginResult& credentials) = 0;
+  // and create a new cryptohome.
+  virtual void ResyncEncryptedData() = 0;
 
   // Attempt to authenticate online again.
   virtual void RetryAuth(Profile* profile,

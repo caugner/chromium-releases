@@ -13,8 +13,8 @@
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -58,8 +58,8 @@ const char NativeComboboxViews::kViewClassName[] =
 NativeComboboxViews::NativeComboboxViews(Combobox* parent)
     : combobox_(parent),
       text_border_(new FocusableBorder()),
-      disclosure_arrow_(ResourceBundle::GetSharedInstance().GetBitmapNamed(
-          IDR_DISCLOSURE_ARROW)),
+      disclosure_arrow_(ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+          IDR_DISCLOSURE_ARROW).ToSkBitmap()),
       dropdown_open_(false),
       selected_item_(-1),
       content_width_(0),
@@ -160,7 +160,7 @@ void NativeComboboxViews::OnBlur() {
 
 void NativeComboboxViews::UpdateFromModel() {
   int max_width = 0;
-  const gfx::Font &font = GetFont();
+  const gfx::Font& font = Combobox::GetFont();
 
   MenuItemView* menu = new MenuItemView(this);
   // MenuRunner owns |menu|.
@@ -268,11 +268,6 @@ bool NativeComboboxViews::GetAccelerator(int id, ui::Accelerator* accel) {
 /////////////////////////////////////////////////////////////////
 // NativeComboboxViews private methods:
 
-const gfx::Font& NativeComboboxViews::GetFont() const {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  return rb.GetFont(ResourceBundle::BaseFont);
-}
-
 void NativeComboboxViews::AdjustBoundsForRTLUI(gfx::Rect* rect) const {
   rect->set_x(GetMirroredXForRect(*rect));
 }
@@ -296,7 +291,7 @@ void NativeComboboxViews::PaintText(gfx::Canvas* canvas) {
   int disclosure_arrow_offset = width() - disclosure_arrow_->width()
       - kDisclosureArrowLeftPadding - kDisclosureArrowRightPadding;
 
-  const gfx::Font& font = GetFont();
+  const gfx::Font& font = Combobox::GetFont();
   int text_width = font.GetStringWidth(text);
   if ((text_width + insets.width()) > disclosure_arrow_offset)
     text_width = disclosure_arrow_offset - insets.width();

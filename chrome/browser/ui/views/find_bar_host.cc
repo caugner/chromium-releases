@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/find_bar_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -69,7 +69,7 @@ bool FindBarHost::MaybeForwardKeyEventToWebpage(
   if (!contents)
     return false;
 
-  RenderViewHost* render_view_host =
+  content::RenderViewHost* render_view_host =
       contents->web_contents()->GetRenderViewHost();
 
   // Make sure we don't have a text field element interfering with keyboard
@@ -142,8 +142,7 @@ void FindBarHost::UpdateUIForFindResult(const FindNotificationDetails& result,
     find_bar_view()->UpdateForResult(result, find_text);
 
   // We now need to check if the window is obscuring the search results.
-  if (!result.selection_rect().IsEmpty())
-    MoveWindowIfNecessary(result.selection_rect(), false);
+  MoveWindowIfNecessary(result.selection_rect(), false);
 
   // Once we find a match we no longer want to keep track of what had
   // focus. EndFindSession will then set the focus to the page content.
@@ -176,16 +175,18 @@ bool FindBarHost::AcceleratorPressed(const ui::Accelerator& accelerator) {
   if (key == ui::VKEY_RETURN && accelerator.IsCtrlDown()) {
     // Ctrl+Enter closes the Find session and navigates any link that is active.
     find_bar_controller_->EndFindSession(FindBarController::kActivateSelection);
+    return true;
   } else if (key == ui::VKEY_ESCAPE) {
     // This will end the Find session and hide the window, causing it to loose
     // focus and in the process unregister us as the handler for the Escape
     // accelerator through the OnWillChangeFocus event.
     find_bar_controller_->EndFindSession(FindBarController::kKeepSelection);
+    return true;
   } else {
     NOTREACHED() << "Unknown accelerator";
   }
 
-  return true;
+  return false;
 }
 
 bool FindBarHost::CanHandleAccelerators() const {
@@ -308,7 +309,8 @@ void FindBarHost::RegisterAccelerators() {
 
   // Register for Ctrl+Return.
   ui::Accelerator escape(ui::VKEY_RETURN, false, true, false);
-  focus_manager()->RegisterAccelerator(escape, this);
+  focus_manager()->RegisterAccelerator(
+      escape, ui::AcceleratorManager::kNormalPriority, this);
 }
 
 void FindBarHost::UnregisterAccelerators() {
