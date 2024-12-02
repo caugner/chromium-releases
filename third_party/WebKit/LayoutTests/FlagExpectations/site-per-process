@@ -1,6 +1,14 @@
 # These tests currently fail when they run with --site-per-process.
 # See https://crbug.com/477150.
 
+# https://crbug.com/710098: Tests failing because of r462933.
+crbug.com/710098 http/tests/security/document-all.html [ Failure ]
+crbug.com/710098 http/tests/security/window-named-proto.html [ Failure ]
+crbug.com/710098 http/tests/security/window-named-valueOf.html [ Failure ]
+crbug.com/710098 virtual/mojo-loading/http/tests/security/document-all.html [ Failure ]
+crbug.com/710098 virtual/mojo-loading/http/tests/security/window-named-proto.html [ Failure ]
+crbug.com/710098 virtual/mojo-loading/http/tests/security/window-named-valueOf.html [ Failure ]
+
 # https://crbug.com/700535: Times out after r454488 landed.
 crbug.com/700535 fast/dnd/dropEffect-for-effectAllowed.html [ Timeout ]
 
@@ -41,6 +49,16 @@ crbug.com/608015 virtual/mojo-loading/http/tests/inspector-protocol/access-inspe
 crbug.com/608023 http/tests/inspector/injected-script-for-origin.html [ Failure ]
 crbug.com/608023 virtual/mojo-loading/http/tests/inspector/injected-script-for-origin.html [ Failure ]
 
+# https://crbug.com/716085 - Feature Policy tests failing when both
+# allowpaymentrequest and allow attribute enables payment feature.
+crbug.com/716085 http/tests/feature-policy/payment-allowed-by-container-policy-relocate.html [ Failure ]
+crbug.com/716085 http/tests/feature-policy/payment-allowed-by-container-policy.html [ Failure ]
+crbug.com/716085 virtual/feature-policy/http/tests/feature-policy/payment-allowed-by-container-policy-relocate.html [ Failure ]
+crbug.com/716085 virtual/feature-policy/http/tests/feature-policy/payment-allowed-by-container-policy.html [ Failure ]
+crbug.com/716085 virtual/mojo-loading/http/tests/feature-policy/payment-allowed-by-container-policy-relocate.html [ Failure ]
+crbug.com/716085 virtual/mojo-loading/http/tests/feature-policy/payment-allowed-by-container-policy.html [ Failure ]
+
+
 # https://crbug.com/602493 - Layout tests harness doesn't support history dump across OOPIFs
 crbug.com/602493 http/tests/security/mixedContent/insecure-iframe-in-main-frame.html [ Crash ]
 crbug.com/602493 virtual/mojo-loading/http/tests/security/mixedContent/insecure-iframe-in-main-frame.html [ Crash ]
@@ -71,6 +89,7 @@ crbug.com/606594 virtual/mojo-loading/http/tests/local/serviceworker/fetch-reque
 # https://crbug.com/607991 - MockWebClipboardImpl not replicated across OOPIFs.
 crbug.com/607991 http/tests/misc/copy-resolves-urls.html [ Failure ]
 crbug.com/607991 virtual/mojo-loading/http/tests/misc/copy-resolves-urls.html [ Failure ]
+crbug.com/607991 virtual/off-main-thread-fetch/http/tests/misc/copy-resolves-urls.html [ Failure ]
 
 # https://crbug.com/608780 - window.performance doesn't work with OOPIFs
 crbug.com/608780 http/tests/w3c/webperf/submission/Intel/resource-timing/test_resource_timing_cross_origin_redirect.html [ Failure ]
@@ -104,14 +123,14 @@ crbug.com/616905 virtual/mojo-loading/http/tests/history/cross-origin-redirect-o
 crbug.com/623268 http/tests/inspector-protocol/request-mixed-content-status-blockable.html [ Timeout ]
 crbug.com/623268 http/tests/inspector-protocol/request-mixed-content-status-none.html [ Timeout ]
 crbug.com/623268 http/tests/inspector-protocol/request-mixed-content-status-optionally-blockable.html [ Timeout ]
+crbug.com/623268 http/tests/inspector-protocol/request-referrer-policy.html [ Timeout ]
 crbug.com/623268 virtual/mojo-loading/http/tests/inspector-protocol/request-mixed-content-status-blockable.html [ Timeout ]
 crbug.com/623268 virtual/mojo-loading/http/tests/inspector-protocol/request-mixed-content-status-none.html [ Timeout ]
 crbug.com/623268 virtual/mojo-loading/http/tests/inspector-protocol/request-mixed-content-status-optionally-blockable.html [ Timeout ]
-crbug.com/623268 http/tests/inspector/change-iframe-src.html [ Timeout ]
-crbug.com/623268 http/tests/inspector/console-cross-origin-iframe-logging.html [ Timeout ]
+crbug.com/623268 virtual/mojo-loading/http/tests/inspector-protocol/request-referrer-policy.html [ Timeout ]
+crbug.com/623268 http/tests/inspector/console-cross-origin-iframe-logging.html [ Failure ]
 crbug.com/623268 http/tests/inspector/inspect-iframe-from-different-domain.html [ Timeout ]
-crbug.com/623268 virtual/mojo-loading/http/tests/inspector/change-iframe-src.html [ Timeout ]
-crbug.com/623268 virtual/mojo-loading/http/tests/inspector/console-cross-origin-iframe-logging.html [ Timeout ]
+crbug.com/623268 virtual/mojo-loading/http/tests/inspector/console-cross-origin-iframe-logging.html [ Failure ]
 crbug.com/623268 virtual/mojo-loading/http/tests/inspector/inspect-iframe-from-different-domain.html [ Timeout ]
 
 # https://crbug.com/623210 - DevTools extensions load in separate process in layout tests.
@@ -149,6 +168,7 @@ crbug.com/678491 virtual/mojo-loading/http/tests/misc/webtiming-no-origin.html [
 # These tests sometimes fail on usual bots but crash w/ --site-per-process.
 crbug.com/678492 http/tests/misc/webtiming-ssl.php [ Crash ]
 crbug.com/678492 virtual/mojo-loading/http/tests/misc/webtiming-ssl.php [ Crash ]
+crbug.com/678492 virtual/off-main-thread-fetch/http/tests/misc/webtiming-ssl.php [ Crash ]
 
 # Slow tests. These are listed in SlowTests listed here also because
 # expectations are unfortunately not inherited automatically (e.g. see

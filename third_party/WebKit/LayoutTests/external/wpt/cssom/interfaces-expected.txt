@@ -1,12 +1,12 @@
 This is a testharness.js-based test.
-Found 195 tests; 154 PASS, 41 FAIL, 0 TIMEOUT, 0 NOTRUN.
+Found 187 tests; 159 PASS, 28 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS Document interface: attribute styleSheets 
 FAIL Document must be primary interface of document assert_equals: document's prototype is not Document.prototype expected object "[object Document]" but got object "[object HTMLDocument]"
 FAIL Stringification of document assert_equals: class string of document expected "[object Document]" but got "[object HTMLDocument]"
 PASS Document interface: document must inherit property "styleSheets" with the proper type (0) 
-FAIL Document must be primary interface of new Document() assert_equals: Unexpected exception when evaluating object expected null but got object "TypeError: Illegal constructor"
-FAIL Stringification of new Document() assert_equals: Unexpected exception when evaluating object expected null but got object "TypeError: Illegal constructor"
-FAIL Document interface: new Document() must inherit property "styleSheets" with the proper type (0) assert_equals: Unexpected exception when evaluating object expected null but got object "TypeError: Illegal constructor"
+PASS Document must be primary interface of new Document() 
+PASS Stringification of new Document() 
+PASS Document interface: new Document() must inherit property "styleSheets" with the proper type (0) 
 PASS ProcessingInstruction interface: attribute sheet 
 PASS HTMLElement interface: attribute style 
 PASS SVGElement interface: attribute style 
@@ -25,7 +25,7 @@ PASS MediaList interface: operation deleteMedium(DOMString)
 PASS StyleSheet interface: existence and properties of interface object 
 PASS StyleSheet interface object length 
 PASS StyleSheet interface object name 
-FAIL StyleSheet interface: existence and properties of interface prototype object assert_equals: class string of StyleSheet.prototype expected "[object StyleSheetPrototype]" but got "[object StyleSheet]"
+PASS StyleSheet interface: existence and properties of interface prototype object 
 PASS StyleSheet interface: existence and properties of interface prototype object's "constructor" property 
 PASS StyleSheet interface: attribute type 
 PASS StyleSheet interface: attribute href 
@@ -37,14 +37,12 @@ PASS StyleSheet interface: attribute disabled
 PASS CSSStyleSheet interface: existence and properties of interface object 
 PASS CSSStyleSheet interface object length 
 PASS CSSStyleSheet interface object name 
-FAIL CSSStyleSheet interface: existence and properties of interface prototype object assert_equals: class string of CSSStyleSheet.prototype expected "[object CSSStyleSheetPrototype]" but got "[object CSSStyleSheet]"
+PASS CSSStyleSheet interface: existence and properties of interface prototype object 
 PASS CSSStyleSheet interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSStyleSheet interface: attribute ownerRule 
 PASS CSSStyleSheet interface: attribute cssRules 
 FAIL CSSStyleSheet interface: operation insertRule(DOMString,unsigned long) assert_equals: property has wrong .length expected 2 but got 1
 PASS CSSStyleSheet interface: operation deleteRule(unsigned long) 
-PASS CSSStyleSheet must be primary interface of style_element.sheet 
-PASS Stringification of style_element.sheet 
 PASS CSSStyleSheet interface: style_element.sheet must inherit property "ownerRule" with the proper type (0) 
 PASS CSSStyleSheet interface: style_element.sheet must inherit property "cssRules" with the proper type (1) 
 PASS CSSStyleSheet interface: style_element.sheet must inherit property "insertRule" with the proper type (2) 
@@ -55,7 +53,7 @@ PASS CSSStyleSheet interface: style_element.sheet must inherit property "deleteR
 PASS CSSStyleSheet interface: calling deleteRule(unsigned long) on style_element.sheet with too few arguments must throw TypeError 
 PASS StyleSheet interface: style_element.sheet must inherit property "type" with the proper type (0) 
 PASS StyleSheet interface: style_element.sheet must inherit property "href" with the proper type (1) 
-FAIL StyleSheet interface: style_element.sheet must inherit property "ownerNode" with the proper type (2) Unrecognized type [object Object],[object Object]
+PASS StyleSheet interface: style_element.sheet must inherit property "ownerNode" with the proper type (2) 
 PASS StyleSheet interface: style_element.sheet must inherit property "parentStyleSheet" with the proper type (3) 
 PASS StyleSheet interface: style_element.sheet must inherit property "title" with the proper type (4) 
 PASS StyleSheet interface: style_element.sheet must inherit property "media" with the proper type (5) 
@@ -67,8 +65,6 @@ FAIL StyleSheetList interface: existence and properties of interface prototype o
 PASS StyleSheetList interface: existence and properties of interface prototype object's "constructor" property 
 PASS StyleSheetList interface: operation item(unsigned long) 
 PASS StyleSheetList interface: attribute length 
-PASS StyleSheetList must be primary interface of document.styleSheets 
-PASS Stringification of document.styleSheets 
 PASS StyleSheetList interface: document.styleSheets must inherit property "item" with the proper type (0) 
 PASS StyleSheetList interface: calling item(unsigned long) on document.styleSheets with too few arguments must throw TypeError 
 PASS StyleSheetList interface: document.styleSheets must inherit property "length" with the proper type (1) 
@@ -79,15 +75,13 @@ FAIL CSSRuleList interface: existence and properties of interface prototype obje
 PASS CSSRuleList interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSRuleList interface: operation item(unsigned long) 
 PASS CSSRuleList interface: attribute length 
-PASS CSSRuleList must be primary interface of style_element.sheet.cssRules 
-PASS Stringification of style_element.sheet.cssRules 
 PASS CSSRuleList interface: style_element.sheet.cssRules must inherit property "item" with the proper type (0) 
 PASS CSSRuleList interface: calling item(unsigned long) on style_element.sheet.cssRules with too few arguments must throw TypeError 
 PASS CSSRuleList interface: style_element.sheet.cssRules must inherit property "length" with the proper type (1) 
 PASS CSSRule interface: existence and properties of interface object 
 PASS CSSRule interface object length 
 PASS CSSRule interface object name 
-FAIL CSSRule interface: existence and properties of interface prototype object assert_equals: class string of CSSRule.prototype expected "[object CSSRulePrototype]" but got "[object CSSRule]"
+PASS CSSRule interface: existence and properties of interface prototype object 
 PASS CSSRule interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSRule interface: constant STYLE_RULE on interface object 
 PASS CSSRule interface: constant STYLE_RULE on interface prototype object 
@@ -112,12 +106,10 @@ PASS CSSRule interface: attribute parentStyleSheet
 PASS CSSStyleRule interface: existence and properties of interface object 
 PASS CSSStyleRule interface object length 
 PASS CSSStyleRule interface object name 
-FAIL CSSStyleRule interface: existence and properties of interface prototype object assert_equals: class string of CSSStyleRule.prototype expected "[object CSSStyleRulePrototype]" but got "[object CSSStyleRule]"
+PASS CSSStyleRule interface: existence and properties of interface prototype object 
 PASS CSSStyleRule interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSStyleRule interface: attribute selectorText 
 PASS CSSStyleRule interface: attribute style 
-PASS CSSStyleRule must be primary interface of style_element.sheet.cssRules[0] 
-PASS Stringification of style_element.sheet.cssRules[0] 
 PASS CSSStyleRule interface: style_element.sheet.cssRules[0] must inherit property "selectorText" with the proper type (0) 
 PASS CSSStyleRule interface: style_element.sheet.cssRules[0] must inherit property "style" with the proper type (1) 
 PASS CSSRule interface: style_element.sheet.cssRules[0] must inherit property "STYLE_RULE" with the proper type (0) 
@@ -135,7 +127,7 @@ PASS CSSRule interface: style_element.sheet.cssRules[0] must inherit property "p
 PASS CSSImportRule interface: existence and properties of interface object 
 PASS CSSImportRule interface object length 
 PASS CSSImportRule interface object name 
-FAIL CSSImportRule interface: existence and properties of interface prototype object assert_equals: class string of CSSImportRule.prototype expected "[object CSSImportRulePrototype]" but got "[object CSSImportRule]"
+PASS CSSImportRule interface: existence and properties of interface prototype object 
 PASS CSSImportRule interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSImportRule interface: attribute href 
 FAIL CSSImportRule interface: attribute media assert_equals: setter must be function for PutForwards, Replaceable, or non-readonly attributes expected "function" but got "undefined"
@@ -143,7 +135,7 @@ PASS CSSImportRule interface: attribute styleSheet
 PASS CSSGroupingRule interface: existence and properties of interface object 
 PASS CSSGroupingRule interface object length 
 PASS CSSGroupingRule interface object name 
-FAIL CSSGroupingRule interface: existence and properties of interface prototype object assert_equals: class string of CSSGroupingRule.prototype expected "[object CSSGroupingRulePrototype]" but got "[object CSSGroupingRule]"
+PASS CSSGroupingRule interface: existence and properties of interface prototype object 
 PASS CSSGroupingRule interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSGroupingRule interface: attribute cssRules 
 PASS CSSGroupingRule interface: operation insertRule(DOMString,unsigned long) 
@@ -171,14 +163,14 @@ FAIL CSSMarginRule interface: attribute style assert_own_property: self does not
 PASS CSSNamespaceRule interface: existence and properties of interface object 
 PASS CSSNamespaceRule interface object length 
 PASS CSSNamespaceRule interface object name 
-FAIL CSSNamespaceRule interface: existence and properties of interface prototype object assert_equals: class string of CSSNamespaceRule.prototype expected "[object CSSNamespaceRulePrototype]" but got "[object CSSNamespaceRule]"
+PASS CSSNamespaceRule interface: existence and properties of interface prototype object 
 PASS CSSNamespaceRule interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSNamespaceRule interface: attribute namespaceURI 
 PASS CSSNamespaceRule interface: attribute prefix 
 PASS CSSStyleDeclaration interface: existence and properties of interface object 
 PASS CSSStyleDeclaration interface object length 
 PASS CSSStyleDeclaration interface object name 
-FAIL CSSStyleDeclaration interface: existence and properties of interface prototype object assert_equals: class string of CSSStyleDeclaration.prototype expected "[object CSSStyleDeclarationPrototype]" but got "[object CSSStyleDeclaration]"
+PASS CSSStyleDeclaration interface: existence and properties of interface prototype object 
 PASS CSSStyleDeclaration interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSSStyleDeclaration interface: attribute cssText 
 PASS CSSStyleDeclaration interface: attribute length 
@@ -194,7 +186,7 @@ PASS CSSStyleDeclaration interface: attribute cssFloat
 PASS CSS interface: existence and properties of interface object 
 PASS CSS interface object length 
 PASS CSS interface object name 
-FAIL CSS interface: existence and properties of interface prototype object assert_equals: class string of CSS.prototype expected "[object CSSPrototype]" but got "[object CSS]"
+PASS CSS interface: existence and properties of interface prototype object 
 PASS CSS interface: existence and properties of interface prototype object's "constructor" property 
 PASS CSS interface: operation escape(DOMString) 
 Harness: the test ran to completion.
