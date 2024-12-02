@@ -70,8 +70,23 @@ typedef NS_ENUM(NSInteger, RowIdentifier) {
           ? [UIColor colorNamed:kGroupedPrimaryBackgroundColor]
           : [UIColor colorNamed:kBackgroundColor];
   self.view.backgroundColor = backgroundColor;
-  self.navigationController.navigationBar.translucent = NO;
-  self.navigationController.navigationBar.backgroundColor = backgroundColor;
+  if (IsPasswordCreationEnabled()) {
+    UINavigationBarAppearance* appearance =
+        [[UINavigationBarAppearance alloc] init];
+    [appearance configureWithDefaultBackground];
+    appearance.backgroundColor = backgroundColor;
+    if (@available(iOS 15, *)) {
+      self.navigationItem.scrollEdgeAppearance = appearance;
+    } else {
+      // On iOS 14, scrollEdgeAppearance only affects navigation bars with large
+      // titles, so it can't be used. Instead, the navigation bar will always be
+      // the same style.
+      self.navigationItem.standardAppearance = appearance;
+    }
+  } else {
+    self.navigationController.navigationBar.translucent = NO;
+    self.navigationController.navigationBar.backgroundColor = backgroundColor;
+  }
   self.navigationItem.rightBarButtonItem = IsPasswordCreationEnabled()
                                                ? [self navigationEnterButton]
                                                : [self navigationCancelButton];
@@ -275,21 +290,19 @@ typedef NS_ENUM(NSInteger, RowIdentifier) {
                 action:@selector(passwordIconButtonTapped:event:)
       forControlEvents:UIControlEventTouchUpInside];
 
-  if (@available(iOS 13.4, *)) {
-    button.pointerInteractionEnabled = YES;
-    button.pointerStyleProvider = ^UIPointerStyle*(
-        UIButton* button, __unused UIPointerEffect* proposedEffect,
-        __unused UIPointerShape* proposedShape) {
-      UITargetedPreview* preview =
-          [[UITargetedPreview alloc] initWithView:button];
-      UIPointerHighlightEffect* effect =
-          [UIPointerHighlightEffect effectWithPreview:preview];
-      UIPointerShape* shape =
-          [UIPointerShape shapeWithRoundedRect:button.frame
-                                  cornerRadius:button.frame.size.width / 2];
-      return [UIPointerStyle styleWithEffect:effect shape:shape];
-    };
-  }
+  button.pointerInteractionEnabled = YES;
+  button.pointerStyleProvider = ^UIPointerStyle*(
+      UIButton* button, __unused UIPointerEffect* proposedEffect,
+      __unused UIPointerShape* proposedShape) {
+    UITargetedPreview* preview =
+        [[UITargetedPreview alloc] initWithView:button];
+    UIPointerHighlightEffect* effect =
+        [UIPointerHighlightEffect effectWithPreview:preview];
+    UIPointerShape* shape =
+        [UIPointerShape shapeWithRoundedRect:button.frame
+                                cornerRadius:button.frame.size.width / 2];
+    return [UIPointerStyle styleWithEffect:effect shape:shape];
+  };
 
   return button;
 }

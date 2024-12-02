@@ -7,7 +7,9 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/share/share_metrics.h"
 #include "chrome/browser/sharesheet/sharesheet_metrics.h"
 #include "chrome/browser/sharesheet/sharesheet_service.h"
 #include "chrome/browser/sharesheet/sharesheet_service_factory.h"
@@ -19,6 +21,8 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
+#include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble_controller.h"
 #include "chrome/browser/ui/sharing_hub/sharing_hub_bubble_view.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
@@ -30,22 +34,6 @@
 namespace sharing_hub {
 
 namespace {
-
-// The source from which the sharing hub was launched from.
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused. Keep in sync with ShareSourceDesktop
-// in src/tools/metrics/histograms/enums.xml.
-enum class ShareSourceDesktop {
-  kUnknown = 0,
-  kOmniboxSharingHub = 1,
-  kMaxValue = kOmniboxSharingHub,
-};
-
-const char kAnyShareStarted[] = "Sharing.AnyShareStartedDesktop";
-
-void LogShareSourceDesktop(ShareSourceDesktop source) {
-  UMA_HISTOGRAM_ENUMERATION(kAnyShareStarted, source);
-}
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 // Result of the CrOS sharesheet, i.e. whether the user selects a share target
@@ -69,6 +57,7 @@ SharingHubSharesheetResult GetSharesheetResultHistogram(
       return SharingHubSharesheetResult::SUCCESS;
     case sharesheet::SharesheetResult::kCancel:
     case sharesheet::SharesheetResult::kErrorAlreadyOpen:
+    case sharesheet::SharesheetResult::kErrorWindowClosed:
       return SharingHubSharesheetResult::CANCELED;
   }
 }
@@ -87,8 +76,7 @@ SharingHubBubbleController::~SharingHubBubbleController() {
   }
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  if (base::FeatureList::IsEnabled(features::kSharesheet) &&
-      base::FeatureList::IsEnabled(features::kChromeOSSharingHub) &&
+  if (base::FeatureList::IsEnabled(features::kChromeOSSharingHub) &&
       sharesheet_controller_) {
     sharesheet_controller_->CloseBubble(sharesheet::SharesheetResult::kCancel);
   }
@@ -120,7 +108,7 @@ void SharingHubBubbleController::ShowBubble() {
 #else
   sharing_hub_bubble_view_ =
       browser->window()->ShowSharingHubBubble(web_contents_, this, true);
-  LogShareSourceDesktop(ShareSourceDesktop::kOmniboxSharingHub);
+  share::LogShareSourceDesktop(share::ShareSourceDesktop::kOmniboxSharingHub);
 #endif
 }
 
@@ -145,8 +133,7 @@ bool SharingHubBubbleController::ShouldOfferOmniboxIcon() {
     return false;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  return base::FeatureList::IsEnabled(features::kSharesheet) &&
-         base::FeatureList::IsEnabled(features::kChromeOSSharingHub);
+  return base::FeatureList::IsEnabled(features::kChromeOSSharingHub);
 #else
   return SharingHubOmniboxEnabled(web_contents_->GetBrowserContext());
 #endif
@@ -169,7 +156,7 @@ SharingHubBubbleController::GetThirdPartyActions() {
 
   SharingHubModel* model = GetSharingHubModel();
   if (model)
-    model->GetThirdPartyActionList(web_contents_, &actions);
+    model->GetThirdPartyActionList(&actions);
 
   return actions;
 }
@@ -185,7 +172,21 @@ void SharingHubBubbleController::OnActionSelected(
 
   if (is_first_party) {
     base::RecordComputedAction(feature_name_for_metrics);
-    chrome::ExecuteCommand(browser, command_id);
+
+    // Show a back button for 1P dialogs anchored to the sharing hub icon.
+    if (command_id == IDC_QRCODE_GENERATOR) {
+      qrcode_generator::QRCodeGeneratorBubbleController* qrcode_controller =
+          qrcode_generator::QRCodeGeneratorBubbleController::Get(web_contents_);
+      qrcode_controller->ShowBubble(web_contents_->GetURL(), true);
+    } else if (command_id == IDC_SEND_TAB_TO_SELF) {
+      send_tab_to_self::SendTabToSelfBubbleController*
+          send_tab_to_self_controller =
+              send_tab_to_self::SendTabToSelfBubbleController::
+                  CreateOrGetFromWebContents(web_contents_);
+      send_tab_to_self_controller->ShowBubble(true);
+    } else {
+      chrome::ExecuteCommand(browser, command_id);
+    }
   } else {
     SharingHubModel* model = GetSharingHubModel();
     DCHECK(model);
@@ -211,8 +212,7 @@ SharingHubModel* SharingHubBubbleController::GetSharingHubModel() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 void SharingHubBubbleController::ShowSharesheet(
     views::Button* highlighted_button) {
-  if (!base::FeatureList::IsEnabled(features::kSharesheet) ||
-      !base::FeatureList::IsEnabled(features::kChromeOSSharingHub)) {
+  if (!base::FeatureList::IsEnabled(features::kChromeOSSharingHub)) {
     return;
   }
 
@@ -267,6 +267,6 @@ SharingHubBubbleController::SharingHubBubbleController(
   DCHECK(web_contents);
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(SharingHubBubbleController)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(SharingHubBubbleController);
 
 }  // namespace sharing_hub

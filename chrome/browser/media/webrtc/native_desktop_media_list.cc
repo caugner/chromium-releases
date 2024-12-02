@@ -95,7 +95,7 @@ gfx::ImageSkia ScaleDesktopFrame(std::unique_ptr<webrtc::DesktopFrame> frame,
 
 #if defined(OS_MAC)
 const base::Feature kWindowCaptureMacV2{"WindowCaptureMacV2",
-                                        base::FEATURE_ENABLED_BY_DEFAULT};
+                                        base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
 }  // namespace
@@ -107,6 +107,10 @@ class NativeDesktopMediaList::Worker
          base::WeakPtr<NativeDesktopMediaList> media_list,
          DesktopMediaList::Type type,
          std::unique_ptr<webrtc::DesktopCapturer> capturer);
+
+  Worker(const Worker&) = delete;
+  Worker& operator=(const Worker&) = delete;
+
   ~Worker() override;
 
   void Start();
@@ -147,8 +151,6 @@ class NativeDesktopMediaList::Worker
   std::unique_ptr<RefreshThumbnailsState> refresh_thumbnails_state_;
 
   base::WeakPtrFactory<Worker> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Worker);
 };
 
 NativeDesktopMediaList::Worker::Worker(
@@ -308,8 +310,8 @@ void NativeDesktopMediaList::Worker::OnCaptureResult(
 NativeDesktopMediaList::NativeDesktopMediaList(
     DesktopMediaList::Type type,
     std::unique_ptr<webrtc::DesktopCapturer> capturer)
-    : DesktopMediaListBase(base::TimeDelta::FromMilliseconds(
-          kDefaultNativeDesktopMediaListUpdatePeriod)),
+    : DesktopMediaListBase(
+          base::Milliseconds(kDefaultNativeDesktopMediaListUpdatePeriod)),
       thread_("DesktopMediaListCaptureThread") {
   type_ = type;
 

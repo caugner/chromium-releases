@@ -201,11 +201,11 @@ void AudioEncoder::ProcessConfigure(Request* request) {
     }
 
     req->EndTracing();
-    self->stall_request_processing_ = false;
+    self->blocking_request_in_progress_ = false;
     self->ProcessRequests();
   };
 
-  stall_request_processing_ = true;
+  blocking_request_in_progress_ = true;
   first_output_after_configure_ = true;
   media_encoder_->Initialize(
       active_config_->options, std::move(output_cb),
@@ -327,7 +327,7 @@ void AudioEncoder::CallOutputCallback(
     first_output_after_configure_ = false;
     auto* decoder_config = MakeGarbageCollected<AudioDecoderConfig>();
     decoder_config->setCodec(active_config->codec_string);
-    decoder_config->setSampleRate(active_config->options.sample_rate);
+    decoder_config->setSampleRate(encoded_buffer.params.sample_rate());
     decoder_config->setNumberOfChannels(active_config->options.channels);
     if (codec_desc.has_value()) {
       auto* desc_array_buf = DOMArrayBuffer::Create(codec_desc.value().data(),

@@ -55,6 +55,10 @@ class X11_WINDOW_EXPORT X11Window : public PlatformWindow,
                                     public X11DesktopWindowMoveClient::Delegate {
  public:
   explicit X11Window(PlatformWindowDelegate* platform_window_delegate);
+
+  X11Window(const X11Window&) = delete;
+  X11Window& operator=(const X11Window&) = delete;
+
   ~X11Window() override;
 
   virtual void Initialize(PlatformWindowInitProperties properties);
@@ -110,9 +114,9 @@ class X11_WINDOW_EXPORT X11Window : public PlatformWindow,
   bool IsTranslucentWindowOpacitySupported() const override;
   void SetOpacity(float opacity) override;
   bool CanSetDecorationInsets() const override;
-  void SetDecorationInsets(gfx::Insets insets_px) override;
-  void SetOpaqueRegion(std::vector<gfx::Rect> region_px) override;
-  void SetInputRegion(gfx::Rect region_px) override;
+  void SetDecorationInsets(const gfx::Insets* insets_px) override;
+  void SetOpaqueRegion(const std::vector<gfx::Rect>* region_px) override;
+  void SetInputRegion(const gfx::Rect* region_px) override;
 
   // WorkspaceExtension:
   std::string GetWorkspace() const override;
@@ -494,8 +498,6 @@ class X11_WINDOW_EXPORT X11Window : public PlatformWindow,
   base::CancelableOnceCallback<void(x11::Cursor)> on_cursor_loaded_;
 
   base::WeakPtrFactory<X11Window> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(X11Window);
 };
 
 }  // namespace ui

@@ -19,8 +19,10 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "components/metrics/client_info.h"
+#include "components/metrics/metrics_data_validation.h"
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
@@ -72,14 +74,24 @@ class MetricsStateManagerTest : public testing::Test {
     MetricsService::RegisterPrefs(prefs_.registry());
   }
 
-  std::unique_ptr<MetricsStateManager> CreateStateManager() {
-    return MetricsStateManager::Create(
-        &prefs_, enabled_state_provider_.get(), std::wstring(),
-        base::FilePath(),
-        base::BindRepeating(&MetricsStateManagerTest::MockStoreClientInfoBackup,
-                            base::Unretained(this)),
-        base::BindRepeating(&MetricsStateManagerTest::LoadFakeClientInfoBackup,
-                            base::Unretained(this)));
+  MetricsStateManagerTest(const MetricsStateManagerTest&) = delete;
+  MetricsStateManagerTest& operator=(const MetricsStateManagerTest&) = delete;
+
+  std::unique_ptr<MetricsStateManager> CreateStateManager(
+      const std::string& external_client_id = "") {
+    std::unique_ptr<MetricsStateManager> state_manager =
+        MetricsStateManager::Create(
+            &prefs_, enabled_state_provider_.get(), std::wstring(),
+            base::FilePath(), StartupVisibility::kUnknown,
+            base::BindRepeating(
+                &MetricsStateManagerTest::MockStoreClientInfoBackup,
+                base::Unretained(this)),
+            base::BindRepeating(
+                &MetricsStateManagerTest::LoadFakeClientInfoBackup,
+                base::Unretained(this)),
+            external_client_id);
+    state_manager->InstantiateFieldTrialList();
+    return state_manager;
   }
 
   // Sets metrics reporting as enabled for testing.
@@ -153,8 +165,6 @@ class MetricsStateManagerTest : public testing::Test {
   }
 
   std::unique_ptr<TestEnabledStateProvider> enabled_state_provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(MetricsStateManagerTest);
 };
 
 TEST_F(MetricsStateManagerTest, ClientIdCorrectlyFormatted_ConsentInitially) {
@@ -533,6 +543,34 @@ TEST_F(MetricsStateManagerTest, CheckProvider) {
   histogram_tester.ExpectTotalCount("UMA.IsClonedInstall", 0);
 }
 
+TEST_F(MetricsStateManagerTest, CheckProviderLogNormal) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  std::unique_ptr<MetricsStateManager> state_manager(CreateStateManager());
+  // Set the random seed to have a deterministic test.
+  std::unique_ptr<MetricsProvider> provider =
+      state_manager->GetProviderAndSetRandomSeedForTesting(42);
+
+  base::HistogramTester histogram_tester;
+  ChromeUserMetricsExtension uma_proto;
+  provider->ProvideCurrentSessionData(&uma_proto);
+  histogram_tester.ExpectUniqueSample("UMA.DataValidation.LogNormal", 189, 1);
+}
+
+TEST_F(MetricsStateManagerTest, CheckProviderLogNormalWithParams) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      kNonUniformityValidationFeature, {{"delta", "10.0"}});
+  std::unique_ptr<MetricsStateManager> state_manager(CreateStateManager());
+  // Set the random seed to have a deterministic test.
+  std::unique_ptr<MetricsProvider> provider =
+      state_manager->GetProviderAndSetRandomSeedForTesting(42);
+
+  base::HistogramTester histogram_tester;
+  ChromeUserMetricsExtension uma_proto;
+  provider->ProvideCurrentSessionData(&uma_proto);
+  histogram_tester.ExpectUniqueSample("UMA.DataValidation.LogNormal", 2081, 1);
+}
+
 TEST_F(MetricsStateManagerTest, CheckClientIdWasNotUsedToAssignFieldTrial) {
   EnableMetricsReporting();
   ClientInfo client_info;
@@ -701,6 +739,17 @@ TEST_F(MetricsStateManagerTest,
               cloned_install_info.first_timestamp());
     EXPECT_NE(cloned_install_info.last_timestamp(), 0);
   }
+}
+
+TEST_F(MetricsStateManagerTest, UseExternalClientId) {
+  base::HistogramTester histogram_tester;
+  std::string external_client_id = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
+  std::unique_ptr<MetricsStateManager> state_manager(
+      CreateStateManager(external_client_id));
+  EnableMetricsReporting();
+  state_manager->ForceClientIdCreation();
+  EXPECT_EQ(external_client_id, state_manager->client_id());
+  histogram_tester.ExpectUniqueSample("UMA.ClientIdSource", 5, 1);
 }
 
 }  // namespace metrics

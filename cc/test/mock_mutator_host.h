@@ -75,19 +75,19 @@ class MockMutatorHost : public MutatorHost {
                      bool(ElementId element_id));
   MOCK_METHOD5(ImplOnlyAutoScrollAnimationCreate,
                void(ElementId element_id,
-                    const gfx::ScrollOffset& target_offset,
-                    const gfx::ScrollOffset& current_offset,
+                    const gfx::Vector2dF& target_offset,
+                    const gfx::Vector2dF& current_offset,
                     float autoscroll_velocity,
                     base::TimeDelta animation_start_offset));
   MOCK_METHOD5(ImplOnlyScrollAnimationCreate,
                void(ElementId element_id,
-                    const gfx::ScrollOffset& target_offset,
-                    const gfx::ScrollOffset& current_offset,
+                    const gfx::Vector2dF& target_offset,
+                    const gfx::Vector2dF& current_offset,
                     base::TimeDelta delayed_by,
                     base::TimeDelta animation_start_offset));
   MOCK_METHOD4(ImplOnlyScrollAnimationUpdateTarget,
                bool(const gfx::Vector2dF& scroll_delta,
-                    const gfx::ScrollOffset& max_scroll_offset,
+                    const gfx::Vector2dF& max_scroll_offset,
                     base::TimeTicks frame_monotonic_time,
                     base::TimeDelta delayed_by));
   MOCK_METHOD0(ScrollAnimationAbort, void());
@@ -102,7 +102,6 @@ class MockMutatorHost : public MutatorHost {
   MOCK_CONST_METHOD0(HasCanvasInvalidation, bool());
   MOCK_CONST_METHOD0(HasJSAnimation, bool());
   MOCK_CONST_METHOD0(MinimumTickInterval, base::TimeDelta());
-  MOCK_CONST_METHOD1(WillCancelScrollAnimation, bool(ElementId element_id));
 };
 
 }  // namespace cc

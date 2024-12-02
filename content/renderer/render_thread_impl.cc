@@ -149,6 +149,7 @@
 #include "third_party/blink/public/web/web_security_policy.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/skia/include/core/SkFontMgr.h"
 #include "third_party/skia/include/core/SkGraphics.h"
 #include "ui/base/layout.h"
 #include "ui/base/ui_base_features.h"
@@ -156,6 +157,7 @@
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/display/display_switches.h"
 #include "ui/gfx/rendering_pipeline.h"
+#include "v8/include/v8-extension.h"
 
 #if defined(OS_ANDROID)
 #include <cpu-features.h>
@@ -198,7 +200,6 @@ namespace content {
 namespace {
 
 using ::base::PassKey;
-using ::base::ThreadRestrictions;
 using ::blink::WebDocument;
 using ::blink::WebFrame;
 using ::blink::WebNetworkStateNotifier;
@@ -364,6 +365,11 @@ static bool IsSingleProcess() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kSingleProcess);
 }
+
+// Whether to initialize the font manager when the renderer starts on a
+// background thread.
+const base::Feature kFontManagerEarlyInit{"FontManagerEarlyInit",
+                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
 }  // namespace
 
@@ -739,6 +745,11 @@ void RenderThreadImpl::Init() {
 
   variations_observer_ = std::make_unique<VariationsRenderThreadObserver>();
   AddObserver(variations_observer_.get());
+
+  if (base::FeatureList::IsEnabled(kFontManagerEarlyInit)) {
+    base::ThreadPool::PostTask(FROM_HERE,
+                               base::BindOnce([] { SkFontMgr::RefDefault(); }));
+  }
 }
 
 RenderThreadImpl::~RenderThreadImpl() {
@@ -871,10 +882,8 @@ void RenderThreadImpl::InitializeCompositorThread() {
   blink_platform_impl_->CreateAndSetCompositorThread();
   compositor_task_runner_ = blink_platform_impl_->CompositorThreadTaskRunner();
 
-  compositor_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(base::IgnoreResult(&ThreadRestrictions::SetIOAllowed),
-                     false));
+  compositor_task_runner_->PostTask(FROM_HERE,
+                                    base::BindOnce(&base::DisallowBlocking));
   GetContentClient()->renderer()->PostCompositorThreadCreated(
       compositor_task_runner_.get());
 }
@@ -1564,21 +1573,21 @@ void RenderThreadImpl::RecordMetricsForBackgroundedRendererPurge() {
           &RenderThreadImpl::
               OnRecordMetricsForBackgroundedRendererPurgeTimerExpired,
           base::Unretained(this), "30min", process_foregrounded_count_),
-      base::TimeDelta::FromMinutes(30));
+      base::Minutes(30));
   GetWebMainThreadScheduler()->DefaultTaskRunner()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(
           &RenderThreadImpl::
               OnRecordMetricsForBackgroundedRendererPurgeTimerExpired,
           base::Unretained(this), "60min", process_foregrounded_count_),
-      base::TimeDelta::FromMinutes(60));
+      base::Minutes(60));
   GetWebMainThreadScheduler()->DefaultTaskRunner()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(
           &RenderThreadImpl::
               OnRecordMetricsForBackgroundedRendererPurgeTimerExpired,
           base::Unretained(this), "90min", process_foregrounded_count_),
-      base::TimeDelta::FromMinutes(90));
+      base::Minutes(90));
 }
 
 void RenderThreadImpl::CompositingModeFallbackToSoftware() {
@@ -1896,19 +1905,19 @@ void RenderThreadImpl::OnRendererBackgrounded() {
       base::BindOnce(&RenderThreadImpl::RecordMemoryUsageAfterBackgrounded,
                      base::Unretained(this), "5min",
                      process_foregrounded_count_),
-      base::TimeDelta::FromMinutes(5));
+      base::Minutes(5));
   GetWebMainThreadScheduler()->DefaultTaskRunner()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&RenderThreadImpl::RecordMemoryUsageAfterBackgrounded,
                      base::Unretained(this), "10min",
                      process_foregrounded_count_),
-      base::TimeDelta::FromMinutes(10));
+      base::Minutes(10));
   GetWebMainThreadScheduler()->DefaultTaskRunner()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&RenderThreadImpl::RecordMemoryUsageAfterBackgrounded,
                      base::Unretained(this), "15min",
                      process_foregrounded_count_),
-      base::TimeDelta::FromMinutes(15));
+      base::Minutes(15));
 }
 
 void RenderThreadImpl::OnRendererForegrounded() {

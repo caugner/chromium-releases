@@ -114,11 +114,14 @@ class ScopedTransaction {
   explicit ScopedTransaction(LoginDatabase* db) : db_(db) {
     db_->BeginTransaction();
   }
+
+  ScopedTransaction(const ScopedTransaction&) = delete;
+  ScopedTransaction& operator=(const ScopedTransaction&) = delete;
+
   ~ScopedTransaction() { db_->CommitTransaction(); }
 
  private:
   LoginDatabase* db_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedTransaction);
 };
 
 // Convenience enum for interacting with SQL queries that use all the columns.
@@ -871,10 +874,22 @@ PasswordStoreChangeList LoginDatabase::AddLogin(const PasswordForm& form,
   }
   // [iOS] Passwords created in Credential Provider Extension (CPE) are already
   // encrypted in the keychain and there is no need to do the process again.
+  // However, the password needs to be decryped instead so the actual password
+  // syncs correctly.
   bool has_encrypted_password =
       !form.encrypted_password.empty() && form.password_value.empty();
   PasswordForm form_with_encrypted_password = form;
-  if (!has_encrypted_password) {
+  if (has_encrypted_password) {
+    std::u16string decrypted_password;
+    if (DecryptedString(form.encrypted_password, &decrypted_password) !=
+        ENCRYPTION_RESULT_SUCCESS) {
+      if (error) {
+        *error = AddLoginError::kEncrytionServiceFailure;
+      }
+      return list;
+    }
+    form_with_encrypted_password.password_value = decrypted_password;
+  } else {
     std::string encrypted_password;
     if (EncryptedString(form.password_value, &encrypted_password) !=
         ENCRYPTION_RESULT_SUCCESS) {
@@ -1259,16 +1274,15 @@ LoginDatabase::EncryptionResult LoginDatabase::InitPasswordFormFromStatement(
       static_cast<PasswordForm::GenerationUploadStatus>(
           s.ColumnInt(COLUMN_GENERATION_UPLOAD_STATUS));
   form->date_last_used = base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromMicroseconds(s.ColumnInt64(COLUMN_DATE_LAST_USED)));
+      base::Microseconds(s.ColumnInt64(COLUMN_DATE_LAST_USED)));
   base::span<const uint8_t> moving_blocked_for_blob =
       s.ColumnBlob(COLUMN_MOVING_BLOCKED_FOR);
   if (!moving_blocked_for_blob.empty()) {
     base::Pickle pickle = PickleFromSpan(moving_blocked_for_blob);
     form->moving_blocked_for_list = DeserializeGaiaIdHashVector(pickle);
   }
-  form->date_password_modified =
-      base::Time::FromDeltaSinceWindowsEpoch(base::TimeDelta::FromMicroseconds(
-          s.ColumnInt64(COLUMN_DATE_PASSWORD_MODIFIED)));
+  form->date_password_modified = base::Time::FromDeltaSinceWindowsEpoch(
+      base::Microseconds(s.ColumnInt64(COLUMN_DATE_PASSWORD_MODIFIED)));
   PopulateFormWithPasswordIssues(FormPrimaryKey(*primary_key), form);
 
   return ENCRYPTION_RESULT_SUCCESS;

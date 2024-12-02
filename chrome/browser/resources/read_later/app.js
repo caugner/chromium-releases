@@ -58,6 +58,12 @@ export class ReadLaterAppElement extends PolymerElement {
         type: Boolean,
         value: () => loadTimeData.getBoolean('useRipples'),
       },
+
+      /** @private {boolean} */
+      loadingContent_: {
+        type: Boolean,
+        value: true,
+      },
     };
   }
 
@@ -95,6 +101,7 @@ export class ReadLaterAppElement extends PolymerElement {
     // If added in a visible state update current read later items.
     if (document.visibilityState === 'visible') {
       this.updateReadLaterEntries_();
+      this.apiProxy_.updateCurrentPageActionButtonState();
     }
   }
 
@@ -143,6 +150,7 @@ export class ReadLaterAppElement extends PolymerElement {
   updateItems_(entries) {
     this.unreadItems_ = entries.unreadEntries;
     this.readItems_ = entries.readEntries;
+    this.loadingContent_ = false;
   }
 
   /**

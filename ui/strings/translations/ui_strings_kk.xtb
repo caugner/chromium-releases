@@ -22,7 +22,7 @@
 <translation id="1414271762428216854"><ph name="APP_NAME" />, орнатылған қолданба</translation>
 <translation id="1450753235335490080"><ph name="CONTENT_TYPE" /> бөлісу мүмкін емес</translation>
 <translation id="1487931858675166540"><ph name="FIRST_ITEM_TITLE" /> және <ph name="SECOND_ITEM_TITLE" /> өзара ауыстырылды.</translation>
-<translation id="1498028757988366001">Оны бұған дейін іздегенсіз. Тарихтан "<ph name="QUERY" />" сұрауын жойып тастасаңыз, ол барлық құрылғыңыздағы есептік жазбаңыздан өшіп қалады.</translation>
+<translation id="1498028757988366001">Оны бұған дейін іздегенсіз. Тарихтан "<ph name="QUERY" />" сұрауын жойып тастасаңыз, ол барлық құрылғыңыздағы аккаунтыңыздан өшіп қалады.</translation>
 <translation id="1510238584712386396">Іске қосу құрылғысы</translation>
 <translation id="1591184457164800433">{MINUTES,plural, =1{1 минут және }other{# минут және }}</translation>
 <translation id="1643823602425662293">Хабарландыру</translation>
@@ -30,6 +30,7 @@
 <translation id="1710340000377843106">қазір</translation>
 <translation id="1752946267035950200">{MINUTES,plural, =1{1 минут}other{# минут}}</translation>
 <translation id="1761785978543082658"><ph name="QUANTITY" /> Б</translation>
+<translation id="1770726142253415363"><ph name="ROW_NUMBER" />-жолға, <ph name="COLUMN_NUMBER" />-бағанға жылжытылды.</translation>
 <translation id="1801827354178857021">Кезең</translation>
 <translation id="1803208670097017349">{MONTHS,plural, =1{1 ай}other{# ай}}</translation>
 <translation id="1809410197924942083"><ph name="QUANTITY" /> МБ/с</translation>

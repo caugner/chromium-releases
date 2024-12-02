@@ -26,13 +26,10 @@ namespace media_router {
 namespace {
 
 const base::Time init_time = base::Time::Now();
-const base::Time paint_time = init_time + base::TimeDelta::FromMilliseconds(50);
-const base::Time sink_load_time =
-    init_time + base::TimeDelta::FromMilliseconds(300);
-const base::Time start_casting_time =
-    init_time + base::TimeDelta::FromMilliseconds(2000);
-const base::Time close_dialog_time =
-    init_time + base::TimeDelta::FromMilliseconds(3000);
+const base::Time paint_time = init_time + base::Milliseconds(50);
+const base::Time sink_load_time = init_time + base::Milliseconds(300);
+const base::Time start_casting_time = init_time + base::Milliseconds(2000);
+const base::Time close_dialog_time = init_time + base::Milliseconds(3000);
 
 }  // namespace
 
@@ -65,12 +62,15 @@ TEST_F(CastDialogMetricsTest, OnStartCasting) {
   constexpr int kSinkIndex = 4;
   metrics_.OnSinksLoaded(sink_load_time);
   metrics_.OnStartCasting(start_casting_time, kSinkIndex, TAB_MIRROR,
-                          SinkIconType::CAST);
+                          SinkIconType::CAST, true);
   tester_.ExpectUniqueSample(
       MediaRouterMetrics::kHistogramStartLocalLatency,
       (start_casting_time - sink_load_time).InMilliseconds(), 1);
   tester_.ExpectUniqueSample("MediaRouter.Sink.SelectedType.CastHarmony",
                              SinkIconType::CAST, 1);
+  tester_.ExpectUniqueSample(
+      "MediaRouter.Sink.SelectedType.CastAndDialPresent.CastHarmony",
+      SinkIconType::CAST, 1);
 }
 
 TEST_F(CastDialogMetricsTest, OnStopCasting) {
@@ -136,7 +136,7 @@ TEST_F(CastDialogMetricsTest, RecordDialogActivationLocationAndCastMode) {
   constexpr int kSinkIndex = 4;
   metrics_.OnSinksLoaded(sink_load_time);
   metrics_.OnStartCasting(start_casting_time, kSinkIndex, TAB_MIRROR,
-                          SinkIconType::CAST);
+                          SinkIconType::CAST, false);
   tester_.ExpectUniqueSample(
       "MediaRouter.Ui.Dialog.ActivationLocationAndCastMode",
       DialogActivationLocationAndCastMode::kEphemeralIconAndTabMirror, 1);
@@ -145,7 +145,8 @@ TEST_F(CastDialogMetricsTest, RecordDialogActivationLocationAndCastMode) {
       init_time, MediaRouterDialogOpenOrigin::PAGE, &profile_};
   metrics_opened_from_page.OnSinksLoaded(sink_load_time);
   metrics_opened_from_page.OnStartCasting(start_casting_time, kSinkIndex,
-                                          PRESENTATION, SinkIconType::GENERIC);
+                                          PRESENTATION, SinkIconType::GENERIC,
+                                          false);
   tester_.ExpectBucketCount(
       "MediaRouter.Ui.Dialog.ActivationLocationAndCastMode",
       DialogActivationLocationAndCastMode::kPageAndPresentation, 1);
@@ -155,7 +156,8 @@ TEST_F(CastDialogMetricsTest, RecordDialogActivationLocationAndCastMode) {
       init_time, MediaRouterDialogOpenOrigin::TOOLBAR, &profile_};
   metrics_with_pinned_icon.OnSinksLoaded(sink_load_time);
   metrics_with_pinned_icon.OnStartCasting(start_casting_time, kSinkIndex,
-                                          DESKTOP_MIRROR, SinkIconType::CAST);
+                                          DESKTOP_MIRROR, SinkIconType::CAST,
+                                          false);
   tester_.ExpectBucketCount(
       "MediaRouter.Ui.Dialog.ActivationLocationAndCastMode",
       DialogActivationLocationAndCastMode::kPinnedIconAndDesktopMirror, 1);

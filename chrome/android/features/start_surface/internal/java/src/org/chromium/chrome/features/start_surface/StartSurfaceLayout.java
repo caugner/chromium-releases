@@ -210,7 +210,7 @@ public class StartSurfaceLayout extends Layout {
             // When shown on StartSurface jank is tracked under
             // JankScenario.START_SURFACE_TAB_SWITCHER and it's started/stopped on
             // StartSurfaceMediator.
-            if (!StartSurfaceConfiguration.isStartSurfaceEnabled()) {
+            if (!StartSurfaceConfiguration.isStartSurfaceFlagEnabled()) {
                 mJankTracker.startTrackingScenario(JankScenario.TAB_SWITCHER);
             }
 
@@ -320,7 +320,7 @@ public class StartSurfaceLayout extends Layout {
             // When shown on StartSurface jank is tracked under
             // JankScenario.START_SURFACE_TAB_SWITCHER and it's started/stopped on
             // StartSurfaceMediator.
-            if (!StartSurfaceConfiguration.isStartSurfaceEnabled()) {
+            if (!StartSurfaceConfiguration.isStartSurfaceFlagEnabled()) {
                 mJankTracker.finishTrackingScenario(JankScenario.TAB_SWITCHER);
             }
         }
@@ -336,7 +336,6 @@ public class StartSurfaceLayout extends Layout {
 
     @Override
     public boolean onBackPressed() {
-        if (mTabModelSelector.getCurrentModel().getCount() == 0) return false;
         return mController.onBackPressed();
     }
 
@@ -563,7 +562,7 @@ public class StartSurfaceLayout extends Layout {
     }
 
     private void postHiding() {
-        if (ReturnToChromeExperimentsUtil.isStartSurfaceHomepageEnabled()) {
+        if (ReturnToChromeExperimentsUtil.isStartSurfaceEnabled(getContext())) {
             mStartSurface.onHide();
         } else {
             getGridTabListDelegate().postHiding();

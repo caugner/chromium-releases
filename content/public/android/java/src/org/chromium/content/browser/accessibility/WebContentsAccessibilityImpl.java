@@ -97,7 +97,7 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
 
     // Constants defined in the N SDK. (API Level 24+25, Android 7)
     public static final int ACTION_SET_PROGRESS = 0x0102003d;
-    private static final String ACTION_ARGUMENT_PROGRESS_VALUE =
+    public static final String ACTION_ARGUMENT_PROGRESS_VALUE =
             "android.view.accessibility.action.ARGUMENT_PROGRESS_VALUE";
 
     // Constants defined in the O SDK. (API Level 26+27, Android 8)
@@ -144,10 +144,15 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
     private static final int CONTENT_INVALID_THROTTLE_DELAY = 4500;
 
     // These are constant names of UMA histograms, and values for custom count histogram.
-    private static final String PERCENTAGE_DROPPED_HISTOGRAM =
+    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    public static final String PERCENTAGE_DROPPED_HISTOGRAM =
             "Accessibility.Android.OnDemand.PercentageDropped";
-    private static final String EVENTS_DROPPED_HISTOGRAM =
+    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    public static final String EVENTS_DROPPED_HISTOGRAM =
             "Accessibility.Android.OnDemand.EventsDropped";
+    @VisibleForTesting(otherwise = VisibleForTesting.PRIVATE)
+    public static final String ONE_HUNDRED_PERCENT_HISTOGRAM =
+            "Accessibility.Android.OnDemand.OneHundredPercentEventsDropped";
     private static final int EVENTS_DROPPED_HISTOGRAM_MIN_BUCKET = 1;
     private static final int EVENTS_DROPPED_HISTOGRAM_MAX_BUCKET = 10000;
     private static final int EVENTS_DROPPED_HISTOGRAM_BUCKET_COUNT = 100;
@@ -433,6 +438,11 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
         recordUMAHistograms();
     }
 
+    @VisibleForTesting
+    public void setEventTypeMaskEmptyForTesting() {
+        BrowserAccessibilityState.setEventTypeMaskEmptyForTesting();
+    }
+
     @CalledByNative
     public void handleEndOfTestSignal() {
         // We have received a signal that we have reached the end of a unit test. If we have a
@@ -462,14 +472,24 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
         // If we did not enqueue any events, we can ignore the data as a trivial case.
         if (mTotalEnqueuedEvents > 0) {
             // Log the percentage dropped (dispatching 0 events should be 100% dropped).
-            RecordHistogram.recordPercentageHistogram(PERCENTAGE_DROPPED_HISTOGRAM,
-                    100 - (int) (mTotalDispatchedEvents * 1.0 / mTotalEnqueuedEvents * 100.0));
+            int percentSent = (int) (mTotalDispatchedEvents * 1.0 / mTotalEnqueuedEvents * 100.0);
+            RecordHistogram.recordPercentageHistogram(
+                    PERCENTAGE_DROPPED_HISTOGRAM, 100 - percentSent);
 
             // Log the total number of dropped events.
             RecordHistogram.recordCustomCountHistogram(EVENTS_DROPPED_HISTOGRAM,
                     mTotalEnqueuedEvents - mTotalDispatchedEvents,
                     EVENTS_DROPPED_HISTOGRAM_MIN_BUCKET, EVENTS_DROPPED_HISTOGRAM_MAX_BUCKET,
                     EVENTS_DROPPED_HISTOGRAM_BUCKET_COUNT);
+
+            // If 100% of events were dropped, also track the number of dropped events in a
+            // separate bucket.
+            if (percentSent == 0) {
+                RecordHistogram.recordCustomCountHistogram(ONE_HUNDRED_PERCENT_HISTOGRAM,
+                        mTotalEnqueuedEvents - mTotalDispatchedEvents,
+                        EVENTS_DROPPED_HISTOGRAM_MIN_BUCKET, EVENTS_DROPPED_HISTOGRAM_MAX_BUCKET,
+                        EVENTS_DROPPED_HISTOGRAM_BUCKET_COUNT);
+            }
         }
 
         // Reset counters.
@@ -847,8 +867,10 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
                     return false;
                 }
                 if (arguments == null) return false;
-                String newText = arguments.getString(ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE);
-                if (newText == null) return false;
+                CharSequence bundleText =
+                        arguments.getCharSequence(ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE);
+                if (bundleText == null) return false;
+                String newText = bundleText.toString();
                 WebContentsAccessibilityImplJni.get().setTextFieldValue(
                         mNativeObj, WebContentsAccessibilityImpl.this, virtualViewId, newText);
                 // Match Android framework and set the cursor to the end of the text field.
@@ -954,10 +976,10 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
                         action == ACTION_PAGE_RIGHT);
             case ACTION_SET_PROGRESS:
                 if (arguments == null) return false;
-                float value = arguments.getFloat(ACTION_ARGUMENT_PROGRESS_VALUE, -1);
-                if (value == -1) return false;
-                return WebContentsAccessibilityImplJni.get().setRangeValue(
-                        mNativeObj, WebContentsAccessibilityImpl.this, virtualViewId, value);
+                if (!arguments.containsKey(ACTION_ARGUMENT_PROGRESS_VALUE)) return false;
+                return WebContentsAccessibilityImplJni.get().setRangeValue(mNativeObj,
+                        WebContentsAccessibilityImpl.this, virtualViewId,
+                        arguments.getFloat(ACTION_ARGUMENT_PROGRESS_VALUE));
             case ACTION_IME_ENTER:
                 if (mDelegate.getWebContents() != null) {
                     if (ImeAdapterImpl.fromWebContents(mDelegate.getWebContents()) != null) {
@@ -1376,15 +1398,6 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProvider
             return null;
         }
         return event;
-    }
-
-    private Bundle getOrCreateBundleForAccessibilityEvent(AccessibilityEvent event) {
-        Bundle bundle = (Bundle) event.getParcelableData();
-        if (bundle == null) {
-            bundle = new Bundle();
-            event.setParcelableData(bundle);
-        }
-        return bundle;
     }
 
     @Override

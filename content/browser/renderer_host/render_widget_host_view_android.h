@@ -296,11 +296,11 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
                                 int start_adjust,
                                 int end_adjust);
 
-  // TODO(ericrk): Ideally we'd reemove |root_scroll_offset| from this function
+  // TODO(ericrk): Ideally we'd remove |root_scroll_offset| from this function
   // once we have a reliable way to get it through RenderFrameMetadata.
   void FrameTokenChangedForSynchronousCompositor(
       uint32_t frame_token,
-      const gfx::ScrollOffset& root_scroll_offset);
+      const gfx::Vector2dF& root_scroll_offset);
 
   void SetSynchronousCompositorClient(SynchronousCompositorClient* client);
 
@@ -390,6 +390,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void SetNeedsBeginFrameForFlingProgress();
 
  protected:
+  ~RenderWidgetHostViewAndroid() override;
+
   // RenderWidgetHostViewBase:
   void UpdateBackgroundColor() override;
   bool HasFallbackSurface() const override;
@@ -402,8 +404,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   friend class RenderWidgetHostViewAndroidRotationTest;
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            GestureManagerListensToChildFrames);
-
-  ~RenderWidgetHostViewAndroid() override;
 
   bool ShouldReportAllRootScrolls();
 
@@ -579,6 +579,12 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   // another before the first has displayed. This can occur on pages that have
   // long layout and rendering time.
   std::deque<std::pair<base::TimeTicks, viz::LocalSurfaceId>> rotation_metrics_;
+  // Tracks the first surface that was allocated for rotation while hidden.
+  // Along with the total time the Renderer spent performing updates for these
+  // incremental surfaces.
+  viz::LocalSurfaceId first_hidden_local_surface_id_;
+  base::TimeDelta hidden_rotation_time_;
+
   // If true, then content was displayed before the completion of the initial
   // navigation. After any content has been displayed, we need to allocate a new
   // surface for all subsequent navigations.

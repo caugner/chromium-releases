@@ -1,4 +1,11 @@
 {
+  "$build/code_coverage": {
+    "coverage_test_types": [
+      "unit",
+      "overall"
+    ],
+    "use_java_coverage": true
+  },
   "$build/goma": {
     "enable_ats": true,
     "jobs": 300,
@@ -10,9 +17,6 @@
     "devshell": true,
     "git_auth": true
   },
-  "$recipe_engine/isolated": {
-    "server": "https://isolateserver.appspot.com"
-  },
   "$recipe_engine/resultdb/test_presentation": {
     "column_keys": [],
     "grouping_keys": [
@@ -20,5 +24,6 @@
       "v.test_suite"
     ]
   },
+  "builder_group": "tryserver.chromium.android",
   "recipe": "chromium_trybot"
 }

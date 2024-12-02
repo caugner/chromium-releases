@@ -44,6 +44,7 @@ const char kMockMerchantARawOfferIdOne[] = "offerId1";
 const char kMockMerchantARawOfferIdTwo[] = "offerId2";
 const char kConfigurableEndpoint[] = "https://testing_endpoint.com/discounts";
 const char kLocales[] = "en-US";
+const char kVariationHeaders[] = "variationsHeaders";
 
 const char kEndpointResponse[] =
     "{ "
@@ -110,7 +111,7 @@ class CartDiscountFetcherTest {
       const std::string fetch_for_locale) {
     return CartDiscountFetcher::CreateEndpointFetcher(
         std::move(pending_factory), std::move(proto_pairs), is_oauth_fetch,
-        fetch_for_locale);
+        fetch_for_locale, kVariationHeaders);
   }
 
   static void OnDiscountsAvailable(
@@ -236,11 +237,10 @@ TEST(CartDiscountFetcherTest, TestRawMaerchantOffersIsOptional) {
       std::move(fake_responses));
 
   EXPECT_EQ(cart_discount_map.size(), 1u);
-  EXPECT_EQ(
-      cart_discount_map.at(kMockMerchantCartURLA).rule_discount_list.size(),
-      1u);
+  EXPECT_EQ(cart_discount_map.at(kMockMerchantCartURLA).rule_discounts.size(),
+            1u);
   EXPECT_TRUE(cart_discount_map.at(kMockMerchantCartURLA)
-                  .rule_discount_list[0]
+                  .rule_discounts[0]
                   .raw_merchant_offer_id()
                   .empty());
 }
@@ -285,11 +285,10 @@ TEST(CartDiscountFetcherTest, TestExternalTesterDiscount) {
       std::move(fake_responses));
 
   EXPECT_EQ(cart_discount_map.size(), 1u);
-  EXPECT_EQ(
-      cart_discount_map.at(kMockMerchantCartURLA).rule_discount_list.size(),
-      1u);
+  EXPECT_EQ(cart_discount_map.at(kMockMerchantCartURLA).rule_discounts.size(),
+            1u);
   EXPECT_TRUE(cart_discount_map.at(kMockMerchantCartURLA)
-                  .rule_discount_list[0]
+                  .rule_discounts[0]
                   .raw_merchant_offer_id()
                   .empty());
 }
@@ -324,9 +323,8 @@ TEST(CartDiscountFetcherTest, TestNoRuleDiscounts) {
       std::move(fake_responses));
 
   EXPECT_EQ(cart_discount_map.size(), 1u);
-  EXPECT_EQ(
-      cart_discount_map.at(kMockMerchantCartURLA).rule_discount_list.size(),
-      0u);
+  EXPECT_EQ(cart_discount_map.at(kMockMerchantCartURLA).rule_discounts.size(),
+            0u);
 }
 
 TEST(CartDiscountFetcherTest, TestOverallDiscountText) {
