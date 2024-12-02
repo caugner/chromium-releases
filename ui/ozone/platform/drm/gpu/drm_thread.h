@@ -115,9 +115,6 @@ class DrmThread : public base::Thread,
   void AddDrmDeviceReceiver(
       mojo::PendingReceiver<ozone::mojom::DrmDevice> receiver);
 
-  void SetColorSpace(gfx::AcceleratedWidget widget,
-                     const gfx::ColorSpace& color_space);
-
   // Verifies if the display controller can successfully scanout the given set
   // of OverlaySurfaceCandidates and return the status associated with each
   // candidate.
@@ -206,7 +203,7 @@ class DrmThread : public base::Thread,
   // ozone::mojom::DeviceCursor
   void SetCursor(gfx::AcceleratedWidget widget,
                  const std::vector<SkBitmap>& bitmaps,
-                 const absl::optional<gfx::Point>& location,
+                 const std::optional<gfx::Point>& location,
                  base::TimeDelta frame_delay) override;
   void MoveCursor(gfx::AcceleratedWidget widget,
                   const gfx::Point& location) override;

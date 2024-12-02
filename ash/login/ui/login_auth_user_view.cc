@@ -294,7 +294,7 @@ class LoginAuthUserView::ChallengeResponseView : public views::View {
                                        /*send_native_event=*/true);
     }
 
-    Layout();
+    DeprecatedLayoutImmediately();
   }
 
   // views::View:
@@ -346,7 +346,7 @@ class LoginAuthUserView::ChallengeResponseView : public views::View {
   base::OneShotTimer reset_state_timer_;
 };
 
-BEGIN_METADATA(LoginAuthUserView, ChallengeResponseView, views::View)
+BEGIN_METADATA(LoginAuthUserView, ChallengeResponseView)
 END_METADATA
 
 LoginAuthUserView::AuthMethodsMetadata::AuthMethodsMetadata() = default;
@@ -490,7 +490,7 @@ LoginAuthUserView::LoginAuthUserView(const LoginUserInfo& user,
   DCHECK(callbacks.on_tap);
   DCHECK(callbacks.on_remove);
   DCHECK(callbacks.on_auth_factor_is_hiding_password_changed);
-  DCHECK_NE(user.basic_user_info.type, user_manager::USER_TYPE_PUBLIC_ACCOUNT);
+  DCHECK_NE(user.basic_user_info.type, user_manager::UserType::kPublicAccount);
   if (Shell::Get()->login_screen_controller()->IsAuthenticating()) {
     // TODO(b/276246832): We should avoid re-layouting during Authentication.
     LOG(WARNING)
@@ -885,9 +885,8 @@ void LoginAuthUserView::ApplyAnimationPostLayout(bool animate) {
       pin_bounds.set_y(previous_state_->pin_start_in_screen.y() -
                        pin_end_in_screen.y());
 
-      // Since PIN is disabled, the previous Layout() hid the PIN keyboard.
-      // We need to redisplay it where it used to be.
-      // pin_view_->SetVisible(true);
+      // Since PIN is disabled, the previous layout hid the PIN keyboard. We
+      // need to redisplay it where it used to be.
       pin_view_->SetBoundsRect(pin_bounds);
     }
 
@@ -1189,6 +1188,14 @@ void LoginAuthUserView::OnOnlineSignInMessageTap() {
     return;
   }
 
+  if (Shell::Get()->login_screen_controller()->IsAuthenticating()) {
+    // TODO(b/330738798): We should prevent starting a
+    // new authentication process if one is already running.
+    LOG(WARNING) << "LoginAuthUserView::OnOnlineSignInMessageTap called during "
+                    "Authentication.";
+    return;
+  }
+
   user_manager::KnownUser known_user(Shell::Get()->local_state());
   int reauth_reason =
       known_user.FindReauthReason(current_user().basic_user_info.account_id)
@@ -1312,7 +1319,7 @@ void LoginAuthUserView::OnSwitchButtonClicked() {
                           : InputFieldMode::PIN_WITH_TOGGLE;
   SetAuthMethods(auth_methods_, auth_metadata_);
   // Layout and animate.
-  Layout();
+  DeprecatedLayoutImmediately();
   ApplyAnimationPostLayout(/*animate*/ true);
 }
 
