@@ -4,8 +4,10 @@
 
 #include "content/browser/gpu/gpu_process_host.h"
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
+#include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
 #include "base/process_util.h"
@@ -18,6 +20,7 @@
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/result_codes.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
 #include "ipc/ipc_channel_handle.h"
@@ -44,7 +47,8 @@ enum GPUProcessLifetimeEvent {
 };
 
 // A global map from GPU process host ID to GpuProcessHost.
-static IDMap<GpuProcessHost> g_hosts_by_id;
+static base::LazyInstance<IDMap<GpuProcessHost> > g_hosts_by_id(
+    base::LINKER_INITIALIZED);
 
 // Number of times the gpu process has crashed in the current browser session.
 static int g_gpu_crash_count = 0;
@@ -176,8 +180,8 @@ GpuProcessHost* GpuProcessHost::GetForRenderer(
   // The current policy is to ignore the renderer ID and use a single GPU
   // process for all renderers. Later this will be extended to allow the
   // use of multiple GPU processes.
-  if (!g_hosts_by_id.IsEmpty()) {
-    IDMap<GpuProcessHost>::iterator it(&g_hosts_by_id);
+  if (!g_hosts_by_id.Pointer()->IsEmpty()) {
+    IDMap<GpuProcessHost>::iterator it(g_hosts_by_id.Pointer());
     return it.GetCurrentValue();
   }
 
@@ -216,7 +220,7 @@ GpuProcessHost* GpuProcessHost::FromID(int host_id) {
   if (host_id == 0)
     return NULL;
 
-  return g_hosts_by_id.Lookup(host_id);
+  return g_hosts_by_id.Pointer()->Lookup(host_id);
 }
 
 GpuProcessHost::GpuProcessHost(int host_id)
@@ -230,9 +234,9 @@ GpuProcessHost::GpuProcessHost(int host_id)
 
   // If the 'single GPU process' policy ever changes, we still want to maintain
   // it for 'gpu thread' mode and only create one instance of host and thread.
-  DCHECK(!in_process_ || g_hosts_by_id.IsEmpty());
+  DCHECK(!in_process_ || g_hosts_by_id.Pointer()->IsEmpty());
 
-  g_hosts_by_id.AddWithID(this, host_id_);
+  g_hosts_by_id.Pointer()->AddWithID(this, host_id_);
 
   // Post a task to create the corresponding GpuProcessHostUIShim.  The
   // GpuProcessHostUIShim will be destroyed if either the browser exits,
@@ -258,7 +262,7 @@ GpuProcessHost::~GpuProcessHost() {
     queued_messages_.pop();
   }
 
-  g_hosts_by_id.Remove(host_id_);
+  g_hosts_by_id.Pointer()->Remove(host_id_);
 
   BrowserThread::PostTask(BrowserThread::UI,
                           FROM_HERE,
@@ -483,10 +487,16 @@ void GpuProcessHost::OnChildDied() {
   UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessLifetimeEvents",
                             DIED_FIRST_TIME + g_gpu_crash_count,
                             GPU_PROCESS_LIFETIME_EVENT_MAX);
-  base::TerminationStatus status = GetChildTerminationStatus(NULL);
+
+  int exit_code;
+  base::TerminationStatus status = GetChildTerminationStatus(&exit_code);
   UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessTerminationStatus",
                             status,
                             base::TERMINATION_STATUS_MAX_ENUM);
+  UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessExitCode",
+                            exit_code,
+                            content::RESULT_CODE_LAST_CODE);
+
   BrowserChildProcessHost::OnChildDied();
 }
 
@@ -511,7 +521,14 @@ bool GpuProcessHost::LaunchGpuProcess() {
   CommandLine::StringType gpu_launcher =
       browser_command_line.GetSwitchValueNative(switches::kGpuLauncher);
 
-  FilePath exe_path = ChildProcessHost::GetChildPath(gpu_launcher.empty());
+#if defined(OS_LINUX)
+  int child_flags = gpu_launcher.empty() ? ChildProcessHost::CHILD_ALLOW_SELF :
+                                           ChildProcessHost::CHILD_NORMAL;
+#else
+  int child_flags = ChildProcessHost::CHILD_NORMAL;
+#endif
+
+  FilePath exe_path = ChildProcessHost::GetChildPath(child_flags);
   if (exe_path.empty())
     return false;
 
@@ -521,7 +538,8 @@ bool GpuProcessHost::LaunchGpuProcess() {
 
   // Propagate relevant command line switches.
   static const char* const kSwitchNames[] = {
-    switches::kUseGL,
+    switches::kDisableBreakpad,
+    switches::kDisableGLMultisampling,
     switches::kDisableGpuSandbox,
     switches::kDisableGpuVsync,
     switches::kDisableGpuWatchdog,
@@ -531,13 +549,20 @@ bool GpuProcessHost::LaunchGpuProcess() {
 #if defined(OS_MACOSX)
     switches::kEnableSandboxLogging,
 #endif
+    switches::kGpuNoContextLost,
     switches::kGpuStartupDialog,
     switches::kLoggingLevel,
     switches::kNoSandbox,
-    switches::kDisableGLMultisampling,
+    switches::kUseGL,
   };
   cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
                              arraysize(kSwitchNames));
+
+  // If --ignore-gpu-blacklist is passed in, don't send in crash reports
+  // because GPU is expected to be unreliable.
+  if (browser_command_line.HasSwitch(switches::kIgnoreGpuBlacklist) &&
+      !cmd_line->HasSwitch(switches::kDisableBreakpad))
+    cmd_line->AppendSwitch(switches::kDisableBreakpad);
 
   GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
   if (flags.flags() & GpuFeatureFlags::kGpuFeatureMultisampling)

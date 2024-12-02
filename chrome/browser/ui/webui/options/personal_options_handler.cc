@@ -8,11 +8,10 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
-#include "base/stringprintf.h"
-#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/value_conversions.h"
 #include "base/values.h"
@@ -31,6 +30,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
@@ -61,7 +61,7 @@ PersonalOptionsHandler::PersonalOptionsHandler() {
 
 PersonalOptionsHandler::~PersonalOptionsHandler() {
   ProfileSyncService* sync_service =
-      web_ui_->GetProfile()->GetProfileSyncService();
+      Profile::FromWebUI(web_ui_)->GetProfileSyncService();
   if (sync_service)
     sync_service->RemoveObserver(this);
 }
@@ -180,6 +180,8 @@ void PersonalOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_THEMES));
   localized_strings->SetString("syncapps",
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_APPS));
+  localized_strings->SetString("syncsearchengines",
+      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SEARCH_ENGINES));
   localized_strings->SetString("syncsessions",
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SESSIONS));
 
@@ -190,6 +192,8 @@ void PersonalOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_ENABLE_SCREENLOCKER_CHECKBOX));
   localized_strings->SetString("changePicture",
       l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE));
+  localized_strings->SetString("userEmail",
+      chromeos::UserManager::Get()->logged_in_user().email());
 #endif
 }
 
@@ -202,11 +206,6 @@ void PersonalOptionsHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(
       "themesSetGTK",
       NewCallback(this, &PersonalOptionsHandler::ThemesSetGTK));
-#endif
-#if defined(OS_CHROMEOS)
-  web_ui_->RegisterMessageCallback(
-      "loadAccountPicture",
-      NewCallback(this, &PersonalOptionsHandler::LoadAccountPicture));
 #endif
   web_ui_->RegisterMessageCallback(
       "createProfile",
@@ -223,7 +222,7 @@ void PersonalOptionsHandler::Observe(int type,
     SendProfilesInfo();
 #if defined(OS_CHROMEOS)
   } else if (type == chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED) {
-    LoadAccountPicture(NULL);
+    UpdateAccountPicture();
 #endif
   } else {
     OptionsPageUIHandler::Observe(type, source, details);
@@ -233,7 +232,8 @@ void PersonalOptionsHandler::Observe(int type,
 void PersonalOptionsHandler::OnStateChanged() {
   string16 status_label;
   string16 link_label;
-  ProfileSyncService* service = web_ui_->GetProfile()->GetProfileSyncService();
+  ProfileSyncService* service =
+      Profile::FromWebUI(web_ui_)->GetProfileSyncService();
   DCHECK(service);
   bool managed = service->IsManaged();
   bool sync_setup_completed = service->HasSyncSetupCompleted();
@@ -312,15 +312,12 @@ void PersonalOptionsHandler::OnStateChanged() {
   web_ui_->CallJavascriptFunction("PersonalOptions.setSyncStatusErrorVisible",
                                   *visible);
 
-#if defined(ENABLE_AUTO_LOGIN_AFTER_M14)
-  // Pre-login is being taken out of M14, but will be put back in right after
-  // the fork.
-  visible.reset(Value::CreateBooleanValue(service->AreCredentialsAvailable()));
-#else
-  visible.reset(Value::CreateBooleanValue(false));
-#endif
-  web_ui_->CallJavascriptFunction("PersonalOptions.setAutoLoginVisible",
-                                  *visible);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAutologin)) {
+    visible.reset(Value::CreateBooleanValue(
+        service->AreCredentialsAvailable()));
+    web_ui_->CallJavascriptFunction("PersonalOptions.setAutoLoginVisible",
+                                    *visible);
+  }
 
   // Set profile creation text and button if multi-profiles switch is on.
   visible.reset(Value::CreateBooleanValue(multiprofile_));
@@ -330,21 +327,12 @@ void PersonalOptionsHandler::OnStateChanged() {
     SendProfilesInfo();
 }
 
-void PersonalOptionsHandler::OnLoginSuccess() {
-  OnStateChanged();
-}
-
-void PersonalOptionsHandler::OnLoginFailure(
-    const GoogleServiceAuthError& error) {
-  OnStateChanged();
-}
-
 void PersonalOptionsHandler::ObserveThemeChanged() {
-  Profile* profile = web_ui_->GetProfile();
+  Profile* profile = Profile::FromWebUI(web_ui_);
 #if defined(TOOLKIT_GTK)
   GtkThemeService* theme_service = GtkThemeService::GetFrom(profile);
   bool is_gtk_theme = theme_service->UsingNativeTheme();
-  FundamentalValue gtk_enabled(!is_gtk_theme);
+  base::FundamentalValue gtk_enabled(!is_gtk_theme);
   web_ui_->CallJavascriptFunction(
       "options.PersonalOptions.setGtkThemeButtonEnabled", gtk_enabled);
 #else
@@ -353,21 +341,23 @@ void PersonalOptionsHandler::ObserveThemeChanged() {
 #endif
 
   bool is_classic_theme = !is_gtk_theme && theme_service->UsingDefaultTheme();
-  FundamentalValue enabled(!is_classic_theme);
+  base::FundamentalValue enabled(!is_classic_theme);
   web_ui_->CallJavascriptFunction(
       "options.PersonalOptions.setThemesResetButtonEnabled", enabled);
 }
 
 void PersonalOptionsHandler::Initialize() {
+  Profile* profile = Profile::FromWebUI(web_ui_);
+
   // Listen for theme installation.
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+                 Source<ThemeService>(ThemeServiceFactory::GetForProfile(
+                     profile)));
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
                  NotificationService::AllSources());
   ObserveThemeChanged();
 
-  ProfileSyncService* sync_service =
-      web_ui_->GetProfile()->GetProfileSyncService();
+  ProfileSyncService* sync_service = profile->GetProfileSyncService();
   if (sync_service) {
     sync_service->AddObserver(this);
     OnStateChanged();
@@ -377,37 +367,27 @@ void PersonalOptionsHandler::Initialize() {
 }
 
 void PersonalOptionsHandler::ThemesReset(const ListValue* args) {
-  UserMetricsRecordAction(UserMetricsAction("Options_ThemesReset"));
-  ThemeServiceFactory::GetForProfile(web_ui_->GetProfile())->UseDefaultTheme();
+  UserMetrics::RecordAction(UserMetricsAction("Options_ThemesReset"));
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  ThemeServiceFactory::GetForProfile(profile)->UseDefaultTheme();
 }
 
 #if defined(TOOLKIT_GTK)
 void PersonalOptionsHandler::ThemesSetGTK(const ListValue* args) {
-  UserMetricsRecordAction(UserMetricsAction("Options_GtkThemeSet"));
-  ThemeServiceFactory::GetForProfile(web_ui_->GetProfile())->SetNativeTheme();
+  UserMetrics::RecordAction(UserMetricsAction("Options_GtkThemeSet"));
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  ThemeServiceFactory::GetForProfile(profile)->SetNativeTheme();
 }
 #endif
 
 #if defined(OS_CHROMEOS)
-void PersonalOptionsHandler::LoadAccountPicture(const ListValue* args) {
-  const chromeos::UserManager::User& user =
-      chromeos::UserManager::Get()->logged_in_user();
-  std::string email = user.email();
+void PersonalOptionsHandler::UpdateAccountPicture() {
+  std::string email = chromeos::UserManager::Get()->logged_in_user().email();
   if (!email.empty()) {
-    // int64 is either long or long long, but we need a certain format
-    // specifier.
-    long long timestamp = base::TimeTicks::Now().ToInternalValue();
-    StringValue image_url(
-        StringPrintf("%s%s?id=%lld",
-                     chrome::kChromeUIUserImageURL,
-                     email.c_str(),
-                     timestamp));
-    web_ui_->CallJavascriptFunction("PersonalOptions.setAccountPicture",
-                                    image_url);
-
-    StringValue email_value(email);
+    web_ui_->CallJavascriptFunction("PersonalOptions.updateAccountPicture");
+    base::StringValue email_value(email);
     web_ui_->CallJavascriptFunction("AccountsOptions.updateAccountPicture",
-                                    email_value, image_url);
+                                    email_value);
   }
 }
 #endif
@@ -416,7 +396,8 @@ void PersonalOptionsHandler::SendProfilesInfo() {
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   ListValue profile_info_list;
-  FilePath current_profile_path = web_ui_->GetProfile()->GetPath();
+  FilePath current_profile_path =
+      web_ui_->tab_contents()->browser_context()->GetPath();
   for (size_t i = 0, e = cache.GetNumberOfProfiles(); i < e; ++i) {
     DictionaryValue *profile_value = new DictionaryValue();
     size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
@@ -439,4 +420,3 @@ void PersonalOptionsHandler::SendProfilesInfo() {
 void PersonalOptionsHandler::CreateProfile(const ListValue* args) {
   ProfileManager::CreateMultiProfileAsync();
 }
-

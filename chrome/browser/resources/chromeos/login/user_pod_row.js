@@ -42,9 +42,12 @@ cr.define('login', function() {
       if (!this.hasAttribute('tabindex'))
         this.tabIndex = 0;
 
-      this.addEventListener('mousedown', this.handleMouseDown_.bind(this));
+      this.addEventListener('mousedown',
+          this.handleMouseDown_.bind(this));
 
       this.enterButtonElement.addEventListener('click',
+          this.activate.bind(this));
+      this.signinButtonElement.addEventListener('click',
           this.activate.bind(this));
       this.removeUserButtonElement.addEventListener('mouseout',
           this.handleRemoveButtonMouseOut_.bind(this));
@@ -93,6 +96,14 @@ cr.define('login', function() {
     },
 
     /**
+     * Gets user signin button.
+     * @type {!HTMLInputElement}
+     */
+    get signinButtonElement() {
+      return this.enterButtonElement.nextElementSibling;
+    },
+
+    /**
      * Gets remove user button.
      * @type {!HTMLInputElement}
      */
@@ -119,10 +130,14 @@ cr.define('login', function() {
         this.imageElement.title = userDict.name;
         this.enterButtonElement.hidden = false;
         this.passwordElement.hidden = true;
+        this.signinButtonElement.hidden = true;
       } else {
+        var needSignin = this.needGaiaSignin;
         this.imageElement.title = userDict.emailAddress;
-        this.passwordElement.hidden = false;
         this.enterButtonElement.hidden = true;
+        this.passwordElement.hidden = needSignin;
+        this.passwordElement.setAttribute('aria-label', userDict.emailAddress);
+        this.signinButtonElement.hidden = !needSignin;
       }
     },
 
@@ -134,11 +149,24 @@ cr.define('login', function() {
     },
 
     /**
+     * Whether Gaia signin is required for a non-guest user.
+     */
+    get needGaiaSignin() {
+      // Gaia signin is performed if we are using gaia extenstion for signin,
+      // the user has an invalid oauth token and device is online.
+      return localStrings.getString('authType') == 'ext' &&
+          this.user.oauthTokenStatus != OAUTH_TOKEN_STATUS_VALID &&
+          window.navigator.onLine;
+    },
+
+    /**
      * Gets main input element.
      */
     get mainInput() {
       if (this.isGuest) {
         return this.enterButtonElement;
+      } else if (!this.signinButtonElement.hidden) {
+        return this.signinButtonElement;
       } else {
         return this.passwordElement;
       }
@@ -169,6 +197,11 @@ cr.define('login', function() {
      * Focuses on input element.
      */
     focusInput: function() {
+      if (!this.isGuest) {
+        var needSignin = this.needGaiaSignin;
+        this.signinButtonElement.hidden = !needSignin;
+        this.passwordElement.hidden = needSignin;
+      }
       this.mainInput.focus();
     },
 
@@ -179,12 +212,22 @@ cr.define('login', function() {
     activate: function() {
       if (this.isGuest) {
         chrome.send('launchIncognito');
-      } else {
-        if (!this.passwordElement.value)
+        this.parentNode.rowEnabled = false;
+      } else if (!this.signinButtonElement.hidden) {
+        // Switch to Gaia signin.
+        if (!this.needGaiaSignin) {
+          // Network may go offline in time period between the pod is focused
+          // and the button is pressed, in which case fallback to offline login.
+          this.focusInput();
           return false;
-
+        }
+        this.parentNode.showSigninUI(this.user.emailAddress);
+      } else if (!this.passwordElement.value) {
+        return false;
+      } else {
         chrome.send('authenticateUser',
             [this.user.emailAddress, this.passwordElement.value]);
+        this.parentNode.rowEnabled = false;
       }
 
       return true;
@@ -195,6 +238,7 @@ cr.define('login', function() {
      * @param {boolean} takeFocus True to take focus.
      */
     reset: function(takeFocus) {
+      this.parentNode.rowEnabled = true;
       this.passwordElement.value = '';
 
       if (takeFocus)
@@ -222,9 +266,17 @@ cr.define('login', function() {
      * Handles mousedown event.
      */
     handleMouseDown_: function(e) {
+      if (!this.parentNode.rowEnabled)
+        return;
+      var handled = false;
       if (e.target == this.removeUserButtonElement) {
         this.handleRemoevButtonMouseDown_(e);
-
+        handled = true;
+      } else if (!this.signinButtonElement.hidden) {
+        this.parentNode.showSigninUI(this.user.emailAddress);
+        handled = true;
+      }
+      if (handled) {
         // Prevent default so that we don't trigger 'focus' event.
         e.preventDefault();
       }
@@ -245,20 +297,20 @@ cr.define('login', function() {
     // Focused pod.
     focusedPod_ : undefined,
 
-    // Acitvated pod, i.e. the pod of current login attempt.
+    // Activated pod, i.e. the pod of current login attempt.
     activatedPod_: undefined,
 
     /** @inheritDoc */
     decorate: function() {
       this.style.left = 0;
 
-      this.ownerDocument.addEventListener('focus',
-          this.handleFocus_.bind(this), true);
-
-      this.ownerDocument.addEventListener('click',
-          this.handleClick_.bind(this));
-      this.ownerDocument.addEventListener('keydown',
-          this.handleKeyDown.bind(this));
+      // Event listeners that are installed for the time period during which
+      // the element is visible.
+      this.listeners_ = {
+        focus: [this.handleFocus_.bind(this), true],
+        click: [this.handleClick_.bind(this), false],
+        keydown: [this.handleKeyDown.bind(this), false]
+      };
     },
 
     /**
@@ -266,6 +318,15 @@ cr.define('login', function() {
      */
     get pods() {
       return this.children;
+    },
+
+    // True when clicking on pods is enabled.
+    rowEnabled_ : true,
+    get rowEnabled() {
+      return this.rowEnabled_;
+    },
+    set rowEnabled(enabled) {
+      this.rowEnabled_ = enabled;
     },
 
     /**
@@ -371,36 +432,28 @@ cr.define('login', function() {
         return;
 
       if (pod) {
-        if (pod.isGuest ||
-            localStrings.getString('authType') != 'ext' ||
-            pod.user.oauthTokenStatus == OAUTH_TOKEN_STATUS_VALID) {
-          // Focus current pod if it is guest pod, or
-          // we are not using gaia ext for signin or
-          // the user has a valid oauth token.
-          for (var i = 0; i < this.pods.length; ++i) {
-            this.pods[i].activeRemoveButton = false;
-            if (this.pods[i] == pod) {
-              pod.classList.remove("faded");
-              pod.classList.add("focused");
-            } else {
-              this.pods[i].classList.remove('focused');
-              this.pods[i].classList.add('faded');
-            }
+        for (var i = 0; i < this.pods.length; ++i) {
+          this.pods[i].activeRemoveButton = false;
+          if (this.pods[i] == pod) {
+            pod.classList.remove("faded");
+            pod.classList.add("focused");
+            pod.tabIndex = -1;  // Make it not keyboard focusable.
+          } else {
+            this.pods[i].classList.remove('focused');
+            this.pods[i].classList.add('faded');
+            this.pods[i].tabIndex = 0;
           }
-          pod.focusInput();
-
-          this.focusedPod_ = pod;
-          this.scrollPodIntoView(pod);
-        } else {
-          // Otherwise, switch to Gaia signin.
-          Oobe.showSigninUI(pod.user.emailAddress);
-          this.focusPod();  // Clears current focus.
         }
+        pod.focusInput();
+
+        this.focusedPod_ = pod;
+        this.scrollPodIntoView(pod);
       } else {
         for (var i = 0; i < this.pods.length; ++i) {
           this.pods[i].classList.remove('focused');
           this.pods[i].classList.remove('faded');
           this.pods[i].activeRemoveButton = false;
+          this.pods[i].tabIndex = 0;
         }
         this.focusedPod_ = undefined;
       }
@@ -452,6 +505,7 @@ cr.define('login', function() {
      * @param {boolean} takeFocus True to take focus.
      */
     reset: function(takeFocus) {
+      this.rowEnabled = true;
       for (var i = 0; i < this.pods.length; ++i)
         this.pods[i].mainInput.disabled = false;
 
@@ -460,10 +514,22 @@ cr.define('login', function() {
     },
 
     /**
+     * Shows signin UI.
+     * @param {string} email Email for signin UI.
+     */
+    showSigninUI: function(email) {
+      this.rowEnabled = false;
+      Oobe.showSigninUI(email);
+    },
+
+    /**
      * Handler of click event.
+     * @param {Event} e Click Event object.
      * @private
      */
     handleClick_: function(e) {
+      if (!this.rowEnabled)
+        return;
       // Clears focus if not clicked on a pod.
       if (e.target.parentNode != this &&
           e.target.parentNode.parentNode != this)
@@ -472,15 +538,25 @@ cr.define('login', function() {
 
     /**
      * Handles focus event.
+     * @param {Event} e Focus Event object.
+     * @private
      */
     handleFocus_: function(e) {
+      if (!this.rowEnabled)
+        return;
       if (e.target.parentNode == this) {
         // Focus on a pod
         if (e.target.classList.contains('focused'))
           e.target.focusInput();
         else
           this.focusPod(e.target);
-      } else if (e.target.parentNode.parentNode != this) {
+      } else if (e.target.parentNode.parentNode == this) {
+        // Focus on a control of a pod.
+        if (!e.target.parentNode.classList.contains('focused')) {
+          this.focusPod(e.target.parentNode);
+          e.target.focus();
+        }
+      } else {
         // Clears pod focus when we reach here. It means new focus is neither
         // on a pod nor on a button/input for a pod.
         this.focusPod();
@@ -489,13 +565,13 @@ cr.define('login', function() {
 
     /**
      * Handler of keydown event.
+     * @param {Event} e KeyDown Event object.
      * @public
      */
     handleKeyDown: function(e) {
-      var editing = false;
-      if (e.target.tagName == 'INPUT' && e.target.value)
-        editing = true;
-
+      if (!this.rowEnabled)
+        return;
+      var editing = e.target.tagName == 'INPUT' && e.target.value;
       switch (e.keyIdentifier) {
         case 'Left':
           if (!editing) {
@@ -523,6 +599,26 @@ cr.define('login', function() {
             e.stopPropagation();
           }
           break;
+      }
+    },
+
+    /**
+     * Called when the element is shown.
+     */
+    handleShow: function() {
+      for (var event in this.listeners_) {
+        this.ownerDocument.addEventListener(
+            event, this.listeners_[event][0], this.listeners_[event][1]);
+      }
+    },
+
+    /**
+     * Called when the element is hidden.
+     */
+    handleHide: function() {
+      for (var event in this.listeners_) {
+        this.ownerDocument.removeEventListener(
+            event, this.listeners_[event][0], this.listeners_[event][1]);
       }
     }
   };

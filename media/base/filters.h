@@ -32,6 +32,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "media/base/audio_decoder_config.h"
+#include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/video_frame.h"
 
@@ -67,12 +68,12 @@ typedef base::Callback<void(PipelineStatus)> FilterStatusCB;
 // This function copies |cb|, calls Reset() on |cb|, and then calls Run()
 // on the copy. This is used in the common case where you need to clear
 // a callback member variable before running the callback.
-void ResetAndRunCB(FilterStatusCB* cb, PipelineStatus status);
+MEDIA_EXPORT void ResetAndRunCB(FilterStatusCB* cb, PipelineStatus status);
 
 // Used for updating pipeline statistics.
 typedef Callback1<const PipelineStatistics&>::Type StatisticsCallback;
 
-class Filter : public base::RefCountedThreadSafe<Filter> {
+class MEDIA_EXPORT Filter : public base::RefCountedThreadSafe<Filter> {
  public:
   Filter();
 
@@ -130,7 +131,7 @@ class Filter : public base::RefCountedThreadSafe<Filter> {
   DISALLOW_COPY_AND_ASSIGN(Filter);
 };
 
-class DataSource : public Filter {
+class MEDIA_EXPORT DataSource : public Filter {
  public:
   typedef Callback1<size_t>::Type ReadCallback;
   static const size_t kReadError = static_cast<size_t>(-1);
@@ -153,9 +154,14 @@ class DataSource : public Filter {
 
   // Alert the DataSource that the video preload value has been changed.
   virtual void SetPreload(Preload preload) = 0;
+
+  // Notify the DataSource of the bitrate of the media.
+  // Values of |bitrate| <= 0 are invalid and should be ignored.
+  virtual void SetBitrate(int bitrate) = 0;
 };
 
-class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
+class MEDIA_EXPORT DemuxerStream
+    : public base::RefCountedThreadSafe<DemuxerStream> {
  public:
   typedef base::Callback<void(Buffer*)> ReadCallback;
 
@@ -183,7 +189,7 @@ class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
   virtual ~DemuxerStream();
 };
 
-class Demuxer : public Filter {
+class MEDIA_EXPORT Demuxer : public Filter {
  public:
   // Returns the given stream type, or NULL if that type is not present.
   virtual scoped_refptr<DemuxerStream> GetStream(DemuxerStream::Type type) = 0;
@@ -196,7 +202,7 @@ class Demuxer : public Filter {
 };
 
 
-class VideoDecoder : public Filter {
+class MEDIA_EXPORT VideoDecoder : public Filter {
  public:
   // Initialize a VideoDecoder with the given DemuxerStream, executing the
   // callback upon completion.
@@ -245,7 +251,7 @@ class VideoDecoder : public Filter {
 };
 
 
-class AudioDecoder : public Filter {
+class MEDIA_EXPORT AudioDecoder : public Filter {
  public:
   // Initialize a AudioDecoder with the given DemuxerStream, executing the
   // callback upon completion.
@@ -280,7 +286,7 @@ class AudioDecoder : public Filter {
 };
 
 
-class VideoRenderer : public Filter {
+class MEDIA_EXPORT VideoRenderer : public Filter {
  public:
   // Initialize a VideoRenderer with the given VideoDecoder, executing the
   // callback upon completion.
@@ -293,7 +299,7 @@ class VideoRenderer : public Filter {
 };
 
 
-class AudioRenderer : public Filter {
+class MEDIA_EXPORT AudioRenderer : public Filter {
  public:
   // Initialize a AudioRenderer with the given AudioDecoder, executing the
   // callback upon completion.

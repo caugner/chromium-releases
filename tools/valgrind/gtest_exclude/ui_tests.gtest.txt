@@ -1,3 +1,8 @@
+# Don't run FLAKY or FAILS ui tests under Valgrind.
+# They tend to generate way too many flaky Valgrind reports.
+*FLAKY_*
+*FAILS_*
+
 # Takes too long to valgrind, causes timeouts
 BrowserTest.ThirtyFourTabs
 # FIXME: these tests hang frequently in valgrind
@@ -54,6 +59,8 @@ DefaultPluginUITest.DefaultPluginLoadTest
 ErrorPageTest.DNSError_Basic
 # See http://crbug.com/59659
 NewTabUITest.NTPHasLoginName
+# See http://crbug.com/30367
+NewTabUITest.UpdateUserPrefsVersion
 
 # Mac: See http://crbug.com/30661, Linux/CrOS: http://crbug.com/49576.
 LayoutPluginTester.NPObjectReleasedOnDestruction
@@ -92,3 +99,30 @@ SessionHistoryTest.JavascriptHistory
 
 # Fails flakily, http://crbug.com/86783
 ResourceDispatcherTest.CrossSiteImmediateLoadOnunloadCookie
+
+# http://crbug.com/89173
+FastShutdown.SlowTermination
+
+# Out-of-process PPAPI tests fail on buildbots http://crbug.com/89961
+OutOfProcessPPAPITest.Instance
+OutOfProcessPPAPITest.CursorControl
+OutOfProcessPPAPITest.PostMessage
+
+# Flakily times out, http://crbug.com/92527
+NamedInterfaceTest.BasicNamedInterface
+
+# Consistently timing out. http://crbug.com/92630
+AutomationProxyTest.Cookies
+AutomationProxyTest.GetActiveTabIndex
+AutomationProxyTest.GetBrowserWindow
+AutomationProxyTest.GetBrowserWindowCount
+AutomationProxyTest.GetTab
+AutomationProxyTest.GetTabCount
+BookmarksUITest.TwoCommandsOneTab
+
+# OptionsUITest.NavBarCheck fails, see http://crbug.com/83209
+OptionsUITest.NavBarCheck
+
+# These tests fail due to timeouts, see http://crbug.com/64619 and
+# http://crbug.com/51387
+OptionsUITest.LoadOptionsByURL

@@ -8,9 +8,11 @@
 
 #include <stack>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "ui/base/accessibility/accessibility_types.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "views/focus/focus_manager.h"
@@ -87,8 +89,8 @@ class RootView;
 //      the Widget it is responsible for destroying the NativeWidget (from its
 //      destructor).
 //
-class Widget : public internal::NativeWidgetDelegate,
-               public FocusTraversable {
+class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
+                            public FocusTraversable {
  public:
   // Observers can listen to various events on the Widgets.
   class Observer {
@@ -106,7 +108,7 @@ class Widget : public internal::NativeWidgetDelegate,
     FRAME_TYPE_FORCE_NATIVE     // Force the native frame.
   };
 
-  struct InitParams {
+  struct VIEWS_EXPORT InitParams {
     enum Type {
       TYPE_WINDOW,      // A decorated Window, like a frame window.
                         // Widgets of TYPE_WINDOW will have a NonClientView.
@@ -143,8 +145,8 @@ class Widget : public internal::NativeWidgetDelegate,
     Ownership ownership;
     bool mirror_origin_in_rtl;
     bool has_dropshadow;
-    // Whether the widget should be maximized.
-    bool maximize;
+    // Whether the widget should be maximized or minimized.
+    ui::WindowShowState show_state;
     // Should the widget be double buffered? Default is false.
     bool double_buffer;
     gfx::NativeView parent;
@@ -155,6 +157,7 @@ class Widget : public internal::NativeWidgetDelegate,
     // When set, this value is used as the Widget's NativeWidget implementation.
     // The Widget will not construct a default one. Default is NULL.
     NativeWidget* native_widget;
+    bool top_level;
   };
   static InitParams WindowInitParams();
 
@@ -198,8 +201,11 @@ class Widget : public internal::NativeWidgetDelegate,
   static Widget* GetWidgetForNativeView(gfx::NativeView native_view);
   static Widget* GetWidgetForNativeWindow(gfx::NativeWindow native_window);
 
-  // Retrieves the highest Widget in a native view hierarchy starting at
-  // |native_view|, which may or may not be a Widget itself.
+  // Retrieves the top level widget in a native view hierarchy
+  // starting at |native_view|. Top level widget is a widget with
+  // TYPE_WINDOW, TYPE_WINDOW_FRAMELESS, POPUP or MENU and has its own
+  // focus manager. This may be itself if the |native_view| is top level,
+  // or NULL if there is no toplevel in a native view hierarchy.
   static Widget* GetTopLevelWidgetForNativeView(gfx::NativeView native_view);
 
   // Returns all Widgets in |native_view|'s hierarchy, including itself if
@@ -225,6 +231,9 @@ class Widget : public internal::NativeWidgetDelegate,
   // Enable/Disable debug paint.
   static void SetDebugPaintEnabled(bool enabled);
   static bool IsDebugPaintEnabled();
+
+  // Returns true if the specified type requires a NonClientView.
+  static bool RequiresNonClientView(InitParams::Type type);
 
   void Init(const InitParams& params);
 
@@ -252,8 +261,9 @@ class Widget : public internal::NativeWidgetDelegate,
   void NotifyNativeViewHierarchyChanged(bool attached,
                                         gfx::NativeView native_view);
 
-  // Returns the topmost Widget in a hierarchy. Will return NULL if called
-  // before the underlying Native Widget has been initialized.
+  // Returns the top level widget in a hierarchy (see is_top_level() for
+  // the definition of top level widget.) Will return NULL if called
+  // before the widget is attached to the top level widget's hierarchy.
   Widget* GetTopLevelWidget();
   const Widget* GetTopLevelWidget() const;
 
@@ -486,11 +496,9 @@ class Widget : public internal::NativeWidgetDelegate,
     return non_client_view_ ? non_client_view_->client_view() : NULL;
   }
 
-#if defined(UNIT_TEST)
-  static void set_compositor_factory(ui::Compositor*(*factory)()) {
+  static void set_compositor_factory_for_testing(ui::Compositor*(*factory)()) {
     compositor_factory_ = factory;
   }
-#endif
   static ui::Compositor* (*compositor_factory())() {
     return compositor_factory_;
   }
@@ -542,10 +550,23 @@ class Widget : public internal::NativeWidgetDelegate,
     focus_on_creation_ = focus_on_creation;
   }
 
+  // Converts the |point| in ancestor's coordinate to this widget's coordinates.
+  // Returns false if |ancestor| is not an ancestor of this widget.
+  // The receiver has to be pure views widget (NativeWidgetViews) and
+  // ancestor can be of any type.
+  bool ConvertPointFromAncestor(
+      const Widget* ancestor, gfx::Point* point) const;
+
   // Returns a View* that any child Widgets backed by NativeWidgetViews
   // are added to.  The default implementation returns the contents view
   // if it exists and the root view otherwise.
   virtual View* GetChildViewParent();
+
+  // True if the widget is considered top level widget. Top level widget
+  // is a widget of TYPE_WINDOW, TYPE_WINDOW_FRAMELESS, POPUP or MENU, and
+  // has a focus manager and input method object associated with it.
+  // TYPE_CONTROL and TYPE_TOOLTIP is not considered top level.
+  bool is_top_level() const { return is_top_level_; }
 
   // Overridden from NativeWidgetDelegate:
   virtual bool IsModal() const OVERRIDE;
@@ -574,6 +595,7 @@ class Widget : public internal::NativeWidgetDelegate,
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
   virtual bool ExecuteCommand(int command_id) OVERRIDE;
+  virtual InputMethod* GetInputMethodDirect() OVERRIDE;
   virtual Widget* AsWidget() OVERRIDE;
   virtual const Widget* AsWidget() const OVERRIDE;
 
@@ -596,9 +618,6 @@ class Widget : public internal::NativeWidgetDelegate,
   // TODO(beng): remove once we fold those objects onto this one.
   void DestroyRootView();
 
-  // Used for testing.
-  void ReplaceFocusManager(FocusManager* focus_manager);
-
   // TODO(beng): Remove NativeWidgetGtk's dependence on these:
   // TODO(msw): Make this mouse state member private.
   // If true, the mouse is currently down.
@@ -613,21 +632,29 @@ class Widget : public internal::NativeWidgetDelegate,
   gfx::Point last_mouse_event_position_;
 
  private:
+  friend class NativeTextfieldViewsTest;
+  friend class NativeComboboxViewsTest;
   friend class ScopedEvent;
 
   // Returns whether capture should be released on mouse release.
   virtual bool ShouldReleaseCaptureOnMouseReleased() const;
 
-  // Persists the window's restored position and maximized state using the
+  // Persists the window's restored position and "show" state using the
   // window delegate.
-  void SaveWindowPosition();
+  void SaveWindowPlacement();
 
   // Sizes and positions the window just after it is created.
   void SetInitialBounds(const gfx::Rect& bounds);
 
-  // Returns the bounds and maximized state from the delegate. Returns true if
+  // Returns the bounds and "show" state from the delegate. Returns true if
   // the delegate wants to use a specified bounds.
-  bool GetSavedBounds(gfx::Rect* bounds, bool* maximize);
+  bool GetSavedWindowPlacement(gfx::Rect* bounds,
+                               ui::WindowShowState* show_state);
+
+  // Sets a different InputMethod instance to this widget. The instance
+  // must not be initialized, the ownership will be assumed by the widget.
+  // It's only for testing purpose.
+  void ReplaceInputMethod(InputMethod* input_method);
 
   internal::NativeWidgetPrivate* native_widget_;
 
@@ -681,12 +708,12 @@ class Widget : public internal::NativeWidgetDelegate,
   // Set to true if the widget is in the process of closing.
   bool widget_closed_;
 
-  // The saved maximized state for this window. See note in SetInitialBounds
+  // The saved "show" state for this window. See note in SetInitialBounds
   // that explains why we save this.
-  bool saved_maximized_state_;
+  ui::WindowShowState saved_show_state_;
 
   // The restored bounds used for the initial show. This is only used if
-  // |saved_maximized_state_| is true.
+  // |saved_show_state_| is maximized.
   gfx::Rect initial_restored_bounds_;
 
   // The smallest size the window can be.
@@ -697,8 +724,16 @@ class Widget : public internal::NativeWidgetDelegate,
   // initial focus for the widget.
   bool focus_on_creation_;
 
+  scoped_ptr<InputMethod> input_method_;
+
+  // See |is_top_leve()| accessor.
+  bool is_top_level_;
+
   // Factory used to create Compositors. Settable by tests.
   static ui::Compositor*(*compositor_factory_)();
+
+  // Tracks whether native widget has been initialized.
+  bool native_widget_initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(Widget);
 };

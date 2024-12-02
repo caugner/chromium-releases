@@ -26,7 +26,7 @@ const char kHotkeyNextEngineInMenu[] =
 const char kHotkeyPreviousEngine[] = "Control+space";
 
 // ---------------------------------------------------------------------------
-// For Traditional Chinese input method (ibus-chewing)
+// For Traditional Chinese input method (ibus-mozc-chewing)
 // ---------------------------------------------------------------------------
 const char kChewingSectionName[] = "engine/Chewing";
 
@@ -139,24 +139,27 @@ const LanguageMultipleChoicePreference<int> kChewingHsuSelKeyType = {
 };
 
 // ---------------------------------------------------------------------------
-// For Korean input method (ibus-hangul)
+// For Korean input method (ibus-mozc-hangul)
 // ---------------------------------------------------------------------------
 const char kHangulSectionName[] = "engine/Hangul";
 const char kHangulKeyboardConfigName[] = "HangulKeyboard";
-const char kHangulHanjaKeysConfigName[] = "HanjaKeys";
+
+const char kHangulHanjaBindingKeysConfigName[] = "HanjaKeyBindings";
+// Mozc-hangul treats Hangul_Hanja key as hanja key event even if it is not set.
 // We add Control+9 since F9 key is reserved by the window manager.
-// TODO: HanjaKeys are not configurable yet (and we're not sure if it should.)
-const char kHangulHanjaKeys[] = "F9,Hangul_Hanja,Control+9";
+// TODO(nona): Hanja keys are not configurable yet (and we're not sure if it
+// should.)
+const char kHangulHanjaBindingKeys[] = "F9,Ctrl 9";
 
 const HangulKeyboardNameIDPair kHangulKeyboardNameIDPairs[] = {
-  // We have to sync the |keyboard_id|s with those in
-  // ibus-hangul/files/setup/main.py.
+  // We have to sync the |keyboard_id|s with those in libhangul.
   { IDS_OPTIONS_SETTINGS_LANGUAGES_HANGUL_SETTINGS_KEYBOARD_2_SET, "2" },
   { IDS_OPTIONS_SETTINGS_LANGUAGES_HANGUL_SETTINGS_KEYBOARD_3_SET_FINAL,
     "3f" },
   { IDS_OPTIONS_SETTINGS_LANGUAGES_HANGUL_SETTINGS_KEYBOARD_3_SET_390, "39" },
   { IDS_OPTIONS_SETTINGS_LANGUAGES_HANGUL_SETTINGS_KEYBOARD_3_SET_NO_SHIFT,
     "3s" },
+  { IDS_OPTIONS_SETTINGS_LANGUAGES_HANGUL_SETTINGS_KEYBOARD_ROMAJA, "ro" },
   // We don't support "Sebeolsik 2 set" keyboard.
 };
 COMPILE_ASSERT(kNumHangulKeyboardNameIDPairs ==
@@ -250,26 +253,6 @@ const LanguageBooleanPrefs kMozcBooleanPrefs[] = {
     true,
     "use_auto_ime_turn_off",
     IDS_MOZC(USE_AUTO_IME_TURN_OFF),
-    PrefService::SYNCABLE_PREF },
-  { prefs::kLanguageMozcUseDateConversion,
-    true,
-    "use_date_conversion",
-    IDS_MOZC(USE_DATE_CONVERSION),
-    PrefService::SYNCABLE_PREF },
-  { prefs::kLanguageMozcUseSingleKanjiConversion,
-    true,
-    "use_single_kanji_conversion",
-    IDS_MOZC(USE_SINGLE_KANJI_CONVERSION),
-    PrefService::SYNCABLE_PREF },
-  { prefs::kLanguageMozcUseSymbolConversion,
-    true,
-    "use_symbol_conversion",
-    IDS_MOZC(USE_SYMBOL_CONVERSION),
-    PrefService::SYNCABLE_PREF },
-  { prefs::kLanguageMozcUseNumberConversion,
-    true,
-    "use_number_conversion",
-    IDS_MOZC(USE_NUMBER_CONVERSION),
     PrefService::SYNCABLE_PREF },
   { prefs::kLanguageMozcUseHistorySuggest,
     true,

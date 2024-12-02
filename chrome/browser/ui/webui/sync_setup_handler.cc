@@ -6,11 +6,14 @@
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
@@ -110,6 +113,12 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
   if (sync_typed_urls)
     config->data_types.insert(syncable::TYPED_URLS);
 
+  bool sync_search_engines;
+  if (!result->GetBoolean("syncSearchEngines", &sync_search_engines))
+    return false;
+  if (sync_search_engines)
+    config->data_types.insert(syncable::SEARCH_ENGINES);
+
   bool sync_sessions;
   if (!result->GetBoolean("syncSessions", &sync_sessions))
     return false;
@@ -127,12 +136,27 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
     return false;
 
   // Passphrase settings.
-  if (!result->GetBoolean("usePassphrase", &config->use_secondary_passphrase))
-    return false;
-  if (config->use_secondary_passphrase &&
-      !result->GetString("passphrase", &config->secondary_passphrase))
+  bool have_passphrase;
+  if (!result->GetBoolean("usePassphrase", &have_passphrase))
     return false;
 
+  if (have_passphrase) {
+    bool is_gaia;
+    if (!result->GetBoolean("isGooglePassphrase", &is_gaia))
+      return false;
+    std::string passphrase;
+    if (!result->GetString("passphrase", &passphrase))
+      return false;
+    // The user provided a passphrase - pass it off to SyncSetupFlow as either
+    // the secondary or GAIA passphrase as appropriate.
+    if (is_gaia) {
+      config->set_gaia_passphrase = true;
+      config->gaia_passphrase = passphrase;
+    } else {
+      config->set_secondary_passphrase = true;
+      config->secondary_passphrase = passphrase;
+    }
+  }
   return true;
 }
 
@@ -229,6 +253,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "extensions", IDS_SYNC_DATATYPE_EXTENSIONS },
     { "typedURLs", IDS_SYNC_DATATYPE_TYPED_URLS },
     { "apps", IDS_SYNC_DATATYPE_APPS },
+    { "searchEngines", IDS_SYNC_DATATYPE_SEARCH_ENGINES },
     { "foreignSessions", IDS_SYNC_DATATYPE_SESSIONS },
     { "syncZeroDataTypesError", IDS_SYNC_ZERO_DATA_TYPES_ERROR },
     { "abortedError", IDS_SYNC_SETUP_ABORTED_BY_PENDING_CLEAR },
@@ -251,6 +276,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "enterPassphraseTitle", IDS_SYNC_ENTER_PASSPHRASE_TITLE },
     { "enterPassphraseBody", IDS_SYNC_ENTER_PASSPHRASE_BODY },
     { "enterOtherPassphraseBody", IDS_SYNC_ENTER_OTHER_PASSPHRASE_BODY },
+    { "enterGooglePassphraseBody", IDS_SYNC_ENTER_PASSPHRASE_BODY },
     { "passphraseLabel", IDS_SYNC_PASSPHRASE_LABEL },
     { "incorrectPassphrase", IDS_SYNC_INCORRECT_PASSPHRASE },
     { "passphraseWarning", IDS_SYNC_PASSPHRASE_WARNING },
@@ -265,7 +291,6 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "encryptSensitiveOption", IDS_SYNC_ENCRYPT_SENSITIVE_DATA },
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
-    { "statusNotConnected", IDS_SYNC_STATUS_NOT_CONNECTED }
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -291,6 +316,15 @@ void SyncSetupHandler::RegisterMessages() {
       NewCallback(this, &SyncSetupHandler::HandleShowErrorUI));
   web_ui_->RegisterMessageCallback("SyncSetupShowSetupUI",
       NewCallback(this, &SyncSetupHandler::HandleShowSetupUI));
+}
+
+// Ideal(?) solution here would be to mimic the ClientLogin overlay.  Since
+// this UI must render an external URL, that overlay cannot be used directly.
+// The current implementation is functional, but fails asthetically.
+// TODO(rickcam): Bug 90711: Update UI for OAuth sign-in flow
+void SyncSetupHandler::ShowOAuthLogin() {
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  profile->GetProfileSyncService()->signin()->StartOAuthSignIn();
 }
 
 void SyncSetupHandler::ShowGaiaLogin(const DictionaryValue& args) {
@@ -421,8 +455,8 @@ void SyncSetupHandler::HandleAttachHandler(const ListValue* args) {
 void SyncSetupHandler::HandleShowErrorUI(const ListValue* args) {
   DCHECK(!flow_);
 
-  ProfileSyncService* service =
-    web_ui_->GetProfile()->GetProfileSyncService();
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  ProfileSyncService* service = profile->GetProfileSyncService();
   DCHECK(service);
 
   service->get_wizard().Step(SyncSetupWizard::NONFATAL_ERROR);
@@ -452,7 +486,8 @@ void SyncSetupHandler::OpenSyncSetup() {
   DCHECK(web_ui_);
   DCHECK(!flow_);
 
-  ProfileSyncService* service = web_ui_->GetProfile()->GetProfileSyncService();
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  ProfileSyncService* service = profile->GetProfileSyncService();
   if (!service) {
     // If there's no sync service, the user tried to manually invoke a syncSetup
     // URL, but sync features are disabled.  We need to close the overlay for

@@ -89,8 +89,15 @@ int main(int argc, const char** argv) {
   base::AtExitManager exit_manager;
 
   CommandLine::Init(argc, argv);
-  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
+  logging::InitLogging(
+      NULL,
+      logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
+      logging::LOCK_LOG_FILE,  // Ignored.
+      logging::DELETE_OLD_LOG_FILE,  // Ignored.
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+
+  const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
   const CommandLine::StringVector& filenames = cmd_line->GetArgs();
   if (filenames.empty()) {
     std::cerr << "Usage: " << argv[0] << " [OPTIONS] FILE [DUMPFILE]\n"
@@ -122,8 +129,8 @@ int main(int argc, const char** argv) {
   // Initialize our media library (try loading DLLs, etc.) before continuing.
   // We use an empty file path as the parameter to force searching of the
   // default locations for necessary DLLs and DSOs.
-  if (media::InitializeMediaLibrary(FilePath()) == false) {
-    std::cerr << "Unable to initialize the media library.";
+  if (!media::InitializeMediaLibrary(FilePath())) {
+    std::cerr << "Unable to initialize the media library." << std::endl;
     return 1;
   }
 
@@ -426,8 +433,12 @@ int main(int argc, const char** argv) {
           if (hash_djb2) {
             hash_value = DJB2Hash(u8_samples, size_out, hash_value);
           }
-          if (hash_md5)
-            base::MD5Update(&ctx, u8_samples, size_out);
+          if (hash_md5) {
+            base::MD5Update(
+                &ctx,
+                base::StringPiece(reinterpret_cast<const char*>(u8_samples),
+                                                                size_out));
+          }
         }
       } else if (target_codec == AVMEDIA_TYPE_VIDEO) {
         int got_picture = 0;
@@ -487,8 +498,10 @@ int main(int argc, const char** argv) {
             }
             if (hash_md5) {
               for (size_t i = 0; i < copy_lines; ++i) {
-                base::MD5Update(&ctx, reinterpret_cast<const uint8*>(source),
-                                bytes_per_line);
+                base::MD5Update(
+                    &ctx,
+                    base::StringPiece(reinterpret_cast<const char*>(source),
+                                      bytes_per_line));
                 source += source_stride;
               }
             }

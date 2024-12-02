@@ -17,6 +17,8 @@
 #include "net/base/ip_endpoint.h"
 #include "net/udp/udp_server_socket.h"
 
+namespace content {
+
 class P2PSocketHostUdp : public P2PSocketHost {
  public:
   P2PSocketHostUdp(IPC::Message::Sender* message_sender,
@@ -34,7 +36,7 @@ class P2PSocketHostUdp : public P2PSocketHost {
  private:
   friend class P2PSocketHostUdpTest;
 
-  typedef std::set<net::IPEndPoint> AuthorizedPeerSet;
+  typedef std::set<net::IPEndPoint> ConnectedPeerSet;
 
   void OnError();
   void DoRead();
@@ -50,13 +52,15 @@ class P2PSocketHostUdp : public P2PSocketHost {
   bool send_pending_;
 
   // Set of peer for which we have received STUN binding request or
-  // response.
-  AuthorizedPeerSet authorized_peers_;
+  // response or relay allocation request or response.
+  ConnectedPeerSet connected_peers_;
 
   net::CompletionCallbackImpl<P2PSocketHostUdp> recv_callback_;
   net::CompletionCallbackImpl<P2PSocketHostUdp> send_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(P2PSocketHostUdp);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_P2P_SOCKET_HOST_UDP_H_

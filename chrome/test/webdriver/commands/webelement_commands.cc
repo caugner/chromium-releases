@@ -7,16 +7,18 @@
 #include "base/file_util.h"
 #include "base/format_macros.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/third_party/icu/icu_utf.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/test/webdriver/commands/response.h"
-#include "chrome/test/webdriver/session.h"
+#include "chrome/test/webdriver/webdriver_basic_types.h"
 #include "chrome/test/webdriver/webdriver_error.h"
+#include "chrome/test/webdriver/webdriver_session.h"
+#include "chrome/test/webdriver/webdriver_util.h"
 #include "third_party/webdriver/atoms.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/size.h"
 
 namespace webdriver {
 
@@ -43,7 +45,7 @@ bool WebElementCommand::Init(Response* const response) {
 
   // We cannot verify the ID is valid until we execute the command and
   // inject the ID into the in-page cache.
-  element = WebElementId(path_segments_.at(4));
+  element = ElementId(path_segments_.at(4));
   return true;
 }
 
@@ -97,7 +99,7 @@ void ElementClearCommand::ExecutePost(Response* const response) {
   args.Append(element.ToValue());
 
   std::string script = base::StringPrintf(
-      "(%s).apply(null, arguments);", atoms::CLEAR);
+      "(%s).apply(null, arguments);", atoms::asString(atoms::CLEAR).c_str());
 
   Value* result = NULL;
   Error* error = session_->ExecuteScript(script, &args, &result);
@@ -130,7 +132,8 @@ void ElementCssCommand::ExecuteGet(Response* const response) {
   }
 
   std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::GET_EFFECTIVE_STYLE);
+      "return (%s).apply(null, arguments);",
+      atoms::asString(atoms::GET_EFFECTIVE_STYLE).c_str());
 
   ListValue args;
   args.Append(element.ToValue());
@@ -188,7 +191,8 @@ void ElementEnabledCommand::ExecuteGet(Response* const response) {
   args.Append(element.ToValue());
 
   std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::IS_ENABLED);
+      "return (%s).apply(null, arguments);",
+      atoms::asString(atoms::IS_ENABLED).c_str());
 
   Value* result = NULL;
   Error* error = session_->ExecuteScript(script, &args, &result);
@@ -225,7 +229,7 @@ void ElementEqualsCommand::ExecuteGet(Response* const response) {
   ListValue args;
   args.Append(element.ToValue());
 
-  WebElementId other_element(path_segments_.at(6));
+  ElementId other_element(path_segments_.at(6));
   args.Append(other_element.ToValue());
 
   Value* result = NULL;
@@ -252,7 +256,8 @@ bool ElementLocationCommand::DoesGet() {
 
 void ElementLocationCommand::ExecuteGet(Response* const response) {
   std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::GET_LOCATION);
+      "return (%s).apply(null, arguments);",
+      atoms::asString(atoms::GET_LOCATION).c_str());
 
   ListValue args;
   args.Append(element.ToValue());
@@ -280,7 +285,7 @@ bool ElementLocationInViewCommand::DoesGet() {
 }
 
 void ElementLocationInViewCommand::ExecuteGet(Response* const response) {
-  gfx::Point location;
+  Point location;
   Error* error = session_->GetElementLocationInView(element, &location);
   if (error) {
     response->SetError(error);
@@ -334,24 +339,19 @@ bool ElementSelectedCommand::DoesPost() {
 }
 
 void ElementSelectedCommand::ExecuteGet(Response* const response) {
-  ListValue args;
-  args.Append(element.ToValue());
-
-  std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::IS_SELECTED);
-
-  Value* result = NULL;
-  Error* error = session_->ExecuteScript(script, &args, &result);
+  bool is_selected;
+  Error* error = session_->IsOptionElementSelected(
+      session_->current_target(), element, &is_selected);
   if (error) {
     response->SetError(error);
     return;
   }
-  response->SetValue(result);
+  response->SetValue(Value::CreateBooleanValue(is_selected));
 }
 
 void ElementSelectedCommand::ExecutePost(Response* const response) {
-  Error* error = session_->SelectOptionElement(
-      session_->current_target(), element);
+  Error* error = session_->SetOptionElementSelected(
+      session_->current_target(), element, true);
   if (error) {
     response->SetError(error);
     return;
@@ -372,7 +372,7 @@ bool ElementSizeCommand::DoesGet() {
 }
 
 void ElementSizeCommand::ExecuteGet(Response* const response) {
-  gfx::Size size;
+  Size size;
   Error* error = session_->GetElementSize(
       session_->current_target(), element, &size);
   if (error) {
@@ -399,10 +399,8 @@ bool ElementSubmitCommand::DoesPost() {
 }
 
 void ElementSubmitCommand::ExecutePost(Response* const response) {
-  // TODO(jleyba): We need to wait for any post-submit navigation events to
-  // complete before responding to the client.
   std::string script = base::StringPrintf(
-      "(%s).apply(null, arguments);", atoms::SUBMIT);
+      "(%s).apply(null, arguments);", atoms::asString(atoms::SUBMIT).c_str());
 
   ListValue args;
   args.Append(element.ToValue());
@@ -431,7 +429,8 @@ bool ElementToggleCommand::DoesPost() {
 
 void ElementToggleCommand::ExecutePost(Response* const response) {
   std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::TOGGLE);
+      "return (%s).apply(null, arguments);",
+      atoms::asString(atoms::TOGGLE).c_str());
 
   ListValue args;
   args.Append(element.ToValue());
@@ -533,48 +532,49 @@ Error* ElementValueCommand::HasAttributeWithLowerCaseValueASCII(
 }
 
 Error* ElementValueCommand::DragAndDropFilePaths() const {
+  ListValue* path_list;
+  if (!GetListParameter("value", &path_list))
+    return new Error(kBadRequest, "Missing or invalid 'value' parameter");
+
+  // Compress array into single string.
+  FilePath::StringType paths_string;
+  for (size_t i = 0; i < path_list->GetSize(); ++i) {
+    FilePath::StringType path_part;
+    if (!path_list->GetString(i, &path_part)) {
+      return new Error(
+          kBadRequest,
+          "'value' is invalid: " + JsonStringify(path_list));
+    }
+    paths_string.append(path_part);
+  }
+
+  // Separate the string into separate paths, delimited by \n.
+  std::vector<FilePath::StringType> paths;
+  base::SplitString(paths_string, '\n', &paths);
+
+  // Return an error if trying to drop multiple paths on a single file input.
   bool multiple = false;
   Error* error = HasAttributeWithLowerCaseValueASCII("multiple", "true",
                                                      &multiple);
-
-  if (error) {
+  if (error)
     return error;
-  }
-
-  ListValue* path_list;
-  if (!GetListParameter("value", &path_list)) {
-    return new Error(kBadRequest, "Missing or invalid 'value' parameter");
-  }
-
-  if (!multiple && path_list->GetSize() > 1) {
+  if (!multiple && paths.size() > 1)
     return new Error(kBadRequest, "The element can not hold multiple files");
-  }
 
-  std::vector<FilePath::StringType> paths;
-  for (size_t i = 0; i < path_list->GetSize(); ++i) {
-    FilePath::StringType path;
-    if (!path_list->GetString(i, &path)) {
-      return new Error(
-          kBadRequest,
-          base::StringPrintf("'value' list item #%" PRIuS " is not a string",
-                             i + 1));
-    }
-
-    if (!file_util::PathExists(FilePath(path))) {
+  // Check the files exist.
+  for (size_t i = 0; i < paths.size(); ++i) {
+    if (!file_util::PathExists(FilePath(paths[i]))) {
       return new Error(
           kBadRequest,
           base::StringPrintf("'%s' does not exist on the file system",
-                             path.c_str()));
+              UTF16ToUTF8(FilePath(paths[i]).LossyDisplayName()).c_str()));
     }
-
-    paths.push_back(path);
   }
 
-  gfx::Point location;
+  Point location;
   error = session_->GetClickableLocation(element, &location);
-  if (error) {
+  if (error)
     return error;
-  }
 
   return session_->DragAndDropFilePaths(location, paths);
 }
@@ -621,7 +621,8 @@ void ElementTextCommand::ExecuteGet(Response* const response) {
   args.Append(element.ToValue());
 
   std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::GET_TEXT);
+      "return (%s).apply(null, arguments);",
+      atoms::asString(atoms::GET_TEXT).c_str());
 
   Error* error = session_->ExecuteScript(script, &args,
                                          &unscoped_result);

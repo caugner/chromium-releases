@@ -21,10 +21,6 @@
 
 using crypto::SecureHash;
 
-// TODO(cpu): remove this ctor and dtor from here once other pieces land.
-CrxComponent::CrxComponent() {}
-CrxComponent::~CrxComponent() {}
-
 namespace {
 // This class makes sure that the CRX digital signature is valid
 // and well formed.
@@ -95,7 +91,7 @@ class CRXValidator {
     }
 
     const size_t kBufSize = 8 * 1024;
-    scoped_ptr<uint8> buf(new uint8[kBufSize]);
+    scoped_array<uint8> buf(new uint8[kBufSize]);
     while ((len = fread(buf.get(), 1, kBufSize, crx_file)) > 0)
       verifier.VerifyUpdate(buf.get(), len);
 
@@ -212,4 +208,3 @@ ComponentUnpacker::~ComponentUnpacker() {
     file_util::Delete(unpack_path_, true);
   }
 }
-

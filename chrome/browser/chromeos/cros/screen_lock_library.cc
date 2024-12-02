@@ -1,59 +1,81 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/cros/screen_lock_library.h"
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/observer_list.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "content/browser/browser_thread.h"
+#include "third_party/cros/chromeos_screen_lock.h"
 
 namespace chromeos {
 
-// This class handles the interaction with the ChromeOS screen lock APIs.
 class ScreenLockLibraryImpl : public ScreenLockLibrary {
  public:
-  ScreenLockLibraryImpl() {
-    if (CrosLibrary::Get()->EnsureLoaded()) {
-      Init();
-    }
-  }
+  ScreenLockLibraryImpl() : screen_lock_connection_(NULL) {}
 
-  ~ScreenLockLibraryImpl() {
+  virtual ~ScreenLockLibraryImpl() {
     if (screen_lock_connection_) {
       chromeos::DisconnectScreenLock(screen_lock_connection_);
+      screen_lock_connection_ = NULL;
     }
   }
 
-  void AddObserver(Observer* observer) {
+  // Begin ScreenLockLibrary implementation.
+  virtual void Init() OVERRIDE {
+    if (CrosLibrary::Get()->EnsureLoaded()) {
+      screen_lock_connection_ =
+          chromeos::MonitorScreenLock(&ScreenLockedHandler, this);
+    }
+  }
+
+  virtual void AddObserver(Observer* observer) OVERRIDE {
     observers_.AddObserver(observer);
   }
 
-  void RemoveObserver(Observer* observer) {
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
     observers_.RemoveObserver(observer);
   }
 
-  void NotifyScreenLockRequested() {
+  virtual void NotifyScreenLockRequested() OVERRIDE {
     chromeos::NotifyScreenLockRequested();
   }
 
-  void NotifyScreenLockCompleted() {
+  virtual void NotifyScreenLockCompleted() OVERRIDE {
     chromeos::NotifyScreenLockCompleted();
   }
 
-  void NotifyScreenUnlockRequested() {
+  virtual void NotifyScreenUnlockRequested() OVERRIDE {
     chromeos::NotifyScreenUnlockRequested();
   }
 
-  void NotifyScreenUnlockCompleted() {
+  virtual void NotifyScreenUnlockCompleted() OVERRIDE {
     chromeos::NotifyScreenUnlockCompleted();
   }
+  // End ScreenLockLibrary implementation.
 
  private:
-  void Init() {
-    screen_lock_connection_ = chromeos::MonitorScreenLock(
-        &ScreenLockedHandler, this);
+  static void ScreenLockedHandler(void* object, ScreenLockEvent event) {
+    ScreenLockLibraryImpl* self = static_cast<ScreenLockLibraryImpl*>(object);
+    switch (event) {
+      case chromeos::LockScreen:
+        self->LockScreen();
+        break;
+      case chromeos::UnlockScreen:
+        self->UnlockScreen();
+        break;
+      case chromeos::UnlockScreenFailed:
+        self->UnlockScreenFailed();
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
   }
 
   void LockScreen() {
@@ -89,27 +111,9 @@ class ScreenLockLibraryImpl : public ScreenLockLibrary {
     FOR_EACH_OBSERVER(Observer, observers_, UnlockScreenFailed(this));
   }
 
-  static void ScreenLockedHandler(void* object, ScreenLockEvent event) {
-    ScreenLockLibraryImpl* self = static_cast<ScreenLockLibraryImpl*>(object);
-    switch (event) {
-      case chromeos::LockScreen:
-        self->LockScreen();
-        break;
-      case chromeos::UnlockScreen:
-        self->UnlockScreen();
-        break;
-      case chromeos::UnlockScreenFailed:
-        self->UnlockScreenFailed();
-        break;
-      default:
-        NOTREACHED();
-    }
-  }
+  chromeos::ScreenLockConnection screen_lock_connection_;
 
   ObserverList<Observer> observers_;
-
-  // A reference to the screen lock api
-  chromeos::ScreenLockConnection screen_lock_connection_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenLockLibraryImpl);
 };
@@ -117,21 +121,25 @@ class ScreenLockLibraryImpl : public ScreenLockLibrary {
 class ScreenLockLibraryStubImpl : public ScreenLockLibrary {
  public:
   ScreenLockLibraryStubImpl() {}
-  ~ScreenLockLibraryStubImpl() {}
-  void AddObserver(Observer* observer) {}
-  void RemoveObserver(Observer* observer) {}
-  void NotifyScreenLockRequested() {}
-  void NotifyScreenLockCompleted() {}
-  void NotifyScreenUnlockRequested() {}
-  void NotifyScreenUnlockCompleted() {}
+  virtual ~ScreenLockLibraryStubImpl() {}
+  virtual void Init() OVERRIDE {}
+  virtual void AddObserver(Observer* observer) OVERRIDE {}
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {}
+  virtual void NotifyScreenLockRequested() OVERRIDE {}
+  virtual void NotifyScreenLockCompleted() OVERRIDE {}
+  virtual void NotifyScreenUnlockRequested() OVERRIDE {}
+  virtual void NotifyScreenUnlockCompleted() OVERRIDE {}
 };
 
 // static
 ScreenLockLibrary* ScreenLockLibrary::GetImpl(bool stub) {
+  ScreenLockLibrary* impl;
   if (stub)
-    return new ScreenLockLibraryStubImpl();
+    impl = new ScreenLockLibraryStubImpl();
   else
-    return new ScreenLockLibraryImpl();
+    impl = new ScreenLockLibraryImpl();
+  impl->Init();
+  return impl;
 }
 
 }  // namespace chromeos

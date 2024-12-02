@@ -14,12 +14,15 @@ var ContentSettings = options.ContentSettings;
 var ContentSettingsExceptionsArea =
     options.contentSettings.ContentSettingsExceptionsArea;
 var CookiesView = options.CookiesView;
+var ExtensionSettings = options.ExtensionSettings;
 var FontSettings = options.FontSettings;
 var HandlerOptions = options.HandlerOptions;
 var ImportDataOverlay = options.ImportDataOverlay;
+var IntentsView = options.IntentsView;
 var InstantConfirmOverlay = options.InstantConfirmOverlay;
 var LanguageOptions = options.LanguageOptions;
 var OptionsPage = options.OptionsPage;
+var PackExtensionOverlay = options.PackExtensionOverlay;
 var PasswordManager = options.PasswordManager;
 var PersonalOptions = options.PersonalOptions;
 var Preferences = options.Preferences;
@@ -28,6 +31,7 @@ var ProxyOptions = options.ProxyOptions;
 var SearchEngineManager = options.SearchEngineManager;
 var SearchPage = options.SearchPage;
 var SyncSetupOverlay = options.SyncSetupOverlay;
+var VirtualKeyboardManager = options.VirtualKeyboardManager;
 
 /**
  * DOMContentLoaded handler, sets up the page.
@@ -97,6 +101,10 @@ function load() {
                         templateData.languagePinyinPageTabTitle,
                         'languagePinyinPage'),
         LanguageOptions.getInstance());
+    if (cr.isTouch) {
+      OptionsPage.registerSubPage(VirtualKeyboardManager.getInstance(),
+                                  LanguageOptions.getInstance());
+    }
     OptionsPage.register(InternetOptions.getInstance());
   }
   OptionsPage.register(AdvancedOptions.getInstance());
@@ -114,6 +122,11 @@ function load() {
     OptionsPage.registerSubPage(HandlerOptions.getInstance(),
                                 ContentSettings.getInstance(),
                                 [$('manage-handlers-button')]);
+  }
+  if (IntentsView && $('manage-intents-button')) {
+    OptionsPage.registerSubPage(IntentsView.getInstance(),
+                                ContentSettings.getInstance(),
+                                [$('manage-intents-button')]);
   }
   OptionsPage.registerSubPage(FontSettings.getInstance(),
                               AdvancedOptions.getInstance(),
@@ -154,6 +167,10 @@ function load() {
                               PersonalOptions.getInstance());
   OptionsPage.registerOverlay(ManageProfileOverlay.getInstance(),
                               PersonalOptions.getInstance());
+
+  OptionsPage.register(ExtensionSettings.getInstance());
+  OptionsPage.registerOverlay(PackExtensionOverlay.getInstance(),
+                              ExtensionSettings.getInstance());
 
   if (cr.isChromeOS) {
     OptionsPage.register(AccountsOptions.getInstance());

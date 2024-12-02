@@ -16,7 +16,6 @@
 #include "base/string_util.h"
 #include "base/threading/thread_checker.h"
 #include "base/time.h"
-#include "base/timer.h"
 #include "base/values.h"
 #include "content/browser/browser_thread.h"
 #include "crypto/hmac.h"
@@ -251,8 +250,11 @@ class InternalAuthVerificationService {
 
     if (key.size() != kKeySizeInBytes)
       return;
-    engine_.reset(new crypto::HMAC(crypto::HMAC::SHA256));
-    engine_->Init(key);
+    scoped_ptr<crypto::HMAC> new_engine(
+        new crypto::HMAC(crypto::HMAC::SHA256));
+    if (!new_engine->Init(key))
+      return;
+    engine_.swap(new_engine);
     key_ = key;
     key_change_tick_ = GetCurrentTick();
   }
@@ -339,17 +341,11 @@ class InternalAuthGenerationService : public base::ThreadChecker {
 
   void GenerateNewKey() {
     DCHECK(CalledOnValidThread());
-    if (!timer_.IsRunning()) {
-      timer_.Start(
-          base::TimeDelta::FromMicroseconds(
-              kKeyRegenerationSoftTicks * kTickUs),
-          this,
-          &InternalAuthGenerationService::GenerateNewKey);
-    }
-
-    engine_.reset(new crypto::HMAC(crypto::HMAC::SHA256));
+    scoped_ptr<crypto::HMAC> new_engine(new crypto::HMAC(crypto::HMAC::SHA256));
     std::string key = base::RandBytesAsString(kKeySizeInBytes);
-    engine_->Init(key);
+    if (!new_engine->Init(key))
+      return;
+    engine_.swap(new_engine);
     key_regeneration_tick_ = GetCurrentTick();
     g_verification_service.Get().ChangeKey(key);
     std::fill(key.begin(), key.end(), 0);
@@ -368,8 +364,13 @@ class InternalAuthGenerationService : public base::ThreadChecker {
     int64 current_tick = GetCurrentTick();
     if (!used_ticks_.empty() && used_ticks_.back() > current_tick)
       current_tick = used_ticks_.back();
-    if (current_tick > key_regeneration_tick_ + kKeyRegenerationHardTicks)
-      return 0;
+    for (bool first_iteration = true;; first_iteration = false) {
+      if (current_tick < key_regeneration_tick_ + kKeyRegenerationHardTicks)
+        break;
+      if (!first_iteration)
+        return 0;
+      GenerateNewKey();
+    }
 
     // Forget outdated ticks if any.
     used_ticks_.erase(
@@ -420,7 +421,6 @@ class InternalAuthGenerationService : public base::ThreadChecker {
   }
 
   scoped_ptr<crypto::HMAC> engine_;
-  base::RepeatingTimer<InternalAuthGenerationService> timer_;
   int64 key_regeneration_tick_;
   std::deque<int64> used_ticks_;
 

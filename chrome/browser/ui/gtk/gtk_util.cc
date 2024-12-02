@@ -21,6 +21,7 @@
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/event_disposition.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -35,8 +36,11 @@
 #include "grit/theme_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/events.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/text/text_elider.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
@@ -194,31 +198,35 @@ GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
 
 namespace event_utils {
 
-WindowOpenDisposition DispositionFromEventFlags(guint event_flags) {
-  return disposition_utils::DispositionFromClick(
-      event_flags & GDK_BUTTON2_MASK,
-      event_flags & GDK_MOD1_MASK,
-      event_flags & GDK_CONTROL_MASK,
-      event_flags & GDK_META_MASK,
-      event_flags & GDK_SHIFT_MASK);
+// TODO(shinyak) This function will be removed after refactoring.
+WindowOpenDisposition DispositionFromGdkState(guint state) {
+  int event_flags = EventFlagsFromGdkState(state);
+  return browser::DispositionFromEventFlags(event_flags);
+}
+
+int EventFlagsFromGdkState(guint state) {
+  int flags = 0;
+  flags |= (state & GDK_LOCK_MASK) ? ui::EF_CAPS_LOCK_DOWN : 0;
+  flags |= (state & GDK_CONTROL_MASK) ? ui::EF_CONTROL_DOWN : 0;
+  flags |= (state & GDK_SHIFT_MASK) ? ui::EF_SHIFT_DOWN : 0;
+  flags |= (state & GDK_MOD1_MASK) ? ui::EF_ALT_DOWN : 0;
+  flags |= (state & GDK_BUTTON1_MASK) ? ui::EF_LEFT_BUTTON_DOWN : 0;
+  flags |= (state & GDK_BUTTON2_MASK) ? ui::EF_MIDDLE_BUTTON_DOWN : 0;
+  flags |= (state & GDK_BUTTON3_MASK) ? ui::EF_RIGHT_BUTTON_DOWN : 0;
+  return flags;
 }
 
 }  // namespace event_utils
 
 namespace gtk_util {
 
-const GdkColor kGdkWhite = GDK_COLOR_RGB(0xff, 0xff, 0xff);
-const GdkColor kGdkGray  = GDK_COLOR_RGB(0x7f, 0x7f, 0x7f);
-const GdkColor kGdkBlack = GDK_COLOR_RGB(0x00, 0x00, 0x00);
-const GdkColor kGdkGreen = GDK_COLOR_RGB(0x00, 0xff, 0x00);
-
 GtkWidget* CreateLabeledControlsGroup(std::vector<GtkWidget*>* labels,
                                       const char* text, ...) {
   va_list ap;
   va_start(ap, text);
   GtkWidget* table = gtk_table_new(0, 2, FALSE);
-  gtk_table_set_col_spacing(GTK_TABLE(table), 0, kLabelSpacing);
-  gtk_table_set_row_spacings(GTK_TABLE(table), kControlSpacing);
+  gtk_table_set_col_spacing(GTK_TABLE(table), 0, ui::kLabelSpacing);
+  gtk_table_set_row_spacings(GTK_TABLE(table), ui::kControlSpacing);
 
   for (guint row = 0; text; ++row) {
     gtk_table_resize(GTK_TABLE(table), row + 1, 2);
@@ -383,7 +391,6 @@ void CenterOverWindow(GtkWindow* window, GtkWindow* parent) {
 }
 
 void MakeAppModalWindowGroup() {
-#if GTK_CHECK_VERSION(2, 14, 0)
   // Older versions of GTK+ don't give us gtk_window_group_list() which is what
   // we need to add current non-browser modal dialogs to the list. If
   // we have 2.14+ we can do things the correct way.
@@ -401,20 +408,9 @@ void MakeAppModalWindowGroup() {
     g_list_free(all_windows);
   }
   g_object_unref(window_group);
-#else
-  // Otherwise just grab all browser windows and be slightly broken.
-  GtkWindowGroup* window_group = gtk_window_group_new();
-  for (BrowserList::const_iterator it = BrowserList::begin();
-       it != BrowserList::end(); ++it) {
-    gtk_window_group_add_window(window_group,
-                                (*it)->window()->GetNativeHandle());
-  }
-  g_object_unref(window_group);
-#endif
 }
 
 void AppModalDismissedUngroupWindows() {
-#if GTK_CHECK_VERSION(2, 14, 0)
   if (BrowserList::begin() != BrowserList::end()) {
     std::vector<GtkWindow*> transient_windows;
 
@@ -443,17 +439,6 @@ void AppModalDismissedUngroupWindows() {
       gtk_window_group_add_window(group, *it);
     }
   }
-#else
-  // This is slightly broken in the case where a different window had a dialog,
-  // but its the best we can do since we don't have newer gtk stuff.
-  for (BrowserList::const_iterator it = BrowserList::begin();
-       it != BrowserList::end(); ++it) {
-    GtkWindowGroup* window_group = gtk_window_group_new();
-    gtk_window_group_add_window(window_group,
-                                (*it)->window()->GetNativeHandle());
-    g_object_unref(window_group);
-  }
-#endif
 }
 
 void RemoveAllChildren(GtkWidget* container) {
@@ -509,35 +494,6 @@ void ConvertWidgetPointToScreen(GtkWidget* widget, gfx::Point* p) {
 
   gfx::Point position = GetWidgetScreenPosition(widget);
   p->SetPoint(p->x() + position.x(), p->y() + position.y());
-}
-
-void InitRCStyles() {
-  static const char kRCText[] =
-      // Make our dialogs styled like the GNOME HIG.
-      //
-      // TODO(evanm): content-area-spacing was introduced in a later
-      // version of GTK, so we need to set that manually on all dialogs.
-      // Perhaps it would make sense to have a shared FixupDialog() function.
-      "style \"gnome-dialog\" {\n"
-      "  xthickness = 12\n"
-      "  GtkDialog::action-area-border = 0\n"
-      "  GtkDialog::button-spacing = 6\n"
-      "  GtkDialog::content-area-spacing = 18\n"
-      "  GtkDialog::content-area-border = 12\n"
-      "}\n"
-      // Note we set it at the "application" priority, so users can override.
-      "widget \"GtkDialog\" style : application \"gnome-dialog\"\n"
-
-      // Make our about dialog special, so the image is flush with the edge.
-      "style \"about-dialog\" {\n"
-      "  GtkDialog::action-area-border = 12\n"
-      "  GtkDialog::button-spacing = 6\n"
-      "  GtkDialog::content-area-spacing = 18\n"
-      "  GtkDialog::content-area-border = 0\n"
-      "}\n"
-      "widget \"about-dialog\" style : application \"about-dialog\"\n";
-
-  gtk_rc_parse_string(kRCText);
 }
 
 GtkWidget* CenterWidgetInHBox(GtkWidget* hbox, GtkWidget* widget,
@@ -665,7 +621,7 @@ GtkWidget* BuildDialogButton(GtkWidget* dialog, int ids_id,
 }
 
 GtkWidget* CreateEntryImageHBox(GtkWidget* entry, GtkWidget* image) {
-  GtkWidget* hbox = gtk_hbox_new(FALSE, gtk_util::kControlSpacing);
+  GtkWidget* hbox = gtk_hbox_new(FALSE, ui::kControlSpacing);
   gtk_box_pack_start(GTK_BOX(hbox), entry, TRUE, TRUE, 0);
   gtk_box_pack_start(GTK_BOX(hbox), image, FALSE, FALSE, 0);
   return hbox;
@@ -681,7 +637,7 @@ void SetLabelColor(GtkWidget* label, const GdkColor* color) {
 GtkWidget* IndentWidget(GtkWidget* content) {
   GtkWidget* content_alignment = gtk_alignment_new(0.0, 0.5, 1.0, 1.0);
   gtk_alignment_set_padding(GTK_ALIGNMENT(content_alignment), 0, 0,
-                            gtk_util::kGroupIndent, 0);
+                            ui::kGroupIndent, 0);
   gtk_container_add(GTK_CONTAINER(content_alignment), content);
   return content_alignment;
 }
@@ -780,7 +736,7 @@ std::string BuildTooltipTitleFor(string16 title, const GURL& url) {
   const std::string& url_str = url.possibly_invalid_spec();
   const std::string& title_str = UTF16ToUTF8(title);
 
-  std::string truncated_url = UTF16ToUTF8(l10n_util::TruncateString(
+  std::string truncated_url = UTF16ToUTF8(ui::TruncateString(
       UTF8ToUTF16(url_str), kMaxTooltipURLLength));
   gchar* escaped_url_cstr = g_markup_escape_text(truncated_url.c_str(),
                                                  truncated_url.size());
@@ -791,7 +747,7 @@ std::string BuildTooltipTitleFor(string16 title, const GURL& url) {
   if (url_str == title_str || title.empty()) {
     return escaped_url;
   } else {
-    std::string truncated_title = UTF16ToUTF8(l10n_util::TruncateString(
+    std::string truncated_title = UTF16ToUTF8(ui::TruncateString(
         title, kMaxTooltipTitleLength));
     gchar* escaped_title_cstr = g_markup_escape_text(truncated_title.c_str(),
                                                      truncated_title.size());
@@ -927,7 +883,7 @@ WindowOpenDisposition DispositionForCurrentButtonPressEvent() {
 
   guint state = event->button.state;
   gdk_event_free(event);
-  return event_utils::DispositionFromEventFlags(state);
+  return event_utils::DispositionFromGdkState(state);
 }
 
 bool GrabAllInput(GtkWidget* widget) {

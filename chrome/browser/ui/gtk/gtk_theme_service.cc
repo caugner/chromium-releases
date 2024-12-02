@@ -36,6 +36,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
@@ -238,9 +239,9 @@ void BuildIconFromIDRWithColor(int id,
 void GdkColorHSLShift(const color_utils::HSL& shift, GdkColor* frame_color) {
   SkColor shifted = color_utils::HSLShift(GdkToSkColor(frame_color), shift);
   frame_color->pixel = 0;
-  frame_color->red = SkColorGetR(shifted) * kSkiaToGDKMultiplier;
-  frame_color->green = SkColorGetG(shifted) * kSkiaToGDKMultiplier;
-  frame_color->blue = SkColorGetB(shifted) * kSkiaToGDKMultiplier;
+  frame_color->red = SkColorGetR(shifted) * ui::kSkiaToGDKMultiplier;
+  frame_color->green = SkColorGetG(shifted) * ui::kSkiaToGDKMultiplier;
+  frame_color->blue = SkColorGetB(shifted) * ui::kSkiaToGDKMultiplier;
 }
 
 }  // namespace
@@ -1080,9 +1081,8 @@ SkBitmap* GtkThemeService::GenerateTintedIcon(
     int base_id,
     const color_utils::HSL& tint) const {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  scoped_ptr<SkBitmap> button(new SkBitmap(*rb.GetBitmapNamed(base_id)));
   return new SkBitmap(SkBitmapOperations::CreateHSLShiftedBitmap(
-      *button, tint));
+      *rb.GetBitmapNamed(base_id), tint));
 }
 
 void GtkThemeService::GetNormalButtonTintHSL(

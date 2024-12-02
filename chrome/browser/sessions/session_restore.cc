@@ -34,10 +34,10 @@
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
+#include "net/base/network_change_notifier.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/network_state_notifier.h"
 #endif
 
 // Are we in the process of restoring?
@@ -58,10 +58,11 @@ static const int kInitialDelayTimerMS = 100;
 //
 // This is not part of SessionRestoreImpl so that synchronous destruction
 // of SessionRestoreImpl doesn't have timing problems.
-class TabLoader : public NotificationObserver {
+class TabLoader : public NotificationObserver,
+                  public net::NetworkChangeNotifier::OnlineStateObserver {
  public:
   explicit TabLoader(base::TimeTicks restore_started);
-  ~TabLoader();
+  virtual ~TabLoader();
 
   // Schedules a tab for loading.
   void ScheduleLoad(NavigationController* controller);
@@ -88,7 +89,10 @@ class TabLoader : public NotificationObserver {
   // tab.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
+
+  // net::NetworkChangeNotifier::OnlineStateObserver overrides.
+  virtual void OnOnlineStateChanged(bool online) OVERRIDE;
 
   // Removes the listeners from the specified tab and removes the tab from
   // the set of tabs to load and list of tabs we're waiting to get a load
@@ -156,6 +160,7 @@ TabLoader::TabLoader(base::TimeTicks restore_started)
 TabLoader::~TabLoader() {
   DCHECK((got_first_paint_ || render_widget_hosts_to_paint_.empty()) &&
           tabs_loading_.empty() && tabs_to_load_.empty());
+  net::NetworkChangeNotifier::RemoveOnlineStateObserver(this);
 }
 
 void TabLoader::ScheduleLoad(NavigationController* controller) {
@@ -181,13 +186,11 @@ void TabLoader::StartLoading() {
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
                  NotificationService::AllSources());
 #if defined(OS_CHROMEOS)
-  if (chromeos::NetworkStateNotifier::is_connected()) {
+  if (!net::NetworkChangeNotifier::IsOffline()) {
     loading_ = true;
     LoadNextTab();
   } else {
-    // Start listening to network state notification now.
-    registrar_.Add(this, chrome::NOTIFICATION_NETWORK_STATE_CHANGED,
-                   NotificationService::AllSources());
+    net::NetworkChangeNotifier::AddOnlineStateObserver(this);
   }
 #else
   loading_ = true;
@@ -222,7 +225,7 @@ void TabLoader::LoadNextTab() {
     force_load_timer_.Stop();
     // Each time we load a tab we also set a timer to force us to start loading
     // the next tab if this one doesn't load quickly enough.
-    force_load_timer_.Start(
+    force_load_timer_.Start(FROM_HERE,
         base::TimeDelta::FromMilliseconds(force_load_delay_),
         this, &TabLoader::ForceLoadTimerFired);
   }
@@ -232,31 +235,6 @@ void TabLoader::Observe(int type,
                         const NotificationSource& source,
                         const NotificationDetails& details) {
   switch (type) {
-#if defined(OS_CHROMEOS)
-    case chrome::NOTIFICATION_NETWORK_STATE_CHANGED: {
-      chromeos::NetworkStateDetails* state_details =
-          Details<chromeos::NetworkStateDetails>(details).ptr();
-      switch (state_details->state()) {
-        case chromeos::NetworkStateDetails::CONNECTED:
-          if (!loading_) {
-            loading_ = true;
-            LoadNextTab();
-          }
-          // Start loading
-          break;
-        case chromeos::NetworkStateDetails::CONNECTING:
-        case chromeos::NetworkStateDetails::DISCONNECTED:
-          // Disconnected while loading. Set loading_ false so
-          // that it stops trying to load next tab.
-          loading_ = false;
-          break;
-        default:
-          NOTREACHED() << "Unknown nework state notification:"
-                       << state_details->state();
-      }
-      break;
-    }
-#endif
     case content::NOTIFICATION_LOAD_START: {
       // Add this render_widget_host to the set of those we're waiting for
       // paints on. We want to only record stats for paints that occur after
@@ -330,6 +308,17 @@ void TabLoader::Observe(int type,
   if ((got_first_paint_ || render_widget_hosts_to_paint_.empty()) &&
       tabs_loading_.empty() && tabs_to_load_.empty())
     delete this;
+}
+
+void TabLoader::OnOnlineStateChanged(bool online) {
+  if (online) {
+    if (!loading_) {
+      loading_ = true;
+      LoadNextTab();
+    }
+  } else {
+    loading_ = false;
+  }
 }
 
 void TabLoader::RemoveTab(NavigationController* tab) {
@@ -466,7 +455,7 @@ class SessionRestoreImpl : public NotificationObserver {
       Browser* browser = CreateRestoredBrowser(
           static_cast<Browser::Type>((*i)->type),
           (*i)->bounds,
-          (*i)->is_maximized);
+          (*i)->show_state);
 
       // Restore and show the browser.
       const int initial_tab_count = browser->tab_count();
@@ -598,6 +587,15 @@ class SessionRestoreImpl : public NotificationObserver {
     // tabbed browsers exist.
     Browser* last_browser = NULL;
     bool has_tabbed_browser = false;
+
+    // Determine if there is a visible window.
+    bool has_visible_browser = false;
+    for (std::vector<SessionWindow*>::iterator i = windows->begin();
+         i != windows->end(); ++i) {
+      if ((*i)->show_state != ui::SHOW_STATE_MINIMIZED)
+        has_visible_browser = true;
+    }
+
     for (std::vector<SessionWindow*>::iterator i = windows->begin();
          i != windows->end(); ++i) {
       Browser* browser = NULL;
@@ -613,10 +611,15 @@ class SessionRestoreImpl : public NotificationObserver {
     chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
         "SessionRestore-CreateRestoredBrowser-Start", false);
 #endif
+        // Show the first window if none are visible.
+        ui::WindowShowState show_state = (*i)->show_state;
+        if (!has_visible_browser) {
+          show_state = ui::SHOW_STATE_NORMAL;
+          has_visible_browser = true;
+        }
+
         browser = CreateRestoredBrowser(
-            static_cast<Browser::Type>((*i)->type),
-            (*i)->bounds,
-            (*i)->is_maximized);
+            static_cast<Browser::Type>((*i)->type), (*i)->bounds, show_state);
 #if defined(OS_CHROMEOS)
     chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
         "SessionRestore-CreateRestoredBrowser-End", false);
@@ -684,7 +687,7 @@ class SessionRestoreImpl : public NotificationObserver {
                  static_cast<int>(tab.navigations.size() - 1)));
 
     // Record an app launch, if applicable.
-    GURL url = tab.navigations.at(tab.current_navigation_index).virtual_url();
+    GURL url = tab.navigations.at(selected_index).virtual_url();
     if (
 #if defined(OS_CHROMEOS)
         browser->profile()->GetExtensionService() &&
@@ -710,12 +713,11 @@ class SessionRestoreImpl : public NotificationObserver {
 
   Browser* CreateRestoredBrowser(Browser::Type type,
                                  gfx::Rect bounds,
-                                 bool is_maximized) {
+                                 ui::WindowShowState show_state) {
     Browser* browser = new Browser(type, profile_);
     browser->set_override_bounds(bounds);
-    browser->set_maximized_state(is_maximized ?
-        Browser::MAXIMIZED_STATE_MAXIMIZED :
-        Browser::MAXIMIZED_STATE_UNMAXIMIZED);
+    browser->set_show_state(show_state);
+    browser->set_is_session_restore(true);
     browser->InitBrowserWindow();
     return browser;
   }
@@ -733,6 +735,8 @@ class SessionRestoreImpl : public NotificationObserver {
       return;
 
     browser->window()->Show();
+    browser->set_is_session_restore(false);
+
     // TODO(jcampan): http://crbug.com/8123 we should not need to set the
     //                initial focus explicitly.
     browser->GetSelectedTabContents()->view()->SetInitialFocus();

@@ -58,11 +58,12 @@ const int kUpdateBoundsDelayMS = 1000;
 // If this status code is seen instant is disabled for the specified host.
 const int kHostBlacklistStatusCode = 403;
 
-// Header and value set for all loads.
-const char kPreviewHeader[] = "X-Purpose";
-const char kPreviewHeaderValue[] = "instant";
-
 }  // namespace
+
+// static
+const char* const InstantLoader::kInstantHeader = "X-Purpose";
+// static
+const char* const InstantLoader::kInstantHeaderValue = "instant";
 
 // FrameLoadObserver is responsible for determining if the page supports
 // instant after it has loaded.
@@ -130,7 +131,7 @@ void InstantLoader::FrameLoadObserver::Observe(
       // TODO: support real cursor position.
       int text_length = static_cast<int>(text_.size());
       RenderViewHost* host = tab_contents_->render_view_host();
-      host->Send(new ViewMsg_DetermineIfPageSupportsInstant(
+      host->Send(new ChromeViewMsg_DetermineIfPageSupportsInstant(
           host->routing_id(), text_, verbatim_, text_length, text_length));
       break;
     }
@@ -181,7 +182,8 @@ class InstantLoader::TabContentsDelegateImpl
   // TabContentsDelegate:
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) OVERRIDE;
-  virtual std::string GetNavigationHeaders(const GURL& url) OVERRIDE;
+  virtual void AddNavigationHeaders(const GURL& url,
+                                    std::string* headers) OVERRIDE;
   virtual bool ShouldFocusConstrainedWindow() OVERRIDE;
   virtual void WillShowConstrainedWindow(TabContents* source) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
@@ -412,12 +414,11 @@ void InstantLoader::TabContentsDelegateImpl::NavigationStateChanged(
   }
 }
 
-std::string InstantLoader::TabContentsDelegateImpl::GetNavigationHeaders(
-    const GURL& url) {
-  std::string header;
-  net::HttpUtil::AppendHeaderIfMissing(kPreviewHeader, kPreviewHeaderValue,
-                                       &header);
-  return header;
+void InstantLoader::TabContentsDelegateImpl::AddNavigationHeaders(
+    const GURL& url,
+    std::string* headers) {
+  net::HttpUtil::AppendHeaderIfMissing(kInstantHeader, kInstantHeaderValue,
+                                       headers);
 }
 
 bool InstantLoader::TabContentsDelegateImpl::ShouldFocusConstrainedWindow() {
@@ -508,8 +509,8 @@ bool InstantLoader::TabContentsDelegateImpl::OnMessageReceived(
     const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(TabContentsDelegateImpl, message)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_SetSuggestions, OnSetSuggestions)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_InstantSupportDetermined,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SetSuggestions, OnSetSuggestions)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_InstantSupportDetermined,
                         OnInstantSupportDetermined)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -639,7 +640,7 @@ bool InstantLoader::Update(TabContentsWrapper* tab_contents,
       // TODO: support real cursor position.
       int text_length = static_cast<int>(user_text_.size());
       RenderViewHost* host = preview_contents_->render_view_host();
-      host->Send(new ViewMsg_SearchBoxChange(
+      host->Send(new ChromeViewMsg_SearchBoxChange(
           host->routing_id(), user_text_, verbatim, text_length, text_length));
 
       string16 complete_suggested_text_lower = base::i18n::ToLower(
@@ -684,7 +685,7 @@ void InstantLoader::SetOmniboxBounds(const gfx::Rect& bounds) {
     if (omnibox_bounds_.height() > last_omnibox_bounds_.height()) {
       SendBoundsToPage(false);
     } else {
-      update_bounds_timer_.Start(
+      update_bounds_timer_.Start(FROM_HERE,
           base::TimeDelta::FromMilliseconds(kUpdateBoundsDelayMS),
           this, &InstantLoader::ProcessBoundsChange);
     }
@@ -708,9 +709,9 @@ TabContentsWrapper* InstantLoader::ReleasePreviewContents(
   if (type != INSTANT_COMMIT_DESTROY && is_showing_instant()) {
     RenderViewHost* host = preview_contents_->render_view_host();
     if (type == INSTANT_COMMIT_FOCUS_LOST) {
-      host->Send(new ViewMsg_SearchBoxCancel(host->routing_id()));
+      host->Send(new ChromeViewMsg_SearchBoxCancel(host->routing_id()));
     } else {
-      host->Send(new ViewMsg_SearchBoxSubmit(
+      host->Send(new ChromeViewMsg_SearchBoxSubmit(
           host->routing_id(), user_text_,
           type == INSTANT_COMMIT_PRESSED_ENTER));
     }
@@ -769,6 +770,39 @@ void InstantLoader::MaybeLoadInstantURL(TabContentsWrapper* tab_contents,
   CreatePreviewContents(tab_contents);
   LoadInstantURL(tab_contents, template_url, PageTransition::GENERATED,
                  string16(), true);
+}
+
+bool InstantLoader::IsNavigationPending() const {
+  return preview_contents_.get() &&
+      preview_contents_->controller().pending_entry();
+}
+
+void InstantLoader::Observe(int type,
+                            const NotificationSource& source,
+                            const NotificationDetails& details) {
+#if defined(OS_MACOSX)
+  if (type == content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED) {
+    if (preview_contents_->tab_contents()->GetRenderWidgetHostView()) {
+      preview_contents_->tab_contents()->GetRenderWidgetHostView()->
+          SetTakesFocusOnlyOnMouseDown(true);
+    }
+    return;
+  }
+#endif
+  if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
+    content::LoadCommittedDetails* load_details =
+        Details<content::LoadCommittedDetails>(details).ptr();
+    if (load_details->is_main_frame) {
+      if (load_details->http_status_code == kHostBlacklistStatusCode) {
+        delegate_->AddToBlacklist(this, load_details->entry->url());
+      } else {
+        SetHTTPStatusOK(load_details->http_status_code == 200);
+      }
+    }
+    return;
+  }
+
+  NOTREACHED() << "Got a notification we didn't register for.";
 }
 
 void InstantLoader::SetCompleteSuggestedText(
@@ -842,34 +876,6 @@ void InstantLoader::ShowPreview() {
   }
 }
 
-void InstantLoader::Observe(int type,
-                            const NotificationSource& source,
-                            const NotificationDetails& details) {
-#if defined(OS_MACOSX)
-  if (type == content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED) {
-    if (preview_contents_->tab_contents()->GetRenderWidgetHostView()) {
-      preview_contents_->tab_contents()->GetRenderWidgetHostView()->
-          SetTakesFocusOnlyOnMouseDown(true);
-    }
-    return;
-  }
-#endif
-  if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
-    content::LoadCommittedDetails* load_details =
-        Details<content::LoadCommittedDetails>(details).ptr();
-    if (load_details->is_main_frame) {
-      if (load_details->http_status_code == kHostBlacklistStatusCode) {
-        delegate_->AddToBlacklist(this, load_details->entry->url());
-      } else {
-        SetHTTPStatusOK(load_details->http_status_code == 200);
-      }
-    }
-    return;
-  }
-
-  NOTREACHED() << "Got a notification we didn't register for.";
-}
-
 void InstantLoader::PageFinishedLoading() {
   frame_load_observer_.reset();
 
@@ -923,7 +929,7 @@ void InstantLoader::SendBoundsToPage(bool force_if_waiting) {
       (force_if_waiting || !is_waiting_for_load())) {
     last_omnibox_bounds_ = omnibox_bounds_;
     RenderViewHost* host = preview_contents_->render_view_host();
-    host->Send(new ViewMsg_SearchBoxResize(
+    host->Send(new ChromeViewMsg_SearchBoxResize(
         host->routing_id(), GetOmniboxBoundsInTermsOfPreview()));
   }
 }
@@ -1030,7 +1036,7 @@ void InstantLoader::LoadInstantURL(TabContentsWrapper* tab_contents,
     instant_url = GURL(cl->GetSwitchValueASCII(switches::kInstantURL));
   preview_contents_->controller().LoadURL(instant_url, GURL(), transition_type);
   RenderViewHost* host = preview_contents_->render_view_host();
-  host->Send(new ViewMsg_SearchBoxChange(
+  host->Send(new ChromeViewMsg_SearchBoxChange(
       host->routing_id(), user_text, verbatim, 0, 0));
   frame_load_observer_.reset(new FrameLoadObserver(
       this, preview_contents()->tab_contents(), user_text, verbatim));

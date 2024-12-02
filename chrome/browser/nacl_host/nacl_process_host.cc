@@ -56,7 +56,7 @@ NaClProcessHost::NaClProcessHost(const std::wstring& url)
       internal_(new NaClInternal()),
       running_on_wow64_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)) {
-  set_name(url);
+  set_name(WideToUTF16Hack(url));
 #if defined(OS_WIN)
   running_on_wow64_ = (base::win::OSInfo::GetInstance()->wow64_status() ==
       base::win::OSInfo::WOW64_ENABLED);
@@ -145,7 +145,22 @@ bool NaClProcessHost::LaunchSelLdr() {
 #endif  // defined(OS_POSIX)
 
   // Build command line for nacl.
-  FilePath exe_path = GetChildPath(nacl_loader_prefix.empty());
+
+#if defined(OS_MACOSX)
+  // The Native Client process needs to be able to allocate a 1GB contiguous
+  // region to use as the client environment's virtual address space. ASLR
+  // (PIE) interferes with this by making it possible that no gap large enough
+  // to accomodate this request will exist in the child process' address
+  // space. Disable PIE for NaCl processes. See http://crbug.com/90221 and
+  // http://code.google.com/p/nativeclient/issues/detail?id=2043.
+  int flags = CHILD_NO_PIE;
+#elif defined(OS_LINUX)
+  int flags = nacl_loader_prefix.empty() ? CHILD_ALLOW_SELF : CHILD_NORMAL;
+#else
+  int flags = CHILD_NORMAL;
+#endif
+
+  FilePath exe_path = GetChildPath(flags);
   if (exe_path.empty())
     return false;
 
@@ -242,7 +257,6 @@ void NaClProcessHost::OnProcessLaunched() {
            irt_path,
            base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ,
            callback)) {
-    delete callback;
     delete this;
   }
 }
@@ -309,7 +323,7 @@ void NaClProcessHost::OpenIrtFileDone(base::PlatformFileError error_code,
   // Get the pid of the NaCl process
   base::ProcessId nacl_process_id = base::GetProcId(handle());
 
-  ViewHostMsg_LaunchNaCl::WriteReplyParams(
+  ChromeViewHostMsg_LaunchNaCl::WriteReplyParams(
       reply_msg_, handles_for_renderer, nacl_process_handle, nacl_process_id);
   chrome_render_message_filter_->Send(reply_msg_);
   chrome_render_message_filter_ = NULL;

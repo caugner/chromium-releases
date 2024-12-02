@@ -7,11 +7,11 @@
 #include "base/message_loop.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/resource.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -19,18 +19,18 @@ namespace {
 PP_Bool ReadImageData(PP_Resource graphics_2d,
                       PP_Resource image,
                       const PP_Point* top_left) {
-  PluginResource* image_object = PluginResourceTracker::GetInstance()->
-      GetResourceObject(image);
+  Resource* image_object = PluginResourceTracker::GetInstance()->
+      GetResource(image);
   if (!image_object)
     return PP_FALSE;
-  PluginResource* graphics_2d_object =
-      PluginResourceTracker::GetInstance()->GetResourceObject(graphics_2d);
+  Resource* graphics_2d_object =
+      PluginResourceTracker::GetInstance()->GetResource(graphics_2d);
   if (!graphics_2d_object ||
-      image_object->instance() != graphics_2d_object->instance())
+      image_object->pp_instance() != graphics_2d_object->pp_instance())
     return PP_FALSE;
 
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(
-      image_object->instance());
+      image_object->pp_instance());
   if (!dispatcher)
     return PP_FALSE;
 
@@ -42,21 +42,14 @@ PP_Bool ReadImageData(PP_Resource graphics_2d,
 }
 
 void RunMessageLoop(PP_Instance instance) {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
-  if (!dispatcher)
-    return;
-  IPC::SyncMessage* msg = new PpapiHostMsg_PPBTesting_RunMessageLoop(
-        INTERFACE_ID_PPB_TESTING, instance);
-  msg->EnableMessagePumping();
-  dispatcher->Send(msg);
+  bool old_state = MessageLoop::current()->NestableTasksAllowed();
+  MessageLoop::current()->SetNestableTasksAllowed(true);
+  MessageLoop::current()->Run();
+  MessageLoop::current()->SetNestableTasksAllowed(old_state);
 }
 
 void QuitMessageLoop(PP_Instance instance) {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
-  if (!dispatcher)
-    return;
-  dispatcher->Send(new PpapiHostMsg_PPBTesting_QuitMessageLoop(
-        INTERFACE_ID_PPB_TESTING, instance));
+  MessageLoop::current()->QuitNow();
 }
 
 uint32_t GetLiveObjectsForInstance(PP_Instance instance_id) {
@@ -70,11 +63,16 @@ uint32_t GetLiveObjectsForInstance(PP_Instance instance_id) {
   return result;
 }
 
+PP_Bool IsOutOfProcess() {
+  return PP_TRUE;
+}
+
 const PPB_Testing_Dev testing_interface = {
   &ReadImageData,
   &RunMessageLoop,
   &QuitMessageLoop,
-  &GetLiveObjectsForInstance
+  &GetLiveObjectsForInstance,
+  &IsOutOfProcess
 };
 
 InterfaceProxy* CreateTestingProxy(Dispatcher* dispatcher,
@@ -109,10 +107,6 @@ bool PPB_Testing_Proxy::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PPB_Testing_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBTesting_ReadImageData,
                         OnMsgReadImageData)
-    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBTesting_RunMessageLoop,
-                        OnMsgRunMessageLoop)
-    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBTesting_QuitMessageLoop,
-                        OnMsgQuitMessageLoop)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBTesting_GetLiveObjectsForInstance,
                         OnMsgGetLiveObjectsForInstance)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -143,4 +137,4 @@ void PPB_Testing_Proxy::OnMsgGetLiveObjectsForInstance(PP_Instance instance,
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

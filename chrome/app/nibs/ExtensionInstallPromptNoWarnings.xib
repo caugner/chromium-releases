@@ -30,7 +30,7 @@
 		<object class="NSMutableArray" key="IBDocument.RootObjects" id="1000">
 			<bool key="EncodedWithXMLCoder">YES</bool>
 			<object class="NSCustomObject" id="1001">
-				<string key="NSClassName">ExtensionInstallPromptController</string>
+				<string key="NSClassName">ExtensionInstallDialogController</string>
 			</object>
 			<object class="NSCustomObject" id="1003">
 				<string key="NSClassName">FirstResponder</string>
@@ -54,7 +54,7 @@
 						<bool key="EncodedWithXMLCoder">YES</bool>
 						<object class="NSImageView" id="561354826">
 							<reference key="NSNextResponder" ref="955129256"/>
-							<int key="NSvFlags">268</int>
+							<int key="NSvFlags">265</int>
 							<object class="NSMutableSet" key="NSDragTypes">
 								<bool key="EncodedWithXMLCoder">YES</bool>
 								<object class="NSArray" key="set.sortedObjects">
@@ -67,7 +67,7 @@
 									<string>NeXT TIFF v4.0 pasteboard type</string>
 								</object>
 							</object>
-							<string key="NSFrame">{{20, 62}, {69, 69}}</string>
+							<string key="NSFrame">{{218, 60}, {69, 69}}</string>
 							<reference key="NSSuperview" ref="955129256"/>
 							<bool key="NSEnabled">YES</bool>
 							<object class="NSImageCell" key="NSCell" id="785962619">
@@ -83,12 +83,12 @@
 						<object class="NSTextField" id="592145570">
 							<reference key="NSNextResponder" ref="955129256"/>
 							<int key="NSvFlags">264</int>
-							<string key="NSFrame">{{104, 88}, {186, 17}}</string>
+							<string key="NSFrame">{{17, 86}, {186, 17}}</string>
 							<reference key="NSSuperview" ref="955129256"/>
 							<bool key="NSEnabled">YES</bool>
 							<object class="NSTextFieldCell" key="NSCell" id="530390105">
 								<int key="NSCellFlags">68288064</int>
-								<int key="NSCellFlags2">272630848</int>
+								<int key="NSCellFlags2">272630784</int>
 								<string key="NSContents">Title</string>
 								<object class="NSFont" key="NSSupport">
 									<string key="NSName">LucidaGrande-Bold</string>
@@ -321,10 +321,10 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 						<reference key="object" ref="955129256"/>
 						<object class="NSMutableArray" key="children">
 							<bool key="EncodedWithXMLCoder">YES</bool>
-							<reference ref="592145570"/>
 							<reference ref="478302198"/>
 							<reference ref="806362510"/>
 							<reference ref="561354826"/>
+							<reference ref="592145570"/>
 						</object>
 						<reference key="parent" ref="477128141"/>
 					</object>
@@ -469,7 +469,7 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">
-					<string key="className">ExtensionInstallPromptController</string>
+					<string key="className">ExtensionInstallDialogController</string>
 					<string key="superclassName">NSWindowController</string>
 					<object class="NSMutableDictionary" key="actions">
 						<bool key="EncodedWithXMLCoder">YES</bool>
@@ -477,9 +477,11 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 							<bool key="EncodedWithXMLCoder">YES</bool>
 							<string>cancel:</string>
 							<string>ok:</string>
+							<string>storeLinkClicked:</string>
 						</object>
 						<object class="NSMutableArray" key="dict.values">
 							<bool key="EncodedWithXMLCoder">YES</bool>
+							<string>id</string>
 							<string>id</string>
 							<string>id</string>
 						</object>
@@ -490,6 +492,7 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 							<bool key="EncodedWithXMLCoder">YES</bool>
 							<string>cancel:</string>
 							<string>ok:</string>
+							<string>storeLinkClicked:</string>
 						</object>
 						<object class="NSMutableArray" key="dict.values">
 							<bool key="EncodedWithXMLCoder">YES</bool>
@@ -501,6 +504,10 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 								<string key="name">ok:</string>
 								<string key="candidateClassName">id</string>
 							</object>
+							<object class="IBActionInfo">
+								<string key="name">storeLinkClicked:</string>
+								<string key="candidateClassName">id</string>
+							</object>
 						</object>
 					</object>
 					<object class="NSMutableDictionary" key="outlets">
@@ -510,10 +517,13 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 							<string>cancelButton_</string>
 							<string>iconView_</string>
 							<string>okButton_</string>
+							<string>ratingCountField_</string>
+							<string>ratingStars_</string>
 							<string>subtitleField_</string>
 							<string>titleField_</string>
-							<string>warningsBox_</string>
+							<string>userCountField_</string>
 							<string>warningsField_</string>
+							<string>warningsSeparator_</string>
 						</object>
 						<object class="NSMutableArray" key="dict.values">
 							<bool key="EncodedWithXMLCoder">YES</bool>
@@ -521,9 +531,12 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 							<string>NSImageView</string>
 							<string>NSButton</string>
 							<string>NSTextField</string>
+							<string>NSView</string>
+							<string>NSTextField</string>
+							<string>NSTextField</string>
+							<string>NSTextField</string>
 							<string>NSTextField</string>
 							<string>NSBox</string>
-							<string>NSTextField</string>
 						</object>
 					</object>
 					<object class="NSMutableDictionary" key="toOneOutletInfosByName">
@@ -533,10 +546,13 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 							<string>cancelButton_</string>
 							<string>iconView_</string>
 							<string>okButton_</string>
+							<string>ratingCountField_</string>
+							<string>ratingStars_</string>
 							<string>subtitleField_</string>
 							<string>titleField_</string>
-							<string>warningsBox_</string>
+							<string>userCountField_</string>
 							<string>warningsField_</string>
+							<string>warningsSeparator_</string>
 						</object>
 						<object class="NSMutableArray" key="dict.values">
 							<bool key="EncodedWithXMLCoder">YES</bool>
@@ -553,6 +569,14 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 								<string key="candidateClassName">NSButton</string>
 							</object>
 							<object class="IBToOneOutletInfo">
+								<string key="name">ratingCountField_</string>
+								<string key="candidateClassName">NSTextField</string>
+							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">ratingStars_</string>
+								<string key="candidateClassName">NSView</string>
+							</object>
+							<object class="IBToOneOutletInfo">
 								<string key="name">subtitleField_</string>
 								<string key="candidateClassName">NSTextField</string>
 							</object>
@@ -561,18 +585,22 @@ ARcABAAAAAEAAAACARwAAwAAAAEAAQAAAVIAAwAAAAEAAQAAAVMAAwAAAAIAAQABAAAAAA</bytes>
 								<string key="candidateClassName">NSTextField</string>
 							</object>
 							<object class="IBToOneOutletInfo">
-								<string key="name">warningsBox_</string>
-								<string key="candidateClassName">NSBox</string>
+								<string key="name">userCountField_</string>
+								<string key="candidateClassName">NSTextField</string>
 							</object>
 							<object class="IBToOneOutletInfo">
 								<string key="name">warningsField_</string>
 								<string key="candidateClassName">NSTextField</string>
 							</object>
+							<object class="IBToOneOutletInfo">
+								<string key="name">warningsSeparator_</string>
+								<string key="candidateClassName">NSBox</string>
+							</object>
 						</object>
 					</object>
 					<object class="IBClassDescriptionSource" key="sourceIdentifier">
 						<string key="majorKey">IBProjectSource</string>
-						<string key="minorKey">browser/ui/cocoa/extensions/extension_install_prompt_controller.h</string>
+						<string key="minorKey">browser/ui/cocoa/extensions/extension_install_dialog_controller.h</string>
 					</object>
 				</object>
 				<object class="IBPartialClassDescription">

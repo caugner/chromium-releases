@@ -10,6 +10,7 @@
 #include "base/string16.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/network_action_predictor.h"
 #include "chrome/common/instant_types.h"
 #include "content/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
@@ -22,6 +23,7 @@ class AutocompleteEditModel;
 class AutocompletePopupModel;
 class AutocompleteResult;
 class InstantController;
+class NetworkActionPredictor;
 class OmniboxView;
 class Profile;
 class SkBitmap;
@@ -118,9 +120,6 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
   AutocompletePopupModel* popup_model() const { return popup_; }
 
   AutocompleteEditController* controller() const { return controller_; }
-
-  // Invoked when the profile has changed.
-  void SetProfile(Profile* profile);
 
   Profile* profile() const { return profile_; }
 
@@ -404,14 +403,6 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
   void GetInfoForCurrentText(AutocompleteMatch* match,
                              GURL* alternate_nav_url) const;
 
-  // Returns true if |text| (which is display text in the current context)
-  // parses as a URL, and in that case sets |url| to the calculated URL.
-  // Subtle note: This ignores the desired_tld_ (unlike GetDataForURLExport()
-  // and CurrentTextIsURL()).  The view needs this because it calls this
-  // function during copy handling, when the control key is down to trigger the
-  // copy.
-  bool GetURLForText(const string16& text, GURL* url) const;
-
   // Reverts the edit box from a temporary text back to the original user text.
   // If |revert_popup| is true then the popup will be reverted as well.
   void RevertTemporaryText(bool revert_popup);
@@ -430,6 +421,16 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
   bool ShouldAllowExactKeywordMatch(const string16& old_user_text,
                                     const string16& new_user_text,
                                     size_t caret_position);
+
+  // Tries to start an instant preview for |match|. Returns true if instant is
+  // supported. |suggested_text| must be non-NULL.
+  bool DoInstant(const AutocompleteMatch& match, string16* suggested_text);
+
+  // Starts a prerender for the given |match|.
+  void DoPrerender(const AutocompleteMatch& match);
+
+  // Starts a DNS prefetch for the given |match|.
+  void DoPreconnect(const AutocompleteMatch& match);
 
   // Checks if a given character is a valid space character for accepting
   // keyword.
@@ -553,6 +554,9 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
 
   // Last value of InstantCompleteBehavior supplied to |SetSuggestedText|.
   InstantCompleteBehavior instant_complete_behavior_;
+
+  // Used to determine what network actions to take in different circumstances.
+  NetworkActionPredictor network_action_predictor_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditModel);
 };

@@ -5,17 +5,18 @@
 #ifndef PPAPI_PROXY_PPB_FONT_PROXY_H_
 #define PPAPI_PROXY_PPB_FONT_PROXY_H_
 
-#include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/synchronization/waitable_event.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/plugin_resource.h"
+#include "ppapi/shared_impl/function_group_base.h"
+#include "ppapi/shared_impl/host_resource.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/shared_impl/webkit_forwarding.h"
 #include "ppapi/thunk/ppb_font_api.h"
 
 struct PPB_Font_Dev;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class SerializedVarReturnValue;
@@ -42,7 +43,7 @@ class PPB_Font_Proxy : public ppapi::FunctionGroupBase,
   DISALLOW_COPY_AND_ASSIGN(PPB_Font_Proxy);
 };
 
-class Font : public PluginResource,
+class Font : public ppapi::Resource,
              public ppapi::thunk::PPB_Font_API {
  public:
   // Note that there isn't a "real" resource in the renderer backing a font,
@@ -50,14 +51,11 @@ class Font : public PluginResource,
   // resource should be 0. However, various code assumes the instance in the
   // host resource is valid (this is how resources are associated with
   // instances), so that should be set.
-  Font(const HostResource& resource, const PP_FontDescription_Dev& desc);
+  Font(const ppapi::HostResource& resource, const PP_FontDescription_Dev& desc);
   virtual ~Font();
 
-  // ResourceObjectBase.
+  // Resource.
   virtual ppapi::thunk::PPB_Font_API* AsPPB_Font_API() OVERRIDE;
-
-  // PluginResource overrides.
-  virtual Font* AsFont() OVERRIDE;
 
   // PPB_Font_API implementation.
   virtual PP_Bool Describe(PP_FontDescription_Dev* description,
@@ -75,18 +73,25 @@ class Font : public PluginResource,
                                           uint32_t char_offset) OVERRIDE;
 
  private:
-  // Posts the given closure to the WebKit thread and waits on the
-  // webkit_event_ for the task to continue.
-  void RunOnWebKitThread(const base::Closure& task);
+  // Posts the given closure to the WebKit thread.
+  // If |blocking| is true, the method waits on |webkit_event_| for the task to
+  // continue.
+  void RunOnWebKitThread(bool blocking, const base::Closure& task);
+
+  static void DeleteFontForwarding(
+      ppapi::WebKitForwarding::Font* font_forwarding);
 
   base::WaitableEvent webkit_event_;
 
-  scoped_ptr<ppapi::WebKitForwarding::Font> font_forwarding_;
+  // This class owns |font_forwarding_|.
+  // |font_forwarding_| should always be used on the WebKit thread (including
+  // destruction).
+  ppapi::WebKitForwarding::Font* font_forwarding_;
 
   DISALLOW_COPY_AND_ASSIGN(Font);
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_FONT_PROXY_H_

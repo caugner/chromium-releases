@@ -13,13 +13,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/sync/engine/http_post_provider_factory.h"
-#include "chrome/browser/sync/engine/http_post_provider_interface.h"
-#include "chrome/browser/sync/engine/syncapi.h"
+#include "chrome/browser/sync/internal_api/http_post_provider_factory.h"
+#include "chrome/browser/sync/internal_api/http_post_provider_interface.h"
 #include "content/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
-#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "net/url_request/url_request_context.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class MessageLoop;

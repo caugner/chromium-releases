@@ -16,6 +16,7 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/system_monitor/system_monitor.h"
@@ -110,11 +111,15 @@ bool SetFocusToAccessibleWindow(HWND hwnd) {
 class FakeBrowserProcessImpl : public BrowserProcessImpl {
  public:
   explicit FakeBrowserProcessImpl(const CommandLine& command_line)
-      : BrowserProcessImpl(command_line) {}
+      : BrowserProcessImpl(command_line) {
+    profiles_dir_.CreateUniqueTempDir();
+  }
 
   virtual ProfileManager* profile_manager() {
-    if (!profile_manager_.get())
-      profile_manager_.reset(new ProfileManagerWithoutInit);
+    if (!profile_manager_.get()) {
+      profile_manager_.reset(
+          new ProfileManagerWithoutInit(profiles_dir_.path()));
+    }
     return profile_manager_.get();
   }
 
@@ -123,6 +128,7 @@ class FakeBrowserProcessImpl : public BrowserProcessImpl {
   }
 
  private:
+  ScopedTempDir profiles_dir_;
   scoped_ptr<ProfileManager> profile_manager_;
 };
 
@@ -352,9 +358,7 @@ void CFUrlRequestUnittestRunner::Initialize() {
 
   SuppressErrorDialogs();
   base::debug::SetSuppressDebugUI(true);
-#if !defined(PURIFY)
   logging::SetLogAssertHandler(UnitTestAssertHandler);
-#endif  // !defined(PURIFY)
 
   // Next, do some initialization for NetTestSuite.
   NetTestSuite::InitializeTestThread();
@@ -578,5 +582,11 @@ int main(int argc, char** argv) {
 
   base::KillProcesses(chrome_frame_test::kIEImageName, 0, NULL);
   base::KillProcesses(chrome_frame_test::kIEBrokerImageName, 0, NULL);
+  // Avoid CRT cleanup in debug test runs to ensure that webkit ASSERTs which
+  // check if globals are created and destroyed on the same thread don't fire.
+  // Webkit global objects are created on the inproc renderer thread.
+#if !defined(NDEBUG)
+  ExitProcess(test_suite.test_result());
+#endif  // NDEBUG
   return test_suite.test_result();
 }

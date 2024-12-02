@@ -55,8 +55,7 @@ void SimDialogDelegate::ShowDialog(gfx::NativeWindow owning_window,
       new HtmlDialogView(profile, new SimDialogDelegate(mode));
   html_view->InitDialog();
   chromeos::BubbleWindow::Create(owning_window,
-                                 gfx::Rect(),
-                                 chromeos::BubbleWindow::STYLE_GENERIC,
+                                 chromeos::STYLE_GENERIC,
                                  html_view);
   html_view->GetWidget()->Show();
 }
@@ -72,8 +71,8 @@ bool SimDialogDelegate::IsDialogModal() const {
   return true;
 }
 
-std::wstring SimDialogDelegate::GetDialogTitle() const {
-  return std::wstring();
+string16 SimDialogDelegate::GetDialogTitle() const {
+  return string16();
 }
 
 GURL SimDialogDelegate::GetDialogContentURL() const {

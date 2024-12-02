@@ -17,11 +17,13 @@
 #include "chrome/browser/extensions/extension_bookmark_manager_api.h"
 #include "chrome/browser/extensions/extension_bookmarks_module.h"
 #include "chrome/browser/extensions/extension_browser_actions_api.h"
+#include "chrome/browser/extensions/extension_clear_api.h"
 #include "chrome/browser/extensions/extension_chrome_auth_private_api.h"
 #include "chrome/browser/extensions/extension_content_settings_api.h"
 #include "chrome/browser/extensions/extension_context_menu_api.h"
 #include "chrome/browser/extensions/extension_cookies_api.h"
 #include "chrome/browser/extensions/extension_debugger_api.h"
+#include "chrome/browser/extensions/extension_downloads_api.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_history_api.h"
 #include "chrome/browser/extensions/extension_i18n_api.h"
@@ -32,11 +34,13 @@
 #include "chrome/browser/extensions/extension_module.h"
 #include "chrome/browser/extensions/extension_omnibox_api.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
+#include "chrome/browser/extensions/extension_permissions_api.h"
 #include "chrome/browser/extensions/extension_preference_api.h"
 #include "chrome/browser/extensions/extension_processes_api.h"
 #include "chrome/browser/extensions/extension_proxy_api.h"
 #include "chrome/browser/extensions/extension_rlz_module.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_settings_api.h"
 #include "chrome/browser/extensions/extension_sidebar_api.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_test_api.h"
@@ -44,6 +48,7 @@
 #include "chrome/browser/extensions/extension_tts_engine_api.h"
 #include "chrome/browser/extensions/extension_web_socket_proxy_private_api.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
+#include "chrome/browser/extensions/extension_webnavigation_api.h"
 #include "chrome/browser/extensions/extension_webrequest_api.h"
 #include "chrome/browser/extensions/extension_webstore_private_api.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
@@ -72,6 +77,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/extensions/extension_file_browser_private_api.h"
 #include "chrome/browser/extensions/extension_info_private_api_chromeos.h"
+#include "chrome/browser/extensions/extension_input_ime_api.h"
 #include "chrome/browser/extensions/extension_input_method_api.h"
 #include "chrome/browser/extensions/extension_mediaplayer_private_api.h"
 #endif
@@ -162,6 +168,15 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<BrowserActionSetBadgeTextFunction>();
   RegisterFunction<BrowserActionSetBadgeBackgroundColorFunction>();
   RegisterFunction<BrowserActionSetPopupFunction>();
+
+  // Browsing Data.
+  RegisterFunction<ClearBrowsingDataFunction>();
+  RegisterFunction<ClearCacheFunction>();
+  RegisterFunction<ClearCookiesFunction>();
+  RegisterFunction<ClearDownloadsFunction>();
+  RegisterFunction<ClearFormDataFunction>();
+  RegisterFunction<ClearHistoryFunction>();
+  RegisterFunction<ClearPasswordsFunction>();
 
   // Bookmarks.
   RegisterFunction<GetBookmarksFunction>();
@@ -289,8 +304,17 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<SetKeyboardHeightFunction>();
 #endif
 
-#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
+#if defined(OS_CHROMEOS)
   // IME
+  RegisterFunction<SetCompositionFunction>();
+  RegisterFunction<ClearCompositionFunction>();
+  RegisterFunction<CommitTextFunction>();
+  RegisterFunction<SetCandidateWindowPropertiesFunction>();
+  RegisterFunction<SetCandidatesFunction>();
+  RegisterFunction<SetCursorPositionFunction>();
+  RegisterFunction<SetMenuItemsFunction>();
+  RegisterFunction<UpdateMenuItemsFunction>();
+#if defined(TOUCH_UI)
   RegisterFunction<CandidateClickedInputUiFunction>();
   RegisterFunction<CursorUpInputUiFunction>();
   RegisterFunction<CursorDownInputUiFunction>();
@@ -300,10 +324,13 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<PageUpInputUiFunction>();
   RegisterFunction<PageDownInputUiFunction>();
 #endif
+#endif
 
   // Management.
   RegisterFunction<GetAllExtensionsFunction>();
   RegisterFunction<GetExtensionByIdFunction>();
+  RegisterFunction<GetPermissionWarningsByIdFunction>();
+  RegisterFunction<GetPermissionWarningsByManifestFunction>();
   RegisterFunction<LaunchAppFunction>();
   RegisterFunction<SetEnabledFunction>();
   RegisterFunction<UninstallFunction>();
@@ -317,10 +344,12 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<GetBrowserLoginFunction>();
   RegisterFunction<GetStoreLoginFunction>();
   RegisterFunction<SetStoreLoginFunction>();
-  RegisterFunction<PromptBrowserLoginFunction>();
   RegisterFunction<BeginInstallFunction>();
   RegisterFunction<BeginInstallWithManifestFunction>();
   RegisterFunction<CompleteInstallFunction>();
+
+  // WebNavigation.
+  RegisterFunction<GetFrameFunction>();
 
   // WebRequest.
   RegisterFunction<WebRequestAddEventListener>();
@@ -350,6 +379,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<AddMountFunction>();
   RegisterFunction<RemoveMountFunction>();
   RegisterFunction<GetMountPointsFunction>();
+  RegisterFunction<FormatDeviceFunction>();
   RegisterFunction<ViewFilesFunction>();
 
   // Mediaplayer
@@ -377,6 +407,12 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<DetachDebuggerFunction>();
   RegisterFunction<SendRequestDebuggerFunction>();
 
+  // Settings
+  RegisterFunction<GetSettingsFunction>();
+  RegisterFunction<SetSettingsFunction>();
+  RegisterFunction<RemoveSettingsFunction>();
+  RegisterFunction<ClearSettingsFunction>();
+
   // Content settings.
   RegisterFunction<GetResourceIdentifiersFunction>();
   RegisterFunction<ClearContentSettingsFunction>();
@@ -389,6 +425,24 @@ void FactoryRegistry::ResetFunctions() {
   // Experimental App API.
   RegisterFunction<AppNotifyFunction>();
   RegisterFunction<AppClearAllNotificationsFunction>();
+
+  // Permissions
+  RegisterFunction<ContainsPermissionsFunction>();
+  RegisterFunction<GetAllPermissionsFunction>();
+  RegisterFunction<RemovePermissionsFunction>();
+  RegisterFunction<RequestPermissionsFunction>();
+
+  // Downloads
+  RegisterFunction<DownloadsDownloadFunction>();
+  RegisterFunction<DownloadsSearchFunction>();
+  RegisterFunction<DownloadsPauseFunction>();
+  RegisterFunction<DownloadsResumeFunction>();
+  RegisterFunction<DownloadsCancelFunction>();
+  RegisterFunction<DownloadsEraseFunction>();
+  RegisterFunction<DownloadsSetDestinationFunction>();
+  RegisterFunction<DownloadsAcceptDangerFunction>();
+  RegisterFunction<DownloadsShowFunction>();
+  RegisterFunction<DownloadsDragFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -487,7 +541,8 @@ Browser* ExtensionFunctionDispatcher::GetCurrentBrowser(
   // profile. Note that the profile may already be incognito, in which case
   // we will search the incognito version only, regardless of the value of
   // |include_incognito|.
-  Profile* profile = render_view_host->process()->profile();
+  Profile* profile = Profile::FromBrowserContext(
+      render_view_host->process()->browser_context());
   browser = BrowserList::FindTabbedBrowser(profile, include_incognito);
 
   // NOTE(rafaelw): This can return NULL in some circumstances. In particular,

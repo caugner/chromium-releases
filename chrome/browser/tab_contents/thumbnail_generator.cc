@@ -79,7 +79,16 @@ SkBitmap GetBitmapForBackingStore(
   if (!backing_store->CopyFromBackingStore(gfx::Rect(backing_store->size()),
                                            &temp_canvas))
     return result;
-  const SkBitmap& bmp = skia::GetTopDevice(temp_canvas)->accessBitmap(false);
+  const SkBitmap& bmp_with_scrollbars =
+      skia::GetTopDevice(temp_canvas)->accessBitmap(false);
+  // Clip the edgemost 15 pixels as that will commonly hold a scrollbar, which
+  // looks bad in thumbnails.
+  SkIRect scrollbarless_rect =
+      { 0, 0,
+        std::max(1, bmp_with_scrollbars.width() - 15),
+        std::max(1, bmp_with_scrollbars.height() - 15) };
+  SkBitmap bmp;
+  bmp_with_scrollbars.extractSubset(&bmp, scrollbarless_rect);
 
   // Check if a clipped thumbnail is requested.
   if (options & ThumbnailGenerator::kClippedThumbnail) {
@@ -354,7 +363,7 @@ void ThumbnailGenerator::Observe(int type,
 void ThumbnailGenerator::WidgetHidden(RenderWidgetHost* widget) {
   // tab_contents_ can be NULL, if StartThumbnailing() is not called, but
   // MonitorRenderer() is called. The use case is found in
-  // chrome/test/ui_test_utils.cc.
+  // chrome/test/base/ui_test_utils.cc.
   if (!tab_contents())
     return;
   UpdateThumbnailIfNecessary(tab_contents());
@@ -440,9 +449,11 @@ SkBitmap ThumbnailGenerator::GetClippedBitmap(const SkBitmap& bitmap,
 void ThumbnailGenerator::UpdateThumbnailIfNecessary(
     TabContents* tab_contents) {
   const GURL& url = tab_contents->GetURL();
-  history::TopSites* top_sites = tab_contents->profile()->GetTopSites();
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents->browser_context());
+  history::TopSites* top_sites = profile->GetTopSites();
   // Skip if we don't need to update the thumbnail.
-  if (!ShouldUpdateThumbnail(tab_contents->profile(), top_sites, url))
+  if (!ShouldUpdateThumbnail(profile, top_sites, url))
     return;
 
   const int options = ThumbnailGenerator::kClippedThumbnail;
@@ -463,7 +474,8 @@ void ThumbnailGenerator::UpdateThumbnailIfNecessary(
        clip_result == ThumbnailGenerator::kNotClipped);
   score.load_completed = (!load_interrupted_ && !tab_contents->IsLoading());
 
-  top_sites->SetPageThumbnail(url, thumbnail, score);
+  gfx::Image image(new SkBitmap(thumbnail));
+  top_sites->SetPageThumbnail(url, &image, score);
   VLOG(1) << "Thumbnail taken for " << url << ": " << score.ToString();
 }
 

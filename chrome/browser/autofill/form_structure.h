@@ -30,6 +30,10 @@ enum UploadRequired {
 
 class AutofillMetrics;
 
+namespace base {
+class TimeTicks;
+}
+
 namespace buzz {
 class XmlElement;
 }
@@ -96,18 +100,26 @@ class FormStructure {
   // |require_method_post| is true.
   bool ShouldBeParsed(bool require_method_post) const;
 
+  // Returns true if we should query the crowdsourcing server to determine this
+  // form's field types.  If the form includes author-specified types, this will
+  // return false.
+  bool ShouldBeCrowdsourced() const;
+
   // Sets the field types and experiment id to be those set for |cached_form|.
   void UpdateFromCache(const FormStructure& cached_form);
 
   // Logs quality metrics for |this|, which should be a user-submitted form.
   // This method should only be called after the possible field types have been
-  // set for each field.
-  void LogQualityMetrics(const AutofillMetrics& metric_logger) const;
-
-  // Sets the possible types for the field at |index|.
-  void set_possible_types(size_t index, const FieldTypeSet& types);
+  // set for each field.  |interaction_time| should be a timestamp corresponding
+  // to the user's first interaction with the form.  |submission_time| should be
+  // a timestamp corresponding to the form's submission.
+  void LogQualityMetrics(const AutofillMetrics& metric_logger,
+                         const base::TimeTicks& load_time,
+                         const base::TimeTicks& interaction_time,
+                         const base::TimeTicks& submission_time) const;
 
   const AutofillField* field(size_t index) const;
+  AutofillField* field(size_t index);
   size_t field_count() const;
 
   // Returns the number of fields that are able to be autofilled.
@@ -150,6 +162,20 @@ class FormStructure {
   bool EncodeFormRequest(EncodeRequestType request_type,
                          buzz::XmlElement* encompassing_xml_element) const;
 
+  // Classifies each field in |fields_| based upon its |autocompletetype|
+  // attribute, if the attribute is available.  The association is stored into
+  // |map|.  Fills |found_attribute| with |true| if the attribute is available
+  // (and non-empty) for at least one field.  Fills |found_sections| with |true|
+  // if the attribute specifies a section for at least one field.
+  void ParseAutocompletetypeAttributes(bool* found_attribute,
+                                       bool* found_sections);
+
+  // Classifies each field in |fields_| into a logical section.
+  // Sections are identified by the heuristic that a logical section should not
+  // include multiple fields of the same autofill type (with some exceptions, as
+  // described in the implementation).
+  void IdentifySections();
+
   // The name of the form.
   string16 form_name_;
 
@@ -180,6 +206,10 @@ class FormStructure {
 
   // GET or POST.
   RequestMethod method_;
+
+  // Whether the form includes any field types explicitly specified by the site
+  // author, via the |autocompletetype| attribute.
+  bool has_author_specified_types_;
 
   DISALLOW_COPY_AND_ASSIGN(FormStructure);
 };

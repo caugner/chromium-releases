@@ -6,11 +6,13 @@
 
 #include "base/i18n/time_formatting.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/crash_upload_list.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/crashes_ui.h"
@@ -20,14 +22,14 @@
 #include "content/browser/gpu/gpu_data_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "grit/generated_resources.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
+#include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -131,7 +133,7 @@ FlashDOMHandler::FlashDOMHandler()
 
   // And lastly, we fire off a timer to make sure we never get stuck at the
   // "Loading..." message.
-  timeout_.Start(base::TimeDelta::FromMilliseconds(kTimeout),
+  timeout_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(kTimeout),
                  this, &FlashDOMHandler::OnTimeout);
 }
 
@@ -210,6 +212,7 @@ void FlashDOMHandler::MaybeRespondToPage() {
     case base::win::VERSION_VISTA: os_label += " Vista"; break;
     case base::win::VERSION_SERVER_2008: os_label += " Server 2008"; break;
     case base::win::VERSION_WIN7: os_label += " 7"; break;
+    case base::win::VERSION_WIN8: os_label += " 8"; break;
     default:  os_label += " UNKNOWN"; break;
   }
   os_label += " SP" + base::IntToString(os->service_pack().major);
@@ -221,15 +224,17 @@ void FlashDOMHandler::MaybeRespondToPage() {
   AddPair(list, l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_OS), os_label);
 
   // Obtain the version of the Flash plugins.
-  std::vector<webkit::npapi::WebPluginInfo> info_array;
+  std::vector<webkit::WebPluginInfo> info_array;
   webkit::npapi::PluginList::Singleton()->GetPluginInfoArray(
-      GURL(), "application/x-shockwave-flash", false, &info_array, NULL);
+      GURL(), "application/x-shockwave-flash", false, NULL, &info_array, NULL);
   string16 flash_version;
   if (info_array.empty()) {
     AddPair(list, ASCIIToUTF16("Flash plugin"), "Disabled");
   } else {
+    PluginPrefs* plugin_prefs =
+        PluginPrefs::GetForProfile(Profile::FromWebUI(web_ui_));
     for (size_t i = 0; i < info_array.size(); ++i) {
-      if (webkit::npapi::IsPluginEnabled(info_array[i])) {
+      if (plugin_prefs->IsPluginEnabled(info_array[i])) {
         flash_version = info_array[i].version + ASCIIToUTF16(" ") +
                         info_array[i].path.LossyDisplayName();
         if (i != 0)
@@ -331,8 +336,8 @@ FlashUI::FlashUI(TabContents* contents) : ChromeWebUI(contents) {
   AddMessageHandler((new FlashDOMHandler())->Attach(this));
 
   // Set up the about:flash source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
-      CreateFlashUIHTMLSource());
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(CreateFlashUIHTMLSource());
 }
 
 // static

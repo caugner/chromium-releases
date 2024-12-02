@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "ui/ui_api.h"
+#include "ui/base/ui_export.h"
 
 // This file provides cross platform typedefs for native widget types.
 //   NativeWindow: this is a handle to a native, top-level window
@@ -36,6 +36,9 @@
 // 'views' and with our Chrome UI code where the elements are also called
 // 'views'.
 
+#if defined(USE_AURA)
+#include "aura/window.h"
+#endif
 #if defined(OS_WIN)
 #include <windows.h>  // NOLINT
 typedef struct HFONT__* HFONT;
@@ -55,6 +58,18 @@ class NSView;
 class NSWindow;
 class NSTextField;
 #endif  // __OBJC__
+#elif defined(USE_WAYLAND)
+typedef struct _PangoFontDescription PangoFontDescription;
+typedef struct _cairo cairo_t;
+typedef struct _GdkPixbuf GdkPixbuf;
+struct wl_egl_window;
+
+namespace ui {
+class WaylandWindow;
+class WaylandCursor;
+}
+
+typedef struct _GdkRegion GdkRegion;
 #elif defined(TOOLKIT_USES_GTK)
 typedef struct _PangoFontDescription PangoFontDescription;
 typedef struct _GdkCursor GdkCursor;
@@ -68,10 +83,25 @@ class SkBitmap;
 
 namespace gfx {
 
-#if defined(OS_WIN)
-typedef HFONT NativeFont;
+#if defined(USE_AURA)
+typedef aura::Window* NativeView;
+typedef aura::Window* NativeWindow;
+#elif defined(OS_WIN)
 typedef HWND NativeView;
 typedef HWND NativeWindow;
+#elif defined(OS_MACOSX)
+typedef NSView* NativeView;
+typedef NSWindow* NativeWindow;
+#elif defined(USE_WAYLAND)
+typedef ui::WaylandWindow* NativeView;
+typedef ui::WaylandWindow* NativeWindow;
+#elif defined(USE_X11)
+typedef GtkWidget* NativeView;
+typedef GtkWindow* NativeWindow;
+#endif
+
+#if defined(OS_WIN)
+typedef HFONT NativeFont;
 typedef HWND NativeEditView;
 typedef HDC NativeDrawingContext;
 typedef HCURSOR NativeCursor;
@@ -80,17 +110,23 @@ typedef HRGN NativeRegion;
 typedef IAccessible* NativeViewAccessible;
 #elif defined(OS_MACOSX)
 typedef NSFont* NativeFont;
-typedef NSView* NativeView;
-typedef NSWindow* NativeWindow;
 typedef NSTextField* NativeEditView;
 typedef CGContext* NativeDrawingContext;
 typedef void* NativeCursor;
 typedef void* NativeMenu;
 typedef void* NativeViewAccessible;
+#elif defined(USE_WAYLAND)
+typedef PangoFontDescription* NativeFont;
+typedef void* NativeEditView;
+typedef cairo_t* NativeDrawingContext;
+typedef void* NativeCursor;
+typedef void* NativeMenu;
+// TODO(dnicoara) This should be replaced with a cairo region or maybe
+// a Wayland specific region
+typedef GdkRegion* NativeRegion;
+typedef void* NativeViewAccessible;
 #elif defined(USE_X11)
 typedef PangoFontDescription* NativeFont;
-typedef GtkWidget* NativeView;
-typedef GtkWindow* NativeWindow;
 typedef GtkWidget* NativeEditView;
 typedef cairo_t* NativeDrawingContext;
 typedef GdkCursor* NativeCursor;
@@ -115,7 +151,7 @@ typedef NativeImageType* NativeImage;
 // See comment at the top of the file for usage.
 typedef intptr_t NativeViewId;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 // Convert a NativeViewId to a NativeView.
 //
 // On Windows, we pass an HWND into the renderer. As stated above, the renderer
@@ -124,10 +160,10 @@ static inline NativeView NativeViewFromId(NativeViewId id) {
   return reinterpret_cast<NativeView>(id);
 }
 #define NativeViewFromIdInBrowser(x) NativeViewFromId(x)
-#elif defined(OS_POSIX)
-// On Mac and Linux, a NativeView is a pointer to an object, and is useless
-// outside the process in which it was created. NativeViewFromId should only be
-// used inside the appropriate platform ifdef outside of the browser.
+#elif defined(OS_POSIX) || defined(USE_AURA)
+// On Mac, Linux and USE_AURA, a NativeView is a pointer to an object, and is
+// useless outside the process in which it was created. NativeViewFromId should
+// only be used inside the appropriate platform ifdef outside of the browser.
 // (NativeViewFromIdInBrowser can be used everywhere in the browser.) If your
 // cross-platform design involves a call to NativeViewFromId from outside the
 // browser it will never work on Mac or Linux and is fundamentally broken.
@@ -139,23 +175,14 @@ static inline NativeView NativeViewFromIdInBrowser(NativeViewId id) {
 }
 #endif  // defined(OS_POSIX)
 
-// Convert a NativeView to a NativeViewId.  See the comments at the top of
-// this file.
-#if defined(OS_WIN) || defined(OS_MACOSX)
-static inline NativeViewId IdFromNativeView(NativeView view) {
-  return reinterpret_cast<NativeViewId>(view);
-}
-#elif defined(USE_X11)
-// Not inlined because it involves pulling too many headers.
-UI_API NativeViewId IdFromNativeView(NativeView view);
-#endif  // defined(USE_X11)
-
-
 // PluginWindowHandle is an abstraction wrapping "the types of windows
 // used by NPAPI plugins".  On Windows it's an HWND, on X it's an X
 // window id.
 #if defined(OS_WIN)
   typedef HWND PluginWindowHandle;
+  const PluginWindowHandle kNullPluginWindow = NULL;
+#elif defined(USE_WAYLAND)
+  typedef struct wl_egl_window* PluginWindowHandle;
   const PluginWindowHandle kNullPluginWindow = NULL;
 #elif defined(USE_X11)
   typedef unsigned long PluginWindowHandle;
@@ -178,6 +205,9 @@ UI_API NativeViewId IdFromNativeView(NativeView view);
 // AcceleratedWidget provides a surface to compositors to paint pixels.
 #if defined(OS_WIN)
 typedef HWND AcceleratedWidget;
+const AcceleratedWidget kNullAcceleratedWidget = NULL;
+#elif defined(USE_WAYLAND)
+typedef struct wl_egl_window* AcceleratedWidget;
 const AcceleratedWidget kNullAcceleratedWidget = NULL;
 #elif defined(USE_X11)
 typedef unsigned long AcceleratedWidget;

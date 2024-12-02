@@ -9,8 +9,10 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/extension_permission_set.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extensions/chrome_app_bindings.h"
+#include "chrome/renderer/extensions/chrome_webstore_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_groups.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
@@ -58,6 +60,7 @@ bool ExtensionDispatcher::OnControlMessageReceived(
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionDispatcher, message)
     IPC_MESSAGE_HANDLER(ExtensionMsg_MessageInvoke, OnMessageInvoke)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_DeliverMessage, OnDeliverMessage)
     IPC_MESSAGE_HANDLER(ExtensionMsg_SetFunctionNames, OnSetFunctionNames)
     IPC_MESSAGE_HANDLER(ExtensionMsg_Loaded, OnLoaded)
     IPC_MESSAGE_HANDLER(ExtensionMsg_Unloaded, OnUnloaded)
@@ -65,6 +68,7 @@ bool ExtensionDispatcher::OnControlMessageReceived(
                         OnSetScriptingWhitelist)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ActivateExtension, OnActivateExtension)
     IPC_MESSAGE_HANDLER(ExtensionMsg_ActivateApplication, OnActivateApplication)
+    IPC_MESSAGE_HANDLER(ExtensionMsg_UpdatePermissions, OnUpdatePermissions)
     IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateUserScripts, OnUpdateUserScripts)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -76,12 +80,13 @@ void ExtensionDispatcher::WebKitInitialized() {
   // For extensions, we want to ensure we call the IdleHandler every so often,
   // even if the extension keeps up activity.
   if (is_extension_process_) {
-    forced_idle_timer_.Start(
+    forced_idle_timer_.Start(FROM_HERE,
         base::TimeDelta::FromSeconds(kMaxExtensionIdleHandlerDelayS),
         RenderThread::current(), &RenderThread::IdleHandler);
   }
 
   RegisterExtension(extensions_v8::ChromeAppExtension::Get(this), false);
+  RegisterExtension(ChromeWebstoreExtension::Get(), false);
 
   // Add v8 extensions related to chrome extensions.
   RegisterExtension(ExtensionProcessBindings::Get(this), true);
@@ -96,7 +101,7 @@ void ExtensionDispatcher::WebKitInitialized() {
        iter != active_extension_ids_.end(); ++iter) {
     const Extension* extension = extensions_.GetByID(*iter);
     if (extension)
-      InitHostPermissions(extension);
+      InitOriginPermissions(extension);
   }
 
   is_webkit_initialized_ = true;
@@ -110,7 +115,7 @@ void ExtensionDispatcher::IdleNotification() {
         RenderThread::current()->idle_notification_delay_in_s()),
         kMaxExtensionIdleHandlerDelayS);
     forced_idle_timer_.Stop();
-    forced_idle_timer_.Start(
+    forced_idle_timer_.Start(FROM_HERE,
         base::TimeDelta::FromSeconds(forced_delay_s),
         RenderThread::current(), &RenderThread::IdleHandler);
   }
@@ -138,6 +143,13 @@ void ExtensionDispatcher::OnMessageInvoke(const std::string& extension_id,
   }
 }
 
+void ExtensionDispatcher::OnDeliverMessage(int target_port_id,
+                                           const std::string& message) {
+  RendererExtensionBindings::DeliverMessage(target_port_id,
+                                            message,
+                                            NULL);  // All render views.
+}
+
 void ExtensionDispatcher::OnLoaded(const ExtensionMsg_Loaded_Params& params) {
   scoped_refptr<const Extension> extension(params.ConvertToExtension());
   if (!extension) {
@@ -156,7 +168,7 @@ void ExtensionDispatcher::OnUnloaded(const std::string& id) {
   // If the extension is later reloaded with a different set of permissions,
   // we'd like it to get a new isolated world ID, so that it can pick up the
   // changed origin whitelist.
-  UserScriptSlave::RemoveIsolatedWorld(id);
+  user_script_slave_->RemoveIsolatedWorld(id);
 }
 
 void ExtensionDispatcher::OnSetScriptingWhitelist(
@@ -231,10 +243,13 @@ void ExtensionDispatcher::OnActivateExtension(
     return;
 
   if (is_webkit_initialized_)
-    InitHostPermissions(extension);
+    InitOriginPermissions(extension);
 }
 
-void ExtensionDispatcher::InitHostPermissions(const Extension* extension) {
+void ExtensionDispatcher::InitOriginPermissions(const Extension* extension) {
+  // TODO(jstritar): We should try to remove this special case. Also, these
+  // whitelist entries need to be updated when the kManagement permission
+  // changes.
   if (extension->HasAPIPermission(ExtensionAPIPermission::kManagement)) {
     WebSecurityPolicy::addOriginAccessWhitelistEntry(
         extension->url(),
@@ -243,10 +258,17 @@ void ExtensionDispatcher::InitHostPermissions(const Extension* extension) {
         false);
   }
 
-  const URLPatternSet& permissions =
-      extension->permission_set()->explicit_hosts();
-  for (URLPatternSet::const_iterator i = permissions.begin();
-       i != permissions.end(); ++i) {
+  UpdateOriginPermissions(UpdatedExtensionPermissionsInfo::ADDED,
+                          extension,
+                          extension->GetActivePermissions()->explicit_hosts());
+}
+
+void ExtensionDispatcher::UpdateOriginPermissions(
+    UpdatedExtensionPermissionsInfo::Reason reason,
+    const Extension* extension,
+    const URLPatternSet& origins) {
+  for (URLPatternSet::const_iterator i = origins.begin();
+       i != origins.end(); ++i) {
     const char* schemes[] = {
       chrome::kHttpScheme,
       chrome::kHttpsScheme,
@@ -255,14 +277,45 @@ void ExtensionDispatcher::InitHostPermissions(const Extension* extension) {
     };
     for (size_t j = 0; j < arraysize(schemes); ++j) {
       if (i->MatchesScheme(schemes[j])) {
-        WebSecurityPolicy::addOriginAccessWhitelistEntry(
-            extension->url(),
-            WebString::fromUTF8(schemes[j]),
-            WebString::fromUTF8(i->host()),
-            i->match_subdomains());
+        ((reason == UpdatedExtensionPermissionsInfo::REMOVED) ?
+         WebSecurityPolicy::removeOriginAccessWhitelistEntry :
+         WebSecurityPolicy::addOriginAccessWhitelistEntry)(
+              extension->url(),
+              WebString::fromUTF8(schemes[j]),
+              WebString::fromUTF8(i->host()),
+              i->match_subdomains());
       }
     }
   }
+}
+
+void ExtensionDispatcher::OnUpdatePermissions(
+    int reason_id,
+    const std::string& extension_id,
+    const ExtensionAPIPermissionSet& apis,
+    const URLPatternSet& explicit_hosts,
+    const URLPatternSet& scriptable_hosts) {
+  const Extension* extension = extensions_.GetByID(extension_id);
+  if (!extension)
+    return;
+
+  scoped_refptr<const ExtensionPermissionSet> delta =
+      new ExtensionPermissionSet(apis, explicit_hosts, scriptable_hosts);
+  scoped_refptr<const ExtensionPermissionSet> old_active =
+      extension->GetActivePermissions();
+  UpdatedExtensionPermissionsInfo::Reason reason =
+      static_cast<UpdatedExtensionPermissionsInfo::Reason>(reason_id);
+
+  const ExtensionPermissionSet* new_active = NULL;
+  if (reason == UpdatedExtensionPermissionsInfo::ADDED) {
+    new_active = ExtensionPermissionSet::CreateUnion(old_active, delta);
+  } else {
+    CHECK_EQ(UpdatedExtensionPermissionsInfo::REMOVED, reason);
+    new_active = ExtensionPermissionSet::CreateDifference(old_active, delta);
+  }
+
+  extension->SetActivePermissions(new_active);
+  UpdateOriginPermissions(reason, extension, explicit_hosts);
 }
 
 void ExtensionDispatcher::OnUpdateUserScripts(

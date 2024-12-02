@@ -2,15 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/logging.h"
+#include "base/stringprintf.h"
+#include "base/time.h"
 #include "media/base/video_frame.h"
 #include "media/base/yuv_convert.h"
 #include "remoting/base/util.h"
 
-#include "base/logging.h"
-
 using media::VideoFrame;
 
 namespace remoting {
+
+std::string GetTimestampString() {
+  base::Time t = base::Time::NowFromSystemTime();
+  base::Time::Exploded tex;
+  t.LocalExplode(&tex);
+  return StringPrintf("%02d%02d/%02d%02d%02d:",
+                      tex.month, tex.day_of_month,
+                      tex.hour, tex.minute, tex.second);
+}
 
 int GetBytesPerPixel(VideoFrame::Format format) {
   // Note: The order is important here for performance. This is sorted from the
@@ -144,6 +154,29 @@ gfx::Rect ScaleRect(const gfx::Rect& rect,
   scaled_rect.set_height(
       rect.bottom() * vertical_ratio - scaled_rect.y());
   return scaled_rect;
+}
+
+void CopyRect(const uint8* src_plane,
+              int src_plane_stride,
+              uint8* dest_plane,
+              int dest_plane_stride,
+              int bytes_per_pixel,
+              const SkIRect& rect) {
+ // Get the address of the starting point.
+  const int src_y_offset = src_plane_stride * rect.fTop;
+  const int dest_y_offset = dest_plane_stride * rect.fTop;
+  const int x_offset = bytes_per_pixel * rect.fLeft;
+  src_plane += src_y_offset + x_offset;
+  dest_plane += dest_y_offset + x_offset;
+
+  // Copy pixels in the rectangle line by line.
+  const int bytes_per_line = bytes_per_pixel * rect.width();
+  const int height = rect.height();
+  for (int i = 0 ; i < height; ++i) {
+    memcpy(dest_plane, src_plane, bytes_per_line);
+    src_plane += src_plane_stride;
+    dest_plane += dest_plane_stride;
+  }
 }
 
 }  // namespace remoting

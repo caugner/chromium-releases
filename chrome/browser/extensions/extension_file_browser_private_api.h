@@ -134,8 +134,8 @@ class FileBrowserFunction
                                  void* context);
 
   // Callback with converted local paths.
-  virtual void GetLocalPathsResponseOnUIThread(
-      const FilePathList& files, void* context) {}
+  virtual void GetLocalPathsResponseOnUIThread(const FilePathList& files,
+                                               void* context) {}
 
   // Figure out the tab_id of the hosting tab.
   int32 GetTabId() const;
@@ -174,8 +174,8 @@ class ViewFilesFunction
   virtual bool RunImpl() OVERRIDE;
 
   // FileBrowserFunction overrides.
-  virtual void GetLocalPathsResponseOnUIThread(
-      const FilePathList& files, void* context) OVERRIDE;
+  virtual void GetLocalPathsResponseOnUIThread(const FilePathList& files,
+                                               void* context) OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.viewFiles");
@@ -194,8 +194,8 @@ class SelectFilesFunction
   virtual bool RunImpl() OVERRIDE;
 
   // FileBrowserFunction overrides.
-  virtual void GetLocalPathsResponseOnUIThread(
-      const FilePathList& files, void* context) OVERRIDE;
+  virtual void GetLocalPathsResponseOnUIThread(const FilePathList& files,
+                                               void* context) OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.selectFiles");
@@ -229,8 +229,8 @@ class AddMountFunction
   virtual bool RunImpl() OVERRIDE;
 
   // FileBrowserFunction overrides.
-  virtual void GetLocalPathsResponseOnUIThread(
-      const FilePathList& files, void* context) OVERRIDE;
+  virtual void GetLocalPathsResponseOnUIThread(const FilePathList& files,
+                                               void* context) OVERRIDE;
 
  private:
   struct MountParamaters {
@@ -257,7 +257,7 @@ class RemoveMountFunction
   // FileBrowserFunction overrides.
   virtual bool RunImpl() OVERRIDE;
   virtual void GetLocalPathsResponseOnUIThread(const FilePathList& files,
-      void* context) OVERRIDE;
+                                               void* context) OVERRIDE;
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.removeMount");
@@ -275,6 +275,25 @@ class GetMountPointsFunction
 
  private:
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getMountPoints");
+};
+
+// Formats Device given its mount path.
+class FormatDeviceFunction
+    : public FileBrowserFunction {
+ public:
+  FormatDeviceFunction();
+
+ protected:
+  virtual ~FormatDeviceFunction();
+
+  virtual bool RunImpl() OVERRIDE;
+
+// FileBrowserFunction overrides.
+  virtual void GetLocalPathsResponseOnUIThread(const FilePathList& files,
+                                               void* context) OVERRIDE;
+
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.formatDevice");
 };
 
 // Retrieves devices meta-data. Expects volume's device path as an argument.

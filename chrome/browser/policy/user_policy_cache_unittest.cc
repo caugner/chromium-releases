@@ -105,6 +105,7 @@ class UserPolicyCacheTest : public testing::Test {
                  em::PolicyFetchResponse* policy_response,
                  bool expect_changed_policy) {
     scoped_ptr<em::PolicyFetchResponse> policy(policy_response);
+    cache->SetReady();
     cache->AddObserver(&observer);
 
     if (expect_changed_policy)
@@ -115,6 +116,10 @@ class UserPolicyCacheTest : public testing::Test {
     testing::Mock::VerifyAndClearExpectations(&observer);
 
     cache->RemoveObserver(&observer);
+  }
+
+  void SetReady(UserPolicyCache* cache) {
+    cache->SetReady();
   }
 
   FilePath test_file() {
@@ -147,6 +152,15 @@ TEST_F(UserPolicyCacheTest, DecodePolicy) {
   settings.mutable_policyrefreshrate()->set_policyrefreshrate(5);
   settings.mutable_policyrefreshrate()->mutable_policy_options()->set_mode(
       em::PolicyOptions::RECOMMENDED);
+  settings.mutable_showhomebutton()->set_showhomebutton(true);
+  settings.mutable_showhomebutton()->mutable_policy_options()->set_mode(
+      em::PolicyOptions::UNSET);
+#ifdef NDEBUG
+  // Setting an invalid PolicyMode enum value triggers a DCHECK in protobuf.
+  settings.mutable_homepageisnewtabpage()->set_homepageisnewtabpage(true);
+  settings.mutable_homepageisnewtabpage()->mutable_policy_options()->set_mode(
+      static_cast<em::PolicyOptions::PolicyMode>(-1));
+#endif
   PolicyMap mandatory_policy;
   PolicyMap recommended_policy;
   DecodePolicy(settings, &mandatory_policy, &recommended_policy);
@@ -166,21 +180,21 @@ TEST_F(UserPolicyCacheTest, DecodeIntegerValue) {
   scoped_ptr<Value> value(
       DecodeIntegerValue(static_cast<google::protobuf::int64>(42)));
   ASSERT_TRUE(value.get());
-  FundamentalValue expected_42(42);
+  base::FundamentalValue expected_42(42);
   EXPECT_TRUE(value->Equals(&expected_42));
   value.reset(
       DecodeIntegerValue(static_cast<google::protobuf::int64>(min - 1LL)));
   EXPECT_EQ(NULL, value.get());
   value.reset(DecodeIntegerValue(static_cast<google::protobuf::int64>(min)));
   ASSERT_TRUE(value.get());
-  FundamentalValue expected_min(min);
+  base::FundamentalValue expected_min(min);
   EXPECT_TRUE(value->Equals(&expected_min));
   value.reset(
       DecodeIntegerValue(static_cast<google::protobuf::int64>(max + 1LL)));
   EXPECT_EQ(NULL, value.get());
   value.reset(DecodeIntegerValue(static_cast<google::protobuf::int64>(max)));
   ASSERT_TRUE(value.get());
-  FundamentalValue expected_max(max);
+  base::FundamentalValue expected_max(max);
   EXPECT_TRUE(value->Equals(&expected_max));
 }
 
@@ -344,6 +358,23 @@ TEST_F(UserPolicyCacheTest, FreshPolicyOverride) {
   expected.Set(kPolicyHomepageLocation,
                Value::CreateStringValue("http://www.chromium.org"));
   EXPECT_TRUE(expected.Equals(mandatory_policy(cache)));
+}
+
+TEST_F(UserPolicyCacheTest, SetReady) {
+  UserPolicyCache cache(test_file());
+  cache.AddObserver(&observer);
+  scoped_ptr<em::PolicyFetchResponse> policy(
+      CreateHomepagePolicy("http://www.example.com",
+                           base::Time::NowFromSystemTime(),
+                           em::PolicyOptions::MANDATORY));
+  EXPECT_CALL(observer, OnCacheUpdate(_)).Times(0);
+  cache.SetPolicy(*policy);
+  testing::Mock::VerifyAndClearExpectations(&observer);
+
+  // Switching the cache to ready should send a notification.
+  EXPECT_CALL(observer, OnCacheUpdate(_)).Times(1);
+  SetReady(&cache);
+  cache.RemoveObserver(&observer);
 }
 
 // Test case for the temporary support for GenericNamedValues in the

@@ -5,7 +5,7 @@
 #include "base/compiler_specific.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
@@ -28,21 +28,29 @@ const char kSameAsAnyInstanceURL[] = "about:internets";
 
 class SiteInstanceTestWebUIFactory : public content::EmptyWebUIFactory {
  public:
-  virtual bool UseWebUIForURL(Profile* profile, const GURL& url) const {
+  virtual bool UseWebUIForURL(content::BrowserContext* browser_context,
+                              const GURL& url) const OVERRIDE {
     return HasWebUIScheme(url);
   }
-  virtual bool HasWebUIScheme(const GURL& url) const {
+  virtual bool HasWebUIScheme(const GURL& url) const OVERRIDE {
     return url.SchemeIs(chrome::kChromeUIScheme);
   }
 };
 
 class SiteInstanceTestBrowserClient : public content::MockContentBrowserClient {
  public:
+  SiteInstanceTestBrowserClient() : old_browser_client_(NULL) {
+  }
+
+  virtual TabContentsView* CreateTabContentsView(TabContents* tab_contents) {
+    return old_browser_client_->CreateTabContentsView(tab_contents);
+  }
+
   virtual content::WebUIFactory* GetWebUIFactory() OVERRIDE {
     return &factory_;
   }
 
-  virtual bool ShouldUseProcessPerSite(Profile* profile,
+  virtual bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
                                        const GURL& effective_url) OVERRIDE {
     return false;
   }
@@ -52,12 +60,18 @@ class SiteInstanceTestBrowserClient : public content::MockContentBrowserClient {
            url == GURL(chrome::kAboutCrashURL);
   }
 
-  virtual GURL GetEffectiveURL(Profile* profile, const GURL& url) OVERRIDE {
+  virtual GURL GetEffectiveURL(content::BrowserContext* browser_context,
+                               const GURL& url) OVERRIDE {
     return url;
+  }
+
+  void SetOriginalClient(content::ContentBrowserClient* old_browser_client) {
+    old_browser_client_ = old_browser_client;
   }
 
  private:
   SiteInstanceTestWebUIFactory factory_;
+  content::ContentBrowserClient* old_browser_client_;
 };
 
 class SiteInstanceTest : public testing::Test {
@@ -69,6 +83,7 @@ class SiteInstanceTest : public testing::Test {
 
   virtual void SetUp() {
     old_browser_client_ = content::GetContentClient()->browser();
+    browser_client_.SetOriginalClient(old_browser_client_);
     content::GetContentClient()->set_browser(&browser_client_);
   }
 

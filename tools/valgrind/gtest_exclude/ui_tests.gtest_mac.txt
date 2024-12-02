@@ -1,8 +1,3 @@
-# Don't run FLAKY or FAILS ui tests under Valgrind on Mac.
-# They tend to generate way too many flaky Valgrind reports...
-*FLAKY_*
-*FAILS_*
-
 # Hangs on mac at exit, during final valgrind leak checking? (valgrind bug?)
 ErrorPageTest.DNSError_GoBack2Forward2
 # Flakily hangs on Mac
@@ -36,7 +31,6 @@ BrowserEncodingTest.TestEncodingAutoDetect
 DOMStorageTest.LocalStorageLayoutTests
 # See http://crbug.com/30367.
 NewTabUITest.NTPHasThumbnails
-NewTabUITest.UpdateUserPrefsVersion
 # http://crbug.com/69040
 ErrorPageTest.Page404
 
@@ -88,7 +82,6 @@ ChromeMainTest.AppLaunch
 SessionHistoryTest.LocationReplace
 
 # UNIMPLEMENTED reached, see http://crbug.com/51387
-OptionsUITest.LoadOptionsByURL
 AutomatedUITestBase.CloseTab
 
 # See http://crbug.com/57717
@@ -96,30 +89,68 @@ ResourceDispatcherTest.CrossSiteFailedRequest
 ResourceDispatcherTest.RespectNoSniffDirective
 
 # Valgrind internal error: received SIGSEGV. http://crbug.com/51716
+AutomatedUITestBase.FindInPage
 AutomatedUITestBase.IncognitoWindow
 AutomatedUITestBase.Navigate
+AutomatedUITestBase.OpenNewTab
 AutomatedUITestBase.ShowDownloads
+AutomationProxySnapshotTest.LargeSnapshot
 AutomationProxyTest.AcceleratorDownloads
 AutomationProxyTest.AcceleratorExtensions
+AutomationProxyTest.AcceleratorHistory
 AutomationProxyTest.ActivateTab
 AutomationProxyTest.BlockedPopupTest
+AutomationProxyTest.Cookies
 AutomationProxyTest.GetActiveTabIndex
+AutomationProxyTest.GetBrowserWindow
+AutomationProxyTest.GetBrowserWindowCount
 AutomationProxyTest.GetCurrentURL
+AutomationProxyTest.GoBackForward
+AutomationProxyTest.NavigateToURLAsync
 AutomationProxyTest2.GetActiveTabIndex
 AutomationProxyTest2.GetTabTitle
 AutomationProxyTest4.NumberValueIsEchoedByDomAutomationController
+AutomationProxyTest4.StringValueIsEchoedByDomAutomationController
 AutomationProxyTest5.TestLifetimeOfDomAutomationController
+DOMStorageTest.EventLayoutTests
+DOMStorageTest.SessionStorageLayoutTests
 ErrorPageTest.IFrameDNSError_Basic
 ExtensionProxyUITest.EnableDisable
+HistoryTester.ConsiderSlowRedirectAsUserInitiated
+HistoryTester.VerifyHistoryLength3
+HostRulesTest.TestMap
 IFrameTest.Crash
+IFrameTest.InEmptyFrame
+LocaleTestsDa.TestStart
+LocaleTestsZhTw.TestStart
 LoginPromptTest.SupplyRedundantAuths
 LoginPromptTest.TestCancelAuth
 MetricsServiceTest.CrashRenderers
+OutOfProcessPPAPITest.Broker
+OutOfProcessPPAPITest.Buffer
+OutOfProcessPPAPITest.CharSet
+OutOfProcessPPAPITest.Core
+OutOfProcessPPAPITest.ImageData
+OutOfProcessPPAPITest.Memory
+OutOfProcessPPAPITest.PaintAggregator
+OutOfProcessPPAPITest.URLUtil
+OutOfProcessPPAPITest.VideoDecoder
 PPAPITest.Buffer
+PPAPITest.CharSet
 PPAPITest.FileIO
 PPAPITest.FileRef
+PPAPITest.FileSystem
+PPAPITest.Graphics2D
 PPAPITest.Graphics2SD
+PPAPITest.ImageData
+PPAPITest.Instance
 PPAPITest.PaintAggregator
+PPAPITest.QueryPolicy
+PPAPITest.Scrollbar
+PPAPITest.UMA
+PPAPITest.URLUtil
+PPAPITest.VarDeprecated
+PPAPITest.VideoDecoder
 PreferenceServiceTest.PreservedWindowPlacementIsLoaded
 PrintPreviewUITest.LoadPrintPreviewByURL
 RedirectTest.Server
@@ -127,14 +158,22 @@ RedirectTest.ServerReference
 RepostFormWarningTest.TestDoubleReload
 ResourceDispatcherTest.ContentDispositionEmpty
 ResourceDispatcherTest.ContentDispositionInline
-ResourceDispatcherTest.SyncXMLHttpRequest
 ResourceDispatcherTest.SniffNoContentTypeNoData
+ResourceDispatcherTest.SyncXMLHttpRequest
+SearchProviderTest.TestIsSearchProviderInstalledWithException
+SecurityTest.DisallowFileUrlUniversalAccessTest
 SessionHistoryTest.BasicBackForward
 SessionHistoryTest.LocationChangeInSubframe
 ShowModalDialogTest.BasicTest
 V8BenchmarkTest.Perf
 ViewSourceTest.DoesBrowserConsumeViewSourcePrefix
 WorkerFileSystemTest.FileEntryToURISync
+WorkerFileSystemTest.FileFromFileEntry
+WorkerFileSystemTest.FileFromFileEntrySync
+WorkerFileSystemTest.FileWriterSyncTruncateExtend
+WorkerFileSystemTest.FileWriterTruncateExtend
+WorkerFileSystemTest.Temporary
+PrintPreviewUITest.AdvancedPrintCommandEnabled
 
 # Valgrind dies on bszB assertion, see http://crbug.com/58145
 AutomatedUITestBase.Home
@@ -148,6 +187,7 @@ SunSpiderTest.Perf
 
 # Valgrind dies on arena assertion, see http://crbug.com/58146
 LoginPromptTest.TestTwoAuths
+UILayoutTest.MediaUILayoutTest
 
 # Can't load a nib under Valgrind, see http://crbug.com/58124
 ImagesTest.AnimatedGIFs
@@ -232,15 +272,12 @@ LoginPromptTest.TestBasicAuth
 LoginPromptTest.TestDigestAuth
 ResourceDispatcherTest.DoNotSniffHTMLFromTextPlain
 
-# OptionsUITest.NavBarCheck fails, see http://crbug.com/83209
-OptionsUITest.NavBarCheck
-
 # Timing out, see http://crbug.com/83565
 NPAPIAutomationEnabledTest.LoadAllBlockedPlugins
 
 # Flaky on valgrind test. See http://crbug.com/84257.
 AutomatedUITestBase.RestoreTab
-AutomationProxyTest4.BooleanValueIsEchoedByDomAutomationController 
+AutomationProxyTest4.BooleanValueIsEchoedByDomAutomationController
 
 # http://crbug.com/87625
 PPAPITest.Var
@@ -259,7 +296,17 @@ NewTabUITest.ChromeHangInNTP
 
 # http://crbug.com/88244
 NoStartupWindowTest.NoStartupWindowBasicTest
-RunInBackgroundTest.RunInBackgroundBasicTest 
+RunInBackgroundTest.RunInBackgroundBasicTest
 
 # http://crbug.com/88254
 PPAPITest.CursorControl
+
+# Flakiness leading to leak reports. http://crbug.com/31739
+SessionHistoryTest.BasicBackForward
+
+# http://crbug.com/91163
+AutomatedUITestBase.OpenCloseBrowserWindowWithAccelerator
+
+# http://crbug.com/92177
+CustomHandlerMailStartupTest.CustomHandlerMailStartup
+CustomHandlerWebcalStartupTest.CustomHandlerWebcalStartup

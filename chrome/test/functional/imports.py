@@ -224,6 +224,8 @@ class ImportsTest(pyauto.PyUITest):
     if not self._CanRunFirefoxTests():
       logging.warn('Not running firefox import tests.')
       return
+    if self.IsWinVista():  # Broken on vista. crbug.com/89768
+      return
     self._SwapFirefoxProfile()
     self.ImportSettings('Mozilla Firefox', False, self._to_import)
     self._CheckDefaults(bookmarks=True, history=True, passwords=True,
@@ -252,6 +254,8 @@ class ImportsTest(pyauto.PyUITest):
     if not self._CanRunFirefoxTests():
       logging.warn('Not running firefox import tests.')
       return
+    if self.IsWinVista():  # Broken on vista. crbug.com/89768
+      return
     self._SwapFirefoxProfile()
     self.ImportSettings('Mozilla Firefox', False, self._to_import)
     num_history_orig = len(self.GetHistoryInfo().History())
@@ -276,6 +280,8 @@ class ImportsTest(pyauto.PyUITest):
 
   def testImportFirefoxPasswordsFromPrefs(self):
     """Verify importing Firefox passwords through preferences."""
+    if self.IsWinVista():  # Broken on vista. crbug.com/89768
+      return
     self._ImportFromFirefox(bookmarks=False, history=False, passwords=True,
                             home_page=False, search_engines=False)
 

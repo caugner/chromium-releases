@@ -63,11 +63,24 @@
     ['OS=="mac" or OS=="win"', {
       'targets': [
         {
-          'target_name': 'chrome_dll',
-          'type': 'shared_library',
           'variables': {
             'chrome_dll_target': 1,
+            'conditions' : [
+              ['OS=="win" and optimize_with_syzygy==1', {
+                # On Windows we use build chrome_dll as an intermediate target
+                # then have a subsequent step which either optimizes it to its
+                # final location, or copies it to its final location, depending
+                # on whether or not optimize_with_syzygy==1.  Please, refer to
+                # chrome_dll_syzygy.gypi for the subsequent defintion of the
+                # Windows chrome_dll target.
+                'dll_target_name': 'chrome_dll_initial',
+              }, {
+                'dll_target_name': 'chrome_dll',
+              }],
+            ],
           },
+          'target_name': '<(dll_target_name)',
+          'type': 'shared_library',
           'dependencies': [
             '<@(chromium_dependencies)',
             'app/policy/cloud_policy_codegen.gyp:policy',
@@ -94,7 +107,6 @@
                 'app/chrome_dll.rc',
                 'app/chrome_dll_resource.h',
                 'app/chrome_main.cc',
-                'app/chrome_main_win.cc',
 
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
 
@@ -122,6 +134,7 @@
                 '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
                 '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
 
@@ -134,8 +147,31 @@
                 'VCLinkerTool': {
                   'ImportLibrary': '$(OutDir)\\lib\\chrome_dll.lib',
                   'ProgramDatabaseFile': '$(OutDir)\\chrome_dll.pdb',
+                  'conditions': [
+                    ['optimize_with_syzygy==1', {
+                      # When syzygy is enabled we use build chrome_dll as an
+                      # intermediate target then have a subsequent step which
+                      # optimizes it to its final location
+                      'ProgramDatabaseFile': '$(OutDir)\\initial\\chrome_dll.pdb',
+                      'OutputFile': '$(OutDir)\\initial\\chrome.dll',
+                    }], ['incremental_chrome_dll==1', {
+                      'OutputFile': '$(OutDir)\\initial\\chrome.dll',
+                      'UseLibraryDependencyInputs': "true",
+                    }],
+                  ],
                 },
               },
+              'conditions': [
+                ['incremental_chrome_dll==1 and optimize_with_syzygy==0', {
+                  # Linking to a different directory and then hardlinking back
+                  # to OutDir is a workaround to avoid having the .ilk for
+                  # chrome.exe and chrome.dll conflicting. See crbug.com/92528
+                  # for more information. Done on the dll instead of the exe so
+                  # that people launching from VS don't need to modify
+                  # $(TargetPath) for the exe.
+                  'msvs_postbuild': 'tools\\build\\win\\hardlink_failsafe.bat $(OutDir)\\initial\\chrome.dll $(OutDir)\\chrome.dll'
+                }]
+              ]
             }],  # OS=="win"
             ['OS=="mac"', {
               # The main browser executable's name is <(mac_product_name).
@@ -182,7 +218,7 @@
                 'app/chrome_main.cc',
                 'app/chrome_main_app_mode_mac.mm',
                 'app/chrome_main_mac.mm',
-                'app/chrome_main_posix.cc',
+                'app/chrome_main_mac.h',
               ],
               'include_dirs': [
                 '<(grit_out_dir)',
@@ -203,6 +239,7 @@
                 'app/framework-Info.plist',
                 'app/nibs/About.xib',
                 'app/nibs/AboutIPC.xib',
+                'app/nibs/AvatarMenuItem.xib',
                 'app/nibs/BookmarkAllTabs.xib',
                 'app/nibs/BookmarkBar.xib',
                 'app/nibs/BookmarkBarFolderWindow.xib',
@@ -223,10 +260,12 @@
                 'app/nibs/EditSearchEngine.xib',
                 'app/nibs/ExtensionInstalledBubble.xib',
                 'app/nibs/ExtensionInstallPrompt.xib',
+                'app/nibs/ExtensionInstallPromptInline.xib',
                 'app/nibs/ExtensionInstallPromptNoWarnings.xib',
                 'app/nibs/FindBar.xib',
                 'app/nibs/FirstRunBubble.xib',
                 'app/nibs/FirstRunDialog.xib',
+                'app/nibs/FullscreenExitBubble.xib',
                 'app/nibs/HungRendererDialog.xib',
                 'app/nibs/HttpAuthLoginSheet.xib',
                 'app/nibs/ImportProgressDialog.xib',
@@ -323,6 +362,7 @@
                       '<(grit_out_dir)/theme_resources_standard.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.pak',
+                      '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
                       '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
                     ],
@@ -502,7 +542,7 @@
                   'files': [
                     # TODO(ajwong): Find a way to share this path with
                     # ffmpeg.gyp so they don't diverge. (BUG=23602)
-                    '<(PRODUCT_DIR)/libffmpegsumo.dylib',
+                    '<(PRODUCT_DIR)/ffmpegsumo.so',
                   ],
                 },
                 {
@@ -640,12 +680,13 @@
           ],
           'defines': [
             '<@(nacl_win64_defines)',
+            # Required to build gl_switches.cc as part of this binary.
+            'GL_IMPLEMENTATION'
           ],
           'sources': [
             'app/chrome_command_ids.h',
             'app/chrome_dll_resource.h',
             'app/chrome_main.cc',
-            'app/chrome_main_win.cc',
             # Parsing is needed for the UserDataDir policy which is read much
             # earlier than the initialization of the policy/pref system.
             'browser/policy/policy_path_parser_win.cc',
@@ -679,9 +720,11 @@
             # to avoid making common compile on 64 bit on Windows.
             '../chrome/common/chrome_content_client.cc',
             '../chrome/common/chrome_content_plugin_client.cc',
+            '../content/app/content_main.cc',
             '../content/common/child_process.cc',
             '../content/common/child_thread.cc',
             '../content/common/content_client.cc',
+            '../content/common/content_constants.cc',
             '../content/common/content_counters.cc',
             '../content/common/content_message_generator.cc',
             '../content/common/content_paths.cc',
@@ -694,6 +737,7 @@
             '../content/common/sandbox_policy.cc',
             '../content/common/sandbox_init_wrapper_win.cc',
             '../content/common/url_constants.cc',
+            '../ui/gfx/gl/gl_switches.cc',
           ],
           'msvs_settings': {
             'VCLinkerTool': {

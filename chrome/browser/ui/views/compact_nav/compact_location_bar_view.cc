@@ -29,6 +29,7 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -109,7 +110,6 @@ void CompactLocationBarView::Init() {
 
   // Location bar.
   location_bar_view_ = new LocationBarView(
-      browser()->profile(),
       browser(),
       browser()->toolbar_model(),
       clb_host(),

@@ -33,6 +33,42 @@ class Message;
 class ChildProcessHost : public IPC::Channel::Listener,
                          public IPC::Message::Sender {
  public:
+
+  // These flags may be passed to GetChildPath in order to alter its behavior,
+  // causing it to return a child path more suited to a specific task.
+  enum {
+    // No special behavior requested.
+    CHILD_NORMAL = 0,
+
+#if defined(OS_LINUX)
+    // Indicates that the child execed after forking may be execced from
+    // /proc/self/exe rather than using the "real" app path. This prevents
+    // autoupdate from confusing us if it changes the file out from under us.
+    // You will generally want to set this on Linux, except when there is an
+    // override to the command line (for example, we're forking a renderer in
+    // gdb). In this case, you'd use GetChildPath to get the real executable
+    // file name, and then prepend the GDB command to the command line.
+    CHILD_ALLOW_SELF = 1 << 0,
+#elif defined(OS_MACOSX)
+
+    // Requests that the child run in a process that does not have the
+    // PIE (position-independent executable) bit set, effectively disabling
+    // ASLR. For process types that need to allocate a large contiguous
+    // region, ASLR may not leave a large enough "hole" for the purpose. This
+    // option should be used sparingly, and only when absolutely necessary.
+    // This option is currently incompatible with CHILD_ALLOW_HEAP_EXECUTION.
+    CHILD_NO_PIE = 1 << 1,
+
+    // Requests that the child run in a process that does not protect the
+    // heap against execution. Normally, heap pages may be made executable
+    // with mprotect, so this mode should be used sparingly. It is intended
+    // for processes that may host plug-ins that expect an executable heap
+    // without having to call mprotect. This option is currently incompatible
+    // with CHILD_NO_PIE.
+    CHILD_ALLOW_HEAP_EXECUTION = 1 << 2,
+#endif
+  };
+
   virtual ~ChildProcessHost();
 
   // Returns the pathname to be used for a child process.  If a subprocess
@@ -40,16 +76,12 @@ class ChildProcessHost : public IPC::Channel::Listener,
   // the default child process pathname will be returned.  On most platforms,
   // this will be the same as the currently-executing process.
   //
-  // The argument allow_self is used on Linux to indicate that we allow us to
-  // fork from /proc/self/exe rather than using the "real" app path. This
-  // prevents autoupdate from confusing us if it changes the file out from
-  // under us. You will generally want to set this to true, except when there
-  // is an override to the command line (for example, we're forking a renderer
-  // in gdb). In this case, you'd use GetChildPath to get the real executable
-  // file name, and then prepend the GDB command to the command line.
+  // The |flags| argument accepts one or more flags such as CHILD_ALLOW_SELF
+  // and CHILD_ALLOW_HEAP_EXECUTION as defined above. Pass only CHILD_NORMAL
+  // if none of these special behaviors are required.
   //
   // On failure, returns an empty FilePath.
-  static FilePath GetChildPath(bool allow_self);
+  static FilePath GetChildPath(int flags);
 
 #if defined(OS_WIN)
   // See comments in the cc file. This is a common hack needed for a process
@@ -80,9 +112,9 @@ class ChildProcessHost : public IPC::Channel::Listener,
   virtual void InstanceCreated();
 
   // IPC::Channel::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void OnChannelConnected(int32 peer_pid);
-  virtual void OnChannelError();
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
 
   bool opening_channel() { return opening_channel_; }
   const std::string& channel_id() { return channel_id_; }
@@ -102,11 +134,16 @@ class ChildProcessHost : public IPC::Channel::Listener,
   class ListenerHook : public IPC::Channel::Listener {
    public:
     explicit ListenerHook(ChildProcessHost* host);
-    virtual bool OnMessageReceived(const IPC::Message& msg);
-    virtual void OnChannelConnected(int32 peer_pid);
-    virtual void OnChannelError();
+
+    void Shutdown();
+
+    // IPC::Channel::Listener methods:
+    virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+    virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+    virtual void OnChannelError() OVERRIDE;
    private:
     ChildProcessHost* host_;
+    DISALLOW_COPY_AND_ASSIGN(ListenerHook);
   };
 
   ListenerHook listener_;

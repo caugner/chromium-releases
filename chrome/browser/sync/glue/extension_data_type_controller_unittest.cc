@@ -13,7 +13,7 @@
 #include "chrome/browser/sync/glue/model_associator_mock.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/test/profile_mock.h"
+#include "chrome/test/base/profile_mock.h"
 #include "content/browser/browser_thread.h"
 
 using browser_sync::ExtensionDataTypeController;
@@ -59,17 +59,17 @@ class ExtensionDataTypeControllerTest : public testing::Test {
         WillRepeatedly(Return(true));
     EXPECT_CALL(*model_associator_, SyncModelHasUserCreatedNodes(_)).
         WillRepeatedly(DoAll(SetArgumentPointee<0>(true), Return(true)));
-    EXPECT_CALL(*model_associator_, AssociateModels()).
+    EXPECT_CALL(*model_associator_, AssociateModels(_)).
         WillRepeatedly(Return(true));
   }
 
   void SetActivateExpectations() {
-    EXPECT_CALL(service_, ActivateDataType(_, _));
+    EXPECT_CALL(service_, ActivateDataType(_, _, _));
   }
 
   void SetStopExpectations() {
-    EXPECT_CALL(service_, DeactivateDataType(_, _));
-    EXPECT_CALL(*model_associator_, DisassociateModels());
+    EXPECT_CALL(service_, DeactivateDataType(_));
+    EXPECT_CALL(*model_associator_, DisassociateModels(_));
   }
 
   MessageLoopForUI message_loop_;
@@ -117,8 +117,9 @@ TEST_F(ExtensionDataTypeControllerTest, StartOk) {
 TEST_F(ExtensionDataTypeControllerTest, StartAssociationFailed) {
   SetStartExpectations();
   SetAssociateExpectations();
-  EXPECT_CALL(*model_associator_, AssociateModels()).
-      WillRepeatedly(Return(false));
+  EXPECT_CALL(*model_associator_, AssociateModels(_)).
+      WillRepeatedly(DoAll(browser_sync::SetSyncError(syncable::EXTENSIONS),
+                           Return(false)));
 
   EXPECT_CALL(start_callback_, Run(DataTypeController::ASSOCIATION_FAILED, _));
   extension_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));

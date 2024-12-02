@@ -11,6 +11,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/themes/theme_service.h"
@@ -339,8 +340,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   [[self view] setFrame:NSMakeRect(0, 0, initialWidth_, 0)];
 
   // Complete init of the "off the side" button, as much as we can.
-  [offTheSideButton_ setDraggable:NO];
-  [offTheSideButton_ setActsOnMouseDown:YES];
+  [offTheSideButton_.draggableButton setDraggable:NO];
+  [offTheSideButton_.draggableButton setActsOnMouseDown:YES];
 
   // We are enabled by default.
   barIsEnabled_ = YES;
@@ -397,7 +398,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
                            name:NSWindowWillCloseNotification
                          object:nil];
   [defaultCenter removeObserver:self
-                           name:NSWindowDidResignKeyNotification
+                           name:NSWindowDidResignMainNotification
                          object:nil];
 
   [defaultCenter addObserver:self
@@ -692,6 +693,9 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     return;
   }
 
+#if defined(WEBUI_DIALOGS)
+  browser_->OpenBookmarkManagerEditNode(node->id());
+#else
   // There is no real need to jump to a platform-common routine at
   // this point (which just jumps back to objc) other than consistency
   // across platforms.
@@ -704,6 +708,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
                        node->parent(),
                        BookmarkEditor::EditDetails(node),
                        BookmarkEditor::SHOW_TREE);
+#endif
 }
 
 - (IBAction)cutBookmark:(id)sender {
@@ -781,11 +786,15 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* parent = [self nodeFromMenuItem:sender];
   if (!parent)
     parent = bookmarkModel_->bookmark_bar_node();
+#if defined(WEBUI_DIALOGS)
+  browser_->OpenBookmarkManagerAddNodeIn(parent->id());
+#else
   BookmarkEditor::Show([[self view] window],
                        browser_->profile(),
                        parent,
                        BookmarkEditor::EditDetails(),
                        BookmarkEditor::SHOW_TREE);
+#endif
 }
 
 // Might be called from the context menu over the bar OR over a
@@ -1085,12 +1094,23 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     return NO;
   }
 
+  Profile* profile = browser_->profile();
   // If this is an incognito window, don't allow "open in incognito".
   if ((action == @selector(openBookmarkInIncognitoWindow:)) ||
       (action == @selector(openAllBookmarksIncognitoWindow:))) {
-    Profile* profile = browser_->profile();
     if (profile->IsOffTheRecord() ||
-        !profile->GetPrefs()->GetBoolean(prefs::kIncognitoEnabled)) {
+        IncognitoModePrefs::GetAvailability(profile->GetPrefs()) ==
+            IncognitoModePrefs::DISABLED) {
+      return NO;
+    }
+  }
+
+  // If Incognito mode is forced, do not let open bookmarks in normal window.
+  if ((action == @selector(openBookmark:)) ||
+      (action == @selector(openAllBookmarksNewWindow:)) ||
+      (action == @selector(openAllBookmarks:))) {
+    if (IncognitoModePrefs::GetAvailability(profile->GetPrefs()) ==
+            IncognitoModePrefs::FORCED) {
       return NO;
     }
   }
@@ -1266,7 +1286,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (node->is_folder()) {
     [button setTarget:self];
     [button setAction:@selector(openBookmarkFolderFromButton:)];
-    [button setActsOnMouseDown:YES];
+    [[button draggableButton] setActsOnMouseDown:YES];
     // If it has a title, and it will be truncated, show full title in
     // tooltip.
     NSString* title = base::SysUTF16ToNSString(node->GetTitle());
@@ -1344,8 +1364,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   frame.origin.x = [[self buttonView] bounds].size.width - frame.size.width;
   frame.origin.x -= bookmarks::kBookmarkHorizontalPadding;
   BookmarkButton* button = [[BookmarkButton alloc] initWithFrame:frame];
-  [button setDraggable:NO];
-  [button setActsOnMouseDown:YES];
+  [[button draggableButton] setDraggable:NO];
+  [[button draggableButton] setActsOnMouseDown:YES];
   otherBookmarksButton_.reset(button);
   view_id_util::SetID(button, VIEW_ID_OTHER_BOOKMARKS);
 
@@ -1914,6 +1934,15 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 - (BookmarkButton*)buttonForDroppingOnAtPoint:(NSPoint)point {
   point = [[self view] convertPoint:point
                            fromView:[[[self view] window] contentView]];
+
+  // If there's a hover button, return it if the point is within its bounds.
+  // Since the logic in -buttonForDroppingOnAtPoint:fromArray: only matches a
+  // button when the point is over the middle half, this is needed to prevent
+  // the button's folder being closed if the mouse temporarily leaves the
+  // middle half but is still within the button bounds.
+  if (hoverButton_ && NSPointInRect(point, [hoverButton_ frame]))
+     return hoverButton_.get();
+
   BookmarkButton* button = [self buttonForDroppingOnAtPoint:point
                                                   fromArray:buttons_.get()];
   // One more chance -- try "Other Bookmarks" and "off the side" (if visible).
@@ -2300,6 +2329,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     return;
   // Else open a new one if it makes sense to do so.
   if ([sender bookmarkNode]->is_folder()) {
+    // Update |hoverButton_| so that it corresponds to the open folder.
+    hoverButton_.reset([sender retain]);
     [folderTarget_ openBookmarkFolderFromButton:sender];
   } else {
     // We're over a non-folder bookmark so close any old folders.

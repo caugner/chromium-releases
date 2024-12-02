@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
 
+#include <algorithm>
+
+#include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
-#include "base/scoped_ptr.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/ui/views/infobars/infobar_background.h"
 #include "chrome/browser/ui/views/infobars/infobar_button_border.h"
@@ -24,6 +26,8 @@
 #include "views/controls/image_view.h"
 #include "views/controls/label.h"
 #include "views/controls/link.h"
+#include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/focus/external_focus_tracker.h"
 #include "views/widget/widget.h"
 #include "views/window/non_client_view.h"
@@ -287,6 +291,21 @@ const InfoBarContainer::Delegate* InfoBarView::container_delegate() const {
   return infobar_container ? infobar_container->delegate() : NULL;
 }
 
+void InfoBarView::RunMenuAt(ui::MenuModel* menu_model,
+                            views::MenuButton* button,
+                            views::MenuItemView::AnchorPosition anchor) {
+  views::MenuModelAdapter adapter(menu_model);
+  gfx::Point screen_point;
+  views::View::ConvertPointToScreen(button, &screen_point);
+  menu_runner_.reset(new views::MenuRunner(adapter.CreateMenu()));
+  // Ignore the result as we know we can only get here after the menu has
+  // closed.
+  ignore_result(menu_runner_->RunMenuAt(
+      GetWidget(), button, gfx::Rect(screen_point, button->size()), anchor,
+      views::MenuRunner::HAS_MNEMONICS));
+  // TODO(pkasting): this may be deleted after rewrite.
+}
+
 void InfoBarView::PlatformSpecificShow(bool animate) {
   views::Widget* widget = GetWidget();
   views::FocusManager* focus_manager = GetFocusManager();
@@ -308,6 +327,12 @@ void InfoBarView::PlatformSpecificShow(bool animate) {
 }
 
 void InfoBarView::PlatformSpecificHide(bool animate) {
+  // We're being removed. Cancel any menus we may have open.  Because we are
+  // deleted after a delay and after our delegate is deleted we have to
+  // explicitly cancel the menu rather than relying on the destructor to cancel
+  // the menu.
+  menu_runner_.reset();
+
   // It's possible to be called twice (once with |animate| true and once with it
   // false); in this case the second RemoveFocusChangeListener() call will
   // silently no-op.
@@ -315,7 +340,7 @@ void InfoBarView::PlatformSpecificHide(bool animate) {
   if (focus_manager)
     focus_manager->RemoveFocusChangeListener(this);
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   if (!animate || !focus_tracker_.get())
     return;
 

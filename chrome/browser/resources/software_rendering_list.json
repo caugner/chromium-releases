@@ -11,7 +11,8 @@
 //   ]
 // }
 //
-// Each entry contains the following fields:
+// Each entry contains the following fields (fields are optional unless
+// specifically described as mandatory below):
 // 1. "id" is an integer.  0 is reserved.  This field is mandatory.
 // 2. "os" contains "type" and an optional "version". "type" could be "macosx",
 //    "linux", "win", "chromeos", or "any".  "any" is the same as not specifying
@@ -23,18 +24,22 @@
 // 6. "driver_version" is a VERSION structure (defined below).
 // 7. "driver_date" is a VERSION structure (defined below).
 //    The version is interpreted as "year.month.day".
-// 8. "gl_renderer" is a STRING structure (defined below).
-// 9: "Exceptions" is a list of entries.
-// 10. "blacklist" is a list of gpu feature strings, valid values include
+// 8. "gl_vendor" is a STRING structure (defined below).
+// 9. "gl_renderer" is a STRING structure (defined below).
+// 10: "exceptions" is a list of entries.
+// 11. "blacklist" is a list of gpu feature strings, valid values include
 //     "accelerated_2d_canvas", "accelerated_compositing", "webgl",
 //     "multisampling", and "all".
 //     This field is mandatory.
-// 11. "description" has the description of the entry.
-// 12. "webkit_bugs" is an array of associated webkit bug numbers.
-// 13. "cr_bugs" is an array of associated webkit bug numbers.
-// 14. "browser_version" is a VERSION structure (defined below).  If this
+// 12. "description" has the description of the entry.
+// 13. "webkit_bugs" is an array of associated webkit bug numbers.
+// 14. "cr_bugs" is an array of associated webkit bug numbers.
+// 15. "browser_version" is a VERSION structure (defined below).  If this
 //     condition is not satisfied, the entry will be ignored.  If it is not
 //     present, then the entry applies to all versions of the browser.
+// 16. "browser_channels" is a list of browser channel strings, valid values
+//     include "stable", "beta", "dev", and "canary". If the browser_channels
+//     list is not present, the entry matches all channels.
 //
 // VERSION includes "op" "number", and "number2".  "op" can be any of the
 // following values: "=", "<", "<=", ">", ">=", "any", "between".  "number2" is
@@ -47,7 +52,7 @@
 {
   "name": "software rendering list",
   // Please update the version number whenever you change this file.
-  "version": "1.14",
+  "version": "1.18",
   "entries": [
     {
       "id": 1,
@@ -268,6 +273,117 @@
       "blacklist": [
         "accelerated_2d_canvas",
         "accelerated_compositing"
+      ]
+    },
+    {
+      "id": 20,
+      "description": "NVIDIA driver 260.19.06 on linux is crash-prone.",
+      "cr_bugs": [82232, 82541],
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x10de",
+      "driver_vendor": {
+        "op": "=",
+        "value": "NVIDIA"
+      },
+      "driver_version": {
+        "op": "=",
+        "number": "260.19.6"
+      },
+      "blacklist": [
+        "all"
+      ]
+    },
+    {
+      "id": 21,
+      "description": "NVIDIA driver 195.36.24 on linux is buggy for certain Quadro FX series cards.",
+      "cr_bugs": [87680,90091],
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x10de",
+      "device_id": ["0x00cd", "0x00ce"],
+      "driver_vendor": {
+        "op": "=",
+        "value": "NVIDIA"
+      },
+      "driver_version": {
+        "op": "=",
+        "number": "195.36.24"
+      },
+      "blacklist": [
+        "all"
+      ]
+    },
+    {
+      "id": 22,
+      "description": "NVIDIA linux drivers older than 195.36.24 are assumed to be buggy.",
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x10de",
+      "driver_vendor": {
+        "op": "=",
+        "value": "NVIDIA"
+      },
+      "driver_version": {
+        "op": "<",
+        "number": "195.36.24"
+      },
+      "blacklist": [
+        "all"
+      ]
+    },
+    {
+      "id": 23,
+      "description": "Mesa drivers in linux older than 7.11 are assumed to be buggy.",
+      "os": {
+        "type": "linux"
+      },
+      "driver_vendor": {
+        "op": "=",
+        "value": "Mesa"
+      },
+      "driver_version": {
+        "op": "<",
+        "number": "7.11"
+      },
+      "blacklist": [
+        "all"
+      ]
+    },
+    {
+      "id": 24,
+      "description": "Accelerated 2d canvas is unstable in Linux at the moment.",
+      "os": {
+        "type": "linux"
+      },
+      "blacklist": [
+        "accelerated_2d_canvas"
+      ]
+    },
+    {
+      "id": 27,
+      "description": "Disable open source drivers for ATI/AMD cards in Linux.",
+      "cr_bugs": [95934],
+      "os": {
+        "type": "linux"
+      },
+      "driver_vendor": {
+        "op": "contains",
+        "value": "SGI"
+      },
+      "exceptions": [
+        {
+          "vendor_id": "0x8086"
+        },
+        {
+          "vendor_id": "0x10de"
+        }
+      ],
+      "blacklist": [
+        "all"
       ]
     }
   ]

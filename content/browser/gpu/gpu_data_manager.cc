@@ -12,6 +12,9 @@
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/sys_info.h"
+#include "base/values.h"
+#include "base/version.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/gpu/gpu_blacklist.h"
 #include "content/browser/gpu/gpu_process_host.h"
@@ -21,6 +24,7 @@
 #include "content/gpu/gpu_info_collector.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_switches.h"
+#include "webkit/plugins/plugin_switches.h"
 
 namespace {
 
@@ -40,11 +44,87 @@ void DisplayReconfigCallback(CGDirectDisplayID display,
 }
 #endif
 
+DictionaryValue* NewDescriptionValuePair(const std::string& desc,
+    const std::string& value) {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->SetString("description", desc);
+  dict->SetString("value", value);
+  return dict;
+}
+
+DictionaryValue* NewDescriptionValuePair(const std::string& desc,
+    Value* value) {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->SetString("description", desc);
+  dict->Set("value", value);
+  return dict;
+}
+
+#if defined(OS_WIN)
+enum WinSubVersion {
+  kWinOthers = 0,
+  kWinXP,
+  kWinVista,
+  kWin7,
+  kNumWinSubVersions
+};
+
+// Output DxDiagNode tree as nested array of {description,value} pairs
+ListValue* DxDiagNodeToList(const DxDiagNode& node) {
+  ListValue* list = new ListValue();
+  for (std::map<std::string, std::string>::const_iterator it =
+      node.values.begin();
+      it != node.values.end();
+      ++it) {
+    list->Append(NewDescriptionValuePair(it->first, it->second));
+  }
+
+  for (std::map<std::string, DxDiagNode>::const_iterator it =
+      node.children.begin();
+      it != node.children.end();
+      ++it) {
+    ListValue* sublist = DxDiagNodeToList(it->second);
+    list->Append(NewDescriptionValuePair(it->first, sublist));
+  }
+  return list;
+}
+
+int GetGpuBlacklistHistogramValueWin(bool blocked) {
+  static WinSubVersion sub_version = kNumWinSubVersions;
+  if (sub_version == kNumWinSubVersions) {
+    sub_version = kWinOthers;
+    std::string version_str = base::SysInfo::OperatingSystemVersion();
+    size_t pos = version_str.find_first_not_of("0123456789.");
+    if (pos != std::string::npos)
+      version_str = version_str.substr(0, pos);
+    scoped_ptr<Version> os_version(Version::GetVersionFromString(version_str));
+    if (os_version.get() && os_version->components().size() >= 2) {
+      const std::vector<uint16>& version_numbers = os_version->components();
+      if (version_numbers[0] == 5)
+        sub_version = kWinXP;
+      else if (version_numbers[0] == 6 && version_numbers[1] == 0)
+        sub_version = kWinVista;
+      else if (version_numbers[0] == 6 && version_numbers[1] == 1)
+        sub_version = kWin7;
+    }
+  }
+  int entry_index = static_cast<int>(sub_version) * 2;
+  if (blocked)
+    entry_index++;
+  return entry_index;
+}
+#endif  // OS_WIN
+
 }  // namespace anonymous
 
 GpuDataManager::GpuDataManager()
     : complete_gpu_info_already_requested_(false) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // Certain tests doesn't go through the browser startup path that
+  // initializes GpuDataManager on FILE thread; therefore, it is initialized
+  // on UI thread later, and we skip the preliminary gpu info collection
+  // in such situation.
+  if (!BrowserThread::CurrentlyOn(BrowserThread::FILE))
+    return;
 
   GPUInfo gpu_info;
   gpu_info_collector::CollectPreliminaryGraphicsInfo(&gpu_info);
@@ -61,6 +141,7 @@ GpuDataManager::~GpuDataManager() {
 #endif
 }
 
+// static
 GpuDataManager* GpuDataManager::GetInstance() {
   return Singleton<GpuDataManager>::get();
 }
@@ -171,15 +252,21 @@ void GpuDataManager::AppendRendererCommandLine(
   DCHECK(command_line);
 
   uint32 flags = gpu_feature_flags_.flags();
-  if ((flags & GpuFeatureFlags::kGpuFeatureWebgl) &&
-      !command_line->HasSwitch(switches::kDisableExperimentalWebGL))
-    command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
+  if ((flags & GpuFeatureFlags::kGpuFeatureWebgl)) {
+    if (!command_line->HasSwitch(switches::kDisableExperimentalWebGL))
+      command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
+    if (!command_line->HasSwitch(switches::kDisablePepper3dForUntrustedUse))
+      command_line->AppendSwitch(switches::kDisablePepper3dForUntrustedUse);
+  }
   if ((flags & GpuFeatureFlags::kGpuFeatureMultisampling) &&
       !command_line->HasSwitch(switches::kDisableGLMultisampling))
     command_line->AppendSwitch(switches::kDisableGLMultisampling);
   if ((flags & GpuFeatureFlags::kGpuFeatureAcceleratedCompositing) &&
       !command_line->HasSwitch(switches::kDisableAcceleratedCompositing))
     command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
+  if ((flags & GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas) &&
+      !command_line->HasSwitch(switches::kDisableAccelerated2dCanvas))
+    command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
 }
 
 void GpuDataManager::SetBuiltInGpuBlacklist(GpuBlacklist* built_in_list) {
@@ -237,6 +324,51 @@ void GpuDataManager::HandleGpuSwitch() {
   // relaunch GPU process.
 }
 
+DictionaryValue* GpuDataManager::GpuInfoAsDictionaryValue() const {
+  ListValue* basic_info = new ListValue();
+  basic_info->Append(NewDescriptionValuePair(
+      "Initialization time",
+      base::Int64ToString(gpu_info().initialization_time.InMilliseconds())));
+  basic_info->Append(NewDescriptionValuePair(
+      "Vendor Id", base::StringPrintf("0x%04x", gpu_info().vendor_id)));
+  basic_info->Append(NewDescriptionValuePair(
+      "Device Id", base::StringPrintf("0x%04x", gpu_info().device_id)));
+  basic_info->Append(NewDescriptionValuePair("Driver vendor",
+                                             gpu_info().driver_vendor));
+  basic_info->Append(NewDescriptionValuePair("Driver version",
+                                             gpu_info().driver_version));
+  basic_info->Append(NewDescriptionValuePair("Driver date",
+                                             gpu_info().driver_date));
+  basic_info->Append(NewDescriptionValuePair("Pixel shader version",
+                                             gpu_info().pixel_shader_version));
+  basic_info->Append(NewDescriptionValuePair("Vertex shader version",
+                                             gpu_info().vertex_shader_version));
+  basic_info->Append(NewDescriptionValuePair("GL version",
+                                             gpu_info().gl_version));
+  basic_info->Append(NewDescriptionValuePair("GL_VENDOR",
+                                             gpu_info().gl_vendor));
+  basic_info->Append(NewDescriptionValuePair("GL_RENDERER",
+                                             gpu_info().gl_renderer));
+  basic_info->Append(NewDescriptionValuePair("GL_VERSION",
+                                             gpu_info().gl_version_string));
+  basic_info->Append(NewDescriptionValuePair("GL_EXTENSIONS",
+                                             gpu_info().gl_extensions));
+
+  DictionaryValue* info = new DictionaryValue();
+  info->Set("basic_info", basic_info);
+
+#if defined(OS_WIN)
+  Value* dx_info;
+  if (gpu_info().dx_diagnostics.children.size())
+    dx_info = DxDiagNodeToList(gpu_info().dx_diagnostics);
+  else
+    dx_info = Value::CreateNullValue();
+  info->Set("diagnostics", dx_info);
+#endif
+
+  return info;
+}
+
 void GpuDataManager::RunGpuInfoUpdateCallbacks() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
@@ -271,24 +403,60 @@ void GpuDataManager::UpdateGpuFeatureFlags() {
         GpuBlacklist::kOsAny, NULL, gpu_info_);
   }
 
-  uint32 max_entry_id = gpu_blacklist->max_entry_id();
-  if (!gpu_feature_flags_.flags()) {
-    UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerEntry",
-        0, max_entry_id + 1);
-    return;
-  }
-
   // Notify clients that GpuInfo state has changed
   RunGpuInfoUpdateCallbacks();
 
-  // TODO(zmo): move histograming to GpuBlacklist::DetermineGpuFeatureFlags.
-  std::vector<uint32> flag_entries;
-  gpu_blacklist->GetGpuFeatureFlagEntries(
-      GpuFeatureFlags::kGpuFeatureAll, flag_entries);
-  DCHECK_GT(flag_entries.size(), 0u);
-  for (size_t i = 0; i < flag_entries.size(); ++i) {
+  uint32 flags = gpu_feature_flags_.flags();
+  uint32 max_entry_id = gpu_blacklist->max_entry_id();
+  if (flags == 0) {
     UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerEntry",
-        flag_entries[i], max_entry_id + 1);
+        0, max_entry_id + 1);
+  } else {
+    std::vector<uint32> flag_entries;
+    gpu_blacklist->GetGpuFeatureFlagEntries(
+        GpuFeatureFlags::kGpuFeatureAll, flag_entries);
+    DCHECK_GT(flag_entries.size(), 0u);
+    for (size_t i = 0; i < flag_entries.size(); ++i) {
+      UMA_HISTOGRAM_ENUMERATION("GPU.BlacklistTestResultsPerEntry",
+          flag_entries[i], max_entry_id + 1);
+    }
+  }
+
+  const GpuFeatureFlags::GpuFeatureType kGpuFeatures[] = {
+      GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas,
+      GpuFeatureFlags::kGpuFeatureAcceleratedCompositing,
+      GpuFeatureFlags::kGpuFeatureWebgl
+  };
+  const std::string kGpuBlacklistFeatureHistogramNames[] = {
+      "GPU.BlacklistFeatureTestResults.Accelerated2dCanvas",
+      "GPU.BlacklistFeatureTestResults.AcceleratedCompositing",
+      "GPU.BlacklistFeatureTestResults.Webgl"
+  };
+#if defined(OS_WIN)
+  const std::string kGpuBlacklistFeatureHistogramNamesWin[] = {
+      "GPU.BlacklistFeatureTestResultsWin.Accelerated2dCanvas",
+      "GPU.BlacklistFeatureTestResultsWin.AcceleratedCompositing",
+      "GPU.BlacklistFeatureTestResultsWin.Webgl"
+  };
+#endif
+  const size_t kNumFeatures =
+      sizeof(kGpuFeatures) / sizeof(GpuFeatureFlags::GpuFeatureType);
+  for (size_t i = 0; i < kNumFeatures; ++i) {
+    // We can't use UMA_HISTOGRAM_ENUMERATION here because the same name is
+    // expected if the macro is used within a loop.
+    base::Histogram* histogram_pointer = base::LinearHistogram::FactoryGet(
+        kGpuBlacklistFeatureHistogramNames[i], 1, 2, 3,
+        base::Histogram::kUmaTargetedHistogramFlag);
+    histogram_pointer->Add((flags & kGpuFeatures[i]) ? 1 : 0);
+#if defined(OS_WIN)
+    histogram_pointer = base::LinearHistogram::FactoryGet(
+        kGpuBlacklistFeatureHistogramNamesWin[i],
+        1, kNumWinSubVersions * 2, kNumWinSubVersions * 2 + 1,
+        base::Histogram::kUmaTargetedHistogramFlag);
+    histogram_pointer->Add(
+        GetGpuBlacklistHistogramValueWin(
+            (flags & kGpuFeatures[i]) ? true : false));
+#endif
   }
 }
 

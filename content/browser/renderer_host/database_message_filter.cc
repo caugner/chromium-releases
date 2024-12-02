@@ -150,7 +150,7 @@ void DatabaseMessageFilter::OnDatabaseOpenFile(const string16& vfs_file_name,
   string16 database_name;
 
   // When in incognito mode, we want to make sure that all DB files are
-  // removed when the incognito profile goes away, so we add the
+  // removed when the incognito browser context goes away, so we add the
   // SQLITE_OPEN_DELETEONCLOSE flag when opening all files, and keep
   // open handles to them in the database tracker to make sure they're
   // around for as long as needed.
@@ -170,8 +170,7 @@ void DatabaseMessageFilter::OnDatabaseOpenFile(const string16& vfs_file_name,
             VfsBackend::OpenFile(db_file,
                                  desired_flags | SQLITE_OPEN_DELETEONCLOSE,
                                  &file_handle);
-            if (VfsBackend::FileTypeIsMainDB(desired_flags) ||
-                VfsBackend::FileTypeIsJournal(desired_flags))
+            if (!(desired_flags & SQLITE_OPEN_DELETEONCLOSE))
               db_tracker_->SaveIncognitoFileHandle(vfs_file_name, file_handle);
           }
         } else {

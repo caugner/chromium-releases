@@ -19,8 +19,8 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -202,6 +202,7 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
         NewRunnableFunction(&internal_cloud_print_helpers::CreateDialogImpl,
                             path_to_pdf,
                             string16(),
+                            string16(),
                             std::string("application/pdf"),
                             true));
   }
@@ -224,7 +225,13 @@ net::URLRequestJob* PrintDialogCloudTest::Factory(net::URLRequest* request,
   return new SimpleTestJob(request);
 }
 
-IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, HandlersRegistered) {
+#if defined(OS_WIN)
+// http://crbug.com/94864
+#define MAYBE_HandlersRegistered DISABLED_HandlersRegistered
+#else
+#define MAYBE_HandlersRegistered HandlersRegistered
+#endif
+IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, MAYBE_HandlersRegistered) {
   BrowserList::SetLastActive(browser());
   ASSERT_TRUE(BrowserList::GetLastActive());
 
@@ -235,6 +242,13 @@ IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, HandlersRegistered) {
   ui_test_utils::RunMessageLoop();
 
   ASSERT_TRUE(TestController::GetInstance()->result());
+
+  // Close the dialog before finishing the test.
+  ui_test_utils::WindowedNotificationObserver signal(
+      content::NOTIFICATION_TAB_CLOSED, NotificationService::AllSources());
+  EXPECT_TRUE(ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_ESCAPE,
+                                              false, false, false, false));
+  signal.Wait();
 }
 
 #if defined(OS_CHROMEOS)

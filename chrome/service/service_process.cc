@@ -192,6 +192,16 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   if (cloud_print_proxy_enabled) {
     GetCloudPrintProxy()->EnableForUser(lsid);
   }
+  // Enable Virtual Printer Driver if needed.
+  bool virtual_printer_driver_enabled = false;
+  service_prefs_->GetBoolean(prefs::kVirtualPrinterDriverEnabled,
+                             &virtual_printer_driver_enabled);
+
+  if (virtual_printer_driver_enabled) {
+    // Register the fact that there is at least one
+    // service needing the process.
+    OnServiceEnabled();
+  }
 
   VLOG(1) << "Starting Service Process IPC Server";
   ipc_server_.reset(new ServiceIPCServer(
@@ -200,8 +210,9 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
 
   // After the IPC server has started we signal that the service process is
   // ready.
-  if (!state->SignalReady(io_thread_->message_loop_proxy(),
-                          NewRunnableMethod(this, &ServiceProcess::Shutdown))) {
+  if (!service_process_state_->SignalReady(
+      io_thread_->message_loop_proxy(),
+      NewRunnableMethod(this, &ServiceProcess::Terminate))) {
     return false;
   }
 
@@ -231,7 +242,23 @@ bool ServiceProcess::Teardown() {
 // This method is called when a shutdown command is received from IPC channel
 // or there was an error in the IPC channel.
 void ServiceProcess::Shutdown() {
-  // Quit the main message loop.
+#if defined(OS_MACOSX)
+  // On MacOS X the service must be removed from the launchd job list.
+  // http://www.chromium.org/developers/design-documents/service-processes
+  // The best way to do that is to go through the ForceServiceProcessShutdown
+  // path. If it succeeds Terminate() will be called from the handler registered
+  // via service_process_state_->SignalReady().
+  // On failure call Terminate() directly to force the process to actually
+  // terminate.
+  if (!ForceServiceProcessShutdown("", 0)) {
+    Terminate();
+  }
+#else
+  Terminate();
+#endif
+}
+
+void ServiceProcess::Terminate() {
   main_message_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
 }
 
@@ -270,6 +297,20 @@ void ServiceProcess::OnCloudPrintProxyDisabled(bool persist_state) {
     service_prefs_->WritePrefs();
   }
   OnServiceDisabled();
+}
+
+void ServiceProcess::EnableVirtualPrintDriver() {
+  OnServiceEnabled();
+  // Save the preference that we have enabled the virtual driver.
+  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, true);
+  service_prefs_->WritePrefs();
+}
+
+void ServiceProcess::DisableVirtualPrintDriver() {
+  OnServiceDisabled();
+  // Save the preference that we have disabled the virtual driver.
+  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, false);
+  service_prefs_->WritePrefs();
 }
 
 ServiceURLRequestContextGetter*

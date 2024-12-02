@@ -98,9 +98,8 @@ void CloudPolicyController::Retry() {
   DoWork();
 }
 
-void CloudPolicyController::StopAutoRetry() {
-  scheduler_->CancelDelayedWork();
-  backend_.reset();
+void CloudPolicyController::Reset() {
+  SetState(STATE_TOKEN_UNAVAILABLE);
 }
 
 void CloudPolicyController::HandlePolicyResponse(
@@ -110,8 +109,9 @@ void CloudPolicyController::HandlePolicyResponse(
       LOG(WARNING) << "More than one policy in the response of the device "
                    << "management server, discarding.";
     }
-    if (response.response(0).error_code() !=
-        DeviceManagementBackend::kErrorServicePolicyNotFound) {
+    if (!response.response(0).has_error_code() ||
+        response.response(0).error_code() ==
+            DeviceManagementBackend::kPolicyFetchSuccess) {
       cache_->SetPolicy(response.response(0));
       SetState(STATE_POLICY_VALID);
     } else {
@@ -128,10 +128,17 @@ void CloudPolicyController::HandlePolicyResponse(
 void CloudPolicyController::OnError(DeviceManagementBackend::ErrorCode code) {
   switch (code) {
     case DeviceManagementBackend::kErrorServiceDeviceNotFound:
+    case DeviceManagementBackend::kErrorServiceDeviceIdConflict:
     case DeviceManagementBackend::kErrorServiceManagementTokenInvalid: {
       LOG(WARNING) << "The device token was either invalid or unknown to the "
                    << "device manager, re-registering device.";
       // Will retry fetching a token but gracefully backing off.
+      SetState(STATE_TOKEN_ERROR);
+      break;
+    }
+    case DeviceManagementBackend::kErrorServiceInvalidSerialNumber: {
+      VLOG(1) << "The device is no longer enlisted for the domain.";
+      token_fetcher_->SetSerialNumberInvalidState();
       SetState(STATE_TOKEN_ERROR);
       break;
     }
@@ -258,6 +265,7 @@ void CloudPolicyController::SendPolicyRequest() {
 
   backend_->ProcessPolicyRequest(data_store_->device_token(),
                                  data_store_->device_id(),
+                                 data_store_->user_affiliation(),
                                  policy_request, this);
 }
 
@@ -283,7 +291,8 @@ void CloudPolicyController::DoWork() {
 void CloudPolicyController::SetState(
     CloudPolicyController::ControllerState new_state) {
   state_ = new_state;
-  backend_.reset();  // Discard any pending requests.
+
+  backend_.reset();  // Stop any pending requests.
 
   base::Time now(base::Time::NowFromSystemTime());
   base::Time refresh_at;

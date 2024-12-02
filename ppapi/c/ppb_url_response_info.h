@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_url_response_info.idl modified Sat Jul 16 16:50:26 2011. */
+/* From ppb_url_response_info.idl modified Wed Aug 24 20:53:17 2011. */
 
 #ifndef PPAPI_C_PPB_URL_RESPONSE_INFO_H_
 #define PPAPI_C_PPB_URL_RESPONSE_INFO_H_
@@ -13,6 +13,9 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_var.h"
+
+#define PPB_URLRESPONSEINFO_INTERFACE_1_0 "PPB_URLResponseInfo;1.0"
+#define PPB_URLRESPONSEINFO_INTERFACE PPB_URLRESPONSEINFO_INTERFACE_1_0
 
 /**
  * @file
@@ -93,10 +96,6 @@ PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_URLResponseProperty, 4);
  * examining URL responses. Refer to <code>PPB_URLLoader</code> for further
  * information.
  */
-#define PPB_URLRESPONSEINFO_INTERFACE_0_1 "PPB_URLResponseInfo;0.1"
-#define PPB_URLRESPONSEINFO_INTERFACE_1_0 "PPB_URLResponseInfo;1.0"
-#define PPB_URLRESPONSEINFO_INTERFACE PPB_URLRESPONSEINFO_INTERFACE_1_0
-
 struct PPB_URLResponseInfo {
   /**
    * IsURLResponseInfo() determines if a response is a
@@ -129,14 +128,14 @@ struct PPB_URLResponseInfo {
    * <code>PP_URLREQUESTPROPERTY_STREAMTOFILE</code> was set on the
    * <code>URLRequestInfo</code> used to produce this response.  This file
    * remains valid until the <code>URLLoader</code> associated with this
-   * <code>URLResponseInfo is closed or destroyed.
+   * <code>URLResponseInfo</code> is closed or destroyed.
    *
    * @param[in] request A <code>PP_Resource</code> corresponding to a
    * <code>URLResponseInfo</code>.
    *
-   * @return A <code>PP_Resource</code> corresponding to a FileRef if
-   * successful, 0 if <code>PP_URLREQUESTPROPERTY_STREAMTOFILE</code> was not
-   * requested or if the <code>URLLoader</code> has not been opened yet.
+   * @return A <code>PP_Resource</code> corresponding to a <code>FileRef</code>
+   * if successful, 0 if <code>PP_URLREQUESTPROPERTY_STREAMTOFILE</code> was
+   * not requested or if the <code>URLLoader</code> has not been opened yet.
    */
   PP_Resource (*GetBodyAsFileRef)(PP_Resource response);
 };

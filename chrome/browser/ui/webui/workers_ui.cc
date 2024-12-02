@@ -9,6 +9,7 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
@@ -33,26 +34,23 @@ static const char kPidField[]  = "pid";
 
 namespace {
 
-class WorkersUIHTMLSource : public ChromeURLDataManager::DataSource {
+class WorkersUIHTMLSource : public ChromeWebUIDataSource {
  public:
   WorkersUIHTMLSource();
 
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
                                 int request_id);
-
-  virtual std::string GetMimeType(const std::string&) const;
-
  private:
   ~WorkersUIHTMLSource() {}
-
   void SendSharedWorkersData(int request_id);
-
   DISALLOW_COPY_AND_ASSIGN(WorkersUIHTMLSource);
 };
 
 WorkersUIHTMLSource::WorkersUIHTMLSource()
-    : DataSource(chrome::kChromeUIWorkersHost, NULL) {
+    : ChromeWebUIDataSource(chrome::kChromeUIWorkersHost, NULL) {
+  add_resource_path("workers.js", IDR_WORKERS_INDEX_JS);
+  set_default_resource(IDR_WORKERS_INDEX_HTML);
 }
 
 void WorkersUIHTMLSource::StartDataRequest(const std::string& path,
@@ -61,21 +59,8 @@ void WorkersUIHTMLSource::StartDataRequest(const std::string& path,
   if (path == kWorkersDataFile) {
     SendSharedWorkersData(request_id);
   } else {
-    int idr = IDR_WORKERS_INDEX_HTML;
-    scoped_refptr<RefCountedStaticMemory> response(
-        ResourceBundle::GetSharedInstance().LoadDataResourceBytes(idr));
-    SendResponse(request_id, response);
+    ChromeWebUIDataSource::StartDataRequest(path, is_incognito, request_id);
   }
-}
-
-std::string WorkersUIHTMLSource::GetMimeType(const std::string& path) const {
-  if (EndsWith(path, ".css", false))
-    return "text/css";
-  if (EndsWith(path, ".js", false))
-    return "application/javascript";
-  if (EndsWith(path, ".json", false))
-    return "plain/text";
-  return "text/html";
 }
 
 void WorkersUIHTMLSource::SendSharedWorkersData(int request_id) {
@@ -111,7 +96,7 @@ class WorkersDOMHandler : public WebUIMessageHandler {
 
  private:
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages();
+  virtual void RegisterMessages() OVERRIDE;
 
   // Callback for "openDevTools" message.
   void HandleOpenDevTools(const ListValue* args);
@@ -122,12 +107,6 @@ class WorkersDOMHandler : public WebUIMessageHandler {
 void WorkersDOMHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(kOpenDevToolsCommand,
       NewCallback(this, &WorkersDOMHandler::HandleOpenDevTools));
-}
-
-static void OpenDevToolsOnIOThread(int worker_process_host_id,
-                                   int worker_route_id) {
-  WorkerDevToolsManagerIO::GetInstance()->OpenDevToolsForWorker(
-      worker_process_host_id, worker_route_id);
 }
 
 void WorkersDOMHandler::HandleOpenDevTools(const ListValue* args) {
@@ -141,8 +120,20 @@ void WorkersDOMHandler::HandleOpenDevTools(const ListValue* args) {
   CHECK(base::StringToInt(worker_process_host_id_str,
                           &worker_process_host_id));
   CHECK(base::StringToInt(worker_route_id_str, &worker_route_id));
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, NewRunnableFunction(
-      &OpenDevToolsOnIOThread, worker_process_host_id, worker_route_id));
+
+  if (WorkerDevToolsManagerIO::HasDevToolsClient(worker_process_host_id,
+                                                 worker_route_id))
+    return;
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  if (!profile)
+    return;
+  DevToolsWindow* window = DevToolsWindow::CreateDevToolsWindowForWorker(
+      profile);
+  window->Show(DEVTOOLS_TOGGLE_ACTION_NONE);
+  WorkerDevToolsManagerIO::RegisterDevToolsClientForWorkerOnUIThread(
+      window,
+      worker_process_host_id,
+      worker_route_id);
 }
 
 }  // namespace
@@ -155,5 +146,6 @@ WorkersUI::WorkersUI(TabContents* contents) : ChromeWebUI(contents) {
   WorkersUIHTMLSource* html_source = new WorkersUIHTMLSource();
 
   // Set up the chrome://workers/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }

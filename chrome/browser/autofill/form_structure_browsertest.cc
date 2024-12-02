@@ -12,8 +12,8 @@
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -77,6 +77,9 @@ std::string FormStructureBrowserTest::FormStructuresToString(
          field_iter != (*iter)->end();
          ++field_iter) {
       forms_string += AutofillType::FieldTypeToString((*field_iter)->type());
+      forms_string += " | " + UTF16ToUTF8((*field_iter)->name);
+      forms_string += " | " + UTF16ToUTF8((*field_iter)->label);
+      forms_string += " | " + UTF16ToUTF8((*field_iter)->value);
       forms_string += "\n";
     }
   }
@@ -210,6 +213,14 @@ IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
 IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
     MAYBE_DataDrivenHeuristics(15)) {
   const FilePath::CharType kFileNamePattern[] = FILE_PATH_LITERAL("15_*.html");
+  RunDataDrivenTest(GetInputDirectory(kTestName),
+                    GetOutputDirectory(kTestName),
+                    kFileNamePattern);
+}
+
+IN_PROC_BROWSER_TEST_F(FormStructureBrowserTest,
+    MAYBE_DataDrivenHeuristics(16)) {
+  const FilePath::CharType kFileNamePattern[] = FILE_PATH_LITERAL("16_*.html");
   RunDataDrivenTest(GetInputDirectory(kTestName),
                     GetOutputDirectory(kTestName),
                     kFileNamePattern);

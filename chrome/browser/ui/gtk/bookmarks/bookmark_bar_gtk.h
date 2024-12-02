@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_bar_instructions_gtk.h"
 #include "chrome/browser/ui/gtk/menu_bar_helper.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -27,6 +26,7 @@
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/size.h"
 
@@ -37,7 +37,6 @@ class CustomContainerButton;
 class GtkThemeService;
 class MenuGtk;
 class PageNavigator;
-class Profile;
 class TabstripOriginProvider;
 
 class BookmarkBarGtk : public ui::AnimationDelegate,
@@ -52,17 +51,9 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
   static const int kBookmarkBarNTPHeight;
 
   BookmarkBarGtk(BrowserWindowGtk* window,
-                 Profile* profile,
                  Browser* browser,
                  TabstripOriginProvider* tabstrip_origin_provider);
   virtual ~BookmarkBarGtk();
-
-  // Resets the profile. This removes any buttons for the current profile and
-  // recreates the models.
-  void SetProfile(Profile* profile);
-
-  // Returns the current profile.
-  Profile* GetProfile() { return profile_; }
 
   // Returns the current browser.
   Browser* browser() const { return browser_; }
@@ -75,7 +66,7 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
   void SetPageNavigator(PageNavigator* navigator);
 
   // Create the contents of the bookmark bar.
-  void Init(Profile* profile);
+  void Init();
 
   // Changes the state of the bookmark bar.
   void SetBookmarkBarState(BookmarkBar::State state,
@@ -134,8 +125,14 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
   // bookmarks in it.
   void UpdateOtherBookmarksVisibility();
 
-  // Helper function which destroys all the bookmark buttons in the GtkToolbar.
-  void RemoveAllBookmarkButtons();
+  // Destroys all the bookmark buttons in the GtkToolbar.
+  void RemoveAllButtons();
+
+  // Adds the "other bookmarks" and overflow buttons.
+  void AddCoreButtons();
+
+  // Removes and recreates all buttons in the bar.
+  void ResetButtons();
 
   // Returns the number of buttons corresponding to starred urls/folders. This
   // is equivalent to the number of children the bookmark bar node from the
@@ -302,8 +299,6 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
   // Updates the drag&drop state when |edit_bookmarks_enabled_| changes.
   void OnEditBookmarksEnabledChanged();
 
-  Profile* profile_;
-
   // Used for opening urls.
   PageNavigator* page_navigator_;
 
@@ -319,7 +314,7 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
 
   // Contains |bookmark_hbox_|. Event box exists to prevent leakage of
   // background color from the toplevel application window's GDK window.
-  OwnedWidgetGtk event_box_;
+  ui::OwnedWidgetGtk event_box_;
 
   // Used to detached the bookmark bar when on the NTP.
   GtkWidget* ntp_padding_box_;
@@ -339,7 +334,7 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
   scoped_ptr<BookmarkBarInstructionsGtk> instructions_gtk_;
 
   // GtkToolbar which contains all the bookmark buttons.
-  OwnedWidgetGtk bookmark_toolbar_;
+  ui::OwnedWidgetGtk bookmark_toolbar_;
 
   // The button that shows extra bookmarks that don't fit on the bookmark
   // bar.

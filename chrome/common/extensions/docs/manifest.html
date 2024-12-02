@@ -288,6 +288,10 @@
                 </li><li>
                   <a href="#name">name</a>
                 </li><li>
+                  <a href="#nacl_modules">nacl_modules</a>
+                </li><li>
+                  <a href="#offline_enabled">offline_enabled</a>
+                </li><li>
                   <a href="#permissions">permissions</a>
                 </li><li>
                   <a href="#version">version</a>
@@ -386,6 +390,8 @@ are <b>name</b> and <b>version</b>.
   "<a href="#incognito">incognito</a>": "spanning" <em>or</em> "split",
   "<a href="#key">key</a>": "<em>publicKey</em>",
   "<a href="#minimum_chrome_version">minimum_chrome_version</a>": "<em>versionString</em>",
+  "<a href="#nacl_modules">nacl_modules</a>": [...],
+  "<a href="#offline_enabled">offline_enabled</a>": true,
   "<a href="omnibox.html">omnibox</a>": { "keyword": "<em>aString</em>" },
   "<a href="options.html">options_page</a>": "<em>aFile</em>.html",
   "<a href="#permissions">permissions</a>": [...],
@@ -482,7 +488,7 @@ For details, see the
 The URL of the homepage for this extension. The extensions management page (chrome://extensions)
 will contain a link to this URL.  This field is particularly useful if you
 <a href="hosting.html">host the extension on your own site</a>. If you distribute your
-extension using the <a href="https://chrome.google.com/extensions">Extensions Gallery</a> or <a href="https://chrome.google.com/webstore">Chrome Web Store</a>,
+extension using the <a href="https://chrome.google.com/webstore">Chrome Web Store</a>,
 the homepage URL defaults to the extension's own page.
 </p>
 
@@ -620,6 +626,79 @@ extension management UI,
 and the <a href="https://chrome.google.com/webstore">store</a>.
 You can specify locale-specific strings for this field;
 see <a href="i18n.html">Internationalization</a> for details.
+</p>
+
+<h3 id="nacl_modules">nacl_modules</h3>
+
+<p>
+One or more mappings from MIME types to the Native Client module
+that handles each type.
+For example, the bold code in the following snippet
+registers a Native Client module as the content handler
+for the OpenOffice spreadsheet MIME type.
+</p>
+
+<pre>{
+  "name": "Native Client OpenOffice Spreadsheet Viewer",
+  "version": "0.1",
+  "description": "Open OpenOffice spreadsheets, right in your browser.",
+  <b>"nacl_modules": [{
+    "path": "OpenOfficeViewer.nmf",
+    "mime_type": "application/vnd.oasis.opendocument.spreadsheet"
+  }]</b>
+}
+</pre>
+
+<p>
+The value of "path" is the location of a Native Client manifest
+(a <code>.nmf</code> file)
+within the extension directory.
+For more information on Native Client and <code>.nmf</code> files, see the
+<a href="http://code.google.com/chrome/nativeclient/docs/technical_overview.html">Native Client Technical Overview</a>.
+</p>
+
+<p>
+Each MIME type can be associated with only one <code>.nmf</code> file,
+but a single <code>.nmf</code> file might handle multiple MIME types.
+The following example shows an extension
+with two <code>.nmf</code> files
+that handle three MIME types.
+</p>
+
+<pre>{
+  "name": "Spreadsheet Viewer",
+  "version": "0.1",
+  "description": "Open OpenOffice and Excel spreadsheets, right in your browser.",
+  "nacl_modules": [{
+    "path": "OpenOfficeViewer.nmf",
+    "mime_type": "application/vnd.oasis.opendocument.spreadsheet"
+  },
+  {
+    "path": "OpenOfficeViewer.nmf",
+    "mime_type": "application/vnd.oasis.opendocument.spreadsheet-template"
+  },
+  {
+    "path": "ExcelViewer.nmf",
+    "mime_type": "application/excel"
+  }]
+}
+</pre>
+
+<p class="note">
+<strong>Note:</strong>
+You can use Native Client modules in extensions
+without specifying "nacl_modules".
+Use "nacl_modules" only if you want the browser
+to use your Native Client module
+to display a particular type of content.
+</p>
+
+<h3 id="offline_enabled">offline_enabled</h3>
+
+<p>
+Whether the app or extension is expected to work offline. When Chrome detects
+that it is offline, apps with this field set to true will be highlighted
+on the New Tab page.
 </p>
 
 <h3 id="permissions">permissions</h3>
@@ -998,7 +1077,7 @@ For more information, see
 
               <div class="summary">
                 <!-- Note: intentionally longer 80 columns -->
-                <span class="subdued">chrome.bookmarks</span><span>onEvent</span><span class="subdued">.addListener</span>(function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span><span>, Type opt_param1, Type opt_param2</span>));
+                <span class="subdued">chrome.bookmarks</span><span>onEvent</span><span class="subdued">.addListener</span>(function(<span>Type param1, Type param2</span>) <span class="subdued">{...}</span><span>, Type opt_param1, Type opt_param2</span>);
               </div>
 
               <div class="description">

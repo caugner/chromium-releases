@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/test_chrome_web_ui_factory.h"
 
+#include "chrome/browser/profiles/profile.h"
 #include "content/browser/tab_contents/tab_contents.h"
 
 TestChromeWebUIFactory::WebUIProvider::~WebUIProvider() {
@@ -27,7 +28,8 @@ void TestChromeWebUIFactory::RemoveFactoryOverride(const std::string& host) {
 }
 
 WebUI::TypeID TestChromeWebUIFactory::GetWebUIType(
-    Profile* profile, const GURL& url) const {
+    content::BrowserContext* browser_context, const GURL& url) const {
+  Profile* profile = Profile::FromBrowserContext(browser_context);
   WebUIProvider* provider = GetWebUIProvider(profile, url);
   return provider ? reinterpret_cast<WebUI::TypeID>(provider) :
       ChromeWebUIFactory::GetWebUIType(profile, url);
@@ -35,7 +37,9 @@ WebUI::TypeID TestChromeWebUIFactory::GetWebUIType(
 
 WebUI* TestChromeWebUIFactory::CreateWebUIForURL(TabContents* tab_contents,
                                                  const GURL& url) const {
-  WebUIProvider* provider = GetWebUIProvider(tab_contents->profile(), url);
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents->browser_context());
+  WebUIProvider* provider = GetWebUIProvider(profile, url);
   return provider ? provider->NewWebUI(tab_contents, url) :
       ChromeWebUIFactory::CreateWebUIForURL(tab_contents, url);
 }

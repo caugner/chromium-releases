@@ -17,6 +17,7 @@
 #include "webkit/glue/window_open_disposition.h"
 
 namespace content {
+class BrowserContext;
 class JavaScriptDialogCreator;
 }
 
@@ -31,13 +32,15 @@ class HistoryAddPageArgs;
 }
 
 struct ContextMenuParams;
+struct OpenURLParams;
 class DownloadItem;
 class GURL;
 class HtmlDialogUIDelegate;
 struct NativeWebKeyboardEvent;
-class Profile;
 class RenderViewHost;
 class TabContents;
+struct ViewHostMsg_RunFileChooser_Params;
+class FilePath;
 
 // Objects implement this interface to get notified about changes in the
 // TabContents and to provide necessary functionality.
@@ -51,14 +54,19 @@ class TabContentsDelegate {
   //
   // A NULL source indicates the current tab (callers should probably use
   // OpenURL() for these cases which does it for you).
-  //
+
   // Returns the TabContents the URL is opened in, or NULL if the URL wasn't
   // opened immediately.
+  // Deprecated. Please use the two-arguments method instead.
+  // TODO(adriansc): Remove this method once refactoring changed all call sites.
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const GURL& url,
                                       const GURL& referrer,
                                       WindowOpenDisposition disposition,
                                       PageTransition::Type transition);
+
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const OpenURLParams& params);
 
   // Called to inform the delegate that the tab content's navigation state
   // changed. The |changed_flags| indicates the parts of the navigation state
@@ -67,9 +75,9 @@ class TabContentsDelegate {
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags);
 
-  // Returns the set of headers to add to the navigation request. Use
+  // Adds the navigation request headers to |headers|. Use
   // net::HttpUtil::AppendHeaderIfMissing to build the set of headers.
-  virtual std::string GetNavigationHeaders(const GURL& url);
+  virtual void AddNavigationHeaders(const GURL& url, std::string* headers);
 
   // Creates a new tab with the already-created TabContents 'new_contents'.
   // The window for the added contents should be reparented correctly when this
@@ -124,7 +132,8 @@ class TabContentsDelegate {
   virtual void WillShowConstrainedWindow(TabContents* source);
 
   // Notification that the target URL has changed.
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url);
+  virtual void UpdateTargetURL(TabContents* source, int32 page_id,
+                               const GURL& url);
 
   // Notification that there was a mouse event, along with the absolute
   // coordinates of the mouse pointer and whether it was a normal motion event
@@ -215,7 +224,7 @@ class TabContentsDelegate {
   // |url| is the url of the page/frame the info applies to, |ssl| is the SSL
   // information for that page/frame.  If |show_history| is true, a section
   // showing how many times that URL has been visited is added to the page info.
-  virtual void ShowPageInfo(Profile* profile,
+  virtual void ShowPageInfo(content::BrowserContext* browser_context,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
@@ -291,6 +300,61 @@ class TabContentsDelegate {
   // pointer returned is to a stub service that marks all dialogs as suppressed
   // and displays nothing.
   virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator();
+
+  // Called when a file selection is to be done.
+  virtual void RunFileChooser(TabContents* tab,
+                              const ViewHostMsg_RunFileChooser_Params& params);
+
+  // Request to enumerate a directory.  This is equivalent to running the file
+  // chooser in directory-enumeration mode and having the user select the given
+  // directory.
+  virtual void EnumerateDirectory(TabContents* tab, int request_id,
+                                  const FilePath& path);
+
+  // Called when the renderer puts a tab into or out of fullscreen mode.
+  virtual void ToggleFullscreenModeForTab(TabContents* tab,
+                                          bool enter_fullscreen);
+
+  // Called when a Javascript out of memory notification is received.
+  virtual void JSOutOfMemory(TabContents* tab);
+
+  // Register a new handler for URL requests with the given scheme.
+  virtual void RegisterProtocolHandler(TabContents* tab,
+                                       const std::string& protocol,
+                                       const GURL& url,
+                                       const string16& title);
+
+  // Register a new handler for Intents with the given action and type filter.
+  virtual void RegisterIntentHandler(TabContents* tab,
+                                     const string16& action,
+                                     const string16& type,
+                                     const string16& href,
+                                     const string16& title);
+
+  // WebIntent notification handler.
+  virtual void WebIntentDispatch(TabContents* tab,
+                                 int routing_id,
+                                 const string16& action,
+                                 const string16& type,
+                                 const string16& data,
+                                 int intent_id);
+
+  // Result of string search in the page. This includes the number of matches
+  // found and the selection rect (in screen coordinates) for the string found.
+  // If |final_update| is false, it indicates that more results follow.
+  virtual void FindReply(TabContents* tab,
+                         int request_id,
+                         int number_of_matches,
+                         const gfx::Rect& selection_rect,
+                         int active_match_ordinal,
+                         bool final_update);
+
+  // Notification that a plugin has crashed.
+  virtual void CrashedPlugin(TabContents* tab, const FilePath& plugin_path);
+
+  // Invoked when the preferred size of the contents has been changed.
+  virtual void UpdatePreferredSize(TabContents* source,
+                                   const gfx::Size& pref_size);
 
  protected:
   virtual ~TabContentsDelegate();

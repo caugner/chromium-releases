@@ -15,6 +15,7 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_server_socket.h"
 #include "net/socket/client_socket_factory.h"
+#include "remoting/protocol/content_description.h"
 #include "remoting/protocol/jingle_session.h"
 
 namespace remoting {
@@ -36,9 +37,6 @@ net::SSLClientSocket* CreateSSLClientSocket(
     net::StreamSocket* socket, const std::string& der_cert,
     net::CertVerifier* cert_verifier) {
   net::SSLConfig ssl_config;
-  // If False Start is enabled then the Connect callback will fire before
-  // the cipher has been set up, and ExportKeyingMaterial will fail.
-  ssl_config.false_start_enabled = false;
 
   // Certificate provided by the host doesn't need authority.
   net::SSLConfig::CertAndStatus cert_and_status;
@@ -46,13 +44,19 @@ net::SSLClientSocket* CreateSSLClientSocket(
   cert_and_status.der_cert = der_cert;
   ssl_config.allowed_bad_certs.push_back(cert_and_status);
 
+  // Revocation checking is not needed because we use self-signed
+  // certs. Disable it so that SSL layer doesn't try to initialize
+  // OCSP (OCSP works only on IO thread).
+  ssl_config.rev_checking_enabled = false;
+
   // SSLClientSocket takes ownership of the adapter.
-  net::HostPortPair host_and_pair(JingleSession::kChromotingContentName, 0);
+  net::HostPortPair host_and_port(
+      ContentDescription::kChromotingContentName, 0);
   net::SSLClientSocketContext context;
   context.cert_verifier = cert_verifier;
   net::SSLClientSocket* ssl_socket =
       net::ClientSocketFactory::GetDefaultFactory()->CreateSSLClientSocket(
-          socket, host_and_pair, ssl_config, NULL, context);
+          socket, host_and_port, ssl_config, NULL, context);
   return ssl_socket;
 }
 
@@ -101,6 +105,16 @@ void JingleStreamConnector::Connect(bool initiator,
 }
 
 bool JingleStreamConnector::EstablishTCPConnection(net::Socket* socket) {
+  // Set options for the raw socket layer.
+  // Send buffer size is set to match the PseudoTcp layer so that it can fit
+  // all the data submitted by the PseudoTcp layer.
+  socket->SetSendBufferSize(kTcpSendBufferSize);
+  // TODO(hclam): We should also set the receive buffer size once we can detect
+  // the underlying socket is a TCP socket. We should also investigate what
+  // value would gurantee that Windows's UDP socket doesn't return a EWOULDBLOCK
+  // error.
+
+  // Set options for the TCP layer.
   jingle_glue::PseudoTcpAdapter* adapter =
       new jingle_glue::PseudoTcpAdapter(socket);
   adapter->SetAckDelay(kTcpAckDelayMilliseconds);
@@ -144,8 +158,6 @@ bool JingleStreamConnector::EstablishSSLConnection() {
 
     // Create server SSL socket.
     net::SSLConfig ssl_config;
-    ssl_config.false_start_enabled = false;
-
     ssl_server_socket_ = net::CreateSSLServerSocket(
         socket_.release(), cert, local_private_key_, ssl_config);
     socket_.reset(ssl_server_socket_);
@@ -219,7 +231,7 @@ void JingleStreamConnector::OnAuthenticationDone(
 
 void JingleStreamConnector::NotifyDone(net::StreamSocket* socket) {
   session_->OnChannelConnectorFinished(name_, this);
-  callback_.Run(name_, socket);
+  callback_.Run(socket);
   delete this;
 }
 

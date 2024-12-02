@@ -19,7 +19,7 @@
 #include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/file_system_test_helper.h"
 #include "webkit/fileapi/file_system_util.h"
-#include "webkit/fileapi/local_file_system_file_util.h"
+#include "webkit/fileapi/local_file_util.h"
 #include "webkit/fileapi/quota_file_util.h"
 #include "webkit/quota/quota_manager.h"
 
@@ -40,8 +40,8 @@ class MockQuotaManager : public QuotaManager {
                    const GURL& origin,
                    StorageType type)
     : QuotaManager(false /* is_incognito */, base_dir,
-                   base::MessageLoopProxy::CreateForCurrentThread(),
-                   base::MessageLoopProxy::CreateForCurrentThread(),
+                   base::MessageLoopProxy::current(),
+                   base::MessageLoopProxy::current(),
                    NULL),
       origin_(origin),
       type_(type),
@@ -89,7 +89,7 @@ class MockQuotaManagerProxy : public QuotaManagerProxy {
  public:
   explicit MockQuotaManagerProxy(QuotaManager* quota_manager)
       : QuotaManagerProxy(quota_manager,
-                          base::MessageLoopProxy::CreateForCurrentThread()),
+                          base::MessageLoopProxy::current()),
         registered_client_(NULL) {
   }
 
@@ -155,8 +155,7 @@ class FileSystemOperationTest : public testing::Test {
  public:
   FileSystemOperationTest()
       : status_(kFileOperationStatusNotSet),
-        local_file_util_(
-            new LocalFileSystemFileUtil(QuotaFileUtil::GetInstance())) {
+        local_file_util_(new LocalFileUtil(QuotaFileUtil::CreateDefault())) {
     EXPECT_TRUE(base_.CreateUniqueTempDir());
   }
 
@@ -250,7 +249,7 @@ class FileSystemOperationTest : public testing::Test {
   std::vector<base::FileUtilProxy::Entry> entries_;
 
  private:
-  scoped_ptr<LocalFileSystemFileUtil> local_file_util_;
+  scoped_ptr<LocalFileUtil> local_file_util_;
   scoped_refptr<QuotaManager> quota_manager_;
   scoped_refptr<QuotaManagerProxy> quota_manager_proxy_;
   DISALLOW_COPY_AND_ASSIGN(FileSystemOperationTest);
@@ -954,6 +953,37 @@ TEST_F(FileSystemOperationTest, TestTruncateFailureByQuota) {
 
   EXPECT_TRUE(file_util::GetFileInfo(PlatformPath(file_path), &info));
   EXPECT_EQ(10, info.size);
+}
+
+TEST_F(FileSystemOperationTest, TestTouchFile) {
+  FilePath file_path(CreateVirtualTemporaryFileInDir(FilePath()));
+  FilePath platform_path = PlatformPath(file_path);
+
+  base::PlatformFileInfo info;
+
+  EXPECT_TRUE(file_util::GetFileInfo(platform_path, &info));
+  EXPECT_FALSE(info.is_directory);
+  EXPECT_EQ(0, info.size);
+  const base::Time last_modified = info.last_modified;
+  const base::Time last_accessed = info.last_accessed;
+
+  const base::Time new_modified_time = base::Time::UnixEpoch();
+  const base::Time new_accessed_time = new_modified_time +
+    base::TimeDelta::FromHours(77);;
+  ASSERT_NE(last_modified, new_modified_time);
+  ASSERT_NE(last_accessed, new_accessed_time);
+
+  operation()->TouchFile(URLForPath(file_path), new_accessed_time,
+      new_modified_time);
+  MessageLoop::current()->RunAllPending();
+  EXPECT_EQ(base::PLATFORM_FILE_OK, status());
+
+  EXPECT_TRUE(file_util::GetFileInfo(platform_path, &info));
+  // We compare as time_t here to lower our resolution, to avoid false
+  // negatives caused by conversion to the local filesystem's native
+  // representation and back.
+  EXPECT_EQ(new_modified_time.ToTimeT(), info.last_modified.ToTimeT());
+  EXPECT_EQ(new_accessed_time.ToTimeT(), info.last_accessed.ToTimeT());
 }
 
 }  // namespace fileapi

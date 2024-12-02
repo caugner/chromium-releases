@@ -92,18 +92,28 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   // wrap_token_duration is typically one hour,
   // which is also the max -- you can only decrease it.
   //
-  // oauth2_scope should be specific to a service.  For example, Chromium Sync
-  // uses https://www.googleapis.com/auth/chromesync as it's OAuth2 scope.
+  // service_scope will be used as a service name.  For example, Chromium Sync
+  // uses https://www.googleapis.com/auth/chromesync for its OAuth2 service
+  // scope here as well as for its service name in TokenService.
   virtual void StartOAuthWrapBridge(
       const std::string& oauth1_access_token,
       const std::string& oauth1_access_token_secret,
       const std::string& wrap_token_duration,
-      const std::string& oauth2_scope);
+      const std::string& service_scope);
 
   // Obtains user information related to an OAuth2 access token
   //
   // oauth2_access_token is from OAuthWrapBridge's result.
   virtual void StartUserInfo(const std::string& oauth2_access_token);
+
+  // Starts a request for revoking the given OAuth access token (as requested by
+  // StartOAuthGetAccessToken).
+  virtual void StartOAuthRevokeAccessToken(const std::string& token,
+                                           const std::string& secret);
+
+  // Starts a request for revoking the given OAuth Bearer token (as requested by
+  // StartOAuthWrapBridge).
+  virtual void StartOAuthRevokeWrapToken(const std::string& token);
 
   // NotificationObserver implementation.
   virtual void Observe(int type,
@@ -156,6 +166,11 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   virtual void OnOAuthWrapBridgeFetched(const std::string& data,
                                         const net::URLRequestStatus& status,
                                         int response_code);
+
+  // Process the results of a token revocation fetch.
+  virtual void OnOAuthRevokeTokenFetched(const std::string& data,
+                                         const net::URLRequestStatus& status,
+                                         int response_code);
 
   // Process the results of a userinfo fetch.
   virtual void OnUserInfoFetched(const std::string& data,
@@ -213,9 +228,6 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
       const std::string& wrap_token_duration,
       const std::string& oauth2_service_scope);
 
-  // Given parameters, create a userinfo request body.
-  static std::string MakeUserInfoBody(const std::string& oauth2_access_token);
-
   // Create a fetcher useable for making any Gaia OAuth request.
   static URLFetcher* CreateGaiaFetcher(net::URLRequestContextGetter* getter,
                                        const GURL& gaia_gurl_,
@@ -230,7 +242,6 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   GaiaOAuthConsumer* const consumer_;
   net::URLRequestContextGetter* const getter_;
   Profile* profile_;
-  std::string service_scope_;
   Browser* popup_;
   NotificationRegistrar registrar_;
 
@@ -238,6 +249,7 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   scoped_ptr<URLFetcher> fetcher_;
   std::string request_body_;
   std::string request_headers_;
+  std::string service_scope_;
   bool fetch_pending_;
   AutoFetchLimit auto_fetch_limit_;
 

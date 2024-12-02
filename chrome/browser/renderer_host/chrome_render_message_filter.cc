@@ -4,7 +4,7 @@
 
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 
-#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 #include "chrome/browser/browser_process.h"
@@ -101,13 +101,16 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                                                   bool* message_was_ok) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(ChromeRenderMessageFilter, message, *message_was_ok)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_LaunchNaCl, OnLaunchNaCl)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_DnsPrefetch, OnDnsPrefetch)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_RendererHistograms, OnRendererHistograms)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_ResourceTypeStats, OnResourceTypeStats)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_UpdatedCacheStats, OnUpdatedCacheStats)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_LaunchNaCl, OnLaunchNaCl)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DnsPrefetch, OnDnsPrefetch)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RendererHistograms,
+                        OnRendererHistograms)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ResourceTypeStats,
+                        OnResourceTypeStats)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_UpdatedCacheStats,
+                        OnUpdatedCacheStats)
     IPC_MESSAGE_HANDLER(ViewHostMsg_FPS, OnFPS)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_V8HeapStats, OnV8HeapStats)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_V8HeapStats, OnV8HeapStats)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_OpenChannelToExtension,
                         OnOpenChannelToExtension)
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_OpenChannelToTab, OnOpenChannelToTab)
@@ -120,32 +123,36 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ExtensionHostMsg_RequestForIOThread,
                         OnExtensionRequestForIOThread)
 #if defined(USE_TCMALLOC)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_RendererTcmalloc, OnRendererTcmalloc)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RendererTcmalloc, OnRendererTcmalloc)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_WriteTcmallocHeapProfile_ACK,
+                        OnWriteTcmallocHeapProfile)
 #endif
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetPluginPolicies, OnGetPluginPolicies)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AllowDatabase, OnAllowDatabase)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AllowDOMStorage, OnAllowDOMStorage)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AllowFileSystem, OnAllowFileSystem)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AllowIndexedDB, OnAllowIndexedDB)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_GetPluginContentSetting,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_GetPluginPolicies,
+                        OnGetPluginPolicies)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowDatabase, OnAllowDatabase)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowDOMStorage, OnAllowDOMStorage)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowFileSystem, OnAllowFileSystem)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_AllowIndexedDB, OnAllowIndexedDB)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_GetPluginContentSetting,
                         OnGetPluginContentSetting)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_CanTriggerClipboardRead,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_CanTriggerClipboardRead,
                         OnCanTriggerClipboardRead)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_CanTriggerClipboardWrite,
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_CanTriggerClipboardWrite,
                         OnCanTriggerClipboardWrite)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ClearPredictorCache, OnClearPredictorCache)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-  if ((message.type() == ViewHostMsg_GetCookies::ID ||
-       message.type() == ViewHostMsg_SetCookie::ID) &&
+  if ((message.type() == ChromeViewHostMsg_GetCookies::ID ||
+       message.type() == ChromeViewHostMsg_SetCookie::ID) &&
     AutomationResourceMessageFilter::ShouldFilterCookieMessages(
         render_process_id_, message.routing_id())) {
     // ChromeFrame then we need to get/set cookies from the external host.
     IPC_BEGIN_MESSAGE_MAP_EX(ChromeRenderMessageFilter, message,
                              *message_was_ok)
-      IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetCookies, OnGetCookies)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_SetCookie, OnSetCookie)
+      IPC_MESSAGE_HANDLER_DELAY_REPLY(ChromeViewHostMsg_GetCookies,
+                                      OnGetCookies)
+      IPC_MESSAGE_HANDLER(ChromeViewHostMsg_SetCookie, OnSetCookie)
     IPC_END_MESSAGE_MAP()
     handled = true;
   }
@@ -166,14 +173,14 @@ void ChromeRenderMessageFilter::OnDestruct() const {
 void ChromeRenderMessageFilter::OverrideThreadForMessage(
     const IPC::Message& message, BrowserThread::ID* thread) {
   switch (message.type()) {
-    case ViewHostMsg_ResourceTypeStats::ID:
+    case ChromeViewHostMsg_ResourceTypeStats::ID:
 #if defined(USE_TCMALLOC)
-    case ViewHostMsg_RendererTcmalloc::ID:
+    case ChromeViewHostMsg_RendererTcmalloc::ID:
 #endif
     case ExtensionHostMsg_AddListener::ID:
     case ExtensionHostMsg_RemoveListener::ID:
     case ExtensionHostMsg_CloseChannel::ID:
-    case ViewHostMsg_UpdatedCacheStats::ID:
+    case ChromeViewHostMsg_UpdatedCacheStats::ID:
       *thread = BrowserThread::UI;
       break;
     default:
@@ -321,25 +328,14 @@ void ChromeRenderMessageFilter::OnGetExtensionMessageBundleOnFileThread(
     IPC::Message* reply_msg) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
-  std::map<std::string, std::string> dictionary_map;
-  if (!default_locale.empty()) {
-    // Touch disk only if extension is localized.
-    std::string error;
-    scoped_ptr<ExtensionMessageBundle> bundle(
-        extension_file_util::LoadExtensionMessageBundle(
-            extension_path, default_locale, &error));
-
-    if (bundle.get())
-      dictionary_map = *bundle->dictionary();
-  }
-
-  // Add @@extension_id reserved message here, so it's available to
-  // non-localized extensions too.
-  dictionary_map.insert(
-      std::make_pair(ExtensionMessageBundle::kExtensionIdKey, extension_id));
+  scoped_ptr<ExtensionMessageBundle::SubstitutionMap> dictionary_map(
+      extension_file_util::LoadExtensionMessageBundleSubstitutionMap(
+          extension_path,
+          extension_id,
+          default_locale));
 
   ExtensionHostMsg_GetMessageBundle::WriteReplyParams(
-      reply_msg, dictionary_map);
+      reply_msg, *dictionary_map);
   Send(reply_msg);
 }
 
@@ -384,9 +380,16 @@ void ChromeRenderMessageFilter::OnExtensionRequestForIOThread(
 }
 
 #if defined(USE_TCMALLOC)
-void ChromeRenderMessageFilter::OnRendererTcmalloc(base::ProcessId pid,
-                                                   const std::string& output) {
+void ChromeRenderMessageFilter::OnRendererTcmalloc(const std::string& output) {
+  base::ProcessId pid = base::GetProcId(peer_handle());
   AboutTcmallocRendererCallback(pid, output);
+}
+
+void ChromeRenderMessageFilter::OnWriteTcmallocHeapProfile(
+    const FilePath::StringType& filepath,
+    const std::string& output) {
+  VLOG(0) << "Writing renderer heap profile dump to: " << filepath;
+  file_util::WriteFile(FilePath(filepath), output.c_str(), output.size());
 }
 #endif
 

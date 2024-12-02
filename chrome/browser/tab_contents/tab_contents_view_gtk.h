@@ -13,11 +13,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "chrome/browser/ui/gtk/focus_store_gtk.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 
 class ConstrainedWindowGtk;
 class RenderViewContextMenuGtk;
@@ -45,29 +45,28 @@ class TabContentsViewGtk : public TabContentsView,
 
   // TabContentsView implementation --------------------------------------------
 
-  virtual void CreateView(const gfx::Size& initial_size);
+  virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* render_widget_host);
+      RenderWidgetHost* render_widget_host) OVERRIDE;
 
-  virtual gfx::NativeView GetNativeView() const;
-  virtual gfx::NativeView GetContentNativeView() const;
-  virtual gfx::NativeWindow GetTopLevelNativeWindow() const;
-  virtual void GetContainerBounds(gfx::Rect* out) const;
-  virtual void SetPageTitle(const std::wstring& title);
+  virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
+  virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
+  virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
+  virtual void SetPageTitle(const std::wstring& title) OVERRIDE;
   virtual void OnTabCrashed(base::TerminationStatus status,
-                            int error_code);
-  virtual void SizeContents(const gfx::Size& size);
-  virtual void RenderViewCreated(RenderViewHost* host);
-  virtual void Focus();
-  virtual void SetInitialFocus();
-  virtual void StoreFocus();
-  virtual void RestoreFocus();
-  virtual void UpdatePreferredSize(const gfx::Size& pref_size);
-  virtual bool IsDoingDrag() const;
-  virtual void CancelDragAndCloseTab();
-  virtual bool IsEventTracking() const;
-  virtual void CloseTabAfterEventTracking();
-  virtual void GetViewBounds(gfx::Rect* out) const;
+                            int error_code) OVERRIDE;
+  virtual void SizeContents(const gfx::Size& size) OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
+  virtual void Focus() OVERRIDE;
+  virtual void SetInitialFocus() OVERRIDE;
+  virtual void StoreFocus() OVERRIDE;
+  virtual void RestoreFocus() OVERRIDE;
+  virtual bool IsDoingDrag() const OVERRIDE;
+  virtual void CancelDragAndCloseTab() OVERRIDE;
+  virtual bool IsEventTracking() const OVERRIDE;
+  virtual void CloseTabAfterEventTracking() OVERRIDE;
+  virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
 
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void CreateNewWindow(
@@ -135,7 +134,7 @@ class TabContentsViewGtk : public TabContentsView,
 
 
   // Contains |expanded_| as its GtkBin member.
-  OwnedWidgetGtk floating_;
+  ui::OwnedWidgetGtk floating_;
 
   // This container holds the tab's web page views. It is a GtkExpandedContainer
   // so that we can control the size of the web pages.

@@ -35,10 +35,10 @@ class ServiceIPCServer : public IPC::Channel::Listener,
 
 
  private:
-  // IPC::Channel::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void OnChannelConnected(int32 peer_pid);
-  virtual void OnChannelError();
+  // IPC::Channel::Listener implementation.
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  virtual void OnChannelError() OVERRIDE;
 
   // IPC message handlers.
   void OnEnableCloudPrintProxy(const std::string& lsid);
@@ -48,6 +48,8 @@ class ServiceIPCServer : public IPC::Channel::Listener,
       const std::string& user_email);
   void OnGetCloudPrintProxyInfo();
   void OnDisableCloudPrintProxy();
+  void OnEnableVirtualDriver();
+  void OnDisableVirtualDriver();
 
   void OnShutdown();
   void OnUpdateAvailable();

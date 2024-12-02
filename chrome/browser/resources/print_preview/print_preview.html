@@ -2,6 +2,7 @@
 <html i18n-values="dir:textdirection;">
 <head>
 <meta charset="utf-8">
+<include src="../content_security_policy.html"/>
 <title i18n-content="title"></title>
 <link rel="icon" href="../../../app/theme/print_preview_favicon.png">
 <link rel="stylesheet" href="../webui.css">
@@ -10,14 +11,8 @@
 <script src="chrome://resources/js/local_strings.js"></script>
 <script src="chrome://resources/js/cr.js"></script>
 <script src="chrome://resources/js/util.js"></script>
-<script src="print_preview.js"></script>
-<script src="print_preview_animations.js"></script>
-<script src="print_preview_cloud.js"></script>
-<script src="print_preview_utils.js"></script>
-<script src="print_header.js"></script>
-<script src="page_settings.js"></script>
-<script src="copies_settings.js"></script>
-<script src="layout_settings.js"></script>
+<script src="chrome://print/print_preview.js"></script>
+<script src="chrome://print/strings.js"></script>
 </head>
 <body>
   <div id="sidebar">
@@ -42,20 +37,13 @@
       <hr>
       <include src="layout_settings.html"></include>
       <hr>
-      <div id="color-options" class="two-column option" aria-hidden="true"
-          aria-live="polite">
-        <h1 i18n-content="optionColor"></h1>
-        <div>
-          <div>
-            <input id="color" type="radio" name="color"/>
-            <label for="color" i18n-content="optionColor"></label>
-          </div>
-          <div>
-            <input id="bw" type="radio" name="color" checked/>
-            <label for="bw" i18n-content="optionBw"></label>
-          </div>
-        </div>
+      <include src="color_settings.html"></include>
+      <hr>
+      <div id="display-margin-options" hidden>
+        <include src="margin_settings.html"></include>
+        <hr>
       </div>
+      <include src="header_footer_settings.html"></include>
       <hr>
       <div id="system-dialog-div">
         <button id="system-dialog-link" class="link-button"
@@ -82,6 +70,8 @@
   </div>
   <object id="dummy-viewer"
       type="application/x-google-chrome-print-preview-pdf"
-      src="chrome://print/dummy.pdf"></object>
+      data="chrome://print/dummy.pdf"></object>
+  <script src="chrome://resources/js/i18n_template.js"></script>
+  <script src="chrome://resources/js/i18n_process.js"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,21 +83,17 @@ void ConstrainedWindowMacDelegateCustomSheet::RunSheet(
                   contextInfo:NULL];
 }
 
-// static
-ConstrainedWindow* ConstrainedWindow::CreateConstrainedDialog(
-    TabContents* parent,
-    ConstrainedWindowMacDelegate* delegate) {
-  return new ConstrainedWindowMac(parent, delegate);
-}
-
 ConstrainedWindowMac::ConstrainedWindowMac(
     TabContents* owner, ConstrainedWindowMacDelegate* delegate)
     : owner_(owner),
       delegate_(delegate),
       controller_(nil),
-      should_be_visible_(false) {
+      should_be_visible_(false),
+      closing_(false) {
   DCHECK(owner);
   DCHECK(delegate);
+
+  owner->AddConstrainedDialog(this);
 }
 
 ConstrainedWindowMac::~ConstrainedWindowMac() {}
@@ -119,6 +115,14 @@ void ConstrainedWindowMac::ShowConstrainedWindow() {
 }
 
 void ConstrainedWindowMac::CloseConstrainedWindow() {
+  // Protection against reentrancy, which might otherwise become a problem if
+  // DeleteDelegate forcibly closes a constrained window in a way that results
+  // in CloseConstrainedWindow being called again.
+  if (closing_)
+    return;
+
+  closing_ = true;
+
   // Note: controller_ can be `nil` here if the sheet was never realized. That's
   // ok.
   [controller_ removeConstrainedWindow:this];

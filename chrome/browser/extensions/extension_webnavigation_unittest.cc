@@ -7,7 +7,7 @@
 
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_webnavigation_api.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -27,13 +27,17 @@ TEST_F(FrameNavigationStateTest, TrackFrame) {
 
   // Create a main frame.
   EXPECT_FALSE(navigation_state.CanSendEvents(frame_id1));
+  EXPECT_FALSE(navigation_state.IsValidFrame(frame_id1));
   navigation_state.TrackFrame(frame_id1, url1, true, false);
   EXPECT_TRUE(navigation_state.CanSendEvents(frame_id1));
+  EXPECT_TRUE(navigation_state.IsValidFrame(frame_id1));
 
   // Add a sub frame.
   EXPECT_FALSE(navigation_state.CanSendEvents(frame_id2));
+  EXPECT_FALSE(navigation_state.IsValidFrame(frame_id2));
   navigation_state.TrackFrame(frame_id2, url2, false, false);
   EXPECT_TRUE(navigation_state.CanSendEvents(frame_id2));
+  EXPECT_TRUE(navigation_state.IsValidFrame(frame_id2));
 
   // Check frame state.
   EXPECT_TRUE(navigation_state.IsMainFrame(frame_id1));
@@ -52,18 +56,22 @@ TEST_F(FrameNavigationStateTest, ErrorState) {
 
   navigation_state.TrackFrame(frame_id, url, true, false);
   EXPECT_TRUE(navigation_state.CanSendEvents(frame_id));
+  EXPECT_FALSE(navigation_state.GetErrorOccurredInFrame(frame_id));
 
   // After an error occurred, no further events should be sent.
-  navigation_state.ErrorOccurredInFrame(frame_id);
+  navigation_state.SetErrorOccurredInFrame(frame_id);
   EXPECT_FALSE(navigation_state.CanSendEvents(frame_id));
+  EXPECT_TRUE(navigation_state.GetErrorOccurredInFrame(frame_id));
 
   // Navigations to a network error page should be ignored.
   navigation_state.TrackFrame(frame_id, GURL(), true, true);
   EXPECT_FALSE(navigation_state.CanSendEvents(frame_id));
+  EXPECT_TRUE(navigation_state.GetErrorOccurredInFrame(frame_id));
 
   // However, when the frame navigates again, it should send events again.
   navigation_state.TrackFrame(frame_id, url, true, false);
   EXPECT_TRUE(navigation_state.CanSendEvents(frame_id));
+  EXPECT_FALSE(navigation_state.GetErrorOccurredInFrame(frame_id));
 }
 
 // Tests that for a sub frame, no events are send after an error occurred, but
@@ -80,7 +88,7 @@ TEST_F(FrameNavigationStateTest, ErrorStateFrame) {
   EXPECT_TRUE(navigation_state.CanSendEvents(frame_id2));
 
   // After an error occurred, no further events should be sent.
-  navigation_state.ErrorOccurredInFrame(frame_id2);
+  navigation_state.SetErrorOccurredInFrame(frame_id2);
   EXPECT_TRUE(navigation_state.CanSendEvents(frame_id1));
   EXPECT_FALSE(navigation_state.CanSendEvents(frame_id2));
 

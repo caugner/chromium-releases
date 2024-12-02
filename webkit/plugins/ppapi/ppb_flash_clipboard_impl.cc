@@ -11,16 +11,18 @@
 #include "base/memory/ref_counted.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_flash_clipboard.h"
+#include "ppapi/shared_impl/var.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebClipboard.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
-#include "webkit/plugins/ppapi/var.h"
+
+using ppapi::StringVar;
 
 namespace webkit {
 namespace ppapi {
@@ -66,7 +68,8 @@ PP_Bool IsFormatAvailable(PP_Instance instance_id,
   if (!instance)
     return PP_FALSE;
 
-  WebKit::WebClipboard* web_clipboard = WebKit::webKitClient()->clipboard();
+  WebKit::WebClipboard* web_clipboard =
+      WebKit::webKitPlatformSupport()->clipboard();
   if (!web_clipboard) {
     NOTREACHED();
     return PP_FALSE;
@@ -83,7 +86,8 @@ PP_Var ReadPlainText(PP_Instance instance_id,
   if (!instance)
     return PP_MakeNull();
 
-  WebKit::WebClipboard* web_clipboard = WebKit::webKitClient()->clipboard();
+  WebKit::WebClipboard* web_clipboard =
+      WebKit::webKitPlatformSupport()->clipboard();
   if (!web_clipboard) {
     NOTREACHED();
     return PP_MakeNull();
@@ -97,7 +101,7 @@ PP_Var ReadPlainText(PP_Instance instance_id,
 int32_t WritePlainText(PP_Instance instance_id,
                        PP_Flash_Clipboard_Type clipboard_type,
                        PP_Var text) {
-  scoped_refptr<StringVar> text_string(StringVar::FromPPVar(text));
+  StringVar* text_string = StringVar::FromPPVar(text);
   if (!text_string)
     return PP_ERROR_BADARGUMENT;
 
@@ -109,7 +113,8 @@ int32_t WritePlainText(PP_Instance instance_id,
     return PP_ERROR_FAILED;
   }
 
-  WebKit::WebClipboard* web_clipboard = WebKit::webKitClient()->clipboard();
+  WebKit::WebClipboard* web_clipboard =
+      WebKit::webKitPlatformSupport()->clipboard();
   if (!web_clipboard) {
     NOTREACHED();
     return PP_ERROR_FAILED;

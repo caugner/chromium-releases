@@ -33,7 +33,6 @@ void ComputePluginsFromCommandLine(std::vector<PepperPluginInfo>* plugins) {
   //    <file-path> +
   //    ["#" + <name> + ["#" + <description> + ["#" + <version>]]] +
   //    *1( LWS + ";" + LWS + <mime-type> )
-
   std::vector<std::string> modules;
   base::SplitString(value, ',', &modules);
   for (size_t i = 0; i < modules.size(); ++i) {
@@ -64,9 +63,9 @@ void ComputePluginsFromCommandLine(std::vector<PepperPluginInfo>* plugins) {
     if (name_parts.size() > 3)
       plugin.version = name_parts[3];
     for (size_t j = 1; j < parts.size(); ++j) {
-      webkit::npapi::WebPluginMimeType mime_type(parts[j],
-                                                 std::string(),
-                                                 plugin.description);
+      webkit::WebPluginMimeType mime_type(parts[j],
+                                          std::string(),
+                                          plugin.description);
       plugin.mime_types.push_back(mime_type);
     }
 
@@ -76,22 +75,26 @@ void ComputePluginsFromCommandLine(std::vector<PepperPluginInfo>* plugins) {
 
 }  // namespace
 
-webkit::npapi::WebPluginInfo PepperPluginInfo::ToWebPluginInfo() const {
-  webkit::npapi::WebPluginInfo info;
+webkit::WebPluginInfo PepperPluginInfo::ToWebPluginInfo() const {
+  webkit::WebPluginInfo info;
 
-  info.name = name.empty() ? path.BaseName().LossyDisplayName() :
-      ASCIIToUTF16(name);
+  info.type = is_out_of_process ?
+      webkit::WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS :
+      webkit::WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS;
+
+  info.name = name.empty() ?
+      path.BaseName().LossyDisplayName() : UTF8ToUTF16(name);
   info.path = path;
   info.version = ASCIIToUTF16(version);
   info.desc = ASCIIToUTF16(description);
   info.mime_types = mime_types;
 
-  webkit::npapi::WebPluginInfo::EnabledStates enabled_state =
-      webkit::npapi::WebPluginInfo::USER_ENABLED_POLICY_UNMANAGED;
+  webkit::WebPluginInfo::EnabledStates enabled_state =
+      webkit::WebPluginInfo::USER_ENABLED_POLICY_UNMANAGED;
 
   if (!enabled) {
     enabled_state =
-        webkit::npapi::WebPluginInfo::USER_DISABLED_POLICY_UNMANAGED;
+        webkit::WebPluginInfo::USER_DISABLED_POLICY_UNMANAGED;
   }
 
   info.enabled = enabled_state;
@@ -105,6 +108,24 @@ PepperPluginInfo::PepperPluginInfo()
 }
 
 PepperPluginInfo::~PepperPluginInfo() {
+}
+
+bool MakePepperPluginInfo(const webkit::WebPluginInfo& webplugin_info,
+                          PepperPluginInfo* pepper_info) {
+  if (!webkit::IsPepperPlugin(webplugin_info))
+    return false;
+
+  pepper_info->is_out_of_process =
+      webplugin_info.type ==
+          webkit::WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS;
+
+  pepper_info->enabled =  webkit::IsPluginEnabled(webplugin_info);
+  pepper_info->path = FilePath(webplugin_info.path);
+  pepper_info->name = UTF16ToASCII(webplugin_info.name);
+  pepper_info->description = UTF16ToASCII(webplugin_info.desc);
+  pepper_info->version = UTF16ToASCII(webplugin_info.version);
+  pepper_info->mime_types = webplugin_info.mime_types;
+  return true;
 }
 
 // static
@@ -140,12 +161,22 @@ void PepperPluginRegistry::PreloadModules() {
 }
 
 const PepperPluginInfo* PepperPluginRegistry::GetInfoForPlugin(
-    const FilePath& path) const {
+    const webkit::WebPluginInfo& info) {
   for (size_t i = 0; i < plugin_list_.size(); ++i) {
-    if (path == plugin_list_[i].path)
+    if (info.path == plugin_list_[i].path)
       return &plugin_list_[i];
   }
-  return NULL;
+  // We did not find the plugin in our list. But wait! the plugin can also
+  // be a latecomer, as it happens with pepper flash. This information
+  // is actually in |info| and we can use it to construct it and add it to
+  // the list. This same deal needs to be done in the browser side in
+  // PluginService.
+  PepperPluginInfo plugin;
+  if (!MakePepperPluginInfo(info, &plugin))
+    return NULL;
+
+  plugin_list_.push_back(plugin);
+  return &plugin_list_[plugin_list_.size() - 1];
 }
 
 webkit::ppapi::PluginModule* PepperPluginRegistry::GetLiveModule(

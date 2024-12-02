@@ -1463,6 +1463,7 @@ function setMostVisitedPages(data, hasBlacklistedUrls) {
   if (localStrings.getString('serverpromo')) {
     showPromoNotification();
   }
+
 }
 
 function maybeDoneLoading() {

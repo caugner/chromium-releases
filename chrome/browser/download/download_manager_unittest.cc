@@ -14,21 +14,24 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/download/download_create_info.h"
-#include "chrome/browser/download/download_file.h"
-#include "chrome/browser/download/download_file_manager.h"
-#include "chrome/browser/download/download_item.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/download/download_util.h"
-#include "chrome/browser/download/mock_download_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/download/download_create_info.h"
+#include "content/browser/download/download_file.h"
+#include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
+#include "content/browser/download/download_status_updater.h"
+#include "content/browser/download/mock_download_manager.h"
 #include "grit/generated_resources.h"
+#include "net/base/io_buffer.h"
+#include "net/base/mock_file_stream.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,10 +45,14 @@ class DownloadManagerTest : public testing::Test {
 
   DownloadManagerTest()
       : profile_(new TestingProfile()),
-        download_manager_(new MockDownloadManager(&download_status_updater_)),
+        download_manager_delegate_(new ChromeDownloadManagerDelegate(
+            profile_.get())),
+        download_manager_(new MockDownloadManager(
+            download_manager_delegate_, &download_status_updater_)),
         ui_thread_(BrowserThread::UI, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_) {
     download_manager_->Init(profile_.get());
+    download_manager_delegate_->SetDownloadManager(download_manager_);
   }
 
   ~DownloadManagerTest() {
@@ -53,6 +60,7 @@ class DownloadManagerTest : public testing::Test {
     // profile_ must outlive download_manager_, so we explicitly delete
     // download_manager_ first.
     download_manager_ = NULL;
+    download_manager_delegate_ = NULL;
     profile_.reset(NULL);
     message_loop_.RunAllPending();
   }
@@ -61,19 +69,44 @@ class DownloadManagerTest : public testing::Test {
     file_manager()->downloads_[id] = download_file;
   }
 
-  void OnAllDataSaved(int32 download_id, int64 size, const std::string& hash) {
-    download_manager_->OnAllDataSaved(download_id, size, hash);
+  void OnResponseCompleted(int32 download_id, int64 size,
+                           const std::string& hash) {
+    download_manager_->OnResponseCompleted(download_id, size, hash);
   }
 
-  void FileSelected(const FilePath& path, int index, void* params) {
-    download_manager_->FileSelected(path, index, params);
+  void FileSelected(const FilePath& path, void* params) {
+    download_manager_->FileSelected(path, params);
   }
 
   void ContinueDownloadWithPath(DownloadItem* download, const FilePath& path) {
     download_manager_->ContinueDownloadWithPath(download, path);
   }
 
-  void OnDownloadError(int32 download_id, int64 size, int os_error) {
+  void UpdateData(int32 id, const char* data, size_t length) {
+    // We are passing ownership of this buffer to the download file manager.
+    net::IOBuffer* io_buffer = new net::IOBuffer(length);
+    // We need |AddRef()| because we do a |Release()| in |UpdateDownload()|.
+    io_buffer->AddRef();
+    memcpy(io_buffer->data(), data, length);
+
+    {
+      base::AutoLock auto_lock(download_buffer_.lock);
+
+      download_buffer_.contents.push_back(
+          std::make_pair(io_buffer, length));
+    }
+
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        NewRunnableMethod(file_manager_.get(),
+                          &DownloadFileManager::UpdateDownload,
+                          id,
+                          &download_buffer_));
+
+    message_loop_.RunAllPending();
+  }
+
+  void OnDownloadError(int32 download_id, int64 size, net::Error os_error) {
     download_manager_->OnDownloadError(download_id, size, os_error);
   }
 
@@ -87,11 +120,13 @@ class DownloadManagerTest : public testing::Test {
  protected:
   DownloadStatusUpdater download_status_updater_;
   scoped_ptr<TestingProfile> profile_;
+  scoped_refptr<ChromeDownloadManagerDelegate> download_manager_delegate_;
   scoped_refptr<DownloadManager> download_manager_;
   scoped_refptr<DownloadFileManager> file_manager_;
   MessageLoopForUI message_loop_;
   BrowserThread ui_thread_;
   BrowserThread file_thread_;
+  DownloadBuffer download_buffer_;
 
   DownloadFileManager* file_manager() {
     if (!file_manager_) {
@@ -118,6 +153,45 @@ class DownloadManagerTest : public testing::Test {
 const char* DownloadManagerTest::kTestData = "a;sdlfalsdfjalsdkfjad";
 const size_t DownloadManagerTest::kTestDataLen =
     strlen(DownloadManagerTest::kTestData);
+
+// A DownloadFile that we can inject errors into.  Uses MockFileStream.
+// Note:  This can't be in an anonymous namespace because it must be declared
+// as a friend of |DownloadFile| in order to access its private members.
+class DownloadFileWithMockStream : public DownloadFile {
+ public:
+  DownloadFileWithMockStream(DownloadCreateInfo* info,
+                             DownloadManager* manager,
+                             net::testing::MockFileStream* stream);
+
+  virtual ~DownloadFileWithMockStream() {}
+
+  void SetForcedError(int error);
+
+ protected:
+  // This version creates a |MockFileStream| instead of a |FileStream|.
+  virtual void CreateFileStream() OVERRIDE;
+};
+
+DownloadFileWithMockStream::DownloadFileWithMockStream(
+    DownloadCreateInfo* info,
+    DownloadManager* manager,
+    net::testing::MockFileStream* stream)
+        : DownloadFile(info, manager) {
+  DCHECK(file_stream_ == NULL);
+  file_stream_.reset(stream);
+}
+
+void DownloadFileWithMockStream::SetForcedError(int error)
+{
+  // |file_stream_| can only be set in the constructor and in
+  // CreateFileStream(), both of which insure that it is a |MockFileStream|.
+  net::testing::MockFileStream* mock_stream =
+    static_cast<net::testing::MockFileStream *>(file_stream_.get());
+  mock_stream->set_forced_error(error);
+}
+void DownloadFileWithMockStream::CreateFileStream() {
+  file_stream_.reset(new net::testing::MockFileStream);
+}
 
 namespace {
 
@@ -202,16 +276,16 @@ class MockDownloadFile : public DownloadFile {
   MockDownloadFile(DownloadCreateInfo* info, DownloadManager* manager)
       : DownloadFile(info, manager), renamed_count_(0) { }
   virtual ~MockDownloadFile() { Destructed(); }
-  MOCK_METHOD1(Rename, bool(const FilePath&));
+  MOCK_METHOD1(Rename, net::Error(const FilePath&));
   MOCK_METHOD0(Destructed, void());
 
-  bool TestMultipleRename(
+  net::Error TestMultipleRename(
       int expected_count, const FilePath& expected,
       const FilePath& path) {
     ++renamed_count_;
     EXPECT_EQ(expected_count, renamed_count_);
     EXPECT_EQ(expected.value(), path.value());
-    return true;
+    return net::OK;
   }
 
  private:
@@ -294,7 +368,9 @@ TEST_F(DownloadManagerTest, StartDownload) {
   BrowserThread io_thread(BrowserThread::IO, &message_loop_);
   PrefService* prefs = profile_->GetPrefs();
   prefs->SetFilePath(prefs::kDownloadDefaultDirectory, FilePath());
-  download_manager_->download_prefs()->EnableAutoOpenBasedOnExtension(
+  DownloadPrefs* download_prefs =
+      DownloadPrefs::FromDownloadManager(download_manager_);
+  download_prefs->EnableAutoOpenBasedOnExtension(
       FilePath(FILE_PATH_LITERAL("example.pdf")));
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kStartDownloadCases); ++i) {
@@ -352,7 +428,7 @@ TEST_F(DownloadManagerTest, DownloadRenameTest) {
     EXPECT_CALL(*download_file, Destructed()).Times(1);
 
     if (kDownloadRenameCases[i].expected_rename_count == 1) {
-      EXPECT_CALL(*download_file, Rename(new_path)).WillOnce(Return(true));
+      EXPECT_CALL(*download_file, Rename(new_path)).WillOnce(Return(net::OK));
     } else {
       ASSERT_EQ(2, kDownloadRenameCases[i].expected_rename_count);
       FilePath crdownload(download_util::GetCrDownloadPath(new_path));
@@ -375,13 +451,13 @@ TEST_F(DownloadManagerTest, DownloadRenameTest) {
     int32* id_ptr = new int32;
     *id_ptr = i;  // Deleted in FileSelected().
     if (kDownloadRenameCases[i].finish_before_rename) {
-      OnAllDataSaved(i, 1024, std::string("fake_hash"));
+      OnResponseCompleted(i, 1024, std::string("fake_hash"));
       message_loop_.RunAllPending();
-      FileSelected(new_path, i, id_ptr);
+      FileSelected(new_path, id_ptr);
     } else {
-      FileSelected(new_path, i, id_ptr);
+      FileSelected(new_path, id_ptr);
       message_loop_.RunAllPending();
-      OnAllDataSaved(i, 1024, std::string("fake_hash"));
+      OnResponseCompleted(i, 1024, std::string("fake_hash"));
     }
 
     message_loop_.RunAllPending();
@@ -416,7 +492,7 @@ TEST_F(DownloadManagerTest, DownloadInterruptTest) {
   ::testing::Mock::AllowLeak(download_file);
   EXPECT_CALL(*download_file, Destructed()).Times(1);
 
-  EXPECT_CALL(*download_file, Rename(cr_path)).WillOnce(Return(true));
+  EXPECT_CALL(*download_file, Rename(cr_path)).WillOnce(Return(net::OK));
 
   download_manager_->CreateDownloadItem(info.get());
 
@@ -435,7 +511,7 @@ TEST_F(DownloadManagerTest, DownloadInterruptTest) {
   EXPECT_TRUE(GetActiveDownloadItem(0) != NULL);
 
   int64 error_size = 3;
-  OnDownloadError(0, error_size, -6);
+  OnDownloadError(0, error_size, net::ERR_FILE_NOT_FOUND);
   message_loop_.RunAllPending();
 
   EXPECT_TRUE(GetActiveDownloadItem(0) == NULL);
@@ -473,6 +549,91 @@ TEST_F(DownloadManagerTest, DownloadInterruptTest) {
   EXPECT_EQ(download->total_bytes(), static_cast<int64>(kTestDataLen));
 }
 
+// Test the behavior of DownloadFileManager and DownloadManager in the event
+// of a file error while writing the download to disk.
+TEST_F(DownloadManagerTest, DownloadFileErrorTest) {
+  // Create a temporary file and a mock stream.
+  FilePath path;
+  ASSERT_TRUE(file_util::CreateTemporaryFile(&path));
+
+  // This file stream will be used, until the first rename occurs.
+  net::testing::MockFileStream* mock_stream = new net::testing::MockFileStream;
+  ASSERT_EQ(0, mock_stream->Open(
+      path,
+      base::PLATFORM_FILE_OPEN_ALWAYS | base::PLATFORM_FILE_WRITE));
+
+  // Normally, the download system takes ownership of info, and is
+  // responsible for deleting it.  In these unit tests, however, we
+  // don't call the function that deletes it, so we do so ourselves.
+  scoped_ptr<DownloadCreateInfo> info(new DownloadCreateInfo);
+  int32 id = 0;
+  info->download_id = id;
+  info->prompt_user_for_save_location = false;
+  info->url_chain.push_back(GURL());
+  info->total_bytes = static_cast<int64>(kTestDataLen * 3);
+  info->save_info.file_path = path;
+
+  // Create a download file that we can insert errors into.
+  DownloadFileWithMockStream* download_file(new DownloadFileWithMockStream(
+      info.get(), download_manager_, mock_stream));
+  AddDownloadToFileManager(id, download_file);
+
+  // |download_file| is owned by DownloadFileManager.
+  download_manager_->CreateDownloadItem(info.get());
+
+  DownloadItem* download = GetActiveDownloadItem(0);
+  ASSERT_TRUE(download != NULL);
+  // This will keep track of what should be displayed on the shelf.
+  scoped_ptr<DownloadItemModel> download_item_model(
+      new DownloadItemModel(download));
+
+  EXPECT_EQ(DownloadItem::IN_PROGRESS, download->state());
+  scoped_ptr<ItemObserver> observer(new ItemObserver(download));
+
+  // Add some data before finalizing the file name.
+  UpdateData(id, kTestData, kTestDataLen);
+
+  // Finalize the file name.
+  ContinueDownloadWithPath(download, path);
+  message_loop_.RunAllPending();
+  EXPECT_TRUE(GetActiveDownloadItem(0) != NULL);
+
+  // Add more data.
+  UpdateData(id, kTestData, kTestDataLen);
+
+  // Add more data, but an error occurs.
+  download_file->SetForcedError(net::ERR_FAILED);
+  UpdateData(id, kTestData, kTestDataLen);
+
+  // Check the state.  The download should have been interrupted.
+  EXPECT_TRUE(GetActiveDownloadItem(0) == NULL);
+  EXPECT_TRUE(observer->hit_state(DownloadItem::IN_PROGRESS));
+  EXPECT_TRUE(observer->hit_state(DownloadItem::INTERRUPTED));
+  EXPECT_FALSE(observer->hit_state(DownloadItem::COMPLETE));
+  EXPECT_FALSE(observer->hit_state(DownloadItem::CANCELLED));
+  EXPECT_FALSE(observer->hit_state(DownloadItem::REMOVING));
+  EXPECT_TRUE(observer->was_updated());
+  EXPECT_FALSE(observer->was_opened());
+  EXPECT_FALSE(download->file_externally_removed());
+  EXPECT_EQ(DownloadItem::INTERRUPTED, download->state());
+
+  // Check the download shelf's information.
+  size_t error_size = kTestDataLen * 3;
+  ui::DataUnits amount_units = ui::GetByteDisplayUnits(kTestDataLen);
+  string16 simple_size =
+      ui::FormatBytesWithUnits(error_size, amount_units, false);
+  string16 simple_total = base::i18n::GetDisplayStringInLTRDirectionality(
+      ui::FormatBytesWithUnits(error_size, amount_units, true));
+  EXPECT_EQ(l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_INTERRUPTED,
+                                       simple_size,
+                                       simple_total),
+            download_item_model->GetStatusText());
+
+  // Clean up.
+  download->Cancel(true);
+  message_loop_.RunAllPending();
+}
+
 TEST_F(DownloadManagerTest, DownloadCancelTest) {
   using ::testing::_;
   using ::testing::CreateFunctor;
@@ -497,7 +658,7 @@ TEST_F(DownloadManagerTest, DownloadCancelTest) {
   ::testing::Mock::AllowLeak(download_file);
   EXPECT_CALL(*download_file, Destructed()).Times(1);
 
-  EXPECT_CALL(*download_file, Rename(cr_path)).WillOnce(Return(true));
+  EXPECT_CALL(*download_file, Rename(cr_path)).WillOnce(Return(net::OK));
 
   download_manager_->CreateDownloadItem(info.get());
 
@@ -558,10 +719,10 @@ TEST_F(DownloadManagerTest, DownloadOverwriteTest) {
 
   // Construct the unique file name that normally would be created, but
   // which we will override.
-  int uniquifier = download_util::GetUniquePathNumber(new_path);
+  int uniquifier = DownloadFile::GetUniquePathNumber(new_path);
   FilePath unique_new_path = new_path;
   EXPECT_NE(0, uniquifier);
-  download_util::AppendNumberToPath(&unique_new_path, uniquifier);
+  DownloadFile::AppendNumberToPath(&unique_new_path, uniquifier);
 
   // Normally, the download system takes ownership of info, and is
   // responsible for deleting it.  In these unit tests, however, we
@@ -600,7 +761,7 @@ TEST_F(DownloadManagerTest, DownloadOverwriteTest) {
   download_file->AppendDataToFile(kTestData, kTestDataLen);
 
   // Finish the download.
-  OnAllDataSaved(0, kTestDataLen, "");
+  OnResponseCompleted(0, kTestDataLen, "");
   message_loop_.RunAllPending();
 
   // Download is complete.
@@ -676,7 +837,7 @@ TEST_F(DownloadManagerTest, DownloadRemoveTest) {
   download_file->AppendDataToFile(kTestData, kTestDataLen);
 
   // Finish the download.
-  OnAllDataSaved(0, kTestDataLen, "");
+  OnResponseCompleted(0, kTestDataLen, "");
   message_loop_.RunAllPending();
 
   // Download is complete.

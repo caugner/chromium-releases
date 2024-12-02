@@ -410,9 +410,11 @@ bool GSSAPISharedLibrary::Init() {
 
 bool GSSAPISharedLibrary::InitImpl() {
   DCHECK(!initialized_);
+#if defined(DLOPEN_KERBEROS)
   gssapi_library_ = LoadSharedLibrary();
   if (gssapi_library_ == NULL)
     return false;
+#endif  // defined(DLOPEN_KERBEROS)
   initialized_ = true;
   return true;
 }
@@ -459,17 +461,20 @@ base::NativeLibrary GSSAPISharedLibrary::LoadSharedLibrary() {
   return NULL;
 }
 
+#if defined(DLOPEN_KERBEROS)
 #define BIND(lib, x)                                                    \
+  DCHECK(lib);                                                          \
   gss_##x##_type x = reinterpret_cast<gss_##x##_type>(                  \
       base::GetFunctionPointerFromNativeLibrary(lib, "gss_" #x));       \
   if (x == NULL) {                                                      \
     LOG(WARNING) << "Unable to bind function \"" << "gss_" #x << "\"";  \
     return false;                                                       \
   }
+#else
+#define BIND(lib, x) gss_##x##_type x = gss_##x
+#endif
 
 bool GSSAPISharedLibrary::BindMethods(base::NativeLibrary lib) {
-  DCHECK(lib != NULL);
-
   BIND(lib, import_name);
   BIND(lib, release_name);
   BIND(lib, release_buffer);
@@ -667,6 +672,10 @@ bool HttpAuthGSSAPI::Init() {
 
 bool HttpAuthGSSAPI::NeedsIdentity() const {
   return decoded_server_auth_token_.empty();
+}
+
+bool HttpAuthGSSAPI::AllowsExplicitCredentials() const {
+  return false;
 }
 
 void HttpAuthGSSAPI::Delegate() {

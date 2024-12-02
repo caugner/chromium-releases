@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 
 namespace {
 
@@ -28,7 +28,7 @@ class CollectedCookiesWindowControllerTest
 TEST_F(CollectedCookiesWindowControllerTest, Construction) {
   CollectedCookiesWindowController* controller =
       [[CollectedCookiesWindowController alloc]
-          initWithTabContents:contents()];
+          initWithTabContentsWrapper:contents_wrapper()];
 
   [controller release];
 }

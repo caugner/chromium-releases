@@ -1,14 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/plugins/ppapi/ppb_flash_impl.h"
 
-#include "skia/ext/platform_canvas.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_rect.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
+#include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
+#include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -16,8 +17,8 @@
 #include "third_party/skia/include/core/SkTemplates.h"
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
-#include "webkit/plugins/ppapi/var.h"
 
+using ppapi::StringVar;
 using ppapi::thunk::EnterResource;
 using ppapi::thunk::PPB_ImageData_API;
 
@@ -45,7 +46,7 @@ PP_Bool PPB_Flash_Impl::DrawGlyphs(PP_Instance,
     return PP_FALSE;
 
   // Set up the typeface.
-  scoped_refptr<StringVar> face_name(StringVar::FromPPVar(font_desc->face));
+  StringVar* face_name = StringVar::FromPPVar(font_desc->face);
   if (!face_name)
     return PP_FALSE;
   int style = SkTypeface::kNormal;
@@ -116,4 +117,3 @@ PP_Bool PPB_Flash_Impl::DrawGlyphs(PP_Instance,
 
 }  // namespace ppapi
 }  // namespace webkit
-

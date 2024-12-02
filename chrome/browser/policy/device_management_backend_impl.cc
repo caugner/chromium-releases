@@ -34,6 +34,8 @@ const char DeviceManagementBackendImpl::kParamDeviceType[] = "devicetype";
 const char DeviceManagementBackendImpl::kParamOAuthToken[] = "oauth_token";
 const char DeviceManagementBackendImpl::kParamPlatform[] = "platform";
 const char DeviceManagementBackendImpl::kParamRequest[] = "request";
+const char DeviceManagementBackendImpl::kParamUserAffiliation[] =
+    "user_affiliation";
 
 // String constants for the device and app type we report to the server.
 const char DeviceManagementBackendImpl::kValueAppType[] = "Chrome";
@@ -42,6 +44,9 @@ const char DeviceManagementBackendImpl::kValueRequestPolicy[] = "policy";
 const char DeviceManagementBackendImpl::kValueRequestRegister[] = "register";
 const char DeviceManagementBackendImpl::kValueRequestUnregister[] =
     "unregister";
+const char DeviceManagementBackendImpl::kValueUserAffiliationManaged[] =
+    "managed";
+const char DeviceManagementBackendImpl::kValueUserAffiliationNone[] = "none";
 
 namespace {
 
@@ -53,24 +58,25 @@ const char kPostContentType[] = "application/protobuf";
 const char kServiceTokenAuthHeader[] = "Authorization: GoogleLogin auth=";
 const char kDMTokenAuthHeader[] = "Authorization: GoogleDMToken token=";
 
-// HTTP Error Codes of the DM Server with their concrete meinings in the context
+// HTTP Error Codes of the DM Server with their concrete meanings in the context
 // of the DM Server communication.
 const int kSuccess = 200;
 const int kInvalidArgument = 400;
 const int kInvalidAuthCookieOrDMToken = 401;
 const int kDeviceManagementNotAllowed = 403;
 const int kInvalidURL = 404; // This error is not coming from the GFE.
+const int kInvalidSerialNumber = 405;
+const int kDeviceIdConflict = 409;
 const int kDeviceNotFound = 410;
 const int kPendingApproval = 412;
 const int kInternalServerError = 500;
 const int kServiceUnavailable = 503;
 const int kPolicyNotFound = 902; // This error is not sent as HTTP status code.
 
-// TODO(pastarmovj): Legacy error codes are here for comaptibility only. They
+// TODO(pastarmovj): Legacy error codes are here for compatibility only. They
 // should be removed once the DM Server has been updated.
 const int kPendingApprovalLegacy = 491;
 const int kDeviceNotFoundLegacy = 901;
-
 
 #if defined(OS_CHROMEOS)
 // Machine info keys.
@@ -252,6 +258,14 @@ void DeviceManagementJobBase::HandleResponse(
       OnError(DeviceManagementBackend::kErrorServicePolicyNotFound);
       break;
     }
+    case kInvalidSerialNumber: {
+      OnError(DeviceManagementBackend::kErrorServiceInvalidSerialNumber);
+      break;
+    }
+    case kDeviceIdConflict: {
+      OnError(DeviceManagementBackend::kErrorServiceDeviceIdConflict);
+      break;
+    }
     default: {
       VLOG(1) << "Unexpected HTTP status in response from DMServer : "
               << response_code << ".";
@@ -324,6 +338,12 @@ class DeviceManagementRegisterJob : public DeviceManagementJobBase {
       case DeviceManagementBackend::kErrorResponseDecoding:
         sample = kMetricTokenFetchBadResponse;
         break;
+      case DeviceManagementBackend::kErrorServiceInvalidSerialNumber:
+        sample = kMetricTokenFetchInvalidSerialNumber;
+        break;
+      case DeviceManagementBackend::kErrorServiceDeviceIdConflict:
+        sample = kMetricTokenFetchDeviceIdConflict;
+        break;
       default:
         sample = kMetricTokenFetchServerFailed;
         break;
@@ -384,6 +404,7 @@ class DeviceManagementPolicyJob : public DeviceManagementJobBase {
       DeviceManagementBackendImpl* backend_impl,
       const std::string& device_management_token,
       const std::string& device_id,
+      const std::string& user_affiliation,
       const em::DevicePolicyRequest& request,
       DeviceManagementBackend::DevicePolicyResponseDelegate* delegate)
       : DeviceManagementJobBase(
@@ -392,6 +413,8 @@ class DeviceManagementPolicyJob : public DeviceManagementJobBase {
           device_id),
         delegate_(delegate) {
     SetDeviceManagementToken(device_management_token);
+    SetQueryParam(DeviceManagementBackendImpl::kParamUserAffiliation,
+                  user_affiliation);
     em::DeviceManagementRequest request_wrapper;
     request_wrapper.mutable_policy_request()->CopyFrom(request);
     SetPayload(request_wrapper);
@@ -538,12 +561,27 @@ void DeviceManagementBackendImpl::ProcessUnregisterRequest(
 void DeviceManagementBackendImpl::ProcessPolicyRequest(
     const std::string& device_management_token,
     const std::string& device_id,
+    CloudPolicyDataStore::UserAffiliation affiliation,
     const em::DevicePolicyRequest& request,
     DevicePolicyResponseDelegate* delegate) {
   UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchRequested,
                             kMetricPolicySize);
   AddJob(new DeviceManagementPolicyJob(this, device_management_token, device_id,
+                                       UserAffiliationToString(affiliation),
                                        request, delegate));
+}
+
+// static
+const char* DeviceManagementBackendImpl::UserAffiliationToString(
+    CloudPolicyDataStore::UserAffiliation affiliation) {
+  switch (affiliation) {
+    case CloudPolicyDataStore::USER_AFFILIATION_MANAGED:
+      return kValueUserAffiliationManaged;
+    case CloudPolicyDataStore::USER_AFFILIATION_NONE:
+      return kValueUserAffiliationNone;
+  }
+  NOTREACHED();
+  return kValueUserAffiliationNone;
 }
 
 }  // namespace policy

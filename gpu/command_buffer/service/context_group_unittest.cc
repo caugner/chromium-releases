@@ -8,7 +8,6 @@
 #include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "gpu/GLES2/gles2_command_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::gfx::MockGLInterface;
@@ -37,7 +36,7 @@ class ContextGroupTest : public testing::Test {
   virtual void SetUp() {
     gl_.reset(new ::testing::StrictMock< ::gfx::MockGLInterface>());
     ::gfx::GLInterface::SetGLInterface(gl_.get());
-    group_ = ContextGroup::Ref(new ContextGroup());
+    group_ = ContextGroup::Ref(new ContextGroup(true));
   }
 
   virtual void TearDown() {

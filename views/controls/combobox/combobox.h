@@ -8,24 +8,18 @@
 
 #include <string>
 
-#include "views/view.h"
-
-#ifdef UNIT_TEST
 #include "ui/gfx/native_widget_types.h"
 #include "views/controls/combobox/native_combobox_wrapper.h"
-#endif
+#include "views/view.h"
 
 namespace ui {
 class ComboboxModel;
 }
-using ui::ComboboxModel;
 
 namespace views {
 
-class NativeComboboxWrapper;
-
 // A non-editable combo-box (aka a drop-down list)
-class Combobox : public View {
+class VIEWS_EXPORT Combobox : public View {
  public:
   // The combobox's class name.
   static const char kViewClassName[];
@@ -42,7 +36,7 @@ class Combobox : public View {
   };
 
   // |model| is not owned by the combo box.
-  explicit Combobox(ComboboxModel* model);
+  explicit Combobox(ui::ComboboxModel* model);
   virtual ~Combobox();
 
   // Register |listener| for item change events.
@@ -61,19 +55,18 @@ class Combobox : public View {
   void SelectionChanged();
 
   // Accessor for |model_|.
-  ComboboxModel* model() const { return model_; }
+  ui::ComboboxModel* model() const { return model_; }
 
   // Set the accessible name of the combo box.
   void SetAccessibleName(const string16& name);
 
-#ifdef UNIT_TEST
+  // Provided only for testing:
   gfx::NativeView GetTestingHandle() const {
     return native_wrapper_ ? native_wrapper_->GetTestingHandle() : NULL;
   }
-  NativeComboboxWrapper* native_wrapper() const {
+  NativeComboboxWrapper* GetNativeWrapperForTesting() const {
     return native_wrapper_;
   }
-#endif
 
   // Overridden from View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
@@ -98,7 +91,7 @@ class Combobox : public View {
 
  private:
   // Our model.
-  ComboboxModel* model_;
+  ui::ComboboxModel* model_;
 
   // Item change listener.
   Listener* listener_;

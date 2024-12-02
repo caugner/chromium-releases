@@ -16,7 +16,7 @@
 #include "chrome/browser/visitedlink/visitedlink_event_listener.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/visitedlink_slave.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
@@ -493,8 +493,9 @@ class VisitCountingProfile : public TestingProfile {
 // Stub out as little as possible, borrowing from BrowserRenderProcessHost.
 class VisitRelayingRenderProcessHost : public BrowserRenderProcessHost {
  public:
-  explicit VisitRelayingRenderProcessHost(Profile* profile)
-      : BrowserRenderProcessHost(profile) {
+  explicit VisitRelayingRenderProcessHost(
+      content::BrowserContext* browser_context)
+          : BrowserRenderProcessHost(browser_context) {
     NotificationService::current()->Notify(
         content::NOTIFICATION_RENDERER_PROCESS_CREATED,
         Source<RenderProcessHost>(this), NotificationService::NoDetails());
@@ -523,14 +524,15 @@ class VisitRelayingRenderProcessHost : public BrowserRenderProcessHost {
 
   virtual bool Send(IPC::Message* msg) {
     VisitCountingProfile* counting_profile =
-        static_cast<VisitCountingProfile*>(profile());
+        static_cast<VisitCountingProfile*>(
+            Profile::FromBrowserContext(browser_context()));
 
-    if (msg->type() == ViewMsg_VisitedLink_Add::ID) {
+    if (msg->type() == ChromeViewMsg_VisitedLink_Add::ID) {
       void* iter = NULL;
       std::vector<uint64> fingerprints;
       CHECK(IPC::ReadParam(msg, &iter, &fingerprints));
       counting_profile->CountAddEvent(fingerprints.size());
-    } else if (msg->type() == ViewMsg_VisitedLink_Reset::ID) {
+    } else if (msg->type() == ChromeViewMsg_VisitedLink_Reset::ID) {
       counting_profile->CountResetEvent();
     }
 
@@ -551,8 +553,9 @@ class VisitedLinkRenderProcessHostFactory
  public:
   VisitedLinkRenderProcessHostFactory()
       : RenderProcessHostFactory() {}
-  virtual RenderProcessHost* CreateRenderProcessHost(Profile* profile) const {
-    return new VisitRelayingRenderProcessHost(profile);
+  virtual RenderProcessHost* CreateRenderProcessHost(
+      content::BrowserContext* browser_context) const OVERRIDE {
+    return new VisitRelayingRenderProcessHost(browser_context);
   }
 
  private:

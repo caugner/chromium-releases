@@ -91,7 +91,7 @@ LocationBarViewMac::LocationBarViewMac(
       profile_(profile),
       browser_(browser),
       toolbar_model_(toolbar_model),
-      transition_(PageTransition::TYPED),
+      transition_(PageTransition::TYPED | PageTransition::FROM_ADDRESS_BAR),
       first_run_bubble_(this) {
   for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
     DCHECK_EQ(i, content_setting_decorations_.size());
@@ -138,7 +138,7 @@ void LocationBarViewMac::ShowFirstRunBubbleInternal(
   [FirstRunBubbleController showForView:field_ offset:kOffset profile:profile_];
 }
 
-std::wstring LocationBarViewMac::GetInputString() const {
+string16 LocationBarViewMac::GetInputString() const {
   return location_input_;
 }
 
@@ -224,9 +224,9 @@ void LocationBarViewMac::OnAutocompleteAccept(const GURL& url,
   // WARNING: don't add an early return here. The calls after the if must
   // happen.
   if (url.is_valid()) {
-    location_input_ = UTF8ToWide(url.spec());
+    location_input_ = UTF8ToUTF16(url.spec());
     disposition_ = disposition;
-    transition_ = transition;
+    transition_ = transition | PageTransition::FROM_ADDRESS_BAR;
 
     if (command_updater_) {
       if (!alternate_nav_url.is_valid()) {
@@ -356,8 +356,7 @@ void LocationBarViewMac::SetPreviewEnabledPageAction(
     return;
 
   decoration->set_preview_enabled(preview_enabled);
-  decoration->UpdateVisibility(contents,
-      GURL(WideToUTF8(toolbar_model_->GetText())));
+  decoration->UpdateVisibility(contents, GURL(toolbar_model_->GetText()));
 }
 
 NSPoint LocationBarViewMac::GetPageActionBubblePoint(
@@ -560,7 +559,7 @@ void LocationBarViewMac::RefreshPageActionDecorations() {
   if (!contents)
     return;
 
-  GURL url = GURL(WideToUTF8(toolbar_model_->GetText()));
+  GURL url = GURL(toolbar_model_->GetText());
   for (size_t i = 0; i < page_action_decorations_.size(); ++i) {
     page_action_decorations_[i]->UpdateVisibility(
         toolbar_model_->input_in_progress() ? NULL : contents, url);
@@ -620,8 +619,8 @@ void LocationBarViewMac::Layout() {
     location_icon_decoration_->SetVisible(false);
     ev_bubble_decoration_->SetVisible(true);
 
-    std::wstring label(toolbar_model_->GetEVCertName());
-    ev_bubble_decoration_->SetFullLabel(base::SysWideToNSString(label));
+    string16 label(toolbar_model_->GetEVCertName());
+    ev_bubble_decoration_->SetFullLabel(base::SysUTF16ToNSString(label));
   } else if (!keyword.empty() && is_keyword_hint) {
     keyword_hint_decoration_->SetKeyword(short_name,
                                          is_extension_keyword);

@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/time.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/form_structure.h"
 #include "webkit/glue/form_data.h"
@@ -26,6 +27,7 @@ enum ServerExperiment {
   TOOLBAR_DATA_ONLY,
   ACCEPTANCE_RATIO_04_WINNER_LEAD_RATIO_3_MIN_FORM_SCORE_4,
   NO_SERVER_RESPONSE,
+  PROBABILITY_PICKER_05,
   NUM_SERVER_EXPERIMENTS
 };
 
@@ -223,6 +225,8 @@ void LogServerExperimentId(const std::string& histogram_name,
     metric = ACCEPTANCE_RATIO_04_WINNER_LEAD_RATIO_3_MIN_FORM_SCORE_4;
   else if (experiment_id == default_experiment_name)
     metric = NO_SERVER_RESPONSE;
+  else if (experiment_id == "fp05")
+    metric = PROBABILITY_PICKER_05;
 
   DCHECK(metric < NUM_SERVER_EXPERIMENTS);
   LogUMAHistogramEnumeration(histogram_name, metric, NUM_SERVER_EXPERIMENTS);
@@ -286,6 +290,51 @@ void AutofillMetrics::LogServerQueryMetric(ServerQueryMetric metric) const {
 
   UMA_HISTOGRAM_ENUMERATION("Autofill.ServerQueryResponse", metric,
                             NUM_SERVER_QUERY_METRICS);
+}
+
+void AutofillMetrics::LogUserHappinessMetric(UserHappinessMetric metric) const {
+  DCHECK(metric < NUM_USER_HAPPINESS_METRICS);
+
+  UMA_HISTOGRAM_ENUMERATION("Autofill.UserHappiness", metric,
+                            NUM_USER_HAPPINESS_METRICS);
+}
+
+void AutofillMetrics::LogFormFillDurationFromLoadWithAutofill(
+    const base::TimeDelta& duration) const {
+  UMA_HISTOGRAM_CUSTOM_TIMES("Autofill.FillDuration.FromLoad.WithAutofill",
+                             duration,
+                             base::TimeDelta::FromMilliseconds(100),
+                             base::TimeDelta::FromMinutes(10),
+                             50);
+}
+
+void AutofillMetrics::LogFormFillDurationFromLoadWithoutAutofill(
+    const base::TimeDelta& duration) const {
+  UMA_HISTOGRAM_CUSTOM_TIMES("Autofill.FillDuration.FromLoad.WithoutAutofill",
+                             duration,
+                             base::TimeDelta::FromMilliseconds(100),
+                             base::TimeDelta::FromMinutes(10),
+                             50);
+}
+
+void AutofillMetrics::LogFormFillDurationFromInteractionWithAutofill(
+    const base::TimeDelta& duration) const {
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+      "Autofill.FillDuration.FromInteraction.WithAutofill",
+      duration,
+      base::TimeDelta::FromMilliseconds(100),
+      base::TimeDelta::FromMinutes(10),
+      50);
+}
+
+void AutofillMetrics::LogFormFillDurationFromInteractionWithoutAutofill(
+    const base::TimeDelta& duration) const {
+  UMA_HISTOGRAM_CUSTOM_TIMES(
+       "Autofill.FillDuration.FromInteraction.WithoutAutofill",
+       duration,
+       base::TimeDelta::FromMilliseconds(100),
+       base::TimeDelta::FromMinutes(10),
+       50);
 }
 
 void AutofillMetrics::LogIsAutofillEnabledAtStartup(bool enabled) const {

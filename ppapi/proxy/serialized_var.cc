@@ -11,7 +11,7 @@
 #include "ppapi/proxy/ppapi_param_traits.h"
 #include "ppapi/proxy/var_serialization_rules.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 // SerializedVar::Inner --------------------------------------------------------
@@ -94,6 +94,14 @@ const std::string& SerializedVar::Inner::GetString() const {
 std::string* SerializedVar::Inner::GetStringPtr() {
   DCHECK(serialization_rules_);
   return &string_value_;
+}
+
+void SerializedVar::Inner::ForceSetVarValueForTest(PP_Var value) {
+  var_ = value;
+}
+
+void SerializedVar::Inner::ForceSetStringValueForTest(const std::string& str) {
+  string_value_ = str;
 }
 
 void SerializedVar::Inner::WriteToMessage(IPC::Message* m) const {
@@ -515,7 +523,7 @@ PP_Var** SerializedVarVectorOutParam::ArrayOutParam(Dispatcher* dispatcher) {
 SerializedVarTestConstructor::SerializedVarTestConstructor(
     const PP_Var& pod_var) {
   DCHECK(pod_var.type != PP_VARTYPE_STRING);
-  inner_->SetVar(pod_var);
+  inner_->ForceSetVarValueForTest(pod_var);
 }
 
 SerializedVarTestConstructor::SerializedVarTestConstructor(
@@ -523,8 +531,8 @@ SerializedVarTestConstructor::SerializedVarTestConstructor(
   PP_Var string_var = {};
   string_var.type = PP_VARTYPE_STRING;
   string_var.value.as_id = 0;
-  inner_->SetVar(string_var);
-  *inner_->GetStringPtr() = str;
+  inner_->ForceSetVarValueForTest(string_var);
+  inner_->ForceSetStringValueForTest(str);
 }
 
 SerializedVarTestReader::SerializedVarTestReader(const SerializedVar& var)
@@ -532,5 +540,5 @@ SerializedVarTestReader::SerializedVarTestReader(const SerializedVar& var)
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 

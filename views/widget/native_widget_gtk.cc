@@ -22,6 +22,7 @@
 #include "ui/base/dragdrop/os_exchange_data_provider_gtk.h"
 #include "ui/base/gtk/g_object_destructor_filo.h"
 #include "ui/base/gtk/gtk_windowing.h"
+#include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/gtk/scoped_handle_gtk.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/canvas_skia_paint.h"
@@ -375,7 +376,8 @@ NativeWidgetGtk::NativeWidgetGtk(internal::NativeWidgetDelegate* delegate)
       has_pointer_grab_(false),
       has_keyboard_grab_(false),
       grab_notify_signal_id_(0),
-      is_menu_(false) {
+      is_menu_(false),
+      signal_registrar_(new ui::GtkSignalRegistrar) {
 #if defined(TOUCH_UI)
   // Make sure the touch factory is initialized so that it can setup XInput2 for
   // the widget.
@@ -393,12 +395,21 @@ NativeWidgetGtk::NativeWidgetGtk(internal::NativeWidgetDelegate* delegate)
 NativeWidgetGtk::~NativeWidgetGtk() {
   // We need to delete the input method before calling DestroyRootView(),
   // because it'll set focus_manager_ to NULL.
-  input_method_.reset();
   if (ownership_ == Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET) {
     DCHECK(widget_ == NULL);
     delete delegate_;
   } else {
+    // Disconnect from GObjectDestructorFILO because we're
+    // deleting the NativeWidgetGtk.
+    bool has_widget = !!widget_;
+    if (has_widget)
+      ui::GObjectDestructorFILO::GetInstance()->Disconnect(
+          G_OBJECT(widget_), &OnDestroyedThunk, this);
     CloseNow();
+    // Call OnNativeWidgetDestroyed because we're not calling
+    // OnDestroyedThunk
+    if (has_widget)
+      delegate_->OnNativeWidgetDestroyed();
   }
 }
 
@@ -703,76 +714,76 @@ void NativeWidgetGtk::InitNativeWidget(const Widget::InitParams& params) {
                         GDK_KEY_PRESS_MASK |
                         GDK_KEY_RELEASE_MASK);
 
-  g_signal_connect_after(G_OBJECT(window_contents_), "size_request",
-                         G_CALLBACK(&OnSizeRequestThunk), this);
-  g_signal_connect_after(G_OBJECT(window_contents_), "size_allocate",
-                         G_CALLBACK(&OnSizeAllocateThunk), this);
+  signal_registrar_->ConnectAfter(G_OBJECT(window_contents_), "size_request",
+                                  G_CALLBACK(&OnSizeRequestThunk), this);
+  signal_registrar_->ConnectAfter(G_OBJECT(window_contents_), "size_allocate",
+                                  G_CALLBACK(&OnSizeAllocateThunk), this);
   gtk_widget_set_app_paintable(window_contents_, true);
-  g_signal_connect(window_contents_, "expose_event",
-                   G_CALLBACK(&OnPaintThunk), this);
-  g_signal_connect(window_contents_, "enter_notify_event",
-                   G_CALLBACK(&OnEnterNotifyThunk), this);
-  g_signal_connect(window_contents_, "leave_notify_event",
-                   G_CALLBACK(&OnLeaveNotifyThunk), this);
-  g_signal_connect(window_contents_, "motion_notify_event",
-                   G_CALLBACK(&OnMotionNotifyThunk), this);
-  g_signal_connect(window_contents_, "button_press_event",
-                   G_CALLBACK(&OnButtonPressThunk), this);
-  g_signal_connect(window_contents_, "button_release_event",
-                   G_CALLBACK(&OnButtonReleaseThunk), this);
-  g_signal_connect(window_contents_, "grab_broken_event",
-                   G_CALLBACK(&OnGrabBrokeEventThunk), this);
-  g_signal_connect(window_contents_, "scroll_event",
-                   G_CALLBACK(&OnScrollThunk), this);
-  g_signal_connect(window_contents_, "visibility_notify_event",
-                   G_CALLBACK(&OnVisibilityNotifyThunk), this);
+  signal_registrar_->Connect(window_contents_, "expose_event",
+                             G_CALLBACK(&OnPaintThunk), this);
+  signal_registrar_->Connect(window_contents_, "enter_notify_event",
+                             G_CALLBACK(&OnEnterNotifyThunk), this);
+  signal_registrar_->Connect(window_contents_, "leave_notify_event",
+                             G_CALLBACK(&OnLeaveNotifyThunk), this);
+  signal_registrar_->Connect(window_contents_, "motion_notify_event",
+                             G_CALLBACK(&OnMotionNotifyThunk), this);
+  signal_registrar_->Connect(window_contents_, "button_press_event",
+                             G_CALLBACK(&OnButtonPressThunk), this);
+  signal_registrar_->Connect(window_contents_, "button_release_event",
+                             G_CALLBACK(&OnButtonReleaseThunk), this);
+  signal_registrar_->Connect(window_contents_, "grab_broken_event",
+                             G_CALLBACK(&OnGrabBrokeEventThunk), this);
+  signal_registrar_->Connect(window_contents_, "scroll_event",
+                             G_CALLBACK(&OnScrollThunk), this);
+  signal_registrar_->Connect(window_contents_, "visibility_notify_event",
+                             G_CALLBACK(&OnVisibilityNotifyThunk), this);
 
   // In order to receive notification when the window is no longer the front
   // window, we need to install these on the widget.
   // NOTE: this doesn't work with focus follows mouse.
-  g_signal_connect(widget_, "focus_in_event",
-                   G_CALLBACK(&OnFocusInThunk), this);
-  g_signal_connect(widget_, "focus_out_event",
-                   G_CALLBACK(&OnFocusOutThunk), this);
-  g_signal_connect(widget_, "destroy",
-                   G_CALLBACK(&OnDestroyThunk), this);
-  g_signal_connect(widget_, "show",
-                   G_CALLBACK(&OnShowThunk), this);
-  g_signal_connect(widget_, "map",
-                   G_CALLBACK(&OnMapThunk), this);
-  g_signal_connect(widget_, "hide",
-                   G_CALLBACK(&OnHideThunk), this);
-  g_signal_connect(widget_, "configure-event",
-                   G_CALLBACK(&OnConfigureEventThunk), this);
+  signal_registrar_->Connect(widget_, "focus_in_event",
+                             G_CALLBACK(&OnFocusInThunk), this);
+  signal_registrar_->Connect(widget_, "focus_out_event",
+                             G_CALLBACK(&OnFocusOutThunk), this);
+  signal_registrar_->Connect(widget_, "destroy",
+                             G_CALLBACK(&OnDestroyThunk), this);
+  signal_registrar_->Connect(widget_, "show",
+                             G_CALLBACK(&OnShowThunk), this);
+  signal_registrar_->Connect(widget_, "map",
+                             G_CALLBACK(&OnMapThunk), this);
+  signal_registrar_->Connect(widget_, "hide",
+                             G_CALLBACK(&OnHideThunk), this);
+  signal_registrar_->Connect(widget_, "configure-event",
+                             G_CALLBACK(&OnConfigureEventThunk), this);
 
   // Views/FocusManager (re)sets the focus to the root window,
   // so we need to connect signal handlers to the gtk window.
   // See views::Views::Focus and views::FocusManager::ClearNativeFocus
   // for more details.
-  g_signal_connect(widget_, "key_press_event",
-                   G_CALLBACK(&OnEventKeyThunk), this);
-  g_signal_connect(widget_, "key_release_event",
-                   G_CALLBACK(&OnEventKeyThunk), this);
+  signal_registrar_->Connect(widget_, "key_press_event",
+                             G_CALLBACK(&OnEventKeyThunk), this);
+  signal_registrar_->Connect(widget_, "key_release_event",
+                             G_CALLBACK(&OnEventKeyThunk), this);
 
   // Drag and drop.
   gtk_drag_dest_set(window_contents_, static_cast<GtkDestDefaults>(0),
                     NULL, 0, GDK_ACTION_COPY);
-  g_signal_connect(window_contents_, "drag_motion",
-                   G_CALLBACK(&OnDragMotionThunk), this);
-  g_signal_connect(window_contents_, "drag_data_received",
-                   G_CALLBACK(&OnDragDataReceivedThunk), this);
-  g_signal_connect(window_contents_, "drag_drop",
-                   G_CALLBACK(&OnDragDropThunk), this);
-  g_signal_connect(window_contents_, "drag_leave",
-                   G_CALLBACK(&OnDragLeaveThunk), this);
-  g_signal_connect(window_contents_, "drag_data_get",
-                   G_CALLBACK(&OnDragDataGetThunk), this);
-  g_signal_connect(window_contents_, "drag_end",
-                   G_CALLBACK(&OnDragEndThunk), this);
-  g_signal_connect(window_contents_, "drag_failed",
-                   G_CALLBACK(&OnDragFailedThunk), this);
-  g_signal_connect(G_OBJECT(widget_), "window-state-event",
-                   G_CALLBACK(&OnWindowStateEventThunk), this);
+  signal_registrar_->Connect(window_contents_, "drag_motion",
+                             G_CALLBACK(&OnDragMotionThunk), this);
+  signal_registrar_->Connect(window_contents_, "drag_data_received",
+                             G_CALLBACK(&OnDragDataReceivedThunk), this);
+  signal_registrar_->Connect(window_contents_, "drag_drop",
+                             G_CALLBACK(&OnDragDropThunk), this);
+  signal_registrar_->Connect(window_contents_, "drag_leave",
+                             G_CALLBACK(&OnDragLeaveThunk), this);
+  signal_registrar_->Connect(window_contents_, "drag_data_get",
+                             G_CALLBACK(&OnDragDataGetThunk), this);
+  signal_registrar_->Connect(window_contents_, "drag_end",
+                             G_CALLBACK(&OnDragEndThunk), this);
+  signal_registrar_->Connect(window_contents_, "drag_failed",
+                             G_CALLBACK(&OnDragFailedThunk), this);
+  signal_registrar_->Connect(G_OBJECT(widget_), "window-state-event",
+                             G_CALLBACK(&OnWindowStateEventThunk), this);
 
   ui::GObjectDestructorFILO::GetInstance()->Connect(
       G_OBJECT(widget_), &OnDestroyedThunk, this);
@@ -789,8 +800,8 @@ void NativeWidgetGtk::InitNativeWidget(const Widget::InitParams& params) {
 
   // Register for tooltips.
   g_object_set(G_OBJECT(window_contents_), "has-tooltip", TRUE, NULL);
-  g_signal_connect(window_contents_, "query_tooltip",
-                   G_CALLBACK(&OnQueryTooltipThunk), this);
+  signal_registrar_->Connect(window_contents_, "query_tooltip",
+                             G_CALLBACK(&OnQueryTooltipThunk), this);
 
   if (child_) {
     if (parent)
@@ -938,6 +949,7 @@ void NativeWidgetGtk::SetMouseCapture() {
 }
 
 void NativeWidgetGtk::ReleaseMouseCapture() {
+  bool delegate_lost_capture = HasMouseCapture();
   if (GTK_WIDGET_HAS_GRAB(window_contents_))
     gtk_grab_remove(window_contents_);
   if (grab_notify_signal_id_) {
@@ -951,61 +963,34 @@ void NativeWidgetGtk::ReleaseMouseCapture() {
     TouchFactory::GetInstance()->UngrabTouchDevices(
         GDK_WINDOW_XDISPLAY(window_contents()->window));
 #endif
-    delegate_->OnMouseCaptureLost();
   }
+  if (delegate_lost_capture)
+    delegate_->OnMouseCaptureLost();
 }
 
 bool NativeWidgetGtk::HasMouseCapture() const {
   return GTK_WIDGET_HAS_GRAB(window_contents_) || has_pointer_grab_;
 }
 
-void NativeWidgetGtk::SetKeyboardCapture() {
-  DCHECK(!has_keyboard_grab_);
-
-  GdkGrabStatus keyboard_grab_status =
-      gdk_keyboard_grab(window_contents()->window, FALSE, GDK_CURRENT_TIME);
-  has_keyboard_grab_ = keyboard_grab_status == GDK_GRAB_SUCCESS;
-  DCHECK_EQ(GDK_GRAB_SUCCESS, keyboard_grab_status);
-}
-
-void NativeWidgetGtk::ReleaseKeyboardCapture() {
-  if (has_keyboard_grab_) {
-    has_keyboard_grab_ = false;
-    gdk_keyboard_ungrab(GDK_CURRENT_TIME);
-  }
-}
-
-bool NativeWidgetGtk::HasKeyboardCapture() const {
-  return has_keyboard_grab_;
-}
-
-InputMethod* NativeWidgetGtk::GetInputMethodNative() {
-  if (!input_method_.get()) {
-    // Create input method when it is requested by a child view.
-    // TODO(suzhe): Always enable input method when we start to use
-    // RenderWidgetHostViewViews in normal ChromeOS.
-    if (!child_ && views::Widget::IsPureViews()) {
+InputMethod* NativeWidgetGtk::CreateInputMethod() {
+  // Create input method when pure views is enabled but not on views desktop.
+  // TODO(suzhe): Always enable input method when we start to use
+  // RenderWidgetHostViewViews in normal ChromeOS.
+  if (views::Widget::IsPureViews() &&
+      !ViewsDelegate::views_delegate->GetDefaultParentView()) {
 #if defined(HAVE_IBUS)
-      input_method_.reset(InputMethodIBus::IsInputMethodIBusEnabled() ?
-                          static_cast<InputMethod*>(new InputMethodIBus(this)) :
-                          static_cast<InputMethod*>(new InputMethodGtk(this)));
+    InputMethod* input_method =
+        InputMethodIBus::IsInputMethodIBusEnabled() ?
+        static_cast<InputMethod*>(new InputMethodIBus(this)) :
+        static_cast<InputMethod*>(new InputMethodGtk(this));
 #else
-      input_method_.reset(new InputMethodGtk(this));
+    InputMethod* input_method = new InputMethodGtk(this);
 #endif
-      input_method_->Init(GetWidget());
-      if (has_focus_)
-        input_method_->OnFocus();
-    }
-  }
-  return input_method_.get();
-}
-
-void NativeWidgetGtk::ReplaceInputMethod(InputMethod* input_method) {
-  input_method_.reset(input_method);
-  if (input_method) {
-    input_method->set_delegate(this);
     input_method->Init(GetWidget());
+    return input_method;
   }
+  // GTK's textfield or InputMethod in NativeWidgetViews will handle IME.
+  return NULL;
 }
 
 void NativeWidgetGtk::CenterWindow(const gfx::Size& size) {
@@ -1031,8 +1016,9 @@ void NativeWidgetGtk::CenterWindow(const gfx::Size& size) {
   SetBoundsConstrained(bounds, NULL);
 }
 
-void NativeWidgetGtk::GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
-                                                       bool* maximized) const {
+void NativeWidgetGtk::GetWindowPlacement(
+    gfx::Rect* bounds,
+    ui::WindowShowState* show_state) const {
   // Do nothing for now. ChromeOS isn't yet saving window placement.
 }
 
@@ -1181,7 +1167,6 @@ void NativeWidgetGtk::Close() {
 
 void NativeWidgetGtk::CloseNow() {
   if (widget_) {
-    input_method_.reset();
     gtk_widget_destroy(widget_);  // Triggers OnDestroy().
   }
 }
@@ -1195,7 +1180,8 @@ void NativeWidgetGtk::Show() {
     gtk_widget_show(widget_);
     if (widget_->window)
       gdk_window_raise(widget_->window);
-    delegate_->OnNativeWidgetVisibilityChanged(true);
+    // See Hide() for the reason why we're not calling
+    // OnNativeWidgetVisibilityChange.
   }
 }
 
@@ -1204,7 +1190,15 @@ void NativeWidgetGtk::Hide() {
     gtk_widget_hide(widget_);
     if (widget_->window)
       gdk_window_lower(widget_->window);
-    delegate_->OnNativeWidgetVisibilityChanged(false);
+    // We're not calling OnNativeWidgetVisibilityChanged because it
+    // breaks the ability to refocus to FindBar. NativeControlGtk
+    // detaches the underlying gtk widget for optimization purpose
+    // when it becomes invisible, which in turn breaks SetNativeFocus
+    // because there is no gtk attached to NativeControlGtk. I'm not
+    // fixing that part because
+    // a) This is views/gtk only issue, which will be gone soon.
+    // b) Alternative fix, which we can modify animator to show it
+    // immediately, won't be necessary for non gtk implementation.
   }
 }
 
@@ -1214,9 +1208,9 @@ void NativeWidgetGtk::ShowMaximizedWithBounds(
   Show();
 }
 
-void NativeWidgetGtk::ShowWithState(ShowState state) {
+void NativeWidgetGtk::ShowWithWindowState(ui::WindowShowState show_state) {
   // No concept of maximization (yet) on ChromeOS.
-  if (state == internal::NativeWidgetPrivate::SHOW_INACTIVE)
+  if (show_state == ui::SHOW_STATE_INACTIVE)
     gtk_window_set_focus_on_map(GetNativeWindow(), false);
   gtk_widget_show(GetNativeView());
 }
@@ -1346,6 +1340,12 @@ void NativeWidgetGtk::FocusNativeView(gfx::NativeView native_view) {
     gtk_widget_grab_focus(native_view);
 }
 
+bool NativeWidgetGtk::ConvertPointFromAncestor(
+    const Widget* ancestor, gfx::Point* point) const {
+  NOTREACHED();
+  return false;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetGtk, protected:
 
@@ -1373,7 +1373,7 @@ void NativeWidgetGtk::OnSizeAllocate(GtkWidget* widget,
     return;
   size_ = new_size;
   if (compositor_.get())
-    compositor_->OnWidgetSizeChanged(size_);
+    compositor_->WidgetSizeChanged(size_);
   delegate_->OnNativeWidgetSizeChanged(size_);
 
   if (GetWidget()->non_client_view()) {
@@ -1660,12 +1660,13 @@ gboolean NativeWidgetGtk::OnFocusIn(GtkWidget* widget, GdkEventFocus* event) {
 
   should_handle_menu_key_release_ = false;
 
-  if (child_)
+  if (!GetWidget()->is_top_level())
     return false;
 
   // Only top-level Widget should have an InputMethod instance.
-  if (input_method_.get())
-    input_method_->OnFocus();
+  InputMethod* input_method = GetWidget()->GetInputMethod();
+  if (input_method)
+    input_method->OnFocus();
 
   // See description of got_initial_focus_in_ for details on this.
   if (!got_initial_focus_in_) {
@@ -1683,19 +1684,21 @@ gboolean NativeWidgetGtk::OnFocusOut(GtkWidget* widget, GdkEventFocus* event) {
     return false;  // This is the second focus-out event in a row, ignore it.
   has_focus_ = false;
 
-  if (child_)
+  if (!GetWidget()->is_top_level())
     return false;
 
   // Only top-level Widget should have an InputMethod instance.
-  if (input_method_.get())
-    input_method_->OnBlur();
+  InputMethod* input_method = GetWidget()->GetInputMethod();
+  if (input_method)
+    input_method->OnBlur();
   return false;
 }
 
 gboolean NativeWidgetGtk::OnEventKey(GtkWidget* widget, GdkEventKey* event) {
   KeyEvent key(reinterpret_cast<NativeEvent>(event));
-  if (input_method_.get())
-    input_method_->DispatchKeyEvent(key);
+  InputMethod* input_method = GetWidget()->GetInputMethod();
+  if (input_method)
+    input_method->DispatchKeyEvent(key);
   else
     DispatchKeyEventPostIME(key);
 
@@ -1764,6 +1767,11 @@ void NativeWidgetGtk::OnGrabNotify(GtkWidget* widget, gboolean was_grabbed) {
 }
 
 void NativeWidgetGtk::OnDestroy(GtkWidget* object) {
+  signal_registrar_.reset();
+  if (grab_notify_signal_id_) {
+    g_signal_handler_disconnect(window_contents_, grab_notify_signal_id_);
+    grab_notify_signal_id_ = 0;
+  }
   delegate_->OnNativeWidgetDestroying();
   if (!child_)
     ActiveWindowWatcherX::RemoveObserver(this);
@@ -1816,7 +1824,6 @@ gboolean NativeWidgetGtk::OnConfigureEvent(GtkWidget* widget,
 
 void NativeWidgetGtk::HandleGtkGrabBroke() {
   ReleaseMouseCapture();
-  ReleaseKeyboardCapture();
   delegate_->OnMouseCaptureLost();
 }
 
@@ -2049,8 +2056,8 @@ void NativeWidgetGtk::ConfigureWidgetForTransparentBackground(
     DCHECK(parent == NULL);
     gtk_widget_set_colormap(widget_, rgba_colormap);
     gtk_widget_set_app_paintable(widget_, true);
-    g_signal_connect(widget_, "expose_event",
-                     G_CALLBACK(&OnWindowPaintThunk), this);
+    signal_registrar_->Connect(widget_, "expose_event",
+                               G_CALLBACK(&OnWindowPaintThunk), this);
     gtk_widget_realize(widget_);
     gdk_window_set_decorations(widget_->window,
                                static_cast<GdkWMDecoration>(0));
@@ -2096,10 +2103,14 @@ void NativeWidgetGtk::SaveWindowPosition() {
   if (!GetWidget()->widget_delegate())
     return;
 
-  bool maximized = window_state_ & GDK_WINDOW_STATE_MAXIMIZED;
+  ui::WindowShowState show_state = ui::SHOW_STATE_NORMAL;
+  if (IsMaximized())
+    show_state = ui::SHOW_STATE_MAXIMIZED;
+  else if (IsMinimized())
+    show_state = ui::SHOW_STATE_MINIMIZED;
   GetWidget()->widget_delegate()->SaveWindowPlacement(
       GetWidget()->GetWindowScreenBounds(),
-      maximized);
+      show_state);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2163,7 +2174,7 @@ namespace internal {
 // static
 NativeWidgetPrivate* NativeWidgetPrivate::CreateNativeWidget(
     NativeWidgetDelegate* delegate) {
-  if (Widget::IsPureViews() &&
+  if (Widget::IsPureViews() && ViewsDelegate::views_delegate &&
       ViewsDelegate::views_delegate->GetDefaultParentView()) {
     return new NativeWidgetViews(delegate);
   }
@@ -2205,7 +2216,7 @@ NativeWidgetPrivate* NativeWidgetPrivate::GetTopLevelNativeWidget(
     parent_gtkwidget = gtk_widget_get_parent(parent_gtkwidget);
   } while (parent_gtkwidget);
 
-  return widget;
+  return widget && widget->GetWidget()->is_top_level() ? widget : NULL;
 }
 
 // static

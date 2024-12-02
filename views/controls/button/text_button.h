@@ -31,7 +31,7 @@ namespace views {
 // focus chain.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class TextButtonBorder : public Border {
+class VIEWS_EXPORT TextButtonBorder : public Border {
  public:
   TextButtonBorder();
   virtual ~TextButtonBorder();
@@ -90,7 +90,7 @@ class TextButtonBorder : public Border {
 //  states, with possible animation between states.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class TextButtonNativeThemeBorder : public Border {
+class VIEWS_EXPORT TextButtonNativeThemeBorder : public Border {
  public:
    TextButtonNativeThemeBorder(NativeThemeDelegate* delegate);
   virtual ~TextButtonNativeThemeBorder();
@@ -117,7 +117,8 @@ class TextButtonNativeThemeBorder : public Border {
 //  passed to SetText. To reset the cached max size invoke ClearMaxTextSize.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class TextButtonBase : public CustomButton, public NativeThemeDelegate {
+class VIEWS_EXPORT TextButtonBase : public CustomButton,
+                                    public NativeThemeDelegate {
  public:
   // The menu button's class name.
   static const char kViewClassName[];
@@ -313,7 +314,7 @@ class TextButtonBase : public CustomButton, public NativeThemeDelegate {
 //  passed to SetText. To reset the cached max size invoke ClearMaxTextSize.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class TextButton : public TextButtonBase {
+class VIEWS_EXPORT TextButton : public TextButtonBase {
  public:
   // The button's class name.
   static const char kViewClassName[];
@@ -326,9 +327,9 @@ class TextButton : public TextButtonBase {
   }
 
   // Sets the icon.
-  void SetIcon(const SkBitmap& icon);
-  void SetHoverIcon(const SkBitmap& icon);
-  void SetPushedIcon(const SkBitmap& icon);
+  virtual void SetIcon(const SkBitmap& icon);
+  virtual void SetHoverIcon(const SkBitmap& icon);
+  virtual void SetPushedIcon(const SkBitmap& icon);
 
   bool HasIcon() const { return !icon_.empty(); }
 
@@ -395,25 +396,16 @@ class TextButton : public TextButtonBase {
 // NativeTextButton
 //
 //  A TextButton that uses the NativeTheme border and sets some properties,
-//  like ignore-minimize-size and text alignment minimum size to mimic the
-//  NativeButton class, making it easier to replace existing NativeButton
-//  instances with NativeTextButton instances.
+//  like ignore-minimize-size and text alignment minimum size.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class NativeTextButton : public TextButton {
+class VIEWS_EXPORT NativeTextButton : public TextButton {
  public:
   // The button's class name.
   static const char kViewClassName[];
 
   NativeTextButton(ButtonListener* listener);
   NativeTextButton(ButtonListener* listener, const std::wstring& text);
-
-  // Sets/Gets the text to be used as the button's label.
-  // TODO: Remove this function and replace all call sites with SetText().
-  void SetLabel(const std::wstring& label) {
-    SetText(label);
-  }
-  std::wstring label() const { return text(); }
 
   // Overridden from TextButton:
   virtual gfx::Size GetMinimumSize() OVERRIDE;

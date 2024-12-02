@@ -19,6 +19,7 @@
 #include "base/task.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
+#include "chrome/browser/event_disposition.h"
 #include "chrome/browser/instant/instant_delegate.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
@@ -43,8 +44,10 @@
 #include "content/common/notification_registrar.h"
 #include "content/common/page_transition_types.h"
 #include "content/common/page_zoom.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
 
+class BrowserSyncedWindowDelegate;
 class BrowserTabRestoreServiceDelegate;
 class BrowserWindow;
 class Extension;
@@ -62,6 +65,8 @@ struct WebApplicationInfo;
 namespace gfx {
 class Point;
 }
+
+struct ViewHostMsg_RunFileChooser_Params;
 
 class Browser : public TabHandlerDelegate,
                 public TabContentsDelegate,
@@ -81,6 +86,8 @@ class Browser : public TabHandlerDelegate,
   // enum, look at SessionService::WindowType to see if it needs to be
   // updated.
   enum Type {
+    // If you add a new type, consider updating the test
+    // BrowserTest.StartMaximized.
     TYPE_TABBED = 1,
     TYPE_POPUP = 2,
     TYPE_PANEL = 3,
@@ -97,19 +104,6 @@ class Browser : public TabHandlerDelegate,
     FEATURE_INFOBAR = 32,
     FEATURE_SIDEBAR = 64,
     FEATURE_DOWNLOADSHELF = 128
-  };
-
-  // Maximized state on creation.
-  enum MaximizedState {
-    // The maximized state is set to the default, which varies depending upon
-    // what the user has done.
-    MAXIMIZED_STATE_DEFAULT,
-
-    // Maximized state is explicitly maximized.
-    MAXIMIZED_STATE_MAXIMIZED,
-
-    // Maximized state is explicitly not maximized (normal).
-    MAXIMIZED_STATE_UNMAXIMIZED
   };
 
   struct CreateParams {
@@ -168,12 +162,21 @@ class Browser : public TabHandlerDelegate,
   void set_override_bounds(const gfx::Rect& bounds) {
     override_bounds_ = bounds;
   }
-  void set_maximized_state(MaximizedState state) {
-    maximized_state_ = state;
+  void set_show_state(ui::WindowShowState show_state) {
+    show_state_ = show_state;
   }
   // Return true if the initial window bounds have been overridden.
   bool bounds_overridden() const {
     return !override_bounds_.IsEmpty();
+  }
+  // Set indicator that this browser is being created via session restore.
+  // This is used on the Mac (only) to determine animation style when the
+  // browser window is shown.
+  void set_is_session_restore(bool is_session_restore) {
+    is_session_restore_ = is_session_restore;
+  }
+  bool is_session_restore() const {
+    return is_session_restore_;
   }
 
   // Creates the Browser Window. Prefer to use the static helpers above where
@@ -186,7 +189,6 @@ class Browser : public TabHandlerDelegate,
   Type type() const { return type_; }
   const std::string& app_name() const { return app_name_; }
   Profile* profile() const { return profile_; }
-  const std::vector<std::wstring>& user_data_dir_profiles() const;
   gfx::Rect override_bounds() const { return override_bounds_; }
 
   // Returns the InstantController or NULL if there is no InstantController for
@@ -213,6 +215,9 @@ class Browser : public TabHandlerDelegate,
   BrowserTabRestoreServiceDelegate* tab_restore_service_delegate() {
     return tab_restore_service_delegate_.get();
   }
+  BrowserSyncedWindowDelegate* synced_window_delegate() {
+    return synced_window_delegate_.get();
+  }
 
   // Get the FindBarController for this browser, creating it if it does not
   // yet exist.
@@ -223,10 +228,6 @@ class Browser : public TabHandlerDelegate,
 
   // Returns the state of the bookmark bar.
   BookmarkBar::State bookmark_bar_state() const { return bookmark_bar_state_; }
-
-  // Setters /////////////////////////////////////////////////////////////////
-
-  void set_user_data_dir_profiles(const std::vector<std::wstring>& profiles);
 
   // Browser Creation Helpers /////////////////////////////////////////////////
 
@@ -309,9 +310,10 @@ class Browser : public TabHandlerDelegate,
   // Save and restore the window position.
   std::string GetWindowPlacementKey() const;
   bool ShouldSaveWindowPlacement() const;
-  void SaveWindowPlacement(const gfx::Rect& bounds, bool maximized);
+  void SaveWindowPlacement(const gfx::Rect& bounds,
+                           ui::WindowShowState show_state);
   gfx::Rect GetSavedWindowBounds() const;
-  bool GetSavedMaximizedState() const;
+  ui::WindowShowState GetSavedWindowShowState() const;
 
   // Gets the Favicon of the page in the selected tab.
   SkBitmap GetCurrentPageIcon() const;
@@ -362,6 +364,7 @@ class Browser : public TabHandlerDelegate,
   int tab_count() const;
   int active_index() const;
   int GetIndexOfController(const NavigationController* controller) const;
+
   // TODO(dpapad): Rename to GetActiveTabContentsWrapper().
   TabContentsWrapper* GetSelectedTabContentsWrapper() const;
   TabContentsWrapper* GetTabContentsWrapperAt(int index) const;
@@ -426,12 +429,12 @@ class Browser : public TabHandlerDelegate,
                       bool user_gesture);
   void CloseTabContents(TabContents* contents);
 
-  // Show a dialog with HTML content. |delegate| contains a pointer to the
-  // delegate who knows how to display the dialog (which file URL and JSON
-  // string input to use during initialization). |parent_window| is the window
-  // that should be parent of the dialog, or NULL for the default.
-  void BrowserShowHtmlDialog(HtmlDialogUIDelegate* delegate,
-                             gfx::NativeWindow parent_window);
+  // Shows a dialog with HTML content and returns it. |delegate| contains a
+  // pointer to the delegate who knows how to display the dialog (which file
+  // URL and JSON string input to use during initialization). |parent_window|
+  // is the window that should be parent of the dialog, or NULL for the default.
+  gfx::NativeWindow BrowserShowHtmlDialog(HtmlDialogUIDelegate* delegate,
+                                          gfx::NativeWindow parent_window);
 
   // Called when a popup select is about to be displayed.
   void BrowserRenderWidgetShowing();
@@ -458,6 +461,9 @@ class Browser : public TabHandlerDelegate,
   // is created.
   void ShowSingletonTab(const GURL& url);
 
+  // Same as ShowSingletonTab, but does not ignore ref.
+  void ShowSingletonTabRespectRef(const GURL& url);
+
   // As ShowSingletonTab, but if the current tab is the new tab page or
   // about:blank, then overwrite it with the passed contents.
   void ShowSingletonTabOverwritingNTP(const browser::NavigateParams& params);
@@ -470,13 +476,18 @@ class Browser : public TabHandlerDelegate,
   // fullscreen.
   void WindowFullscreenStateChanged();
 
+  // Sends a notification that the fullscreen state has changed.
+  void NotifyFullscreenChange();
+
   // Assorted browser commands ////////////////////////////////////////////////
 
   // NOTE: Within each of the following sections, the IDs are ordered roughly by
   // how they appear in the GUI/menus (left to right, top to bottom, etc.).
 
   // Navigation commands
+  bool CanGoBack() const;
   void GoBack(WindowOpenDisposition disposition);
+  bool CanGoForward() const;
   void GoForward(WindowOpenDisposition disposition);
   void Reload(WindowOpenDisposition disposition);
   void ReloadIgnoringCache(WindowOpenDisposition disposition);  // Shift-reload.
@@ -530,6 +541,7 @@ class Browser : public TabHandlerDelegate,
   // TODO(port): port these, and re-merge the two function declaration lists.
   // Page-related commands.
   void Print();
+  void AdvancedPrint();
   void EmailPageLocation();
   void ToggleEncodingAutoDetect();
   void OverrideEncoding(int encoding_id);
@@ -568,6 +580,8 @@ class Browser : public TabHandlerDelegate,
 
   void OpenBookmarkManager();
   void OpenBookmarkManagerForNode(int64 node_id);
+  void OpenBookmarkManagerEditNode(int64 node_id);
+  void OpenBookmarkManagerAddNodeIn(int64 node_id);
   void ShowAppMenu();
   void ShowHistoryTab();
   void ShowDownloadsTab();
@@ -586,8 +600,6 @@ class Browser : public TabHandlerDelegate,
   void OpenAboutChromeDialog();
   void OpenUpdateChromeDialog();
   void ShowHelpTab();
-  // Used by the "Get themes" link in the options dialog.
-  void OpenThemeGalleryTabAndActivate();
   void OpenAutofillHelpTabAndActivate();
   void OpenPrivacyDashboardTabAndActivate();
   void OpenSearchEngineOptionsDialog();
@@ -603,6 +615,7 @@ class Browser : public TabHandlerDelegate,
 #endif
   void OpenPluginsTabAndActivate();
   void ShowSyncSetup();
+  void ToggleSpeechInput();
 
   virtual void UpdateDownloadShelfVisibility(bool visible);
 
@@ -641,8 +654,59 @@ class Browser : public TabHandlerDelegate,
   // Creates a new Browser if none are available.
   static Browser* GetOrCreateTabbedBrowser(Profile* profile);
 
+  // Helper function to display the file selection dialog.
+  static void RunFileChooserHelper(
+      TabContents* tab, const ViewHostMsg_RunFileChooser_Params& params);
+
+  // Helper function to enumerate a directory.
+  static void EnumerateDirectoryHelper(TabContents* tab, int request_id,
+                                       const FilePath& path);
+
+  // Helper function to handle JS out of memory notifications
+  static void JSOutOfMemoryHelper(TabContents* tab);
+
+  // Helper function to register a protocol handler.
+  static void RegisterProtocolHandlerHelper(TabContents* tab,
+                                            const std::string& protocol,
+                                            const GURL& url,
+                                            const string16& title);
+
+  // Helper function to register an intent handler.
+  static void RegisterIntentHandlerHelper(TabContents* tab,
+                                          const string16& action,
+                                          const string16& type,
+                                          const string16& href,
+                                          const string16& title);
+
+  // Helper function to handle WebIntent notifications.
+  static void WebIntentDispatchHelper(TabContents* tab,
+                                      int routing_id,
+                                      const string16& action,
+                                      const string16& type,
+                                      const string16& data,
+                                      int intent_id);
+
+  // Helper function to handle find results.
+  static void FindReplyHelper(TabContents* tab,
+                              int request_id,
+                              int number_of_matches,
+                              const gfx::Rect& selection_rect,
+                              int active_match_ordinal,
+                              bool final_update);
+
+  // Helper function to handle crashed plugin notifications.
+  static void CrashedPluginHelper(TabContents* tab,
+                                  const FilePath& plugin_path);
+
+  // Helper function to handle url update notifications.
+  static void UpdateTargetURLHelper(TabContents* tab, int32 page_id,
+                                    const GURL& url);
+
   // Calls ExecuteCommandWithDisposition with the given disposition.
   void ExecuteCommandWithDisposition(int id, WindowOpenDisposition);
+
+  // Calls ExecuteCommandWithDisposition with the given event flags.
+  void ExecuteCommand(int id, int event_flags);
 
   // Executes a command if it's enabled.
   // Returns true if the command is executed.
@@ -676,16 +740,19 @@ class Browser : public TabHandlerDelegate,
   // specified.
   GURL GetHomePage() const;
 
-  // Shows the cookies collected in the tab contents.
-  void ShowCollectedCookiesDialog(TabContents* tab_contents);
+  // Shows the cookies collected in the tab contents wrapper.
+  void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper);
 
   // Interface implementations ////////////////////////////////////////////////
 
   // Overridden from PageNavigator:
+  // Deprecated. Please use the one-argument variant instead.
+  // TODO(adriansc): Remove this method once refactoring changed all call sites.
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
                                PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE;
 
   // Overridden from CommandUpdater::CommandUpdaterDelegate:
   virtual void ExecuteCommand(int id);
@@ -772,6 +839,10 @@ class Browser : public TabHandlerDelegate,
   bool is_app() const;
   bool is_devtools() const;
 
+  // True when the current tab is in fullscreen mode, requested by
+  // webkitRequestFullScreen.
+  bool is_fullscreen_for_tab() const { return fullscreened_tab_ != NULL; }
+
  protected:
   // Wrapper for the factory method in BrowserWindow. This allows subclasses to
   // set their own window.
@@ -783,6 +854,9 @@ class Browser : public TabHandlerDelegate,
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, ConvertTabToAppShortcut);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, OpenAppWindowLikeNtp);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, AppIdSwitch);
+  FRIEND_TEST_ALL_PREFIXES(BrowserTest, TestNewTabExitsFullscreen);
+  FRIEND_TEST_ALL_PREFIXES(BrowserTest, TestTabExitsItselfFromFullscreen);
+  FRIEND_TEST_ALL_PREFIXES(BrowserTest, TabEntersPresentationModeFromWindowed);
   FRIEND_TEST_ALL_PREFIXES(BrowserInitTest, OpenAppShortcutNoPref);
   FRIEND_TEST_ALL_PREFIXES(BrowserInitTest, OpenAppShortcutWindowPref);
   FRIEND_TEST_ALL_PREFIXES(BrowserInitTest, OpenAppShortcutTabPref);
@@ -820,11 +894,15 @@ class Browser : public TabHandlerDelegate,
   };
 
   // Overridden from TabContentsDelegate:
+  // Deprecated. Please use two-argument variant.
+  // TODO(adriansc): Remove this method once refactoring changed all call sites.
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const GURL& url,
                                       const GURL& referrer,
                                       WindowOpenDisposition disposition,
                                       PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const OpenURLParams& params) OVERRIDE;
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) OVERRIDE;
   virtual void AddNewContents(TabContents* source,
@@ -840,7 +918,8 @@ class Browser : public TabHandlerDelegate,
   virtual void DetachContents(TabContents* source) OVERRIDE;
   virtual bool IsPopupOrPanel(const TabContents* source) const OVERRIDE;
   virtual bool CanReloadContents(TabContents* source) const;
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) OVERRIDE;
+  virtual void UpdateTargetURL(TabContents* source, int32 page_id,
+                               const GURL& url) OVERRIDE;
   virtual void ContentsMouseEvent(
       TabContents* source, const gfx::Point& location, bool motion) OVERRIDE;
   virtual void ContentsZoomChange(bool zoom_in) OVERRIDE;
@@ -858,7 +937,7 @@ class Browser : public TabHandlerDelegate,
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void OnStartDownload(TabContents* source,
                                DownloadItem* download) OVERRIDE;
-  virtual void ShowPageInfo(Profile* profile,
+  virtual void ShowPageInfo(content::BrowserContext* browser_context,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history) OVERRIDE;
@@ -884,6 +963,41 @@ class Browser : public TabHandlerDelegate,
   virtual void DidNavigateToPendingEntry(TabContents* tab) OVERRIDE;
   virtual content::JavaScriptDialogCreator*
   GetJavaScriptDialogCreator() OVERRIDE;
+  virtual void RunFileChooser(
+      TabContents* tab,
+      const ViewHostMsg_RunFileChooser_Params& params) OVERRIDE;
+  virtual void EnumerateDirectory(TabContents* tab, int request_id,
+                                const FilePath& path) OVERRIDE;
+  virtual void ToggleFullscreenModeForTab(TabContents* tab,
+      bool enter_fullscreen) OVERRIDE;
+  virtual void JSOutOfMemory(TabContents* tab) OVERRIDE;
+  virtual void RegisterProtocolHandler(TabContents* tab,
+                                       const std::string& protocol,
+                                       const GURL& url,
+                                       const string16& title) OVERRIDE;
+  virtual void RegisterIntentHandler(TabContents* tab,
+                                     const string16& action,
+                                     const string16& type,
+                                     const string16& href,
+                                     const string16& title) OVERRIDE;
+  virtual void WebIntentDispatch(TabContents* tab,
+                                 int routing_id,
+                                 const string16& action,
+                                 const string16& type,
+                                 const string16& data,
+                                 int intent_id) OVERRIDE;
+  virtual void UpdatePreferredSize(TabContents* source,
+                                   const gfx::Size& pref_size) OVERRIDE;
+
+  virtual void FindReply(TabContents* tab,
+                         int request_id,
+                         int number_of_matches,
+                         const gfx::Rect& selection_rect,
+                         int active_match_ordinal,
+                         bool final_update) OVERRIDE;
+
+  virtual void CrashedPlugin(TabContents* tab,
+                             const FilePath& plugin_path) OVERRIDE;
 
   // Overridden from TabContentsWrapperDelegate:
   virtual void OnDidGetApplicationInfo(TabContentsWrapper* source,
@@ -949,6 +1063,12 @@ class Browser : public TabHandlerDelegate,
   // Updates commands for bookmark editing.
   void UpdateCommandsForBookmarkEditing();
 
+  // Updates commands that affect the bookmark bar.
+  void UpdateCommandsForBookmarkBar();
+
+  // Set the preference that indicates that the home page has been changed.
+  void MarkHomePageAsChanged(PrefService* pref_service);
+
   // Update commands whose state depends on whether the window is in fullscreen
   // mode.
   void UpdateCommandsForFullscreenMode(bool is_fullscreen);
@@ -1009,6 +1129,25 @@ class Browser : public TabHandlerDelegate,
   // Notifies the history database of the index for all tabs whose index is
   // >= index.
   void SyncHistoryWithTabs(int index);
+
+  // Tab fullscreen functions /////////////////////////////////////////////////
+
+  // There are two different kinds of fullscreen mode - "tab fullscreen" and
+  // "browser fullscreen". "Tab fullscreen" refers to when a tab enters
+  // fullscreen mode via the JS fullscreen API, and "browser fullscreen"
+  // refers to the user putting the browser itself into fullscreen mode from
+  // the UI. The difference is that tab fullscreen has implications for how
+  // the contents of the tab render (eg: a video element may grow to consume
+  // the whole tab), whereas browser fullscreen mode doesn't. Therefore if a
+  // user forces an exit from fullscreen, we need to notify the tab so it can
+  // stop rendering in its fullscreen mode.
+
+  // Make the current tab exit fullscreen mode if it is in it.
+  void ExitTabbedFullscreenModeIfNecessary();
+
+  // Notifies the tab that it has been forced out of fullscreen mode if
+  // necessary.
+  void NotifyTabOfFullscreenExitIfNecessary();
 
   // OnBeforeUnload handling //////////////////////////////////////////////////
 
@@ -1130,6 +1269,17 @@ class Browser : public TabHandlerDelegate,
   // BrowserWindow if necessary.
   void UpdateBookmarkBarState(BookmarkBarStateChangeReason reason);
 
+  // Open the bookmark manager with a defined hash action.
+  void OpenBookmarkManagerWithHash(const std::string& action, int64 node_id);
+
+  // Make the current tab exit fullscreen mode. If the browser was fullscreen
+  // because of that (as opposed to the user clicking the fullscreen button)
+  // then take the browser out of fullscreen mode as well.
+  void ExitTabbedFullscreenMode();
+
+  // Notifies the tab that it has been forced out of fullscreen mode.
+  void NotifyTabOfFullscreenExit();
+
   // Data members /////////////////////////////////////////////////////////////
 
   NotificationRegistrar registrar_;
@@ -1209,13 +1359,17 @@ class Browser : public TabHandlerDelegate,
 
   /////////////////////////////////////////////////////////////////////////////
 
-  // Override values for the bounds of the window and its maximized state.
+  // Override values for the bounds of the window and its maximized or minimized
+  // state.
   // These are supplied by callers that don't want to use the default values.
   // The default values are typically loaded from local state (last session),
   // obtained from the last window of the same type, or obtained from the
   // shell shortcut's startup info.
   gfx::Rect override_bounds_;
-  MaximizedState maximized_state_;
+  ui::WindowShowState show_state_;
+
+  // Tracks when this browser is being created by session restore.
+  bool is_session_restore_;
 
   // The following factory is used to close the frame at a later time.
   ScopedRunnableMethodFactory<Browser> method_factory_;
@@ -1264,10 +1418,20 @@ class Browser : public TabHandlerDelegate,
   // Helper which implements the TabRestoreServiceDelegate interface.
   scoped_ptr<BrowserTabRestoreServiceDelegate> tab_restore_service_delegate_;
 
+  // Helper which implements the SyncedWindowDelegate interface.
+  scoped_ptr<BrowserSyncedWindowDelegate> synced_window_delegate_;
+
   scoped_ptr<InstantController> instant_;
   scoped_ptr<InstantUnloadHandler> instant_unload_handler_;
 
   BookmarkBar::State bookmark_bar_state_;
+
+  // If there is currently a tab in fullscreen mode (entered via
+  // webkitRequestFullScreen), this is its wrapper.
+  TabContentsWrapper* fullscreened_tab_;
+
+  // True if the current tab entered fullscreen mode via webkitRequestFullScreen
+  bool tab_caused_fullscreen_;
 
   DISALLOW_COPY_AND_ASSIGN(Browser);
 };

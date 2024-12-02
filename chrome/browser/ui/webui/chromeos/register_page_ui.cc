@@ -118,8 +118,8 @@ class RegisterPageHandler : public WebUIMessageHandler,
   void Init();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
  private:
   // Handlers for JS WebUI messages.
@@ -310,5 +310,6 @@ RegisterPageUI::RegisterPageUI(TabContents* contents) : ChromeWebUI(contents) {
   RegisterPageUIHTMLSource* html_source = new RegisterPageUIHTMLSource();
 
   // Set up the chrome://register/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }

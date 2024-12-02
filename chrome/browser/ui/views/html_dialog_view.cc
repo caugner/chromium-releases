@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/window.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -31,7 +32,7 @@ gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent, Profile* profile,
                                  HtmlDialogUIDelegate* delegate) {
   HtmlDialogView* html_view =
       new HtmlDialogView(profile, delegate);
-  browser::CreateViewsWindow(parent, gfx::Rect(), html_view);
+  browser::CreateViewsWindow(parent, html_view);
   html_view->InitDialog();
   html_view->GetWidget()->Show();
   return html_view->GetWidget()->GetNativeWindow();
@@ -66,7 +67,6 @@ gfx::Size HtmlDialogView::GetPreferredSize() {
 bool HtmlDialogView::AcceleratorPressed(const views::Accelerator& accelerator) {
   // Pressing ESC closes the dialog.
   DCHECK_EQ(ui::VKEY_ESCAPE, accelerator.key_code());
-  OnWindowClosed();
   OnDialogClosed(std::string());
   return true;
 }
@@ -100,7 +100,7 @@ bool HtmlDialogView::IsModal() const {
 
 std::wstring HtmlDialogView::GetWindowTitle() const {
   if (delegate_)
-    return delegate_->GetDialogTitle();
+    return UTF16ToWideHack(delegate_->GetDialogTitle());
   return std::wstring();
 }
 
@@ -108,10 +108,8 @@ void HtmlDialogView::WindowClosing() {
   // If we still have a delegate that means we haven't notified it of the
   // dialog closing. This happens if the user clicks the Close button on the
   // dialog.
-  if (delegate_) {
-    OnWindowClosed();
+  if (delegate_)
     OnDialogClosed("");
-  }
 }
 
 views::View* HtmlDialogView::GetContentsView() {
@@ -141,8 +139,8 @@ bool HtmlDialogView::IsDialogModal() const {
   return IsModal();
 }
 
-std::wstring HtmlDialogView::GetDialogTitle() const {
-  return GetWindowTitle();
+string16 HtmlDialogView::GetDialogTitle() const {
+  return WideToUTF16Hack(GetWindowTitle());
 }
 
 GURL HtmlDialogView::GetDialogContentURL() const {
@@ -176,11 +174,6 @@ void HtmlDialogView::OnDialogClosed(const std::string& json_retval) {
     dialog_delegate->OnDialogClosed(json_retval);
   }
   GetWidget()->Close();
-}
-
-void HtmlDialogView::OnWindowClosed() {
-  if (delegate_)
-      delegate_->OnWindowClosed();
 }
 
 void HtmlDialogView::OnCloseContents(TabContents* source,
@@ -243,20 +236,21 @@ void HtmlDialogView::InitDialog() {
   // Now Init the DOMView. This view runs in its own process to render the html.
   DOMView::Init(profile(), NULL);
 
-  tab_contents_->set_delegate(this);
+  TabContents* tab_contents = dom_contents_->tab_contents();
+  tab_contents->set_delegate(this);
 
   // Set the delegate. This must be done before loading the page. See
   // the comment above HtmlDialogUI in its header file for why.
-  HtmlDialogUI::GetPropertyAccessor().SetProperty(tab_contents_->property_bag(),
-                                                  this);
+  HtmlDialogUI::GetPropertyAccessor().SetProperty(
+      tab_contents->property_bag(), this);
   notification_registrar_.Add(
       this,
       content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-      Source<TabContents>(tab_contents()));
+      Source<TabContents>(tab_contents));
   notification_registrar_.Add(
       this,
       content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-      Source<TabContents>(tab_contents()));
+      Source<TabContents>(tab_contents));
 
   DOMView::LoadURL(GetDialogContentURL());
 }

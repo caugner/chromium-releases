@@ -320,9 +320,8 @@ Chrome supports. -->
                desc="Title for the hard-coded thumbnail that represents the Google Chrome Welcome page.  This is used on the NTP when there aren't enough thumbnails to show.">
         Welcome to Google Chrome
       </message>
-      <message name="IDS_NEW_TAB_THEMES_GALLERY_PAGE_TITLE"
-         desc="Title for the hard coded thumbnail that represents the Themes Gallery page. This is used on the NTP when there aren't enough thumbnails to show.">
-        Google Chrome Themes Gallery
+      <message name="IDS_NTP4_INTRO_MESSAGE" desc="Message explaning the navigation bar at the bottom of the new NTP.">
+        Chrome's New Tab page has been remodeled. Switch between sections by clicking these labels. Chrome will remember your preference for next time.
       </message>
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_EXTERNAL_PROTOCOL_INFORMATION" desc="General information about what Chrome is trying to do when opening this external protocol">
@@ -399,10 +398,13 @@ Chrome supports. -->
         An administrator has installed Google Chrome on this system, and it is available for all users. The system-level Google Chrome will replace your user-level installation now.
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION" desc="Error displayed when higher version already exists.">
-        This computer already has a more recent version of Google Chrome. If the software is not working, please uninstall Google Chrome and download it again.
+        This computer already has a more recent version of Google Chrome. If the software is not working, please uninstall Google Chrome and try again.
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version of Chrome Frame already exists">
-        This computer already has a more recent version of Google Chrome Frame. If the software is not working, please uninstall Google Chrome Frame and download it again.
+        This computer already has a more recent version of Google Chrome Frame. If the software is not working, please uninstall Google Chrome Frame and try again.
+      </message>
+      <message name="IDS_INSTALL_HIGHER_VERSION_CB_CF" desc="Error displayed when higher version of Chrome and Chrome Frame already exists">
+        This computer already has a more recent version of Google Chrome and Google Chrome Frame. If the software is not working, please uninstall both Google Chrome and Google Chrome Frame and try again.
       </message>
       <message name="IDS_INSTALL_SYSTEM_LEVEL_EXISTS" desc="Error displayed during user level install if system level Chromium is already installed.">
         Google Chrome is already installed and available to all users of this computer. If you want to install Google Chrome at the user level, you must first uninstall the system-level version installed by an administrator.
@@ -539,8 +541,8 @@ Chrome supports. -->
       <message name="IDS_PRINT_PREVIEW_NO_PLUGIN" desc="Message to display when the PDF viewer is missing.">
         Google Chrome cannot show the print preview when the built-in PDF viewer is disabled. In order to see the preview, please visit <ph name="BEGIN_LINK">&lt;a target="_blank" rel="noreferrer" href="$1"&gt;</ph>$1<ph name="END_LINK">&lt;/a&gt;</ph>, enable the "Chrome PDF Viewer", and try again.
       </message>
-      <message name="IDS_PRINT_PREVIEW_NATIVE_DIALOG" desc="Option offering the user to open the native print dialog, displayed when the PDF viewer is missing.">
-        Launch native print dialog
+      <message name="IDS_PRINT_PREVIEW_NATIVE_DIALOG" desc="Option offering the user to open the native print dialog, displayed when the PDF viewer is missing or when print preview fails.">
+        Print using system dialog…
       </message>
 
       <if expr="is_macosx">

@@ -53,7 +53,7 @@ class MockHttpServer {
   static net::URLRequestJob* JobFactory(net::URLRequest* request) {
     if (request->url().host() != "mockhost" &&
         request->url().host() != "cross_origin_host")
-      return new net::URLRequestErrorJob(request, -1);
+      return new net::URLRequestErrorJob(request, -100);
 
     std::string headers, body;
     GetMockResponse(request->url().path(), &headers, &body);
@@ -411,9 +411,9 @@ class RetryRequestTestJob : public net::URLRequestTestJob {
         "http://retry\r");  // must be same as kRetryUrl
   }
 
-  explicit RetryRequestTestJob(net::URLRequest* request,
-                               const std::string& headers,
-                               int response_code)
+  RetryRequestTestJob(net::URLRequest* request,
+                      const std::string& headers,
+                      int response_code)
       : net::URLRequestTestJob(request, headers, data(), true),
         response_code_(response_code) {
   }

@@ -18,7 +18,7 @@
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
@@ -40,6 +40,8 @@ static const char* const kPDFTestFile = "printing/cloud_print_unittest.pdf";
 static const char* const kEmptyPDFTestFile =
     "printing/cloud_print_emptytest.pdf";
 static const char* const kMockJobTitle = "Mock Job Title";
+static const char* const kMockPrintTicket = "Resolution=300";
+
 
 FilePath GetTestDataFileName() {
   FilePath test_data_directory;
@@ -81,10 +83,12 @@ class MockCloudPrintFlowHandler
     : public CloudPrintFlowHandler,
       public base::SupportsWeakPtr<MockCloudPrintFlowHandler> {
  public:
-  explicit MockCloudPrintFlowHandler(const FilePath& path,
-                                     const string16& title,
-                                     const std::string& file_type)
-      : CloudPrintFlowHandler(path, title, file_type) {}
+  MockCloudPrintFlowHandler(const FilePath& path,
+                            const string16& title,
+                            const string16& print_ticket,
+                            const std::string& file_type
+                            )
+      : CloudPrintFlowHandler(path, title, print_ticket, file_type) {}
   MOCK_METHOD0(DestructorCalled, void());
   MOCK_METHOD0(RegisterMessages, void());
   MOCK_METHOD3(Observe,
@@ -102,7 +106,7 @@ class MockCloudPrintHtmlDialogDelegate : public CloudPrintHtmlDialogDelegate {
   MOCK_CONST_METHOD0(IsDialogModal,
       bool());
   MOCK_CONST_METHOD0(GetDialogTitle,
-      std::wstring());
+      string16());
   MOCK_CONST_METHOD0(GetDialogContentURL,
       GURL());
   MOCK_CONST_METHOD1(GetWebUIMessageHandlers,
@@ -216,10 +220,12 @@ class CloudPrintDataSenderTest : public testing::Test {
  protected:
   virtual void SetUp() {
     string16 mock_job_title(ASCIIToUTF16(kMockJobTitle));
+    string16 mock_print_ticket(ASCIIToUTF16(kMockPrintTicket));
     mock_helper_.reset(new MockCloudPrintDataSenderHelper);
     print_data_sender_ =
         new CloudPrintDataSender(mock_helper_.get(),
                                  mock_job_title,
+                                 mock_print_ticket,
                                  std::string("application/pdf"));
   }
 
@@ -295,9 +301,11 @@ class CloudPrintHtmlDialogDelegateTest : public testing::Test {
   virtual void SetUp() {
     FilePath mock_path;
     string16 mock_title;
+    string16 mock_print_ticket;
     std::string mock_file_type;
     MockCloudPrintFlowHandler* handler =
-        new MockCloudPrintFlowHandler(mock_path, mock_title, mock_file_type);
+        new MockCloudPrintFlowHandler(mock_path, mock_print_ticket,
+                                      mock_title, mock_file_type);
     mock_flow_handler_ = handler->AsWeakPtr();
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(_));
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(NULL));

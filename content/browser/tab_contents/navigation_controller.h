@@ -19,13 +19,13 @@
 #include "content/common/page_transition_types.h"
 
 class NavigationEntry;
-class Profile;
 class SessionStorageNamespace;
 class SiteInstance;
 class TabContents;
 struct ViewHostMsg_FrameNavigate_Params;
 
 namespace content {
+class BrowserContext;
 struct LoadCommittedDetails;
 }
 
@@ -46,18 +46,18 @@ class NavigationController {
   // ---------------------------------------------------------------------------
 
   NavigationController(TabContents* tab_contents,
-                       Profile* profile,
+                       content::BrowserContext* browser_context,
                        SessionStorageNamespace* session_storage_namespace);
   ~NavigationController();
 
-  // Returns the profile for this controller. It can never be NULL.
-  Profile* profile() const {
-    return profile_;
+  // Returns the browser context for this controller. It can never be NULL.
+  content::BrowserContext* browser_context() const {
+    return browser_context_;
   }
 
-  // Sets the profile for this controller.
-  void set_profile(Profile* profile) {
-    profile_ = profile;
+  // Sets the browser context for this controller.
+  void set_browser_context(content::BrowserContext* browser_context) {
+    browser_context_ = browser_context;
   }
 
   // Initializes this NavigationController with the given saved navigations,
@@ -78,8 +78,17 @@ class NavigationController {
   // NOTE: This can be NULL!!
   //
   // If you are trying to get the current state of the NavigationController,
-  // this is the method you will typically want to call.
+  // this is the method you will typically want to call.  If you want to display
+  // the active entry to the user (e.g., in the location bar), use
+  // GetVisibleEntry instead.
   NavigationEntry* GetActiveEntry() const;
+
+  // Returns the same entry as GetActiveEntry, except that it ignores pending
+  // history navigation entries.  This should be used when displaying info to
+  // the user, so that the location bar and other indicators do not update for
+  // a back/forward navigation until the pending entry commits.  This approach
+  // guards against URL spoofs on slow history navigations.
+  NavigationEntry* GetVisibleEntry() const;
 
   // Returns the index from which we would go back/forward or reload.  This is
   // the last_committed_entry_index_ if pending_entry_index_ is -1.  Otherwise,
@@ -166,6 +175,13 @@ class NavigationController {
   // Loads the specified URL.
   void LoadURL(const GURL& url, const GURL& referrer,
                PageTransition::Type type);
+
+  // Loads the specified URL, specifying extra http headers to add to the
+  // request.  Extra headers are separated by \n.
+  void LoadURLWithHeaders(const GURL& url,
+                          const GURL& referrer,
+                          PageTransition::Type type,
+                          const std::string& extra_headers);
 
   // Loads the current page if this NavigationController was restored from
   // history and the current page has not loaded yet.
@@ -264,11 +280,7 @@ class NavigationController {
   // this:   E F *G*   (last must be active or pending)
   // result: A B *G*
   // This ignores the transient index of the source and honors that of 'this'.
-  //
-  // If |remove_first_entry| is true, the first NavigationEntry is removed
-  // from this before merging.
-  void CopyStateFromAndPrune(NavigationController* source,
-                             bool remove_first_entry);
+  void CopyStateFromAndPrune(NavigationController* source);
 
   // Removes all the entries except the active entry. If there is a new pending
   // navigation it is preserved.
@@ -318,11 +330,14 @@ class NavigationController {
   bool IsInitialNavigation();
 
   // Creates navigation entry and translates the virtual url to a real one.
-  // Used when navigating to a new URL using LoadURL.
-  static NavigationEntry* CreateNavigationEntry(const GURL& url,
-                                                const GURL& referrer,
-                                                PageTransition::Type transition,
-                                                Profile* profile);
+  // Used when navigating to a new URL using LoadURL.  Extra headers are
+  // separated by \n.
+  static NavigationEntry* CreateNavigationEntry(
+      const GURL& url,
+      const GURL& referrer,
+      PageTransition::Type transition,
+      const std::string& extra_headers,
+      content::BrowserContext* browser_context);
 
  private:
   class RestoreHelper;
@@ -410,8 +425,8 @@ class NavigationController {
 
   // ---------------------------------------------------------------------------
 
-  // The user profile associated with this controller
-  Profile* profile_;
+  // The user browser context associated with this controller.
+  content::BrowserContext* browser_context_;
 
   // List of NavigationEntry for this tab
   typedef std::vector<linked_ptr<NavigationEntry> > NavigationEntries;

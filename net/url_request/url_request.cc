@@ -117,13 +117,14 @@ void URLRequest::Delegate::OnSSLCertificateError(URLRequest* request,
   request->Cancel();
 }
 
-bool URLRequest::Delegate::CanGetCookies(URLRequest* request) {
+bool URLRequest::Delegate::CanGetCookies(const URLRequest* request,
+                                         const CookieList& cookie_list) const {
   return true;
 }
 
-bool URLRequest::Delegate::CanSetCookie(URLRequest* request,
+bool URLRequest::Delegate::CanSetCookie(const URLRequest* request,
                                         const std::string& cookie_line,
-                                        CookieOptions* options) {
+                                        CookieOptions* options) const {
   return true;
 }
 
@@ -140,6 +141,7 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
       final_upload_progress_(0),
       priority_(LOWEST),
       identifier_(GenerateURLRequestIdentifier()),
+      blocked_on_delegate_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           before_request_callback_(this, &URLRequest::BeforeRequestComplete)),
       has_notified_completion_(false) {
@@ -253,8 +255,13 @@ void URLRequest::SetExtraRequestHeaders(
   // for request headers are implemented.
 }
 
-LoadState URLRequest::GetLoadState() const {
-  return job_ ? job_->GetLoadState() : LOAD_STATE_IDLE;
+LoadStateWithParam URLRequest::GetLoadState() const {
+  if (blocked_on_delegate_) {
+    return LoadStateWithParam(LOAD_STATE_WAITING_FOR_DELEGATE,
+                              load_state_param_);
+  }
+  return LoadStateWithParam(job_ ? job_->GetLoadState() : LOAD_STATE_IDLE,
+                            string16());
 }
 
 uint64 URLRequest::GetUploadProgress() const {
@@ -396,11 +403,17 @@ void URLRequest::Start() {
 
   // Only notify the delegate for the initial request.
   if (context_ && context_->network_delegate()) {
-    if (context_->network_delegate()->NotifyBeforeURLRequest(
-            this, &before_request_callback_, &delegate_redirect_url_) ==
-            net::ERR_IO_PENDING) {
-      net_log_.BeginEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
-      return;  // paused
+    int error = context_->network_delegate()->NotifyBeforeURLRequest(
+        this, &before_request_callback_, &delegate_redirect_url_);
+    if (error != net::OK) {
+      if (error == net::ERR_IO_PENDING) {
+        // Paused on the delegate, will invoke |before_request_callback_| later.
+        SetBlockedOnDelegate();
+      } else {
+        // The delegate immediately returned some error code.
+        BeforeRequestComplete(error);
+      }
+      return;
     }
   }
 
@@ -413,10 +426,9 @@ void URLRequest::BeforeRequestComplete(int error) {
   DCHECK(!job_);
   DCHECK_NE(ERR_IO_PENDING, error);
 
-  net_log_.EndEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
+  if (blocked_on_delegate_)
+    SetUnblockedOnDelegate();
   if (error != OK) {
-    // TODO(battre): Allow passing information of the extension that canceled
-    // the event.
     net_log_.AddEvent(NetLog::TYPE_CANCELLED,
         make_scoped_refptr(new NetLogStringParameter("source", "delegate")));
     StartJob(new URLRequestErrorJob(this, error));
@@ -709,7 +721,12 @@ void URLRequest::set_context(const URLRequestContext* context) {
 
   // If the context this request belongs to has changed, update the tracker.
   if (prev_context != context) {
-    net_log_.EndEvent(NetLog::TYPE_REQUEST_ALIVE, NULL);
+    int net_error = OK;
+    // Log error only on failure, not cancellation, as even successful requests
+    // are "cancelled" on destruction.
+    if (status_.status() == URLRequestStatus::FAILED)
+      net_error = status_.os_error();
+    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_REQUEST_ALIVE, net_error);
     net_log_ = BoundNetLog();
 
     if (context) {
@@ -749,6 +766,8 @@ void URLRequest::NotifyAuthRequired(AuthChallengeInfo* auth_info) {
   // URLRequestTestHTTP.BasicAuthWithCookies. In both cases we observe a
   // call sequence of OnBeforeSendHeaders -> OnSendHeaders ->
   // OnBeforeSendHeaders.
+  if (context_ && context_->network_delegate())
+    context_->network_delegate()->NotifyAuthRequired(this, *auth_info);
 
   if (delegate_)
     delegate_->OnAuthRequired(this, auth_info);
@@ -766,14 +785,14 @@ void URLRequest::NotifySSLCertificateError(int cert_error,
     delegate_->OnSSLCertificateError(this, cert_error, cert);
 }
 
-bool URLRequest::CanGetCookies() {
+bool URLRequest::CanGetCookies(const CookieList& cookie_list) const {
   if (delegate_)
-    return delegate_->CanGetCookies(this);
+    return delegate_->CanGetCookies(this, cookie_list);
   return false;
 }
 
 bool URLRequest::CanSetCookie(const std::string& cookie_line,
-                              CookieOptions* options) {
+                              CookieOptions* options) const {
   if (delegate_)
     return delegate_->CanSetCookie(this, cookie_line, options);
   return false;
@@ -797,9 +816,21 @@ void URLRequest::NotifyRequestCompleted() {
   if (has_notified_completion_)
     return;
 
+  is_pending_ = false;
   has_notified_completion_ = true;
   if (context_ && context_->network_delegate())
     context_->network_delegate()->NotifyCompleted(this);
+}
+
+void URLRequest::SetBlockedOnDelegate() {
+  blocked_on_delegate_ = true;
+  net_log_.BeginEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
+}
+
+void URLRequest::SetUnblockedOnDelegate() {
+  blocked_on_delegate_ = false;
+  load_state_param_.clear();
+  net_log_.EndEvent(NetLog::TYPE_URL_REQUEST_BLOCKED_ON_DELEGATE, NULL);
 }
 
 }  // namespace net

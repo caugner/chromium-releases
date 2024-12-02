@@ -232,7 +232,7 @@ void ThumbnailLoader::LoadThumbnail() {
     // TODO(thakis|rsesek): This is not correct for background tabs with
     // infobars as the aspect ratio will be wrong. Fix that.
     topOffset += NSHeight([[infoBarContainer view] frame]) -
-        [infoBarContainer antiSpoofHeight];
+        [infoBarContainer overlappingTipHeight];
   }
 
   bool always_show_bookmark_bar =
@@ -1194,6 +1194,12 @@ void AnimateCALayerOpacityFromTo(
 
 - (BOOL)canBecomeKeyWindow {
  return YES;
+}
+
+// Lets the traffic light buttons on the browser window keep their "active"
+// state while an info bubble is open. Only has an effect on 10.7.
+- (BOOL)_sharesParentKeyState {
+  return YES;
 }
 
 // Handle key events that should be executed repeatedly while the key is down.

@@ -11,8 +11,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/page_transition_types.h"
 
@@ -121,11 +121,18 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreIndividualTabFromWindow) {
 
   // Add and navigate three tabs.
   ui_test_utils::NavigateToURL(browser(), url1);
-  browser()->AddSelectedTabWithURL(url2, PageTransition::LINK);
-  ui_test_utils::WaitForNavigationInCurrentTab(browser());
-
-  browser()->AddSelectedTabWithURL(url3, PageTransition::LINK);
-  ui_test_utils::WaitForNavigationInCurrentTab(browser());
+  {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+    browser()->AddSelectedTabWithURL(url2, PageTransition::LINK);
+    observer.Wait();
+  }
+  {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+    browser()->AddSelectedTabWithURL(url3, PageTransition::LINK);
+    observer.Wait();
+  }
 
   TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser()->profile());

@@ -11,11 +11,11 @@
 #include "views/widget/widget.h"
 
 #if defined(OS_WIN)
-#include "chrome/browser/renderer_host/render_widget_host_view_win.h"
+#include "content/browser/renderer_host/render_widget_host_view_win.h"
 #elif defined(TOUCH_UI)
 #include "chrome/browser/renderer_host/render_widget_host_view_views.h"
 #elif defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/renderer_host/render_widget_host_view_gtk.h"
+#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #endif
 
 ExtensionView::ExtensionView(ExtensionHost* host, Browser* browser)
@@ -85,7 +85,10 @@ void ExtensionView::CreateWidgetHostView() {
       RenderWidgetHostView::CreateViewForWidget(render_view_host());
 
   // TODO(mpcomplete): RWHV needs a cross-platform Init function.
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(beng): should be same as TOUCH_UI
+  NOTIMPLEMENTED();
+#elif defined(OS_WIN)
   // Create the HWND. Note:
   // RenderWidgetHostHWND supports windowed plugins, but if we ever also
   // wanted to support constrained windows with this, we would need an
@@ -172,8 +175,11 @@ void ExtensionView::PreferredSizeChanged() {
 
 bool ExtensionView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
   // Let the tab key event be processed by the renderer (instead of moving the
-  // focus to the next focusable view).
-  return (e.key_code() == ui::VKEY_TAB);
+  // focus to the next focusable view). Also handle Backspace, since otherwise
+  // (on Windows at least), pressing Backspace, when focus is on a text field
+  // within the ExtensionView, will navigate the page back instead of erasing a
+  // character.
+  return (e.key_code() == ui::VKEY_TAB || e.key_code() == ui::VKEY_BACK);
 }
 
 void ExtensionView::OnBoundsChanged(const gfx::Rect& previous_bounds) {

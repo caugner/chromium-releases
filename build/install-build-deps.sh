@@ -48,7 +48,7 @@ install_gold() {
 
   BINUTILS=binutils-2.21.1
   BINUTILS_URL=http://ftp.gnu.org/gnu/binutils/$BINUTILS.tar.bz2
-  BINUTILS_SHA1=f188490772cc902ec44a76545887bff60dbfa22d
+  BINUTILS_SHA1=525255ca6874b872540c9967a1d26acfbc7c8230
 
   test -f $BINUTILS.tar.bz2 || wget $BINUTILS_URL
   if test "`sha1sum $BINUTILS.tar.bz2|cut -d' ' -f1`" != "$BINUTILS_SHA1"
@@ -103,13 +103,13 @@ chromeos_dev_list="libpulse-dev"
 # Packages need for development
 dev_list="apache2.2-bin bison fakeroot flex g++ gperf language-pack-fr
           libapache2-mod-php5 libasound2-dev libbz2-dev libcairo2-dev
-          libcups2-dev libdbus-glib-1-dev libgconf2-dev
+          libcups2-dev libdbus-glib-1-dev libelf-dev libgconf2-dev
           libgl1-mesa-dev libglu1-mesa-dev libglib2.0-dev libgnome-keyring-dev
-          libgtk2.0-dev libjpeg62-dev libnspr4-dev libnss3-dev libpam0g-dev
-          libsctp-dev libsqlite3-dev libxslt1-dev libxss-dev libxtst-dev
-          mesa-common-dev msttcorefonts patch perl libwww-perl php5-cgi
-          pkg-config python python-dev rpm subversion ttf-dejavu-core
-          ttf-kochi-gothic ttf-kochi-mincho wdiff libcurl4-gnutls-dev
+          libgtk2.0-dev libjpeg62-dev libkrb5-dev libnspr4-dev libnss3-dev
+          libpam0g-dev libsctp-dev libsqlite3-dev libxslt1-dev libxss-dev
+          libxtst-dev mesa-common-dev msttcorefonts patch perl libwww-perl
+          php5-cgi pkg-config python python-dev rpm subversion ttf-dejavu-core
+          ttf-kochi-gothic ttf-kochi-mincho wdiff ruby libcurl4-gnutls-dev
           ttf-indic-fonts ttf-thai-tlwg
           $chromeos_dev_list"
 
@@ -134,6 +134,9 @@ dbg_list="libatk1.0-dbg libc6-dbg libcairo2-dbg
           libxcursor1-dbg libxdamage1-dbg libxdmcp6-dbg libxext6-dbg
           libxfixes3-dbg libxi6-dbg libxinerama1-dbg libxrandr2-dbg
           libxrender1-dbg libxtst6-dbg zlib1g-dbg"
+
+# Plugin lists needed for tests.
+plugin_list="flashplugin-installer"
 
 # Some NSS packages were renamed in Natty.
 if egrep -q 'Ubuntu (10\.04|10\.10)' /etc/issue; then
@@ -205,7 +208,7 @@ sudo apt-get update
 # without accidentally promoting any packages from "auto" to "manual".
 # We then re-run "apt-get" with just the list of missing packages.
 echo "Finding missing packages..."
-packages="${dev_list} ${lib_list} ${dbg_list}"
+packages="${dev_list} ${lib_list} ${dbg_list} ${plugin_list}"
 # Intentially leaving $packages unquoted so it's more readable.
 echo "Packages required: " $packages
 echo

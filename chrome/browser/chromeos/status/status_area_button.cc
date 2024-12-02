@@ -16,13 +16,14 @@ namespace chromeos {
 
 // Colors for different text styles.
 static const SkColor kWhitePlainTextColor = 0x99ffffff;
+static const SkColor kGrayPlainTextColor = 0x99666666;
 static const SkColor kWhiteHaloedTextColor = 0xb3ffffff;
 static const SkColor kWhiteHaloedHaloColor = 0xb3000000;
 static const SkColor kGrayEmbossedTextColor = 0xff4c4c4c;
 static const SkColor kGrayEmbossedShadowColor = 0x80ffffff;
 
 // Status area font is bigger.
-const int kFontSizeDelta = 1;
+const int kFontSizeDelta = 3;
 
 ////////////////////////////////////////////////////////////////////////////////
 // StatusAreaButton
@@ -35,10 +36,15 @@ StatusAreaButton::StatusAreaButton(StatusAreaHost* host,
       host_(host) {
   set_border(NULL);
   set_use_menu_button_paint(true);
+
+  bool webui_login = host_->GetScreenMode() == StatusAreaHost::kWebUILoginMode;
+
   gfx::Font font =
       ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
-  font = font.DeriveFont(3, gfx::Font::BOLD);
+  font = font.DeriveFont(kFontSizeDelta, webui_login ? font.GetStyle()
+                                                     : gfx::Font::BOLD);
   SetFont(font);
+
   SetShowMultipleIconStates(false);
   set_alignment(TextButton::ALIGN_CENTER);
   set_border(NULL);
@@ -150,6 +156,9 @@ void StatusAreaButton::UpdateTextStyle() {
   switch (host_->GetTextStyle()) {
     case StatusAreaHost::kWhitePlain:
       SetEnabledColor(kWhitePlainTextColor);
+      break;
+    case StatusAreaHost::kGrayPlain:
+      SetEnabledColor(kGrayPlainTextColor);
       break;
     case StatusAreaHost::kWhiteHaloed:
       SetEnabledColor(kWhiteHaloedTextColor);

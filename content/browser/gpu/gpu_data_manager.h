@@ -80,6 +80,9 @@ class GpuDataManager {
   // This gets called when switching GPU might have happened.
   void HandleGpuSwitch();
 
+  // Returns the Gpu Info as a DictionaryValue.
+  DictionaryValue* GpuInfoAsDictionaryValue() const;
+
  private:
   friend struct DefaultSingletonTraits<GpuDataManager>;
 
@@ -99,7 +102,6 @@ class GpuDataManager {
 
   bool complete_gpu_info_already_requested_;
 
-  bool gpu_feature_flags_set_;
   GpuFeatureFlags gpu_feature_flags_;
   GpuFeatureFlags preliminary_gpu_feature_flags_;
 

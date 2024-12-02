@@ -10,12 +10,14 @@ namespace switches {
 // override for developers who need the old behavior for testing.
 const char kAllowFileAccessFromFiles[]      = "allow-file-access-from-files";
 
-// By default, an https page cannot run JavaScript, CSS or plug-ins from http
-// URLs. This provides an override to get the old insecure behavior.
-const char kNoRunningInsecureContent[]   = "no-running-insecure-content";
-
 // Allows debugging of sandboxed processes (see zygote_main_linux.cc).
 const char kAllowSandboxDebugging[]         = "allow-sandbox-debugging";
+
+// Causes the browser process to throw an assertion on startup.
+const char kBrowserAssertTest[]             = "assert-test";
+
+// Causes the browser process to crash on startup.
+const char kBrowserCrashTest[]              = "crash-test";
 
 // Path to the exe to run for the renderer and plugin subprocesses.
 const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
@@ -38,6 +40,9 @@ const char kDisableAcceleratedCompositing[] = "disable-accelerated-compositing";
 
 // Disables the hardware acceleration of 3D CSS and animation.
 const char kDisableAcceleratedLayers[]      = "disable-accelerated-layers";
+
+// Disables the hardware acceleration of plugins.
+const char kDisableAcceleratedPlugins[]     = "disable-accelerated-plugins";
 
 // Disables GPU accelerated video display.
 const char kDisableAcceleratedVideo[]       = "disable-accelerated-video";
@@ -123,6 +128,12 @@ const char kDisablePopupBlocking[]          = "disable-popup-blocking";
 // Turns off the accessibility in the renderer.
 const char kDisableRendererAccessibility[]  = "disable-renderer-accessibility";
 
+// Disable False Start in SSL and TLS connections.
+const char kDisableSSLFalseStart[]          = "disable-ssl-false-start";
+
+// Disable smooth scrolling for testing.
+const char kDisableSmoothScrolling[]        = "disable-smooth-scrolling";
+
 // Disable the seccomp sandbox (Linux only)
 const char kDisableSeccompSandbox[]         = "disable-seccomp-sandbox";
 
@@ -153,17 +164,25 @@ const char kEnableAccelerated2dCanvas[]     = "enable-accelerated-2d-canvas";
 // in build/features_override.gypi.
 const char kEnableAcceleratedDrawing[]      = "enable-accelerated-drawing";
 
-// Enables the hardware acceleration of plugins.
-const char kEnableAcceleratedPlugins[]      = "enable-accelerated-plugins";
-
 // Enables WebKit accessibility within the renderer process.
 const char kEnableAccessibility[]           = "enable-accessibility";
+
+// Turns on extremely verbose logging of accessibility events.
+const char kEnableAccessibilityLogging[]    = "enable-accessibility-logging";
 
 // Enables the benchmarking extensions.
 const char kEnableBenchmarking[]            = "enable-benchmarking";
 
+// Enable DNS side checking of certificates. Still experimental, should only
+// be used by developers at the current time.
+const char kEnableDNSCertProvenanceChecking[] =
+     "enable-dns-cert-provenance-checking";
+
 // Enables device motion events.
 const char kEnableDeviceMotion[]            = "enable-device-motion";
+
+// Enable the JavaScript Full Screen API.
+const char kDisableFullScreen[]             = "disable-fullscreen";
 
 // Enable the GPU plugin and Pepper 3D rendering.
 const char kEnableGPUPlugin[]               = "enable-gpu-plugin";
@@ -181,8 +200,14 @@ const char kEnableMediaStream[]             = "enable-media-stream";
 // assumed to be sRGB.
 const char kEnableMonitorProfile[]          = "enable-monitor-profile";
 
+// Enables TLS origin bound certificate extension.
+const char kEnableOriginBoundCerts[]  = "enable-origin-bound-certs";
+
 // Enable caching of pre-parsed JS script data.  See http://crbug.com/32407.
 const char kEnablePreparsedJsCaching[]      = "enable-preparsed-js-caching";
+
+// Enables TLS cached info extension.
+const char kEnableSSLCachedInfo[]  = "enable-ssl-cached-info";
 
 // Cause the OS X sandbox write to syslog every time an access to a resource
 // is denied by the sandbox.
@@ -194,6 +219,10 @@ const char kEnableSeccompSandbox[]          = "enable-seccomp-sandbox";
 // Enables StatsTable, logging statistics to a global named shared memory table.
 const char kEnableStatsTable[]              = "enable-stats-table";
 
+// Enable use of experimental TCP sockets API for sending data in the
+// SYN packet.
+const char kEnableTcpFastOpen[]             = "enable-tcp-fastopen";
+
 // Enables support for fullscreen video. Current implementation is
 // incomplete and this flag is used for development and testing.
 const char kEnableVideoFullscreen[]         = "enable-video-fullscreen";
@@ -201,6 +230,9 @@ const char kEnableVideoFullscreen[]         = "enable-video-fullscreen";
 // Enables video logging where video elements log playback performance data to
 // the debug log.
 const char kEnableVideoLogging[]            = "enable-video-logging";
+
+// Enable Web Intents.
+const char kEnableWebIntents[]              = "enable-web-intents";
 
 // Enables experimental features for the geolocation API.
 // Current features:
@@ -275,16 +307,8 @@ const char kLowLatencyAudio[]               = "enable-low-latency-audio";
 // (used for launching NaCl loader processes on 64-bit Windows).
 const char kNaClBrokerProcess[]             = "nacl-broker";
 
-// Enables experimental lightweight Native Client launcher for Linux
-// Value is the path to the helper binary.
-const char kNaClLinuxHelper[]               = "nacl-linux-helper";
-
 // Causes the process to run as a NativeClient loader.
 const char kNaClLoaderProcess[]             = "nacl-loader";
-
-// By default, an https page can load images, fonts or frames from an http page.
-// This switch overrides this to block this lesser mixed-content problem.
-const char kNoDisplayingInsecureContent[]   = "no-displaying-insecure-content";
 
 // Support a separate switch that enables the v8 playback extension.
 // The extension causes javascript calls to Date.now() and Math.random()
@@ -417,11 +441,6 @@ const char kTestSandbox[]                   = "test-sandbox";
 // TODO(dumi): remove the switch when we have a real quota implementation.
 const char kUnlimitedQuotaForFiles[]        = "unlimited-quota-for-files";
 
-// This is for testing IndexedDB and will give any website you visit unlimited
-// quota in IndexedDB. This should only be used for development and not general
-// browsing. It is ignored in single process mode.
-const char kUnlimitedQuotaForIndexedDB[]    = "unlimited-quota-for-indexeddb";
-
 // A string used to override the default user agent with a custom one.
 const char kUserAgent[]                     = "user-agent";
 
@@ -469,6 +488,11 @@ const char kAuditHandles[]                  = "enable-handle-auditing";
 
 // The same as kAuditHandles except all handles are enumerated.
 const char kAuditAllHandles[]               = "enable-handle-auditing-all";
+#endif
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+// Specify the amount the trackpad should scroll by.
+const char kScrollPixels[]                  = "scroll-pixels";
 #endif
 
 #if !defined(OFFICIAL_BUILD)

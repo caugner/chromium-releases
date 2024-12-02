@@ -80,6 +80,7 @@ void MockInputMethod::DispatchKeyEvent(const KeyEvent& key) {
 void MockInputMethod::OnTextInputTypeChanged(View* view) {
   if (IsViewFocused(view))
     text_input_type_changed_ = true;
+  InputMethodBase::OnTextInputTypeChanged(view);
 }
 
 void MockInputMethod::OnCaretBoundsChanged(View* view) {
@@ -104,6 +105,10 @@ base::i18n::TextDirection MockInputMethod::GetInputTextDirection() {
 
 bool MockInputMethod::IsActive() {
   return active_;
+}
+
+bool MockInputMethod::IsMock() const {
+  return true;
 }
 
 void MockInputMethod::FocusedViewWillChange() {

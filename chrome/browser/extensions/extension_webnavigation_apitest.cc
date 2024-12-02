@@ -11,7 +11,7 @@
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "net/base/mock_host_resolver.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
@@ -46,6 +46,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigation) {
 
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_api.html")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationGetFrame) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableExperimentalExtensionApis);
+
+  FrameNavigationState::set_allow_extension_scheme(true);
+
+  ASSERT_TRUE(
+      RunExtensionSubtest("webnavigation", "test_getFrame.html")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationClientRedirect) {
@@ -134,7 +144,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationFailures) {
       RunExtensionSubtest("webnavigation", "test_failures.html")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationUserAction) {
+// Fails almost consistently on Mac only.  http://crbug.com/94932
+#if defined(OS_MACOSX)
+#define MAYBE_WebNavigationUserAction FAILS_WebNavigationUserAction
+#else
+#define MAYBE_WebNavigationUserAction WebNavigationUserAction
+#endif
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_WebNavigationUserAction) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
 

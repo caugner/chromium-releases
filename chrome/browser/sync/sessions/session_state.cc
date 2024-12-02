@@ -47,7 +47,7 @@ DictionaryValue* SyncSourceInfo::ToValue() const {
 SyncerStatus::SyncerStatus()
     : invalid_store(false),
       syncer_stuck(false),
-      syncing(false),
+      sync_in_progress(false),
       num_successful_commits(0),
       num_successful_bookmark_commits(0),
       num_updates_downloaded_total(0),
@@ -63,7 +63,7 @@ DictionaryValue* SyncerStatus::ToValue() const {
   DictionaryValue* value = new DictionaryValue();
   value->SetBoolean("invalidStore", invalid_store);
   value->SetBoolean("syncerStuck", syncer_stuck);
-  value->SetBoolean("syncing", syncing);
+  value->SetBoolean("syncInProgress", sync_in_progress);
   value->SetInteger("numSuccessfulCommits", num_successful_commits);
   value->SetInteger("numSuccessfulBookmarkCommits",
                 num_successful_bookmark_commits);
@@ -124,7 +124,8 @@ SyncSessionSnapshot::SyncSessionSnapshot(
     int num_conflicting_updates,
     bool did_commit_items,
     const SyncSourceInfo& source,
-    size_t num_entries)
+    size_t num_entries,
+    base::Time sync_start_time)
     : syncer_status(syncer_status),
       errors(errors),
       num_server_changes_remaining(num_server_changes_remaining),
@@ -138,7 +139,8 @@ SyncSessionSnapshot::SyncSessionSnapshot(
       num_conflicting_updates(num_conflicting_updates),
       did_commit_items(did_commit_items),
       source(source),
-      num_entries(num_entries){
+      num_entries(num_entries),
+      sync_start_time(sync_start_time) {
   for (int i = syncable::FIRST_REAL_MODEL_TYPE;
        i < syncable::MODEL_TYPE_COUNT; ++i) {
     const_cast<std::string&>(this->download_progress_markers[i]).assign(
@@ -380,7 +382,7 @@ bool UpdateProgress::HasConflictingUpdates() const {
 AllModelTypeState::AllModelTypeState(bool* dirty_flag)
     : unsynced_handles(dirty_flag),
       syncer_status(dirty_flag),
-      error_counters(dirty_flag),
+      error(dirty_flag),
       num_server_changes_remaining(dirty_flag, 0),
       commit_set(ModelSafeRoutingInfo()) {
 }

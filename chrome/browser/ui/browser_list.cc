@@ -10,6 +10,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/background_printing_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -503,8 +504,13 @@ void BrowserList::ExitCleanly() {
 }
 #endif
 
-// static
-void BrowserList::SessionEnding() {
+static void TimeLimitedSessionEnding() {
+  // Start watching for hang during shutdown, and crash it if takes too long.
+  // We disarm when |shutdown_watcher| object is destroyed, which is when we
+  // exit this function.
+  ShutdownWatcherHelper shutdown_watcher;
+  shutdown_watcher.Arm(base::TimeDelta::FromSeconds(90));
+
   // EndSession is invoked once per frame. Only do something the first time.
   static bool already_ended = false;
   // We may get called in the middle of shutdown, e.g. http://crbug.com/70852
@@ -534,6 +540,11 @@ void BrowserList::SessionEnding() {
 
   // And shutdown.
   browser_shutdown::Shutdown();
+}
+
+// static
+void BrowserList::SessionEnding() {
+  TimeLimitedSessionEnding();
 
 #if defined(OS_WIN)
   // At this point the message loop is still running yet we've shut everything
@@ -571,6 +582,12 @@ void BrowserList::StartKeepAlive() {
 void BrowserList::EndKeepAlive() {
   DCHECK_GT(keep_alive_count_, 0);
   keep_alive_count_--;
+
+  DCHECK(g_browser_process);
+  // Although we should have a browser process, if there is none,
+  // there is nothing to do.
+  if (!g_browser_process) return;
+
   // Allow the app to shutdown again.
   if (!WillKeepAlive()) {
     g_browser_process->ReleaseModule();
@@ -697,6 +714,17 @@ bool BrowserList::IsOffTheRecordSessionActive() {
        i != BrowserList::end(); ++i) {
     if ((*i)->profile()->IsOffTheRecord())
       return true;
+  }
+  return false;
+}
+// static
+bool BrowserList::IsOffTheRecordSessionActiveForProfile(Profile* profile) {
+  for (BrowserList::const_iterator i = BrowserList::begin();
+       i != BrowserList::end(); ++i) {
+    if ((*i)->profile()->IsSameProfile(profile) &&
+        (*i)->profile()->IsOffTheRecord()) {
+      return true;
+    }
   }
   return false;
 }

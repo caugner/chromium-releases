@@ -74,13 +74,6 @@
     <link rel="stylesheet" href="css/file_manager.css"></link>
     <link rel="stylesheet" href="css/dialogs.css"></link>
 
-    <link rel="stylesheet" href="js/image_editor/image_editor.css"></link>
-    <script src="js/image_editor/image_util.js"></script>
-    <script src="js/image_editor/image_buffer.js"></script>
-    <script src="js/image_editor/image_editor.js"></script>
-    <script src="js/image_editor/image_transform.js"></script>
-    <script src="js/image_editor/image_adjust.js"></script>
-
     <script src="js/util.js"></script>
     <script src="js/file_copy_manager.js"></script>
     <script src="js/file_manager.js"></script>
@@ -145,9 +138,12 @@
                  i18n-content=PREVIEW_COLUMN_LABEL>[PREVIEW]</div>
           </div>
         </div>
-        <div class=preview-filename></div>
         <center><img class=preview-img></center>
-        <div class=preview-metadata></div>
+        <div class=preview-filename></div>
+        <div class="preview-metadata">
+            <table class="preview-metadata-table">
+            </table>
+        </div>
         <div class=vertical-spacer></div>
         <div class=task-buttons></div>
         <div class=clipboard-status>

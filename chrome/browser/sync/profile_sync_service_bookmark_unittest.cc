@@ -21,21 +21,24 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
-#include "chrome/browser/sync/engine/syncapi.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
 #include "chrome/browser/sync/glue/bookmark_model_associator.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/read_transaction.h"
+#include "chrome/browser/sync/internal_api/sync_manager.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
+#include "chrome/browser/sync/test/engine/test_id_factory.h"
+#include "chrome/browser/sync/test/engine/test_user_share.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/sync/engine/test_id_factory.h"
-#include "chrome/test/sync/engine/test_user_share.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
-
-namespace {
 
 using testing::_;
 using testing::InvokeWithoutArgs;
@@ -56,12 +59,7 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
   // requested.  A better way would be to have utility functions to
   // create sync nodes from some bookmark structure and to use that.
   virtual bool GetSyncIdForTaggedNode(const std::string& tag, int64* sync_id) {
-    std::wstring tag_wide;
-    if (!UTF8ToWide(tag.c_str(), tag.length(), &tag_wide)) {
-      NOTREACHED() << "Unable to convert UTF8 to wide for string: " << tag;
-      return false;
-    }
-
+    std::string tag_str = std::string(tag.c_str(), tag.length());
     bool root_exists = false;
     syncable::ModelType type = model_type();
     {
@@ -96,7 +94,7 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
       sync_api::ReadNode child(&trans);
       child.InitByIdLookup(id);
       last_child_id = id;
-      if (tag_wide == child.GetTitle()) {
+      if (tag_str == child.GetTitle()) {
         *sync_id = id;
         return true;
       }
@@ -113,7 +111,8 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
     // Create new fake tagged nodes at the end of the ordering.
     node.InitByCreation(type, root, predecessor);
     node.SetIsFolder(true);
-    node.SetTitle(tag_wide);
+    node.entry_->Put(syncable::UNIQUE_SERVER_TAG, tag);
+    node.SetTitle(UTF8ToWide(tag_str));
     node.SetExternalId(0);
     *sync_id = node.GetId();
     return true;
@@ -123,6 +122,8 @@ class TestBookmarkModelAssociator : public BookmarkModelAssociator {
   sync_api::UserShare* user_share_;
   browser_sync::TestIdFactory id_factory_;
 };
+
+namespace {
 
 // FakeServerChange constructs a list of sync_api::ChangeRecords while modifying
 // the sync model, and can pass the ChangeRecord list to a
@@ -211,10 +212,10 @@ class FakeServerChange {
   std::wstring ModifyTitle(int64 id, const std::wstring& new_title) {
     sync_api::WriteNode node(trans_);
     EXPECT_TRUE(node.InitByIdLookup(id));
-    std::wstring old_title = node.GetTitle();
+    std::string old_title = node.GetTitle();
     node.SetTitle(new_title);
     SetModified(id);
-    return old_title;
+    return UTF8ToWide(old_title);
   }
 
   // Set a new parent and predecessor value.  Return the old parent id.
@@ -325,7 +326,8 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
         profile_.GetBookmarkModel(),
         test_user_share_.user_share(),
         &mock_unrecoverable_error_handler_));
-    EXPECT_TRUE(model_associator_->AssociateModels());
+    SyncError error;
+    EXPECT_TRUE(model_associator_->AssociateModels(&error));
     MessageLoop::current()->RunAllPending();
 
     // Set up change processor.
@@ -338,8 +340,8 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   void StopSync() {
     change_processor_->Stop();
     change_processor_.reset();
-
-    EXPECT_TRUE(model_associator_->DisassociateModels());
+    SyncError error;
+    EXPECT_TRUE(model_associator_->DisassociateModels(&error));
     model_associator_.reset();
 
     message_loop_.RunAllPending();
@@ -367,7 +369,7 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
     ASSERT_TRUE(InitSyncNodeFromChromeNode(bnode, &gnode));
     // Non-root node titles and parents must match.
     if (!model_->is_permanent_node(bnode)) {
-      EXPECT_EQ(bnode->GetTitle(), WideToUTF16Hack(gnode.GetTitle()));
+      EXPECT_EQ(bnode->GetTitle(), UTF8ToUTF16(gnode.GetTitle()));
       EXPECT_EQ(
           model_associator_->GetChromeNodeFromSyncId(gnode.GetParentId()),
           bnode->parent());

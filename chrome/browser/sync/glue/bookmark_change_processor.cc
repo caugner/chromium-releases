@@ -15,6 +15,9 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "content/browser/browser_thread.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -474,7 +477,7 @@ const BookmarkNode* BookmarkChangeProcessor::CreateOrUpdateBookmarkNode(
 
     if (!src->GetIsFolder())
       model->SetURL(dst, src->GetURL());
-    model->SetTitle(dst, WideToUTF16Hack(src->GetTitle()));
+    model->SetTitle(dst, UTF8ToUTF16(src->GetTitle()));
 
     SetBookmarkFavicon(src, dst, model);
   }
@@ -496,10 +499,10 @@ const BookmarkNode* BookmarkChangeProcessor::CreateBookmarkNode(
   const BookmarkNode* node;
   if (sync_node->GetIsFolder()) {
     node = model->AddFolder(parent, index,
-                            WideToUTF16Hack(sync_node->GetTitle()));
+                            UTF8ToUTF16(sync_node->GetTitle()));
   } else {
     node = model->AddURL(parent, index,
-                         WideToUTF16Hack(sync_node->GetTitle()),
+                         UTF8ToUTF16(sync_node->GetTitle()),
                          sync_node->GetURL());
     SetBookmarkFavicon(sync_node, node, model);
   }

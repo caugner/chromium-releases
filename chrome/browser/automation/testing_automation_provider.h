@@ -14,13 +14,14 @@
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/browser/importer/importer_list.h"
+#include "chrome/browser/importer/importer_list_observer.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/page_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
+class ImporterList;
 class TemplateURLService;
 
 namespace base {
@@ -30,7 +31,7 @@ class DictionaryValue;
 // This is an automation provider containing testing calls.
 class TestingAutomationProvider : public AutomationProvider,
                                   public BrowserList::Observer,
-                                  public ImporterList::Observer,
+                                  public importer::ImporterListObserver,
                                   public NotificationObserver {
  public:
   explicit TestingAutomationProvider(Profile* profile);
@@ -59,7 +60,7 @@ class TestingAutomationProvider : public AutomationProvider,
   virtual void OnBrowserAdded(const Browser* browser) OVERRIDE;
   virtual void OnBrowserRemoved(const Browser* browser) OVERRIDE;
 
-  // ImporterList::Observer:
+  // importer::ImporterListObserver:
   virtual void OnSourceProfilesLoaded() OVERRIDE;
 
   // NotificationObserver:
@@ -385,8 +386,7 @@ class TestingAutomationProvider : public AutomationProvider,
   // Get info about the chromium/chrome in use.
   // This includes things like version, executable name, executable path.
   // Uses the JSON interface for input/output.
-  void GetBrowserInfo(Browser* browser,
-                      base::DictionaryValue* args,
+  void GetBrowserInfo(base::DictionaryValue* args,
                       IPC::Message* reply_message);
 
   // Get info about the state of navigation in a given tab.
@@ -405,9 +405,9 @@ class TestingAutomationProvider : public AutomationProvider,
 
   // Wait for all downloads to complete.
   // Uses the JSON interface for input/output.
-  void WaitForDownloadsToComplete(Browser* browser,
-                                  base::DictionaryValue* args,
-                                  IPC::Message* reply_message);
+  void WaitForAllDownloadsToComplete(Browser* browser,
+                                     base::DictionaryValue* args,
+                                     IPC::Message* reply_message);
 
   // Performs the given action on the specified download.
   // Uses the JSON interface for input/output.
@@ -646,6 +646,13 @@ class TestingAutomationProvider : public AutomationProvider,
                            base::DictionaryValue* args,
                            IPC::Message* reply_message);
 
+  // Injects Javascript into a specified frame that is assumed to submit
+  // Autofill data via a webpage form, then waits for Autofill's personal data
+  // manager to finish processing the data.
+  void SubmitAutofillForm(Browser* browser,
+                          base::DictionaryValue* args,
+                          IPC::Message* reply_message);
+
   // Causes the autofill popup to be displayed in an already-focused webpage
   // form field.  Waits until the popup is displayed before returning.
   void AutofillTriggerSuggestions(Browser* browser,
@@ -881,6 +888,22 @@ class TestingAutomationProvider : public AutomationProvider,
   // dropped.
   // TODO(kkania): Replace the non-JSON counterparts and drop the JSON suffix.
   void ExecuteJavascriptJSON(
+      base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Executes javascript in the specified frame of a render view.
+  // Uses the JSON interface. Waits for a result from the
+  // |DOMAutomationController|. The javascript must send a string.
+  // Example:
+  //   input: { "view": {
+  //              "render_process_id": 1,
+  //              "render_view_id": 2,
+  //            }
+  //            "frame_xpath": "//frames[1]",
+  //            "javascript":
+  //                "window.domAutomationController.send(window.name)",
+  //           }
+  //   output: { "result": "My Window Name" }
+  void ExecuteJavascriptInRenderView(
       base::DictionaryValue* args, IPC::Message* reply_message);
 
   // Goes forward in the specified tab. Uses the JSON interface.
@@ -1149,7 +1172,16 @@ class TestingAutomationProvider : public AutomationProvider,
   void UpdateExtensionsNow(base::DictionaryValue* args,
                            IPC::Message* reply_message);
 
+  // Creates a new |TestingAutomationProvider| that opens a server channel
+  // for the given |channel_id|.
+  // The server channel will be available for connection when this returns.
+  // Example:
+  //   input: { "channel_id": "testChannel123" }
+  void CreateNewAutomationProvider(base::DictionaryValue* args,
+                                   IPC::Message* reply_message);
+
 #if defined(OS_CHROMEOS)
+  // Login.
   void GetLoginInfo(base::DictionaryValue* args, IPC::Message* reply_message);
 
   void ShowCreateAccountUI(base::DictionaryValue* args,
@@ -1159,6 +1191,7 @@ class TestingAutomationProvider : public AutomationProvider,
 
   void Login(base::DictionaryValue* args, IPC::Message* reply_message);
 
+  // Screen locker.
   void LockScreen(base::DictionaryValue* args, IPC::Message* reply_message);
 
   void UnlockScreen(base::DictionaryValue* args, IPC::Message* reply_message);
@@ -1166,11 +1199,16 @@ class TestingAutomationProvider : public AutomationProvider,
   void SignoutInScreenLocker(base::DictionaryValue* args,
                              IPC::Message* reply_message);
 
+  // Battery.
   void GetBatteryInfo(base::DictionaryValue* args, IPC::Message* reply_message);
 
+  // Network.
   void GetNetworkInfo(base::DictionaryValue* args, IPC::Message* reply_message);
 
   void NetworkScan(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  void ToggleNetworkDevice(base::DictionaryValue* args,
+                           IPC::Message* reply_message);
 
   void GetProxySettings(base::DictionaryValue* args,
                         IPC::Message* reply_message);
@@ -1189,7 +1227,7 @@ class TestingAutomationProvider : public AutomationProvider,
 
   void ForgetWifiNetwork(DictionaryValue* args, IPC::Message* reply_message);
 
-  // VPN automation.
+  // VPN.
   void AddPrivateNetwork(DictionaryValue* args, IPC::Message* reply_message);
 
   void GetPrivateNetworkInfo(base::DictionaryValue* args,
@@ -1201,16 +1239,27 @@ class TestingAutomationProvider : public AutomationProvider,
   void DisconnectFromPrivateNetwork(base::DictionaryValue* args,
                                     IPC::Message* reply_message);
 
-  // Enterprise policy automation.
+  // Enterprise policy.
   void IsEnterpriseDevice(DictionaryValue* args, IPC::Message* reply_message);
 
   void FetchEnterprisePolicy(DictionaryValue* args,
                              IPC::Message* reply_message);
 
+  void EnrollEnterpriseDevice(DictionaryValue* args,
+                              IPC::Message* reply_message);
+
   void GetEnterprisePolicyInfo(DictionaryValue* args,
                                IPC::Message* reply_message);
 
+  // Time.
+  void GetTimeInfo(Browser* browser, base::DictionaryValue* args,
+                   IPC::Message* reply_message);
 
+  void GetTimeInfo(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  void SetTimezone(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  // Update.
   void GetUpdateInfo(base::DictionaryValue* args, IPC::Message* reply_message);
 
   void UpdateCheck(base::DictionaryValue* args, IPC::Message* reply_message);
@@ -1218,11 +1267,16 @@ class TestingAutomationProvider : public AutomationProvider,
   void SetReleaseTrack(base::DictionaryValue* args,
                        IPC::Message* reply_message);
 
+  // Volume.
   void GetVolumeInfo(base::DictionaryValue* args, IPC::Message* reply_message);
 
   void SetVolume(base::DictionaryValue* args, IPC::Message* reply_message);
 
   void SetMute(base::DictionaryValue* args, IPC::Message* reply_message);
+
+  void CaptureProfilePhoto(Browser* browser,
+                           DictionaryValue* args,
+                           IPC::Message* reply_message);
 #endif  // defined(OS_CHROMEOS)
 
   void WaitForTabCountToBecome(int browser_handle,

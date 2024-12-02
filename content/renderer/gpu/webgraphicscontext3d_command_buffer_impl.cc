@@ -6,14 +6,16 @@
 
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
 
-#include <GLES2/gl2.h>
+#include "gpu/GLES2/gl2.h"
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES 1
 #endif
-#include <GLES2/gl2ext.h>
+#include "gpu/GLES2/gl2ext.h"
 
 #include <algorithm>
+#include <set>
 
+#include "base/lazy_instance.h"
 #include "base/string_tokenizer.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
@@ -30,22 +32,30 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
 
+static base::LazyInstance<std::set<WebGraphicsContext3DCommandBufferImpl*> >
+    g_all_shared_contexts(base::LINKER_INITIALIZED);
+
 WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
     : context_(NULL),
       gl_(NULL),
+#ifndef WTF_USE_THREADED_COMPOSITING
       web_view_(NULL),
+#endif
 #if defined(OS_MACOSX)
       plugin_handle_(NULL),
 #endif  // defined(OS_MACOSX)
       context_lost_callback_(0),
       context_lost_reason_(GL_NO_ERROR),
+      swapbuffers_complete_callback_(0),
       cached_width_(0),
       cached_height_(0),
-      bound_fbo_(0) {
+      bound_fbo_(0),
+      method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 WebGraphicsContext3DCommandBufferImpl::
     ~WebGraphicsContext3DCommandBufferImpl() {
+  g_all_shared_contexts.Pointer()->erase(this);
   delete context_;
 }
 
@@ -62,7 +72,6 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     WebKit::WebView* web_view,
     bool render_directly_to_web_view) {
   TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::initialize");
-  webkit_glue::BindSkiaToCommandBufferGL();
   RenderThread* render_thread = RenderThread::current();
   if (!render_thread)
     return false;
@@ -86,6 +95,8 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     RendererGLContext::STENCIL_SIZE, stencil_size,
     RendererGLContext::SAMPLES, samples,
     RendererGLContext::SAMPLE_BUFFERS, sample_buffers,
+    RendererGLContext::SHARE_RESOURCES, attributes.shareResources ? 1 : 0,
+    RendererGLContext::BIND_GENERATES_RESOURCES, 0,
     RendererGLContext::NONE,
   };
 
@@ -106,31 +117,38 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
   if (web_view && web_view->mainFrame())
     active_url = GURL(web_view->mainFrame()->document().url());
 
+  RendererGLContext* share_group = NULL;
+  if (attributes.shareResources) {
+    share_group = g_all_shared_contexts.Pointer()->empty() ?
+        NULL : (*g_all_shared_contexts.Pointer()->begin())->context_;
+  }
+
+  render_directly_to_web_view_ = render_directly_to_web_view;
   if (render_directly_to_web_view) {
+#ifndef WTF_USE_THREADED_COMPOSITING
     RenderView* renderview = RenderView::FromWebView(web_view);
     if (!renderview)
       return false;
-
     web_view_ = web_view;
+#endif
     context_ = RendererGLContext::CreateViewContext(
         host,
         renderview->routing_id(),
+        share_group,
         preferred_extensions,
         attribs,
         active_url);
-    if (context_) {
-      context_->SetSwapBuffersCallback(
-          NewCallback(this,
-              &WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete));
-    }
   } else {
     context_ = RendererGLContext::CreateOffscreenContext(
         host,
         gfx::Size(1, 1),
+        share_group,
         preferred_extensions,
         attribs,
         active_url);
+#ifndef WTF_USE_THREADED_COMPOSITING
     web_view_ = NULL;
+#endif
   }
   if (!context_)
     return false;
@@ -162,6 +180,9 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     getIntegerv(GL_SAMPLES, &samples);
     attributes_.antialias = samples > 0;
   }
+
+  if (attributes.shareResources)
+    g_all_shared_contexts.Pointer()->insert(this);
 
   return true;
 }
@@ -198,28 +219,28 @@ WebGLId WebGraphicsContext3DCommandBufferImpl::getPlatformTextureId() {
 void WebGraphicsContext3DCommandBufferImpl::prepareTexture() {
   // Copies the contents of the off-screen render target into the texture
   // used by the compositor.
+#ifndef WTF_USE_THREADED_COMPOSITING
   RenderView* renderview =
       web_view_ ? RenderView::FromWebView(web_view_) : NULL;
   if (renderview)
     renderview->OnViewContextSwapBuffersPosted();
+#endif
   context_->SwapBuffers();
+  context_->Echo(method_factory_.NewRunnableMethod(
+      &WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete));
+#if defined(OS_MACOSX)
+  // It appears that making the compositor's on-screen context current on
+  // other platforms implies this flush. TODO(kbr): this means that the
+  // TOUCH build and, in the future, other platforms might need this.
+  gl_->Flush();
+#endif
 }
 
 void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
   cached_width_ = width;
   cached_height_ = height;
 
-  if (web_view_) {
-#if defined(OS_MACOSX)
-    context_->ResizeOnscreen(gfx::Size(width, height));
-#else
-    gl_->ResizeCHROMIUM(width, height);
-#endif
-  } else {
-    context_->ResizeOffscreen(gfx::Size(width, height));
-    // Force a SwapBuffers to get the framebuffer to resize.
-    context_->SwapBuffers();
-  }
+  gl_->ResizeCHROMIUM(width, height);
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   scanline_.reset(new uint8[width * 4]);
@@ -341,40 +362,7 @@ void WebGraphicsContext3DCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
 
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToParentTextureCHROMIUM(
     WebGLId texture, WebGLId parentTexture) {
-  TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::copyTextureToCompositor");
-  gl_->CopyTextureToParentTextureCHROMIUM(texture, parentTexture);
-  gl_->Flush();
-}
-
-void WebGraphicsContext3DCommandBufferImpl::getParentToChildLatchCHROMIUM(
-    WGC3Duint* latch_id)
-{
-  if (!context_->GetParentToChildLatch(latch_id)) {
-    LOG(ERROR) << "getLatch must only be called on child context";
-    synthesizeGLError(GL_INVALID_OPERATION);
-    *latch_id = gpu::kInvalidLatchId;
-  }
-}
-
-void WebGraphicsContext3DCommandBufferImpl::getChildToParentLatchCHROMIUM(
-    WGC3Duint* latch_id)
-{
-  if (!context_->GetChildToParentLatch(latch_id)) {
-    LOG(ERROR) << "getLatch must only be called on child context";
-    synthesizeGLError(GL_INVALID_OPERATION);
-    *latch_id = gpu::kInvalidLatchId;
-  }
-}
-
-void WebGraphicsContext3DCommandBufferImpl::waitLatchCHROMIUM(
-    WGC3Duint latch_id)
-{
-}
-
-void WebGraphicsContext3DCommandBufferImpl::setLatchCHROMIUM(
-    WGC3Duint latch_id)
-{
-  gl_->Flush();
+  NOTIMPLEMENTED();
 }
 
 void WebGraphicsContext3DCommandBufferImpl::
@@ -1013,11 +1001,15 @@ void WebGraphicsContext3DCommandBufferImpl::deleteTexture(WebGLId texture) {
 }
 
 void WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete() {
+#ifndef WTF_USE_THREADED_COMPOSITING
   // This may be called after tear-down of the RenderView.
   RenderView* renderview =
       web_view_ ? RenderView::FromWebView(web_view_) : NULL;
   if (renderview)
     renderview->OnViewContextSwapBuffersComplete();
+#endif
+  if (swapbuffers_complete_callback_)
+    swapbuffers_complete_callback_->onSwapBuffersComplete();
 }
 
 void WebGraphicsContext3DCommandBufferImpl::setContextLostCallback(
@@ -1033,6 +1025,18 @@ WGC3Denum WebGraphicsContext3DCommandBufferImpl::getGraphicsResetStatusARB() {
 
   return context_lost_reason_;
 }
+
+void WebGraphicsContext3DCommandBufferImpl::
+    setSwapBuffersCompleteCallbackCHROMIUM(
+    WebGraphicsContext3D::WebGraphicsSwapBuffersCompleteCallbackCHROMIUM* cb) {
+  swapbuffers_complete_callback_ = cb;
+}
+
+#if WEBKIT_USING_SKIA
+GrGLInterface* WebGraphicsContext3DCommandBufferImpl::onCreateGrGLInterface() {
+  return webkit_glue::CreateCommandBufferSkiaGLBinding();
+}
+#endif
 
 namespace {
 
@@ -1058,11 +1062,12 @@ void WebGraphicsContext3DCommandBufferImpl::OnContextLost(
   if (context_lost_callback_) {
     context_lost_callback_->onContextLost();
   }
-
+#ifndef WTF_USE_THREADED_COMPOSITING
   RenderView* renderview =
       web_view_ ? RenderView::FromWebView(web_view_) : NULL;
   if (renderview)
     renderview->OnViewContextSwapBuffersAborted();
+#endif
 }
 
 #endif  // defined(ENABLE_GPU)

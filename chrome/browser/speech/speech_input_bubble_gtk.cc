@@ -5,6 +5,7 @@
 #include "chrome/browser/speech/speech_input_bubble.h"
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -13,11 +14,12 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
-#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "media/audio/audio_manager.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
@@ -31,7 +33,7 @@ const int kIconHorizontalPadding = 10;
 const int kButtonBarHorizontalSpacing = 10;
 
 // Use black for text labels since the bubble has white background.
-const GdkColor kLabelTextColor = gtk_util::kGdkBlack;
+const GdkColor kLabelTextColor = ui::kGdkBlack;
 
 // Implementation of SpeechInputBubble for GTK. This shows a speech input bubble
 // on screen.
@@ -106,6 +108,7 @@ void SpeechInputBubbleGtk::OnTryAgainClicked(GtkWidget* widget) {
 
 void SpeechInputBubbleGtk::OnMicSettingsClicked(GtkWidget* widget) {
   AudioManager::GetAudioManager()->ShowAudioInputSettings();
+  Hide();
 }
 
 void SpeechInputBubbleGtk::Show() {
@@ -161,8 +164,9 @@ void SpeechInputBubbleGtk::Show() {
       kBubbleControlHorizontalSpacing, kBubbleControlHorizontalSpacing);
   gtk_container_add(GTK_CONTAINER(content), vbox);
 
-  GtkThemeService* theme_provider = GtkThemeService::GetFrom(
-      tab_contents()->profile());
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  GtkThemeService* theme_provider = GtkThemeService::GetFrom(profile);
   GtkWidget* reference_widget = tab_contents()->GetNativeView();
   gfx::Rect container_rect;
   tab_contents()->GetContainerBounds(&container_rect);
@@ -174,7 +178,7 @@ void SpeechInputBubbleGtk::Show() {
       target_rect.y() > container_rect.height()) {
     // Target is not in screen view, so point to wrench.
     Browser* browser =
-        Browser::GetOrCreateTabbedBrowser(tab_contents()->profile());
+        Browser::GetOrCreateTabbedBrowser(profile);
     BrowserWindowGtk* browser_window =
         BrowserWindowGtk::GetBrowserWindowForNativeWindow(
             browser->window()->GetNativeHandle());

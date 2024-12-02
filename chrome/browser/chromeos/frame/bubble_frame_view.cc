@@ -6,7 +6,7 @@
 
 #include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/helper.h"
-#include "chrome/browser/ui/views/bubble/bubble_border.h"
+#include "views/bubble/bubble_border.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
@@ -41,13 +41,13 @@ namespace chromeos {
 
 BubbleFrameView::BubbleFrameView(views::Widget* frame,
                                  views::WidgetDelegate* widget_delegate,
-                                 BubbleWindow::Style style)
+                                 BubbleWindowStyle style)
     : frame_(frame),
       style_(style),
       title_(NULL),
       close_button_(NULL),
       throbber_(NULL) {
-  set_border(new BubbleBorder(BubbleBorder::NONE));
+  set_border(new views::BubbleBorder(views::BubbleBorder::NONE));
 
   if (widget_delegate->ShouldShowWindowTitle()) {
     title_ = new views::Label(widget_delegate->GetWindowTitle());
@@ -57,7 +57,7 @@ BubbleFrameView::BubbleFrameView(views::Widget* frame,
     AddChildView(title_);
   }
 
-  if (style_ & BubbleWindow::STYLE_XBAR) {
+  if (style_ & STYLE_XBAR) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     close_button_ = new views::ImageButton(this);
     close_button_->SetImage(views::CustomButton::BS_NORMAL,
@@ -69,7 +69,7 @@ BubbleFrameView::BubbleFrameView(views::Widget* frame,
     AddChildView(close_button_);
   }
 
-  if (style_ & BubbleWindow::STYLE_THROBBER) {
+  if (style_ & STYLE_THROBBER) {
     throbber_ = CreateDefaultSmoothedThrobber();
     AddChildView(throbber_);
   }
@@ -212,13 +212,13 @@ void BubbleFrameView::OnPaint(gfx::Canvas* canvas) {
   SkPaint paint;
   paint.setAntiAlias(true);
   paint.setStyle(SkPaint::kFill_Style);
-  paint.setColor(BubbleWindow::kBackgroundColor);
+  paint.setColor(kBubbleWindowBackgroundColor);
   gfx::Path path;
   gfx::Rect bounds(GetContentsBounds());
   SkRect rect;
   rect.set(SkIntToScalar(bounds.x()), SkIntToScalar(bounds.y()),
            SkIntToScalar(bounds.right()), SkIntToScalar(bounds.bottom()));
-  SkScalar radius = SkIntToScalar(BubbleBorder::GetCornerRadius());
+  SkScalar radius = SkIntToScalar(views::BubbleBorder::GetCornerRadius());
   path.addRoundRect(rect, radius, radius);
   canvas->AsCanvasSkia()->drawPath(path, paint);
 

@@ -16,8 +16,10 @@
 #include "base/string_tokenizer.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
@@ -44,6 +46,7 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
@@ -150,8 +153,7 @@ GdkColor PickLuminosityContrastingColor(const GdkColor* base,
 // user clicks on the favicon) and all of its submenus.
 class PopupPageMenuModel : public ui::SimpleMenuModel {
  public:
-  explicit PopupPageMenuModel(ui::SimpleMenuModel::Delegate* delegate,
-                              Browser* browser);
+  PopupPageMenuModel(ui::SimpleMenuModel::Delegate* delegate, Browser* browser);
   virtual ~PopupPageMenuModel() { }
 
  private:
@@ -311,7 +313,10 @@ void BrowserTitlebar::Init() {
 
   // If multi-profile is enabled set up profile button and login notifications.
   // The button lives in its own vbox in container_hbox_.
+  ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
   if (ProfileManager::IsMultipleProfilesEnabled() &&
+      cache.GetNumberOfProfiles() > 1 &&
       !browser_window_->browser()->profile()->IsOffTheRecord()) {
     PrefService* prefs = browser_window_->browser()->profile()->GetPrefs();
     usernamePref_.Init(prefs::kGoogleServicesUsername, prefs, this);
@@ -754,10 +759,10 @@ void BrowserTitlebar::UpdateTextColor() {
           ThemeService::COLOR_FRAME_INACTIVE);
     }
     GdkColor text_color = PickLuminosityContrastingColor(
-        &frame_color, &gtk_util::kGdkWhite, &gtk_util::kGdkBlack);
+        &frame_color, &ui::kGdkWhite, &ui::kGdkBlack);
     gtk_util::SetLabelColor(app_mode_title_, &text_color);
   } else {
-    gtk_util::SetLabelColor(app_mode_title_, &gtk_util::kGdkWhite);
+    gtk_util::SetLabelColor(app_mode_title_, &ui::kGdkWhite);
   }
 }
 

@@ -10,7 +10,6 @@
 #include "ppapi/c/dev/ppb_surface_3d_dev.h"
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_context_3d_proxy.h"
 #include "ppapi/thunk/enter.h"
@@ -21,7 +20,7 @@ using ppapi::thunk::EnterFunctionNoLock;
 using ppapi::thunk::PPB_Surface3D_API;
 using ppapi::thunk::ResourceCreationAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -36,8 +35,7 @@ InterfaceProxy* CreateSurface3DProxy(Dispatcher* dispatcher,
 // Surface3D -------------------------------------------------------------------
 
 Surface3D::Surface3D(const HostResource& host_resource)
-    : PluginResource(host_resource),
-      resource_(0),
+    : Resource(host_resource),
       context_(NULL),
       current_flush_callback_(PP_BlockUntilComplete()) {
 }
@@ -78,7 +76,7 @@ int32_t Surface3D::SwapBuffers(PP_CompletionCallback callback) {
   IPC::Message* msg = new PpapiHostMsg_PPBSurface3D_SwapBuffers(
       INTERFACE_ID_PPB_SURFACE_3D, host_resource());
   msg->set_unblock(true);
-  GetDispatcher()->Send(msg);
+  PluginDispatcher::GetForResource(this)->Send(msg);
 
   context_->gles2_impl()->SwapBuffers();
   return PP_OK_COMPLETIONPENDING;
@@ -102,7 +100,7 @@ PPB_Surface3D_Proxy::~PPB_Surface3D_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_Surface3D_Proxy::GetInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_Surface3D_Thunk(),
+    thunk::GetPPB_Surface3D_Thunk(),
     PPB_SURFACE_3D_DEV_INTERFACE,
     INTERFACE_ID_PPB_SURFACE_3D,
     false,
@@ -136,11 +134,7 @@ PP_Resource PPB_Surface3D_Proxy::CreateProxyResource(
 
   if (result.is_null())
     return 0;
-  linked_ptr<Surface3D> surface_3d(new Surface3D(result));
-  PP_Resource resource =
-      PluginResourceTracker::GetInstance()->AddResource(surface_3d);
-  surface_3d->set_resource(resource);
-  return resource;
+  return (new Surface3D(result))->GetReference();
 }
 
 bool PPB_Surface3D_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -177,19 +171,11 @@ void PPB_Surface3D_Proxy::OnMsgCreate(PP_Instance instance,
 }
 
 void PPB_Surface3D_Proxy::OnMsgSwapBuffers(const HostResource& surface_3d) {
-  CompletionCallback callback = callback_factory_.NewOptionalCallback(
+  EnterHostFromHostResourceForceCallback<PPB_Surface3D_API> enter(
+      surface_3d, callback_factory_,
       &PPB_Surface3D_Proxy::SendSwapBuffersACKToPlugin, surface_3d);
-
-  EnterHostFromHostResource<PPB_Surface3D_API> enter(surface_3d);
-  int32_t result = PP_ERROR_BADRESOURCE;
   if (enter.succeeded())
-    result = enter.object()->SwapBuffers(callback.pp_completion_callback());
-  if (result != PP_OK_COMPLETIONPENDING) {
-    // There was some error, so we won't get a flush callback. We need to now
-    // issue the ACK to the plugin hears about the error. This will also clean
-    // up the data associated with the callback.
-    callback.Run(result);
-  }
+    enter.SetResult(enter.object()->SwapBuffers(enter.callback()));
 }
 
 void PPB_Surface3D_Proxy::OnMsgSwapBuffersACK(const HostResource& resource,
@@ -207,4 +193,4 @@ void PPB_Surface3D_Proxy::SendSwapBuffersACKToPlugin(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

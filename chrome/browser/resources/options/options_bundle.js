@@ -12,6 +12,7 @@
 <include src="options_page.js"></include>
 <if expr="pp_ifdef('chromeos')">
   <include src="about_page.js"></include>
+  <include src="../chromeos/user_images_grid.js"></include>
   <include src="chromeos/cellular_plan_element.js"></include>
   <include src="chromeos/change_picture_options.js"></include>
   <include src="chromeos/internet_detail_ip_config_list.js"></include>
@@ -24,6 +25,8 @@
   <include src="chromeos/proxy_rules_list.js"></include>
   <include src="chromeos/accounts_user_list.js"></include>
   <include src="chromeos/accounts_user_name_edit.js"></include>
+  <include src="chromeos/virtual_keyboard.js"></include>
+  <include src="chromeos/virtual_keyboard_list.js"></include>
   var AboutPage = options.AboutPage;
   var AccountsOptions = options.AccountsOptions;
   var ChangePictureOptions = options.ChangePictureOptions;
@@ -59,6 +62,8 @@
 <include src="content_settings_ui.js"></include>
 <include src="cookies_list.js"></include>
 <include src="cookies_view.js"></include>
+<include src="extension_list.js"></include>
+<include src="extension_settings.js"></include>
 <include src="font_settings.js"></include>
 <if expr="pp_ifdef('enable_register_protocol_handler')">
   <include src="handler_options.js"></script>
@@ -66,10 +71,15 @@
 </if>
 <include src="import_data_overlay.js"></include>
 <include src="instant_confirm_overlay.js"></include>
+<if expr="pp_ifdef('enable_web_intents')">
+  <include src="intents_list.js"></include>
+  <include src="intents_view.js"></include>
+</if>
 <include src="language_add_language_overlay.js"></include>
 <include src="language_list.js"></include>
 <include src="language_options.js"></include>
 <include src="manage_profile_overlay.js"></include>
+<include src="pack_extension_overlay.js"></include>
 <include src="password_manager.js"></include>
 <include src="password_manager_list.js"></include>
 <include src="personal_options.js"></include>

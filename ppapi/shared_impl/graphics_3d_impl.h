@@ -8,6 +8,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "ppapi/c/pp_completion_callback.h"
+#include "ppapi/shared_impl/ppapi_shared_export.h"
 #include "ppapi/thunk/ppb_graphics_3d_api.h"
 
 namespace gpu {
@@ -20,12 +21,24 @@ class GLES2Implementation;
 
 namespace ppapi {
 
-class Graphics3DImpl : public thunk::PPB_Graphics3D_API {
+class PPAPI_SHARED_EXPORT Graphics3DImpl : public thunk::PPB_Graphics3D_API {
  public:
   // PPB_Graphics3D_API implementation.
   virtual int32_t GetAttribs(int32_t* attrib_list) OVERRIDE;
   virtual int32_t SetAttribs(int32_t* attrib_list) OVERRIDE;
+  virtual int32_t GetError() OVERRIDE;
+  virtual int32_t ResizeBuffers(int32_t width, int32_t height) OVERRIDE;
   virtual int32_t SwapBuffers(PP_CompletionCallback callback) OVERRIDE;
+  virtual void* MapTexSubImage2DCHROMIUM(GLenum target,
+                                         GLint level,
+                                         GLint xoffset,
+                                         GLint yoffset,
+                                         GLsizei width,
+                                         GLsizei height,
+                                         GLenum format,
+                                         GLenum type,
+                                         GLenum access) OVERRIDE;
+  virtual void UnmapTexSubImage2DCHROMIUM(const void* mem) OVERRIDE;
 
   gpu::gles2::GLES2Implementation* gles2_impl() {
     return gles2_impl_.get();

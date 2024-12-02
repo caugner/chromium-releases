@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 
 #include "chrome/browser/chromeos/login/webui_login_view.h"
+#include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -43,8 +44,6 @@ void WebUILoginDisplay::Destroy() {
   delegate_ = NULL;
 }
 
-  // TODO(rharrison): Add mechanism to pass in the show_guest and show_new_user
-  // values.
 void WebUILoginDisplay::Init(const std::vector<UserManager::User>& users,
                              bool show_guest,
                              bool show_new_user) {
@@ -89,17 +88,11 @@ void WebUILoginDisplay::OnLoginSuccess(const std::string& username) {
 }
 
 void WebUILoginDisplay::SetUIEnabled(bool is_enabled) {
-  // Send message to WM to enable/disable click on windows.
-  WmIpc::Message message(WM_IPC_MESSAGE_WM_SET_LOGIN_STATE);
-  message.set_param(0, is_enabled);
-  WmIpc::instance()->SendMessage(message);
-
   if (is_enabled)
     webui_handler_->ClearAndEnablePassword();
 }
 
 void WebUILoginDisplay::SelectPod(int index) {
-  // TODO(rharrison): Figure out what we should be doing here.
 }
 
 void WebUILoginDisplay::ShowError(int error_msg_id,
@@ -141,29 +134,41 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
 
   webui_handler_->ShowError(login_attempts, error_text, help_link,
                             help_topic_id);
+  WizardAccessibilityHelper::GetInstance()->MaybeSpeak(
+      error_text.c_str(), false, false);
 }
 
 // WebUILoginDisplay, SigninScreenHandlerDelegate implementation: --------------
 void WebUILoginDisplay::CompleteLogin(const std::string& username,
                                       const std::string& password) {
   DCHECK(delegate_);
-  delegate_->CompleteLogin(username, password);
+  if (delegate_)
+    delegate_->CompleteLogin(username, password);
 }
 
 void WebUILoginDisplay::Login(const std::string& username,
                               const std::string& password) {
   DCHECK(delegate_);
-  delegate_->Login(username, password);
+  if (delegate_)
+    delegate_->Login(username, password);
 }
 
 void WebUILoginDisplay::LoginAsGuest() {
   DCHECK(delegate_);
-  delegate_->LoginAsGuest();
+  if (delegate_)
+    delegate_->LoginAsGuest();
+}
+
+void WebUILoginDisplay::FixCaptivePortal() {
+  DCHECK(delegate_);
+  if (delegate_)
+    delegate_->FixCaptivePortal();
 }
 
 void WebUILoginDisplay::CreateAccount() {
   DCHECK(delegate_);
-  delegate_->CreateAccount();
+  if (delegate_)
+    delegate_->CreateAccount();
 }
 
 void WebUILoginDisplay::RemoveUser(const std::string& username) {
@@ -171,12 +176,20 @@ void WebUILoginDisplay::RemoveUser(const std::string& username) {
 }
 
 void WebUILoginDisplay::ShowEnterpriseEnrollmentScreen() {
-  delegate_->OnStartEnterpriseEnrollment();
+  if (delegate_)
+    delegate_->OnStartEnterpriseEnrollment();
 }
 
 void WebUILoginDisplay::SetWebUIHandler(
     LoginDisplayWebUIHandler* webui_handler) {
   webui_handler_ = webui_handler;
+}
+
+void WebUILoginDisplay::ShowSigninScreenForCreds(
+    const std::string& username,
+    const std::string& password) {
+  DCHECK(webui_handler_);
+  webui_handler_->ShowSigninScreenForCreds(username, password);
 }
 
 // WebUILoginDisplay, private: -------------------------------------------------

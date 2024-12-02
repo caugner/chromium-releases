@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/task.h"
 #include "content/renderer/gpu/renderer_gl_context.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
@@ -407,11 +408,6 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void copyTextureToParentTextureCHROMIUM(
       WebGLId texture, WebGLId parentTexture);
 
-  virtual void getParentToChildLatchCHROMIUM(WGC3Duint* latch_id);
-  virtual void getChildToParentLatchCHROMIUM(WGC3Duint* latch_id);
-  virtual void waitLatchCHROMIUM(WGC3Duint latch_id);
-  virtual void setLatchCHROMIUM(WGC3Duint latch_id);
-
   virtual void rateLimitOffscreenContextCHROMIUM();
 
   virtual WebKit::WebString getRequestableExtensionsCHROMIUM();
@@ -431,6 +427,15 @@ class WebGraphicsContext3DCommandBufferImpl
       WebGraphicsContext3D::WebGraphicsContextLostCallback* callback);
   virtual WGC3Denum getGraphicsResetStatusARB();
 
+  virtual void setSwapBuffersCompleteCallbackCHROMIUM(
+      WebGraphicsContext3D::
+          WebGraphicsSwapBuffersCompleteCallbackCHROMIUM* callback);
+
+ protected:
+#if WEBKIT_USING_SKIA
+  virtual GrGLInterface* onCreateGrGLInterface();
+#endif
+
  private:
   // SwapBuffers callback.
   void OnSwapBuffersComplete();
@@ -441,14 +446,20 @@ class WebGraphicsContext3DCommandBufferImpl
   // The GLES2Implementation we use for OpenGL rendering.
   gpu::gles2::GLES2Implementation* gl_;
 
+  bool render_directly_to_web_view_;
+#ifndef WTF_USE_THREADED_COMPOSITING
   // If rendering directly to WebView, weak pointer to it.
   WebKit::WebView* web_view_;
+#endif
 #if defined(OS_MACOSX)
   // "Fake" plugin window handle in browser process for the compositor's output.
   gfx::PluginWindowHandle plugin_handle_;
 #endif
   WebGraphicsContext3D::WebGraphicsContextLostCallback* context_lost_callback_;
   WGC3Denum context_lost_reason_;
+
+  WebGraphicsContext3D::WebGraphicsSwapBuffersCompleteCallbackCHROMIUM*
+      swapbuffers_complete_callback_;
 
   WebKit::WebGraphicsContext3D::Attributes attributes_;
   int cached_width_, cached_height_;
@@ -458,6 +469,9 @@ class WebGraphicsContext3DCommandBufferImpl
 
   // Errors raised by synthesizeGLError().
   std::vector<WGC3Denum> synthetic_errors_;
+
+  ScopedRunnableMethodFactory<WebGraphicsContext3DCommandBufferImpl>
+      method_factory_;
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   scoped_array<uint8> scanline_;

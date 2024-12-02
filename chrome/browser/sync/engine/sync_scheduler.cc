@@ -29,6 +29,41 @@ using syncable::ModelTypePayloadMap;
 using syncable::ModelTypeBitSet;
 using sync_pb::GetUpdatesCallerInfo;
 
+namespace {
+bool ShouldRequestEarlyExit(
+    const browser_sync::SyncProtocolError& error) {
+  switch (error.error_type) {
+    case browser_sync::SYNC_SUCCESS:
+    case browser_sync::MIGRATION_DONE:
+    case browser_sync::THROTTLED:
+    case browser_sync::TRANSIENT_ERROR:
+      return false;
+    case browser_sync::NOT_MY_BIRTHDAY:
+    case browser_sync::CLEAR_PENDING:
+      // If we send terminate sync early then |sync_cycle_ended| notification
+      // would not be sent. If there were no actions then |ACTIONABLE_ERROR|
+      // notification wouldnt be sent either. Then the UI layer would be left
+      // waiting forever. So assert we would send something.
+      DCHECK(error.action != browser_sync::UNKNOWN_ACTION);
+      return true;
+    case browser_sync::INVALID_CREDENTIAL:
+      // The notification for this is handled by PostAndProcessHeaders|.
+      // Server does no have to send any action for this.
+      return true;
+    // Make the default a NOTREACHED. So if a new error is introduced we
+    // think about its expected functionality.
+    default:
+      NOTREACHED();
+      return false;
+  }
+}
+
+bool IsActionableError(
+    const browser_sync::SyncProtocolError& error) {
+  return (error.action != browser_sync::UNKNOWN_ACTION);
+}
+}  // namespace
+
 SyncScheduler::DelayProvider::DelayProvider() {}
 SyncScheduler::DelayProvider::~DelayProvider() {}
 
@@ -104,22 +139,6 @@ GetUpdatesCallerInfo::GetUpdatesSource GetUpdatesFromNudgeSource(
   }
 }
 
-GetUpdatesCallerInfo::GetUpdatesSource GetSourceFromReason(
-    sync_api::ConfigureReason reason) {
-  switch (reason) {
-    case sync_api::CONFIGURE_REASON_RECONFIGURATION:
-      return GetUpdatesCallerInfo::RECONFIGURATION;
-    case sync_api::CONFIGURE_REASON_MIGRATION:
-      return GetUpdatesCallerInfo::MIGRATION;
-    case sync_api::CONFIGURE_REASON_NEW_CLIENT:
-      return GetUpdatesCallerInfo::NEW_CLIENT;
-    default:
-      NOTREACHED();
-  }
-
-  return GetUpdatesCallerInfo::UNKNOWN;
-}
-
 SyncScheduler::WaitInterval::WaitInterval(Mode mode, TimeDelta length)
     : mode(mode), had_nudge(false), length(length) { }
 
@@ -133,6 +152,25 @@ SyncScheduler::WaitInterval::WaitInterval(Mode mode, TimeDelta length)
 #define SVLOG_LOC(from_here, verbose_level)             \
   VLOG_LOC(from_here, verbose_level) << name_ << ": "
 
+namespace {
+
+const int kDefaultSessionsCommitDelaySeconds = 10;
+
+bool IsConfigRelatedUpdateSourceValue(
+    GetUpdatesCallerInfo::GetUpdatesSource source) {
+  switch (source) {
+    case GetUpdatesCallerInfo::RECONFIGURATION:
+    case GetUpdatesCallerInfo::MIGRATION:
+    case GetUpdatesCallerInfo::NEW_CLIENT:
+    case GetUpdatesCallerInfo::NEWLY_SUPPORTED_DATATYPE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+
 SyncScheduler::SyncScheduler(const std::string& name,
                              sessions::SyncSessionContext* context,
                              Syncer* syncer)
@@ -144,6 +182,8 @@ SyncScheduler::SyncScheduler(const std::string& name,
           TimeDelta::FromSeconds(kDefaultShortPollIntervalSeconds)),
       syncer_long_poll_interval_seconds_(
           TimeDelta::FromSeconds(kDefaultLongPollIntervalSeconds)),
+      sessions_commit_delay_(
+          TimeDelta::FromSeconds(kDefaultSessionsCommitDelaySeconds)),
       mode_(NORMAL_MODE),
       server_connection_ok_(false),
       delay_provider_(new DelayProvider()),
@@ -405,11 +445,13 @@ void SyncScheduler::ScheduleClearUserData() {
                &SyncScheduler::ScheduleClearUserDataImpl));
 }
 
+// TODO(sync): Remove the *Impl methods for the other Schedule*
+// functions, too.
 void SyncScheduler::ScheduleCleanupDisabledTypes() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  PostTask(FROM_HERE, "ScheduleCleanupDisabledTypes",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::ScheduleCleanupDisabledTypesImpl));
+  ScheduleSyncSessionJob(
+      TimeDelta::FromSeconds(0), SyncSessionJob::CLEANUP_DISABLED_TYPES,
+      CreateSyncSession(SyncSourceInfo()), FROM_HERE);
 }
 
 void SyncScheduler::ScheduleNudge(
@@ -453,13 +495,6 @@ void SyncScheduler::ScheduleClearUserDataImpl() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   ScheduleSyncSessionJob(
       TimeDelta::FromSeconds(0), SyncSessionJob::CLEAR_USER_DATA,
-      CreateSyncSession(SyncSourceInfo()), FROM_HERE);
-}
-
-void SyncScheduler::ScheduleCleanupDisabledTypesImpl() {
-  DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  ScheduleSyncSessionJob(
-      TimeDelta::FromSeconds(0), SyncSessionJob::CLEANUP_DISABLED_TYPES,
       CreateSyncSession(SyncSourceInfo()), FROM_HERE);
 }
 
@@ -561,9 +596,11 @@ void GetModelSafeParamsForTypes(const ModelTypeBitSet& types,
   }
 }
 
-void SyncScheduler::ScheduleConfig(const ModelTypeBitSet& types,
-                                   sync_api::ConfigureReason reason) {
+void SyncScheduler::ScheduleConfig(
+    const ModelTypeBitSet& types,
+    GetUpdatesCallerInfo::GetUpdatesSource source) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  DCHECK(IsConfigRelatedUpdateSourceValue(source));
   SVLOG(2) << "Scheduling a config";
   ModelSafeRoutingInfo routes;
   std::vector<ModelSafeWorker*> workers;
@@ -572,8 +609,7 @@ void SyncScheduler::ScheduleConfig(const ModelTypeBitSet& types,
 
   PostTask(FROM_HERE, "ScheduleConfigImpl",
            method_factory_.NewRunnableMethod(
-               &SyncScheduler::ScheduleConfigImpl, routes, workers,
-               GetSourceFromReason(reason)));
+               &SyncScheduler::ScheduleConfigImpl, routes, workers, source));
 }
 
 void SyncScheduler::ScheduleConfigImpl(
@@ -865,13 +901,13 @@ void SyncScheduler::AdjustPolling(const SyncSessionJob* old_job) {
 
   // Adjust poll rate.
   poll_timer_.Stop();
-  poll_timer_.Start(poll, this, &SyncScheduler::PollTimerCallback);
+  poll_timer_.Start(FROM_HERE, poll, this, &SyncScheduler::PollTimerCallback);
 }
 
 void SyncScheduler::RestartWaiting() {
   CHECK(wait_interval_.get());
   wait_interval_->timer.Stop();
-  wait_interval_->timer.Start(wait_interval_->length,
+  wait_interval_->timer.Start(FROM_HERE, wait_interval_->length,
                               this, &SyncScheduler::DoCanaryJob);
 }
 
@@ -887,7 +923,7 @@ void SyncScheduler::HandleConsecutiveContinuationError(
   TimeDelta length = delay_provider_->GetDelay(
       IsBackingOff() ? wait_interval_->length : TimeDelta::FromSeconds(1));
 
-  SVLOG(2) << "In handle continuation error with"
+  SVLOG(2) << "In handle continuation error with "
            << SyncSessionJob::GetPurposeString(old_job.purpose)
            << " job. The time delta(ms) is "
            << length.InMilliseconds();
@@ -996,6 +1032,8 @@ SyncSession* SyncScheduler::CreateSyncSession(const SyncSourceInfo& source) {
   ModelSafeRoutingInfo routes;
   std::vector<ModelSafeWorker*> workers;
   session_context_->registrar()->GetModelSafeRoutingInfo(&routes);
+  VLOG(2) << "Creating sync session with routes "
+          << ModelSafeRoutingInfoToString(routes);
   session_context_->registrar()->GetWorkers(&workers);
   SyncSourceInfo info(source);
 
@@ -1039,7 +1077,7 @@ void SyncScheduler::OnSilencedUntil(const base::TimeTicks& silenced_until) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   wait_interval_.reset(new WaitInterval(WaitInterval::THROTTLED,
                                         silenced_until - TimeTicks::Now()));
-  wait_interval_->timer.Start(wait_interval_->length, this,
+  wait_interval_->timer.Start(FROM_HERE, wait_interval_->length, this,
       &SyncScheduler::Unthrottle);
 }
 
@@ -1061,12 +1099,40 @@ void SyncScheduler::OnReceivedLongPollIntervalUpdate(
   syncer_long_poll_interval_seconds_ = new_interval;
 }
 
+void SyncScheduler::OnReceivedSessionsCommitDelay(
+    const base::TimeDelta& new_delay) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  sessions_commit_delay_ = new_delay;
+}
+
 void SyncScheduler::OnShouldStopSyncingPermanently() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   SVLOG(2) << "OnShouldStopSyncingPermanently";
   syncer_->RequestEarlyExit();  // Thread-safe.
   Notify(SyncEngineEvent::STOP_SYNCING_PERMANENTLY);
 }
+
+void SyncScheduler::OnActionableError(
+    const sessions::SyncSessionSnapshot& snap) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  SVLOG(2) << "OnActionableError";
+  SyncEngineEvent event(SyncEngineEvent::ACTIONABLE_ERROR);
+  sessions::SyncSessionSnapshot snapshot(snap);
+  event.snapshot = &snapshot;
+  session_context_->NotifyListeners(event);
+}
+
+void SyncScheduler::OnSyncProtocolError(
+    const sessions::SyncSessionSnapshot& snapshot) {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  if (ShouldRequestEarlyExit(snapshot.errors.sync_protocol_error)) {
+    SVLOG(2) << "Sync Scheduler requesting early exit.";
+    syncer_->RequestEarlyExit();  // Thread-safe.
+  }
+  if (IsActionableError(snapshot.errors.sync_protocol_error))
+    OnActionableError(snapshot);
+}
+
 
 void SyncScheduler::OnServerConnectionEvent(
     const ServerConnectionEvent& event) {
@@ -1082,15 +1148,16 @@ void SyncScheduler::set_notifications_enabled(bool notifications_enabled) {
   session_context_->set_notifications_enabled(notifications_enabled);
 }
 
+base::TimeDelta SyncScheduler::sessions_commit_delay() const {
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  return sessions_commit_delay_;
+}
+
 #undef SVLOG_LOC
 
 #undef SVLOG
 
 #undef SLOG
-
-#undef VLOG_LOC
-
-#undef VLOG_LOC_STREAM
 
 #undef ENUM_CASE
 

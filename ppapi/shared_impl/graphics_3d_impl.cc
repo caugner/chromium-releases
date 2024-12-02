@@ -33,6 +33,20 @@ int32_t Graphics3DImpl::SetAttribs(int32_t* attrib_list) {
   return PP_ERROR_FAILED;
 }
 
+int32_t Graphics3DImpl::GetError() {
+  // TODO(alokp): Implement me.
+  return PP_ERROR_FAILED;
+}
+
+int32_t Graphics3DImpl::ResizeBuffers(int32_t width, int32_t height) {
+  if ((width < 0) || (height < 0))
+    return PP_ERROR_BADARGUMENT;
+
+  gles2_impl()->ResizeCHROMIUM(width, height);
+  // TODO(alokp): Check if resize succeeded and return appropriate error code.
+  return PP_OK;
+}
+
 int32_t Graphics3DImpl::SwapBuffers(PP_CompletionCallback callback) {
   if (!callback.func) {
     // Blocking SwapBuffers isn't supported (since we have to be on the main
@@ -47,6 +61,23 @@ int32_t Graphics3DImpl::SwapBuffers(PP_CompletionCallback callback) {
 
   swap_callback_ = callback;
   return DoSwapBuffers();
+}
+
+void* Graphics3DImpl::MapTexSubImage2DCHROMIUM(GLenum target,
+                                               GLint level,
+                                               GLint xoffset,
+                                               GLint yoffset,
+                                               GLsizei width,
+                                               GLsizei height,
+                                               GLenum format,
+                                               GLenum type,
+                                               GLenum access) {
+  return gles2_impl_->MapTexSubImage2DCHROMIUM(
+      target, level, xoffset, yoffset, width, height, format, type, access);
+}
+
+void Graphics3DImpl::UnmapTexSubImage2DCHROMIUM(const void* mem) {
+  gles2_impl_->UnmapTexSubImage2DCHROMIUM(mem);
 }
 
 void Graphics3DImpl::SwapBuffersACK(int32_t pp_error) {
@@ -83,7 +114,8 @@ bool Graphics3DImpl::CreateGLES2Impl(int32 command_buffer_size,
       transfer_buffer.size,
       transfer_buffer.ptr,
       transfer_buffer_id_,
-      false));
+      false,
+      true));
 
   return true;
 }

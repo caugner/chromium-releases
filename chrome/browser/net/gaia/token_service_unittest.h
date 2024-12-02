@@ -12,9 +12,9 @@
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
-#include "chrome/test/signaling_task.h"
-#include "chrome/test/test_notification_tracker.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/signaling_task.h"
+#include "chrome/test/base/test_notification_tracker.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -75,6 +75,8 @@ class TokenServiceTestHarness : public testing::Test {
   TokenAvailableTracker success_tracker_;
   TokenFailedTracker failure_tracker_;
   GaiaAuthConsumer::ClientLoginResult credentials_;
+  std::string oauth_token_;
+  std::string oauth_secret_;
   scoped_ptr<TestingProfile> profile_;
 };
 

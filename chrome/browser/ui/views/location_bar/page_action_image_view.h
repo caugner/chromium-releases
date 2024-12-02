@@ -16,6 +16,9 @@
 #include "views/controls/image_view.h"
 
 class LocationBarView;
+namespace views {
+class MenuRunner;
+}
 
 // PageActionImageView is used by the LocationBarView to display the icon for a
 // given PageAction and notify the extension when the icon is clicked.
@@ -25,7 +28,6 @@ class PageActionImageView : public views::ImageView,
                             public ExtensionPopup::Observer {
  public:
   PageActionImageView(LocationBarView* owner,
-                      Profile* profile,
                       ExtensionAction* page_action);
   virtual ~PageActionImageView();
 
@@ -71,9 +73,6 @@ class PageActionImageView : public views::ImageView,
   // The location bar view that owns us.
   LocationBarView* owner_;
 
-  // The current profile (not owned by us).
-  Profile* profile_;
-
   // The PageAction that this view represents. The PageAction is not owned by
   // us, it resides in the extension of this particular profile.
   ExtensionAction* page_action_;
@@ -101,6 +100,8 @@ class PageActionImageView : public views::ImageView,
 
   // The current popup and the button it came from.  NULL if no popup.
   ExtensionPopup* popup_;
+
+  scoped_ptr<views::MenuRunner> menu_runner_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(PageActionImageView);
 };

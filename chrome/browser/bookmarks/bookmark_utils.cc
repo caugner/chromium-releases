@@ -16,9 +16,9 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/history/query_parser.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/simple_message_box.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -71,18 +71,25 @@ class NewBrowserPageNavigator : public PageNavigator {
 
   Browser* browser() const { return browser_; }
 
+  // Deprecated. Please use one-argument variant.
+  // TODO(adriansc): Remove this method once refactoring changed all call sites.
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
                                PageTransition::Type transition) OVERRIDE {
+    return OpenURL(OpenURLParams(url, referrer, disposition, transition));
+  }
+
+  virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
     if (!browser_) {
-      Profile* profile = (disposition == OFF_THE_RECORD) ?
+      Profile* profile = (params.disposition == OFF_THE_RECORD) ?
           profile_->GetOffTheRecordProfile() : profile_;
       browser_ = Browser::Create(profile);
-      // Always open the first tab in the foreground.
-      disposition = NEW_FOREGROUND_TAB;
     }
-    return browser_->OpenURL(url, referrer, NEW_FOREGROUND_TAB, transition);
+
+    OpenURLParams forward_params = params;
+    forward_params.disposition = NEW_FOREGROUND_TAB;
+    return browser_->OpenURL(forward_params);
   }
 
  private:
@@ -147,8 +154,8 @@ void OpenAllImpl(const BookmarkNode* node,
       disposition = NEW_BACKGROUND_TAB;
     else
       disposition = initial_disposition;
-    (*navigator)->OpenURL(node->url(), GURL(), disposition,
-                          PageTransition::AUTO_BOOKMARK);
+    (*navigator)->OpenURL(OpenURLParams(node->url(), GURL(), disposition,
+                          PageTransition::AUTO_BOOKMARK));
     if (!*opened_url) {
       *opened_url = true;
       // We opened the first URL which may have opened a new window or clobbered
@@ -184,7 +191,7 @@ bool ShouldOpenAll(gfx::NativeWindow parent,
       IDS_BOOKMARK_BAR_SHOULD_OPEN_ALL,
       base::IntToString16(child_count));
   string16 title = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  return platform_util::SimpleYesNoBox(parent, title, message);
+  return browser::ShowYesNoBox(parent, title, message);
 }
 
 // Comparison function that compares based on date modified of the two nodes.
@@ -456,7 +463,7 @@ bool CanPasteFromClipboard(const BookmarkNode* node) {
 
 string16 GetNameForURL(const GURL& url) {
   if (url.is_valid()) {
-    return net::GetSuggestedFilename(url, "", "", "", string16());
+    return net::GetSuggestedFilename(url, "", "", "", "", string16());
   } else {
     return l10n_util::GetStringUTF16(IDS_APP_UNTITLED_SHORTCUT_FILE_NAME);
   }
@@ -724,9 +731,9 @@ bool NodeHasURLs(const BookmarkNode* node) {
 bool ConfirmDeleteBookmarkNode(const BookmarkNode* node,
                                gfx::NativeWindow window) {
   DCHECK(node && node->is_folder() && !node->empty());
-  return platform_util::SimpleYesNoBox(window,
+  return browser::ShowYesNoBox(window,
       l10n_util::GetStringUTF16(IDS_DELETE),
-      l10n_util::GetStringFUTF16Int(IDS_BOOMARK_EDITOR_CONFIRM_DELETE,
+      l10n_util::GetStringFUTF16Int(IDS_BOOKMARK_EDITOR_CONFIRM_DELETE,
                                     ChildURLCountTotal(node)));
 }
 
@@ -742,6 +749,31 @@ void DeleteBookmarkFolders(BookmarkModel* model,
       continue;
     const BookmarkNode* parent = node->parent();
     model->Remove(parent, parent->GetIndexOf(node));
+  }
+}
+
+void AddIfNotBookmarked(BookmarkModel* model,
+                        const GURL& url,
+                        const string16& title) {
+  std::vector<const BookmarkNode*> bookmarks;
+  model->GetNodesByURL(url, &bookmarks);
+  if (!bookmarks.empty())
+    return;  // Nothing to do, a bookmark with that url already exists.
+
+  const BookmarkNode* parent = model->GetParentForNewNodes();
+  model->AddURL(parent, parent->child_count(), title, url);
+}
+
+void RemoveAllBookmarks(BookmarkModel* model, const GURL& url) {
+  std::vector<const BookmarkNode*> bookmarks;
+  model->GetNodesByURL(url, &bookmarks);
+
+  // Remove all the bookmarks.
+  for (size_t i = 0; i < bookmarks.size(); ++i) {
+    const BookmarkNode* node = bookmarks[i];
+    int index = node->parent()->GetIndexOf(node);
+    if (index > -1)
+      model->Remove(node->parent(), index);
   }
 }
 

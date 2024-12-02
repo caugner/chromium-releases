@@ -118,7 +118,7 @@ void MockSigner::OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
 ////////////////////////////////////////////////////////////////////////////////
 // OwnerManagerTest
 
-class OwnerManagerTest : public ::testing::Test {
+class OwnerManagerTest : public testing::Test {
  public:
   OwnerManagerTest()
       : message_loop_(MessageLoop::TYPE_UI),

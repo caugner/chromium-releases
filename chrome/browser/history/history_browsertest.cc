@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
-
-// Helper to debug intermittent test hangs/timeouts.
-// TODO(phajdan.jr): remove when http://crbug.com/57994 is fixed.
-void Checkpoint(const char* message, const base::TimeTicks& start_time) {
-  LOG(INFO) << message << " : "
-            << (base::TimeTicks::Now() - start_time).InMilliseconds()
-            << " ms" << std::flush;
-}
 
 // Note: WaitableEvent is not used for synchronization between the main thread
 // and history backend thread because the history subsystem posts tasks back
@@ -150,7 +142,6 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabled) {
 }
 
 // Test that disabling saving browser history really works.
-// TODO(phajdan.jr): remove debug code when http://crbug.com/57994 is fixed.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryDisabled) {
   base::TimeTicks start_time = base::TimeTicks::Now();
 
@@ -159,40 +150,28 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryDisabled) {
   EXPECT_TRUE(GetProfile()->GetHistoryService(Profile::EXPLICIT_ACCESS));
   EXPECT_FALSE(GetProfile()->GetHistoryService(Profile::IMPLICIT_ACCESS));
 
-  Checkpoint("Before waiting for history to load", start_time);
   ui_test_utils::WaitForHistoryToLoad(browser());
-  Checkpoint("After waiting for history to load", start_time);
   ExpectEmptyHistory();
-  Checkpoint("After checking history", start_time);
 
   ui_test_utils::NavigateToURL(browser(), GetTestUrl());
-  Checkpoint("After NavigateToURL", start_time);
   WaitForHistoryBackendToRun();
-  Checkpoint("After waiting for history backend to run", start_time);
   ExpectEmptyHistory();
-  Checkpoint("After second check", start_time);
 }
 
 // Test that changing the pref takes effect immediately
 // when the browser is running.
-// TODO(phajdan.jr): remove debug code when http://crbug.com/57994 is fixed.
 IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabledThenDisabled) {
   base::TimeTicks start_time = base::TimeTicks::Now();
 
   EXPECT_FALSE(GetPrefs()->GetBoolean(prefs::kSavingBrowserHistoryDisabled));
 
-  Checkpoint("Before waiting for history to load", start_time);
   ui_test_utils::WaitForHistoryToLoad(browser());
-  Checkpoint("After waiting for history to load", start_time);
 
   ui_test_utils::NavigateToURL(browser(), GetTestUrl());
-  Checkpoint("After first NavigateToURL", start_time);
   WaitForHistoryBackendToRun();
-  Checkpoint("After waiting for history backend to run", start_time);
 
   {
     std::vector<GURL> urls(GetHistoryContents());
-    Checkpoint("After first GetHistoryContents", start_time);
     ASSERT_EQ(1U, urls.size());
     EXPECT_EQ(GetTestUrl().spec(), urls[0].spec());
   }
@@ -200,14 +179,11 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, SavingHistoryEnabledThenDisabled) {
   GetPrefs()->SetBoolean(prefs::kSavingBrowserHistoryDisabled, true);
 
   ui_test_utils::NavigateToURL(browser(), GetTestUrl());
-  Checkpoint("After second NavigateToURL", start_time);
   WaitForHistoryBackendToRun();
-  Checkpoint("After waiting for history backend to run (2nd time)", start_time);
 
   {
     // No additional entries should be present in the history.
     std::vector<GURL> urls(GetHistoryContents());
-    Checkpoint("After second GetHistoryContents", start_time);
     ASSERT_EQ(1U, urls.size());
     EXPECT_EQ(GetTestUrl().spec(), urls[0].spec());
   }

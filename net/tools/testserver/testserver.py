@@ -3,8 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This is a simple HTTP/FTP/SYNC/TCP ECHO/UDP ECHO/ server used for testing
-Chrome.
+"""This is a simple HTTP/FTP/SYNC/TCP/UDP/ server used for testing Chrome.
 
 It supports several test URLs, as specified by the handlers in TestPageHandler.
 By default, it listens on an ephemeral port and sends the port number back to
@@ -21,6 +20,7 @@ import cgi
 import errno
 import optparse
 import os
+import random
 import re
 import select
 import simplejson
@@ -36,6 +36,7 @@ import zlib
 # Ignore deprecation warnings, they make our output more cluttered.
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+import echo_message
 import pyftpdlib.ftpserver
 import tlslite
 import tlslite.api
@@ -131,6 +132,9 @@ class SyncHTTPServer(StoppableHTTPServer):
     self._xmpp_server = xmppserver.XmppServer(
       self._xmpp_socket_map, ('localhost', 0))
     self.xmpp_port = self._xmpp_server.getsockname()[1]
+
+  def GetXmppServer(self):
+    return self._xmpp_server
 
   def HandleCommand(self, query, raw_request):
     return self._sync_handler.HandleCommand(query, raw_request)
@@ -1404,7 +1408,14 @@ class SyncPageHandler(BasePageHandler):
 
   def __init__(self, request, client_address, sync_http_server):
     get_handlers = [self.ChromiumSyncMigrationOpHandler,
-                    self.ChromiumSyncTimeHandler]
+                    self.ChromiumSyncTimeHandler,
+                    self.ChromiumSyncDisableNotificationsOpHandler,
+                    self.ChromiumSyncEnableNotificationsOpHandler,
+                    self.ChromiumSyncSendNotificationOpHandler,
+                    self.ChromiumSyncBirthdayErrorOpHandler,
+                    self.ChromiumSyncTransientErrorOpHandler,
+                    self.ChromiumSyncSyncTabsOpHandler]
+
     post_handlers = [self.ChromiumSyncCommandHandler,
                      self.ChromiumSyncTimeHandler]
     BasePageHandler.__init__(self, request, client_address,
@@ -1452,8 +1463,6 @@ class SyncPageHandler(BasePageHandler):
     return True
 
   def ChromiumSyncMigrationOpHandler(self):
-    """Handle a chromiumsync test-op command arriving via http.
-    """
     test_name = "/chromiumsync/migrate"
     if not self._ShouldHandleRequest(test_name):
       return False
@@ -1466,6 +1475,97 @@ class SyncPageHandler(BasePageHandler):
     self.end_headers()
     self.wfile.write(raw_reply)
     return True
+
+  def ChromiumSyncDisableNotificationsOpHandler(self):
+    test_name = "/chromiumsync/disablenotifications"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    self.server.GetXmppServer().DisableNotifications()
+    result = 200
+    raw_reply = ('<html><title>Notifications disabled</title>'
+                 '<H1>Notifications disabled</H1></html>')
+    self.send_response(result)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True;
+
+  def ChromiumSyncEnableNotificationsOpHandler(self):
+    test_name = "/chromiumsync/enablenotifications"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    self.server.GetXmppServer().EnableNotifications()
+    result = 200
+    raw_reply = ('<html><title>Notifications enabled</title>'
+                 '<H1>Notifications enabled</H1></html>')
+    self.send_response(result)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True;
+
+  def ChromiumSyncSendNotificationOpHandler(self):
+    test_name = "/chromiumsync/sendnotification"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    query = urlparse.urlparse(self.path)[4]
+    query_params = urlparse.parse_qs(query)
+    channel = ''
+    data = ''
+    if 'channel' in query_params:
+      channel = query_params['channel'][0]
+    if 'data' in query_params:
+      data = query_params['data'][0]
+    self.server.GetXmppServer().SendNotification(channel, data)
+    result = 200
+    raw_reply = ('<html><title>Notification sent</title>'
+                 '<H1>Notification sent with channel "%s" '
+                 'and data "%s"</H1></html>'
+                 % (channel, data))
+    self.send_response(result)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True;
+
+  def ChromiumSyncBirthdayErrorOpHandler(self):
+    test_name = "/chromiumsync/birthdayerror"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    result, raw_reply = self.server._sync_handler.HandleCreateBirthdayError()
+    self.send_response(result)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True;
+
+  def ChromiumSyncTransientErrorOpHandler(self):
+    test_name = "/chromiumsync/transienterror"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    result, raw_reply = self.server._sync_handler.HandleSetTransientError()
+    self.send_response(result)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True;
+
+  def ChromiumSyncSyncTabsOpHandler(self):
+    test_name = "/chromiumsync/synctabs"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    result, raw_reply = self.server._sync_handler.HandleSetSyncTabs()
+    self.send_response(result)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True;
 
 
 def MakeDataDir():
@@ -1494,10 +1594,19 @@ class TCPEchoHandler(SocketServer.BaseRequestHandler):
   """
 
   def handle(self):
-    data = self.request.recv(65536)
-    if not data:
+    """Handles the request from the client and constructs a response."""
+
+    data = self.request.recv(65536).strip()
+    # Verify the "echo request" message received from the client. Send back
+    # "echo response" message if "echo request" message is valid.
+    try:
+      return_data = echo_message.GetEchoResponseData(data)
+      if not return_data:
         return
-    self.request.send(data)
+    except ValueError:
+      return
+
+    self.request.send(return_data)
 
 
 class UDPEchoHandler(SocketServer.BaseRequestHandler):
@@ -1508,9 +1617,19 @@ class UDPEchoHandler(SocketServer.BaseRequestHandler):
   """
 
   def handle(self):
+    """Handles the request from the client and constructs a response."""
+
     data = self.request[0].strip()
     socket = self.request[1]
-    socket.sendto(data, self.client_address)
+    # Verify the "echo request" message received from the client. Send back
+    # "echo response" message if "echo request" message is valid.
+    try:
+      return_data = echo_message.GetEchoResponseData(data)
+      if not return_data:
+        return
+    except ValueError:
+      return
+    socket.sendto(return_data, self.client_address)
 
 
 class FileMultiplexer:
@@ -1577,10 +1696,16 @@ def main(options, args):
     server_data['port'] = server.server_port
     server_data['xmpp_port'] = server.xmpp_port
   elif options.server_type == SERVER_TCP_ECHO:
+    # Used for generating the key (randomly) that encodes the "echo request"
+    # message.
+    random.seed()
     server = TCPEchoServer(('127.0.0.1', port), TCPEchoHandler)
     print 'Echo TCP server started on port %d...' % server.server_port
     server_data['port'] = server.server_port
   elif options.server_type == SERVER_UDP_ECHO:
+    # Used for generating the key (randomly) that encodes the "echo request"
+    # message.
+    random.seed()
     server = UDPEchoServer(('127.0.0.1', port), UDPEchoHandler)
     print 'Echo UDP server started on port %d...' % server.server_port
     server_data['port'] = server.server_port

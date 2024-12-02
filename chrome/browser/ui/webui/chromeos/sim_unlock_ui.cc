@@ -93,16 +93,16 @@ class SimUnlockHandler : public WebUIMessageHandler,
   void Init(TabContents* contents);
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // NetworkLibrary::NetworkDeviceObserver implementation.
-  virtual void OnNetworkDeviceChanged(NetworkLibrary* cros,
-                                      const NetworkDevice* device);
+  virtual void OnNetworkDeviceSimLockChanged(
+      NetworkLibrary* cros, const NetworkDevice* device) OVERRIDE;
 
   // NetworkLibrary::PinOperationObserver implementation.
   virtual void OnPinOperationCompleted(NetworkLibrary* cros,
-                                       PinOperationError error);
+                                       PinOperationError error) OVERRIDE;
 
  private:
   // Should keep this state enum in sync with similar one in JS code.
@@ -213,6 +213,8 @@ class SimUnlockHandler : public WebUIMessageHandler,
                   const std::string& error_msg);
 
   TabContents* tab_contents_;
+
+  // Dialog internal state.
   SimUnlockState state_;
 
   // Path of the Cellular device that we monitor property updates from.
@@ -223,6 +225,12 @@ class SimUnlockHandler : public WebUIMessageHandler,
 
   // New PIN value for the case when we unblock SIM card or change PIN.
   std::string new_pin_;
+
+  // True if there's a pending PIN operation.
+  // That means that SIM lock state change will be received 2 times:
+  // OnNetworkDeviceSimLockChanged and OnPinOperationCompleted.
+  // First one should be ignored.
+  bool pending_pin_operation_;
 
   DISALLOW_COPY_AND_ASSIGN(SimUnlockHandler);
 };
@@ -306,7 +314,8 @@ void SimUnlockUIHTMLSource::StartDataRequest(const std::string& path,
 SimUnlockHandler::SimUnlockHandler()
     : tab_contents_(NULL),
       state_(SIM_UNLOCK_LOADING),
-      dialog_mode_(SimDialogDelegate::SIM_DIALOG_UNLOCK) {
+      dialog_mode_(SimDialogDelegate::SIM_DIALOG_UNLOCK),
+      pending_pin_operation_(false) {
   const chromeos::NetworkDevice* cellular = GetCellularDevice();
   // One could just call us directly via chrome://sim-unlock.
   if (cellular) {
@@ -348,17 +357,21 @@ void SimUnlockHandler::RegisterMessages() {
       NewCallback(this, &SimUnlockHandler::HandleSimStatusInitialize));
 }
 
-void SimUnlockHandler::OnNetworkDeviceChanged(NetworkLibrary* cros,
-                                              const NetworkDevice* device) {
-  chromeos::SIMLockState lock_state = device->sim_lock_state();
+void SimUnlockHandler::OnNetworkDeviceSimLockChanged(
+    NetworkLibrary* cros, const NetworkDevice* device) {
+  chromeos::SimLockState lock_state = device->sim_lock_state();
   int retries_left = device->sim_retries_left();
-  VLOG(1) << "OnNetworkDeviceChanged, lock: " << lock_state
+  VLOG(1) << "OnNetworkDeviceSimLockChanged, lock: " << lock_state
           << ", retries: " << retries_left;
-  ProcessSimCardState(GetCellularDevice());
+  // There's a pending PIN operation.
+  // Wait for it to finish and refresh state then.
+  if (!pending_pin_operation_)
+    ProcessSimCardState(GetCellularDevice());
 }
 
 void SimUnlockHandler::OnPinOperationCompleted(NetworkLibrary* cros,
                                                PinOperationError error) {
+  pending_pin_operation_ = false;
   DCHECK(cros);
   const NetworkDevice* cellular = cros->FindCellularDevice();
   DCHECK(cellular);
@@ -407,7 +420,8 @@ void SimUnlockHandler::EnterCode(const std::string& code,
   CHECK(lib);
 
   const NetworkDevice* cellular = GetCellularDevice();
-  chromeos::SIMLockState lock_state = cellular->sim_lock_state();
+  chromeos::SimLockState lock_state = cellular->sim_lock_state();
+  pending_pin_operation_ = true;
 
   switch (code_type) {
     case CODE_PIN:
@@ -548,7 +562,7 @@ void SimUnlockHandler::ProcessSimCardState(
     const chromeos::NetworkDevice* cellular) {
   std::string error_msg;
   if (cellular) {
-    chromeos::SIMLockState lock_state = cellular->sim_lock_state();
+    chromeos::SimLockState lock_state = cellular->sim_lock_state();
     int retries_left = cellular->sim_retries_left();
     VLOG(1) << "Current state: " << state_ << " lock_state: " << lock_state
             << " retries: " << retries_left;
@@ -656,7 +670,8 @@ SimUnlockUI::SimUnlockUI(TabContents* contents) : ChromeWebUI(contents) {
   SimUnlockUIHTMLSource* html_source = new SimUnlockUIHTMLSource();
 
   // Set up the chrome://sim-unlock/ source.
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 
 }  // namespace chromeos

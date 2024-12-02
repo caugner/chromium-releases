@@ -26,7 +26,8 @@ BackgroundContents::BackgroundContents(SiteInstance* site_instance,
                                        int routing_id,
                                        Delegate* delegate)
     : delegate_(delegate) {
-  Profile* profile = site_instance->browsing_instance()->profile();
+  Profile* profile = Profile::FromBrowserContext(
+      site_instance->browsing_instance()->browser_context());
 
   // TODO(rafaelw): Implement correct session storage.
   render_view_host_ = new RenderViewHost(site_instance, this, routing_id, NULL);
@@ -51,7 +52,8 @@ BackgroundContents::BackgroundContents()
 BackgroundContents::~BackgroundContents() {
   if (!render_view_host_)   // Will be null for unit tests.
     return;
-  Profile* profile = render_view_host_->process()->profile();
+  Profile* profile = Profile::FromBrowserContext(
+      render_view_host_->process()->browser_context());
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
       Source<Profile>(profile),
@@ -91,7 +93,8 @@ void BackgroundContents::DidNavigate(
   // extent a background page will be opened but will remain at about:blank.
   url_ = params.url;
 
-  Profile* profile = render_view_host->process()->profile();
+  Profile* profile = Profile::FromBrowserContext(
+      render_view_host->process()->browser_context());
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
       Source<Profile>(profile),
@@ -146,7 +149,8 @@ gfx::NativeWindow BackgroundContents::GetDialogRootWindow() {
 }
 
 void BackgroundContents::Close(RenderViewHost* render_view_host) {
-  Profile* profile = render_view_host->process()->profile();
+  Profile* profile = Profile::FromBrowserContext(
+      render_view_host->process()->browser_context());
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_CLOSED,
       Source<Profile>(profile),
@@ -157,7 +161,8 @@ void BackgroundContents::Close(RenderViewHost* render_view_host) {
 void BackgroundContents::RenderViewGone(RenderViewHost* rvh,
                                         base::TerminationStatus status,
                                         int error_code) {
-  Profile* profile = rvh->process()->profile();
+  Profile* profile =
+      Profile::FromBrowserContext(rvh->process()->browser_context());
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED,
       Source<Profile>(profile),
@@ -171,7 +176,8 @@ void BackgroundContents::RenderViewGone(RenderViewHost* rvh,
 }
 
 RendererPreferences BackgroundContents::GetRendererPrefs(
-    Profile* profile) const {
+    content::BrowserContext* browser_context) const {
+  Profile* profile = Profile::FromBrowserContext(browser_context);
   RendererPreferences preferences;
   renderer_preferences_util::UpdateFromSystemSettings(&preferences, profile);
   return preferences;
@@ -180,20 +186,32 @@ RendererPreferences BackgroundContents::GetRendererPrefs(
 WebPreferences BackgroundContents::GetWebkitPrefs() {
   // TODO(rafaelw): Consider enabling the webkit_prefs.dom_paste_enabled for
   // apps.
-  Profile* profile = render_view_host_->process()->profile();
-  return RenderViewHostDelegateHelper::GetWebkitPrefs(profile,
-                                                      false);  // is_web_ui
+  Profile* profile = Profile::FromBrowserContext(
+      render_view_host_->process()->browser_context());
+  WebPreferences prefs = RenderViewHostDelegateHelper::GetWebkitPrefs(profile,
+                                                                      false);
+  // Disable all kinds of acceleration for background pages.
+  // See http://crbug.com/96005 and http://crbug.com/96006
+  prefs.force_compositing_mode = false;
+  prefs.accelerated_compositing_enabled = false;
+  prefs.accelerated_2d_canvas_enabled = false;
+  prefs.accelerated_video_enabled = false;
+  prefs.accelerated_drawing_enabled = false;
+  prefs.accelerated_plugins_enabled = false;
+
+  return prefs;
 }
 
 void BackgroundContents::CreateNewWindow(
     int route_id,
     const ViewHostMsg_CreateWindow_Params& params) {
+  Profile* profile = Profile::FromBrowserContext(
+      render_view_host_->process()->browser_context());
   delegate_view_helper_.CreateNewWindow(
       route_id,
-      render_view_host_->process()->profile(),
+      profile,
       render_view_host_->site_instance(),
-      ChromeWebUIFactory::GetInstance()->GetWebUIType(
-          render_view_host_->process()->profile(), url_),
+      ChromeWebUIFactory::GetInstance()->GetWebUIType(profile, url_),
       this,
       params.window_container_type,
       params.frame_name);

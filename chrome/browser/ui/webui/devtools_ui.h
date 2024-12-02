@@ -8,14 +8,16 @@
 
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
 
+class Profile;
+
 class DevToolsUI : public ChromeWebUI {
  public:
-  static void RegisterDevToolsDataSource();
+  static void RegisterDevToolsDataSource(Profile* profile);
 
   explicit DevToolsUI(TabContents* contents);
 
   // WebUI
-  virtual void RenderViewCreated(RenderViewHost* render_view_host);
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DevToolsUI);

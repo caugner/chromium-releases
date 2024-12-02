@@ -8,8 +8,9 @@
 #include "base/i18n/rtl.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/download/download_item.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/common/time_format.h"
+#include "content/browser/download/download_item.h"
 #include "content/browser/download/save_package.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -56,7 +57,9 @@ string16 DownloadItemModel::GetStatusText() {
   string16 status_text;
   switch (download_->state()) {
     case DownloadItem::IN_PROGRESS:
-      if (download_->IsCrxInstallRuning()) {
+      if (ChromeDownloadManagerDelegate::IsExtensionDownload(download_) &&
+          download_->all_data_saved() &&
+          download_->state() == DownloadItem::IN_PROGRESS) {
         // The download is a CRX (app, extension, theme, ...) and it is
         // being unpacked and validated.
         status_text = l10n_util::GetStringUTF16(

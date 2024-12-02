@@ -23,7 +23,6 @@
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
-#include "chrome/browser/ui/gtk/gtk_floating_container.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/nine_box.h"
@@ -41,6 +40,8 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "ui/base/gtk/gtk_floating_container.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -48,11 +49,11 @@ namespace {
 
 // Used as the color of the text in the entry box and the text for the results
 // label for failure searches.
-const GdkColor kEntryTextColor = gtk_util::kGdkBlack;
+const GdkColor kEntryTextColor = ui::kGdkBlack;
 
 // Used as the color of the background of the entry box and the background of
 // the find label for successful searches.
-const GdkColor kEntryBackgroundColor = gtk_util::kGdkWhite;
+const GdkColor kEntryBackgroundColor = ui::kGdkWhite;
 const GdkColor kFindFailureBackgroundColor = GDK_COLOR_RGB(255, 102, 102);
 const GdkColor kFindSuccessTextColor = GDK_COLOR_RGB(178, 178, 178);
 
@@ -173,10 +174,10 @@ void BuildBorder(GtkWidget* child,
 
 }  // namespace
 
-FindBarGtk::FindBarGtk(Browser* browser)
-    : browser_(browser),
-      window_(static_cast<BrowserWindowGtk*>(browser->window())),
-      theme_service_(GtkThemeService::GetFrom(browser->profile())),
+FindBarGtk::FindBarGtk(BrowserWindowGtk* window)
+    : browser_(window->browser()),
+      window_(window),
+      theme_service_(GtkThemeService::GetFrom(browser_->profile())),
       container_width_(-1),
       container_height_(-1),
       match_label_failure_(false),
@@ -203,7 +204,7 @@ FindBarGtk::FindBarGtk(Browser* browser)
   g_signal_connect(text_entry_, "button-press-event",
                    G_CALLBACK(OnButtonPress), this);
   g_signal_connect(text_entry_, "move-cursor", G_CALLBACK(OnMoveCursor), this);
-  g_signal_connect(text_entry_, "activate", G_CALLBACK(OnActivate), this);
+  g_signal_connect(text_entry_, "activate", G_CALLBACK(OnActivateThunk), this);
   g_signal_connect(text_entry_, "direction-changed",
                    G_CALLBACK(OnWidgetDirectionChanged), this);
   g_signal_connect(text_entry_, "focus-in-event",
@@ -501,7 +502,7 @@ void FindBarGtk::Observe(int type,
     gtk_misc_set_alignment(GTK_MISC(match_count_label_), 0.5, 0.5);
   } else {
     gtk_widget_modify_cursor(
-        text_entry_, &gtk_util::kGdkBlack, &gtk_util::kGdkGray);
+        text_entry_, &ui::kGdkBlack, &ui::kGdkGray);
     gtk_widget_modify_base(text_entry_, GTK_STATE_NORMAL,
                            &kEntryBackgroundColor);
     gtk_widget_modify_text(text_entry_, GTK_STATE_NORMAL,
@@ -962,9 +963,8 @@ void FindBarGtk::OnMoveCursor(GtkEntry* entry, GtkMovementStep step, gint count,
   }
 }
 
-// static
-void FindBarGtk::OnActivate(GtkEntry* entry, FindBarGtk* bar) {
-  bar->FindEntryTextInContents(true);
+void FindBarGtk::OnActivate(GtkWidget* entry) {
+  FindEntryTextInContents(true);
 }
 
 // static

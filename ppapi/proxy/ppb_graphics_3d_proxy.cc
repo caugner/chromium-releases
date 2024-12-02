@@ -18,7 +18,7 @@ using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_Graphics3D_API;
 using ppapi::thunk::ResourceCreationAPI;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -323,7 +323,7 @@ InterfaceProxy* CreateGraphics3DProxy(Dispatcher* dispatcher,
 }  // namespace
 
 Graphics3D::Graphics3D(const HostResource& resource)
-    : PluginResource(resource) {
+    : Resource(resource) {
 }
 
 Graphics3D::~Graphics3D() {
@@ -331,11 +331,13 @@ Graphics3D::~Graphics3D() {
 }
 
 bool Graphics3D::Init() {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance());
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForResource(this);
   if (!dispatcher)
     return false;
 
   command_buffer_.reset(new CommandBuffer(host_resource(), dispatcher));
+  if (!command_buffer_->Initialize(kCommandBufferSize))
+    return false;
 
   return CreateGLES2Impl(kCommandBufferSize, kTransferBufferSize);
 }
@@ -387,7 +389,7 @@ int32 Graphics3D::DoSwapBuffers() {
   IPC::Message* msg = new PpapiHostMsg_PPBGraphics3D_SwapBuffers(
       INTERFACE_ID_PPB_GRAPHICS_3D, host_resource());
   msg->set_unblock(true);
-  GetDispatcher()->Send(msg);
+  PluginDispatcher::GetForResource(this)->Send(msg);
 
   gles2_impl()->SwapBuffers();
   return PP_OK_COMPLETIONPENDING;
@@ -395,7 +397,8 @@ int32 Graphics3D::DoSwapBuffers() {
 
 PPB_Graphics3D_Proxy::PPB_Graphics3D_Proxy(Dispatcher* dispatcher,
                                            const void* target_interface)
-    : InterfaceProxy(dispatcher, target_interface) {
+    : InterfaceProxy(dispatcher, target_interface),
+      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 PPB_Graphics3D_Proxy::~PPB_Graphics3D_Proxy() {
@@ -404,8 +407,8 @@ PPB_Graphics3D_Proxy::~PPB_Graphics3D_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_Graphics3D_Proxy::GetInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_Graphics3D_Thunk(),
-    PPB_GRAPHICS_3D_DEV_INTERFACE,
+    thunk::GetPPB_Graphics3D_Thunk(),
+    PPB_GRAPHICS_3D_INTERFACE,
     INTERFACE_ID_PPB_GRAPHICS_3D,
     false,
     &CreateGraphics3DProxy,
@@ -416,7 +419,6 @@ const InterfaceProxy::Info* PPB_Graphics3D_Proxy::GetInfo() {
 // static
 PP_Resource PPB_Graphics3D_Proxy::CreateProxyResource(
     PP_Instance instance,
-    PP_Config3D_Dev config,
     PP_Resource share_context,
     const int32_t* attrib_list) {
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
@@ -431,24 +433,24 @@ PP_Resource PPB_Graphics3D_Proxy::CreateProxyResource(
   std::vector<int32_t> attribs;
   if (attrib_list) {
     for (const int32_t* attr = attrib_list;
-         *attr != PP_GRAPHICS3DATTRIB_NONE;
-         ++attr) {
-      attribs.push_back(*attr);
+         attr[0] != PP_GRAPHICS3DATTRIB_NONE;
+         attr += 2) {
+      attribs.push_back(attr[0]);
+      attribs.push_back(attr[1]);
     }
-    attribs.push_back(PP_GRAPHICS3DATTRIB_NONE);
   }
+  attribs.push_back(PP_GRAPHICS3DATTRIB_NONE);
 
   HostResource result;
   dispatcher->Send(new PpapiHostMsg_PPBGraphics3D_Create(
-      INTERFACE_ID_PPB_GRAPHICS_3D, instance, config, attribs, &result));
+      INTERFACE_ID_PPB_GRAPHICS_3D, instance, attribs, &result));
   if (result.is_null())
     return 0;
 
-  linked_ptr<Graphics3D> graphics_3d(new Graphics3D(result));
+  scoped_refptr<Graphics3D> graphics_3d(new Graphics3D(result));
   if (!graphics_3d->Init())
     return 0;
-
-  return PluginResourceTracker::GetInstance()->AddResource(graphics_3d);
+  return graphics_3d->GetReference();
 }
 
 bool PPB_Graphics3D_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -483,18 +485,16 @@ bool PPB_Graphics3D_Proxy::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void PPB_Graphics3D_Proxy::OnMsgCreate(PP_Instance instance,
-                                       PP_Config3D_Dev config,
                                        const std::vector<int32_t>& attribs,
                                        HostResource* result) {
-  if (attribs.empty() || attribs.back() != 0)
+  if (attribs.empty() || attribs.back() != PP_GRAPHICS3DATTRIB_NONE)
     return;  // Bad message.
 
   EnterFunctionNoLock<ResourceCreationAPI> enter(instance, true);
   if (enter.succeeded()) {
     result->SetHostResource(
         instance,
-        enter.functions()->CreateGraphics3DRaw(instance, config, 0,
-                                               &attribs.front()));
+        enter.functions()->CreateGraphics3DRaw(instance, 0, &attribs.front()));
   }
 }
 
@@ -583,19 +583,11 @@ void PPB_Graphics3D_Proxy::OnMsgGetTransferBuffer(
 }
 
 void PPB_Graphics3D_Proxy::OnMsgSwapBuffers(const HostResource& context) {
-  CompletionCallback callback = callback_factory_.NewOptionalCallback(
+  EnterHostFromHostResourceForceCallback<PPB_Graphics3D_API> enter(
+      context, callback_factory_,
       &PPB_Graphics3D_Proxy::SendSwapBuffersACKToPlugin, context);
-
-  EnterHostFromHostResource<PPB_Graphics3D_API> enter(context);
-  int32_t result = PP_ERROR_BADRESOURCE;
   if (enter.succeeded())
-    result = enter.object()->SwapBuffers(callback.pp_completion_callback());
-  if (result != PP_OK_COMPLETIONPENDING) {
-    // There was some error, so we won't get a flush callback. We need to now
-    // issue the ACK to the plugin hears about the error. This will also clean
-    // up the data associated with the callback.
-    callback.Run(result);
-  }
+    enter.SetResult(enter.object()->SwapBuffers(enter.callback()));
 }
 
 void PPB_Graphics3D_Proxy::OnMsgSwapBuffersACK(const HostResource& resource,
@@ -613,5 +605,5 @@ void PPB_Graphics3D_Proxy::SendSwapBuffersACKToPlugin(
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 

@@ -15,6 +15,7 @@
 #include "base/sync_socket.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
+#include "media/video/capture/video_capture.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ppapi/c/dev/pp_video_dev.h"
 #include "ppapi/c/pp_completion_callback.h"
@@ -28,12 +29,16 @@
 
 class AudioMessageFilter;
 class GURL;
-class P2PSocketDispatcher;
 class SkBitmap;
+class Task;
 
 namespace base {
 class MessageLoopProxy;
 class Time;
+}
+
+namespace content {
+class P2PSocketDispatcher;
 }
 
 namespace fileapi {
@@ -47,7 +52,6 @@ class Rect;
 
 namespace gpu {
 class CommandBuffer;
-class CommandBufferHelper;
 }
 
 namespace ppapi {
@@ -160,12 +164,7 @@ class PluginDelegate {
     virtual ~PlatformContext3D() {}
 
     // Initialize the context.
-    virtual bool Init() = 0;
-
-    // Set an optional callback that will be invoked when the side effects of
-    // a SwapBuffers call become visible to the compositor. Takes ownership
-    // of the callback.
-    virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;
+    virtual bool Init(const int32* attrib_list) = 0;
 
     // If the plugin instance is backed by an OpenGL, return its ID in the
     // compositors namespace. Otherwise return 0. Returns 0 by default.
@@ -183,6 +182,10 @@ class PluginDelegate {
     // Set an optional callback that will be invoked when the context is lost
     // (e.g. gpu process crash). Takes ownership of the callback.
     virtual void SetContextLostCallback(Callback0::Type* callback) = 0;
+
+    // Run the task once the channel has been flushed. Takes care of deleting
+    // the task whether the echo succeeds or not.
+    virtual bool Echo(Task* task) = 0;
   };
 
   class PlatformAudio {
@@ -219,6 +222,11 @@ class PluginDelegate {
   class PlatformVideoDecoder : public media::VideoDecodeAccelerator {
    protected:
     virtual ~PlatformVideoDecoder() {}
+  };
+
+  class PlatformVideoCapture : public media::VideoCapture {
+   public:
+    virtual ~PlatformVideoCapture() {}
   };
 
   // Provides access to the ppapi broker.
@@ -263,10 +271,13 @@ class PluginDelegate {
   virtual PlatformContext3D* CreateContext3D() = 0;
 
   // The caller will own the pointer returned from this.
+  virtual PlatformVideoCapture* CreateVideoCapture(
+      media::VideoCapture::EventHandler* handler) = 0;
+
+  // The caller will own the pointer returned from this.
   virtual PlatformVideoDecoder* CreateVideoDecoder(
       media::VideoDecodeAccelerator::Client* client,
-      int32 command_buffer_route_id,
-      gpu::CommandBufferHelper* cmd_buffer_helper) = 0;
+      int32 command_buffer_route_id) = 0;
 
   // The caller is responsible for calling Shutdown() on the returned pointer
   // to clean up the corresponding resources allocated during this call.
@@ -355,6 +366,10 @@ class PluginDelegate {
   virtual base::PlatformFileError GetDirContents(const PepperFilePath& path,
                                                  DirContents* contents) = 0;
 
+  // Synchronously returns the platform file path for a filesystem URL.
+  virtual void SyncGetFileSystemPlatformPath(const GURL& url,
+                                             FilePath* platform_path) = 0;
+
   // Returns a MessageLoopProxy instance associated with the message loop
   // of the file thread in this renderer.
   virtual scoped_refptr<base::MessageLoopProxy>
@@ -406,9 +421,6 @@ class PluginDelegate {
   // Sets restrictions on how the content can be used (i.e. no print/copy).
   virtual void SetContentRestriction(int restrictions) = 0;
 
-  // Tells the browser that the PDF has an unsupported feature.
-  virtual void HasUnsupportedFeature() = 0;
-
   // Tells the browser to bring up SaveAs dialog to save specified URL.
   virtual void SaveURLAs(const GURL& url) = 0;
 
@@ -417,7 +429,7 @@ class PluginDelegate {
   //
   // TODO(sergeyu): Stop using GetP2PSocketDispatcher() in remoting
   // client and remove it from here.
-  virtual P2PSocketDispatcher* GetP2PSocketDispatcher() = 0;
+  virtual content::P2PSocketDispatcher* GetP2PSocketDispatcher() = 0;
 
   // Creates P2PTransport object.
   virtual webkit_glue::P2PTransport* CreateP2PTransport() = 0;

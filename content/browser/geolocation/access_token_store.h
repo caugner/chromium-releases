@@ -23,19 +23,26 @@
 #include "googleurl/src/gurl.h"
 
 class GURL;
-class PrefService;
+
+namespace net {
+class URLRequestContextGetter;
+}
 
 // Provides storage for the access token used in the network request.
 class AccessTokenStore : public base::RefCountedThreadSafe<AccessTokenStore>,
                          public CancelableRequestProvider {
  public:
-  static void RegisterPrefs(PrefService* prefs);
 
   // Map of server URLs to associated access token.
   typedef std::map<GURL, string16> AccessTokenSet;
-  typedef Callback1<AccessTokenSet>::Type LoadAccessTokensCallbackType;
-  // callback will be invoked once, after existing access tokens have
-  // been loaded from persistent store. Takes ownership of callback.
+  typedef Callback2<AccessTokenSet, net::URLRequestContextGetter*>::Type
+      LoadAccessTokensCallbackType;
+  // |callback| will be invoked once per LoadAccessTokens call, after existing
+  // access tokens have been loaded from persistent store. As a convenience the
+  // URLRequestContextGetter is also supplied as an argument in |callback|, as
+  // in Chrome the call to obtain this must also be performed on the UI thread
+  // so it is efficient to piggyback it onto this request.
+  // Takes ownership of |callback|.
   // Returns a handle which can subsequently be used with CancelRequest().
   Handle LoadAccessTokens(CancelableRequestConsumerBase* consumer,
                           LoadAccessTokensCallbackType* callback);
@@ -54,8 +61,5 @@ class AccessTokenStore : public base::RefCountedThreadSafe<AccessTokenStore>,
  private:
   DISALLOW_COPY_AND_ASSIGN(AccessTokenStore);
 };
-
-// Creates a new access token store backed by the global chome prefs.
-AccessTokenStore* NewChromePrefsAccessTokenStore();
 
 #endif  // CONTENT_BROWSER_GEOLOCATION_ACCESS_TOKEN_STORE_H_

@@ -16,9 +16,12 @@
 #include "content/common/renderer_preferences.h"
 #include "content/common/webkit_param_traits.h"
 #include "content/common/window_container_type.h"
+#include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/base/media_log_event.h"
 #include "net/base/host_port_pair.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
@@ -34,7 +37,7 @@
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/webaccessibility.h"
 #include "webkit/plugins/npapi/webplugin.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_MACOSX)
 #include "content/common/font_descriptor_mac.h"
@@ -44,25 +47,67 @@
 #ifndef CONTENT_COMMON_VIEW_MESSAGES_H_
 #define CONTENT_COMMON_VIEW_MESSAGES_H_
 
-struct ViewHostMsg_AccessibilityNotification_Type {
+struct ViewHostMsg_AccEvent {
   enum Value {
+    // The active descendant of a node has changed.
+    ACTIVE_DESCENDANT_CHANGED,
+
+    // An alert appeared.
+    ALERT,
+
     // The node checked state has changed.
-    NOTIFICATION_TYPE_CHECK_STATE_CHANGED,
+    CHECK_STATE_CHANGED,
 
     // The node tree structure has changed.
-    NOTIFICATION_TYPE_CHILDREN_CHANGED,
+    CHILDREN_CHANGED,
 
     // The node in focus has changed.
-    NOTIFICATION_TYPE_FOCUS_CHANGED,
+    FOCUS_CHANGED,
+
+    // Page layout has completed.
+    LAYOUT_COMPLETE,
+
+    // Content within a part of the page marked as a live region changed.
+    LIVE_REGION_CHANGED,
 
     // The document node has loaded.
-    NOTIFICATION_TYPE_LOAD_COMPLETE,
+    LOAD_COMPLETE,
 
-    // The node value has changed.
-    NOTIFICATION_TYPE_VALUE_CHANGED,
+    // A menu list value changed.
+    MENU_LIST_VALUE_CHANGED,
+
+    // An object was shown.
+    OBJECT_SHOW,
+
+    // An object was hidden.
+    OBJECT_HIDE,
+
+    // The number of rows in a grid or tree control changed.
+    ROW_COUNT_CHANGED,
+
+    // A row in a grid or tree control was collapsed.
+    ROW_COLLAPSED,
+
+    // A row in a grid or tree control was expanded.
+    ROW_EXPANDED,
+
+    // The document was scrolled to an anchor node.
+    SCROLLED_TO_ANCHOR,
+
+    // One or more selected children of this node have changed.
+    SELECTED_CHILDREN_CHANGED,
 
     // The text cursor or selection changed.
-    NOTIFICATION_TYPE_SELECTED_TEXT_CHANGED,
+    SELECTED_TEXT_CHANGED,
+
+    // Text was inserted in a node with text content.
+    TEXT_INSERTED,
+
+    // Text was removed in a node with text content.
+    TEXT_REMOVED,
+
+    // The node value has changed.
+    VALUE_CHANGED,
   };
 };
 
@@ -157,20 +202,24 @@ IPC_ENUM_TRAITS(NavigationGesture)
 IPC_ENUM_TRAITS(PageZoom::Function)
 IPC_ENUM_TRAITS(RendererPreferencesHintingEnum)
 IPC_ENUM_TRAITS(RendererPreferencesSubpixelRenderingEnum)
-IPC_ENUM_TRAITS(ViewHostMsg_AccessibilityNotification_Type::Value)
+IPC_ENUM_TRAITS(ViewHostMsg_AccEvent::Value)
 IPC_ENUM_TRAITS(ViewHostMsg_RunFileChooser_Mode::Value)
 IPC_ENUM_TRAITS(ViewMsg_Navigate_Type::Value)
 IPC_ENUM_TRAITS(ViewMsg_StopFinding_Params::Action)
 IPC_ENUM_TRAITS(WebKit::WebContextMenuData::MediaType)
 IPC_ENUM_TRAITS(WebKit::WebMediaPlayerAction::Type)
 IPC_ENUM_TRAITS(WebKit::WebPopupType)
+IPC_ENUM_TRAITS(WebKit::WebTextDirection)
 IPC_ENUM_TRAITS(ui::TextInputType)
 IPC_ENUM_TRAITS(WebMenuItem::Type)
 IPC_ENUM_TRAITS(WindowContainerType)
+IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::BoolAttribute)
+IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::FloatAttribute)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::IntAttribute)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::Role)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::State)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::StringAttribute)
+IPC_ENUM_TRAITS(media::MediaLogEvent::Type)
 
 IPC_STRUCT_TRAITS_BEGIN(ContextMenuParams)
   IPC_STRUCT_TRAITS_MEMBER(media_type)
@@ -188,6 +237,7 @@ IPC_STRUCT_TRAITS_BEGIN(ContextMenuParams)
   IPC_STRUCT_TRAITS_MEMBER(selection_text)
   IPC_STRUCT_TRAITS_MEMBER(misspelled_word)
   IPC_STRUCT_TRAITS_MEMBER(dictionary_suggestions)
+  IPC_STRUCT_TRAITS_MEMBER(speech_input_enabled)
   IPC_STRUCT_TRAITS_MEMBER(spellcheck_enabled)
   IPC_STRUCT_TRAITS_MEMBER(is_editable)
 #if defined(OS_MACOSX)
@@ -276,6 +326,12 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(sans_serif_font_family)
   IPC_STRUCT_TRAITS_MEMBER(cursive_font_family)
   IPC_STRUCT_TRAITS_MEMBER(fantasy_font_family)
+  IPC_STRUCT_TRAITS_MEMBER(standard_font_family_map)
+  IPC_STRUCT_TRAITS_MEMBER(fixed_font_family_map)
+  IPC_STRUCT_TRAITS_MEMBER(serif_font_family_map)
+  IPC_STRUCT_TRAITS_MEMBER(sans_serif_font_family_map)
+  IPC_STRUCT_TRAITS_MEMBER(cursive_font_family_map)
+  IPC_STRUCT_TRAITS_MEMBER(fantasy_font_family_map)
   IPC_STRUCT_TRAITS_MEMBER(default_font_size)
   IPC_STRUCT_TRAITS_MEMBER(default_fixed_font_size)
   IPC_STRUCT_TRAITS_MEMBER(minimum_font_size)
@@ -320,6 +376,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(show_fps_counter)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(force_compositing_mode)
+  IPC_STRUCT_TRAITS_MEMBER(allow_webui_compositing)
   IPC_STRUCT_TRAITS_MEMBER(composite_to_texture_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_2d_canvas_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_drawing_enabled)
@@ -361,11 +418,14 @@ IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebAccessibility)
   IPC_STRUCT_TRAITS_MEMBER(location)
   IPC_STRUCT_TRAITS_MEMBER(string_attributes)
   IPC_STRUCT_TRAITS_MEMBER(int_attributes)
+  IPC_STRUCT_TRAITS_MEMBER(float_attributes)
+  IPC_STRUCT_TRAITS_MEMBER(bool_attributes)
   IPC_STRUCT_TRAITS_MEMBER(children)
   IPC_STRUCT_TRAITS_MEMBER(indirect_child_ids)
   IPC_STRUCT_TRAITS_MEMBER(html_attributes)
   IPC_STRUCT_TRAITS_MEMBER(line_breaks)
   IPC_STRUCT_TRAITS_MEMBER(cell_ids)
+  IPC_STRUCT_TRAITS_MEMBER(unique_cell_ids)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(webkit_glue::WebCookie)
@@ -388,7 +448,7 @@ IPC_STRUCT_TRAITS_BEGIN(webkit::npapi::WebPluginGeometry)
   IPC_STRUCT_TRAITS_MEMBER(visible)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(webkit::npapi::WebPluginMimeType)
+IPC_STRUCT_TRAITS_BEGIN(webkit::WebPluginMimeType)
   IPC_STRUCT_TRAITS_MEMBER(mime_type)
   IPC_STRUCT_TRAITS_MEMBER(file_extensions)
   IPC_STRUCT_TRAITS_MEMBER(description)
@@ -396,13 +456,21 @@ IPC_STRUCT_TRAITS_BEGIN(webkit::npapi::WebPluginMimeType)
   IPC_STRUCT_TRAITS_MEMBER(additional_param_values)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(webkit::npapi::WebPluginInfo)
+IPC_STRUCT_TRAITS_BEGIN(webkit::WebPluginInfo)
   IPC_STRUCT_TRAITS_MEMBER(name)
   IPC_STRUCT_TRAITS_MEMBER(path)
   IPC_STRUCT_TRAITS_MEMBER(version)
   IPC_STRUCT_TRAITS_MEMBER(desc)
   IPC_STRUCT_TRAITS_MEMBER(mime_types)
   IPC_STRUCT_TRAITS_MEMBER(enabled)
+  IPC_STRUCT_TRAITS_MEMBER(type)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(media::MediaLogEvent)
+  IPC_STRUCT_TRAITS_MEMBER(id)
+  IPC_STRUCT_TRAITS_MEMBER(type)
+  IPC_STRUCT_TRAITS_MEMBER(params)
+  IPC_STRUCT_TRAITS_MEMBER(time)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Params)
@@ -539,8 +607,7 @@ IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewHostMsg_AccessibilityNotification_Params)
   // Type of notification.
-  IPC_STRUCT_MEMBER(ViewHostMsg_AccessibilityNotification_Type::Value,
-                    notification_type)
+  IPC_STRUCT_MEMBER(ViewHostMsg_AccEvent::Value, notification_type)
 
   // The accessibility node tree.
   IPC_STRUCT_MEMBER(webkit_glue::WebAccessibility, acc_obj)
@@ -634,7 +701,7 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   //   ViewHostMsg_UpdateRect_Flags::IS_REPAINT_ACK
   //     Indicates that this is a response to a ViewMsg_Repaint message.
   //
-  // If flags is zero, then this message corresponds to an unsoliticed paint
+  // If flags is zero, then this message corresponds to an unsolicited paint
   // request by the render view.  Any of the above bits may be set in flags,
   // which would indicate that this paint message is an ACK for multiple
   // request messages.
@@ -732,16 +799,15 @@ IPC_STRUCT_END()
 IPC_MESSAGE_CONTROL1(ViewMsg_SetNextPageID,
                      int32 /* next_page_id */)
 
-// Sent to the RenderView when a prerendered or instant page is committed
-// to an existing tab. The existing tab has a history of
-// |merged_history_length| which precedes the current history of pages
-// in the render view. All page_ids >= |minimum_page_id| are appended to
-// this new history in the same order.
+// Sent to the RenderView when a new tab is swapped into an existing
+// tab and the histories need to be merged. The existing tab has a history of
+// |merged_history_length| which precedes the history of the new tab. All
+// page_ids >= |minimum_page_id| in the new tab are appended to the history.
 //
-// For example, suppose the history of page_ids in the instant RenderView
-// is [4 7 8]. This instant RenderView is committed, and merged into
-// an existing tab with 3 history items, with every page with page_id >= 7
-// is preserved. The resulting page history is [-1 -1 -1 7 8].
+// For example, suppose the history of page_ids in the new tab's RenderView
+// is [4 7 8]. This is merged into an existing tab with 3 history items, and
+// all pages in the new tab with page_id >= 7 are to be preserved.
+// The resulting page history is [-1 -1 -1 7 8].
 IPC_MESSAGE_ROUTED2(ViewMsg_SetHistoryLengthAndPrune,
                     int, /* merge_history_length */
                     int32 /* minimum_page_id */)
@@ -925,6 +991,11 @@ IPC_MESSAGE_ROUTED1(ViewMsg_Replace,
 IPC_MESSAGE_ROUTED0(ViewMsg_Delete)
 IPC_MESSAGE_ROUTED0(ViewMsg_SelectAll)
 
+// Requests the renderer to select the region between two points.
+IPC_MESSAGE_ROUTED2(ViewMsg_SelectRange,
+                    gfx::Point /* start */,
+                    gfx::Point /* end */)
+
 // Copies the image at location x, y to the clipboard (if there indeed is an
 // image at that location).
 IPC_MESSAGE_ROUTED2(ViewMsg_CopyImageAt,
@@ -969,10 +1040,9 @@ IPC_MESSAGE_ROUTED4(ViewMsg_ScriptEvalRequest,
 // Request for the renderer to evaluate an xpath to a frame and insert css
 // into that frame's document. See ViewMsg_ScriptEvalRequest for details on
 // allowed xpath expressions.
-IPC_MESSAGE_ROUTED3(ViewMsg_CSSInsertRequest,
-                    std::wstring,  /* frame_xpath */
-                    std::string,  /* css string */
-                    std::string  /* element id */)
+IPC_MESSAGE_ROUTED2(ViewMsg_CSSInsertRequest,
+                    string16,  /* frame_xpath */
+                    std::string  /* css string */)
 
 // External popup menus.
 IPC_MESSAGE_ROUTED1(ViewMsg_SelectPopupMenuItem,
@@ -1202,9 +1272,6 @@ IPC_MESSAGE_ROUTED3(ViewMsg_PpapiBrokerChannelCreated,
 IPC_MESSAGE_CONTROL1(ViewMsg_PurgePluginListCache,
                      bool /* reload_pages */)
 
-// Install the first missing pluign.
-IPC_MESSAGE_ROUTED0(ViewMsg_InstallMissingPlugin)
-
 // Sent to the renderer when a popup window should no longer count against
 // the current popup count (either because it's not a popup or because it was
 // a generated by a user action or because a constrained popup got turned
@@ -1221,6 +1288,9 @@ IPC_MESSAGE_ROUTED0(ViewMsg_EnableViewSourceMode)
 IPC_MESSAGE_ROUTED2(ViewMsg_SavePageAsMHTML,
                     int /* job_id */,
                     IPC::PlatformFileForTransit /* file handle */)
+
+// Exit fullscreen.
+IPC_MESSAGE_ROUTED0(ViewMsg_ExitFullscreen)
 
 // Messages sent from the renderer to the browser.
 
@@ -1382,10 +1452,10 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DidFinishLoad,
 
 // Changes the title for the page in the UI when the page is navigated or the
 // title changes.
-// TODO(darin): use a UTF-8 string to reduce data size
-IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateTitle,
-                    int32,
-                    std::wstring)
+IPC_MESSAGE_ROUTED3(ViewHostMsg_UpdateTitle,
+                    int32 /* page_id */,
+                    string16 /* title */,
+                    WebKit::WebTextDirection /* title direction */)
 
 // Changes the icon url for the page in the UI.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateIconURL,
@@ -1430,9 +1500,11 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DocumentOnLoadCompletedInMainFrame,
 // The security info is non empty if the resource was originally loaded over
 // a secure connection.
 // Note: May only be sent once per URL per frame per committed load.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_DidLoadResourceFromMemoryCache,
+IPC_MESSAGE_ROUTED4(ViewHostMsg_DidLoadResourceFromMemoryCache,
                     GURL /* url */,
-                    std::string  /* security info */)
+                    std::string  /* security info */,
+                    std::string  /* http method */,
+                    ResourceType::Type /* resource type */)
 
 // Sent when the renderer displays insecure content in a secure page.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_DidDisplayInsecureContent)
@@ -1538,34 +1610,40 @@ IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_CookiesEnabled,
 // Used to get the list of plugins
 IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_GetPlugins,
     bool /* refresh*/,
-    std::vector<webkit::npapi::WebPluginInfo> /* plugins */)
+    std::vector<webkit::WebPluginInfo> /* plugins */)
 
 // Return information about a plugin for the given URL and MIME
-// type. If there is no matching plugin, |found| is false.  If
-// |enabled| in the WebPluginInfo struct is false, the plug-in is
-// treated as if it was not installed at all.
+// type. If there is no matching plugin, |found| is false.
 // |actual_mime_type| is the actual mime type supported by the
 // plugin found that match the URL given (one for each item in
 // |info|).
 IPC_SYNC_MESSAGE_CONTROL4_3(ViewHostMsg_GetPluginInfo,
                             int /* routing_id */,
                             GURL /* url */,
-                            GURL /* policy_url */,
+                            GURL /* page_url */,
                             std::string /* mime_type */,
                             bool /* found */,
-                            webkit::npapi::WebPluginInfo /* plugin info */,
+                            webkit::WebPluginInfo /* plugin info */,
                             std::string /* actual_mime_type */)
 
 // A renderer sends this to the browser process when it wants to
 // create a plugin.  The browser will create the plugin process if
 // necessary, and will return a handle to the channel on success.
 // On error an empty string is returned.
-IPC_SYNC_MESSAGE_CONTROL3_2(ViewHostMsg_OpenChannelToPlugin,
+IPC_SYNC_MESSAGE_CONTROL4_2(ViewHostMsg_OpenChannelToPlugin,
                             int /* routing_id */,
                             GURL /* url */,
+                            GURL /* page_url */,
                             std::string /* mime_type */,
                             IPC::ChannelHandle /* channel_handle */,
-                            webkit::npapi::WebPluginInfo /* info */)
+                            webkit::WebPluginInfo /* info */)
+
+// Get the list of proxies to use for |url|, as a semicolon delimited list
+// of "<TYPE> <HOST>:<PORT>" | "DIRECT".
+IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_ResolveProxy,
+                            GURL /* url */,
+                            bool /* result */,
+                            std::string /* proxy list */)
 
 // A renderer sends this to the browser process when it wants to create a
 // worker.  The browser will create the worker process if necessary, and
@@ -1643,6 +1721,20 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_OpenURL,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidContentsPreferredSizeChange,
                     gfx::Size /* pref_size */)
 
+// Notifies that the scrollbars-visible state of the content changed.
+IPC_MESSAGE_ROUTED2(ViewHostMsg_DidChangeScrollOffsetPinningForMainFrame,
+                    bool /* has_horizontal_scrollbar */,
+                    bool /* has_vertical_scrollbar */)
+
+// Notifies that the pinned-to-side state of the content changed.
+IPC_MESSAGE_ROUTED2(ViewHostMsg_DidChangeScrollbarsForMainFrame,
+                    bool /* pinned_to_left */,
+                    bool /* pinned_to_right */)
+
+// Notifies that the number of JavaScript scroll handlers changed.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_DidChangeNumWheelEvents,
+                    int /* count */)
+
 // A message from HTML-based UI.  When (trusted) Javascript calls
 // send(message, args), this message is sent to the browser.
 IPC_MESSAGE_ROUTED3(ViewHostMsg_WebUISend,
@@ -1708,13 +1800,15 @@ IPC_SYNC_MESSAGE_ROUTED1_1(ViewHostMsg_GetScreenInfo,
 
 // Send the tooltip text for the current mouse position to the browser.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_SetTooltipText,
-                    std::wstring /* tooltip text string */,
+                    string16 /* tooltip text string */,
                     WebKit::WebTextDirection /* text direction hint */)
 
 // Notification that the text selection has changed.
-IPC_MESSAGE_ROUTED2(ViewHostMsg_SelectionChanged,
+IPC_MESSAGE_ROUTED4(ViewHostMsg_SelectionChanged,
                     std::string /* currently selected text */,
-                    ui::Range /* selection range */)
+                    ui::Range /* selection range */,
+                    gfx::Point,
+                    gfx::Point /* visual end points of selection */)
 
 // Asks the browser to display the file chooser.  The result is returned in a
 // ViewHost_RunFileChooserResponse message.
@@ -1759,9 +1853,9 @@ IPC_MESSAGE_ROUTED0(ViewHostMsg_ImeCancelComposition)
 // or debugger UI.
 IPC_MESSAGE_ROUTED4(ViewHostMsg_AddMessageToConsole,
                     int32, /* log level */
-                    std::wstring, /* msg */
+                    string16, /* msg */
                     int32, /* line number */
-                    std::wstring /* source id */)
+                    string16 /* source id */)
 
 // Sent by the renderer process to indicate that a plugin instance has
 // crashed.
@@ -1976,16 +2070,9 @@ IPC_MESSAGE_CONTROL3(ViewHostMsg_DidGenerateCacheableMetadata,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_UpdateContentRestrictions,
                     int /* restrictions */)
 
-// The currently displayed PDF has an unsupported feature.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_PDFHasUnsupportedFeature)
-
 // Brings up SaveAs... dialog to save specified URL.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SaveURLAs,
                     GURL /* url */)
-
-// Notifies when default plugin updates status of the missing plugin.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_MissingPluginStatus,
-                    int /* status */)
 
 // Displays a JavaScript out-of-memory message in the infobar.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_JSOutOfMemory)
@@ -1996,11 +2083,30 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_RegisterProtocolHandler,
                     GURL /* url */,
                     string16 /* title */)
 
+// Register a new handler for Intents with the given action and type filter.
+IPC_MESSAGE_ROUTED4(ViewHostMsg_RegisterIntentHandler,
+                    string16 /* action */,
+                    string16 /* type */,
+                    string16 /* href */,
+                    string16 /* title */)
+
+// Route the startActivity Intents call from a page to the service picker.
+IPC_MESSAGE_ROUTED4(ViewHostMsg_WebIntentDispatch,
+                    string16 /* action */,
+                    string16 /* type */,
+                    string16 /* payload data */,
+                    int /* intent ID */)
+
 // Stores new inspector setting in the profile.
 // TODO(jam): this should be in the chrome module
 IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateInspectorSetting,
                     std::string,  /* key */
                     std::string /* value */)
+
+// Puts the browser into "tab fullscreen" mode for the sending renderer.
+// See the comment in chrome/browser/ui/browser.h for more details.
+IPC_MESSAGE_ROUTED1(ViewHostMsg_ToggleFullscreen,
+                    bool /* enter_fullscreen */)
 
 // Send back a string to be recorded by UserMetrics.
 IPC_MESSAGE_CONTROL1(ViewHostMsg_UserMetricsRecordAction,
@@ -2031,3 +2137,6 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_SendSerializedHtmlData,
 // being sent back.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_RequestRemoteAccessClientFirewallTraversal)
 
+// Notifies the browser of an event occurring in the media pipeline.
+IPC_MESSAGE_CONTROL1(ViewHostMsg_MediaLogEvent,
+                     media::MediaLogEvent /* event */)

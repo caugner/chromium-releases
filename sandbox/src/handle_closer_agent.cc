@@ -56,13 +56,6 @@ bool HandleCloserAgent::CloseHandles() {
   const int kInvalidHandleThreshold = 100;
   const size_t kHandleOffset = sizeof(HANDLE);
 
-  // Need to warm up GetUserDefaultLangID first if we're closing ALPC clients.
-  HandleMap::iterator names = handles_to_close_.find(L"ALPC Port");
-  if (names != handles_to_close_.end() &&
-    (names->second.empty() || names->second.size() == 0)) {
-    ::GetUserDefaultLangID();
-  }
-
   if (!::GetProcessHandleCount(::GetCurrentProcess(), &handle_count))
     return false;
 
@@ -89,7 +82,8 @@ bool HandleCloserAgent::CloseHandles() {
     // Get the type name, reusing the buffer.
     ULONG size = static_cast<ULONG>(type_info_buffer.size());
     rc = QueryObject(handle, ObjectTypeInformation, type_info, size, &size);
-    while (rc == STATUS_INFO_LENGTH_MISMATCH) {
+    while (rc == STATUS_INFO_LENGTH_MISMATCH ||
+           rc == STATUS_BUFFER_OVERFLOW) {
       type_info_buffer.resize(size + sizeof(wchar_t));
       type_info = reinterpret_cast<OBJECT_TYPE_INFORMATION*>(
           &(type_info_buffer[0]));
@@ -98,7 +92,7 @@ bool HandleCloserAgent::CloseHandles() {
       if (NT_SUCCESS(0) && size == type_info_buffer.size())
         rc = STATUS_INFO_LENGTH_MISMATCH;
     }
-    if (!NT_SUCCESS(rc)) {
+    if (!NT_SUCCESS(rc) || !type_info->Name.Buffer) {
       ++invalid_count;
       continue;
     }

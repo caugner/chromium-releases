@@ -70,8 +70,9 @@ ProcessData& ProcessData::operator=(const ProcessData& rhs) {
 // expensive parts of this operation over on the file thread.
 //
 void MemoryDetails::StartFetch() {
+  // This might get called from the UI or FILE threads, but should not be
+  // getting called from the IO thread.
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   // In order to process this request, we need to use the plugin information.
   // However, plugin process information is only available from the IO thread.
@@ -96,7 +97,7 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
 
     info.type = iter->type();
     info.renderer_type = iter->renderer_type();
-    info.titles.push_back(WideToUTF16Hack(iter->name()));
+    info.titles.push_back(iter->name());
     child_info.push_back(info);
   }
 
@@ -135,7 +136,8 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
         continue;
       }
       process.type = ChildProcessInfo::RENDER_PROCESS;
-      Profile* profile = render_process_host->profile();
+      Profile* profile =
+          Profile::FromBrowserContext(render_process_host->browser_context());
       ExtensionService* extension_service = profile->GetExtensionService();
 
       // The RenderProcessHost may host multiple TabContents.  Any

@@ -39,12 +39,21 @@ class NewTabSyncSetupHandler : public SyncSetupHandler {
   // Javascript callback handler to expand the sync promo.
   void HandleExpandSyncPromo(const ListValue* args);
 
+  // Javascript callback handler to show the profiles menu.
+  void HandleShowProfilesMenu(const ListValue* args);
+
  private:
   // Sends the sync login name to the page.
   void UpdateLogin();
 
+  // Saves the expanded state to preferences.
+  void SaveExpandedPreference(bool is_expanded);
+
   // Preference for the sync login name.
   StringPrefMember username_pref_;
+
+  // This is used to monitor the profile state.
+  NotificationRegistrar registrar_;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_NTP_NEW_TAB_SYNC_SETUP_HANDLER_H_

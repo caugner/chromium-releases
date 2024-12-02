@@ -16,7 +16,6 @@
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
 #include "base/logging.h"
-#include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -30,6 +29,7 @@ using printing::PrintSettings;
 namespace {
 
 // CUPS ColorModel attribute and values.
+const char kCMYK[] = "CMYK";
 const char kCUPSColorModel[] = "cups-ColorModel";
 const char kColor[] = "Color";
 const char kGrayscale[] = "Grayscale";
@@ -133,7 +133,6 @@ PrintDialogGtk::~PrintDialogGtk() {
 }
 
 void PrintDialogGtk::UseDefaultSettings() {
-  DCHECK(!save_document_event_.get());
   DCHECK(!page_setup_);
 
   // |gtk_settings_| is a new object.
@@ -145,9 +144,7 @@ void PrintDialogGtk::UseDefaultSettings() {
     g_object_ref(printer_);
     gtk_print_settings_set_printer(gtk_settings_,
                                    gtk_printer_get_name(printer_));
-#if GTK_CHECK_VERSION(2, 14, 0)
     page_setup_ = gtk_printer_get_default_page_size(printer_);
-#endif
   }
 
   if (!page_setup_)
@@ -161,7 +158,7 @@ void PrintDialogGtk::UseDefaultSettings() {
 bool PrintDialogGtk::UpdateSettings(const DictionaryValue& settings,
                                     const printing::PageRanges& ranges) {
   bool collate;
-  bool color;
+  int color;
   bool landscape;
   bool print_to_pdf;
   int copies;
@@ -170,7 +167,7 @@ bool PrintDialogGtk::UpdateSettings(const DictionaryValue& settings,
 
   if (!settings.GetBoolean(printing::kSettingLandscape, &landscape) ||
       !settings.GetBoolean(printing::kSettingCollate, &collate) ||
-      !settings.GetBoolean(printing::kSettingColor, &color) ||
+      !settings.GetInteger(printing::kSettingColor, &color) ||
       !settings.GetBoolean(printing::kSettingPrintToPDF, &print_to_pdf) ||
       !settings.GetInteger(printing::kSettingDuplexMode, &duplex_mode) ||
       !settings.GetInteger(printing::kSettingCopies, &copies) ||
@@ -188,8 +185,21 @@ bool PrintDialogGtk::UpdateSettings(const DictionaryValue& settings,
     }
     gtk_print_settings_set_n_copies(gtk_settings_, copies);
     gtk_print_settings_set_collate(gtk_settings_, collate);
-    gtk_print_settings_set(gtk_settings_, kCUPSColorModel,
-                           color ? kColor : kGrayscale);
+
+    const char* color_mode;
+    switch (color) {
+      case printing::COLOR:
+        color_mode = kColor;
+        break;
+      case printing::CMYK:
+        color_mode = kCMYK;
+        break;
+      default:
+        color_mode = kGrayscale;
+        break;
+    }
+    gtk_print_settings_set(gtk_settings_, kCUPSColorModel, color_mode);
+
     const char* cups_duplex_mode;
     switch (duplex_mode) {
       case printing::LONG_EDGE:
@@ -216,8 +226,6 @@ bool PrintDialogGtk::UpdateSettings(const DictionaryValue& settings,
 
 void PrintDialogGtk::ShowDialog(
     PrintingContextCairo::PrintSettingsCallback* callback) {
-  DCHECK(!save_document_event_.get());
-
   callback_ = callback;
 
   GtkWindow* parent = BrowserList::GetLastActive()->window()->GetNativeHandle();
@@ -240,10 +248,8 @@ void PrintDialogGtk::ShowDialog(
       GTK_PRINT_CAPABILITY_REVERSE);
   gtk_print_unix_dialog_set_manual_capabilities(GTK_PRINT_UNIX_DIALOG(dialog_),
                                                 cap);
-#if GTK_CHECK_VERSION(2, 18, 0)
   gtk_print_unix_dialog_set_embed_page_setup(GTK_PRINT_UNIX_DIALOG(dialog_),
                                              TRUE);
-#endif
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
   gtk_widget_show(dialog_);
 }
@@ -256,17 +262,30 @@ void PrintDialogGtk::PrintDocument(const printing::Metafile* metafile,
   // The document printing tasks can outlive the PrintingContext that created
   // this dialog.
   AddRef();
-  DCHECK(!save_document_event_.get());
-  save_document_event_.reset(new base::WaitableEvent(false, false));
 
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-                        &PrintDialogGtk::SaveDocumentToDisk,
-                        metafile,
-                        document_name));
-  // Wait for SaveDocumentToDisk() to finish.
-  save_document_event_->Wait();
+  bool error = false;
+  if (!file_util::CreateTemporaryFile(&path_to_pdf_)) {
+    LOG(ERROR) << "Creating temporary file failed";
+    error = true;
+  }
+
+  if (!error && !metafile->SaveTo(path_to_pdf_)) {
+    LOG(ERROR) << "Saving metafile failed";
+    file_util::Delete(path_to_pdf_, false);
+    error = true;
+  }
+
+  if (error) {
+    // Matches AddRef() above.
+    Release();
+  } else {
+    // No errors, continue printing.
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        NewRunnableMethod(this,
+                          &PrintDialogGtk::SendDocumentToPrinter,
+                          document_name));
+  }
 }
 
 void PrintDialogGtk::AddRefToDialog() {
@@ -332,38 +351,6 @@ void PrintDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
     default: {
       NOTREACHED();
     }
-  }
-}
-
-void PrintDialogGtk::SaveDocumentToDisk(const printing::Metafile* metafile,
-                                        const string16& document_name) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-
-  bool error = false;
-  if (!file_util::CreateTemporaryFile(&path_to_pdf_)) {
-    LOG(ERROR) << "Creating temporary file failed";
-    error = true;
-  }
-
-  if (!error && !metafile->SaveTo(path_to_pdf_)) {
-    LOG(ERROR) << "Saving metafile failed";
-    file_util::Delete(path_to_pdf_, false);
-    error = true;
-  }
-
-  // Done saving, let PrintDialogGtk::PrintDocument() continue.
-  save_document_event_->Signal();
-
-  if (error) {
-    // Matches AddRef() in PrintDocument();
-    Release();
-  } else {
-    // No errors, continue printing.
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &PrintDialogGtk::SendDocumentToPrinter,
-                          document_name));
   }
 }
 

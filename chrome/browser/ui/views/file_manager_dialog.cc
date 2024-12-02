@@ -29,7 +29,7 @@ class PendingDialog {
  public:
   static void Add(int32 tab_id, FileManagerDialog* dialog);
   static void Remove(int32 tab_id);
-  static FileManagerDialog* Find(int32 tab_id);
+  static scoped_refptr<FileManagerDialog> Find(int32 tab_id);
 
  private:
   explicit PendingDialog(FileManagerDialog* dialog)
@@ -60,13 +60,13 @@ void PendingDialog::Remove(int32 tab_id) {
 }
 
 // static
-FileManagerDialog* PendingDialog::Find(int32 tab_id) {
+scoped_refptr<FileManagerDialog> PendingDialog::Find(int32 tab_id) {
   Map::const_iterator it = map_.find(tab_id);
   if (it == map_.end()) {
     LOG(WARNING) << "Pending dialog not found " << tab_id;
     return NULL;
   }
-  return it->second.dialog_.get();
+  return it->second.dialog_;
 }
 
 }  // namespace
@@ -119,7 +119,7 @@ void FileManagerDialog::Close() {
 // static
 void FileManagerDialog::OnFileSelected(
     int32 tab_id, const FilePath& path, int index) {
-  FileManagerDialog* self = PendingDialog::Find(tab_id);
+  scoped_refptr<FileManagerDialog> self = PendingDialog::Find(tab_id);
   if (self) {
     DCHECK(self->listener_);
     self->listener_->FileSelected(path, index, self->params_);
@@ -130,7 +130,7 @@ void FileManagerDialog::OnFileSelected(
 // static
 void FileManagerDialog::OnMultiFilesSelected(
     int32 tab_id, const std::vector<FilePath>& files) {
-  FileManagerDialog* self = PendingDialog::Find(tab_id);
+  scoped_refptr<FileManagerDialog> self = PendingDialog::Find(tab_id);
   if (self) {
     DCHECK(self->listener_);
     self->listener_->MultiFilesSelected(files, self->params_);
@@ -140,7 +140,7 @@ void FileManagerDialog::OnMultiFilesSelected(
 
 // static
 void FileManagerDialog::OnFileSelectionCanceled(int32 tab_id) {
-  FileManagerDialog* self = PendingDialog::Find(tab_id);
+  scoped_refptr<FileManagerDialog> self = PendingDialog::Find(tab_id);
   if (self) {
     DCHECK(self->listener_);
     self->listener_->FileSelectionCanceled(self->params_);
@@ -176,18 +176,30 @@ void FileManagerDialog::SelectFileImpl(
     return;
   }
 
+  FilePath virtual_path;
+  if (!FileManagerUtil::ConvertFileToRelativeFileSystemPath(
+          owner_browser->profile(), default_path, &virtual_path)) {
+    virtual_path = FilePath();
+  }
+
   GURL file_browser_url = FileManagerUtil::GetFileBrowserUrlWithParams(
-      type, title, default_path, file_types, file_type_index,
+      type, title, virtual_path, file_types, file_type_index,
       default_extension);
-  extension_dialog_ = ExtensionDialog::Show(file_browser_url,
-      owner_browser, kFileManagerWidth, kFileManagerHeight,
+  TabContentsWrapper* tab = owner_browser->GetSelectedTabContentsWrapper();
+  ExtensionDialog* dialog = ExtensionDialog::Show(file_browser_url,
+      owner_browser, tab->tab_contents(),
+      kFileManagerWidth, kFileManagerHeight,
       this /* ExtensionDialog::Observer */);
+  if (!dialog) {
+    LOG(ERROR) << "Unable to create extension dialog";
+    return;
+  }
 
   // Connect our listener to FileDialogFunction's per-tab callbacks.
-  TabContentsWrapper* tab = owner_browser->GetSelectedTabContentsWrapper();
   int32 tab_id = (tab ? tab->restore_tab_helper()->session_id().id() : 0);
   PendingDialog::Add(tab_id, this);
 
+  extension_dialog_ = dialog;
   params_ = params;
   tab_id_ = tab_id;
   owner_window_ = owner_window;

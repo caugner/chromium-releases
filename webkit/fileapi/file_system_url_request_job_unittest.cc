@@ -37,6 +37,7 @@
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
+#include "webkit/quota/mock_special_storage_policy.h"
 
 namespace fileapi {
 namespace {
@@ -60,21 +61,6 @@ void FillBuffer(char* buffer, size_t len) {
   }
 }
 
-class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
- public:
-  virtual bool IsStorageProtected(const GURL& origin) {
-    return false;
-  }
-
-  virtual bool IsStorageUnlimited(const GURL& origin) {
-    return true;
-  }
-
-  virtual bool IsFileHandler(const std::string& extension_id) {
-    return true;
-  }
-};
-
 }  // namespace
 
 class FileSystemURLRequestJobTest : public testing::Test {
@@ -87,18 +73,18 @@ class FileSystemURLRequestJobTest : public testing::Test {
   virtual void SetUp() {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    special_storage_policy_ = new TestSpecialStoragePolicy();
+    special_storage_policy_ = new quota::MockSpecialStoragePolicy;
     // We use the main thread so that we can get the root path synchronously.
     // TODO(adamk): Run this on the FILE thread we've created as well.
     file_system_context_ =
         new FileSystemContext(
-            base::MessageLoopProxy::CreateForCurrentThread(),
-            base::MessageLoopProxy::CreateForCurrentThread(),
+            base::MessageLoopProxy::current(),
+            base::MessageLoopProxy::current(),
             special_storage_policy_, NULL,
             FilePath(), false /* is_incognito */,
             false, true,
             new FileSystemPathManager(
-                base::MessageLoopProxy::CreateForCurrentThread(),
+                base::MessageLoopProxy::current(),
                 temp_dir_.path(), NULL, false, false));
 
     file_system_context_->path_manager()->ValidateFileSystemRootAndGetURL(
@@ -134,7 +120,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
     job_ = new FileSystemURLRequestJob(
         request_.get(),
         file_system_context_.get(),
-        base::MessageLoopProxy::CreateForCurrentThread());
+        base::MessageLoopProxy::current());
 
     request_->Start();
     ASSERT_TRUE(request_->is_pending());  // verify that we're starting async
@@ -158,10 +144,9 @@ class FileSystemURLRequestJobTest : public testing::Test {
   void CreateDirectory(const base::StringPiece& dir_name) {
     FilePath path = FilePath().AppendASCII(dir_name);
     FileSystemFileUtil* file_util = file_system_context_->path_manager()->
-        sandbox_provider()->GetFileSystemFileUtil();
+        sandbox_provider()->GetFileUtil();
     FileSystemOperationContext context(file_system_context_, file_util);
     context.set_src_origin_url(GURL("http://remote"));
-    context.set_src_virtual_path(path);
     context.set_src_type(fileapi::kFileSystemTypeTemporary);
     context.set_allowed_bytes_growth(1024);
 
@@ -176,10 +161,9 @@ class FileSystemURLRequestJobTest : public testing::Test {
                  const char* buf, int buf_size) {
     FilePath path = FilePath().AppendASCII(file_name);
     FileSystemFileUtil* file_util = file_system_context_->path_manager()->
-        sandbox_provider()->GetFileSystemFileUtil();
+        sandbox_provider()->GetFileUtil();
     FileSystemOperationContext context(file_system_context_, file_util);
     context.set_src_origin_url(GURL("http://remote"));
-    context.set_src_virtual_path(path);
     context.set_src_type(fileapi::kFileSystemTypeTemporary);
     context.set_allowed_bytes_growth(1024);
 
@@ -216,7 +200,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
 
   ScopedTempDir temp_dir_;
   FilePath origin_root_path_;
-  scoped_refptr<TestSpecialStoragePolicy> special_storage_policy_;
+  scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::ScopedCallbackFactory<FileSystemURLRequestJobTest> callback_factory_;
 

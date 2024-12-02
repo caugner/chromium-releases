@@ -21,6 +21,7 @@ class CommandBuffer;
 class CommandBufferProxy;
 class GpuChannelHost;
 class RendererGLContext;
+class Task;
 
 class PlatformContext3DImpl
     : public webkit::ppapi::PluginDelegate::PlatformContext3D {
@@ -28,12 +29,12 @@ class PlatformContext3DImpl
   explicit PlatformContext3DImpl(RendererGLContext* parent_context);
   virtual ~PlatformContext3DImpl();
 
-  virtual bool Init();
-  virtual void SetSwapBuffersCallback(Callback0::Type* callback);
+  virtual bool Init(const int32* attrib_list);
   virtual unsigned GetBackingTextureId();
   virtual gpu::CommandBuffer* GetCommandBuffer();
   virtual int GetCommandBufferRouteId();
   virtual void SetContextLostCallback(Callback0::Type* callback);
+  virtual bool Echo(Task* task);
 
  private:
   bool InitRaw();

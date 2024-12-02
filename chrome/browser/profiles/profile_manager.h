@@ -23,7 +23,6 @@
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
-class FilePath;
 class NewProfileLauncher;
 class ProfileInfoCache;
 
@@ -58,7 +57,7 @@ class ProfileManager : public base::NonThreadSafe,
                        public NotificationObserver,
                        public Profile::Delegate {
  public:
-  ProfileManager();
+  explicit ProfileManager(const FilePath& user_data_dir);
   virtual ~ProfileManager();
 
   // Invokes SessionServiceFactory::ShutdownForProfile() for all profiles.
@@ -98,9 +97,9 @@ class ProfileManager : public base::NonThreadSafe,
   // profile.
   bool IsValidProfile(Profile* profile);
 
-  // Returns the directory where the currently active profile is
-  // stored, relative to the user data directory currently in use..
-  FilePath GetCurrentProfileDir();
+  // Returns the directory where the first created profile is stored,
+  // relative to the user data directory currently in use..
+  FilePath GetInitialProfileDir();
 
   // Get the Profile last used with this Chrome build. If no signed profile has
   // been stored in Local State, hand back the Default profile.
@@ -125,6 +124,13 @@ class ProfileManager : public base::NonThreadSafe,
   virtual void OnBrowserAdded(const Browser* browser);
   virtual void OnBrowserRemoved(const Browser* browser);
   virtual void OnBrowserSetLastActive(const Browser* browser);
+
+  // Indicate that an import process will run for the next created Profile.
+  void SetWillImport();
+  bool will_import() { return will_import_; }
+
+  // Indicate that the import process for |profile| has completed.
+  void OnImportFinished(Profile* profile);
 
   // ------------------ static utility functions -------------------
 
@@ -172,7 +178,7 @@ class ProfileManager : public base::NonThreadSafe,
   virtual void DoFinalInit(Profile* profile, bool go_off_the_record);
 
  private:
-  friend class ExtensionEventRouterForwarderTest;
+  friend class TestingProfileManager;
 
   // This struct contains information about profiles which are being loaded or
   // were loaded.
@@ -220,10 +226,16 @@ class ProfileManager : public base::NonThreadSafe,
 
   NotificationRegistrar registrar_;
 
+  // The path to the user data directory (DIR_USER_DATA).
+  const FilePath user_data_dir_;
+
   // Indicates that a user has logged in and that the profile specified
   // in the --login-profile command line argument should be used as the
   // default.
   bool logged_in_;
+
+  // True if an import process will be run.
+  bool will_import_;
 
   // Maps profile path to ProfileInfo (if profile has been created). Use
   // RegisterProfile() to add into this map.
@@ -242,6 +254,9 @@ class ProfileManager : public base::NonThreadSafe,
 // Same as the ProfileManager, but doesn't initialize some services of the
 // profile. This one is useful in unittests.
 class ProfileManagerWithoutInit : public ProfileManager {
+ public:
+  explicit ProfileManagerWithoutInit(const FilePath& user_data_dir);
+
  protected:
   virtual void DoFinalInit(Profile*, bool) {}
 };

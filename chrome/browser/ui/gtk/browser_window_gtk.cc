@@ -27,7 +27,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/download/download_item_model.h"
-#include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/page_info_window.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -55,7 +54,6 @@
 #include "chrome/browser/ui/gtk/find_bar_gtk.h"
 #include "chrome/browser/ui/gtk/fullscreen_exit_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/global_menu_bar.h"
-#include "chrome/browser/ui/gtk/gtk_floating_container.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
@@ -79,6 +77,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/download/download_manager.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -91,6 +90,8 @@
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "ui/base/gtk/gtk_floating_container.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/gtk_util.h"
@@ -296,26 +297,10 @@ GQuark GetBrowserWindowQuarkKey() {
 }
 
 // Set a custom WM_CLASS for a window.
-// This would normally be a simple gtk_window_set_wmclass call but we have
-// an XFCE workaround.
 void SetWindowCustomClass(GtkWindow* window, const std::string& wmclass) {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  if (base::nix::GetDesktopEnvironment(env.get()) ==
-      base::nix::DESKTOP_ENVIRONMENT_XFCE) {
-    // Workaround for XFCE. XFCE seems to treat the class as a user
-    // displayed title, which our app name certainly isn't. They don't have
-    // a dock or application based behaviour so do what looks good.
-    gtk_window_set_wmclass(window,
-                           wmclass.c_str(),
-                           gdk_get_program_class());
-  } else {
-    // Most everything else uses the wmclass_class to group windows
-    // together (docks, per application stuff, etc). Hopefully they won't
-    // display wmclassname to the user.
-    gtk_window_set_wmclass(window,
-                           g_get_prgname(),
-                           wmclass.c_str());
-  }
+  gtk_window_set_wmclass(window,
+                         wmclass.c_str(),
+                         gdk_get_program_class());
 
   // Set WM_WINDOW_ROLE for session management purposes.
   // See http://tronche.com/gui/x/icccm/sec-5.html .
@@ -323,8 +308,6 @@ void SetWindowCustomClass(GtkWindow* window, const std::string& wmclass) {
 }
 
 }  // namespace
-
-std::map<XID, GtkWindow*> BrowserWindowGtk::xid_map_;
 
 BrowserWindowGtk::BrowserWindowGtk(Browser* browser)
     :  window_(NULL),
@@ -340,7 +323,7 @@ BrowserWindowGtk::BrowserWindowGtk(Browser* browser)
        frame_cursor_(NULL),
        is_active_(!ui::ActiveWindowWatcherX::WMSupportsActivation()),
        last_click_time_(0),
-       maximize_after_show_(false),
+       show_state_after_show_(ui::SHOW_STATE_DEFAULT),
        suppress_window_raise_(false),
        accel_group_(NULL),
        debounce_timer_disabled_(false) {
@@ -440,18 +423,19 @@ gboolean BrowserWindowGtk::OnCustomFrameExpose(GtkWidget* widget,
   cairo_destroy(cr);
 
   if (UseCustomFrame() && !IsMaximized()) {
-    static NineBox custom_frame_border(
-        IDR_WINDOW_TOP_LEFT_CORNER,
-        IDR_WINDOW_TOP_CENTER,
-        IDR_WINDOW_TOP_RIGHT_CORNER,
-        IDR_WINDOW_LEFT_SIDE,
-        0,
-        IDR_WINDOW_RIGHT_SIDE,
-        IDR_WINDOW_BOTTOM_LEFT_CORNER,
-        IDR_WINDOW_BOTTOM_CENTER,
-        IDR_WINDOW_BOTTOM_RIGHT_CORNER);
-
-    custom_frame_border.RenderToWidget(widget);
+    static NineBox* custom_frame_border = NULL;
+    if (!custom_frame_border) {
+      custom_frame_border = new NineBox(IDR_WINDOW_TOP_LEFT_CORNER,
+                                        IDR_WINDOW_TOP_CENTER,
+                                        IDR_WINDOW_TOP_RIGHT_CORNER,
+                                        IDR_WINDOW_LEFT_SIDE,
+                                        0,
+                                        IDR_WINDOW_RIGHT_SIDE,
+                                        IDR_WINDOW_BOTTOM_LEFT_CORNER,
+                                        IDR_WINDOW_BOTTOM_CENTER,
+                                        IDR_WINDOW_BOTTOM_RIGHT_CORNER);
+    }
+    custom_frame_border->RenderToWidget(widget);
   }
 
   return FALSE;  // Allow subwidgets to paint.
@@ -661,9 +645,12 @@ void BrowserWindowGtk::Show() {
   BrowserList::SetLastActive(browser());
 
   gtk_window_present(window_);
-  if (maximize_after_show_) {
+  if (show_state_after_show_ == ui::SHOW_STATE_MAXIMIZED) {
     gtk_window_maximize(window_);
-    maximize_after_show_ = false;
+    show_state_after_show_ = ui::SHOW_STATE_NORMAL;
+  } else if (show_state_after_show_ == ui::SHOW_STATE_MINIMIZED) {
+    gtk_window_iconify(window_);
+    show_state_after_show_ = ui::SHOW_STATE_NORMAL;
   }
 
   // If we have sized the window by setting a size request for the render
@@ -742,6 +729,10 @@ void BrowserWindowGtk::Close() {
   // destruction, set window_ to NULL before any handlers will run.
   window_ = NULL;
   titlebar_->set_window(NULL);
+
+  // We don't want GlobalMenuBar handling any notifications or commands after
+  // the window is destroyed.
+  global_menu_bar_->Disable();
   gtk_widget_destroy(window);
 }
 
@@ -801,7 +792,7 @@ void BrowserWindowGtk::UpdateLoadingAnimations(bool should_animate) {
   if (should_animate) {
     if (!loading_animation_timer_.IsRunning()) {
       // Loads are happening, and the timer isn't running, so start it.
-      loading_animation_timer_.Start(
+      loading_animation_timer_.Start(FROM_HERE,
           base::TimeDelta::FromMilliseconds(kLoadingAnimationFrameTimeMs), this,
           &BrowserWindowGtk::LoadingAnimationCallback);
     }
@@ -846,6 +837,10 @@ gfx::Rect BrowserWindowGtk::GetBounds() const {
 
 bool BrowserWindowGtk::IsMaximized() const {
   return (state_ & GDK_WINDOW_STATE_MAXIMIZED);
+}
+
+bool BrowserWindowGtk::IsMinimized() const {
+  return (state_ & GDK_WINDOW_STATE_ICONIFIED);
 }
 
 bool BrowserWindowGtk::ShouldDrawContentDropShadow() {
@@ -924,12 +919,9 @@ void BrowserWindowGtk::RotatePaneFocus(bool forwards) {
 }
 
 bool BrowserWindowGtk::IsBookmarkBarVisible() const {
-  return (browser_->SupportsWindowFeature(Browser::FEATURE_BOOKMARKBAR) &&
-          bookmark_bar_.get() &&
-          browser_->profile()->GetPrefs()->GetBoolean(
-              prefs::kShowBookmarkBar) &&
-          browser_->profile()->GetPrefs()->GetBoolean(
-              prefs::kEnableBookmarkBar));
+  return browser_->SupportsWindowFeature(Browser::FEATURE_BOOKMARKBAR) &&
+         bookmark_bar_.get() &&
+         browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
 }
 
 bool BrowserWindowGtk::IsBookmarkBarAnimating() const {
@@ -992,18 +984,18 @@ void BrowserWindowGtk::ShowRepostFormWarningDialog(TabContents* tab_contents) {
   new RepostFormWarningGtk(GetNativeHandle(), tab_contents);
 }
 
-void BrowserWindowGtk::ShowCollectedCookiesDialog(TabContents* tab_contents) {
+void BrowserWindowGtk::ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) {
   // Deletes itself on close.
-  new CollectedCookiesGtk(GetNativeHandle(), tab_contents);
+  new CollectedCookiesGtk(GetNativeHandle(), wrapper);
 }
 
 void BrowserWindowGtk::ShowThemeInstallBubble() {
   ThemeInstallBubbleViewGtk::Show(window_);
 }
 
-void BrowserWindowGtk::ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                                      gfx::NativeWindow parent_window) {
-  browser::ShowHtmlDialog(parent_window, browser_->profile(), delegate);
+gfx::NativeWindow BrowserWindowGtk::ShowHTMLDialog(
+    HtmlDialogUIDelegate* delegate, gfx::NativeWindow parent_window) {
+  return browser::ShowHtmlDialog(parent_window, browser_->profile(), delegate);
 }
 
 void BrowserWindowGtk::UserChangedTheme() {
@@ -1183,6 +1175,10 @@ WindowOpenDisposition BrowserWindowGtk::GetDispositionForPopupBounds(
   return NEW_POPUP;
 }
 
+FindBar* BrowserWindowGtk::CreateFindBar() {
+  return new FindBarGtk(this);
+}
+
 void BrowserWindowGtk::ConfirmBrowserCloseWithPendingDownloads() {
   new DownloadInProgressDialogGtk(browser());
 }
@@ -1317,10 +1313,8 @@ void BrowserWindowGtk::MaybeShowBookmarkBar(bool animate) {
 
   TabContentsWrapper* tab = GetDisplayedTab();
 
-  if (tab) {
-    bookmark_bar_->SetProfile(tab->profile());
+  if (tab)
     bookmark_bar_->SetPageNavigator(browser_.get());
-  }
 
   BookmarkBar::State state = browser_->bookmark_bar_state();
   if (contents_container_->HasPreview() && state == BookmarkBar::DETACHED)
@@ -1425,8 +1419,8 @@ gboolean BrowserWindowGtk::OnConfigure(GtkWidget* widget,
   // (In that case Stop() is a no-op.)
   if (!debounce_timer_disabled_) {
     window_configure_debounce_timer_.Stop();
-    window_configure_debounce_timer_.Start(base::TimeDelta::FromMilliseconds(
-        kDebounceTimeoutMilliseconds), this,
+    window_configure_debounce_timer_.Start(FROM_HERE,
+        base::TimeDelta::FromMilliseconds(kDebounceTimeoutMilliseconds), this,
         &BrowserWindowGtk::OnDebouncedBoundsChanged);
   }
 
@@ -1453,11 +1447,14 @@ gboolean BrowserWindowGtk::OnWindowState(GtkWidget* sender,
       UpdateCustomFrame();
       toolbar_->Hide();
       tabstrip_->Hide();
+      if (bookmark_bar_.get())
+        gtk_widget_hide(bookmark_bar_->widget());
       bool is_kiosk =
           CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode);
       if (!is_kiosk) {
         fullscreen_exit_bubble_.reset(new FullscreenExitBubbleGtk(
-            GTK_FLOATING_CONTAINER(render_area_floating_container_)));
+            GTK_FLOATING_CONTAINER(render_area_floating_container_),
+            browser()));
       }
       gtk_widget_hide(toolbar_border_);
     } else {
@@ -1577,9 +1574,12 @@ BrowserWindowGtk* BrowserWindowGtk::GetBrowserWindowForNativeWindow(
 
 // static
 GtkWindow* BrowserWindowGtk::GetBrowserWindowForXID(XID xid) {
-  std::map<XID, GtkWindow*>::iterator iter =
-      BrowserWindowGtk::xid_map_.find(xid);
-  return (iter != BrowserWindowGtk::xid_map_.end()) ? iter->second : NULL;
+  GtkWindow* window = ui::GetGtkWindowFromX11Window(xid);
+  // Use GetBrowserWindowForNativeWindow() to verify the GtkWindow we found
+  // is actually a browser window (and not e.g. a dialog).
+  if (!GetBrowserWindowForNativeWindow(window))
+    return NULL;
+  return window;
 }
 
 GtkWidget* BrowserWindowGtk::titlebar_widget() const {
@@ -1613,7 +1613,7 @@ void BrowserWindowGtk::SetGeometryHints() {
   // confused and maximizes the window, but doesn't set the
   // GDK_WINDOW_STATE_MAXIMIZED bit.  So instead, we keep track of whether to
   // maximize and call it after gtk_window_present.
-  maximize_after_show_ = browser_->GetSavedMaximizedState();
+  show_state_after_show_ = browser_->GetSavedWindowShowState();
 
   gfx::Rect bounds = browser_->GetSavedWindowBounds();
   // We don't blindly call SetBounds here: that sets a forced position
@@ -1646,10 +1646,6 @@ void BrowserWindowGtk::ConnectHandlersToSignals() {
                    G_CALLBACK(OnConfigureThunk), this);
   g_signal_connect(window_, "window-state-event",
                    G_CALLBACK(OnWindowStateThunk), this);
-  g_signal_connect(window_, "map",
-                   G_CALLBACK(MainWindowMapped), NULL);
-  g_signal_connect(window_, "unmap",
-                   G_CALLBACK(MainWindowUnMapped), NULL);
   g_signal_connect(window_, "key-press-event",
                    G_CALLBACK(OnKeyPressThunk), this);
   g_signal_connect(window_, "motion-notify-event",
@@ -1699,7 +1695,7 @@ void BrowserWindowGtk::InitWidgets() {
                      0);
 
   toolbar_.reset(new BrowserToolbarGtk(browser_.get(), this));
-  toolbar_->Init(browser_->profile(), window_);
+  toolbar_->Init(window_);
   gtk_box_pack_start(GTK_BOX(window_vbox_), toolbar_->widget(),
                      FALSE, FALSE, 0);
   g_signal_connect_after(toolbar_->widget(), "expose-event",
@@ -1756,7 +1752,7 @@ void BrowserWindowGtk::InitWidgets() {
   // Set a white background so during startup the user sees white in the
   // content area before we get a TabContents in place.
   gtk_widget_modify_bg(render_area_event_box_, GTK_STATE_NORMAL,
-                       &gtk_util::kGdkWhite);
+                       &ui::kGdkWhite);
   gtk_container_add(GTK_CONTAINER(render_area_event_box_),
                     render_area_floating_container_);
   gtk_widget_show(render_area_event_box_);
@@ -1765,7 +1761,6 @@ void BrowserWindowGtk::InitWidgets() {
 
   if (IsBookmarkBarSupported()) {
     bookmark_bar_.reset(new BookmarkBarGtk(this,
-                                           browser_->profile(),
                                            browser_.get(),
                                            tabstrip_.get()));
     PlaceBookmarkBar(false);
@@ -1903,8 +1898,14 @@ void BrowserWindowGtk::UpdateCustomFrame() {
 
 void BrowserWindowGtk::SaveWindowPosition() {
   // Browser::SaveWindowPlacement is used for session restore.
+  ui::WindowShowState show_state = ui::SHOW_STATE_NORMAL;
+  if (IsMaximized())
+    show_state = ui::SHOW_STATE_MAXIMIZED;
+  else if (IsMinimized())
+    show_state = ui::SHOW_STATE_MINIMIZED;
+
   if (browser_->ShouldSaveWindowPlacement())
-    browser_->SaveWindowPlacement(restored_bounds_, IsMaximized());
+    browser_->SaveWindowPlacement(restored_bounds_, show_state);
 
   // We also need to save the placement for startup.
   // This is a web of calls between views and delegates on Windows, but the
@@ -2204,21 +2205,6 @@ bool BrowserWindowGtk::HandleTitleBarLeftMousePress(
     return TRUE;
   }
   return FALSE;
-}
-
-// static
-void BrowserWindowGtk::MainWindowMapped(GtkWidget* widget) {
-  // Map the X Window ID of the window to our window.
-  XID xid = ui::GetX11WindowFromGtkWidget(widget);
-  BrowserWindowGtk::xid_map_.insert(
-      std::pair<XID, GtkWindow*>(xid, GTK_WINDOW(widget)));
-}
-
-// static
-void BrowserWindowGtk::MainWindowUnMapped(GtkWidget* widget) {
-  // Unmap the X Window ID.
-  XID xid = ui::GetX11WindowFromGtkWidget(widget);
-  BrowserWindowGtk::xid_map_.erase(xid);
 }
 
 gboolean BrowserWindowGtk::OnFocusIn(GtkWidget* widget,

@@ -88,6 +88,28 @@ bool PrintViewManager::PrintForSystemDialogNow() {
   return PrintNowInternal(new PrintMsg_PrintForSystemDialog(routing_id()));
 }
 
+bool PrintViewManager::AdvancedPrintNow() {
+  PrintPreviewTabController* tab_controller =
+      PrintPreviewTabController::GetInstance();
+  if (!tab_controller)
+    return false;
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents());
+  TabContentsWrapper* print_preview_tab =
+      tab_controller->GetPrintPreviewForTab(wrapper);
+  if (print_preview_tab) {
+    // Preview tab exist for current tab or current tab is preview tab.
+    if (!print_preview_tab->web_ui())
+      return false;
+    PrintPreviewUI* print_preview_ui =
+        static_cast<PrintPreviewUI*>(print_preview_tab->web_ui());
+    print_preview_ui->OnShowSystemDialog();
+    return true;
+  } else {
+    return PrintNow();
+  }
+}
+
 bool PrintViewManager::PrintPreviewNow() {
   return PrintNowInternal(new PrintMsg_InitiatePrintPreview(routing_id()));
 }
@@ -102,6 +124,10 @@ void PrintViewManager::PreviewPrintingRequestCancelled() {
 void PrintViewManager::set_observer(PrintViewManagerObserver* observer) {
   DCHECK(!observer || !observer_);
   observer_ = observer;
+}
+
+void PrintViewManager::ResetTitleOverride() {
+  is_title_overridden_ = false;
 }
 
 void PrintViewManager::StopNavigation() {
@@ -455,7 +481,8 @@ bool PrintViewManager::RunInnerMessageLoop() {
   // memory-bound.
   static const int kPrinterSettingsTimeout = 60000;
   base::OneShotTimer<MessageLoop> quit_timer;
-  quit_timer.Start(TimeDelta::FromMilliseconds(kPrinterSettingsTimeout),
+  quit_timer.Start(FROM_HERE,
+                   TimeDelta::FromMilliseconds(kPrinterSettingsTimeout),
                    MessageLoop::current(), &MessageLoop::Quit);
 
   inside_inner_message_loop_ = true;

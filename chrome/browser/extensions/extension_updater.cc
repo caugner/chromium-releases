@@ -313,12 +313,11 @@ void ManifestFetchesBuilder::AddPendingExtension(
   // Use a zero version to ensure that a pending extension will always
   // be updated, and thus installed (assuming all extensions have
   // non-zero versions).
-  scoped_ptr<Version> version(
-      Version::GetVersionFromString("0.0.0.0"));
+  Version version("0.0.0.0");
+  DCHECK(version.IsValid());
 
-  AddExtensionData(
-      info.install_source(), id, *version,
-      Extension::TYPE_UNKNOWN, info.update_url(), "");
+  AddExtensionData(info.install_source(), id, version,
+                   Extension::TYPE_UNKNOWN, info.update_url(), "");
 }
 
 void ManifestFetchesBuilder::ReportStats() const {
@@ -381,7 +380,7 @@ void ManifestFetchesBuilder::AddExtensionData(
     // Fill in default update URL.
     //
     // TODO(akalin): Figure out if we should use the HTTPS version.
-    update_url = Extension::GalleryUpdateUrl(false);
+    update_url = extension_urls::GetWebstoreUpdateUrl(false);
   } else {
     url_stats_.other_url_count++;
   }
@@ -642,7 +641,7 @@ class SafeManifestParser : public UtilityProcessHost::Client {
     if (use_utility_process) {
       UtilityProcessHost* host = new UtilityProcessHost(
           this, BrowserThread::UI);
-      host->Send(new UtilityMsg_ParseUpdateManifest(xml_));
+      host->Send(new ChromeUtilityMsg_ParseUpdateManifest(xml_));
     } else {
       UpdateManifest manifest;
       if (manifest.Parse(xml_)) {
@@ -669,9 +668,9 @@ class SafeManifestParser : public UtilityProcessHost::Client {
   virtual bool OnMessageReceived(const IPC::Message& message) {
     bool handled = true;
     IPC_BEGIN_MESSAGE_MAP(SafeManifestParser, message)
-      IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseUpdateManifest_Succeeded,
+      IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_ParseUpdateManifest_Succeeded,
                           OnParseUpdateManifestSucceeded)
-      IPC_MESSAGE_HANDLER(UtilityHostMsg_ParseUpdateManifest_Failed,
+      IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_ParseUpdateManifest_Failed,
                           OnParseUpdateManifestFailed)
       IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
@@ -942,7 +941,7 @@ void ExtensionUpdater::ScheduleNextCheck(const TimeDelta& target_delay) {
   prefs_->SetInt64(kNextExtensionsUpdateCheck, next.ToInternalValue());
   prefs_->ScheduleSavePersistentPrefs();
 
-  timer_.Start(actual_delay, this, &ExtensionUpdater::TimerFired);
+  timer_.Start(FROM_HERE, actual_delay, this, &ExtensionUpdater::TimerFired);
 }
 
 void ExtensionUpdater::TimerFired() {
@@ -1000,14 +999,9 @@ void ExtensionUpdater::CheckNow() {
   NotifyStarted();
   ManifestFetchesBuilder fetches_builder(service_, extension_prefs_);
 
-  const ExtensionList* extensions = service_->extensions();
-  for (ExtensionList::const_iterator iter = extensions->begin();
-       iter != extensions->end(); ++iter) {
-    fetches_builder.AddExtension(**iter);
-  }
-
   const PendingExtensionManager* pending_extension_manager =
       service_->pending_extension_manager();
+  std::set<std::string> pending_ids;
 
   PendingExtensionManager::const_iterator iter;
   for (iter = pending_extension_manager->begin();
@@ -1016,8 +1010,21 @@ void ExtensionUpdater::CheckNow() {
     // class PendingExtensionManager.
     Extension::Location location = iter->second.install_source();
     if (location != Extension::EXTERNAL_PREF &&
-        location != Extension::EXTERNAL_REGISTRY)
+        location != Extension::EXTERNAL_REGISTRY) {
       fetches_builder.AddPendingExtension(iter->first, iter->second);
+      pending_ids.insert(iter->first);
+    }
+  }
+
+  const ExtensionList* extensions = service_->extensions();
+  for (ExtensionList::const_iterator iter = extensions->begin();
+       iter != extensions->end(); ++iter) {
+    // An extension might be overwritten by policy, and have its update url
+    // changed. Make sure existing extensions aren't fetched again, if a
+    // pending fetch for an extension with the same id already exists.
+    if (!ContainsKey(pending_ids, (*iter)->id())) {
+      fetches_builder.AddExtension(**iter);
+    }
   }
 
   fetches_builder.ReportStats();
@@ -1030,7 +1037,7 @@ void ExtensionUpdater::CheckNow() {
     // url here to avoid DNS hijacking of the blacklist, which is not validated
     // by a public key signature like .crx files are.
     ManifestFetchData* blacklist_fetch =
-        new ManifestFetchData(Extension::GalleryUpdateUrl(true));
+        new ManifestFetchData(extension_urls::GetWebstoreUpdateUrl(true));
     std::string version = prefs_->GetString(kExtensionBlacklistUpdateVersion);
     ManifestFetchData::PingData ping_data;
     ping_data.rollcall_days =
@@ -1075,9 +1082,9 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
   DCHECK(alive_);
   std::vector<int> result;
 
-  // This will only get set if one of possible_updates specifies
+  // This will only be valid if one of possible_updates specifies
   // browser_min_version.
-  scoped_ptr<Version> browser_version;
+  Version browser_version;
   PendingExtensionManager* pending_extension_manager =
       service_->pending_extension_manager();
 
@@ -1095,13 +1102,11 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
       if (!GetExistingVersion(update->extension_id, &version))
         continue;
 
-      scoped_ptr<Version> existing_version(
-          Version::GetVersionFromString(version));
-      scoped_ptr<Version> update_version(
-          Version::GetVersionFromString(update->version));
+      Version existing_version(version);
+      Version update_version(update->version);
 
-      if (!update_version.get() ||
-          update_version->CompareTo(*(existing_version.get())) <= 0) {
+      if (!update_version.IsValid() ||
+          update_version.CompareTo(existing_version) <= 0) {
         continue;
       }
     }
@@ -1109,17 +1114,14 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
     // If the update specifies a browser minimum version, do we qualify?
     if (update->browser_min_version.length() > 0) {
       // First determine the browser version if we haven't already.
-      if (!browser_version.get()) {
+      if (!browser_version.IsValid()) {
         chrome::VersionInfo version_info;
-        if (version_info.is_valid()) {
-          browser_version.reset(Version::GetVersionFromString(
-                                    version_info.Version()));
-        }
+        if (version_info.is_valid())
+          browser_version = Version(version_info.Version());
       }
-      scoped_ptr<Version> browser_min_version(
-          Version::GetVersionFromString(update->browser_min_version));
-      if (browser_version.get() && browser_min_version.get() &&
-          browser_min_version->CompareTo(*browser_version.get()) > 0) {
+      Version browser_min_version(update->browser_min_version);
+      if (browser_version.IsValid() && browser_min_version.IsValid() &&
+          browser_min_version.CompareTo(browser_version) > 0) {
         // TODO(asargent) - We may want this to show up in the extensions UI
         // eventually. (http://crbug.com/12547).
         LOG(WARNING) << "Updated version of extension " << update->extension_id

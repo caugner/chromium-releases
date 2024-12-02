@@ -18,7 +18,7 @@
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -275,10 +275,13 @@ TEST_F(ProfileSyncServiceStartupTest, ClearServerData) {
 
 TEST_F(ProfileSyncServiceStartupTest, StartFailure) {
   DataTypeManagerMock* data_type_manager = SetUpDataTypeManager();
-  DataTypeManager::ConfigureResult configure_result =
+  DataTypeManager::ConfigureStatus status =
       DataTypeManager::ASSOCIATION_FAILED;
-  browser_sync::DataTypeManager::ConfigureResultWithErrorLocation result(
-      configure_result, FROM_HERE, syncable::ModelTypeSet());
+  browser_sync::DataTypeManager::ConfigureResult result(
+      status,
+      syncable::ModelTypeSet(),
+      syncable::ModelTypeSet(),
+      FROM_HERE);
   EXPECT_CALL(*data_type_manager, Configure(_, _)).
       WillRepeatedly(
           DoAll(

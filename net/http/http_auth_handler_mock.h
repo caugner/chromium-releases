@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/memory/scoped_vector.h"
 #include "base/string16.h"
 #include "base/task.h"
 #include "googleurl/src/gurl.h"
@@ -29,14 +30,14 @@ class HttpAuthHandlerMock : public HttpAuthHandler {
     RESOLVE_TESTED,
   };
 
-  // The Factory class simply returns the same handler each time
-  // CreateAuthHandler is called.
+  // The Factory class returns handlers in the order they were added via
+  // AddMockHandler.
   class Factory : public HttpAuthHandlerFactory {
    public:
     Factory();
     virtual ~Factory();
 
-    void set_mock_handler(HttpAuthHandler* handler, HttpAuth::Target target);
+    void AddMockHandler(HttpAuthHandler* handler, HttpAuth::Target target);
 
     void set_do_init_from_challenge(bool do_init_from_challenge) {
       do_init_from_challenge_ = do_init_from_challenge;
@@ -52,7 +53,7 @@ class HttpAuthHandlerMock : public HttpAuthHandler {
                                   scoped_ptr<HttpAuthHandler>* handler);
 
    private:
-    scoped_ptr<HttpAuthHandler> handlers_[HttpAuth::AUTH_NUM_TARGETS];
+    ScopedVector<HttpAuthHandler> handlers_[HttpAuth::AUTH_NUM_TARGETS];
     bool do_init_from_challenge_;
   };
 
@@ -74,14 +75,24 @@ class HttpAuthHandlerMock : public HttpAuthHandler {
     connection_based_ = connection_based;
   }
 
+  void set_allows_default_credentials(bool allows_default_credentials) {
+    allows_default_credentials_ = allows_default_credentials;
+  }
+
+  void set_allows_explicit_credentials(bool allows_explicit_credentials) {
+    allows_explicit_credentials_ = allows_explicit_credentials;
+  }
+
   const GURL& request_url() const {
     return request_url_;
   }
 
   // HttpAuthHandler:
   virtual HttpAuth::AuthorizationResult HandleAnotherChallenge(
-      HttpAuth::ChallengeTokenizer* challenge);
-  virtual bool NeedsIdentity();
+      HttpAuth::ChallengeTokenizer* challenge) OVERRIDE;
+  virtual bool NeedsIdentity() OVERRIDE;
+  virtual bool AllowsDefaultCredentials() OVERRIDE;
+  virtual bool AllowsExplicitCredentials() OVERRIDE;
 
  protected:
   virtual bool Init(HttpAuth::ChallengeTokenizer* challenge);
@@ -105,6 +116,8 @@ class HttpAuthHandlerMock : public HttpAuthHandler {
   std::string* auth_token_;
   bool first_round_;
   bool connection_based_;
+  bool allows_default_credentials_;
+  bool allows_explicit_credentials_;
   GURL request_url_;
 };
 

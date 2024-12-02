@@ -9,11 +9,12 @@
 #include "chrome/browser/ui/panels/native_panel.h"
 
 class Panel;
+class NativePanelTestingGtk;
 
 class PanelBrowserWindowGtk : public BrowserWindowGtk,
                               public NativePanel,
-                              public NativePanelTesting,
                               public MessageLoopForUI::Observer {
+  friend class NativePanelTestingGtk;
  public:
   PanelBrowserWindowGtk(Browser* browser, Panel* panel,
                         const gfx::Rect& bounds);
@@ -43,7 +44,7 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void OnPanelExpansionStateChanged(
       Panel::ExpansionState expansion_state) OVERRIDE;
-  virtual bool ShouldBringUpPanelTitleBar(int mouse_x,
+  virtual bool ShouldBringUpPanelTitlebar(int mouse_x,
                                           int mouse_y) const OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
@@ -52,11 +53,20 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
   virtual void ShowTaskManagerForPanel() OVERRIDE;
+  virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
   virtual void DrawAttention() OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
+  virtual bool PreHandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event,
+      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandlePanelKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
-  virtual NativePanelTesting* GetNativePanelTesting() OVERRIDE;
+  virtual gfx::Size GetNonClientAreaExtent() const OVERRIDE;
+  virtual int GetRestoredHeight() const OVERRIDE;
+  virtual void SetRestoredHeight(int height) OVERRIDE;
 
  private:
   void SetBoundsImpl();

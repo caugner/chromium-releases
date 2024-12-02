@@ -4,12 +4,15 @@
 
 #include "chrome/browser/autofill/form_structure.h"
 
+#include <utility>
+
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/sha1.h"
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_type.h"
@@ -85,6 +88,186 @@ std::string EncodeFieldTypes(const FieldTypeSet& available_field_types) {
   return data_presence;
 }
 
+bool UpdateFromAutocompleteType(const string16& autocomplete_type,
+                                AutofillField* field) {
+  if (autocomplete_type == ASCIIToUTF16("given-name")) {
+    field->set_heuristic_type(NAME_FIRST);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("middle-name")) {
+    field->set_heuristic_type(NAME_MIDDLE);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("middle-initial")) {
+    field->set_heuristic_type(NAME_MIDDLE_INITIAL);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("surname")) {
+    field->set_heuristic_type(NAME_LAST);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("full-name")) {
+    field->set_heuristic_type(NAME_FULL);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("street-address") ||
+      autocomplete_type == ASCIIToUTF16("address-line1")) {
+    field->set_heuristic_type(ADDRESS_HOME_LINE1);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("address-line2")) {
+    field->set_heuristic_type(ADDRESS_HOME_LINE2);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("locality") ||
+      autocomplete_type == ASCIIToUTF16("city")) {
+    field->set_heuristic_type(ADDRESS_HOME_CITY);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("administrative-area") ||
+      autocomplete_type == ASCIIToUTF16("state") ||
+      autocomplete_type == ASCIIToUTF16("province") ||
+      autocomplete_type == ASCIIToUTF16("region")) {
+    field->set_heuristic_type(ADDRESS_HOME_STATE);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("postal-code")) {
+    field->set_heuristic_type(ADDRESS_HOME_ZIP);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("country")) {
+    field->set_heuristic_type(ADDRESS_HOME_COUNTRY);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("organization")) {
+    field->set_heuristic_type(COMPANY_NAME);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("email")) {
+    field->set_heuristic_type(EMAIL_ADDRESS);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("phone-full")) {
+    field->set_heuristic_type(PHONE_HOME_WHOLE_NUMBER);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("phone-country-code")) {
+    field->set_heuristic_type(PHONE_HOME_COUNTRY_CODE);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("phone-national")) {
+    field->set_heuristic_type(PHONE_HOME_CITY_AND_NUMBER);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("phone-area-code")) {
+    field->set_heuristic_type(PHONE_HOME_CITY_CODE);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("phone-local")) {
+    field->set_heuristic_type(PHONE_HOME_NUMBER);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("phone-local-prefix")) {
+    field->set_heuristic_type(PHONE_HOME_NUMBER);
+    field->set_phone_part(AutofillField::PHONE_PREFIX);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("phone-local-suffix")) {
+    field->set_heuristic_type(PHONE_HOME_NUMBER);
+    field->set_phone_part(AutofillField::PHONE_SUFFIX);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("fax-full")) {
+    field->set_heuristic_type(PHONE_FAX_WHOLE_NUMBER);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("fax-country-code")) {
+    field->set_heuristic_type(PHONE_FAX_COUNTRY_CODE);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("fax-national")) {
+    field->set_heuristic_type(PHONE_FAX_CITY_AND_NUMBER);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("fax-area-code")) {
+    field->set_heuristic_type(PHONE_FAX_CITY_CODE);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("fax-local")) {
+    field->set_heuristic_type(PHONE_FAX_NUMBER);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("fax-local-prefix")) {
+    field->set_heuristic_type(PHONE_FAX_NUMBER);
+    field->set_phone_part(AutofillField::PHONE_PREFIX);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("fax-local-suffix")) {
+    field->set_heuristic_type(PHONE_FAX_NUMBER);
+    field->set_phone_part(AutofillField::PHONE_SUFFIX);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("cc-full-name")) {
+    field->set_heuristic_type(CREDIT_CARD_NAME);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("cc-number")) {
+    field->set_heuristic_type(CREDIT_CARD_NUMBER);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("cc-exp-month")) {
+    field->set_heuristic_type(CREDIT_CARD_EXP_MONTH);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("cc-exp-year")) {
+    if (field->max_length == 2)
+      field->set_heuristic_type(CREDIT_CARD_EXP_2_DIGIT_YEAR);
+    else
+      field->set_heuristic_type(CREDIT_CARD_EXP_4_DIGIT_YEAR);
+    return true;
+  }
+
+  if (autocomplete_type == ASCIIToUTF16("cc-exp")) {
+    if (field->max_length == 5)
+      field->set_heuristic_type(CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR);
+    else
+      field->set_heuristic_type(CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR);
+    return true;
+  }
+
+  return false;
+}
+
 }  // namespace
 
 FormStructure::FormStructure(const FormData& form)
@@ -93,7 +276,8 @@ FormStructure::FormStructure(const FormData& form)
       target_url_(form.action),
       autofill_count_(0),
       upload_required_(USE_UPLOAD_RATES),
-      server_experiment_id_("no server response") {
+      server_experiment_id_("no server response"),
+      has_author_specified_types_(false) {
   // Copy the form fields.
   std::vector<webkit_glue::FormField>::const_iterator field;
   for (field = form.fields.begin();
@@ -122,26 +306,39 @@ FormStructure::FormStructure(const FormData& form)
 FormStructure::~FormStructure() {}
 
 void FormStructure::DetermineHeuristicTypes() {
-  autofill_count_ = 0;
+  // First, try to detect field types based on the fields' |autocompletetype|
+  // attributes.  If there is at least one form field with this attribute, don't
+  // try to apply other heuristics to match fields in this form.
+  bool found_sections;
+  ParseAutocompletetypeAttributes(&has_author_specified_types_,
+                                  &found_sections);
 
-  FieldTypeMap field_type_map;
-  FormField::ParseFormFields(fields_.get(), &field_type_map);
-
-  for (size_t index = 0; index < field_count(); index++) {
-    AutofillField* field = fields_[index];
-    FieldTypeMap::iterator iter = field_type_map.find(field->unique_name());
-
-    AutofillFieldType heuristic_autofill_type;
-    if (iter == field_type_map.end()) {
-      heuristic_autofill_type = UNKNOWN_TYPE;
-    } else {
-      heuristic_autofill_type = iter->second;
-      ++autofill_count_;
+  if (!has_author_specified_types_) {
+    FieldTypeMap field_type_map;
+    FormField::ParseFormFields(fields_.get(), &field_type_map);
+    for (size_t index = 0; index < field_count(); index++) {
+      AutofillField* field = fields_[index];
+      FieldTypeMap::iterator iter = field_type_map.find(field->unique_name());
+      if (iter != field_type_map.end())
+        field->set_heuristic_type(iter->second);
     }
+  }
 
-    field->set_heuristic_type(heuristic_autofill_type);
+  UpdateAutofillCount();
 
-    AutofillType autofill_type(field->type());
+  if (!found_sections)
+    IdentifySections();
+
+  // Ensure that credit card and address fields are in separate sections.
+  // This simplifies the section-aware logic in autofill_manager.cc.
+  for (std::vector<AutofillField*>::iterator field = fields_->begin();
+       field != fields_->end(); ++field) {
+    AutofillType::FieldTypeGroup field_type_group =
+        AutofillType((*field)->type()).group();
+    if (field_type_group == AutofillType::CREDIT_CARD)
+      (*field)->set_section((*field)->section() + ASCIIToUTF16("-cc"));
+    else
+      (*field)->set_section((*field)->section() + ASCIIToUTF16("-default"));
   }
 }
 
@@ -149,8 +346,8 @@ bool FormStructure::EncodeUploadRequest(
     const FieldTypeSet& available_field_types,
     bool form_was_autofilled,
     std::string* encoded_xml) const {
-  if (!ShouldBeParsed(true)) {
-    NOTREACHED();  // Caller should've checked for search pages.
+  if (!ShouldBeCrowdsourced()) {
+    NOTREACHED();
     return false;
   }
 
@@ -403,6 +600,10 @@ bool FormStructure::ShouldBeParsed(bool require_method_post) const {
   return !require_method_post || (method_ == POST);
 }
 
+bool FormStructure::ShouldBeCrowdsourced() const {
+  return !has_author_specified_types_ && ShouldBeParsed(true);
+}
+
 void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
   // Map from field signatures to cached fields.
   std::map<std::string, const AutofillField*> cached_fields;
@@ -446,10 +647,16 @@ void FormStructure::UpdateFromCache(const FormStructure& cached_form) {
 }
 
 void FormStructure::LogQualityMetrics(
-    const AutofillMetrics& metric_logger) const {
+    const AutofillMetrics& metric_logger,
+    const base::TimeTicks& load_time,
+    const base::TimeTicks& interaction_time,
+    const base::TimeTicks& submission_time) const {
   std::string experiment_id = server_experiment_id();
   metric_logger.LogServerExperimentIdForUpload(experiment_id);
 
+  size_t num_detected_field_types = 0;
+  bool did_autofill_all_possible_fields = true;
+  bool did_autofill_some_possible_fields = false;
   for (size_t i = 0; i < field_count(); ++i) {
     const AutofillField* field = this->field(i);
     metric_logger.LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,
@@ -461,6 +668,12 @@ void FormStructure::LogQualityMetrics(
     DCHECK(!field_types.empty());
     if (field_types.count(EMPTY_TYPE) || field_types.count(UNKNOWN_TYPE))
       continue;
+
+    ++num_detected_field_types;
+    if (field->is_autofilled)
+      did_autofill_some_possible_fields = true;
+    else
+      did_autofill_all_possible_fields = false;
 
     // Collapse field types that Chrome treats as identical, e.g. home and
     // billing address fields.
@@ -565,16 +778,51 @@ void FormStructure::LogQualityMetrics(
       }
     }
   }
-}
 
-void FormStructure::set_possible_types(size_t index,
-                                       const FieldTypeSet& types) {
-  if (index >= fields_.size()) {
-    NOTREACHED();
-    return;
+  if (num_detected_field_types < kRequiredFillableFields) {
+    metric_logger.LogUserHappinessMetric(
+        AutofillMetrics::SUBMITTED_NON_FILLABLE_FORM);
+  } else {
+    if (did_autofill_all_possible_fields) {
+      metric_logger.LogUserHappinessMetric(
+          AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_ALL);
+    } else if (did_autofill_some_possible_fields) {
+      metric_logger.LogUserHappinessMetric(
+          AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_SOME);
+    } else {
+      metric_logger.LogUserHappinessMetric(
+          AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_NONE);
+    }
+
+    // Unlike the other times, the |submission_time| should always be available.
+    DCHECK(!submission_time.is_null());
+
+    // The |load_time| might be unset, in the case that the form was dynamically
+    // added to the DOM.
+    if (!load_time.is_null()) {
+      // Submission should always chronologically follow form load.
+      DCHECK(submission_time > load_time);
+      base::TimeDelta elapsed = submission_time - load_time;
+      if (did_autofill_some_possible_fields)
+        metric_logger.LogFormFillDurationFromLoadWithAutofill(elapsed);
+      else
+        metric_logger.LogFormFillDurationFromLoadWithoutAutofill(elapsed);
+    }
+
+    // The |interaction_time| might be unset, in the case that the user
+    // submitted a blank form.
+    if (!interaction_time.is_null()) {
+      // Submission should always chronologically follow interaction.
+      DCHECK(submission_time > interaction_time);
+      base::TimeDelta elapsed = submission_time - interaction_time;
+      if (did_autofill_some_possible_fields) {
+        metric_logger.LogFormFillDurationFromInteractionWithAutofill(elapsed);
+      } else {
+        metric_logger.LogFormFillDurationFromInteractionWithoutAutofill(
+            elapsed);
+      }
+    }
   }
-
-  fields_[index]->set_possible_types(types);
 }
 
 const AutofillField* FormStructure::field(size_t index) const {
@@ -584,6 +832,11 @@ const AutofillField* FormStructure::field(size_t index) const {
   }
 
   return fields_[index];
+}
+
+AutofillField* FormStructure::field(size_t index) {
+  return const_cast<AutofillField*>(
+      static_cast<const FormStructure*>(this)->field(index));
 }
 
 size_t FormStructure::field_count() const {
@@ -668,4 +921,84 @@ bool FormStructure::EncodeFormRequest(
     }
   }
   return true;
+}
+
+void FormStructure::ParseAutocompletetypeAttributes(bool* found_attribute,
+                                                    bool* found_sections) {
+  *found_attribute = false;
+  *found_sections = false;
+  for (std::vector<AutofillField*>::iterator field = fields_->begin();
+       field != fields_->end(); ++field) {
+    if ((*field)->autocomplete_type.empty())
+      continue;
+
+    *found_attribute = true;
+    std::vector<string16> types;
+    Tokenize((*field)->autocomplete_type, ASCIIToUTF16(" "), &types);
+
+    // Look for a named section.
+    const string16 kSectionPrefix = ASCIIToUTF16("section-");
+    if (!types.empty() && StartsWith(types.front(), kSectionPrefix, true)) {
+      *found_sections = true;
+      (*field)->set_section(types.front().substr(kSectionPrefix.size()));
+    }
+
+    // Look for specified types.
+    for (std::vector<string16>::const_iterator type = types.begin();
+         type != types.end(); ++type) {
+      if (UpdateFromAutocompleteType(*type, *field))
+        break;
+    }
+  }
+}
+
+void FormStructure::IdentifySections() {
+  if (fields_.empty())
+    return;
+
+  // Name sections after the first field in the section.
+  string16 current_section = fields_->front()->unique_name();
+
+  // Keep track of the types we've seen in this section.
+  std::set<AutofillFieldType> seen_types;
+  AutofillFieldType previous_type = UNKNOWN_TYPE;
+
+  for (std::vector<AutofillField*>::iterator field = fields_->begin();
+       field != fields_->end(); ++field) {
+    const AutofillFieldType current_type =
+        AutofillType::GetEquivalentFieldType((*field)->type());
+
+    bool already_saw_current_type = seen_types.count(current_type) > 0;
+
+    // Forms often ask for multiple phone numbers -- e.g. both a daytime and
+    // evening phone number.  Our phone and fax number detection is also
+    // generally a little off.  Hence, ignore both field types as a signal here.
+    AutofillType::FieldTypeGroup current_type_group =
+        AutofillType(current_type).group();
+    if (current_type_group == AutofillType::PHONE_HOME ||
+        current_type_group == AutofillType::PHONE_FAX)
+      already_saw_current_type = false;
+
+    // Some forms have adjacent fields of the same type.  Two common examples:
+    //  * Forms with two email fields, where the second is meant to "confirm"
+    //    the first.
+    //  * Forms with a <select> menu for states in some countries, and a
+    //    freeform <input> field for states in other countries.  (Usually, only
+    //    one of these two will be visible for any given choice of country.)
+    // Generally, adjacent fields of the same type belong in the same logical
+    // section.
+    if (current_type == previous_type)
+      already_saw_current_type = false;
+
+    previous_type = current_type;
+
+    if (current_type != UNKNOWN_TYPE && already_saw_current_type) {
+      // We reached the end of a section, so start a new section.
+      seen_types.clear();
+      current_section = (*field)->unique_name();
+    }
+
+    seen_types.insert(current_type);
+    (*field)->set_section(current_section);
+  }
 }

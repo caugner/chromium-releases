@@ -4,8 +4,10 @@
 
 #include "chrome/browser/chromeos/cros/update_library.h"
 
+#include "base/basictypes.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/observer_list.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "content/browser/browser_thread.h"
 
@@ -13,16 +15,22 @@ namespace chromeos {
 
 class UpdateLibraryImpl : public UpdateLibrary {
  public:
-  UpdateLibraryImpl()
-    : status_connection_(NULL) {
-    if (CrosLibrary::Get()->EnsureLoaded()) {
-      Init();
-    }
-  }
+  UpdateLibraryImpl() : status_connection_(NULL) {}
 
   virtual ~UpdateLibraryImpl() {
     if (status_connection_) {
-      DisconnectUpdateProgress(status_connection_);
+      chromeos::DisconnectUpdateProgress(status_connection_);
+      status_connection_ = NULL;
+    }
+  }
+
+  void Init() {
+    if (CrosLibrary::Get()->EnsureLoaded()) {
+      CHECK(!status_connection_) << "Already initialized";
+      status_connection_ =
+          chromeos::MonitorUpdateStatus(&UpdateStatusHandler, this);
+      // Asynchronously load the initial state.
+      chromeos::RequestUpdateStatus(&UpdateStatusHandler, this);
     }
   }
 
@@ -66,16 +74,9 @@ class UpdateLibraryImpl : public UpdateLibrary {
   }
 
  private:
-  static void ChangedHandler(void* object,
-      const UpdateProgress& status) {
-    UpdateLibraryImpl* updater = static_cast<UpdateLibraryImpl*>(object);
-    updater->UpdateStatus(Status(status));
-  }
-
-  void Init() {
-    status_connection_ = MonitorUpdateStatus(&ChangedHandler, this);
-    // Asynchronously load the initial state.
-    RequestUpdateStatus(&ChangedHandler, this);
+  static void UpdateStatusHandler(void* object, const UpdateProgress& status) {
+    UpdateLibraryImpl* impl = static_cast<UpdateLibraryImpl*>(object);
+    impl->UpdateStatus(Status(status));
   }
 
   void UpdateStatus(const Status& status) {
@@ -107,6 +108,7 @@ class UpdateLibraryStubImpl : public UpdateLibrary {
  public:
   UpdateLibraryStubImpl() {}
   virtual ~UpdateLibraryStubImpl() {}
+  void Init() {}
   void AddObserver(Observer* observer) {}
   void RemoveObserver(Observer* observer) {}
   bool HasObserver(Observer* observer) { return false; }
@@ -121,9 +123,7 @@ class UpdateLibraryStubImpl : public UpdateLibrary {
     if (callback)
       callback(user_data, "beta-channel");
   }
-  const UpdateLibrary::Status& status() const {
-    return status_;
-  }
+  const UpdateLibrary::Status& status() const { return status_; }
 
  private:
   Status status_;
@@ -133,10 +133,13 @@ class UpdateLibraryStubImpl : public UpdateLibrary {
 
 // static
 UpdateLibrary* UpdateLibrary::GetImpl(bool stub) {
+  UpdateLibrary* impl;
   if (stub)
-    return new UpdateLibraryStubImpl();
+    impl = new UpdateLibraryStubImpl();
   else
-    return new UpdateLibraryImpl();
+    impl = new UpdateLibraryImpl();
+  impl->Init();
+  return impl;
 }
 
 }  // namespace chromeos

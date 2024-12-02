@@ -38,11 +38,14 @@ typedef std::multimap<std::string, std::string> LanguageCodeToIdsMap;
 // Map from input method ID to associated input method descriptor.
 typedef std::map<std::string, InputMethodDescriptor>
     InputMethodIdToDescriptorMap;
+// Map from XKB layout ID to associated input method descriptor.
+typedef std::map<std::string, InputMethodDescriptor> XkbIdToDescriptorMap;
 
 struct IdMaps {
   scoped_ptr<LanguageCodeToIdsMap> language_code_to_ids;
   scoped_ptr<std::map<std::string, std::string> > id_to_language_code;
   scoped_ptr<InputMethodIdToDescriptorMap> id_to_descriptor;
+  scoped_ptr<XkbIdToDescriptorMap> xkb_id_to_descriptor;
 
   // Returns the singleton instance.
   static IdMaps* GetInstance() {
@@ -61,6 +64,7 @@ struct IdMaps {
     language_code_to_ids->clear();
     id_to_language_code->clear();
     id_to_descriptor->clear();
+    xkb_id_to_descriptor->clear();
 
     for (size_t i = 0; i < supported_input_methods->size(); ++i) {
       const InputMethodDescriptor& input_method =
@@ -74,6 +78,10 @@ struct IdMaps {
           std::make_pair(input_method.id(), language_code));
       id_to_descriptor->insert(
           std::make_pair(input_method.id(), input_method));
+      if (IsKeyboardLayout(input_method.id())) {
+        xkb_id_to_descriptor->insert(
+            std::make_pair(input_method.keyboard_layout(), input_method));
+      }
     }
 
     // Go through the languages listed in kExtraLanguages.
@@ -95,7 +103,8 @@ struct IdMaps {
  private:
   IdMaps() : language_code_to_ids(new LanguageCodeToIdsMap),
              id_to_language_code(new std::map<std::string, std::string>),
-             id_to_descriptor(new InputMethodIdToDescriptorMap) {
+             id_to_descriptor(new InputMethodIdToDescriptorMap),
+             xkb_id_to_descriptor(new XkbIdToDescriptorMap) {
     ReloadMaps();
   }
 
@@ -117,10 +126,6 @@ const struct EnglishToResouceId {
   { "Latin", IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_LATIN },
   { "Wide Latin", IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_WIDE_LATIN },
 
-  // For ibus-hangul: third_party/ibus-hangul/files/po/.
-  // TODO(nona): Remove ibus-hangul support.
-  { "Enable/Disable Hanja mode", IDS_STATUSBAR_IME_KOREAN_HANJA_MODE },
-
   // For ibus-mozc-hangul
   { "Hanja mode", IDS_STATUSBAR_IME_KOREAN_HANJA_INPUT_MODE },
   { "Hangul mode", IDS_STATUSBAR_IME_KOREAN_HANGUL_INPUT_MODE },
@@ -136,6 +141,8 @@ const struct EnglishToResouceId {
   // For ibus-mozc-chewing.
   { "English",
     IDS_STATUSBAR_IME_CHINESE_MOZC_CHEWING_ENGLISH_MODE },
+  { "_Chinese",
+    IDS_STATUSBAR_IME_CHINESE_MOZC_CHEWING_CHINESE_MODE },
   { "Full-width English",
     IDS_STATUSBAR_IME_CHINESE_MOZC_CHEWING_FULL_WIDTH_ENGLISH_MODE },
 
@@ -163,6 +170,19 @@ const struct EnglishToResouceId {
     IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_VIETNAMESE_VIQR_INPUT_METHOD },
   { "m17n:vi:vni",
     IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_VIETNAMESE_VNI_INPUT_METHOD },
+  { "m17n:bn:itrans",
+    IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD },
+  { "m17n:gu:itrans",
+    IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD },
+  { "m17n:ml:itrans",
+    IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD },
+  { "m17n:mr:itrans",
+    IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD },
+  { "m17n:ta:itrans",
+    IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD },
+  { "m17n:am:sera",
+    IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD },
+
   { "mozc-chewing",
     IDS_OPTIONS_SETTINGS_LANGUAGES_CHEWING_INPUT_METHOD },
   { "pinyin", IDS_OPTIONS_SETTINGS_LANGUAGES_PINYIN_INPUT_METHOD },
@@ -237,6 +257,8 @@ const struct EnglishToResouceId {
   { "xkb:ca:eng:eng", IDS_STATUSBAR_LAYOUT_CANADA_ENGLISH },
   { "xkb:il::heb", IDS_STATUSBAR_LAYOUT_ISRAEL },
   { "xkb:kr:kr104:kor", IDS_STATUSBAR_LAYOUT_KOREA_104 },
+
+  { "english-m", IDS_STATUSBAR_LAYOUT_USA_MYSTERY },
 };
 const size_t kEnglishToResourceIdArraySize =
     arraysize(kEnglishToResourceIdArray);
@@ -362,13 +384,16 @@ const ExtraLanguage kExtraLanguages[] = {
   // Language Code  Input Method ID
   { "en-AU",        "xkb:us::eng" },  // For Austrailia, use US keyboard layout.
   { "id",           "xkb:us::eng" },  // For Indonesian, use US keyboard layout.
-  // The code "fil" comes from app/l10_util.cc.
+  // The code "fil" comes from l10_util.cc.
   { "fil",          "xkb:us::eng" },  // For Filipino, use US keyboard layout.
   // For Netherlands, use US international keyboard layout.
   { "nl",           "xkb:us:intl:eng" },
-  // The code "es-419" comes from app/l10_util.cc.
+  // The code "es-419" comes from l10_util.cc.
   // For Spanish in Latin America, use Latin American keyboard layout.
   { "es-419",       "xkb:latam::spa" },
+
+  // TODO(yusukes): Add {"sw", "xkb:us::eng"} once Swahili is removed from the
+  // blacklist in src/ui/base/l10n/l10n_util_posix.cc.
 };
 const size_t kExtraLanguagesLength = arraysize(kExtraLanguages);
 
@@ -522,6 +547,14 @@ const InputMethodDescriptor* GetInputMethodDescriptorFromId(
       NULL : &(iter->second);
 }
 
+const InputMethodDescriptor* GetInputMethodDescriptorFromXkbId(
+    const std::string& xkb_id) {
+  InputMethodIdToDescriptorMap::const_iterator iter
+      = IdMaps::GetInstance()->xkb_id_to_descriptor->find(xkb_id);
+  return (iter == IdMaps::GetInstance()->xkb_id_to_descriptor->end()) ?
+      NULL : &(iter->second);
+}
+
 string16 GetLanguageDisplayNameFromCode(const std::string& language_code) {
   if (!g_browser_process) {
     return string16();
@@ -629,7 +662,9 @@ void GetFirstLoginInputMethodIds(
   }
   // Add the most popular input method ID, if it's different from the
   // current input method.
-  if (most_popular_id != current_input_method.id()) {
+  if (most_popular_id != current_input_method.id() &&
+      // TODO(yusukes): Remove this hack when we remove the "english-m" IME.
+      most_popular_id != "english-m") {
     out_input_method_ids->push_back(most_popular_id);
   }
 }

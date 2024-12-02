@@ -18,18 +18,16 @@
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_directory_reader_impl.h"
-#include "webkit/plugins/ppapi/resource.h"
-#include "webkit/plugins/ppapi/resource_tracker.h"
+#include "webkit/plugins/ppapi/resource_helper.h"
 
 using ppapi::thunk::PPB_FileSystem_API;
 
 namespace webkit {
 namespace ppapi {
 
-PPB_FileSystem_Impl::PPB_FileSystem_Impl(PluginInstance* instance,
+PPB_FileSystem_Impl::PPB_FileSystem_Impl(PP_Instance instance,
                                          PP_FileSystemType type)
     : Resource(instance),
-      instance_(instance),
       type_(type),
       opened_(false),
       called_open_(false) {
@@ -40,15 +38,13 @@ PPB_FileSystem_Impl::~PPB_FileSystem_Impl() {
 }
 
 // static
-PP_Resource PPB_FileSystem_Impl::Create(PluginInstance* instance,
+PP_Resource PPB_FileSystem_Impl::Create(PP_Instance instance,
                                         PP_FileSystemType type) {
   if (type != PP_FILESYSTEMTYPE_EXTERNAL &&
       type != PP_FILESYSTEMTYPE_LOCALPERSISTENT &&
       type != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
     return 0;
-
-  PPB_FileSystem_Impl* file_system = new PPB_FileSystem_Impl(instance, type);
-  return file_system->GetReference();
+  return (new PPB_FileSystem_Impl(instance, type))->GetReference();
 }
 
 PPB_FileSystem_API* PPB_FileSystem_Impl::AsPPB_FileSystem_API() {
@@ -66,16 +62,19 @@ int32_t PPB_FileSystem_Impl::Open(int64_t expected_size,
       type_ != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
     return PP_ERROR_FAILED;
 
+  PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
+  if (!plugin_instance)
+    return PP_ERROR_FAILED;
+
   fileapi::FileSystemType file_system_type =
       (type_ == PP_FILESYSTEMTYPE_LOCALTEMPORARY ?
        fileapi::kFileSystemTypeTemporary :
        fileapi::kFileSystemTypePersistent);
-  if (!instance()->delegate()->OpenFileSystem(
-          instance()->container()->element().document().url(),
+  if (!plugin_instance->delegate()->OpenFileSystem(
+          plugin_instance->container()->element().document().url(),
           file_system_type, expected_size,
-          new FileCallbacks(instance()->module()->AsWeakPtr(),
-                            GetReferenceNoAddRef(),
-                            callback, NULL,
+          new FileCallbacks(plugin_instance->module()->AsWeakPtr(),
+                            pp_resource(), callback, NULL,
                             scoped_refptr<PPB_FileSystem_Impl>(this), NULL)))
     return PP_ERROR_FAILED;
   return PP_OK_COMPLETIONPENDING;

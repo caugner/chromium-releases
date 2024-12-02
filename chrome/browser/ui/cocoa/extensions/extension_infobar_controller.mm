@@ -223,7 +223,7 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
 
   [[NSNotificationCenter defaultCenter]
       addObserver:self
-         selector:@selector(adjustWidthToFitWindow)
+         selector:@selector(adjustExtensionViewSize)
              name:NSWindowDidResizeNotification
            object:window_];
 }
@@ -242,8 +242,8 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
 }
 
 - (CGFloat)clampedExtensionViewHeight {
-  return std::max(kToolbarMinHeightPx,
-      std::min(NSHeight([extensionView_ frame]), kToolbarMaxHeightPx));
+  CGFloat height = delegate_->AsExtensionInfoBarDelegate()->height();
+  return std::max(kToolbarMinHeightPx, std::min(height, kToolbarMaxHeightPx));
 }
 
 - (void)adjustExtensionViewSize {

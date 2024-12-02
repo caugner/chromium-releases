@@ -28,6 +28,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_service.h"
 #include "grit/theme_resources.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_windowing.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/font.h"
@@ -270,14 +271,13 @@ void OmniboxPopupViewGtk::SetupLayoutForMatch(
 OmniboxPopupViewGtk::OmniboxPopupViewGtk(const gfx::Font& font,
                                          OmniboxView* omnibox_view,
                                          AutocompleteEditModel* edit_model,
-                                         Profile* profile,
                                          GtkWidget* location_bar)
-    : model_(new AutocompletePopupModel(this, edit_model, profile)),
+    : model_(new AutocompletePopupModel(this, edit_model)),
       omnibox_view_(omnibox_view),
       location_bar_(location_bar),
       window_(gtk_window_new(GTK_WINDOW_POPUP)),
       layout_(NULL),
-      theme_service_(GtkThemeService::GetFrom(profile)),
+      theme_service_(GtkThemeService::GetFrom(edit_model->profile())),
       font_(font.DeriveFont(kEditFontAdjust)),
       ignore_mouse_drag_(false),
       opened_(false) {
@@ -313,7 +313,7 @@ OmniboxPopupViewGtk::OmniboxPopupViewGtk(const gfx::Font& font,
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+                 Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 
   // TODO(erg): There appears to be a bug somewhere in something which shows

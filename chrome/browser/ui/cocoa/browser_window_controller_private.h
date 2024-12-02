@@ -28,9 +28,6 @@
 // Saves the window's position in the local state preferences.
 - (void)saveWindowPositionIfNeeded;
 
-// Saves the window's position to the given pref service.
-- (void)saveWindowPositionToPrefs:(PrefService*)prefs;
-
 // We need to adjust where sheets come out of the window, as by default they
 // erupt from the omnibox, which is rather weird.
 - (NSRect)window:(NSWindow*)window
@@ -45,6 +42,10 @@
 // Find the total height of the floating bar (in presentation mode). Safe to
 // call even when not in presentation mode.
 - (CGFloat)floatingBarHeight;
+
+// Shows the informational "how to exit fullscreen" bubble.
+- (void)showFullscreenExitBubbleIfNecessary;
+- (void)destroyFullscreenExitBubbleIfNecessary;
 
 // Lays out the presentation mode toggle button at the top right corner of the
 // overlay.  Creates the button if needed, and removes it if it is not needed.

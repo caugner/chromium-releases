@@ -25,6 +25,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/gtk_util.h"
@@ -104,7 +105,7 @@ class BookmarkEditorGtk::ContextMenuController
     menu_model_->AddItemWithStringId(COMMAND_DELETE, IDS_DELETE);
     menu_model_->AddItemWithStringId(
         COMMAND_NEW_FOLDER,
-        IDS_BOOMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
+        IDS_BOOKMARK_EDITOR_NEW_FOLDER_MENU_ITEM);
 #if defined(TOOLKIT_VIEWS)
     menu_.reset(new views::Menu2(menu_model_.get()));
 #else
@@ -298,7 +299,7 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   bb_model_->AddObserver(this);
 
   dialog_ = gtk_dialog_new_with_buttons(
-      l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_TITLE).c_str(),
+      l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_TITLE).c_str(),
       parent_window,
       GTK_DIALOG_MODAL,
       GTK_STOCK_CANCEL, GTK_RESPONSE_REJECT,
@@ -309,7 +310,8 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   if (show_tree_) {
     GtkWidget* action_area = GTK_DIALOG(dialog_)->action_area;
     new_folder_button_ = gtk_button_new_with_label(
-        l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NEW_FOLDER_BUTTON).c_str());
+        l10n_util::GetStringUTF8(
+            IDS_BOOKMARK_EDITOR_NEW_FOLDER_BUTTON).c_str());
     g_signal_connect(new_folder_button_, "clicked",
                      G_CALLBACK(OnNewFolderClickedThunk), this);
     gtk_container_add(GTK_CONTAINER(action_area), new_folder_button_);
@@ -343,8 +345,8 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
   // +---------------------------------------------------------------+
   //
   // * The url and corresponding label are not shown if creating a new folder.
-  GtkWidget* content_area = GTK_DIALOG(dialog_)->vbox;
-  gtk_box_set_spacing(GTK_BOX(content_area), gtk_util::kContentAreaSpacing);
+  GtkWidget* content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog_));
+  gtk_box_set_spacing(GTK_BOX(content_area), ui::kContentAreaSpacing);
 
   GtkWidget* vbox = gtk_vbox_new(FALSE, 12);
 
@@ -355,7 +357,7 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
     title = UTF16ToUTF8(details_.existing_node->GetTitle());
     url = details_.existing_node->url();
   } else if (details_.type == EditDetails::NEW_FOLDER) {
-    title = l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME);
+    title = l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME);
   } else if (details_.type == EditDetails::NEW_URL) {
     string16 title16;
     bookmark_utils::GetURLAndTitleToBookmarkFromCurrentTab(profile_,
@@ -375,16 +377,16 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
                      G_CALLBACK(OnEntryChangedThunk), this);
     gtk_entry_set_activates_default(GTK_ENTRY(url_entry_), TRUE);
     table = gtk_util::CreateLabeledControlsGroup(NULL,
-        l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NAME_LABEL).c_str(),
+        l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_NAME_LABEL).c_str(),
         name_entry_,
-        l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_URL_LABEL).c_str(),
+        l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_URL_LABEL).c_str(),
         url_entry_,
         NULL);
 
   } else {
     url_entry_ = NULL;
     table = gtk_util::CreateLabeledControlsGroup(NULL,
-        l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NAME_LABEL).c_str(),
+        l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_NAME_LABEL).c_str(),
         name_entry_,
         NULL);
   }
@@ -588,7 +590,7 @@ void BookmarkEditorGtk::AddNewFolder(GtkTreeIter* parent, GtkTreeIter* child) {
       tree_store_, child,
       bookmark_utils::FOLDER_ICON, GtkThemeService::GetFolderIcon(true),
       bookmark_utils::FOLDER_NAME,
-          l10n_util::GetStringUTF8(IDS_BOOMARK_EDITOR_NEW_FOLDER_NAME).c_str(),
+          l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME).c_str(),
       bookmark_utils::ITEM_ID, static_cast<int64>(0),
       bookmark_utils::IS_EDITABLE, TRUE,
       -1);

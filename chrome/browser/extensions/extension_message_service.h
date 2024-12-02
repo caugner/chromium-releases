@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -55,7 +56,6 @@ class ExtensionMessageService
   // Javascript function name constants.
   static const char kDispatchOnConnect[];
   static const char kDispatchOnDisconnect[];
-  static const char kDispatchOnMessage[];
 
   // Allocates a pair of port ids.
   // NOTE: this can be called from any thread.
@@ -136,7 +136,7 @@ class ExtensionMessageService
   // NotificationObserver interface.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   // An IPC sender that might be in our list of channels has closed.
   void OnSenderClosed(IPC::Message::Sender* sender);

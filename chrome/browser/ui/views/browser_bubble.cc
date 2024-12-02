@@ -5,9 +5,6 @@
 #include "chrome/browser/ui/views/browser_bubble.h"
 
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#if defined(OS_WIN)
-#include "chrome/browser/external_tab_container_win.h"
-#endif
 #include "views/widget/widget.h"
 
 namespace {
@@ -32,7 +29,7 @@ BrowserBubbleHost* GetBubbleHostFromFrame(views::Widget* frame) {
 BrowserBubble::BrowserBubble(views::View* view,
                              views::Widget* frame,
                              const gfx::Rect& relative_to,
-                             BubbleBorder::ArrowLocation arrow_location)
+                             views::BubbleBorder::ArrowLocation arrow_location)
     : frame_(frame),
       view_(view),
       relative_to_(relative_to),
@@ -48,7 +45,7 @@ BrowserBubble::BrowserBubble(views::View* view,
 
   // Use half the corner radius as contents margins so that contents fit better
   // in the bubble. See http://crbug.com/80416.
-  int corner_inset = BubbleBorder::GetCornerRadius() / 2;
+  int corner_inset = views::BubbleBorder::GetCornerRadius() / 2;
   gfx::Insets content_margins(corner_inset, corner_inset,
                               corner_inset, corner_inset);
   InitPopup(content_margins);
@@ -146,5 +143,3 @@ void BrowserBubble::SetAbsoluteBounds(const gfx::Rect& window_bounds) {
 void BrowserBubble::MovePopup(int x, int y, int w, int h) {
   popup_->SetBounds(gfx::Rect(x, y, w, h));
 }
-
-

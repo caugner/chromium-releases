@@ -9,7 +9,6 @@
 #include <set>
 #include <vector>
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/prefs/pref_member.h"
@@ -46,11 +45,7 @@ class ToolbarView : public AccessiblePaneView,
   virtual ~ToolbarView();
 
   // Create the contents of the Browser Toolbar
-  void Init(Profile* profile);
-
-  // Sets the profile which is active on the currently-active tab.
-  void SetProfile(Profile* profile);
-  Profile* profile() { return profile_; }
+  void Init();
 
   // Updates the toolbar (and transitively the location bar) with the states of
   // the specified |tab|.  If |should_restore_state| is true, we're switching
@@ -191,7 +186,6 @@ class ToolbarView : public AccessiblePaneView,
   LocationBarView* location_bar_;
   BrowserActionsContainer* browser_actions_;
   views::MenuButton* app_menu_;
-  Profile* profile_;
   Browser* browser_;
 
   // Contents of the profiles menu to populate with profile names.
@@ -207,7 +201,7 @@ class ToolbarView : public AccessiblePaneView,
   scoped_ptr<ui::SimpleMenuModel> wrench_menu_model_;
 
   // Wrench menu.
-  scoped_refptr<WrenchMenu> wrench_menu_;
+  scoped_ptr<WrenchMenu> wrench_menu_;
 
   // Vector of listeners to receive callbacks when the menu opens.
   std::vector<views::MenuListener*> menu_listeners_;

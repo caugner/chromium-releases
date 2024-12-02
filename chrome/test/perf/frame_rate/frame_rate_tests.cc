@@ -54,7 +54,7 @@ class FrameRateTest : public UIPerfTest {
     // Block until the tests completes.
     ASSERT_TRUE(WaitUntilJavaScriptCondition(
         tab, L"", L"window.domAutomationController.send(!__running_all);",
-        TestTimeouts::huge_test_timeout_ms()));
+        TestTimeouts::large_test_timeout_ms()));
 
     // Read out the results.
     std::wstring json;
@@ -73,14 +73,15 @@ class FrameRateTest : public UIPerfTest {
     ASSERT_TRUE(results.find("means") != results.end());
     ASSERT_TRUE(results.find("sigmas") != results.end());
 
-    std::cout << "Gestures: " + results["gestures"] + "\n";
-    std::cout << "Means:    " + results["means"] + "\n";
-    std::cout << "Sigmas:   " + results["sigmas"] + "\n";
-    PrintResultList("fps", suffix, "", results["means"],
-                    "frames-per-second", true);
+    std::string trace_name = "fps" + suffix;
+    printf("GESTURES %s: %s= [%s] [%s] [%s]\n", name.c_str(),
+                                                trace_name.c_str(),
+                                                results["gestures"].c_str(),
+                                                results["means"].c_str(),
+                                                results["sigmas"].c_str());
 
     std::string mean_and_error = results["mean"] + "," + results["sigma"];
-    PrintResultMeanAndError("fps", suffix, "", mean_and_error,
+    PrintResultMeanAndError(name, "", trace_name, mean_and_error,
                             "frames-per-second", true);
   }
 };

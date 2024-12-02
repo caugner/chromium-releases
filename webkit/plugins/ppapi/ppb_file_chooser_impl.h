@@ -8,34 +8,36 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "ppapi/c/dev/ppb_file_chooser_dev.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_file_chooser_api.h"
-#include "webkit/plugins/ppapi/resource.h"
 
 struct PP_CompletionCallback;
 
 namespace webkit {
 namespace ppapi {
 
-class PluginInstance;
 class PPB_FileRef_Impl;
 class TrackedCompletionCallback;
 
-class PPB_FileChooser_Impl : public Resource,
+class PPB_FileChooser_Impl : public ::ppapi::Resource,
                              public ::ppapi::thunk::PPB_FileChooser_API {
  public:
-  PPB_FileChooser_Impl(PluginInstance* instance,
-                       const PP_FileChooserOptions_Dev* options);
+  PPB_FileChooser_Impl(PP_Instance instance,
+                       PP_FileChooserMode_Dev mode,
+                       const PP_Var& accept_mime_types);
   virtual ~PPB_FileChooser_Impl();
 
-  static PP_Resource Create(PluginInstance* instance,
-                            const PP_FileChooserOptions_Dev* options);
+  static PP_Resource Create(PP_Instance instance,
+                            PP_FileChooserMode_Dev mode,
+                            const PP_Var& accept_mime_types);
 
   // Resource overrides.
   virtual PPB_FileChooser_Impl* AsPPB_FileChooser_Impl();
 
-  // ResourceObjectBase overrides.
+  // Resource overrides.
   virtual ::ppapi::thunk::PPB_FileChooser_API* AsPPB_FileChooser_API() OVERRIDE;
 
   // Stores the list of selected files.
@@ -53,7 +55,7 @@ class PPB_FileChooser_Impl : public Resource,
   void RunCallback(int32_t result);
 
   // PPB_FileChooser_API implementation.
-  virtual int32_t Show(PP_CompletionCallback callback) OVERRIDE;
+  virtual int32_t Show(const PP_CompletionCallback& callback) OVERRIDE;
   virtual PP_Resource GetNextChosenFile() OVERRIDE;
 
  private:

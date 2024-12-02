@@ -11,8 +11,6 @@
 #include "views/controls/button/menu_button.h"
 #include "views/controls/label.h"
 #include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/widget/widget.h"
 
 AfterTranslateInfoBar::AfterTranslateInfoBar(
     TabContentsWrapper* owner,
@@ -166,18 +164,20 @@ void AfterTranslateInfoBar::TargetLanguageChanged() {
 
 void AfterTranslateInfoBar::RunMenu(View* source, const gfx::Point& pt) {
   ui::MenuModel* menu_model = NULL;
+  views::MenuButton* button = NULL;
+  views::MenuItemView::AnchorPosition anchor = views::MenuItemView::TOPLEFT;
   if (source == original_language_menu_button_) {
     menu_model = &original_language_menu_model_;
+    button = original_language_menu_button_;
   } else if (source == target_language_menu_button_) {
     menu_model = &target_language_menu_model_;
+    button = target_language_menu_button_;
   } else {
     DCHECK_EQ(options_menu_button_, source);
     menu_model = &options_menu_model_;
+    button = options_menu_button_;
+    anchor = views::MenuItemView::TOPRIGHT;
   }
-
-  views::MenuModelAdapter menu_model_adapter(menu_model);
-  views::MenuItemView menu(&menu_model_adapter);
-  menu_model_adapter.BuildMenu(&menu);
-  menu.RunMenuAt(source->GetWidget()->GetNativeWindow(), NULL,
-      gfx::Rect(pt, gfx::Size()), views::MenuItemView::TOPRIGHT, true);
+  RunMenuAt(menu_model, button, anchor);
+  // TODO(pkasting): this may be deleted after rewrite.
 }

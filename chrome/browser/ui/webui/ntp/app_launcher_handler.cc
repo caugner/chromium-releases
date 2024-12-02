@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/command_line.h"
+#include "base/callback.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -16,9 +16,9 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/apps_promo.h"
+#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,15 +26,17 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "chrome/common/favicon_url.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/web_apps.h"
 #include "content/browser/disposition_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
@@ -43,6 +45,7 @@
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "ui/base/animation/animation.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "webkit/glue/window_open_disposition.h"
 
 namespace {
@@ -69,9 +72,11 @@ extension_misc::AppLaunchBucket ParseLaunchSource(
 }  // namespace
 
 AppLauncherHandler::AppLauncherHandler(ExtensionService* extension_service)
-    : extensions_service_(extension_service),
+    : extension_service_(extension_service),
       promo_active_(false),
-      ignore_changes_(false) {
+      ignore_changes_(false),
+      attempted_bookmark_app_install_(false),
+      has_loaded_apps_(false) {
 }
 
 AppLauncherHandler::~AppLauncherHandler() {}
@@ -91,40 +96,65 @@ static DictionaryValue* SerializeNotification(
 }
 
 // static
+bool AppLauncherHandler::IsAppExcludedFromList(const Extension* extension) {
+  // Don't include the WebStore and the Cloud Print app.
+  // The WebStore launcher gets special treatment in ntp/apps.js.
+  // The Cloud Print app should never be displayed in the NTP.
+  bool ntp3 =
+      !NewTabUI::NTP4Enabled();
+  if (!extension->is_app() ||
+      (ntp3 && extension->id() == extension_misc::kWebStoreAppId) ||
+      (extension->id() == extension_misc::kCloudPrintAppId)) {
+    return true;
+  }
+  return false;
+}
+
 void AppLauncherHandler::CreateAppInfo(const Extension* extension,
                                        const AppNotification* notification,
                                        ExtensionService* service,
                                        DictionaryValue* value) {
-  bool enabled = service->IsExtensionEnabled(extension->id());
+  bool enabled = service->IsExtensionEnabled(extension->id()) &&
+      !service->GetTerminatedExtension(extension->id());
+  bool icon_big_exists = true;
+  // Instead of setting grayscale here, we do it in apps_page.js in NTP4.
+  bool grayscale = NewTabUI::NTP4Enabled() ? false : !enabled;
   GURL icon_big =
       ExtensionIconSource::GetIconURL(extension,
                                       Extension::EXTENSION_ICON_LARGE,
                                       ExtensionIconSet::MATCH_EXACTLY,
-                                      !enabled);
+                                      grayscale, &icon_big_exists);
+  bool icon_small_exists = true;
   GURL icon_small =
       ExtensionIconSource::GetIconURL(extension,
                                       Extension::EXTENSION_ICON_BITTY,
                                       ExtensionIconSet::MATCH_BIGGER,
-                                      !enabled);
+                                      grayscale, &icon_small_exists);
 
   value->Clear();
   value->SetString("id", extension->id());
   value->SetString("name", extension->name());
   value->SetString("description", extension->description());
   value->SetString("launch_url", extension->GetFullLaunchURL().spec());
-  if (enabled)
+  value->SetBoolean("enabled", enabled);
+  if (NewTabUI::NTP4Enabled() || enabled)
     value->SetString("options_url", extension->options_url().spec());
   value->SetBoolean("can_uninstall",
                     Extension::UserMayDisable(extension->location()));
   value->SetString("icon_big", icon_big.spec());
+  value->SetBoolean("icon_big_exists", icon_big_exists);
   value->SetString("icon_small", icon_small.spec());
+  value->SetBoolean("icon_small_exists", icon_small_exists);
   value->SetInteger("launch_container", extension->launch_container());
   ExtensionPrefs* prefs = service->extension_prefs();
   value->SetInteger("launch_type",
       prefs->GetLaunchType(extension->id(),
                            ExtensionPrefs::LAUNCH_DEFAULT));
+  value->SetBoolean("offline_enabled", extension->offline_enabled());
   value->SetBoolean("is_component",
       extension->location() == Extension::COMPONENT);
+  value->SetBoolean("is_webstore",
+      extension->id() == extension_misc::kWebStoreAppId);
 
   if (notification)
     value->Set("notification", SerializeNotification(*notification));
@@ -132,18 +162,28 @@ void AppLauncherHandler::CreateAppInfo(const Extension* extension,
   int app_launch_index = prefs->GetAppLaunchIndex(extension->id());
   if (app_launch_index == -1) {
     // Make sure every app has a launch index (some predate the launch index).
-    app_launch_index = prefs->GetNextAppLaunchIndex();
+    // The webstore's app launch index is set to -2 to make sure it's first.
+    // The next time the user drags (any) app this will be set to something
+    // sane (i.e. >= 0).
+    app_launch_index = extension->id() == extension_misc::kWebStoreAppId ?
+        -2 : prefs->GetNextAppLaunchIndex(0);
     prefs->SetAppLaunchIndex(extension->id(), app_launch_index);
   }
   value->SetInteger("app_launch_index", app_launch_index);
 
   int page_index = prefs->GetPageIndex(extension->id());
-  if (page_index >= 0) {
-    // Only provide a value if one is stored
-    value->SetInteger("page_index", page_index);
+  if (page_index < 0) {
+    // Make sure every app has a page index (some predate the page index).
+    // The webstore app should be on the first page.
+    page_index = extension->id() == extension_misc::kWebStoreAppId ?
+        0 : prefs->GetNaturalAppPageIndex();
+    prefs->SetPageIndex(extension->id(), page_index);
   }
+  value->SetInteger("page_index", page_index);
 }
 
+// TODO(estade): remove this. We record app launches via js calls rather than
+// pings for ntp4.
 // static
 bool AppLauncherHandler::HandlePing(Profile* profile, const std::string& path) {
   std::vector<std::string> params;
@@ -186,7 +226,8 @@ bool AppLauncherHandler::HandlePing(Profile* profile, const std::string& path) {
 }
 
 WebUIMessageHandler* AppLauncherHandler::Attach(WebUI* web_ui) {
-  // TODO(arv): Add initialization code to the Apps store etc.
+  registrar_.Add(this, chrome::NOTIFICATION_APP_INSTALLED_TO_NTP,
+      Source<TabContents>(web_ui->tab_contents()));
   return WebUIMessageHandler::Attach(web_ui);
 }
 
@@ -211,6 +252,10 @@ void AppLauncherHandler::RegisterMessages() {
       NewCallback(this, &AppLauncherHandler::HandlePromoSeen));
   web_ui_->RegisterMessageCallback("saveAppPageName",
       NewCallback(this, &AppLauncherHandler::HandleSaveAppPageName));
+  web_ui_->RegisterMessageCallback("generateAppForLink",
+      NewCallback(this, &AppLauncherHandler::HandleGenerateAppForLink));
+  web_ui_->RegisterMessageCallback("recordAppLaunchByURL",
+      NewCallback(this, &AppLauncherHandler::HandleRecordAppLaunchByURL));
 }
 
 void AppLauncherHandler::Observe(int type,
@@ -221,37 +266,75 @@ void AppLauncherHandler::Observe(int type,
 
   switch (type) {
     case chrome::NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED: {
+      Profile* profile = Source<Profile>(source).ptr();
+      if (!Profile::FromWebUI(web_ui_)->IsSameProfile(profile))
+        return;
+
       const std::string& id = *Details<const std::string>(details).ptr();
       const AppNotification* notification =
-          extensions_service_->app_notification_manager()->GetLast(id);
-      ListValue args;
-      args.Append(new StringValue(id));
-      if (notification)
-        args.Append(SerializeNotification(*notification));
-      web_ui_->CallJavascriptFunction("appNotificationChanged", args);
+          extension_service_->app_notification_manager()->GetLast(id);
+      base::StringValue id_value(id);
+      if (notification) {
+        scoped_ptr<DictionaryValue> notification_value(
+            SerializeNotification(*notification));
+        web_ui_->CallJavascriptFunction("appNotificationChanged",
+            id_value, *notification_value.get());
+      } else {
+        web_ui_->CallJavascriptFunction("appNotificationChanged", id_value);
+      }
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
-      const Extension* extension =
-          type == chrome::NOTIFICATION_EXTENSION_LOADED ?
-              Details<const Extension>(details).ptr() :
-              Details<UnloadedExtensionInfo>(details)->extension;
-      if (!extension->is_app())
+    case chrome::NOTIFICATION_APP_INSTALLED_TO_NTP: {
+      if (!NewTabUI::NTP4Enabled())
         break;
 
-      if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4)) {
-        scoped_ptr<DictionaryValue> app_info(GetAppInfo(extension));
-        if (app_info.get()) {
-          std::string function =
-              type == chrome::NOTIFICATION_EXTENSION_LOADED ?
-                  "ntp4.appAdded" : "ntp4.appRemoved";
-          web_ui_->CallJavascriptFunction(function, *app_info);
-        }
-      } else if (web_ui_->tab_contents()) {
+      highlight_app_id_ = *Details<const std::string>(details).ptr();
+      if (has_loaded_apps_)
+        SetAppToBeHighlighted();
+      break;
+    }
+    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+      const Extension* extension = Details<const Extension>(details).ptr();
+      if (!extension->is_app())
+        return;
+
+      if (!NewTabUI::NTP4Enabled()) {
         HandleGetApps(NULL);
+        break;
       }
 
+      scoped_ptr<DictionaryValue> app_info(GetAppInfo(extension));
+      if (app_info.get()) {
+        ExtensionPrefs* prefs = extension_service_->extension_prefs();
+        scoped_ptr<base::FundamentalValue> highlight(Value::CreateBooleanValue(
+              prefs->IsFromBookmark(extension->id()) &&
+              attempted_bookmark_app_install_));
+        attempted_bookmark_app_install_ = false;
+        web_ui_->CallJavascriptFunction("ntp4.appAdded", *app_info, *highlight);
+      }
+
+      break;
+    }
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
+      const Extension* extension =
+          Details<UnloadedExtensionInfo>(details)->extension;
+      if (!extension->is_app())
+        return;
+
+      if (!NewTabUI::NTP4Enabled()) {
+        HandleGetApps(NULL);
+        break;
+      }
+
+      scoped_ptr<DictionaryValue> app_info(GetAppInfo(extension));
+      scoped_ptr<base::FundamentalValue> uninstall_value(
+          Value::CreateBooleanValue(
+              Details<UnloadedExtensionInfo>(details)->reason ==
+              extension_misc::UNLOAD_REASON_UNINSTALL));
+      if (app_info.get()) {
+        web_ui_->CallJavascriptFunction(
+            "ntp4.appRemoved", *app_info, *uninstall_value);
+      }
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_LAUNCHER_REORDERED:
@@ -277,6 +360,10 @@ void AppLauncherHandler::Observe(int type,
       }
       break;
     }
+    case chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR: {
+      attempted_bookmark_app_install_ = false;
+      break;
+    }
     default:
       NOTREACHED();
   }
@@ -284,29 +371,37 @@ void AppLauncherHandler::Observe(int type,
 
 void AppLauncherHandler::FillAppDictionary(DictionaryValue* dictionary) {
   ListValue* list = new ListValue();
-  const ExtensionList* extensions = extensions_service_->extensions();
+  const ExtensionList* extensions = extension_service_->extensions();
   ExtensionList::const_iterator it;
   for (it = extensions->begin(); it != extensions->end(); ++it) {
-    // Don't include the WebStore and the Cloud Print app.
-    // The WebStore launcher gets special treatment in ntp/apps.js.
-    // The Cloud Print app should never be displayed in the NTP.
-    const Extension* extension = *it;
-    DictionaryValue* app_info = GetAppInfo(extension);
-    if (app_info)
+    if (!IsAppExcludedFromList(*it)) {
+      DictionaryValue* app_info = GetAppInfo(*it);
       list->Append(app_info);
+    }
   }
 
-  extensions = extensions_service_->disabled_extensions();
+  // CreateAppInfo can change the extension prefs.
+  AutoReset<bool> auto_reset(&ignore_changes_, true);
+
+  extensions = extension_service_->disabled_extensions();
   for (it = extensions->begin(); it != extensions->end(); ++it) {
-    bool ntp3 =
-        !CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4);
-    if ((*it)->is_app() &&
-        !(ntp3 && (*it)->id() == extension_misc::kWebStoreAppId) &&
-        ((*it)->id() != extension_misc::kCloudPrintAppId)) {
+    if (!IsAppExcludedFromList(*it)) {
       DictionaryValue* app_info = new DictionaryValue();
       CreateAppInfo(*it,
                     NULL,
-                    extensions_service_,
+                    extension_service_,
+                    app_info);
+      list->Append(app_info);
+    }
+  }
+
+  extensions = extension_service_->terminated_extensions();
+  for (it = extensions->begin(); it != extensions->end(); ++it) {
+    if (!IsAppExcludedFromList(*it)) {
+      DictionaryValue* app_info = new DictionaryValue();
+      CreateAppInfo(*it,
+                    NULL,
+                    extension_service_,
                     app_info);
       list->Append(app_info);
     }
@@ -330,11 +425,11 @@ void AppLauncherHandler::FillAppDictionary(DictionaryValue* dictionary) {
 
   dictionary->SetBoolean(
       "showLauncher",
-      extensions_service_->apps_promo()->ShouldShowAppLauncher(
-          extensions_service_->GetAppIds()));
+      extension_service_->apps_promo()->ShouldShowAppLauncher(
+          extension_service_->GetAppIds()));
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4)) {
-    PrefService* prefs = web_ui_->GetProfile()->GetPrefs();
+  if (NewTabUI::NTP4Enabled()) {
+    PrefService* prefs = Profile::FromWebUI(web_ui_)->GetPrefs();
     const ListValue* app_page_names = prefs->GetList(prefs::kNTPAppPageNames);
     if (app_page_names && app_page_names->GetSize()) {
       dictionary->Set("appPageNames",
@@ -344,20 +439,14 @@ void AppLauncherHandler::FillAppDictionary(DictionaryValue* dictionary) {
 }
 
 DictionaryValue* AppLauncherHandler::GetAppInfo(const Extension* extension) {
-  bool ntp3 =
-      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4);
-  if (!extension->is_app() ||
-      (ntp3 && extension->id() == extension_misc::kWebStoreAppId) ||
-      (extension->id() == extension_misc::kCloudPrintAppId)) {
-    return NULL;
-  }
-
-  DictionaryValue* app_info = new DictionaryValue();
   AppNotificationManager* notification_manager =
-      extensions_service_->app_notification_manager();
+      extension_service_->app_notification_manager();
+  DictionaryValue* app_info = new DictionaryValue();
+  // CreateAppInfo can change the extension prefs.
+  AutoReset<bool> auto_reset(&ignore_changes_, true);
   CreateAppInfo(extension,
                 notification_manager->GetLast(extension->id()),
-                extensions_service_,
+                extension_service_,
                 app_info);
   return app_info;
 }
@@ -381,10 +470,11 @@ void AppLauncherHandler::HandleGetApps(const ListValue* args) {
   //    expired.
   // b) Conceptually, it doesn't really make sense to count a
   //    prefchange-triggered refresh as a promo 'view'.
-  AppsPromo* apps_promo = extensions_service_->apps_promo();
-  PrefService* prefs = web_ui_->GetProfile()->GetPrefs();
+  AppsPromo* apps_promo = extension_service_->apps_promo();
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  PrefService* prefs = profile->GetPrefs();
   bool apps_promo_just_expired = false;
-  if (apps_promo->ShouldShowPromo(extensions_service_->GetAppIds(),
+  if (apps_promo->ShouldShowPromo(extension_service_->GetAppIds(),
                                   &apps_promo_just_expired)) {
     apps_promo->MaximizeAppsIfNecessary();
     dictionary.SetBoolean("showPromo", true);
@@ -404,29 +494,33 @@ void AppLauncherHandler::HandleGetApps(const ListValue* args) {
     ShownSectionsHandler::SetShownSection(prefs, THUMB);
   }
 
+  SetAppToBeHighlighted();
   FillAppDictionary(&dictionary);
   web_ui_->CallJavascriptFunction("getAppsCallback", dictionary);
 
   // First time we get here we set up the observer so that we can tell update
   // the apps as they change.
-  if (registrar_.IsEmpty()) {
+  if (!has_loaded_apps_) {
+    pref_change_registrar_.Init(
+        extension_service_->extension_prefs()->pref_service());
+    pref_change_registrar_.Add(ExtensionPrefs::kExtensionsPref, this);
+    pref_change_registrar_.Add(prefs::kNTPAppPageNames, this);
+
     registrar_.Add(this, chrome::NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED,
         NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-        NotificationService::AllSources());
+        Source<Profile>(profile));
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-        NotificationService::AllSources());
+        Source<Profile>(profile));
     registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
-        NotificationService::AllSources());
+        Source<ExtensionPrefs>(extension_service_->extension_prefs()));
     registrar_.Add(this, chrome::NOTIFICATION_WEB_STORE_PROMO_LOADED,
-        NotificationService::AllSources());
+        Source<Profile>(profile));
+    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
+        Source<Profile>(profile));
   }
-  if (pref_change_registrar_.IsEmpty()) {
-    pref_change_registrar_.Init(
-        extensions_service_->extension_prefs()->pref_service());
-    pref_change_registrar_.Add(ExtensionPrefs::kExtensionsPref, this);
-    pref_change_registrar_.Add(prefs::kNTPAppPageNames, this);
-  }
+
+  has_loaded_apps_ = true;
 }
 
 void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
@@ -455,7 +549,7 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
         launch_bucket < extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
 
   const Extension* extension =
-      extensions_service_->GetExtensionById(extension_id, false);
+      extension_service_->GetExtensionById(extension_id, false);
 
   // Prompt the user to re-enable the application if disabled.
   if (!extension) {
@@ -463,7 +557,7 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
     return;
   }
 
-  Profile* profile = extensions_service_->profile();
+  Profile* profile = extension_service_->profile();
 
   // If the user pressed special keys when clicking, override the saved
   // preference for launch container.
@@ -474,7 +568,9 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
 
   if (extension_id != extension_misc::kWebStoreAppId) {
     RecordAppLaunchByID(promo_active_, launch_bucket);
-    extensions_service_->apps_promo()->ExpireDefaultApps();
+    extension_service_->apps_promo()->ExpireDefaultApps();
+  } else if (NewTabUI::NTP4Enabled()) {
+    RecordWebStoreLaunch(promo_active_);
   }
 
   if (disposition == NEW_FOREGROUND_TAB || disposition == NEW_BACKGROUND_TAB) {
@@ -489,7 +585,7 @@ void AppLauncherHandler::HandleLaunchApp(const ListValue* args) {
     // Look at preference to find the right launch container.  If no preference
     // is set, launch as a regular tab.
     extension_misc::LaunchContainer launch_container =
-        extensions_service_->extension_prefs()->GetLaunchContainer(
+        extension_service_->extension_prefs()->GetLaunchContainer(
             extension, ExtensionPrefs::LAUNCH_REGULAR);
 
     // To give a more "launchy" experience when using the NTP launcher, we close
@@ -516,15 +612,15 @@ void AppLauncherHandler::HandleSetLaunchType(const ListValue* args) {
   CHECK(args->GetDouble(1, &launch_type));
 
   const Extension* extension =
-      extensions_service_->GetExtensionById(extension_id, true);
+      extension_service_->GetExtensionById(extension_id, true);
   CHECK(extension);
 
   // Don't update the page; it already knows about the launch type change.
   scoped_ptr<AutoReset<bool> > auto_reset;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4))
+  if (NewTabUI::NTP4Enabled())
     auto_reset.reset(new AutoReset<bool>(&ignore_changes_, true));
 
-  extensions_service_->extension_prefs()->SetLaunchType(
+  extension_service_->extension_prefs()->SetLaunchType(
       extension_id,
       static_cast<ExtensionPrefs::LaunchType>(
           static_cast<int>(launch_type)));
@@ -534,7 +630,7 @@ void AppLauncherHandler::HandleUninstallApp(const ListValue* args) {
   std::string extension_id;
   CHECK(args->GetString(0, &extension_id));
 
-  const Extension* extension = extensions_service_->GetExtensionById(
+  const Extension* extension = extension_service_->GetExtensionById(
       extension_id, true);
   if (!extension)
     return;
@@ -552,7 +648,7 @@ void AppLauncherHandler::HandleUninstallApp(const ListValue* args) {
   bool dont_confirm = false;
   if (args->GetBoolean(1, &dont_confirm) && dont_confirm) {
     scoped_ptr<AutoReset<bool> > auto_reset;
-    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4))
+    if (NewTabUI::NTP4Enabled())
       auto_reset.reset(new AutoReset<bool>(&ignore_changes_, true));
     ExtensionDialogAccepted();
   } else {
@@ -564,11 +660,22 @@ void AppLauncherHandler::HandleHideAppsPromo(const ListValue* args) {
   // If the user has intentionally hidden the promotion, we'll uninstall all the
   // default apps (we know the user hasn't installed any apps on their own at
   // this point, or the promotion wouldn't have been shown).
-  ignore_changes_ = true;
-  UninstallDefaultApps();
-  extensions_service_->apps_promo()->HidePromo();
-  ignore_changes_ = false;
-  HandleGetApps(NULL);
+  // TODO(estade): this isn't used right now as we sort out the future of the
+  // apps promo on ntp4.
+  if (NewTabUI::NTP4Enabled()) {
+    UninstallDefaultApps();
+    extension_service_->apps_promo()->HidePromo();
+  } else {
+    // TODO(estade): remove all this. NTP3 uninstalled all the default apps then
+    // refreshed the entire NTP, we don't have to jump through these hoops for
+    // NTP4 because each app uninstall is handled separately without reloading
+    // the entire page.
+    ignore_changes_ = true;
+    UninstallDefaultApps();
+    extension_service_->apps_promo()->HidePromo();
+    ignore_changes_ = false;
+    HandleGetApps(NULL);
+  }
 }
 
 void AppLauncherHandler::HandleCreateAppShortcut(const ListValue* args) {
@@ -579,7 +686,7 @@ void AppLauncherHandler::HandleCreateAppShortcut(const ListValue* args) {
   }
 
   const Extension* extension =
-      extensions_service_->GetExtensionById(extension_id, true);
+      extension_service_->GetExtensionById(extension_id, true);
   CHECK(extension);
 
   Browser* browser = BrowserList::GetLastActive();
@@ -606,11 +713,11 @@ void AppLauncherHandler::HandleReorderApps(const ListValue* args) {
 
   // Don't update the page; it already knows the apps have been reordered.
   scoped_ptr<AutoReset<bool> > auto_reset;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4))
+  if (NewTabUI::NTP4Enabled())
     auto_reset.reset(new AutoReset<bool>(&ignore_changes_, true));
 
-  extensions_service_->extension_prefs()->SetAppDraggedByUser(dragged_app_id);
-  extensions_service_->extension_prefs()->SetAppLauncherOrder(extension_ids);
+  extension_service_->extension_prefs()->SetAppDraggedByUser(dragged_app_id);
+  extension_service_->extension_prefs()->SetAppLauncherOrder(extension_ids);
 }
 
 void AppLauncherHandler::HandleSetPageIndex(const ListValue* args) {
@@ -621,10 +728,10 @@ void AppLauncherHandler::HandleSetPageIndex(const ListValue* args) {
 
   // Don't update the page; it already knows the apps have been reordered.
   scoped_ptr<AutoReset<bool> > auto_reset;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage4))
+  if (NewTabUI::NTP4Enabled())
     auto_reset.reset(new AutoReset<bool>(&ignore_changes_, true));
 
-  extensions_service_->extension_prefs()->SetPageIndex(extension_id,
+  extension_service_->extension_prefs()->SetPageIndex(extension_id,
       static_cast<int>(page_index));
 }
 
@@ -642,10 +749,93 @@ void AppLauncherHandler::HandleSaveAppPageName(const ListValue* args) {
   CHECK(args->GetDouble(1, &page_index));
 
   AutoReset<bool> auto_reset(&ignore_changes_, true);
-  PrefService* prefs = web_ui_->GetProfile()->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui_)->GetPrefs();
   ListPrefUpdate update(prefs, prefs::kNTPAppPageNames);
   ListValue* list = update.Get();
   list->Set(static_cast<size_t>(page_index), Value::CreateStringValue(name));
+}
+
+void AppLauncherHandler::HandleGenerateAppForLink(const ListValue* args) {
+  std::string url;
+  CHECK(args->GetString(0, &url));
+  GURL launch_url(url);
+
+  string16 title;
+  CHECK(args->GetString(1, &title));
+
+  double page_index;
+  CHECK(args->GetDouble(2, &page_index));
+
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  FaviconService* favicon_service =
+      profile->GetFaviconService(Profile::EXPLICIT_ACCESS);
+  if (!favicon_service) {
+    LOG(ERROR) << "No favicon service";
+    return;
+  }
+
+  scoped_ptr<AppInstallInfo> install_info(new AppInstallInfo());
+  install_info->is_bookmark_app = true;
+  install_info->title = title;
+  install_info->app_url = launch_url;
+  install_info->page_index = static_cast<int>(page_index);
+
+  FaviconService::Handle h = favicon_service->GetFaviconForURL(
+      launch_url, history::FAVICON, &favicon_consumer_,
+      NewCallback(this, &AppLauncherHandler::OnFaviconForApp));
+  favicon_consumer_.SetClientData(favicon_service, h, install_info.release());
+}
+
+void AppLauncherHandler::HandleRecordAppLaunchByURL(
+    const base::ListValue* args) {
+  std::string url;
+  CHECK(args->GetString(0, &url));
+  double source;
+  CHECK(args->GetDouble(1, &source));
+
+  extension_misc::AppLaunchBucket bucket =
+      static_cast<extension_misc::AppLaunchBucket>(static_cast<int>(source));
+  CHECK(source < extension_misc::APP_LAUNCH_BUCKET_BOUNDARY);
+
+  RecordAppLaunchByURL(Profile::FromWebUI(web_ui_), url, bucket);
+}
+
+void AppLauncherHandler::OnFaviconForApp(FaviconService::Handle handle,
+                                         history::FaviconData data) {
+  scoped_ptr<AppInstallInfo> install_info(
+      favicon_consumer_.GetClientDataForCurrentRequest());
+  scoped_ptr<WebApplicationInfo> web_app(new WebApplicationInfo());
+  web_app->is_bookmark_app = install_info->is_bookmark_app;
+  web_app->title = install_info->title;
+  web_app->app_url = install_info->app_url;
+  web_app->urls.push_back(install_info->app_url);
+
+  WebApplicationInfo::IconInfo icon;
+  web_app->icons.push_back(icon);
+  if (data.is_valid() && gfx::PNGCodec::Decode(data.image_data->front(),
+                                               data.image_data->size(),
+                                               &(web_app->icons[0].data))) {
+    web_app->icons[0].url = GURL();
+    web_app->icons[0].width = web_app->icons[0].data.width();
+    web_app->icons[0].height = web_app->icons[0].data.height();
+  } else {
+    web_app->icons.clear();
+  }
+
+  scoped_refptr<CrxInstaller> installer(
+      extension_service_->MakeCrxInstaller(NULL));
+  installer->set_page_index(install_info->page_index);
+  installer->InstallWebApp(*web_app);
+  attempted_bookmark_app_install_ = true;
+}
+
+void AppLauncherHandler::SetAppToBeHighlighted() {
+  if (highlight_app_id_.empty())
+    return;
+
+  scoped_ptr<StringValue> app_id(Value::CreateStringValue(highlight_app_id_));
+  web_ui_->CallJavascriptFunction("ntp4.setAppToBeHighlighted", *app_id);
+  highlight_app_id_.clear();
 }
 
 // static
@@ -655,7 +845,7 @@ void AppLauncherHandler::RegisterUserPrefs(PrefService* pref_service) {
                                  PrefService::UNSYNCABLE_PREF);
 }
 
-// static
+// statiic
 void AppLauncherHandler::RecordWebStoreLaunch(bool promo_active) {
   UMA_HISTOGRAM_ENUMERATION(extension_misc::kAppLaunchHistogram,
                             extension_misc::APP_LAUNCH_NTP_WEBSTORE,
@@ -701,16 +891,24 @@ void AppLauncherHandler::RecordAppLaunchByURL(
 
 void AppLauncherHandler::PromptToEnableApp(const std::string& extension_id) {
   const Extension* extension =
-      extensions_service_->GetExtensionById(extension_id, true);
-  CHECK(extension);
+      extension_service_->GetExtensionById(extension_id, true);
+  if (!extension) {
+    extension = extension_service_->GetTerminatedExtension(extension_id);
+    CHECK(extension);
+    // If the app was terminated, reload it first. (This reallocates the
+    // Extension object.)
+    extension_service_->ReloadExtension(extension_id);
+    extension = extension_service_->GetExtensionById(extension_id, true);
+  }
 
-  ExtensionPrefs* extension_prefs = extensions_service_->extension_prefs();
+  ExtensionPrefs* extension_prefs = extension_service_->extension_prefs();
   if (!extension_prefs->DidExtensionEscalatePermissions(extension_id)) {
     // Enable the extension immediately if its privileges weren't escalated.
-    extensions_service_->EnableExtension(extension_id);
+    // This is a no-op if the extension was previously terminated.
+    extension_service_->EnableExtension(extension_id);
 
     // Launch app asynchronously so the image will update.
-    StringValue* app_id = Value::CreateStringValue(extension->id());
+    scoped_ptr<StringValue> app_id(Value::CreateStringValue(extension_id));
     web_ui_->CallJavascriptFunction("launchAppAfterEnable", *app_id);
     return;
   }
@@ -729,12 +927,12 @@ void AppLauncherHandler::ExtensionDialogAccepted() {
   // The extension can be uninstalled in another window while the UI was
   // showing. Do nothing in that case.
   const Extension* extension =
-      extensions_service_->GetExtensionById(extension_id_prompting_, true);
+      extension_service_->GetExtensionById(extension_id_prompting_, true);
   if (!extension)
     return;
 
-  extensions_service_->UninstallExtension(extension_id_prompting_,
-                                          false /* external_uninstall */, NULL);
+  extension_service_->UninstallExtension(extension_id_prompting_,
+                                         false /* external_uninstall */, NULL);
 
   extension_id_prompting_ = "";
 }
@@ -750,17 +948,17 @@ void AppLauncherHandler::InstallUIProceed() {
   // The extension can be uninstalled in another window while the UI was
   // showing. Do nothing in that case.
   const Extension* extension =
-      extensions_service_->GetExtensionById(extension_id_prompting_, true);
+      extension_service_->GetExtensionById(extension_id_prompting_, true);
   if (!extension)
     return;
 
-  extensions_service_->GrantPermissionsAndEnableExtension(extension);
+  extension_service_->GrantPermissionsAndEnableExtension(extension);
 
   // We bounce this off the NTP so the browser can update the apps icon.
   // If we don't launch the app asynchronously, then the app's disabled
   // icon disappears but isn't replaced by the enabled icon, making a poor
   // visual experience.
-  StringValue* app_id = Value::CreateStringValue(extension->id());
+  scoped_ptr<StringValue> app_id(Value::CreateStringValue(extension->id()));
   web_ui_->CallJavascriptFunction("launchAppAfterEnable", *app_id);
 
   extension_id_prompting_ = "";
@@ -770,7 +968,7 @@ void AppLauncherHandler::InstallUIAbort(bool user_initiated) {
   // We record the histograms here because ExtensionDialogCanceled is also
   // called when the extension uninstall dialog is canceled.
   const Extension* extension =
-      extensions_service_->GetExtensionById(extension_id_prompting_, true);
+      extension_service_->GetExtensionById(extension_id_prompting_, true);
   std::string histogram_name = user_initiated ?
       "Extensions.Permissions_ReEnableCancel" :
       "Extensions.Permissions_ReEnableAbort";
@@ -783,7 +981,7 @@ void AppLauncherHandler::InstallUIAbort(bool user_initiated) {
 ExtensionUninstallDialog* AppLauncherHandler::GetExtensionUninstallDialog() {
   if (!extension_uninstall_dialog_.get()) {
     extension_uninstall_dialog_.reset(
-        new ExtensionUninstallDialog(web_ui_->GetProfile()));
+        new ExtensionUninstallDialog(Profile::FromWebUI(web_ui_)));
   }
   return extension_uninstall_dialog_.get();
 }
@@ -791,17 +989,17 @@ ExtensionUninstallDialog* AppLauncherHandler::GetExtensionUninstallDialog() {
 ExtensionInstallUI* AppLauncherHandler::GetExtensionInstallUI() {
   if (!extension_install_ui_.get()) {
     extension_install_ui_.reset(
-        new ExtensionInstallUI(web_ui_->GetProfile()));
+        new ExtensionInstallUI(Profile::FromWebUI(web_ui_)));
   }
   return extension_install_ui_.get();
 }
 
 void AppLauncherHandler::UninstallDefaultApps() {
-  AppsPromo* apps_promo = extensions_service_->apps_promo();
+  AppsPromo* apps_promo = extension_service_->apps_promo();
   const ExtensionIdSet& app_ids = apps_promo->old_default_apps();
   for (ExtensionIdSet::const_iterator iter = app_ids.begin();
        iter != app_ids.end(); ++iter) {
-    if (extensions_service_->GetExtensionById(*iter, true))
-      extensions_service_->UninstallExtension(*iter, false, NULL);
+    if (extension_service_->GetExtensionById(*iter, true))
+      extension_service_->UninstallExtension(*iter, false, NULL);
   }
 }

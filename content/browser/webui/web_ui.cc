@@ -46,6 +46,7 @@ WebUI::WebUI(TabContents* contents)
       bindings_(BindingsPolicy::WEB_UI),
       register_callback_overwrites_(false),
       tab_contents_(contents) {
+  DCHECK(contents);
   GenericHandler* handler = new GenericHandler();
   AddMessageHandler(handler->Attach(this));
 }
@@ -155,16 +156,6 @@ void WebUI::RegisterMessageCallback(const std::string &message,
     result.first->second = callback;
 }
 
-Profile* WebUI::GetProfile() const {
-  DCHECK(tab_contents());
-  return tab_contents()->profile();
-}
-
-RenderViewHost* WebUI::GetRenderViewHost() const {
-  DCHECK(tab_contents());
-  return tab_contents()->render_view_host();
-}
-
 bool WebUI::IsLoading() const {
   std::vector<WebUIMessageHandler*>::const_iterator iter;
   for (iter = handlers_.begin(); iter != handlers_.end(); ++iter) {
@@ -181,8 +172,8 @@ void WebUI::AddMessageHandler(WebUIMessageHandler* handler) {
 }
 
 void WebUI::ExecuteJavascript(const string16& javascript) {
-  GetRenderViewHost()->ExecuteJavascriptInWebFrame(string16(),
-                                                   javascript);
+  tab_contents_->render_view_host()->ExecuteJavascriptInWebFrame(string16(),
+                                                                 javascript);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

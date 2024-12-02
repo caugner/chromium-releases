@@ -11,10 +11,9 @@
 #include "ppapi/shared_impl/input_event_impl.h"
 
 namespace ppapi {
-struct InputEventData;
-}
 
-namespace pp {
+struct InputEventData;
+
 namespace proxy {
 
 class PPB_InputEvent_Proxy : public InterfaceProxy {
@@ -24,11 +23,9 @@ class PPB_InputEvent_Proxy : public InterfaceProxy {
 
   static const Info* GetInputEventInfo();
   static const Info* GetKeyboardInputEventInfo();
-  static const Info* GetMouseInputEventInfo();
+  static const Info* GetMouseInputEventInfo1_0();
+  static const Info* GetMouseInputEventInfo1_1();
   static const Info* GetWheelInputEventInfo();
-
-  static PP_Resource CreateProxyResource(PP_Instance instance,
-                                         const ppapi::InputEventData& data);
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -38,6 +35,6 @@ class PPB_InputEvent_Proxy : public InterfaceProxy {
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_INPUT_EVENT_PROXY_H_

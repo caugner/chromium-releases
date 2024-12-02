@@ -19,8 +19,8 @@ class View;
 
 // A helper class providing functionalities shared among InputMethod
 // implementations.
-class InputMethodBase : public InputMethod,
-                        public FocusChangeListener {
+class VIEWS_EXPORT InputMethodBase : public InputMethod,
+                                     public FocusChangeListener {
  public:
   InputMethodBase();
   virtual ~InputMethodBase();
@@ -48,6 +48,7 @@ class InputMethodBase : public InputMethod,
 
   virtual TextInputClient* GetTextInputClient() const OVERRIDE;
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
+  virtual bool IsMock() const OVERRIDE;
 
   // Overridden from FocusChangeListener. Derived classes shouldn't override
   // this method. Override FocusedViewWillChange() and FocusedViewDidChange()

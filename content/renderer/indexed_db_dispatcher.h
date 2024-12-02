@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,8 +37,7 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
       const string16& name,
       WebKit::WebIDBCallbacks* callbacks,
       const string16& origin,
-      WebKit::WebFrame* web_frame,
-      uint64 maximum_size);
+      WebKit::WebFrame* web_frame);
 
   void RequestIDBFactoryDeleteDatabase(
       const string16& name,
@@ -151,7 +150,6 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
   void OnSuccessIDBDatabase(int32 response_id, int32 object_id);
   void OnSuccessIndexedDBKey(int32 response_id, const IndexedDBKey& key);
   void OnSuccessIDBTransaction(int32 response_id, int32 object_id);
-  void OnSuccessIDBIndex(int32 response_id, int32 object_id);
   void OnSuccessOpenCursor(int32 response_id, int32 object_id);
   void OnSuccessSerializedScriptValue(int32 response_id,
                                       const SerializedScriptValue& value);
@@ -159,7 +157,6 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
   void OnBlocked(int32 response_id);
   void OnAbort(int32 transaction_id);
   void OnComplete(int32 transaction_id);
-  void OnTimeout(int32 transaction_id);
   void OnVersionChange(int32 database_id, const string16& newVersion);
 
   // Careful! WebIDBCallbacks wraps non-threadsafe data types. It must be

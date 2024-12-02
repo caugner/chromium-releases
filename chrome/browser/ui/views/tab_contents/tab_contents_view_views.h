@@ -64,12 +64,13 @@ class TabContentsViewViews : public views::Widget,
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
   virtual void RestoreFocus() OVERRIDE;
-  virtual void UpdatePreferredSize(const gfx::Size& pref_size) OVERRIDE;
   virtual bool IsDoingDrag() const OVERRIDE;
   virtual void CancelDragAndCloseTab() OVERRIDE;
   virtual bool IsEventTracking() const;
   virtual void CloseTabAfterEventTracking();
   virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+
+  // Implementation of RenderViewHostDelegate::View.
   virtual void CreateNewWindow(
       int route_id,
       const ViewHostMsg_CreateWindow_Params& params) OVERRIDE;

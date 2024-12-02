@@ -91,20 +91,6 @@ class WebPluginImpl : public WebPlugin,
   virtual void didFailLoadingFrameRequest(
       const WebKit::WebURL& url, void* notify_data,
       const WebKit::WebURLError& error);
-  virtual bool supportsPaginatedPrint();
-  virtual int printBegin(const WebKit::WebRect& printable_area,
-                         int printer_dpi);
-  virtual bool printPage(int page_number, WebKit::WebCanvas* canvas);
-  virtual void printEnd();
-  virtual bool hasSelection() const;
-  virtual WebKit::WebString selectionAsText() const;
-  virtual WebKit::WebString selectionAsMarkup() const;
-  virtual void setZoomFactor(float scale, bool text_only);
-  virtual bool startFind(const WebKit::WebString& search_text,
-                         bool case_sensitive,
-                         int identifier);
-  virtual void selectFindResult(bool forward);
-  virtual void stopFind();
 
   // WebPlugin implementation:
   virtual void SetWindow(gfx::PluginWindowHandle window);
@@ -119,13 +105,12 @@ class WebPluginImpl : public WebPlugin,
   virtual void InvalidateRect(const gfx::Rect& rect);
   virtual NPObject* GetWindowScriptNPObject();
   virtual NPObject* GetPluginElement();
+  virtual bool FindProxyForUrl(const GURL& url, std::string* proxy_list);
   virtual void SetCookie(const GURL& url,
                          const GURL& first_party_for_cookies,
                          const std::string& cookie);
   virtual std::string GetCookies(const GURL& url,
                                  const GURL& first_party_for_cookies);
-  virtual void OnMissingPluginStatus(int status);
-
   virtual void URLRedirectResponse(bool allow, int resource_id);
 
   // Given a (maybe partial) url, completes using the base url.

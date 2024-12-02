@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
+#include "content/common/request_extra_data.h"
 #include "content/common/resource_dispatcher_delegate.h"
 #include "content/common/resource_messages.h"
 #include "content/common/resource_response.h"
@@ -53,6 +54,7 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
   virtual void Cancel();
   virtual void SetDefersLoading(bool value);
   virtual void SyncLoad(SyncLoadResponse* response);
+  virtual void UpdateRoutingId(int new_routing_id);
 
  private:
   ResourceLoaderBridge::Peer* peer_;
@@ -92,8 +94,17 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   request_.appcache_host_id = request_info.appcache_host_id;
   request_.download_to_file = request_info.download_to_file;
   request_.has_user_gesture = request_info.has_user_gesture;
-  request_.is_main_frame = request_info.is_main_frame;
-  request_.frame_id = request_info.frame_id;
+  if (request_info.extra_data) {
+    RequestExtraData* extra_data =
+        static_cast<RequestExtraData*>(request_info.extra_data);
+    request_.is_main_frame = extra_data->is_main_frame();
+    request_.frame_id = extra_data->frame_id();
+    request_.transition_type = extra_data->transition_type();
+  } else {
+    request_.is_main_frame = false;
+    request_.frame_id = -1;
+    request_.transition_type = PageTransition::LINK;
+  }
 }
 
 IPCResourceLoaderBridge::~IPCResourceLoaderBridge() {
@@ -224,6 +235,18 @@ void IPCResourceLoaderBridge::SyncLoad(SyncLoadResponse* response) {
   response->download_file_path = result.download_file_path;
 }
 
+void IPCResourceLoaderBridge::UpdateRoutingId(int new_routing_id) {
+  if (request_id_ < 0) {
+    NOTREACHED() << "Trying to update an unstarted request";
+    return;
+  }
+
+  routing_id_ = new_routing_id;
+  dispatcher_->message_sender()->Send(
+      new ResourceHostMsg_TransferRequestToNewPage(new_routing_id,
+                                                   request_id_));
+}
+
 }  // namespace webkit_glue
 
 // ResourceDispatcher ---------------------------------------------------------
@@ -284,9 +307,7 @@ ResourceDispatcher::PendingRequestInfo*
 ResourceDispatcher::GetPendingRequestInfo(int request_id) {
   PendingRequestList::iterator it = pending_requests_.find(request_id);
   if (it == pending_requests_.end()) {
-    // This might happen for kill()ed requests on the webkit end, so perhaps it
-    // shouldn't be a warning...
-    DLOG(WARNING) << "Received message for a nonexistent or finished request";
+    // This might happen for kill()ed requests on the webkit end.
     return NULL;
   }
   return &(it->second);

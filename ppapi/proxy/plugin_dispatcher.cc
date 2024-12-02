@@ -24,6 +24,7 @@
 #include "ppapi/proxy/ppb_instance_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/shared_impl/tracker_base.h"
 
 #if defined(OS_POSIX)
@@ -31,7 +32,7 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -53,8 +54,7 @@ PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
   // GetInterface call or name for it, so we insert it into our table now.
   target_proxies_[INTERFACE_ID_PPP_CLASS].reset(new PPP_Class_Proxy(this));
 
-  ::ppapi::TrackerBase::Init(
-      &PluginResourceTracker::GetTrackerBaseInstance);
+  TrackerBase::Init(&PluginResourceTracker::GetTrackerBaseInstance);
 }
 
 PluginDispatcher::~PluginDispatcher() {
@@ -71,6 +71,11 @@ PluginDispatcher* PluginDispatcher::GetForInstance(PP_Instance instance) {
   if (found == g_instance_to_dispatcher->end())
     return NULL;
   return found->second;
+}
+
+// static
+PluginDispatcher* PluginDispatcher::GetForResource(const Resource* resource) {
+  return GetForInstance(resource->pp_instance());
 }
 
 // static
@@ -104,7 +109,6 @@ bool PluginDispatcher::IsPlugin() const {
 }
 
 bool PluginDispatcher::Send(IPC::Message* msg) {
-  DCHECK(MessageLoop::current());
   TRACE_EVENT2("ppapi proxy", "PluginDispatcher::Send",
                "Class", IPC_MESSAGE_ID_CLASS(msg->type()),
                "Line", IPC_MESSAGE_ID_LINE(msg->type()));
@@ -225,13 +229,12 @@ bool PluginDispatcher::SendToBrowser(IPC::Message* msg) {
   return plugin_delegate_->SendToBrowser(msg);
 }
 
-ppapi::WebKitForwarding* PluginDispatcher::GetWebKitForwarding() {
+WebKitForwarding* PluginDispatcher::GetWebKitForwarding() {
   return plugin_delegate_->GetWebKitForwarding();
 }
 
-::ppapi::FunctionGroupBase* PluginDispatcher::GetFunctionAPI(
-    pp::proxy::InterfaceID id) {
-  scoped_ptr< ::ppapi::FunctionGroupBase >& proxy = function_proxies_[id];
+FunctionGroupBase* PluginDispatcher::GetFunctionAPI(InterfaceID id) {
+  scoped_ptr<FunctionGroupBase >& proxy = function_proxies_[id];
 
   if (proxy.get())
     return proxy.get();
@@ -294,7 +297,7 @@ void PluginDispatcher::OnMsgSupportsInterface(
   *result = true;
 }
 
-void PluginDispatcher::OnMsgSetPreferences(const ::ppapi::Preferences& prefs) {
+void PluginDispatcher::OnMsgSetPreferences(const Preferences& prefs) {
   // The renderer may send us preferences more than once (currently this
   // happens every time a new plugin instance is created). Since we don't have
   // a way to signal to the plugin that the preferences have changed, changing
@@ -309,4 +312,4 @@ void PluginDispatcher::OnMsgSetPreferences(const ::ppapi::Preferences& prefs) {
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

@@ -22,10 +22,11 @@
 
 struct PPB_Audio;
 
-namespace pp {
-namespace proxy {
+namespace ppapi {
 
 class HostResource;
+
+namespace proxy {
 
 class PPB_Audio_Proxy : public InterfaceProxy {
  public:
@@ -53,18 +54,18 @@ class PPB_Audio_Proxy : public InterfaceProxy {
   void OnMsgCreate(PP_Instance instance_id,
                    int32_t sample_rate,
                    uint32_t sample_frame_count,
-                   HostResource* result);
-  void OnMsgStartOrStop(const HostResource& audio_id, bool play);
+                   ppapi::HostResource* result);
+  void OnMsgStartOrStop(const ppapi::HostResource& audio_id, bool play);
 
   // Renderer->plugin message handlers.
-  void OnMsgNotifyAudioStreamCreated(const HostResource& audio_id,
+  void OnMsgNotifyAudioStreamCreated(const ppapi::HostResource& audio_id,
                                      int32_t result_code,
                                      IPC::PlatformFileForTransit socket_handle,
                                      base::SharedMemoryHandle handle,
                                      uint32_t length);
 
   void AudioChannelConnected(int32_t result,
-                             const HostResource& resource);
+                             const ppapi::HostResource& resource);
 
   // In the renderer, this is called in response to a stream created message.
   // It will retrieve the shared memory and socket handles and place them into
@@ -75,18 +76,18 @@ class PPB_Audio_Proxy : public InterfaceProxy {
   // arguments may be written to, and others may be untouched, depending on
   // where the error occurred.
   int32_t GetAudioConnectedHandles(
-      const HostResource& resource,
+      const ppapi::HostResource& resource,
       IPC::PlatformFileForTransit* foreign_socket_handle,
       base::SharedMemoryHandle* foreign_shared_memory_handle,
       uint32_t* shared_memory_length);
 
-  CompletionCallbackFactory<PPB_Audio_Proxy,
-                            ProxyNonThreadSafeRefCount> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_Audio_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_Audio_Proxy);
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PROXY_PPB_AUDIO_PROXY_H_

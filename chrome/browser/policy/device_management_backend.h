@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/threading/non_thread_safe.h"
+#include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
 
 namespace policy {
@@ -41,8 +42,19 @@ class DeviceManagementBackend : base::NonThreadSafe {
     kErrorServiceManagementTokenInvalid,
     // Service error: Activation pending.
     kErrorServiceActivationPending,
+    // Service error: The serial number is not valid or not known to the server.
+    kErrorServiceInvalidSerialNumber,
+    // Service error: The device id used for registration is already taken.
+    kErrorServiceDeviceIdConflict,
     // Service error: Policy not found. Error code defined by the DM folks.
     kErrorServicePolicyNotFound = 902,
+  };
+
+  // These codes are sent in the |error_code| field of the the
+  // PolicyFetchResponse protobuf.
+  enum PolicyFetchErrorCode {
+    kPolicyFetchSuccess = 200,
+    kPolicyFetchErrorNotFound = 902
   };
 
   class DeviceRegisterResponseDelegate {
@@ -106,6 +118,7 @@ class DeviceManagementBackend : base::NonThreadSafe {
   virtual void ProcessPolicyRequest(
       const std::string& device_management_token,
       const std::string& device_id,
+      CloudPolicyDataStore::UserAffiliation user_affiliation,
       const em::DevicePolicyRequest& request,
       DevicePolicyResponseDelegate* delegate) = 0;
 

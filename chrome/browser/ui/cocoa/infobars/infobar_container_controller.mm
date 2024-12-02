@@ -4,9 +4,11 @@
 
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
 #include "chrome/browser/tab_contents/infobar.h"
 #import "chrome/browser/ui/cocoa/animatable_view.h"
+#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_controller.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
@@ -125,15 +127,24 @@ class InfoBarNotificationObserver : public NotificationObserver {
   [self positionInfoBarsAndRedraw];
 }
 
+- (BrowserWindowController*)browserWindowController {
+  id controller = [[[self view] window] windowController];
+  if (![controller isKindOfClass:[BrowserWindowController class]])
+    return nil;
+  return controller;
+}
+
 - (void)changeTabContents:(TabContentsWrapper*)contents {
   registrar_.RemoveAll();
   [self removeAllInfoBars];
 
   currentTabContents_ = contents;
   if (currentTabContents_) {
-    for (size_t i = 0; i < currentTabContents_->infobar_count(); ++i) {
-      InfoBar* infobar = currentTabContents_->GetInfoBarDelegateAt(i)->
-          CreateInfoBar(currentTabContents_);
+    InfoBarTabHelper* infobar_helper =
+        currentTabContents_->infobar_tab_helper();
+    for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
+      InfoBar* infobar = infobar_helper->
+          GetInfoBarDelegateAt(i)->CreateInfoBar(currentTabContents_);
       [self addInfoBar:infobar animate:NO];
     }
 
@@ -158,8 +169,8 @@ class InfoBarNotificationObserver : public NotificationObserver {
   return [infobarControllers_ count] - [closingInfoBars_ count];
 }
 
-- (CGFloat)antiSpoofHeight {
-  return 0;
+- (CGFloat)overlappingTipHeight {
+  return [self infobarCount] ? infobars::kTipHeight : 0;
 }
 
 - (void)resizeView:(NSView*)view newHeight:(CGFloat)height {
@@ -180,8 +191,17 @@ class InfoBarNotificationObserver : public NotificationObserver {
 
 - (CGFloat)desiredHeight {
   CGFloat height = 0;
+
+  // Take out the height of the tip from the total size of the infobar so that
+  // the tip overlaps the preceding infobar when there is more than one infobar.
   for (InfoBarController* controller in infobarControllers_.get())
-    height += NSHeight([[controller view] frame]);
+    height += NSHeight([[controller view] frame]) - infobars::kTipHeight;
+
+  // If there are any infobars, add a little extra room for the tip of the first
+  // infobar.
+  if (height)
+    height += infobars::kTipHeight;
+
   return height;
 }
 
@@ -243,7 +263,7 @@ class InfoBarNotificationObserver : public NotificationObserver {
     frame.size.width = NSWidth(containerBounds);
     [view setFrame:frame];
 
-    minY += NSHeight(frame);
+    minY += NSHeight(frame) - infobars::kTipHeight;
   }
 
   [resizeDelegate_ resizeView:[self view] newHeight:[self desiredHeight]];

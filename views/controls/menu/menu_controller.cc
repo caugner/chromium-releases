@@ -14,6 +14,7 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/screen.h"
 #include "views/controls/button/menu_button.h"
+#include "views/controls/menu/menu_controller_delegate.h"
 #include "views/controls/menu/menu_scroll_view_container.h"
 #include "views/controls/menu/submenu_view.h"
 #include "views/drag_utils.h"
@@ -167,8 +168,9 @@ class MenuController::MenuScrollTask {
     is_scrolling_up_ = new_is_up;
 
     if (!scrolling_timer_.IsRunning()) {
-      scrolling_timer_.Start(TimeDelta::FromMilliseconds(kScrollTimerMS), this,
-                             &MenuScrollTask::Run);
+      scrolling_timer_.Start(FROM_HERE,
+                             TimeDelta::FromMilliseconds(kScrollTimerMS),
+                             this, &MenuScrollTask::Run);
     }
   }
 
@@ -257,7 +259,7 @@ MenuController* MenuController::GetActiveInstance() {
   return active_instance_;
 }
 
-MenuItemView* MenuController::Run(gfx::NativeWindow parent,
+MenuItemView* MenuController::Run(Widget* parent,
                                   MenuButton* button,
                                   MenuItemView* root,
                                   const gfx::Rect& bounds,
@@ -277,7 +279,7 @@ MenuItemView* MenuController::Run(gfx::NativeWindow parent,
     menu_stack_.push_back(state_);
 
     // The context menu should be owned by the same parent.
-    DCHECK(owner_ == parent);
+    DCHECK_EQ(owner_, parent);
   } else {
     showing_ = true;
   }
@@ -366,6 +368,12 @@ MenuItemView* MenuController::Run(gfx::NativeWindow parent,
 }
 
 void MenuController::Cancel(ExitType type) {
+  // If the menu has already been destroyed, no further cancellation is
+  // needed.  We especially don't want to set the |exit_type_| to a lesser
+  // value.
+  if (exit_type_ == EXIT_DESTROYED || exit_type_ == type)
+    return;
+
   if (!showing_) {
     // This occurs if we're in the process of notifying the delegate for a drop
     // and the delegate cancels us.
@@ -385,7 +393,9 @@ void MenuController::Cancel(ExitType type) {
     // triggers deleting us.
     DCHECK(selected);
     showing_ = false;
-    selected->GetRootMenuItem()->DropMenuClosed(true);
+    delegate_->DropMenuClosed(
+        internal::MenuControllerDelegate::NOTIFY_DELEGATE,
+        selected->GetRootMenuItem());
     // WARNING: the call to MenuClosed deletes us.
     return;
   }
@@ -710,8 +720,11 @@ int MenuController::OnPerformDrop(SubmenuView* source,
   if (drop_target->id() == MenuItemView::kEmptyMenuItemViewID)
     drop_target = drop_target->GetParentMenuItem();
 
-  if (!IsBlockingRun())
-    item->GetRootMenuItem()->DropMenuClosed(false);
+  if (!IsBlockingRun()) {
+    delegate_->DropMenuClosed(
+        internal::MenuControllerDelegate::DONT_NOTIFY_DELEGATE,
+        item->GetRootMenuItem());
+  }
 
   // WARNING: the call to MenuClosed deletes us.
 
@@ -736,6 +749,11 @@ void MenuController::OnDragExitedScrollButton(SubmenuView* source) {
   StartCancelAllTimer();
   SetDropMenuItem(NULL, MenuDelegate::DROP_NONE);
   StopScrolling();
+}
+
+void MenuController::OnWidgetActivationChanged() {
+  if (!drag_in_progress_)
+    Cancel(EXIT_ALL);
 }
 
 void MenuController::SetSelection(MenuItemView* menu_item,
@@ -773,7 +791,8 @@ void MenuController::SetSelection(MenuItemView* menu_item,
   if (menu_item && menu_item->GetDelegate())
     menu_item->GetDelegate()->SelectionChanged(menu_item);
 
-  DCHECK(menu_item || (selection_types & SELECTION_EXIT) != 0);
+  // TODO(sky): convert back to DCHECK when figure out 93471.
+  CHECK(menu_item || (selection_types & SELECTION_EXIT) != 0);
 
   pending_state_.item = menu_item;
   pending_state_.submenu_open = (selection_types & SELECTION_OPEN_SUBMENU) != 0;
@@ -794,11 +813,6 @@ void MenuController::SetSelection(MenuItemView* menu_item,
     menu_item->GetWidget()->NotifyAccessibilityEvent(
         menu_item, ui::AccessibilityTypes::EVENT_FOCUS, true);
   }
-}
-
-// static
-void MenuController::SetActiveInstance(MenuController* controller) {
-  active_instance_ = controller;
 }
 
 #if defined(OS_WIN)
@@ -855,6 +869,13 @@ bool MenuController::Dispatch(const MSG& msg) {
   TranslateMessage(&msg);
   DispatchMessage(&msg);
   return exit_type_ == EXIT_NONE;
+}
+#elif defined(USE_WAYLAND)
+base::MessagePumpDispatcher::DispatchStatus
+    MenuController::Dispatch(ui::WaylandEvent* ev) {
+  return exit_type_ != EXIT_NONE ?
+      base::MessagePumpDispatcher::EVENT_QUIT :
+      base::MessagePumpDispatcher::EVENT_PROCESSED;
 }
 #elif defined(TOUCH_UI)
 base::MessagePumpDispatcher::DispatchStatus
@@ -982,7 +1003,8 @@ bool MenuController::OnKeyDown(int key_code
   return true;
 }
 
-MenuController::MenuController(bool blocking)
+MenuController::MenuController(bool blocking,
+                               internal::MenuControllerDelegate* delegate)
     : blocking_run_(blocking),
       showing_(false),
       exit_type_(EXIT_NONE),
@@ -996,11 +1018,15 @@ MenuController::MenuController(bool blocking)
       valid_drop_coordinates_(false),
       showing_submenu_(false),
       menu_button_(NULL),
-      active_mouse_view_(NULL) {
+      active_mouse_view_(NULL),
+      delegate_(delegate) {
+  active_instance_ = this;
 }
 
 MenuController::~MenuController() {
   DCHECK(!showing_);
+  if (active_instance_ == this)
+    active_instance_ = NULL;
   StopShowTimer();
   StopCancelAllTimer();
 }
@@ -1066,7 +1092,8 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source,
 
   gfx::NativeWindow window_under_mouse =
       gfx::Screen::GetWindowAtCursorScreenPoint();
-  if (window_under_mouse != owner_)
+  // TODO(oshima): Replace with views only API.
+  if (window_under_mouse != owner_->GetNativeWindow())
     return false;
 
   // The user moved the mouse outside the menu and over the owning window. See
@@ -1079,8 +1106,10 @@ bool MenuController::ShowSiblingMenu(SubmenuView* source,
   MenuItemView* alt_menu = source->GetMenuItem()->GetDelegate()->
       GetSiblingMenu(source->GetMenuItem()->GetRootMenuItem(),
                      screen_point, &anchor, &has_mnemonics, &button);
-  if (!alt_menu || alt_menu == state_.item)
+  if (!alt_menu || (state_.item && state_.item->GetRootMenuItem() == alt_menu))
     return false;
+
+  delegate_->SiblingMenuCreated(alt_menu);
 
   if (!button) {
     // If the delegate returns a menu, they must also return a button.
@@ -1409,7 +1438,7 @@ void MenuController::BuildMenuItemPath(MenuItemView* item,
 }
 
 void MenuController::StartShowTimer() {
-  show_timer_.Start(TimeDelta::FromMilliseconds(kShowDelay), this,
+  show_timer_.Start(FROM_HERE, TimeDelta::FromMilliseconds(kShowDelay), this,
                     &MenuController::CommitPendingSelection);
 }
 
@@ -1418,7 +1447,8 @@ void MenuController::StopShowTimer() {
 }
 
 void MenuController::StartCancelAllTimer() {
-  cancel_all_timer_.Start(TimeDelta::FromMilliseconds(kCloseOnExitTime),
+  cancel_all_timer_.Start(FROM_HERE,
+                          TimeDelta::FromMilliseconds(kCloseOnExitTime),
                           this, &MenuController::CancelAll);
 }
 
@@ -1728,6 +1758,11 @@ bool MenuController::SelectByChar(char16 character) {
 }
 
 #if defined(OS_WIN)
+#if defined(USE_AURA)
+void MenuController::RepostEvent(SubmenuView* source,
+                                 const MouseEvent& event) {
+}
+#else
 void MenuController::RepostEvent(SubmenuView* source,
                                  const MouseEvent& event) {
   if (!state_.item) {
@@ -1794,7 +1829,8 @@ void MenuController::RepostEvent(SubmenuView* source,
     }
   }
 }
-#endif
+#endif  // !defined(USE_AURA)
+#endif  // defined(OS_WIN)
 
 void MenuController::SetDropMenuItem(
     MenuItemView* new_target,

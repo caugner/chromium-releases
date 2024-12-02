@@ -9,6 +9,11 @@
 #include "chrome/browser/ui/views/bookmarks/bookmark_context_menu_controller_views.h"
 #include "views/controls/menu/menu_delegate.h"
 
+namespace views {
+class MenuRunner;
+class Widget;
+}
+
 // Observer for the BookmarkContextMenu.
 class BookmarkContextMenuObserver {
  public:
@@ -27,7 +32,7 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerViewsDelegate,
                             public views::MenuDelegate {
  public:
   BookmarkContextMenu(
-      gfx::NativeWindow parent_window,
+      views::Widget* parent_widget,
       Profile* profile,
       PageNavigator* page_navigator,
       const BookmarkNode* parent,
@@ -38,11 +43,14 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerViewsDelegate,
   // Shows the context menu at the specified point.
   void RunMenuAt(const gfx::Point& point);
 
-  views::MenuItemView* menu() const { return menu_.get(); }
+  views::MenuItemView* menu() const { return menu_; }
 
   void set_observer(BookmarkContextMenuObserver* observer) {
     observer_ = observer;
   }
+
+  // Sets the PageNavigator.
+  void SetPageNavigator(PageNavigator* navigator);
 
   // Overridden from views::MenuDelegate:
   virtual void ExecuteCommand(int command_id);
@@ -63,10 +71,13 @@ class BookmarkContextMenu : public BookmarkContextMenuControllerViewsDelegate,
   scoped_ptr<BookmarkContextMenuControllerViews> controller_;
 
   // The parent of dialog boxes opened from the context menu.
-  gfx::NativeWindow parent_window_;
+  views::Widget* parent_widget_;
 
-  // The menu itself.
-  scoped_ptr<views::MenuItemView> menu_;
+  // The menu itself. This is owned by |menu_runner_|.
+  views::MenuItemView* menu_;
+
+  // Responsible for running the menu.
+  scoped_ptr<views::MenuRunner> menu_runner_;
 
   // The node we're showing the menu for.
   const BookmarkNode* parent_node_;

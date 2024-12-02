@@ -1,3 +1,8 @@
+/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
+
 html,
 #most-visited-settings {
   background-attachment: fixed;
@@ -13,33 +18,21 @@ body {
   overflow: auto;
 }
 
-#attribution {
+#attribution, a.link-color {
   color: $9; /* COLOR_NTP_LINK */
 }
 
-#tip-line {
+.app span {
   color: $8; /* COLOR_NTP_TEXT */
 }
 
-.link-color {
-  color: $9; /* COLOR_NTP_LINK */
+.page-switcher {
+  color: rgba($23, 0.5); /* COLOR_NTP_TEXT */
 }
 
-:link,
-:visited,
-.link {
-  color: $14; /* COLOR_NTP_LINK_UNDERLINE */
-}
-
-.app span,
-.link span {
-  color: $8; /* COLOR_NTP_TEXT */
-}
-
-.app:hover > a,
-.app.dragging > a {
-  color: $12; /* COLOR_NTP_SECTION_TEXT */
-  background-color: $10; /* COLOR_NTP_SECTION */;
+.page-switcher:hover,
+.page-switcher.drag-target {
+  background-color: rgba($23, 0.06); /* COLOR_NTP_TEXT */
 }
 
 .tile-page-scrollbar {
@@ -60,13 +53,11 @@ body {
   background-color: $2; /* COLOR_NTP_BACKGROUND */
 }
 
-.tile-page-title,
-#footer-content span {
-  color: $21; /* COLOR_NTP_TEXT_LIGHT */
-}
+/* Bookmarks ******************************************************************/
 
-.disclosure-triangle {
-  background-color: $8 /* COLOR_NTP_TEXT */
+.bookmark,
+.bookmark > .title {
+  color: $8; /* COLOR_NTP_TEXT */
 }
 
 /* Most Visited ***************************************************************/

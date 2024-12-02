@@ -26,7 +26,6 @@
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/common/constants.h"
-#include "gpu/GLES2/gles2_command_buffer.h"
 #endif  // ENABLE_GPU
 
 namespace {
@@ -35,8 +34,6 @@ const int32 kCommandBufferSize = 1024 * 1024;
 // TODO(kbr): make the transfer buffer size configurable via context
 // creation attributes.
 const int32 kTransferBufferSize = 1024 * 1024;
-
-const uint32 kMaxLatchesPerRenderer = 2048;
 
 // Singleton used to initialize and terminate the gles2 library.
 class GLES2Initializer {
@@ -52,93 +49,6 @@ class GLES2Initializer {
  private:
   DISALLOW_COPY_AND_ASSIGN(GLES2Initializer);
 };
-
-// Shared memory allocator for latches. Creates a block of shared memory for
-// each renderer process.
-class LatchAllocator {
- public:
-  static LatchAllocator* GetInstance();
-  static uint32 size() { return kMaxLatchesPerRenderer*sizeof(uint32); }
-  static const uint32_t kFreeLatch = 0xffffffffu;
-
-  LatchAllocator();
-  ~LatchAllocator();
-
-  base::SharedMemoryHandle handle() const { return shm_->handle(); }
-  base::SharedMemory* shared_memory() { return shm_.get(); }
-
-  bool AllocateLatch(uint32* latch_id);
-  bool FreeLatch(uint32 latch_id);
-
- private:
-  friend struct DefaultSingletonTraits<LatchAllocator>;
-
-  scoped_ptr<base::SharedMemory> shm_;
-  // Pointer to mapped shared memory.
-  volatile uint32* latches_;
-
-  DISALLOW_COPY_AND_ASSIGN(LatchAllocator);
-};
-
-////////////////////////////////////////////////////////////////////////////////
-/// LatchAllocator implementation
-
-LatchAllocator* LatchAllocator::GetInstance() {
-  return Singleton<LatchAllocator>::get();
-}
-
-LatchAllocator::LatchAllocator() {
-  base::SharedMemoryHandle handle;
-  RenderThread* render_thread = RenderThread::current();
-  if (!render_thread->Send(
-      new ViewHostMsg_AllocateSharedMemoryBuffer(size(), &handle))) {
-    NOTREACHED() << "failed to send sync IPC";
-  }
-
-  if (!base::SharedMemory::IsHandleValid(handle)) {
-    NOTREACHED() << "failed to create shared memory";
-  }
-
-  // Handle is closed by the SharedMemory object below. This stops
-  // base::FileDescriptor from closing it as well.
-#if defined(OS_POSIX)
-  handle.auto_close = false;
-#endif
-
-  shm_.reset(new base::SharedMemory(handle, false));
-  if (!shm_->Map(size())) {
-    NOTREACHED() << "failed to map shared memory";
-  }
-
-  latches_ = static_cast<uint32*>(shm_->memory());
-  // Mark all latches as unallocated.
-  for (uint32 i = 0; i < kMaxLatchesPerRenderer; ++i)
-    latches_[i] = kFreeLatch;
-}
-
-LatchAllocator::~LatchAllocator() {
-}
-
-bool LatchAllocator::AllocateLatch(uint32* latch_id) {
-  for (uint32 i = 0; i < kMaxLatchesPerRenderer; ++i) {
-    if (latches_[i] == kFreeLatch) {
-      // mark latch as taken and blocked.
-      // 0 means waiter will block, 1 means waiter will pass.
-      latches_[i] = 0;
-      *latch_id = i;
-      return true;
-    }
-  }
-  return false;
-}
-
-bool LatchAllocator::FreeLatch(uint32 latch_id) {
-  if (latch_id < kMaxLatchesPerRenderer && latches_[latch_id] != kFreeLatch) {
-    latches_[latch_id] = kFreeLatch;
-    return true;
-  }
-  return false;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -172,6 +82,7 @@ RendererGLContext::~RendererGLContext() {
 RendererGLContext* RendererGLContext::CreateViewContext(
     GpuChannelHost* channel,
     int render_view_id,
+    RendererGLContext* share_group,
     const char* allowed_extensions,
     const int32* attrib_list,
     const GURL& active_url) {
@@ -181,6 +92,7 @@ RendererGLContext* RendererGLContext::CreateViewContext(
       true,
       render_view_id,
       gfx::Size(),
+      share_group,
       allowed_extensions,
       attrib_list,
       active_url))
@@ -192,17 +104,10 @@ RendererGLContext* RendererGLContext::CreateViewContext(
 #endif
 }
 
-#if defined(OS_MACOSX)
-void RendererGLContext::ResizeOnscreen(const gfx::Size& size) {
-  DCHECK(size.width() > 0 && size.height() > 0);
-  size_ = size;
-  command_buffer_->SetWindowSize(size);
-}
-#endif
-
 RendererGLContext* RendererGLContext::CreateOffscreenContext(
     GpuChannelHost* channel,
     const gfx::Size& size,
+    RendererGLContext* share_group,
     const char* allowed_extensions,
     const int32* attrib_list,
     const GURL& active_url) {
@@ -212,6 +117,7 @@ RendererGLContext* RendererGLContext::CreateOffscreenContext(
       false,
       0,
       size,
+      share_group,
       allowed_extensions,
       attrib_list,
       active_url))
@@ -271,62 +177,19 @@ bool RendererGLContext::SetParent(RendererGLContext* new_parent) {
   return true;
 }
 
-void RendererGLContext::ResizeOffscreen(const gfx::Size& size) {
-  DCHECK(size.width() > 0 && size.height() > 0);
-  if (size_ != size) {
-    command_buffer_->ResizeOffscreenFrameBuffer(size);
-    size_ = size;
-  }
-}
-
 uint32 RendererGLContext::GetParentTextureId() {
   return parent_texture_id_;
 }
 
 uint32 RendererGLContext::CreateParentTexture(const gfx::Size& size) {
-  // Allocate a texture ID with respect to the parent.
-  if (parent_.get()) {
-    if (!MakeCurrent(parent_.get()))
-      return 0;
-    uint32 texture_id = parent_->gles2_implementation_->MakeTextureId();
-    parent_->gles2_implementation_->BindTexture(GL_TEXTURE_2D, texture_id);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    parent_->gles2_implementation_->TexParameteri(
-        GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    parent_->gles2_implementation_->TexImage2D(GL_TEXTURE_2D,
-        0,  // mip level
-        GL_RGBA,
-        size.width(),
-        size.height(),
-        0,  // border
-        GL_RGBA,
-        GL_UNSIGNED_BYTE,
-        NULL);
-    // Make sure that the parent texture's storage is allocated before we let
-    // the caller attempt to use it.
-    int32 token = parent_->gles2_helper_->InsertToken();
-    parent_->gles2_helper_->WaitForToken(token);
-    return texture_id;
-  }
-  return 0;
+  uint32 texture_id = 0;
+  gles2_implementation_->GenTextures(1, &texture_id);
+  gles2_implementation_->Flush();
+  return texture_id;
 }
 
 void RendererGLContext::DeleteParentTexture(uint32 texture) {
-  if (parent_.get()) {
-    if (!MakeCurrent(parent_.get()))
-      return;
-    parent_->gles2_implementation_->DeleteTextures(1, &texture);
-  }
-}
-
-void RendererGLContext::SetSwapBuffersCallback(Callback0::Type* callback) {
-  swap_buffers_callback_.reset(callback);
+  gles2_implementation_->DeleteTextures(1, &texture);
 }
 
 void RendererGLContext::SetContextLostCallback(
@@ -362,7 +225,12 @@ bool RendererGLContext::SwapBuffers() {
     return false;
 
   gles2_implementation_->SwapBuffers();
+
   return true;
+}
+
+bool RendererGLContext::Echo(Task* task) {
+  return command_buffer_->Echo(task);
 }
 
 scoped_refptr<TransportTextureHost>
@@ -395,8 +263,7 @@ CommandBufferProxy* RendererGLContext::GetCommandBufferProxy() {
 
 // TODO(gman): Remove This
 void RendererGLContext::DisableShaderTranslation() {
-  gles2_implementation_->CommandBufferEnableCHROMIUM(
-      PEPPER3D_SKIP_GLSL_TRANSLATION);
+  NOTREACHED();
 }
 
 gpu::gles2::GLES2Implementation* RendererGLContext::GetImplementation() {
@@ -407,9 +274,6 @@ RendererGLContext::RendererGLContext(GpuChannelHost* channel)
     : channel_(channel),
       parent_(base::WeakPtr<RendererGLContext>()),
       parent_texture_id_(0),
-      child_to_parent_latch_(gpu::kInvalidLatchId),
-      parent_to_child_latch_(gpu::kInvalidLatchId),
-      latch_transfer_buffer_id_(-1),
       command_buffer_(NULL),
       gles2_helper_(NULL),
       transfer_buffer_id_(-1),
@@ -422,6 +286,7 @@ RendererGLContext::RendererGLContext(GpuChannelHost* channel)
 bool RendererGLContext::Initialize(bool onscreen,
                                    int render_view_id,
                                    const gfx::Size& size,
+                                   RendererGLContext* share_group,
                                    const char* allowed_extensions,
                                    const int32* attrib_list,
                                    const GURL& active_url) {
@@ -435,6 +300,8 @@ bool RendererGLContext::Initialize(bool onscreen,
   // Ensure the gles2 library is initialized first in a thread safe way.
   g_gles2_initializer.Get();
 
+  bool share_resources = true;
+  bool bind_generates_resources = true;
   std::vector<int32> attribs;
   while (attrib_list) {
     int32 attrib = *attrib_list++;
@@ -450,6 +317,12 @@ bool RendererGLContext::Initialize(bool onscreen,
       case SAMPLE_BUFFERS:
         attribs.push_back(attrib);
         attribs.push_back(*attrib_list++);
+        break;
+      case SHARE_RESOURCES:
+        share_resources = !!(*attrib_list++);
+        break;
+      case BIND_GENERATES_RESOURCES:
+        bind_generates_resources = !!(*attrib_list++);
         break;
       case NONE:
         attribs.push_back(attrib);
@@ -469,12 +342,14 @@ bool RendererGLContext::Initialize(bool onscreen,
                  "RendererGLContext::Initialize::CreateViewCommandBuffer");
     command_buffer_ = channel_->CreateViewCommandBuffer(
         render_view_id,
+        share_group ? share_group->command_buffer_ : NULL,
         allowed_extensions,
         attribs,
         active_url);
   } else {
     command_buffer_ = channel_->CreateOffscreenCommandBuffer(
         size,
+        share_group ? share_group->command_buffer_ : NULL,
         allowed_extensions,
         attribs,
         active_url);
@@ -493,9 +368,6 @@ bool RendererGLContext::Initialize(bool onscreen,
       return false;
     }
   }
-
-  command_buffer_->SetSwapBuffersCallback(
-      NewCallback(this, &RendererGLContext::OnSwapBuffers));
 
   command_buffer_->SetChannelErrorCallback(
       NewCallback(this, &RendererGLContext::OnContextLost));
@@ -527,33 +399,14 @@ bool RendererGLContext::Initialize(bool onscreen,
     return false;
   }
 
-  // Register transfer buffer so that the context can access latches.
-  LatchAllocator* latch_shm = LatchAllocator::GetInstance();
-  latch_transfer_buffer_id_ = command_buffer_->RegisterTransferBuffer(
-      latch_shm->shared_memory(), LatchAllocator::size(),
-      gpu::kLatchSharedMemoryId);
-  if (latch_transfer_buffer_id_ != gpu::kLatchSharedMemoryId) {
-    Destroy();
-    return false;
-  }
-
-  // If this is a child context, setup latches for synchronization between child
-  // and parent.
-  if (!CreateLatch(&child_to_parent_latch_) ||
-      !CreateLatch(&parent_to_child_latch_)) {
-    Destroy();
-    return false;
-  }
-
   // Create the object exposing the OpenGL API.
   gles2_implementation_ = new gpu::gles2::GLES2Implementation(
       gles2_helper_,
       transfer_buffer.size,
       transfer_buffer.ptr,
       transfer_buffer_id_,
-      false);
-
-  size_ = size;
+      share_resources,
+      bind_generates_resources);
 
   return true;
 }
@@ -562,13 +415,21 @@ void RendererGLContext::Destroy() {
   TRACE_EVENT0("gpu", "RendererGLContext::Destroy");
   SetParent(NULL);
 
-  delete gles2_implementation_;
-  gles2_implementation_ = NULL;
+  if (gles2_implementation_) {
+    // First flush the context to ensure that any pending frees of resources
+    // are completed. Otherwise, if this context is part of a share group,
+    // those resources might leak. Also, any remaining side effects of commands
+    // issued on this context might not be visible to other contexts in the
+    // share group.
+    gles2_implementation_->Flush();
 
-  // Do not destroy these transfer buffers here, because commands are still
+    delete gles2_implementation_;
+    gles2_implementation_ = NULL;
+  }
+
+  // Do not destroy this transfer buffer here, because commands are still
   // in flight on the GPU process that may access them. When the command buffer
   // is destroyed, the associated shared memory will be cleaned up.
-  latch_transfer_buffer_id_ = -1;
   transfer_buffer_id_ = -1;
 
   delete gles2_helper_;
@@ -580,22 +441,6 @@ void RendererGLContext::Destroy() {
   }
 
   channel_ = NULL;
-
-  // Destroy latches here, after the command buffer is destroyed so that no
-  // commands are still in flight that may access the latch memory.
-  if (child_to_parent_latch_ != gpu::kInvalidLatchId) {
-    DestroyLatch(child_to_parent_latch_);
-    child_to_parent_latch_ = gpu::kInvalidLatchId;
-  }
-  if (parent_to_child_latch_ != gpu::kInvalidLatchId) {
-    DestroyLatch(parent_to_child_latch_);
-    parent_to_child_latch_ = gpu::kInvalidLatchId;
-  }
-}
-
-void RendererGLContext::OnSwapBuffers() {
-  if (swap_buffers_callback_.get())
-    swap_buffers_callback_->Run();
 }
 
 void RendererGLContext::OnContextLost() {
@@ -607,22 +452,4 @@ void RendererGLContext::OnContextLost() {
     }
     context_lost_callback_->Run(reason);
   }
-}
-
-bool RendererGLContext::CreateLatch(uint32* ret_latch) {
-  return LatchAllocator::GetInstance()->AllocateLatch(ret_latch);
-}
-
-bool RendererGLContext::DestroyLatch(uint32 latch) {
-  return LatchAllocator::GetInstance()->FreeLatch(latch);
-}
-
-bool RendererGLContext::GetParentToChildLatch(uint32* parent_to_child_latch) {
-  *parent_to_child_latch = parent_to_child_latch_;
-  return true;
-}
-
-bool RendererGLContext::GetChildToParentLatch(uint32* child_to_parent_latch) {
-  *child_to_parent_latch = child_to_parent_latch_;
-  return true;
 }

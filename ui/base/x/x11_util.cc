@@ -181,6 +181,19 @@ XID GetX11WindowFromGdkWindow(GdkWindow* window) {
   return GDK_WINDOW_XID(window);
 }
 
+GtkWindow* GetGtkWindowFromX11Window(XID xid) {
+  GdkWindow* gdk_window =
+      gdk_window_lookup_for_display(gdk_display_get_default(), xid);
+  if (!gdk_window)
+    return NULL;
+  GtkWindow* gtk_window = NULL;
+  gdk_window_get_user_data(gdk_window,
+                           reinterpret_cast<gpointer*>(&gtk_window));
+  if (!gtk_window)
+    return NULL;
+  return gtk_window;
+}
+
 void* GetVisualFromGtkWidget(GtkWidget* widget) {
   return GDK_VISUAL_XVISUAL(gtk_widget_get_visual(widget));
 }
@@ -205,7 +218,8 @@ int BitsPerPixelForPixmapDepth(Display* dpy, int depth) {
 
 bool IsWindowVisible(XID window) {
   XWindowAttributes win_attributes;
-  XGetWindowAttributes(GetXDisplay(), window, &win_attributes);
+  if (!XGetWindowAttributes(GetXDisplay(), window, &win_attributes))
+    return false;
   if (win_attributes.map_state != IsViewable)
     return false;
   // Some compositing window managers (notably kwin) do not actually unmap

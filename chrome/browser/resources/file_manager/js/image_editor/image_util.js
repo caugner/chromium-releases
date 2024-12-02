@@ -14,11 +14,12 @@ ImageUtil.trace = (function() {
     this.container_ = null;
   }
 
-  PerformanceTrace.prototype.report_ = function(key, value) {
-    if (!this.container_) {
-      this.container_ = document.getElementById('debug-output');
-      if (!this.container_) return;
-    }
+  PerformanceTrace.prototype.bindToDOM = function(container) {
+    this.container_ = container;
+  };
+
+  PerformanceTrace.prototype.report = function(key, value) {
+    if (!this.container_) return;
     if (!(key in this.lines_)) {
       var div = this.lines_[key] = document.createElement('div');
       this.container_.appendChild(div);
@@ -28,40 +29,23 @@ ImageUtil.trace = (function() {
 
   PerformanceTrace.prototype.resetTimer = function(key) {
     this.timers_[key] = Date.now();
-  }
+  };
 
   PerformanceTrace.prototype.reportTimer = function(key) {
-    this.report_(key, (Date.now() - this.timers_[key]) + 'ms');
+    this.report(key, (Date.now() - this.timers_[key]) + 'ms');
   };
 
   return new PerformanceTrace();
 })();
 
 
-ImageUtil.clip = function(min, value, max) {
+ImageUtil.clamp = function(min, value, max) {
   return Math.max(min, Math.min(max, value));
 };
 
 ImageUtil.between = function(min, value, max) {
   return (value - min) * (value - max) <= 0;
 };
-
-/**
- * Computes the function for every integer value between 0 and max and stores
- * the results. Rounds and clips the results to fit the [0..255] range.
- * Used to speed up pixel manipulations.
- * @param {Function} func Function returning a number.
- * @param {Number} max Maximum argument value (inclusive).
- * @return {Array<Number>} Computed results
- */
-
-ImageUtil.precomputeByteFunction = function(func, max) {
-  var results = [];
-  for (var arg = 0; arg <= max; arg ++) {
-    results.push(Math.max(0, Math.min(0xFF, Math.round(func(arg)))));
-  }
-  return results;
-}
 
 /**
  * Rectangle class.
@@ -96,10 +80,10 @@ function Rect(args) {
 
     case 1: {
       var source = arguments[0];
-      if (source.hasOwnProperty('left') && source.hasOwnProperty('top')) {
+      if ('left' in source && 'top' in source) {
         this.left = source.left;
         this.top = source.top;
-        if (source.hasOwnProperty('right') && source.hasOwnProperty('bottom')) {
+        if ('right' in source && 'bottom' in source) {
           this.width = source.right - source.left;
           this.height = source.bottom - source.top;
           return;
@@ -108,7 +92,7 @@ function Rect(args) {
         this.left = 0;
         this.top = 0;
       }
-      if (source.hasOwnProperty('width') && source.hasOwnProperty('height')) {
+      if ('width' in source && 'height' in source) {
         this.width = source.width;
         this.height = source.height;
         return;
@@ -157,7 +141,7 @@ Rect.prototype.moveTo = function(x, y) {
  */
 Rect.prototype.inflate = function(dx, dy) {
   return new Rect(
-      this.left - dx, this.top - dx, this.width + 2 * dx, this.height + 2 * dy);
+      this.left - dx, this.top - dy, this.width + 2 * dx, this.height + 2 * dy);
 };
 
 /**
@@ -168,24 +152,64 @@ Rect.prototype.inside = function(x, y) {
          this.top <= y && y < this.top + this.height;
 };
 
+/**
+ * Clamp the rectangle to the bounds by moving it.
+ * Decrease the size only if necessary.
+ */
+Rect.prototype.clamp = function(bounds) {
+  var rect = new Rect(this);
+
+  if (rect.width > bounds.width) {
+    rect.left = bounds.left;
+    rect.width = bounds.width;
+  } else if (rect.left < bounds.left){
+    rect.left = bounds.left;
+  } else if (rect.left + rect.width >
+             bounds.left + bounds.width) {
+    rect.left = bounds.left + bounds.width - rect.width;
+  }
+
+  if (rect.height > bounds.height) {
+    rect.top = bounds.top;
+    rect.height = bounds.height;
+  } else if (rect.top < bounds.top){
+    rect.top = bounds.top;
+  } else if (rect.top + rect.height >
+             bounds.top + bounds.height) {
+    rect.top = bounds.top + bounds.height - rect.height;
+  }
+
+  return rect;
+};
+
 /*
  * Useful shortcuts for drawing (static functions).
  */
 
 /**
- * Draws the image in context with appropriate scaling.
+ * Draw the image in context with appropriate scaling.
  */
-Rect.drawImage = function(context, image, dstRect, srcRect) {
+Rect.drawImage = function(context, image, opt_dstRect, opt_srcRect) {
+  opt_dstRect = opt_dstRect || new Rect(context.canvas);
+  opt_srcRect = opt_srcRect || new Rect(image);
   context.drawImage(image,
-      srcRect.left, srcRect.top, srcRect.width, srcRect.height,
-      dstRect.left, dstRect.top, dstRect.width, dstRect.height);
+      opt_srcRect.left, opt_srcRect.top, opt_srcRect.width, opt_srcRect.height,
+      opt_dstRect.left, opt_dstRect.top, opt_dstRect.width, opt_dstRect.height);
 };
 
 /**
- * Strokes the rectangle.
+ * Draw a box around the rectangle.
  */
-Rect.stroke = function(context, rect) {
-  context.strokeRect(rect.left, rect.top, rect.width, rect.height);
+Rect.outline = function(context, rect) {
+  context.strokeRect(
+      rect.left - 0.5, rect.top - 0.5, rect.width + 1, rect.height + 1);
+};
+
+/**
+ * Fill the rectangle.
+ */
+Rect.fill = function(context, rect) {
+  context.fillRect(rect.left, rect.top, rect.width, rect.height);
 };
 
 /**
@@ -222,7 +246,7 @@ function Circle(x, y, R) {
   this.x = x;
   this.y = y;
   this.squaredR = R * R;
-};
+}
 
 Circle.prototype.inside = function(x, y) {
   x -= this.x;

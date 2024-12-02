@@ -25,7 +25,7 @@ namespace keys = extension_accessibility_api_constants;
 // Returns the AccessibilityControlInfo serialized into a JSON string,
 // consisting of an array of a single object of type AccessibilityObject,
 // as defined in the accessibility extension api's json schema.
-std::string ControlInfoToJsonString(const AccessibilityControlInfo* info) {
+std::string ControlInfoToJsonString(const AccessibilityEventInfo* info) {
   ListValue args;
   DictionaryValue* dict = new DictionaryValue();
   info->SerializeToDict(dict);
@@ -41,39 +41,36 @@ ExtensionAccessibilityEventRouter*
 }
 
 ExtensionAccessibilityEventRouter::ExtensionAccessibilityEventRouter()
-    : enabled_(false) {}
+    : enabled_(false) {
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_OPENED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_CLOSED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_ACTION,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_TEXT_CHANGED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_MENU_OPENED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
+                 NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED,
+                 NotificationService::AllSources());
+}
 
 ExtensionAccessibilityEventRouter::~ExtensionAccessibilityEventRouter() {
   STLDeleteElements(&on_enabled_listeners_);
   STLDeleteElements(&on_disabled_listeners_);
-}
-
-void ExtensionAccessibilityEventRouter::ObserveProfile(Profile* profile) {
-  last_focused_control_dict_.Clear();
-
-  if (registrar_.IsEmpty()) {
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_OPENED,
-                   NotificationService::AllSources());
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_ACCESSIBILITY_WINDOW_CLOSED,
-                   NotificationService::AllSources());
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
-                   NotificationService::AllSources());
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_ACTION,
-                   NotificationService::AllSources());
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_ACCESSIBILITY_TEXT_CHANGED,
-                   NotificationService::AllSources());
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_ACCESSIBILITY_MENU_OPENED,
-                   NotificationService::AllSources());
-    registrar_.Add(this,
-                   chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
-                   NotificationService::AllSources());
-  }
 }
 
 void ExtensionAccessibilityEventRouter::Observe(
@@ -101,6 +98,9 @@ void ExtensionAccessibilityEventRouter::Observe(
       break;
     case chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED:
       OnMenuClosed(Details<const AccessibilityMenuInfo>(details).ptr());
+      break;
+    case chrome::NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED:
+      OnVolumeChanged(Details<const AccessibilityVolumeInfo>(details).ptr());
       break;
     default:
       NOTREACHED();
@@ -178,6 +178,12 @@ void ExtensionAccessibilityEventRouter::OnMenuClosed(
     const AccessibilityMenuInfo* info) {
   std::string json_args = ControlInfoToJsonString(info);
   DispatchEvent(info->profile(), keys::kOnMenuClosed, json_args);
+}
+
+void ExtensionAccessibilityEventRouter::OnVolumeChanged(
+    const AccessibilityVolumeInfo* info) {
+  std::string json_args = ControlInfoToJsonString(info);
+  DispatchEvent(info->profile(), keys::kOnVolumeChanged, json_args);
 }
 
 void ExtensionAccessibilityEventRouter::DispatchEvent(

@@ -16,6 +16,7 @@
 #include "base/process_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/range/range.h"
@@ -48,6 +49,12 @@ struct WebPluginGeometry;
 }
 }
 
+#if defined(OS_POSIX)
+namespace WebKit {
+struct WebScreenInfo;
+}
+#endif
+
 // RenderWidgetHostView is an interface implemented by an object that acts as
 // the "View" portion of a RenderWidgetHost. The RenderWidgetHost and its
 // associated RenderProcessHost own the "Model" in this case which is the
@@ -70,11 +77,6 @@ class RenderWidgetHostView {
   // The RenderWidgetHost must already be created (because we can't know if it's
   // going to be a regular RenderWidgetHost or a RenderViewHost (a subclass).
   static RenderWidgetHostView* CreateViewForWidget(RenderWidgetHost* widget);
-
-  // Retrieves the RenderWidgetHostView corresponding to the specified
-  // |native_view|, or NULL if there is no such instance.
-  static RenderWidgetHostView* GetRenderWidgetHostViewFromNativeView(
-      gfx::NativeView native_view);
 
   // Perform all the initialization steps necessary for this object to represent
   // a popup (such as a <select> dropdown), then shows the popup at |pos|.
@@ -105,7 +107,8 @@ class RenderWidgetHostView {
 
   // Retrieves the native view used to contain plugins and identify the
   // renderer in IPC messages.
-  virtual gfx::NativeView GetNativeView() = 0;
+  virtual gfx::NativeView GetNativeView() const = 0;
+  virtual gfx::NativeViewId GetNativeViewId() const = 0;
 
   // Moves all plugin windows as described in the given list.
   virtual void MovePluginWindows(
@@ -179,9 +182,13 @@ class RenderWidgetHostView {
   // the page has changed.
   virtual void SetTooltipText(const std::wstring& tooltip_text) = 0;
 
-  // Notifies the View that the renderer text selection has changed.
+  // Notifies the View that the renderer text selection has changed. |start|
+  // and |end| are the visual end points of the selection in the coordinate
+  // system of the render view.
   virtual void SelectionChanged(const std::string& text,
-                                const ui::Range& range) {}
+                                const ui::Range& range,
+                                const gfx::Point& start,
+                                const gfx::Point& end) {}
 
   // Tells the View whether the context menu is showing. This is used on Linux
   // to suppress updates to webkit focus for the duration of the show.
@@ -202,9 +209,6 @@ class RenderWidgetHostView {
   // (400, 300) in pixels, while this method will return (200, 150).
   // Even though this returns an gfx::Rect, the result is NOT IN PIXELS.
   virtual gfx::Rect GetViewCocoaBounds() const = 0;
-
-  // Get the view's window's position on the screen.
-  virtual gfx::Rect GetRootWindowRect() = 0;
 
   // Set the view's active state (i.e., tint state of controls).
   virtual void SetActive(bool active) = 0;
@@ -282,6 +286,12 @@ class RenderWidgetHostView {
   virtual void ShowCompositorHostWindow(bool show) = 0;
 #endif
 
+#if defined(OS_POSIX)
+  static void GetDefaultScreenInfo(WebKit::WebScreenInfo* results);
+  virtual void GetScreenInfo(WebKit::WebScreenInfo* results) = 0;
+  virtual gfx::Rect GetRootWindowBounds() = 0;
+#endif
+
   virtual gfx::PluginWindowHandle GetCompositingSurface() = 0;
 
   // Toggles visual muting of the render view area. This is on when a
@@ -291,6 +301,12 @@ class RenderWidgetHostView {
   // fade effect, pass a NULL value for |color|. In this case, |animate| is
   // ignored.
   virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate) = 0;
+
+  virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) = 0;
+
+  virtual void SetHasHorizontalScrollbar(bool has_horizontal_scrollbar) = 0;
+  virtual void SetScrollOffsetPinning(
+      bool is_pinned_to_left, bool is_pinned_to_right) = 0;
 
   void set_popup_type(WebKit::WebPopupType popup_type) {
     popup_type_ = popup_type;

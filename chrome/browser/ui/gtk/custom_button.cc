@@ -41,7 +41,7 @@ CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeService* theme_provider,
 
     registrar_.Add(this,
                    chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                   NotificationService::AllSources());
+                   Source<ThemeService>(theme_provider));
   } else {
     // Load the button images from the resource bundle.
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -222,7 +222,8 @@ CustomDrawButton::CustomDrawButton(int normal_id,
                                    int hover_id,
                                    int disabled_id)
     : button_base_(NULL, normal_id, pressed_id, hover_id, disabled_id),
-      theme_service_(NULL) {
+      theme_service_(NULL),
+      forcing_chrome_theme_(false) {
   Init();
 
   // Initialize the theme stuff with no theme_provider.
@@ -238,7 +239,8 @@ CustomDrawButton::CustomDrawButton(GtkThemeService* theme_provider,
                                    GtkIconSize stock_size)
     : button_base_(theme_provider, normal_id, pressed_id, hover_id,
                    disabled_id),
-      theme_service_(theme_provider) {
+      theme_service_(theme_provider),
+      forcing_chrome_theme_(false) {
   native_widget_.Own(gtk_image_new_from_stock(stock_id, stock_size));
 
   Init();
@@ -246,7 +248,7 @@ CustomDrawButton::CustomDrawButton(GtkThemeService* theme_provider,
   theme_service_->InitThemesFor(this);
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+                 Source<ThemeService>(theme_provider));
 }
 
 CustomDrawButton::CustomDrawButton(GtkThemeService* theme_provider,
@@ -258,13 +260,14 @@ CustomDrawButton::CustomDrawButton(GtkThemeService* theme_provider,
     : button_base_(theme_provider, normal_id, pressed_id, hover_id,
                    disabled_id),
       native_widget_(native_widget),
-      theme_service_(theme_provider) {
+      theme_service_(theme_provider),
+      forcing_chrome_theme_(false) {
   Init();
 
   theme_service_->InitThemesFor(this);
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 NotificationService::AllSources());
+                 Source<ThemeService>(theme_provider));
 }
 
 CustomDrawButton::~CustomDrawButton() {
@@ -278,6 +281,11 @@ void CustomDrawButton::Init() {
   g_signal_connect(widget(), "expose-event",
                    G_CALLBACK(OnCustomExposeThunk), this);
   hover_controller_.Init(widget());
+}
+
+void CustomDrawButton::ForceChromeTheme() {
+  forcing_chrome_theme_ = true;
+  SetBrowserTheme();
 }
 
 void CustomDrawButton::Observe(int type,
@@ -350,5 +358,6 @@ void CustomDrawButton::SetBrowserTheme() {
 }
 
 bool CustomDrawButton::UseGtkTheme() {
-  return theme_service_ && theme_service_->UsingNativeTheme();
+  return !forcing_chrome_theme_ && theme_service_ &&
+      theme_service_->UsingNativeTheme();
 }

@@ -89,7 +89,7 @@ class InfobarTest(pyauto.PyUITest):
     """Verify geoLocation infobar."""
     url = self.GetFileURLForDataPath(  # triggers geolocation
         'geolocation', 'geolocation_on_load.html')
-    match_text='file:/// wants to track your physical location'
+    match_text='file:/// wants to track your physical location.'
     self.NavigateToURL(url)
     self.assertTrue(self.WaitForInfobarCount(1))
     self._VerifyGeolocationInfobar(windex=0, tab_index=0, match_text=match_text)
@@ -101,7 +101,7 @@ class InfobarTest(pyauto.PyUITest):
     """Verify GeoLocation inforbar in multiple tabs."""
     url = self.GetFileURLForDataPath(  # triggers geolocation
         'geolocation', 'geolocation_on_load.html')
-    match_text='file:/// wants to track your physical location'
+    match_text='file:/// wants to track your physical location.'
     for tab_index in range(1, 2):
       self.AppendTab(pyauto.GURL(url))
       self.assertTrue(
@@ -146,6 +146,12 @@ class InfobarTest(pyauto.PyUITest):
 
   def testPluginCrashForMultiTabs(self):
     """Verify plugin crash infobar shows up only on the tabs using plugin."""
+    if self.IsMac():
+      # On Mac 10.5, flash files loaded too quickly after firing browser ends
+      # up getting downloaded, which seems to indicate that the plugin hasn't
+      # been registered yet.
+      # Hack to register Flash plugin on Mac 10.5.  crbug.com/94123
+      self.GetPluginsInfo()
     non_flash_url = self.GetFileURLForDataPath('english_page.html')
     flash_url = self.GetFileURLForDataPath('plugin', 'FlashSpin.swf')
     # False = Non flash url, True = Flash url

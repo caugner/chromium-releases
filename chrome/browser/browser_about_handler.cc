@@ -32,6 +32,7 @@
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -59,8 +60,8 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/plugins/plugin_list.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #ifdef CHROME_V8
 #include "v8/include/v8.h"
@@ -125,6 +126,7 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIHistogramsHost,
   chrome::kChromeUIHistoryHost,
   chrome::kChromeUIIPCHost,
+  chrome::kChromeUIMediaInternalsHost,
   chrome::kChromeUIMemoryHost,
   chrome::kChromeUINetInternalsHost,
   chrome::kChromeUINetworkViewCacheHost,
@@ -138,6 +140,7 @@ const char* const kChromePaths[] = {
   chrome::kChromeUISyncInternalsHost,
   chrome::kChromeUITCMallocHost,
   chrome::kChromeUITermsHost,
+  chrome::kChromeUITracingHost,
   chrome::kChromeUIVersionHost,
   chrome::kChromeUIWorkersHost,
 #ifdef TRACK_ALL_TASK_OBJECTS
@@ -163,18 +166,6 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIProxySettingsHost,
   chrome::kChromeUISystemInfoHost,
 #endif
-};
-
-// Debug paths, presented without links in chrome://about.
-// These paths will not be suggested by BuiltinProvider.
-const char* const kDebugChromePaths[] = {
-  chrome::kChromeUICrashHost,
-  chrome::kChromeUIKillHost,
-  chrome::kChromeUIHangHost,
-  chrome::kChromeUIShorthangHost,
-  chrome::kChromeUIGpuCleanHost,
-  chrome::kChromeUIGpuCrashHost,
-  chrome::kChromeUIGpuHangHost
 };
 
 // AboutSource handles these chrome:// paths.
@@ -439,8 +430,8 @@ std::string ChromeURLs() {
       "<p>The following pages are for debugging purposes only. Because they "
       "crash or hang the renderer, they're not linked directly; you can type "
       "them into the address bar if you need them.</p>\n<ul>";
-  for (size_t i = 0; i < arraysize(kDebugChromePaths); i++)
-    html += "<li>chrome://" + std::string(kDebugChromePaths[i]) + "</li>\n";
+  for (int i = 0; i < chrome::kNumberOfChromeDebugURLs; i++)
+    html += "<li>" + std::string(chrome::kChromeDebugURLs[i]) + "</li>\n";
   html += "</ul>\n";
   AppendFooter(&html);
   return html;
@@ -769,7 +760,7 @@ std::string AboutTcmalloc() {
   AboutTcmallocOutputs::GetInstance()->SetOutput(browser, buffer);
   RenderProcessHost::iterator it(RenderProcessHost::AllHostsIterator());
   while (!it.IsAtEnd()) {
-    it.GetCurrentValue()->Send(new ViewMsg_GetRendererTcmalloc);
+    it.GetCurrentValue()->Send(new ChromeViewMsg_GetRendererTcmalloc);
     it.Advance();
   }
 
@@ -1106,13 +1097,14 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   localized_strings->SetString("js_version", js_version);
 
   // Obtain the version of the first enabled Flash plugin.
-  std::vector<webkit::npapi::WebPluginInfo> info_array;
+  std::vector<webkit::WebPluginInfo> info_array;
   webkit::npapi::PluginList::Singleton()->GetPluginInfoArray(
-      GURL(), "application/x-shockwave-flash", false, &info_array, NULL);
+      GURL(), "application/x-shockwave-flash", false, NULL, &info_array, NULL);
   string16 flash_version =
       l10n_util::GetStringUTF16(IDS_PLUGINS_DISABLED_PLUGIN);
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
   for (size_t i = 0; i < info_array.size(); ++i) {
-    if (webkit::npapi::IsPluginEnabled(info_array[i])) {
+    if (plugin_prefs->IsPluginEnabled(info_array[i])) {
       flash_version = info_array[i].version;
       break;
     }
@@ -1438,7 +1430,9 @@ std::string AboutSource::GetMimeType(const std::string& path) const {
 
 // -----------------------------------------------------------------------------
 
-void InitializeAboutDataSource(const std::string& name, Profile* profile) {
+void InitializeAboutDataSource(const std::string& name,
+                               content::BrowserContext* browser_context) {
+  Profile* profile = static_cast<Profile*>(browser_context);
   ChromeURLDataManager* manager = profile->GetChromeURLDataManager();
   for (size_t i = 0; i < arraysize(kAboutSourceNames); i++) {
     if (name == kAboutSourceNames[i]) {
@@ -1448,7 +1442,8 @@ void InitializeAboutDataSource(const std::string& name, Profile* profile) {
   }
 }
 
-bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
+bool WillHandleBrowserAboutURL(GURL* url,
+                               content::BrowserContext* browser_context) {
   // TODO(msw): Eliminate "about:*" constants and literals from code and tests,
   //            then hopefully we can remove this forced fixup.
   *url = URLFixerUpper::FixupURL(url->possibly_invalid_spec(), std::string());
@@ -1499,7 +1494,7 @@ bool WillHandleBrowserAboutURL(GURL* url, Profile* profile) {
   }
 
   // Initialize any potentially corresponding AboutSource handler.
-  InitializeAboutDataSource(host, profile);
+  InitializeAboutDataSource(host, browser_context);
   return true;
 }
 

@@ -50,7 +50,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/x11_util.h"
@@ -247,7 +247,7 @@ class LockWindow : public views::NativeWidgetGtk {
 };
 
 // GrabWidget's root view to layout the ScreenLockView at the center
-// and the Shutdown button at the right bottom.
+// and the Shutdown button at the left top.
 class GrabWidgetRootView
     : public views::View,
       public chromeos::ScreenLocker::ScreenLockViewContainer {
@@ -263,7 +263,10 @@ class GrabWidgetRootView
   // views::View implementation.
   virtual void Layout() OVERRIDE {
     gfx::Size size = screen_lock_view_->GetPreferredSize();
-    screen_lock_view_->SetBounds(0, 0, size.width(), size.height());
+    gfx::Rect b = bounds();
+    screen_lock_view_->SetBounds(
+        b.width() - size.width(), b.height() - size.height(),
+        size.width(), size.height());
     shutdown_button_->LayoutIn(this);
   }
 
@@ -541,7 +544,7 @@ class ScreenLockerBackgroundView
                         (screen.height() - size.height()) / 2);
       gfx::Size widget_size(screen.size());
       widget_size.Enlarge(-origin.x(), -origin.y());
-      lock_widget_->SetBounds(gfx::Rect(origin, widget_size));
+      lock_widget_->SetBounds(gfx::Rect(widget_size));
     } else {
       // No password entry. Move the lock widget to off screen.
       lock_widget_->SetBounds(gfx::Rect(-100, -100, 1, 1));
@@ -675,7 +678,8 @@ class LockerInputEventObserver : public MessageLoopForUI::Observer {
   explicit LockerInputEventObserver(ScreenLocker* screen_locker)
       : screen_locker_(screen_locker),
         ALLOW_THIS_IN_INITIALIZER_LIST(
-            timer_(base::TimeDelta::FromSeconds(kScreenSaverIdleTimeout), this,
+            timer_(FROM_HERE,
+                   base::TimeDelta::FromSeconds(kScreenSaverIdleTimeout), this,
                    &LockerInputEventObserver::StartScreenSaver)) {
   }
 
@@ -849,7 +853,7 @@ void ScreenLocker::OnLoginFailure(const LoginFailure& error) {
     msg += ASCIIToUTF16("\n") +
         l10n_util::GetStringUTF16(IDS_LOGIN_ERROR_KEYBOARD_SWITCH_HINT);
 
-  ShowErrorBubble(UTF16ToWide(msg), BubbleBorder::BOTTOM_LEFT);
+  ShowErrorBubble(UTF16ToWide(msg), views::BubbleBorder::BOTTOM_LEFT);
 
   if (login_status_consumer_)
     login_status_consumer_->OnLoginFailure(error);
@@ -876,10 +880,9 @@ void ScreenLocker::OnLoginSuccess(
     ProfileSyncService* service = profile->GetProfileSyncService(username);
     if (service && !service->HasSyncSetupCompleted()) {
       // If sync has failed somehow, try setting the sync passphrase here.
-      service->SetPassphrase(password, false, true);
+      service->SetPassphrase(password, false);
     }
   }
-
   if (CrosLibrary::Get()->EnsureLoaded())
     CrosLibrary::Get()->GetScreenLockLibrary()->NotifyScreenUnlockRequested();
 
@@ -1012,8 +1015,9 @@ void ScreenLocker::ShowErrorMessage(const std::wstring& message,
   }
   screen_lock_view_->SetSignoutEnabled(sign_out_only);
   // Make sure that active Sign Out button is not hidden behind the bubble.
-  ShowErrorBubble(message, sign_out_only ?
-      BubbleBorder::BOTTOM_RIGHT : BubbleBorder::BOTTOM_LEFT);
+  ShowErrorBubble(
+      message, sign_out_only ?
+      views::BubbleBorder::BOTTOM_RIGHT : views::BubbleBorder::BOTTOM_LEFT);
 }
 
 void ScreenLocker::OnGrabInputs() {
@@ -1170,8 +1174,9 @@ void ScreenLocker::OnWindowManagerReady() {
     ScreenLockReady();
 }
 
-void ScreenLocker::ShowErrorBubble(const std::wstring& message,
-                                   BubbleBorder::ArrowLocation arrow_location) {
+void ScreenLocker::ShowErrorBubble(
+    const std::wstring& message,
+    views::BubbleBorder::ArrowLocation arrow_location) {
   if (error_info_)
     error_info_->Close();
 

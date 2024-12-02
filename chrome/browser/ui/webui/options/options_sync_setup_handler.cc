@@ -9,7 +9,7 @@
 
 void OptionsSyncSetupHandler::ShowSetupUI() {
   ProfileSyncService* service =
-      web_ui_->GetProfile()->GetProfileSyncService();
+      Profile::FromWebUI(web_ui_)->GetProfileSyncService();
   DCHECK(service);
 
   // If the wizard is already visible, focus it.
@@ -28,7 +28,7 @@ void OptionsSyncSetupHandler::ShowSetupUI() {
       service->get_wizard().Step(SyncSetupWizard::CONFIGURE);
     }
   } else {
-    service->get_wizard().Step(SyncSetupWizard::GAIA_LOGIN);
+    service->get_wizard().Step(SyncSetupWizard::GetLoginState());
   }
 
   // Show the Sync Setup page.

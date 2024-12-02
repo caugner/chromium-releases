@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "ui/gfx/native_widget_types.h"
+#include "views/views_export.h"
 
 class SkBitmap;
 
@@ -21,7 +22,7 @@ namespace views {
 
 class Accelerator;
 
-class Menu {
+class VIEWS_EXPORT Menu {
  public:
   /////////////////////////////////////////////////////////////////////////////
   //
@@ -31,7 +32,7 @@ class Menu {
   //  item as it is created.
   //
   /////////////////////////////////////////////////////////////////////////////
-  class Delegate {
+  class VIEWS_EXPORT Delegate {
    public:
     virtual ~Delegate() {}
 

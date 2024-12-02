@@ -10,9 +10,9 @@
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
-#include "chrome/test/layout_test_http_server.h"
+#include "chrome/test/base/layout_test_http_server.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_layout_test.h"
-#include "chrome/test/ui_test_utils.h"
 #include "content/browser/worker_host/worker_service.h"
 #include "content/common/url_constants.h"
 #include "net/test/test_server.h"
@@ -87,8 +87,7 @@ class WorkerTest : public UILayoutTest {
 
   bool WaitForProcessCountToBe(int tabs, int workers) {
     // The 1 is for the browser process.
-    int number_of_processes = 1 + workers +
-        (ProxyLauncher::in_process_renderer() ? 0 : tabs);
+    int number_of_processes = 1 + workers + tabs;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     // On Unix, we also have a zygote process and a sandbox host process.
     number_of_processes += 2;
@@ -188,10 +187,10 @@ TEST_F(WorkerTest, MultipleSharedWorkers) {
 
 #if defined(OS_LINUX) || defined(OS_CHROMEOS)
 // http://crbug.com/80446
-#define TerminateQueuedWorkers FLAKY_TerminateQueuedWorkers
+#define DISABLED_TerminateQueuedWorkers FLAKY_TerminateQueuedWorkers
 #endif
 
-TEST_F(WorkerTest, TerminateQueuedWorkers) {
+TEST_F(WorkerTest, DISABLED_TerminateQueuedWorkers) {
   ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
   RunTest(FilePath(FILE_PATH_LITERAL("terminate_queued_workers.html")), "");
   // Make sure all workers exit.
@@ -342,7 +341,7 @@ TEST_F(WorkerTest, WorkerReplaceSelf) {
 #define WorkerScriptError FLAKY_WorkerScriptError
 #endif
 
-TEST_F(WorkerTest, WorkerScriptError) {
+TEST_F(WorkerTest, DISABLED_WorkerScriptError) {
   RunWorkerFastLayoutTest("worker-script-error.html");
 }
 

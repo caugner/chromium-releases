@@ -1,13 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/test_helper.h"
 
+#include "base/string_tokenizer.h"
 #include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/types.h"
-#include "gpu/GLES2/gles2_command_buffer.h"
+#include "gpu/command_buffer/service/gl_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#include <string.h>
 
 using ::testing::_;
 using ::testing::DoAll;
@@ -29,6 +32,8 @@ const GLuint TestHelper::kServiceBlackTexture2dId;
 const GLuint TestHelper::kServiceBlackTextureCubemapId;
 const GLuint TestHelper::kServiceDefaultTexture2dId;
 const GLuint TestHelper::kServiceDefaultTextureCubemapId;
+const GLuint TestHelper::kServiceDefaultExternalTextureId;
+const GLuint TestHelper::kServiceBlackExternalTextureId;
 
 const GLint TestHelper::kMaxRenderbufferSize;
 const GLint TestHelper::kMaxTextureSize;
@@ -46,7 +51,8 @@ const GLint TestHelper::kMaxVertexUniformComponents;
 #endif
 
 void TestHelper::SetupTextureManagerInitExpectations(
-    ::gfx::MockGLInterface* gl) {
+    ::gfx::MockGLInterface* gl,
+    const char* extensions) {
   static GLuint texture_ids[] = {
     kServiceBlackTexture2dId,
     kServiceDefaultTexture2dId,
@@ -89,6 +95,30 @@ void TestHelper::SetupTextureManagerInitExpectations(
   EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_CUBE_MAP, 0))
       .Times(1)
       .RetiresOnSaturation();
+
+  bool ext_image_external = false;
+  CStringTokenizer t(extensions, extensions + strlen(extensions), " ");
+  while (t.GetNext()) {
+    if (t.token() == "GL_OES_EGL_image_external") {
+      ext_image_external = true;
+      break;
+    }
+  }
+
+  if (ext_image_external) {
+    static GLuint external_texture_ids[] = {
+      kServiceDefaultExternalTextureId,
+      kServiceBlackExternalTextureId,
+    };
+    EXPECT_CALL(*gl, GenTextures(arraysize(external_texture_ids), _))
+        .WillOnce(SetArrayArgument<1>(
+            external_texture_ids,
+            external_texture_ids + arraysize(external_texture_ids)))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_EXTERNAL_OES, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
 }
 
 void TestHelper::SetupContextGroupInitExpectations(
@@ -115,6 +145,12 @@ void TestHelper::SetupContextGroupInitExpectations(
       .WillOnce(SetArgumentPointee<1>(kMaxCubeMapTextureSize))
       .RetiresOnSaturation();
 
+#if defined(OS_MACOSX)
+  EXPECT_CALL(*gl, GetString(GL_VENDOR))
+      .WillOnce(Return(reinterpret_cast<const uint8*>("")))
+      .RetiresOnSaturation();
+#endif
+
   EXPECT_CALL(*gl, GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, _))
       .WillOnce(SetArgumentPointee<1>(kMaxTextureImageUnits))
       .RetiresOnSaturation();
@@ -131,7 +167,7 @@ void TestHelper::SetupContextGroupInitExpectations(
       .WillOnce(SetArgumentPointee<1>(kMaxVertexUniformComponents))
       .RetiresOnSaturation();
 
-  SetupTextureManagerInitExpectations(gl);
+  SetupTextureManagerInitExpectations(gl, extensions);
 }
 
 void TestHelper::SetupFeatureInfoInitExpectations(

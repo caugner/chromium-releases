@@ -13,7 +13,7 @@
 #include "net/base/address_family.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/net_api.h"
+#include "net/base/net_export.h"
 #include "net/base/net_util.h"
 #include "net/base/request_priority.h"
 
@@ -34,11 +34,11 @@ class NetLog;
 // request at a time is to create a SingleRequestHostResolver wrapper around
 // HostResolver (which will automatically cancel the single request when it
 // goes out of scope).
-class NET_API HostResolver {
+class NET_EXPORT HostResolver {
  public:
   // The parameters for doing a Resolve(). A hostname and port are required,
   // the rest are optional (and have reasonable defaults).
-  class NET_API RequestInfo {
+  class NET_EXPORT RequestInfo {
    public:
     explicit RequestInfo(const HostPortPair& host_port_pair);
 
@@ -65,9 +65,6 @@ class NET_API HostResolver {
     bool allow_cached_response() const { return allow_cached_response_; }
     void set_allow_cached_response(bool b) { allow_cached_response_ = b; }
 
-    bool only_use_cached_response() const { return only_use_cached_response_; }
-    void set_only_use_cached_response(bool b) { only_use_cached_response_ = b; }
-
     bool is_speculative() const { return is_speculative_; }
     void set_is_speculative(bool b) { is_speculative_ = b; }
 
@@ -89,9 +86,6 @@ class NET_API HostResolver {
 
     // Whether it is ok to return a result from the host cache.
     bool allow_cached_response_;
-
-    // Whether the response will only use the cache.
-    bool only_use_cached_response_;
 
     // Whether this request was started by the DNS prefetcher.
     bool is_speculative_;
@@ -146,15 +140,16 @@ class NET_API HostResolver {
   // Resolves the given hostname (or IP address literal), filling out the
   // |addresses| object upon success.  The |info.port| parameter will be set as
   // the sin(6)_port field of the sockaddr_in{6} struct.  Returns OK if
-  // successful or an error code upon failure.
+  // successful or an error code upon failure.  Returns
+  // ERR_NAME_NOT_RESOLVED if hostname is invalid, or if it is an
+  // incompatible IP literal (e.g. IPv6 is disabled and it is an IPv6
+  // literal).
   //
-  // When callback is null, the operation completes synchronously.
-  //
-  // When callback is non-null, the operation may be performed asynchronously.
   // If the operation cannnot be completed synchronously, ERR_IO_PENDING will
   // be returned and the real result code will be passed to the completion
   // callback.  Otherwise the result code is returned immediately from this
   // call.
+  //
   // If |out_req| is non-NULL, then |*out_req| will be filled with a handle to
   // the async request. This handle is not valid after the request has
   // completed.
@@ -165,6 +160,14 @@ class NET_API HostResolver {
                       CompletionCallback* callback,
                       RequestHandle* out_req,
                       const BoundNetLog& net_log) = 0;
+
+  // Resolves the given hostname (or IP address literal) out of cache
+  // only.  This is guaranteed to complete synchronously.  This acts like
+  // |Resolve()| if the hostname is IP literal or cached value exists.
+  // Otherwise, ERR_DNS_CACHE_MISS is returned.
+  virtual int ResolveFromCache(const RequestInfo& info,
+                               AddressList* addresses,
+                               const BoundNetLog& net_log) = 0;
 
   // Cancels the specified request. |req| is the handle returned by Resolve().
   // After a request is cancelled, its completion callback will not be called.
@@ -206,15 +209,16 @@ class NET_API HostResolver {
 // |max_retry_attempts| is the maximum number of times we will retry for host
 // resolution. Pass HostResolver::kDefaultRetryAttempts to choose a default
 // value.
-NET_API HostResolver* CreateSystemHostResolver(size_t max_concurrent_resolves,
-                                               size_t max_retry_attempts,
-                                               NetLog* net_log);
+NET_EXPORT HostResolver* CreateSystemHostResolver(
+    size_t max_concurrent_resolves,
+    size_t max_retry_attempts,
+    NetLog* net_log);
 
 // Creates a HostResolver implementation that sends actual DNS queries to
 // the specified DNS server and parses response and returns results.
-NET_API HostResolver* CreateAsyncHostResolver(size_t max_concurrent_resolves,
-                                              const IPAddressNumber& dns_ip,
-                                              NetLog* net_log);
+NET_EXPORT HostResolver* CreateAsyncHostResolver(size_t max_concurrent_resolves,
+                                                 const IPAddressNumber& dns_ip,
+                                                 NetLog* net_log);
 }  // namespace net
 
 #endif  // NET_BASE_HOST_RESOLVER_H_

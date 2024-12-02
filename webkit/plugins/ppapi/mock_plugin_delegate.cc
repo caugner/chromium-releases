@@ -46,8 +46,13 @@ MockPluginDelegate::PlatformContext3D* MockPluginDelegate::CreateContext3D() {
 MockPluginDelegate::PlatformVideoDecoder*
 MockPluginDelegate::CreateVideoDecoder(
     media::VideoDecodeAccelerator::Client* client,
-    int32 command_buffer_route_id,
-    gpu::CommandBufferHelper* cmd_buffer_helper) {
+    int32 command_buffer_route_id) {
+  return NULL;
+}
+
+MockPluginDelegate::PlatformVideoCapture*
+MockPluginDelegate::CreateVideoCapture(
+    media::VideoCapture::EventHandler* handler){
   return NULL;
 }
 
@@ -183,6 +188,13 @@ base::PlatformFileError MockPluginDelegate::GetDirContents(
   return base::PLATFORM_FILE_ERROR_FAILED;
 }
 
+void MockPluginDelegate::SyncGetFileSystemPlatformPath(
+    const GURL& url,
+    FilePath* platform_path) {
+  DCHECK(platform_path);
+  *platform_path = FilePath();
+}
+
 void MockPluginDelegate::PublishPolicy(const std::string& policy_json) {
 }
 
@@ -244,13 +256,10 @@ void MockPluginDelegate::DidStopLoading() {
 void MockPluginDelegate::SetContentRestriction(int restrictions) {
 }
 
-void MockPluginDelegate::HasUnsupportedFeature() {
-}
-
 void MockPluginDelegate::SaveURLAs(const GURL& url) {
 }
 
-P2PSocketDispatcher* MockPluginDelegate::GetP2PSocketDispatcher() {
+content::P2PSocketDispatcher* MockPluginDelegate::GetP2PSocketDispatcher() {
   return NULL;
 }
 

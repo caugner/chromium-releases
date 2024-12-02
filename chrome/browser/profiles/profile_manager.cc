@@ -68,7 +68,7 @@ class NewProfileLauncher : public ProfileManagerObserver {
     if (status == STATUS_INITIALIZED) {
       DCHECK(profile);
       Browser* browser = Browser::Create(profile);
-      browser->AddSelectedTabWithURL(GURL(chrome::kChromeUINewProfile),
+      browser->AddSelectedTabWithURL(GURL(chrome::kChromeUINewTabURL),
                                      PageTransition::LINK);
       browser->window()->Show();
     }
@@ -103,7 +103,10 @@ Profile* ProfileManager::GetLastUsedProfile() {
   return profile_manager->GetLastUsedProfile(user_data_dir);
 }
 
-ProfileManager::ProfileManager() : logged_in_(false) {
+ProfileManager::ProfileManager(const FilePath& user_data_dir)
+    : user_data_dir_(user_data_dir),
+      logged_in_(false),
+      will_import_(false) {
   BrowserList::AddObserver(this);
 #if defined(OS_CHROMEOS)
   registrar_.Add(
@@ -129,7 +132,7 @@ FilePath ProfileManager::GetDefaultProfileDir(
     const FilePath& user_data_dir) {
   FilePath default_profile_dir(user_data_dir);
   default_profile_dir =
-      default_profile_dir.AppendASCII(chrome::kNotSignedInProfile);
+      default_profile_dir.AppendASCII(chrome::kInitialProfile);
   return default_profile_dir;
 }
 
@@ -140,7 +143,7 @@ FilePath ProfileManager::GetProfilePrefsPath(
   return default_prefs_path;
 }
 
-FilePath ProfileManager::GetCurrentProfileDir() {
+FilePath ProfileManager::GetInitialProfileDir() {
   FilePath relative_profile_dir;
 #if defined(OS_CHROMEOS)
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -160,7 +163,7 @@ FilePath ProfileManager::GetCurrentProfileDir() {
 #endif
   // TODO(mirandac): should not automatically be default profile.
   relative_profile_dir =
-      relative_profile_dir.AppendASCII(chrome::kNotSignedInProfile);
+      relative_profile_dir.AppendASCII(chrome::kInitialProfile);
   return relative_profile_dir;
 }
 
@@ -173,7 +176,7 @@ Profile* ProfileManager::GetLastUsedProfile(const FilePath& user_data_dir) {
   if (local_state->HasPrefPath(prefs::kProfileLastUsed))
     last_profile_used = local_state->GetString(prefs::kProfileLastUsed);
   last_used_profile_dir = last_profile_used.empty() ?
-      last_used_profile_dir.AppendASCII(chrome::kNotSignedInProfile) :
+      last_used_profile_dir.AppendASCII(chrome::kInitialProfile) :
       last_used_profile_dir.AppendASCII(last_profile_used);
   return GetProfile(last_used_profile_dir);
 }
@@ -192,7 +195,7 @@ void ProfileManager::RegisterProfileName(Profile* profile) {
 
 Profile* ProfileManager::GetDefaultProfile(const FilePath& user_data_dir) {
   FilePath default_profile_dir(user_data_dir);
-  default_profile_dir = default_profile_dir.Append(GetCurrentProfileDir());
+  default_profile_dir = default_profile_dir.Append(GetInitialProfileDir());
 #if defined(OS_CHROMEOS)
   if (!logged_in_) {
     Profile* profile = GetProfile(default_profile_dir);
@@ -285,7 +288,7 @@ void ProfileManager::CreateDefaultProfileAsync(
   PathService::Get(chrome::DIR_USER_DATA, &default_profile_dir);
   // TODO(mirandac): current directory will not always be default in the future
   default_profile_dir = default_profile_dir.Append(
-      profile_manager->GetCurrentProfileDir());
+      profile_manager->GetInitialProfileDir());
 
   profile_manager->CreateProfileAsync(default_profile_dir,
                                       observer);
@@ -340,6 +343,19 @@ void ProfileManager::Observe(
 #endif
 }
 
+void ProfileManager::SetWillImport() {
+  will_import_ = true;
+}
+
+void ProfileManager::OnImportFinished(Profile* profile) {
+  will_import_ = false;
+  DCHECK(profile);
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_IMPORT_FINISHED,
+      Source<Profile>(profile),
+      NotificationService::NoDetails());
+}
+
 void ProfileManager::OnBrowserAdded(const Browser* browser) {}
 
 void ProfileManager::OnBrowserRemoved(const Browser* browser) {}
@@ -348,8 +364,11 @@ void ProfileManager::OnBrowserSetLastActive(const Browser* browser) {
   Profile* last_active = browser->GetProfile();
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
-  local_state->SetString(prefs::kProfileLastUsed,
-      last_active->GetPath().BaseName().MaybeAsASCII());
+  // Only keep track of profiles that we are managing; tests may create others.
+  if (profiles_info_.find(last_active->GetPath()) != profiles_info_.end()) {
+    local_state->SetString(prefs::kProfileLastUsed,
+                           last_active->GetPath().BaseName().MaybeAsASCII());
+  }
 }
 
 void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
@@ -502,10 +521,8 @@ ProfileManager::GetSortedProfilesFromDirectoryMap() {
 
 ProfileInfoCache& ProfileManager::GetProfileInfoCache() {
   if (!profile_info_cache_.get()) {
-    FilePath user_data_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
     profile_info_cache_.reset(new ProfileInfoCache(
-        g_browser_process->local_state(), user_data_dir));
+        g_browser_process->local_state(), user_data_dir_));
   }
   return *profile_info_cache_.get();
 }
@@ -557,4 +574,8 @@ void ProfileManager::ScheduleProfileForDeletion(const FilePath& profile_dir) {
 // static
 bool ProfileManager::IsMultipleProfilesEnabled() {
   return CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles);
+}
+
+ProfileManagerWithoutInit::ProfileManagerWithoutInit(
+    const FilePath& user_data_dir) : ProfileManager(user_data_dir) {
 }

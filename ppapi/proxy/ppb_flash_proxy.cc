@@ -14,12 +14,17 @@
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/proxy_module.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/scoped_pp_resource.h"
+#include "ppapi/thunk/enter.h"
+#include "ppapi/thunk/ppb_url_request_info_api.h"
+#include "ppapi/thunk/resource_creation_api.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -42,17 +47,17 @@ PP_Bool DrawGlyphs(PP_Instance instance,
                    uint32_t glyph_count,
                    const uint16_t glyph_indices[],
                    const PP_Point glyph_advances[]) {
-  PluginResource* image_data = PluginResourceTracker::GetInstance()->
-      GetResourceObject(pp_image_data);
+  Resource* image_data = PluginResourceTracker::GetInstance()->GetResource(
+      pp_image_data);
   if (!image_data)
     return PP_FALSE;
   // The instance parameter isn't strictly necessary but we check that it
   // matches anyway.
-  if (image_data->instance() != instance)
+  if (image_data->pp_instance() != instance)
     return PP_FALSE;
 
   PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(
-      image_data->instance());
+      image_data->pp_instance());
   if (!dispatcher)
     return PP_FALSE;
 
@@ -94,20 +99,19 @@ PP_Var GetProxyForURL(PP_Instance instance, const char* url) {
 int32_t Navigate(PP_Resource request_id,
                  const char* target,
                  bool from_user_action) {
-  PluginResource* request_object =
-      PluginResourceTracker::GetInstance()->GetResourceObject(request_id);
-  if (!request_object)
+  thunk::EnterResource<thunk::PPB_URLRequestInfo_API> enter(request_id, true);
+  if (enter.failed())
     return PP_ERROR_BADRESOURCE;
+  PP_Instance instance = enter.resource()->pp_instance();
 
-  PluginDispatcher* dispatcher =
-      PluginDispatcher::GetForInstance(request_object->instance());
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
   if (!dispatcher)
     return PP_ERROR_FAILED;
 
   int32_t result = PP_ERROR_FAILED;
   dispatcher->Send(new PpapiHostMsg_PPBFlash_Navigate(
       INTERFACE_ID_PPB_FLASH,
-      request_object->host_resource(), target, from_user_action,
+      instance, enter.object()->GetData(), target, from_user_action,
       &result));
   return result;
 }
@@ -152,8 +156,7 @@ PP_Var GetCommandLineArgs(PP_Module pp_module) {
       static_cast<const PPB_Var_Deprecated*>(
           PluginDispatcher::GetInterfaceFromDispatcher(
               PPB_VAR_DEPRECATED_INTERFACE));
-  std::string args =
-      pp::proxy::ProxyModule::GetInstance()->GetFlashCommandLineArgs();
+  std::string args = ProxyModule::GetInstance()->GetFlashCommandLineArgs();
   return var_deprecated->VarFromUtf8(pp_module, args.data(), args.length());
 }
 
@@ -228,9 +231,8 @@ void PPB_Flash_Proxy::OnMsgSetInstanceAlwaysOnTop(
   ppb_flash_target()->SetInstanceAlwaysOnTop(instance, on_top);
 }
 
-void PPB_Flash_Proxy::OnMsgDrawGlyphs(
-    const pp::proxy::PPBFlash_DrawGlyphs_Params& params,
-    PP_Bool* result) {
+void PPB_Flash_Proxy::OnMsgDrawGlyphs(const PPBFlash_DrawGlyphs_Params& params,
+                                      PP_Bool* result) {
   *result = PP_FALSE;
 
   PP_FontDescription_Dev font_desc;
@@ -257,18 +259,40 @@ void PPB_Flash_Proxy::OnMsgGetProxyForURL(PP_Instance instance,
       instance, url.c_str()));
 }
 
-void PPB_Flash_Proxy::OnMsgNavigate(const HostResource& request_info,
+void PPB_Flash_Proxy::OnMsgNavigate(PP_Instance instance,
+                                    const PPB_URLRequestInfo_Data& data,
                                     const std::string& target,
                                     bool from_user_action,
                                     int32_t* result) {
   DCHECK(!dispatcher()->IsPlugin());
+
+  // Validate the PP_Instance since we'll be constructing resources on its
+  // behalf.
+  HostDispatcher* host_dispatcher = static_cast<HostDispatcher*>(dispatcher());
+  if (HostDispatcher::GetForInstance(instance) != host_dispatcher) {
+    NOTREACHED();
+    *result = PP_ERROR_BADARGUMENT;
+    return;
+  }
+
   // We need to allow re-entrancy here, because this may call into Javascript
   // (e.g. with a "javascript:" URL), or do things like navigate away from the
   // page, either one of which will need to re-enter into the plugin.
   // It is safe, because it is essentially equivalent to NPN_GetURL, where Flash
   // would expect re-entrancy. When running in-process, it does re-enter here.
-  static_cast<HostDispatcher*>(dispatcher())->set_allow_plugin_reentrancy();
-  *result = ppb_flash_target()->Navigate(request_info.host_resource(),
+  host_dispatcher->set_allow_plugin_reentrancy();
+
+  // Make a temporary request resource.
+  thunk::EnterFunctionNoLock<thunk::ResourceCreationAPI> enter(instance, true);
+  if (enter.failed()) {
+    *result = PP_ERROR_FAILED;
+    return;
+  }
+  ScopedPPResource request_resource(
+      ScopedPPResource::PassRef(),
+      enter.functions()->CreateURLRequestInfo(instance, data));
+
+  *result = ppb_flash_target()->Navigate(request_resource,
                                          target.c_str(),
                                          from_user_action);
 }
@@ -288,4 +312,4 @@ void PPB_Flash_Proxy::OnMsgGetLocalTimeZoneOffset(PP_Instance instance,
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

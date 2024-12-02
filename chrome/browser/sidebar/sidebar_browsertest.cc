@@ -14,8 +14,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "net/test/test_server.h"
 
@@ -71,14 +71,15 @@ class SidebarTest : public ExtensionBrowserTest {
     TabContents* tab = browser()->GetSelectedTabContents();
 
     SidebarManager* sidebar_manager = SidebarManager::GetInstance();
-
-    sidebar_manager->NavigateSidebar(tab, content_id_, url);
-
     SidebarContainer* sidebar_container =
         sidebar_manager->GetSidebarContainerFor(tab, content_id_);
-
     TabContents* client_contents = sidebar_container->sidebar_contents();
-    ui_test_utils::WaitForNavigation(&client_contents->controller());
+
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        Source<NavigationController>(&client_contents->controller()));
+    sidebar_manager->NavigateSidebar(tab, content_id_, url);
+    observer.Wait();
   }
 
   void ShowSidebar(TabContents* tab) {
@@ -199,4 +200,3 @@ IN_PROC_BROWSER_TEST_F(SidebarTest, SidebarNavigate) {
 }
 
 }  // namespace
-

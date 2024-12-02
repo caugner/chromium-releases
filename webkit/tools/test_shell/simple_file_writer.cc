@@ -9,14 +9,12 @@
 #include "net/url_request/url_request_context.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
 using fileapi::FileSystemCallbackDispatcher;
 using fileapi::FileSystemContext;
-using fileapi::FileSystemFileUtil;
 using fileapi::FileSystemOperation;
 using fileapi::WebFileWriterBase;
 using WebKit::WebFileWriterClient;
@@ -31,15 +29,15 @@ net::URLRequestContext* SimpleFileWriter::request_context_ = NULL;
 class SimpleFileWriter::IOThreadProxy
     : public base::RefCountedThreadSafe<SimpleFileWriter::IOThreadProxy> {
  public:
-  explicit IOThreadProxy(const base::WeakPtr<SimpleFileWriter>& simple_writer,
-                         FileSystemContext* file_system_context)
+  IOThreadProxy(const base::WeakPtr<SimpleFileWriter>& simple_writer,
+                FileSystemContext* file_system_context)
       : simple_writer_(simple_writer),
         operation_(NULL),
         file_system_context_(file_system_context) {
     // The IO thread needs to be running for this class to work.
     SimpleResourceLoaderBridge::EnsureIOThread();
     io_thread_ = SimpleResourceLoaderBridge::GetIoThread();
-    main_thread_ = base::MessageLoopProxy::CreateForCurrentThread();
+    main_thread_ = base::MessageLoopProxy::current();
   }
 
   virtual ~IOThreadProxy() {

@@ -16,7 +16,7 @@
           'app/breakpad_win.cc',
           'app/breakpad_win.h',
           'app/chrome_exe_main_gtk.cc',
-          'app/chrome_exe_main_mac.mm',
+          'app/chrome_exe_main_mac.cc',
           'app/chrome_exe_main_win.cc',
           'app/chrome_exe_resource.h',
           'app/client_util.cc',
@@ -24,11 +24,8 @@
           'app/hard_error_handler_win.cc',
           'app/hard_error_handler_win.h',
           'app/scoped_ole_initializer.h',
-          # TODO(bradnelson): once automatic generation of 64 bit targets on
-          # Windows is ready, take this out and add a dependency on
-          # content_common.gypi.
+          '../content/app/sandbox_helper_win.cc',
           '../content/common/content_switches.cc',
-          '../content/common/content_switches.h',
         ],
         'mac_bundle_resources': [
           'app/app-Info.plist',
@@ -45,19 +42,6 @@
         },
         'conditions': [
           ['OS=="win"', {
-            # TODO(scottbyer): This is a temporary workaround.  The right fix
-            # is to change the output file to be in $(IntDir) for this project
-            # and the .dll project and use the hardlink script to link it back
-            # to $(OutDir).
-            'configurations': {
-              'Debug_Base': {
-                'msvs_settings': {
-                  'VCLinkerTool': {
-                    'LinkIncremental': '1',
-                  },
-                },
-              },
-            },
             'msvs_settings': {
               'VCLinkerTool': {
                 'DelayLoadDLLs': [
@@ -91,6 +75,12 @@
             'sources!': [
               'app/client_util.cc',
             ]
+          }],
+          ['OS=="mac" and asan==1', {
+            'xcode_settings': {
+              # Override the outer definition of CHROMIUM_STRIP_SAVE_FILE.
+              'CHROMIUM_STRIP_SAVE_FILE': 'app/app_asan.saves',
+            },
           }],
         ],
       }],
@@ -195,14 +185,12 @@
             # Needed for chrome_main.cc initialization of libraries.
             '../build/linux/system.gyp:dbus-glib',
             '../build/linux/system.gyp:gtk',
-            'packed_resources',
             # Needed to use the master_preferences functions
             'installer_util',
           ],
           'sources': [
             'app/chrome_dll_resource.h',
             'app/chrome_main.cc',
-            'app/chrome_main_posix.cc',
           ],
         }],
         ['OS=="mac"', {
@@ -235,12 +223,18 @@
               'dependencies': [
                 '../breakpad/breakpad.gyp:dump_syms',
                 '../breakpad/breakpad.gyp:symupload',
+
+                # In order to process symbols for the Remoting Host plugin,
+                # that plugin needs to be built beforehand.  Since the
+                # "Dump Symbols" step hangs off this target, that plugin also
+                # needs to be added as a dependency.
+                '../remoting/remoting.gyp:remoting_host_plugin',
               ],
               # The "Dump Symbols" post-build step is in a target_conditions
               # block so that it will follow the "Strip If Needed" step if that
               # is also being used.  There is no standard configuration where
               # both of these steps occur together, but Mark likes to use this
-              # configuraiton sometimes when testing Breakpad-enabled builds
+              # configuration sometimes when testing Breakpad-enabled builds
               # without the time overhead of creating real .dSYM files.  When
               # both "Dump Symbols" and "Strip If Needed" are present, "Dump
               # Symbols" must come second because "Strip If Needed" creates
@@ -280,6 +274,7 @@
           'dependencies': [
             'helper_app',
             'infoplist_strings_tool',
+            'interpose_dependency_shim',
             'chrome_manifest_bundle',
           ],
           'mac_bundle_resources': [
@@ -334,6 +329,7 @@
               'destination': '<(PRODUCT_DIR)/<(mac_product_name).app/Contents/Versions/<(version_full)',
               'files': [
                 '<(PRODUCT_DIR)/<(mac_product_name) Helper.app',
+                '<(PRODUCT_DIR)/libplugin_carbon_interpose.dylib',
               ],
             },
           ],
@@ -373,6 +369,47 @@
                 '<(version_full)'
               ],
             },
+            {
+              # This postbuid step is responsible for creating the following
+              # helpers:
+              #
+              # For unofficial Chromium branding, Chromium Helper EH.app and
+              # Chromium Helper NP.app are created from Chromium Helper.app.
+              # For official Google Chrome branding, Google Chrome Helper
+              # EH.app and Google Chrome Helper NP.app are created from
+              # Google Chrome Helper.app.
+              #
+              # The EH helper is marked for an executable heap. The NP helper
+              # is marked for no PIE (ASLR).
+              #
+              # Normally, applications shipping as part of offical builds with
+              # Google Chrome branding have dsymutil (dwarf-with-dsym,
+              # mac_real_dsym) and dump_syms (mac_breakpad) run on them to
+              # produce a .dSYM bundle and a Breakpad .sym file. This is
+              # unnecessary for the "More Helpers" because they're identical
+              # to the original helper except for the bits in their Mach-O
+              # headers that change to enable or disable special features.
+              # Each .dSYM is identified by UUID stored in a Mach-O file's
+              # LC_UUID load command. Because the "More Helpers" share a UUID
+              # with the original helper, there's no need to run dsymutil
+              # again. All helpers can share the same .dSYM. Special handling
+              # is performed in chrome/tools/build/mac/dump_product_syms to
+              # prepare their Breakpad symbol files.
+              'postbuild_name': 'Make More Helpers',
+              'action': [
+                'tools/build/mac/make_more_helpers.sh',
+                '<(version_full)',
+                '<(mac_product_name)',
+              ],
+            },
+            {
+              # Make sure there isn't any Objective-C in the browser app's
+              # executable.
+              'postbuild_name': 'Verify No Objective-C',
+              'action': [
+                'tools/build/mac/verify_no_objc.sh',
+              ],
+            },
           ],  # postbuilds
         }],
         ['OS=="linux"', {
@@ -408,17 +445,43 @@
           ],
           'dependencies': [
             'packed_extra_resources',
+            'packed_resources',
             # Copy Flash Player files to PRODUCT_DIR if applicable. Let the .gyp
             # file decide what to do on a per-OS basis; on Mac, internal plugins
             # go inside the framework, so this dependency is in chrome_dll.gypi.
             '../third_party/adobe/flash/flash_player.gyp:flash_player',
           ],
         }],
-        ['OS=="mac" or OS=="win"', {
+        ['OS=="linux"', {
+          'conditions': [
+            # For now, do not build nacl_helper on ARM or when disable_nacl=1
+            ['disable_nacl!=1 and target_arch!="arm"', {
+              'dependencies': [
+                'nacl_helper_bootstrap',
+                'nacl_helper',
+                ],
+            }],
+          ],
+        }],
+        ['OS=="mac"', {
           'dependencies': [
-            # On Windows and Mac, make sure we've built chrome_dll, which
-            # contains all of the library code with Chromium functionality.
+            # On Mac, make sure we've built chrome_dll, which contains all of
+            # the library code with Chromium functionality.
             'chrome_dll',
+          ],
+        }],
+        ['OS=="win"', {
+          'conditions': [
+            ['optimize_with_syzygy==1', {
+              # With syzygy enabled there is an intermediate target which
+              # builds an initial version of chrome_dll, then optimizes it
+              # to its final location.  The optimization step also
+              # depends on chrome_exe, so here we depend on the initial
+              # chrome_dll.
+              'dependencies': ['chrome_dll_initial',]
+            }, {
+              'dependencies': ['chrome_dll',]
+            }],
           ],
         }],
         ['OS=="win"', {
@@ -430,7 +493,6 @@
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../breakpad/breakpad.gyp:breakpad_sender',
             '../sandbox/sandbox.gyp:sandbox',
-            'app/locales/locales.gyp:*',
             'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'sources': [

@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From ppb_file_ref.idl modified Wed Jul 13 16:43:20 2011. */
+/* From ppb_file_ref.idl modified Wed Aug 24 20:52:42 2011. */
 
 #ifndef PPAPI_C_PPB_FILE_REF_H_
 #define PPAPI_C_PPB_FILE_REF_H_
@@ -16,6 +16,9 @@
 #include "ppapi/c/pp_stdint.h"
 #include "ppapi/c/pp_time.h"
 #include "ppapi/c/pp_var.h"
+
+#define PPB_FILEREF_INTERFACE_1_0 "PPB_FileRef;1.0"
+#define PPB_FILEREF_INTERFACE PPB_FILEREF_INTERFACE_1_0
 
 /**
  * @file
@@ -33,10 +36,6 @@
  * a file system.  This struct contains a <code>PP_FileSystemType</code>
  * identifier and a file path string.
  */
-#define PPB_FILEREF_INTERFACE_0_9 "PPB_FileRef;0.9"
-#define PPB_FILEREF_INTERFACE_1_0 "PPB_FileRef;1.0"
-#define PPB_FILEREF_INTERFACE PPB_FILEREF_INTERFACE_1_0
-
 struct PPB_FileRef {
   /**
    * Create() creates a weak pointer to a file in the given file system. File

@@ -38,8 +38,7 @@ class PepperWidget : public WebWidget {
   PepperWidget(webkit::ppapi::PluginInstance* plugin,
                RenderWidgetFullscreenPepper* widget)
       : plugin_(plugin),
-        widget_(widget),
-        cursor_(WebCursorInfo::TypePointer) {
+        widget_(widget) {
   }
 
   virtual ~PepperWidget() {}
@@ -97,7 +96,10 @@ class PepperWidget : public WebWidget {
   }
 
   virtual bool handleInputEvent(const WebInputEvent& event) {
-    bool result = plugin_->HandleInputEvent(event, &cursor_);
+    // This cursor info is ignored, we always set the cursor directly from
+    // RenderWidgetFullscreenPepper::DidChangeCursor.
+    WebCursorInfo cursor;
+    bool result = plugin_->HandleInputEvent(event, &cursor);
 
     // For normal web pages, WebViewImpl does input event translations and
     // generates context menu events. Since we don't have a WebView, we need to
@@ -126,7 +128,7 @@ class PepperWidget : public WebWidget {
       if (send_context_menu_event) {
         WebMouseEvent context_menu_event(mouse_event);
         context_menu_event.type = WebInputEvent::ContextMenu;
-        plugin_->HandleInputEvent(context_menu_event, &cursor_);
+        plugin_->HandleInputEvent(context_menu_event, &cursor);
       }
     }
     return result;
@@ -188,7 +190,6 @@ class PepperWidget : public WebWidget {
   scoped_refptr<webkit::ppapi::PluginInstance> plugin_;
   RenderWidgetFullscreenPepper* widget_;
   WebSize size_;
-  WebCursorInfo cursor_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperWidget);
 };
@@ -226,7 +227,8 @@ RenderWidgetFullscreenPepper::RenderWidgetFullscreenPepper(
       plugin_(plugin),
       context_(NULL),
       buffer_(0),
-      program_(0) {
+      program_(0),
+      method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 RenderWidgetFullscreenPepper::~RenderWidgetFullscreenPepper() {
@@ -260,6 +262,12 @@ void RenderWidgetFullscreenPepper::Destroy() {
   // plugin_ to NULL to avoid calling into a dangling pointer e.g. on Close().
   plugin_ = NULL;
   Send(new ViewHostMsg_Close(routing_id_));
+  Release();
+}
+
+void RenderWidgetFullscreenPepper::DidChangeCursor(
+    const WebKit::WebCursorInfo& cursor) {
+  didChangeCursor(cursor);
 }
 
 webkit::ppapi::PluginDelegate::PlatformContext3D*
@@ -309,11 +317,7 @@ void RenderWidgetFullscreenPepper::OnResize(const gfx::Size& size,
                                             const gfx::Rect& resizer_rect) {
   if (context_) {
     gpu::gles2::GLES2Implementation* gl = context_->GetImplementation();
-#if defined(OS_MACOSX)
-    context_->ResizeOnscreen(size);
-#else
     gl->ResizeCHROMIUM(size.width(), size.height());
-#endif
     gl->Viewport(0, 0, size.width(), size.height());
   }
   RenderWidget::OnResize(size, resizer_rect);
@@ -341,11 +345,14 @@ void RenderWidgetFullscreenPepper::CreateContext() {
     RendererGLContext::STENCIL_SIZE, 0,
     RendererGLContext::SAMPLES, 0,
     RendererGLContext::SAMPLE_BUFFERS, 0,
+    RendererGLContext::SHARE_RESOURCES, 0,
+    RendererGLContext::BIND_GENERATES_RESOURCES, 1,
     RendererGLContext::NONE,
   };
   context_ = RendererGLContext::CreateViewContext(
       host,
       routing_id(),
+      NULL,
       "GL_OES_packed_depth_stencil GL_OES_depth24",
       attribs,
       active_url_);
@@ -357,10 +364,6 @@ void RenderWidgetFullscreenPepper::CreateContext() {
     context_ = NULL;
     return;
   }
-  context_->SetSwapBuffersCallback(
-      NewCallback(this,
-          &RenderWidgetFullscreenPepper::
-              OnSwapBuffersCompleteByRendererGLContext));
   context_->SetContextLostCallback(
       NewCallback(this, &RenderWidgetFullscreenPepper::OnLostContext));
 }
@@ -460,10 +463,10 @@ bool RenderWidgetFullscreenPepper::InitContext() {
 }
 
 bool RenderWidgetFullscreenPepper::CheckCompositing() {
-  bool compositing = webwidget_->isAcceleratedCompositingActive();
-  if (compositing != is_accelerated_compositing_active_) {
+  bool compositing =
+      webwidget_ && webwidget_->isAcceleratedCompositingActive();
+  if (compositing != is_accelerated_compositing_active_)
     didActivateAcceleratedCompositing(compositing);
-  }
   return compositing;
 }
 
@@ -471,6 +474,8 @@ void RenderWidgetFullscreenPepper::SwapBuffers() {
   DCHECK(context_);
   OnSwapBuffersPosted();
   context_->SwapBuffers();
+  context_->Echo(method_factory_.NewRunnableMethod(
+      &RenderWidgetFullscreenPepper::OnSwapBuffersCompleteByRendererGLContext));
 }
 
 void RenderWidgetFullscreenPepper::OnLostContext(
@@ -487,6 +492,7 @@ void RenderWidgetFullscreenPepper::OnLostContext(
   program_ = 0;
   buffer_ = 0;
   OnSwapBuffersAborted();
+  CheckCompositing();
 }
 
 void RenderWidgetFullscreenPepper::OnSwapBuffersCompleteByRendererGLContext() {

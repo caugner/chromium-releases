@@ -23,7 +23,7 @@ class BookmarksUITest : public UITest {
         L"domAutomationController.send("
         L"    location.protocol == 'chrome-extension:' && "
         L"    document.readyState == 'complete')",
-        TestTimeouts::huge_test_timeout_ms());
+        TestTimeouts::large_test_timeout_ms());
   }
 
   scoped_refptr<TabProxy> GetBookmarksUITab() {
@@ -102,7 +102,14 @@ TEST_F(BookmarksUITest, CommandOpensBookmarksTab) {
   AssertIsBookmarksPage(tab);
 }
 
-TEST_F(BookmarksUITest, CommandAgainGoesBackToBookmarksTab) {
+// http://crbug.com/91843
+#if defined(OS_LINUX)
+#define MAYBE_CommandAgainGoesBackToBookmarksTab FLAKY_CommandAgainGoesBackToBookmarksTab
+#else
+#define MAYBE_CommandAgainGoesBackToBookmarksTab CommandAgainGoesBackToBookmarksTab
+#endif
+
+TEST_F(BookmarksUITest, MAYBE_CommandAgainGoesBackToBookmarksTab) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
 

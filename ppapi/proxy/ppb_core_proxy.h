@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,12 @@
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/proxy/host_resource.h"
 #include "ppapi/proxy/interface_proxy.h"
+#include "ppapi/shared_impl/host_resource.h"
 
 struct PPB_Core;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class PPB_Core_Proxy : public InterfaceProxy {
@@ -32,11 +32,11 @@ class PPB_Core_Proxy : public InterfaceProxy {
 
  private:
   // Message handlers.
-  void OnMsgAddRefResource(HostResource resource);
-  void OnMsgReleaseResource(HostResource resource);
+  void OnMsgAddRefResource(const ppapi::HostResource& resource);
+  void OnMsgReleaseResource(const ppapi::HostResource& resource);
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PPB_CORE_PROXY_H_

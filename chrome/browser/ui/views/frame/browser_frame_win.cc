@@ -21,6 +21,8 @@
 #include "views/widget/widget.h"
 #include "views/window/non_client_view.h"
 
+#pragma comment(lib, "dwmapi.lib")
+
 // static
 static const int kClientEdgeThickness = 3;
 static const int kTabDragWindowAlpha = 200;
@@ -109,7 +111,9 @@ void BrowserFrameWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
   // Note that we will call Layout every time SetWindowPos is called with
   // SWP_SHOWWINDOW, however callers typically are careful about not specifying
   // this flag unless necessary to avoid flicker.
-  if (window_pos->flags & SWP_SHOWWINDOW) {
+  // This may be invoked during creation on XP and before the non_client_view
+  // has been created.
+  if (window_pos->flags & SWP_SHOWWINDOW && GetWidget()->non_client_view()) {
     GetWidget()->non_client_view()->Layout();
     GetWidget()->non_client_view()->SchedulePaint();
   }

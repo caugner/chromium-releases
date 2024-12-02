@@ -15,6 +15,7 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/archived_database.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
@@ -24,7 +25,7 @@
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/thumbnail_score.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
 #include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -226,16 +227,16 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
   url_ids[2] = main_db_->AddURL(url_row3);
   thumb_db_->AddIconMapping(url_row3.url(), favicon2);
 
-  // Thumbnails for each URL.
-  scoped_ptr<SkBitmap> thumbnail(
+  // Thumbnails for each URL. |thumbnail| takes ownership of decoded SkBitmap.
+  gfx::Image thumbnail(
       gfx::JPEGCodec::Decode(kGoogleThumbnail, sizeof(kGoogleThumbnail)));
   ThumbnailScore score(0.25, true, true, Time::Now());
 
   Time time;
   GURL gurl;
-  top_sites_->SetPageThumbnail(url_row1.url(), *thumbnail, score);
-  top_sites_->SetPageThumbnail(url_row2.url(), *thumbnail, score);
-  top_sites_->SetPageThumbnail(url_row3.url(), *thumbnail, score);
+  top_sites_->SetPageThumbnail(url_row1.url(), &thumbnail, score);
+  top_sites_->SetPageThumbnail(url_row2.url(), &thumbnail, score);
+  top_sites_->SetPageThumbnail(url_row3.url(), &thumbnail, score);
 
   // Four visits.
   VisitRow visit_row1;
@@ -562,7 +563,7 @@ TEST_F(ExpireHistoryTest, DontDeleteStarredURL) {
   // ASSERT_TRUE(HasThumbnail(url_row.id()));
 
   // Unstar the URL and delete again.
-  bookmark_model_.SetURLStarred(url, string16(), false);
+  bookmark_utils::RemoveAllBookmarks(&bookmark_model_, url);
   expirer_.DeleteURL(url);
 
   // Now it should be completely deleted.

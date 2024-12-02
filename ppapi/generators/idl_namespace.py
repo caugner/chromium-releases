@@ -18,7 +18,6 @@ from idl_log import ErrOut, InfoOut, WarnOut
 from idl_version import IDLVersion
 
 Option('label', 'Use the specifed label blocks.', default='Chrome')
-Option('version', 'Use the specified version', default='M14')
 Option('namespace_debug', 'Use the specified version')
 
 
@@ -106,11 +105,13 @@ class IDLVersionMap(object):
     self.version_to_release = {}
     self.release_to_version = {}
     self.versions = []
+    self.releases = []
 
   def AddReleaseVersionMapping(self, release, version):
     self.version_to_release[version] = release
     self.release_to_version[release] = version
     self.versions = sorted(self.version_to_release.keys())
+    self.releases = sorted(self.release_to_version.keys())
 
   def GetRelease(self, version):
     # Check for exact match
@@ -118,6 +119,10 @@ class IDLVersionMap(object):
       return self.version_to_release[version]
 
   def GetVersion(self, release):
+    if release > self.releases[-1]:
+      release = self.releases[-1]
+    elif release < self.releases[0]:
+      release = self.releases[0]
     return self.release_to_version[release]
 
 

@@ -3,6 +3,7 @@
 include_rules = [
   "+crypto",
 
+  "-chrome",
   # Until we move most of our testing infrastructure in a way that content can
   # make use of it.
   "+chrome/test",
@@ -18,7 +19,9 @@ include_rules = [
   # directories in content/ so we disallow all of them.
   "-content",
   "+content/common",
+  "+content/test",
 
+  "+dbus",
   "+grit",
   "+gpu",
   "+net",
@@ -34,6 +37,7 @@ include_rules = [
   "+third_party/gpsd",
   "+third_party/npapi/bindings",
   "+third_party/sqlite",
+  "+third_party/tcmalloc",
   # Allow inclusion of WebKit API files.
   "+third_party/WebKit/Source/WebKit/chromium",
 
@@ -43,7 +47,13 @@ include_rules = [
   # given its id is left to the embedder.
   "-ui/base/l10n",
   "-ui/base/resource",
+  # This file isn't related to grd, so it's fine.
+  "+ui/base/l10n/l10n_util_win.h",
 
-  "+views",
+  # Content shouldn't depend on views. While we technically don't need this
+  # line, since the top level DEPS doesn't allow it, we add it to make this
+  # explicit. 
+  "-views",
+
   "+webkit",
 ]

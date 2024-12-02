@@ -266,7 +266,7 @@ TEST_F(DiskCacheTest, ShutdownWithPendingIO) {
     disk_cache::Backend* cache;
     int rv = disk_cache::BackendImpl::CreateBackend(
                  path, false, 0, net::DISK_CACHE, disk_cache::kNoRandom,
-                 base::MessageLoopProxy::CreateForCurrentThread(), NULL,
+                 base::MessageLoopProxy::current(), NULL,
                  &cache, &cb);
     ASSERT_EQ(net::OK, cb.GetResult(rv));
 
@@ -584,10 +584,9 @@ void DiskCacheBackendTest::BackendInvalidEntry() {
 }
 
 // This and the other intentionally leaky tests below are excluded from
-// purify and valgrind runs by naming them in the files
-//   net/data/purify/net_unittests.exe.gtest.txt and
+// valgrind runs by naming them in the files
 //   net/data/valgrind/net_unittests.gtest.txt
-// The scripts tools/{purify,valgrind}/chrome_tests.sh
+// The scripts tools/valgrind/chrome_tests.sh
 // read those files and pass the appropriate --gtest_filter to net_unittests.
 TEST_F(DiskCacheBackendTest, InvalidEntry) {
   BackendInvalidEntry();
@@ -1818,7 +1817,7 @@ TEST_F(DiskCacheTest, Backend_UsageStats) {
   ASSERT_TRUE(DeleteCache(path));
   scoped_ptr<disk_cache::BackendImpl> cache;
   cache.reset(new disk_cache::BackendImpl(
-                  path, base::MessageLoopProxy::CreateForCurrentThread(),
+                  path, base::MessageLoopProxy::current(),
                   NULL));
   ASSERT_TRUE(NULL != cache.get());
   cache->SetUnitTestMode();
@@ -2117,4 +2116,27 @@ TEST_F(DiskCacheBackendTest, FileSharing) {
   EXPECT_EQ(0, memcmp(buffer1, buffer2, kSize));
 
   EXPECT_TRUE(disk_cache::DeleteCacheFile(name));
+}
+
+TEST_F(DiskCacheBackendTest, UpdateRankForExternalCacheHit) {
+  SetDirectMode();
+  InitCache();
+
+  disk_cache::Entry* entry;
+
+  for (int i = 0; i < 2; ++i) {
+    std::string key = StringPrintf("key%d", i);
+    ASSERT_EQ(net::OK, CreateEntry(key, &entry));
+    entry->Close();
+  }
+
+  // Ping the oldest entry.
+  cache_->OnExternalCacheHit("key0");
+
+  TrimForTest(false);
+
+  // Make sure the older key remains.
+  EXPECT_EQ(1, cache_->GetEntryCount());
+  ASSERT_EQ(net::OK, OpenEntry("key0", &entry));
+  entry->Close();
 }

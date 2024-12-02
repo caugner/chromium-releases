@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,20 +22,20 @@ struct GroupRange {
 };
 
 // The model driving the GroupTableView.
-class GroupTableModel : public TableModel {
+class GroupTableModel : public ui::TableModel {
  public:
   // Populates the passed range with the first row/last row (included)
   // that this item belongs to.
   virtual void GetGroupRangeForItem(int item, GroupRange* range) = 0;
 };
 
-class GroupTableView : public TableView {
+class VIEWS_EXPORT GroupTableView : public TableView {
  public:
    // The view class name.
    static const char kViewClassName[];
 
   GroupTableView(GroupTableModel* model,
-                 const std::vector<TableColumn>& columns,
+                 const std::vector<ui::TableColumn>& columns,
                  TableTypes table_type, bool single_selection,
                  bool resizable_columns, bool autosize_columns,
                  bool draw_group_separators);

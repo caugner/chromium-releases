@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_url_handler.h"
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
@@ -137,8 +137,12 @@ RenderWidgetHost* TestRenderWidgetHostView::GetRenderWidgetHost() const {
   return NULL;
 }
 
-gfx::NativeView TestRenderWidgetHostView::GetNativeView() {
+gfx::NativeView TestRenderWidgetHostView::GetNativeView() const {
   return NULL;
+}
+
+gfx::NativeViewId TestRenderWidgetHostView::GetNativeViewId() const {
+  return 0;
 }
 
 bool TestRenderWidgetHostView::HasFocus() {
@@ -173,20 +177,7 @@ BackingStore* TestRenderWidgetHostView::AllocBackingStore(
 
 #if defined(OS_MACOSX)
 
-void TestRenderWidgetHostView::ShowPopupWithItems(
-    gfx::Rect bounds,
-    int item_height,
-    double item_font_size,
-    int selected_item,
-    const std::vector<WebMenuItem>& items,
-    bool right_aligned) {
-}
-
 gfx::Rect TestRenderWidgetHostView::GetViewCocoaBounds() const {
-  return gfx::Rect();
-}
-
-gfx::Rect TestRenderWidgetHostView::GetRootWindowRect() {
   return gfx::Rect();
 }
 
@@ -242,11 +233,18 @@ void TestRenderWidgetHostView::AcceleratedSurfaceBuffersSwapped(
 
 void TestRenderWidgetHostView::GpuRenderingStateDidChange() {
 }
+
 #elif defined(OS_WIN)
 void TestRenderWidgetHostView::WillWmDestroy() {
 }
 
 void TestRenderWidgetHostView::ShowCompositorHostWindow(bool show) {
+}
+#endif
+
+#if defined(OS_POSIX)
+gfx::Rect TestRenderWidgetHostView::GetRootWindowBounds() {
+  return gfx::Rect();
 }
 #endif
 

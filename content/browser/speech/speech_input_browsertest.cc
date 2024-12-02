@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/speech/speech_input_dispatcher_host.h"
 #include "content/browser/speech/speech_input_manager.h"
@@ -141,19 +141,21 @@ class SpeechInputBrowserTest : public InProcessBrowserTest {
     mouse_event.y = 0;
     mouse_event.clickCount = 1;
     TabContents* tab_contents = browser()->GetSelectedTabContents();
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        Source<NavigationController>(&tab_contents->controller()));
     tab_contents->render_view_host()->ForwardMouseEvent(mouse_event);
     mouse_event.type = WebKit::WebInputEvent::MouseUp;
     tab_contents->render_view_host()->ForwardMouseEvent(mouse_event);
+    observer.Wait();
   }
 
   void RunSpeechInputTest(const FilePath::CharType* filename) {
-    LoadAndStartSpeechInputTest(filename);
-
     // The fake speech input manager would receive the speech input
     // request and return the test string as recognition result. The test page
     // then sets the URL fragment as 'pass' if it received the expected string.
-    TabContents* tab_contents = browser()->GetSelectedTabContents();
-    ui_test_utils::WaitForNavigations(&tab_contents->controller(), 1);
+    LoadAndStartSpeechInputTest(filename);
+
     EXPECT_EQ("pass", browser()->GetSelectedTabContents()->GetURL().ref());
   }
 
@@ -164,22 +166,17 @@ class SpeechInputBrowserTest : public InProcessBrowserTest {
 
     // Inject the fake manager factory so that the test result is returned to
     // the web page.
-    SpeechInputDispatcherHost::set_manager_accessor(&fakeManagerAccessor);
+    SpeechInputDispatcherHost::set_manager(speech_input_manager_);
   }
 
   virtual void TearDownInProcessBrowserTestFixture() {
     speech_input_manager_ = NULL;
   }
 
-  // Factory method.
-  static SpeechInputManager* fakeManagerAccessor() {
-    return speech_input_manager_;
-  }
-
   FakeSpeechInputManager fake_speech_input_manager_;
 
-  // This is used by the static |fakeManagerAccessor|, and it is a pointer
-  // rather than a direct instance per the style guide.
+  // This is used by the static |fakeManager|, and it is a pointer rather than a
+  // direct instance per the style guide.
   static SpeechInputManager* speech_input_manager_;
 };
 

@@ -269,7 +269,8 @@ void InitialObserver::GetInitialDnsResolutionList(ListValue* startup_list) {
   DCHECK(startup_list);
   startup_list->Clear();
   DCHECK_EQ(0u, startup_list->GetSize());
-  startup_list->Append(new FundamentalValue(kPredictorStartupFormatVersion));
+  startup_list->Append(
+      new base::FundamentalValue(kPredictorStartupFormatVersion));
   for (FirstNavigations::iterator it = first_navigations_.begin();
        it != first_navigations_.end();
        ++it) {
@@ -308,7 +309,7 @@ class OffTheRecordObserver : public NotificationObserver {
       registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSED,
                      NotificationService::AllSources());
       registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                     NotificationService::AllSources());
+                     NotificationService::AllBrowserContextsAndSources());
     }
   }
 

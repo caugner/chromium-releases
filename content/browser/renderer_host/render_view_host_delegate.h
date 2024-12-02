@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/i18n/rtl.h"
 #include "base/memory/ref_counted.h"
 #include "base/process_util.h"
 #include "base/string16.h"
@@ -27,7 +28,6 @@ class BookmarkNode;
 struct ContextMenuParams;
 class GURL;
 struct NativeWebKeyboardEvent;
-class Profile;
 struct RendererPreferences;
 class RenderProcessHost;
 class RenderViewHost;
@@ -39,6 +39,11 @@ struct WebDropData;
 struct WebMenuItem;
 class WebKeyboardEvent;
 struct WebPreferences;
+struct ViewHostMsg_RunFileChooser_Params;
+
+namespace content {
+class BrowserContext;
+}
 
 namespace gfx {
 class Point;
@@ -145,9 +150,6 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
     // retrieved by doing a Shift-Tab.
     virtual void TakeFocus(bool reverse) = 0;
 
-    // The contents' preferred size changed.
-    virtual void UpdatePreferredSize(const gfx::Size& pref_size) = 0;
-
    protected:
     virtual ~View() {}
   };
@@ -235,7 +237,8 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   // The page's title was changed and should be updated.
   virtual void UpdateTitle(RenderViewHost* render_view_host,
                            int32 page_id,
-                           const std::wstring& title) {}
+                           const string16& title,
+                           base::i18n::TextDirection title_direction) {}
 
   // The page's encoding was changed and should be updated.
   virtual void UpdateEncoding(RenderViewHost* render_view_host,
@@ -295,7 +298,8 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // Return a dummy RendererPreferences object that will be used by the renderer
   // associated with the owning RenderViewHost.
-  virtual RendererPreferences GetRendererPrefs(Profile* profile) const = 0;
+  virtual RendererPreferences GetRendererPrefs(
+      content::BrowserContext* browser_context) const = 0;
 
   // Returns a WebPreferences object that will be used by the renderer
   // associated with the owning render view host.
@@ -323,8 +327,10 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   virtual void RendererResponsive(RenderViewHost* render_view_host) {}
 
   // Notification that the RenderViewHost's load state changed.
-  virtual void LoadStateChanged(const GURL& url, net::LoadState load_state,
-                                uint64 upload_position, uint64 upload_size) {}
+  virtual void LoadStateChanged(const GURL& url,
+                                const net::LoadStateWithParam& load_state,
+                                uint64 upload_position,
+                                uint64 upload_size) {}
 
   // Notification that a worker process has crashed.
   virtual void WorkerCrashed() {}
@@ -357,6 +363,17 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   virtual void HandleMouseLeave() {}
   virtual void HandleMouseUp() {}
   virtual void HandleMouseActivate() {}
+
+  // Called when a file selection is to be done.
+  virtual void RunFileChooser(
+      RenderViewHost* render_view_host,
+      const ViewHostMsg_RunFileChooser_Params& params) {}
+
+  // Notification that the page wants to go into or out of fullscreen mode.
+  virtual void ToggleFullscreenMode(bool enter_fullscreen) {}
+
+  // The contents' preferred size changed.
+  virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}
 
  protected:
   virtual ~RenderViewHostDelegate() {}

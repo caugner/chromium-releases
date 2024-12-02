@@ -57,11 +57,14 @@ class ExtensionIconSource : public ChromeURLDataManager::DataSource,
 
   // Gets the URL of the |extension| icon in the given |size|, falling back
   // based on the |match| type. If |grayscale|, the URL will be for the
-  // desaturated version of the icon.
+  // desaturated version of the icon. |exists|, if non-NULL, will be set to true
+  // if the icon exists; false if it will lead to a default or not-present
+  // image.
   static GURL GetIconURL(const Extension* extension,
                          Extension::Icons icon_size,
                          ExtensionIconSet::MatchType match,
-                         bool grayscale);
+                         bool grayscale,
+                         bool* exists);
 
   // A public utility function for accessing the bitmap of the image specified
   // by |resource_id|.
@@ -93,6 +96,12 @@ class ExtensionIconSource : public ChromeURLDataManager::DataSource,
 
   // Loads the default image for |request_id| and returns to the client.
   void LoadDefaultImage(int request_id);
+
+  // Tries loading component extension image. These usually come from resources
+  // instead of file system. Returns false if a given |icon| does not have
+  // a corresponding image in bundled resources.
+  bool TryLoadingComponentExtensionImage(const ExtensionResource& icon,
+                                         int request_id);
 
   // Loads the extension's |icon| for the given |request_id| and returns the
   // image to the client.

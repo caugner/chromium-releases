@@ -18,7 +18,6 @@
 #include "ui/gfx/canvas_skia.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
 #include "views/widget/widget.h"
 
 // ExtensionInfoBarDelegate ----------------------------------------------------
@@ -42,19 +41,13 @@ ExtensionInfoBar::ExtensionInfoBar(TabContentsWrapper* owner,
       ALLOW_THIS_IN_INITIALIZER_LIST(tracker_(this)) {
   delegate->set_observer(this);
 
-  ExtensionView* extension_view = delegate->extension_host()->view();
-  int height = extension_view->GetPreferredSize().height();
+  int height = delegate->height();
   SetBarTargetHeight((height > 0) ? (height + kSeparatorLineHeight) : 0);
-
-  // Get notified of resize events for the ExtensionView.
-  extension_view->SetContainer(this);
 }
 
 ExtensionInfoBar::~ExtensionInfoBar() {
-  if (GetDelegate()) {
-    GetDelegate()->extension_host()->view()->SetContainer(NULL);
+  if (GetDelegate())
     GetDelegate()->set_observer(NULL);
-  }
 }
 
 void ExtensionInfoBar::Layout() {
@@ -109,35 +102,6 @@ int ExtensionInfoBar::ContentMinimumWidth() const {
   return menu_->GetPreferredSize().width() + kMenuHorizontalMargin;
 }
 
-void ExtensionInfoBar::OnExtensionMouseMove(ExtensionView* view) {
-}
-
-void ExtensionInfoBar::OnExtensionMouseLeave(ExtensionView* view) {
-}
-
-void ExtensionInfoBar::OnExtensionPreferredSizeChanged(ExtensionView* view) {
-  ExtensionInfoBarDelegate* delegate = GetDelegate();
-  DCHECK_EQ(delegate->extension_host()->view(), view);
-
-  // When the infobar is closed, it animates to 0 vertical height. We'll
-  // continue to get size changed notifications from the ExtensionView, but we
-  // need to ignore them otherwise we'll try to re-animate open (and leak the
-  // infobar view).
-  if (delegate->closing())
-    return;
-
-  view->SetVisible(true);
-
-  if (height() == 0)
-    animation()->Reset(0.0);
-
-  // Clamp height to a min and a max size of between 1 and 2 InfoBars.
-  SetBarTargetHeight(std::min(2 * kDefaultBarTargetHeight,
-      std::max(kDefaultBarTargetHeight, view->GetPreferredSize().height())));
-
-  animation()->Show();
-}
-
 void ExtensionInfoBar::OnImageLoaded(SkBitmap* image,
                                      const ExtensionResource& resource,
                                      int index) {
@@ -169,7 +133,6 @@ void ExtensionInfoBar::OnImageLoaded(SkBitmap* image,
 }
 
 void ExtensionInfoBar::OnDelegateDeleted() {
-  GetDelegate()->extension_host()->view()->SetContainer(NULL);
   delegate_ = NULL;
 }
 
@@ -183,15 +146,9 @@ void ExtensionInfoBar::RunMenu(View* source, const gfx::Point& pt) {
       browser();
   scoped_refptr<ExtensionContextMenuModel> options_menu_contents =
       new ExtensionContextMenuModel(extension, browser, NULL);
-  views::MenuModelAdapter options_menu_delegate(options_menu_contents.get());
-  views::MenuItemView options_menu(&options_menu_delegate);
-  options_menu_delegate.BuildMenu(&options_menu);
-
-  gfx::Point screen_point;
-  views::View::ConvertPointToScreen(menu_, &screen_point);
-  options_menu.RunMenuAt(GetWidget()->GetNativeWindow(), menu_,
-      gfx::Rect(screen_point, menu_->size()), views::MenuItemView::TOPLEFT,
-      true);
+  DCHECK_EQ(source, menu_);
+  RunMenuAt(options_menu_contents.get(), menu_, views::MenuItemView::TOPLEFT);
+  // TODO(pkasting): this may be deleted after rewrite.
 }
 
 ExtensionInfoBarDelegate* ExtensionInfoBar::GetDelegate() {

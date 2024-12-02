@@ -7,12 +7,13 @@
 #pragma once
 
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/ui_export.h"
 
 namespace ui {
 
 // This is a cross-platform base class for accelerator keys used in menus. It is
 // meant to be subclassed for concrete toolkit implementations.
-class Accelerator {
+class UI_EXPORT Accelerator {
  public:
   Accelerator() : key_code_(ui::VKEY_UNKNOWN), modifiers_(0) {}
 

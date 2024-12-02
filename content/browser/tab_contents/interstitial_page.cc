@@ -117,7 +117,6 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
                            const gfx::Rect& selection_rect,
                            int active_match_ordinal,
                            bool final_update);
-  virtual void UpdatePreferredSize(const gfx::Size& pref_size);
 
  private:
   InterstitialPage* interstitial_page_;
@@ -255,7 +254,7 @@ void InterstitialPage::Hide() {
   // Let's revert to the original title if necessary.
   NavigationEntry* entry = tab_->controller().GetActiveEntry();
   if (!new_navigation_ && should_revert_tab_title_) {
-    entry->set_title(WideToUTF16Hack(original_tab_title_));
+    entry->set_title(original_tab_title_);
     tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TITLE);
   }
   delete this;
@@ -281,8 +280,9 @@ void InterstitialPage::Observe(int type,
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED:
       if (action_taken_ == NO_ACTION) {
         // The RenderViewHost is being destroyed (as part of the tab being
-        // closed), make sure we clear the blocked requests.
-        RenderViewHost* rvh = Source<RenderViewHost>(source).ptr();
+        // closed); make sure we clear the blocked requests.
+        RenderViewHost* rvh = static_cast<RenderViewHost*>(
+            Source<RenderWidgetHost>(source).ptr());
         DCHECK(rvh->process()->id() == original_child_id_ &&
                rvh->routing_id() == original_rvh_id_);
         TakeActionOnResourceDispatcher(CANCEL);
@@ -375,7 +375,8 @@ void InterstitialPage::DidNavigate(
 
 void InterstitialPage::UpdateTitle(RenderViewHost* render_view_host,
                                    int32 page_id,
-                                   const std::wstring& title) {
+                                   const string16& title,
+                                   base::i18n::TextDirection title_direction) {
   DCHECK(render_view_host == render_view_host_);
   NavigationEntry* entry = tab_->controller().GetActiveEntry();
   if (!entry) {
@@ -394,20 +395,23 @@ void InterstitialPage::UpdateTitle(RenderViewHost* render_view_host,
   // If this interstitial is shown on an existing navigation entry, we'll need
   // to remember its title so we can revert to it when hidden.
   if (!new_navigation_ && !should_revert_tab_title_) {
-    original_tab_title_ = UTF16ToWideHack(entry->title());
+    original_tab_title_ = entry->title();
     should_revert_tab_title_ = true;
   }
-  entry->set_title(WideToUTF16Hack(title));
+  // TODO(evan): make use of title_direction.
+  // http://code.google.com/p/chromium/issues/detail?id=27094
+  entry->set_title(title);
   tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TITLE);
 }
 
-RendererPreferences InterstitialPage::GetRendererPrefs(Profile* profile) const {
+RendererPreferences InterstitialPage::GetRendererPrefs(
+    content::BrowserContext* browser_context) const {
   return renderer_preferences_;
 }
 
 RenderViewHost* InterstitialPage::CreateRenderViewHost() {
   RenderViewHost* render_view_host = new RenderViewHost(
-      SiteInstance::CreateSiteInstance(tab()->profile()),
+      SiteInstance::CreateSiteInstance(tab()->browser_context()),
       this, MSG_ROUTING_NONE, kInvalidSessionStorageNamespaceId);
   return render_view_host;
 }
@@ -647,10 +651,6 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::UpdateDragCursor(
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::GotFocus() {
-}
-
-void InterstitialPage::InterstitialPageRVHViewDelegate::UpdatePreferredSize(
-    const gfx::Size& pref_size) {
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::TakeFocus(

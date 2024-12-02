@@ -6,14 +6,12 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/views/tabs/base_tab_strip.h"
@@ -26,6 +24,7 @@
 #include "content/common/notification_service.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/widget/widget.h"
 
 static TabRendererData::NetworkState TabContentsNetworkState(
@@ -42,19 +41,18 @@ class BrowserTabStripController::TabContextMenuContents
  public:
   TabContextMenuContents(BaseTab* tab,
                          BrowserTabStripController* controller)
-      : ALLOW_THIS_IN_INITIALIZER_LIST(
-          model_(this,
-                 controller->model_,
-                 controller->tabstrip_->GetModelIndexOfBaseTab(tab))),
-        menu_model_adapter_(&model_),
-        menu_(&menu_model_adapter_),
-        tab_(tab),
+      : tab_(tab),
         controller_(controller),
         last_command_(TabStripModel::CommandFirst) {
-    menu_model_adapter_.BuildMenu(&menu_);
+    model_.reset(new TabMenuModel(
+        this, controller->model_,
+        controller->tabstrip_->GetModelIndexOfBaseTab(tab)));
+    menu_model_adapter_.reset(new views::MenuModelAdapter(model_.get()));
+    menu_runner_.reset(
+        new views::MenuRunner(menu_model_adapter_->CreateMenu()));
   }
+
   virtual ~TabContextMenuContents() {
-    menu_.Cancel();
     if (controller_)
       controller_->tabstrip_->StopAllHighlighting();
   }
@@ -64,9 +62,11 @@ class BrowserTabStripController::TabContextMenuContents
   }
 
   void RunMenuAt(const gfx::Point& point) {
-    menu_.RunMenuAt(tab_->GetWidget()->GetNativeWindow(), NULL,
-        gfx::Rect(point, gfx::Size()), views::MenuItemView::TOPLEFT, true);
-    // We could be gone now. Assume |this| is junk!
+    if (menu_runner_->RunMenuAt(
+            tab_->GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
+            views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS) ==
+        views::MenuRunner::MENU_DELETED)
+      return;
   }
 
   // Overridden from ui::SimpleMenuModel::Delegate:
@@ -111,9 +111,9 @@ class BrowserTabStripController::TabContextMenuContents
   }
 
  private:
-  TabMenuModel model_;
-  views::MenuModelAdapter menu_model_adapter_;
-  views::MenuItemView menu_;
+  scoped_ptr<TabMenuModel> model_;
+  scoped_ptr<views::MenuModelAdapter> menu_model_adapter_;
+  scoped_ptr<views::MenuRunner> menu_runner_;
 
   // The tab we're showing a menu for.
   BaseTab* tab_;
@@ -319,16 +319,6 @@ void BrowserTabStripController::ClickActiveTab(int index) {
   model_->ActiveTabClicked(index);
 }
 
-bool BrowserTabStripController::SizeTabButtonToTopOfTabStrip() {
-  if (browser_defaults::kSizeTabButtonToTopOfTabStrip)
-    return true;
-
-  if (browser_ && browser_->window())
-    return browser_->window()->IsMaximized();
-
-  return false;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, TabStripModelObserver implementation:
 
@@ -451,7 +441,7 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
   data->url = contents->GetURL();
   data->loading = contents->IsLoading();
   data->crashed_status = contents->crashed_status();
-  data->incognito = contents->profile()->IsOffTheRecord();
+  data->incognito = contents->browser_context()->IsOffTheRecord();
   data->show_icon = wrapper->favicon_tab_helper()->ShouldDisplayFavicon();
   data->mini = model_->IsMiniTab(model_index);
   data->blocked = model_->IsTabBlocked(model_index);

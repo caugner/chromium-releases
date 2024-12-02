@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_touch.h"
 
+#include <X11/extensions/XInput2.h>
+#undef Status
+
 #include "base/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_views.h"
@@ -31,11 +34,6 @@ using WebKit::WebInputEvent;
 // static
 const char TabContentsViewTouch::kViewClassName[] =
     "browser/ui/views/tab_contents/TabContentsViewTouch";
-
-// static
-TabContentsView* TabContentsView::Create(TabContents* tab_contents) {
-  return new TabContentsViewTouch(tab_contents);
-}
 
 TabContentsViewTouch::TabContentsViewTouch(TabContents* tab_contents)
     : tab_contents_(tab_contents),
@@ -187,8 +185,7 @@ void TabContentsViewTouch::StoreFocus() {
   if (view_storage->RetrieveView(last_focused_view_storage_id_) != NULL)
     view_storage->RemoveView(last_focused_view_storage_id_);
 
-  views::FocusManager* focus_manager =
-      views::FocusManager::GetFocusManagerForNativeView(GetNativeView());
+  views::FocusManager* focus_manager = GetFocusManager();
   if (focus_manager) {
     // |focus_manager| can be NULL if the tab has been detached but still
     // exists.
@@ -205,8 +202,7 @@ void TabContentsViewTouch::RestoreFocus() {
   if (!last_focused_view) {
     SetInitialFocus();
   } else {
-    views::FocusManager* focus_manager =
-        views::FocusManager::GetFocusManagerForNativeView(GetNativeView());
+    views::FocusManager* focus_manager = GetFocusManager();
 
     // If you hit this DCHECK, please report it to Jay (jcampan).
     DCHECK(focus_manager != NULL) << "No focus manager when restoring focus.";
@@ -226,9 +222,6 @@ void TabContentsViewTouch::RestoreFocus() {
   }
 }
 
-void TabContentsViewTouch::UpdatePreferredSize(const gfx::Size& pref_size) {
-}
-
 bool TabContentsViewTouch::IsDoingDrag() const {
   return false;
 }
@@ -245,6 +238,47 @@ void TabContentsViewTouch::CloseTabAfterEventTracking() {
 
 void TabContentsViewTouch::GetViewBounds(gfx::Rect* out) const {
   out->SetRect(x(), y(), width(), height());
+}
+
+bool TabContentsViewTouch::OnMousePressed(const views::MouseEvent& event) {
+  if ((event.flags() & (ui::EF_LEFT_BUTTON_DOWN |
+                        ui::EF_RIGHT_BUTTON_DOWN |
+                        ui::EF_MIDDLE_BUTTON_DOWN))) {
+    return false;
+  }
+
+  // It is necessary to look at the native event to determine what special
+  // button was pressed.
+  views::NativeEvent2 native_event = event.native_event_2();
+  if (!native_event)
+    return false;
+
+  int button = 0;
+  switch (native_event->type) {
+    case ButtonPress: {
+      button = native_event->xbutton.button;
+      break;
+    }
+    case GenericEvent: {
+      XIDeviceEvent* xievent =
+          static_cast<XIDeviceEvent*>(native_event->xcookie.data);
+      button = xievent->detail;
+      break;
+    }
+    default:
+      break;
+  }
+
+  switch (button) {
+    case 8:
+      tab_contents_->controller().GoBack();
+      return true;
+    case 9:
+      tab_contents_->controller().GoForward();
+      return true;
+  }
+
+  return false;
 }
 
 void TabContentsViewTouch::OnBoundsChanged(const gfx::Rect& previous_bounds) {
@@ -274,8 +308,7 @@ void TabContentsViewTouch::TakeFocus(bool reverse) {
   if (tab_contents_->delegate() &&
       !tab_contents_->delegate()->TakeFocus(reverse)) {
 
-    views::FocusManager* focus_manager =
-        views::FocusManager::GetFocusManagerForNativeView(GetNativeView());
+    views::FocusManager* focus_manager = GetFocusManager();
 
     // We may not have a focus manager if the tab has been switched before this
     // message arrived.

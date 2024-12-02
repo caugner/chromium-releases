@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,8 +43,6 @@ bool IndexedDBDispatcher::OnMessageReceived(const IPC::Message& msg) {
                         OnSuccessOpenCursor)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIDBDatabase,
                         OnSuccessIDBDatabase)
-    IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIDBIndex,
-                        OnSuccessIDBIndex)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIndexedDBKey,
                         OnSuccessIndexedDBKey)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIDBTransaction,
@@ -55,7 +53,6 @@ bool IndexedDBDispatcher::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksBlocked, OnBlocked)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksAbort, OnAbort)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksComplete, OnComplete)
-    IPC_MESSAGE_HANDLER(IndexedDBMsg_TransactionCallbacksTimeout, OnTimeout)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_DatabaseCallbacksVersionChange,
                         OnVersionChange)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -108,8 +105,7 @@ void IndexedDBDispatcher::RequestIDBFactoryOpen(
     const string16& name,
     WebIDBCallbacks* callbacks_ptr,
     const string16& origin,
-    WebFrame* web_frame,
-    uint64 maximum_size) {
+    WebFrame* web_frame) {
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   if (!web_frame)
@@ -123,7 +119,6 @@ void IndexedDBDispatcher::RequestIDBFactoryOpen(
   params.response_id = pending_callbacks_.Add(callbacks.release());
   params.origin = origin;
   params.name = name;
-  params.maximum_size = maximum_size;
   RenderThread::current()->Send(new IndexedDBHostMsg_FactoryOpen(params));
 }
 
@@ -389,13 +384,6 @@ void IndexedDBDispatcher::OnSuccessIDBTransaction(int32 response_id,
   pending_callbacks_.Remove(response_id);
 }
 
-void IndexedDBDispatcher::OnSuccessIDBIndex(int32 response_id,
-                                            int32 object_id) {
-  WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
-  callbacks->onSuccess(new RendererWebIDBIndexImpl(object_id));
-  pending_callbacks_.Remove(response_id);
-}
-
 void IndexedDBDispatcher::OnSuccessSerializedScriptValue(
     int32 response_id, const SerializedScriptValue& value) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
@@ -434,13 +422,6 @@ void IndexedDBDispatcher::OnComplete(int32 transaction_id) {
   WebIDBTransactionCallbacks* callbacks =
       pending_transaction_callbacks_.Lookup(transaction_id);
   callbacks->onComplete();
-  pending_transaction_callbacks_.Remove(transaction_id);
-}
-
-void IndexedDBDispatcher::OnTimeout(int32 transaction_id) {
-  WebIDBTransactionCallbacks* callbacks =
-      pending_transaction_callbacks_.Lookup(transaction_id);
-  callbacks->onTimeout();
   pending_transaction_callbacks_.Remove(transaction_id);
 }
 

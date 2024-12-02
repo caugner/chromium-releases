@@ -10,19 +10,21 @@
 #include "chrome/browser/extensions/extension_app_api.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
+#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "content/browser/cancelable_request.h"
 #include "content/browser/webui/web_ui.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
 class ExtensionPrefs;
 class ExtensionService;
-class NotificationRegistrar;
 class PrefChangeRegistrar;
 class PrefsService;
 class Profile;
+struct WebApplicationInfo;
 
 namespace gfx {
 class Rect;
@@ -37,23 +39,28 @@ class AppLauncherHandler : public WebUIMessageHandler,
   explicit AppLauncherHandler(ExtensionService* extension_service);
   virtual ~AppLauncherHandler();
 
+  // Whether the app should be excluded from the "apps" list because
+  // it is special (such as the Web Store app).
+  static bool IsAppExcludedFromList(const Extension* extension);
+
   // Populate a dictionary with the information from an extension.
-  static void CreateAppInfo(const Extension* extension,
-                            const AppNotification* notification,
-                            ExtensionService* service,
-                            base::DictionaryValue* value);
+  static void CreateAppInfo(
+      const Extension* extension,
+      const AppNotification* notification,
+      ExtensionService* service,
+      base::DictionaryValue* value);
 
   // Callback for pings related to launching apps on the NTP.
   static bool HandlePing(Profile* profile, const std::string& path);
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui);
-  virtual void RegisterMessages();
+  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
+  virtual void RegisterMessages() OVERRIDE;
 
   // NotificationObserver
   virtual void Observe(int type,
-                      const NotificationSource& source,
-                      const NotificationDetails& details);
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
 
   // Populate the given dictionary with all installed app info.
   void FillAppDictionary(base::DictionaryValue* value);
@@ -96,10 +103,25 @@ class AppLauncherHandler : public WebUIMessageHandler,
   // Callback for the "saveAppPageName" message.
   void HandleSaveAppPageName(const base::ListValue* args);
 
+  // Callback for the "generateAppForLink" message.
+  void HandleGenerateAppForLink(const base::ListValue* args);
+
+  // Callback for the "recordAppLaunchByURL" message. Takes an escaped URL and a
+  // launch source (integer), and if the URL represents an app, records the
+  // action for UMA.
+  void HandleRecordAppLaunchByURL(const base::ListValue* args);
+
   // Register app launcher preferences.
   static void RegisterUserPrefs(PrefService* pref_service);
 
  private:
+  struct AppInstallInfo {
+    bool is_bookmark_app;
+    string16 title;
+    GURL app_url;
+    int page_index;
+  };
+
   // Records a web store launch in the appropriate histograms. |promo_active|
   // specifies if the web store promotion was active.
   static void RecordWebStoreLaunch(bool promo_active);
@@ -119,12 +141,12 @@ class AppLauncherHandler : public WebUIMessageHandler,
   void PromptToEnableApp(const std::string& extension_id);
 
   // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionDialogAccepted();
-  virtual void ExtensionDialogCanceled();
+  virtual void ExtensionDialogAccepted() OVERRIDE;
+  virtual void ExtensionDialogCanceled() OVERRIDE;
 
   // ExtensionInstallUI::Delegate:
-  virtual void InstallUIProceed();
-  virtual void InstallUIAbort(bool user_initiated);
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.
@@ -137,9 +159,16 @@ class AppLauncherHandler : public WebUIMessageHandler,
   // Helper that uninstalls all the default apps.
   void UninstallDefaultApps();
 
+  // Continuation for installing a bookmark app after favicon lookup.
+  void OnFaviconForApp(FaviconService::Handle handle,
+                       history::FaviconData data);
+
+  // Sends |highlight_app_id_| to the js.
+  void SetAppToBeHighlighted();
+
   // The apps are represented in the extensions model, which
-  // outlives us since its owned by our containing profile.
-  ExtensionService* const extensions_service_;
+  // outlives us since it's owned by our containing profile.
+  ExtensionService* const extension_service_;
 
   // We monitor changes to the extension system so that we can reload the apps
   // when necessary.
@@ -163,6 +192,21 @@ class AppLauncherHandler : public WebUIMessageHandler,
   // When true, we ignore changes to the underlying data rather than immediately
   // refreshing. This is useful when making many batch updates to avoid flicker.
   bool ignore_changes_;
+
+  // When true, we have attempted to install a bookmark app, and are still
+  // waiting to hear about success or failure from the extensions system.
+  bool attempted_bookmark_app_install_;
+
+  // True if we have executed HandleGetApps() at least once.
+  bool has_loaded_apps_;
+
+  // The ID of the app to be highlighted on the NTP (i.e. shown on the page
+  // and pulsed). This is done for new installs. The actual higlighting occurs
+  // when the app is added to the page (via getAppsCallback or appAdded).
+  std::string highlight_app_id_;
+
+  // Hold state for favicon requests.
+  CancelableRequestConsumerTSimple<AppInstallInfo*> favicon_consumer_;
 
   DISALLOW_COPY_AND_ASSIGN(AppLauncherHandler);
 };

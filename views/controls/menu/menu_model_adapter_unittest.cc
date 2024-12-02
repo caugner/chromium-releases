@@ -7,6 +7,7 @@
 #include "ui/base/models/menu_model_delegate.h"
 #include "views/controls/menu/menu_item_view.h"
 #include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/menu/submenu_view.h"
 #include "views/test/views_test_base.h"
 
@@ -104,7 +105,7 @@ class MenuModelBase : public ui::MenuModel {
     set_last_activation(index);
   }
 
-  virtual void ActivatedAtWithDisposition(int index, int disposition) OVERRIDE {
+  virtual void ActivatedAt(int index, int event_flags) OVERRIDE {
     ActivatedAt(index);
   }
 
@@ -137,7 +138,7 @@ class MenuModelBase : public ui::MenuModel {
     return items_[index];
   }
 
-  // Access index argument to ActivatedAt() or ActivatedAtWithDisposition().
+  // Access index argument to ActivatedAt().
   int last_activation() const { return last_activation_; }
   void set_last_activation(int last_activation) {
     last_activation_ = last_activation;
@@ -200,9 +201,11 @@ TEST_F(MenuModelAdapterTest, BasicTest) {
   views::MenuModelAdapter delegate(&model);
 
   // Create menu.  Build menu twice to check that rebuilding works properly.
-  scoped_ptr<views::MenuItemView> menu(new views::MenuItemView(&delegate));
-  delegate.BuildMenu(menu.get());
-  delegate.BuildMenu(menu.get());
+  MenuItemView* menu = new views::MenuItemView(&delegate);
+  // MenuRunner takes ownership of menu.
+  scoped_ptr<MenuRunner> menu_runner(new MenuRunner(menu));
+  delegate.BuildMenu(menu);
+  delegate.BuildMenu(menu);
   EXPECT_TRUE(menu->HasSubmenu());
 
   // Check top level menu items.
@@ -297,7 +300,7 @@ TEST_F(MenuModelAdapterTest, BasicTest) {
   // Check that selecting the root item is safe.  The MenuModel does
   // not care about the root so MenuModelAdapter should do nothing
   // (not hit the NOTREACHED check) when the root is selected.
-  static_cast<views::MenuDelegate*>(&delegate)->SelectionChanged(menu.get());
+  static_cast<views::MenuDelegate*>(&delegate)->SelectionChanged(menu);
 }
 
 }  // namespace views

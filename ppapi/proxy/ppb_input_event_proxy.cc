@@ -6,53 +6,17 @@
 
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/input_event_impl.h"
+#include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/thunk.h"
 
-using ppapi::InputEventData;
-using ppapi::InputEventImpl;
 using ppapi::thunk::PPB_InputEvent_API;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
-
-// The implementation is actually in InputEventImpl.
-class InputEvent : public PluginResource, public InputEventImpl {
- public:
-  InputEvent(const HostResource& resource, const InputEventData& data);
-  virtual ~InputEvent();
-
-  // ResourceObjectBase overrides.
-  virtual PPB_InputEvent_API* AsPPB_InputEvent_API() OVERRIDE;
-
-  // InputEventImpl overrides.
-  virtual PP_Var StringToPPVar(const std::string& str) OVERRIDE;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InputEvent);
-};
-
-InputEvent::InputEvent(const HostResource& resource, const InputEventData& data)
-    : PluginResource(resource),
-      InputEventImpl(data) {
-}
-
-InputEvent::~InputEvent() {
-}
-
-PPB_InputEvent_API* InputEvent::AsPPB_InputEvent_API() {
-  return this;
-}
-
-PP_Var InputEvent::StringToPPVar(const std::string& str) {
-  PP_Var ret;
-  ret.type = PP_VARTYPE_STRING;
-  ret.value.as_id = PluginVarTracker::GetInstance()->MakeString(str);
-  return ret;
-}
 
 namespace {
 
@@ -74,7 +38,7 @@ PPB_InputEvent_Proxy::~PPB_InputEvent_Proxy() {
 // static
 const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetInputEventInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_InputEvent_Thunk(),
+    thunk::GetPPB_InputEvent_Thunk(),
     PPB_INPUT_EVENT_INTERFACE,
     INTERFACE_ID_NONE,
     false,
@@ -86,7 +50,7 @@ const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetInputEventInfo() {
 // static
 const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetKeyboardInputEventInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_KeyboardInputEvent_Thunk(),
+    thunk::GetPPB_KeyboardInputEvent_Thunk(),
     PPB_KEYBOARD_INPUT_EVENT_INTERFACE,
     INTERFACE_ID_NONE,
     false,
@@ -96,10 +60,22 @@ const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetKeyboardInputEventInfo() {
 }
 
 // static
-const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetMouseInputEventInfo() {
+const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetMouseInputEventInfo1_0() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_MouseInputEvent_Thunk(),
-    PPB_MOUSE_INPUT_EVENT_INTERFACE,
+    thunk::GetPPB_MouseInputEvent_1_0_Thunk(),
+    PPB_MOUSE_INPUT_EVENT_INTERFACE_1_0,
+    INTERFACE_ID_NONE,
+    false,
+    &CreateInputEventProxy,
+  };
+  return &info;
+}
+
+// static
+const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetMouseInputEventInfo1_1() {
+  static const Info info = {
+    thunk::GetPPB_MouseInputEvent_1_1_Thunk(),
+    PPB_MOUSE_INPUT_EVENT_INTERFACE_1_1,
     INTERFACE_ID_NONE,
     false,
     &CreateInputEventProxy,
@@ -110,22 +86,13 @@ const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetMouseInputEventInfo() {
 // static
 const InterfaceProxy::Info* PPB_InputEvent_Proxy::GetWheelInputEventInfo() {
   static const Info info = {
-    ::ppapi::thunk::GetPPB_WheelInputEvent_Thunk(),
+    thunk::GetPPB_WheelInputEvent_Thunk(),
     PPB_WHEEL_INPUT_EVENT_INTERFACE,
     INTERFACE_ID_NONE,
     false,
     &CreateInputEventProxy,
   };
   return &info;
-}
-
-// static
-PP_Resource PPB_InputEvent_Proxy::CreateProxyResource(
-    PP_Instance instance,
-    const InputEventData& data) {
-  linked_ptr<InputEvent> object(new InputEvent(
-      HostResource::MakeInstanceOnly(instance), data));
-  return PluginResourceTracker::GetInstance()->AddResource(object);
 }
 
 bool PPB_InputEvent_Proxy::OnMessageReceived(const IPC::Message& msg) {
@@ -135,4 +102,4 @@ bool PPB_InputEvent_Proxy::OnMessageReceived(const IPC::Message& msg) {
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

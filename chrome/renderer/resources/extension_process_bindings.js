@@ -18,26 +18,12 @@ var chrome = chrome || {};
   native function OpenChannelToTab();
   native function GetRenderViewId();
   native function SetIconCommon();
-  native function IsExtensionProcess();
-  native function IsIncognitoProcess();
   native function GetUniqueSubEventName(eventName);
   native function GetLocalFileSystem(name, path);
   native function DecodeJPEG(jpeg_image);
+  native function Print();
 
   var chromeHidden = GetChromeHidden();
-
-  // These bindings are for the extension process only. Since a chrome-extension
-  // URL can be loaded in an iframe of a regular renderer, we check here to
-  // ensure we don't expose the APIs in that case.
-  if (!IsExtensionProcess()) {
-    chromeHidden.onLoad.addListener(function (extensionId) {
-      if (!extensionId) {
-        return;
-      }
-      chrome.initExtension(extensionId, false);
-    });
-    return;
-  }
 
   if (!chrome)
     chrome = {};
@@ -77,8 +63,6 @@ var chrome = chrome || {};
 
         throw new Error(message);
       } else if (!schemas[i].optional) {
-        console.log(chromeHidden.JSON.stringify(args));
-        console.log(chromeHidden.JSON.stringify(schemas));
         throw new Error("Parameter " + (i + 1) + " is required.");
       }
     }
@@ -272,6 +256,16 @@ var chrome = chrome || {};
     this.extraArgSchemas_ = opt_extraArgSchemas;
     this.subEvents_ = [];
     this.callbackMap_ = {};
+  };
+
+  // Test if the given callback is registered for this event.
+  chrome.WebRequestEvent.prototype.hasListener = function(cb) {
+    return this.findListener_(cb) > -1;
+  };
+
+  // Test if any callbacks are registered fur thus event.
+  chrome.WebRequestEvent.prototype.hasListeners = function(cb) {
+    return this.subEvents_.length > 0;
   };
 
   // Registers a callback to be called when this event is dispatched. If
@@ -581,11 +575,10 @@ var chrome = chrome || {};
     return "unknown";
   }
 
-  chromeHidden.onLoad.addListener(function (extensionId) {
-    if (!extensionId) {
+  chromeHidden.onLoad.addListener(function(extensionId, isExtensionProcess,
+                                           isIncognitoProcess) {
+    if (!isExtensionProcess)
       return;
-    }
-    chrome.initExtension(extensionId, false, IsIncognitoProcess());
 
     // Setup the ChromeSetting class so we can use it to construct
     // ChromeSetting objects from the API definition.
@@ -1043,4 +1036,7 @@ var chrome = chrome || {};
 
   if (!chrome.ttsEngine)
     chrome.ttsEngine = {};
+
+  if (!chrome.experimental.downloads)
+    chrome.experimental.downloads = {};
 })();

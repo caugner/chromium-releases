@@ -11,11 +11,26 @@
 #include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/sync/engine/syncapi.h"
+#include "chrome/browser/sync/api/sync_error.h"
+#include "chrome/browser/sync/internal_api/read_node.h"
+#include "chrome/browser/sync/internal_api/read_transaction.h"
+#include "chrome/browser/sync/internal_api/write_node.h"
+#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
 
 namespace browser_sync {
+
+// The server backend can't handle arbitrarily large node sizes, so to keep
+// the size under control we limit the visit array.
+static const int kMaxTypedUrlVisits = 100;
+
+// There's no limit on how many visits the history DB could have for a given
+// typed URL, so we limit how many we fetch from the DB to avoid crashes due to
+// running out of memory (http://crbug.com/89793). This value is different
+// from kMaxTypedUrlVisits, as some of the visits fetched from the DB may be
+// RELOAD visits, which will be stripped.
+static const int kMaxVisitsToFetch = 1000;
 
 const char kTypedUrlTag[] = "google_chrome_typed_urls";
 
@@ -23,10 +38,17 @@ static bool CheckVisitOrdering(const history::VisitVector& visits) {
   int64 previous_visit_time = 0;
   for (history::VisitVector::const_iterator visit = visits.begin();
        visit != visits.end(); ++visit) {
-    if (visit != visits.begin() &&
-        previous_visit_time >= visit->visit_time.ToInternalValue()) {
-      return false;
+    if (visit != visits.begin()) {
+      // We allow duplicate visits here - they shouldn't really be allowed, but
+      // they still seem to show up sometimes and we haven't figured out the
+      // source, so we just log an error instead of failing an assertion.
+      // (http://crbug.com/91473).
+      if (previous_visit_time == visit->visit_time.ToInternalValue())
+        LOG(ERROR) << "Duplicate visit time encountered";
+      else if (previous_visit_time > visit->visit_time.ToInternalValue())
+        return false;
     }
+
     previous_visit_time = visit->visit_time.ToInternalValue();
   }
   return true;
@@ -46,13 +68,47 @@ TypedUrlModelAssociator::TypedUrlModelAssociator(
 
 TypedUrlModelAssociator::~TypedUrlModelAssociator() {}
 
-bool TypedUrlModelAssociator::AssociateModels() {
+
+// static
+bool TypedUrlModelAssociator::GetVisitsForURL(history::HistoryBackend* backend,
+                                              const history::URLRow& url,
+                                              history::VisitVector* visits) {
+  if (!backend->GetMostRecentVisitsForURL(url.id(), kMaxVisitsToFetch, visits))
+    return false;
+
+  // Sometimes (due to a bug elsewhere in the history or sync code, or due to
+  // a crash between adding a URL to the history database and updating the
+  // visit DB) the visit vector for a URL can be empty. If this happens, just
+  // create a new visit whose timestamp is the same as the last_visit time.
+  // This is a workaround for http://crbug.com/84258.
+  if (visits->empty()) {
+    history::VisitRow visit(
+        url.id(), url.last_visit(), 0, PageTransition::TYPED, 0);
+    visits->push_back(visit);
+  }
+
+  // GetMostRecentVisitsForURL() returns the data in the opposite order that
+  // we need it, so reverse it.
+  std::reverse(visits->begin(), visits->end());
+
+  // Checking DB consistency to try to track down http://crbug.com/94733 - if
+  // we start hitting this DCHECK, we can try to fixup the data by adding our
+  // own mock visit as we do for empty visit vectors.
+  DCHECK_EQ(url.last_visit().ToInternalValue(),
+            visits->back().visit_time.ToInternalValue());
+  DCHECK(CheckVisitOrdering(*visits));
+  return true;
+}
+
+bool TypedUrlModelAssociator::AssociateModels(SyncError* error) {
   VLOG(1) << "Associating TypedUrl Models";
   DCHECK(expected_loop_ == MessageLoop::current());
 
   std::vector<history::URLRow> typed_urls;
   if (!history_backend_->GetAllTypedURLs(&typed_urls)) {
-    LOG(ERROR) << "Could not get the typed_url entries.";
+    error->Reset(FROM_HERE,
+                "Could not get the typed_url entries.",
+                model_type());
     return false;
   }
 
@@ -60,22 +116,10 @@ bool TypedUrlModelAssociator::AssociateModels() {
   std::map<history::URLID, history::VisitVector> visit_vectors;
   for (std::vector<history::URLRow>::iterator ix = typed_urls.begin();
        ix != typed_urls.end(); ++ix) {
-    if (!history_backend_->GetVisitsForURL(ix->id(),
-                                           &(visit_vectors[ix->id()]))) {
-      LOG(ERROR) << "Could not get the url's visits.";
+    if (!GetVisitsForURL(history_backend_, *ix, &(visit_vectors[ix->id()]))) {
+      error->Reset(FROM_HERE, "Could not get the url's visits.", model_type());
       return false;
     }
-    // Sometimes (due to a bug elsewhere in the history or sync code, or due to
-    // a crash between adding a URL to the history database and updating the
-    // visit DB) the visit vector for a URL can be empty. If this happens, just
-    // create a new visit whose timestamp is the same as the last_visit time.
-    // This is a workaround for http://crbug.com/84258.
-    if (visit_vectors[ix->id()].empty()) {
-      history::VisitRow visit(
-          ix->id(), ix->last_visit(), 0, PageTransition::TYPED, 0);
-      visit_vectors[ix->id()].push_back(visit);
-    }
-    DCHECK(CheckVisitOrdering(visit_vectors[ix->id()]));
   }
 
   TypedUrlTitleVector titles;
@@ -87,8 +131,10 @@ bool TypedUrlModelAssociator::AssociateModels() {
     sync_api::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     sync_api::ReadNode typed_url_root(&trans);
     if (!typed_url_root.InitByTagLookup(kTypedUrlTag)) {
-      LOG(ERROR) << "Server did not create the top-level typed_url node. We "
-                 << "might be running against an out-of-date server.";
+      error->Reset(FROM_HERE,
+                  "Server did not create the top-level typed_url node. We "
+                  "might be running against an out-of-date server.",
+                  model_type());
       return false;
     }
 
@@ -115,12 +161,14 @@ bool TypedUrlModelAssociator::AssociateModels() {
         history::URLRow new_url(*ix);
 
         std::vector<history::VisitInfo> added_visits;
-        int difference = MergeUrls(typed_url, *ix, &visits, &new_url,
-                                   &added_visits);
+        MergeResult difference =
+            MergeUrls(typed_url, *ix, &visits, &new_url, &added_visits);
         if (difference & DIFF_UPDATE_NODE) {
           sync_api::WriteNode write_node(&trans);
           if (!write_node.InitByClientTagLookup(syncable::TYPED_URLS, tag)) {
-            LOG(ERROR) << "Failed to edit typed_url sync node.";
+            error->Reset(FROM_HERE,
+                         "Failed to edit typed_url sync node.",
+                         model_type());
             return false;
           }
           // We don't want to resurrect old visits that have been aged out by
@@ -137,6 +185,8 @@ bool TypedUrlModelAssociator::AssociateModels() {
             // visit vector contains all the items in typed_url.visits.
             DCHECK(visits.size() > 0);
           }
+          DCHECK_EQ(new_url.last_visit().ToInternalValue(),
+                    visits.back().visit_time.ToInternalValue());
           WriteToSyncNode(new_url, visits, &write_node);
         }
         if (difference & DIFF_LOCAL_TITLE_CHANGED) {
@@ -159,7 +209,9 @@ bool TypedUrlModelAssociator::AssociateModels() {
         sync_api::WriteNode node(&trans);
         if (!node.InitUniqueByCreation(syncable::TYPED_URLS,
                                        typed_url_root, tag)) {
-          LOG(ERROR) << "Failed to create typed_url sync node.";
+          error->Reset(FROM_HERE,
+                       "Failed to create typed_url sync node.",
+                       model_type());
           return false;
         }
 
@@ -179,7 +231,7 @@ bool TypedUrlModelAssociator::AssociateModels() {
     while (sync_child_id != sync_api::kInvalidId) {
       sync_api::ReadNode sync_child_node(&trans);
       if (!sync_child_node.InitByIdLookup(sync_child_id)) {
-        LOG(ERROR) << "Failed to fetch child node.";
+        error->Reset(FROM_HERE, "Failed to fetch child node.", model_type());
         return false;
       }
       const sync_pb::TypedUrlSpecifics& typed_url(
@@ -188,8 +240,14 @@ bool TypedUrlModelAssociator::AssociateModels() {
       sync_child_id = sync_child_node.GetSuccessorId();
 
       // Ignore old sync nodes that don't have any transition data stored with
-      // them (will be deleted below).
-      if (typed_url.visit_transitions_size() == 0) {
+      // them, or transition data that does not match the visit data (will be
+      // deleted below).
+      if (typed_url.visit_transitions_size() == 0 ||
+          typed_url.visit_transitions_size() != typed_url.visits_size()) {
+        // Generate a debug assertion to help track down http://crbug.com/91473,
+        // even though we gracefully handle this case by throwing away this
+        // node.
+        DCHECK_EQ(typed_url.visits_size(), typed_url.visit_transitions_size());
         VLOG(1) << "Deleting obsolete sync node with no visit transition info.";
         obsolete_nodes.push_back(sync_child_node.GetId());
         continue;
@@ -206,7 +264,13 @@ bool TypedUrlModelAssociator::AssociateModels() {
             typed_url, &new_url);
 
         for (int c = 0; c < typed_url.visits_size(); ++c) {
-          DCHECK(c == 0 || typed_url.visits(c) > typed_url.visits(c - 1));
+          // Allow duplicate visits - they aren't technically legal, but they
+          // still show up in the data sometimes and we can't figure out the
+          // source (http://crbug.com/91473).
+          DLOG_IF(ERROR, (c > 0 &&
+                          typed_url.visits(c) == typed_url.visits(c - 1)))
+              << "Duplicate visit for url: " << typed_url.url();
+          DCHECK(c == 0 || typed_url.visits(c) >= typed_url.visits(c - 1));
           DCHECK_LE(typed_url.visit_transitions(c) & PageTransition::CORE_MASK,
                     PageTransition::LAST_CORE);
           visits.push_back(history::VisitInfo(
@@ -228,7 +292,9 @@ bool TypedUrlModelAssociator::AssociateModels() {
            ++it) {
         sync_api::WriteNode sync_node(&trans);
         if (!sync_node.InitByIdLookup(*it)) {
-          LOG(ERROR) << "Failed to fetch obsolete node.";
+          error->Reset(FROM_HERE,
+                      "Failed to fetch obsolete node.",
+                      model_type());
           return false;
         }
         sync_node.Remove();
@@ -241,8 +307,14 @@ bool TypedUrlModelAssociator::AssociateModels() {
   // this is the only thread that writes to the database.  We also don't have
   // to worry about the sync model getting out of sync, because changes are
   // propagated to the ChangeProcessor on this thread.
-  return WriteToHistoryBackend(&titles, &new_urls, &updated_urls,
-                               &new_visits, NULL);
+  if (!WriteToHistoryBackend(&titles, &new_urls, &updated_urls,
+                             &new_visits, NULL)) {
+    error->Reset(FROM_HERE,
+                 "Failed to write to history backend",
+                 model_type());
+    return false;
+  }
+  return true;
 }
 
 bool TypedUrlModelAssociator::DeleteAllNodes(
@@ -266,7 +338,7 @@ bool TypedUrlModelAssociator::DeleteAllNodes(
   return true;
 }
 
-bool TypedUrlModelAssociator::DisassociateModels() {
+bool TypedUrlModelAssociator::DisassociateModels(SyncError* error) {
   id_map_.clear();
   id_map_inverse_.clear();
   return true;
@@ -409,7 +481,7 @@ bool TypedUrlModelAssociator::WriteToHistoryBackend(
 }
 
 // static
-int TypedUrlModelAssociator::MergeUrls(
+TypedUrlModelAssociator::MergeResult TypedUrlModelAssociator::MergeUrls(
     const sync_pb::TypedUrlSpecifics& node,
     const history::URLRow& url,
     history::VisitVector* visits,
@@ -419,7 +491,7 @@ int TypedUrlModelAssociator::MergeUrls(
   DCHECK(!node.url().compare(url.url().spec()));
   DCHECK(!node.url().compare(new_url->url().spec()));
   DCHECK(visits->size());
-  DCHECK_EQ(node.visits_size(), node.visit_transitions_size());
+  CHECK_EQ(node.visits_size(), node.visit_transitions_size());
 
   // If we have an old-format node (before we added the visits and
   // visit_transitions arrays to the protobuf), just overwrite
@@ -434,7 +506,7 @@ int TypedUrlModelAssociator::MergeUrls(
 
   // This is a bitfield representing what we'll need to update with the output
   // value.
-  int different = DIFF_NONE;
+  MergeResult different = DIFF_NONE;
 
   // Check if the non-incremented values changed.
   if ((node_title.compare(url.title()) != 0) ||
@@ -526,23 +598,97 @@ void TypedUrlModelAssociator::WriteToSyncNode(
     const history::URLRow& url,
     const history::VisitVector& visits,
     sync_api::WriteNode* node) {
+  sync_pb::TypedUrlSpecifics typed_url;
+  WriteToTypedUrlSpecifics(url, visits, &typed_url);
+  node->SetTypedUrlSpecifics(typed_url);
+}
+
+void TypedUrlModelAssociator::WriteToTypedUrlSpecifics(
+    const history::URLRow& url,
+    const history::VisitVector& visits,
+    sync_pb::TypedUrlSpecifics* typed_url) {
+
   DCHECK(!url.last_visit().is_null());
   DCHECK(!visits.empty());
-  DCHECK(url.last_visit() == visits.back().visit_time);
+  DCHECK_EQ(url.last_visit().ToInternalValue(),
+            visits.back().visit_time.ToInternalValue());
 
-  sync_pb::TypedUrlSpecifics typed_url;
-  typed_url.set_url(url.url().spec());
-  typed_url.set_title(UTF16ToUTF8(url.title()));
-  typed_url.set_hidden(url.hidden());
+  typed_url->set_url(url.url().spec());
+  typed_url->set_title(UTF16ToUTF8(url.title()));
+  typed_url->set_hidden(url.hidden());
 
   DCHECK(CheckVisitOrdering(visits));
-  for (history::VisitVector::const_iterator visit = visits.begin();
-       visit != visits.end(); ++visit) {
-    typed_url.add_visits(visit->visit_time.ToInternalValue());
-    typed_url.add_visit_transitions(visit->transition);
+
+  bool only_typed = false;
+  int skip_count = 0;
+
+  if (visits.size() > static_cast<size_t>(kMaxTypedUrlVisits)) {
+    int typed_count = 0;
+    int total = 0;
+    // Walk the passed-in visit vector and count the # of typed visits.
+    for (history::VisitVector::const_iterator visit = visits.begin();
+         visit != visits.end(); ++visit) {
+      PageTransition::Type transition = static_cast<PageTransition::Type>(
+          visit->transition) & PageTransition::CORE_MASK;
+      // We ignore reload visits.
+      if (transition == PageTransition::RELOAD)
+        continue;
+      ++total;
+      if (transition == PageTransition::TYPED)
+        ++typed_count;
+    }
+    // We should have at least one typed visit. This can sometimes happen if
+    // the history DB has an inaccurate count for some reason (there's been
+    // bugs in the history code in the past which has left users in the wild
+    // with incorrect counts - http://crbug.com/84258).
+    DCHECK(typed_count > 0);
+
+    if (typed_count > kMaxTypedUrlVisits) {
+      only_typed = true;
+      skip_count = typed_count - kMaxTypedUrlVisits;
+    } else if (total > kMaxTypedUrlVisits) {
+      skip_count = total - kMaxTypedUrlVisits;
+    }
   }
 
-  node->SetTypedUrlSpecifics(typed_url);
+
+  for (history::VisitVector::const_iterator visit = visits.begin();
+       visit != visits.end(); ++visit) {
+    PageTransition::Type transition = static_cast<PageTransition::Type>(
+        visit->transition) & PageTransition::CORE_MASK;
+    // Skip reload visits.
+    if (transition == PageTransition::RELOAD)
+      continue;
+
+    // If we only have room for typed visits, then only add typed visits.
+    if (only_typed && transition != PageTransition::TYPED)
+      continue;
+
+    if (skip_count > 0) {
+      // We have too many entries to fit, so we need to skip the oldest ones.
+      // Only skip typed URLs if there are too many typed URLs to fit.
+      if (only_typed || transition != PageTransition::TYPED) {
+        --skip_count;
+        continue;
+      }
+    }
+    typed_url->add_visits(visit->visit_time.ToInternalValue());
+    typed_url->add_visit_transitions(visit->transition);
+  }
+  DCHECK_EQ(skip_count, 0);
+
+  if (typed_url->visits_size() == 0) {
+    // If we get here, it's because we don't actually have any TYPED visits
+    // even though the visit's typed_count > 0 (corrupted typed_count). So
+    // let's go ahead and add a RELOAD visit at the most recent visit since
+    // it's not legal to have an empty visit array (yet another workaround
+    // for http://crbug.com/84258).
+    typed_url->add_visits(url.last_visit().ToInternalValue());
+    typed_url->add_visit_transitions(PageTransition::RELOAD);
+  }
+  CHECK_GT(typed_url->visits_size(), 0);
+  CHECK_LE(typed_url->visits_size(), kMaxTypedUrlVisits);
+  CHECK_EQ(typed_url->visits_size(), typed_url->visit_transitions_size());
 }
 
 // static
@@ -587,7 +733,7 @@ void TypedUrlModelAssociator::DiffVisits(
 void TypedUrlModelAssociator::UpdateURLRowFromTypedUrlSpecifics(
     const sync_pb::TypedUrlSpecifics& typed_url, history::URLRow* new_url) {
   DCHECK_GT(typed_url.visits_size(), 0);
-  DCHECK_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
+  CHECK_EQ(typed_url.visit_transitions_size(), typed_url.visits_size());
   new_url->set_title(UTF8ToUTF16(typed_url.title()));
   new_url->set_hidden(typed_url.hidden());
   new_url->set_last_visit(base::Time::FromInternalValue(

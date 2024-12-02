@@ -4,6 +4,7 @@
 
 #include "base/stringprintf.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_webstore_private_api.h"
@@ -11,7 +12,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
@@ -32,7 +33,7 @@ class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
     host_resolver()->AddRule("www.example.com", "127.0.0.1");
     ASSERT_TRUE(test_server()->Start());
     BeginInstallWithManifestFunction::SetIgnoreUserGestureForTests(true);
-    BeginInstallWithManifestFunction::SetAutoConfirmForTests(true);
+    SetExtensionInstallDialogForManifestAutoConfirmForTests(true);
     ExtensionInstallUI::DisableFailureUIForTests();
   }
 
@@ -80,7 +81,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallLocalized) {
 
 // Now test the case where the user cancels the confirmation dialog.
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallCancelled) {
-  BeginInstallWithManifestFunction::SetAutoConfirmForTests(false);
+  SetExtensionInstallDialogForManifestAutoConfirmForTests(false);
   ASSERT_TRUE(RunInstallTest("cancelled.html", "extension.crx"));
 }
 
@@ -105,4 +106,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
       NotificationService::AllSources());
   ASSERT_TRUE(RunInstallTest("incorrect_manifest2.html", "extension.crx"));
   observer.Wait();
+}
+
+// Tests that we can request an app installed bubble (instead of the default
+// UI when an app is installed).
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
+                       AppInstallBubble) {
+  ASSERT_TRUE(RunInstallTest("app_install_bubble.html", "app.crx"));
+}
+
+// Tests using the iconUrl parameter to the install function.
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest,
+                       IconUrl) {
+  ASSERT_TRUE(RunInstallTest("icon_url.html", "extension.crx"));
 }

@@ -20,6 +20,7 @@
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
+#include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -67,7 +68,7 @@ class LoginHandlerGtk : public LoginHandler,
                                            const string16& explanation) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-    root_.Own(gtk_vbox_new(FALSE, gtk_util::kContentAreaBorder));
+    root_.Own(gtk_vbox_new(FALSE, ui::kContentAreaBorder));
     GtkWidget* label = gtk_label_new(UTF16ToUTF8(explanation).c_str());
     gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
     gtk_box_pack_start(GTK_BOX(root_.get()), label, FALSE, FALSE, 0);
@@ -114,7 +115,7 @@ class LoginHandlerGtk : public LoginHandler,
     TabContents* requesting_contents = GetTabContentsForLogin();
     DCHECK(requesting_contents);
 
-    SetDialog(requesting_contents->CreateConstrainedDialog(this));
+    SetDialog(new ConstrainedWindowGtk(requesting_contents, this));
     NotifyAuthNeeded();
   }
 
@@ -147,7 +148,7 @@ class LoginHandlerGtk : public LoginHandler,
 
   // The GtkWidgets that form our visual hierarchy:
   // The root container we pass to our parent.
-  OwnedWidgetGtk root_;
+  ui::OwnedWidgetGtk root_;
 
   // GtkEntry widgets that the user types into.
   GtkWidget* username_entry_;

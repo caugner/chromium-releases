@@ -9,7 +9,6 @@
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/signin_manager.h"
@@ -19,9 +18,9 @@
 #include "chrome/browser/ui/webui/options/options_sync_setup_handler.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/browser_with_test_window_test.h"
-#include "chrome/test/test_browser_window.h"
-#include "chrome/test/testing_profile.h"
+#include "chrome/test/base/browser_with_test_window_test.h"
+#include "chrome/test/base/test_browser_window.h"
+#include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 static const char kTestUser[] = "chrome.p13n.test@gmail.com";
@@ -62,7 +61,8 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
   ProfileSyncServiceForWizardTest(ProfileSyncFactory* factory, Profile* profile)
       : ProfileSyncService(factory, profile, new SigninManager(), ""),
         user_cancelled_dialog_(false),
-        is_using_secondary_passphrase_(false) {
+        is_using_secondary_passphrase_(false),
+        encrypt_everything_(false) {
     RegisterPreferences();
     ResetTestStats();
   }
@@ -89,8 +89,7 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
   }
 
   virtual void SetPassphrase(const std::string& passphrase,
-                             bool is_explicit,
-                             bool is_creation) {
+                             bool is_explicit) {
     passphrase_ = passphrase;
   }
 
@@ -126,6 +125,18 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
     passphrase_required_reason_ = reason;
   }
 
+  virtual bool sync_initialized() const {
+    return true;
+  }
+
+  virtual bool EncryptEverythingEnabled() const {
+    return encrypt_everything_;
+  }
+
+  void set_encrypt_everything(bool encrypt_everything) {
+    encrypt_everything_ = encrypt_everything;
+  }
+
   void ResetTestStats() {
     username_.clear();
     password_.clear();
@@ -148,6 +159,7 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
   bool user_chose_data_types_;
   bool keep_everything_synced_;
   bool is_using_secondary_passphrase_;
+  bool encrypt_everything_;
   syncable::ModelTypeSet chosen_data_types_;
 
   std::string passphrase_;
@@ -236,10 +248,6 @@ class SyncSetupWizardTest : public BrowserWithTestWindowTest {
 
 TEST_F(SyncSetupWizardTest, InitialStepLogin) {
   SKIP_TEST_ON_MACOSX();
-  DictionaryValue dialog_args;
-  SyncSetupFlow::GetArgsForGaiaLogin(service_, &dialog_args);
-  std::string json_start_args;
-  base::JSONWriter::Write(&dialog_args, false, &json_start_args);
   ListValue credentials;
   std::string auth = "{\"user\":\"";
   auth += std::string(kTestUser) + "\",\"pass\":\"";
@@ -256,7 +264,6 @@ TEST_F(SyncSetupWizardTest, InitialStepLogin) {
   EXPECT_TRUE(wizard_->IsVisible());
   EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
   EXPECT_EQ(SyncSetupWizard::DONE, flow_->end_state_);
-  EXPECT_EQ(json_start_args, flow_->dialog_start_args_);
 
   // Simulate the user submitting credentials.
   handler_.HandleSubmitAuth(&credentials);
@@ -274,7 +281,7 @@ TEST_F(SyncSetupWizardTest, InitialStepLogin) {
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   EXPECT_TRUE(wizard_->IsVisible());
   EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
-  dialog_args.Clear();
+  DictionaryValue dialog_args;
   SyncSetupFlow::GetArgsForGaiaLogin(service_, &dialog_args);
   EXPECT_EQ(4U, dialog_args.size());
   std::string actual_user;
@@ -325,8 +332,8 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
       "{\"keepEverythingSynced\":false,\"syncBookmarks\":true,"
       "\"syncPreferences\":true,\"syncThemes\":false,\"syncPasswords\":false,"
       "\"syncAutofill\":false,\"syncExtensions\":false,\"syncTypedUrls\":true,"
-      "\"syncApps\":true,\"syncSessions\":false,\"usePassphrase\":false,"
-      "\"encryptAllData\":false}";
+      "\"syncApps\":true,\"syncSearchEngines\":false,\"syncSessions\":false,"
+      "\"usePassphrase\":false,\"encryptAllData\":false}";
   data_type_choices_value.Append(new StringValue(data_type_choices));
 
   // Simulate the user choosing data types; bookmarks, prefs, typed URLS, and
@@ -342,6 +349,7 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
   EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::EXTENSIONS));
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::TYPED_URLS));
   EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::APPS));
+  EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::SEARCH_ENGINES));
 
   CloseSetupUI();
 }

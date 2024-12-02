@@ -6,7 +6,7 @@
 
 #include "ppapi/shared_impl/opengles2_impl.h"
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 namespace {
@@ -28,7 +28,7 @@ PPB_OpenGLES2_Proxy::~PPB_OpenGLES2_Proxy() {
 const InterfaceProxy::Info* PPB_OpenGLES2_Proxy::GetInfo() {
   static const Info info = {
     ppapi::OpenGLES2Impl::GetInterface(),
-    PPB_OPENGLES2_DEV_INTERFACE,
+    PPB_OPENGLES2_INTERFACE,
     INTERFACE_ID_PPB_OPENGLES2,
     false,
     &CreateOpenGLES2Proxy,
@@ -41,4 +41,4 @@ bool PPB_OpenGLES2_Proxy::OnMessageReceived(const IPC::Message& msg) {
 }
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi

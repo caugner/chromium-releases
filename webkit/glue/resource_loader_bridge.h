@@ -33,6 +33,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
 #include "net/url_request/url_request_status.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "webkit/glue/resource_type.h"
 
 namespace net {
@@ -247,12 +248,11 @@ class ResourceLoaderBridge {
     // True if the request was user initiated.
     bool has_user_gesture;
 
-    // True if |frame_id| represents a main frame of a RenderView.
-    bool is_main_frame;
+    // Extra data associated with this request.  We do not own this pointer.
+    WebKit::WebURLRequest::ExtraData* extra_data;
 
-    // Identifies the frame within the RenderView that sent the request.
-    // -1 if unknown / invalid.
-    int64 frame_id;
+   private:
+    DISALLOW_COPY_AND_ASSIGN(RequestInfo);
   };
 
   // See the SyncLoad method declared below.  (The name of this struct is not
@@ -388,6 +388,10 @@ class ResourceLoaderBridge {
   // interrupt this method.  Errors are reported via the status field of the
   // response parameter.
   virtual void SyncLoad(SyncLoadResponse* response) = 0;
+
+  // When loader is transferred from one page to another, the IPC routing id
+  // can change (they are associated with pages).
+  virtual void UpdateRoutingId(int new_routing_id) = 0;
 
  protected:
   // construction must go through Create()

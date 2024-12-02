@@ -12,6 +12,7 @@
 #include "chrome/browser/automation/automation_window_tracker.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/external_tab_container_win.h"
+#include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -424,7 +425,7 @@ void AutomationProvider::OnMessageFromExternalHost(int handle,
   if (!view_host)
     return;
 
-  view_host->Send(new ViewMsg_HandleMessageFromExternalHost(
+  view_host->Send(new ChromeViewMsg_HandleMessageFromExternalHost(
       view_host->routing_id(), message, origin, target));
 }
 

@@ -11,6 +11,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_test_util.h"
@@ -25,8 +26,8 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "net/base/mock_host_resolver.h"
@@ -56,8 +57,16 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
   }
 };
 
+// Flaky crashes on ChromeOS (triggers pure virtual function call), see
+// http://crbug.com/92297 for details
+#if defined(OS_CHROMEOS)
+#define MAYBE_ShutdownWhileOpen DISABLED_ShutdownWhileOpen
+#else
+#define MAYBE_ShutdownWhileOpen ShutdownWhileOpen
+#endif
+
 // Regression test for http://crbug.com/13361
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, ShutdownWhileOpen) {
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_ShutdownWhileOpen) {
   browser()->window()->ShowTaskManager();
 }
 
@@ -365,19 +374,25 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   // Reload the extension using the "crashed extension" infobar while the task
   // manager is still visible. Make sure we don't crash and the extension
   // gets reloaded and noticed in the task manager.
-  TabContentsWrapper* current_tab = browser()->GetSelectedTabContentsWrapper();
-  ASSERT_EQ(1U, current_tab->infobar_count());
-  ConfirmInfoBarDelegate* delegate =
-      current_tab->GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
+  InfoBarTabHelper* infobar_helper =
+      browser()->GetSelectedTabContentsWrapper()->infobar_tab_helper();
+  ASSERT_EQ(1U, infobar_helper->infobar_count());
+  ConfirmInfoBarDelegate* delegate = infobar_helper->
+      GetInfoBarDelegateAt(0)->AsConfirmInfoBarDelegate();
   ASSERT_TRUE(delegate);
   delegate->Accept();
   TaskManagerBrowserTestUtil::WaitForResourceChange(3);
 }
 
+#if defined(OS_WIN)
+// Bug 93158.
+#define MAYBE_ReloadExtension FLAKY_ReloadExtension
+#else
+#define MAYBE_ReloadExtension ReloadExtension
+#endif
+
 // Regression test for http://crbug.com/18693.
-//
-// This test is crashy. See http://crbug.com/42315.
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DISABLED_ReloadExtension) {
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_ReloadExtension) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
   browser()->window()->ShowTaskManager();

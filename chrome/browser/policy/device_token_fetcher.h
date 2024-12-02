@@ -48,9 +48,10 @@ class DeviceTokenFetcher
   virtual void FetchToken();
 
   virtual void SetUnmanagedState();
+  virtual void SetSerialNumberInvalidState();
 
-  // Disables the auto-retry-on-error behavior of this token fetcher.
-  void StopAutoRetry();
+  // Cancels any pending work on this fetcher and resets it to inactive state.
+  void Reset();
 
   // DeviceManagementBackend::DeviceRegisterResponseDelegate method overrides:
   virtual void HandleRegisterResponse(
@@ -74,6 +75,8 @@ class DeviceTokenFetcher
     STATE_TOKEN_AVAILABLE,
     // Device unmanaged.
     STATE_UNMANAGED,
+    // The device is not enlisted for the domain.
+    STATE_BAD_SERIAL,
     // Error, retry later.
     STATE_ERROR,
     // Temporary error. Retry sooner.

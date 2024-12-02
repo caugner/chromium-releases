@@ -41,9 +41,9 @@ namespace internal {
 //  TODO(beng): Enforce no other callers to AddChildView/tree functions by
 //              overriding those methods as private here.
 //  TODO(beng): Clean up API further, make Widget a friend.
+//  TODO(sky): We don't really want to export this class.
 //
-class RootView : public View,
-                 public FocusTraversable {
+class VIEWS_EXPORT RootView : public View, public FocusTraversable {
  public:
   static const char kViewClassName[];
 
@@ -64,21 +64,13 @@ class RootView : public View,
 
   // Input ---------------------------------------------------------------------
 
-  // If a capture view has been set all mouse events are forwarded to the
-  // capture view, regardless of whether the mouse is over the view.
-  void set_capture_view(View* v) { capture_view_ = v; }
-  const View* capture_view() const { return capture_view_; }
-
   // Process a key event. Send the event to the focused view and up the focus
   // path, and finally to the default keyboard handler, until someone consumes
   // it. Returns whether anyone consumed the event.
   bool OnKeyEvent(const KeyEvent& event);
 
-#if defined(UNIT_TEST)
-  // For unit testing purposes, we use this method to set a mock
-  // GestureManager
-  void SetGestureManager(GestureManager* g) { gesture_manager_ = g; }
-#endif
+  // Provided only for testing:
+  void SetGestureManagerForTesting(GestureManager* g) { gesture_manager_ = g; }
 
   // Focus ---------------------------------------------------------------------
 
@@ -163,9 +155,6 @@ class RootView : public View,
   Widget* widget_;
 
   // Input ---------------------------------------------------------------------
-
-  // View capturing mouse input.
-  View* capture_view_;
 
   // The view currently handing down - drag - up
   View* mouse_pressed_handler_;

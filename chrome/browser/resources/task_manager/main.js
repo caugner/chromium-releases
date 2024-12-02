@@ -224,6 +224,9 @@ TaskManager.prototype = {
     this.table_.selectionModel = this.selectionModel_;
     this.table_.columnModel = this.columnModel_;
 
+    // Expands height of row when a process has some tasks.
+    this.table_.autoExpands = true;
+
     // Sets custom row render function.
     this.table_.setRenderFunction(this.renderRow_.bind(this));
   },

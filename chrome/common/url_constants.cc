@@ -35,19 +35,24 @@ const char kChromeUIExtensionsURL[] = "chrome://extensions/";
 const char kChromeUIFaviconURL[] = "chrome://favicon/";
 const char kChromeUIFlagsURL[] = "chrome://flags/";
 const char kChromeUIFlashURL[] = "chrome://flash/";
+const char kChromeUIGpuCleanURL[] = "chrome://gpuclean";
 const char kChromeUIGpuCrashURL[] = "chrome://gpucrash";
+const char kChromeUIGpuHangURL[] = "chrome://gpuhang";
 const char kChromeUIHangURL[] = "chrome://hang/";
 const char kChromeUIHistory2URL[] = "chrome://history2/";
 const char kChromeUIHistoryURL[] = "chrome://history/";
+const char kChromeUIHungRendererDialogURL[] = "chrome://hung-renderer/";
 const char kChromeUIIPCURL[] = "chrome://ipc/";
 const char kChromeUIKeyboardURL[] = "chrome://keyboard/";
 const char kChromeUIKillURL[] = "chrome://kill/";
 const char kChromeUIMemoryURL[] = "chrome://memory/";
 const char kChromeUIMemoryRedirectURL[] = "chrome://memory-redirect/";
 const char kChromeUINetworkViewCacheURL[] = "chrome://view-http-cache/";
-const char kChromeUINewTabURL[] = "chrome://newtab/";
+const char kChromeUINetInternalsURL[] = "chrome://net-internals/";
 const char kChromeUINewProfile[] = "chrome://newprofile/";
+const char kChromeUINewTabURL[] = "chrome://newtab/";
 const char kChromeUIPluginsURL[] = "chrome://plugins/";
+const char kChromeUIPolicyURL[] = "chrome://policy/";
 const char kChromeUIPrintURL[] = "chrome://print/";
 const char kChromeUISessionsURL[] = "chrome://sessions/";
 const char kChromeUISettingsURL[] = "chrome://settings/";
@@ -78,7 +83,7 @@ const char kChromeUIRegisterPageURL[] = "chrome://register/";
 const char kChromeUISlideshowURL[] = "chrome://slideshow/";
 const char kChromeUISimUnlockURL[] = "chrome://sim-unlock/";
 const char kChromeUISystemInfoURL[] = "chrome://system/";
-const char kChromeUITermsOemURL[] = "chrome://terms/oem/";
+const char kChromeUITermsOemURL[] = "chrome://terms/oem";
 const char kChromeUIUserImageURL[] = "chrome://userimage/";
 #endif
 
@@ -125,6 +130,7 @@ const char kChromeUIHangHost[] = "hang";
 const char kChromeUIHistory2Host[] = "history2";
 const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIHistogramsHost[] = "histograms";
+const char kChromeUIHungRendererDialogHost[] = "hung-renderer";
 const char kChromeUIIPCHost[] = "ipc";
 const char kChromeUIKeyboardHost[] = "keyboard";
 const char kChromeUIKillHost[] = "kill";
@@ -133,9 +139,9 @@ const char kChromeUIMemoryHost[] = "memory";
 const char kChromeUIMemoryRedirectHost[] = "memory-redirect";
 const char kChromeUINetInternalsHost[] = "net-internals";
 const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
-const char kChromeUINewProfileHost[] = "newprofile";
 const char kChromeUINewTabHost[] = "newtab";
 const char kChromeUIPluginsHost[] = "plugins";
+const char kChromeUIPolicyHost[] = "policy";
 const char kChromeUIPrintHost[] = "print";
 const char kChromeUIQuotaInternalsHost[] = "quota-internals";
 const char kChromeUIResourcesHost[] = "resources";
@@ -151,6 +157,7 @@ const char kChromeUITCMallocHost[] = "tcmalloc";
 const char kChromeUITextfieldsHost[] = "textfields";
 const char kChromeUITermsHost[] = "terms";
 const char kChromeUITouchIconHost[] = "touch-icon";
+const char kChromeUITracingHost[] = "tracing";
 const char kChromeUIVersionHost[] = "version";
 const char kChromeUIWorkersHost[] = "workers";
 
@@ -209,6 +216,7 @@ const char kClearBrowserDataSubPage[] = "clearBrowserData";
 const char kContentSettingsSubPage[] = "content";
 const char kContentSettingsExceptionsSubPage[] = "contentExceptions";
 const char kHandlerSettingsSubPage[] = "handlers";
+const char kExtensionsSubPage[] = "extensionSettings";
 const char kImportDataSubPage[] = "importData";
 const char kInstantConfirmPage[] = "instantConfirm";
 const char kLanguageOptionsSubPage[] = "languages";
@@ -252,14 +260,8 @@ const char kCrashReasonURL[] =
     "https://www.google.com/support/chrome/bin/answer.py?answer=95669";
 #endif
 
-// TODO: These are currently placeholders that point to the crash
-// docs.  See bug http://crosbug.com/10711
 const char kKillReasonURL[] =
-#if defined(OS_CHROMEOS)
-    "https://www.google.com/support/chromeos/bin/answer.py?answer=1047340";
-#else
-    "https://www.google.com/support/chrome/bin/answer.py?answer=95669";
-#endif
+    "http://www.google.com/support/chrome/bin/answer.py?answer=1270364";
 
 const char kPrivacyLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
@@ -279,6 +281,9 @@ const char kOutdatedPluginLearnMoreURL[] =
 const char kBlockedPluginLearnMoreURL[] =
     "https://www.google.com/support/chrome/bin/answer.py?answer=1247383";
 
+const char kSpeechInputAboutURL[] =
+    "https://www.google.com/support/chrome/bin/answer.py?answer=1407892";
+
 const char kLearnMoreRegisterProtocolHandlerURL[] =
     "http://www.google.com/support/chrome/bin/answer.py?answer=1382847";
 
@@ -286,6 +291,17 @@ const char kLearnMoreRegisterProtocolHandlerURL[] =
 const char kCloudPrintLearnMoreURL[] =
     "https://www.google.com/support/chromeos/bin/topic.py?topic=29023";
 #endif
+
+const char* const kChromeDebugURLs[] = {
+  kChromeUICrashURL,
+  kChromeUIKillURL,
+  kChromeUIHangURL,
+  kChromeUIShorthangURL,
+  kChromeUIGpuCleanURL,
+  kChromeUIGpuCrashURL,
+  kChromeUIGpuHangURL,
+};
+int kNumberOfChromeDebugURLs = static_cast<int>(arraysize(kChromeDebugURLs));
 
 void RegisterChromeSchemes() {
   // Don't need "chrome-internal" which was used in old versions of Chrome for

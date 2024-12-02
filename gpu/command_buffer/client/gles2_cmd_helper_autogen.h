@@ -1188,18 +1188,11 @@
     c.Init(namespace_id, n, ids_shm_id, ids_shm_offset);
   }
 
-  void CommandBufferEnableCHROMIUM(
+  void EnableFeatureCHROMIUM(
       GLuint bucket_id, uint32 result_shm_id, uint32 result_shm_offset) {
-    gles2::CommandBufferEnableCHROMIUM& c =
-        GetCmdSpace<gles2::CommandBufferEnableCHROMIUM>();
+    gles2::EnableFeatureCHROMIUM& c =
+        GetCmdSpace<gles2::EnableFeatureCHROMIUM>();
     c.Init(bucket_id, result_shm_id, result_shm_offset);
-  }
-
-  void CopyTextureToParentTextureCHROMIUM(
-      GLuint client_child_id, GLuint client_parent_id) {
-    gles2::CopyTextureToParentTextureCHROMIUM& c =
-        GetCmdSpace<gles2::CopyTextureToParentTextureCHROMIUM>();
-    c.Init(client_child_id, client_parent_id);
   }
 
   void ResizeCHROMIUM(GLuint width, GLuint height) {
@@ -1217,11 +1210,6 @@
     gles2::RequestExtensionCHROMIUM& c =
         GetCmdSpace<gles2::RequestExtensionCHROMIUM>();
     c.Init(bucket_id);
-  }
-
-  void SetSurfaceCHROMIUM(GLint surface_id) {
-    gles2::SetSurfaceCHROMIUM& c = GetCmdSpace<gles2::SetSurfaceCHROMIUM>();
-    c.Init(surface_id);
   }
 
   void GetMultipleIntegervCHROMIUM(

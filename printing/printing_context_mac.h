@@ -19,7 +19,7 @@ class NSPrintInfo;
 
 namespace printing {
 
-class PrintingContextMac : public PrintingContext {
+class PRINTING_EXPORT PrintingContextMac : public PrintingContext {
  public:
   explicit PrintingContextMac(const std::string& app_locale);
   virtual ~PrintingContextMac();
@@ -30,8 +30,9 @@ class PrintingContextMac : public PrintingContext {
                                   bool has_selection,
                                   PrintSettingsCallback* callback);
   virtual Result UseDefaultSettings();
-  virtual Result UpdatePrintSettings(const base::DictionaryValue& job_settings,
-                                     const PageRanges& ranges);
+  virtual Result UpdatePrinterSettings(
+      const base::DictionaryValue& job_settings,
+      const PageRanges& ranges);
   virtual Result InitWithSettings(const PrintSettings& settings);
   virtual Result NewDocument(const string16& document_name);
   virtual Result NewPage();
@@ -74,7 +75,7 @@ class PrintingContextMac : public PrintingContext {
 
   // Sets output color mode in PMPrintSettings.
   // Returns true if color mode is set.
-  bool SetOutputIsColor(bool color);
+  bool SetOutputColor(int color_mode);
 
   // The native print info object.
   scoped_nsobject<NSPrintInfo> print_info_;

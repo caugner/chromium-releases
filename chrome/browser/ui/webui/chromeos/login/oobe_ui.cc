@@ -6,24 +6,29 @@
 
 #include <string>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/values.h"
 #include "chrome/browser/browser_about_handler.h"
-#include "chrome/browser/chromeos/login/enterprise_enrollment_screen_actor.h"
+#include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen_actor.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/enterprise_enrollment_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/enterprise_oauth_enrollment_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/eula_screen_handler.h"
+#include "chrome/browser/ui/webui/chromeos/login/network_dropdown_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/update_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/user_image_screen_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -31,6 +36,9 @@
 #include "ui/base/resource/resource_bundle.h"
 
 namespace {
+
+// Path for a stripped down login page that does not have OOBE elements.
+const char kLoginPath[] = "login";
 
 // Path for the enterprise enrollment gaia page hosting.
 const char kEnterpriseEnrollmentGaiaLoginPath[] = "gaialogin";
@@ -55,6 +63,8 @@ class OobeUIHTMLSource : public ChromeURLDataManager::DataSource {
  private:
   virtual ~OobeUIHTMLSource() {}
 
+  std::string GetDataResource(int resource_id) const;
+
   scoped_ptr<DictionaryValue> localized_strings_;
   DISALLOW_COPY_AND_ASSIGN(OobeUIHTMLSource);
 };
@@ -69,21 +79,28 @@ OobeUIHTMLSource::OobeUIHTMLSource(DictionaryValue* localized_strings)
 void OobeUIHTMLSource::StartDataRequest(const std::string& path,
                                         bool is_incognito,
                                         int request_id) {
-  std::string response;
-  if (path.empty()) {
-    static const base::StringPiece html(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(IDR_OOBE_HTML));
-    response = jstemplate_builder::GetI18nTemplateHtml(
-        html, localized_strings_.get());
-  } else if (path == kEnterpriseEnrollmentGaiaLoginPath) {
-    static const base::StringPiece html(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            IDR_GAIA_LOGIN_HTML));
-    response = jstemplate_builder::GetI18nTemplateHtml(
-        html, localized_strings_.get());
+  if (UserManager::Get()->user_is_logged_in()) {
+    scoped_refptr<RefCountedBytes> empty_bytes(new RefCountedBytes());
+    SendResponse(request_id, empty_bytes);
+    return;
   }
 
+  std::string response;
+  if (path.empty())
+    response = GetDataResource(IDR_OOBE_HTML);
+  else if (path == kLoginPath)
+    response = GetDataResource(IDR_LOGIN_HTML);
+  else if (path == kEnterpriseEnrollmentGaiaLoginPath)
+    response = GetDataResource(IDR_GAIA_LOGIN_HTML);
+
   SendResponse(request_id, base::RefCountedString::TakeString(&response));
+}
+
+std::string OobeUIHTMLSource::GetDataResource(int resource_id) const {
+  const base::StringPiece html(
+      ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id));
+  return jstemplate_builder::GetI18nTemplateHtml(html,
+                                                 localized_strings_.get());
 }
 
 // OobeUI ----------------------------------------------------------------------
@@ -98,6 +115,8 @@ OobeUI::OobeUI(TabContents* contents)
   core_handler_ = new CoreOobeHandler(this);
   AddScreenHandler(core_handler_);
 
+  AddScreenHandler(new NetworkDropdownHandler);
+
   NetworkScreenHandler* network_screen_handler = new NetworkScreenHandler();
   network_screen_actor_ = network_screen_handler;
   AddScreenHandler(network_screen_handler);
@@ -110,10 +129,19 @@ OobeUI::OobeUI(TabContents* contents)
   update_screen_actor_ = update_screen_handler;
   AddScreenHandler(update_screen_handler);
 
-  EnterpriseEnrollmentScreenHandler* enterprise_enrollment_screen_handler =
-      new EnterpriseEnrollmentScreenHandler;
-  enterprise_enrollment_screen_actor_ = enterprise_enrollment_screen_handler;
-  AddScreenHandler(enterprise_enrollment_screen_handler);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin)) {
+    EnterpriseOAuthEnrollmentScreenHandler*
+        enterprise_oauth_enrollment_screen_handler =
+            new EnterpriseOAuthEnrollmentScreenHandler;
+    enterprise_enrollment_screen_actor_ =
+        enterprise_oauth_enrollment_screen_handler;
+    AddScreenHandler(enterprise_oauth_enrollment_screen_handler);
+  } else {
+    EnterpriseEnrollmentScreenHandler* enterprise_enrollment_screen_handler =
+        new EnterpriseEnrollmentScreenHandler;
+    enterprise_enrollment_screen_actor_ = enterprise_enrollment_screen_handler;
+    AddScreenHandler(enterprise_enrollment_screen_handler);
+  }
 
   UserImageScreenHandler* user_image_screen_handler =
       new UserImageScreenHandler();
@@ -126,22 +154,21 @@ OobeUI::OobeUI(TabContents* contents)
   DictionaryValue* localized_strings = new DictionaryValue();
   GetLocalizedStrings(localized_strings);
 
+  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
   // Set up the chrome://theme/ source, for Chrome logo.
-  ThemeSource* theme = new ThemeSource(contents->profile());
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(theme);
+  ThemeSource* theme = new ThemeSource(profile);
+  profile->GetChromeURLDataManager()->AddDataSource(theme);
 
   // Set up the chrome://terms/ data source, for EULA content.
-  InitializeAboutDataSource(chrome::kChromeUITermsHost, contents->profile());
+  InitializeAboutDataSource(chrome::kChromeUITermsHost, profile);
 
   // Set up the chrome://oobe/ source.
-  OobeUIHTMLSource* html_source =
-      new OobeUIHTMLSource(localized_strings);
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(html_source);
+  OobeUIHTMLSource* html_source = new OobeUIHTMLSource(localized_strings);
+  profile->GetChromeURLDataManager()->AddDataSource(html_source);
 
   // Set up the chrome://userimage/ source.
   UserImageSource* user_image_source = new UserImageSource();
-  contents->profile()->GetChromeURLDataManager()->AddDataSource(
-      user_image_source);
+  profile->GetChromeURLDataManager()->AddDataSource(user_image_source);
 }
 
 void OobeUI::ShowScreen(WizardScreen* screen) {
@@ -179,7 +206,9 @@ ViewScreenDelegate* OobeUI::GetRegistrationScreenActor() {
 }
 
 ViewScreenDelegate* OobeUI::GetHTMLPageScreenActor() {
-  NOTIMPLEMENTED();
+  // WebUI implementation of the LoginDisplayHost opens HTML page directly,
+  // without opening OOBE page.
+  NOTREACHED();
   return NULL;
 }
 

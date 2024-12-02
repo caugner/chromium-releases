@@ -98,7 +98,7 @@ class ProtoDelegate : public DummyDelegate<const em::PolicyFetchResponse&> {
 
 }  // anonymous namespace
 
-class SignedSettingsTest : public ::testing::Test {
+class SignedSettingsTest : public testing::Test {
  public:
   SignedSettingsTest()
       : fake_email_("fakey@example.com"),

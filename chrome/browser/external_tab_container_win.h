@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
@@ -115,11 +116,16 @@ class ExternalTabContainer : public TabContentsDelegate,
   static ExternalTabContainer* GetContainerForTab(HWND tab_window);
 
   // Overridden from TabContentsDelegate:
+
+  // Deprecated. Please used two-arguments variant.
+  // TODO(adriansc): Remove method once refactoring changed all call sites.
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const GURL& url,
                                       const GURL& referrer,
                                       WindowOpenDisposition disposition,
-                                      PageTransition::Type transition);
+                                      PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const OpenURLParams& params) OVERRIDE;
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags);
   virtual void AddNewContents(TabContents* source,
@@ -130,7 +136,8 @@ class ExternalTabContainer : public TabContentsDelegate,
   virtual void CloseContents(TabContents* source);
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
   virtual bool IsPopup(const TabContents* source) const;
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url);
+  virtual void UpdateTargetURL(TabContents* source, int32 page_id,
+                               const GURL& url);
   virtual void ContentsZoomChange(bool zoom_in);
   virtual gfx::NativeWindow GetFrameNativeWindow();
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -149,7 +156,36 @@ class ExternalTabContainer : public TabContentsDelegate,
                                  bool proceed,
                                  bool* proceed_to_fire_unload);
   virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator();
-  void ShowRepostFormWarningDialog(TabContents* tab_contents);
+  virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
+  virtual void RunFileChooser(TabContents* tab,
+                              const ViewHostMsg_RunFileChooser_Params& params);
+  virtual void EnumerateDirectory(TabContents* tab, int request_id,
+                                const FilePath& path);
+  virtual void JSOutOfMemory(TabContents* tab);
+  virtual void RegisterProtocolHandler(TabContents* tab,
+                                       const std::string& protocol,
+                                       const GURL& url,
+                                       const string16& title);
+  virtual void RegisterIntentHandler(TabContents* tab,
+                                     const string16& action,
+                                     const string16& type,
+                                     const string16& href,
+                                     const string16& title);
+  virtual void WebIntentDispatch(TabContents* tab,
+                                 int routing_id,
+                                 const string16& action,
+                                 const string16& type,
+                                 const string16& data,
+                                 int intent_id);
+  virtual void FindReply(TabContents* tab,
+                         int request_id,
+                         int number_of_matches,
+                         const gfx::Rect& selection_rect,
+                         int active_match_ordinal,
+                         bool final_update);
+  virtual void CrashedPlugin(TabContents* tab,
+                             const FilePath& plugin_path);
+
   void RegisterRenderViewHost(RenderViewHost* render_view_host);
   void UnregisterRenderViewHost(RenderViewHost* render_view_host);
 
@@ -219,22 +255,6 @@ class ExternalTabContainer : public TabContentsDelegate,
   void RegisterRenderViewHostForAutomation(RenderViewHost* render_view_host,
                                            bool pending_view);
 
-  // Top level navigations received for a tab while it is waiting for an ack
-  // from the external host go here. Scenario is a window.open executes on a
-  // page in ChromeFrame. A new TabContents is created and the current
-  // ExternalTabContainer is notified via AddNewContents. At this point we
-  // send off an attach tab request to the host browser. Before the host
-  // browser sends over the ack, we receive a top level URL navigation for the
-  // new tab, which needs to be routed over the correct automation channel.
-  // We receive the automation channel only when the external host acks the
-  // attach tab request.
-  struct PendingTopLevelNavigation {
-    GURL url;
-    GURL referrer;
-    WindowOpenDisposition disposition;
-    PageTransition::Type transition;
-  };
-
   // Helper function for processing keystokes coming back from the renderer
   // process.
   bool ProcessUnhandledKeyStroke(HWND window, UINT message, WPARAM wparam,
@@ -278,9 +298,6 @@ class ExternalTabContainer : public TabContentsDelegate,
   // whether top level URL requests are to be handled by the automation client.
   bool handle_top_level_requests_;
 
-  // Scoped browser object for this ExternalTabContainer instance.
-  scoped_ptr<Browser> browser_;
-
   // Contains ExternalTabContainers that have not been connected to as yet.
   static base::LazyInstance<PendingTabs> pending_tabs_;
 
@@ -296,9 +313,18 @@ class ExternalTabContainer : public TabContentsDelegate,
   // A mapping between accelerators and commands.
   std::map<views::Accelerator, int> accelerator_table_;
 
+  // Top level navigations received for a tab while it is waiting for an ack
+  // from the external host go here. Scenario is a window.open executes on a
+  // page in ChromeFrame. A new TabContents is created and the current
+  // ExternalTabContainer is notified via AddNewContents. At this point we
+  // send off an attach tab request to the host browser. Before the host
+  // browser sends over the ack, we receive a top level URL navigation for the
+  // new tab, which needs to be routed over the correct automation channel.
+  // We receive the automation channel only when the external host acks the
+  // attach tab request.
   // Contains the list of URL requests which are pending waiting for an ack
   // from the external host.
-  std::vector<PendingTopLevelNavigation> pending_open_url_requests_;
+  std::vector<OpenURLParams> pending_open_url_requests_;
 
   // Set to true if the ExternalTabContainer instance is waiting for an ack
   // from the host.
@@ -347,11 +373,14 @@ class TemporaryPopupExternalTabContainer : public ExternalTabContainer {
   virtual void Observe(int type, const NotificationSource& source,
                        const NotificationDetails& details) {}
 
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const GURL& url,
+  // Deprecated. Please use the two-argument variant.
+  // TODO(adriansc): Remove method once refactoring changed all call sites.
+  virtual TabContents* OpenURLFromTab(TabContents* source, const GURL& url,
                                       const GURL& referrer,
                                       WindowOpenDisposition disposition,
-                                      PageTransition::Type transition);
+                                      PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(TabContents* source,
+                                      const OpenURLParams& params) OVERRIDE;
 
   virtual void NavigationStateChanged(const TabContents* source,
                                       unsigned changed_flags) {
@@ -362,7 +391,8 @@ class TemporaryPopupExternalTabContainer : public ExternalTabContainer {
     NOTREACHED();
   }
 
-  virtual void UpdateTargetURL(TabContents* source, const GURL& url) {
+  virtual void UpdateTargetURL(TabContents* source, int32 page_id,
+                               const GURL& url) {
     NOTREACHED();
   }
 

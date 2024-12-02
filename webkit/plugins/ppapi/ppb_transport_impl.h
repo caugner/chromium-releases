@@ -11,29 +11,31 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/completion_callback.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_transport_api.h"
 #include "webkit/glue/p2p_transport.h"
 #include "webkit/plugins/ppapi/callbacks.h"
-#include "webkit/plugins/ppapi/resource.h"
 
 namespace webkit {
 namespace ppapi {
 
-class PPB_Transport_Impl : public Resource,
+class PPB_Transport_Impl : public ::ppapi::Resource,
                            public ::ppapi::thunk::PPB_Transport_API,
                            public webkit_glue::P2PTransport::EventHandler {
  public:
   virtual ~PPB_Transport_Impl();
 
-  static PP_Resource Create(PluginInstance* instance,
+  static PP_Resource Create(PP_Instance instance,
                             const char* name,
                             const char* proto);
 
-  // ResourceObjectBase override.
+  // Resource override.
   virtual ::ppapi::thunk::PPB_Transport_API* AsPPB_Transport_API() OVERRIDE;
 
   // PPB_Transport_API implementation.
   virtual PP_Bool IsWritable() OVERRIDE;
+  virtual int32_t SetProperty(PP_TransportProperty property,
+                              PP_Var value) OVERRIDE;
   virtual int32_t Connect(PP_CompletionCallback callback) OVERRIDE;
   virtual int32_t GetNextAddress(PP_Var* address,
                                  PP_CompletionCallback callback) OVERRIDE;
@@ -50,7 +52,7 @@ class PPB_Transport_Impl : public Resource,
   virtual void OnError(int error) OVERRIDE;
 
  private:
-  explicit PPB_Transport_Impl(PluginInstance* instance);
+  explicit PPB_Transport_Impl(PP_Instance instance);
 
   bool Init(const char* name, const char* proto);
 
@@ -59,6 +61,7 @@ class PPB_Transport_Impl : public Resource,
 
   std::string name_;
   bool use_tcp_;
+  webkit_glue::P2PTransport::Config config_;
   bool started_;
   scoped_ptr<webkit_glue::P2PTransport> p2p_transport_;
   bool writable_;

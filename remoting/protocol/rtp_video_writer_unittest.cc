@@ -1,12 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/string_number_conversions.h"
+#include "remoting/base/constants.h"
 #include "remoting/proto/video.pb.h"
 #include "remoting/protocol/fake_session.h"
 #include "remoting/protocol/rtp_reader.h"
@@ -55,9 +58,19 @@ class RtpVideoWriterTest : public testing::Test {
     bool last;
   };
 
+  RtpVideoWriterTest()
+      : writer_(base::MessageLoopProxy::current()) {
+  }
+
   virtual void SetUp() {
     session_.reset(new FakeSession());
-    writer_.Init(session_.get());
+    writer_.Init(session_.get(),
+                 base::Bind(&RtpVideoWriterTest::OnWriterInitialized,
+                            base::Unretained(this)));
+  }
+
+  void OnWriterInitialized(bool success) {
+    ASSERT_TRUE(success);
   }
 
   void InitData(int size) {
@@ -88,7 +101,7 @@ class RtpVideoWriterTest : public testing::Test {
   void VerifyResult(const ExpectedPacket expected[],
                     int count) {
     const vector<string>& rtp_packets =
-        session_->video_rtp_channel()->written_packets();
+        session_->GetDatagramChannel(kVideoRtpChannelName)->written_packets();
     ASSERT_EQ(count, static_cast<int>(rtp_packets.size()));
     int pos = 0;
     for (int i = 0; i < count; ++i) {

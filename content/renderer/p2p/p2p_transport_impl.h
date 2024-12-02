@@ -13,8 +13,6 @@
 #include "third_party/libjingle/source/talk/base/sigslot.h"
 #include "webkit/glue/p2p_transport.h"
 
-class P2PSocketDispatcher;
-
 namespace cricket {
 class Candidate;
 class PortAllocator;
@@ -33,12 +31,17 @@ class NetworkManager;
 class PacketSocketFactory;
 }  // namespace talk_base
 
+namespace content {
+
+class P2PPortAllocator;
+class P2PSocketDispatcher;
+
 class P2PTransportImpl : public webkit_glue::P2PTransport,
                          public sigslot::has_slots<> {
  public:
-  // Create P2PTransportImpl using specified NetworkManager and
+  // Creates P2PTransportImpl using specified NetworkManager and
   // PacketSocketFactory. Takes ownership of |network_manager| and
-  // |socket_factory|.
+  // |socket_factory|. Provided to be used for tests only.
   P2PTransportImpl(talk_base::NetworkManager* network_manager,
                    talk_base::PacketSocketFactory* socket_factory);
 
@@ -52,7 +55,7 @@ class P2PTransportImpl : public webkit_glue::P2PTransport,
   // webkit_glue::P2PTransport interface.
   virtual bool Init(const std::string& name,
                     Protocol protocol,
-                    const std::string& config,
+                    const Config& config,
                     EventHandler* event_handler) OVERRIDE;
   virtual bool AddRemoteCandidate(const std::string& address) OVERRIDE;
   virtual net::Socket* GetChannel() OVERRIDE;
@@ -66,12 +69,9 @@ class P2PTransportImpl : public webkit_glue::P2PTransport,
   void OnReadableState(cricket::TransportChannel* channel);
   void OnWriteableState(cricket::TransportChannel* channel);
 
-  std::string SerializeCandidate(const cricket::Candidate& candidate);
-  bool DeserializeCandidate(const std::string& address,
-                            cricket::Candidate* candidate);
-
   void OnTcpConnected(int result);
 
+  P2PSocketDispatcher* socket_dispatcher_;
   std::string name_;
   EventHandler* event_handler_;
   State state_;
@@ -89,5 +89,7 @@ class P2PTransportImpl : public webkit_glue::P2PTransport,
 
   DISALLOW_COPY_AND_ASSIGN(P2PTransportImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_P2P_P2P_TRANSPORT_IMPL_H_

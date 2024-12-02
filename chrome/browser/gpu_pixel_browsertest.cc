@@ -16,9 +16,9 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/in_process_browser_test.h"
-#include "chrome/test/test_launcher_utils.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_launcher_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/gpu/gpu_data_manager.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -129,6 +129,9 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 #endif
       using_gpu_ = false;
     }
+    // Allow file access from "file://" protocol. Otherwise, test fails with
+    // "Uncaught Error: SECURITY_ERR: DOM Exception 18."
+    command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
   }
 
   virtual void SetUpInProcessBrowserTestFixture() {
@@ -271,7 +274,19 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(GpuPixelBrowserTest);
 };
 
-IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, WebGLTeapot) {
+#if defined(OS_LINUX)
+// Currently fails (and times out) on linux due to a NOTIMPLEMENTED() statement.
+// (http://crbug.com/89964)
+#define MAYBE_WebGLTeapot DISABLED_WebGLTeapot
+#elif defined(OS_WIN)
+// Fails (and times out) on Windows due to pixel mismatch.
+// (http://crbug.com/95214)
+#define MAYBE_WebGLTeapot DISABLED_WebGLTeapot
+#else
+#define MAYBE_WebGLTeapot WebGLTeapot
+#endif
+
+IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, MAYBE_WebGLTeapot) {
   ui_test_utils::DOMMessageQueue message_queue;
   ui_test_utils::NavigateToURL(
       browser(),

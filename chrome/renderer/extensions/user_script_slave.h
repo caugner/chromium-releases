@@ -47,13 +47,16 @@ class UserScriptSlave {
   // Gets the isolated world ID to use for the given |extension| in the given
   // |frame|. If no isolated world has been created for that extension,
   // one will be created and initialized.
-  static int GetIsolatedWorldId(const Extension* extension,
-                                WebKit::WebFrame* frame);
+  int GetIsolatedWorldIdForExtension(const Extension* extension,
+                                     WebKit::WebFrame* frame);
 
-  static void RemoveIsolatedWorld(const std::string& extension_id);
+  // Gets the id of the extension running in a given isolated world. If no such
+  // isolated world exists, or no extension is running in it, returns empty
+  // string.
+  std::string GetExtensionIdForIsolatedWorld(int isolated_world_id);
 
-  static void InsertInitExtensionCode(std::vector<WebScriptSource>* sources,
-                                      const std::string& extension_id);
+  void RemoveIsolatedWorld(const std::string& extension_id);
+
  private:
   static void InitializeIsolatedWorld(int isolated_world_id,
                                       const Extension* extension);
@@ -72,7 +75,7 @@ class UserScriptSlave {
   const ExtensionSet* extensions_;
 
   typedef std::map<std::string, int> IsolatedWorldMap;
-  static IsolatedWorldMap isolated_world_ids_;
+  IsolatedWorldMap isolated_world_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(UserScriptSlave);
 };

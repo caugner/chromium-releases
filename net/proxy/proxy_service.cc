@@ -264,6 +264,31 @@ class ProxyConfigChangedNetLogParam : public NetLog::EventParameters {
   DISALLOW_COPY_AND_ASSIGN(ProxyConfigChangedNetLogParam);
 };
 
+class BadProxyListNetLogParam : public NetLog::EventParameters {
+ public:
+  BadProxyListNetLogParam(const ProxyRetryInfoMap& retry_info) {
+    proxy_list_.reserve(retry_info.size());
+    for (ProxyRetryInfoMap::const_iterator iter = retry_info.begin();
+         iter != retry_info.end(); ++iter) {
+      proxy_list_.push_back(iter->first);
+    }
+  }
+
+  virtual Value* ToValue() const OVERRIDE {
+    DictionaryValue* dict = new DictionaryValue();
+    ListValue* list = new ListValue();
+    for (std::vector<std::string>::const_iterator iter = proxy_list_.begin();
+         iter != proxy_list_.end(); ++iter)
+      list->Append(Value::CreateStringValue(*iter));
+    dict->Set("bad_proxy_list", list);
+    return dict;
+  }
+
+ private:
+  std::vector<std::string> proxy_list_;
+  DISALLOW_COPY_AND_ASSIGN(BadProxyListNetLogParam);
+};
+
 }  // namespace
 
 // ProxyService::PacRequest ---------------------------------------------------
@@ -283,7 +308,7 @@ class ProxyService::PacRequest
         results_(results),
         url_(url),
         resolve_job_(NULL),
-        config_id_(ProxyConfig::INVALID_ID),
+        config_id_(ProxyConfig::kInvalidConfigID),
         net_log_(net_log) {
     DCHECK(user_callback);
   }
@@ -350,7 +375,7 @@ class ProxyService::PacRequest
 
     // Reset the state associated with in-progress-resolve.
     resolve_job_ = NULL;
-    config_id_ = ProxyConfig::INVALID_ID;
+    config_id_ = ProxyConfig::kInvalidConfigID;
 
     return service_->DidFinishResolvingProxy(results_, result_code, net_log_);
   }
@@ -428,7 +453,7 @@ ProxyService* ProxyService::CreateUsingV8ProxyResolver(
       new ProxyResolverFactoryForV8(
           host_resolver,
           MessageLoop::current(),
-          base::MessageLoopProxy::CreateForCurrentThread(),
+          base::MessageLoopProxy::current(),
           net_log,
           network_delegate);
 
@@ -574,7 +599,7 @@ int ProxyService::TryToCompleteSynchronously(const GURL& url,
   if (current_state_ != STATE_READY)
     return ERR_IO_PENDING;  // Still initializing.
 
-  DCHECK_NE(config_.id(), ProxyConfig::INVALID_ID);
+  DCHECK_NE(config_.id(), ProxyConfig::kInvalidConfigID);
 
   // If it was impossible to fetch or parse the PAC script, we cannot complete
   // the request here and bail out.
@@ -715,11 +740,36 @@ int ProxyService::ReconsiderProxyAfterError(const GURL& url,
 
   // We don't have new proxy settings to try, try to fallback to the next proxy
   // in the list.
-  bool did_fallback = result->Fallback(&proxy_retry_info_);
+  bool did_fallback = result->Fallback(net_log);
 
   // Return synchronous failure if there is nothing left to fall-back to.
   // TODO(eroman): This is a yucky API, clean it up.
   return did_fallback ? OK : ERR_FAILED;
+}
+
+void ProxyService::ReportSuccess(const ProxyInfo& result) {
+  DCHECK(CalledOnValidThread());
+
+  const ProxyRetryInfoMap& new_retry_info = result.proxy_retry_info();
+  if (new_retry_info.empty())
+    return;
+
+  for (ProxyRetryInfoMap::const_iterator iter = new_retry_info.begin();
+       iter != new_retry_info.end(); ++iter) {
+    ProxyRetryInfoMap::iterator existing = proxy_retry_info_.find(iter->first);
+    if (existing == proxy_retry_info_.end())
+      proxy_retry_info_[iter->first] = iter->second;
+    else if (existing->second.bad_until < iter->second.bad_until)
+      existing->second.bad_until = iter->second.bad_until;
+  }
+  if (net_log_) {
+    net_log_->AddEntry(NetLog::TYPE_BAD_PROXY_LIST_REPORTED,
+                       base::TimeTicks::Now(),
+                       NetLog::Source(),
+                       NetLog::PHASE_NONE,
+                       make_scoped_refptr(
+                           new BadProxyListNetLogParam(new_retry_info)));
+  }
 }
 
 void ProxyService::CancelPacRequest(PacRequest* req) {

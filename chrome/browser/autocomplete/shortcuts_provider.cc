@@ -117,7 +117,7 @@ void ShortcutsProvider::OnShortcutsLoaded() {
   LoadShortcuts();
 }
 
-void ShortcutsProvider::OnShortcutAddedOrUpdated(Shortcut shortcut) {
+void ShortcutsProvider::OnShortcutAddedOrUpdated(const Shortcut& shortcut) {
   shortcuts_provider::GuidToShortcutsIteratorMap::iterator it =
       guid_map_.find(shortcut.id);
   if (it != guid_map_.end()) {
@@ -128,7 +128,7 @@ void ShortcutsProvider::OnShortcutAddedOrUpdated(Shortcut shortcut) {
 }
 
 void ShortcutsProvider::OnShortcutsRemoved(
-    std::vector<std::string> shortcuts_ids) {
+    const std::vector<std::string>& shortcuts_ids) {
   for (size_t i = 0; i < shortcuts_ids.size(); ++i) {
     shortcuts_provider::GuidToShortcutsIteratorMap::iterator it =
         guid_map_.find(shortcuts_ids[i]);

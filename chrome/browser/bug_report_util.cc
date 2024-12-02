@@ -12,6 +12,7 @@
 #include "base/file_version_info.h"
 #include "base/memory/singleton.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/browser_process_impl.h"
@@ -49,9 +50,6 @@ static char const kProtBufMimeType[] = "application/x-protobuf";
 static char const kPngMimeType[] = "image/png";
 
 // Tags we use in product specific data
-static char const kPageTitleTag[] = "PAGE TITLE";
-static char const kProblemTypeIdTag[] = "PROBLEM TYPE ID";
-static char const kProblemTypeTag[] = "PROBLEM TYPE";
 static char const kChromeVersionTag[] = "CHROME VERSION";
 static char const kOsVersionTag[] = "OS VERSION";
 
@@ -67,10 +65,10 @@ static char const kBZip2MimeType[] = "application/x-bzip2";
 static char const kLogsAttachmentName[] = "system_logs.bz2";
 // Maximum number of lines in system info log chunk to be still included
 // in product specific data.
-const size_t kMaxLineCount       = 10;
+const size_t kMaxLineCount       = 40;
 // Maximum number of bytes in system info log chunk to be still included
 // in product specific data.
-const size_t kMaxSystemLogLength = 1024;
+const size_t kMaxSystemLogLength = 4 * 1024;
 #endif
 
 const int64 kInitialRetryDelay = 900000; // 15 minutes
@@ -161,24 +159,18 @@ void BugReportUtil::SetOSVersion(std::string* os_version) {
 #if defined(OS_WIN)
   base::win::OSInfo* os_info = base::win::OSInfo::GetInstance();
   base::win::OSInfo::VersionNumber version_number = os_info->version_number();
-  *os_version = StringPrintf("%d.%d.%d", version_number.major,
-                             version_number.minor, version_number.build);
+  *os_version = base::StringPrintf("%d.%d.%d",
+                                   version_number.major,
+                                   version_number.minor,
+                                   version_number.build);
   int service_pack = os_info->service_pack().major;
   if (service_pack > 0)
-    os_version->append(StringPrintf("Service Pack %d", service_pack));
+    os_version->append(base::StringPrintf("Service Pack %d", service_pack));
 #elif defined(OS_MACOSX)
   *os_version = base::SysInfo::OperatingSystemVersion();
 #else
   *os_version = "unknown";
 #endif
-}
-
-// static
-std::string BugReportUtil::feedback_server_("");
-
-// static
-void BugReportUtil::SetFeedbackServer(const std::string& server) {
-  feedback_server_ = server;
 }
 
 // static
@@ -248,22 +240,21 @@ bool BugReportUtil::ValidFeedbackSize(const std::string& content) {
 #endif
 
 // static
-void BugReportUtil::SendReport(Profile* profile,
-    int problem_type,
-    const std::string& page_url_text,
-    const std::string& description,
-    const char* png_data,
-    int png_data_length,
-    int png_width,
+void BugReportUtil::SendReport(
+    Profile* profile
+    , int problem_type
+    , const std::string& page_url_text
+    , const std::string& description
+    , ScreenshotDataPtr image_data_ptr
+    , int png_width
+    , int png_height
 #if defined(OS_CHROMEOS)
-    int png_height,
-    const std::string& user_email_text,
-    const char* zipped_logs_data,
-    int zipped_logs_length,
-    const chromeos::system::LogDictionaryType* const sys_info) {
-#else
-    int png_height) {
+    , const std::string& user_email_text
+    , const char* zipped_logs_data
+    , int zipped_logs_length
+    , const chromeos::system::LogDictionaryType* const sys_info
 #endif
+    ) {
   // Create google feedback protocol buffer objects
   userfeedback::ExternalExtensionSubmit feedback_data;
   // type id set to 0, unused field but needs to be initialized to 0
@@ -309,7 +300,7 @@ void BugReportUtil::SendReport(Profile* profile,
   AddFeedbackData(&feedback_data, std::string(kOsVersionTag), os_version);
 
   // Include the page image if we have one.
-  if (png_data) {
+  if (image_data_ptr.get() && image_data_ptr->size()) {
     userfeedback::PostedScreenshot screenshot;
     screenshot.set_mime_type(kPngMimeType);
     // Set the dimensions of the screenshot
@@ -317,7 +308,10 @@ void BugReportUtil::SendReport(Profile* profile,
     dimensions.set_width(static_cast<float>(png_width));
     dimensions.set_height(static_cast<float>(png_height));
     *(screenshot.mutable_dimensions()) = dimensions;
-    screenshot.set_binary_content(std::string(png_data, png_data_length));
+
+    int image_data_size = image_data_ptr->size();
+    char* image_data = reinterpret_cast<char*>(&(image_data_ptr->front()));
+    screenshot.set_binary_content(std::string(image_data, image_data_size));
 
     // Set the screenshot object in feedback
     *(feedback_data.mutable_screenshot()) = screenshot;
@@ -327,11 +321,12 @@ void BugReportUtil::SendReport(Profile* profile,
   if (sys_info) {
     // Add the product specific data
     for (chromeos::system::LogDictionaryType::const_iterator i =
-             sys_info->begin(); i != sys_info->end(); ++i)
+             sys_info->begin(); i != sys_info->end(); ++i) {
       if (!CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kCompressSystemFeedback) || ValidFeedbackSize(i->second)) {
         AddFeedbackData(&feedback_data, i->first, i->second);
       }
+    }
 
     // If we have zipped logs, add them here
     if (zipped_logs_data && CommandLine::ForCurrentProcess()->HasSwitch(
@@ -385,3 +380,32 @@ void BugReportUtil::ReportPhishing(TabContents* currentTab,
       PageTransition::LINK);
 }
 #endif
+
+static std::vector<unsigned char>* screenshot_png = NULL;
+static gfx::Rect* screenshot_size = NULL;
+
+// static
+std::vector<unsigned char>* BugReportUtil::GetScreenshotPng() {
+  if (screenshot_png == NULL)
+    screenshot_png = new std::vector<unsigned char>;
+  return screenshot_png;
+}
+
+// static
+void BugReportUtil::ClearScreenshotPng() {
+  if (screenshot_png)
+    screenshot_png->clear();
+}
+
+// static
+gfx::Rect& BugReportUtil::GetScreenshotSize() {
+  if (screenshot_size == NULL)
+    screenshot_size = new gfx::Rect();
+  return *screenshot_size;
+}
+
+// static
+void BugReportUtil::SetScreenshotSize(const gfx::Rect& rect) {
+  gfx::Rect& screen_size = GetScreenshotSize();
+  screen_size = rect;
+}

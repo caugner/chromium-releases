@@ -28,8 +28,8 @@
 #include "chrome/test/automation/proxy_launcher.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
-#include "chrome/test/ui_test_utils.h"
 #include "content/browser/net/url_request_slow_http_job.h"
 #include "content/common/json_value_serializer.h"
 #include "net/base/host_port_pair.h"
@@ -63,9 +63,13 @@ class ExternalTabUITestMockLauncher : public ProxyLauncher {
     return *mock_;
   }
 
-  void InitializeConnection(const LaunchState& state,
-                            bool wait_for_initial_loads) {
-    ASSERT_TRUE(LaunchBrowserAndServer(state, wait_for_initial_loads));
+  bool InitializeConnection(
+      const LaunchState& state,
+      bool wait_for_initial_loads) OVERRIDE WARN_UNUSED_RESULT {
+    bool launch_browser_and_server =
+        LaunchBrowserAndServer(state, wait_for_initial_loads);
+    EXPECT_TRUE(launch_browser_and_server);
+    return launch_browser_and_server;
   }
 
   void TerminateConnection() {
@@ -509,8 +513,7 @@ TEST_F(AutomationProxyTest, AcceleratorExtensions) {
 
   ASSERT_TRUE(window->RunCommand(IDC_MANAGE_EXTENSIONS));
 
-  // We expect the RunCommand above to wait until the title is updated.
-  EXPECT_EQ(L"Extensions", GetActiveTabTitle());
+  EXPECT_EQ("chrome://settings/extensionSettings", GetActiveTabURL().spec());
 }
 
 TEST_F(AutomationProxyTest, AcceleratorHistory) {
@@ -1076,8 +1079,8 @@ TEST_F(ExternalTabUITest, FLAKY_PostMessageTarget)  {
   loop.RunFor(TestTimeouts::action_max_timeout_ms());
 }
 
-// Flaky, http://crbug.com/42545.
-TEST_F(ExternalTabUITest, FLAKY_HostNetworkStack) {
+// Disabled, http://crbug.com/42545.
+TEST_F(ExternalTabUITest, DISABLED_HostNetworkStack) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -1147,8 +1150,8 @@ TEST_F(ExternalTabUITest, FLAKY_HostNetworkStack) {
   loop.RunFor(TestTimeouts::action_max_timeout_ms());
 }
 
-// Flaky, http://crbug.com/61023.
-TEST_F(ExternalTabUITest, FLAKY_HostNetworkStackAbortRequest) {
+// Disabled, http://crbug.com/61023.
+TEST_F(ExternalTabUITest, DISABLED_HostNetworkStackAbortRequest) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -1189,8 +1192,8 @@ TEST_F(ExternalTabUITest, FLAKY_HostNetworkStackAbortRequest) {
   loop.RunFor(TestTimeouts::action_max_timeout_ms());
 }
 
-// Flaky, http://crbug.com/61023.
-TEST_F(ExternalTabUITest, FLAKY_HostNetworkStackUnresponsiveRenderer) {
+// Disabled, http://crbug.com/61023.
+TEST_F(ExternalTabUITest, DISABLED_HostNetworkStackUnresponsiveRenderer) {
   scoped_refptr<TabProxy> tab;
   TimedMessageLoopRunner loop(MessageLoop::current());
   ASSERT_THAT(mock_, testing::NotNull());
@@ -1268,8 +1271,8 @@ class ExternalTabUITestPopupEnabled : public ExternalTabUITest {
 
 #if defined(OS_WIN)
 // http://crbug.com/61023 - Fails on one popular operating system.
-#define MAYBE_WindowDotOpen FLAKY_WindowDotOpen
-#define MAYBE_UserGestureTargetBlank FLAKY_UserGestureTargetBlank
+#define MAYBE_WindowDotOpen DISABLED_WindowDotOpen
+#define MAYBE_UserGestureTargetBlank DISABLED_UserGestureTargetBlank
 #else
 #define MAYBE_WindowDotOpen WindowDotOpen
 #define MAYBE_UserGestureTargetBlank UserGestureTargetBlank

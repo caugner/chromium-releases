@@ -119,6 +119,9 @@ below:
     <output filename="webkit_strings_da.pak" type="data_package" lang="da" />
     <output filename="webkit_strings_de.pak" type="data_package" lang="de" />
     <output filename="webkit_strings_el.pak" type="data_package" lang="el" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="webkit_strings_en-AU.pak" type="data_package" lang="en-AU" />
+    </if>
     <output filename="webkit_strings_en-GB.pak" type="data_package" lang="en-GB" />
     <output filename="webkit_strings_en-US.pak" type="data_package" lang="en" />
     <if expr="pp_ifdef('use_third_party_translations')">
@@ -131,6 +134,7 @@ below:
       <output filename="webkit_strings_eu.pak" type="data_package" lang="eu" />
     </if>
     <output filename="webkit_strings_fa.pak" type="data_package" lang="fa" />
+    <output filename="webkit_strings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
     <output filename="webkit_strings_fi.pak" type="data_package" lang="fi" />
     <output filename="webkit_strings_fil.pak" type="data_package" lang="fil" />
     <output filename="webkit_strings_fr.pak" type="data_package" lang="fr" />
@@ -144,6 +148,7 @@ below:
     <output filename="webkit_strings_hu.pak" type="data_package" lang="hu" />
     <if expr="pp_ifdef('use_third_party_translations')">
       <output filename="webkit_strings_hy.pak" type="data_package" lang="hy" />
+      <output filename="webkit_strings_ia.pak" type="data_package" lang="ia" />
     </if>
     <output filename="webkit_strings_id.pak" type="data_package" lang="id" />
     <output filename="webkit_strings_it.pak" type="data_package" lang="it" />
@@ -161,6 +166,9 @@ below:
     <output filename="webkit_strings_lv.pak" type="data_package" lang="lv" />
     <output filename="webkit_strings_ml.pak" type="data_package" lang="ml" />
     <output filename="webkit_strings_mr.pak" type="data_package" lang="mr" />
+    <if expr="pp_ifdef('use_third_party_translations')">
+      <output filename="webkit_strings_ms.pak" type="data_package" lang="ms" />
+    </if>
     <output filename="webkit_strings_nl.pak" type="data_package" lang="nl" />
     <!-- The translation console uses 'no' for Norwegian Bokmål. It should
          be 'nb'. -->
@@ -186,7 +194,6 @@ below:
     <output filename="webkit_strings_vi.pak" type="data_package" lang="vi" />
     <output filename="webkit_strings_zh-CN.pak" type="data_package" lang="zh-CN" />
     <output filename="webkit_strings_zh-TW.pak" type="data_package" lang="zh-TW" />
-    <output filename="webkit_strings_fake-bidi.pak" type="data_package" lang="fake-bidi" />
   </outputs>
   <translations>
     <file path="resources/webkit_strings_am.xtb" lang="am" />
@@ -201,6 +208,7 @@ below:
     <file path="resources/webkit_strings_da.xtb" lang="da" />
     <file path="resources/webkit_strings_de.xtb" lang="de" />
     <file path="resources/webkit_strings_el.xtb" lang="el" />
+    <file path="../../third_party/launchpad_translations/webkit_strings_en-AU.xtb" lang="en-AU" />
     <file path="resources/webkit_strings_en-GB.xtb" lang="en-GB" />
     <file path="resources/webkit_strings_es.xtb" lang="es" />
     <file path="resources/webkit_strings_es-419.xtb" lang="es-419" />
@@ -230,6 +238,7 @@ below:
     <file path="resources/webkit_strings_lv.xtb" lang="lv" />
     <file path="resources/webkit_strings_ml.xtb" lang="ml" />
     <file path="resources/webkit_strings_mr.xtb" lang="mr" />
+    <file path="../../third_party/launchpad_translations/webkit_strings_ms.xtb" lang="ms" />
     <file path="resources/webkit_strings_nl.xtb" lang="nl" />
     <file path="resources/webkit_strings_no.xtb" lang="no" />
     <file path="resources/webkit_strings_pl.xtb" lang="pl" />

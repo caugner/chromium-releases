@@ -13,19 +13,21 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/download/download_types.h"
-#include "chrome/browser/download/download_util.h"
-#include "chrome/browser/profiles/profile.h"
+#include "content/browser/browser_context.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/content_browser_client.h"
+#include "content/browser/download/download_stats.h"
+#include "content/browser/download/download_types.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/browser/ppapi_broker_process_host.h"
 #include "content/browser/renderer_host/browser_render_process_host.h"
+#include "content/browser/renderer_host/media/media_observer.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
+#include "content/browser/resource_context.h"
 #include "content/browser/user_metrics.h"
 #include "content/common/content_switches.h"
 #include "content/common/desktop_notification_messages.h"
@@ -35,6 +37,7 @@
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/audio/audio_util.h"
+#include "media/base/media_log_event.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver_impl.h"
 #include "net/base/io_buffer.h"
@@ -53,7 +56,8 @@
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin.h"
-#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/plugin_constants.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_MACOSX)
 #include "content/common/font_descriptor_mac.h"
@@ -67,6 +71,7 @@
 #endif
 
 using net::CookieStore;
+using content::PluginServiceFilter;
 
 namespace {
 
@@ -118,27 +123,43 @@ class OpenChannelToNpapiPluginCallback : public RenderMessageCompletionCallback,
                                          public PluginProcessHost::Client {
  public:
   OpenChannelToNpapiPluginCallback(RenderMessageFilter* filter,
+                                   const content::ResourceContext& context,
                                    IPC::Message* reply_msg)
-      : RenderMessageCompletionCallback(filter, reply_msg) {
+      : RenderMessageCompletionCallback(filter, reply_msg),
+        context_(context) {
   }
 
-  virtual int ID() {
+  virtual int ID() OVERRIDE {
     return filter()->render_process_id();
   }
 
-  virtual bool OffTheRecord() {
-    return filter()->OffTheRecord();
+  virtual const content::ResourceContext& GetResourceContext() OVERRIDE {
+    return context_;
   }
 
-  virtual void SetPluginInfo(const webkit::npapi::WebPluginInfo& info) {
+  virtual bool OffTheRecord() OVERRIDE {
+    if (filter()->OffTheRecord())
+      return true;
+    if (content::GetContentClient()->browser()->AllowSaveLocalState(context_))
+      return false;
+
+    // For now, only disallow storing data for Flash <http://crbug.com/97319>.
+    for (size_t i = 0; i < info_.mime_types.size(); ++i) {
+      if (info_.mime_types[i].mime_type == kFlashPluginSwfMimeType)
+        return true;
+    }
+    return false;
+  }
+
+  virtual void SetPluginInfo(const webkit::WebPluginInfo& info) OVERRIDE {
     info_ = info;
   }
 
-  virtual void OnChannelOpened(const IPC::ChannelHandle& handle) {
+  virtual void OnChannelOpened(const IPC::ChannelHandle& handle) OVERRIDE {
     WriteReplyAndDeleteThis(handle);
   }
 
-  virtual void OnError() {
+  virtual void OnError() OVERRIDE {
     WriteReplyAndDeleteThis(IPC::ChannelHandle());
   }
 
@@ -149,7 +170,8 @@ class OpenChannelToNpapiPluginCallback : public RenderMessageCompletionCallback,
     SendReplyAndDeleteThis();
   }
 
-  webkit::npapi::WebPluginInfo info_;
+  const content::ResourceContext& context_;
+  webkit::WebPluginInfo info_;
 };
 
 class OpenChannelToPpapiPluginCallback : public RenderMessageCompletionCallback,
@@ -270,18 +292,18 @@ class DoomEntriesHelper {
 RenderMessageFilter::RenderMessageFilter(
     int render_process_id,
     PluginService* plugin_service,
-    Profile* profile,
+    content::BrowserContext* browser_context,
     net::URLRequestContextGetter* request_context,
     RenderWidgetHelper* render_widget_helper)
     : resource_dispatcher_host_(
           content::GetContentClient()->browser()->GetResourceDispatcherHost()),
       plugin_service_(plugin_service),
-      profile_(profile),
+      browser_context_(browser_context),
       request_context_(request_context),
-      resource_context_(profile->GetResourceContext()),
+      resource_context_(browser_context->GetResourceContext()),
       render_widget_helper_(render_widget_helper),
-      incognito_(profile->IsOffTheRecord()),
-      webkit_context_(profile->GetWebKitContext()),
+      incognito_(browser_context->IsOffTheRecord()),
+      webkit_context_(browser_context->GetWebKitContext()),
       render_process_id_(render_process_id) {
   DCHECK(request_context_);
 
@@ -369,6 +391,7 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
     IPC_MESSAGE_HANDLER(ViewHostMsg_AsyncOpenFile, OnAsyncOpenFile)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareSampleRate,
                         OnGetHardwareSampleRate)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_MediaLogEvent, OnMediaLogEvent)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
 
@@ -380,9 +403,7 @@ void RenderMessageFilter::OnDestruct() const {
 }
 
 bool RenderMessageFilter::OffTheRecord() const {
-  return incognito_ ||
-         !content::GetContentClient()->browser()->AllowSaveLocalState(
-             resource_context_);
+  return incognito_;
 }
 
 void RenderMessageFilter::OnMsgCreateWindow(
@@ -514,7 +535,7 @@ void RenderMessageFilter::OnPreCacheFont(const LOGFONT& font) {
 
 void RenderMessageFilter::OnGetPlugins(
     bool refresh,
-    std::vector<webkit::npapi::WebPluginInfo>* plugins) {
+    std::vector<webkit::WebPluginInfo>* plugins) {
   // Don't refresh if the specified threshold has not been passed.  Note that
   // this check is performed before off-loading to the file thread.  The reason
   // we do this is that some pages tend to request that the list of plugins be
@@ -522,42 +543,46 @@ void RenderMessageFilter::OnGetPlugins(
   // is accumulated by doing multiple reads from disk.  This effect is
   // multiplied when we have several pages requesting this operation.
   if (refresh) {
-      const base::TimeDelta threshold = base::TimeDelta::FromSeconds(
-          kPluginsRefreshThresholdInSeconds);
-      const base::TimeTicks now = base::TimeTicks::Now();
-      if (now - last_plugin_refresh_time_ < threshold)
-        refresh = false;  // Ignore refresh request; threshold not exceeded yet.
-      else
-        last_plugin_refresh_time_ = now;
+    const base::TimeDelta threshold = base::TimeDelta::FromSeconds(
+        kPluginsRefreshThresholdInSeconds);
+    const base::TimeTicks now = base::TimeTicks::Now();
+    if (now - last_plugin_refresh_time_ >= threshold) {
+      // Only refresh if the threshold hasn't been exceeded yet.
+      webkit::npapi::PluginList::Singleton()->RefreshPlugins();
+      last_plugin_refresh_time_ = now;
+    }
   }
 
-  webkit::npapi::PluginList::Singleton()->GetEnabledPlugins(refresh, plugins);
+  PluginService::GetInstance()->GetPlugins(resource_context_,
+                                           plugins);
 }
 
 void RenderMessageFilter::OnGetPluginInfo(
     int routing_id,
     const GURL& url,
-    const GURL& policy_url,
+    const GURL& page_url,
     const std::string& mime_type,
     bool* found,
-    webkit::npapi::WebPluginInfo* info,
+    webkit::WebPluginInfo* info,
     std::string* actual_mime_type) {
+  bool allow_wildcard = true;
   *found = plugin_service_->GetPluginInfo(
-      render_process_id_, routing_id, url, mime_type, info, actual_mime_type);
-
-  if (*found) {
-    if (!plugin_service_->PluginAllowedForURL(info->path, policy_url))
-      info->enabled |= webkit::npapi::WebPluginInfo::POLICY_DISABLED;
-  }
+      render_process_id_, routing_id, resource_context_,
+      url, page_url, mime_type, allow_wildcard,
+      NULL, info, actual_mime_type);
 }
 
 void RenderMessageFilter::OnOpenChannelToPlugin(int routing_id,
                                                 const GURL& url,
+                                                const GURL& policy_url,
                                                 const std::string& mime_type,
                                                 IPC::Message* reply_msg) {
   plugin_service_->OpenChannelToNpapiPlugin(
-      render_process_id_, routing_id, url, mime_type,
-      new OpenChannelToNpapiPluginCallback(this, reply_msg));
+      render_process_id_, routing_id,
+      url, policy_url, mime_type,
+      new OpenChannelToNpapiPluginCallback(this,
+                                           resource_context_,
+                                           reply_msg));
 }
 
 void RenderMessageFilter::OnOpenChannelToPepperPlugin(
@@ -599,8 +624,8 @@ void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
                                            render_process_id_,
                                            message.routing_id(),
                                            resource_context_);
-  download_util::RecordDownloadCount(
-      download_util::INITIATED_BY_RENDERER_COUNT);
+  download_stats::RecordDownloadCount(
+      download_stats::INITIATED_BY_RENDERER_COUNT);
 }
 
 void RenderMessageFilter::OnCheckNotificationPermission(
@@ -859,6 +884,10 @@ void RenderMessageFilter::AsyncOpenFileOnFileThread(const FilePath& path,
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE, NewRunnableMethod(
           this, &RenderMessageFilter::Send, reply));
+}
+
+void RenderMessageFilter::OnMediaLogEvent(const media::MediaLogEvent& event) {
+  resource_context_.media_observer()->OnMediaEvent(render_process_id_, event);
 }
 
 void RenderMessageFilter::CheckPolicyForCookies(

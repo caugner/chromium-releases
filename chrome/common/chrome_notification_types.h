@@ -10,7 +10,7 @@
 
 namespace chrome {
 
-enum {
+enum NotificationType {
   NOTIFICATION_CHROME_START = content::NOTIFICATION_CONTENT_END,
 
   // Browser-window ----------------------------------------------------------
@@ -45,10 +45,6 @@ enum {
   // Indicates that a top window has been closed.  The source is the HWND
   // that was closed, no details are expected.
   NOTIFICATION_WINDOW_CLOSED,
-
-  // Sent when an info bubble has been created but not yet shown. The source
-  // is the InfoBubble.
-  NOTIFICATION_INFO_BUBBLE_CREATED,
 
   // Sent when the language (English, French...) for a page has been detected.
   // The details Details<std::string> contain the ISO 639-1 language code and
@@ -102,10 +98,6 @@ enum {
   // pointers to the old and new delegates, respectively.
   NOTIFICATION_TAB_CONTENTS_INFOBAR_REPLACED,
 
-  // This is sent when an externally hosted tab is created. The details
-  // contain the ExternalTabContainer that contains the tab
-  NOTIFICATION_EXTERNAL_TAB_CREATED,
-
   // This is sent when an externally hosted tab is closed.  No details are
   // expected.
   NOTIFICATION_EXTERNAL_TAB_CLOSED,
@@ -127,12 +119,6 @@ enum {
   NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
 
   // Stuff inside the tabs ---------------------------------------------------
-
-  // This message is sent after a constrained window has been closed.  The
-  // source is a Source<ConstrainedWindow> with a pointer to the closed child
-  // window.  (The pointer isn't usable, except for identification.) No
-  // details are expected.
-  NOTIFICATION_CWINDOW_CLOSED,
 
   // Notification from TabContents that we have received a response from the
   // renderer in response to a dom automation controller action.
@@ -157,13 +143,6 @@ enum {
   // Sent just before the installation confirm dialog is shown. The source
   // is the ExtensionInstallUI, the details are NoDetails.
   NOTIFICATION_EXTENSION_WILL_SHOW_CONFIRM_DIALOG,
-
-  // Used to monitor web cache usage by notifying whenever the
-  // CacheManagerHost observes new UsageStats. The source will be the
-  // RenderProcessHost that corresponds to the new statistics. Details are a
-  // UsageStats object sent by the renderer, and should be copied - ptr not
-  // guaranteed to be valid after the notification.
-  NOTIFICATION_WEB_CACHE_STATS_OBSERVED,
 
   // BackgroundContents ------------------------------------------------------
 
@@ -190,12 +169,6 @@ enum {
   // and the details are the BackgroundContents.
   NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED,
 
-  // This is sent when network interception is disabled for a plugin, or the
-  // plugin is unloaded.  This should only be sent/received on the browser IO
-  // thread or the plugin thread. The source is the plugin that is disabling
-  // interception.  No details are expected.
-  NOTIFICATION_CHROME_PLUGIN_UNLOADED,
-
   // This is sent when a login prompt is shown.  The source is the
   // Source<NavigationController> for the tab in which the prompt is shown.
   // Details are a LoginNotificationDetails which provide the LoginHandler
@@ -219,13 +192,6 @@ enum {
   NOTIFICATION_AUTH_CANCELLED,
 
   // History -----------------------------------------------------------------
-
-  // Sent when a history service is created on the main thread. This is sent
-  // after history is created, but before it has finished loading. Use
-  // HISTORY_LOADED is you need to know when loading has completed.
-  // The source is the profile that the history service belongs to, and the
-  // details is the pointer to the newly created HistoryService object.
-  NOTIFICATION_HISTORY_CREATED,
 
   // Sent when a history service has finished loading. The source is the
   // profile that the history service belongs to, and the details is the
@@ -294,15 +260,6 @@ enum {
   // used.
   NOTIFICATION_TOP_SITES_CHANGED,
 
-  // Thumbnails---------------------------------------------------------------
-
-  // Sent by the ThumbnailGenerator whenever a render widget host
-  // updates its backing store.  The source is the
-  // ThumbnailGenerator, and the details are the RenderWidgetHost
-  // that notified the ThumbnailGenerator that its backing store was
-  // updated.
-  NOTIFICATION_THUMBNAIL_GENERATOR_SNAPSHOT_CHANGED,
-
   // Bookmarks ---------------------------------------------------------------
 
   // Sent when the starred state of a URL changes. A URL is starred if there
@@ -335,11 +292,6 @@ enum {
   // Profile, and the details the id of the TemplateURL being removed.
   NOTIFICATION_TEMPLATE_URL_REMOVED,
 
-  // Notification triggered when a web application has been installed or
-  // uninstalled. Any application view should reload its data.  The source is
-  // the profile. No details are provided.
-  NOTIFICATION_WEB_APP_INSTALL_CHANGED,
-
   // This is sent to a pref observer when a pref is changed. The source is the
   // PrefService and the details a std::string of the changed path.
   NOTIFICATION_PREF_CHANGED,
@@ -347,12 +299,6 @@ enum {
   // This is broadcast after the preference subsystem has completed
   // asynchronous initalization of a PrefService.
   NOTIFICATION_PREF_INITIALIZATION_COMPLETED,
-
-  // Sent when a default request context has been created, so calling
-  // Profile::GetDefaultRequestContext() will not return NULL.  This is sent
-  // on the thread where Profile::GetRequestContext() is first called, which
-  // should be the UI thread.
-  NOTIFICATION_DEFAULT_REQUEST_CONTEXT_AVAILABLE,
 
   // The state of a web resource has been changed. A resource may have been
   // added, removed, or altered. Source is WebResourceService, and the
@@ -368,12 +314,6 @@ enum {
   // This is sent when an item of the Omnibox popup is selected. The source
   // is the profile.
   NOTIFICATION_OMNIBOX_OPENED_URL,
-
-  // Sent by the omnibox when it is destroyed.
-  NOTIFICATION_OMNIBOX_DESTROYED,
-
-  // Sent by the omnibox when it is focused.
-  NOTIFICATION_OMNIBOX_FOCUSED,
 
   // Sent when the main Google URL has been updated.  Some services cache
   // this value and need to update themselves when it changes.  See
@@ -392,11 +332,6 @@ enum {
   NOTIFICATION_PRINT_JOB_RELEASED,
 
   // Shutdown ----------------------------------------------------------------
-
-  // Sent on the browser IO thread when an net::URLRequestContext is released
-  // by its owning Profile.  The source is a pointer to the
-  // net::URLRequestContext.
-  NOTIFICATION_URL_REQUEST_CONTEXT_RELEASED,
 
   // Sent when WM_ENDSESSION has been received, after the browsers have been
   // closed but before browser process has been shutdown. The source/details
@@ -432,6 +367,10 @@ enum {
   // Sent when attempting to load a new extension, but they are disabled. The
   // details are an Extension*, and the source is a Profile*.
   NOTIFICATION_EXTENSION_UPDATE_DISABLED,
+
+  // Sent when an extension's permissions change. The details are an
+  // UpdatedExtensionPermissionsInfo, and the source is a Profile.
+  NOTIFICATION_EXTENSION_PERMISSIONS_UPDATED,
 
   // Sent when an extension is about to be installed so we can (in the case of
   // themes) alert the user with a loading dialog. The source is the download
@@ -637,12 +576,6 @@ enum {
 
   // Upgrade notifications ---------------------------------------------------
 
-  // Sent when Chrome detects that it has been upgraded behind the scenes.
-  // NOTE: The detection mechanism is asynchronous, so this event may arrive
-  // quite some time after the upgrade actually happened. No details are
-  // expected.
-  NOTIFICATION_UPGRADE_DETECTED,
-
   // Sent when Chrome believes an update has been installed and available for
   // long enough with the user shutting down to let it take effect. See
   // upgrade_detector.cc for details on how long it waits. No details are
@@ -693,6 +626,11 @@ enum {
   // Details will be an AccessibilityMenuInfo.
   NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
 
+  // Notification that the volume was changed, for propagating
+  // to an accessibility extension.
+  // Details will be an AccessibilityVolumeInfo.
+  NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED,
+
   // Content Settings --------------------------------------------------------
 
   // Sent when content settings change. The source is a HostContentSettings
@@ -702,10 +640,6 @@ enum {
   // Sent when the collect cookies dialog is shown. The source is a
   // TabSpecificContentSettings object, there are no details.
   NOTIFICATION_COLLECTED_COOKIES_SHOWN,
-
-  // Sent when the default setting for desktop notifications has changed.
-  // The source is the DesktopNotificationService, the details are None.
-  NOTIFICATION_DESKTOP_NOTIFICATION_DEFAULT_CHANGED,
 
   // Sent when a non-default setting in the the notification content settings
   // map has changed. The source is the DesktopNotificationService, the
@@ -778,8 +712,8 @@ enum {
   NOTIFICATION_TOKEN_REQUEST_FAILED,
 
   // When a service has a new token they got from a frontend that the
-  // TokenService should know about, fire this notification. The details
-  // are a TokenAvailableDetails object.
+  // TokenService should know about, fire this notification. The source is the
+  // Profile. The details are a TokenAvailableDetails object.
   NOTIFICATION_TOKEN_UPDATED,
 
   // Sent when a user signs into Google services such as sync.
@@ -822,6 +756,9 @@ enum {
   // all and the details are AuthenticationNotificationDetails.
   NOTIFICATION_LOGIN_AUTHENTICATION,
 
+  // Sent when webui login screen is ready and gaia iframe has loaded.
+  NOTIFICATION_LOGIN_WEBUI_READY,
+
   // Sent when a panel state changed.
   NOTIFICATION_PANEL_STATE_CHANGED,
 
@@ -838,12 +775,6 @@ enum {
   // is being deleted, so the receiver shouldn't use the screen locker
   // object.
   NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-
-  // Sent when the network state has changed on UI thread.
-  // The source is AllSources and the details is NetworkStateDetails defined
-  // in chrome/browser/chromeos/network_state_notifier.h.
-  // TODO(oshima): Port this to all platforms.
-  NOTIFICATION_NETWORK_STATE_CHANGED,
 
   // Sent when an attempt to acquire the public key of the owner of a chromium
   // os device has succeeded.
@@ -906,8 +837,16 @@ enum {
   // |webkit_glue::PasswordForm|s that were affected.
   NOTIFICATION_LOGINS_CHANGED,
 
+  // Sent when an import process has ended.
+  NOTIFICATION_IMPORT_FINISHED,
+
   // Sent when the applications in the NTP app launcher have been reordered.
   NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
+
+  // Sent when an app is installed and an NTP has been shown. Source is the
+  // TabContents that was shown, and Details is the string ID of the extension
+  // which was installed.
+  NOTIFICATION_APP_INSTALLED_TO_NTP,
 
 #if defined(OS_CHROMEOS)
   // Sent when WebSocketProxy started accepting connections.
@@ -918,6 +857,11 @@ enum {
   NOTIFICATION_WEB_STORE_PROMO_LOADED,
 
 #if defined(TOUCH_UI)
+  // Sent when the keyboard visibility has changed. Used for testing purposes
+  // only. Source is the keyboard manager, and Details is a boolean indicating
+  // whether the keyboard is visibile or not.
+  NOTIFICATION_KEYBOARD_VISIBILITY_CHANGED,
+
   // Sent when an API for hiding the keyboard is invoked from JavaScript code.
   NOTIFICATION_HIDE_KEYBOARD_INVOKED,
 
@@ -931,11 +875,18 @@ enum {
 #endif
 
   // Protocol Handler Registry -----------------------------------------------
-  // Sent when a ProtocolHandlerRegistry is changed.
+  // Sent when a ProtocolHandlerRegistry is changed. The source is the profile.
   NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
 
   // Sent when the cached profile info has changed.
   NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
+
+  // Sent when the browser enters or exits fullscreen mode.
+  NOTIFICATION_FULLSCREEN_CHANGED,
+
+  // Sent by the PluginPrefs when there is a change of plugin
+  // enable/disable status.
+  NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
 
   // Note:-
   // Currently only Content and Chrome define and use notifications.

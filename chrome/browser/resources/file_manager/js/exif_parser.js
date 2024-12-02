@@ -101,12 +101,13 @@ ExifParser.prototype.parse = function(file, callback, errorCallback) {
 
       var metadata = {
         metadataType: 'exif',
+        littleEndian: (order == EXIF_ALIGN_LITTLE),
         ifd: {
           image: {},
           thumbnail: {},
           exif: {},
-          gps: {},
-        },
+          gps: {}
+        }
       };
 
       var directoryOffset = br.readScalar(4);
@@ -249,9 +250,11 @@ ExifParser.prototype.readTagValue = function(br, tag) {
 
     case 2: // String
       safeRead(1);
-      tag.value = tag.value.map(
-          function(v) { return String.fromCharCode(v) });
-      tag.value = tag.value.join('');
+      if (tag.componentCount == 1) {
+        tag.value = String.fromCharCode(tag.value);
+      } else {
+        tag.value = String.fromCharCode.apply(null, tag.value);
+      }
       break;
 
     case 3: // Short

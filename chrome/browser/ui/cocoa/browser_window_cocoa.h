@@ -11,6 +11,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "content/common/notification_registrar.h"
+#include "ui/base/ui_base_types.h"
 
 class Browser;
 @class BrowserWindowController;
@@ -27,8 +28,7 @@ class BrowserWindowCocoa : public BrowserWindow,
                            public NotificationObserver {
  public:
   BrowserWindowCocoa(Browser* browser,
-                     BrowserWindowController* controller,
-                     NSWindow* window);
+                     BrowserWindowController* controller);
   virtual ~BrowserWindowCocoa();
 
   // Overridden from BrowserWindow
@@ -53,6 +53,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual gfx::Rect GetRestoredBounds() const;
   virtual gfx::Rect GetBounds() const;
   virtual bool IsMaximized() const;
+  virtual bool IsMinimized() const;
   virtual void SetFullscreen(bool fullscreen);
   virtual bool IsFullscreen() const;
   virtual bool IsFullscreenBubbleVisible() const;
@@ -81,11 +82,11 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual bool IsDownloadShelfVisible() const;
   virtual DownloadShelf* GetDownloadShelf();
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
-  virtual void ShowCollectedCookiesDialog(TabContents* tab_contents);
+  virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper);
   virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
-  virtual void ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                              gfx::NativeWindow parent_window);
+  virtual gfx::NativeWindow ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
+                                           gfx::NativeWindow parent_window);
   virtual void UserChangedTheme();
   virtual int GetExtraRenderViewHeight() const;
   virtual void TabContentsFocused(TabContents* tab_contents);
@@ -115,6 +116,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual gfx::Rect GetInstantBounds();
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds);
+  virtual FindBar* CreateFindBar() OVERRIDE;
 
   // Overridden from NotificationObserver
   virtual void Observe(int type,
@@ -131,8 +133,6 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void DestroyBrowser();
 
  private:
-  int GetCommandId(const NativeWebKeyboardEvent& event);
-  bool HandleKeyboardEventInternal(NSEvent* event);
   NSWindow* window() const;  // Accessor for the (current) |NSWindow|.
   void UpdateSidebarForContents(TabContents* tab_contents);
 
@@ -141,6 +141,7 @@ class BrowserWindowCocoa : public BrowserWindow,
   BrowserWindowController* controller_;  // weak, owns us
   ScopedRunnableMethodFactory<Browser> confirm_close_factory_;
   scoped_nsobject<NSString> pending_window_title_;
+  ui::WindowShowState initial_show_state_;
 };
 
 #endif  // CHROME_BROWSER_UI_COCOA_BROWSER_WINDOW_COCOA_H_

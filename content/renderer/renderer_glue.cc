@@ -26,7 +26,7 @@
 #include "content/renderer/render_thread.h"
 #include "googleurl/src/url_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -191,7 +191,7 @@ uint64 ClipboardGetSequenceNumber() {
 }
 
 void GetPlugins(bool refresh,
-                std::vector<webkit::npapi::WebPluginInfo>* plugins) {
+                std::vector<webkit::WebPluginInfo>* plugins) {
   if (!RenderThread::current()->plugin_refresh_allowed())
     refresh = false;
   RenderThread::current()->Send(new ViewHostMsg_GetPlugins(refresh, plugins));

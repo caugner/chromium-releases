@@ -48,60 +48,60 @@ const char kViewCacheCommand[] = "view-cache";
 const char kViewEntryCommand[] = "view-entry";
 
 void EmitPageStart(std::string* out) {
-  DCHECK(out);
   out->append(
       "<!DOCTYPE HTML>\n"
       "<html><title>AppCache Internals</title>\n"
+      "<meta http-equiv=\"X-WebKit-CSP\""
+      "  content=\"object-src 'none'; script-src 'none'\">\n"
       "<style>\n"
       "body { font-family: sans-serif; font-size: 0.8em; }\n"
       "tt, code, pre { font-family: WebKitHack, monospace; }\n"
+      "form { display: inline; }\n"
       ".subsection_body { margin: 10px 0 10px 2em; }\n"
       ".subsection_title { font-weight: bold; }\n"
       "</style>\n"
-      "<script>\n"
-      "function PerformCommand(command, param) {\n"
-      "  location = location.pathname + '?' + command + '=' + param;\n"
-      "}\n"
-      "</script>\n"
       "</head><body>\n");
 }
 
 void EmitPageEnd(std::string* out) {
-  DCHECK(out);
   out->append("</body></html>\n");
 }
 
-// Appends an input button to |out| with text |label| that sends
-// |command| and |param| back to the browser and navigates the frame
-// to the resulting page.
-void EmitCommandButton(const std::string& label,
-                       const std::string& command,
-                       const std::string& param,
-                       std::string* out) {
-  base::StringAppendF(out, "<input type=\"button\" value=\"%s\" "
-                      "onclick=\"PerformCommand('%s', '%s')\" />\n",
-                      label.c_str(), command.c_str(), param.c_str());
-}
-
-void EmitListItem(const std::string& label,  const std::string& data,
+void EmitListItem(const std::string& label,
+                  const std::string& data,
                   std::string* out) {
-  DCHECK(out);
   out->append("<li>");
-  out->append(label);
-  out->append(data);
+  out->append(EscapeForHTML(label));
+  out->append(EscapeForHTML(data));
   out->append("</li>\n");
 }
 
 void EmitAnchor(const std::string& url, const std::string& text,
                 std::string* out) {
-  out->append("<a href=");
-  out->append(url);
-  out->append(">");
-  out->append(text);
-  out->append("</a><br/>");
+  out->append("<a href=\"");
+  out->append(EscapeForHTML(url));
+  out->append("\">");
+  out->append(EscapeForHTML(text));
+  out->append("</a>");
 }
 
-void EmitAppCacheInfo(AppCacheService* service,
+void EmitCommandAnchor(const char* label,
+                       const GURL& base_url,
+                       const char* command,
+                       const char* param,
+                       std::string* out) {
+  std::string query(command);
+  query.push_back('=');
+  query.append(param);
+  GURL::Replacements replacements;
+  replacements.SetQuery(query.data(),
+                        url_parse::Component(0, query.length()));
+  GURL command_url = base_url.ReplaceComponents(replacements);
+  EmitAnchor(command_url.spec(), label, out);
+}
+
+void EmitAppCacheInfo(const GURL& base_url,
+                      AppCacheService* service,
                       const AppCacheInfo* info,
                       std::string* out) {
   std::string manifest_url_base64;
@@ -110,15 +110,18 @@ void EmitAppCacheInfo(AppCacheService* service,
   out->append("\n<p>");
   out->append(kManifest);
   EmitAnchor(info->manifest_url.spec(), info->manifest_url.spec(), out);
+  out->append("<br/>\n");
   if (!service->appcache_policy()->CanLoadAppCache(
           info->manifest_url)) {
     out->append(kFormattedDisabledAppCacheMsg);
   }
   out->append("\n<br/>\n");
-  EmitCommandButton(kRemoveCacheLabel, kRemoveCacheCommand,
-                    manifest_url_base64, out);
-  EmitCommandButton(kViewCacheLabel, kViewCacheCommand,
-                    manifest_url_base64, out);
+  EmitCommandAnchor(kRemoveCacheLabel, base_url,
+                    kRemoveCacheCommand, manifest_url_base64.c_str(), out);
+  out->append("&nbsp;&nbsp;");
+  EmitCommandAnchor(kViewCacheLabel, base_url,
+                    kViewCacheCommand, manifest_url_base64.c_str(), out);
+  out->append("\n<br/>\n");
   out->append("<ul>");
   EmitListItem(
       kSize,
@@ -140,13 +143,14 @@ void EmitAppCacheInfo(AppCacheService* service,
 }
 
 void EmitAppCacheInfoVector(
+    const GURL& base_url,
     AppCacheService* service,
     const AppCacheInfoVector& appcaches,
     std::string* out) {
   for (std::vector<AppCacheInfo>::const_iterator info =
            appcaches.begin();
        info != appcaches.end(); ++info) {
-    EmitAppCacheInfo(service, &(*info), out);
+    EmitAppCacheInfo(base_url, service, &(*info), out);
   }
 }
 
@@ -340,7 +344,9 @@ class MainPageJob : public BaseInternalsJob {
                          origin->second.begin(), origin->second.end());
       }
       std::sort(appcaches.begin(), appcaches.end(), SortByManifestUrl);
-      EmitAppCacheInfoVector(appcache_service_, appcaches, out);
+
+      GURL base_url = ClearQuery(request_->url());
+      EmitAppCacheInfoVector(base_url, appcache_service_, appcaches, out);
     }
     EmitPageEnd(out);
     return true;
@@ -445,8 +451,9 @@ class ViewAppCacheJob : public BaseInternalsJob,
     if (appcache_info_.manifest_url.is_empty()) {
       out->append(kManifestNotFoundMessage);
     } else {
-      EmitAppCacheInfo(appcache_service_, &appcache_info_, out);
-      EmitAppCacheResourceInfoVector(ClearQuery(request_->url()),
+      GURL base_url = ClearQuery(request_->url());
+      EmitAppCacheInfo(base_url, appcache_service_, &appcache_info_, out);
+      EmitAppCacheResourceInfoVector(base_url,
                                      manifest_url_,
                                      resource_infos_, out);
     }
@@ -512,6 +519,7 @@ class ViewEntryJob : public BaseInternalsJob,
     out->clear();
     EmitPageStart(out);
     EmitAnchor(entry_url_.spec(), entry_url_.spec(), out);
+    out->append("<br/>\n");
     if (response_info_) {
       if (response_info_->http_response_info())
         EmitResponseHeaders(response_info_->http_response_info()->headers, out);

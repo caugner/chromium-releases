@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/key_identifier_conversion_views.h"
@@ -58,13 +59,21 @@ ui::EventType GetTypeFromString(const std::string& type) {
   return ui::ET_UNKNOWN;
 }
 
-}  // namespace
-
-void InputFunction::Run() {
-  SendResponse(RunImpl());
+// Converts a hex string "U+NNNN" to uint16. Returns 0 on error.
+uint16 UnicodeIdentifierStringToInt(const std::string& key_identifier) {
+  int character = 0;
+  if ((key_identifier.length() == 6) &&
+      (key_identifier.substr(0, 2) == "U+") &&
+      (key_identifier.substr(2).find_first_not_of("0123456789abcdefABCDEF") ==
+       std::string::npos)) {
+    const bool result =
+        base::HexStringToInt(key_identifier.substr(2), &character);
+    DCHECK(result) << key_identifier;
+  }
+  return character;
 }
 
-views::Widget* SendKeyboardEventInputFunction::GetTopLevelWidget() {
+views::Widget* GetTopLevelWidget(Browser* browser) {
   if (views::ViewsDelegate::views_delegate) {
     views::View* view = views::ViewsDelegate::views_delegate->
                         GetDefaultParentView();
@@ -78,7 +87,6 @@ views::Widget* SendKeyboardEventInputFunction::GetTopLevelWidget() {
     return login_window;
 #endif
 
-  Browser* browser = GetCurrentBrowser();
   if (!browser)
     return NULL;
 
@@ -90,6 +98,8 @@ views::Widget* SendKeyboardEventInputFunction::GetTopLevelWidget() {
       window->GetNativeHandle());
   return browser_view ? browser_view->GetWidget() : NULL;
 }
+
+}  // namespace
 
 bool SendKeyboardEventInputFunction::RunImpl() {
   DictionaryValue* args;
@@ -109,13 +119,20 @@ bool SendKeyboardEventInputFunction::RunImpl() {
 
   const views::KeyEvent& prototype_event =
       KeyEventFromKeyIdentifier(identifier);
+  uint16 character = 0;
   if (prototype_event.key_code() == ui::VKEY_UNKNOWN) {
-    error_ = kUnknownOrUnsupportedKeyIdentiferError;
-    return false;
+    // Check if |identifier| is "U+NNNN" format.
+    character = UnicodeIdentifierStringToInt(identifier);
+    if (!character) {
+      error_ = kUnknownOrUnsupportedKeyIdentiferError;
+      return false;
+    }
   }
 
   bool flag = false;
-  int flags = prototype_event.flags();
+  int flags = 0;
+  if (prototype_event.key_code() != ui::VKEY_UNKNOWN)
+    flags = prototype_event.flags();
   flags |= (args->GetBoolean(kAlt, &flag) && flag) ? ui::EF_ALT_DOWN : 0;
   flags |= (args->GetBoolean(kCtrl, &flag) && flag) ? ui::EF_CONTROL_DOWN : 0;
   flags |= (args->GetBoolean(kShift, &flag) && flag) ? ui::EF_SHIFT_DOWN : 0;
@@ -125,13 +142,18 @@ bool SendKeyboardEventInputFunction::RunImpl() {
     return false;
   }
 
-  views::Widget* widget = GetTopLevelWidget();
+  views::Widget* widget = GetTopLevelWidget(GetCurrentBrowser());
   if (!widget) {
     error_ = kNoValidRecipientError;
     return false;
   }
 
   views::KeyEvent event(type, prototype_event.key_code(), flags);
+  if (character) {
+    event.set_character(character);
+    event.set_unmodified_character(character);
+  }
+
   views::InputMethod* ime = widget->GetInputMethod();
   if (ime) {
     ime->DispatchKeyEvent(event);
@@ -189,6 +211,21 @@ bool SendHandwritingStrokeFunction::RunImpl() {
     EXTENSION_FUNCTION_VALIDATE(dict->GetDouble("y", &y));
     stroke.push_back(std::make_pair(x, y));
   }
+
+  views::Widget* widget = GetTopLevelWidget(GetCurrentBrowser());
+  views::InputMethod* ime = widget ? widget->GetInputMethod() : NULL;
+  if (ime) {
+    static const views::KeyEvent* dummy_keydown = new views::KeyEvent(
+        ui::ET_KEY_PRESSED, ui::VKEY_UNKNOWN, 0);
+    static const views::KeyEvent* dummy_keyup = new views::KeyEvent(
+        ui::ET_KEY_RELEASED, ui::VKEY_UNKNOWN, 0);
+    // These fake key events are necessary for clearing |suppress_next_result_|
+    // flag in view/ime/input_method_*.cc. Otherwise, clicking a candidate in
+    // the candidate window might be ignored.
+    ime->DispatchKeyEvent(*dummy_keydown);
+    ime->DispatchKeyEvent(*dummy_keyup);
+  }
+
   chromeos::input_method::InputMethodManager::GetInstance()->
       SendHandwritingStroke(stroke);
   return true;

@@ -52,7 +52,7 @@ typedef Callback4<QuotaStatusCode,
 typedef Callback2<QuotaStatusCode,
                   int64>::Type AvailableSpaceCallback;
 typedef Callback1<QuotaStatusCode>::Type StatusCallback;
-typedef Callback1<const std::set<GURL>&>::Type GetOriginsCallback;
+typedef Callback2<const std::set<GURL>&, StorageType>::Type GetOriginsCallback;
 
 // Simple template wrapper for a callback queue.
 template <typename CallbackType>
@@ -161,6 +161,10 @@ class CallbackQueueMapBase {
 
   bool HasCallbacks(const KEY& key) const {
     return (callback_map_.find(key) != callback_map_.end());
+  }
+
+  bool HasAnyCallbacks() const {
+    return !callback_map_.empty();
   }
 
   iterator Begin() { return callback_map_.begin(); }

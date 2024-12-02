@@ -6,7 +6,9 @@
 
 #include <string>
 
+#include "base/file_path.h"
 #include "content/browser/webui/empty_web_ui_factory.h"
+#include "content/test/test_tab_contents_view.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -15,6 +17,16 @@
 namespace content {
 
 MockContentBrowserClient::~MockContentBrowserClient() {
+}
+
+BrowserMainParts* MockContentBrowserClient::CreateBrowserMainParts(
+    const MainFunctionParams& parameters) {
+  return NULL;
+}
+
+TabContentsView* MockContentBrowserClient::CreateTabContentsView(
+    TabContents* tab_contents) {
+  return new TestTabContentsView;
 }
 
 void MockContentBrowserClient::RenderViewHostCreated(
@@ -35,12 +47,17 @@ void MockContentBrowserClient::WorkerProcessHostCreated(
 
 WebUIFactory* MockContentBrowserClient::GetWebUIFactory() {
   // Return an empty factory so callsites don't have to check for NULL.
-  return EmptyWebUIFactory::Get();
+  return EmptyWebUIFactory::GetInstance();
 }
 
-GURL MockContentBrowserClient::GetEffectiveURL(Profile* profile,
-                                               const GURL& url) {
+GURL MockContentBrowserClient::GetEffectiveURL(
+    content::BrowserContext* browser_context, const GURL& url) {
   return GURL();
+}
+
+bool MockContentBrowserClient::ShouldUseProcessPerSite(
+    BrowserContext* browser_context, const GURL& effective_url) {
+  return false;
 }
 
 bool MockContentBrowserClient::IsURLSameAsAnySiteInstance(const GURL& url) {
@@ -110,7 +127,10 @@ net::URLRequestContext* MockContentBrowserClient::OverrideRequestContextForURL(
   return NULL;
 }
 
-void MockContentBrowserClient::RevealFolderInOS(const FilePath& path) {
+void MockContentBrowserClient::OpenItem(const FilePath& path) {
+}
+
+void MockContentBrowserClient::ShowItemInFolder(const FilePath& path) {
 }
 
 void MockContentBrowserClient::AllowCertificateError(
@@ -119,7 +139,7 @@ void MockContentBrowserClient::AllowCertificateError(
     Callback2<SSLCertErrorHandler*, bool>::Type* callback) {
 }
 
-void MockContentBrowserClient::ShowClientCertificateRequestDialog(
+void MockContentBrowserClient::SelectClientCertificate(
     int render_process_id,
     int render_view_id,
     SSLClientAuthHandler* handler) {
@@ -188,12 +208,26 @@ DevToolsManager* MockContentBrowserClient::GetDevToolsManager() {
   return NULL;
 }
 
+net::NetLog* MockContentBrowserClient::GetNetLog() {
+  return NULL;
+}
+
+speech_input::SpeechInputManager*
+    MockContentBrowserClient::GetSpeechInputManager() {
+  return NULL;
+}
+
+AccessTokenStore* MockContentBrowserClient::CreateAccessTokenStore() {
+  return NULL;
+}
+
 bool MockContentBrowserClient::IsFastShutdownPossible() {
   return true;
 }
 
-WebPreferences MockContentBrowserClient::GetWebkitPrefs(Profile* profile,
-                                                        bool is_web_ui) {
+WebPreferences MockContentBrowserClient::GetWebkitPrefs(
+    content::BrowserContext* browser_context,
+    bool is_web_ui) {
   return WebPreferences();
 }
 
@@ -214,16 +248,30 @@ void MockContentBrowserClient::ClearCache(RenderViewHost* rvh) {
 void MockContentBrowserClient::ClearCookies(RenderViewHost* rvh) {
 }
 
-void MockContentBrowserClient::ChooseSavePath(
-    const base::WeakPtr<SavePackage>& save_package,
-    const FilePath& suggested_path,
-    bool can_save_as_complete) {
+FilePath MockContentBrowserClient::GetDefaultDownloadDirectory() {
+  return FilePath();
+}
+
+net::URLRequestContextGetter*
+MockContentBrowserClient::GetDefaultRequestContextDeprecatedCrBug64339() {
+  return NULL;
+}
+
+net::URLRequestContextGetter*
+MockContentBrowserClient::GetSystemRequestContext() {
+  return NULL;
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 int MockContentBrowserClient::GetCrashSignalFD(
     const std::string& process_type) {
   return -1;
+}
+#endif
+
+#if defined(OS_WIN)
+const wchar_t* MockContentBrowserClient::GetResourceDllName() {
+  return NULL;
 }
 #endif
 

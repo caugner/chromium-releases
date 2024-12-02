@@ -7,29 +7,29 @@
 
 #include <vector>
 
-#include "ppapi/c/dev/pp_graphics_3d_dev.h"
 #include "ppapi/c/pp_completion_callback.h"
+#include "ppapi/c/pp_graphics_3d.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/proxy/interface_proxy.h"
-#include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_surface_3d_api.h"
 
 struct PPB_Surface3D_Dev;
 
-namespace pp {
+namespace ppapi {
 namespace proxy {
 
 class Context3D;
 
-class Surface3D : public PluginResource,
+class Surface3D : public ppapi::Resource,
                   public ppapi::thunk::PPB_Surface3D_API {
  public:
-  explicit Surface3D(const HostResource& host_resource);
+  explicit Surface3D(const ppapi::HostResource& host_resource);
   virtual ~Surface3D();
 
-  // ResourceObjectBase overrides.
+  // Resource overrides.
   virtual PPB_Surface3D_API* AsPPB_Surface3D_API() OVERRIDE;
 
   // PPB_Surface3D_API implementation.
@@ -51,11 +51,7 @@ class Surface3D : public PluginResource,
 
   Context3D* context() const { return context_; }
 
-  void set_resource(PP_Resource resource) { resource_ = resource; }
-  PP_Resource resource() const { return resource_; }
-
  private:
-  PP_Resource resource_;
   Context3D* context_;
 
   // In the plugin, this is the current callback set for Flushes. When the
@@ -84,19 +80,20 @@ class PPB_Surface3D_Proxy : public InterfaceProxy {
   void OnMsgCreate(PP_Instance instance,
                    PP_Config3D_Dev config,
                    const std::vector<int32_t>& attribs,
-                   HostResource* result);
-  void OnMsgSwapBuffers(const HostResource& surface);
+                   ppapi::HostResource* result);
+  void OnMsgSwapBuffers(const ppapi::HostResource& surface);
   // Renderer->plugin message handlers.
-  void OnMsgSwapBuffersACK(const HostResource& surface, int32_t pp_error);
+  void OnMsgSwapBuffersACK(const ppapi::HostResource& surface,
+                           int32_t pp_error);
 
   void SendSwapBuffersACKToPlugin(int32_t result,
-                                  const HostResource& surface_3d);
+                                  const ppapi::HostResource& surface_3d);
 
-  CompletionCallbackFactory<PPB_Surface3D_Proxy,
-                            ProxyNonThreadSafeRefCount> callback_factory_;
+  pp::CompletionCallbackFactory<PPB_Surface3D_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 };
 
 }  // namespace proxy
-}  // namespace pp
+}  // namespace ppapi
 
 #endif  // PPAPI_PPB_SURFACE_3D_PROXY_H_

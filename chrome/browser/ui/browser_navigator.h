@@ -108,6 +108,9 @@ struct NavigateParams {
   // If non-empty, the new tab is an app tab.
   std::string extension_app_id;
 
+  // If non-empty, the new tab contents encoding is overriden by this value.
+  std::string override_encoding;
+
   // If non-empty, specifies the desired initial position and size of the
   // window if |disposition| == NEW_POPUP.
   // TODO(beng): Figure out if this can be used to create Browser windows
@@ -145,6 +148,16 @@ struct NavigateParams {
   };
   // Default is RESPECT.
   PathBehavior path_behavior;
+
+  // What to do with the ref component of the URL for singleton navigations.
+  enum RefBehavior {
+    // Two URLs with differing refs are same.
+    IGNORE_REF,
+    // Two URLs with differing refs are different.
+    RESPECT_REF,
+  };
+  // Default is IGNORE.
+  RefBehavior ref_behavior;
 
   // [in]  Specifies a Browser object where the navigation could occur or the
   //       tab could be added. Navigate() is not obliged to use this Browser if

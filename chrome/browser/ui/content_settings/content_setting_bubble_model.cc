@@ -9,7 +9,7 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/geolocation/geolocation_content_settings_map.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
@@ -46,7 +46,7 @@ int GetIdForContentType(const ContentSettingsTypeIdEntry* entries,
   return 0;
 }
 
-}
+}  // namespace
 
 class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
  public:
@@ -318,7 +318,7 @@ class ContentSettingCookiesBubbleModel : public ContentSettingSingleRadioGroup {
 
   virtual ~ContentSettingCookiesBubbleModel() {
     if (settings_changed()) {
-      tab_contents()->AddInfoBar(
+      tab_contents()->infobar_tab_helper()->AddInfoBar(
           new CollectedCookiesInfoBarDelegate(tab_contents()->tab_contents()));
     }
   }
@@ -331,7 +331,7 @@ class ContentSettingCookiesBubbleModel : public ContentSettingSingleRadioGroup {
         chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
         Source<TabSpecificContentSettings>(tab_contents()->content_settings()),
         NotificationService::NoDetails());
-    browser()->ShowCollectedCookiesDialog(tab_contents()->tab_contents());
+    browser()->ShowCollectedCookiesDialog(tab_contents());
   }
 };
 
@@ -355,7 +355,7 @@ class ContentSettingPluginBubbleModel : public ContentSettingSingleRadioGroup {
     UserMetrics::RecordAction(UserMetricsAction("ClickToPlay_LoadAll_Bubble"));
     DCHECK(tab_contents());
     RenderViewHost* host = tab_contents()->render_view_host();
-    host->Send(new ViewMsg_LoadBlockedPlugins(host->routing_id()));
+    host->Send(new ChromeViewMsg_LoadBlockedPlugins(host->routing_id()));
     set_custom_link_enabled(false);
     tab_contents()->content_settings()->set_load_plugins_link_enabled(false);
   }
@@ -463,12 +463,17 @@ class ContentSettingDomainListBubbleModel
         tab_contents()->content_settings();
     const GeolocationSettingsState::StateMap& state_map =
         content_settings->geolocation_settings_state().state_map();
-    GeolocationContentSettingsMap* settings_map =
-        profile()->GetGeolocationContentSettingsMap();
+    HostContentSettingsMap* settings_map =
+        profile()->GetHostContentSettingsMap();
+
     for (GeolocationSettingsState::StateMap::const_iterator it =
          state_map.begin(); it != state_map.end(); ++it) {
-      settings_map->SetContentSetting(it->first, embedder_url,
-                                      CONTENT_SETTING_DEFAULT);
+      settings_map->SetContentSetting(
+          ContentSettingsPattern::FromURLNoWildcard(it->first),
+          ContentSettingsPattern::FromURLNoWildcard(embedder_url),
+          CONTENT_SETTINGS_TYPE_GEOLOCATION,
+          std::string(),
+          CONTENT_SETTING_DEFAULT);
     }
   }
 };

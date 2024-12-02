@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@ namespace speech_input {
 // handles requests received from various render views and makes sure only one
 // of them can use speech recognition at a time. It also sends recognition
 // results and status events to the render views when required.
-// This class is a singleton and accessed via the Get method.
 class SpeechInputManager {
  public:
   // Implemented by the dispatcher host to relay events to the render views.
@@ -31,18 +30,13 @@ class SpeechInputManager {
     virtual ~Delegate() {}
   };
 
+  SpeechInputManager();
+
   // Invokes the platform provided microphone settings UI in a non-blocking way,
   // via the BrowserThread::FILE thread.
   static void ShowAudioInputSettings();
 
-  // Factory method to access the singleton. We have this method here instead of
-  // using Singleton directly in the calling code to aid tests in injection
-  // mocks.
-  static SpeechInputManager* Get();
-  // Factory method definition useful for tests.
-  typedef SpeechInputManager* (AccessorMethod)();
-
-  virtual ~SpeechInputManager() {}
+  virtual ~SpeechInputManager();
 
   // Handlers for requests from render views.
 
@@ -64,6 +58,13 @@ class SpeechInputManager {
   virtual void StopRecording(int caller_id) = 0;
 
   virtual void CancelAllRequestsWithDelegate(Delegate* delegate) = 0;
+
+  void set_censor_results(bool censor) { censor_results_ = censor; }
+
+  bool censor_results() { return censor_results_; }
+
+ private:
+  bool censor_results_;
 };
 
 // This typedef is to workaround the issue with certain versions of

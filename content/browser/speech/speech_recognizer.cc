@@ -5,8 +5,9 @@
 #include "content/browser/speech/speech_recognizer.h"
 
 #include "base/time.h"
-#include "chrome/browser/profiles/profile.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/content_browser_client.h"
+#include "content/common/content_client.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using media::AudioInputController;
@@ -58,12 +59,14 @@ SpeechRecognizer::SpeechRecognizer(Delegate* delegate,
                                    int caller_id,
                                    const std::string& language,
                                    const std::string& grammar,
+                                   bool censor_results,
                                    const std::string& hardware_info,
                                    const std::string& origin_url)
     : delegate_(delegate),
       caller_id_(caller_id),
       language_(language),
       grammar_(grammar),
+      censor_results_(censor_results),
       hardware_info_(hardware_info),
       origin_url_(origin_url),
       codec_(AudioEncoder::CODEC_FLAC),
@@ -221,10 +224,13 @@ void SpeechRecognizer::HandleOnData(string* data) {
     // This was the first audio packet recorded, so start a request to the
     // server to send the data and inform the delegate.
     delegate_->DidStartReceivingAudio(caller_id_);
-    request_.reset(new SpeechRecognitionRequest(
-        Profile::Deprecated::GetDefaultRequestContext(), this));
-    request_->Start(language_, grammar_, hardware_info_, origin_url_,
-                    encoder_->mime_type());
+    // Deprecated; see http://crbug.com/92366
+    net::URLRequestContextGetter* context_getter =
+        content::GetContentClient()->browser()->
+            GetDefaultRequestContextDeprecatedCrBug64339();
+    request_.reset(new SpeechRecognitionRequest(context_getter, this));
+    request_->Start(language_, grammar_, censor_results_, hardware_info_,
+                    origin_url_, encoder_->mime_type());
   }
 
   string encoded_data;

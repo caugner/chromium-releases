@@ -8,31 +8,37 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/stl_util.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/prerender/prerender_condition.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
+#include "chrome/browser/prerender/prerender_histograms.h"
 #include "chrome/browser/prerender/prerender_history.h"
-#include "chrome/browser/prerender/prerender_observer.h"
+#include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper_delegate.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/cancelable_request.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/render_view_host_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 
 namespace prerender {
@@ -65,37 +71,6 @@ const char* const kValidHttpMethods[] = {
 const int kHistoryLength = 100;
 
 }  // namespace
-
-// Helper macros for experiment-based and origin-based histogram reporting.
-#define PREFIXED_HISTOGRAM(histogram) \
-  PREFIXED_HISTOGRAM_INTERNAL(GetCurrentOrigin(), GetCurrentExperimentId(), \
-                              IsOriginExperimentWash(), histogram)
-
-#define PREFIXED_HISTOGRAM_PRERENDER_MANAGER(pm, histogram) \
-  PREFIXED_HISTOGRAM_INTERNAL(pm->GetCurrentOrigin(), \
-                              pm->GetCurrentExperimentId(), \
-                              pm->IsOriginExperimentWash(), histogram)
-
-#define PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(origin, experiment, histogram) \
-  PREFIXED_HISTOGRAM_INTERNAL(origin, experiment, false, histogram)
-
-#define PREFIXED_HISTOGRAM_INTERNAL(origin, experiment, wash, histogram) { \
-  static uint8 recording_experiment = kNoExperiment; \
-  if (recording_experiment == kNoExperiment && experiment != kNoExperiment) \
-    recording_experiment = experiment; \
-  if (wash) { \
-    histogram; \
-  } else if (experiment != kNoExperiment && \
-             (origin != ORIGIN_LINK_REL_PRERENDER || \
-              experiment != recording_experiment)) { \
-  } else if (experiment != kNoExperiment) { \
-    histogram; \
-  } else if (origin == ORIGIN_OMNIBOX) { \
-    histogram; \
-  } else { \
-    histogram; \
-  } \
-}
 
 class PrerenderManager::OnCloseTabContentsDeleter : public TabContentsDelegate {
  public:
@@ -141,10 +116,9 @@ void PrerenderManager::SetMode(PrerenderManagerMode mode) {
 
 // static
 bool PrerenderManager::IsPrerenderingPossible() {
-  return
-      GetMode() == PRERENDER_MODE_ENABLED ||
-      GetMode() == PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP ||
-      GetMode() == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP;
+  return GetMode() == PRERENDER_MODE_ENABLED ||
+         GetMode() == PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP ||
+         GetMode() == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP;
 }
 
 // static
@@ -195,19 +169,77 @@ struct PrerenderManager::PendingContentsData {
   Origin origin_;
 };
 
+class PrerenderManager::MostVisitedSites : public NotificationObserver {
+ public:
+  explicit MostVisitedSites(Profile* profile) :
+      profile_(profile) {
+    history::TopSites* top_sites = GetTopSites();
+    if (top_sites) {
+      registrar_.Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
+                     Source<history::TopSites>(top_sites));
+    }
+
+    UpdateMostVisited();
+  }
+
+  void UpdateMostVisited() {
+    history::TopSites* top_sites = GetTopSites();
+    if (top_sites) {
+      top_sites->GetMostVisitedURLs(
+          &topsites_consumer_,
+          NewCallback(this,
+                      &prerender::PrerenderManager::MostVisitedSites::
+                      OnMostVisitedURLsAvailable));
+    }
+  }
+
+  void OnMostVisitedURLsAvailable(const history::MostVisitedURLList& data) {
+    urls_.clear();
+    for (int i = 0; i < static_cast<int>(data.size()); i++)
+      urls_.insert(data[i].url);
+  }
+
+  void Observe(int type,
+               const NotificationSource& source,
+               const NotificationDetails& details) {
+    DCHECK_EQ(type, chrome::NOTIFICATION_TOP_SITES_CHANGED);
+    UpdateMostVisited();
+  }
+
+  bool IsTopSite(const GURL& url) const {
+    return (urls_.count(url) > 0);
+  }
+
+ private:
+  history::TopSites* GetTopSites() const {
+    if (profile_)
+      return profile_->GetTopSites();
+    return NULL;
+  }
+
+  CancelableRequestConsumer topsites_consumer_;
+  Profile* profile_;
+  NotificationRegistrar registrar_;
+  std::set<GURL> urls_;
+};
+
+bool PrerenderManager::IsTopSite(const GURL& url) {
+  if (!most_visited_.get())
+    most_visited_.reset(new MostVisitedSites(profile_));
+  return most_visited_->IsTopSite(url);
+}
+
 PrerenderManager::PrerenderManager(Profile* profile,
                                    PrerenderTracker* prerender_tracker)
     : enabled_(true),
       profile_(profile),
       prerender_tracker_(prerender_tracker),
       prerender_contents_factory_(PrerenderContents::CreateFactory()),
-      last_experiment_id_(kNoExperiment),
-      last_origin_(ORIGIN_LINK_REL_PRERENDER),
-      origin_experiment_wash_(false),
       last_prerender_start_time_(GetCurrentTimeTicks() -
           base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs)),
       runnable_method_factory_(this),
-      prerender_history_(new PrerenderHistory(kHistoryLength)) {
+      prerender_history_(new PrerenderHistory(kHistoryLength)),
+      histograms_(new PrerenderHistograms()) {
   // There are some assumptions that the PrerenderManager is on the UI thread.
   // Any other checks simply make sure that the PrerenderManager is accessed on
   // the same thread that it was created on.
@@ -216,6 +248,7 @@ PrerenderManager::PrerenderManager(Profile* profile,
 
 PrerenderManager::~PrerenderManager() {
   DestroyAllContents(FINAL_STATUS_MANAGER_SHUTDOWN);
+  STLDeleteElements(&prerender_conditions_);
 }
 
 void PrerenderManager::SetPrerenderContentsFactory(
@@ -250,30 +283,10 @@ bool PrerenderManager::AddPrerender(
     const GURL& referrer) {
   DCHECK(CalledOnValidThread());
 
-  // Check if we are doing an experiment.
-  uint8 experiment = GetQueryStringBasedExperiment(url_arg);
+  if (origin == ORIGIN_LINK_REL_PRERENDER && IsGoogleSearchResultURL(referrer))
+    origin = ORIGIN_GWS_PRERENDER;
 
-  // We need to update last_experiment_id_, last_origin_, and
-  // origin_experiment_wash_.
-  if (!WithinWindow()) {
-    // If we are outside a window, this is a fresh start and we are fine,
-    // and there is no mix.
-    origin_experiment_wash_ = false;
-  } else {
-    // If we are inside the last window, there is a mish mash of origins
-    // and experiments if either there was a mish mash before, or the current
-    // experiment/origin does not match the previous one.
-    if (experiment != last_experiment_id_ || origin != last_origin_)
-      origin_experiment_wash_ = true;
-  }
-
-  last_origin_ = origin;
-  last_experiment_id_ = experiment;
-
-  // If we observe multiple tags within the 30 second window, we will still
-  // reset the window to begin at the most recent occurrence, so that we will
-  // always be in a window in the 30 seconds from each occurrence.
-  last_prerender_seen_time_ = GetCurrentTimeTicks();
+  histograms_->RecordPrerender(origin, url_arg);
 
   // If the referring page is prerendering, defer the prerender.
   if (FindPrerenderContentsForChildRouteIdPair(child_route_id_pair) !=
@@ -293,6 +306,8 @@ bool PrerenderManager::AddPrerender(
 
   if (FindEntry(url))
     return false;
+
+  uint8 experiment = GetQueryStringBasedExperiment(url_arg);
 
   // Do not prerender if there are too many render processes, and we would
   // have to use an existing one.  We do not want prerendering to happen in
@@ -516,20 +531,21 @@ bool PrerenderManager::MaybeUsePrerenderedPage(TabContents* tab_contents,
   if (!prerender_tracker_->TryUse(child_id, route_id))
     return false;
 
-  if (!prerender_contents->load_start_time().is_null())
-    RecordTimeUntilUsed(GetCurrentTimeTicks() -
-                        prerender_contents->load_start_time());
+  if (!prerender_contents->load_start_time().is_null()) {
+    histograms_->RecordTimeUntilUsed(GetCurrentTimeTicks() -
+                                     prerender_contents->load_start_time(),
+                                     config_.max_age);
+  }
 
-  PREFIXED_HISTOGRAM(UMA_HISTOGRAM_COUNTS(
-      GetDefaultHistogramName("PrerendersPerSessionCount"),
-      ++prerenders_per_session_count_));
+  histograms_->RecordPerSessionCount(++prerenders_per_session_count_);
   prerender_contents->set_final_status(FINAL_STATUS_USED);
 
   RenderViewHost* render_view_host =
       prerender_contents->prerender_contents()->render_view_host();
   DCHECK(render_view_host);
   render_view_host->Send(
-      new ViewMsg_SetIsPrerendering(render_view_host->routing_id(), false));
+      new ChromeViewMsg_SetIsPrerendering(render_view_host->routing_id(),
+                                          false));
 
   TabContentsWrapper* new_tab_contents =
       prerender_contents->ReleasePrerenderContents();
@@ -542,8 +558,7 @@ bool PrerenderManager::MaybeUsePrerenderedPage(TabContents* tab_contents,
 
   // Merge the browsing history.
   new_tab_contents->controller().CopyStateFromAndPrune(
-      &old_tab_contents->controller(),
-      false);
+      &old_tab_contents->controller());
   old_tab_contents->delegate()->SwapTabContents(old_tab_contents,
                                                 new_tab_contents);
   prerender_contents->CommitHistory(new_tab_contents);
@@ -560,10 +575,10 @@ bool PrerenderManager::MaybeUsePrerenderedPage(TabContents* tab_contents,
   // Update PPLT metrics:
   // If the tab has finished loading, record a PPLT of 0.
   // If the tab is still loading, reset its start time to the current time.
-  PrerenderObserver* prerender_observer =
-      new_tab_contents->prerender_observer();
-  DCHECK(prerender_observer != NULL);
-  prerender_observer->PrerenderSwappedIn();
+  PrerenderTabHelper* prerender_tab_helper =
+      new_tab_contents->prerender_tab_helper();
+  DCHECK(prerender_tab_helper != NULL);
+  prerender_tab_helper->PrerenderSwappedIn();
 
   // See if we have any pending prerender requests for this routing id and start
   // the preload if we do.
@@ -608,6 +623,7 @@ void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry) {
       break;
     }
   }
+  AddToHistory(entry);
   pending_delete_list_.push_back(entry);
 
   // Destroy the old TabContents relatively promptly to reduce resource usage,
@@ -656,21 +672,8 @@ void PrerenderManager::DeletePendingDeleteEntries() {
   while (!pending_delete_list_.empty()) {
     PrerenderContents* contents = pending_delete_list_.front();
     pending_delete_list_.pop_front();
-    AddToHistory(contents);
     delete contents;
   }
-}
-
-// Helper macro for histograms.
-#define RECORD_PLT(tag, perceived_page_load_time) { \
-  PREFIXED_HISTOGRAM_PRERENDER_MANAGER(prerender_manager, \
-    UMA_HISTOGRAM_CUSTOM_TIMES( \
-        base::FieldTrial::MakeName( \
-            prerender_manager->GetDefaultHistogramName(tag), "Prefetch"), \
-        perceived_page_load_time, \
-        base::TimeDelta::FromMilliseconds(10), \
-        base::TimeDelta::FromSeconds(60), \
-        100)); \
 }
 
 // static
@@ -678,36 +681,44 @@ void PrerenderManager::RecordPerceivedPageLoadTime(
     base::TimeDelta perceived_page_load_time,
     TabContents* tab_contents) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  PrerenderManager* prerender_manager =
-      tab_contents->profile()->GetPrerenderManager();
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents->browser_context());
+  PrerenderManager* prerender_manager = profile->GetPrerenderManager();
   if (!prerender_manager)
     return;
   if (!prerender_manager->is_enabled())
     return;
-  bool within_window = prerender_manager->WithinWindow();
-  RECORD_PLT("PerceivedPLT", perceived_page_load_time);
-  if (within_window)
-    RECORD_PLT("PerceivedPLTWindowed", perceived_page_load_time);
-  if (prerender_manager &&
+  bool was_prerender =
       ((mode_ == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP &&
         prerender_manager->WouldTabContentsBePrerendered(tab_contents)) ||
        (mode_ == PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP &&
-        prerender_manager->IsTabContentsPrerendered(tab_contents)))) {
-    RECORD_PLT("PerceivedPLTMatched", perceived_page_load_time);
-  } else {
-    if (within_window)
-      RECORD_PLT("PerceivedPLTWindowNotMatched", perceived_page_load_time);
-  }
+        prerender_manager->IsTabContentsPrerendered(tab_contents)));
+  prerender_manager->histograms_->RecordPerceivedPageLoadTime(
+      perceived_page_load_time, was_prerender);
 }
 
 bool PrerenderManager::is_enabled() const {
   DCHECK(CalledOnValidThread());
-  return enabled_;
+  if (!enabled_)
+    return false;
+  for (std::list<const PrerenderCondition*>::const_iterator it =
+           prerender_conditions_.begin();
+       it != prerender_conditions_.end();
+       ++it) {
+    const PrerenderCondition* condition = *it;
+    if (!condition->CanPrerender())
+      return false;
+  }
+  return true;
 }
 
 void PrerenderManager::set_enabled(bool enabled) {
   DCHECK(CalledOnValidThread());
   enabled_ = enabled;
+}
+
+void PrerenderManager::AddCondition(const PrerenderCondition* condition) {
+  prerender_conditions_.push_back(condition);
 }
 
 PrerenderContents* PrerenderManager::FindEntry(const GURL& url) {
@@ -756,23 +767,11 @@ void PrerenderManager::RemovePendingPrerender(PrerenderContents* entry) {
   }
 }
 
-bool PrerenderManager::WithinWindow() const {
-  DCHECK(CalledOnValidThread());
-  if (last_prerender_seen_time_.is_null())
-    return false;
-  base::TimeDelta elapsed_time =
-      base::TimeTicks::Now() - last_prerender_seen_time_;
-  return elapsed_time <= base::TimeDelta::FromSeconds(kWindowDurationSeconds);
-}
-
 bool PrerenderManager::DoesRateLimitAllowPrerender() const {
   DCHECK(CalledOnValidThread());
   base::TimeDelta elapsed_time =
       GetCurrentTimeTicks() - last_prerender_start_time_;
-  PREFIXED_HISTOGRAM(
-      UMA_HISTOGRAM_TIMES(
-          GetDefaultHistogramName("TimeBetweenPrerenderRequests"),
-          elapsed_time));
+  histograms_->RecordTimeBetweenPrerenderRequests(elapsed_time);
   if (!config_.rate_limit_enabled)
     return true;
   return elapsed_time >
@@ -783,7 +782,7 @@ void PrerenderManager::StartSchedulingPeriodicCleanups() {
   DCHECK(CalledOnValidThread());
   if (repeating_timer_.IsRunning())
     return;
-  repeating_timer_.Start(
+  repeating_timer_.Start(FROM_HERE,
       base::TimeDelta::FromMilliseconds(kPeriodicCleanupIntervalMs),
       this,
       &PrerenderManager::PeriodicCleanup);
@@ -959,6 +958,9 @@ Value* PrerenderManager::GetAsValue() const {
   dict_value->Set("history", prerender_history_->GetEntriesAsValue());
   dict_value->Set("active", GetActivePrerendersAsValue());
   dict_value->SetBoolean("enabled", enabled_);
+  // If prerender is disabled via a flag this method is not even called.
+  if (IsControlGroup())
+    dict_value->SetString("disabled_reason", "(Disabled for testing)");
   return dict_value;
 }
 
@@ -1011,89 +1013,10 @@ void PrerenderManager::DestroyAllContents(FinalStatus final_status) {
   DeletePendingDeleteEntries();
 }
 
-void PrerenderManager::RecordTimeUntilUsed(base::TimeDelta time_until_used) {
-  DCHECK(CalledOnValidThread());
-  PREFIXED_HISTOGRAM(UMA_HISTOGRAM_CUSTOM_TIMES(
-      GetDefaultHistogramName("TimeUntilUsed"),
-      time_until_used,
-      base::TimeDelta::FromMilliseconds(10),
-      config_.max_age,
-      50));
-}
-
 void PrerenderManager::RecordFinalStatus(Origin origin,
                                          uint8 experiment_id,
                                          FinalStatus final_status) const {
-  DCHECK(final_status != FINAL_STATUS_MAX);
-  // FINAL_STATUS_CONTROL_GROUP indicates that the PrerenderContents
-  // was created only to measure "would-have-been-prerendered" for
-  // control group measurements. Don't pollute data with it.
-  if (PrerenderManager::IsControlGroup() ||
-      final_status == FINAL_STATUS_CONTROL_GROUP)
-    return;
-  PREFIXED_HISTOGRAM_ORIGIN_EXPERIMENT(origin, experiment_id,
-                     UMA_HISTOGRAM_ENUMERATION(
-                         GetHistogramName(origin, experiment_id, "FinalStatus"),
-                         final_status,
-                         FINAL_STATUS_MAX));
-}
-
-std::string PrerenderManager::ComposeHistogramName(
-    const std::string& prefix_type,
-    const std::string& name) const {
-  if (prefix_type.empty())
-    return std::string("Prerender.") + name;
-  return std::string("Prerender.") + prefix_type + std::string("_") + name;
-}
-
-std::string PrerenderManager::GetHistogramName(Origin origin,
-                                               uint8 experiment_id,
-                                               const std::string& name) const {
-  switch (origin) {
-    case ORIGIN_OMNIBOX:
-      if (experiment_id != kNoExperiment)
-        return ComposeHistogramName("wash", name);
-      return ComposeHistogramName("omnibox", name);
-    case ORIGIN_LINK_REL_PRERENDER:
-      if (experiment_id == kNoExperiment)
-        return ComposeHistogramName("", name);
-      return ComposeHistogramName("exp" + std::string(1, experiment_id + '0'),
-                                  name);
-    default:
-      NOTREACHED();
-      break;
-  };
-
-  // Dummy return value to make the compiler happy.
-  NOTREACHED();
-  return ComposeHistogramName("wash", name);
-}
-
-std::string PrerenderManager::GetDefaultHistogramName(
-    const std::string& name) const {
-  if (!WithinWindow())
-    return ComposeHistogramName("", name);
-  if (origin_experiment_wash_)
-    return ComposeHistogramName("wash", name);
-  return GetHistogramName(last_origin_, last_experiment_id_, name);
-}
-
-uint8 PrerenderManager::GetCurrentExperimentId() const {
-  if (!WithinWindow())
-    return kNoExperiment;
-  return last_experiment_id_;
-}
-
-Origin PrerenderManager::GetCurrentOrigin() const {
-  if (!WithinWindow())
-    return ORIGIN_LINK_REL_PRERENDER;
-  return last_origin_;
-}
-
-bool PrerenderManager::IsOriginExperimentWash() const {
-  if (!WithinWindow())
-    return false;
-  return origin_experiment_wash_;
+  histograms_->RecordFinalStatus(origin, experiment_id, final_status);
 }
 
 }  // namespace prerender

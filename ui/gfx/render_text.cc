@@ -11,6 +11,7 @@
 #include "base/stl_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia.h"
+#include "unicode/uchar.h"
 
 namespace {
 
@@ -38,26 +39,26 @@ void CheckStyleRanges(const gfx::StyleRanges& style_ranges, size_t length) {
 }
 #endif
 
-void ApplyStyleRangeImpl(gfx::StyleRanges& style_ranges,
+void ApplyStyleRangeImpl(gfx::StyleRanges* style_ranges,
                          gfx::StyleRange style_range) {
   const ui::Range& new_range = style_range.range;
   // Follow StyleRanges invariant conditions: sorted and non-overlapping ranges.
   gfx::StyleRanges::iterator i;
-  for (i = style_ranges.begin(); i != style_ranges.end();) {
+  for (i = style_ranges->begin(); i != style_ranges->end();) {
     if (i->range.end() < new_range.start()) {
       i++;
     } else if (i->range.start() == new_range.end()) {
       break;
     } else if (new_range.Contains(i->range)) {
-      i = style_ranges.erase(i);
-      if (i == style_ranges.end())
+      i = style_ranges->erase(i);
+      if (i == style_ranges->end())
         break;
     } else if (i->range.start() < new_range.start() &&
                i->range.end() > new_range.end()) {
       // Split the current style into two styles.
       gfx::StyleRange split_style = gfx::StyleRange(*i);
       split_style.range.set_end(new_range.start());
-      i = style_ranges.insert(i, split_style) + 1;
+      i = style_ranges->insert(i, split_style) + 1;
       i->range.set_start(new_range.end());
       break;
     } else if (i->range.start() < new_range.start()) {
@@ -70,7 +71,7 @@ void ApplyStyleRangeImpl(gfx::StyleRanges& style_ranges,
       NOTREACHED();
   }
   // Add the new range in its sorted location.
-  style_ranges.insert(i, style_range);
+  style_ranges->insert(i, style_range);
 }
 
 }  // namespace
@@ -83,6 +84,54 @@ StyleRange::StyleRange()
       strike(false),
       underline(false),
       range() {
+}
+
+SelectionModel::SelectionModel() {
+  Init(0, 0, 0, LEADING);
+}
+
+SelectionModel::SelectionModel(size_t pos) {
+  Init(pos, pos, pos, LEADING);
+}
+
+SelectionModel::SelectionModel(size_t start, size_t end) {
+  Init(start, end, end, LEADING);
+}
+
+SelectionModel::SelectionModel(size_t end,
+                               size_t pos,
+                               CaretPlacement placement) {
+  Init(end, end, pos, placement);
+}
+
+SelectionModel::SelectionModel(size_t start,
+                               size_t end,
+                               size_t pos,
+                               CaretPlacement placement) {
+  Init(start, end, pos, placement);
+}
+
+SelectionModel::~SelectionModel() {
+}
+
+bool SelectionModel::Equals(const SelectionModel& sel) const {
+  return selection_start_ == sel.selection_start() &&
+         selection_end_ == sel.selection_end() &&
+         caret_pos_ == sel.caret_pos() &&
+         caret_placement_ == sel.caret_placement();
+}
+
+void SelectionModel::Init(size_t start,
+                          size_t end,
+                          size_t pos,
+                          CaretPlacement placement) {
+  selection_start_ = start;
+  selection_end_ = end;
+  caret_pos_ = pos;
+  caret_placement_ = placement;
+}
+
+RenderText::~RenderText() {
 }
 
 void RenderText::SetText(const string16& text) {
@@ -112,121 +161,133 @@ void RenderText::SetText(const string16& text) {
 #ifndef NDEBUG
   CheckStyleRanges(style_ranges_, text_.length());
 #endif
+  cached_bounds_and_offset_valid_ = false;
+}
+
+void RenderText::ToggleInsertMode() {
+  insert_mode_ = !insert_mode_;
+  cached_bounds_and_offset_valid_ = false;
+}
+
+void RenderText::SetDisplayRect(const Rect& r) {
+  display_rect_ = r;
+  cached_bounds_and_offset_valid_ = false;
 }
 
 size_t RenderText::GetCursorPosition() const {
-  return GetSelection().end();
+  return selection_model_.selection_end();
 }
 
-void RenderText::SetCursorPosition(const size_t position) {
-  SetSelection(ui::Range(position, position));
+void RenderText::SetCursorPosition(size_t position) {
+  MoveCursorTo(position, false);
 }
 
 void RenderText::MoveCursorLeft(BreakType break_type, bool select) {
-  if (break_type == LINE_BREAK) {
-    MoveCursorTo(0, select);
-    return;
-  }
-  size_t position = GetCursorPosition();
+  SelectionModel position(selection_model());
+  position.set_selection_start(GetCursorPosition());
   // Cancelling a selection moves to the edge of the selection.
-  if (!GetSelection().is_empty() && !select) {
+  if (break_type != LINE_BREAK && !EmptySelection() && !select) {
     // Use the selection start if it is left of the selection end.
-    if (GetCursorBounds(GetSelection().start(), false).x() <
+    SelectionModel selection_start(GetSelectionStart(), GetSelectionStart(),
+                                   SelectionModel::LEADING);
+    if (GetCursorBounds(selection_start, false).x() <
         GetCursorBounds(position, false).x())
-      position = GetSelection().start();
-    // If |move_by_word|, use the nearest word boundary left of the selection.
+      position = selection_start;
+    // For word breaks, use the nearest word boundary left of the selection.
     if (break_type == WORD_BREAK)
-      position = GetLeftCursorPosition(position, true);
+      position = GetLeftSelectionModel(position, break_type);
   } else {
-    position = GetLeftCursorPosition(position, break_type == WORD_BREAK);
+    position = GetLeftSelectionModel(position, break_type);
   }
-  MoveCursorTo(position, select);
+  if (select)
+    position.set_selection_start(GetSelectionStart());
+  MoveCursorTo(position);
 }
 
 void RenderText::MoveCursorRight(BreakType break_type, bool select) {
-  if (break_type == LINE_BREAK) {
-    MoveCursorTo(text().length(), select);
-    return;
-  }
-  size_t position = GetCursorPosition();
+  SelectionModel position(selection_model());
+  position.set_selection_start(GetCursorPosition());
   // Cancelling a selection moves to the edge of the selection.
-  if (!GetSelection().is_empty() && !select) {
+  if (break_type != LINE_BREAK && !EmptySelection() && !select) {
     // Use the selection start if it is right of the selection end.
-    if (GetCursorBounds(GetSelection().start(), false).x() >
+    SelectionModel selection_start(GetSelectionStart(), GetSelectionStart(),
+                                   SelectionModel::LEADING);
+    if (GetCursorBounds(selection_start, false).x() >
         GetCursorBounds(position, false).x())
-      position = GetSelection().start();
-    // If |move_by_word|, use the nearest word boundary right of the selection.
+      position = selection_start;
+    // For word breaks, use the nearest word boundary right of the selection.
     if (break_type == WORD_BREAK)
-      position = GetRightCursorPosition(position, true);
+      position = GetRightSelectionModel(position, break_type);
   } else {
-    position = GetRightCursorPosition(position, break_type == WORD_BREAK);
+    position = GetRightSelectionModel(position, break_type);
   }
-  MoveCursorTo(position, select);
+  if (select)
+    position.set_selection_start(GetSelectionStart());
+  MoveCursorTo(position);
 }
 
-bool RenderText::MoveCursorTo(size_t position, bool select) {
-  bool changed = GetCursorPosition() != position ||
-                 select == GetSelection().is_empty();
-  if (select)
-    SetSelection(ui::Range(GetSelection().start(), position));
-  else
-    SetSelection(ui::Range(position, position));
+bool RenderText::MoveCursorTo(const SelectionModel& selection_model) {
+  SelectionModel sel(selection_model);
+  size_t text_length = text().length();
+  // Enforce valid selection model components.
+  if (sel.selection_start() > text_length)
+    sel.set_selection_start(text_length);
+  if (sel.selection_end() > text_length)
+    sel.set_selection_end(text_length);
+  // The current model only supports caret positions at valid character indices.
+  if (text_length == 0) {
+    sel.set_caret_pos(0);
+    sel.set_caret_placement(SelectionModel::LEADING);
+  } else if (sel.caret_pos() >= text_length) {
+    SelectionModel end = GetTextDirection() == base::i18n::RIGHT_TO_LEFT ?
+        LeftEndSelectionModel() : RightEndSelectionModel();
+    sel.set_caret_pos(end.caret_pos());
+    sel.set_caret_placement(end.caret_placement());
+  }
+  bool changed = !sel.Equals(selection_model_);
+  SetSelectionModel(sel);
   return changed;
 }
 
-bool RenderText::MoveCursorTo(const gfx::Point& point, bool select) {
-  // TODO(msw): Make this function support cursor placement via mouse near BiDi
-  //  level changes. The visual cursor appearance will depend on the location
-  //  clicked, not solely the resulting logical cursor position. See the TODO
-  //  note pertaining to selection_range_ for more information.
-  return MoveCursorTo(FindCursorPosition(point), select);
+bool RenderText::MoveCursorTo(const Point& point, bool select) {
+  SelectionModel selection = FindCursorPosition(point);
+  if (select)
+    selection.set_selection_start(GetSelectionStart());
+  return MoveCursorTo(selection);
 }
 
-const ui::Range& RenderText::GetSelection() const {
-  return selection_range_;
-}
-
-void RenderText::SetSelection(const ui::Range& range) {
-  selection_range_.set_end(std::min(range.end(), text().length()));
-  selection_range_.set_start(std::min(range.start(), text().length()));
-
-  // Update |display_offset_| to ensure the current cursor is visible.
-  gfx::Rect cursor_bounds(GetCursorBounds(GetCursorPosition(), insert_mode()));
-  int display_width = display_rect_.width();
-  int string_width = GetStringWidth();
-  if (string_width < display_width) {
-    // Show all text whenever the text fits to the size.
-    display_offset_.set_x(0);
-  } else if ((display_offset_.x() + cursor_bounds.right()) > display_width) {
-    // Pan to show the cursor when it overflows to the right,
-     display_offset_.set_x(display_width - cursor_bounds.right());
-  } else if ((display_offset_.x() + cursor_bounds.x()) < 0) {
-    // Pan to show the cursor when it overflows to the left.
-    display_offset_.set_x(-cursor_bounds.x());
-  }
-}
-
-bool RenderText::IsPointInSelection(const gfx::Point& point) const {
-  size_t pos = FindCursorPosition(point);
-  return (pos >= GetSelection().GetMin() && pos < GetSelection().GetMax());
+bool RenderText::IsPointInSelection(const Point& point) {
+  if (EmptySelection())
+    return false;
+  // TODO(xji): should this check whether the point is inside the visual
+  // selection bounds? In case of "abcFED", if "ED" is selected, |point| points
+  // to the right half of 'c', is the point in selection?
+  size_t pos = FindCursorPosition(point).selection_end();
+  return (pos >= MinOfSelection() && pos < MaxOfSelection());
 }
 
 void RenderText::ClearSelection() {
-  SetCursorPosition(GetCursorPosition());
+  SelectionModel sel(selection_model());
+  sel.set_selection_start(GetCursorPosition());
+  SetSelectionModel(sel);
 }
 
 void RenderText::SelectAll() {
-  SetSelection(ui::Range(0, text().length()));
+  SelectionModel sel(RightEndSelectionModel());
+  sel.set_selection_start(LeftEndSelectionModel().selection_start());
+  SetSelectionModel(sel);
 }
 
+// TODO(xji): it does not work for languages do not use space as word breaker,
+// such as Chinese. Should use BreakIterator.
 void RenderText::SelectWord() {
-  size_t selection_start = GetSelection().start();
+  size_t selection_start = GetSelectionStart();
   size_t cursor_position = GetCursorPosition();
-  // First we setup selection_start_ and cursor_pos_. There are so many cases
+  // First we setup selection_start_ and selection_end_. There are so many cases
   // because we try to emulate what select-word looks like in a gtk textfield.
   // See associated testcase for different cases.
   if (cursor_position > 0 && cursor_position < text().length()) {
-    if (isalnum(text()[cursor_position])) {
+    if (u_isalnum(text()[cursor_position])) {
       selection_start = cursor_position;
       cursor_position++;
     } else
@@ -247,7 +308,7 @@ void RenderText::SelectWord() {
       break;
   }
 
-  // Now we move cursor_pos_ to end of selection. Selection boundary
+  // Now we move selection_end_ to end of selection. Selection boundary
   // is defined as the position where we have alpha-num character on one side
   // and non-alpha-num char on the other side.
   for (; cursor_position < text().length(); cursor_position++) {
@@ -255,7 +316,8 @@ void RenderText::SelectWord() {
       break;
   }
 
-  SetSelection(ui::Range(selection_start, cursor_position));
+  MoveCursorTo(selection_start, false);
+  MoveCursorTo(cursor_position, true);
 }
 
 const ui::Range& RenderText::GetCompositionRange() const {
@@ -275,10 +337,12 @@ void RenderText::ApplyStyleRange(StyleRange style_range) {
     return;
   CHECK(!new_range.is_reversed());
   CHECK(ui::Range(0, text_.length()).Contains(new_range));
-  ApplyStyleRangeImpl(style_ranges_, style_range);
+  ApplyStyleRangeImpl(&style_ranges_, style_range);
 #ifndef NDEBUG
   CheckStyleRanges(style_ranges_, text_.length());
 #endif
+  // TODO(xji): only invalidate if font or underline changes.
+  cached_bounds_and_offset_valid_ = false;
 }
 
 void RenderText::ApplyDefaultStyle() {
@@ -286,61 +350,45 @@ void RenderText::ApplyDefaultStyle() {
   StyleRange style = StyleRange(default_style_);
   style.range.set_end(text_.length());
   style_ranges_.push_back(style);
+  cached_bounds_and_offset_valid_ = false;
 }
 
 base::i18n::TextDirection RenderText::GetTextDirection() const {
-  // TODO(msw): Bidi implementation, intended to replace the functionality added
-  //  in crrev.com/91881 (discussed in codereview.chromium.org/7324011).
+  if (base::i18n::IsRTL())
+    return base::i18n::RIGHT_TO_LEFT;
   return base::i18n::LEFT_TO_RIGHT;
 }
 
-int RenderText::GetStringWidth() const {
-  return GetSubstringBounds(ui::Range(0, text_.length()))[0].width();
+int RenderText::GetStringWidth() {
+  return default_style_.font.GetStringWidth(text());
 }
 
-void RenderText::Draw(gfx::Canvas* canvas) {
+void RenderText::Draw(Canvas* canvas) {
   // Clip the canvas to the text display area.
   canvas->ClipRectInt(display_rect_.x(), display_rect_.y(),
                       display_rect_.width(), display_rect_.height());
 
   // Draw the selection.
-  std::vector<gfx::Rect> selection(GetSubstringBounds(GetSelection()));
+  std::vector<Rect> selection(GetSubstringBounds(GetSelectionStart(),
+                                                 GetCursorPosition()));
   SkColor selection_color =
       focused() ? kFocusedSelectionColor : kUnfocusedSelectionColor;
-  for (std::vector<gfx::Rect>::const_iterator i = selection.begin();
+  for (std::vector<Rect>::const_iterator i = selection.begin();
        i < selection.end(); ++i) {
-    gfx::Rect r(*i);
-    r.Offset(display_offset_);
+    Rect r(*i);
     canvas->FillRectInt(selection_color, r.x(), r.y(), r.width(), r.height());
   }
 
   // Create a temporary copy of the style ranges for composition and selection.
-  // TODO(msw): This pattern ought to be reconsidered; what about composition
-  //            and selection overlaps, retain existing local style features?
   StyleRanges style_ranges(style_ranges_);
-  // Apply a composition style override to a copy of the style ranges.
-  if (composition_range_.IsValid() && !composition_range_.is_empty()) {
-    StyleRange composition_style(default_style_);
-    composition_style.underline = true;
-    composition_style.range.set_start(composition_range_.start());
-    composition_style.range.set_end(composition_range_.end());
-    ApplyStyleRangeImpl(style_ranges, composition_style);
-  }
-  // Apply a selection style override to a copy of the style ranges.
-  if (selection_range_.IsValid() && !selection_range_.is_empty()) {
-    StyleRange selection_style(default_style_);
-    selection_style.foreground = kSelectedTextColor;
-    selection_style.range.set_start(selection_range_.GetMin());
-    selection_style.range.set_end(selection_range_.GetMax());
-    ApplyStyleRangeImpl(style_ranges, selection_style);
-  }
+  ApplyCompositionAndSelectionStyles(&style_ranges);
 
   // Draw the text.
-  gfx::Rect bounds(display_rect_);
-  bounds.Offset(display_offset_);
+  Rect bounds(display_rect_);
+  bounds.Offset(GetUpdatedDisplayOffset());
   for (StyleRanges::const_iterator i = style_ranges.begin();
        i < style_ranges.end(); ++i) {
-    Font font = !i->underline ? i->font :
+    const Font& font = !i->underline ? i->font :
         i->font.DeriveFont(0, i->font.GetStyle() | Font::UNDERLINED);
     string16 text = text_.substr(i->range.start(), i->range.length());
     bounds.set_width(font.GetStringWidth(text));
@@ -364,75 +412,81 @@ void RenderText::Draw(gfx::Canvas* canvas) {
   }
 
   // Paint cursor. Replace cursor is drawn as rectangle for now.
-  if (cursor_visible() && focused()) {
-    bounds = GetCursorBounds(GetCursorPosition(), insert_mode());
-    bounds.Offset(display_offset_);
-    if (!bounds.IsEmpty())
-      canvas->DrawRectInt(kCursorColor,
-                          bounds.x(),
-                          bounds.y(),
-                          bounds.width(),
-                          bounds.height());
-  }
+  Rect cursor(GetUpdatedCursorBounds());
+  if (cursor_visible() && focused())
+    canvas->DrawRectInt(kCursorColor, cursor.x(), cursor.y(),
+                        cursor.width(), cursor.height());
 }
 
-size_t RenderText::FindCursorPosition(const gfx::Point& point) const {
-  const gfx::Font& font = Font();
+SelectionModel RenderText::FindCursorPosition(const Point& point) {
+  const Font& font = default_style_.font;
   int left = 0;
   int left_pos = 0;
   int right = font.GetStringWidth(text());
   int right_pos = text().length();
 
-  int x = point.x();
-  if (x <= left) return left_pos;
-  if (x >= right) return right_pos;
+  int x = point.x() - (display_rect_.x() + GetUpdatedDisplayOffset().x());
+  if (x <= left) return SelectionModel(left_pos);
+  if (x >= right) return SelectionModel(right_pos);
   // binary searching the cursor position.
   // TODO(oshima): use the center of character instead of edge.
   // Binary search may not work for language like arabic.
-  while (std::abs(static_cast<long>(right_pos - left_pos) > 1)) {
+  while (std::abs(static_cast<long>(right_pos - left_pos)) > 1) {
     int pivot_pos = left_pos + (right_pos - left_pos) / 2;
     int pivot = font.GetStringWidth(text().substr(0, pivot_pos));
     if (pivot < x) {
       left = pivot;
       left_pos = pivot_pos;
     } else if (pivot == x) {
-      return pivot_pos;
+      return SelectionModel(pivot_pos);
     } else {
       right = pivot;
       right_pos = pivot_pos;
     }
   }
-  return left_pos;
+  return SelectionModel(left_pos);
 }
 
-std::vector<gfx::Rect> RenderText::GetSubstringBounds(
-    const ui::Range& range) const {
-  size_t start = range.GetMin();
-  size_t end = range.GetMax();
-  gfx::Font font;
-  int start_x = font.GetStringWidth(text().substr(0, start));
-  int end_x = font.GetStringWidth(text().substr(0, end));
-  std::vector<gfx::Rect> bounds;
-  bounds.push_back(gfx::Rect(start_x, 0, end_x - start_x, font.GetHeight()));
-  return bounds;
+Rect RenderText::GetCursorBounds(const SelectionModel& selection,
+                                 bool insert_mode) {
+  size_t from = selection.selection_end();
+  size_t to = insert_mode ? from : std::min(text_.length(), from + 1);
+  return GetSubstringBounds(from, to)[0];
 }
 
-gfx::Rect RenderText::GetCursorBounds(size_t cursor_pos,
-                                      bool insert_mode) const {
-  gfx::Font font;
-  int x = font.GetStringWidth(text_.substr(0U, cursor_pos));
-  DCHECK_GE(x, 0);
-  int h = std::min(display_rect_.height(), font.GetHeight());
-  gfx::Rect bounds(x, (display_rect_.height() - h) / 2, 1, h);
-  if (!insert_mode && text_.length() != cursor_pos)
-    bounds.set_width(font.GetStringWidth(text_.substr(0, cursor_pos + 1)) - x);
-  return bounds;
+const Rect& RenderText::GetUpdatedCursorBounds() {
+  UpdateCachedBoundsAndOffset();
+  return cursor_bounds_;
 }
 
-size_t RenderText::GetLeftCursorPosition(size_t position,
-                                         bool move_by_word) const {
-  if (!move_by_word)
-    return position == 0? position : position - 1;
+RenderText::RenderText()
+    : text_(),
+      selection_model_(),
+      cursor_bounds_(),
+      cursor_visible_(false),
+      insert_mode_(true),
+      composition_range_(),
+      style_ranges_(),
+      default_style_(),
+      display_rect_(),
+      display_offset_(),
+      cached_bounds_and_offset_valid_(false) {
+}
+
+const Point& RenderText::GetUpdatedDisplayOffset() {
+  UpdateCachedBoundsAndOffset();
+  return display_offset_;
+}
+
+SelectionModel RenderText::GetLeftSelectionModel(const SelectionModel& current,
+                                                 BreakType break_type) {
+  if (break_type == LINE_BREAK)
+    return SelectionModel(0, 0, SelectionModel::LEADING);
+  size_t pos = std::max(static_cast<long>(current.selection_end() - 1),
+                        static_cast<long>(0));
+  if (break_type == CHARACTER_BREAK)
+    return SelectionModel(pos, pos, SelectionModel::LEADING);
+
   // Notes: We always iterate words from the begining.
   // This is probably fast enough for our usage, but we may
   // want to modify WordIterator so that it can start from the
@@ -441,66 +495,171 @@ size_t RenderText::GetLeftCursorPosition(size_t position,
   bool success = iter.Init();
   DCHECK(success);
   if (!success)
-    return position;
-  int last = 0;
+    return current;
   while (iter.Advance()) {
     if (iter.IsWord()) {
       size_t begin = iter.pos() - iter.GetString().length();
-      if (begin == position) {
+      if (begin == current.selection_end()) {
         // The cursor is at the beginning of a word.
         // Move to previous word.
         break;
-      } else if(iter.pos() >= position) {
+      } else if (iter.pos() >= current.selection_end()) {
         // The cursor is in the middle or at the end of a word.
         // Move to the top of current word.
-        last = begin;
+        pos = begin;
         break;
       } else {
-        last = iter.pos() - iter.GetString().length();
+        pos = iter.pos() - iter.GetString().length();
       }
     }
   }
 
-  return last;
+  return SelectionModel(pos, pos, SelectionModel::LEADING);
 }
 
-size_t RenderText::GetRightCursorPosition(size_t position,
-                                          bool move_by_word) const {
-  if (!move_by_word)
-    return std::min(position + 1, text().length());
+SelectionModel RenderText::GetRightSelectionModel(const SelectionModel& current,
+                                                  BreakType break_type) {
+  if (break_type == LINE_BREAK)
+    return SelectionModel(text().length(),
+        GetIndexOfPreviousGrapheme(text().length()), SelectionModel::TRAILING);
+  size_t pos = std::min(current.selection_end() + 1, text().length());
+  if (break_type == CHARACTER_BREAK)
+    return SelectionModel(pos, pos, SelectionModel::LEADING);
+
   base::i18n::BreakIterator iter(text(), base::i18n::BreakIterator::BREAK_WORD);
   bool success = iter.Init();
   DCHECK(success);
   if (!success)
-    return position;
-  size_t pos = 0;
+    return current;
   while (iter.Advance()) {
     pos = iter.pos();
-    if (iter.IsWord() && pos > position) {
+    if (iter.IsWord() && pos > current.selection_end())
       break;
-    }
   }
-  return pos;
+  return SelectionModel(pos, pos, SelectionModel::LEADING);
 }
 
-RenderText::RenderText()
-    : text_(),
-      selection_range_(),
-      cursor_visible_(false),
-      insert_mode_(true),
-      composition_range_(),
-      style_ranges_(),
-      default_style_(),
-      display_rect_(),
-      display_offset_() {
+SelectionModel RenderText::LeftEndSelectionModel() {
+  return SelectionModel(0, 0, SelectionModel::LEADING);
 }
 
-RenderText::~RenderText() {
+SelectionModel RenderText::RightEndSelectionModel() {
+  size_t cursor = text().length();
+  size_t caret_pos = GetIndexOfPreviousGrapheme(cursor);
+  SelectionModel::CaretPlacement placement = (caret_pos == cursor) ?
+      SelectionModel::LEADING : SelectionModel::TRAILING;
+  return SelectionModel(cursor, caret_pos, placement);
+}
+
+size_t RenderText::GetIndexOfPreviousGrapheme(size_t position) {
+  // TODO(msw): Handle complex script.
+  return std::max(static_cast<long>(position - 1), static_cast<long>(0));
+}
+
+std::vector<Rect> RenderText::GetSubstringBounds(size_t from, size_t to) {
+  size_t start = std::min(from, to);
+  size_t end = std::max(from, to);
+  const Font& font = default_style_.font;
+  int start_x = font.GetStringWidth(text().substr(0, start));
+  int end_x = font.GetStringWidth(text().substr(0, end));
+  Rect rect(start_x, 0, end_x - start_x, font.GetHeight());
+  rect.Offset(display_rect_.origin());
+  rect.Offset(GetUpdatedDisplayOffset());
+  // Center the rect vertically in |display_rect_|.
+  rect.Offset(Point(0, (display_rect_.height() - rect.height()) / 2));
+  return std::vector<Rect>(1, rect);
+}
+
+void RenderText::ApplyCompositionAndSelectionStyles(
+    StyleRanges* style_ranges) const {
+  // TODO(msw): This pattern ought to be reconsidered; what about composition
+  //            and selection overlaps, retain existing local style features?
+  // Apply a composition style override to a copy of the style ranges.
+  if (composition_range_.IsValid() && !composition_range_.is_empty()) {
+    StyleRange composition_style(default_style_);
+    composition_style.underline = true;
+    composition_style.range.set_start(composition_range_.start());
+    composition_style.range.set_end(composition_range_.end());
+    ApplyStyleRangeImpl(style_ranges, composition_style);
+  }
+  // Apply a selection style override to a copy of the style ranges.
+  if (!EmptySelection()) {
+    StyleRange selection_style(default_style_);
+    selection_style.foreground = kSelectedTextColor;
+    selection_style.range.set_start(MinOfSelection());
+    selection_style.range.set_end(MaxOfSelection());
+    ApplyStyleRangeImpl(style_ranges, selection_style);
+  }
+}
+
+Point RenderText::ToTextPoint(const Point& point) {
+  Point p(point.Subtract(display_rect().origin()));
+  p = p.Subtract(GetUpdatedDisplayOffset());
+  if (base::i18n::IsRTL())
+    p.Offset(GetStringWidth() - display_rect().width() + 1, 0);
+  return p;
+}
+
+Point RenderText::ToViewPoint(const Point& point) {
+  Point p(point.Add(display_rect().origin()));
+  p = p.Add(GetUpdatedDisplayOffset());
+  if (base::i18n::IsRTL())
+    p.Offset(display_rect().width() - GetStringWidth() - 1, 0);
+  return p;
+}
+
+void RenderText::SetSelectionModel(const SelectionModel& selection_model) {
+  DCHECK_LE(selection_model.selection_start(), text().length());
+  selection_model_.set_selection_start(selection_model.selection_start());
+  DCHECK_LE(selection_model.selection_end(), text().length());
+  selection_model_.set_selection_end(selection_model.selection_end());
+  DCHECK_LT(selection_model.caret_pos(),
+            std::max(text().length(), static_cast<size_t>(1)));
+  selection_model_.set_caret_pos(selection_model.caret_pos());
+  selection_model_.set_caret_placement(selection_model.caret_placement());
+
+  cached_bounds_and_offset_valid_ = false;
+}
+
+void RenderText::MoveCursorTo(size_t position, bool select) {
+  size_t cursor = std::min(position, text().length());
+  size_t caret_pos = GetIndexOfPreviousGrapheme(cursor);
+  SelectionModel::CaretPlacement placement = (caret_pos == cursor) ?
+      SelectionModel::LEADING : SelectionModel::TRAILING;
+  size_t selection_start = select ? GetSelectionStart() : cursor;
+  SelectionModel sel(selection_start, cursor, caret_pos, placement);
+  SetSelectionModel(sel);
 }
 
 bool RenderText::IsPositionAtWordSelectionBoundary(size_t pos) {
-  return pos == 0 || (isalnum(text()[pos - 1]) && !isalnum(text()[pos])) ||
-      (!isalnum(text()[pos - 1]) && isalnum(text()[pos]));
+  return pos == 0 || (u_isalnum(text()[pos - 1]) && !u_isalnum(text()[pos])) ||
+      (!u_isalnum(text()[pos - 1]) && u_isalnum(text()[pos]));
+}
+
+void RenderText::UpdateCachedBoundsAndOffset() {
+  if (cached_bounds_and_offset_valid_)
+    return;
+  // First, set the valid flag true to calculate the current cursor bounds using
+  // the stale |display_offset_|. Applying |delta_offset| at the end of this
+  // function will set |cursor_bounds_| and |display_offset_| to correct values.
+  cached_bounds_and_offset_valid_ = true;
+  cursor_bounds_ = GetCursorBounds(selection_model_, insert_mode_);
+  // Update |display_offset_| to ensure the current cursor is visible.
+  int display_width = display_rect_.width();
+  int string_width = GetStringWidth();
+  int delta_offset = 0;
+  if (string_width < display_width) {
+    // Show all text whenever the text fits to the size.
+    delta_offset = -display_offset_.x();
+  } else if (cursor_bounds_.right() > display_rect_.right()) {
+    // Pan to show the cursor when it overflows to the right,
+    delta_offset = display_rect_.right() - cursor_bounds_.right();
+  } else if (cursor_bounds_.x() < display_rect_.x()) {
+    // Pan to show the cursor when it overflows to the left.
+    delta_offset = display_rect_.x() - cursor_bounds_.x();
+  }
+  display_offset_.Offset(delta_offset, 0);
+  cursor_bounds_.Offset(delta_offset, 0);
 }
 
 }  // namespace gfx

@@ -4,8 +4,8 @@
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop_proxy.h"
 #include "base/task.h"
-#include "remoting/base/logger.h"
 #include "remoting/host/capturer_fake.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
@@ -68,16 +68,17 @@ class ChromotingHostTest : public testing::Test {
   ChromotingHostTest() {
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
+    message_loop_proxy_ = base::MessageLoopProxy::current();
     config_ = new InMemoryHostConfig();
     ON_CALL(context_, main_message_loop())
         .WillByDefault(Return(&message_loop_));
     ON_CALL(context_, encode_message_loop())
         .WillByDefault(Return(&message_loop_));
     ON_CALL(context_, network_message_loop())
-        .WillByDefault(Return(&message_loop_));
+        .WillByDefault(Return(message_loop_proxy_.get()));
     ON_CALL(context_, ui_message_loop())
-        .WillByDefault(Return(&message_loop_));
+        .WillByDefault(Return(message_loop_proxy_.get()));
     EXPECT_CALL(context_, main_message_loop())
         .Times(AnyNumber());
     EXPECT_CALL(context_, encode_message_loop())
@@ -87,34 +88,28 @@ class ChromotingHostTest : public testing::Test {
     EXPECT_CALL(context_, ui_message_loop())
         .Times(AnyNumber());
 
-    logger_.reset(new Logger());
-
-    context_.SetUITaskPostFunction(base::Bind(
-        static_cast<void(MessageLoop::*)(
-            const tracked_objects::Location&, Task*)>(&MessageLoop::PostTask),
-        base::Unretained(&message_loop_)));
-
     Capturer* capturer = new CapturerFake();
     event_executor_ = new MockEventExecutor();
     curtain_ = new MockCurtain();
     disconnect_window_ = new MockDisconnectWindow();
     continue_window_ = new MockContinueWindow();
     local_input_monitor_ = new MockLocalInputMonitor();
-    DesktopEnvironment* desktop =
+    desktop_environment_.reset(
         new DesktopEnvironment(&context_, capturer, event_executor_, curtain_,
                                disconnect_window_, continue_window_,
-                               local_input_monitor_);
+                               local_input_monitor_));
     MockAccessVerifier* access_verifier = new MockAccessVerifier();
 
-    host_ = ChromotingHost::Create(&context_, config_, desktop,
-                                   access_verifier, logger_.get(), false);
+    host_ = ChromotingHost::Create(&context_, config_,
+                                   desktop_environment_.get(),
+                                   access_verifier, false);
     credentials_.set_type(protocol::PASSWORD);
     credentials_.set_username("user");
     credentials_.set_credential("password");
     connection_ = new MockConnectionToClient(
-        &message_loop_, &handler_, &host_stub_, event_executor_);
+        &handler_, &host_stub_, event_executor_);
     connection2_ = new MockConnectionToClient(
-        &message_loop_, &handler_, &host_stub2_, &event_executor2_);
+        &handler_, &host_stub2_, &event_executor2_);
     session_.reset(new MockSession());
     session2_.reset(new MockSession());
     session_config_.reset(SessionConfig::CreateDefault());
@@ -160,6 +155,10 @@ class ChromotingHostTest : public testing::Test {
         .Times(AnyNumber());
   }
 
+  virtual void TearDown() OVERRIDE {
+    message_loop_.RunAllPending();
+  }
+
   // Helper method to pretend a client is connected to ChromotingHost.
   void SimulateClientConnection(int connection_index, bool authenticate) {
     scoped_refptr<MockConnectionToClient> connection =
@@ -173,7 +172,8 @@ class ChromotingHostTest : public testing::Test {
         host_.get(),
         user_authenticator,
         connection,
-        event_executor_);
+        event_executor_,
+        desktop_environment_->capturer());
     connection->set_host_stub(client.get());
 
     context_.network_message_loop()->PostTask(
@@ -208,9 +208,10 @@ class ChromotingHostTest : public testing::Test {
   }
 
  protected:
-  scoped_ptr<Logger> logger_;
   MessageLoop message_loop_;
+  scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
   MockConnectionToClientEventHandler handler_;
+  scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_refptr<ChromotingHost> host_;
   scoped_refptr<InMemoryHostConfig> config_;
   MockChromotingHostContext context_;

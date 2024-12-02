@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
+#include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -34,6 +35,12 @@ class UserPolicyTokenCache;
 // respective classes.
 class BrowserPolicyConnector : public NotificationObserver {
  public:
+  // Indicates the type of token passed to SetDeviceCredentials.
+  enum TokenType {
+    TOKEN_TYPE_GAIA,  // A gaia service token.
+    TOKEN_TYPE_OAUTH, // An OAuth v2 access token.
+  };
+
   static BrowserPolicyConnector* Create();
   virtual ~BrowserPolicyConnector();
 
@@ -61,10 +68,10 @@ class BrowserPolicyConnector : public NotificationObserver {
     return user_cloud_policy_subsystem_.get();
   }
 
-  // Used to set the credentials stored in the data store associated
-  // with this policy connector.
-  void SetDeviceCredentials(const std::string& owner_email,
-                            const std::string& gaia_token);
+  // Triggers registration for device policy.
+  void RegisterForDevicePolicy(const std::string& owner_email,
+                               const std::string& token,
+                               TokenType token_type);
 
   // Returns true if this device is managed by an enterprise (as opposed to
   // a local owner).
@@ -76,30 +83,31 @@ class BrowserPolicyConnector : public NotificationObserver {
   // Returns the enterprise domain if device is managed.
   std::string GetEnterpriseDomain();
 
-  // Exposes the StopAutoRetry() method of the CloudPolicySubsystem managed
-  // by this connector, which can be used to disable automatic
-  // retrying behavior.
-  void DeviceStopAutoRetry();
+  // Reset the device policy machinery. This stops any automatic retry behavior
+  // and clears the error flags, so potential retries have a chance to succeed.
+  void ResetDevicePolicy();
 
   // Initiates a policy fetch after a successful device registration.
   void FetchDevicePolicy();
+
+  // Initiates a user policy fetch after a successful device registration. This
+  // is only safe to call when a user device token is available.
+  void FetchUserPolicy();
 
   // Schedules initialization of the cloud policy backend services, if the
   // services are already constructed.
   void ScheduleServiceInitialization(int64 delay_milliseconds);
 
-  // Initializes the user cloud policy infrasturcture.
-  // TODO(sfeuz): Listen to log-out or going-away messages of TokenService and
-  // reset the backend at that point.
-  void InitializeUserPolicy(const std::string& user_name,
-                            const FilePath& policy_dir,
-                            TokenService* token_service);
+  // Initializes the user cloud policy infrastructure.
+  void InitializeUserPolicy(const std::string& user_name);
+
+  // Installs a token service for user policy.
+  void SetUserPolicyTokenService(TokenService* token_service);
 
   // Registers for user policy (if not already registered), using the passed
   // OAuth V2 token for authentication.
   void RegisterForUserPolicy(const std::string& oauth_token);
 
-  // Only used in testing.
   const CloudPolicyDataStore* GetDeviceCloudPolicyDataStore() const;
   const CloudPolicyDataStore* GetUserCloudPolicyDataStore() const;
 
@@ -128,6 +136,11 @@ class BrowserPolicyConnector : public NotificationObserver {
   // from InitializeDevicePolicy since it needs to wait for the message loops to
   // be running.
   void InitializeDevicePolicySubsystem();
+
+  // Works out the user affiliation by checking the given |user_name| against
+  // the installation attributes.
+  policy::CloudPolicyDataStore::UserAffiliation GetUserAffiliation(
+      const std::string& user_name);
 
   static BrowserPolicyConnector* CreateForTests();
   static ConfigurationPolicyProvider* CreateManagedPlatformProvider();

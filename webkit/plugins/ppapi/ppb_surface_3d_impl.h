@@ -6,10 +6,11 @@
 #define WEBKIT_PLUGINS_PPAPI_PPB_SURFACE_3D_IMPL_H_
 
 #include "base/memory/ref_counted.h"
+#include "base/task.h"
+#include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_surface_3d_api.h"
 #include "webkit/plugins/ppapi/callbacks.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
-#include "webkit/plugins/ppapi/resource.h"
 
 namespace gfx {
 class Size;
@@ -20,16 +21,16 @@ namespace ppapi {
 
 class PPB_Context3D_Impl;
 
-class PPB_Surface3D_Impl : public Resource,
+class PPB_Surface3D_Impl : public ::ppapi::Resource,
                            public ::ppapi::thunk::PPB_Surface3D_API {
  public:
   virtual ~PPB_Surface3D_Impl();
 
-  static PP_Resource Create(PluginInstance* instance_id,
+  static PP_Resource Create(PP_Instance instance,
                             PP_Config3D_Dev config,
                             const int32_t* attrib_list);
 
-  // ResourceObjectBase override.
+  // Resource override.
   virtual ::ppapi::thunk::PPB_Surface3D_API* AsPPB_Surface3D_API() OVERRIDE;
 
   // PPB_Surface3D_API implementation.
@@ -58,7 +59,7 @@ class PPB_Surface3D_Impl : public Resource,
   void OnContextLost();
 
  private:
-  explicit PPB_Surface3D_Impl(PluginInstance* instance);
+  explicit PPB_Surface3D_Impl(PP_Instance instance);
 
   bool Init(PP_Config3D_Dev config, const int32_t* attrib_list);
 
@@ -74,6 +75,8 @@ class PPB_Surface3D_Impl : public Resource,
 
   // The context this surface is currently bound to.
   PPB_Context3D_Impl* context_;
+
+  ScopedRunnableMethodFactory<PPB_Surface3D_Impl> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_Surface3D_Impl);
 };

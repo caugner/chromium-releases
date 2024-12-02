@@ -21,7 +21,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/ui_test_utils.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/common/content_notification_types.h"
 
 #if defined(TOOLKIT_GTK)
@@ -75,8 +75,9 @@ class OmniboxApiTest : public ExtensionApiTest {
 
   void WaitForAutocompleteDone(AutocompleteController* controller) {
     while (!controller->done()) {
-      ui_test_utils::WaitForNotification(
-          chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY);
+      ui_test_utils::WaitForNotificationFrom(
+          chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
+          Source<AutocompleteController>(controller));
     }
   }
 };
@@ -109,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxApiTest, MAYBE_Basic) {
 
     WaitForAutocompleteDone(autocomplete_controller);
     EXPECT_TRUE(autocomplete_controller->done());
-    EXPECT_EQ(std::wstring(), location_bar->GetInputString());
+    EXPECT_EQ(string16(), location_bar->GetInputString());
     EXPECT_EQ(string16(), location_bar->location_entry()->GetText());
     EXPECT_TRUE(location_bar->location_entry()->IsSelectAll());
 

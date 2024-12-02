@@ -7,13 +7,14 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "chrome/browser/ui/cocoa/background_gradient_view.h"
 #import "chrome/browser/ui/cocoa/tracking_area.h"
 
 @class CrTrackingArea;
 @class PanelWindowControllerCocoa;
 
-// A class that works as a custom title bar for Panels. It is placed on top of
-// the regular Cocoa title bar. We paint theme image on it, and it's
+// A class that works as a custom titlebar for Panels. It is placed on top of
+// the regular Cocoa titlebar. We paint theme image on it, and it's
 // the place for the close button, wrench button, page favicon, title label.
 // It also facilitates dragging and minimization of the panels, and changes
 // color as 'new activity' indicator.
@@ -22,7 +23,7 @@
 // differently based on being key window) so it appears easier to simply overlay
 // the standard titlebar.
 
-@interface PanelTitlebarViewCocoa : NSView {
+@interface PanelTitlebarViewCocoa : BackgroundGradientView {
   IBOutlet PanelWindowControllerCocoa* controller_;
   NSButton* closeButton_;  // Created explicitly, not from NIB. Weak, destroyed
                            // when view is destroyed, as a subview.
@@ -35,7 +36,9 @@
   // Attaches this view to the controller_'s window as a titlebar.
 - (void)attach;
 
-  // Should be called when size of the title bar changes.
+- (void)setTitle:(NSString*)newTitle;
+
+  // Should be called when size of the titlebar changes.
 - (void)updateCloseButtonLayout;
 
   // Accessor to Panel's controller.

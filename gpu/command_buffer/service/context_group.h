@@ -11,12 +11,13 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/service/gles2_cmd_validation.h"
 #include "gpu/command_buffer/service/feature_info.h"
 
 namespace gpu {
 
-class IdAllocator;
+class IdAllocatorInterface;
 
 namespace gles2 {
 
@@ -35,7 +36,7 @@ class ContextGroup : public base::RefCounted<ContextGroup> {
  public:
   typedef scoped_refptr<ContextGroup> Ref;
 
-  ContextGroup();
+  explicit ContextGroup(bool bind_generates_resource);
   ~ContextGroup();
 
   // This should only be called by GLES2Decoder.
@@ -45,6 +46,10 @@ class ContextGroup : public base::RefCounted<ContextGroup> {
   // Sets the ContextGroup has having a lost context.
   void set_have_context(bool have_context) {
     have_context_ = have_context;
+  }
+
+  bool bind_generates_resource() {
+    return bind_generates_resource_;
   }
 
   uint32 max_vertex_attribs() const {
@@ -103,7 +108,7 @@ class ContextGroup : public base::RefCounted<ContextGroup> {
     return shader_manager_.get();
   }
 
-  IdAllocator* GetIdAllocator(unsigned namepsace_id);
+  IdAllocatorInterface* GetIdAllocator(unsigned namespace_id);
 
  private:
   // Destroys all the resources.
@@ -112,6 +117,7 @@ class ContextGroup : public base::RefCounted<ContextGroup> {
   // Whether or not this context is initialized.
   bool initialized_;
   bool have_context_;
+  bool bind_generates_resource_;
 
   uint32 max_vertex_attribs_;
   uint32 max_texture_units_;
@@ -133,8 +139,8 @@ class ContextGroup : public base::RefCounted<ContextGroup> {
 
   scoped_ptr<ShaderManager> shader_manager_;
 
-  typedef base::hash_map<uint32, linked_ptr<IdAllocator> > IdAllocatorMap;
-  IdAllocatorMap id_namespaces_;
+  linked_ptr<IdAllocatorInterface>
+      id_namespaces_[id_namespaces::kNumIdNamespaces];
 
   FeatureInfo feature_info_;
 

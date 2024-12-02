@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define GPU_COMMAND_BUFFER_SERVICE_TEST_HELPER_H_
 
 #include "gpu/command_buffer/common/gl_mock.h"
-#include "gpu/GLES2/gles2_command_buffer.h"
 
 namespace gpu {
 namespace gles2 {
@@ -19,6 +18,8 @@ class TestHelper {
   static const GLuint kServiceBlackTextureCubemapId = 702;
   static const GLuint kServiceDefaultTexture2dId = 703;
   static const GLuint kServiceDefaultTextureCubemapId = 704;
+  static const GLuint kServiceDefaultExternalTextureId = 705;
+  static const GLuint kServiceBlackExternalTextureId = 706;
 
   static const GLint kMaxRenderbufferSize = 1024;
   static const GLint kMaxTextureSize = 2048;
@@ -41,7 +42,8 @@ class TestHelper {
       const char* extensions);
   static void SetupFeatureInfoInitExpectations(
       ::gfx::MockGLInterface* gl, const char* extensions);
-  static void SetupTextureManagerInitExpectations(::gfx::MockGLInterface* gl);
+  static void SetupTextureManagerInitExpectations(::gfx::MockGLInterface* gl,
+                                                  const char* extensions);
 };
 
 }  // namespace gles2

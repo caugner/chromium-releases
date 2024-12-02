@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,6 @@
 namespace base {
 
 MessageLoopProxyImpl::~MessageLoopProxyImpl() {
-  AutoLock lock(message_loop_lock_);
-  // If the target message loop still exists, the d'tor WILL execute on the
-  // target loop.
-  if (target_message_loop_) {
-    DCHECK(MessageLoop::current() == target_message_loop_);
-    MessageLoop::current()->RemoveDestructionObserver(this);
-  }
 }
 
   // MessageLoopProxy implementation
@@ -36,6 +29,30 @@ bool MessageLoopProxyImpl::PostNonNestableTask(
 bool MessageLoopProxyImpl::PostNonNestableDelayedTask(
     const tracked_objects::Location& from_here,
     Task* task,
+    int64 delay_ms) {
+  return PostTaskHelper(from_here, task, delay_ms, false);
+}
+
+bool MessageLoopProxyImpl::PostTask(const tracked_objects::Location& from_here,
+                                    const base::Closure& task) {
+  return PostTaskHelper(from_here, task, 0, true);
+}
+
+bool MessageLoopProxyImpl::PostDelayedTask(
+    const tracked_objects::Location& from_here,
+    const base::Closure& task,
+    int64 delay_ms) {
+  return PostTaskHelper(from_here, task, delay_ms, true);
+}
+
+bool MessageLoopProxyImpl::PostNonNestableTask(
+    const tracked_objects::Location& from_here, const base::Closure& task) {
+  return PostTaskHelper(from_here, task, 0, false);
+}
+
+bool MessageLoopProxyImpl::PostNonNestableDelayedTask(
+    const tracked_objects::Location& from_here,
+    const base::Closure& task,
     int64 delay_ms) {
   return PostTaskHelper(from_here, task, delay_ms, false);
 }
@@ -78,7 +95,6 @@ void MessageLoopProxyImpl::OnDestruct() const {
 
 MessageLoopProxyImpl::MessageLoopProxyImpl()
     : target_message_loop_(MessageLoop::current()) {
-  target_message_loop_->AddDestructionObserver(this);
 }
 
 bool MessageLoopProxyImpl::PostTaskHelper(
@@ -102,10 +118,28 @@ bool MessageLoopProxyImpl::PostTaskHelper(
   return ret;
 }
 
+bool MessageLoopProxyImpl::PostTaskHelper(
+    const tracked_objects::Location& from_here, const base::Closure& task,
+    int64 delay_ms, bool nestable) {
+  AutoLock lock(message_loop_lock_);
+  if (target_message_loop_) {
+    if (nestable) {
+      target_message_loop_->PostDelayedTask(from_here, task, delay_ms);
+    } else {
+      target_message_loop_->PostNonNestableDelayedTask(from_here, task,
+                                                       delay_ms);
+    }
+    return true;
+  }
+  return false;
+}
+
 scoped_refptr<MessageLoopProxy>
-MessageLoopProxy::CreateForCurrentThread() {
-  scoped_refptr<MessageLoopProxy> ret(new MessageLoopProxyImpl());
-  return ret;
+MessageLoopProxy::current() {
+  MessageLoop* cur_loop = MessageLoop::current();
+  if (!cur_loop)
+    return NULL;
+  return cur_loop->message_loop_proxy();
 }
 
 }  // namespace base

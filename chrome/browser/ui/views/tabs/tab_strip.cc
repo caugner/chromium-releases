@@ -11,6 +11,7 @@
 #include "base/compiler_specific.h"
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -67,7 +68,7 @@ namespace {
 
 class NewTabButton : public views::ImageButton {
  public:
-  explicit NewTabButton(TabStrip* tab_strip, views::ButtonListener* listener)
+  NewTabButton(TabStrip* tab_strip, views::ButtonListener* listener)
       : views::ImageButton(listener),
         tab_strip_(tab_strip) {
   }
@@ -148,7 +149,8 @@ gfx::Rect TabStrip::GetNewTabButtonBounds() {
 }
 
 bool TabStrip::SizeTabButtonToTopOfTabStrip() {
-  return controller()->SizeTabButtonToTopOfTabStrip();
+  return browser_defaults::kSizeTabButtonToTopOfTabStrip ||
+      (GetWidget() && GetWidget()->IsMaximized());
 }
 
 void TabStrip::MouseMovedOutOfView() {
@@ -185,6 +187,10 @@ bool TabStrip::IsPositionInWindowCaption(const gfx::Point& point) {
 void TabStrip::SetBackgroundOffset(const gfx::Point& offset) {
   for (int i = 0; i < tab_count(); ++i)
     GetTabAtTabDataIndex(i)->set_background_offset(offset);
+}
+
+views::View* TabStrip::GetNewTabButton() {
+  return newtab_button_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -554,6 +560,23 @@ void TabStrip::ButtonPressed(views::Button* sender, const views::Event& event) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// TabStrip, protected:
+
+Tab* TabStrip::GetTabAtTabDataIndex(int tab_data_index) const {
+  return static_cast<Tab*>(base_tab_at_tab_index(tab_data_index));
+}
+
+Tab* TabStrip::GetTabAtModelIndex(int model_index) const {
+  return GetTabAtTabDataIndex(ModelIndexToTabIndex(model_index));
+}
+
+void TabStrip::GetCurrentTabWidths(double* unselected_width,
+                                   double* selected_width) const {
+  *unselected_width = current_unselected_width_;
+  *selected_width = current_selected_width_;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // TabStrip, private:
 
 void TabStrip::Init() {
@@ -600,20 +623,6 @@ void TabStrip::LoadNewTabButtonImage() {
                                 tp->GetBitmapNamed(IDR_NEWTAB_BUTTON_MASK));
   if (in_test)
     delete tp;
-}
-
-Tab* TabStrip::GetTabAtTabDataIndex(int tab_data_index) const {
-  return static_cast<Tab*>(base_tab_at_tab_index(tab_data_index));
-}
-
-Tab* TabStrip::GetTabAtModelIndex(int model_index) const {
-  return GetTabAtTabDataIndex(ModelIndexToTabIndex(model_index));
-}
-
-void TabStrip::GetCurrentTabWidths(double* unselected_width,
-                                   double* selected_width) const {
-  *unselected_width = current_unselected_width_;
-  *selected_width = current_selected_width_;
 }
 
 void TabStrip::GetDesiredTabWidths(int tab_count,

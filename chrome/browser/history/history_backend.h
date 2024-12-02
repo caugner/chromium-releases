@@ -25,7 +25,7 @@
 #include "sql/init_status.h"
 
 class BookmarkService;
-struct DownloadHistoryInfo;
+struct DownloadPersistentStoreInfo;
 class TestingProfile;
 struct ThumbnailScore;
 
@@ -190,7 +190,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Thumbnails ----------------------------------------------------------------
 
   void SetPageThumbnail(const GURL& url,
-                        const SkBitmap& thumbnail,
+                        const gfx::Image* thumbnail,
                         const ThumbnailScore& score);
 
   // Retrieves a thumbnail, passing it across thread boundaries
@@ -242,7 +242,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   void UpdateDownloadPath(const FilePath& path, int64 db_handle);
   void CreateDownload(scoped_refptr<DownloadCreateRequest> request,
                       int32 id,
-                      const DownloadHistoryInfo& info);
+                      const DownloadPersistentStoreInfo& info);
   void RemoveDownload(int64 db_handle);
   void RemoveDownloadsBetween(const base::Time remove_begin,
                               const base::Time remove_end);
@@ -277,6 +277,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   virtual bool GetAllTypedURLs(std::vector<history::URLRow>* urls);
 
   virtual bool GetVisitsForURL(URLID id, VisitVector* visits);
+
+  // Fetches up to |max_visits| most recent visits for the passed URL.
+  virtual bool GetMostRecentVisitsForURL(URLID id,
+                                         int max_visits,
+                                         VisitVector* visits);
 
   virtual bool UpdateURL(URLID id, const history::URLRow& url);
 
@@ -349,6 +354,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MigrationIconMapping);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, SetFaviconMapping);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, AddOrUpdateIconMapping);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetMostRecentVisits);
 
   friend class ::TestingProfile;
 

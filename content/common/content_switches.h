@@ -13,8 +13,9 @@
 namespace switches {
 
 extern const char kAllowFileAccessFromFiles[];
-extern const char kNoRunningInsecureContent[];
 extern const char kAllowSandboxDebugging[];
+extern const char kBrowserAssertTest[];
+extern const char kBrowserCrashTest[];
 extern const char kBrowserSubprocessPath[];
 // TODO(jam): this doesn't belong in content.
 extern const char kChromeFrame[];
@@ -22,6 +23,7 @@ extern const char kDisable3DAPIs[];
 extern const char kDisableAccelerated2dCanvas[];
 extern const char kDisableAcceleratedCompositing[];
 extern const char kDisableAcceleratedLayers[];
+extern const char kDisableAcceleratedPlugins[];
 extern const char kDisableAcceleratedVideo[];
 extern const char kDisableAltWinstation[];
 extern const char kDisableApplicationCache[];
@@ -45,9 +47,11 @@ extern const char kDisableJavaScript[];
 extern const char kDisableJavaScriptI18NAPI[];
 extern const char kDisableLocalStorage[];
 extern const char kDisableLogging[];
+extern const char kDisableSmoothScrolling[];
 extern const char kDisablePlugins[];
 extern const char kDisablePopupBlocking[];
 extern const char kDisableRendererAccessibility[];
+extern const char kDisableSSLFalseStart[];
 extern const char kDisableSeccompSandbox[];
 extern const char kDisableSessionStorage[];
 extern const char kDisableSharedWorkers[];
@@ -57,20 +61,26 @@ extern const char kDisableWebAudio[];
 extern const char kDisableWebSockets[];
 extern const char kEnableAccelerated2dCanvas[];
 extern const char kEnableAcceleratedDrawing[];
-extern const char kEnableAcceleratedPlugins[];
 extern const char kEnableAccessibility[];
+extern const char kEnableAccessibilityLogging[];
 extern const char kEnableBenchmarking[];
+extern const char kEnableDNSCertProvenanceChecking[];
 extern const char kEnableDeviceMotion[];
+extern const char kDisableFullScreen[];
 extern const char kEnableGPUPlugin[];
 extern const char kEnableLogging[];
 extern const char kEnableMediaStream[];
 extern const char kEnableMonitorProfile[];
+extern const char kEnableOriginBoundCerts[];
 extern const char kEnablePreparsedJsCaching[];
+extern const char kEnableSSLCachedInfo[];
 extern const char kEnableSandboxLogging[];
 extern const char kEnableSeccompSandbox[];
 extern const char kEnableStatsTable[];
+extern const char kEnableTcpFastOpen[];
 extern const char kEnableVideoFullscreen[];
 extern const char kEnableVideoLogging[];
+extern const char kEnableWebIntents[];
 extern const char kExperimentalLocationFeatures[];
 // TODO(jam): this doesn't belong in content.
 extern const char kExtensionProcess[];
@@ -92,11 +102,6 @@ extern const char kLowLatencyAudio[];
 // TODO(jam): this doesn't belong in content.
 extern const char kNaClBrokerProcess[];
 extern const char kNaClLoaderProcess[];
-// TODO(bradchen): remove kNaClLinuxHelper switch.
-// This switch enables the experimental lightweight nacl_helper for Linux.
-// It will be going away soon, when the helper is enabled permanently.
-extern const char kNaClLinuxHelper[];
-extern const char kNoDisplayingInsecureContent[];
 extern const char kNoJsRandomness[];
 extern const char kNoReferrers[];
 extern const char kNoSandbox[];
@@ -134,7 +139,6 @@ extern const char kSingleProcess[];
 extern const char kSQLiteIndexedDatabase[];
 extern const char kTestSandbox[];
 extern const char kUnlimitedQuotaForFiles[];
-extern const char kUnlimitedQuotaForIndexedDB[];
 extern const char kUserAgent[];
 extern const char kUtilityCmdPrefix[];
 extern const char kUtilityProcess[];
@@ -150,6 +154,10 @@ extern const char kZygoteProcess[];
 #if defined(OS_WIN)
 extern const char kAuditHandles[];
 extern const char kAuditAllHandles[];
+#endif
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+extern const char kScrollPixels[];
 #endif
 
 #if !defined(OFFICIAL_BUILD)

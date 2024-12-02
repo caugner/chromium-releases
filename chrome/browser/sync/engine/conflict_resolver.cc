@@ -16,7 +16,6 @@
 #include "chrome/browser/sync/sessions/status_controller.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/common/deprecated/event_sys-inl.h"
 
 using std::map;
 using std::set;
@@ -289,7 +288,7 @@ bool AttemptToFixUpdateEntryInDeletedLocalTree(WriteTransaction* trans,
   Id id = parent_id;
   // As we will be crawling the path of deleted entries there's a chance we'll
   // end up having to reparent an item as there will be an invalid parent.
-  Id reroot_id = syncable::kNullId;
+  Id reroot_id = syncable::GetNullId();
   // Similarly crawling deleted items means we risk loops.
   int loop_detection = conflict_set->size();
   while (!id.IsRoot() && --loop_detection >= 0) {

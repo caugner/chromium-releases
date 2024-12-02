@@ -39,7 +39,7 @@ enum BackendFlags {
 
 // This class implements the Backend interface. An object of this
 // class handles the operations of the cache for a particular profile.
-class NET_TEST BackendImpl : public Backend {
+class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   friend class Eviction;
  public:
   BackendImpl(const FilePath& path, base::MessageLoopProxy* cache_thread,
@@ -79,6 +79,7 @@ class NET_TEST BackendImpl : public Backend {
   int SyncOpenNextEntry(void** iter, Entry** next_entry);
   int SyncOpenPrevEntry(void** iter, Entry** prev_entry);
   void SyncEndEnumeration(void* iter);
+  void SyncOnExternalCacheHit(const std::string& key);
 
   // Open or create an entry for the given |key| or |iter|.
   EntryImpl* OpenEntryImpl(const std::string& key);
@@ -263,6 +264,7 @@ class NET_TEST BackendImpl : public Backend {
                             CompletionCallback* callback);
   virtual void EndEnumeration(void** iter);
   virtual void GetStats(StatsItems* stats);
+  virtual void OnExternalCacheHit(const std::string& key);
 
  private:
   typedef base::hash_map<CacheAddr, EntryImpl*> EntriesMap;
@@ -355,7 +357,7 @@ class NET_TEST BackendImpl : public Backend {
   int entry_count_;  // Number of entries accessed lately.
   int byte_count_;  // Number of bytes read/written lately.
   int buffer_bytes_;  // Total size of the temporary entries' buffers.
-  int io_delay_;  // Average time (ms) required to complete some IO operations.
+  int up_ticks_;  // The number of timer ticks received (OnStatsTimer).
   net::CacheType cache_type_;
   int uma_report_;  // Controls transmision of UMA data.
   uint32 user_flags_;  // Flags set by the user.
@@ -381,7 +383,7 @@ class NET_TEST BackendImpl : public Backend {
 };
 
 // Returns the prefered max cache size given the available disk space.
-NET_TEST int PreferedCacheSize(int64 available);
+NET_EXPORT_PRIVATE int PreferedCacheSize(int64 available);
 
 }  // namespace disk_cache
 

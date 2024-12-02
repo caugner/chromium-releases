@@ -195,6 +195,9 @@ class BrowserList {
   // Returns true if at least one incognito session is active.
   static bool IsOffTheRecordSessionActive();
 
+  // Returns true if at least one incognito session is active for |profile|.
+  static bool IsOffTheRecordSessionActiveForProfile(Profile* profile);
+
   // Send out notifications.
   // For ChromeOS, also request session manager to end the session.
   static void NotifyAndTerminate(bool fast_path);
@@ -241,7 +244,7 @@ class TabContentsIterator {
   }
 
   // Returns the Browser instance associated with the current TabContents.
-  // Valid as long as !Done()
+  // Valid as long as !done()
   Browser* browser() const {
     if (browser_iterator_ != BrowserList::end())
       return *browser_iterator_;

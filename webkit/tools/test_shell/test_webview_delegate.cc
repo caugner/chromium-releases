@@ -17,6 +17,7 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "media/base/filter_collection.h"
+#include "media/base/media_log.h"
 #include "media/base/message_loop_factory_impl.h"
 #include "net/base/net_errors.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
@@ -35,7 +36,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClientMock.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
@@ -52,6 +53,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
 #include "ui/gfx/native_widget_types.h"
@@ -126,6 +128,7 @@ using WebKit::WebWidget;
 using WebKit::WebWindowFeatures;
 using WebKit::WebWorker;
 using WebKit::WebWorkerClient;
+using WebKit::WebVector;
 using WebKit::WebView;
 
 namespace {
@@ -592,15 +595,47 @@ WebScreenInfo TestWebViewDelegate::screenInfo() {
 WebPlugin* TestWebViewDelegate::createPlugin(WebFrame* frame,
                                              const WebPluginParams& params) {
   bool allow_wildcard = true;
-  webkit::npapi::WebPluginInfo info;
-  std::string actual_mime_type;
-  if (!webkit::npapi::PluginList::Singleton()->GetPluginInfo(
-          params.url, params.mimeType.utf8(), allow_wildcard, &info,
-          &actual_mime_type) || !webkit::npapi::IsPluginEnabled(info))
+  std::vector<webkit::WebPluginInfo> plugins;
+  std::vector<std::string> mime_types;
+  webkit::npapi::PluginList::Singleton()->GetPluginInfoArray(
+      params.url, params.mimeType.utf8(), allow_wildcard,
+      NULL, &plugins, &mime_types);
+  if (plugins.empty())
     return NULL;
 
+#if defined(OS_MACOSX)
+  if (!shell_->layout_test_mode()) {
+    bool flash = LowerCaseEqualsASCII(params.mimeType.utf8(),
+                                      "application/x-shockwave-flash");
+    if (flash) {
+      // Mac does not support windowed plugins. Force Flash plugins to use
+      // windowless mode by setting the wmode="opaque" attribute.
+      DCHECK(params.attributeNames.size() == params.attributeValues.size());
+      size_t size = params.attributeNames.size();
+
+      WebVector<WebString> new_names(size+1),  new_values(size+1);
+
+      for (size_t i = 0; i < size; ++i) {
+        new_names[i] = params.attributeNames[i];
+        new_values[i] = params.attributeValues[i];
+      }
+
+      new_names[size] = "wmode";
+      new_values[size] = "opaque";
+
+      WebPluginParams new_params = params;
+      new_params.attributeNames.swap(new_names);
+      new_params.attributeValues.swap(new_values);
+
+      return new webkit::npapi::WebPluginImpl(
+          frame, new_params, plugins.front().path, mime_types.front(),
+          AsWeakPtr());
+    }
+  }
+#endif  // defined (OS_MACOSX)
+
   return new webkit::npapi::WebPluginImpl(
-      frame, params, info.path, actual_mime_type, AsWeakPtr());
+      frame, params, plugins.front().path, mime_types.front(), AsWeakPtr());
 }
 
 WebWorker* TestWebViewDelegate::createWorker(WebFrame* frame,
@@ -624,7 +659,8 @@ WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
       new webkit_glue::WebMediaPlayerImpl(client,
                                           collection.release(),
                                           message_loop_factory.release(),
-                                          NULL));
+                                          NULL,
+                                          new media::MediaLog()));
   if (!result->Initialize(frame, false, video_renderer)) {
     return NULL;
   }
@@ -915,14 +951,14 @@ void TestWebViewDelegate::openFileSystem(
     WebFrame* frame, WebFileSystem::Type type, long long size, bool create,
     WebFileSystemCallbacks* callbacks) {
   SimpleFileSystem* fileSystem = static_cast<SimpleFileSystem*>(
-      WebKit::webKitClient()->fileSystem());
+      WebKit::webKitPlatformSupport()->fileSystem());
   fileSystem->OpenFileSystem(frame, type, size, create, callbacks);
 }
 
 // WebPluginPageDelegate -----------------------------------------------------
 
 WebCookieJar* TestWebViewDelegate::GetCookieJar() {
-  return WebKit::webKitClient()->cookieJar();
+  return WebKit::webKitPlatformSupport()->cookieJar();
 }
 
 // Public methods ------------------------------------------------------------

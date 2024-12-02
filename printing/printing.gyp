@@ -9,7 +9,7 @@
   'targets': [
     {
       'target_name': 'printing',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
@@ -18,7 +18,10 @@
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/icu/icu.gyp:icuuc',
-        '../ui/ui.gyp:ui',  # Only required for Font support.
+        '../ui/ui.gyp:ui',
+      ],
+      'defines': [
+        'PRINTING_IMPLEMENTATION',
       ],
       'include_dirs': [
         '..',
@@ -42,12 +45,11 @@
         'metafile_skia_wrapper.cc',
         'page_number.cc',
         'page_number.h',
-        'page_overlays.cc',
-        'page_overlays.h',
         'page_range.cc',
         'page_range.h',
         'page_setup.cc',
         'page_setup.h',
+        'page_size_margins.h',
         'pdf_metafile_cairo_linux.cc',
         'pdf_metafile_cairo_linux.h',
         'pdf_metafile_cg_mac.cc',
@@ -58,7 +60,6 @@
         'printed_document.cc',
         'printed_document.h',
         'printed_document_mac.cc',
-        'printed_document_posix.cc',
         'printed_document_win.cc',
         'printed_page.cc',
         'printed_page.h',
@@ -76,6 +77,8 @@
         'print_job_constants.h',
         'print_settings.cc',
         'print_settings.h',
+        'print_settings_initializer.cc',
+        'print_settings_initializer.h',
         'print_settings_initializer_gtk.cc',
         'print_settings_initializer_gtk.h',
         'print_settings_initializer_mac.cc',
@@ -105,6 +108,12 @@
             '../build/linux/system.gyp:freetype2',
             '../build/linux/system.gyp:gtk',
             '../build/linux/system.gyp:gtkprint',
+          ],
+        }],
+        ['use_aura==1', {
+          'sources/': [
+            ['exclude', '^printing_context_win.cc'],
+            ['exclude', '^printing_context_win.h'],          
           ],
         }],
         ['OS=="mac" and use_skia==0', {
@@ -166,12 +175,12 @@
         'printing',
         '../testing/gtest.gyp:gtest',
         '../base/base.gyp:test_support_base',
+        '../ui/ui.gyp:ui',
       ],
       'sources': [
         'emf_win_unittest.cc',
         'printing_test.h',
         'page_number_unittest.cc',
-        'page_overlays_unittest.cc',
         'page_range_unittest.cc',
         'page_setup_unittest.cc',
         'pdf_metafile_cairo_linux_unittest.cc',
@@ -222,7 +231,7 @@
               }, {
                 'link_settings': {
                   'libraries': [
-                    '<!@(cups-config --libs)',
+                    '<!@(python cups_config_helper.py --libs)',
                   ],
                 },
               }],
