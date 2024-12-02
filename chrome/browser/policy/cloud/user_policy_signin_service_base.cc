@@ -9,7 +9,7 @@
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
-#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_switches.h"
@@ -18,6 +18,7 @@
 #include "components/policy/core/common/cloud/system_policy_request_context.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
 #include "components/policy/core/common/cloud/user_policy_request_context.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/notification_source.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -71,14 +72,15 @@ void UserPolicySigninServiceBase::FetchPolicyForSignedInUser(
   manager->core()->service()->RefreshPolicy(callback);
 }
 
+void UserPolicySigninServiceBase::GoogleSignedOut(const std::string& username) {
+  ShutdownUserCloudPolicyManager();
+}
+
 void UserPolicySigninServiceBase::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_GOOGLE_SIGNED_OUT:
-      ShutdownUserCloudPolicyManager();
-      break;
     case chrome::NOTIFICATION_PROFILE_ADDED:
       // A new profile has been loaded - if it's signed in, then initialize the
       // UCPM, otherwise shut down the UCPM (which deletes any cached policy
@@ -131,6 +133,8 @@ void UserPolicySigninServiceBase::OnClientError(CloudPolicyClient* client) {
 }
 
 void UserPolicySigninServiceBase::Shutdown() {
+  if (signin_manager())
+    signin_manager()->RemoveObserver(this);
   PrepareForUserCloudPolicyManagerShutdown();
 }
 
@@ -147,7 +151,11 @@ UserPolicySigninServiceBase::CreateClientForRegistrationOnly(
     const std::string& username) {
   DCHECK(!username.empty());
   // We should not be called with a client already initialized.
+#if !defined(OS_IOS)
+  // On iOS we check if an account has policy while the profile is signed in
+  // to another account.
   DCHECK(!policy_manager() || !policy_manager()->core()->client());
+#endif
 
   // If the user should not get policy, just bail out.
   if (!policy_manager() || !ShouldLoadPolicyForUser(username)) {
@@ -179,12 +187,11 @@ void UserPolicySigninServiceBase::InitializeOnProfileReady(Profile* profile) {
     return;
   }
 
-  // Shutdown the UserCloudPolicyManager when the user signs out. We do
-  // this here because we don't want to get SIGNED_OUT notifications until
-  // after the profile has started initializing (http://crbug.com/316229).
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_GOOGLE_SIGNED_OUT,
-                 content::Source<Profile>(profile));
+  // Shutdown the UserCloudPolicyManager when the user signs out. We start
+  // observing the SigninManager here because we don't want to get signout
+  // notifications until after the profile has started initializing
+  // (http://crbug.com/316229).
+  signin_manager()->AddObserver(this);
 
   std::string username = signin_manager()->GetAuthenticatedUsername();
   if (username.empty())

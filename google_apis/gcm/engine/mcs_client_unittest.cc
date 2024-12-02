@@ -4,16 +4,18 @@
 
 #include "google_apis/gcm/engine/mcs_client.h"
 
+#include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/simple_test_clock.h"
-#include "components/os_crypt/os_crypt.h"
+#include "components/os_crypt/os_crypt_switches.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/engine/fake_connection_factory.h"
 #include "google_apis/gcm/engine/fake_connection_handler.h"
 #include "google_apis/gcm/engine/gcm_store_impl.h"
+#include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace gcm {
@@ -66,8 +68,9 @@ class TestMCSClient : public MCSClient {
  public:
   TestMCSClient(base::Clock* clock,
                 ConnectionFactory* connection_factory,
-                GCMStore* gcm_store)
-    : MCSClient("", clock, connection_factory, gcm_store),
+                GCMStore* gcm_store,
+                gcm::GCMStatsRecorder* recorder)
+    : MCSClient("", clock, connection_factory, gcm_store, recorder),
       next_id_(0) {
   }
 
@@ -83,6 +86,8 @@ class MCSClientTest : public testing::Test {
  public:
   MCSClientTest();
   virtual ~MCSClientTest();
+
+  virtual void SetUp() OVERRIDE;
 
   void BuildMCSClient();
   void InitializeClient();
@@ -133,6 +138,8 @@ class MCSClientTest : public testing::Test {
   scoped_ptr<MCSMessage> received_message_;
   std::string sent_message_id_;
   MCSClient::MessageSendStatus message_send_status_;
+
+  gcm::GCMStatsRecorder recorder_;
 };
 
 MCSClientTest::MCSClientTest()
@@ -144,24 +151,27 @@ MCSClientTest::MCSClientTest()
   EXPECT_TRUE(temp_directory_.CreateUniqueTempDir());
   run_loop_.reset(new base::RunLoop());
 
-  // On OSX, prevent the Keychain permissions popup during unit tests.
-#if defined(OS_MACOSX)
-  OSCrypt::UseMockKeychain(true);
-#endif
-
   // Advance the clock to a non-zero time.
   clock_.Advance(base::TimeDelta::FromSeconds(1));
 }
 
 MCSClientTest::~MCSClientTest() {}
 
+void MCSClientTest::SetUp() {
+  testing::Test::SetUp();
+#if defined(OS_MACOSX)
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      os_crypt::switches::kUseMockKeychain);
+#endif  // OS_MACOSX
+}
+
 void MCSClientTest::BuildMCSClient() {
-  gcm_store_.reset(new GCMStoreImpl(true,
-                                    temp_directory_.path(),
+  gcm_store_.reset(new GCMStoreImpl(temp_directory_.path(),
                                     message_loop_.message_loop_proxy()));
   mcs_client_.reset(new TestMCSClient(&clock_,
                                       &connection_factory_,
-                                      gcm_store_.get()));
+                                      gcm_store_.get(),
+                                      &recorder_));
 }
 
 void MCSClientTest::InitializeClient() {

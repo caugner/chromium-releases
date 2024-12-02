@@ -256,7 +256,7 @@ void ThemeService::Observe(int type,
         installed_pending_load_id_ = installed_details->extension->id();
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
     {
       const Extension* extension = Details<const Extension>(details).ptr();
       if (extension->is_theme() &&
@@ -482,7 +482,7 @@ void ThemeService::NotifyThemeChanged() {
   }
 }
 
-#if defined(OS_WIN) || defined(USE_AURA)
+#if defined(USE_AURA)
 void ThemeService::FreePlatformCaches() {
   // Views (Skia) has no platform image cache to clear.
 }
@@ -504,7 +504,7 @@ void ThemeService::OnExtensionServiceReady() {
                  chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_LOADED,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_ENABLED,

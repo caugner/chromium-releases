@@ -24,7 +24,6 @@
 #include "ui/message_center/message_center_style.h"
 #include "ui/message_center/message_center_tray.h"
 #include "ui/message_center/message_center_types.h"
-#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/views/message_center_button_bar.h"
 #include "ui/message_center/views/message_view.h"
 #include "ui/message_center/views/message_view_context_menu_controller.h"
@@ -114,7 +113,7 @@ class MessageListView : public views::View,
 
   void AddNotificationAt(MessageView* view, int i);
   void RemoveNotification(MessageView* view);
-  void UpdateNotification(MessageView* view, MessageView* new_view);
+  void UpdateNotification(MessageView* view, const Notification& notification);
   void SetRepositionTarget(const gfx::Rect& target_rect);
   void ResetRepositionSession();
   void ClearAllNotifications(const gfx::Rect& visible_scroll_rect);
@@ -262,23 +261,17 @@ void MessageListView::RemoveNotification(MessageView* view) {
 }
 
 void MessageListView::UpdateNotification(MessageView* view,
-                                         MessageView* new_view) {
+                                         const Notification& notification) {
   int index = GetIndexOf(view);
   DCHECK_LE(0, index);  // GetIndexOf is negative if not a child.
 
   if (animator_.get())
     animator_->StopAnimatingView(view);
-  gfx::Rect old_bounds = view->bounds();
   if (deleting_views_.find(view) != deleting_views_.end())
     deleting_views_.erase(view);
   if (deleted_when_done_.find(view) != deleted_when_done_.end())
     deleted_when_done_.erase(view);
-  delete view;
-  AddChildViewAt(new_view, index);
-  new_view->SetBounds(old_bounds.x(),
-                      old_bounds.y(),
-                      old_bounds.width(),
-                      new_view->GetHeightForWidth(old_bounds.width()));
+  view->UpdateWithNotification(notification);
   DoUpdateIfPossible();
 }
 
@@ -621,7 +614,8 @@ void MessageCenterView::SetNotifications(
            notifications.begin(); iter != notifications.end(); ++iter) {
     AddNotificationAt(*(*iter), index++);
 
-    message_center_->DisplayedNotification((*iter)->id());
+    message_center_->DisplayedNotification(
+        (*iter)->id(), message_center::DISPLAY_SOURCE_MESSAGE_CENTER);
     if (notification_views_.size() >= kMaxVisibleMessageCenterNotifications)
       break;
   }
@@ -886,16 +880,11 @@ void MessageCenterView::OnNotificationUpdated(const std::string& id) {
   for (NotificationList::Notifications::const_iterator iter =
            notifications.begin(); iter != notifications.end(); ++iter) {
     if ((*iter)->id() == id) {
-      NotificationView* new_view =
-          NotificationView::Create(this,
-                                   *(*iter),
-                                   false); // Not creating a top-level
-                                           // notification.
-      new_view->set_context_menu_controller(context_menu_controller_.get());
-      new_view->set_scroller(scroller_);
-      message_list_view_->UpdateNotification(view, new_view);
-      notification_views_[id] = new_view;
-      NotificationsChanged();
+      int old_width = view->width();
+      int old_height = view->GetHeightForWidth(old_width);
+      message_list_view_->UpdateNotification(view, **iter);
+      if (view->GetHeightForWidth(old_width) != old_height)
+        NotificationsChanged();
       break;
     }
   }

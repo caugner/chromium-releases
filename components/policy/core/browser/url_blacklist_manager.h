@@ -43,8 +43,7 @@ class POLICY_EXPORT URLBlacklist {
  public:
   // This is meant to be bound to URLFixerUpper::SegmentURL. See that function
   // for documentation on the parameters and return value.
-  typedef std::string (*SegmentURLCallback)(const std::string&,
-                                            url_parse::Parsed*);
+  typedef std::string (*SegmentURLCallback)(const std::string&, url::Parsed*);
 
   explicit URLBlacklist(SegmentURLCallback segment_url);
   virtual ~URLBlacklist();
@@ -77,17 +76,20 @@ class POLICY_EXPORT URLBlacklist {
   // of the hostname (if it is one.)
   // |port| is 0 if none is explicitly defined.
   // |path| does not include query parameters.
+  // |query| contains the query parameters ('?' not included).
   static bool FilterToComponents(SegmentURLCallback segment_url,
                                  const std::string& filter,
                                  std::string* scheme,
                                  std::string* host,
                                  bool* match_subdomains,
                                  uint16* port,
-                                 std::string* path);
+                                 std::string* path,
+                                 std::string* query);
 
   // Creates a condition set that can be used with the |url_matcher|. |id| needs
   // to be a unique number that will be returned by the |url_matcher| if the URL
-  // matches that condition set.
+  // matches that condition set. |allow| indicates if it is a white-list (true)
+  // or black-list (false) filter.
   static scoped_refptr<url_matcher::URLMatcherConditionSet> CreateConditionSet(
       url_matcher::URLMatcher* url_matcher,
       url_matcher::URLMatcherConditionSet::ID id,
@@ -95,7 +97,9 @@ class POLICY_EXPORT URLBlacklist {
       const std::string& host,
       bool match_subdomains,
       uint16 port,
-      const std::string& path);
+      const std::string& path,
+      const std::string& query,
+      bool allow);
 
  private:
   struct FilterComponents;
@@ -133,7 +137,9 @@ class POLICY_EXPORT URLBlacklistManager {
  public:
   // Returns true if the blacklist should be overridden for |url| and sets
   // |block| to true if it should be blocked and false otherwise.
-  typedef base::Callback<bool(const GURL&, bool*)> OverrideBlacklistCallback;
+  // |reason| is set to the exact reason for blocking |url| iff |block| is true.
+  typedef base::Callback<bool(const GURL& url, bool* block, int* reason)>
+      OverrideBlacklistCallback;
 
   // Must be constructed on the UI thread.
   // |background_task_runner| is used to build the blacklist in a background
@@ -159,8 +165,10 @@ class POLICY_EXPORT URLBlacklistManager {
   // Only main frame and sub frame requests may be blocked; other sub resources
   // or background downloads (e.g. extensions updates, sync, etc) are not
   // filtered. The sync signin page is also not filtered.
+  // |reason| is populated with the exact reason for blocking the url if and
+  // only if the return value is true otherwise it is left untouched.
   // Must be called from the IO thread.
-  bool IsRequestBlocked(const net::URLRequest& request) const;
+  bool IsRequestBlocked(const net::URLRequest& request, int* reason) const;
 
   // Replaces the current blacklist. Must be called on the IO thread.
   // Virtual for testing.

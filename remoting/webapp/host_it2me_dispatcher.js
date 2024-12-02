@@ -42,25 +42,26 @@ remoting.HostIt2MeDispatcher = function() {
  * @param {function():remoting.HostPlugin} createPluginCallback Callback to
  *     instantiate the NPAPI plugin when NativeMessaging is determined to be
  *     unsupported.
- * @param {function():void} onDone Callback to be called after initialization
- *     has finished successfully.
- * @param {function(remoting.Error):void} onError Callback to invoke if neither
- *     the native messaging host nor the NPAPI plugin works.
+ * @param {function():void} onDispatcherInitialized Callback to be called after
+ *     initialization has finished successfully.
+ * @param {function(remoting.Error):void} onDispatcherInitializationFailed
+ *     Callback to invoke if neither the native messaging host nor the NPAPI
+ *     plugin works.
  */
 remoting.HostIt2MeDispatcher.prototype.initialize =
-    function(createPluginCallback, onDone, onError) {
+    function(createPluginCallback, onDispatcherInitialized,
+             onDispatcherInitializationFailed) {
   /** @type {remoting.HostIt2MeDispatcher} */
   var that = this;
 
   function onNativeMessagingStarted() {
     console.log('Native Messaging supported.');
-    onDone();
+
+    that.npapiHost_ = null;
+    onDispatcherInitialized();
   }
 
-  /**
-   * @param {remoting.Error} error
-   */
-  function onNativeMessagingFailed(error) {
+  function onNativeMessagingInitFailed() {
     console.log('Native Messaging unsupported, falling back to NPAPI.');
 
     that.nativeMessagingHost_ = null;
@@ -69,15 +70,15 @@ remoting.HostIt2MeDispatcher.prototype.initialize =
     // TODO(weitaosu): is there a better way to check whether NPAPI plugin is
     // supported?
     if (that.npapiHost_) {
-      onDone();
+      onDispatcherInitialized();
     } else {
-      onError(error);
+      onDispatcherInitializationFailed(remoting.Error.MISSING_PLUGIN);
     }
   }
 
   this.nativeMessagingHost_ = new remoting.HostIt2MeNativeMessaging();
   this.nativeMessagingHost_.initialize(onNativeMessagingStarted,
-                                       onNativeMessagingFailed,
+                                       onNativeMessagingInitFailed,
                                        this.onNativeMessagingError_.bind(this));
 }
 
@@ -88,6 +89,20 @@ remoting.HostIt2MeDispatcher.prototype.onNativeMessagingError_ =
     function(error) {
   this.nativeMessagingHost_ = null;
   this.onErrorHandler_(error);
+}
+
+/**
+ * @return {boolean}
+ */
+remoting.HostIt2MeDispatcher.prototype.usingNpapi = function() {
+  return this.npapiHost_ != null;
+}
+
+/**
+ * @return {remoting.HostPlugin}
+ */
+remoting.HostIt2MeDispatcher.prototype.getNpapiHost = function() {
+  return this.npapiHost_;
 }
 
 /**

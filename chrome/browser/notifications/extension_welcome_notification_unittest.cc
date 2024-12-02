@@ -215,7 +215,7 @@ class ExtensionWelcomeNotificationTest : public testing::Test {
 
     virtual std::string id() const OVERRIDE { return id_; }
 
-    virtual content::RenderViewHost* GetRenderViewHost() const OVERRIDE {
+    virtual content::WebContents* GetWebContents() const OVERRIDE {
       return NULL;
     }
 
@@ -546,5 +546,3 @@ TEST_F(ExtensionWelcomeNotificationTest, NotificationPreviouslyExpired) {
   EXPECT_TRUE(GetBooleanPref(prefs::kWelcomeNotificationPreviouslyPoppedUp));
   EXPECT_EQ(GetInt64Pref(prefs::kWelcomeNotificationExpirationTimestamp), 1);
 }
-
-// C++ Readability Review Change Trigger

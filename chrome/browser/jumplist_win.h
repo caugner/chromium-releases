@@ -88,11 +88,7 @@ class JumpList : public TabRestoreServiceObserver,
   void Terminate();
 
   // Returns true if the custom JumpList is enabled.
-  // We use the custom JumpList when we satisfy the following conditions:
-  // * Chromium is running on Windows 7 and;
-  // * Chromium is lauched without a "--disable-custom-jumplist" option.
-  // TODO(hbono): to be enabled by default when we finalize the categories and
-  // items of our JumpList.
+  // The custom jumplist works only on Windows 7 and above.
   static bool Enabled();
 
  protected:
@@ -124,7 +120,8 @@ class JumpList : public TabRestoreServiceObserver,
   // is available.
   // To avoid file operations, this function just attaches the given data to
   // a ShellLinkItem object.
-  void OnFaviconDataAvailable(const chrome::FaviconImageResult& image_result);
+  void OnFaviconDataAvailable(
+      const favicon_base::FaviconImageResult& image_result);
 
   // Callback for TopSites that notifies when the "Most
   // Visited" list is available. This function updates the ShellLinkItemList

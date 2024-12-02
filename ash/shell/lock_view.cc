@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
 #include "ash/shell_window_ids.h"
@@ -94,9 +94,8 @@ void CreateLockScreen() {
                             (root_window_size.height() - ps.height()) / 2,
                             ps.width(), ps.height());
   params.delegate = lock_view;
-  params.parent = Shell::GetContainer(
-      Shell::GetPrimaryRootWindow(),
-      internal::kShellWindowId_LockScreenContainer);
+  params.parent = Shell::GetContainer(Shell::GetPrimaryRootWindow(),
+                                      kShellWindowId_LockScreenContainer);
   widget->Init(params);
   widget->SetContentsView(lock_view);
   widget->Show();

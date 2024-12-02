@@ -19,7 +19,6 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
-#include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
@@ -39,6 +38,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "extensions/browser/extension_protocols.h"
 #include "extensions/common/constants.h"
 #include "net/base/cache_type.h"
 #include "net/ftp/ftp_network_layer.h"
@@ -49,10 +49,15 @@
 #include "webkit/browser/quota/special_storage_policy.h"
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_settings.h"
+#if defined(SPDY_PROXY_AUTH_VALUE)
+#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
+#endif
 #endif
 
 namespace {
+
+// Identifies Chrome as the source of Domain Reliability uploads it sends.
+const char* kDomainReliabilityUploadReporterString = "chrome";
 
 net::BackendType ChooseCacheBackendType() {
 #if defined(OS_ANDROID)
@@ -462,8 +467,11 @@ void ProfileImplIOData::InitializeInternal(
   main_cache->InitializeInfiniteCache(lazy_params_->infinite_cache_path);
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
-  DataReductionProxySettings::InitDataReductionProxySession(
-      main_cache->GetSession());
+#if defined(SPDY_PROXY_AUTH_VALUE)
+  data_reduction_proxy::DataReductionProxySettings::
+      InitDataReductionProxySession(main_cache->GetSession(),
+                                    SPDY_PROXY_AUTH_VALUE);
+#endif
 #endif
 
   if (chrome_browser_net::ShouldUseInMemoryCookiesAndCache()) {
@@ -503,7 +511,9 @@ void ProfileImplIOData::InitializeInternal(
 
   if (IsDomainReliabilityMonitoringEnabled()) {
     domain_reliability_monitor_.reset(
-        new domain_reliability::DomainReliabilityMonitor(main_context));
+        new domain_reliability::DomainReliabilityMonitor(
+            main_context, kDomainReliabilityUploadReporterString));
+    domain_reliability_monitor_->AddBakedInConfigs();
     network_delegate()->set_domain_reliability_monitor(
         domain_reliability_monitor_.get());
   }

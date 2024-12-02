@@ -25,20 +25,13 @@ GLViewRendererManager::GLViewRendererManager() {}
 
 GLViewRendererManager::~GLViewRendererManager() {}
 
-bool GLViewRendererManager::OnRenderThread() const {
+GLViewRendererManager::Key GLViewRendererManager::NullKey() {
   AutoLock auto_lock(lock_);
-  return render_thread_.is_equal(base::PlatformThread::CurrentHandle());
-}
-
-void GLViewRendererManager::MarkRenderThread() {
-  lock_.AssertAcquired();
-  if (render_thread_.is_null())
-    render_thread_ = base::PlatformThread::CurrentHandle();
-  DCHECK(render_thread_.is_equal(base::PlatformThread::CurrentHandle()));
+  return mru_list_.end();
 }
 
 GLViewRendererManager::Key GLViewRendererManager::PushBack(RendererType view) {
-  MarkRenderThread();
+  AutoLock auto_lock(lock_);
   DCHECK(mru_list_.end() ==
          std::find(mru_list_.begin(), mru_list_.end(), view));
   mru_list_.push_back(view);

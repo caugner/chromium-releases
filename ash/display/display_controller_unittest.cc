@@ -509,10 +509,10 @@ TEST_F(DisplayControllerTest, SecondaryDisplayLayout) {
 
 namespace {
 
-internal::DisplayInfo CreateDisplayInfo(int64 id,
-                                        const gfx::Rect& bounds,
-                                        float device_scale_factor) {
-  internal::DisplayInfo info(id, "", false);
+DisplayInfo CreateDisplayInfo(int64 id,
+                              const gfx::Rect& bounds,
+                              float device_scale_factor) {
+  DisplayInfo info(id, "", false);
   info.SetBounds(bounds);
   info.set_device_scale_factor(device_scale_factor);
   return info;
@@ -526,15 +526,14 @@ TEST_F(DisplayControllerTest, MirrorToDockedWithFullscreen) {
   w1->Focus();
 
   // Docked mode.
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
 
-  const internal::DisplayInfo internal_display_info =
+  const DisplayInfo internal_display_info =
       CreateDisplayInfo(1, gfx::Rect(0, 0, 500, 500), 2.0f);
-  const internal::DisplayInfo external_display_info =
+  const DisplayInfo external_display_info =
       CreateDisplayInfo(2, gfx::Rect(0, 0, 500, 500), 1.0f);
 
-  std::vector<internal::DisplayInfo> display_info_list;
+  std::vector<DisplayInfo> display_info_list;
   // Mirror.
   display_info_list.push_back(internal_display_info);
   display_info_list.push_back(external_display_info);
@@ -583,8 +582,7 @@ TEST_F(DisplayControllerTest, BoundsUpdated) {
   EXPECT_EQ(0, observer.GetFocusChangedCountAndReset());
   EXPECT_EQ(0, observer.GetActivationChangedCountAndReset());
 
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   gfx::Insets insets(5, 5, 5, 5);
   display_manager->UpdateWorkAreaOfDisplay(
       ScreenUtil::GetSecondaryDisplay().id(), insets);
@@ -666,8 +664,7 @@ TEST_F(DisplayControllerTest, SwapPrimary) {
 
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
 
   UpdateDisplay("200x200,300x300");
   gfx::Display primary_display = Shell::GetScreen()->GetPrimaryDisplay();
@@ -757,8 +754,7 @@ TEST_F(DisplayControllerTest, FindNearestDisplay) {
 
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
 
   UpdateDisplay("200x200,300x300");
   DisplayLayout display_layout(DisplayLayout::RIGHT, 50);
@@ -794,108 +790,13 @@ TEST_F(DisplayControllerTest, FindNearestDisplay) {
       gfx::Point(300, 400)).id());
 }
 
-TEST_F(DisplayControllerTest, SwapPrimaryForLegacyShelfLayout) {
-  if (!SupportsMultipleDisplays())
-    return;
-
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kAshDisableAlternateShelfLayout);
-
-  DisplayController* display_controller =
-      Shell::GetInstance()->display_controller();
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
-
-  UpdateDisplay("200x200,300x300");
-  gfx::Display primary_display = Shell::GetScreen()->GetPrimaryDisplay();
-  gfx::Display secondary_display = ScreenUtil::GetSecondaryDisplay();
-
-  DisplayLayout display_layout(DisplayLayout::RIGHT, 50);
-  display_manager->SetLayoutForCurrentDisplays(display_layout);
-
-  EXPECT_NE(primary_display.id(), secondary_display.id());
-  aura::Window* primary_root =
-      display_controller->GetRootWindowForDisplayId(primary_display.id());
-  aura::Window* secondary_root =
-      display_controller->GetRootWindowForDisplayId(secondary_display.id());
-  EXPECT_NE(primary_root, secondary_root);
-  aura::Window* shelf_window =
-      Shelf::ForPrimaryDisplay()->shelf_widget()->GetNativeView();
-  EXPECT_TRUE(primary_root->Contains(shelf_window));
-  EXPECT_FALSE(secondary_root->Contains(shelf_window));
-  EXPECT_EQ(primary_display.id(),
-            Shell::GetScreen()->GetDisplayNearestPoint(
-                gfx::Point(-100, -100)).id());
-  EXPECT_EQ(primary_display.id(),
-            Shell::GetScreen()->GetDisplayNearestWindow(NULL).id());
-
-  EXPECT_EQ("0,0 200x200", primary_display.bounds().ToString());
-  EXPECT_EQ("0,0 200x152", primary_display.work_area().ToString());
-  EXPECT_EQ("200,0 300x300", secondary_display.bounds().ToString());
-  EXPECT_EQ("200,0 300x252", secondary_display.work_area().ToString());
-  EXPECT_EQ("right, 50",
-            display_manager->GetCurrentDisplayLayout().ToString());
-
-  // Switch primary and secondary
-  display_controller->SetPrimaryDisplay(secondary_display);
-  const DisplayLayout& inverted_layout =
-      display_manager->GetCurrentDisplayLayout();
-  EXPECT_EQ("left, -50", inverted_layout.ToString());
-
-  EXPECT_EQ(secondary_display.id(),
-            Shell::GetScreen()->GetPrimaryDisplay().id());
-  EXPECT_EQ(primary_display.id(), ScreenUtil::GetSecondaryDisplay().id());
-  EXPECT_EQ(primary_display.id(),
-            Shell::GetScreen()->GetDisplayNearestPoint(
-                gfx::Point(-100, -100)).id());
-  EXPECT_EQ(secondary_display.id(),
-            Shell::GetScreen()->GetDisplayNearestWindow(NULL).id());
-
-  EXPECT_EQ(
-      primary_root,
-      display_controller->GetRootWindowForDisplayId(secondary_display.id()));
-  EXPECT_EQ(
-      secondary_root,
-      display_controller->GetRootWindowForDisplayId(primary_display.id()));
-  EXPECT_TRUE(primary_root->Contains(shelf_window));
-  EXPECT_FALSE(secondary_root->Contains(shelf_window));
-
-  // Test if the bounds are correctly swapped.
-  gfx::Display swapped_primary = Shell::GetScreen()->GetPrimaryDisplay();
-  gfx::Display swapped_secondary = ScreenUtil::GetSecondaryDisplay();
-  EXPECT_EQ("0,0 300x300", swapped_primary.bounds().ToString());
-  EXPECT_EQ("0,0 300x252", swapped_primary.work_area().ToString());
-  EXPECT_EQ("-200,-50 200x200", swapped_secondary.bounds().ToString());
-
-  EXPECT_EQ("-200,-50 200x152", swapped_secondary.work_area().ToString());
-
-  aura::WindowTracker tracker;
-  tracker.Add(primary_root);
-  tracker.Add(secondary_root);
-
-  // Deleting 2nd display should move the primary to original primary display.
-  UpdateDisplay("200x200");
-  RunAllPendingInMessageLoop();  // RootWindow is deleted in a posted task.
-  EXPECT_EQ(1, Shell::GetScreen()->GetNumDisplays());
-  EXPECT_EQ(primary_display.id(), Shell::GetScreen()->GetPrimaryDisplay().id());
-  EXPECT_EQ(primary_display.id(),
-            Shell::GetScreen()->GetDisplayNearestPoint(
-                gfx::Point(-100, -100)).id());
-  EXPECT_EQ(primary_display.id(),
-            Shell::GetScreen()->GetDisplayNearestWindow(NULL).id());
-  EXPECT_TRUE(tracker.Contains(primary_root));
-  EXPECT_FALSE(tracker.Contains(secondary_root));
-  EXPECT_TRUE(primary_root->Contains(shelf_window));
-}
-
 TEST_F(DisplayControllerTest, SwapPrimaryById) {
   if (!SupportsMultipleDisplays())
     return;
 
   DisplayController* display_controller =
       Shell::GetInstance()->display_controller();
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
 
   UpdateDisplay("200x200,300x300");
   gfx::Display primary_display = Shell::GetScreen()->GetPrimaryDisplay();
@@ -966,7 +867,7 @@ TEST_F(DisplayControllerTest, SwapPrimaryById) {
 
   // Adding 2nd display with the same ID.  The 2nd display should become primary
   // since secondary id is still stored as desirable_primary_id.
-  std::vector<internal::DisplayInfo> display_info_list;
+  std::vector<DisplayInfo> display_info_list;
   display_info_list.push_back(
       display_manager->GetDisplayInfo(primary_display.id()));
   display_info_list.push_back(
@@ -988,14 +889,14 @@ TEST_F(DisplayControllerTest, SwapPrimaryById) {
   // Deleting 2nd display and adding 2nd display with a different ID.  The 2nd
   // display shouldn't become primary.
   UpdateDisplay("200x200");
-  internal::DisplayInfo third_display_info(
+  DisplayInfo third_display_info(
       secondary_display.id() + 1, std::string(), false);
   third_display_info.SetBounds(secondary_display.bounds());
   ASSERT_NE(primary_display.id(), third_display_info.id());
 
-  const internal::DisplayInfo& primary_display_info =
+  const DisplayInfo& primary_display_info =
       display_manager->GetDisplayInfo(primary_display.id());
-  std::vector<internal::DisplayInfo> display_info_list2;
+  std::vector<DisplayInfo> display_info_list2;
   display_info_list2.push_back(primary_display_info);
   display_info_list2.push_back(third_display_info);
   display_manager->OnNativeDisplaysChanged(display_info_list2);
@@ -1034,11 +935,11 @@ TEST_F(DisplayControllerTest, CursorDeviceScaleFactorSwapPrimary) {
   EXPECT_EQ(1.0f, primary_root->GetHost()->compositor()->
       device_scale_factor());
   primary_root->MoveCursorTo(gfx::Point(50, 50));
-  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(1.0f, test_api.GetCurrentCursor().device_scale_factor());
   EXPECT_EQ(2.0f, secondary_root->GetHost()->compositor()->
       device_scale_factor());
   secondary_root->MoveCursorTo(gfx::Point(50, 50));
-  EXPECT_EQ(2.0f, test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(2.0f, test_api.GetCurrentCursor().device_scale_factor());
 
   // Switch primary and secondary
   display_controller->SetPrimaryDisplay(secondary_display);
@@ -1048,23 +949,23 @@ TEST_F(DisplayControllerTest, CursorDeviceScaleFactorSwapPrimary) {
   EXPECT_EQ(1.0f, secondary_root->GetHost()->compositor()->
       device_scale_factor());
   secondary_root->MoveCursorTo(gfx::Point(50, 50));
-  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(1.0f, test_api.GetCurrentCursor().device_scale_factor());
   primary_root->MoveCursorTo(gfx::Point(50, 50));
   EXPECT_EQ(2.0f, primary_root->GetHost()->compositor()->
       device_scale_factor());
-  EXPECT_EQ(2.0f, test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(2.0f, test_api.GetCurrentCursor().device_scale_factor());
 
   // Deleting 2nd display.
   UpdateDisplay("200x200");
   RunAllPendingInMessageLoop();  // RootWindow is deleted in a posted task.
 
   // Cursor's device scale factor should be updated even without moving cursor.
-  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(1.0f, test_api.GetCurrentCursor().device_scale_factor());
 
   primary_root->MoveCursorTo(gfx::Point(50, 50));
   EXPECT_EQ(1.0f, primary_root->GetHost()->compositor()->
       device_scale_factor());
-  EXPECT_EQ(1.0f, test_api.GetDisplay().device_scale_factor());
+  EXPECT_EQ(1.0f, test_api.GetCurrentCursor().device_scale_factor());
 }
 
 TEST_F(DisplayControllerTest, OverscanInsets) {
@@ -1121,8 +1022,7 @@ TEST_F(DisplayControllerTest, Rotate) {
   if (!SupportsMultipleDisplays())
     return;
 
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   TestEventHandler event_handler;
   Shell::GetInstance()->AddPreTargetHandler(&event_handler);
 
@@ -1212,8 +1112,7 @@ TEST_F(DisplayControllerTest, ScaleRootWindow) {
   generator.MoveMouseToInHost(599, 200);
   EXPECT_EQ("449,150", event_handler.GetLocationAndReset());
 
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   display_manager->SetDisplayUIScale(display1.id(), 1.25f);
   display1 = Shell::GetScreen()->GetPrimaryDisplay();
   display2 = ScreenUtil::GetSecondaryDisplay();
@@ -1320,10 +1219,10 @@ TEST_F(DisplayControllerTest, ConvertHostToRootCoords) {
 
 namespace {
 
-internal::DisplayInfo CreateDisplayInfo(int64 id,
-                                        int y,
-                                        gfx::Display::Rotation rotation) {
-  internal::DisplayInfo info(id, "", false);
+DisplayInfo CreateDisplayInfo(int64 id,
+                              int y,
+                              gfx::Display::Rotation rotation) {
+  DisplayInfo info(id, "", false);
   info.SetBounds(gfx::Rect(0, y, 500, 500));
   info.set_rotation(rotation);
   return info;
@@ -1337,17 +1236,16 @@ TEST_F(DisplayControllerTest, DockToSingle) {
   if (!SupportsMultipleDisplays())
     return;
 
-  internal::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
 
   const int64 internal_id = 1;
 
-  const internal::DisplayInfo internal_display_info =
+  const DisplayInfo internal_display_info =
       CreateDisplayInfo(internal_id, 0, gfx::Display::ROTATE_0);
-  const internal::DisplayInfo external_display_info =
+  const DisplayInfo external_display_info =
       CreateDisplayInfo(2, 1, gfx::Display::ROTATE_90);
 
-  std::vector<internal::DisplayInfo> display_info_list;
+  std::vector<DisplayInfo> display_info_list;
   // Extended
   display_info_list.push_back(internal_display_info);
   display_info_list.push_back(external_display_info);

@@ -33,11 +33,10 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/tab_contents/tab_util.h"
-#include "chrome/browser/ui/auto_login_prompter.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/mime_types_handler.h"
+#include "chrome/common/extensions/manifest_handlers/mime_types_handler.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
@@ -75,6 +74,7 @@
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/intercept_download_resource_throttle.h"
+#include "chrome/browser/ui/android/infobars/auto_login_prompter.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #else
 #include "chrome/browser/apps/app_url_redirector.h"
@@ -198,7 +198,8 @@ void SendExecuteMimeTypeHandlerEvent(scoped_ptr<content::StreamHandle> stream,
       extension_id, web_contents, stream.Pass(), expected_content_size);
 }
 
-void LaunchURL(const GURL& url, int render_process_id, int render_view_id) {
+void LaunchURL(const GURL& url, int render_process_id, int render_view_id,
+               bool user_gesture) {
   // If there is no longer a WebContents, the request may have raced with tab
   // closing. Don't fire the external request. (It may have been a prerender.)
   content::WebContents* web_contents =
@@ -217,7 +218,8 @@ void LaunchURL(const GURL& url, int render_process_id, int render_view_id) {
 
   ExternalProtocolHandler::LaunchUrlWithDelegate(
       url, render_process_id, render_view_id,
-      g_external_protocol_handler_delegate);
+      g_external_protocol_handler_delegate,
+      user_gesture);
 }
 #endif  // !defined(OS_ANDROID)
 
@@ -441,7 +443,10 @@ ResourceDispatcherHostLoginDelegate*
 }
 
 bool ChromeResourceDispatcherHostDelegate::HandleExternalProtocol(
-    const GURL& url, int child_id, int route_id) {
+    const GURL& url,
+    int child_id,
+    int route_id,
+    bool initiated_by_user_gesture) {
 #if defined(OS_ANDROID)
   // Android use a resource throttle to handle external as well as internal
   // protocols.
@@ -457,7 +462,8 @@ bool ChromeResourceDispatcherHostDelegate::HandleExternalProtocol(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&LaunchURL, url, child_id, route_id));
+      base::Bind(&LaunchURL, url, child_id, route_id,
+                 initiated_by_user_gesture));
   return true;
 #endif
 }
@@ -594,11 +600,13 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     IPC::Sender* sender) {
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
 
+#if defined(OS_ANDROID)
   // See if the response contains the X-Auto-Login header.  If so, this was
   // a request for a login page, and the server is allowing the browser to
   // suggest auto-login, if available.
   AutoLoginPrompter::ShowInfoBarIfPossible(request, info->GetChildID(),
                                            info->GetRouteID());
+#endif
 
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
 
@@ -630,8 +638,14 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
   }
 
   // Ignores x-frame-options for the chrome signin UI.
-  if (request->first_party_for_cookies().GetOrigin().spec() ==
-      chrome::kChromeUIChromeSigninURL) {
+  const std::string request_spec(
+      request->first_party_for_cookies().GetOrigin().spec());
+#if defined(OS_CHROMEOS)
+  if (request_spec == chrome::kChromeUIOobeURL ||
+      request_spec == chrome::kChromeUIChromeSigninURL) {
+#else
+  if (request_spec == chrome::kChromeUIChromeSigninURL) {
+#endif
     net::HttpResponseHeaders* response_headers = request->response_headers();
     if (response_headers->HasHeader("x-frame-options"))
       response_headers->RemoveHeader("x-frame-options");

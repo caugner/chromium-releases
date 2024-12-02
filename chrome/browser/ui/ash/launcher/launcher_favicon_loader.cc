@@ -19,7 +19,7 @@ const int kMaxBitmapSize = 256;
 
 ////////////////////////////////////////////////////////////////////////////////
 // FaviconBitmapHandler fetchs all bitmaps with the 'icon' (or 'shortcut icon')
-// link tag, storing the one that best matches ash::kShelfPreferredSize.
+// link tag, storing the one that best matches ash::kShelfSize.
 // These icon bitmaps are not resized and are not cached beyond the lifetime
 // of the class. Bitmaps larger than kMaxBitmapSize are ignored.
 
@@ -41,7 +41,6 @@ class FaviconBitmapHandler : public content::WebContentsObserver {
 
   // content::WebContentObserver implementation.
   virtual void DidUpdateFaviconURL(
-    int32 page_id,
     const std::vector<content::FaviconURL>& candidates) OVERRIDE;
 
  private:
@@ -73,7 +72,6 @@ class FaviconBitmapHandler : public content::WebContentsObserver {
 };
 
 void FaviconBitmapHandler::DidUpdateFaviconURL(
-    int32 page_id,
     const std::vector<content::FaviconURL>& candidates) {
   // This function receives a complete list of faviocn urls for the page.
   // It may get called multiple times with the same list, and will also get
@@ -147,7 +145,7 @@ void FaviconBitmapHandler::AddFavicon(const GURL& image_url,
   if (new_bitmap.height() > kMaxBitmapSize ||
       new_bitmap.width() > kMaxBitmapSize)
     return;
-  if (new_bitmap.height() < ash::kShelfPreferredSize)
+  if (new_bitmap.height() < ash::kShelfSize)
     return;
   if (!bitmap_.isNull()) {
     // We want the smallest icon that is large enough.

@@ -43,7 +43,7 @@ class WebstoreInlineInstallerFactory;
 
 // Per-tab extension helper. Also handles non-extension apps.
 class TabHelper : public content::WebContentsObserver,
-                  public ExtensionFunctionDispatcher::Delegate,
+                  public extensions::ExtensionFunctionDispatcher::Delegate,
                   public base::SupportsWeakPtr<TabHelper>,
                   public content::NotificationObserver,
                   public content::WebContentsUserData<TabHelper> {
@@ -100,6 +100,7 @@ class TabHelper : public content::WebContentsObserver,
   void CreateApplicationShortcuts();
   void CreateHostedAppFromWebContents();
   bool CanCreateApplicationShortcuts() const;
+  bool CanCreateBookmarkApp() const;
 
   void set_pending_web_app_action(WebAppAction action) {
     pending_web_app_action_ = action;
@@ -181,7 +182,7 @@ class TabHelper : public content::WebContentsObserver,
       content::WebContents* old_web_contents,
       content::WebContents* new_web_contents) OVERRIDE;
 
-  // ExtensionFunctionDispatcher::Delegate overrides.
+  // extensions::ExtensionFunctionDispatcher::Delegate overrides.
   virtual extensions::WindowController* GetExtensionWindowController()
       const OVERRIDE;
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
@@ -251,7 +252,7 @@ class TabHelper : public content::WebContentsObserver,
   SkBitmap extension_app_icon_;
 
   // Process any extension messages coming from the tab.
-  ExtensionFunctionDispatcher extension_function_dispatcher_;
+  extensions::ExtensionFunctionDispatcher extension_function_dispatcher_;
 
   // Cached web app info data.
   WebApplicationInfo web_app_info_;

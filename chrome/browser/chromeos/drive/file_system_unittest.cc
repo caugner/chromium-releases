@@ -26,6 +26,7 @@
 #include "chrome/browser/drive/drive_api_util.h"
 #include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/drive/fake_drive_service.h"
+#include "chrome/browser/drive/test_util.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/test_util.h"
@@ -84,10 +85,7 @@ class FileSystemTest : public testing::Test {
 
     logger_.reset(new EventLogger);
     fake_drive_service_.reset(new FakeDriveService);
-    fake_drive_service_->LoadResourceListForWapi(
-        "gdata/root_feed.json");
-    fake_drive_service_->LoadAccountMetadataForWapi(
-        "gdata/account_metadata.json");
+    test_util::SetUpTestEntries(fake_drive_service_.get());
 
     fake_free_disk_space_getter_.reset(new FakeFreeDiskSpaceGetter);
 
@@ -166,11 +164,10 @@ class FileSystemTest : public testing::Test {
       const base::FilePath& file_path) {
     FileError error = FILE_ERROR_FAILED;
     scoped_ptr<ResourceEntryVector> entries(new ResourceEntryVector);
-    bool last_has_more = true;
     file_system_->ReadDirectory(
         file_path,
-        base::Bind(&AccumulateReadDirectoryResult,
-                   &error, entries.get(), &last_has_more));
+        base::Bind(&AccumulateReadDirectoryResult, entries.get()),
+        google_apis::test_util::CreateCopyResultCallback(&error));
     test_util::RunBlockingPoolTask();
     if (error != FILE_ERROR_OK)
       entries.reset();
@@ -179,21 +176,10 @@ class FileSystemTest : public testing::Test {
 
   // Used to implement ReadDirectorySync().
   static void AccumulateReadDirectoryResult(
-      FileError* out_error,
       ResourceEntryVector* out_entries,
-      bool* last_has_more,
-      FileError error,
-      scoped_ptr<ResourceEntryVector> entries,
-      bool has_more) {
-    EXPECT_TRUE(*last_has_more);
-    *out_error = error;
-    *last_has_more = has_more;
-    if (error == FILE_ERROR_OK) {
-      ASSERT_TRUE(entries);
-      out_entries->insert(out_entries->end(), entries->begin(), entries->end());
-    } else {
-      EXPECT_FALSE(has_more);
-    }
+      scoped_ptr<ResourceEntryVector> entries) {
+    ASSERT_TRUE(entries);
+    out_entries->insert(out_entries->end(), entries->begin(), entries->end());
   }
 
   // Returns true if an entry exists at |file_path|.
@@ -210,8 +196,8 @@ class FileSystemTest : public testing::Test {
   // Sets up a filesystem with directories: drive/root, drive/root/Dir1,
   // drive/root/Dir1/SubDir2 and files drive/root/File1, drive/root/Dir1/File2,
   // drive/root/Dir1/SubDir2/File3. If |use_up_to_date_timestamp| is true, sets
-  // the changestamp to 654321, equal to that of "account_metadata.json" test
-  // data, indicating the cache is holding the latest file system info.
+  // the changestamp to that of FakeDriveService, indicating the cache is
+  // holding the latest file system info.
   void SetUpTestFileSystem(SetUpTestFileSystemParam param) {
     // Destroy the existing resource metadata to close DB.
     resource_metadata_.reset();
@@ -229,7 +215,8 @@ class FileSystemTest : public testing::Test {
 
     ASSERT_EQ(FILE_ERROR_OK, resource_metadata->Initialize());
 
-    const int64 changestamp = param == USE_SERVER_TIMESTAMP ? 654321 : 1;
+    const int64 changestamp = param == USE_SERVER_TIMESTAMP ?
+        fake_drive_service_->about_resource().largest_change_id() : 1;
     ASSERT_EQ(FILE_ERROR_OK,
               resource_metadata->SetLargestChangestamp(changestamp));
 
@@ -662,7 +649,7 @@ TEST_F(FileSystemTest, LoadFileSystemFromUpToDateCache) {
   // Kicks loading of cached file system and query for server update.
   EXPECT_TRUE(ReadDirectorySync(util::GetDriveMyDriveRootPath()));
 
-  // SetUpTestFileSystem and "account_metadata.json" have the same
+  // SetUpTestFileSystem and FakeDriveService have the same
   // changestamp (i.e. the local metadata is up-to-date), so no request for
   // new resource list (i.e., call to GetResourceList) should happen.
   EXPECT_EQ(0, fake_drive_service_->resource_list_load_count());
@@ -859,27 +846,29 @@ TEST_F(FileSystemTest, GetAvailableSpace) {
       google_apis::test_util::CreateCopyResultCallback(
           &error, &bytes_total, &bytes_used));
   test_util::RunBlockingPoolTask();
-  EXPECT_EQ(GG_LONGLONG(6789012345), bytes_used);
-  EXPECT_EQ(GG_LONGLONG(9876543210), bytes_total);
+  EXPECT_EQ(6789012345LL, bytes_used);
+  EXPECT_EQ(9876543210LL, bytes_total);
 }
 
 TEST_F(FileSystemTest, MarkCacheFileAsMountedAndUnmounted) {
   ASSERT_TRUE(LoadFullResourceList());
 
   base::FilePath file_in_root(FILE_PATH_LITERAL("drive/root/File 1.txt"));
-  scoped_ptr<ResourceEntry> entry(GetResourceEntrySync(file_in_root));
-  ASSERT_TRUE(entry);
 
-  // Write to cache.
-  ASSERT_EQ(FILE_ERROR_OK, cache_->Store(
-      entry->local_id(),
-      entry->file_specific_info().md5(),
-      google_apis::test_util::GetTestFilePath("gdata/root_feed.json"),
-      internal::FileCache::FILE_OPERATION_COPY));
-
-  // Test for mounting.
+  // Make the file cached.
   FileError error = FILE_ERROR_FAILED;
   base::FilePath file_path;
+  scoped_ptr<ResourceEntry> entry;
+  file_system_->GetFile(
+      file_in_root,
+      google_apis::test_util::CreateCopyResultCallback(
+          &error, &file_path, &entry));
+  test_util::RunBlockingPoolTask();
+  EXPECT_EQ(FILE_ERROR_OK, error);
+
+  // Test for mounting.
+  error = FILE_ERROR_FAILED;
+  file_path.clear();
   file_system_->MarkCacheFileAsMounted(
       file_in_root,
       google_apis::test_util::CreateCopyResultCallback(&error, &file_path));
@@ -918,29 +907,7 @@ TEST_F(FileSystemTest, GetShareUrl) {
 
   // Verify the share url to the sharing dialog.
   EXPECT_EQ(FILE_ERROR_OK, error);
-  EXPECT_EQ(GURL("https://file_link_share/"), share_url);
-}
-
-TEST_F(FileSystemTest, GetShareUrlNotAvailable) {
-  ASSERT_TRUE(LoadFullResourceList());
-
-  const base::FilePath kFileInRoot(
-      FILE_PATH_LITERAL("drive/root/Directory 1/SubDirectory File 1.txt"));
-  const GURL kEmbedOrigin("chrome-extension://test-id");
-
-  // Try to fetch the URL for the sharing dialog.
-  FileError error = FILE_ERROR_FAILED;
-  GURL share_url;
-
-  file_system_->GetShareUrl(
-      kFileInRoot,
-      kEmbedOrigin,
-      google_apis::test_util::CreateCopyResultCallback(&error, &share_url));
-  test_util::RunBlockingPoolTask();
-
-  // Verify the error and the share url, which should be empty.
-  EXPECT_EQ(FILE_ERROR_FAILED, error);
-  EXPECT_TRUE(share_url.is_empty());
+  EXPECT_TRUE(share_url.is_valid());
 }
 
 }   // namespace drive

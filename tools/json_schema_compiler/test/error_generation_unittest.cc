@@ -78,7 +78,8 @@ TEST(JsonSchemaCompilerErrorTest, TooManyParameters) {
   {
     scoped_ptr<base::ListValue> params_value = List(
         new FundamentalValue(5));
-    EXPECT_TRUE(TestFunction::Params::Create(*params_value));
+    base::string16 error;
+    EXPECT_TRUE(TestFunction::Params::Create(*params_value, &error));
   }
   {
     scoped_ptr<base::ListValue> params_value = List(
@@ -96,7 +97,8 @@ TEST(JsonSchemaCompilerErrorTest, ParamIsRequired) {
   {
     scoped_ptr<base::ListValue> params_value = List(
         new FundamentalValue(5));
-    EXPECT_TRUE(TestFunction::Params::Create(*params_value));
+    base::string16 error;
+    EXPECT_TRUE(TestFunction::Params::Create(*params_value, &error));
   }
   {
     scoped_ptr<base::ListValue> params_value = List(
@@ -125,9 +127,10 @@ TEST(JsonSchemaCompilerErrorTest, WrongPropertyValueType) {
 
 TEST(JsonSchemaCompilerErrorTest, WrongParameterCreationType) {
   {
+    base::string16 error;
     scoped_ptr<base::ListValue> params_value = List(
         new base::StringValue("Yeah!"));
-    EXPECT_TRUE(TestString::Params::Create(*params_value));
+    EXPECT_TRUE(TestString::Params::Create(*params_value, &error));
   }
   {
     scoped_ptr<base::ListValue> params_value = List(
@@ -211,7 +214,7 @@ TEST(JsonSchemaCompilerErrorTest, BadEnumValue) {
   {
     scoped_ptr<base::DictionaryValue> value = Dictionary(
         "enumeration", new base::StringValue("bad sauce"));
-    EXPECT_TRUE(EqualsUtf16("'enumeration': expected \"one\" or \"two\" "
+    EXPECT_TRUE(EqualsUtf16("'Enumeration': expected \"one\" or \"two\" "
               "or \"three\", got \"bad sauce\"",
         GetPopulateError<HasEnumeration>(*value)));
   }
@@ -314,5 +317,20 @@ TEST(JsonSchemaCompilerErrorTest, MultiplePopulationErrors) {
         "'TheArray': expected list, got integer",
         error));
     EXPECT_EQ(NULL, out.the_array.get());
+  }
+}
+
+TEST(JsonSchemaCompilerErrorTest, TooManyKeys) {
+  {
+    scoped_ptr<base::DictionaryValue> value = Dictionary(
+      "string", new base::StringValue("yes"));
+    EXPECT_TRUE(EqualsUtf16("", GetPopulateError<TestType>(*value)));
+  }
+  {
+    scoped_ptr<base::DictionaryValue> value = Dictionary(
+        "string", new base::StringValue("yes"),
+        "ohno", new base::StringValue("many values"));
+    EXPECT_TRUE(EqualsUtf16("found unexpected key 'ohno'",
+        GetPopulateError<TestType>(*value)));
   }
 }

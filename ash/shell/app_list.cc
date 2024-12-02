@@ -4,7 +4,7 @@
 
 #include <string>
 
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
 #include "ash/shell/toplevel_window.h"
@@ -246,6 +246,10 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
 
   virtual const Users& GetUsers() const OVERRIDE {
     return users_;
+  }
+
+  virtual bool ShouldCenterWindow() const OVERRIDE {
+    return false;
   }
 
   virtual app_list::AppListModel* GetModel() OVERRIDE { return model_.get(); }

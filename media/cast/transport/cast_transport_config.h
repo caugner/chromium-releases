@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "media/cast/transport/cast_transport_defines.h"
 #include "net/base/ip_endpoint.h"
@@ -23,13 +24,10 @@ enum RtcpMode {
   kRtcpReducedSize,  // Reduced-size RTCP mode is described by RFC 5506.
 };
 
-enum VideoCodec {
-  kVp8,
-  kH264,
-  kVideoCodecLast = kH264
-};
+enum VideoCodec { kFakeSoftwareVideo, kVp8, kH264, kVideoCodecLast = kH264 };
 
 enum AudioCodec {
+  kFakeSoftwareAudio,
   kOpus,
   kPcm16,
   kExternalAudio,
@@ -38,27 +36,26 @@ enum AudioCodec {
 
 struct RtpConfig {
   RtpConfig();
-  int history_ms;  // The time RTP packets are stored for retransmissions.
+  ~RtpConfig();
+  uint32 ssrc;
   int max_delay_ms;
   int payload_type;
-};
-
-// TODO(mikhal): Consider combining this with the cast_sender config.
-struct CastTransportBaseConfig {
-  CastTransportBaseConfig();
-  ~CastTransportBaseConfig();
-
-  uint32 ssrc;
-  RtpConfig rtp_config;
   std::string aes_key;      // Binary string of size kAesKeySize.
   std::string aes_iv_mask;  // Binary string of size kAesBlockSize.
+};
+
+struct CastTransportRtpConfig {
+  CastTransportRtpConfig();
+  ~CastTransportRtpConfig();
+  RtpConfig config;
+  int max_outstanding_frames;
 };
 
 struct CastTransportAudioConfig {
   CastTransportAudioConfig();
   ~CastTransportAudioConfig();
 
-  CastTransportBaseConfig base;
+  CastTransportRtpConfig rtp;
   AudioCodec codec;
   int frequency;
   int channels;
@@ -68,7 +65,7 @@ struct CastTransportVideoConfig {
   CastTransportVideoConfig();
   ~CastTransportVideoConfig();
 
-  CastTransportBaseConfig base;
+  CastTransportRtpConfig rtp;
   VideoCodec codec;
 };
 
@@ -97,16 +94,19 @@ struct EncodedAudioFrame {
 };
 
 typedef std::vector<uint8> Packet;
-typedef std::vector<Packet> PacketList;
+typedef scoped_refptr<base::RefCountedData<Packet> > PacketRef;
+typedef std::vector<PacketRef> PacketList;
 
 typedef base::Callback<void(scoped_ptr<Packet> packet)> PacketReceiverCallback;
 
 class PacketSender {
  public:
-  // All packets to be sent to the network will be delivered via these
-  // functions.
-  virtual bool SendPacket(const transport::Packet& packet) = 0;
-
+  // Send a packet to the network. Returns false if the network is blocked
+  // and we should wait for |cb| to be called. It is not allowed to called
+  // SendPacket again until |cb| has been called. Any other errors that
+  // occur will be reported through side channels, in such cases, this function
+  // will return true indicating that the channel is not blocked.
+  virtual bool SendPacket(PacketRef packet, const base::Closure& cb) = 0;
   virtual ~PacketSender() {}
 };
 

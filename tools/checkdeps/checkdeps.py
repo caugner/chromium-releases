@@ -33,7 +33,7 @@ def _IsTestFile(filename):
 
 
 class DepsChecker(DepsBuilder):
-  """Parses include_rules from DEPS files and erifies files in the
+  """Parses include_rules from DEPS files and verifies files in the
   source tree against them.
   """
 
@@ -83,13 +83,13 @@ class DepsChecker(DepsBuilder):
 
   def _CheckDirectoryImpl(self, checkers, dir_name):
     rules = self.GetDirectoryRules(dir_name)
-    if rules == None:
+    if rules is None:
       return
 
     # Collect a list of all files and directories to check.
     files_to_check = []
     dirs_to_check = []
-    contents = os.listdir(dir_name)
+    contents = sorted(os.listdir(dir_name))
     for cur in contents:
       full_name = os.path.join(dir_name, cur)
       if os.path.isdir(full_name):
@@ -125,18 +125,21 @@ class DepsChecker(DepsBuilder):
     problems = []
     for file_path, include_lines in added_includes:
       if not cpp.IsCppFile(file_path):
-        pass
+        continue
       rules_for_file = self.GetDirectoryRules(os.path.dirname(file_path))
-      if rules_for_file:
-        for line in include_lines:
-          is_include, violation = cpp.CheckLine(
-              rules_for_file, line, file_path, True)
-          if violation:
-            rule_type = violation.violated_rule.allow
-            if rule_type != Rule.ALLOW:
-              violation_text = results.NormalResultsFormatter.FormatViolation(
-                  violation, self.verbose)
-              problems.append((file_path, rule_type, violation_text))
+      if not rules_for_file:
+        continue
+      for line in include_lines:
+        is_include, violation = cpp.CheckLine(
+            rules_for_file, line, file_path, True)
+        if not violation:
+          continue
+        rule_type = violation.violated_rule.allow
+        if rule_type == Rule.ALLOW:
+          continue
+        violation_text = results.NormalResultsFormatter.FormatViolation(
+            violation, self.verbose)
+        problems.append((file_path, rule_type, violation_text))
     return problems
 
 
@@ -195,21 +198,26 @@ def main():
                              verbose=options.verbose,
                              ignore_temp_rules=options.ignore_temp_rules,
                              skip_tests=options.skip_tests)
+  base_directory = deps_checker.base_directory  # Default if needed, normalized
 
   # Figure out which directory we have to check.
-  start_dir = deps_checker.base_directory
+  start_dir = base_directory
   if len(args) == 1:
     # Directory specified. Start here. It's supposed to be relative to the
     # base directory.
-    start_dir = os.path.abspath(
-        os.path.join(deps_checker.base_directory, args[0]))
+    start_dir = os.path.abspath(os.path.join(base_directory, args[0]))
   elif len(args) >= 2 or (options.generate_temp_rules and
                           options.count_violations):
     # More than one argument, or incompatible flags, we don't handle this.
     PrintUsage()
     return 1
 
-  print 'Using base directory:', deps_checker.base_directory
+  if not start_dir.startswith(deps_checker.base_directory):
+    print 'Directory to check must be a subdirectory of the base directory,'
+    print 'but %s is not a subdirectory of %s' % (start_dir, base_directory)
+    return 1
+
+  print 'Using base directory:', base_directory
   print 'Checking:', start_dir
 
   if options.generate_temp_rules:

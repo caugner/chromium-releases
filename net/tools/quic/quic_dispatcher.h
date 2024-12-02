@@ -37,7 +37,6 @@ namespace net {
 
 class EpollServer;
 class QuicConfig;
-class QuicConnectionHelper;
 class QuicCryptoServerConfig;
 class QuicSession;
 
@@ -63,11 +62,12 @@ class QuicDispatcher : public QuicServerSessionVisitor {
   QuicDispatcher(const QuicConfig& config,
                  const QuicCryptoServerConfig& crypto_config,
                  const QuicVersionVector& supported_versions,
-                 EpollServer* epoll_server);
+                 EpollServer* epoll_server,
+                 uint32 initial_flow_control_window_bytes);
 
   virtual ~QuicDispatcher();
 
-  void Initialize(int fd);
+  virtual void Initialize(int fd);
 
   // Process the incoming packet by creating a new session, passing it to
   // an existing session, or passing it to the TimeWaitListManager.
@@ -104,23 +104,30 @@ class QuicDispatcher : public QuicServerSessionVisitor {
  protected:
   // Instantiates a new low-level packet writer. Caller takes ownership of the
   // returned object.
-  QuicPacketWriter* CreateWriter(int fd);
-
-  // Instantiates a new top-level writer wrapper. Takes ownership of |writer|.
-  // Caller takes ownership of the returned object.
-  virtual QuicPacketWriterWrapper* CreateWriterWrapper(
-      QuicPacketWriter* writer);
+  virtual QuicPacketWriter* CreateWriter(int fd);
 
   virtual QuicSession* CreateQuicSession(QuicConnectionId connection_id,
                                          const IPEndPoint& server_address,
                                          const IPEndPoint& client_address);
 
-  QuicConnection* CreateQuicConnection(QuicConnectionId connection_id,
-                                       const IPEndPoint& server_address,
-                                       const IPEndPoint& client_address);
+  virtual QuicConnection* CreateQuicConnection(
+      QuicConnectionId connection_id,
+      const IPEndPoint& server_address,
+      const IPEndPoint& client_address,
+      uint32 initial_flow_control_window);
+
+  // Called by |framer_visitor_| when the public header has been parsed.
+  virtual bool OnUnauthenticatedPublicHeader(
+      const QuicPacketPublicHeader& header);
+
+  // Create and return the time wait list manager for this dispatcher, which
+  // will be owned by the dispatcher as time_wait_list_manager_
+  virtual QuicTimeWaitListManager* CreateQuicTimeWaitListManager();
 
   // Replaces the packet writer with |writer|. Takes ownership of |writer|.
-  void set_writer(QuicPacketWriter* writer);
+  void set_writer(QuicPacketWriter* writer) {
+    writer_.reset(writer);
+  }
 
   QuicTimeWaitListManager* time_wait_list_manager() {
     return time_wait_list_manager_.get();
@@ -132,12 +139,20 @@ class QuicDispatcher : public QuicServerSessionVisitor {
     return supported_versions_;
   }
 
-  // Called by |framer_visitor_| when the public header has been parsed.
-  virtual bool OnUnauthenticatedPublicHeader(
-      const QuicPacketPublicHeader& header);
+  const QuicVersionVector& supported_versions_no_flow_control() const {
+    return supported_versions_no_flow_control_;
+  }
+
+  const QuicVersionVector& supported_versions_no_connection_flow_control()
+      const {
+    return supported_versions_no_connection_flow_control_;
+  }
 
   const IPEndPoint& current_server_address() {
     return current_server_address_;
+  }
+  const IPEndPoint& current_client_address() {
+    return current_client_address_;
   }
   const QuicEncryptedPacket& current_packet() {
     return *current_packet_;
@@ -146,6 +161,16 @@ class QuicDispatcher : public QuicServerSessionVisitor {
   const QuicConfig& config() const { return config_; }
 
   const QuicCryptoServerConfig& crypto_config() const { return crypto_config_; }
+
+  QuicFramer* framer() { return &framer_; }
+
+  QuicEpollConnectionHelper* helper() { return helper_.get(); }
+
+  QuicPacketWriter* writer() { return writer_.get(); }
+
+  const uint32 initial_flow_control_window_bytes() const {
+    return initial_flow_control_window_bytes_;
+  }
 
  private:
   class QuicFramerVisitor;
@@ -184,16 +209,28 @@ class QuicDispatcher : public QuicServerSessionVisitor {
   // The helper used for all connections.
   scoped_ptr<QuicEpollConnectionHelper> helper_;
 
-  // The writer to write to the socket with. We require a writer wrapper to
-  // allow replacing writer implementation without disturbing running
-  // connections.
-  scoped_ptr<QuicPacketWriterWrapper> writer_;
+  // The writer to write to the socket with.
+  scoped_ptr<QuicPacketWriter> writer_;
 
   // This vector contains QUIC versions which we currently support.
   // This should be ordered such that the highest supported version is the first
   // element, with subsequent elements in descending order (versions can be
   // skipped as necessary).
   const QuicVersionVector supported_versions_;
+
+  // Versions which do not support flow control (introduced in QUIC_VERSION_17).
+  // This is used to construct new QuicConnections when flow control is disabled
+  // via flag.
+  // TODO(rjshade): Remove this when
+  // FLAGS_enable_quic_stream_flow_control_2 is removed.
+  QuicVersionVector supported_versions_no_flow_control_;
+  // Versions which do not support *connection* flow control (introduced in
+  // QUIC_VERSION_19).
+  // This is used to construct new QuicConnections when connection flow control
+  // is disabled via flag.
+  // TODO(rjshade): Remove this when
+  // FLAGS_enable_quic_connection_flow_control is removed.
+  QuicVersionVector supported_versions_no_connection_flow_control_;
 
   // Information about the packet currently being handled.
   IPEndPoint current_client_address_;
@@ -202,6 +239,10 @@ class QuicDispatcher : public QuicServerSessionVisitor {
 
   QuicFramer framer_;
   scoped_ptr<QuicFramerVisitor> framer_visitor_;
+
+  // Initial flow control window size to advertize to peer on newly created
+  // connections.
+  const uint32 initial_flow_control_window_bytes_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicDispatcher);
 };

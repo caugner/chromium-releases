@@ -21,7 +21,6 @@ from telemetry.core import wpr_modes
 from telemetry.core import wpr_server
 from telemetry.core.backends import browser_backend
 from telemetry.core.backends.chrome import extension_backend
-from telemetry.core.backends.chrome import misc_web_contents_backend
 from telemetry.core.backends.chrome import system_info_backend
 from telemetry.core.backends.chrome import tab_list_backend
 from telemetry.core.backends.chrome import tracing_backend
@@ -73,12 +72,6 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
       extra_wpr_args.append('--net=%s' % self.browser_options.netsim)
     else:
       extra_wpr_args.append('--no-dns_forwarding')
-
-  @property
-  @decorators.Cache
-  def misc_web_contents_backend(self):
-    """Access to chrome://oobe/login page."""
-    return misc_web_contents_backend.MiscWebContentsBackend(self)
 
   @property
   @decorators.Cache
@@ -192,7 +185,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
         logging.error('ExtensionsToLoad: ' +
             repr([e.extension_id for e in self._extensions_to_load]))
         logging.error('Extension list: ' +
-            pprint.pformat(self._extension_backend, indent=4))
+            pprint.pformat(self.extension_backend, indent=4))
         raise
 
   def _PostBrowserStartupInitialization(self):

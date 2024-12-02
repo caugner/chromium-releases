@@ -36,10 +36,8 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
-#include "chrome/browser/signin/signin_tracker.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -55,6 +53,8 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
+#include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/browser/signin_tracker.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -214,7 +214,8 @@ void SetImportItem(PrefService* user_prefs,
   if (!user_prefs->FindPreference(pref_path)->IsDefaultValue()) {
     if (user_prefs->GetBoolean(pref_path))
       *items |= import_type;
-  } else { // no policy (recommended or managed) is set
+  } else {
+    // no policy (recommended or managed) is set
     if (should_import)
       *items |= import_type;
   }
@@ -269,7 +270,7 @@ void ImportFromFile(Profile* profile,
 // Imports settings from the first profile in |importer_list|.
 void ImportSettings(Profile* profile,
                     ExternalProcessImporterHost* importer_host,
-                    scoped_refptr<ImporterList> importer_list,
+                    scoped_ptr<ImporterList> importer_list,
                     int items_to_import) {
   const importer::SourceProfile& source_profile =
       importer_list->GetSourceProfileAt(0);
@@ -457,7 +458,7 @@ void ProcessDefaultBrowserPolicy(bool make_chrome_default_for_user) {
 namespace first_run {
 namespace internal {
 
-FirstRunState first_run_ = FIRST_RUN_UNKNOWN;
+FirstRunState g_first_run = FIRST_RUN_UNKNOWN;
 
 void SetupMasterPrefsFromInstallPrefs(
     const installer::MasterPreferences& install_prefs,
@@ -584,21 +585,23 @@ MasterPrefs::MasterPrefs()
 MasterPrefs::~MasterPrefs() {}
 
 bool IsChromeFirstRun() {
-  if (internal::first_run_ == internal::FIRST_RUN_UNKNOWN) {
-    internal::first_run_ = internal::FIRST_RUN_FALSE;
+  if (internal::g_first_run == internal::FIRST_RUN_UNKNOWN) {
+    internal::g_first_run = internal::FIRST_RUN_FALSE;
     const CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kForceFirstRun) ||
         (!command_line->HasSwitch(switches::kNoFirstRun) &&
          !internal::IsFirstRunSentinelPresent())) {
-      internal::first_run_ = internal::FIRST_RUN_TRUE;
+      internal::g_first_run = internal::FIRST_RUN_TRUE;
     }
   }
-  return internal::first_run_ == internal::FIRST_RUN_TRUE;
+  return internal::g_first_run == internal::FIRST_RUN_TRUE;
 }
 
+#if defined(OS_MACOSX)
 bool IsFirstRunSuppressed(const CommandLine& command_line) {
   return command_line.HasSwitch(switches::kNoFirstRun);
 }
+#endif
 
 void CreateSentinelIfNeeded() {
   if (IsChromeFirstRun())
@@ -616,12 +619,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       GetPingDelayPrefName().c_str(),
       0,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-}
-
-bool RemoveSentinel() {
-  base::FilePath first_run_sentinel;
-  return internal::GetFirstRunSentinelFilePath(&first_run_sentinel) &&
-      base::DeleteFile(first_run_sentinel, false);
 }
 
 bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option) {
@@ -705,9 +702,15 @@ void AutoImport(
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
   bool local_state_file_exists = base::PathExists(local_state_path);
 
-  scoped_refptr<ImporterList> importer_list(new ImporterList());
-  importer_list->DetectSourceProfilesHack(
-      g_browser_process->GetApplicationLocale(), false);
+  // It may be possible to do the if block below asynchronously. In which case,
+  // get rid of this RunLoop. http://crbug.com/366116.
+  base::RunLoop run_loop;
+  scoped_ptr<ImporterList> importer_list(new ImporterList());
+  importer_list->DetectSourceProfiles(
+      g_browser_process->GetApplicationLocale(),
+      false,  // include_interactive_profiles?
+      run_loop.QuitClosure());
+  run_loop.Run();
 
   // Do import if there is an available profile for us to import.
   if (importer_list->count() > 0) {
@@ -766,7 +769,7 @@ void AutoImport(
     importer::LogImporterUseToMetrics(
         "AutoImport", importer_list->GetSourceProfileAt(0).importer_type);
 
-    ImportSettings(profile, importer_host, importer_list, items);
+    ImportSettings(profile, importer_host, importer_list.Pass(), items);
   }
 
   if (!import_bookmarks_path.empty()) {

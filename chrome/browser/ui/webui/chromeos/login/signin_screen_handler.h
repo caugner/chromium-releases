@@ -156,9 +156,6 @@ class SigninScreenHandlerDelegate {
   virtual void ShowKioskEnableScreen() = 0;
 
   // Shows Reset screen.
-  virtual void ShowResetScreen() = 0;
-
-  // Shows Reset screen.
   virtual void ShowKioskAutolaunchScreen() = 0;
 
   // Show wrong hwid screen.
@@ -173,7 +170,8 @@ class SigninScreenHandlerDelegate {
   // Whether login as guest is available.
   virtual bool IsShowGuest() const = 0;
 
-  // Whether login as guest is available.
+  // Weather to show the user pods or only GAIA sign in.
+  // Public sessions are always shown.
   virtual bool IsShowUsers() const = 0;
 
   // Whether new user pod is available.
@@ -359,7 +357,6 @@ class SigninScreenHandler
   void HandleWallpaperReady();
   void HandleLoginWebuiReady();
   void HandleSignOutUser();
-  void HandleNetworkErrorShown();
   void HandleOpenProxySettings();
   void HandleLoginVisible(const std::string& source);
   void HandleCancelPasswordChangedFlow();

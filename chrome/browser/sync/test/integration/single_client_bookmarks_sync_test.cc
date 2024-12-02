@@ -2,15 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
-#include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_service.h"
+#include "sync/test/fake_server/bookmark_entity_builder.h"
+#include "sync/test/fake_server/entity_builder_factory.h"
+#include "sync/test/fake_server/fake_server_verifier.h"
 #include "ui/base/layout.h"
 
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::AddURL;
+using bookmarks_helper::CountBookmarksWithTitlesMatching;
 using bookmarks_helper::Create1xFaviconFromPNGFile;
 using bookmarks_helper::GetBookmarkBarNode;
 using bookmarks_helper::GetBookmarkModel;
@@ -28,9 +35,37 @@ class SingleClientBookmarksSyncTest : public SyncTest {
   SingleClientBookmarksSyncTest() : SyncTest(SINGLE_CLIENT) {}
   virtual ~SingleClientBookmarksSyncTest() {}
 
+  // Verify that the local bookmark model (for the Profile corresponding to
+  // |index|) matches the data on the FakeServer. It is assumed that FakeServer
+  // is being used and each bookmark has a unique title. Folders are not
+  // verified.
+  void VerifyBookmarkModelMatchesFakeServer(int index);
+
  private:
   DISALLOW_COPY_AND_ASSIGN(SingleClientBookmarksSyncTest);
 };
+
+void SingleClientBookmarksSyncTest::VerifyBookmarkModelMatchesFakeServer(
+    int index) {
+  fake_server::FakeServerVerifier fake_server_verifier(GetFakeServer());
+  std::vector<BookmarkService::URLAndTitle> local_bookmarks;
+  GetBookmarkModel(index)->GetBookmarks(&local_bookmarks);
+
+  // Verify that the number of local bookmarks matches the number in the
+  // server.
+  ASSERT_TRUE(fake_server_verifier.VerifyEntityCountByType(
+      local_bookmarks.size(),
+      syncer::BOOKMARKS));
+
+  // Verify that all local bookmark titles exist once on the server.
+  std::vector<BookmarkService::URLAndTitle>::const_iterator it;
+  for (it = local_bookmarks.begin(); it != local_bookmarks.end(); ++it) {
+    ASSERT_TRUE(fake_server_verifier.VerifyEntityCountByTypeAndName(
+        1,
+        syncer::BOOKMARKS,
+        base::UTF16ToUTF8(it->title)));
+  }
+}
 
 IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, Sanity) {
   ASSERT_TRUE(SetupClients()) << "SetupClients() failed.";
@@ -58,7 +93,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, Sanity) {
 
   // Setup sync, wait for its completion, and make sure changes were synced.
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   ASSERT_TRUE(ModelMatchesVerifier(0));
 
   //  Ultimately we want to end up with the following model; but this test is
@@ -89,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, Sanity) {
   Move(0, tier1_a, bar, 1);
 
   // Wait for the bookmark position change to sync.
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   ASSERT_TRUE(ModelMatchesVerifier(0));
 
   const BookmarkNode* porsche = AddURL(0, bar, 2, L"Porsche",
@@ -101,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, Sanity) {
   Move(0, tier1_a_url1, tier1_a, 2);
 
   // Wait for the rearranged hierarchy to sync.
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   ASSERT_TRUE(ModelMatchesVerifier(0));
 
   ASSERT_EQ(1, tier1_a_url0->parent()->GetIndexOf(tier1_a_url0));
@@ -124,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, Sanity) {
   SetTitle(0, porsche, L"ICanHazPorsche?");
 
   // Wait for the title change to sync.
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   ASSERT_TRUE(ModelMatchesVerifier(0));
 
   ASSERT_EQ(tier1_a_url0->id(), top->GetChild(top->child_count() - 1)->id());
@@ -141,8 +176,29 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, Sanity) {
   Move(0, leafs, tier3_b, 0);
 
   // Wait for newly added bookmarks to sync.
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   ASSERT_TRUE(ModelMatchesVerifier(0));
+
+  // Only verify FakeServer data if FakeServer is being used.
+  // TODO(pvalenzuela): Use this style of verification in more tests once it is
+  // proven stable.
+  if (GetFakeServer())
+    VerifyBookmarkModelMatchesFakeServer(0);
+}
+
+IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest, InjectedBookmark) {
+  std::string title = "Montreal Canadiens";
+  fake_server::EntityBuilderFactory entity_builder_factory;
+  scoped_ptr<fake_server::FakeServerEntity> entity =
+      entity_builder_factory.NewBookmarkEntityBuilder(
+          title, GURL("http://canadiens.nhl.com")).Build();
+  fake_server_->InjectEntity(entity.Pass());
+
+  DisableVerifier();
+  ASSERT_TRUE(SetupClients());
+  ASSERT_TRUE(SetupSync());
+
+  ASSERT_EQ(1, CountBookmarksWithTitlesMatching(0, base::UTF8ToWide(title)));
 }
 
 // Test that a client doesn't mutate the favicon data in the process
@@ -175,7 +231,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest,
   SetFavicon(0, bookmark, icon_url, original_favicon,
              bookmarks_helper::FROM_SYNC);
 
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   ASSERT_TRUE(ModelMatchesVerifier(0));
 
   scoped_refptr<base::RefCountedMemory> original_favicon_bytes =
@@ -225,12 +281,12 @@ IN_PROC_BROWSER_TEST_F(SingleClientBookmarksSyncTest,
 
   // Set up sync, wait for its completion and verify that changes propagated.
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   ASSERT_TRUE(ModelMatchesVerifier(0));
 
   // Remove all bookmarks and wait for sync completion.
   RemoveAll(0);
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
   // Verify other node has no children now.
   EXPECT_EQ(0, GetOtherNode(0)->child_count());
   EXPECT_EQ(0, GetBookmarkBarNode(0)->child_count());

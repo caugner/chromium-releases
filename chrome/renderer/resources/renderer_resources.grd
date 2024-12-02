@@ -24,6 +24,11 @@ without changes to the corresponding grd file. fb9 -->
       <include name="IDR_ERROR_APP_HTML" file="error_app.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NET_ERROR_HTML" file="neterror.html" flattenhtml="true" type="BINDATA" />
 
+      <!-- Searchbox API -->
+      <if expr="enable_extensions or is_android">
+        <include name="IDR_SEARCHBOX_API" file="extensions\searchbox_api.js" type="BINDATA" />
+      </if>
+
       <!-- Extension libraries. -->
       <if expr="enable_extensions">
         <!-- Custom bindings for extension APIs. -->
@@ -33,6 +38,7 @@ without changes to the corresponding grd file. fb9 -->
         <include name="IDR_APP_RUNTIME_CUSTOM_BINDINGS_JS" file="extensions\app_runtime_custom_bindings.js" type="BINDATA" />
         <include name="IDR_APP_WINDOW_CUSTOM_BINDINGS_JS" file="extensions\app_window_custom_bindings.js" type="BINDATA" />
         <include name="IDR_AUTOMATION_CUSTOM_BINDINGS_JS" file="extensions\automation_custom_bindings.js" type="BINDATA" />
+        <include name="IDR_AUTOMATION_EVENT_JS" file="extensions\automation\automation_event.js" type="BINDATA" />
         <include name="IDR_AUTOMATION_NODE_JS" file="extensions\automation\automation_node.js" type="BINDATA" />
         <include name="IDR_AUTOMATION_TREE_JS" file="extensions\automation\automation_tree.js" type="BINDATA" />
         <include name="IDR_BINDING_JS" file="extensions\binding.js" type="BINDATA" />
@@ -79,7 +85,6 @@ without changes to the corresponding grd file. fb9 -->
         <include name="IDR_PERMISSIONS_CUSTOM_BINDINGS_JS" file="extensions\permissions_custom_bindings.js" type="BINDATA" />
         <include name="IDR_RUNTIME_CUSTOM_BINDINGS_JS" file="extensions\runtime_custom_bindings.js" type="BINDATA" />
         <include name="IDR_SCHEMA_UTILS_JS" file="extensions\schema_utils.js" type="BINDATA" />
-        <include name="IDR_SEARCHBOX_API" file="extensions\searchbox_api.js" type="BINDATA" />
         <include name="IDR_SEND_REQUEST_JS" file="extensions\send_request.js" type="BINDATA" />
         <include name="IDR_SET_ICON_JS" file="extensions\set_icon.js" type="BINDATA" />
         <include name="IDR_STORAGE_AREA_JS" file="extensions\storage_area.js" type="BINDATA" />
@@ -91,6 +96,7 @@ without changes to the corresponding grd file. fb9 -->
         <include name="IDR_TEST_CUSTOM_BINDINGS_JS" file="extensions\test_custom_bindings.js" type="BINDATA" />
         <include name="IDR_TTS_CUSTOM_BINDINGS_JS" file="extensions\tts_custom_bindings.js" type="BINDATA" />
         <include name="IDR_TTS_ENGINE_CUSTOM_BINDINGS_JS" file="extensions\tts_engine_custom_bindings.js" type="BINDATA" />
+        <include name="IDR_UNCAUGHT_EXCEPTION_HANDLER_JS" file="extensions\uncaught_exception_handler.js" type="BINDATA" />
         <include name="IDR_UNLOAD_EVENT_JS" file="extensions\unload_event.js" type="BINDATA" />
         <include name="IDR_UTILS_JS" file="extensions\utils.js" type="BINDATA" />
         <include name="IDR_WINDOW_CONTROLS_JS" file="extensions\window_controls.js" type="BINDATA" />

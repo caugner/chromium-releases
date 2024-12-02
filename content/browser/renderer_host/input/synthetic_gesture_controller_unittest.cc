@@ -88,11 +88,6 @@ class MockSyntheticGestureTarget : public SyntheticGestureTarget {
   GetDefaultSyntheticGestureSourceType() const OVERRIDE {
     return SyntheticGestureParams::TOUCH_INPUT;
   }
-  virtual bool SupportsSyntheticGestureSourceType(
-      SyntheticGestureParams::GestureSourceType gesture_source_type)
-      const OVERRIDE {
-    return true;
-  }
 
   virtual base::TimeDelta PointerAssumedStoppedTime() const OVERRIDE {
     return base::TimeDelta::FromMilliseconds(pointer_assumed_stopped_time_ms_);
@@ -385,9 +380,12 @@ class SyntheticGestureControllerTest : public testing::Test {
 
   void FlushInputUntilComplete() {
     while (target_->flush_requested()) {
-      target_->ClearFlushRequest();
-      time_ += base::TimeDelta::FromMilliseconds(kFlushInputRateInMs);
-      controller_->Flush(time_);
+      while (target_->flush_requested()) {
+        target_->ClearFlushRequest();
+        time_ += base::TimeDelta::FromMilliseconds(kFlushInputRateInMs);
+        controller_->Flush(time_);
+      }
+      controller_->OnDidFlushInput();
     }
   }
 
@@ -481,6 +479,37 @@ TEST_F(SyntheticGestureControllerTest, TwoGesturesInFlight) {
 
   EXPECT_EQ(2, num_success_);
   EXPECT_EQ(0, num_failure_);
+}
+
+TEST_F(SyntheticGestureControllerTest, GestureCompletedOnDidFlushInput) {
+  CreateControllerAndTarget<MockSyntheticGestureTarget>();
+
+  bool finished_1, finished_2;
+  scoped_ptr<MockSyntheticGesture> gesture_1(
+      new MockSyntheticGesture(&finished_1, 2));
+  scoped_ptr<MockSyntheticGesture> gesture_2(
+      new MockSyntheticGesture(&finished_2, 4));
+
+  QueueSyntheticGesture(gesture_1.PassAs<SyntheticGesture>());
+  QueueSyntheticGesture(gesture_2.PassAs<SyntheticGesture>());
+
+  while (target_->flush_requested()) {
+    target_->ClearFlushRequest();
+    time_ += base::TimeDelta::FromMilliseconds(kFlushInputRateInMs);
+    controller_->Flush(time_);
+  }
+  EXPECT_EQ(0, num_success_);
+  controller_->OnDidFlushInput();
+  EXPECT_EQ(1, num_success_);
+
+  while (target_->flush_requested()) {
+    target_->ClearFlushRequest();
+    time_ += base::TimeDelta::FromMilliseconds(kFlushInputRateInMs);
+    controller_->Flush(time_);
+  }
+  EXPECT_EQ(1, num_success_);
+  controller_->OnDidFlushInput();
+  EXPECT_EQ(2, num_success_);
 }
 
 gfx::Vector2d AddTouchSlopToVector(const gfx::Vector2d& vector,

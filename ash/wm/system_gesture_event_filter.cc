@@ -14,12 +14,11 @@
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(USE_X11)
 #include "ui/events/x/touch_factory_x11.h"
 #endif
 
 namespace ash {
-namespace internal {
 
 SystemGestureEventFilter::SystemGestureEventFilter()
     : long_press_affordance_(new LongPressAffordanceHandler),
@@ -31,7 +30,7 @@ SystemGestureEventFilter::~SystemGestureEventFilter() {
 }
 
 void SystemGestureEventFilter::OnMouseEvent(ui::MouseEvent* event) {
-#if defined(OS_CHROMEOS) && !defined(USE_OZONE)
+#if defined(OS_CHROMEOS) && defined(USE_X11)
   if (event->type() == ui::ET_MOUSE_PRESSED && event->native_event() &&
       ui::TouchFactory::GetInstance()->IsTouchDevicePresent() &&
       Shell::GetInstance()->delegate()) {
@@ -65,9 +64,10 @@ void SystemGestureEventFilter::OnGestureEvent(ui::GestureEvent* event) {
 
   if (event->type() == ui::ET_GESTURE_WIN8_EDGE_SWIPE &&
       shelf_gesture_handler_->ProcessGestureEvent(*event)) {
-    event->StopPropagation();
+    // Do not stop propagation, since the immersive fullscreen controller may
+    // need to handle this event.
+    return;
   }
 }
 
-}  // namespace internal
 }  // namespace ash

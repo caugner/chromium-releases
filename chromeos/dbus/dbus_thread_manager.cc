@@ -16,6 +16,7 @@
 #include "chromeos/dbus/bluetooth_device_client.h"
 #include "chromeos/dbus/bluetooth_gatt_characteristic_client.h"
 #include "chromeos/dbus/bluetooth_gatt_descriptor_client.h"
+#include "chromeos/dbus/bluetooth_gatt_manager_client.h"
 #include "chromeos/dbus/bluetooth_gatt_service_client.h"
 #include "chromeos/dbus/bluetooth_input_client.h"
 #include "chromeos/dbus/bluetooth_profile_manager_client.h"
@@ -29,6 +30,7 @@
 #include "chromeos/dbus/gsm_sms_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
+#include "chromeos/dbus/lorgnette_manager_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/nfc_adapter_client.h"
 #include "chromeos/dbus/nfc_device_client.h"
@@ -78,6 +80,7 @@ class DBusClientBundle {
         BluetoothGattCharacteristicClient::Create());
     bluetooth_gatt_descriptor_client_.reset(
         BluetoothGattDescriptorClient::Create());
+    bluetooth_gatt_manager_client_.reset(BluetoothGattManagerClient::Create());
     bluetooth_gatt_service_client_.reset(BluetoothGattServiceClient::Create());
     bluetooth_input_client_.reset(BluetoothInputClient::Create());
     bluetooth_profile_manager_client_.reset(
@@ -86,6 +89,7 @@ class DBusClientBundle {
     cros_disks_client_.reset(CrosDisksClient::Create(client_type));
     cryptohome_client_.reset(CryptohomeClient::Create());
     debug_daemon_client_.reset(DebugDaemonClient::Create());
+    lorgnette_manager_client_.reset(LorgnetteManagerClient::Create());
     shill_manager_client_.reset(ShillManagerClient::Create());
     shill_device_client_.reset(ShillDeviceClient::Create());
     shill_ipconfig_client_.reset(ShillIPConfigClient::Create());
@@ -128,6 +132,9 @@ class DBusClientBundle {
   BluetoothGattDescriptorClient* bluetooth_gatt_descriptor_client() {
     return bluetooth_gatt_descriptor_client_.get();
   }
+  BluetoothGattManagerClient* bluetooth_gatt_manager_client() {
+    return bluetooth_gatt_manager_client_.get();
+  }
   BluetoothGattServiceClient* bluetooth_gatt_service_client() {
     return bluetooth_gatt_service_client_.get();
   }
@@ -148,6 +155,9 @@ class DBusClientBundle {
   }
   DebugDaemonClient* debug_daemon_client() {
     return debug_daemon_client_.get();
+  }
+  LorgnetteManagerClient* lorgnette_manager_client() {
+    return lorgnette_manager_client_.get();
   }
   ShillDeviceClient* shill_device_client() {
     return shill_device_client_.get();
@@ -217,6 +227,7 @@ class DBusClientBundle {
   scoped_ptr<BluetoothGattCharacteristicClient>
       bluetooth_gatt_characteristic_client_;
   scoped_ptr<BluetoothGattDescriptorClient> bluetooth_gatt_descriptor_client_;
+  scoped_ptr<BluetoothGattManagerClient> bluetooth_gatt_manager_client_;
   scoped_ptr<BluetoothGattServiceClient> bluetooth_gatt_service_client_;
   scoped_ptr<BluetoothInputClient> bluetooth_input_client_;
   scoped_ptr<BluetoothProfileManagerClient> bluetooth_profile_manager_client_;
@@ -224,6 +235,7 @@ class DBusClientBundle {
   scoped_ptr<CrosDisksClient> cros_disks_client_;
   scoped_ptr<CryptohomeClient> cryptohome_client_;
   scoped_ptr<DebugDaemonClient> debug_daemon_client_;
+  scoped_ptr<LorgnetteManagerClient> lorgnette_manager_client_;
   scoped_ptr<ShillDeviceClient> shill_device_client_;
   scoped_ptr<ShillIPConfigClient> shill_ipconfig_client_;
   scoped_ptr<ShillManagerClient> shill_manager_client_;
@@ -326,6 +338,10 @@ class DBusThreadManagerImpl : public DBusThreadManager {
     return client_bundle_->bluetooth_gatt_descriptor_client();
   }
 
+  virtual BluetoothGattManagerClient* GetBluetoothGattManagerClient() OVERRIDE {
+    return client_bundle_->bluetooth_gatt_manager_client();
+  }
+
   virtual BluetoothGattServiceClient* GetBluetoothGattServiceClient() OVERRIDE {
     return client_bundle_->bluetooth_gatt_service_client();
   }
@@ -353,6 +369,10 @@ class DBusThreadManagerImpl : public DBusThreadManager {
 
   virtual DebugDaemonClient* GetDebugDaemonClient() OVERRIDE {
     return client_bundle_->debug_daemon_client();
+  }
+
+  virtual LorgnetteManagerClient* GetLorgnetteManagerClient() OVERRIDE {
+    return client_bundle_->lorgnette_manager_client();
   }
 
   virtual ShillDeviceClient* GetShillDeviceClient() OVERRIDE {
@@ -557,6 +577,7 @@ void DBusThreadManager::InitializeClients() {
   InitClient(g_dbus_thread_manager->GetBluetoothDeviceClient());
   InitClient(g_dbus_thread_manager->GetBluetoothGattCharacteristicClient());
   InitClient(g_dbus_thread_manager->GetBluetoothGattDescriptorClient());
+  InitClient(g_dbus_thread_manager->GetBluetoothGattManagerClient());
   InitClient(g_dbus_thread_manager->GetBluetoothGattServiceClient());
   InitClient(g_dbus_thread_manager->GetBluetoothInputClient());
   InitClient(g_dbus_thread_manager->GetBluetoothProfileManagerClient());
@@ -567,6 +588,7 @@ void DBusThreadManager::InitializeClients() {
   InitClient(g_dbus_thread_manager->GetGsmSMSClient());
   InitClient(g_dbus_thread_manager->GetImageBurnerClient());
   InitClient(g_dbus_thread_manager->GetIntrospectableClient());
+  InitClient(g_dbus_thread_manager->GetLorgnetteManagerClient());
   InitClient(g_dbus_thread_manager->GetModemMessagingClient());
   InitClient(g_dbus_thread_manager->GetPermissionBrokerClient());
   InitClient(g_dbus_thread_manager->GetPowerManagerClient());

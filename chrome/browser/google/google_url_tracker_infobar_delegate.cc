@@ -6,9 +6,8 @@
 
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "content/public/browser/navigation_details.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
@@ -18,7 +17,7 @@
 
 
 // static
-InfoBar* GoogleURLTrackerInfoBarDelegate::Create(
+infobars::InfoBar* GoogleURLTrackerInfoBarDelegate::Create(
     InfoBarService* infobar_service,
     GoogleURLTracker* google_url_tracker,
     const GURL& search_url) {
@@ -53,13 +52,14 @@ void GoogleURLTrackerInfoBarDelegate::Close(bool redo_search) {
   if (redo_search) {
     // Re-do the user's search on the new domain.
     DCHECK(search_url_.is_valid());
-    url_canon::Replacements<char> replacements;
+    url::Replacements<char> replacements;
     const std::string& host(google_url_tracker_->fetched_google_url().host());
-    replacements.SetHost(host.data(), url_parse::Component(0, host.length()));
+    replacements.SetHost(host.data(), url::Component(0, host.length()));
     new_search_url = search_url_.ReplaceComponents(replacements);
   }
 
-  content::WebContents* contents = web_contents();
+  content::WebContents* contents =
+      InfoBarService::WebContentsFromInfoBar(infobar());
   infobar()->RemoveSelf();
   // WARNING: |this| may be deleted at this point!  Do not access any members!
 
@@ -107,18 +107,19 @@ base::string16 GoogleURLTrackerInfoBarDelegate::GetLinkText() const {
 
 bool GoogleURLTrackerInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  web_contents()->OpenURL(content::OpenURLParams(
-      google_util::AppendGoogleLocaleParam(GURL(
-          "https://www.google.com/support/chrome/bin/answer.py?"
-          "answer=1618699")),
-      content::Referrer(),
-      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK, false));
+  InfoBarService::WebContentsFromInfoBar(infobar())->OpenURL(
+      content::OpenURLParams(
+          google_util::AppendGoogleLocaleParam(GURL(
+              "https://www.google.com/support/chrome/bin/answer.py?"
+              "answer=1618699")),
+          content::Referrer(),
+          (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+          content::PAGE_TRANSITION_LINK, false));
   return false;
 }
 
 bool GoogleURLTrackerInfoBarDelegate::ShouldExpireInternal(
-    const content::LoadCommittedDetails& details) const {
-  int unique_id = details.entry->GetUniqueID();
-  return (unique_id != contents_unique_id()) && (unique_id != pending_id_);
+    const NavigationDetails& details) const {
+  return (details.entry_id != contents_unique_id()) &&
+      (details.entry_id != pending_id_);
 }

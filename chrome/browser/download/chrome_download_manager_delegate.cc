@@ -35,6 +35,7 @@
 #include "chrome/browser/download/save_package_file_picker.h"
 #include "chrome/browser/extensions/api/downloads/downloads_api.h"
 #include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -49,8 +50,8 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/page_navigator.h"
 #include "extensions/common/constants.h"
+#include "net/base/filename_util.h"
 #include "net/base/mime_util.h"
-#include "net/base/net_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/drive/download_handler.h"
@@ -197,7 +198,6 @@ bool IsOpenInBrowserPreferreredForFile(const base::FilePath& path) {
       path.MatchesExtension(FILE_PATH_LITERAL(".xht")) ||
       path.MatchesExtension(FILE_PATH_LITERAL(".xhtm")) ||
       path.MatchesExtension(FILE_PATH_LITERAL(".xhtml")) ||
-      path.MatchesExtension(FILE_PATH_LITERAL(".xml")) ||
       path.MatchesExtension(FILE_PATH_LITERAL(".xsl")) ||
       path.MatchesExtension(FILE_PATH_LITERAL(".xslt"))) {
     return true;
@@ -370,7 +370,8 @@ bool ChromeDownloadManagerDelegate::ShouldCompleteDownload(
 
 bool ChromeDownloadManagerDelegate::ShouldOpenDownload(
     DownloadItem* item, const content::DownloadOpenDelayedCallback& callback) {
-  if (download_crx_util::IsExtensionDownload(*item)) {
+  if (download_crx_util::IsExtensionDownload(*item) &&
+      !extensions::WebstoreInstaller::GetAssociatedApproval(*item)) {
     scoped_refptr<extensions::CrxInstaller> crx_installer =
         download_crx_util::OpenChromeExtension(profile_, *item);
 
@@ -535,9 +536,9 @@ void ChromeDownloadManagerDelegate::NotifyExtensions(
     const NotifyExtensionsCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 #if !defined(OS_ANDROID)
-  ExtensionDownloadsEventRouter* router =
-      DownloadServiceFactory::GetForBrowserContext(profile_)->
-      GetExtensionEventRouter();
+  extensions::ExtensionDownloadsEventRouter* router =
+      DownloadServiceFactory::GetForBrowserContext(profile_)
+          ->GetExtensionEventRouter();
   if (router) {
     base::Closure original_path_callback =
         base::Bind(callback, base::FilePath(),

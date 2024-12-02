@@ -7,6 +7,7 @@
 #include <set>
 
 #include "cc/animation/layer_animation_controller.h"
+#include "cc/animation/transform_operations.h"
 #include "cc/base/math_util.h"
 #include "cc/layers/content_layer.h"
 #include "cc/layers/content_layer_client.h"
@@ -14,6 +15,7 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_client.h"
 #include "cc/layers/layer_impl.h"
+#include "cc/layers/layer_iterator.h"
 #include "cc/layers/render_surface.h"
 #include "cc/layers/render_surface_impl.h"
 #include "cc/output/copy_output_request.h"
@@ -37,6 +39,8 @@ namespace {
 
 class LayerTreeHostCommonTestBase {
  protected:
+  LayerTreeHostCommonTestBase() : render_surface_layer_list_count_(0) {}
+
   template <typename LayerType>
   void SetLayerPropertiesForTestingInternal(
       LayerType* layer,
@@ -119,21 +123,29 @@ class LayerTreeHostCommonTestBase {
                                       LayerImpl* page_scale_application_layer,
                                       bool can_use_lcd_text) {
     gfx::Transform identity_matrix;
-    LayerImplList dummy_render_surface_layer_list;
     gfx::Size device_viewport_size =
         gfx::Size(root_layer->bounds().width() * device_scale_factor,
                   root_layer->bounds().height() * device_scale_factor);
+
+    render_surface_layer_list_impl_.reset(new LayerImplList);
 
     // We are probably not testing what is intended if the root_layer bounds are
     // empty.
     DCHECK(!root_layer->bounds().IsEmpty());
     LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
-        root_layer, device_viewport_size, &dummy_render_surface_layer_list);
+        root_layer,
+        device_viewport_size,
+        render_surface_layer_list_impl_.get());
     inputs.device_scale_factor = device_scale_factor;
     inputs.page_scale_factor = page_scale_factor;
     inputs.page_scale_application_layer = page_scale_application_layer;
     inputs.can_use_lcd_text = can_use_lcd_text;
     inputs.can_adjust_raster_scales = true;
+
+    ++render_surface_layer_list_count_;
+    inputs.current_render_surface_layer_list_id =
+        render_surface_layer_list_count_;
+
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
   }
 
@@ -171,8 +183,19 @@ class LayerTreeHostCommonTestBase {
     return render_surface_layer_list_.get();
   }
 
+  LayerImplList* render_surface_layer_list_impl() const {
+    return render_surface_layer_list_impl_.get();
+  }
+
+  int render_surface_layer_list_count() const {
+    return render_surface_layer_list_count_;
+  }
+
  private:
   scoped_ptr<RenderSurfaceLayerList> render_surface_layer_list_;
+  scoped_ptr<LayerImplList> render_surface_layer_list_impl_;
+
+  int render_surface_layer_list_count_;
 };
 
 class LayerTreeHostCommonTest : public LayerTreeHostCommonTestBase,
@@ -181,23 +204,58 @@ class LayerTreeHostCommonTest : public LayerTreeHostCommonTestBase,
 
 class LayerWithForcedDrawsContent : public Layer {
  public:
-  LayerWithForcedDrawsContent() : Layer() {}
+  LayerWithForcedDrawsContent() : Layer(), last_device_scale_factor_(0.f) {}
 
   virtual bool DrawsContent() const OVERRIDE;
+  virtual void CalculateContentsScale(float ideal_contents_scale,
+                                      float device_scale_factor,
+                                      float page_scale_factor,
+                                      float maximum_animation_contents_scale,
+                                      bool animating_transform_to_screen,
+                                      float* contents_scale_x,
+                                      float* contents_scale_y,
+                                      gfx::Size* content_bounds) OVERRIDE;
+
+  float last_device_scale_factor() const { return last_device_scale_factor_; }
 
  private:
   virtual ~LayerWithForcedDrawsContent() {}
+
+  // Parameters from last CalculateContentsScale.
+  float last_device_scale_factor_;
 };
 
 bool LayerWithForcedDrawsContent::DrawsContent() const { return true; }
+
+void LayerWithForcedDrawsContent::CalculateContentsScale(
+    float ideal_contents_scale,
+    float device_scale_factor,
+    float page_scale_factor,
+    float maximum_animation_contents_scale,
+    bool animating_transform_to_screen,
+    float* contents_scale_x,
+    float* contents_scale_y,
+    gfx::Size* content_bounds) {
+  last_device_scale_factor_ = device_scale_factor;
+  Layer::CalculateContentsScale(ideal_contents_scale,
+                                device_scale_factor,
+                                page_scale_factor,
+                                maximum_animation_contents_scale,
+                                animating_transform_to_screen,
+                                contents_scale_x,
+                                contents_scale_y,
+                                content_bounds);
+}
 
 class MockContentLayerClient : public ContentLayerClient {
  public:
   MockContentLayerClient() {}
   virtual ~MockContentLayerClient() {}
-  virtual void PaintContents(SkCanvas* canvas,
-                             const gfx::Rect& clip,
-                             gfx::RectF* opaque) OVERRIDE {}
+  virtual void PaintContents(
+      SkCanvas* canvas,
+      const gfx::Rect& clip,
+      gfx::RectF* opaque,
+      ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE {}
   virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
   virtual bool FillsBoundsCompletely() const OVERRIDE { return false; }
 };
@@ -1224,8 +1282,10 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
   // Transformations applied at the root of the tree should be forwarded
   // to child layers instead of applied to the root RenderSurface.
   const gfx::Transform identity_matrix;
-  scoped_refptr<Layer> root = Layer::Create();
-  scoped_refptr<Layer> child = Layer::Create();
+  scoped_refptr<LayerWithForcedDrawsContent> root =
+      new LayerWithForcedDrawsContent;
+  scoped_refptr<LayerWithForcedDrawsContent> child =
+      new LayerWithForcedDrawsContent;
   child->SetScrollClipLayerId(root->id());
   root->AddChild(child);
 
@@ -1258,6 +1318,8 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
     EXPECT_EQ(translate, root->draw_properties().target_space_transform);
     EXPECT_EQ(translate, child->draw_properties().target_space_transform);
     EXPECT_EQ(identity_matrix, root->render_surface()->draw_transform());
+    EXPECT_EQ(1.f, root->last_device_scale_factor());
+    EXPECT_EQ(1.f, child->last_device_scale_factor());
   }
 
   gfx::Transform scale;
@@ -1271,6 +1333,8 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
     EXPECT_EQ(scale, root->draw_properties().target_space_transform);
     EXPECT_EQ(scale, child->draw_properties().target_space_transform);
     EXPECT_EQ(identity_matrix, root->render_surface()->draw_transform());
+    EXPECT_EQ(2.f, root->last_device_scale_factor());
+    EXPECT_EQ(2.f, child->last_device_scale_factor());
   }
 
   gfx::Transform rotate;
@@ -1284,6 +1348,8 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
     EXPECT_EQ(rotate, root->draw_properties().target_space_transform);
     EXPECT_EQ(rotate, child->draw_properties().target_space_transform);
     EXPECT_EQ(identity_matrix, root->render_surface()->draw_transform());
+    EXPECT_EQ(1.f, root->last_device_scale_factor());
+    EXPECT_EQ(1.f, child->last_device_scale_factor());
   }
 
   gfx::Transform composite;
@@ -1318,6 +1384,8 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
     EXPECT_EQ(device_scaled_translate,
               child->draw_properties().target_space_transform);
     EXPECT_EQ(identity_matrix, root->render_surface()->draw_transform());
+    EXPECT_EQ(device_scale_factor, root->last_device_scale_factor());
+    EXPECT_EQ(device_scale_factor, child->last_device_scale_factor());
   }
 
   // Verify it composes correctly with page scale.
@@ -1337,6 +1405,8 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
     EXPECT_EQ(page_scaled_translate,
               child->draw_properties().target_space_transform);
     EXPECT_EQ(identity_matrix, root->render_surface()->draw_transform());
+    EXPECT_EQ(1.f, root->last_device_scale_factor());
+    EXPECT_EQ(1.f, child->last_device_scale_factor());
   }
 
   // Verify that it composes correctly with transforms directly on root layer.
@@ -1410,7 +1480,6 @@ TEST_F(LayerTreeHostCommonTest,
   // are unexpected at draw time (e.g. we might try to create a content texture
   // of size 0).
   ASSERT_TRUE(parent->render_surface());
-  ASSERT_FALSE(render_surface1->render_surface());
   EXPECT_EQ(1U, render_surface_layer_list.size());
 }
 
@@ -2120,9 +2189,6 @@ TEST_F(LayerTreeHostCommonTest, ClipRectIsPropagatedCorrectlyToSurfaces) {
   ASSERT_TRUE(grand_child1->render_surface());
   ASSERT_TRUE(grand_child2->render_surface());
   ASSERT_TRUE(grand_child3->render_surface());
-  // Because grand_child4 is entirely clipped, it is expected to not have a
-  // render surface.
-  EXPECT_FALSE(grand_child4->render_surface());
 
   // Surfaces are clipped by their parent, but un-affected by the owning layer's
   // masksToBounds.
@@ -2896,10 +2962,8 @@ TEST_F(LayerTreeHostCommonTest,
   EXPECT_TRUE(child->visible_content_rect().IsEmpty());
   EXPECT_TRUE(child->drawable_content_rect().IsEmpty());
 
-  // Case 2: a matrix with flattened z, technically uninvertible but still
-  // drawable and visible. In this case, we must assume that the entire layer
-  // bounds are visible since there is no way to inverse-project the surface
-  // bounds to intersect.
+  // Case 2: a matrix with flattened z, uninvertible and not visible according
+  // to the CSS spec.
   uninvertible_matrix.MakeIdentity();
   uninvertible_matrix.matrix().set(2, 2, 0.0);
   ASSERT_FALSE(uninvertible_matrix.IsInvertible());
@@ -2914,12 +2978,10 @@ TEST_F(LayerTreeHostCommonTest,
 
   ExecuteCalculateDrawProperties(root.get());
 
-  EXPECT_RECT_EQ(gfx::Rect(0, 0, 50, 50), child->visible_content_rect());
-  EXPECT_RECT_EQ(gfx::Rect(5, 5, 50, 50), child->drawable_content_rect());
+  EXPECT_TRUE(child->visible_content_rect().IsEmpty());
+  EXPECT_TRUE(child->drawable_content_rect().IsEmpty());
 
-  // Case 3: a matrix with flattened z, technically uninvertible but still
-  // drawable, but not visible. In this case, we don't need to conservatively
-  // assume that the whole layer is visible.
+  // Case 3: a matrix with flattened z, also uninvertible and not visible.
   uninvertible_matrix.MakeIdentity();
   uninvertible_matrix.Translate(500.0, 0.0);
   uninvertible_matrix.matrix().set(2, 2, 0.0);
@@ -2936,7 +2998,82 @@ TEST_F(LayerTreeHostCommonTest,
   ExecuteCalculateDrawProperties(root.get());
 
   EXPECT_TRUE(child->visible_content_rect().IsEmpty());
-  EXPECT_RECT_EQ(gfx::Rect(505, 5, 50, 50), child->drawable_content_rect());
+  EXPECT_TRUE(child->drawable_content_rect().IsEmpty());
+}
+
+TEST_F(LayerTreeHostCommonTest,
+       SingularTransformDoesNotPreventClearingDrawProperties) {
+  scoped_refptr<Layer> root = Layer::Create();
+  scoped_refptr<LayerWithForcedDrawsContent> child =
+      make_scoped_refptr(new LayerWithForcedDrawsContent());
+  root->AddChild(child);
+
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  host->SetRootLayer(root);
+
+  gfx::Transform identity_matrix;
+  gfx::Transform uninvertible_matrix(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  ASSERT_FALSE(uninvertible_matrix.IsInvertible());
+
+  SetLayerPropertiesForTesting(root.get(),
+                               uninvertible_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(100, 100),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(child.get(),
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(5.f, 5.f),
+                               gfx::Size(50, 50),
+                               true,
+                               false);
+
+  child->draw_properties().sorted_for_recursion = true;
+
+  TransformOperations start_transform_operations;
+  start_transform_operations.AppendScale(1.f, 0.f, 0.f);
+
+  TransformOperations end_transform_operations;
+  end_transform_operations.AppendScale(1.f, 1.f, 0.f);
+
+  AddAnimatedTransformToLayer(
+      root.get(), 10.0, start_transform_operations, end_transform_operations);
+
+  EXPECT_TRUE(root->TransformIsAnimating());
+
+  ExecuteCalculateDrawProperties(root.get());
+
+  EXPECT_FALSE(child->draw_properties().sorted_for_recursion);
+}
+
+TEST_F(LayerTreeHostCommonTest,
+       SingularNonAnimatingTransformDoesNotPreventClearingDrawProperties) {
+  scoped_refptr<Layer> root = Layer::Create();
+
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  host->SetRootLayer(root);
+
+  gfx::Transform identity_matrix;
+  gfx::Transform uninvertible_matrix(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  ASSERT_FALSE(uninvertible_matrix.IsInvertible());
+
+  SetLayerPropertiesForTesting(root.get(),
+                               uninvertible_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(100, 100),
+                               true,
+                               false);
+
+  root->draw_properties().sorted_for_recursion = true;
+
+  EXPECT_FALSE(root->TransformIsAnimating());
+
+  ExecuteCalculateDrawProperties(root.get());
+
+  EXPECT_FALSE(root->draw_properties().sorted_for_recursion);
 }
 
 TEST_F(LayerTreeHostCommonTest,
@@ -5999,6 +6136,7 @@ class NoScaleContentLayer : public ContentLayer {
   virtual void CalculateContentsScale(float ideal_contents_scale,
                                       float device_scale_factor,
                                       float page_scale_factor,
+                                      float maximum_animation_contents_scale,
                                       bool animating_transform_to_screen,
                                       float* contents_scale_x,
                                       float* contents_scale_y,
@@ -6007,6 +6145,7 @@ class NoScaleContentLayer : public ContentLayer {
     Layer::CalculateContentsScale(ideal_contents_scale,
                                   device_scale_factor,
                                   page_scale_factor,
+                                  maximum_animation_contents_scale,
                                   animating_transform_to_screen,
                                   contents_scale_x,
                                   contents_scale_y,
@@ -9090,6 +9229,70 @@ TEST_F(LayerTreeHostCommonTest, ClippedByScrollParent) {
   EXPECT_TRUE(scroll_child->is_clipped());
 }
 
+TEST_F(LayerTreeHostCommonTest, SingularTransformSubtreesDoNotDraw) {
+  scoped_refptr<LayerWithForcedDrawsContent> root =
+      make_scoped_refptr(new LayerWithForcedDrawsContent);
+  scoped_refptr<LayerWithForcedDrawsContent> parent =
+      make_scoped_refptr(new LayerWithForcedDrawsContent);
+  scoped_refptr<LayerWithForcedDrawsContent> child =
+      make_scoped_refptr(new LayerWithForcedDrawsContent);
+
+  root->AddChild(parent);
+  parent->AddChild(child);
+
+  gfx::Transform identity_transform;
+  SetLayerPropertiesForTesting(root.get(),
+                               identity_transform,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(50, 50),
+                               true,
+                               true);
+  root->SetForceRenderSurface(true);
+  SetLayerPropertiesForTesting(parent.get(),
+                               identity_transform,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(30, 30),
+                               true,
+                               true);
+  parent->SetForceRenderSurface(true);
+  SetLayerPropertiesForTesting(child.get(),
+                               identity_transform,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(20, 20),
+                               true,
+                               true);
+  child->SetForceRenderSurface(true);
+
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create();
+  host->SetRootLayer(root);
+
+  ExecuteCalculateDrawProperties(root.get());
+
+  EXPECT_EQ(3u, render_surface_layer_list()->size());
+
+  gfx::Transform singular_transform;
+  singular_transform.Scale3d(
+      SkDoubleToMScalar(1.0), SkDoubleToMScalar(1.0), SkDoubleToMScalar(0.0));
+
+  child->SetTransform(singular_transform);
+
+  ExecuteCalculateDrawProperties(root.get());
+
+  EXPECT_EQ(2u, render_surface_layer_list()->size());
+
+  // Ensure that the entire subtree under a layer with singular transform does
+  // not get rendered.
+  parent->SetTransform(singular_transform);
+  child->SetTransform(identity_transform);
+
+  ExecuteCalculateDrawProperties(root.get());
+
+  EXPECT_EQ(1u, render_surface_layer_list()->size());
+}
+
 TEST_F(LayerTreeHostCommonTest, ClippedByOutOfOrderScrollParent) {
   // Checks that clipping by a scroll parent that follows you in paint order
   // still results in correct clipping.
@@ -9737,5 +9940,508 @@ TEST_F(LayerTreeHostCommonTest, ScrollCompensationWithRounding) {
   }
 }
 
+class AnimationScaleFactorTrackingLayerImpl : public LayerImpl {
+ public:
+  static scoped_ptr<AnimationScaleFactorTrackingLayerImpl> Create(
+      LayerTreeImpl* tree_impl,
+      int id) {
+    return make_scoped_ptr(
+        new AnimationScaleFactorTrackingLayerImpl(tree_impl, id));
+  }
+
+  virtual ~AnimationScaleFactorTrackingLayerImpl() {}
+
+  virtual void CalculateContentsScale(float ideal_contents_scale,
+                                      float device_scale_factor,
+                                      float page_scale_factor,
+                                      float maximum_animation_contents_scale,
+                                      bool animating_transform_to_screen,
+                                      float* contents_scale_x,
+                                      float* contents_scale_y,
+                                      gfx::Size* content_bounds) OVERRIDE {
+    last_maximum_animation_contents_scale_ = maximum_animation_contents_scale;
+    LayerImpl::CalculateContentsScale(ideal_contents_scale,
+                                      device_scale_factor,
+                                      page_scale_factor,
+                                      maximum_animation_contents_scale,
+                                      animating_transform_to_screen,
+                                      contents_scale_x,
+                                      contents_scale_y,
+                                      content_bounds);
+  }
+
+  float last_maximum_animation_contents_scale() {
+    return last_maximum_animation_contents_scale_;
+  }
+
+ private:
+  explicit AnimationScaleFactorTrackingLayerImpl(LayerTreeImpl* tree_impl,
+                                                 int id)
+      : LayerImpl(tree_impl, id), last_maximum_animation_contents_scale_(0.f) {
+    SetDrawsContent(true);
+  }
+
+  float last_maximum_animation_contents_scale_;
+};
+
+TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
+  FakeImplProxy proxy;
+  TestSharedBitmapManager shared_bitmap_manager;
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  gfx::Transform identity_matrix;
+  scoped_ptr<AnimationScaleFactorTrackingLayerImpl> grand_parent =
+      AnimationScaleFactorTrackingLayerImpl::Create(host_impl.active_tree(), 1);
+  scoped_ptr<AnimationScaleFactorTrackingLayerImpl> parent =
+      AnimationScaleFactorTrackingLayerImpl::Create(host_impl.active_tree(), 2);
+  scoped_ptr<AnimationScaleFactorTrackingLayerImpl> child =
+      AnimationScaleFactorTrackingLayerImpl::Create(host_impl.active_tree(), 3);
+  scoped_ptr<AnimationScaleFactorTrackingLayerImpl> grand_child =
+      AnimationScaleFactorTrackingLayerImpl::Create(host_impl.active_tree(), 4);
+
+  AnimationScaleFactorTrackingLayerImpl* parent_raw = parent.get();
+  AnimationScaleFactorTrackingLayerImpl* child_raw = child.get();
+  AnimationScaleFactorTrackingLayerImpl* grand_child_raw = grand_child.get();
+
+  child->AddChild(grand_child.PassAs<LayerImpl>());
+  parent->AddChild(child.PassAs<LayerImpl>());
+  grand_parent->AddChild(parent.PassAs<LayerImpl>());
+
+  SetLayerPropertiesForTesting(grand_parent.get(),
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(parent_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(child_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(grand_child_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // No layers have animations.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  TransformOperations translation;
+  translation.AppendTranslate(1.f, 2.f, 3.f);
+
+  AddAnimatedTransformToLayer(
+      parent_raw, 1.0, TransformOperations(), translation);
+
+  // No layers have scale-affecting animations.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  TransformOperations scale;
+  scale.AppendScale(5.f, 4.f, 3.f);
+
+  AddAnimatedTransformToLayer(child_raw, 1.0, TransformOperations(), scale);
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // Only |child| has a scale-affecting animation.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(5.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(5.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  AddAnimatedTransformToLayer(
+      grand_parent.get(), 1.0, TransformOperations(), scale);
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // |grand_parent| and |child| have scale-affecting animations.
+  EXPECT_EQ(5.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(5.f, parent_raw->last_maximum_animation_contents_scale());
+  // We don't support combining animated scales from two nodes; 0.f means
+  // that the maximum scale could not be computed.
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  AddAnimatedTransformToLayer(parent_raw, 1.0, TransformOperations(), scale);
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // |grand_parent|, |parent|, and |child| have scale-affecting animations.
+  EXPECT_EQ(5.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  grand_parent->layer_animation_controller()->AbortAnimations(
+      Animation::Transform);
+  parent_raw->layer_animation_controller()->AbortAnimations(
+      Animation::Transform);
+  child_raw->layer_animation_controller()->AbortAnimations(
+      Animation::Transform);
+
+  TransformOperations perspective;
+  perspective.AppendPerspective(10.f);
+
+  AddAnimatedTransformToLayer(
+      child_raw, 1.0, TransformOperations(), perspective);
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // |child| has a scale-affecting animation but computing the maximum of this
+  // animation is not supported.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  child_raw->layer_animation_controller()->AbortAnimations(
+      Animation::Transform);
+
+  gfx::Transform scale_matrix;
+  scale_matrix.Scale(1.f, 2.f);
+  grand_parent->SetTransform(scale_matrix);
+  parent_raw->SetTransform(scale_matrix);
+  AddAnimatedTransformToLayer(parent_raw, 1.0, TransformOperations(), scale);
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // |grand_parent| and |parent| each have scale 2.f. |parent| has a  scale
+  // animation with maximum scale 5.f.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(10.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(10.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(10.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  gfx::Transform perspective_matrix;
+  perspective_matrix.ApplyPerspectiveDepth(2.f);
+  child_raw->SetTransform(perspective_matrix);
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // |child| has a transform that's neither a translation nor a scale.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(10.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  parent_raw->SetTransform(perspective_matrix);
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // |parent| and |child| have transforms that are neither translations nor
+  // scales.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+
+  parent_raw->SetTransform(identity_matrix);
+  child_raw->SetTransform(identity_matrix);
+  grand_parent->SetTransform(perspective_matrix);
+
+  ExecuteCalculateDrawProperties(grand_parent.get());
+
+  // |grand_parent| has a transform that's neither a translation nor a scale.
+  EXPECT_EQ(0.f, grand_parent->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, parent_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, child_raw->last_maximum_animation_contents_scale());
+  EXPECT_EQ(0.f, grand_child_raw->last_maximum_animation_contents_scale());
+}
+
+static int membership_id(LayerImpl* layer) {
+  return layer->draw_properties().last_drawn_render_surface_layer_list_id;
+}
+
+static void GatherDrawnLayers(LayerImplList* rsll,
+                              std::set<LayerImpl*>* drawn_layers) {
+  for (LayerIterator<LayerImpl> it = LayerIterator<LayerImpl>::Begin(rsll),
+                                end = LayerIterator<LayerImpl>::End(rsll);
+       it != end;
+       ++it) {
+    LayerImpl* layer = *it;
+    if (it.represents_itself())
+      drawn_layers->insert(layer);
+
+    if (!it.represents_contributing_render_surface())
+      continue;
+
+    if (layer->mask_layer())
+      drawn_layers->insert(layer->mask_layer());
+    if (layer->replica_layer() && layer->replica_layer()->mask_layer())
+      drawn_layers->insert(layer->replica_layer()->mask_layer());
+  }
+}
+
+TEST_F(LayerTreeHostCommonTest, RenderSurfaceLayerListMembership) {
+  FakeImplProxy proxy;
+  TestSharedBitmapManager shared_bitmap_manager;
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  gfx::Transform identity_matrix;
+
+  scoped_ptr<LayerImpl> grand_parent =
+      LayerImpl::Create(host_impl.active_tree(), 1);
+  scoped_ptr<LayerImpl> parent = LayerImpl::Create(host_impl.active_tree(), 3);
+  scoped_ptr<LayerImpl> child = LayerImpl::Create(host_impl.active_tree(), 5);
+  scoped_ptr<LayerImpl> grand_child1 =
+      LayerImpl::Create(host_impl.active_tree(), 7);
+  scoped_ptr<LayerImpl> grand_child2 =
+      LayerImpl::Create(host_impl.active_tree(), 9);
+
+  LayerImpl* grand_parent_raw = grand_parent.get();
+  LayerImpl* parent_raw = parent.get();
+  LayerImpl* child_raw = child.get();
+  LayerImpl* grand_child1_raw = grand_child1.get();
+  LayerImpl* grand_child2_raw = grand_child2.get();
+
+  child->AddChild(grand_child1.Pass());
+  child->AddChild(grand_child2.Pass());
+  parent->AddChild(child.Pass());
+  grand_parent->AddChild(parent.Pass());
+
+  SetLayerPropertiesForTesting(grand_parent_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(parent_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(child_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(grand_child1_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+  SetLayerPropertiesForTesting(grand_child2_raw,
+                               identity_matrix,
+                               gfx::PointF(),
+                               gfx::PointF(),
+                               gfx::Size(1, 2),
+                               true,
+                               false);
+
+  // Start with nothing being drawn.
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  int member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_NE(member_id, membership_id(child_raw));
+  EXPECT_NE(member_id, membership_id(grand_child1_raw));
+  EXPECT_NE(member_id, membership_id(grand_child2_raw));
+
+  std::set<LayerImpl*> expected;
+  std::set<LayerImpl*> actual;
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  // If we force render surface, but none of the layers are in the layer list,
+  // then this layer should not appear in RSLL.
+  grand_child1_raw->SetForceRenderSurface(true);
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_NE(member_id, membership_id(child_raw));
+  EXPECT_NE(member_id, membership_id(grand_child1_raw));
+  EXPECT_NE(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  // However, if we say that this layer also draws content, it will appear in
+  // RSLL.
+  grand_child1_raw->SetDrawsContent(true);
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_NE(member_id, membership_id(child_raw));
+  EXPECT_EQ(member_id, membership_id(grand_child1_raw));
+  EXPECT_NE(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  expected.insert(grand_child1_raw);
+
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  // Now child is forced to have a render surface, and one if its children draws
+  // content.
+  grand_child1_raw->SetDrawsContent(false);
+  grand_child1_raw->SetForceRenderSurface(false);
+  child_raw->SetForceRenderSurface(true);
+  grand_child2_raw->SetDrawsContent(true);
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_NE(member_id, membership_id(child_raw));
+  EXPECT_NE(member_id, membership_id(grand_child1_raw));
+  EXPECT_EQ(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  expected.insert(grand_child2_raw);
+
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  // Add a mask layer to child.
+  child_raw->SetMaskLayer(LayerImpl::Create(host_impl.active_tree(), 6).Pass());
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_NE(member_id, membership_id(child_raw));
+  EXPECT_EQ(member_id, membership_id(child_raw->mask_layer()));
+  EXPECT_NE(member_id, membership_id(grand_child1_raw));
+  EXPECT_EQ(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  expected.insert(grand_child2_raw);
+  expected.insert(child_raw->mask_layer());
+
+  expected.clear();
+  expected.insert(grand_child2_raw);
+  expected.insert(child_raw->mask_layer());
+
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  // Add replica mask layer.
+  scoped_ptr<LayerImpl> replica_layer =
+      LayerImpl::Create(host_impl.active_tree(), 20);
+  replica_layer->SetMaskLayer(LayerImpl::Create(host_impl.active_tree(), 21));
+  child_raw->SetReplicaLayer(replica_layer.Pass());
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_NE(member_id, membership_id(child_raw));
+  EXPECT_EQ(member_id, membership_id(child_raw->mask_layer()));
+  EXPECT_EQ(member_id, membership_id(child_raw->replica_layer()->mask_layer()));
+  EXPECT_NE(member_id, membership_id(grand_child1_raw));
+  EXPECT_EQ(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  expected.insert(grand_child2_raw);
+  expected.insert(child_raw->mask_layer());
+  expected.insert(child_raw->replica_layer()->mask_layer());
+
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  child_raw->TakeReplicaLayer();
+
+  // With nothing drawing, we should have no layers.
+  grand_child2_raw->SetDrawsContent(false);
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_NE(member_id, membership_id(child_raw));
+  EXPECT_NE(member_id, membership_id(child_raw->mask_layer()));
+  EXPECT_NE(member_id, membership_id(grand_child1_raw));
+  EXPECT_NE(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  // Child itself draws means that we should have the child and the mask in the
+  // list.
+  child_raw->SetDrawsContent(true);
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_NE(member_id, membership_id(grand_parent_raw));
+  EXPECT_NE(member_id, membership_id(parent_raw));
+  EXPECT_EQ(member_id, membership_id(child_raw));
+  EXPECT_EQ(member_id, membership_id(child_raw->mask_layer()));
+  EXPECT_NE(member_id, membership_id(grand_child1_raw));
+  EXPECT_NE(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  expected.insert(child_raw);
+  expected.insert(child_raw->mask_layer());
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+
+  child_raw->TakeMaskLayer();
+
+  // Now everyone's a member!
+  grand_parent_raw->SetDrawsContent(true);
+  parent_raw->SetDrawsContent(true);
+  child_raw->SetDrawsContent(true);
+  grand_child1_raw->SetDrawsContent(true);
+  grand_child2_raw->SetDrawsContent(true);
+
+  ExecuteCalculateDrawProperties(grand_parent_raw);
+  member_id = render_surface_layer_list_count();
+
+  EXPECT_EQ(member_id, membership_id(grand_parent_raw));
+  EXPECT_EQ(member_id, membership_id(parent_raw));
+  EXPECT_EQ(member_id, membership_id(child_raw));
+  EXPECT_EQ(member_id, membership_id(grand_child1_raw));
+  EXPECT_EQ(member_id, membership_id(grand_child2_raw));
+
+  expected.clear();
+  expected.insert(grand_parent_raw);
+  expected.insert(parent_raw);
+  expected.insert(child_raw);
+  expected.insert(grand_child1_raw);
+  expected.insert(grand_child2_raw);
+
+  actual.clear();
+  GatherDrawnLayers(render_surface_layer_list_impl(), &actual);
+  EXPECT_EQ(expected, actual);
+}
 }  // namespace
 }  // namespace cc

@@ -10,18 +10,19 @@
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_view.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/public/test/test_browser_thread.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
 
 class MockView : public PermissionBubbleView {
  public:
-  MockView() : shown_(false), delegate_(NULL) {}
+  MockView() : shown_(false), can_accept_updates_(true), delegate_(NULL) {}
   virtual ~MockView() {}
 
   void Clear() {
     shown_ = false;
+    can_accept_updates_ = true;
     delegate_ = NULL;
     permission_requests_.clear();
     permission_states_.clear();
@@ -46,10 +47,11 @@ class MockView : public PermissionBubbleView {
   }
 
   virtual bool CanAcceptRequestUpdate() OVERRIDE {
-    return true;
+    return can_accept_updates_;
   }
 
   bool shown_;
+  bool can_accept_updates_;
   Delegate* delegate_;
   std::vector<PermissionBubbleRequest*> permission_requests_;
   std::vector<bool> permission_states_;
@@ -57,13 +59,24 @@ class MockView : public PermissionBubbleView {
 
 }  // namespace
 
-class PermissionBubbleManagerTest : public testing::Test {
+class PermissionBubbleManagerTest : public ChromeRenderViewHostTestHarness {
  public:
-  PermissionBubbleManagerTest();
+  PermissionBubbleManagerTest()
+      : ChromeRenderViewHostTestHarness(),
+        request1_("test1"),
+        request2_("test2") {}
   virtual ~PermissionBubbleManagerTest() {}
 
-  virtual void TearDown() {
+  virtual void SetUp() OVERRIDE {
+    ChromeRenderViewHostTestHarness::SetUp();
+    SetContents(CreateTestWebContents());
+
+    manager_.reset(new PermissionBubbleManager(web_contents()));
+  }
+
+  virtual void TearDown() OVERRIDE {
     manager_.reset();
+    ChromeRenderViewHostTestHarness::TearDown();
   }
 
   void ToggleAccept(int index, bool value) {
@@ -74,8 +87,18 @@ class PermissionBubbleManagerTest : public testing::Test {
     manager_->Accept();
   }
 
+  void Closing() {
+    manager_->Closing();
+  }
+
   void WaitForCoalescing() {
+    manager_->DocumentOnLoadCompletedInMainFrame();
     base::MessageLoop::current()->RunUntilIdle();
+  }
+
+  virtual void NavigationEntryCommitted(
+      const content::LoadCommittedDetails& details) {
+    manager_->NavigationEntryCommitted(details);
   }
 
  protected:
@@ -83,18 +106,7 @@ class PermissionBubbleManagerTest : public testing::Test {
   MockPermissionBubbleRequest request2_;
   MockView view_;
   scoped_ptr<PermissionBubbleManager> manager_;
-
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
 };
-
-PermissionBubbleManagerTest::PermissionBubbleManagerTest()
-    : request1_("test1"),
-      request2_("test2"),
-      manager_(new PermissionBubbleManager(NULL)),
-      ui_thread_(content::BrowserThread::UI, &message_loop_) {
-  manager_->SetCoalesceIntervalForTesting(0);
-}
 
 TEST_F(PermissionBubbleManagerTest, TestFlag) {
   EXPECT_FALSE(PermissionBubbleManager::Enabled());
@@ -231,9 +243,8 @@ TEST_F(PermissionBubbleManagerTest, TwoRequestsShownInTwoBubbles) {
 
   view_.Hide();
   Accept();
-  EXPECT_FALSE(view_.shown_);
-
   WaitForCoalescing();
+
   EXPECT_TRUE(view_.shown_);
   ASSERT_EQ(1u, view_.permission_requests_.size());
   EXPECT_EQ(&request2_, view_.permission_requests_[0]);
@@ -308,3 +319,75 @@ TEST_F(PermissionBubbleManagerTest, DuplicateQueuedRequest) {
   EXPECT_TRUE(dupe_request2.finished());
   EXPECT_FALSE(request2_.finished());
 }
+
+TEST_F(PermissionBubbleManagerTest, ForgetRequestsOnPageNavigation) {
+  NavigateAndCommit(GURL("http://www.google.com/"));
+  manager_->SetView(&view_);
+  manager_->AddRequest(&request1_);
+  WaitForCoalescing();
+  manager_->AddRequest(&request2_);
+
+  EXPECT_TRUE(view_.shown_);
+  ASSERT_EQ(1u, view_.permission_requests_.size());
+
+  NavigateAndCommit(GURL("http://www2.google.com/"));
+  WaitForCoalescing();
+
+  EXPECT_TRUE(request1_.finished());
+  EXPECT_TRUE(request2_.finished());
+}
+
+TEST_F(PermissionBubbleManagerTest, TestCancel) {
+  manager_->SetView(NULL);
+  manager_->AddRequest(&request1_);
+  WaitForCoalescing();
+
+  manager_->CancelRequest(&request1_);
+  EXPECT_TRUE(request1_.finished());
+  manager_->SetView(&view_);
+  EXPECT_FALSE(view_.shown_);
+
+  manager_->AddRequest(&request2_);
+  WaitForCoalescing();
+  EXPECT_TRUE(view_.shown_);
+}
+
+TEST_F(PermissionBubbleManagerTest, TestCancelWhileDialogShown) {
+  manager_->SetView(&view_);
+  manager_->AddRequest(&request1_);
+  WaitForCoalescing();
+
+  EXPECT_TRUE(view_.shown_);
+  EXPECT_FALSE(request1_.finished());
+  manager_->CancelRequest(&request1_);
+  EXPECT_TRUE(request1_.finished());
+}
+
+TEST_F(PermissionBubbleManagerTest, TestCancelWhileDialogShownNoUpdate) {
+  manager_->SetView(&view_);
+  view_.can_accept_updates_ = false;
+  manager_->AddRequest(&request1_);
+  WaitForCoalescing();
+
+  EXPECT_TRUE(view_.shown_);
+  EXPECT_FALSE(request1_.finished());
+  manager_->CancelRequest(&request1_);
+  EXPECT_TRUE(request1_.finished());
+  Closing();
+}
+
+TEST_F(PermissionBubbleManagerTest, TestCancelPendingRequest) {
+  manager_->SetView(&view_);
+  manager_->AddRequest(&request1_);
+  WaitForCoalescing();
+  manager_->AddRequest(&request2_);
+
+  EXPECT_TRUE(view_.shown_);
+  EXPECT_EQ(1u, view_.permission_requests_.size());
+  manager_->CancelRequest(&request2_);
+
+  EXPECT_TRUE(view_.shown_);
+  EXPECT_FALSE(request1_.finished());
+  EXPECT_TRUE(request2_.finished());
+}
+

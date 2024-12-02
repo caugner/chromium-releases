@@ -36,14 +36,12 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/base/net_util.h"
+#include "net/base/filename_util.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 #if defined(OS_WIN)
-#include "content/public/browser/web_contents_view.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #endif
@@ -431,8 +429,14 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, BigString) {
                             kFwd, kIgnoreCase, NULL));
 }
 
+// http://crbug.com/369169
+#if defined(OS_CHROMEOS)
+#define MAYBE_SingleOccurrence DISABLED_SingleOccurrence
+#else
+#define MAYBE_SingleOccurrence SingleOccurrence
+#endif
 // Search Back and Forward on a single occurrence.
-IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, SingleOccurrence) {
+IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, MAYBE_SingleOccurrence) {
   WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   ui_test_utils::NavigateToURL(browser(), GetURL("FindRandomTests.html"));
@@ -797,9 +801,17 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindRestarts_Issue1155639) {
   EXPECT_EQ(1, ordinal);
 }
 
+// Disable the test for win and mac as it started being flaky, see
+// http://crbug/367701.
+#if defined(OS_MACOSX) && !defined(OS_IOS) || defined(OS_WIN)
+#define MAYBE_FindRestarts_Issue70505 DISABLED_FindRestarts_Issue70505
+#else
+#define MAYBE_FindRestarts_Issue70505 FindRestarts_Issue70505
+#endif
 // Make sure we don't get into an infinite loop when text box contains very
 // large amount of text.
-IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindRestarts_Issue70505) {
+IN_PROC_BROWSER_TEST_F(FindInPageControllerTest,
+                       MAYBE_FindRestarts_Issue70505) {
   // First we navigate to our page.
   GURL url = GetURL(kLongTextareaPage);
   ui_test_utils::NavigateToURL(browser(), url);
@@ -992,9 +1004,9 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindMovesWhenObscuring) {
   EXPECT_EQ(position.x(), start_position.x());
 }
 
-// FindNextInNewTabUsesPrepopulate times-out on Mac, Windows and Aura.
+// FindNextInNewTabUsesPrepopulate times-out on Mac and Aura.
 // See http://crbug.com/43070
-#if defined(OS_MACOSX) || defined(OS_WIN) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA)
 #define MAYBE_FindNextInNewTabUsesPrepopulate \
     DISABLED_FindNextInNewTabUsesPrepopulate
 #else
@@ -1583,8 +1595,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, WindowedNPAPIPluginHidden) {
   EXPECT_EQ(expected_title, title_watcher.WaitAndGetTitle());
 
   // Now get the region of the plugin before the find bar is shown.
-  HWND hwnd =
-      tab->GetView()->GetNativeView()->GetHost()->GetAcceleratedWidget();
+  HWND hwnd = tab->GetNativeView()->GetHost()->GetAcceleratedWidget();
   HWND child = NULL;
   EnumChildWindows(hwnd, EnumerateChildren,reinterpret_cast<LPARAM>(&child));
 

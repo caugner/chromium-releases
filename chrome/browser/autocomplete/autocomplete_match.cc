@@ -152,6 +152,7 @@ int AutocompleteMatch::TypeToIcon(Type type) {
     IDR_OMNIBOX_EXTENSION_APP,
     IDR_OMNIBOX_SEARCH,
     IDR_OMNIBOX_HTTP,
+    IDR_OMNIBOX_HTTP,
   };
   COMPILE_ASSERT(arraysize(icons) == AutocompleteMatchType::NUM_TYPES,
                  icons_array_must_match_type_enum);
@@ -174,19 +175,6 @@ bool AutocompleteMatch::MoreRelevant(const AutocompleteMatch& elem1,
   // across multiple updates.
   return (elem1.relevance == elem2.relevance) ?
       (elem1.contents < elem2.contents) : (elem1.relevance > elem2.relevance);
-}
-
-// static
-bool AutocompleteMatch::DestinationSortFunc(const AutocompleteMatch& elem1,
-                                            const AutocompleteMatch& elem2) {
-  // Sort identical destination_urls together.  Place the most relevant matches
-  // first, so that when we call std::unique(), these are the ones that get
-  // preserved.
-  if (DestinationsEqual(elem1, elem2) ||
-      (elem1.stripped_destination_url.is_empty() &&
-       elem2.stripped_destination_url.is_empty()))
-    return MoreRelevant(elem1, elem2);
-  return elem1.stripped_destination_url < elem2.stripped_destination_url;
 }
 
 // static
@@ -389,10 +377,9 @@ void AutocompleteMatch::ComputeStrippedDestinationURL(Profile* profile) {
   }
 
   // Replace https protocol with http protocol.
-  if (stripped_destination_url.SchemeIs(content::kHttpsScheme)) {
-    replacements.SetScheme(
-        content::kHttpScheme,
-        url_parse::Component(0, strlen(content::kHttpScheme)));
+  if (stripped_destination_url.SchemeIs(url::kHttpsScheme)) {
+    replacements.SetScheme(url::kHttpScheme,
+                           url::Component(0, strlen(url::kHttpScheme)));
     needs_replacement = true;
   }
 

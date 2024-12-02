@@ -18,7 +18,6 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
-#include "chrome/browser/ui/search/instant_search_prerenderer.h"
 #include "chrome/browser/ui/search/instant_tab.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/common/chrome_switches.h"
@@ -32,7 +31,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "net/base/escape.h"
 #include "net/base/network_change_notifier.h"
 #include "url/gurl.h"
@@ -85,26 +83,6 @@ InstantController::InstantController(BrowserInstantController* browser)
 InstantController::~InstantController() {
 }
 
-void InstantController::SetSuggestionToPrefetch(
-    const InstantSuggestion& suggestion) {
-  if (instant_tab_ &&
-      SearchTabHelper::FromWebContents(instant_tab_->contents())->
-          IsSearchResultsPage()) {
-    if (chrome::ShouldPrefetchSearchResultsOnSRP() ||
-        chrome::ShouldPrefetchSearchResults()) {
-      SearchTabHelper::FromWebContents(instant_tab_->contents())->
-          SetSuggestionToPrefetch(suggestion);
-    }
-  } else {
-    if (chrome::ShouldPrefetchSearchResults()) {
-      InstantSearchPrerenderer* prerenderer =
-          InstantSearchPrerenderer::GetForProfile(profile());
-      if (prerenderer)
-        prerenderer->Prerender(suggestion);
-    }
-  }
-}
-
 bool InstantController::SubmitQuery(const base::string16& search_terms) {
   if (instant_tab_ && instant_tab_->supports_instant() &&
       search_mode_.is_origin_search()) {
@@ -112,7 +90,7 @@ bool InstantController::SubmitQuery(const base::string16& search_terms) {
     // page. (NOTE: in particular, we do not send the query to NTPs.)
     SearchTabHelper::FromWebContents(instant_tab_->contents())->Submit(
         search_terms);
-    instant_tab_->contents()->GetView()->Focus();
+    instant_tab_->contents()->Focus();
     EnsureSearchTermsAreSet(instant_tab_->contents(), search_terms);
     return true;
   }

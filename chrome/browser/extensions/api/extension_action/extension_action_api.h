@@ -8,11 +8,13 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
+#include "extensions/browser/extension_registry_observer.h"
 
 namespace base {
 class DictionaryValue;
@@ -25,6 +27,7 @@ class WebContents;
 
 namespace extensions {
 class ExtensionPrefs;
+class ExtensionRegistry;
 class TabHelper;
 
 class ExtensionActionAPI : public BrowserContextKeyedAPI {
@@ -91,6 +94,7 @@ class ExtensionActionAPI : public BrowserContextKeyedAPI {
 // This class manages reading and writing browser action values from storage.
 class ExtensionActionStorageManager
     : public content::NotificationObserver,
+      public ExtensionRegistryObserver,
       public base::SupportsWeakPtr<ExtensionActionStorageManager> {
  public:
   explicit ExtensionActionStorageManager(Profile* profile);
@@ -102,6 +106,10 @@ class ExtensionActionStorageManager
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // ExtensionRegistryObserver:
+  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
+                                 const Extension* extension) OVERRIDE;
+
   // Reads/Writes the ExtensionAction's default values to/from storage.
   void WriteToStorage(ExtensionAction* extension_action);
   void ReadFromStorage(
@@ -109,6 +117,10 @@ class ExtensionActionStorageManager
 
   Profile* profile_;
   content::NotificationRegistrar registrar_;
+
+  // Listen to extension loaded notification.
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 };
 
 // Implementation of the browserAction and pageAction APIs.
@@ -125,7 +137,7 @@ class ExtensionActionFunction : public ChromeSyncExtensionFunction {
  protected:
   ExtensionActionFunction();
   virtual ~ExtensionActionFunction();
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
   virtual bool RunExtensionAction() = 0;
 
   bool ExtractDataFromArguments();
@@ -351,7 +363,7 @@ class BrowserActionOpenPopupFunction : public ChromeAsyncExtensionFunction,
   virtual ~BrowserActionOpenPopupFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -449,7 +461,7 @@ class EnablePageActionsFunction : public PageActionsFunction {
   virtual ~EnablePageActionsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 // Implement chrome.pageActions.disableForTab().
@@ -462,7 +474,7 @@ class DisablePageActionsFunction : public PageActionsFunction {
   virtual ~DisablePageActionsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_EXTENSION_ACTION_EXTENSION_ACTION_API_H_

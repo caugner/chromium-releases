@@ -9,6 +9,7 @@
 #include "media/cdm/ppapi/cdm_logging.h"
 #include "media/cdm/ppapi/supported_cdm_versions.h"
 #include "ppapi/c/ppb_console.h"
+#include "ppapi/cpp/private/uma_private.h"
 
 #if defined(CHECK_DOCUMENT_URL)
 #include "ppapi/cpp/dev/url_util_dev.h"
@@ -154,6 +155,8 @@ cdm::VideoDecoderConfig::VideoCodec PpVideoCodecToCdmVideoCodec(
       return cdm::VideoDecoderConfig::kCodecVp8;
     case PP_VIDEOCODEC_H264:
       return cdm::VideoDecoderConfig::kCodecH264;
+    case PP_VIDEOCODEC_VP9:
+      return cdm::VideoDecoderConfig::kCodecVp9;
     default:
       return cdm::VideoDecoderConfig::kUnknownVideoCodec;
   }
@@ -162,8 +165,8 @@ cdm::VideoDecoderConfig::VideoCodec PpVideoCodecToCdmVideoCodec(
 cdm::VideoDecoderConfig::VideoCodecProfile PpVCProfileToCdmVCProfile(
     PP_VideoCodecProfile profile) {
   switch (profile) {
-    case PP_VIDEOCODECPROFILE_VP8_MAIN:
-      return cdm::VideoDecoderConfig::kVp8ProfileMain;
+    case PP_VIDEOCODECPROFILE_NOT_NEEDED:
+      return cdm::VideoDecoderConfig::kProfileNotNeeded;
     case PP_VIDEOCODECPROFILE_H264_BASELINE:
       return cdm::VideoDecoderConfig::kH264ProfileBaseline;
     case PP_VIDEOCODECPROFILE_H264_MAIN:
@@ -222,6 +225,8 @@ CdmAdapter::CdmAdapter(PP_Instance instance, pp::Module* module)
       output_link_mask_(0),
       output_protection_mask_(0),
       query_output_protection_in_progress_(false),
+      uma_for_output_protection_query_reported_(false),
+      uma_for_output_protection_positive_result_reported_(false),
 #endif
       allocator_(this),
       cdm_(NULL),
@@ -259,6 +264,25 @@ void CdmAdapter::Initialize(const std::string& key_system) {
   PP_DCHECK(!key_system.empty());
   PP_DCHECK(key_system_.empty() || (key_system_ == key_system && cdm_));
 
+#if defined(CHECK_DOCUMENT_URL)
+  PP_URLComponents_Dev url_components = {};
+  const pp::URLUtil_Dev* url_util = pp::URLUtil_Dev::Get();
+  if (!url_util)
+    return;
+  pp::Var href = url_util->GetDocumentURL(pp::InstanceHandle(pp_instance()),
+                                          &url_components);
+  PP_DCHECK(href.is_string());
+  std::string url = href.AsString();
+  PP_DCHECK(!url.empty());
+  std::string url_scheme =
+      url.substr(url_components.scheme.begin, url_components.scheme.len);
+  if (url_scheme != "file") {
+    // Skip this check for file:// URLs as they don't have a host component.
+    PP_DCHECK(url_components.host.begin);
+    PP_DCHECK(0 < url_components.host.len);
+  }
+#endif  // defined(CHECK_DOCUMENT_URL)
+
   if (!cdm_ && !CreateCdmInstance(key_system))
     return;
 
@@ -276,21 +300,6 @@ void CdmAdapter::CreateSession(uint32_t session_id,
     return;
   }
 
-#if defined(CHECK_DOCUMENT_URL)
-  PP_URLComponents_Dev url_components = {};
-  const pp::URLUtil_Dev* url_util = pp::URLUtil_Dev::Get();
-  if (!url_util) {
-    OnSessionError(session_id, cdm::kUnknownError, 0);
-    return;
-  }
-  pp::Var href = url_util->GetDocumentURL(
-      pp::InstanceHandle(pp_instance()), &url_components);
-  PP_DCHECK(href.is_string());
-  PP_DCHECK(!href.AsString().empty());
-  PP_DCHECK(url_components.host.begin);
-  PP_DCHECK(0 < url_components.host.len);
-#endif  // defined(CHECK_DOCUMENT_URL)
-
   cdm_->CreateSession(session_id,
                       content_type.data(),
                       content_type.size(),
@@ -307,20 +316,11 @@ void CdmAdapter::LoadSession(uint32_t session_id,
     return;
   }
 
-  if (!cdm_->LoadSession(
-           session_id, web_session_id.data(), web_session_id.size()))
-    OnSessionError(session_id, cdm::kUnknownError, 0);
+  cdm_->LoadSession(session_id, web_session_id.data(), web_session_id.size());
 }
 
 void CdmAdapter::UpdateSession(uint32_t session_id,
                                pp::VarArrayBuffer response) {
-  // TODO(jrummell): In EME WD, AddKey() can only be called on valid sessions.
-  // We should be able to DCHECK(cdm_) when addressing http://crbug.com/249976.
-  if (!cdm_) {
-    OnSessionError(session_id, cdm::kUnknownError, 0);
-    return;
-  }
-
   const uint8_t* response_ptr = static_cast<const uint8_t*>(response.Map());
   const uint32_t response_size = response.ByteLength();
 
@@ -328,39 +328,11 @@ void CdmAdapter::UpdateSession(uint32_t session_id,
     OnSessionError(session_id, cdm::kUnknownError, 0);
     return;
   }
-  CdmWrapper::Result result =
-      cdm_->UpdateSession(session_id, response_ptr, response_size);
-  switch (result) {
-    case CdmWrapper::NO_ACTION:
-      break;
-    case CdmWrapper::CALL_KEY_ADDED:
-      OnSessionReady(session_id);
-      break;
-    case CdmWrapper::CALL_KEY_ERROR:
-      OnSessionError(session_id, cdm::kUnknownError, 0);
-      break;
-  }
+  cdm_->UpdateSession(session_id, response_ptr, response_size);
 }
 
 void CdmAdapter::ReleaseSession(uint32_t session_id) {
-  // TODO(jrummell): In EME WD, AddKey() can only be called on valid sessions.
-  // We should be able to DCHECK(cdm_) when addressing http://crbug.com/249976.
-  if (!cdm_) {
-    OnSessionError(session_id, cdm::kUnknownError, 0);
-    return;
-  }
-
-  CdmWrapper::Result result = cdm_->ReleaseSession(session_id);
-  switch (result) {
-    case CdmWrapper::NO_ACTION:
-      break;
-    case CdmWrapper::CALL_KEY_ADDED:
-      PP_NOTREACHED();
-      break;
-    case CdmWrapper::CALL_KEY_ERROR:
-      OnSessionError(session_id, cdm::kUnknownError, 0);
-      break;
-  }
+  cdm_->ReleaseSession(session_id);
 }
 
 // Note: In the following decryption/decoding related functions, errors are NOT
@@ -559,37 +531,6 @@ void CdmAdapter::TimerExpired(int32_t result, void* context) {
 
 double CdmAdapter::GetCurrentWallTimeInSeconds() {
   return pp::Module::Get()->core()->GetTime();
-}
-
-void CdmAdapter::SendKeyMessage(
-    const char* session_id, uint32_t session_id_length,
-    const char* message, uint32_t message_length,
-    const char* default_url, uint32_t default_url_length) {
-  PP_DCHECK(!key_system_.empty());
-
-  std::string session_id_str(session_id, session_id_length);
-  PP_DCHECK(!session_id_str.empty());
-  uint32_t session_reference_id = cdm_->LookupSessionId(session_id_str);
-
-  OnSessionCreated(session_reference_id, session_id, session_id_length);
-  OnSessionMessage(session_reference_id,
-                   message, message_length,
-                   default_url, default_url_length);
-}
-
-void CdmAdapter::SendKeyError(const char* session_id,
-                              uint32_t session_id_length,
-                              cdm::MediaKeyError error_code,
-                              uint32_t system_code) {
-  std::string session_id_str(session_id, session_id_length);
-  uint32_t session_reference_id = cdm_->LookupSessionId(session_id_str);
-  OnSessionError(session_reference_id, error_code, system_code);
-}
-
-void CdmAdapter::GetPrivateData(int32_t* instance,
-                                GetPrivateInterface* get_interface) {
-  *instance = pp_instance();
-  *get_interface = pp::Module::Get()->get_browser_interface();
 }
 
 void CdmAdapter::OnSessionCreated(uint32_t session_id,
@@ -903,6 +844,7 @@ void CdmAdapter::QueryOutputProtectionStatus() {
           &CdmAdapter::QueryOutputProtectionStatusDone));
   if (result == PP_OK_COMPLETIONPENDING) {
     query_output_protection_in_progress_ = true;
+    ReportOutputProtectionQuery();
     return;
   }
 
@@ -945,6 +887,45 @@ cdm::FileIO* CdmAdapter::CreateFileIO(cdm::FileIOClient* client) {
 }
 
 #if defined(OS_CHROMEOS)
+void CdmAdapter::ReportOutputProtectionUMA(OutputProtectionStatus status) {
+  pp::UMAPrivate uma_interface_(this);
+  uma_interface_.HistogramEnumeration(
+      "Media.EME.OutputProtection", status, OUTPUT_PROTECTION_MAX);
+}
+
+void CdmAdapter::ReportOutputProtectionQuery() {
+  if (uma_for_output_protection_query_reported_)
+    return;
+
+  ReportOutputProtectionUMA(OUTPUT_PROTECTION_QUERIED);
+  uma_for_output_protection_query_reported_ = true;
+}
+
+void CdmAdapter::ReportOutputProtectionQueryResult() {
+  if (uma_for_output_protection_positive_result_reported_)
+    return;
+
+  // Report UMAs for output protection query result.
+  uint32_t external_links = (output_link_mask_ & ~cdm::kLinkTypeInternal);
+
+  if (!external_links) {
+    ReportOutputProtectionUMA(OUTPUT_PROTECTION_NO_EXTERNAL_LINK);
+    uma_for_output_protection_positive_result_reported_ = true;
+    return;
+  }
+
+  if ((output_protection_mask_ & external_links) == external_links) {
+    ReportOutputProtectionUMA(
+        OUTPUT_PROTECTION_ALL_EXTERNAL_LINKS_PROTECTED);
+    uma_for_output_protection_positive_result_reported_ = true;
+    return;
+  }
+
+  // Do not report a negative result because it could be a false negative.
+  // Instead, we will calculate number of negatives using the total number of
+  // queries and success results.
+}
+
 void CdmAdapter::SendPlatformChallengeDone(int32_t result) {
   challenge_in_progress_ = false;
 
@@ -989,6 +970,8 @@ void CdmAdapter::QueryOutputProtectionStatusDone(int32_t result) {
   // Return a protection status of none on error.
   if (result != PP_OK)
     output_link_mask_ = output_protection_mask_ = 0;
+  else
+    ReportOutputProtectionQueryResult();
 
   cdm_->OnQueryOutputProtectionStatus(output_link_mask_,
                                       output_protection_mask_);
@@ -999,24 +982,24 @@ void* GetCdmHost(int host_interface_version, void* user_data) {
   if (!host_interface_version || !user_data)
     return NULL;
 
-  COMPILE_ASSERT(cdm::ContentDecryptionModule::Host::kVersion ==
-                 cdm::ContentDecryptionModule_4::Host::kVersion,
-                 update_code_below);
+  COMPILE_ASSERT(
+      cdm::ContentDecryptionModule::Host::kVersion == cdm::Host_4::kVersion,
+      update_code_below);
 
   // Ensure IsSupportedCdmHostVersion matches implementation of this function.
   // Always update this DCHECK when updating this function.
   // If this check fails, update this function and DCHECK or update
   // IsSupportedCdmHostVersion.
+
   PP_DCHECK(
       // Future version is not supported.
-      !IsSupportedCdmHostVersion(
-          cdm::ContentDecryptionModule::Host::kVersion + 1) &&
+      !IsSupportedCdmHostVersion(cdm::Host_4::kVersion + 1) &&
       // Current version is supported.
-      IsSupportedCdmHostVersion(cdm::ContentDecryptionModule::Host::kVersion) &&
-      // Include all previous supported versions here.
-      IsSupportedCdmHostVersion(cdm::Host_1::kVersion) &&
+      IsSupportedCdmHostVersion(cdm::Host_4::kVersion) &&
+      // Include all previous supported versions (if any) here.
+      // No supported previous versions.
       // One older than the oldest supported version is not supported.
-      !IsSupportedCdmHostVersion(cdm::Host_1::kVersion - 1));
+      !IsSupportedCdmHostVersion(cdm::Host_4::kVersion - 1));
   PP_DCHECK(IsSupportedCdmHostVersion(host_interface_version));
 
   CdmAdapter* cdm_adapter = static_cast<CdmAdapter*>(user_data);
@@ -1024,10 +1007,6 @@ void* GetCdmHost(int host_interface_version, void* user_data) {
   switch (host_interface_version) {
     case cdm::Host_4::kVersion:
       return static_cast<cdm::Host_4*>(cdm_adapter);
-    case cdm::Host_2::kVersion:
-      return static_cast<cdm::Host_2*>(cdm_adapter);
-    case cdm::Host_1::kVersion:
-      return static_cast<cdm::Host_1*>(cdm_adapter);
     default:
       PP_NOTREACHED();
       return NULL;

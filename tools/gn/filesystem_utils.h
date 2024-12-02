@@ -26,10 +26,10 @@ enum SourceFileType {
   SOURCE_MM,
   SOURCE_S,
   SOURCE_RC,
+  SOURCE_O,  // Object files can be inputs, too. Also counts .obj.
 };
 
-SourceFileType GetSourceFileType(const SourceFile& file,
-                                 Settings::TargetOS os);
+SourceFileType GetSourceFileType(const SourceFile& file);
 
 // Returns the extension, not including the dot, for the given file type on the
 // given system.
@@ -93,6 +93,10 @@ bool EndsWithSlash(const std::string& s);
 // input pointer must outlive the output.
 base::StringPiece FindDir(const std::string* path);
 
+// Returns the substring identifying the last component of the dir, or the
+// empty substring if none. For example "//foo/bar/" -> "bar".
+base::StringPiece FindLastDirComponent(const SourceDir& dir);
+
 // Verifies that the given string references a file inside of the given
 // directory. This is pretty stupid and doesn't handle "." and "..", etc.,
 // it is designed for a sanity check to keep people from writing output files
@@ -138,7 +142,6 @@ void NormalizePath(std::string* path);
 // Converts slashes to backslashes for Windows. Keeps the string unchanged
 // for other systems.
 void ConvertPathToSystem(std::string* path);
-std::string PathToSystem(const std::string& path);
 
 // Takes a source-absolute path (must begin with "//") and makes it relative
 // to the given directory, which also must be source-absolute.

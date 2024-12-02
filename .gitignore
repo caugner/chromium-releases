@@ -18,6 +18,7 @@
 *.vpwhistu
 *.vtg
 *.xcodeproj
+*.xcworkspace
 *_proto.xml
 *_proto_cpp.xml
 *~
@@ -50,6 +51,7 @@ v8.log
 /build/ipch/
 /build/Release
 /build/Release_x64
+/build/win_toolchain.json
 /build/util/LASTCHANGE*
 /build/util/support
 /build/x64/
@@ -67,6 +69,7 @@ v8.log
 /chrome/app/theme/default_200_percent/google_chrome
 /chrome/app/theme/google_chrome
 /chrome/browser/autofill/internal
+/chrome/browser/extensions/api/ledger/
 /chrome/browser/extensions/default_extensions/chromeos
 /chrome/browser/google/linkdoctor_internal
 /chrome/browser/intents/internal/
@@ -84,6 +87,7 @@ v8.log
 /chrome/chrome_user32_delay_imports.xml
 /chrome/chrome_version_resources.xml
 /chrome/common/extensions/api/api.xml
+/chrome/common/extensions/api/ledger/
 /chrome/Hammer
 /chrome/installer/linux/debian_wheezy_amd64-sysroot/
 /chrome/installer/linux/debian_wheezy_i386-sysroot/
@@ -121,6 +125,7 @@ v8.log
 /chrome/test/data/perf/third_party/
 /chrome/test/data/plugin/
 /chrome/test/data/pyauto_private
+/chrome/test/data/webrtc/resources
 /chrome/tools/memory
 /chrome/tools/test/reference_build
 /chrome/unit_tests_run.xml
@@ -224,10 +229,10 @@ v8.log
 /third_party/chromeos_text_input
 /third_party/chromite
 /third_party/clang_format/bin/*/*
+/third_party/clang_format/script
 !/third_party/clang_format/bin/*/*.sha1
 /third_party/cld_2/src
 /third_party/cros
-/third_party/cros_dbus_cplusplus/source
 /third_party/cros_system_api
 /third_party/cygwin
 /third_party/directxsdk
@@ -241,7 +246,6 @@ v8.log
 /third_party/freetype2/src
 /third_party/gles2_conform
 /third_party/gnu_binutils/
-/third_party/gold
 /third_party/google_appengine_cloudstorage
 /third_party/google_toolbox_for_mac/src
 /third_party/googlemac
@@ -265,7 +269,6 @@ v8.log
 /third_party/libjingle/source_internal
 /third_party/libjpeg_turbo
 /third_party/liblouis/src
-/third_party/libmtp/
 /third_party/libphonenumber/libphonenumber.xml
 /third_party/libphonenumber/libphonenumber_without_metadata.xml
 /third_party/libphonenumber/src
@@ -282,7 +285,6 @@ v8.log
 /third_party/mingw-w64
 /third_party/mkl
 /third_party/mt19937ar
-/third_party/mtpd/source/
 /third_party/nacl_sdk_binaries/
 /third_party/nss
 /third_party/openmax_dl/
@@ -360,6 +362,7 @@ v8.log
 /tools/metrics/histograms/histograms.before.pretty-print.xml
 /tools/page_cycler/acid3
 /tools/perf/data
+/tools/perf/internal
 /tools/perf/results.html
 /tools/swarming_client
 /tools/tryserver

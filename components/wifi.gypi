@@ -9,8 +9,8 @@
       'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
-        '../components/components.gyp:onc_component',
         '../third_party/libxml/libxml.gyp:libxml',
+        'onc_component',
       ],
       'include_dirs': [
         '..',
@@ -22,7 +22,6 @@
         'wifi/wifi_export.h',
         'wifi/wifi_service.cc',
         'wifi/wifi_service.h',
-        'wifi/fake_wifi_service.cc',
         'wifi/wifi_service_mac.mm',
         'wifi/wifi_service_win.cc',
       ],
@@ -45,12 +44,28 @@
       ],
     },
     {
+      'target_name': 'wifi_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+        'onc_component',
+        'wifi_component',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'wifi/fake_wifi_service.cc',
+        'wifi/fake_wifi_service.h',
+      ],
+    },
+    {
       'target_name': 'wifi_test',
       'type': 'executable',
       'dependencies': [
-        'wifi_component',
         '../base/base.gyp:base',
-        '../components/components.gyp:onc_component',
+        'onc_component',
+        'wifi_component',
       ],
       'include_dirs': [
         '..',

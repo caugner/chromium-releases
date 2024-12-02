@@ -99,8 +99,7 @@
       'conditions': [
         ['os_posix==1 and OS!="mac" and OS!="ios"', {
           'conditions': [
-            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-            ['(use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1)', {
+            ['use_allocator!="none"', {
               'dependencies': [
                 '../base/allocator/allocator.gyp:allocator',
               ],
@@ -130,7 +129,6 @@
           ],
           'variables': {
             'test_suite_name': 'sql_unittests',
-            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)sql_unittests<(SHARED_LIB_SUFFIX)',
           },
           'includes': [ '../build/apk_test.gypi' ],
         },

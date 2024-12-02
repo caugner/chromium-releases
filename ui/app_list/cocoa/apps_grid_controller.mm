@@ -88,11 +88,6 @@ NSTimeInterval g_scroll_duration = 0.18;
 // Moves the selection by |indexDelta| items.
 - (BOOL)moveSelectionByDelta:(int)indexDelta;
 
-// -[NSCollectionView frameForItemAtIndex:] misreports the frame origin of an
-// item when the method is called during a scroll animation provided by the
-// NSScrollView. This returns the correct value.
-- (NSRect)trueFrameForItemAtIndex:(size_t)itemIndex;
-
 @end
 
 namespace app_list {
@@ -491,7 +486,6 @@ class AppsGridDelegateBridge : public AppListItemListObserver {
         [pageView itemAtIndex:i]);
     [gridItem setModel:static_cast<app_list::AppListItem*>(
         [[pageContent objectAtIndex:i] pointerValue])];
-    [gridItem setInitialFrameRect:[self trueFrameForItemAtIndex:i]];
   }
 }
 
@@ -619,15 +613,6 @@ class AppsGridDelegateBridge : public AppListItemListObserver {
 
   [self selectItemAtIndex:oldIndex + indexDelta];
   return YES;
-}
-
-- (NSRect)trueFrameForItemAtIndex:(size_t)itemIndex {
-  size_t column = itemIndex % kFixedColumns;
-  size_t row = itemIndex % kItemsPerPage / kFixedColumns;
-  return NSMakeRect(column * kPreferredTileWidth,
-                    row * kPreferredTileHeight,
-                    kPreferredTileWidth,
-                    kPreferredTileHeight);
 }
 
 - (void)selectItemAtIndex:(NSUInteger)index {

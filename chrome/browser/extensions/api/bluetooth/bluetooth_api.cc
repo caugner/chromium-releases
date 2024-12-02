@@ -6,10 +6,12 @@
 
 #include <string>
 
+#include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/api/bluetooth/bluetooth_api_utils.h"
 #include "chrome/browser/extensions/api/bluetooth/bluetooth_event_router.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/bluetooth.h"
 #include "chrome/common/extensions/api/bluetooth/bluetooth_manifest_data.h"
 #include "content/public/browser/browser_thread.h"
@@ -19,47 +21,20 @@
 #include "device/bluetooth/bluetooth_profile.h"
 #include "device/bluetooth/bluetooth_service_record.h"
 #include "device/bluetooth/bluetooth_socket.h"
-#include "device/bluetooth/bluetooth_utils.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "net/base/io_buffer.h"
 
 using content::BrowserContext;
+using content::BrowserThread;
+
 using device::BluetoothAdapter;
 using device::BluetoothDevice;
 using device::BluetoothProfile;
 using device::BluetoothServiceRecord;
 using device::BluetoothSocket;
 
-namespace {
-
-extensions::ExtensionBluetoothEventRouter* GetEventRouter(
-    BrowserContext* context) {
-  return extensions::BluetoothAPI::Get(context)->bluetooth_event_router();
-}
-
-}  // namespace
-
-namespace {
-
-const char kCouldNotGetLocalOutOfBandPairingData[] =
-    "Could not get local Out Of Band Pairing Data";
-const char kCouldNotSetOutOfBandPairingData[] =
-    "Could not set Out Of Band Pairing Data";
-const char kFailedToConnect[] = "Connection failed";
-const char kInvalidDevice[] = "Invalid device";
-const char kInvalidUuid[] = "Invalid UUID";
-const char kPermissionDenied[] = "Permission to add profile denied.";
-const char kProfileAlreadyRegistered[] =
-    "This profile has already been registered";
-const char kProfileNotFound[] = "Profile not found: invalid uuid";
-const char kProfileRegistrationFailed[] = "Profile registration failed";
-const char kSocketNotFoundError[] = "Socket not found: invalid socket id";
-const char kStartDiscoveryFailed[] = "Starting discovery failed";
-const char kStopDiscoveryFailed[] = "Failed to stop discovery";
-
-}  // namespace
+using extensions::BluetoothApiSocket;
 
 namespace AddProfile = extensions::api::bluetooth::AddProfile;
 namespace bluetooth = extensions::api::bluetooth;
@@ -67,11 +42,56 @@ namespace Connect = extensions::api::bluetooth::Connect;
 namespace Disconnect = extensions::api::bluetooth::Disconnect;
 namespace GetDevice = extensions::api::bluetooth::GetDevice;
 namespace GetDevices = extensions::api::bluetooth::GetDevices;
-namespace Read = extensions::api::bluetooth::Read;
 namespace RemoveProfile = extensions::api::bluetooth::RemoveProfile;
 namespace SetOutOfBandPairingData =
     extensions::api::bluetooth::SetOutOfBandPairingData;
-namespace Write = extensions::api::bluetooth::Write;
+namespace Send = extensions::api::bluetooth::Send;
+
+namespace {
+
+const char kCouldNotGetLocalOutOfBandPairingData[] =
+    "Could not get local Out Of Band Pairing Data";
+const char kCouldNotSetOutOfBandPairingData[] =
+    "Could not set Out Of Band Pairing Data";
+const char kInvalidDevice[] = "Invalid device";
+const char kInvalidUuid[] = "Invalid UUID";
+const char kPermissionDenied[] = "Permission to add profile denied.";
+const char kProfileAlreadyRegistered[] =
+    "This profile has already been registered";
+const char kProfileNotFound[] = "Profile not found: invalid uuid";
+const char kProfileRegistrationFailed[] = "Profile registration failed";
+const char kStartDiscoveryFailed[] = "Starting discovery failed";
+const char kStopDiscoveryFailed[] = "Failed to stop discovery";
+
+extensions::BluetoothEventRouter* GetEventRouter(BrowserContext* context) {
+  // Note: |context| is valid on UI thread only.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return extensions::BluetoothAPI::Get(context)->event_router();
+}
+
+static void DispatchConnectionEventWorker(
+    void* browser_context_id,
+    const std::string& extension_id,
+    const device::BluetoothUUID& profile_uuid,
+    const device::BluetoothDevice* device,
+    scoped_refptr<device::BluetoothSocket> socket) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  content::BrowserContext* context =
+      reinterpret_cast<content::BrowserContext*>(browser_context_id);
+  if (!extensions::ExtensionsBrowserClient::Get()->IsValidContext(context))
+    return;
+
+  extensions::BluetoothAPI* bluetooth_api =
+      extensions::BluetoothAPI::Get(context);
+  if (!bluetooth_api)
+    return;
+
+  bluetooth_api->DispatchConnectionEvent(
+      extension_id, profile_uuid, device, socket);
+}
+
+}  // namespace
 
 namespace extensions {
 
@@ -86,57 +106,224 @@ BluetoothAPI::GetFactoryInstance() {
 
 // static
 BluetoothAPI* BluetoothAPI::Get(BrowserContext* context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return GetFactoryInstance()->Get(context);
 }
 
-BluetoothAPI::BluetoothAPI(BrowserContext* context)
+BluetoothAPI::ConnectionParams::ConnectionParams() {}
+
+BluetoothAPI::ConnectionParams::~ConnectionParams() {}
+
+BluetoothAPI::BluetoothAPI(content::BrowserContext* context)
     : browser_context_(context) {
-  ExtensionSystem::Get(browser_context_)->event_router()->RegisterObserver(
-      this, bluetooth::OnAdapterStateChanged::kEventName);
-  ExtensionSystem::Get(browser_context_)->event_router()->RegisterObserver(
-      this, bluetooth::OnDeviceAdded::kEventName);
-  ExtensionSystem::Get(browser_context_)->event_router()->RegisterObserver(
-      this, bluetooth::OnDeviceChanged::kEventName);
-  ExtensionSystem::Get(browser_context_)->event_router()->RegisterObserver(
-      this, bluetooth::OnDeviceRemoved::kEventName);
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  EventRouter* event_router = EventRouter::Get(browser_context_);
+  event_router->RegisterObserver(this,
+                                 bluetooth::OnAdapterStateChanged::kEventName);
+  event_router->RegisterObserver(this, bluetooth::OnDeviceAdded::kEventName);
+  event_router->RegisterObserver(this, bluetooth::OnDeviceChanged::kEventName);
+  event_router->RegisterObserver(this, bluetooth::OnDeviceRemoved::kEventName);
 }
 
-BluetoothAPI::~BluetoothAPI() {
+BluetoothAPI::~BluetoothAPI() {}
+
+BluetoothEventRouter* BluetoothAPI::event_router() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!event_router_) {
+    event_router_.reset(new BluetoothEventRouter(browser_context_));
+  }
+  return event_router_.get();
 }
 
-ExtensionBluetoothEventRouter* BluetoothAPI::bluetooth_event_router() {
-  if (!bluetooth_event_router_)
-    bluetooth_event_router_.reset(
-        new ExtensionBluetoothEventRouter(browser_context_));
+scoped_refptr<BluetoothAPI::SocketData> BluetoothAPI::socket_data() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!socket_data_) {
+    ApiResourceManager<BluetoothApiSocket>* socket_manager =
+        ApiResourceManager<BluetoothApiSocket>::Get(browser_context_);
+    DCHECK(socket_manager)
+        << "There is no socket manager. "
+           "If this assertion is failing during a test, then it is likely that "
+           "TestExtensionSystem is failing to provide an instance of "
+           "ApiResourceManager<BluetoothApiSocket>.";
 
-  return bluetooth_event_router_.get();
+    socket_data_ = socket_manager->data_;
+  }
+  return socket_data_;
 }
 
 void BluetoothAPI::Shutdown() {
-  ExtensionSystem::Get(browser_context_)->event_router()->UnregisterObserver(
-      this);
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 void BluetoothAPI::OnListenerAdded(const EventListenerInfo& details) {
-  if (bluetooth_event_router()->IsBluetoothSupported())
-    bluetooth_event_router()->OnListenerAdded();
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (event_router()->IsBluetoothSupported())
+    event_router()->OnListenerAdded();
 }
 
 void BluetoothAPI::OnListenerRemoved(const EventListenerInfo& details) {
-  if (bluetooth_event_router()->IsBluetoothSupported())
-    bluetooth_event_router()->OnListenerRemoved();
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (event_router()->IsBluetoothSupported())
+    event_router()->OnListenerRemoved();
+}
+
+void BluetoothAPI::DispatchConnectionEvent(
+    const std::string& extension_id,
+    const device::BluetoothUUID& uuid,
+    const device::BluetoothDevice* device,
+    scoped_refptr<device::BluetoothSocket> socket) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (!event_router()->HasProfile(uuid))
+    return;
+
+  extensions::BluetoothAPI::ConnectionParams params;
+  params.browser_context_id = browser_context_;
+  params.thread_id = BluetoothApiSocket::kThreadId;
+  params.extension_id = extension_id;
+  params.uuid = uuid;
+  params.device_address = device->GetAddress();
+  params.socket = socket;
+  params.socket_data = socket_data();
+  BrowserThread::PostTask(
+      params.thread_id, FROM_HERE, base::Bind(&RegisterSocket, params));
+}
+
+// static
+void BluetoothAPI::RegisterSocket(
+    const BluetoothAPI::ConnectionParams& params) {
+  DCHECK(BrowserThread::CurrentlyOn(params.thread_id));
+
+  BluetoothApiSocket* api_socket = new BluetoothApiSocket(
+      params.extension_id, params.socket, params.device_address, params.uuid);
+  int socket_id = params.socket_data->Add(api_socket);
+
+  BrowserThread::PostTask(BrowserThread::UI,
+                          FROM_HERE,
+                          base::Bind(&RegisterSocketUI, params, socket_id));
+}
+
+// static
+void BluetoothAPI::RegisterSocketUI(const ConnectionParams& params,
+                                    int socket_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  content::BrowserContext* context =
+      reinterpret_cast<content::BrowserContext*>(params.browser_context_id);
+  if (!extensions::ExtensionsBrowserClient::Get()->IsValidContext(context))
+    return;
+
+  BluetoothAPI::Get(context)->event_router()->GetAdapter(
+      base::Bind(&RegisterSocketWithAdapterUI, params, socket_id));
+}
+
+void BluetoothAPI::RegisterSocketWithAdapterUI(
+    const ConnectionParams& params,
+    int socket_id,
+    scoped_refptr<device::BluetoothAdapter> adapter) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  content::BrowserContext* context =
+      reinterpret_cast<content::BrowserContext*>(params.browser_context_id);
+  if (!extensions::ExtensionsBrowserClient::Get()->IsValidContext(context))
+    return;
+
+  BluetoothDevice* device = adapter->GetDevice(params.device_address);
+  if (!device)
+    return;
+
+  api::bluetooth::Socket result_socket;
+  bluetooth::BluetoothDeviceToApiDevice(*device, &result_socket.device);
+  result_socket.uuid = params.uuid.canonical_value();
+  result_socket.id = socket_id;
+
+  scoped_ptr<base::ListValue> args =
+      bluetooth::OnConnection::Create(result_socket);
+  scoped_ptr<Event> event(
+      new Event(bluetooth::OnConnection::kEventName, args.Pass()));
+
+  EventRouter* router = EventRouter::Get(context);
+  if (router)
+    router->DispatchEventToExtension(params.extension_id, event.Pass());
 }
 
 namespace api {
 
-BluetoothAddProfileFunction::BluetoothAddProfileFunction() {
+BluetoothGetAdapterStateFunction::~BluetoothGetAdapterStateFunction() {}
+
+bool BluetoothGetAdapterStateFunction::DoWork(
+    scoped_refptr<BluetoothAdapter> adapter) {
+  bluetooth::AdapterState state;
+  PopulateAdapterState(*adapter.get(), &state);
+  results_ = bluetooth::GetAdapterState::Results::Create(state);
+  SendResponse(true);
+  return true;
 }
 
-bool BluetoothAddProfileFunction::RunImpl() {
+BluetoothGetDevicesFunction::~BluetoothGetDevicesFunction() {}
+
+bool BluetoothGetDevicesFunction::DoWork(
+    scoped_refptr<BluetoothAdapter> adapter) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  base::ListValue* device_list = new base::ListValue;
+  SetResult(device_list);
+
+  BluetoothAdapter::DeviceList devices = adapter->GetDevices();
+  for (BluetoothAdapter::DeviceList::const_iterator iter = devices.begin();
+       iter != devices.end();
+       ++iter) {
+    const BluetoothDevice* device = *iter;
+    DCHECK(device);
+
+    bluetooth::Device extension_device;
+    bluetooth::BluetoothDeviceToApiDevice(*device, &extension_device);
+
+    device_list->Append(extension_device.ToValue().release());
+  }
+
+  SendResponse(true);
+
+  return true;
+}
+
+BluetoothGetDeviceFunction::~BluetoothGetDeviceFunction() {}
+
+bool BluetoothGetDeviceFunction::DoWork(
+    scoped_refptr<BluetoothAdapter> adapter) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+
+  scoped_ptr<GetDevice::Params> params(GetDevice::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
+  const std::string& device_address = params->device_address;
+
+  BluetoothDevice* device = adapter->GetDevice(device_address);
+  if (device) {
+    bluetooth::Device extension_device;
+    bluetooth::BluetoothDeviceToApiDevice(*device, &extension_device);
+    SetResult(extension_device.ToValue().release());
+    SendResponse(true);
+  } else {
+    SetError(kInvalidDevice);
+    SendResponse(false);
+  }
+
+  return false;
+}
+
+BluetoothAddProfileFunction::BluetoothAddProfileFunction() {}
+
+BluetoothAddProfileFunction::~BluetoothAddProfileFunction() {}
+
+bool BluetoothAddProfileFunction::RunAsync() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   scoped_ptr<AddProfile::Params> params(AddProfile::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
 
-  if (!BluetoothDevice::IsUUIDValid(params->profile.uuid)) {
+  device::BluetoothUUID uuid(params->profile.uuid);
+
+  if (!uuid.IsValid()) {
     SetError(kInvalidUuid);
     return false;
   }
@@ -147,7 +334,7 @@ bool BluetoothAddProfileFunction::RunImpl() {
     return false;
   }
 
-  uuid_ = device::bluetooth_utils::CanonicalUuid(params->profile.uuid);
+  uuid_ = uuid;
 
   if (GetEventRouter(browser_context())->HasProfile(uuid_)) {
     SetError(kProfileAlreadyRegistered);
@@ -186,11 +373,13 @@ bool BluetoothAddProfileFunction::RunImpl() {
 void BluetoothAddProfileFunction::RegisterProfile(
     const BluetoothProfile::Options& options,
     const BluetoothProfile::ProfileCallback& callback) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   BluetoothProfile::Register(uuid_, options, callback);
 }
 
 void BluetoothAddProfileFunction::OnProfileRegistered(
     BluetoothProfile* bluetooth_profile) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (!bluetooth_profile) {
     SetError(kProfileRegistrationFailed);
     SendResponse(false);
@@ -205,8 +394,8 @@ void BluetoothAddProfileFunction::OnProfileRegistered(
   }
 
   bluetooth_profile->SetConnectionCallback(
-      base::Bind(&ExtensionBluetoothEventRouter::DispatchConnectionEvent,
-                 base::Unretained(GetEventRouter(browser_context())),
+      base::Bind(&DispatchConnectionEventWorker,
+                 browser_context(),
                  extension_id(),
                  uuid_));
   GetEventRouter(browser_context())
@@ -214,17 +403,19 @@ void BluetoothAddProfileFunction::OnProfileRegistered(
   SendResponse(true);
 }
 
-bool BluetoothRemoveProfileFunction::RunImpl() {
+BluetoothRemoveProfileFunction::~BluetoothRemoveProfileFunction() {}
+
+bool BluetoothRemoveProfileFunction::RunSync() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   scoped_ptr<RemoveProfile::Params> params(
       RemoveProfile::Params::Create(*args_));
 
-  if (!BluetoothDevice::IsUUIDValid(params->profile.uuid)) {
+  device::BluetoothUUID uuid(params->profile.uuid);
+
+  if (!uuid.IsValid()) {
     SetError(kInvalidUuid);
     return false;
   }
-
-  std::string uuid =
-      device::bluetooth_utils::CanonicalUuid(params->profile.uuid);
 
   if (!GetEventRouter(browser_context())->HasProfile(uuid)) {
     SetError(kProfileNotFound);
@@ -235,77 +426,16 @@ bool BluetoothRemoveProfileFunction::RunImpl() {
   return true;
 }
 
-bool BluetoothGetAdapterStateFunction::DoWork(
-    scoped_refptr<BluetoothAdapter> adapter) {
-  bluetooth::AdapterState state;
-  PopulateAdapterState(*adapter.get(), &state);
-  SetResult(state.ToValue().release());
-  SendResponse(true);
-  return true;
-}
-
-bool BluetoothGetDevicesFunction::DoWork(
-    scoped_refptr<BluetoothAdapter> adapter) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-
-  base::ListValue* device_list = new base::ListValue;
-  SetResult(device_list);
-
-  BluetoothAdapter::DeviceList devices = adapter->GetDevices();
-  for (BluetoothAdapter::DeviceList::const_iterator iter = devices.begin();
-       iter != devices.end();
-       ++iter) {
-    const BluetoothDevice* device = *iter;
-    DCHECK(device);
-
-    bluetooth::Device extension_device;
-    bluetooth::BluetoothDeviceToApiDevice(*device, &extension_device);
-
-    device_list->Append(extension_device.ToValue().release());
-  }
-
-  SendResponse(true);
-
-  return true;
-}
-
-bool BluetoothGetDeviceFunction::DoWork(
-    scoped_refptr<BluetoothAdapter> adapter) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-
-  scoped_ptr<GetDevice::Params> params(GetDevice::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
-  const std::string& device_address = params->device_address;
-
-  BluetoothDevice* device = adapter->GetDevice(device_address);
-  if (device) {
-    bluetooth::Device extension_device;
-    bluetooth::BluetoothDeviceToApiDevice(*device, &extension_device);
-    SetResult(extension_device.ToValue().release());
-    SendResponse(true);
-  } else {
-    SetError(kInvalidDevice);
-    SendResponse(false);
-  }
-
-  return false;
-}
-
-void BluetoothConnectFunction::OnSuccessCallback() {
-  SendResponse(true);
-}
-
-void BluetoothConnectFunction::OnErrorCallback() {
-  SetError(kFailedToConnect);
-  SendResponse(false);
-}
+BluetoothConnectFunction::~BluetoothConnectFunction() {}
 
 bool BluetoothConnectFunction::DoWork(scoped_refptr<BluetoothAdapter> adapter) {
   scoped_ptr<Connect::Params> params(Connect::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
   const bluetooth::ConnectOptions& options = params->options;
 
-  if (!BluetoothDevice::IsUUIDValid(options.profile.uuid)) {
+  device::BluetoothUUID uuid(options.profile.uuid);
+
+  if (!uuid.IsValid()) {
     SetError(kInvalidUuid);
     SendResponse(false);
     return false;
@@ -318,9 +448,6 @@ bool BluetoothConnectFunction::DoWork(scoped_refptr<BluetoothAdapter> adapter) {
     return false;
   }
 
-  std::string uuid = device::bluetooth_utils::CanonicalUuid(
-      options.profile.uuid);
-
   BluetoothProfile* bluetooth_profile =
       GetEventRouter(browser_context())->GetProfile(uuid);
   if (!bluetooth_profile) {
@@ -331,114 +458,80 @@ bool BluetoothConnectFunction::DoWork(scoped_refptr<BluetoothAdapter> adapter) {
 
   device->ConnectToProfile(
       bluetooth_profile,
-      base::Bind(&BluetoothConnectFunction::OnSuccessCallback, this),
+      base::Bind(&BluetoothConnectFunction::OnConnectedCallback,
+                 this,
+                 adapter,
+                 device->GetAddress()),
       base::Bind(&BluetoothConnectFunction::OnErrorCallback, this));
 
   return true;
 }
 
-bool BluetoothDisconnectFunction::RunImpl() {
-  scoped_ptr<Disconnect::Params> params(Disconnect::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
-  const bluetooth::DisconnectOptions& options = params->options;
-  return GetEventRouter(browser_context())->ReleaseSocket(options.socket.id);
-}
+void BluetoothConnectFunction::OnConnectedCallback(
+    scoped_refptr<device::BluetoothAdapter> adapter,
+    const std::string& device_address) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-BluetoothReadFunction::BluetoothReadFunction() : success_(false) {}
-BluetoothReadFunction::~BluetoothReadFunction() {}
-
-bool BluetoothReadFunction::Prepare() {
-  scoped_ptr<Read::Params> params(Read::Params::Create(*args_));
-  EXTENSION_FUNCTION_VALIDATE(params.get() != NULL);
-  const bluetooth::ReadOptions& options = params->options;
-
-  socket_ = GetEventRouter(browser_context())->GetSocket(options.socket.id);
-  if (socket_.get() == NULL) {
-    SetError(kSocketNotFoundError);
-    return false;
-  }
-
-  success_ = false;
-  return true;
-}
-
-void BluetoothReadFunction::Work() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-
-  if (!socket_.get())
+  // TODO(tengs): Remove this once we have an API for starting the connection
+  // monitor.
+  BluetoothDevice* device = adapter->GetDevice(device_address);
+  if (!device) {
+    SetError(kInvalidDevice);
+    SendResponse(false);
     return;
-
-  scoped_refptr<net::GrowableIOBuffer> buffer(new net::GrowableIOBuffer);
-  success_ = socket_->Receive(buffer.get());
-  if (success_)
-    SetResult(base::BinaryValue::CreateWithCopiedBuffer(buffer->StartOfBuffer(),
-                                                        buffer->offset()));
-  else
-    SetError(socket_->GetLastErrorMessage());
-}
-
-bool BluetoothReadFunction::Respond() {
-  return success_;
-}
-
-BluetoothWriteFunction::BluetoothWriteFunction()
-    : success_(false),
-      data_to_write_(NULL) {
-}
-
-BluetoothWriteFunction::~BluetoothWriteFunction() {}
-
-bool BluetoothWriteFunction::Prepare() {
-  // TODO(bryeung): update to new-style parameter passing when ArrayBuffer
-  // support is added
-  base::DictionaryValue* options;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetDictionary(0, &options));
-
-  base::DictionaryValue* socket;
-  EXTENSION_FUNCTION_VALIDATE(options->GetDictionary("socket", &socket));
-
-  int socket_id;
-  EXTENSION_FUNCTION_VALIDATE(socket->GetInteger("id", &socket_id));
-
-  socket_ = GetEventRouter(browser_context())->GetSocket(socket_id);
-  if (socket_.get() == NULL) {
-    SetError(kSocketNotFoundError);
-    return false;
   }
-
-  base::BinaryValue* tmp_data;
-  EXTENSION_FUNCTION_VALIDATE(options->GetBinary("data", &tmp_data));
-  data_to_write_ = tmp_data;
-
-  success_ = false;
-  return socket_.get() != NULL;
+  // Start the connection monitor, and return success even if this fails,
+  // as the connection was still opened successfully.
+  device->StartConnectionMonitor(
+      base::Bind(&BluetoothConnectFunction::OnMonitorStartedCallback, this),
+      base::Bind(&BluetoothConnectFunction::OnMonitorStartedCallback, this));
 }
 
-void BluetoothWriteFunction::Work() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-
-  if (socket_.get() == NULL)
-    return;
-
-  scoped_refptr<net::WrappedIOBuffer> wrapped_io_buffer(
-      new net::WrappedIOBuffer(data_to_write_->GetBuffer()));
-  scoped_refptr<net::DrainableIOBuffer> drainable_io_buffer(
-      new net::DrainableIOBuffer(wrapped_io_buffer.get(),
-                                 data_to_write_->GetSize()));
-  success_ = socket_->Send(drainable_io_buffer.get());
-  if (success_) {
-    if (drainable_io_buffer->BytesConsumed() > 0)
-      SetResult(new base::FundamentalValue(
-          drainable_io_buffer->BytesConsumed()));
-    else
-      results_.reset();
-  } else {
-    SetError(socket_->GetLastErrorMessage());
-  }
+void BluetoothConnectFunction::OnMonitorStartedCallback() {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  SendResponse(true);
 }
 
-bool BluetoothWriteFunction::Respond() {
-  return success_;
+void BluetoothConnectFunction::OnErrorCallback(const std::string& error) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  SetError(error);
+  SendResponse(false);
+}
+
+bool BluetoothDisconnectFunction::RunAsync() {
+  // TODO(keybuk): Remove.
+  SetError("Removed. Use chrome.bluetoothSocket.disconnect() instead.");
+  return false;
+}
+
+bool BluetoothSendFunction::RunAsync() {
+  // TODO(keybuk): Remove.
+  SetError("Removed. Use chrome.bluetoothSocket.send() instead.");
+  return false;
+}
+
+bool BluetoothUpdateSocketFunction::RunAsync() {
+  // TODO(keybuk): Remove.
+  SetError("Removed. Use chrome.bluetoothSocket.update() instead.");
+  return false;
+}
+
+bool BluetoothSetSocketPausedFunction::RunAsync() {
+  // TODO(keybuk): Remove.
+  SetError("Removed. Use chrome.bluetoothSocket.setPaused() instead.");
+  return false;
+}
+
+bool BluetoothGetSocketFunction::RunAsync() {
+  // TODO(keybuk): Remove.
+  SetError("Removed. Use chrome.bluetoothSocket.getInfo() instead.");
+  return false;
+}
+
+bool BluetoothGetSocketsFunction::RunAsync() {
+  // TODO(keybuk): Remove.
+  SetError("Removed. Use chrome.bluetoothSocket.getSockets() instead.");
+  return false;
 }
 
 void BluetoothSetOutOfBandPairingDataFunction::OnSuccessCallback() {

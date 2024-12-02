@@ -50,13 +50,6 @@ public abstract class WebContentsObserverAndroid {
             boolean isMainFrame, int errorCode, String description, String failingUrl) {
     }
 
-    // TODO(mkosiba): delete once downstream rolls.
-    @Deprecated
-    @CalledByNative
-    public void didNavigateMainFrame(String url, String baseUrl,
-            boolean isNavigationToDifferentPage) {
-    }
-
     /**
      * Called when the main frame of the page has committed.
      * @param url The validated url for the page.
@@ -72,10 +65,9 @@ public abstract class WebContentsObserverAndroid {
 
     /**
      * Called when the page had painted something non-empty.
-     * @param pageId unique ID of the page in history entries.
      */
     @CalledByNative
-    public void didFirstVisuallyNonEmptyPaint(int pageId) {
+    public void didFirstVisuallyNonEmptyPaint() {
     }
 
     /**

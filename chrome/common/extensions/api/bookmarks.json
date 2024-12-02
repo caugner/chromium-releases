@@ -64,6 +64,33 @@
             "description": "An ordered list of children of this node."
           }
         }
+      },
+      {
+        "id": "CreateDetails",
+        "description": "Object passed to the create() function.",
+        "inline_doc": true,
+        "type": "object",
+        "properties": {
+          "parentId": {
+            "type": "string",
+            "serialized_type": "int64",
+            "optional": true,
+            "description": "Defaults to the Other Bookmarks folder."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "optional": true
+          },
+          "title": {
+            "type": "string",
+            "optional": true
+          },
+          "url": {
+            "type": "string",
+            "optional": true
+          }
+        }
       }
     ],
     "functions": [
@@ -199,6 +226,7 @@
         "parameters": [
           {
             "name": "query",
+            "description": "Either a string of words and quoted phrases that are matched against bookmark URLs and titles, or an object. If an object, the properties <code>query</code>, <code>url</code>, and <code>title</code> may be specified and bookmarks matching all specified properties will be produced.",
             "choices": [
               {
                 "type": "string",
@@ -246,29 +274,8 @@
         "description": "Creates a bookmark or folder under the specified parentId.  If url is NULL or missing, it will be a folder.",
         "parameters": [
           {
-            "type": "object",
-            "name": "bookmark",
-            "properties": {
-              "parentId": {
-                "type": "string",
-                "serialized_type": "int64",
-                "optional": true,
-                "description": "Defaults to the Other Bookmarks folder."
-              },
-              "index": {
-                "type": "integer",
-                "minimum": 0,
-                "optional": true
-              },
-              "title": {
-                "type": "string",
-                "optional": true
-              },
-              "url": {
-                "type": "string",
-                "optional": true
-              }
-            }
+            "$ref": "CreateDetails",
+            "name": "bookmark"
           },
           {
             "type": "function",

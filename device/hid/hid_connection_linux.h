@@ -5,19 +5,21 @@
 #ifndef DEVICE_HID_HID_CONNECTION_LINUX_H_
 #define DEVICE_HID_HID_CONNECTION_LINUX_H_
 
+#include <queue>
+
 #include "base/files/file.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop/message_pump_libevent.h"
 #include "device/hid/hid_connection.h"
 #include "device/hid/hid_device_info.h"
-#include "device/hid/hid_service_linux.h"
+#include "device/hid/udev_common.h"
 
 namespace device {
 
 class HidConnectionLinux : public HidConnection,
                            public base::MessagePumpLibevent::Watcher {
  public:
-  HidConnectionLinux(HidDeviceInfo device_info,
-                     ScopedUdevDevicePtr udev_raw_device);
+  HidConnectionLinux(HidDeviceInfo device_info, std::string dev_node);
 
   virtual void Read(scoped_refptr<net::IOBufferWithSize> buffer,
                     const IOCallback& callback) OVERRIDE;
@@ -38,8 +40,6 @@ class HidConnectionLinux : public HidConnection,
  private:
   friend class base::RefCountedThreadSafe<HidConnectionLinux>;
   virtual ~HidConnectionLinux();
-
-  static bool FindHidrawDevNode(udev_device* parent, std::string* result);
 
   void ProcessReadQueue();
   void Disconnect();

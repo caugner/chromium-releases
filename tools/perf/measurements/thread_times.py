@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 from measurements import timeline_controller
 from metrics import timeline
+from telemetry.core.backends.chrome import tracing_backend
 from telemetry.page import page_measurement
 
 class ThreadTimes(page_measurement.PageMeasurement):
@@ -26,28 +27,25 @@ class ThreadTimes(page_measurement.PageMeasurement):
     if self.options.report_silk_details:
       # We need the other traces in order to have any details to report.
       self.timeline_controller.trace_categories = \
-          timeline_controller.DEFAULT_TRACE_CATEGORIES
+          tracing_backend.DEFAULT_TRACE_CATEGORIES
     else:
       self._timeline_controller.trace_categories = \
-          timeline_controller.MINIMAL_TRACE_CATEGORIES
+          tracing_backend.MINIMAL_TRACE_CATEGORIES
     self._timeline_controller.Start(page, tab)
-
-  def DidRunAction(self, page, tab, action):
-    self._timeline_controller.AddActionToIncludeInMetric(action)
 
   def DidRunActions(self, page, tab):
     self._timeline_controller.Stop(tab)
 
   def MeasurePage(self, page, tab, results):
-    metric = timeline.ThreadTimesTimelineMetric(
-      self._timeline_controller.model,
-      self._timeline_controller.renderer_process,
-      self._timeline_controller.action_ranges)
+    metric = timeline.ThreadTimesTimelineMetric()
+    renderer_thread = \
+        self._timeline_controller.model.GetRendererThreadFromTab(tab)
     if self.options.report_silk_results:
       metric.results_to_report = timeline.ReportSilkResults
     if self.options.report_silk_details:
       metric.details_to_report = timeline.ReportSilkDetails
-    metric.AddResults(tab, results)
+    metric.AddResults(self._timeline_controller.model, renderer_thread,
+                      self._timeline_controller.smooth_records, results)
 
   def CleanUpAfterPage(self, _, tab):
     self._timeline_controller.CleanUp(tab)

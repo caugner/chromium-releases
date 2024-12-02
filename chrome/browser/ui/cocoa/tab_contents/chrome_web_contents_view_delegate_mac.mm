@@ -10,11 +10,11 @@
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 
 ChromeWebContentsViewDelegateMac::ChromeWebContentsViewDelegateMac(
     content::WebContents* web_contents)
-    : bookmark_handler_(new WebDragBookmarkHandlerMac),
+    : ContextMenuDelegate(web_contents),
+      bookmark_handler_(new WebDragBookmarkHandlerMac),
       web_contents_(web_contents) {
 }
 
@@ -36,6 +36,17 @@ content::WebDragDestDelegate*
 void ChromeWebContentsViewDelegateMac::ShowContextMenu(
     content::RenderFrameHost* render_frame_host,
     const content::ContextMenuParams& params) {
+  ShowMenu(
+      BuildMenu(content::WebContents::FromRenderFrameHost(render_frame_host),
+                params));
+}
+
+void ChromeWebContentsViewDelegateMac::ShowMenu(
+    scoped_ptr<RenderViewContextMenu> menu) {
+  context_menu_.reset(static_cast<RenderViewContextMenuMac*>(menu.release()));
+  if (!context_menu_.get())
+    return;
+
   // The renderer may send the "show context menu" message multiple times, one
   // for each right click mouse event it receives. Normally, this doesn't happen
   // because mouse events are not forwarded once the context menu is showing.
@@ -47,9 +58,27 @@ void ChromeWebContentsViewDelegateMac::ShowContextMenu(
   if (widget_view && widget_view->IsShowingContextMenu())
     return;
 
-  context_menu_.reset(new RenderViewContextMenuMac(
-      render_frame_host, params, widget_view->GetNativeView()));
-  context_menu_->Init();
+  context_menu_->Show();
+}
+
+scoped_ptr<RenderViewContextMenu> ChromeWebContentsViewDelegateMac::BuildMenu(
+    content::WebContents* web_contents,
+    const content::ContextMenuParams& params) {
+  scoped_ptr<RenderViewContextMenuMac> menu;
+  content::RenderFrameHost* focused_frame = web_contents->GetFocusedFrame();
+  // If the frame tree does not have a focused frame at this point, do not
+  // bother creating RenderViewContextMenuMac.
+  // This happens if the frame has navigated to a different page before
+  // ContextMenu message was received by the current RenderFrameHost.
+  if (focused_frame) {
+    content::RenderWidgetHostView* widget_view =
+        GetActiveRenderWidgetHostView();
+    menu.reset(new RenderViewContextMenuMac(
+        focused_frame, params, widget_view->GetNativeView()));
+    menu->Init();
+  }
+
+  return menu.PassAs<RenderViewContextMenu>();
 }
 
 content::RenderWidgetHostView*

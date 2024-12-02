@@ -6,7 +6,6 @@
 
 #include "base/lazy_instance.h"
 #include "chrome/browser/extensions/api/sync_file_system/sync_file_system_api_helpers.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/sync_file_system/sync_event_observer.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service.h"
 #include "chrome/browser/sync_file_system/sync_file_system_service_factory.h"
@@ -14,9 +13,10 @@
 #include "chrome/common/extensions/api/sync_file_system.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_system.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "extensions/common/extension_set.h"
 #include "webkit/browser/fileapi/file_system_url.h"
 #include "webkit/common/fileapi/file_system_util.h"
 
@@ -58,9 +58,8 @@ void ExtensionSyncEventObserver::Shutdown() {
 
 std::string ExtensionSyncEventObserver::GetExtensionId(
     const GURL& app_origin) {
-  const Extension* app = ExtensionSystem::Get(browser_context_)
-                             ->extension_service()
-                             ->GetInstalledApp(app_origin);
+  const Extension* app = ExtensionRegistry::Get(browser_context_)
+      ->enabled_extensions().GetAppByURL(app_origin);
   if (!app) {
     // The app is uninstalled or disabled.
     return std::string();
@@ -93,8 +92,12 @@ void ExtensionSyncEventObserver::OnFileSynced(
   scoped_ptr<base::ListValue> params(new base::ListValue());
 
   // For now we always assume events come only for files (not directories).
-  params->Append(CreateDictionaryValueForFileSystemEntry(
-      url, sync_file_system::SYNC_FILE_TYPE_FILE));
+  scoped_ptr<base::DictionaryValue> entry(
+      CreateDictionaryValueForFileSystemEntry(
+          url, sync_file_system::SYNC_FILE_TYPE_FILE));
+  if (!entry)
+    return;
+  params->Append(entry.release());
 
   // Status, SyncAction and any optional notes to go here.
   api::sync_file_system::FileStatus status_enum =
@@ -120,8 +123,7 @@ void ExtensionSyncEventObserver::BroadcastOrDispatchEvent(
   // Check to see whether the event should be broadcasted to all listening
   // extensions or sent to a specific extension ID.
   bool broadcast_mode = app_origin.is_empty();
-  EventRouter* event_router =
-      ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* event_router = EventRouter::Get(browser_context_);
   DCHECK(event_router);
 
   scoped_ptr<Event> event(new Event(event_name, values.Pass()));

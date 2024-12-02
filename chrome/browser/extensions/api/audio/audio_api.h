@@ -45,7 +45,7 @@ class AudioGetInfoFunction : public ChromeAsyncExtensionFunction {
 
  protected:
   virtual ~AudioGetInfoFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
  private:
   void OnGetInfoCompleted(const OutputInfo& output_info,
@@ -60,7 +60,7 @@ class AudioSetActiveDevicesFunction : public ChromeSyncExtensionFunction {
 
  protected:
   virtual ~AudioSetActiveDevicesFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class AudioSetPropertiesFunction : public ChromeSyncExtensionFunction {
@@ -70,7 +70,7 @@ class AudioSetPropertiesFunction : public ChromeSyncExtensionFunction {
 
  protected:
   virtual ~AudioSetPropertiesFunction() {}
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 

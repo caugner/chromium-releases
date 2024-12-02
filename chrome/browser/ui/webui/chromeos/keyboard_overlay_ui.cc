@@ -17,8 +17,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/ime/ime_keyboard.h"
 #include "chromeos/ime/input_method_manager.h"
-#include "chromeos/ime/xkeyboard.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -261,7 +261,7 @@ content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource() {
                      CommandLine::ForCurrentProcess()->HasSwitch(
                          chromeos::switches::kHasChromeOSDiamondKey));
   ash::Shell* shell = ash::Shell::GetInstance();
-  ash::internal::DisplayManager* display_manager = shell->display_manager();
+  ash::DisplayManager* display_manager = shell->display_manager();
   source->AddBoolean("keyboardOverlayIsDisplayUIScalingEnabled",
                      display_manager->IsDisplayUIScalingEnabled());
   source->SetJsonPath("strings.js");

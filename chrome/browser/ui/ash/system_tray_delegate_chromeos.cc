@@ -14,8 +14,8 @@
 #include "ash/ime/input_method_menu_item.h"
 #include "ash/ime/input_method_menu_manager.h"
 #include "ash/metrics/user_metrics_recorder.h"
-#include "ash/session_state_delegate.h"
-#include "ash/session_state_observer.h"
+#include "ash/session/session_state_delegate.h"
+#include "ash/session/session_state_observer.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
@@ -48,7 +48,6 @@
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_pairing_dialog.h"
 #include "chrome/browser/chromeos/charger_replace/charger_replacement_dialog.h"
-#include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/job_list.h"
 #include "chrome/browser/chromeos/enrollment_dialog_view.h"
@@ -59,7 +58,6 @@
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
-#include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/supervised_user_manager.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_adding_screen.h"
@@ -69,14 +67,16 @@
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/profiles/multiprofiles_intro_dialog.h"
+#include "chrome/browser/chromeos/set_time_dialog.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
+#include "chrome/browser/chromeos/ui/choose_mobile_network_dialog.h"
 #include "chrome/browser/drive/drive_service_interface.h"
-#include "chrome/browser/feedback/tracing_manager.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
+#include "chrome/browser/ui/ash/stub_user_accounts_delegate.h"
 #include "chrome/browser/ui/ash/volume_controller_chromeos.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -95,8 +95,8 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/ime/extension_ime_util.h"
+#include "chromeos/ime/ime_keyboard.h"
 #include "chromeos/ime/input_method_manager.h"
-#include "chromeos/ime/xkeyboard.h"
 #include "chromeos/login/login_state.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "content/public/browser/notification_observer.h"
@@ -147,9 +147,9 @@ gfx::NativeWindow GetNativeWindowByStatus(ash::user::LoginStatus login_status,
                                           bool session_started) {
   int container_id =
       (!session_started || login_status == ash::user::LOGGED_IN_NONE ||
-       login_status == ash::user::LOGGED_IN_LOCKED) ?
-          ash::internal::kShellWindowId_LockSystemModalContainer :
-          ash::internal::kShellWindowId_SystemModalContainer;
+       login_status == ash::user::LOGGED_IN_LOCKED)
+          ? ash::kShellWindowId_LockSystemModalContainer
+          : ash::kShellWindowId_SystemModalContainer;
   return ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
                                   container_id);
 }
@@ -414,13 +414,6 @@ ash::user::LoginStatus SystemTrayDelegateChromeOS::GetUserLoginStatus() const {
   return ash::user::LOGGED_IN_NONE;
 }
 
-bool SystemTrayDelegateChromeOS::IsOobeCompleted() const {
-  if (!base::SysInfo::IsRunningOnChromeOS() &&
-      LoginState::Get()->IsUserLoggedIn())
-    return true;
-  return StartupUtils::IsOobeCompleted();
-}
-
 void SystemTrayDelegateChromeOS::ChangeProfilePicture() {
   content::RecordAction(
       base::UserMetricsAction("OpenChangeProfilePictureDialog"));
@@ -486,6 +479,10 @@ void SystemTrayDelegateChromeOS::ShowDateSettings() {
       l10n_util::GetStringUTF8(IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME);
   // Everybody can change the time zone (even though it is a device setting).
   ShowSettingsSubPageForActiveUser(sub_page);
+}
+
+void SystemTrayDelegateChromeOS::ShowSetTimeDialog() {
+  SetTimeDialog::ShowDialog(GetNativeWindow());
 }
 
 void SystemTrayDelegateChromeOS::ShowNetworkSettings(
@@ -692,8 +689,7 @@ void SystemTrayDelegateChromeOS::GetAvailableBluetoothDevices(
 }
 
 void SystemTrayDelegateChromeOS::BluetoothStartDiscovering() {
-  if (bluetooth_discovery_session_.get() &&
-      bluetooth_discovery_session_->IsActive()) {
+  if (GetBluetoothDiscovering()) {
     LOG(WARNING) << "Already have active Bluetooth device discovery session.";
     return;
   }
@@ -707,8 +703,7 @@ void SystemTrayDelegateChromeOS::BluetoothStartDiscovering() {
 
 void SystemTrayDelegateChromeOS::BluetoothStopDiscovering() {
   should_run_bluetooth_discovery_ = false;
-  if (!bluetooth_discovery_session_.get() ||
-      !bluetooth_discovery_session_->IsActive()) {
+  if (!GetBluetoothDiscovering()) {
     LOG(WARNING) << "No active Bluetooth device discovery session.";
     return;
   }
@@ -864,6 +859,11 @@ bool SystemTrayDelegateChromeOS::GetBluetoothEnabled() {
   return bluetooth_adapter_->IsPowered();
 }
 
+bool SystemTrayDelegateChromeOS::GetBluetoothDiscovering() {
+  return (bluetooth_discovery_session_.get() &&
+      bluetooth_discovery_session_->IsActive());
+}
+
 void SystemTrayDelegateChromeOS::ChangeProxySettings() {
   CHECK(GetUserLoginStatus() == ash::user::LOGGED_IN_NONE);
   LoginDisplayHostImpl::default_host()->OpenProxySettings();
@@ -909,6 +909,26 @@ bool SystemTrayDelegateChromeOS::IsNetworkBehindCaptivePortal(
 
 bool SystemTrayDelegateChromeOS::IsSearchKeyMappedToCapsLock() {
   return search_key_mapped_to_ == input_method::kCapsLockKey;
+}
+
+ash::tray::UserAccountsDelegate*
+SystemTrayDelegateChromeOS::GetUserAccountsDelegate(
+    const std::string& user_id) {
+  if (!accounts_delegates_.contains(user_id)) {
+    // TODO(dzhioev): replace stub with real implementation.
+    accounts_delegates_.set(user_id,
+                            scoped_ptr<ash::tray::UserAccountsDelegate>(
+                                new StubUserAccountsDelegate(user_id)));
+    static_cast<StubUserAccountsDelegate*>(accounts_delegates_.get(user_id))
+        ->AddAccount("secondary_account1@gmail.com");
+    static_cast<StubUserAccountsDelegate*>(accounts_delegates_.get(user_id))
+        ->AddAccount("very_long_account_name_for_user@gmail.com");
+    static_cast<StubUserAccountsDelegate*>(accounts_delegates_.get(user_id))
+        ->AddAccount("secondary_account2@gmail.com");
+    static_cast<StubUserAccountsDelegate*>(accounts_delegates_.get(user_id))
+        ->AddAccount("very_very_very_long_account_name_for_user@gmail.com");
+  }
+  return accounts_delegates_.get(user_id);
 }
 
 ash::SystemTray* SystemTrayDelegateChromeOS::GetPrimarySystemTray() {
@@ -1343,6 +1363,7 @@ void SystemTrayDelegateChromeOS::OnStartBluetoothDiscoverySession(
     return;
   VLOG(1) << "Claiming new Bluetooth device discovery session.";
   bluetooth_discovery_session_ = discovery_session.Pass();
+  GetSystemTrayNotifier()->NotifyBluetoothDiscoveringChanged();
 }
 
 void SystemTrayDelegateChromeOS::UpdateEnterpriseDomain() {
@@ -1377,12 +1398,6 @@ void SystemTrayDelegateChromeOS::OnBrowserRemoved(Browser* browser) {
 }
 
 // Overridden from apps::AppWindowRegistry::Observer.
-void SystemTrayDelegateChromeOS::OnAppWindowAdded(apps::AppWindow* app_window) {
-}
-
-void SystemTrayDelegateChromeOS::OnAppWindowIconChanged(
-    apps::AppWindow* app_window) {}
-
 void SystemTrayDelegateChromeOS::OnAppWindowRemoved(
     apps::AppWindow* app_window) {
   NotifyIfLastWindowClosed();

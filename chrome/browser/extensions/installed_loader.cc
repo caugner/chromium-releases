@@ -11,23 +11,24 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
+#include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/managed_mode_private/managed_mode_handler.h"
-#include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/browser/api/runtime/runtime_api.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_l10n_util.h"
+#include "extensions/common/file_util.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -171,8 +172,11 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
   }
 
   if (!extension.get()) {
-    extension_service_->ReportExtensionLoadError(
-        info.extension_path, error, false);
+    ExtensionErrorReporter::GetInstance()->ReportLoadError(
+        info.extension_path,
+        error,
+        extension_service_->profile(),
+        false);  // Be quiet.
     return;
   }
 
@@ -217,15 +221,17 @@ void InstalledLoader::LoadAllExtensions() {
 
       std::string error;
       scoped_refptr<const Extension> extension(
-          extension_file_util::LoadExtension(
-              info->extension_path,
-              info->extension_location,
-              GetCreationFlags(info),
-              &error));
+          file_util::LoadExtension(info->extension_path,
+                                   info->extension_location,
+                                   GetCreationFlags(info),
+                                   &error));
 
       if (!extension.get()) {
-        extension_service_->ReportExtensionLoadError(
-            info->extension_path, error, false);
+        ExtensionErrorReporter::GetInstance()->ReportLoadError(
+            info->extension_path,
+            error,
+            extension_service_->profile(),
+            false);  // Be quiet.
         continue;
       }
 

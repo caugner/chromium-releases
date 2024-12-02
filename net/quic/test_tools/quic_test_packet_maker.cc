@@ -61,7 +61,8 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckAndRstPacket(
   header.fec_flag = false;
   header.fec_group = 0;
 
-  QuicAckFrame ack(largest_received, QuicTime::Zero(), least_unacked);
+  QuicAckFrame ack(MakeAckFrame(largest_received, least_unacked));
+  ack.received_info.delta_time_largest_observed = QuicTime::Delta::Zero();
   QuicFrames frames;
   frames.push_back(QuicFrame(&ack));
   QuicCongestionFeedbackFrame feedback;
@@ -121,7 +122,8 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckPacket(
   header.fec_flag = false;
   header.fec_group = 0;
 
-  QuicAckFrame ack(largest_received, QuicTime::Zero(), least_unacked);
+  QuicAckFrame ack(MakeAckFrame(largest_received, least_unacked));
+  ack.received_info.delta_time_largest_observed = QuicTime::Delta::Zero();
 
   QuicCongestionFeedbackFrame feedback;
   feedback.type = kTCP;

@@ -23,6 +23,7 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/pref_hash_filter.h"
+#include "chrome/common/pref_names.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -62,7 +63,7 @@ class RegistryVerifier : public PrefStore::Observer {
   scoped_refptr<PrefRegistry> pref_registry_;
 };
 
-const char kUnprotectedAtomic[] = "unprotected_atomic";
+const char kUnprotectedPref[] = "unprotected_pref";
 const char kTrackedAtomic[] = "tracked_atomic";
 const char kProtectedAtomic[] = "protected_atomic";
 
@@ -98,16 +99,29 @@ class ProfilePrefStoreManagerTest : public testing::Test {
          ++it) {
       if (it->strategy == PrefHashFilter::TRACKING_STRATEGY_ATOMIC) {
         profile_pref_registry_->RegisterStringPref(
-            it->name, "", user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+            it->name,
+            std::string(),
+            user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
       } else {
         profile_pref_registry_->RegisterDictionaryPref(
             it->name, user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
       }
     }
     profile_pref_registry_->RegisterStringPref(
-        kUnprotectedAtomic,
+        kUnprotectedPref,
         std::string(),
         user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+
+    // As in chrome_pref_service_factory.cc, kPreferencesResetTime needs to be
+    // declared as protected in order to be read from the proper store by the
+    // SegregatedPrefStore. Only declare it after configured prefs have been
+    // registered above for this test as kPreferenceResetTime is already
+    // registered in ProfilePrefStoreManager::RegisterProfilePrefs.
+    PrefHashFilter::TrackedPreferenceMetadata pref_reset_time_config =
+        {configuration_.rbegin()->reporting_id + 1, prefs::kPreferenceResetTime,
+         PrefHashFilter::ENFORCE_ON_LOAD,
+         PrefHashFilter::TRACKING_STRATEGY_ATOMIC};
+    configuration_.push_back(pref_reset_time_config);
 
     ASSERT_TRUE(profile_dir_.CreateUniqueTempDir());
     ReloadConfiguration();
@@ -176,7 +190,7 @@ class ProfilePrefStoreManagerTest : public testing::Test {
     EXPECT_EQ(PersistentPrefStore::PREF_READ_ERROR_NO_FILE, error);
     pref_store->SetValue(kTrackedAtomic, new base::StringValue(kFoobar));
     pref_store->SetValue(kProtectedAtomic, new base::StringValue(kHelloWorld));
-    pref_store->SetValue(kUnprotectedAtomic, new base::StringValue(kFoobar));
+    pref_store->SetValue(kUnprotectedPref, new base::StringValue(kFoobar));
     pref_store->RemoveObserver(&registry_verifier_);
     pref_store->CommitPendingWrite();
     base::RunLoop().RunUntilIdle();
@@ -280,8 +294,8 @@ TEST_F(ProfilePrefStoreManagerTest, ResetPrefHashStore) {
 
   // kTrackedAtomic is loaded as it appears on disk.
   ExpectStringValueEquals(kTrackedAtomic, kFoobar);
-  // If preference tracking is supported, the tampered value of kProtectedAtomic
-  // will be discarded at load time, leaving this preference undefined.
+  // If preference tracking is supported, kProtectedAtomic will be undefined
+  // because the value was discarded due to loss of the hash store contents.
   EXPECT_NE(ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking,
             pref_store_->GetValue(kProtectedAtomic, NULL));
   EXPECT_EQ(ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking,
@@ -342,12 +356,10 @@ TEST_F(ProfilePrefStoreManagerTest, UpdateProfileHashStoreIfRequired) {
 }
 
 TEST_F(ProfilePrefStoreManagerTest, InitializePrefsFromMasterPrefs) {
-  scoped_ptr<base::DictionaryValue> master_prefs(
-      new base::DictionaryValue);
-  master_prefs->Set(kTrackedAtomic, new base::StringValue(kFoobar));
-  master_prefs->Set(kProtectedAtomic, new base::StringValue(kHelloWorld));
-  EXPECT_TRUE(
-      manager_->InitializePrefsFromMasterPrefs(*master_prefs));
+  base::DictionaryValue master_prefs;
+  master_prefs.Set(kTrackedAtomic, new base::StringValue(kFoobar));
+  master_prefs.Set(kProtectedAtomic, new base::StringValue(kHelloWorld));
+  EXPECT_TRUE(manager_->InitializePrefsFromMasterPrefs(master_prefs));
 
   LoadExistingPrefs();
 
@@ -361,7 +373,7 @@ TEST_F(ProfilePrefStoreManagerTest, InitializePrefsFromMasterPrefs) {
 TEST_F(ProfilePrefStoreManagerTest, UnprotectedToProtected) {
   InitializePrefs();
   LoadExistingPrefs();
-  ExpectStringValueEquals(kUnprotectedAtomic, kFoobar);
+  ExpectStringValueEquals(kUnprotectedPref, kFoobar);
 
   // Ensure everything is written out to disk.
   DestroyPrefStore();
@@ -370,11 +382,11 @@ TEST_F(ProfilePrefStoreManagerTest, UnprotectedToProtected) {
 
   // It's unprotected, so we can load the modified value.
   LoadExistingPrefs();
-  ExpectStringValueEquals(kUnprotectedAtomic, kBarfoo);
+  ExpectStringValueEquals(kUnprotectedPref, kBarfoo);
 
   // Now update the configuration to protect it.
   PrefHashFilter::TrackedPreferenceMetadata new_protected = {
-      kExtraReportingId, kUnprotectedAtomic, PrefHashFilter::ENFORCE_ON_LOAD,
+      kExtraReportingId, kUnprotectedPref, PrefHashFilter::ENFORCE_ON_LOAD,
       PrefHashFilter::TRACKING_STRATEGY_ATOMIC};
   configuration_.push_back(new_protected);
   ReloadConfiguration();
@@ -384,7 +396,7 @@ TEST_F(ProfilePrefStoreManagerTest, UnprotectedToProtected) {
 
   // Since there was a valid super MAC we were able to extend the existing trust
   // to the newly proteted preference.
-  ExpectStringValueEquals(kUnprotectedAtomic, kBarfoo);
+  ExpectStringValueEquals(kUnprotectedPref, kBarfoo);
   EXPECT_FALSE(WasResetRecorded());
 
   // Ensure everything is written out to disk.
@@ -395,7 +407,7 @@ TEST_F(ProfilePrefStoreManagerTest, UnprotectedToProtected) {
   ReplaceStringInPrefs(kBarfoo, kFoobar);
   LoadExistingPrefs();
   EXPECT_NE(ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking,
-            pref_store_->GetValue(kUnprotectedAtomic, NULL));
+            pref_store_->GetValue(kUnprotectedPref, NULL));
   EXPECT_EQ(ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking,
             WasResetRecorded());
 }
@@ -405,7 +417,7 @@ TEST_F(ProfilePrefStoreManagerTest, UnprotectedToProtectedWithoutTrust) {
 
   // Now update the configuration to protect it.
   PrefHashFilter::TrackedPreferenceMetadata new_protected = {
-      kExtraReportingId, kUnprotectedAtomic, PrefHashFilter::ENFORCE_ON_LOAD,
+      kExtraReportingId, kUnprotectedPref, PrefHashFilter::ENFORCE_ON_LOAD,
       PrefHashFilter::TRACKING_STRATEGY_ATOMIC};
   configuration_.push_back(new_protected);
   ReloadConfiguration();
@@ -414,19 +426,15 @@ TEST_F(ProfilePrefStoreManagerTest, UnprotectedToProtectedWithoutTrust) {
   // And try loading with the new configuration.
   LoadExistingPrefs();
 
-  // If preference tracking is supported, kUnprotectedAtomic will have been
+  // If preference tracking is supported, kUnprotectedPref will have been
   // discarded because new values are not accepted without a valid super MAC.
   EXPECT_NE(ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking,
-            pref_store_->GetValue(kUnprotectedAtomic, NULL));
+            pref_store_->GetValue(kUnprotectedPref, NULL));
   EXPECT_EQ(ProfilePrefStoreManager::kPlatformSupportsPreferenceTracking,
             WasResetRecorded());
 }
 
-// This test does not directly verify that the values are moved from one pref
-// store to the other. segregated_pref_store_unittest.cc _does_ verify that
-// functionality.
-//
-// _This_ test verifies that preference values are correctly maintained when a
+// This test verifies that preference values are correctly maintained when a
 // preference's protection state changes from protected to unprotected.
 TEST_F(ProfilePrefStoreManagerTest, ProtectedToUnprotected) {
   InitializePrefs();
@@ -438,7 +446,7 @@ TEST_F(ProfilePrefStoreManagerTest, ProtectedToUnprotected) {
        it != configuration_.end();
        ++it) {
     if (it->name == kProtectedAtomic) {
-      configuration_.erase(it);
+      it->enforcement_level = PrefHashFilter::NO_ENFORCEMENT;
       break;
     }
   }

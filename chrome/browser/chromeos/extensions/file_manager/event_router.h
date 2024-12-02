@@ -18,6 +18,7 @@
 #include "chrome/browser/chromeos/drive/sync_client.h"
 #include "chrome/browser/chromeos/file_manager/file_watcher.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
+#include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager_observer.h"
 #include "chrome/browser/drive/drive_service_interface.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
@@ -118,7 +119,8 @@ class EventRouter
   virtual void OnDiskRemoved(
       const chromeos::disks::DiskMountManager::Disk& disk) OVERRIDE;
   virtual void OnDeviceAdded(const std::string& device_path) OVERRIDE;
-  virtual void OnDeviceRemoved(const std::string& device_path) OVERRIDE;
+  virtual void OnDeviceRemoved(const std::string& device_path,
+                               bool hard_unplugged) OVERRIDE;
   virtual void OnVolumeMounted(chromeos::MountError error_code,
                                const VolumeInfo& volume_info,
                                bool is_remounting) OVERRIDE;
@@ -162,7 +164,8 @@ class EventRouter
   // If needed, opens a file manager window for the removable device mounted at
   // |mount_path|. Disk.mount_path() is empty, since it is being filled out
   // after calling notifying observers by DiskMountManager.
-  void ShowRemovableDeviceInFileManager(const base::FilePath& mount_path);
+  void ShowRemovableDeviceInFileManager(VolumeType type,
+                                        const base::FilePath& mount_path);
 
   // Dispatches an onDeviceChanged event containing |type| and |path| to
   // extensions.
@@ -185,6 +188,7 @@ class EventRouter
   };
   std::map<drive::JobID, DriveJobInfoWithStatus> drive_jobs_;
   base::Time last_file_transfer_event_;
+  base::Time last_copy_progress_event_;
 
   WatcherMap file_watchers_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;

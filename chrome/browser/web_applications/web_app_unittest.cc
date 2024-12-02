@@ -9,7 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/ui/web_applications/web_app_ui.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/test/test_renderer_host.h"
@@ -43,7 +43,7 @@ TEST_F(WebApplicationTest, MAYBE_GetShortcutInfoForTab) {
   RenderViewHostTester::TestOnMessageReceived(
       rvh(),
       ChromeExtensionHostMsg_DidGetApplicationInfo(0, 0, web_app_info));
-  ShellIntegration::ShortcutInfo info;
+  web_app::ShortcutInfo info;
   web_app::GetShortcutInfoForTab(web_contents(), &info);
 
   EXPECT_EQ(title, info.title);

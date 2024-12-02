@@ -46,6 +46,7 @@
           'dependencies': [
             '../content/content_shell_and_tests.gyp:content_shell_apk',
             '../mojo/mojo.gyp:mojo_shell_apk',
+            '../mojo/mojo.gyp:mojo_test_apk',
             '<@(android_app_targets)',
             'android_builder_tests',
             '../android_webview/android_webview.gyp:android_webview_apk',
@@ -125,6 +126,7 @@
         }],
         ['OS=="mac"', {
           'dependencies': [
+            '../sandbox/sandbox.gyp:*',
             '../third_party/ocmock/ocmock.gyp:*',
           ],
         }],
@@ -140,13 +142,6 @@
                 '../chrome/chrome.gyp:linux_packages_<(channel)',
               ],
             }],
-            ['chromeos==0', {
-              'dependencies': [
-                '../third_party/cros_dbus_cplusplus/cros_dbus_cplusplus.gyp:*',
-                '../third_party/libmtp/libmtp.gyp:*',
-                '../third_party/mtpd/mtpd.gyp:*',
-              ],
-            }],
             ['enable_ipc_fuzzer==1', {
               'dependencies': [
                 '../tools/ipc_fuzzer/ipc_fuzzer.gyp:*',
@@ -157,11 +152,6 @@
         ['use_x11==1', {
           'dependencies': [
             '../tools/xdisplaycheck/xdisplaycheck.gyp:*',
-          ],
-        }],
-        ['toolkit_uses_gtk==1', {
-          'dependencies': [
-            '../tools/gtk_clipboard_dump/gtk_clipboard_dump.gyp:*',
           ],
         }],
         ['OS=="win"', {
@@ -228,6 +218,11 @@
         ['OS!="android" and OS!="ios"', {
           'dependencies': [
             '../google_apis/gcm/gcm.gyp:*',
+          ],
+        }],
+        ['chromeos==1 or (OS=="linux" and use_aura==1)', {
+          'dependencies': [
+            '../apps/shell/app_shell.gyp:*',
           ],
         }],
       ],
@@ -391,15 +386,13 @@
             '../ash/ash.gyp:ash_unittests',
           ],
         }],
+        ['disable_nacl==0', {
+          'dependencies': [
+            '../components/nacl.gyp:nacl_loader_unittests',
+          ],
+        }],
       ],
     }, # target_name: chromium_builder_tests
-    {
-      'target_name': 'chromium_2010_builder_tests',
-      'type': 'none',
-      'dependencies': [
-        'chromium_builder_tests',
-      ],
-    }, # target_name: chromium_2010_builder_tests
   ],
   'conditions': [
     ['OS!="ios"', {
@@ -466,7 +459,6 @@
             '../chrome/chrome.gyp:chrome',
             '../chrome/chrome.gyp:load_library_perf_tests',
             '../chrome/chrome.gyp:performance_browser_tests',
-            '../chrome/chrome.gyp:performance_ui_tests',
             '../chrome/chrome.gyp:sync_performance_tests',
             '../media/media.gyp:media_perftests',
             '../tools/perf/clear_system_cache/clear_system_cache.gyp:*',
@@ -501,7 +493,6 @@
           'dependencies': [
             '../chrome/chrome.gyp:chrome',
             '../chrome/chrome.gyp:performance_browser_tests',
-            '../chrome/chrome.gyp:performance_ui_tests',
             '../content/content_shell_and_tests.gyp:content_browsertests',
             '../content/content_shell_and_tests.gyp:content_gl_tests',
             '../gpu/gles2_conform_support/gles2_conform_test.gyp:gles2_conform_test',
@@ -574,7 +565,6 @@
             '../chrome/chrome.gyp:chrome',
             # Dependencies of pyauto_functional tests.
             '../remoting/remoting.gyp:remoting_webapp',
-            '../chrome/chrome.gyp:pyautolib',
           ],
           'conditions': [
             ['OS=="mac"', {
@@ -610,15 +600,14 @@
         {
           # This target contains everything we need to run tests on the special
           # device-equipped WebRTC bots. We have device-requiring tests in
-          # PyAuto, browser_tests and content_browsertests.
+          # browser_tests and content_browsertests.
           'target_name': 'chromium_builder_webrtc',
           'type': 'none',
           'dependencies': [
-            'chromium_builder_qa',  # needed for perf pyauto tests
+            'chromium_builder_qa',  # TODO(phoglund): not sure if needed?
             '../chrome/chrome.gyp:browser_tests',
             '../content/content_shell_and_tests.gyp:content_browsertests',
             '../content/content_shell_and_tests.gyp:content_unittests',
-            '../third_party/libjingle/libjingle.gyp:peerconnection_server',
             '../third_party/webrtc/tools/tools.gyp:frame_analyzer',
             '../third_party/webrtc/tools/tools.gyp:rgba_to_i420_converter',
           ],
@@ -652,6 +641,7 @@
           'conditions': [
             ['OS!="win"', {
               'dependencies': [
+                '../net/net.gyp:hpack_fuzz_wrapper',
                 '../net/net.gyp:dns_fuzz_stub',
                 '../skia/skia.gyp:filter_fuzz_stub',
               ],
@@ -752,11 +742,6 @@
             '../tools/android/findbugs_plugin/findbugs_plugin.gyp:findbugs_plugin_test',
             '../ui/events/events.gyp:events_unittests',
             '../ui/ui_unittests.gyp:ui_unittests',
-            # Required by ui_unittests.
-            # TODO(wangxianzhu): It'd better let ui_unittests depend on it, but
-            # this would cause circular gyp dependency which needs refactoring the
-            # gyps to resolve.
-            '../chrome/chrome_resources.gyp:packed_resources',
           ],
           'conditions': [
             ['"<(gtest_target_type)"=="shared_library"', {
@@ -780,6 +765,7 @@
                 '../sql/sql.gyp:sql_unittests_apk',
                 '../sync/sync.gyp:sync_unit_tests_apk',
                 '../ui/events/events.gyp:events_unittests_apk',
+                '../ui/gfx/gfx.gyp:gfx_unittests_apk',
                 '../ui/ui_unittests.gyp:ui_unittests_apk',
                 '../android_webview/android_webview.gyp:android_webview_test_apk',
                 '../chrome/chrome.gyp:chrome_shell_test_apk',
@@ -892,7 +878,6 @@
             '../cc/cc_tests.gyp:cc_unittests',
             '../chrome/chrome.gyp:browser_tests',
             '../chrome/chrome.gyp:performance_browser_tests',
-            '../chrome/chrome.gyp:performance_ui_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
             '../chrome/chrome.gyp:unit_tests',
             '../cloud_print/cloud_print.gyp:cloud_print_unittests',
@@ -988,12 +973,12 @@
           'dependencies': [
             '../cc/cc_tests.gyp:cc_unittests',
             '../chrome/chrome.gyp:browser_tests',
+            '../chrome/chrome.gyp:crash_service',
             '../chrome/chrome.gyp:gcapi_test',
             '../chrome/chrome.gyp:installer_util_unittests',
             '../chrome/chrome.gyp:interactive_ui_tests',
             '../chrome/chrome.gyp:mini_installer_test',
             '../chrome/chrome.gyp:performance_browser_tests',
-            '../chrome/chrome.gyp:performance_ui_tests',
             '../chrome/chrome.gyp:sync_integration_tests',
             '../chrome/chrome.gyp:unit_tests',
             '../cloud_print/cloud_print.gyp:cloud_print_unittests',
@@ -1027,6 +1012,13 @@
             '../ui/views/views.gyp:views_unittests',
             '../url/url.gyp:url_unittests',
             '../webkit/renderer/compositor_bindings/compositor_bindings_tests.gyp:webkit_compositor_bindings_unittests',
+          ],
+          'conditions': [
+            ['target_arch=="ia32"', {
+              'dependencies': [
+                '../chrome/chrome.gyp:crash_service_win64',
+              ],
+            }],
           ],
         },
         {
@@ -1064,17 +1056,24 @@
             '../chrome/chrome.gyp:browser_tests',
             '../cloud_print/cloud_print.gyp:cloud_print_unittests',
             '../components/components_tests.gyp:components_unittests',
+            '../content/content_shell_and_tests.gyp:content_browsertests',
+            '../content/content_shell_and_tests.gyp:content_shell',
+            '../content/content_shell_and_tests.gyp:content_shell_crash_service',
+            '../content/content_shell_and_tests.gyp:layout_test_helper',
             '../content/content_shell_and_tests.gyp:content_unittests',
             '../crypto/crypto.gyp:crypto_unittests',
             '../device/device_tests.gyp:device_unittests',
             '../ipc/ipc.gyp:ipc_tests',
             '../jingle/jingle.gyp:jingle_unittests',
             '../media/media.gyp:media_unittests',
+            '../mojo/mojo.gyp:mojo',
             '../net/net.gyp:net_unittests',
             '../google_apis/gcm/gcm.gyp:gcm_unit_tests',
+            '../gpu/gpu.gyp:gpu_unittests',
             '../printing/printing.gyp:printing_unittests',
             '../remoting/remoting.gyp:remoting_unittests',
             '../sql/sql.gyp:sql_unittests',
+            '../sync/sync.gyp:sync_unit_tests',
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
             '../third_party/libaddressinput/libaddressinput.gyp:libaddressinput_unittests',
             '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber_unittests',
@@ -1162,6 +1161,7 @@
             '../ui/aura/aura.gyp:*',
             '../ui/compositor/compositor.gyp:*',
             '../ui/events/events.gyp:*',
+            '../ui/wm/wm.gyp:*',
             '../ui/gfx/gfx.gyp:gfx_unittests',
             '../ui/keyboard/keyboard.gyp:*',
             '../ui/message_center/message_center.gyp:*',
@@ -1202,6 +1202,11 @@
             ['chromeos==1', {
               'dependencies': [
                 '../chromeos/chromeos.gyp:chromeos_unittests',
+              ],
+            }],
+            ['use_ozone==1', {
+              'dependencies!': [
+                '../chrome/chrome.gyp:interactive_ui_tests',  # crbug.com/362166
               ],
             }],
           ],

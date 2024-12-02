@@ -210,6 +210,11 @@ void ClientSession::DeliverClientMessage(
             << message.type() << ": " << message.data();
 }
 
+void ClientSession::OnConnectionAuthenticating(
+    protocol::ConnectionToClient* connection) {
+  event_handler_->OnSessionAuthenticating(this);
+}
+
 void ClientSession::OnConnectionAuthenticated(
     protocol::ConnectionToClient* connection) {
   DCHECK(CalledOnValidThread());
@@ -444,6 +449,8 @@ scoped_ptr<VideoEncoder> ClientSession::CreateVideoEncoder(
 
   if (video_config.codec == protocol::ChannelConfig::CODEC_VP8) {
     return remoting::VideoEncoderVpx::CreateForVP8().PassAs<VideoEncoder>();
+  } else if (video_config.codec == protocol::ChannelConfig::CODEC_VP9) {
+    return remoting::VideoEncoderVpx::CreateForVP9().PassAs<VideoEncoder>();
   }
 
   NOTREACHED();

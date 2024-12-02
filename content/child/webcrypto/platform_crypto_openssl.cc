@@ -12,11 +12,11 @@
 #include <openssl/sha.h>
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/child/webcrypto/crypto_data.h"
 #include "content/child/webcrypto/status.h"
 #include "content/child/webcrypto/webcrypto_util.h"
 #include "crypto/openssl_util.h"
-#include "third_party/WebKit/public/platform/WebArrayBuffer.h"
 #include "third_party/WebKit/public/platform/WebCryptoAlgorithm.h"
 #include "third_party/WebKit/public/platform/WebCryptoAlgorithmParams.h"
 #include "third_party/WebKit/public/platform/WebCryptoKeyAlgorithm.h"
@@ -35,6 +35,11 @@ class SymKey : public Key {
   virtual SymKey* AsSymKey() OVERRIDE { return this; }
   virtual PublicKey* AsPublicKey() OVERRIDE { return NULL; }
   virtual PrivateKey* AsPrivateKey() OVERRIDE { return NULL; }
+  virtual bool ThreadSafeSerializeForClone(
+      blink::WebVector<uint8>* key_data) OVERRIDE {
+    key_data->assign(Uint8VectorStart(key_), key_.size());
+    return true;
+  }
 
   const std::vector<unsigned char>& key() const { return key_; }
 
@@ -82,7 +87,7 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt mode,
                             SymKey* key,
                             const CryptoData& iv,
                             const CryptoData& data,
-                            blink::WebArrayBuffer* buffer) {
+                            std::vector<uint8>* buffer) {
   CipherOperation cipher_operation =
       (mode == ENCRYPT) ? kDoEncrypt : kDoDecrypt;
 
@@ -98,7 +103,7 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt mode,
       EVP_CIPHER_CTX_new());
 
   if (!context.get())
-    return Status::Error();
+    return Status::OperationError();
 
   const EVP_CIPHER* const cipher = GetAESCipherByKeyLength(key->key().size());
   DCHECK(cipher);
@@ -109,7 +114,7 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt mode,
                          &key->key()[0],
                          iv.bytes(),
                          cipher_operation)) {
-    return Status::Error();
+    return Status::OperationError();
   }
 
   // According to the openssl docs, the amount of data written may be as large
@@ -121,10 +126,9 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt mode,
     output_max_len += AES_BLOCK_SIZE - remainder;
   DCHECK_GT(output_max_len, data.byte_length());
 
-  *buffer = blink::WebArrayBuffer::create(output_max_len, 1);
+  buffer->resize(output_max_len);
 
-  unsigned char* const buffer_data =
-      reinterpret_cast<unsigned char*>(buffer->data());
+  unsigned char* const buffer_data = Uint8VectorStart(buffer);
 
   int output_len = 0;
   if (!EVP_CipherUpdate(context.get(),
@@ -132,11 +136,11 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt mode,
                         &output_len,
                         data.bytes(),
                         data.byte_length()))
-    return Status::Error();
+    return Status::OperationError();
   int final_output_chunk_len = 0;
   if (!EVP_CipherFinal_ex(
           context.get(), buffer_data + output_len, &final_output_chunk_len)) {
-    return Status::Error();
+    return Status::OperationError();
   }
 
   const unsigned int final_output_len =
@@ -144,15 +148,98 @@ Status AesCbcEncryptDecrypt(EncryptOrDecrypt mode,
       static_cast<unsigned int>(final_output_chunk_len);
   DCHECK_LE(final_output_len, output_max_len);
 
-  ShrinkBuffer(buffer, final_output_len);
+  buffer->resize(final_output_len);
 
   return Status::Success();
 }
 
 }  // namespace
 
-Status ExportKeyRaw(SymKey* key, blink::WebArrayBuffer* buffer) {
-  *buffer = CreateArrayBuffer(Uint8VectorStart(key->key()), key->key().size());
+class DigestorOpenSSL : public blink::WebCryptoDigestor {
+ public:
+  explicit DigestorOpenSSL(blink::WebCryptoAlgorithmId algorithm_id)
+      : initialized_(false),
+        digest_context_(EVP_MD_CTX_create()),
+        algorithm_id_(algorithm_id) {}
+
+  virtual bool consume(const unsigned char* data, unsigned int size) {
+    return ConsumeWithStatus(data, size).IsSuccess();
+  }
+
+  Status ConsumeWithStatus(const unsigned char* data, unsigned int size) {
+    crypto::OpenSSLErrStackTracer(FROM_HERE);
+    Status error = Init();
+    if (!error.IsSuccess())
+      return error;
+
+    if (!EVP_DigestUpdate(digest_context_.get(), data, size))
+      return Status::OperationError();
+
+    return Status::Success();
+  }
+
+  virtual bool finish(unsigned char*& result_data,
+                      unsigned int& result_data_size) {
+    Status error = FinishInternal(result_, &result_data_size);
+    if (!error.IsSuccess())
+      return false;
+    result_data = result_;
+    return true;
+  }
+
+  Status FinishWithVectorAndStatus(std::vector<uint8>* result) {
+    const int hash_expected_size = EVP_MD_CTX_size(digest_context_.get());
+    result->resize(hash_expected_size);
+    unsigned char* const hash_buffer = Uint8VectorStart(result);
+    unsigned int hash_buffer_size;  // ignored
+    return FinishInternal(hash_buffer, &hash_buffer_size);
+  }
+
+ private:
+  Status Init() {
+    if (initialized_)
+      return Status::Success();
+
+    const EVP_MD* digest_algorithm = GetDigest(algorithm_id_);
+    if (!digest_algorithm)
+      return Status::ErrorUnexpected();
+
+    if (!digest_context_.get())
+      return Status::OperationError();
+
+    if (!EVP_DigestInit_ex(digest_context_.get(), digest_algorithm, NULL))
+      return Status::OperationError();
+
+    initialized_ = true;
+    return Status::Success();
+  }
+
+  Status FinishInternal(unsigned char* result, unsigned int* result_size) {
+    crypto::OpenSSLErrStackTracer(FROM_HERE);
+    Status error = Init();
+    if (!error.IsSuccess())
+      return error;
+
+    const int hash_expected_size = EVP_MD_CTX_size(digest_context_.get());
+    if (hash_expected_size <= 0)
+      return Status::ErrorUnexpected();
+    DCHECK_LE(hash_expected_size, EVP_MAX_MD_SIZE);
+
+    if (!EVP_DigestFinal_ex(digest_context_.get(), result, result_size) ||
+        static_cast<int>(*result_size) != hash_expected_size)
+      return Status::OperationError();
+
+    return Status::Success();
+  }
+
+  bool initialized_;
+  crypto::ScopedOpenSSL<EVP_MD_CTX, EVP_MD_CTX_destroy> digest_context_;
+  blink::WebCryptoAlgorithmId algorithm_id_;
+  unsigned char result_[EVP_MAX_MD_SIZE];
+};
+
+Status ExportKeyRaw(SymKey* key, std::vector<uint8>* buffer) {
+  *buffer = key->key();
   return Status::Success();
 }
 
@@ -162,48 +249,25 @@ Status EncryptDecryptAesCbc(EncryptOrDecrypt mode,
                             SymKey* key,
                             const CryptoData& data,
                             const CryptoData& iv,
-                            blink::WebArrayBuffer* buffer) {
+                            std::vector<uint8>* buffer) {
   // TODO(eroman): inline the function here.
   return AesCbcEncryptDecrypt(mode, key, iv, data, buffer);
 }
 
 Status DigestSha(blink::WebCryptoAlgorithmId algorithm,
                  const CryptoData& data,
-                 blink::WebArrayBuffer* buffer) {
-  crypto::OpenSSLErrStackTracer(FROM_HERE);
+                 std::vector<uint8>* buffer) {
+  DigestorOpenSSL digestor(algorithm);
+  Status error = digestor.ConsumeWithStatus(data.bytes(), data.byte_length());
+  if (!error.IsSuccess())
+    return error;
+  return digestor.FinishWithVectorAndStatus(buffer);
+}
 
-  const EVP_MD* digest_algorithm = GetDigest(algorithm);
-  if (!digest_algorithm)
-    return Status::ErrorUnexpected();
-
-  crypto::ScopedOpenSSL<EVP_MD_CTX, EVP_MD_CTX_destroy> digest_context(
-      EVP_MD_CTX_create());
-  if (!digest_context.get())
-    return Status::Error();
-
-  if (!EVP_DigestInit_ex(digest_context.get(), digest_algorithm, NULL) ||
-      !EVP_DigestUpdate(
-          digest_context.get(), data.bytes(), data.byte_length())) {
-    return Status::Error();
-  }
-
-  const int hash_expected_size = EVP_MD_CTX_size(digest_context.get());
-  if (hash_expected_size <= 0)
-    return Status::ErrorUnexpected();
-  DCHECK_LE(hash_expected_size, EVP_MAX_MD_SIZE);
-
-  *buffer = blink::WebArrayBuffer::create(hash_expected_size, 1);
-  unsigned char* const hash_buffer =
-      reinterpret_cast<unsigned char* const>(buffer->data());
-
-  unsigned int hash_size = 0;
-  if (!EVP_DigestFinal_ex(digest_context.get(), hash_buffer, &hash_size) ||
-      static_cast<int>(hash_size) != hash_expected_size) {
-    buffer->reset();
-    return Status::Error();
-  }
-
-  return Status::Success();
+scoped_ptr<blink::WebCryptoDigestor> CreateDigestor(
+    blink::WebCryptoAlgorithmId algorithm_id) {
+  return scoped_ptr<blink::WebCryptoDigestor>(
+      new DigestorOpenSSL(algorithm_id));
 }
 
 Status GenerateSecretKey(const blink::WebCryptoAlgorithm& algorithm,
@@ -219,7 +283,7 @@ Status GenerateSecretKey(const blink::WebCryptoAlgorithm& algorithm,
 
   std::vector<unsigned char> random_bytes(keylen_bytes, 0);
   if (!(RAND_bytes(&random_bytes[0], keylen_bytes)))
-    return Status::Error();
+    return Status::OperationError();
 
   blink::WebCryptoKeyAlgorithm key_algorithm;
   if (!CreateSecretKeyAlgorithm(algorithm, keylen_bytes, &key_algorithm))
@@ -270,9 +334,7 @@ Status ImportKeyRaw(const blink::WebCryptoAlgorithm& algorithm,
 Status SignHmac(SymKey* key,
                 const blink::WebCryptoAlgorithm& hash,
                 const CryptoData& data,
-                blink::WebArrayBuffer* buffer) {
-  blink::WebArrayBuffer result;
-
+                std::vector<uint8>* buffer) {
   const EVP_MD* digest_algorithm = GetDigest(hash.id());
   if (!digest_algorithm)
     return Status::ErrorUnsupported();
@@ -288,9 +350,9 @@ Status SignHmac(SymKey* key,
   const unsigned char null_key[] = {};
   const void* const raw_key_voidp = raw_key.size() ? &raw_key[0] : null_key;
 
-  result = blink::WebArrayBuffer::create(hmac_expected_length, 1);
+  buffer->resize(hmac_expected_length);
   crypto::ScopedOpenSSLSafeSizeBuffer<EVP_MAX_MD_SIZE> hmac_result(
-      reinterpret_cast<unsigned char*>(result.data()), hmac_expected_length);
+      Uint8VectorStart(buffer), hmac_expected_length);
 
   crypto::OpenSSLErrStackTracer(FROM_HERE);
 
@@ -303,9 +365,8 @@ Status SignHmac(SymKey* key,
                                       hmac_result.safe_buffer(),
                                       &hmac_actual_length);
   if (!success || hmac_actual_length != hmac_expected_length)
-    return Status::Error();
+    return Status::OperationError();
 
-  *buffer = result;
   return Status::Success();
 }
 
@@ -326,7 +387,7 @@ Status EncryptDecryptAesGcm(EncryptOrDecrypt mode,
                             const CryptoData& iv,
                             const CryptoData& additional_data,
                             unsigned int tag_length_bits,
-                            blink::WebArrayBuffer* buffer) {
+                            std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
@@ -334,14 +395,14 @@ Status EncryptDecryptAesGcm(EncryptOrDecrypt mode,
 // Guaranteed that key is valid.
 Status EncryptRsaEsPkcs1v1_5(PublicKey* key,
                              const CryptoData& data,
-                             blink::WebArrayBuffer* buffer) {
+                             std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
 
 Status DecryptRsaEsPkcs1v1_5(PrivateKey* key,
                              const CryptoData& data,
-                             blink::WebArrayBuffer* buffer) {
+                             std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
@@ -349,7 +410,7 @@ Status DecryptRsaEsPkcs1v1_5(PrivateKey* key,
 Status SignRsaSsaPkcs1v1_5(PrivateKey* key,
                            const blink::WebCryptoAlgorithm& hash,
                            const CryptoData& data,
-                           blink::WebArrayBuffer* buffer) {
+                           std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
@@ -382,14 +443,14 @@ Status ImportKeyPkcs8(const blink::WebCryptoAlgorithm& algorithm,
   return Status::ErrorUnsupported();
 }
 
-Status ExportKeySpki(PublicKey* key, blink::WebArrayBuffer* buffer) {
+Status ExportKeySpki(PublicKey* key, std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
 
 Status ExportKeyPkcs8(PrivateKey* key,
                       const blink::WebCryptoKeyAlgorithm& key_algorithm,
-                      blink::WebArrayBuffer* buffer) {
+                      std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
@@ -403,7 +464,7 @@ Status ExportRsaPublicKey(PublicKey* key,
 
 Status WrapSymKeyAesKw(SymKey* wrapping_key,
                        SymKey* key,
-                       blink::WebArrayBuffer* buffer) {
+                       std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
@@ -420,14 +481,14 @@ Status UnwrapSymKeyAesKw(const CryptoData& wrapped_key_data,
 
 Status DecryptAesKw(SymKey* key,
                     const CryptoData& data,
-                    blink::WebArrayBuffer* buffer) {
+                    std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
 
 Status WrapSymKeyRsaEs(PublicKey* wrapping_key,
                        SymKey* key,
-                       blink::WebArrayBuffer* buffer) {
+                       std::vector<uint8>* buffer) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
 }
@@ -440,6 +501,17 @@ Status UnwrapSymKeyRsaEs(const CryptoData& wrapped_key_data,
                          blink::WebCryptoKey* key) {
   // TODO(eroman): http://crbug.com/267888
   return Status::ErrorUnsupported();
+}
+
+bool ThreadSafeDeserializeKeyForClone(
+    const blink::WebCryptoKeyAlgorithm& algorithm,
+    blink::WebCryptoKeyType type,
+    bool extractable,
+    blink::WebCryptoKeyUsageMask usages,
+    const CryptoData& key_data,
+    blink::WebCryptoKey* key) {
+  // TODO(eroman): http://crbug.com/267888
+  return false;
 }
 
 }  // namespace platform

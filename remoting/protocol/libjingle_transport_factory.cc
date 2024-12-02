@@ -132,6 +132,8 @@ LibjingleStreamTransport::LibjingleStreamTransport(
       can_start_(false),
       channel_was_writable_(false),
       connect_attempts_left_(kMaxReconnectAttempts) {
+  DCHECK(!ice_username_fragment_.empty());
+  DCHECK(!ice_password_.empty());
 }
 
 LibjingleStreamTransport::~LibjingleStreamTransport() {
@@ -205,10 +207,8 @@ void LibjingleStreamTransport::DoStart() {
       this, &LibjingleStreamTransport::OnRouteChange);
   channel_->SignalWritableState.connect(
       this, &LibjingleStreamTransport::OnWritableState);
-  if (network_settings_.nat_traversal_mode ==
-      NetworkSettings::NAT_TRAVERSAL_DISABLED) {
-    channel_->set_incoming_only(true);
-  }
+  channel_->set_incoming_only(
+      !(network_settings_.flags & NetworkSettings::NAT_TRAVERSAL_OUTGOING));
 
   channel_->Connect();
 
@@ -314,8 +314,6 @@ void LibjingleStreamTransport::OnRouteChange(
 void LibjingleStreamTransport::OnWritableState(
     cricket::TransportChannel* channel) {
   DCHECK_EQ(channel, channel_.get());
-
-  event_handler_->OnTransportReady(this, channel->writable());
 
   if (channel->writable()) {
     channel_was_writable_ = true;
@@ -452,8 +450,9 @@ LibjingleTransportFactory::CreateDatagramTransport() {
 }
 
 void LibjingleTransportFactory::EnsureFreshJingleInfo() {
-  if (network_settings_.nat_traversal_mode !=
-          NetworkSettings::NAT_TRAVERSAL_ENABLED ||
+  uint32 stun_or_relay_flags = NetworkSettings::NAT_TRAVERSAL_STUN |
+      NetworkSettings::NAT_TRAVERSAL_RELAY;
+  if (!(network_settings_.flags & stun_or_relay_flags) ||
       jingle_info_request_) {
     return;
   }

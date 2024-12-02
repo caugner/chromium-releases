@@ -48,22 +48,22 @@ class RegisterAppTaskTest : public testing::Test {
 
     scoped_ptr<drive::FakeDriveService>
         fake_drive_service(new drive::FakeDriveService);
-    ASSERT_TRUE(fake_drive_service->LoadAccountMetadataForWapi(
-        "sync_file_system/account_metadata.json"));
-    ASSERT_TRUE(fake_drive_service->LoadResourceListForWapi(
-        "gdata/empty_feed.json"));
-
     scoped_ptr<drive::DriveUploaderInterface>
         drive_uploader(new drive::DriveUploader(
-            fake_drive_service.get(), base::MessageLoopProxy::current()));
+            fake_drive_service.get(),
+            base::MessageLoopProxy::current()));
 
     fake_drive_service_helper_.reset(new FakeDriveServiceHelper(
         fake_drive_service.get(), drive_uploader.get(),
         kSyncRootFolderTitle));
 
-    context_.reset(new SyncEngineContext(
-        fake_drive_service.PassAs<drive::DriveServiceInterface>(),
-        drive_uploader.Pass(), base::MessageLoopProxy::current()));
+    context_.reset(
+        new SyncEngineContext(
+            fake_drive_service.PassAs<drive::DriveServiceInterface>(),
+            drive_uploader.Pass(),
+            base::MessageLoopProxy::current(),
+            base::MessageLoopProxy::current(),
+            base::MessageLoopProxy::current()));
 
     ASSERT_EQ(google_apis::HTTP_CREATED,
               fake_drive_service_helper_->AddOrphanedFolder(
@@ -132,7 +132,7 @@ class RegisterAppTaskTest : public testing::Test {
   SyncStatusCode RunRegisterAppTask(const std::string& app_id) {
     RegisterAppTask task(context_.get(), app_id);
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
-    task.RunSequential(CreateResultReceiver(&status));
+    task.RunExclusive(CreateResultReceiver(&status));
     base::RunLoop().RunUntilIdle();
     return status;
   }

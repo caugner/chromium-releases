@@ -5,7 +5,10 @@
 #include "components/domain_reliability/uploader.h"
 
 #include "base/bind.h"
+#include "base/memory/scoped_vector.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/stl_util.h"
+#include "base/supports_user_data.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -15,11 +18,30 @@ namespace domain_reliability {
 
 namespace {
 
+const char* kJsonMimeType = "application/json; charset=utf-8";
+
+class UploadUserData : public base::SupportsUserData::Data {
+ public:
+  static net::URLFetcher::CreateDataCallback CreateCreateDataCallback() {
+    return base::Bind(&UploadUserData::CreateUploadUserData);
+  }
+
+  static const void* kUserDataKey;
+
+ private:
+  static base::SupportsUserData::Data* CreateUploadUserData() {
+    return new UploadUserData();
+  }
+};
+
+const void* UploadUserData::kUserDataKey =
+    static_cast<const void*>(&UploadUserData::kUserDataKey);
+
 class DomainReliabilityUploaderImpl
     : public DomainReliabilityUploader, net::URLFetcherDelegate {
  public:
-  DomainReliabilityUploaderImpl(
-      scoped_refptr<net::URLRequestContextGetter> url_request_context_getter)
+  DomainReliabilityUploaderImpl(const scoped_refptr<
+      net::URLRequestContextGetter>& url_request_context_getter)
       : url_request_context_getter_(url_request_context_getter) {}
 
   virtual ~DomainReliabilityUploaderImpl() {
@@ -41,8 +63,11 @@ class DomainReliabilityUploaderImpl
     fetcher->SetRequestContext(url_request_context_getter_);
     fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                           net::LOAD_DO_NOT_SAVE_COOKIES);
-    fetcher->SetUploadData("text/json", report_json);
+    fetcher->SetUploadData(kJsonMimeType, report_json);
     fetcher->SetAutomaticallyRetryOn5xx(false);
+    fetcher->SetURLRequestUserData(
+        UploadUserData::kUserDataKey,
+        UploadUserData::CreateCreateDataCallback());
     fetcher->Start();
 
     upload_callbacks_[fetcher] = callback;
@@ -57,6 +82,9 @@ class DomainReliabilityUploaderImpl
     DCHECK(callback_it != upload_callbacks_.end());
 
     VLOG(1) << "Upload finished with " << fetcher->GetResponseCode();
+
+    UMA_HISTOGRAM_SPARSE_SLOWLY("DomainReliability.UploadResponseCode",
+                                fetcher->GetResponseCode());
 
     bool success = fetcher->GetResponseCode() == 200;
     callback_it->second.Run(success);
@@ -76,14 +104,20 @@ class DomainReliabilityUploaderImpl
 }  // namespace
 
 DomainReliabilityUploader::DomainReliabilityUploader() {}
-
 DomainReliabilityUploader::~DomainReliabilityUploader() {}
 
 // static
 scoped_ptr<DomainReliabilityUploader> DomainReliabilityUploader::Create(
-    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter) {
+    const scoped_refptr<net::URLRequestContextGetter>&
+        url_request_context_getter) {
   return scoped_ptr<DomainReliabilityUploader>(
       new DomainReliabilityUploaderImpl(url_request_context_getter));
+}
+
+// static
+bool DomainReliabilityUploader::URLRequestIsUpload(
+    const net::URLRequest& request) {
+  return request.GetUserData(UploadUserData::kUserDataKey) != NULL;
 }
 
 }  // namespace domain_reliability

@@ -15,13 +15,15 @@
 #include "ui/wm/core/native_cursor_manager.h"
 #include "ui/wm/core/native_cursor_manager_delegate.h"
 
+namespace ui {
+class ImageCursors;
+}
+
 namespace ash {
 
 namespace test {
 class CursorManagerTestApi;
 }
-
-class ImageCursors;
 
 // This does the ash-specific setting of cursor details like cursor
 // visibility. It communicates back with the CursorManager through the
@@ -52,9 +54,6 @@ class ASH_EXPORT AshNativeCursorManager
   virtual void SetVisibility(
       bool visible,
       ::wm::NativeCursorManagerDelegate* delegate) OVERRIDE;
-  virtual void SetScale(
-      float scale,
-      ::wm::NativeCursorManagerDelegate* delegate) OVERRIDE;
   virtual void SetCursorSet(
       ui::CursorSetType cursor_set,
       ::wm::NativeCursorManagerDelegate* delegate) OVERRIDE;
@@ -67,7 +66,7 @@ class ASH_EXPORT AshNativeCursorManager
 
   bool native_cursor_enabled_;
 
-  scoped_ptr<ImageCursors> image_cursors_;
+  scoped_ptr<ui::ImageCursors> image_cursors_;
 
   DISALLOW_COPY_AND_ASSIGN(AshNativeCursorManager);
 };

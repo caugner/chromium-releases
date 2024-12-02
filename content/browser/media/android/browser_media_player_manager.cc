@@ -16,6 +16,7 @@
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/android/external_video_surface_container.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/storage_partition.h"
@@ -127,7 +128,6 @@ BrowserMediaPlayerManager::BrowserMediaPlayerManager(
     RenderViewHost* render_view_host)
     : WebContentsObserver(WebContents::FromRenderViewHost(render_view_host)),
       fullscreen_player_id_(-1),
-      pending_fullscreen_player_id_(-1),
       fullscreen_player_is_released_(false),
       web_contents_(WebContents::FromRenderViewHost(render_view_host)),
       weak_ptr_factory_(this) {
@@ -150,6 +150,7 @@ bool BrowserMediaPlayerManager::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(MediaPlayerHostMsg_DestroyMediaPlayer, OnDestroyPlayer)
     IPC_MESSAGE_HANDLER(MediaPlayerHostMsg_DestroyAllMediaPlayers,
                         DestroyAllMediaPlayers)
+    IPC_MESSAGE_HANDLER(MediaPlayerHostMsg_SetCdm, OnSetCdm)
     IPC_MESSAGE_HANDLER(CdmHostMsg_InitializeCdm, OnInitializeCdm)
     IPC_MESSAGE_HANDLER(CdmHostMsg_CreateSession, OnCreateSession)
     IPC_MESSAGE_HANDLER(CdmHostMsg_UpdateSession, OnUpdateSession)
@@ -317,8 +318,13 @@ BrowserMediaPlayerManager::GetMediaResourceGetter() {
     StoragePartition* partition = host->GetStoragePartition();
     fileapi::FileSystemContext* file_system_context =
         partition ? partition->GetFileSystemContext() : NULL;
+    // Eventually this needs to be fixed to pass the correct frame rather
+    // than just using the main frame.
     media_resource_getter_.reset(new MediaResourceGetterImpl(
-        context, file_system_context, host->GetID(), routing_id()));
+        context,
+        file_system_context,
+        host->GetID(),
+        web_contents()->GetMainFrame()->GetRoutingID()));
   }
   return media_resource_getter_.get();
 }
@@ -354,7 +360,7 @@ void BrowserMediaPlayerManager::DestroyAllMediaPlayers() {
   }
 }
 
-void BrowserMediaPlayerManager::OnProtectedSurfaceRequested(int player_id) {
+void BrowserMediaPlayerManager::RequestFullScreen(int player_id) {
   if (fullscreen_player_id_ == player_id)
     return;
 
@@ -364,20 +370,9 @@ void BrowserMediaPlayerManager::OnProtectedSurfaceRequested(int player_id) {
     return;
   }
 
-  // If the player is pending approval, wait for the approval to happen.
-  if (cdm_ids_pending_approval_.end() !=
-      cdm_ids_pending_approval_.find(player_id)) {
-    pending_fullscreen_player_id_ = player_id;
-    return;
-  }
-
   // Send an IPC to the render process to request the video element to enter
   // fullscreen. OnEnterFullscreen() will be called later on success.
   // This guarantees the fullscreen video will be rendered correctly.
-  // During the process, DisableFullscreenEncryptedMediaPlayback() may get
-  // called before or after OnEnterFullscreen(). If it is called before
-  // OnEnterFullscreen(), the player will not enter fullscreen. And it will
-  // retry the process once CreateSession() is allowed to proceed.
   // TODO(qinmin): make this flag default on android.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableGestureRequirementForMediaFullscreen)) {
@@ -437,57 +432,50 @@ void BrowserMediaPlayerManager::DetachExternalVideoSurface(int player_id) {
     player->SetVideoSurface(gfx::ScopedJavaSurface());
 }
 
+void BrowserMediaPlayerManager::OnFrameInfoUpdated() {
+  if (external_video_surface_container_)
+    external_video_surface_container_->OnFrameInfoUpdated();
+}
+
 void BrowserMediaPlayerManager::OnNotifyExternalSurface(
     int player_id, bool is_request, const gfx::RectF& rect) {
   if (!web_contents_)
     return;
 
-  ExternalVideoSurfaceContainer::CreateForWebContents(web_contents_);
-  ExternalVideoSurfaceContainer* surface_container =
-      ExternalVideoSurfaceContainer::FromWebContents(web_contents_);
-  if (!surface_container)
-    return;
-
   if (is_request) {
-    // It's safe to use base::Unretained(this), because the callbacks will not
-    // be called after running ReleaseExternalVideoSurface().
-    surface_container->RequestExternalVideoSurface(
+    OnRequestExternalSurface(player_id, rect);
+  }
+  if (external_video_surface_container_) {
+    external_video_surface_container_->OnExternalVideoSurfacePositionChanged(
+        player_id, rect);
+  }
+}
+
+void BrowserMediaPlayerManager::OnRequestExternalSurface(
+    int player_id, const gfx::RectF& rect) {
+  if (!external_video_surface_container_) {
+    ContentBrowserClient* client = GetContentClient()->browser();
+    external_video_surface_container_.reset(
+        client->OverrideCreateExternalVideoSurfaceContainer(web_contents_));
+  }
+  // It's safe to use base::Unretained(this), because the callbacks will not
+  // be called after running ReleaseExternalVideoSurface().
+  if (external_video_surface_container_) {
+    external_video_surface_container_->RequestExternalVideoSurface(
         player_id,
         base::Bind(&BrowserMediaPlayerManager::AttachExternalVideoSurface,
                    base::Unretained(this)),
         base::Bind(&BrowserMediaPlayerManager::DetachExternalVideoSurface,
                    base::Unretained(this)));
   }
-  surface_container->OnExternalVideoSurfacePositionChanged(player_id, rect);
 }
 #endif  // defined(VIDEO_HOLE)
 
-void BrowserMediaPlayerManager::DisableFullscreenEncryptedMediaPlayback() {
-  if (fullscreen_player_id_ == -1)
-    return;
-
-  // If the fullscreen player is not playing back encrypted video, do nothing.
-  MediaDrmBridge* drm_bridge = GetDrmBridge(fullscreen_player_id_);
-  if (!drm_bridge)
-    return;
-
-  // Exit fullscreen.
-  pending_fullscreen_player_id_ = fullscreen_player_id_;
-  OnExitFullscreen(fullscreen_player_id_);
-}
-
 void BrowserMediaPlayerManager::OnEnterFullscreen(int player_id) {
   DCHECK_EQ(fullscreen_player_id_, -1);
-  if (cdm_ids_pending_approval_.find(player_id) !=
-      cdm_ids_pending_approval_.end()) {
-    return;
-  }
-
 #if defined(VIDEO_HOLE)
-  ExternalVideoSurfaceContainer* surface_container =
-      ExternalVideoSurfaceContainer::FromWebContents(web_contents_);
-  if (surface_container)
-    surface_container->ReleaseExternalVideoSurface(player_id);
+  if (external_video_surface_container_)
+    external_video_surface_container_->ReleaseExternalVideoSurface(player_id);
 #endif  // defined(VIDEO_HOLE)
   if (video_view_.get()) {
     fullscreen_player_id_ = player_id;
@@ -537,10 +525,14 @@ void BrowserMediaPlayerManager::OnInitialize(
 
   RenderProcessHostImpl* host = static_cast<RenderProcessHostImpl*>(
       web_contents()->GetRenderProcessHost());
-  AddPlayer(CreateMediaPlayer(
+  MediaPlayerAndroid* player = CreateMediaPlayer(
       type, player_id, url, first_party_for_cookies, demuxer_client_id,
       host->GetBrowserContext()->IsOffTheRecord(), this,
-      host->browser_demuxer_android()));
+      host->browser_demuxer_android());
+  if (!player)
+    return;
+
+  AddPlayer(player);
 }
 
 void BrowserMediaPlayerManager::OnStart(int player_id) {
@@ -596,7 +588,7 @@ void BrowserMediaPlayerManager::OnDestroyPlayer(int player_id) {
 
 void BrowserMediaPlayerManager::OnInitializeCdm(int cdm_id,
                                                 const std::string& key_system,
-                                                const GURL& frame_url) {
+                                                const GURL& security_origin) {
   if (key_system.size() > kMaxKeySystemLength) {
     // This failure will be discovered and reported by OnCreateSession()
     // as GetDrmBridge() will return null.
@@ -604,15 +596,12 @@ void BrowserMediaPlayerManager::OnInitializeCdm(int cdm_id,
     return;
   }
 
-  if (!MediaDrmBridge::IsKeySystemSupportedWithType(key_system, "")) {
+  if (!MediaDrmBridge::IsKeySystemSupported(key_system)) {
     NOTREACHED() << "Unsupported key system: " << key_system;
     return;
   }
 
-  AddDrmBridge(cdm_id, key_system, frame_url);
-  // In EME v0.1b MediaKeys lives in the media element. So the |cdm_id|
-  // is the same as the |player_id|.
-  OnSetMediaKeys(cdm_id, cdm_id);
+  AddDrmBridge(cdm_id, key_system, security_origin);
 }
 
 void BrowserMediaPlayerManager::OnCreateSession(
@@ -657,10 +646,6 @@ void BrowserMediaPlayerManager::OnCreateSession(
     return;
   }
 
-  if (cdm_ids_approved_.find(cdm_id) == cdm_ids_approved_.end()) {
-    cdm_ids_pending_approval_.insert(cdm_id);
-  }
-
   BrowserContext* context =
       web_contents()->GetRenderProcessHost()->GetBrowserContext();
 
@@ -669,7 +654,7 @@ void BrowserMediaPlayerManager::OnCreateSession(
       web_contents()->GetRenderViewHost()->GetRoutingID(),
       static_cast<int>(session_id),
       cdm_id,
-      drm_bridge->frame_url(),
+      drm_bridge->security_origin(),
       base::Bind(&BrowserMediaPlayerManager::CreateSessionIfPermitted,
                  weak_ptr_factory_.GetWeakPtr(),
                  cdm_id,
@@ -697,10 +682,13 @@ void BrowserMediaPlayerManager::OnUpdateSession(
   }
 
   drm_bridge->UpdateSession(session_id, &response[0], response.size());
-  // In EME v0.1b MediaKeys lives in the media element. So the |cdm_id|
-  // is the same as the |player_id|.
-  // TODO(xhwang): Separate |cdm_id| and |player_id|.
-  MediaPlayerAndroid* player = GetPlayer(cdm_id);
+
+  DrmBridgePlayerMap::const_iterator iter = drm_bridge_player_map_.find(cdm_id);
+  if (iter == drm_bridge_player_map_.end())
+    return;
+
+  int player_id = iter->second;
+  MediaPlayerAndroid* player = GetPlayer(player_id);
   if (player)
     player->OnKeyAdded();
 }
@@ -745,6 +733,14 @@ void BrowserMediaPlayerManager::RemovePlayer(int player_id) {
       break;
     }
   }
+
+  for (DrmBridgePlayerMap::iterator it = drm_bridge_player_map_.begin();
+       it != drm_bridge_player_map_.end(); ++it) {
+    if (it->second == player_id) {
+      drm_bridge_player_map_.erase(it);
+      break;
+    }
+  }
 }
 
 scoped_ptr<media::MediaPlayerAndroid> BrowserMediaPlayerManager::SwapPlayer(
@@ -764,11 +760,11 @@ scoped_ptr<media::MediaPlayerAndroid> BrowserMediaPlayerManager::SwapPlayer(
 
 void BrowserMediaPlayerManager::AddDrmBridge(int cdm_id,
                                              const std::string& key_system,
-                                             const GURL& frame_url) {
+                                             const GURL& security_origin) {
   DCHECK(!GetDrmBridge(cdm_id));
 
   scoped_ptr<MediaDrmBridge> drm_bridge(
-      MediaDrmBridge::Create(cdm_id, key_system, frame_url, this));
+      MediaDrmBridge::Create(cdm_id, key_system, security_origin, this));
   if (!drm_bridge) {
     // This failure will be discovered and reported by OnCreateSession()
     // as GetDrmBridge() will return null.
@@ -792,25 +788,34 @@ void BrowserMediaPlayerManager::AddDrmBridge(int cdm_id,
 }
 
 void BrowserMediaPlayerManager::RemoveDrmBridge(int cdm_id) {
+  // TODO(xhwang): Detach DrmBridge from the player it's set to. In prefixed
+  // EME implementation the current code is fine because we always destroy the
+  // player before we destroy the DrmBridge. This will not always be the case
+  // in unprefixed EME implementation.
   for (ScopedVector<MediaDrmBridge>::iterator it = drm_bridges_.begin();
       it != drm_bridges_.end(); ++it) {
     if ((*it)->cdm_id() == cdm_id) {
       drm_bridges_.erase(it);
+      drm_bridge_player_map_.erase(cdm_id);
       break;
     }
   }
 }
 
-void BrowserMediaPlayerManager::OnSetMediaKeys(int player_id, int cdm_id) {
+void BrowserMediaPlayerManager::OnSetCdm(int player_id, int cdm_id) {
   MediaPlayerAndroid* player = GetPlayer(player_id);
   MediaDrmBridge* drm_bridge = GetDrmBridge(cdm_id);
-  if (!player || !drm_bridge) {
-    DVLOG(1) << "OnSetMediaKeys(): Player and MediaKeys must be present.";
+  if (!drm_bridge || !player) {
+    DVLOG(1) << "Cannot set CDM on the specified player.";
     return;
   }
+
   // TODO(qinmin): add the logic to decide whether we should create the
   // fullscreen surface for EME lv1.
   player->SetDrmBridge(drm_bridge);
+  // Do now support setting one CDM on multiple players.
+  DCHECK(drm_bridge_player_map_.find(cdm_id) == drm_bridge_player_map_.end());
+  drm_bridge_player_map_[cdm_id] = player_id;
 }
 
 void BrowserMediaPlayerManager::CreateSessionIfPermitted(
@@ -830,26 +835,10 @@ void BrowserMediaPlayerManager::CreateSessionIfPermitted(
     OnSessionError(cdm_id, session_id, media::MediaKeys::kUnknownError, 0);
     return;
   }
-  cdm_ids_pending_approval_.erase(cdm_id);
-  cdm_ids_approved_.insert(cdm_id);
 
-  if (!drm_bridge->CreateSession(
-           session_id, content_type, &init_data[0], init_data.size())) {
-    return;
-  }
-
-  // TODO(xhwang): Move the following code to OnSessionReady.
-
-  // TODO(qinmin): For prefixed EME implementation, |cdm_id| and player_id are
-  // identical. This will not be the case for unpredixed EME. See:
-  // http://crbug.com/338910
-  if (pending_fullscreen_player_id_ != cdm_id)
-    return;
-
-  pending_fullscreen_player_id_ = -1;
-  MediaPlayerAndroid* player = GetPlayer(cdm_id);
-  if (player->IsPlaying())
-    OnProtectedSurfaceRequested(cdm_id);
+  // This could fail, in which case a SessionError will be fired.
+  drm_bridge->CreateSession(
+      session_id, content_type, &init_data[0], init_data.size());
 }
 
 void BrowserMediaPlayerManager::ReleaseFullscreenPlayer(
@@ -890,10 +879,8 @@ void BrowserMediaPlayerManager::OnMediaResourcesReleased(int player_id) {
   MediaPlayerAndroid* player = GetPlayer(player_id);
   if (player && player->IsSurfaceInUse())
     return;
-  ExternalVideoSurfaceContainer* surface_container =
-      ExternalVideoSurfaceContainer::FromWebContents(web_contents_);
-  if (surface_container)
-    surface_container->ReleaseExternalVideoSurface(player_id);
+  if (external_video_surface_container_)
+    external_video_surface_container_->ReleaseExternalVideoSurface(player_id);
 #endif  // defined(VIDEO_HOLE)
 }
 

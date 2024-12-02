@@ -7,16 +7,16 @@
 #include <functional>
 #include <iterator>
 
-#include "base/base64.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "chrome/common/extensions/api/cast_streaming_rtp_stream.h"
 #include "chrome/common/extensions/api/cast_streaming_udp_transport.h"
-#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/media/cast_rtp_stream.h"
 #include "chrome/renderer/media/cast_session.h"
 #include "chrome/renderer/media/cast_udp_transport.h"
 #include "content/public/renderer/v8_value_converter.h"
+#include "extensions/renderer/script_context.h"
 #include "net/base/host_port_pair.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 #include "third_party/WebKit/public/web/WebDOMMediaStreamTrack.h"
@@ -55,14 +55,24 @@ void FromCastCodecSpecificParams(const CastCodecSpecificParams& cast_params,
   ext_params->value = cast_params.value;
 }
 
+namespace {
+bool HexDecode(const std::string& input, std::string* output) {
+  std::vector<uint8> bytes;
+  if (!base::HexStringToBytes(input, &bytes))
+    return false;
+  output->assign(reinterpret_cast<const char*>(&bytes[0]), bytes.size());
+  return true;
+}
+}  // namespace
+
 bool ToCastRtpPayloadParamsOrThrow(v8::Isolate* isolate,
                                    const RtpPayloadParams& ext_params,
                                    CastRtpPayloadParams* cast_params) {
   cast_params->payload_type = ext_params.payload_type;
+  cast_params->max_latency_ms = ext_params.max_latency;
   cast_params->codec_name = ext_params.codec_name;
-  cast_params->ssrc = ext_params.ssrc ? *ext_params.ssrc : 0;
-  cast_params->feedback_ssrc =
-      ext_params.feedback_ssrc ? *ext_params.feedback_ssrc : 0;
+  cast_params->ssrc = ext_params.ssrc;
+  cast_params->feedback_ssrc = ext_params.feedback_ssrc;
   cast_params->clock_rate = ext_params.clock_rate ? *ext_params.clock_rate : 0;
   cast_params->min_bitrate =
       ext_params.min_bitrate ? *ext_params.min_bitrate : 0;
@@ -72,14 +82,13 @@ bool ToCastRtpPayloadParamsOrThrow(v8::Isolate* isolate,
   cast_params->width = ext_params.width ? *ext_params.width : 0;
   cast_params->height = ext_params.height ? *ext_params.height : 0;
   if (ext_params.aes_key &&
-      !base::Base64Decode(*ext_params.aes_key, &cast_params->aes_key)) {
+      !HexDecode(*ext_params.aes_key, &cast_params->aes_key)) {
     isolate->ThrowException(v8::Exception::Error(
         v8::String::NewFromUtf8(isolate, kInvalidAesKey)));
     return false;
   }
   if (ext_params.aes_iv_mask &&
-      !base::Base64Decode(*ext_params.aes_iv_mask,
-                          &cast_params->aes_iv_mask)) {
+      !HexDecode(*ext_params.aes_iv_mask, &cast_params->aes_iv_mask)) {
     isolate->ThrowException(v8::Exception::Error(
         v8::String::NewFromUtf8(isolate, kInvalidAesIvMask)));
     return false;
@@ -96,11 +105,10 @@ bool ToCastRtpPayloadParamsOrThrow(v8::Isolate* isolate,
 void FromCastRtpPayloadParams(const CastRtpPayloadParams& cast_params,
                               RtpPayloadParams* ext_params) {
   ext_params->payload_type = cast_params.payload_type;
+  ext_params->max_latency = cast_params.max_latency_ms;
   ext_params->codec_name = cast_params.codec_name;
-  if (cast_params.ssrc)
-    ext_params->ssrc.reset(new int(cast_params.ssrc));
-  if (cast_params.feedback_ssrc)
-    ext_params->feedback_ssrc.reset(new int(cast_params.feedback_ssrc));
+  ext_params->ssrc = cast_params.ssrc;
+  ext_params->feedback_ssrc = cast_params.feedback_ssrc;
   if (cast_params.clock_rate)
     ext_params->clock_rate.reset(new int(cast_params.clock_rate));
   if (cast_params.min_bitrate)
@@ -146,9 +154,9 @@ bool ToCastRtpParamsOrThrow(v8::Isolate* isolate,
 
 }  // namespace
 
-CastStreamingNativeHandler::CastStreamingNativeHandler(ChromeV8Context* context)
+CastStreamingNativeHandler::CastStreamingNativeHandler(ScriptContext* context)
     : ObjectBackedNativeHandler(context),
-      last_transport_id_(0),
+      last_transport_id_(1),
       weak_factory_(this) {
   RouteFunction("CreateSession",
       base::Bind(&CastStreamingNativeHandler::CreateCastSession,

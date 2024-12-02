@@ -33,6 +33,12 @@ class QuicSocketUtils {
   // address_family.  Returns the return code from setsockopt.
   static int SetGetAddressInfo(int fd, int address_family);
 
+  // Sets the send buffer size to |size| and returns false if it fails.
+  static bool SetSendBufferSize(int fd, size_t size);
+
+  // Sets the receive buffer size to |size| and returns false if it fails.
+  static bool SetReceiveBufferSize(int fd, size_t size);
+
   // Reads buf_len from the socket.  If reading is successful, returns bytes
   // read and sets peer_address to the peer address.  Otherwise returns -1.
   //
@@ -42,7 +48,9 @@ class QuicSocketUtils {
   //
   // If self_address is non-null, it will be set to the address the peer sent
   // packets to, assuming a packet was read.
-  static int ReadPacket(int fd, char* buffer, size_t buf_len,
+  static int ReadPacket(int fd,
+                        char* buffer,
+                        size_t buf_len,
                         uint32* dropped_packets,
                         IPAddressNumber* self_address,
                         IPEndPoint* peer_address);
@@ -54,6 +62,9 @@ class QuicSocketUtils {
   static WriteResult WritePacket(int fd, const char* buffer, size_t buf_len,
                                  const IPAddressNumber& self_address,
                                  const IPEndPoint& peer_address);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(QuicSocketUtils);
 };
 
 }  // namespace tools

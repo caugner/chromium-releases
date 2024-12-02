@@ -22,7 +22,6 @@
 #include "ui/gfx/image/image_skia_operations.h"
 
 namespace ash {
-namespace internal {
 
 class CursorWindowDelegate : public aura::WindowDelegate {
  public:
@@ -118,9 +117,10 @@ void CursorWindowController::UpdateContainer() {
   if (is_cursor_compositing_enabled_) {
     SetDisplay(display_);
   } else {
-    aura::WindowTreeHost* mirror_host = Shell::GetInstance()->
-        display_controller()->mirror_window_controller()->host();
-    SetContainer(mirror_host ? mirror_host->window() : NULL);
+    SetContainer(Shell::GetInstance()->
+                 display_controller()->
+                 mirror_window_controller()->
+                 GetWindow());
   }
 }
 
@@ -258,5 +258,4 @@ void CursorWindowController::UpdateCursorImage() {
   }
 }
 
-}  // namespace internal
 }  // namespace ash

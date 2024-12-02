@@ -103,7 +103,8 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../net/net.gyp:net',
-	'../third_party/protobuf/protobuf.gyp:protobuf_lite',
+        '../testing/gtest.gyp:gtest',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         'sync',
       ],
       'export_dependent_settings': [
@@ -112,6 +113,12 @@
       'sources': [
         'test/fake_server/bookmark_entity.cc',
         'test/fake_server/bookmark_entity.h',
+        'test/fake_server/bookmark_entity_builder.cc',
+        'test/fake_server/bookmark_entity_builder.h',
+        'test/fake_server/entity_builder.cc',
+        'test/fake_server/entity_builder.h',
+        'test/fake_server/entity_builder_factory.cc',
+        'test/fake_server/entity_builder_factory.h',
         'test/fake_server/fake_server.cc',
         'test/fake_server/fake_server.h',
         'test/fake_server/fake_server_entity.cc',
@@ -120,6 +127,8 @@
         'test/fake_server/fake_server_http_post_provider.h',
         'test/fake_server/fake_server_network_resources.cc',
         'test/fake_server/fake_server_network_resources.h',
+        'test/fake_server/fake_server_verifier.cc',
+        'test/fake_server/fake_server_verifier.h',
         'test/fake_server/permanent_entity.cc',
         'test/fake_server/permanent_entity.h',
         'test/fake_server/tombstone_entity.cc',
@@ -191,11 +200,13 @@
         'internal_api/public/base/invalidation_test_util.cc',
         'internal_api/public/base/invalidation_test_util.h',
         'internal_api/public/test/fake_sync_manager.h',
+        'internal_api/public/test/null_sync_core_proxy.h',
         'internal_api/public/test/sync_manager_factory_for_profile_sync_test.h',
         'internal_api/public/test/test_entry_factory.h',
         'internal_api/public/test/test_internal_components_factory.h',
         'internal_api/public/test/test_user_share.h',
         'internal_api/test/fake_sync_manager.cc',
+        'internal_api/test/null_sync_core_proxy.cc',
         'internal_api/test/sync_manager_factory_for_profile_sync_test.cc',
         'internal_api/test/sync_manager_for_profile_sync_test.cc',
         'internal_api/test/sync_manager_for_profile_sync_test.h',
@@ -291,8 +302,6 @@
           'engine/sync_scheduler_unittest.cc',
           'engine/syncer_proto_util_unittest.cc',
           'engine/syncer_unittest.cc',
-          'engine/traffic_recorder_unittest.cc',
-          'js/js_arg_list_unittest.cc',
           'js/js_event_details_unittest.cc',
           'js/sync_js_controller_unittest.cc',
           'protocol/proto_enum_conversions_unittest.cc',
@@ -300,7 +309,10 @@
           'sessions/model_type_registry_unittest.cc',
           'sessions/nudge_tracker_unittest.cc',
           'sessions/status_controller_unittest.cc',
+          'syncable/directory_unittest.cc',
+          'syncable/directory_unittest.h',
           'syncable/directory_backing_store_unittest.cc',
+          'syncable/entry_kernel_unittest.cc',
           'syncable/model_type_unittest.cc',
           'syncable/nigori_util_unittest.cc',
           'syncable/parent_child_index_unittest.cc',
@@ -417,11 +429,15 @@
           'internal_api/js_mutation_event_observer_unittest.cc',
           'internal_api/js_sync_encryption_handler_observer_unittest.cc',
           'internal_api/js_sync_manager_observer_unittest.cc',
+          'internal_api/protocol_event_buffer_unittest.cc',
           'internal_api/public/change_record_unittest.cc',
           'internal_api/public/sessions/sync_session_snapshot_unittest.cc',
-          'internal_api/sync_core_proxy_unittest.cc',
+          'internal_api/sync_backup_manager_unittest.cc',
+          'internal_api/sync_core_proxy_impl_unittest.cc',
           'internal_api/sync_encryption_handler_impl_unittest.cc',
-          'internal_api/sync_manager_impl_unittest.cc',
+          'internal_api/sync_manager_impl_unittest.cc',          
+          'internal_api/sync_rollback_manager_base_unittest.cc',
+          'internal_api/sync_rollback_manager_unittest.cc',
           'internal_api/syncapi_server_connection_manager_unittest.cc',
         ],
         'conditions': [
@@ -464,7 +480,9 @@
         'sources': [
           'api/attachments/attachment_unittest.cc',
           'api/attachments/attachment_id_unittest.cc',
+          'api/attachments/attachment_service_proxy_unittest.cc',
           'api/attachments/fake_attachment_store_unittest.cc',
+          'api/attachments/fake_attachment_uploader_unittest.cc',
           'api/sync_change_unittest.cc',
           'api/sync_data_unittest.cc',
           'api/sync_error_unittest.cc',
@@ -493,8 +511,7 @@
         # TODO(akalin): This is needed because histogram.cc uses
         # leak_annotations.h, which pulls this in.  Make 'base'
         # propagate this dependency.
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+        ['OS=="linux" and use_allocator!="none"', {
           'dependencies': [
             '../base/allocator/allocator.gyp:allocator',
           ],
@@ -587,27 +604,6 @@
           ],
         },
 
-        # A standalone executable that runs a Sync FakeServer instance.
-        {
-          'target_name': 'run_sync_fake_server',
-          'type': 'executable',
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../base/base.gyp:test_support_base',
-            '../net/net.gyp:http_server',
-            '../net/net.gyp:net',
-            '../net/net.gyp:net_test_support',
-            '../testing/gtest.gyp:gtest',
-            '../url/url.gyp:url_lib',
-            'test_support_sync_fake_server',
-          ],
-          'sources': [
-            'test/fake_server/run_sync_fake_server.cc',
-            'test/fake_server/fake_sync_server_http_handler.cc',
-            'test/fake_server/fake_sync_server_http_handler.h',
-          ],
-        },
-
         # A tool to listen to sync notifications and print them out.
         {
           'target_name': 'sync_listen_notifications',
@@ -691,7 +687,6 @@
           ],
           'variables': {
             'test_suite_name': 'sync_unit_tests',
-            'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)sync_unit_tests<(SHARED_LIB_SUFFIX)',
           },
           'includes': [ '../build/apk_test.gypi' ],
         },

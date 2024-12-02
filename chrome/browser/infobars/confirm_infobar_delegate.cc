@@ -4,9 +4,10 @@
 
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
 
-#include "content/public/browser/navigation_details.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using infobars::InfoBarDelegate;
 
 ConfirmInfoBarDelegate::~ConfirmInfoBarDelegate() {
 }
@@ -25,7 +26,7 @@ base::string16 ConfirmInfoBarDelegate::GetButtonLabel(
   return l10n_util::GetStringUTF16((button == BUTTON_OK) ? IDS_OK : IDS_CANCEL);
 }
 
-bool ConfirmInfoBarDelegate::NeedElevation(InfoBarButton button) const {
+bool ConfirmInfoBarDelegate::OKButtonTriggersUACPrompt() const {
   return false;
 }
 
@@ -50,7 +51,7 @@ ConfirmInfoBarDelegate::ConfirmInfoBarDelegate()
 }
 
 bool ConfirmInfoBarDelegate::ShouldExpireInternal(
-    const content::LoadCommittedDetails& details) const {
+    const NavigationDetails& details) const {
   return !details.did_replace_entry &&
       InfoBarDelegate::ShouldExpireInternal(details);
 }

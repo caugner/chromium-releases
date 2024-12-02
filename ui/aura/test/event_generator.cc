@@ -11,7 +11,9 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/event.h"
+#include "ui/events/event_source.h"
 #include "ui/events/event_utils.h"
+#include "ui/events/test/events_test_utils.h"
 #include "ui/gfx/vector2d_conversions.h"
 
 #if defined(USE_X11)
@@ -147,6 +149,13 @@ void EventGenerator::PressRightButton() {
 
 void EventGenerator::ReleaseRightButton() {
   ReleaseButton(ui::EF_RIGHT_MOUSE_BUTTON);
+}
+
+void EventGenerator::MoveMouseWheel(int delta_x, int delta_y) {
+  gfx::Point location = GetLocationInCurrentRoot();
+  ui::MouseEvent mouseev(ui::ET_MOUSEWHEEL, location, location, flags_, 0);
+  ui::MouseWheelEvent wheelev(mouseev, delta_x, delta_y);
+  Dispatch(&wheelev);
 }
 
 void EventGenerator::SendMouseExit() {
@@ -607,8 +616,10 @@ void EventGenerator::DoDispatchEvent(ui::Event* event, bool async) {
     }
     pending_events_.push_back(pending_event);
   } else {
+    ui::EventSource* event_source = current_host_->GetEventSource();
+    ui::EventSourceTestApi event_source_test(event_source);
     ui::EventDispatchDetails details =
-        current_host_->event_processor()->OnEventFromSource(event);
+        event_source_test.SendEventToProcessor(event);
     CHECK(!details.dispatcher_destroyed);
   }
 }

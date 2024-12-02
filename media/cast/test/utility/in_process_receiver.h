@@ -8,11 +8,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "media/base/audio_bus.h"
 #include "media/cast/cast_config.h"
 #include "media/cast/transport/cast_transport_config.h"
 
 namespace base {
 class TimeTicks;
+class WaitableEvent;
 }  // namespace base
 
 namespace net {
@@ -47,32 +49,39 @@ class InProcessReceiver {
                     const AudioReceiverConfig& audio_config,
                     const VideoReceiverConfig& video_config);
 
-  // Must be destroyed on the cast MAIN thread.  See DestroySoon().
   virtual ~InProcessReceiver();
 
-  // Convenience accessor to CastEnvironment.
+  // Convenience accessors.
   scoped_refptr<CastEnvironment> cast_env() const { return cast_environment_; }
+  const AudioReceiverConfig& audio_config() const { return audio_config_; }
+  const VideoReceiverConfig& video_config() const { return video_config_; }
 
   // Begin delivering any received audio/video frames to the OnXXXFrame()
   // methods.
-  void Start();
+  virtual void Start();
 
-  // Schedules destruction on the cast MAIN thread.  Any external references to
-  // the InProcessReceiver instance become invalid.
-  void DestroySoon();
+  // Destroy the sub-compontents of this class.
+  // After this call, it is safe to destroy this object on any thread.
+  virtual void Stop();
 
  protected:
   // To be implemented by subclasses.  These are called on the Cast MAIN thread
   // as each frame is received.
-  virtual void OnAudioFrame(scoped_ptr<PcmAudioFrame> audio_frame,
-                            const base::TimeTicks& playout_time) = 0;
+  virtual void OnAudioFrame(scoped_ptr<AudioBus> audio_frame,
+                            const base::TimeTicks& playout_time,
+                            bool is_continuous) = 0;
   virtual void OnVideoFrame(const scoped_refptr<VideoFrame>& video_frame,
-                            const base::TimeTicks& render_time) = 0;
+                            const base::TimeTicks& playout_time,
+                            bool is_continuous) = 0;
 
   // Helper method that creates |transport_| and |cast_receiver_|, starts
   // |transport_| receiving, and requests the first audio/video frame.
   // Subclasses may override to provide additional start-up functionality.
   virtual void StartOnMainThread();
+
+  // Helper method that destroys |transport_| and |cast_receiver_|.
+  // Subclasses may override to provide additional start-up functionality.
+  virtual void StopOnMainThread(base::WaitableEvent* event);
 
   // Callback for the transport to notify of status changes.  A default
   // implementation is provided here that simply logs socket errors.
@@ -81,16 +90,17 @@ class InProcessReceiver {
  private:
   friend class base::RefCountedThreadSafe<InProcessReceiver>;
 
-  // CastReceiver callbacks that receive a frame and then request another.
-  void GotAudioFrame(scoped_ptr<PcmAudioFrame> audio_frame,
-                     const base::TimeTicks& playout_time);
+  // CastReceiver callbacks that receive a frame and then request another.  See
+  // comments for the callbacks defined in src/media/cast/cast_receiver.h for
+  // argument description and semantics.
+  void GotAudioFrame(scoped_ptr<AudioBus> audio_frame,
+                     const base::TimeTicks& playout_time,
+                     bool is_continuous);
   void GotVideoFrame(const scoped_refptr<VideoFrame>& video_frame,
-                     const base::TimeTicks& render_time);
+                     const base::TimeTicks& playout_time,
+                     bool is_continuous);
   void PullNextAudioFrame();
   void PullNextVideoFrame();
-
-  // Invoked just before the destruction of |receiver| on the cast MAIN thread.
-  static void WillDestroyReceiver(InProcessReceiver* receiver);
 
   const scoped_refptr<CastEnvironment> cast_environment_;
   const net::IPEndPoint local_end_point_;

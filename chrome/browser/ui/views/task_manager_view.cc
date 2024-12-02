@@ -50,7 +50,6 @@
 #include "chrome/browser/shell_integration.h"
 #include "ui/base/win/shell.h"
 #include "ui/views/win/hwnd_util.h"
-#include "win8/util/win8_util.h"
 #endif
 
 namespace {
@@ -461,10 +460,6 @@ bool TaskManagerView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 
 // static
 void TaskManagerView::Show(Browser* browser) {
-#if defined(OS_WIN)
-  // In Windows Metro it's not good to open this native window.
-  DCHECK(!win8::IsSingleWindowMetroMode());
-#endif
   // In ash we can come here through the ChromeShellDelegate. If there is no
   // browser window at that time of the call, browser could be passed as NULL.
   const chrome::HostDesktopType desktop_type =
@@ -504,7 +499,7 @@ void TaskManagerView::Show(Browser* browser) {
     focus_manager->SetFocusedView(instance_->tab_table_);
 
 #if defined(USE_ASH)
-  CreateShelfItemForDialog(IDR_AURA_LAUNCHER_ICON_TASK_MANAGER,
+  CreateShelfItemForDialog(IDR_ASH_SHELF_ICON_TASK_MANAGER,
                            instance_->GetWidget()->GetNativeWindow());
 #endif
 }
@@ -599,11 +594,15 @@ void TaskManagerView::ShowContextMenuForView(views::View* source,
     menu_model.AddCheckItem(i->id, l10n_util::GetStringUTF16(i->id));
   }
   menu_runner_.reset(new views::MenuRunner(&menu_model));
-  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
-                              views::MenuItemView::TOPLEFT, source_type,
+  if (menu_runner_->RunMenuAt(GetWidget(),
+                              NULL,
+                              gfx::Rect(point, gfx::Size()),
+                              views::MENU_ANCHOR_TOPLEFT,
+                              source_type,
                               views::MenuRunner::CONTEXT_MENU) ==
-      views::MenuRunner::MENU_DELETED)
+      views::MenuRunner::MENU_DELETED) {
     return;
+  }
 }
 
 bool TaskManagerView::IsCommandIdChecked(int id) const {

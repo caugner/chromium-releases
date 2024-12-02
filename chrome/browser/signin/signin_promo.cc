@@ -15,7 +15,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -23,8 +22,9 @@
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/net/url_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "components/user_prefs/pref_registry_syncable.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
@@ -38,8 +38,10 @@
 #include "net/base/network_change_notifier.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "url/gurl.h"
 
 using content::WebContents;
+using net::GetValueForKeyInQuery;
 
 namespace {
 
@@ -178,6 +180,13 @@ GURL GetPromoURL(Source source, bool auto_close) {
 }
 
 GURL GetPromoURL(Source source, bool auto_close, bool is_constrained) {
+  return GetPromoURLWithContinueURL(source, auto_close, is_constrained, GURL());
+}
+
+GURL GetPromoURLWithContinueURL(Source source,
+                                bool auto_close,
+                                bool is_constrained,
+                                GURL continue_url) {
   DCHECK_NE(SOURCE_UNKNOWN, source);
 
   if (!switches::IsEnableWebBasedSignin()) {
@@ -187,6 +196,15 @@ GURL GetPromoURL(Source source, bool auto_close, bool is_constrained) {
       base::StringAppendF(&url, "&%s=1", kSignInPromoQueryKeyAutoClose);
     if (is_constrained)
       base::StringAppendF(&url, "&%s=1", kSignInPromoQueryKeyConstrained);
+    if (!continue_url.is_empty()) {
+      DCHECK(continue_url.is_valid());
+      std::string escaped_continue_url =
+          net::EscapeQueryParamValue(continue_url.spec(), false);
+      base::StringAppendF(&url,
+                          "&%s=%s",
+                          kSignInPromoQueryKeyContinue,
+                          escaped_continue_url.c_str());
+    }
     return GURL(url);
   }
 
@@ -206,14 +224,19 @@ GURL GetPromoURL(Source source, bool auto_close, bool is_constrained) {
   // See OneClickSigninHelper for details.
   std::string query_string = "?service=chromiumsync&sarp=1";
 
-  std::string continue_url = GetLandingURL(kSignInPromoQueryKeySource,
-                                           static_cast<int>(source)).spec();
-  if (auto_close)
-    base::StringAppendF(&continue_url, "&%s=1", kSignInPromoQueryKeyAutoClose);
+  DCHECK(continue_url.is_empty());
+  std::string continue_url_str = GetLandingURL(kSignInPromoQueryKeySource,
+                                               static_cast<int>(source)).spec();
+  if (auto_close) {
+    base::StringAppendF(
+        &continue_url_str, "&%s=1", kSignInPromoQueryKeyAutoClose);
+  }
 
-  base::StringAppendF(&query_string, "&%s=%s", kSignInPromoQueryKeyContinue,
-                      net::EscapeQueryParamValue(
-                          continue_url, false).c_str());
+  base::StringAppendF(
+      &query_string,
+      "&%s=%s",
+      kSignInPromoQueryKeyContinue,
+      net::EscapeQueryParamValue(continue_url_str, false).c_str());
 
   return GaiaUrls::GetInstance()->service_login_url().Resolve(query_string);
 }
@@ -240,15 +263,18 @@ GURL GetReauthURL(Profile* profile, const std::string& account_id) {
 
 GURL GetNextPageURLForPromoURL(const GURL& url) {
   std::string value;
-  if (net::GetValueForKeyInQuery(url, kSignInPromoQueryKeyContinue, &value))
-    return GURL(value);
+  if (GetValueForKeyInQuery(url, kSignInPromoQueryKeyContinue, &value)) {
+    GURL continue_url = GURL(value);
+    if (continue_url.is_valid())
+      return continue_url;
+  }
 
   return GURL();
 }
 
 Source GetSourceForPromoURL(const GURL& url) {
   std::string value;
-  if (net::GetValueForKeyInQuery(url, kSignInPromoQueryKeySource, &value)) {
+  if (GetValueForKeyInQuery(url, kSignInPromoQueryKeySource, &value)) {
     int source = 0;
     if (base::StringToInt(value, &source) && source >= SOURCE_START_PAGE &&
         source < SOURCE_UNKNOWN) {
@@ -260,7 +286,7 @@ Source GetSourceForPromoURL(const GURL& url) {
 
 bool IsAutoCloseEnabledInURL(const GURL& url) {
   std::string value;
-  if (net::GetValueForKeyInQuery(url, kSignInPromoQueryKeyAutoClose, &value)) {
+  if (GetValueForKeyInQuery(url, kSignInPromoQueryKeyAutoClose, &value)) {
     int enabled = 0;
     if (base::StringToInt(value, &enabled) && enabled == 1)
       return true;

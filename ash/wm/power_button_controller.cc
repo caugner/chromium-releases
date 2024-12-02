@@ -5,14 +5,14 @@
 #include "ash/wm/power_button_controller.h"
 
 #include "ash/ash_switches.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/session_state_animator.h"
 #include "base/command_line.h"
 #include "ui/aura/window_event_dispatcher.h"
-#include "ui/display/chromeos/display_snapshot.h"
+#include "ui/display/types/chromeos/display_snapshot.h"
 #include "ui/wm/core/compound_event_filter.h"
 
 namespace ash {
@@ -27,14 +27,14 @@ PowerButtonController::PowerButtonController(
           CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kAuraLegacyPowerButton)),
       controller_(controller) {
-#if defined(OS_CHROMEOS) && defined(USE_X11)
-  Shell::GetInstance()->output_configurator()->AddObserver(this);
+#if defined(OS_CHROMEOS)
+  Shell::GetInstance()->display_configurator()->AddObserver(this);
 #endif
 }
 
 PowerButtonController::~PowerButtonController() {
-#if defined(OS_CHROMEOS) && defined(USE_X11)
-  Shell::GetInstance()->output_configurator()->RemoveObserver(this);
+#if defined(OS_CHROMEOS)
+  Shell::GetInstance()->display_configurator()->RemoveObserver(this);
 #endif
 }
 
@@ -116,17 +116,17 @@ void PowerButtonController::OnLockButtonEvent(
     controller_->CancelLockAnimation();
 }
 
-#if defined(OS_CHROMEOS) && defined(USE_X11)
+#if defined(OS_CHROMEOS)
 void PowerButtonController::OnDisplayModeChanged(
-    const ui::OutputConfigurator::DisplayStateList& outputs) {
+    const ui::DisplayConfigurator::DisplayStateList& display_states) {
   bool internal_display_off = false;
   bool external_display_on = false;
-  for (size_t i = 0; i < outputs.size(); ++i) {
-    const ui::OutputConfigurator::DisplayState& output = outputs[i];
-    if (output.display->type() == ui::OUTPUT_TYPE_INTERNAL) {
-      if (!output.display->current_mode())
+  for (size_t i = 0; i < display_states.size(); ++i) {
+    const ui::DisplayConfigurator::DisplayState& state = display_states[i];
+    if (state.display->type() == ui::DISPLAY_CONNECTION_TYPE_INTERNAL) {
+      if (!state.display->current_mode())
         internal_display_off = true;
-    } else if (output.display->current_mode()) {
+    } else if (state.display->current_mode()) {
       external_display_on = true;
     }
   }

@@ -18,6 +18,7 @@ namespace chromeos {
 
 class DataPromoNotification;
 class EventRewriter;
+class EventRewriterController;
 class ExtensionSystemEventObserver;
 class IdleActionWarningObserver;
 class MagnificationManager;
@@ -67,7 +68,8 @@ class ChromeBrowserMainPartsChromeos : public ChromeBrowserMainPartsLinux {
   scoped_ptr<DataPromoNotification> data_promo_notification_;
 
   scoped_ptr<internal::DBusServices> dbus_services_;
-  scoped_ptr<EventRewriter> event_rewriter_;
+
+  scoped_ptr<EventRewriterController> keyboard_event_rewriters_;
 
   VersionLoader cros_version_loader_;
   base::CancelableTaskTracker tracker_;

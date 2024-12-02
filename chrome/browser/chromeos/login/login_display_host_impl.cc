@@ -42,12 +42,14 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
+#include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/mobile_config.h"
+#include "chrome/browser/chromeos/net/delay_network_call.h"
 #include "chrome/browser/chromeos/policy/auto_enrollment_client.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
@@ -70,7 +72,6 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "media/audio/sounds/sounds_manager.h"
@@ -80,10 +81,16 @@
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/events/event_utils.h"
+#include "ui/gfx/display.h"
 #include "ui/gfx/rect.h"
+#include "ui/gfx/screen.h"
+#include "ui/gfx/size.h"
 #include "ui/gfx/transform.h"
+#include "ui/keyboard/keyboard_controller.h"
+#include "ui/keyboard/keyboard_util.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/window_animations.h"
 #include "url/gurl.h"
 
@@ -250,6 +257,48 @@ void AddToSetIfIsGaiaAuthIframe(std::set<content::RenderFrameHost*>* frame_set,
     frame_set->insert(frame);
 }
 
+// A login implementation of WidgetDelegate.
+class LoginWidgetDelegate : public views::WidgetDelegate {
+ public:
+  explicit LoginWidgetDelegate(views::Widget* widget) : widget_(widget) {
+  }
+  virtual ~LoginWidgetDelegate() {}
+
+  // Overridden from WidgetDelegate:
+  virtual void DeleteDelegate() OVERRIDE {
+    delete this;
+  }
+  virtual views::Widget* GetWidget() OVERRIDE {
+    return widget_;
+  }
+  virtual const views::Widget* GetWidget() const OVERRIDE {
+    return widget_;
+  }
+  virtual bool CanActivate() const OVERRIDE {
+    return true;
+  }
+  virtual bool ShouldAdvanceFocusToTopLevelWidget() const OVERRIDE {
+    return true;
+  }
+
+ private:
+  views::Widget* widget_;
+
+  DISALLOW_COPY_AND_ASSIGN(LoginWidgetDelegate);
+};
+
+// Disables virtual keyboard overscroll. Login UI will scroll user pods
+// into view on JS side when virtual keyboard is shown.
+void DisableKeyboardOverscroll() {
+  keyboard::SetKeyboardOverscrollOverride(
+      keyboard::KEYBOARD_OVERSCROLL_OVERRIDE_DISABLED);
+}
+
+void ResetKeyboardOverscrollOverride() {
+  keyboard::SetKeyboardOverscrollOverride(
+      keyboard::KEYBOARD_OVERSCROLL_OVERRIDE_NONE);
+}
+
 }  // namespace
 
 namespace chromeos {
@@ -290,9 +339,17 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
       finalize_animation_type_(ANIMATION_WORKSPACE),
       animation_weak_ptr_factory_(this),
       startup_sound_played_(false),
-      startup_sound_honors_spoken_feedback_(false) {
+      startup_sound_honors_spoken_feedback_(false),
+      is_observing_keyboard_(false) {
   DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
   CrasAudioHandler::Get()->AddAudioObserver(this);
+  if (keyboard::KeyboardController::GetInstance()) {
+    keyboard::KeyboardController::GetInstance()->AddObserver(this);
+    is_observing_keyboard_ = true;
+  }
+
+  ash::Shell::GetInstance()->delegate()->AddVirtualKeyboardStateObserver(this);
+  ash::Shell::GetScreen()->AddObserver(this);
 
   // We need to listen to CLOSE_ALL_BROWSERS_REQUEST but not APP_TERMINATING
   // because/ APP_TERMINATING will never be fired as long as this keeps
@@ -388,6 +445,17 @@ LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
 LoginDisplayHostImpl::~LoginDisplayHostImpl() {
   DBusThreadManager::Get()->GetSessionManagerClient()->RemoveObserver(this);
   CrasAudioHandler::Get()->RemoveAudioObserver(this);
+  if (keyboard::KeyboardController::GetInstance() && is_observing_keyboard_) {
+    keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
+    is_observing_keyboard_ = false;
+  }
+
+  ash::Shell::GetInstance()->delegate()->
+      RemoveVirtualKeyboardStateObserver(this);
+  ash::Shell::GetScreen()->RemoveObserver(this);
+
+  if (login::LoginScrollIntoViewEnabled())
+    ResetKeyboardOverscrollOverride();
 
   views::FocusManager::set_arrow_key_traversal_enabled(false);
   ResetLoginWindowAndView();
@@ -484,6 +552,9 @@ AutoEnrollmentController* LoginDisplayHostImpl::GetAutoEnrollmentController() {
 void LoginDisplayHostImpl::StartWizard(
     const std::string& first_screen_name,
     scoped_ptr<base::DictionaryValue> screen_parameters) {
+  if (login::LoginScrollIntoViewEnabled())
+    DisableKeyboardOverscroll();
+
   startup_sound_honors_spoken_feedback_ = true;
   TryToPlayStartupSound();
 
@@ -528,6 +599,9 @@ AppLaunchController* LoginDisplayHostImpl::GetAppLaunchController() {
 
 void LoginDisplayHostImpl::StartUserAdding(
     const base::Closure& completion_callback) {
+  if (login::LoginScrollIntoViewEnabled())
+    DisableKeyboardOverscroll();
+
   restore_path_ = RESTORE_ADD_USER_INTO_SESSION;
   completion_callback_ = completion_callback;
   finalize_animation_type_ = ANIMATION_NONE;
@@ -540,7 +614,7 @@ void LoginDisplayHostImpl::StartUserAdding(
   // Lock container can be transparent after lock screen animation.
   aura::Window* lock_container = ash::Shell::GetContainer(
       ash::Shell::GetPrimaryRootWindow(),
-      ash::internal::kShellWindowId_LockScreenContainersContainer);
+      ash::kShellWindowId_LockScreenContainersContainer);
   lock_container->layer()->SetOpacity(1.0);
 
   ash::Shell::GetInstance()->
@@ -560,6 +634,9 @@ void LoginDisplayHostImpl::StartUserAdding(
 
 void LoginDisplayHostImpl::StartSignInScreen(
     const LoginScreenContext& context) {
+  if (login::LoginScrollIntoViewEnabled())
+    DisableKeyboardOverscroll();
+
   startup_sound_honors_spoken_feedback_ = true;
   TryToPlayStartupSound();
 
@@ -796,8 +873,75 @@ void LoginDisplayHostImpl::EmitLoginPromptVisibleCalled() {
   OnLoginPromptVisible();
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// LoginDisplayHostImpl, chromeos::CrasAudioHandler::AudioObserver
+// implementation:
+
 void LoginDisplayHostImpl::OnActiveOutputNodeChanged() {
   TryToPlayStartupSound();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// LoginDisplayHostImpl, ash::KeyboardStateObserver:
+// implementation:
+
+void LoginDisplayHostImpl::OnVirtualKeyboardStateChanged(bool activated) {
+  if (keyboard::KeyboardController::GetInstance()) {
+    if (activated) {
+      if (!is_observing_keyboard_) {
+        keyboard::KeyboardController::GetInstance()->AddObserver(this);
+        is_observing_keyboard_ = true;
+      }
+    } else {
+      keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
+      is_observing_keyboard_ = false;
+    }
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// LoginDisplayHostImpl, keyboard::KeyboardControllerObserver:
+// implementation:
+
+void LoginDisplayHostImpl::OnKeyboardBoundsChanging(
+    const gfx::Rect& new_bounds) {
+  if (new_bounds.IsEmpty() && !keyboard_bounds_.IsEmpty()) {
+    // Keyboard has been hidden.
+    if (GetOobeUI()) {
+      GetOobeUI()->GetCoreOobeActor()->ShowControlBar(true);
+      if (login::LoginScrollIntoViewEnabled())
+        GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(false, new_bounds);
+    }
+  } else if (!new_bounds.IsEmpty() && keyboard_bounds_.IsEmpty()) {
+    // Keyboard has been shown.
+    if (GetOobeUI()) {
+      GetOobeUI()->GetCoreOobeActor()->ShowControlBar(false);
+      if (login::LoginScrollIntoViewEnabled())
+        GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(true, new_bounds);
+    }
+  }
+
+  keyboard_bounds_ = new_bounds;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// LoginDisplayHostImpl, gfx::DisplayObserver implementation:
+
+void LoginDisplayHostImpl::OnDisplayBoundsChanged(const gfx::Display& display) {
+  if (display.id() != ash::Shell::GetScreen()->GetPrimaryDisplay().id())
+    return;
+
+  if (GetOobeUI()) {
+    const gfx::Size& size = ash::Shell::GetScreen()->GetPrimaryDisplay().size();
+    GetOobeUI()->GetCoreOobeActor()->SetClientAreaSize(size.width(),
+                                                       size.height());
+  }
+}
+
+void LoginDisplayHostImpl::OnDisplayAdded(const gfx::Display& new_display) {
+}
+
+void LoginDisplayHostImpl::OnDisplayRemoved(const gfx::Display& old_display) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -818,10 +962,10 @@ void LoginDisplayHostImpl::ShutdownDisplayHost(bool post_quit_task) {
 }
 
 void LoginDisplayHostImpl::ScheduleWorkspaceAnimation() {
-  if (ash::Shell::GetContainer(
-          ash::Shell::GetPrimaryRootWindow(),
-          ash::internal::kShellWindowId_DesktopBackgroundContainer)->
-          children().empty()) {
+  if (ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
+                               ash::kShellWindowId_DesktopBackgroundContainer)
+          ->children()
+          .empty()) {
     // If there is no background window, don't perform any animation on the
     // default and background layer because there is nothing behind it.
     return;
@@ -872,7 +1016,7 @@ void LoginDisplayHostImpl::ShowWebUI() {
   }
   LOG(WARNING) << "Login WebUI >> Show already initialized UI";
   login_window_->Show();
-  login_view_->GetWebContents()->GetView()->Focus();
+  login_view_->GetWebContents()->Focus();
   login_view_->SetStatusAreaVisible(status_area_saved_visibility_);
   login_view_->OnPostponedShow();
 
@@ -934,15 +1078,16 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.bounds = background_bounds();
-  params.show_state = ui::SHOW_STATE_FULLSCREEN;
+  params.show_state = ui::SHOW_STATE_MAXIMIZED;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   params.parent =
-      ash::Shell::GetContainer(
-          ash::Shell::GetPrimaryRootWindow(),
-          ash::internal::kShellWindowId_LockScreenContainer);
+      ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
+                               ash::kShellWindowId_LockScreenContainer);
 
   login_window_ = new views::Widget;
+  params.delegate = new LoginWidgetDelegate(login_window_);
   login_window_->Init(params);
+
   login_view_ = new WebUILoginView();
   login_view_->Init();
   if (login_view_->webui_visible())
@@ -1055,9 +1200,9 @@ void ShowLoginWizard(const std::string& first_screen_name) {
     system::InputDeviceSettings::Get()->SetTapToClick(
         prefs->GetBoolean(prefs::kOwnerTapToClickEnabled));
   }
-
-  ui::SetNaturalScroll(CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kNaturalScrollDefault));
+  system::InputDeviceSettings::Get()->SetNaturalScroll(
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kNaturalScrollDefault));
 
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
 
@@ -1096,6 +1241,13 @@ void ShowLoginWizard(const std::string& first_screen_name) {
     display_host->StartWizard(chromeos::WizardController::kNetworkScreenName,
                               scoped_ptr<base::DictionaryValue>());
     return;
+  }
+
+  if (StartupUtils::IsEulaAccepted()) {
+    DelayNetworkCall(
+        ServicesCustomizationDocument::GetInstance()
+            ->EnsureCustomizationAppliedClosure(),
+        base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS));
   }
 
   bool show_login_screen =

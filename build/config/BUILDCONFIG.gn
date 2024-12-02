@@ -42,10 +42,6 @@ declare_args() {
   # the default toolchain to 64-bit.
   force_win64 = false
 
-  # Set to true on the command line when invoked by GYP. Build files can key
-  # off of this to make any GYP-output-specific changes to the build.
-  is_gyp = false
-
   # Selects the desired build flavor. Official builds get additional
   # processing to prepare for release. Normally you will want to develop and
   # test with this flag off.
@@ -67,13 +63,6 @@ declare_args() {
 
   # Compile for Thread Sanitizer to find threading bugs.
   is_tsan = false
-
-  # When running in gyp-generating mode, this is the root of the build tree.
-  gyp_output_dir = "out"
-
-  # When running in gyp-generating mode, this flag indicates if the current GYP
-  # generator is xcode. Can only be true when building for iOS).
-  is_gyp_xcode_generator = false
 }
 
 # =============================================================================
@@ -200,11 +189,14 @@ if (is_win) {
 # muct match the pattern (so you need "*.cc" to match all .cc files, for
 # example).
 
+# DO NOT ADD MORE PATTERNS TO THIS LIST, see set_sources_assignment_filter call
+# below.
 windows_sources_filters = [
   "*_win.cc",
   "*_win.h",
   "*_win_unittest.cc",
   "*\bwin/*",
+  "*.rc",
 ]
 mac_sources_filters = [
   "*_mac.h",
@@ -240,8 +232,6 @@ linux_sources_filters = [
   "*_linux_unittest.h",
   "*_linux_unittest.cc",
   "*\blinux/*",
-  "*_x11.cc",
-  "*_x11.h",
 ]
 android_sources_filters = [
   "*_android.h",
@@ -257,6 +247,15 @@ posix_sources_filters = [
   "*_posix_unittest.cc",
   "*\bposix/*",
 ]
+chromeos_sources_filters = [
+  "*_chromeos.h",
+  "*_chromeos.cc",
+  "*_chromeos_unittest.h",
+  "*_chromeos_unittest.cc",
+  "*\bchromeos/*",
+]
+# DO NOT ADD MORE PATTERNS TO THIS LIST, see set_sources_assignment_filter call
+# below.
 
 # Construct the full list of sources we're using for this platform.
 sources_assignment_filter = []
@@ -280,8 +279,24 @@ if (!is_linux) {
 if (!is_android) {
   sources_assignment_filter += android_sources_filters
 }
+if (!is_chromeos) {
+  sources_assignment_filter += chromeos_sources_filters
+}
 
-# This is the actual set.
+# Actually save this list.
+#
+# DO NOT ADD MORE PATTERNS TO THIS LIST.
+#
+# These patterns are executed for every file in the source tree of every run.
+# Therefore, adding more patterns slows down the build for everybody. We should
+# only add automatic patterns for configurations affecting hundreds of files
+# across many projects in the tree.
+#
+# Therefore, we only add rules to this list corresponding to platforms on the
+# Chromium waterfall.  This is not for non-officially-supported platforms
+# (FreeBSD, etc.) toolkits, (X11, GTK, etc.), or features. For these cases,
+# write a conditional in the target to remove the file(s) from the list when
+# your platform/toolkit/feature doesn't apply.
 set_sources_assignment_filter(sources_assignment_filter)
 
 # =============================================================================
@@ -321,16 +336,28 @@ native_compiler_configs = [
   "//build/config/compiler:runtime_library",
 ]
 if (is_win) {
-  native_compiler_configs += [ "//build/config/win:sdk", ]
+  native_compiler_configs += [
+    "//build/config/win:lean_and_mean",
+    "//build/config/win:sdk",
+    "//build/config/win:unicode",
+  ]
 } else if (is_linux) {
   native_compiler_configs += [ "//build/config/linux:sdk", ]
 } else if (is_mac) {
   native_compiler_configs += [ "//build/config/mac:sdk", ]
 } else if (is_ios) {
   native_compiler_configs += [ "//build/config/ios:sdk", ]
+} else if (is_android) {
+  native_compiler_configs += [ "//build/config/android:sdk", ]
+}
+if (!is_win) {
+  native_compiler_configs += [ "//build/config/gcc:symbol_visibility_hidden" ]
 }
 if (is_clang) {
-  native_compiler_configs += [ "//build/config/clang:find_bad_constructs" ]
+  native_compiler_configs += [
+    "//build/config/clang:find_bad_constructs",
+    "//build/config/clang:extra_warnings",
+  ]
 }
 
 # Optimizations and debug checking.

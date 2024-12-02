@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
@@ -59,7 +60,8 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
 #endif
       settings_provider_(settings_provider.Pass()),
       system_observer_(this),
-      stats_collector_(message_center) {
+      stats_collector_(message_center),
+      google_now_stats_collector_(message_center) {
 #if defined(OS_WIN)
   first_run_pref_.Init(prefs::kMessageCenterShowedFirstRunBalloon, local_state);
 #endif
@@ -88,6 +90,14 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
 
 MessageCenterNotificationManager::~MessageCenterNotificationManager() {
   message_center_->RemoveObserver(this);
+}
+
+void MessageCenterNotificationManager::RegisterPrefs(
+    PrefRegistrySimple* registry) {
+  registry->RegisterBooleanPref(prefs::kMessageCenterShowedFirstRunBalloon,
+                                false);
+  registry->RegisterBooleanPref(prefs::kMessageCenterShowIcon, true);
+  registry->RegisterBooleanPref(prefs::kMessageCenterForcedOnTaskbar, false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -360,14 +370,7 @@ void MessageCenterNotificationManager::ImageDownloads::StartDownloadWithImage(
   if (url.is_empty())
     return;
 
-  content::RenderViewHost* host = notification.GetRenderViewHost();
-  if (!host) {
-    LOG(WARNING) << "Notification needs an image but has no RenderViewHost";
-    return;
-  }
-
-  content::WebContents* contents =
-      content::WebContents::FromRenderViewHost(host);
+  content::WebContents* contents = notification.GetWebContents();
   if (!contents) {
     LOG(WARNING) << "Notification needs an image but has no WebContents";
     return;

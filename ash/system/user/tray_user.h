@@ -6,7 +6,7 @@
 #define ASH_SYSTEM_USER_TRAY_USER_H_
 
 #include "ash/ash_export.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/system/user/user_observer.h"
 #include "base/compiler_specific.h"
@@ -22,11 +22,10 @@ class Label;
 }
 
 namespace ash {
-namespace internal {
 
 namespace tray {
-class UserView;
 class RoundedImageView;
+class UserView;
 }
 
 class ASH_EXPORT TrayUser : public SystemTrayItem,
@@ -97,7 +96,6 @@ class ASH_EXPORT TrayUser : public SystemTrayItem,
   DISALLOW_COPY_AND_ASSIGN(TrayUser);
 };
 
-}  // namespace internal
 }  // namespace ash
 
 #endif  // ASH_SYSTEM_USER_TRAY_USER_H_

@@ -87,6 +87,15 @@ void ToastContentsView::SetContents(MessageView* view,
     NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, false);
 }
 
+void ToastContentsView::UpdateContents(const Notification& notification,
+                                       bool a11y_feedback_for_updates) {
+  DCHECK_GT(child_count(), 0);
+  MessageView* message_view = static_cast<MessageView*>(child_at(0));
+  message_view->UpdateWithNotification(notification);
+  if (a11y_feedback_for_updates)
+    NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, false);
+}
+
 void ToastContentsView::RevealWithAnimation(gfx::Point origin) {
   // Place/move the toast widgets. Currently it stacks the widgets from the
   // right-bottom of the work area.
@@ -172,16 +181,16 @@ void ToastContentsView::OnBoundsAnimationEndedOrCancelled(
     const gfx::Animation* animation) {
   if (is_closing_ && closing_animation_ == animation && GetWidget()) {
     views::Widget* widget = GetWidget();
-#if defined(USE_AURA)
+
     // TODO(dewittj): This is a workaround to prevent a nasty bug where
     // closing a transparent widget doesn't actually remove the window,
     // causing entire areas of the screen to become unresponsive to clicks.
     // See crbug.com/243469
     widget->Hide();
-# if defined(OS_WIN)
+#if defined(OS_WIN)
     widget->SetOpacity(0xFF);
-# endif
 #endif
+
     widget->Close();
   }
 

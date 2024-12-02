@@ -32,21 +32,27 @@ class ScoredHistoryMatch : public history::HistoryMatch {
 
   ScoredHistoryMatch();  // Required by STL.
 
-  // Creates a new match with a raw score calculated for the history
-  // item given in |row| with recent visits as indicated in |visits|.
-  // First determines if the row qualifies by seeing if all of the
-  // terms in |terms_vector| occur in |row|. If so, calculates a raw score.
-  // This raw score allows the matches to be ordered and can be used to
-  // influence the final score calculated by the client of this index.
-  // If the row does not qualify the raw score will be 0. |bookmark_service| is
-  // used to determine if the match's URL is referenced by any bookmarks.
-  // |languages| is used to help parse/format the URL before looking for
-  // the terms.
+  // Creates a new match with a raw score calculated for the history item
+  // given in |row| with recent visits as indicated in |visits|.  First
+  // determines if the row qualifies by seeing if all of the terms in
+  // |terms_vector| occur in |row|.  If so, calculates a raw score.  This raw
+  // score is in part determined by whether the matches occur at word
+  // boundaries, the locations of which are stored in |word_starts|.  For some
+  // terms, it's appropriate to look for the word boundary within the term.
+  // For instance, the term ".net" should look for a word boundary at the "n".
+  // These offsets (".net" should have an offset of 1) come from
+  // |terms_to_word_starts_offsets|.  |bookmark_service| is used to determine
+  // if the match's URL is referenced by any bookmarks, which can also affect
+  // the raw score.  The raw score allows the matches to be ordered and can be
+  // used to influence the final score calculated by the client of this index.
+  // If the row does not qualify the raw score will be 0.  |languages| is used
+  // to help parse/format the URL before looking for the terms.
   ScoredHistoryMatch(const URLRow& row,
                      const VisitInfoVector& visits,
                      const std::string& languages,
                      const base::string16& lower_string,
                      const String16Vector& terms_vector,
+                     const WordStarts& terms_to_word_starts_offsets,
                      const RowWordStarts& word_starts,
                      const base::Time now,
                      BookmarkService* bookmark_service);
@@ -71,6 +77,7 @@ class ScoredHistoryMatch : public history::HistoryMatch {
   // end_pos == string::npos is treated as end_pos = length of string.
   static TermMatches FilterTermMatchesByWordStarts(
       const TermMatches& term_matches,
+      const WordStarts& terms_to_word_starts_offsets,
       const WordStarts& word_starts,
       size_t start_pos,
       size_t end_pos);
@@ -96,6 +103,7 @@ class ScoredHistoryMatch : public history::HistoryMatch {
   // instance, some mid-word matches are not given credit in scoring.)
   float GetTopicalityScore(const int num_terms,
                            const base::string16& cleaned_up_url,
+                           const WordStarts& terms_to_word_starts_offsets,
                            const RowWordStarts& word_starts);
 
   // Precalculates raw_term_score_to_topicality_score_, used in
@@ -173,16 +181,6 @@ class ScoredHistoryMatch : public history::HistoryMatch {
   // Untyped visits to bookmarked pages score this, compared to 1 for
   // untyped visits to non-bookmarked pages and 20 for typed visits.
   static int bookmark_value_;
-
-  // If true, we treat URLs with fewer visits than kMaxVisitsToScore as if
-  // they had kMaxVisitsToScore visits, just with the additional visits having
-  // zero score.  This means that a URL that has, for instance, one typed visit
-  // today and no other visits would have a score of 2.0 ( = 20 for the single
-  // typed visit / 10 visits total ) versus a score of 20.0 ( = 20 for the
-  // single typed visit / 1 visit total ).  As you can see, if this value is
-  // false, we're extremely optimistic that the visit frequency trends we
-  // observe with a tiny number of visits will continue.
-  static bool discount_frecency_when_few_visits_;
 
   // If true, we allow input terms to match in the TLD (e.g., .com).
   static bool allow_tld_matches_;

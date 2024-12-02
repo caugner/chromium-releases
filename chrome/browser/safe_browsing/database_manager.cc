@@ -68,6 +68,28 @@ bool IsExpectedThreat(
                                              threat_type);
 }
 
+// |list_id| is from |safe_browsing_util::ListType|.
+SBThreatType GetThreatTypeFromListId(int list_id) {
+  if (list_id == safe_browsing_util::PHISH) {
+    return SB_THREAT_TYPE_URL_PHISHING;
+  }
+
+  if (list_id == safe_browsing_util::MALWARE) {
+    return SB_THREAT_TYPE_URL_MALWARE;
+  }
+
+  if (list_id == safe_browsing_util::BINURL) {
+    return SB_THREAT_TYPE_BINARY_MALWARE_URL;
+  }
+
+  if (list_id == safe_browsing_util::EXTENSIONBLACKLIST) {
+    return SB_THREAT_TYPE_EXTENSION;
+  }
+
+  DVLOG(1) << "Unknown safe browsing list id " << list_id;
+  return SB_THREAT_TYPE_SAFE;
+}
+
 }  // namespace
 
 SafeBrowsingDatabaseManager::SafeBrowsingCheck::SafeBrowsingCheck(
@@ -200,8 +222,8 @@ SafeBrowsingDatabaseManager::~SafeBrowsingDatabaseManager() {
 
 bool SafeBrowsingDatabaseManager::CanCheckUrl(const GURL& url) const {
   return url.SchemeIs(content::kFtpScheme) ||
-         url.SchemeIs(content::kHttpScheme) ||
-         url.SchemeIs(content::kHttpsScheme);
+         url.SchemeIs(url::kHttpScheme) ||
+         url.SchemeIs(url::kHttpsScheme);
 }
 
 bool SafeBrowsingDatabaseManager::CheckDownloadUrl(
@@ -336,12 +358,11 @@ bool SafeBrowsingDatabaseManager::CheckBrowseUrl(const GURL& url,
     return false;
   }
 
-  std::string list;
   std::vector<SBPrefix> prefix_hits;
-  std::vector<SBFullHashResult> full_hits;
+  std::vector<SBFullHashResult> cached_hits;
 
   bool prefix_match =
-      database_->ContainsBrowseUrl(url, &list, &prefix_hits, &full_hits,
+      database_->ContainsBrowseUrl(url, &prefix_hits, &cached_hits,
           sb_service_->protocol_manager()->last_update());
 
   UMA_HISTOGRAM_TIMES("SB2.FilterCheck", base::TimeTicks::Now() - start);
@@ -356,9 +377,9 @@ bool SafeBrowsingDatabaseManager::CheckBrowseUrl(const GURL& url,
                                                    client,
                                                    safe_browsing_util::MALWARE,
                                                    expected_threats);
-  check->need_get_hash = full_hits.empty();
+  check->need_get_hash = cached_hits.empty();
   check->prefix_hits.swap(prefix_hits);
-  check->full_hits.swap(full_hits);
+  check->full_hits.swap(cached_hits);
   checks_.insert(check);
 
   BrowserThread::PostTask(
@@ -784,28 +805,6 @@ void SafeBrowsingDatabaseManager::DeleteDatabaseChunks(
   }
 }
 
-SBThreatType SafeBrowsingDatabaseManager::GetThreatTypeFromListname(
-    const std::string& list_name) {
-  if (safe_browsing_util::IsPhishingList(list_name)) {
-    return SB_THREAT_TYPE_URL_PHISHING;
-  }
-
-  if (safe_browsing_util::IsMalwareList(list_name)) {
-    return SB_THREAT_TYPE_URL_MALWARE;
-  }
-
-  if (safe_browsing_util::IsBadbinurlList(list_name)) {
-    return SB_THREAT_TYPE_BINARY_MALWARE_URL;
-  }
-
-  if (safe_browsing_util::IsExtensionList(list_name)) {
-    return SB_THREAT_TYPE_EXTENSION;
-  }
-
-  DVLOG(1) << "Unknown safe browsing list " << list_name;
-  return SB_THREAT_TYPE_SAFE;
-}
-
 void SafeBrowsingDatabaseManager::DatabaseUpdateFinished(
     bool update_succeeded) {
   DCHECK_EQ(base::MessageLoop::current(),
@@ -891,7 +890,7 @@ bool SafeBrowsingDatabaseManager::HandleOneCheck(
     if (index == -1)
       continue;
     SBThreatType threat =
-        GetThreatTypeFromListname(full_hashes[index].list_name);
+        GetThreatTypeFromListId(full_hashes[index].list_id);
     if (threat != SB_THREAT_TYPE_SAFE &&
         IsExpectedThreat(threat, check->expected_threats)) {
       check->url_results[i] = threat;
@@ -905,7 +904,7 @@ bool SafeBrowsingDatabaseManager::HandleOneCheck(
     if (index == -1)
       continue;
     SBThreatType threat =
-        GetThreatTypeFromListname(full_hashes[index].list_name);
+        GetThreatTypeFromListId(full_hashes[index].list_id);
     if (threat != SB_THREAT_TYPE_SAFE &&
         IsExpectedThreat(threat, check->expected_threats)) {
       check->full_hash_results[i] = threat;

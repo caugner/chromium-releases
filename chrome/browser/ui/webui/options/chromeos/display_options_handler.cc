@@ -6,9 +6,9 @@
 
 #include <string>
 
+#include "ash/display/display_configurator_animation.h"
 #include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
-#include "ash/display/output_configurator_animation.h"
 #include "ash/display/resolution_notification_controller.h"
 #include "ash/shell.h"
 #include "base/bind.h"
@@ -17,6 +17,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/display/display_preferences.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "grit/ash_strings.h"
 #include "grit/generated_resources.h"
@@ -26,7 +27,7 @@
 #include "ui/gfx/screen.h"
 #include "ui/gfx/size_conversions.h"
 
-using ash::internal::DisplayManager;
+using ash::DisplayManager;
 
 namespace chromeos {
 namespace options {
@@ -53,8 +54,7 @@ int64 GetDisplayId(const base::ListValue* args) {
   return display_id;
 }
 
-bool CompareDisplayMode(ash::internal::DisplayMode d1,
-                        ash::internal::DisplayMode d2) {
+bool CompareDisplayMode(ash::DisplayMode d1, ash::DisplayMode d2) {
   if (d1.size.GetArea() == d2.size.GetArea())
     return d1.refresh_rate < d2.refresh_rate;
   return d1.size.GetArea() < d2.size.GetArea();
@@ -202,7 +202,7 @@ void DisplayOptionsHandler::SendDisplayInfo(
   base::ListValue js_displays;
   for (size_t i = 0; i < displays.size(); ++i) {
     const gfx::Display& display = displays[i];
-    const ash::internal::DisplayInfo& display_info =
+    const ash::DisplayInfo& display_info =
         display_manager->GetDisplayInfo(display.id());
     const gfx::Rect& bounds = display.bounds();
     base::DictionaryValue* js_display = new base::DictionaryValue();
@@ -217,7 +217,7 @@ void DisplayOptionsHandler::SendDisplayInfo(
     js_display->SetBoolean("isInternal", display.IsInternal());
     js_display->SetInteger("orientation",
                            static_cast<int>(display_info.rotation()));
-    std::vector<ash::internal::DisplayMode> display_modes;
+    std::vector<ash::DisplayMode> display_modes;
     std::vector<float> ui_scales;
     if (display.IsInternal()) {
       ui_scales = DisplayManager::GetScalesForDisplay(display_info);
@@ -232,7 +232,7 @@ void DisplayOptionsHandler::SendDisplayInfo(
       for (size_t i = 0; i < ui_scales.size(); ++i) {
         gfx::SizeF new_size = base_size;
         new_size.Scale(ui_scales[i]);
-        display_modes.push_back(ash::internal::DisplayMode(
+        display_modes.push_back(ash::DisplayMode(
             gfx::ToFlooredSize(new_size), -1.0f, false, false));
       }
     } else {
@@ -243,7 +243,6 @@ void DisplayOptionsHandler::SendDisplayInfo(
 
     base::ListValue* js_resolutions = new base::ListValue();
     gfx::Size current_size = display_info.bounds_in_native().size();
-    gfx::Insets current_overscan = display_info.GetOverscanInsetsInPixel();
     for (size_t i = 0; i < display_modes.size(); ++i) {
       base::DictionaryValue* resolution_info = new base::DictionaryValue();
       gfx::Size resolution = display_modes[i].size;
@@ -259,8 +258,6 @@ void DisplayOptionsHandler::SendDisplayInfo(
         if (i == display_modes.size() - 1)
           resolution_info->SetBoolean("isBest", true);
         resolution_info->SetBoolean("selected", (resolution == current_size));
-        resolution.Enlarge(
-            -current_overscan.width(), -current_overscan.height());
       }
       resolution_info->SetInteger("width", resolution.width());
       resolution_info->SetInteger("height", resolution.height());
@@ -303,14 +300,14 @@ void DisplayOptionsHandler::SendDisplayInfo(
 
 void DisplayOptionsHandler::OnFadeOutForMirroringFinished(bool is_mirroring) {
   ash::Shell::GetInstance()->display_manager()->SetMirrorMode(is_mirroring);
-  // Not necessary to start fade-in animation.  OutputConfigurator will do that.
+  // Not necessary to start fade-in animation. DisplayConfigurator will do that.
 }
 
 void DisplayOptionsHandler::OnFadeOutForDisplayLayoutFinished(
     int position, int offset) {
   SetCurrentDisplayLayout(
       ash::DisplayLayout::FromInts(position, offset));
-  ash::Shell::GetInstance()->output_configurator_animation()->
+  ash::Shell::GetInstance()->display_configurator_animation()->
       StartFadeInAnimation();
 }
 
@@ -321,9 +318,11 @@ void DisplayOptionsHandler::HandleDisplayInfo(
 
 void DisplayOptionsHandler::HandleMirroring(const base::ListValue* args) {
   DCHECK(!args->empty());
+  content::RecordAction(
+      base::UserMetricsAction("Options_DisplayToggleMirroring"));
   bool is_mirroring = false;
   args->GetBoolean(0, &is_mirroring);
-  ash::Shell::GetInstance()->output_configurator_animation()->
+  ash::Shell::GetInstance()->display_configurator_animation()->
       StartFadeOutAnimation(base::Bind(
           &DisplayOptionsHandler::OnFadeOutForMirroringFinished,
           base::Unretained(this),
@@ -336,6 +335,7 @@ void DisplayOptionsHandler::HandleSetPrimary(const base::ListValue* args) {
   if (display_id == gfx::Display::kInvalidDisplayID)
     return;
 
+  content::RecordAction(base::UserMetricsAction("Options_DisplaySetPrimary"));
   ash::Shell::GetInstance()->display_controller()->
       SetPrimaryDisplayId(display_id);
 }
@@ -350,7 +350,8 @@ void DisplayOptionsHandler::HandleDisplayLayout(const base::ListValue* args) {
   }
   DCHECK_LE(ash::DisplayLayout::TOP, layout);
   DCHECK_GE(ash::DisplayLayout::LEFT, layout);
-  ash::Shell::GetInstance()->output_configurator_animation()->
+  content::RecordAction(base::UserMetricsAction("Options_DisplayRearrange"));
+  ash::Shell::GetInstance()->display_configurator_animation()->
       StartFadeOutAnimation(base::Bind(
           &DisplayOptionsHandler::OnFadeOutForDisplayLayoutFinished,
           base::Unretained(this),
@@ -380,6 +381,8 @@ void DisplayOptionsHandler::HandleSetResolution(const base::ListValue* args) {
   if (display_id == gfx::Display::kInvalidDisplayID)
     return;
 
+  content::RecordAction(
+      base::UserMetricsAction("Options_DisplaySetResolution"));
   double width = 0.0f;
   double height = 0.0f;
   if (!args->GetDouble(1, &width) || width == 0.0f) {
@@ -391,16 +394,14 @@ void DisplayOptionsHandler::HandleSetResolution(const base::ListValue* args) {
     return;
   }
 
-  const ash::internal::DisplayInfo& display_info =
+  const ash::DisplayInfo& display_info =
       GetDisplayManager()->GetDisplayInfo(display_id);
-  gfx::Insets current_overscan = display_info.GetOverscanInsetsInPixel();
   gfx::Size new_resolution = gfx::ToFlooredSize(gfx::SizeF(width, height));
-  new_resolution.Enlarge(current_overscan.width(), current_overscan.height());
   gfx::Size old_resolution = display_info.bounds_in_native().size();
   bool has_new_resolution = false;
   bool has_old_resolution = false;
   for (size_t i = 0; i < display_info.display_modes().size(); ++i) {
-    ash::internal::DisplayMode display_mode = display_info.display_modes()[i];
+    ash::DisplayMode display_mode = display_info.display_modes()[i];
     if (display_mode.size == new_resolution)
       has_new_resolution = true;
     if (display_mode.size == old_resolution)
@@ -445,6 +446,8 @@ void DisplayOptionsHandler::HandleSetOrientation(const base::ListValue* args) {
   else if (rotation_value != "0")
     LOG(ERROR) << "Invalid rotation: " << rotation_value << " Falls back to 0";
 
+  content::RecordAction(
+      base::UserMetricsAction("Options_DisplaySetOrientation"));
   GetDisplayManager()->SetDisplayRotation(display_id, new_rotation);
 }
 

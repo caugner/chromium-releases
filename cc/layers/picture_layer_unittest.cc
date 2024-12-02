@@ -20,9 +20,11 @@ namespace {
 
 class MockContentLayerClient : public ContentLayerClient {
  public:
-  virtual void PaintContents(SkCanvas* canvas,
-                             const gfx::Rect& clip,
-                             gfx::RectF* opaque) OVERRIDE {}
+  virtual void PaintContents(
+      SkCanvas* canvas,
+      const gfx::Rect& clip,
+      gfx::RectF* opaque,
+      ContentLayerClient::GraphicsContextStatus gc_status) OVERRIDE {}
   virtual void DidChangeLayerCanUseLCDText() OVERRIDE {}
   virtual bool FillsBoundsCompletely() const OVERRIDE {
     return false;
@@ -62,9 +64,39 @@ TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
     layer->PushPropertiesTo(layer_impl.get());
     EXPECT_FALSE(layer_impl->CanHaveTilings());
     EXPECT_TRUE(layer_impl->bounds() == gfx::Size(0, 0));
-    EXPECT_TRUE(layer_impl->pile()->size() == gfx::Size(0, 0));
+    EXPECT_TRUE(layer_impl->pile()->tiling_rect() == gfx::Rect());
     EXPECT_FALSE(layer_impl->pile()->HasRecordings());
   }
+}
+
+TEST(PictureLayerTest, SuitableForGpuRasterization) {
+  MockContentLayerClient client;
+  scoped_refptr<PictureLayer> layer = PictureLayer::Create(&client);
+  PicturePile* pile = layer->GetPicturePileForTesting();
+
+  // Layer is suitable for gpu rasterization by default.
+  EXPECT_TRUE(pile->is_suitable_for_gpu_rasterization());
+  EXPECT_TRUE(layer->IsSuitableForGpuRasterization());
+
+  // Veto gpu rasterization.
+  pile->SetUnsuitableForGpuRasterizationForTesting();
+  EXPECT_FALSE(pile->is_suitable_for_gpu_rasterization());
+  EXPECT_FALSE(layer->IsSuitableForGpuRasterization());
+}
+
+TEST(PictureLayerTest, RecordingModes) {
+  MockContentLayerClient client;
+  scoped_refptr<PictureLayer> layer = PictureLayer::Create(&client);
+
+  LayerTreeSettings settings;
+  scoped_ptr<FakeLayerTreeHost> host = FakeLayerTreeHost::Create(settings);
+  host->SetRootLayer(layer);
+  EXPECT_EQ(Picture::RECORD_NORMALLY, layer->RecordingMode());
+
+  settings.recording_mode = LayerTreeSettings::RecordWithSkRecord;
+  host = FakeLayerTreeHost::Create(settings);
+  host->SetRootLayer(layer);
+  EXPECT_EQ(Picture::RECORD_WITH_SKRECORD, layer->RecordingMode());
 }
 
 }  // namespace

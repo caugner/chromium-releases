@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_agent_service_provider.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
@@ -18,9 +19,7 @@
 #include "device/bluetooth/bluetooth_device.h"
 
 namespace device {
-
-class BluetoothAdapterFactory;
-
+class BluetoothSocketThread;
 }  // namespace device
 
 namespace chromeos {
@@ -33,12 +32,14 @@ class BluetoothPairingChromeOS;
 // Chrome OS platform.
 class BluetoothAdapterChromeOS
     : public device::BluetoothAdapter,
-      private chromeos::BluetoothAdapterClient::Observer,
-      private chromeos::BluetoothDeviceClient::Observer,
-      private chromeos::BluetoothInputClient::Observer,
-      private chromeos::BluetoothAgentServiceProvider::Delegate {
+      public chromeos::BluetoothAdapterClient::Observer,
+      public chromeos::BluetoothDeviceClient::Observer,
+      public chromeos::BluetoothInputClient::Observer,
+      public chromeos::BluetoothAgentServiceProvider::Delegate {
  public:
-  // BluetoothAdapter override
+  static base::WeakPtr<BluetoothAdapter> CreateAdapter();
+
+  // BluetoothAdapter:
   virtual void AddObserver(
       device::BluetoothAdapter::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(
@@ -67,12 +68,11 @@ class BluetoothAdapterChromeOS
       const ErrorCallback& error_callback) OVERRIDE;
 
  protected:
-  // BluetoothAdapter override
+  // BluetoothAdapter:
   virtual void RemovePairingDelegateInternal(
       device::BluetoothDevice::PairingDelegate* pairing_delegate) OVERRIDE;
 
  private:
-  friend class device::BluetoothAdapterFactory;
   friend class BluetoothChromeOSTest;
   friend class BluetoothDeviceChromeOS;
   friend class BluetoothProfileChromeOS;
@@ -105,7 +105,7 @@ class BluetoothAdapterChromeOS
                                     const std::string& property_name) OVERRIDE;
 
   // BluetoothAgentServiceProvider::Delegate override.
-  virtual void Release() OVERRIDE;
+  virtual void Released() OVERRIDE;
   virtual void RequestPinCode(const dbus::ObjectPath& device_path,
                               const PinCodeCallback& callback) OVERRIDE;
   virtual void DisplayPinCode(const dbus::ObjectPath& device_path,
@@ -181,7 +181,7 @@ class BluetoothAdapterChromeOS
                                  const ErrorCallback& error_callback,
                                  bool success);
 
-  // BluetoothAdapter override.
+  // BluetoothAdapter:
   virtual void AddDiscoverySession(
       const base::Closure& callback,
       const ErrorCallback& error_callback) OVERRIDE;
@@ -234,6 +234,10 @@ class BluetoothAdapterChromeOS
   // Instance of the D-Bus agent object used for pairing, initialized with
   // our own class as its delegate.
   scoped_ptr<BluetoothAgentServiceProvider> agent_;
+
+  // UI thread task runner and socket thread object used to create sockets.
+  scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
+  scoped_refptr<device::BluetoothSocketThread> socket_thread_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

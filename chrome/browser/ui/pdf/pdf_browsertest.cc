@@ -19,7 +19,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_observer.h"
-#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
@@ -96,8 +95,11 @@ class PDFBrowserTest : public InProcessBrowserTest,
     DCHECK(web_contents);
 
     content::RenderWidgetHost* rwh = web_contents->GetRenderViewHost();
-    rwh->GetSnapshotFromRenderer(gfx::Rect(), base::Bind(
-        &PDFBrowserTest::GetSnapshotFromRendererCallback, this));
+    rwh->CopyFromBackingStore(
+        gfx::Rect(),
+        gfx::Size(),
+        base::Bind(&PDFBrowserTest::CopyFromBackingStoreCallback, this),
+        SkBitmap::kARGB_8888_Config);
 
     content::RunMessageLoop();
 
@@ -127,8 +129,7 @@ class PDFBrowserTest : public InProcessBrowserTest,
   }
 
  private:
-  void GetSnapshotFromRendererCallback(bool success,
-                                       const SkBitmap& bitmap) {
+  void CopyFromBackingStoreCallback(bool success, const SkBitmap& bitmap) {
     base::MessageLoopForUI::current()->Quit();
     ASSERT_EQ(success, true);
     base::FilePath reference = ui_test_utils::GetTestFilePath(
@@ -287,8 +288,7 @@ IN_PROC_BROWSER_TEST_F(PDFBrowserTest, MAYBE_FindAndCopy) {
   // Reset the clipboard first.
   clipboard->Clear(ui::CLIPBOARD_TYPE_COPY_PASTE);
 
-  browser()->tab_strip_model()->GetActiveWebContents()->
-      GetMainFrame()->Copy();
+  browser()->tab_strip_model()->GetActiveWebContents()->Copy();
   ASSERT_NO_FATAL_FAILURE(WaitForResponse());
 
   std::string text;

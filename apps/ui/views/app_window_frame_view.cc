@@ -15,6 +15,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
 #include "ui/views/controls/button/image_button.h"
@@ -23,14 +24,12 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
-#if defined(USE_AURA)
-#include "ui/aura/env.h"
-#include "ui/aura/window.h"
-#endif
-
 namespace {
-// Height of the chrome-style caption, in pixels.
+
+const int kDefaultResizeInsideBoundsSize = 5;
+const int kDefaultResizeAreaCornerSize = 16;
 const int kCaptionHeight = 25;
+
 }  // namespace
 
 namespace apps {
@@ -38,36 +37,29 @@ namespace apps {
 const char AppWindowFrameView::kViewClassName[] =
     "browser/ui/views/extensions/AppWindowFrameView";
 
-AppWindowFrameView::AppWindowFrameView()
-    : widget_(NULL),
-      window_(NULL),
+AppWindowFrameView::AppWindowFrameView(views::Widget* widget,
+                                       NativeAppWindow* window,
+                                       bool draw_frame,
+                                       const SkColor& active_frame_color,
+                                       const SkColor& inactive_frame_color)
+    : widget_(widget),
+      window_(window),
+      draw_frame_(draw_frame),
+      active_frame_color_(active_frame_color),
+      inactive_frame_color_(inactive_frame_color),
       close_button_(NULL),
       maximize_button_(NULL),
       restore_button_(NULL),
       minimize_button_(NULL),
-      resize_inside_bounds_size_(0),
+      resize_inside_bounds_size_(kDefaultResizeInsideBoundsSize),
       resize_outside_bounds_size_(0),
-      resize_area_corner_size_(0) {}
+      resize_area_corner_size_(kDefaultResizeAreaCornerSize) {
+}
 
 AppWindowFrameView::~AppWindowFrameView() {}
 
-void AppWindowFrameView::Init(views::Widget* widget,
-                              NativeAppWindow* window,
-                              bool draw_frame,
-                              const SkColor& frame_color,
-                              int resize_inside_bounds_size,
-                              int resize_outside_bounds_size,
-                              int resize_outside_scale_for_touch,
-                              int resize_area_corner_size) {
-  widget_ = widget;
-  window_ = window;
-  draw_frame_ = draw_frame;
-  frame_color_ = frame_color;
-  resize_inside_bounds_size_ = resize_inside_bounds_size;
-  resize_outside_bounds_size_ = resize_outside_bounds_size;
-  resize_area_corner_size_ = resize_area_corner_size;
-
-  if (draw_frame) {
+void AppWindowFrameView::Init() {
+  if (draw_frame_) {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button_ = new views::ImageButton(this);
     close_button_->SetImage(
@@ -82,10 +74,8 @@ void AppWindowFrameView::Init(views::Widget* widget,
     close_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_APP_ACCNAME_CLOSE));
     AddChildView(close_button_);
+    // STATE_NORMAL images are set in SetButtonImagesForFrame, not here.
     maximize_button_ = new views::ImageButton(this);
-    maximize_button_->SetImage(
-        views::CustomButton::STATE_NORMAL,
-        rb.GetNativeImageNamed(IDR_APP_WINDOW_MAXIMIZE).ToImageSkia());
     maximize_button_->SetImage(
         views::CustomButton::STATE_HOVERED,
         rb.GetNativeImageNamed(IDR_APP_WINDOW_MAXIMIZE_H).ToImageSkia());
@@ -100,9 +90,6 @@ void AppWindowFrameView::Init(views::Widget* widget,
     AddChildView(maximize_button_);
     restore_button_ = new views::ImageButton(this);
     restore_button_->SetImage(
-        views::CustomButton::STATE_NORMAL,
-        rb.GetNativeImageNamed(IDR_APP_WINDOW_RESTORE).ToImageSkia());
-    restore_button_->SetImage(
         views::CustomButton::STATE_HOVERED,
         rb.GetNativeImageNamed(IDR_APP_WINDOW_RESTORE_H).ToImageSkia());
     restore_button_->SetImage(
@@ -113,9 +100,6 @@ void AppWindowFrameView::Init(views::Widget* widget,
     AddChildView(restore_button_);
     minimize_button_ = new views::ImageButton(this);
     minimize_button_->SetImage(
-        views::CustomButton::STATE_NORMAL,
-        rb.GetNativeImageNamed(IDR_APP_WINDOW_MINIMIZE).ToImageSkia());
-    minimize_button_->SetImage(
         views::CustomButton::STATE_HOVERED,
         rb.GetNativeImageNamed(IDR_APP_WINDOW_MINIMIZE_H).ToImageSkia());
     minimize_button_->SetImage(
@@ -124,7 +108,17 @@ void AppWindowFrameView::Init(views::Widget* widget,
     minimize_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_APP_ACCNAME_MINIMIZE));
     AddChildView(minimize_button_);
+
+    SetButtonImagesForFrame();
   }
+}
+
+void AppWindowFrameView::SetResizeSizes(int resize_inside_bounds_size,
+                                        int resize_outside_bounds_size,
+                                        int resize_area_corner_size) {
+  resize_inside_bounds_size_ = resize_inside_bounds_size;
+  resize_outside_bounds_size_ = resize_outside_bounds_size;
+  resize_area_corner_size_ = resize_area_corner_size;
 }
 
 // views::NonClientFrameView implementation.
@@ -235,8 +229,6 @@ void AppWindowFrameView::GetWindowMask(const gfx::Size& size,
   // We got nothing to say about no window mask.
 }
 
-// views::View implementation.
-
 gfx::Size AppWindowFrameView::GetPreferredSize() {
   gfx::Size pref = widget_->client_view()->GetPreferredSize();
   gfx::Rect bounds(0, 0, pref.width(), pref.height());
@@ -307,11 +299,12 @@ void AppWindowFrameView::OnPaint(gfx::Canvas* canvas) {
         rb.GetNativeImageNamed(IDR_APP_WINDOW_CLOSE_U).ToImageSkia());
   }
 
-  // TODO(jeremya): different look for inactive?
+  SetButtonImagesForFrame();
+  // TODO(benwells): different look for inactive by default.
   SkPaint paint;
   paint.setAntiAlias(false);
   paint.setStyle(SkPaint::kFill_Style);
-  paint.setColor(frame_color_);
+  paint.setColor(CurrentFrameColor());
   gfx::Path path;
   path.moveTo(0, 0);
   path.lineTo(width(), 0);
@@ -353,8 +346,6 @@ gfx::Size AppWindowFrameView::GetMaximumSize() {
   return max_size;
 }
 
-// views::ButtonListener implementation.
-
 void AppWindowFrameView::ButtonPressed(views::Button* sender,
                                        const ui::Event& event) {
   DCHECK(draw_frame_);
@@ -366,6 +357,44 @@ void AppWindowFrameView::ButtonPressed(views::Button* sender,
     widget_->Restore();
   else if (sender == minimize_button_)
     widget_->Minimize();
+}
+
+SkColor AppWindowFrameView::CurrentFrameColor() {
+  return widget_->IsActive() ? active_frame_color_ : inactive_frame_color_;
+}
+
+void AppWindowFrameView::SetButtonImagesForFrame() {
+  DCHECK(draw_frame_);
+
+  // If the frame is dark, we should use the light images so they have
+  // some contrast.
+  unsigned char frame_luma =
+      color_utils::GetLuminanceForColor(CurrentFrameColor());
+  const unsigned char kLuminanceThreshold = 100;
+  bool use_light = frame_luma < kLuminanceThreshold;
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  if (use_light) {
+    maximize_button_->SetImage(
+        views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_MAXIMIZE_L).ToImageSkia());
+    restore_button_->SetImage(
+        views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_RESTORE_L).ToImageSkia());
+    minimize_button_->SetImage(
+        views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_MINIMIZE_L).ToImageSkia());
+  } else {
+    maximize_button_->SetImage(
+        views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_MAXIMIZE).ToImageSkia());
+    restore_button_->SetImage(
+        views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_RESTORE).ToImageSkia());
+    minimize_button_->SetImage(
+        views::CustomButton::STATE_NORMAL,
+        rb.GetNativeImageNamed(IDR_APP_WINDOW_MINIMIZE).ToImageSkia());
+  }
 }
 
 }  // namespace apps

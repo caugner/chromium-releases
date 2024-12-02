@@ -35,9 +35,9 @@ TEST(USBDevicePermissionTest, PermissionDataOrder) {
 
 TEST(USBDevicePermissionTest, MAYBE_PermissionMessage) {
   const char* const kMessages[] = {
-      "Access the USB device PVR Mass Storage from HUMAX Co., Ltd..",
-      "Access the USB device from HUMAX Co., Ltd..",
-      "Access the USB device.",
+      "Access the USB device PVR Mass Storage from HUMAX Co., Ltd.",
+      "Access the USB device from HUMAX Co., Ltd.",
+      "Access the USB device",
   };
 
   // Prepare data set
@@ -51,7 +51,7 @@ TEST(USBDevicePermissionTest, MAYBE_PermissionMessage) {
 
   UsbDevicePermission permission(
       PermissionsInfo::GetInstance()->GetByID(APIPermission::kUsbDevice));
-  ASSERT_TRUE(permission.FromValue(permission_list.get(), NULL));
+  ASSERT_TRUE(permission.FromValue(permission_list.get(), NULL, NULL));
 
   PermissionMessages messages = permission.GetMessages();
   ASSERT_EQ(3U, messages.size());

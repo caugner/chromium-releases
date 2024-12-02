@@ -11,7 +11,7 @@
 
 using namespace std;
 
-namespace WebTestRunner {
+namespace content {
 
 WebPermissions::WebPermissions()
     : m_delegate(0)
@@ -23,7 +23,7 @@ WebPermissions::~WebPermissions()
 {
 }
 
-bool WebPermissions::allowImage(blink::WebFrame*, bool enabledPerSettings, const blink::WebURL& imageURL)
+bool WebPermissions::allowImage(bool enabledPerSettings, const blink::WebURL& imageURL)
 {
     bool allowed = enabledPerSettings && m_imagesAllowed;
     if (m_dumpCallbacks && m_delegate)
@@ -31,7 +31,7 @@ bool WebPermissions::allowImage(blink::WebFrame*, bool enabledPerSettings, const
     return allowed;
 }
 
-bool WebPermissions::allowScriptFromSource(blink::WebFrame*, bool enabledPerSettings, const blink::WebURL& scriptURL)
+bool WebPermissions::allowScriptFromSource(bool enabledPerSettings, const blink::WebURL& scriptURL)
 {
     bool allowed = enabledPerSettings && m_scriptsAllowed;
     if (m_dumpCallbacks && m_delegate)
@@ -39,22 +39,22 @@ bool WebPermissions::allowScriptFromSource(blink::WebFrame*, bool enabledPerSett
     return allowed;
 }
 
-bool WebPermissions::allowStorage(blink::WebFrame*, bool)
+bool WebPermissions::allowStorage(bool)
 {
     return m_storageAllowed;
 }
 
-bool WebPermissions::allowPlugins(blink::WebFrame*, bool enabledPerSettings)
+bool WebPermissions::allowPlugins(bool enabledPerSettings)
 {
     return enabledPerSettings && m_pluginsAllowed;
 }
 
-bool WebPermissions::allowDisplayingInsecureContent(blink::WebFrame*, bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&)
+bool WebPermissions::allowDisplayingInsecureContent(bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&)
 {
     return enabledPerSettings || m_displayingInsecureContentAllowed;
 }
 
-bool WebPermissions::allowRunningInsecureContent(blink::WebFrame*, bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&)
+bool WebPermissions::allowRunningInsecureContent(bool enabledPerSettings, const blink::WebSecurityOrigin&, const blink::WebURL&)
 {
     return enabledPerSettings || m_runningInsecureContentAllowed;
 }
@@ -110,4 +110,4 @@ void WebPermissions::reset()
     m_runningInsecureContentAllowed = false;
 }
 
-}
+}  // namespace content

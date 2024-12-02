@@ -123,8 +123,8 @@ class LocalRtcpReceiverFeedback : public RtcpReceiverFeedback {
       switch (it->frame_status) {
         case transport::kRtcpSenderFrameStatusDroppedByFlowControl:
           // A frame that have been dropped by the flow control would have
-          // kVideoFrameCaptured as its last event in the log.
-          log_event = kVideoFrameCaptured;
+          // kVideoFrameCaptureBegin as its last event in the log.
+          log_event = kVideoFrameCaptureBegin;
           break;
         case transport::kRtcpSenderFrameStatusDroppedByEncoder:
           // A frame that have been dropped by the encoder would have
@@ -169,8 +169,8 @@ Rtcp::Rtcp(scoped_refptr<CastEnvironment> cast_environment,
       remote_ssrc_(remote_ssrc),
       c_name_(c_name),
       rtp_receiver_statistics_(rtp_receiver_statistics),
-      receiver_feedback_(new LocalRtcpReceiverFeedback(this, cast_environment)),
       rtt_feedback_(new LocalRtcpRttFeedback(this)),
+      receiver_feedback_(new LocalRtcpReceiverFeedback(this, cast_environment)),
       rtcp_sender_(new RtcpSender(cast_environment, paced_packet_sender,
                                   local_ssrc, c_name)),
       last_report_received_(0),
@@ -230,7 +230,7 @@ void Rtcp::IncomingRtcpPacket(const uint8* rtcp_buffer, size_t length) {
 
 void Rtcp::SendRtcpFromRtpReceiver(
     const RtcpCastMessage* cast_message,
-    const ReceiverRtcpEventSubscriber* event_subscriber) {
+    const ReceiverRtcpEventSubscriber::RtcpEventMultiMap* rtcp_events) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
   uint32 packet_type_flags = 0;
 
@@ -247,7 +247,7 @@ void Rtcp::SendRtcpFromRtpReceiver(
   if (cast_message) {
     packet_type_flags |= transport::kRtcpCast;
   }
-  if (event_subscriber) {
+  if (rtcp_events) {
     packet_type_flags |= transport::kRtcpReceiverLog;
   }
   if (rtcp_mode_ == kRtcpCompound || now >= next_time_to_send_rtcp_) {
@@ -259,10 +259,6 @@ void Rtcp::SendRtcpFromRtpReceiver(
       rtp_receiver_statistics_->GetStatistics(
           &report_block.fraction_lost, &report_block.cumulative_lost,
           &report_block.extended_high_sequence_number, &report_block.jitter);
-      cast_environment_->Logging()->InsertGenericEvent(now, kJitterMs,
-                                                       report_block.jitter);
-      cast_environment_->Logging()->InsertGenericEvent(
-          now, kPacketLoss, report_block.fraction_lost);
     }
 
     report_block.last_sr = last_report_received_;
@@ -279,9 +275,12 @@ void Rtcp::SendRtcpFromRtpReceiver(
     }
     UpdateNextTimeToSendRtcp();
   }
-  rtcp_sender_->SendRtcpFromRtpReceiver(
-      packet_type_flags, &report_block, &rrtr, cast_message, event_subscriber,
-      target_delay_ms_);
+  rtcp_sender_->SendRtcpFromRtpReceiver(packet_type_flags,
+                                        &report_block,
+                                        &rrtr,
+                                        cast_message,
+                                        rtcp_events,
+                                        target_delay_ms_);
 }
 
 void Rtcp::SendRtcpFromRtpSender(
@@ -445,10 +444,6 @@ bool Rtcp::Rtt(base::TimeDelta* rtt, base::TimeDelta* avg_rtt,
   DCHECK(max_rtt) << "Invalid argument";
 
   if (number_of_rtt_in_avg_ == 0) return false;
-
-  base::TimeTicks now = cast_environment_->Clock()->NowTicks();
-  cast_environment_->Logging()->InsertGenericEvent(now, kRttMs,
-                                                   rtt->InMilliseconds());
 
   *rtt = rtt_;
   *avg_rtt = base::TimeDelta::FromMilliseconds(avg_rtt_ms_);

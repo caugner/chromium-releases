@@ -28,10 +28,8 @@ namespace {
 
 #if defined(OS_WIN)
 // crbug.com/98721
-#  define MAYBE_Crash DISABLED_Crash
 #  define MAYBE_SysconfNprocessorsOnln DISABLED_SysconfNprocessorsOnln
 #else
-#  define MAYBE_Crash Crash
 #  define MAYBE_SysconfNprocessorsOnln SysconfNprocessorsOnln
 #endif
 
@@ -39,15 +37,12 @@ NACL_BROWSER_TEST_F(NaClBrowserTest, SimpleLoad, {
   RunLoadTest(FILE_PATH_LITERAL("nacl_load_test.html"));
 })
 
-// ASan does not work with libc-free context, so disable the test.
-#if defined(OS_LINUX) && !defined(ADDRESS_SANITIZER)
-#  define MAYBE_NonSfiMessaging NonSfiMessaging
-#else
-#  define MAYBE_NonSfiMessaging DISABLED_NonSfiMessaging
-#endif
-
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestNonSfiMode, MAYBE_NonSfiMessaging) {
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNonSfiMode, MAYBE_NONSFI(Messaging)) {
   RunLoadTest(FILE_PATH_LITERAL("libc_free.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNonSfiMode, MAYBE_NONSFI(Irt)) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_test.html"));
 }
 
 NACL_BROWSER_TEST_F(NaClBrowserTest, ExitStatus0, {
@@ -103,6 +98,15 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, BadNative) {
 }
 #endif
 
+#if defined(OS_WIN)
+// crbug.com/98721
+#  define MAYBE_Crash DISABLED_Crash
+#elif defined(OS_LINUX)
+// crbug.com/366334
+#  define MAYBE_Crash DISABLED_Crash
+#else
+#  define MAYBE_Crash Crash
+#endif
 NACL_BROWSER_TEST_F(NaClBrowserTest, MAYBE_Crash, {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("ppapi_crash.html"));
 })
@@ -111,19 +115,32 @@ NACL_BROWSER_TEST_F(NaClBrowserTest, MAYBE_Crash, {
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, ManifestFile) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_manifest_file_test.html"));
 }
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc, ManifestFile) {
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc, MAYBE_GLIBC(ManifestFile)) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("pm_manifest_file_test.html"));
 }
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, PreInitManifestFile) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL(
       "pm_pre_init_manifest_file_test.html"));
 }
-IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc, PreInitManifestFile) {
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestGLibc,
+                       MAYBE_GLIBC(PreInitManifestFile)) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL(
       "pm_pre_init_manifest_file_test.html"));
 }
 IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, IrtManifestFile) {
   RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_manifest_file_test.html"));
+}
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnaclNonSfi,
+                       MAYBE_PNACL_NONSFI(IrtManifestFile)) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_manifest_file_test.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, IrtException) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_exception_test.html"));
+}
+IN_PROC_BROWSER_TEST_F(NaClBrowserTestPnaclNonSfi,
+                       MAYBE_PNACL_NONSFI(IrtException)) {
+  RunNaClIntegrationTest(FILE_PATH_LITERAL("irt_exception_test.html"));
 }
 
 NACL_BROWSER_TEST_F(NaClBrowserTest, Nameservice, {

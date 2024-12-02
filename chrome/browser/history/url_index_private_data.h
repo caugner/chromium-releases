@@ -16,7 +16,6 @@
 #include "chrome/browser/history/in_memory_url_index_cache.pb.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
-#include "content/public/browser/notification_details.h"
 
 class BookmarkService;
 class HistoryQuickProviderTest;
@@ -214,6 +213,7 @@ class URLIndexPrivateData
     ScoredHistoryMatches scored_matches_;
     const base::string16& lower_string_;
     const String16Vector& lower_terms_;
+    WordStarts lower_terms_to_word_starts_offsets_;
     const base::Time now_;
   };
 

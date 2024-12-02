@@ -19,8 +19,10 @@
 #include "ash/shell.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/ime/component_extension_ime_manager.h"
 #include "chromeos/ime/composition_text.h"
@@ -55,10 +57,23 @@ void UpdateComposition(const CompositionText& composition_text,
         composition_text, cursor_pos, is_visible);
 }
 
+// Returns the length of characters of a UTF-8 string with unknown string
+// length. Cannot apply faster algorithm to count characters in an utf-8
+// string without knowing the string length,  so just does a full scan.
+size_t GetUtf8StringLength(const char* s) {
+  size_t ret = 0;
+  while (*s) {
+    if ((*s & 0xC0) != 0x80)
+      ret++;
+    ++s;
+  }
+  return ret;
+}
+
 }  // namespace
 
 InputMethodEngine::InputMethodEngine()
-    : focused_(false),
+    : current_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       active_(false),
       context_id_(0),
       next_context_id_(1),
@@ -69,6 +84,8 @@ InputMethodEngine::InputMethodEngine()
       sent_key_event_(NULL) {}
 
 InputMethodEngine::~InputMethodEngine() {
+  if (start_time_.ToInternalValue())
+    RecordHistogram("WorkingTime", (end_time_ - start_time_).InSeconds());
   input_method::InputMethodManager::Get()->RemoveInputMethodExtension(imm_id_);
 }
 
@@ -93,7 +110,7 @@ void InputMethodEngine::Initialize(
   ComponentExtensionIMEManager* comp_ext_ime_manager =
       manager->GetComponentExtensionIMEManager();
 
-  if (comp_ext_ime_manager->IsInitialized() &&
+  if (comp_ext_ime_manager && comp_ext_ime_manager->IsInitialized() &&
       comp_ext_ime_manager->IsWhitelistedExtension(extension_id)) {
     imm_id_ = comp_ext_ime_manager->GetId(extension_id, engine_id);
   } else {
@@ -120,6 +137,15 @@ void InputMethodEngine::Initialize(
 const input_method::InputMethodDescriptor& InputMethodEngine::GetDescriptor()
     const {
   return descriptor_;
+}
+
+void InputMethodEngine::RecordHistogram(const char* name, int count) {
+  std::string histo_name =
+      base::StringPrintf("InputMethod.%s.%s", name, engine_id_.c_str());
+  base::HistogramBase* counter = base::Histogram::FactoryGet(
+      histo_name, 0, 1000000, 50, base::HistogramBase::kNoFlags);
+  if (counter)
+    counter->Add(count);
 }
 
 void InputMethodEngine::NotifyImeReady() {
@@ -209,6 +235,14 @@ bool InputMethodEngine::CommitText(int context_id, const char* text,
   }
 
   IMEBridge::Get()->GetInputContextHandler()->CommitText(text);
+
+  // Records times for using input method.
+  if (!start_time_.ToInternalValue())
+    start_time_ = base::Time::Now();
+  end_time_ = base::Time::Now();
+  // Records histograms for counts of commits and committed characters.
+  RecordHistogram("Commit", 1);
+  RecordHistogram("CommitCharacter", GetUtf8StringLength(text));
   return true;
 }
 
@@ -220,7 +254,7 @@ bool InputMethodEngine::SendKeyEvents(
   }
   // context_id  ==  0, means sending key events to non-input field.
   // context_id_ == -1, means the focus is not in an input field.
-  if ((context_id != 0 && context_id != context_id_) || context_id_ == -1) {
+  if (context_id != 0 && (context_id != context_id_ || context_id_ == -1)) {
     return false;
   }
 
@@ -435,24 +469,45 @@ bool InputMethodEngine::DeleteSurroundingText(int context_id,
 
 void InputMethodEngine::HideInputView() {
   keyboard::KeyboardController* keyboard_controller =
-    ash::Shell::GetInstance()->keyboard_controller();
+    keyboard::KeyboardController::GetInstance();
   if (keyboard_controller) {
     keyboard_controller->HideKeyboard(
         keyboard::KeyboardController::HIDE_REASON_MANUAL);
   }
 }
 
+void InputMethodEngine::EnableInputView(bool enabled) {
+  const GURL& url = enabled ? input_view_url_ : GURL();
+  keyboard::SetOverrideContentUrl(url);
+  keyboard::KeyboardController* keyboard_controller =
+      keyboard::KeyboardController::GetInstance();
+  if (keyboard_controller)
+    keyboard_controller->Reload();
+}
+
 void InputMethodEngine::FocusIn(
     const IMEEngineHandlerInterface::InputContext& input_context) {
-  focused_ = true;
-  if (!active_)
+  current_input_type_ = input_context.type;
+
+  if (!active_ || current_input_type_ == ui::TEXT_INPUT_TYPE_NONE)
     return;
+
+  // Prevent sending events on password field to 3rd-party IME extensions.
+  // And also make sure the VK fallback to system VK.
+  // TODO(shuchen): for password field, forcibly switch/lock the IME to the XKB
+  // keyboard related to the current IME.
+  if (current_input_type_ == ui::TEXT_INPUT_TYPE_PASSWORD &&
+      !extension_ime_util::IsComponentExtensionIME(GetDescriptor().id())) {
+    EnableInputView(false);
+    return;
+  }
+
   context_id_ = next_context_id_;
   ++next_context_id_;
 
   InputMethodEngineInterface::InputContext context;
   context.id = context_id_;
-  switch (input_context.type) {
+  switch (current_input_type_) {
     case ui::TEXT_INPUT_TYPE_SEARCH:
       context.type = "search";
       break;
@@ -468,6 +523,9 @@ void InputMethodEngine::FocusIn(
     case ui::TEXT_INPUT_TYPE_NUMBER:
       context.type = "number";
       break;
+    case ui::TEXT_INPUT_TYPE_PASSWORD:
+      context.type = "password";
+      break;
     default:
       context.type = "text";
       break;
@@ -477,9 +535,20 @@ void InputMethodEngine::FocusIn(
 }
 
 void InputMethodEngine::FocusOut() {
-  focused_ = false;
-  if (!active_)
+  if (!active_ || current_input_type_ == ui::TEXT_INPUT_TYPE_NONE)
     return;
+
+  ui::TextInputType previous_input_type = current_input_type_;
+  current_input_type_ = ui::TEXT_INPUT_TYPE_NONE;
+
+  // Prevent sending events on password field to 3rd-party IME extensions.
+  // And also make sure the VK restore to IME input view.
+  if (previous_input_type == ui::TEXT_INPUT_TYPE_PASSWORD &&
+      !extension_ime_util::IsComponentExtensionIME(GetDescriptor().id())) {
+    EnableInputView(true);
+    return;
+  }
+
   int context_id = context_id_;
   context_id_ = -1;
   observer_->OnBlur(context_id);
@@ -488,27 +557,22 @@ void InputMethodEngine::FocusOut() {
 void InputMethodEngine::Enable() {
   active_ = true;
   observer_->OnActivate(engine_id_);
-  IMEEngineHandlerInterface::InputContext context(ui::TEXT_INPUT_TYPE_TEXT,
-                                                  ui::TEXT_INPUT_MODE_DEFAULT);
-  FocusIn(context);
+  current_input_type_ = IMEBridge::Get()->GetCurrentTextInputType();
+  FocusIn(IMEEngineHandlerInterface::InputContext(
+      current_input_type_, ui::TEXT_INPUT_MODE_DEFAULT));
+  EnableInputView(true);
 
-  keyboard::SetOverrideContentUrl(input_view_url_);
-  keyboard::KeyboardController* keyboard_controller =
-      ash::Shell::GetInstance()->keyboard_controller();
-  if (keyboard_controller)
-    keyboard_controller->Reload();
+  start_time_ = base::Time();
+  end_time_ = base::Time();
+  RecordHistogram("Enable", 1);
 }
 
 void InputMethodEngine::Disable() {
   active_ = false;
   observer_->OnDeactivated(engine_id_);
 
-  GURL empty_url;
-  keyboard::SetOverrideContentUrl(empty_url);
-  keyboard::KeyboardController* keyboard_controller =
-      ash::Shell::GetInstance()->keyboard_controller();
-  if (keyboard_controller)
-    keyboard_controller->Reload();
+  if (start_time_.ToInternalValue())
+    RecordHistogram("WorkingTime", (end_time_ - start_time_).InSeconds());
 }
 
 void InputMethodEngine::PropertyActivate(const std::string& property_name) {

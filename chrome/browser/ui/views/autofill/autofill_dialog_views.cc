@@ -25,7 +25,6 @@
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -33,6 +32,7 @@
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/events/event_handler.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
@@ -65,6 +65,7 @@
 #include "ui/views/painter.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
+#include "ui/views/window/non_client_view.h"
 
 using web_modal::WebContentsModalDialogManager;
 using web_modal::WebContentsModalDialogManagerDelegate;
@@ -397,8 +398,6 @@ class LoadingAnimationView : public views::View,
       container_->AddChildView(
           new views::Label(base::ASCIIToUTF16("."), font_list));
     }
-
-    OnNativeThemeChanged(GetNativeTheme());
   }
 
   virtual ~LoadingAnimationView() {}
@@ -456,6 +455,24 @@ views::View* GetAncestralInputView(views::View* view) {
 
   return view->GetAncestorWithClassName(ExpandingTextfield::kViewClassName);
 }
+
+// A class that informs |delegate_| when an unhandled mouse press occurs.
+class MousePressedHandler : public ui::EventHandler {
+ public:
+  explicit MousePressedHandler(AutofillDialogViewDelegate* delegate)
+      : delegate_(delegate) {}
+
+  // ui::EventHandler implementation.
+  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE {
+    if (event->type() == ui::ET_MOUSE_PRESSED && !event->handled())
+      delegate_->FocusMoved();
+  }
+
+ private:
+  AutofillDialogViewDelegate* const delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(MousePressedHandler);
+};
 
 }  // namespace
 
@@ -519,7 +536,7 @@ void AutofillDialogViews::AccountChooser::OnMenuButtonClicked(
   if (menu_runner_->RunMenuAt(source->GetWidget(),
                               NULL,
                               source->GetBoundsInScreen(),
-                              views::MenuItemView::TOPRIGHT,
+                              views::MENU_ANCHOR_TOPRIGHT,
                               ui::MENU_SOURCE_NONE,
                               0) == views::MenuRunner::MENU_DELETED) {
     return;
@@ -559,8 +576,6 @@ AutofillDialogViews::OverlayView::OverlayView(
 
   AddChildView(image_view_);
   AddChildView(message_view_);
-
-  OnNativeThemeChanged(GetNativeTheme());
 }
 
 AutofillDialogViews::OverlayView::~OverlayView() {}
@@ -767,6 +782,11 @@ void AutofillDialogViews::NotificationArea::OnPaint(gfx::Canvas* canvas) {
   }
 }
 
+void AutofillDialogViews::OnWidgetDestroying(views::Widget* widget) {
+  if (widget == window_)
+    window_->GetRootView()->RemovePostTargetHandler(event_handler_.get());
+}
+
 void AutofillDialogViews::OnWidgetClosing(views::Widget* widget) {
   observer_.Remove(widget);
   if (error_bubble_ && error_bubble_->GetWidget() == widget)
@@ -775,6 +795,9 @@ void AutofillDialogViews::OnWidgetClosing(views::Widget* widget) {
 
 void AutofillDialogViews::OnWidgetBoundsChanged(views::Widget* widget,
                                                 const gfx::Rect& new_bounds) {
+  if (error_bubble_ && error_bubble_->GetWidget() == widget)
+    return;
+
   // Notify the web contents of its new auto-resize limits.
   if (sign_in_delegate_ && sign_in_web_view_->visible()) {
     sign_in_delegate_->UpdateLimitsAndEnableAutoResize(
@@ -1223,7 +1246,8 @@ void AutofillDialogViews::Show() {
   DCHECK(modal_delegate);
   window_ = views::Widget::CreateWindowAsFramelessChild(
       this, modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window_->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(
+      window_->GetNativeView());
   focus_manager_ = window_->GetFocusManager();
   focus_manager_->AddFocusChangeListener(this);
 
@@ -1232,8 +1256,13 @@ void AutofillDialogViews::Show() {
   // Listen for size changes on the browser.
   views::Widget* browser_widget =
       views::Widget::GetTopLevelWidgetForNativeView(
-          delegate_->GetWebContents()->GetView()->GetNativeView());
+          delegate_->GetWebContents()->GetNativeView());
   observer_.Add(browser_widget);
+
+  // Listen for unhandled mouse presses on the non-client view.
+  event_handler_.reset(new MousePressedHandler(delegate_));
+  window_->GetRootView()->AddPostTargetHandler(event_handler_.get());
+  observer_.Add(window_);
 }
 
 void AutofillDialogViews::Hide() {
@@ -1375,22 +1404,6 @@ void AutofillDialogViews::GetUserInput(DialogSection section,
 base::string16 AutofillDialogViews::GetCvc() {
   return GroupForSection(GetCreditCardSection())->suggested_info->
       textfield()->GetText();
-}
-
-bool AutofillDialogViews::HitTestInput(ServerFieldType type,
-                                       const gfx::Point& screen_point) {
-  views::View* view = TextfieldForType(type);
-  if (!view)
-    view = ComboboxForType(type);
-
-  if (view) {
-    gfx::Point target_point(screen_point);
-    views::View::ConvertPointFromScreen(view, &target_point);
-    return view->HitTestPoint(target_point);
-  }
-
-  NOTREACHED();
-  return false;
 }
 
 bool AutofillDialogViews::SaveDetailsLocally() {
@@ -1613,7 +1626,6 @@ views::View* AutofillDialogViews::CreateFootnoteView() {
       views::Background::CreateSolidBackground(kShadingColor));
 
   legal_document_view_ = new views::StyledLabel(base::string16(), this);
-  OnNativeThemeChanged(GetNativeTheme());
 
   footnote_view_->AddChildView(legal_document_view_);
   footnote_view_->SetVisible(false);
@@ -1739,7 +1751,7 @@ void AutofillDialogViews::OnMenuButtonClicked(views::View* source,
   if (menu_runner_->RunMenuAt(source->GetWidget(),
                               NULL,
                               screen_bounds,
-                              views::MenuItemView::TOPRIGHT,
+                              views::MENU_ANCHOR_TOPRIGHT,
                               ui::MENU_SOURCE_NONE,
                               0) == views::MenuRunner::MENU_DELETED) {
     return;
@@ -2485,6 +2497,10 @@ void AutofillDialogViews::SetEditabilityForSection(DialogSection section) {
       combobox->SetEnabled(editable);
     }
   }
+}
+
+void AutofillDialogViews::NonClientMousePressed() {
+  delegate_->FocusMoved();
 }
 
 AutofillDialogViews::DetailsGroup::DetailsGroup(DialogSection section)

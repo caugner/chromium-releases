@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "ash/shell_delegate.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -23,7 +24,9 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "ui/gfx/display_observer.h"
 #include "ui/gfx/rect.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 
 class PrefService;
 
@@ -47,7 +50,10 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
                              public content::NotificationObserver,
                              public content::WebContentsObserver,
                              public chromeos::SessionManagerClient::Observer,
-                             public chromeos::CrasAudioHandler::AudioObserver {
+                             public chromeos::CrasAudioHandler::AudioObserver,
+                             public ash::VirtualKeyboardStateObserver,
+                             public keyboard::KeyboardControllerObserver,
+                             public gfx::DisplayObserver {
  public:
   explicit LoginDisplayHostImpl(const gfx::Rect& background_bounds);
   virtual ~LoginDisplayHostImpl();
@@ -118,6 +124,17 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
 
   // Overridden from chromeos::CrasAudioHandler::AudioObserver:
   virtual void OnActiveOutputNodeChanged() OVERRIDE;
+
+  // Overridden from ash::KeyboardStateObserver:
+  virtual void OnVirtualKeyboardStateChanged(bool activated) OVERRIDE;
+
+  // Overridden from keyboard::KeyboardControllerObserver:
+  virtual void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) OVERRIDE;
+
+  // Overridden from gfx::DisplayObserver:
+  virtual void OnDisplayBoundsChanged(const gfx::Display& display) OVERRIDE;
+  virtual void OnDisplayAdded(const gfx::Display& new_display) OVERRIDE;
+  virtual void OnDisplayRemoved(const gfx::Display& old_display) OVERRIDE;
 
  private:
   // Way to restore if renderer have crashed.
@@ -292,6 +309,12 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // feedback is enabled.  Otherwise, startup sound should be played
   // in any case.
   bool startup_sound_honors_spoken_feedback_;
+
+  // True is subscribed as keyboard controller observer.
+  bool is_observing_keyboard_;
+
+  // The bounds of the virtual keyboard.
+  gfx::Rect keyboard_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(LoginDisplayHostImpl);
 };

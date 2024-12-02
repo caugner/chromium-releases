@@ -50,7 +50,6 @@
             'autofill/core/browser/form_field_unittest.cc',
             'autofill/core/browser/form_structure_unittest.cc',
             'autofill/core/browser/name_field_unittest.cc',
-            'autofill/core/browser/password_autofill_manager_unittest.cc',
             'autofill/core/browser/password_generator_unittest.cc',
             'autofill/core/browser/personal_data_manager_unittest.cc',
             'autofill/core/browser/phone_field_unittest.cc',
@@ -63,7 +62,17 @@
             'autofill/core/common/form_data_unittest.cc',
             'autofill/core/common/form_field_data_unittest.cc',
             'autofill/core/common/password_form_fill_data_unittest.cc',
-            'cloud_devices/printer_description_unittest.cc',
+            'autofill/core/common/save_password_progress_logger_unittest.cc',
+            'bookmarks/core/browser/bookmark_codec_unittest.cc',
+            'bookmarks/core/browser/bookmark_index_unittest.cc',
+            'captive_portal/captive_portal_detector_unittest.cc',
+            'cloud_devices/common/cloud_devices_urls_unittest.cc',
+            'cloud_devices/common/printer_description_unittest.cc',
+            'data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler_unittest.cc',
+            'data_reduction_proxy/browser/data_reduction_proxy_config_service_unittest.cc',
+            'data_reduction_proxy/browser/data_reduction_proxy_metrics_unittest.cc',
+            'data_reduction_proxy/browser/data_reduction_proxy_settings_unittest.cc',
+            'data_reduction_proxy/browser/http_auth_handler_data_reduction_proxy_unittest.cc',
             'dom_distiller/core/article_entry_unittest.cc',
             'dom_distiller/core/distiller_unittest.cc',
             'dom_distiller/core/distiller_url_fetcher_unittest.cc',
@@ -73,6 +82,8 @@
             'dom_distiller/core/dom_distiller_store_unittest.cc',
             'dom_distiller/core/task_tracker_unittest.cc',
             'dom_distiller/core/url_utils_unittest.cc',
+            'dom_distiller/core/viewer_unittest.cc',
+            'domain_reliability/config_unittest.cc',
             'domain_reliability/context_unittest.cc',
             'domain_reliability/dispatcher_unittest.cc',
             'domain_reliability/monitor_unittest.cc',
@@ -81,6 +92,8 @@
             'domain_reliability/test_util.h',
             'domain_reliability/uploader_unittest.cc',
             'domain_reliability/util_unittest.cc',
+            'feedback/feedback_uploader_unittest.cc',
+            'invalidation/invalidation_logger_unittest.cc',
             'json_schema/json_schema_validator_unittest.cc',
             'json_schema/json_schema_validator_unittest_base.cc',
             'json_schema/json_schema_validator_unittest_base.h',
@@ -88,11 +101,15 @@
             'keyed_service/core/dependency_graph_unittest.cc',
             'language_usage_metrics/language_usage_metrics_unittest.cc',
             'metrics/metrics_hashes_unittest.cc',
+            'metrics/metrics_log_base_unittest.cc',
+            'metrics/metrics_log_manager_unittest.cc',
             'navigation_interception/intercept_navigation_resource_throttle_unittest.cc',
             'os_crypt/ie7_password_win_unittest.cc',
             'os_crypt/keychain_password_mac_unittest.mm',
             'os_crypt/os_crypt_unittest.cc',
+            'password_manager/core/browser/browser_save_password_progress_logger_unittest.cc',
             'password_manager/core/browser/login_database_unittest.cc',
+            'password_manager/core/browser/password_autofill_manager_unittest.cc',
             'password_manager/core/browser/password_form_manager_unittest.cc',
             'password_manager/core/browser/password_generation_manager_unittest.cc',
             'password_manager/core/browser/password_manager_unittest.cc',
@@ -104,14 +121,20 @@
             'precache/core/precache_database_unittest.cc',
             'precache/core/precache_fetcher_unittest.cc',
             'precache/core/precache_url_table_unittest.cc',
+            'query_parser/query_parser_unittest.cc',
+            'query_parser/snippet_unittest.cc',
             'rappor/bloom_filter_unittest.cc',
             'rappor/byte_vector_utils_unittest.cc',
             'rappor/log_uploader_unittest.cc',
             'rappor/rappor_metric_unittest.cc',
             'rappor/rappor_service_unittest.cc',
+            'search_provider_logos/logo_cache_unittest.cc',
+            'search_provider_logos/logo_tracker_unittest.cc',
             'sessions/serialized_navigation_entry_unittest.cc',
+            'signin/core/browser/mutable_profile_oauth2_token_service_unittest.cc',
             'signin/core/browser/signin_error_controller_unittest.cc',
             'signin/core/browser/webdata/token_service_table_unittest.cc',
+            'signin/ios/browser/profile_oauth2_token_service_ios_unittest.mm',
             'storage_monitor/image_capture_device_manager_unittest.mm',
             'storage_monitor/media_storage_util_unittest.cc',
             'storage_monitor/media_transfer_protocol_device_observer_linux_unittest.cc',
@@ -121,7 +144,9 @@
             'storage_monitor/storage_monitor_mac_unittest.mm',
             'storage_monitor/storage_monitor_unittest.cc',
             'storage_monitor/storage_monitor_win_unittest.cc',
+            'sync_driver/generic_change_processor_unittest.cc',
             'sync_driver/model_association_manager_unittest.cc',
+            'sync_driver/non_blocking_data_type_controller_unittest.cc',
             'sync_driver/sync_prefs_unittest.cc',
             'sync_driver/system_encryptor_unittest.cc',
             'test/run_all_unittests.cc',
@@ -139,6 +164,7 @@
             'url_matcher/url_matcher_unittest.cc',
             'variations/entropy_provider_unittest.cc',
             'variations/metrics_util_unittest.cc',
+            'variations/study_filtering_unittest.cc',
             'variations/variations_associated_data_unittest.cc',
             'variations/variations_seed_processor_unittest.cc',
             'variations/variations_seed_simulator_unittest.cc',
@@ -176,8 +202,21 @@
             'components_strings.gyp:components_strings',
             '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber',
 
+            # Dependencies of bookmarks
+            'components.gyp:bookmarks_core_browser',
+            'components.gyp:bookmarks_core_test_support',
+            
+            # Dependencies of captive_portal
+            'components.gyp:captive_portal_test_support',
+            '../net/net.gyp:net_test_support',
+
             # Dependencies of cloud_devices
-            'components.gyp:cloud_devices',
+            'components.gyp:cloud_devices_common',
+
+            # Dependencies of data_reduction_proxy
+            'components.gyp:data_reduction_proxy_browser',
+            'components.gyp:data_reduction_proxy_common',
+            'components.gyp:data_reduction_proxy_test_support',
 
             # Dependencies of dom_distiller
             'components.gyp:distilled_page_proto',
@@ -186,6 +225,12 @@
 
             # Dependencies of domain_reliability
             'components.gyp:domain_reliability',
+
+            # Dependencies of feedback
+            'components.gyp:feedback_component',
+
+            # Dependencies of invalidation
+            'components.gyp:invalidation',
 
             # Dependencies of json_schema
             'components.gyp:json_schema',
@@ -207,12 +252,19 @@
             'components.gyp:password_manager_core_browser',
             'components.gyp:precache_core',
 
+            # Dependencies of query_parser
+            'components.gyp:query_parser',
+
             # Dependencies of rappor
             'components.gyp:rappor',
+
+            # Dependencies of search_provider_logos
+            'components.gyp:search_provider_logos',
 
             # Dependencies of signin
             'components.gyp:signin_core_browser',
             'components.gyp:signin_core_browser_test_support',
+            '../google_apis/google_apis.gyp:google_apis_test_support',
 
             # Dependencies of sync_driver
             'components.gyp:sync_driver_test_support',
@@ -228,11 +280,14 @@
           'conditions': [
             ['OS != "ios"', {
               'sources': [
+                'autofill/content/renderer/renderer_save_password_progress_logger_unittest.cc',
                 'dom_distiller/content/dom_distiller_viewer_source_unittest.cc',
+                'usb_service/usb_context_unittest.cc',
               ],
               'dependencies': [
                 # Dependencies of autofill
                 'components.gyp:autofill_content_browser',
+                'components.gyp:autofill_content_renderer',
                 'components.gyp:autofill_content_test_support',
 
                 # Dependencies of dom_distiller
@@ -261,6 +316,10 @@
                 # Dependencies of url_matcher.
                 'components.gyp:url_matcher',
 
+                # Dependencies of usb_service tests.
+                'components.gyp:usb_service',
+                '../third_party/libusb/libusb.gyp:libusb',
+
                 # Dependencies of visitedlink
                 'components.gyp:visitedlink_browser',
                 'components.gyp:visitedlink_renderer',
@@ -278,16 +337,25 @@
                 ['include', '^test/run_all_unittests\\.cc$'],
                 ['include', '^auto_login_parser/'],
                 ['include', '^autofill/core/'],
+                ['include', '^bookmarks/'],
+                ['include', '^data_reduction_proxy/'],
                 ['include', '^dom_distiller/'],
+                ['include', '^invalidation/'],
                 ['include', '^json_schema/'],
                 ['include', '^keyed_service/core/'],
                 ['include', '^language_usage_metrics/'],
                 ['include', '^password_manager/'],
                 ['include', '^precache/core/'],
+                ['include', '^search_provider_logos/'],
                 ['include', '^signin/'],
                 ['include', '^sync_driver/'],
                 ['include', '^translate/'],
                 ['include', '^variations/'],
+              ],
+              'dependencies': [
+                # Dependencies of signin
+                'components.gyp:signin_ios_browser',
+                '../ios/ios_tests.gyp:test_support_ios',
               ],
               'actions': [
                 {
@@ -323,6 +391,16 @@
                 'nacl.gyp:nacl_common',
               ],
             }],
+            ['disable_nacl==0 and OS=="linux"', {
+              'sources': [
+                'nacl/loader/nonsfi/nonsfi_sandbox_unittest.cc',
+                'nacl/loader/nonsfi/nonsfi_sandbox_sigsys_unittest.cc',
+              ],
+              'dependencies': [
+                'nacl.gyp:nacl_linux',
+                '../sandbox/sandbox.gyp:sandbox_linux_test_utils',
+              ],
+            }],
             ['OS == "mac"', {
               'link_settings': {
                 'libraries': [
@@ -337,16 +415,20 @@
             }],
             ['OS == "android"', {
               'sources!': [
+                'signin/core/browser/mutable_profile_oauth2_token_service_unittest.cc',
                 'storage_monitor/media_storage_util_unittest.cc',
                 'storage_monitor/storage_info_unittest.cc',
                 'storage_monitor/storage_monitor_unittest.cc',
+                'usb_service/usb_context_unittest.cc',
                 'web_modal/web_contents_modal_dialog_manager_unittest.cc',
               ],
               'dependencies!': [
                 'components.gyp:storage_monitor',
                 'components.gyp:storage_monitor_test_support',
+                'components.gyp:usb_service',
                 'components.gyp:web_modal',
                 'components.gyp:web_modal_test_support',
+                '../third_party/libusb/libusb.gyp:libusb',
               ],
             }],
             ['OS == "android" and gtest_target_type == "shared_library"', {
@@ -373,8 +455,7 @@
                 '../base/allocator/allocator.gyp:allocator',
               ],
             }],
-            # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-            ['OS=="linux" and component=="shared_library" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))', {
+            ['OS=="linux" and component=="shared_library" and use_allocator!="none"', {
             'dependencies': [
                 '<(DEPTH)/base/allocator/allocator.gyp:allocator',
             ],
@@ -514,7 +595,6 @@
               ],
               'variables': {
                 'test_suite_name': 'components_unittests',
-                'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)components_unittests<(SHARED_LIB_SUFFIX)',
               },
               'includes': [ '../build/apk_test.gypi' ],
             },
@@ -529,6 +609,7 @@
           'type': '<(gtest_target_type)',
           'defines!': ['CONTENT_IMPLEMENTATION'],
           'dependencies': [
+            'components.gyp:autofill_content_browser',
             'components.gyp:dom_distiller_content',
             'components.gyp:dom_distiller_core',
             'components_resources.gyp:components_resources',
@@ -542,6 +623,7 @@
             '../content/content_shell_and_tests.gyp:content_shell_pak',
             '../content/content_shell_and_tests.gyp:test_support_content',
             '../skia/skia.gyp:skia',
+            '../testing/gmock.gyp:gmock',
             '../testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
@@ -551,11 +633,8 @@
             'HAS_OUT_OF_PROC_TEST_RUNNER',
           ],
           'sources': [
+            'autofill/content/browser/risk/fingerprint_browsertest.cc',
             'dom_distiller/content/distiller_page_web_contents_browsertest.cc',
-
-            # content_extractor is a standalone content extraction tool built as
-            # a MANUAL component_browsertest.
-            'dom_distiller/standalone/content_extractor.cc',
           ],
           'actions': [
             {
@@ -563,7 +642,7 @@
               'variables': {
                 'pak_inputs': [
                   '<(SHARED_INTERMEDIATE_DIR)/components/component_resources.pak',
-                  '<(SHARED_INTERMEDIATE_DIR)/components/strings/component_strings_en-US.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/components/strings/components_strings_en-US.pak',
                 ],
                 'pak_output': '<(PRODUCT_DIR)/components_resources.pak',
               },
@@ -571,6 +650,18 @@
             },
           ],
           'conditions': [
+            ['OS == "android"', {
+              'sources!': [
+                'autofill/content/browser/risk/fingerprint_browsertest.cc',
+              ],
+            }],
+            ['OS == "linux"', {
+              'sources': [
+                  # content_extractor is a standalone content extraction tool built as
+                  # a MANUAL component_browsertest.
+                  'dom_distiller/standalone/content_extractor.cc',
+                ],
+            }],
             ['OS=="win"', {
               'resource_include_dirs': [
                 '<(SHARED_INTERMEDIATE_DIR)/webkit',

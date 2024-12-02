@@ -13,7 +13,7 @@
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "grit/component_strings.h"
+#include "grit/components_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
@@ -567,8 +567,9 @@ TEST(AutofillProfileTest, OverwriteWithOrAddTo) {
   // Create an identical profile except that the new profile:
   //   (1) Has a different origin,
   //   (2) Has a different address line 2,
-  //   (3) Lacks a company name, and
-  //   (4) Has a different full name variant.
+  //   (3) Lacks a company name,
+  //   (4) Has a different full name variant, and
+  //   (5) Has a language code.
   AutofillProfile b = a;
   b.set_guid(base::GenerateGUID());
   b.set_origin("Chrome settings");
@@ -577,6 +578,7 @@ TEST(AutofillProfileTest, OverwriteWithOrAddTo) {
   b.GetRawMultiInfo(NAME_FULL, &names);
   names.push_back(ASCIIToUTF16("Marion M. Morrison"));
   b.SetRawMultiInfo(NAME_FULL, names);
+  b.set_language_code("en");
 
   a.OverwriteWithOrAddTo(b, "en-US");
   EXPECT_EQ("Chrome settings", a.origin());
@@ -587,6 +589,7 @@ TEST(AutofillProfileTest, OverwriteWithOrAddTo) {
   EXPECT_EQ(ASCIIToUTF16("Marion Mitchell Morrison"), names[0]);
   EXPECT_EQ(ASCIIToUTF16("Marion Morrison"), names[1]);
   EXPECT_EQ(ASCIIToUTF16("Marion M. Morrison"), names[2]);
+  EXPECT_EQ("en", a.language_code());
 }
 
 TEST(AutofillProfileTest, AssignmentOperator) {

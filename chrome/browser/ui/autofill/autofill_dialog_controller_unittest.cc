@@ -204,10 +204,6 @@ class TestAutofillDialogView : public AutofillDialogView {
   }
 
   virtual base::string16 GetCvc() OVERRIDE { return base::string16(); }
-  virtual bool HitTestInput(ServerFieldType type,
-                            const gfx::Point& screen_point) OVERRIDE {
-    return false;
-  }
 
   virtual bool SaveDetailsLocally() OVERRIDE {
     return save_details_locally_checked_;
@@ -259,7 +255,7 @@ class TestAutofillDialogController
       const FormData& form_structure,
       const GURL& source_url,
       const AutofillMetrics& metric_logger,
-      const base::Callback<void(const FormStructure*)>& callback,
+      const AutofillManagerDelegate::ResultCallback& callback,
       MockNewCreditCardBubbleController* mock_new_card_bubble_controller)
       : AutofillDialogControllerImpl(contents,
                                      form_structure,
@@ -449,7 +445,7 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
     if (controller_)
       controller_->ViewClosed();
 
-    base::Callback<void(const FormStructure*)> callback =
+    AutofillManagerDelegate::ResultCallback callback =
         base::Bind(&AutofillDialogControllerTest::FinishedCallback,
                    base::Unretained(this));
     controller_ = (new testing::NiceMock<TestAutofillDialogController>(
@@ -467,7 +463,8 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
   void SetUpControllerWithFormData(const FormData& form_data) {
     ResetControllerWithFormData(form_data);
     controller()->Show();
-    if (!profile()->GetPrefs()->GetBoolean(
+    if (controller() &&
+        !profile()->GetPrefs()->GetBoolean(
             ::prefs::kAutofillDialogPayWithoutWallet)) {
       EXPECT_CALL(*controller()->GetTestingWalletClient(), GetWalletItems());
       controller()->OnDidFetchWalletCookieValue(std::string());
@@ -647,7 +644,10 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
   }
 
  private:
-  void FinishedCallback(const FormStructure* form_structure) {
+  void FinishedCallback(
+      AutofillManagerDelegate::RequestAutocompleteResult result,
+      const base::string16& debug_message,
+      const FormStructure* form_structure) {
     form_structure_ = form_structure;
   }
 
@@ -677,6 +677,42 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
 };
 
 }  // namespace
+
+TEST_F(AutofillDialogControllerTest, RefuseToShowWithNoAutocompleteAttributes) {
+  FormFieldData email_field;
+  email_field.name = ASCIIToUTF16("email");
+  FormFieldData cc_field;
+  cc_field.name = ASCIIToUTF16("cc");
+  FormFieldData billing_field;
+  billing_field.name = ASCIIToUTF16("billing name");
+
+  FormData form_data;
+  form_data.fields.push_back(email_field);
+  form_data.fields.push_back(cc_field);
+  form_data.fields.push_back(billing_field);
+
+  SetUpControllerWithFormData(form_data);
+  EXPECT_FALSE(controller());
+}
+
+TEST_F(AutofillDialogControllerTest, RefuseToShowWithNoCcField) {
+  FormFieldData shipping_tel;
+  shipping_tel.autocomplete_attribute = "shipping tel";
+
+  FormData form_data;
+  form_data.fields.push_back(shipping_tel);
+
+  SetUpControllerWithFormData(form_data);
+  EXPECT_FALSE(controller());
+
+  // Any cc- field will do.
+  FormFieldData cc_field;
+  cc_field.autocomplete_attribute = "cc-csc";
+  form_data.fields.push_back(cc_field);
+
+  SetUpControllerWithFormData(form_data);
+  EXPECT_TRUE(controller());
+}
 
 // Ensure the default ValidityMessage has the expected values.
 TEST_F(AutofillDialogControllerTest, DefaultValidityMessage) {
@@ -1312,10 +1348,13 @@ TEST_F(AutofillDialogControllerTest, BillingVsShippingPhoneNumber) {
   shipping_tel.autocomplete_attribute = "shipping tel";
   FormFieldData billing_tel;
   billing_tel.autocomplete_attribute = "billing tel";
+  FormFieldData cc_field;
+  cc_field.autocomplete_attribute = "cc-csc";
 
   FormData form_data;
   form_data.fields.push_back(shipping_tel);
   form_data.fields.push_back(billing_tel);
+  form_data.fields.push_back(cc_field);
   SetUpControllerWithFormData(form_data);
 
   SwitchToAutofill();
@@ -1333,7 +1372,7 @@ TEST_F(AutofillDialogControllerTest, BillingVsShippingPhoneNumber) {
   billing_model->ActivatedAt(1);
 
   controller()->OnAccept();
-  ASSERT_EQ(2U, form_structure()->field_count());
+  ASSERT_EQ(3U, form_structure()->field_count());
   EXPECT_EQ(PHONE_HOME_WHOLE_NUMBER,
             form_structure()->field(0)->Type().GetStorableType());
   EXPECT_EQ(PHONE_HOME, form_structure()->field(0)->Type().group());
@@ -1362,12 +1401,15 @@ TEST_F(AutofillDialogControllerTest, BillingVsShippingStreetAddress) {
   FormFieldData billing_address_textarea;
   billing_address_textarea.autocomplete_attribute = "billing street-address";
   billing_address_textarea.form_control_type = "textarea";
+  FormFieldData cc_field;
+  cc_field.autocomplete_attribute = "cc-csc";
 
   FormData form_data;
   form_data.fields.push_back(shipping_address);
   form_data.fields.push_back(billing_address);
   form_data.fields.push_back(shipping_address_textarea);
   form_data.fields.push_back(billing_address_textarea);
+  form_data.fields.push_back(cc_field);
   SetUpControllerWithFormData(form_data);
 
   SwitchToAutofill();
@@ -1385,7 +1427,7 @@ TEST_F(AutofillDialogControllerTest, BillingVsShippingStreetAddress) {
   billing_model->ActivatedAt(1);
 
   controller()->OnAccept();
-  ASSERT_EQ(4U, form_structure()->field_count());
+  ASSERT_EQ(5U, form_structure()->field_count());
   EXPECT_EQ(ADDRESS_HOME_STREET_ADDRESS,
             form_structure()->field(0)->Type().GetStorableType());
   EXPECT_EQ(ADDRESS_HOME, form_structure()->field(0)->Type().group());
@@ -1801,11 +1843,7 @@ TEST_F(AutofillDialogControllerTest, SaveInstrumentSameAsBilling) {
   CreditCard full_card(test::GetCreditCard());
   for (size_t i = 0; i < inputs.size(); ++i) {
     const ServerFieldType type = inputs[i].type;
-#if defined(OS_MACOSX)
-    if (type == ADDRESS_BILLING_LINE1)
-#else
     if (type == ADDRESS_BILLING_STREET_ADDRESS)
-#endif
       outputs[type] = ASCIIToUTF16(kEditedBillingAddress);
     else
       outputs[type] = full_profile.GetInfo(AutofillType(type), "en-US");
@@ -3186,16 +3224,28 @@ TEST_F(AutofillDialogControllerTest, CorrectCountryFromInputs) {
 
 TEST_F(AutofillDialogControllerTest, ValidationRulesLoadedOnCountryChange) {
   ResetControllerWithFormData(DefaultFormData());
-  EXPECT_CALL(*controller()->GetMockValidator(), LoadRules("US"));
+  EXPECT_CALL(*controller()->GetMockValidator(),
+              LoadRules("US")).Times(AtLeast(1));
   controller()->Show();
 
   EXPECT_CALL(*controller()->GetMockValidator(), LoadRules("FR"));
-  controller()->UserEditedOrActivatedInput(SECTION_CC_BILLING,
+  controller()->UserEditedOrActivatedInput(SECTION_BILLING,
                                            ADDRESS_BILLING_COUNTRY,
                                            gfx::NativeView(),
                                            gfx::Rect(),
                                            ASCIIToUTF16("France"),
                                            true);
+}
+
+TEST_F(AutofillDialogControllerTest, UsValidationRulesLoadedForJpOnlyProfile) {
+  ResetControllerWithFormData(DefaultFormData());
+  AutofillProfile jp_profile(base::GenerateGUID(), kSettingsOrigin);
+  jp_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("JP"));
+  controller()->GetTestingManager()->AddTestingProfile(&jp_profile);
+  EXPECT_CALL(*controller()->GetMockValidator(), LoadRules("US"));
+  EXPECT_CALL(*controller()->GetMockValidator(),
+              LoadRules("JP")).Times(AtLeast(1));
+  controller()->Show();
 }
 
 TEST_F(AutofillDialogControllerTest, InvalidWhenRulesNotReady) {
@@ -3283,7 +3333,12 @@ TEST_F(AutofillDialogControllerTest, LimitedCountryChoices) {
   field.option_values.push_back(ASCIIToUTF16(""));
   field.option_contents.push_back(ASCIIToUTF16("Germany"));
   field.option_values.push_back(ASCIIToUTF16("GRMNY"));
+
+  FormFieldData cc_field;
+  cc_field.autocomplete_attribute = "cc-csc";
+
   form_data.fields.push_back(field);
+  form_data.fields.push_back(cc_field);
   ResetControllerWithFormData(form_data);
   controller()->Show();
 
@@ -3406,6 +3461,16 @@ TEST_F(AutofillDialogControllerTest, SuggestCountrylessProfiles) {
       profile.GetRawInfo(NAME_FULL).substr(0, 1),
       true);
   EXPECT_EQ(NAME_FULL, controller()->popup_input_type());
+}
+
+TEST_F(AutofillDialogControllerTest, SwitchFromWalletWithFirstName) {
+  controller()->MenuModelForSection(SECTION_CC_BILLING)->ActivatedAt(2);
+
+  FieldValueMap outputs;
+  outputs[NAME_FULL] = ASCIIToUTF16("madonna");
+  controller()->GetView()->SetUserInput(SECTION_CC_BILLING, outputs);
+
+  ASSERT_NO_FATAL_FAILURE(SwitchToAutofill());
 }
 
 }  // namespace autofill

@@ -7,7 +7,7 @@
 #include "ash/display/display_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/wm/always_on_top_controller.h"
@@ -32,8 +32,6 @@ using aura::Window;
 
 namespace ash {
 
-namespace internal {
-
 WorkspaceLayoutManager::WorkspaceLayoutManager(aura::Window* window)
     : shelf_(NULL),
       window_(window),
@@ -57,7 +55,7 @@ WorkspaceLayoutManager::~WorkspaceLayoutManager() {
   Shell::GetInstance()->activation_client()->RemoveObserver(this);
 }
 
-void WorkspaceLayoutManager::SetShelf(internal::ShelfLayoutManager* shelf) {
+void WorkspaceLayoutManager::SetShelf(ShelfLayoutManager* shelf) {
   shelf_ = shelf;
 }
 
@@ -281,5 +279,4 @@ void WorkspaceLayoutManager::UpdateFullscreenState() {
   }
 }
 
-}  // namespace internal
 }  // namespace ash

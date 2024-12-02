@@ -47,6 +47,16 @@ class SafeBrowsingDatabaseFactory {
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingDatabaseFactory);
 };
 
+// Contains full_hash elements which are cached in memory.  Differs from
+// SBAddFullHash in deriving |list_id| from |chunk_id|.  Differs from
+// SBFullHashResult in adding |received| for later expiration.
+// TODO(shess): Remove/refactor this as part of converting to v2.3 caching
+// semantics.
+struct SBFullHashCached {
+  SBFullHash hash;
+  int list_id;  // TODO(shess): Use safe_browsing_util::ListType.
+  int received;  // time_t like SBAddFullHash.
+};
 
 // Encapsulates on-disk databases that for safebrowsing. There are
 // four databases: browse, download, download whitelist and
@@ -93,15 +103,13 @@ class SafeBrowsingDatabase {
   // Deletes the current database and creates a new one.
   virtual bool ResetDatabase() = 0;
 
-  // Returns false if |url| is not in the browse database.  If it
-  // returns true, then either |matching_list| is the name of the matching
-  // list, or |prefix_hits| and |full_hits| contains the matching hash
-  // prefixes.  This function is safe to call from threads other than
-  // the creation thread.
+  // Returns false if |url| is not in the browse database.  If it returns true,
+  // then |prefix_hits| contains the list of prefix matches, and |cached_hits|
+  // contains the cached gethash results for those prefixes (if any).  This
+  // function is safe to call from threads other than the creation thread.
   virtual bool ContainsBrowseUrl(const GURL& url,
-                                 std::string* matching_list,
                                  std::vector<SBPrefix>* prefix_hits,
-                                 std::vector<SBFullHashResult>* full_hits,
+                                 std::vector<SBFullHashResult>* cached_hits,
                                  base::Time last_update) = 0;
 
   // Returns false if none of |urls| are in Download database. If it returns
@@ -291,9 +299,8 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
   virtual void Init(const base::FilePath& filename) OVERRIDE;
   virtual bool ResetDatabase() OVERRIDE;
   virtual bool ContainsBrowseUrl(const GURL& url,
-                                 std::string* matching_list,
                                  std::vector<SBPrefix>* prefix_hits,
-                                 std::vector<SBFullHashResult>* full_hits,
+                                 std::vector<SBFullHashResult>* cached_hits,
                                  base::Time last_update) OVERRIDE;
   virtual bool ContainsDownloadUrl(const std::vector<GURL>& urls,
                                    std::vector<SBPrefix>* prefix_hits) OVERRIDE;
@@ -398,8 +405,8 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
   base::MessageLoop* creation_loop_;
 
   // Lock for protecting access to variables that may be used on the
-  // IO thread.  This includes |prefix_set_|, |full_browse_hashes_|,
-  // |pending_browse_hashes_|, |prefix_miss_cache_|, |csd_whitelist_|.
+  // IO thread.  This includes |prefix_set_|, |cached_browse_hashes_|,
+  // |prefix_miss_cache_|, |csd_whitelist_|.
   base::Lock lookup_lock_;
 
   // Underlying persistent store for chunk data.
@@ -440,13 +447,9 @@ class SafeBrowsingDatabaseNew : public SafeBrowsingDatabase {
   // The IP blacklist should be small.  At most a couple hundred IPs.
   IPBlacklist ip_blacklist_;
 
-  // Cached browse store related full-hash items, ordered by prefix for
-  // efficient scanning.
-  // |full_browse_hashes_| are items from |browse_store_|,
-  // |pending_browse_hashes_| are items from |CacheHashResults()|, which
-  // will be pushed to the store on the next update.
-  std::vector<SBAddFullHash> full_browse_hashes_;
-  std::vector<SBAddFullHash> pending_browse_hashes_;
+  // Store items from CacheHashResults(), ordered by hash for efficient
+  // scanning.  Discarded on next update.
+  std::vector<SBFullHashCached> cached_browse_hashes_;
 
   // Cache of prefixes that returned empty results (no full hash
   // match) to |CacheHashResults()|.  Cached to prevent asking for

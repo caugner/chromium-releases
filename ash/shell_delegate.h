@@ -42,7 +42,6 @@ namespace ash {
 class AccessibilityDelegate;
 class MediaDelegate;
 class NewWindowDelegate;
-class WindowTreeHostFactory;
 class SessionStateDelegate;
 class ShelfDelegate;
 class ShelfItemDelegate;
@@ -50,6 +49,15 @@ class ShelfModel;
 class SystemTrayDelegate;
 class UserWallpaperDelegate;
 struct ShelfItem;
+
+class ASH_EXPORT VirtualKeyboardStateObserver {
+ public:
+  // Called when keyboard is activated/deactivated.
+  virtual void OnVirtualKeyboardStateChanged(bool activated) {}
+
+ protected:
+  virtual ~VirtualKeyboardStateObserver() {}
+};
 
 // Delegate of the Shell.
 class ASH_EXPORT ShellDelegate {
@@ -72,6 +80,9 @@ class ASH_EXPORT ShellDelegate {
   // Returns true if we're running in forced app mode.
   virtual bool IsRunningInForcedAppMode() const = 0;
 
+  // Returns true if multi account is enabled.
+  virtual bool IsMultiAccountEnabled() const = 0;
+
   // Called before processing |Shell::Init()| so that the delegate
   // can perform tasks necessary before the shell is initialized.
   virtual void PreInit() = 0;
@@ -86,6 +97,15 @@ class ASH_EXPORT ShellDelegate {
   // Create a shell-specific keyboard::KeyboardControllerProxy
   virtual keyboard::KeyboardControllerProxy*
       CreateKeyboardControllerProxy() = 0;
+
+  // Called when virtual keyboard has been activated/deactivated.
+  virtual void VirtualKeyboardActivated(bool activated) = 0;
+
+  // Adds or removes virtual keyboard state observer.
+  virtual void AddVirtualKeyboardStateObserver(
+      VirtualKeyboardStateObserver* observer) = 0;
+  virtual void RemoveVirtualKeyboardStateObserver(
+      VirtualKeyboardStateObserver* observer) = 0;
 
   // Get the active browser context. This will get us the active profile
   // in chrome.
@@ -124,10 +144,6 @@ class ASH_EXPORT ShellDelegate {
       aura::Window* root_window,
       ash::ShelfItemDelegate* item_delegate,
       ash::ShelfItem* item) = 0;
-
-  // Creates a root window host factory. Shell takes ownership of the returned
-  // value.
-  virtual WindowTreeHostFactory* CreateWindowTreeHostFactory() = 0;
 
   // Creates a GPU support object. Shell takes ownership of the object.
   virtual GPUSupport* CreateGPUSupport() = 0;

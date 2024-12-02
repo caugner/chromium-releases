@@ -11,6 +11,7 @@
 #include "ash/display/display_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_button.h"
+#include "ash/shelf/shelf_constants.h"
 #include "ash/shelf/shelf_model.h"
 #include "ash/shelf/shelf_util.h"
 #include "ash/shelf/shelf_view.h"
@@ -24,7 +25,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
-#include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -41,8 +41,10 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/settings_window_manager.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -90,13 +92,9 @@ class TestAppWindowRegistryObserver : public apps::AppWindowRegistry::Observer {
   }
 
   // Overridden from AppWindowRegistry::Observer:
-  virtual void OnAppWindowAdded(AppWindow* app_window) OVERRIDE {}
-
   virtual void OnAppWindowIconChanged(AppWindow* app_window) OVERRIDE {
     ++icon_updates_;
   }
-
-  virtual void OnAppWindowRemoved(AppWindow* app_window) OVERRIDE {}
 
   int icon_updates() { return icon_updates_; }
 
@@ -273,7 +271,7 @@ class ShelfAppBrowserTest : public ExtensionBrowserTest {
                        aura::test::EventGenerator* generator,
                        ash::test::ShelfViewTestAPI* test,
                        RipOffCommand command) {
-    ash::internal::ShelfButton* button = test->GetButton(index);
+    ash::ShelfButton* button = test->GetButton(index);
     gfx::Point start_point = button->GetBoundsInScreen().CenterPoint();
     gfx::Point rip_off_point(start_point.x(), 0);
     generator->MoveMouseTo(start_point.x(), start_point.y());
@@ -821,7 +819,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, SetIcon) {
   EXPECT_TRUE(app_item_controller->image_set_by_controller());
   EXPECT_TRUE(panel_item_controller->image_set_by_controller());
   // Ensure icon heights are correct (see test.js in app_icon/ test directory)
-  EXPECT_EQ(48, app_item.image.height());
+  EXPECT_EQ(ash::kShelfSize, app_item.image.height());
   EXPECT_EQ(64, panel_item.image.height());
 }
 
@@ -1380,7 +1378,6 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, LaunchPanelWindow) {
   EXPECT_EQ(item_count, shelf_model()->item_count());
 }
 
-#if defined(OS_CHROMEOS)
 // Test that we get correct shelf presence with hidden app windows.
 IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, HiddenAppWindows) {
   int item_count = shelf_model()->item_count();
@@ -1417,7 +1414,6 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, HiddenAppWindows) {
   --item_count;
   EXPECT_EQ(item_count, shelf_model()->item_count());
 }
-#endif
 
 // Test attention states of windows.
 IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, WindowAttentionStatus) {
@@ -1814,8 +1810,8 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, DragOffShelf) {
             GetIndexOfShelfItemType(ash::TYPE_BROWSER_SHORTCUT));
   // Make sure that the hide state has been unset after the snap back animation
   // finished.
-  ash::internal::ShelfButton* button = test.GetButton(browser_index);
-  EXPECT_FALSE(button->state() & ash::internal::ShelfButton::STATE_HIDDEN);
+  ash::ShelfButton* button = test.GetButton(browser_index);
+  EXPECT_FALSE(button->state() & ash::ShelfButton::STATE_HIDDEN);
 
   // Test #2: Ripping out the application and canceling the operation should
   // not change anything.
@@ -2069,4 +2065,26 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, V1AppNavigation) {
   // Make sure that the app is really gone.
   base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(ash::STATUS_CLOSED, model_->ItemByID(id)->status);
+}
+
+// Checks that a opening a settings window creates a new launcher item.
+IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, SettingsWindow) {
+  chrome::SettingsWindowManager* settings_manager =
+      chrome::SettingsWindowManager::GetInstance();
+  ash::ShelfModel* shelf_model = ash::Shell::GetInstance()->shelf_model();
+
+  // Get the number of items in the shelf and browser menu.
+  int item_count = shelf_model->item_count();
+  size_t browser_count = NumberOfDetectedLauncherBrowsers(false);
+
+  // Open a settings window. Number of browser items should remain unchanged,
+  // number of shelf items should increase.
+  settings_manager->ShowChromePageForProfile(
+      browser()->profile(),
+      chrome::GetSettingsUrl(std::string()));
+  Browser* settings_browser =
+      settings_manager->FindBrowserForProfile(browser()->profile());
+  ASSERT_TRUE(settings_browser);
+  EXPECT_EQ(browser_count, NumberOfDetectedLauncherBrowsers(false));
+  EXPECT_EQ(item_count + 1, shelf_model->item_count());
 }

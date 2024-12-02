@@ -23,9 +23,9 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/performance_monitor/startup_timer.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_types.h"
@@ -37,6 +37,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/navigation_controller.h"
@@ -48,15 +49,12 @@
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension_set.h"
 #include "net/base/network_change_notifier.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#endif
-
-#if defined(OS_WIN)
-#include "win8/util/win8_util.h"
 #endif
 
 using content::NavigationController;
@@ -832,8 +830,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
         browser = browser_;
       } else {
 #if defined(OS_CHROMEOS)
-    chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
-        "SessionRestore-CreateRestoredBrowser-Start", false);
+        chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
+            "SessionRestore-CreateRestoredBrowser-Start", false);
 #endif
         // Show the first window if none are visible.
         ui::WindowShowState show_state = (*i)->show_state;
@@ -841,36 +839,14 @@ class SessionRestoreImpl : public content::NotificationObserver {
           show_state = ui::SHOW_STATE_NORMAL;
           has_visible_browser = true;
         }
-        browser = NULL;
-#if defined(OS_WIN)
-        if (win8::IsSingleWindowMetroMode()) {
-          // We don't want to add tabs to the off the record browser.
-          if (browser_ && !browser_->profile()->IsOffTheRecord()) {
-            browser = browser_;
-          } else {
-            browser = last_browser;
-            // last_browser should never be off the record either.
-            // We don't set browser higher above when browser_ is offtherecord,
-            // and CreateRestoredBrowser below, is never created offtherecord.
-            DCHECK(!browser || !browser->profile()->IsOffTheRecord());
-          }
-          // Metro should only have tabbed browsers.
-          // It never creates any non-tabbed browser, and thus should never
-          // restore non-tabbed items...
-          DCHECK(!browser || browser->is_type_tabbed());
-          DCHECK((*i)->type == Browser::TYPE_TABBED);
-        }
-#endif
-        if (!browser) {
-          browser = CreateRestoredBrowser(
-              static_cast<Browser::Type>((*i)->type),
-              (*i)->bounds,
-              show_state,
-              (*i)->app_name);
-        }
+        browser = CreateRestoredBrowser(
+            static_cast<Browser::Type>((*i)->type),
+            (*i)->bounds,
+            show_state,
+            (*i)->app_name);
 #if defined(OS_CHROMEOS)
-    chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
-        "SessionRestore-CreateRestoredBrowser-End", false);
+        chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
+            "SessionRestore-CreateRestoredBrowser-End", false);
 #endif
       }
       if ((*i)->type == Browser::TYPE_TABBED)
@@ -917,19 +893,8 @@ class SessionRestoreImpl : public content::NotificationObserver {
     chromeos::BootTimesLoader::Get()->AddLoginTimeMarker(
         "SessionRestore-CreatingTabs-End", false);
 #endif
-    if (browser_to_activate) {
+    if (browser_to_activate)
       browser_to_activate->window()->Activate();
-#if defined(OS_WIN)
-      // On Win8 Metro, we merge all browsers together, so if we need to
-      // activate one of the previously separated window, we need to activate
-      // the tab. Also, selected_tab_to_activate can be -1 if we clobbered the
-      // tab that would have been activated.
-      // In that case we'll leave activation to last tab.
-      // The only current usage of clobber is for crash recovery, so it's fine.
-      if (win8::IsSingleWindowMetroMode() && selected_tab_to_activate != -1)
-        ShowBrowser(browser_to_activate, selected_tab_to_activate);
-#endif
-    }
 
     // If last_browser is NULL and urls_to_open_ is non-empty,
     // FinishedTabCreation will create a new TabbedBrowser and add the urls to
@@ -955,14 +920,13 @@ class SessionRestoreImpl : public content::NotificationObserver {
     DCHECK(selected_index >= 0 &&
            selected_index < static_cast<int>(tab.navigations.size()));
     GURL url = tab.navigations[selected_index].virtual_url();
-    if (browser->profile()->GetExtensionService()) {
-      const extensions::Extension* extension =
-          browser->profile()->GetExtensionService()->GetInstalledApp(url);
-      if (extension) {
-        CoreAppLauncherHandler::RecordAppLaunchType(
-            extension_misc::APP_LAUNCH_SESSION_RESTORE,
-            extension->GetType());
-      }
+    const extensions::Extension* extension =
+        extensions::ExtensionRegistry::Get(profile())
+            ->enabled_extensions().GetAppByURL(url);
+    if (extension) {
+      CoreAppLauncherHandler::RecordAppLaunchType(
+          extension_misc::APP_LAUNCH_SESSION_RESTORE,
+          extension->GetType());
     }
   }
 
@@ -979,18 +943,27 @@ class SessionRestoreImpl : public content::NotificationObserver {
     if (initial_tab_count == 0) {
       for (int i = 0; i < static_cast<int>(window.tabs.size()); ++i) {
         const SessionTab& tab = *(window.tabs[i]);
+
         // Loads are scheduled for each restored tab unless the tab is going to
         // be selected as ShowBrowser() will load the selected tab.
-        if (i == selected_tab_index) {
-          ShowBrowser(browser,
-                      browser->tab_strip_model()->GetIndexOfWebContents(
-                          RestoreTab(tab, i, browser, false)));
-          tab_loader_->TabIsLoading(
-              &browser->tab_strip_model()->GetActiveWebContents()->
-                  GetController());
-        } else {
-          RestoreTab(tab, i, browser, true);
-        }
+        bool is_not_selected_tab = (i != selected_tab_index);
+        WebContents* restored_tab =
+            RestoreTab(tab, i, browser, is_not_selected_tab);
+
+        // RestoreTab can return NULL if |tab| doesn't have valid data.
+        if (!restored_tab)
+          continue;
+
+        // If this isn't the selected tab, there's nothing else to do.
+        if (is_not_selected_tab)
+          continue;
+
+        ShowBrowser(
+            browser,
+            browser->tab_strip_model()->GetIndexOfWebContents(restored_tab));
+        tab_loader_->TabIsLoading(&browser->tab_strip_model()
+                                       ->GetActiveWebContents()
+                                       ->GetController());
       }
     } else {
       // If the browser already has tabs, we want to restore the new ones after
@@ -1072,8 +1045,16 @@ class SessionRestoreImpl : public content::NotificationObserver {
                                  ui::WindowShowState show_state,
                                  const std::string& app_name) {
     Browser::CreateParams params(type, profile_, host_desktop_type_);
-    params.app_name = app_name;
-    params.initial_bounds = bounds;
+    if (!app_name.empty()) {
+      const bool trusted_source = true;  // We only store trusted app windows.
+      params = Browser::CreateParams::CreateForApp(app_name,
+                                                   trusted_source,
+                                                   bounds,
+                                                   profile_,
+                                                   host_desktop_type_);
+    } else {
+      params.initial_bounds = bounds;
+    }
     params.initial_show_state = show_state;
     params.is_session_restore = true;
     return new Browser(params);
@@ -1092,8 +1073,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
 
     // TODO(jcampan): http://crbug.com/8123 we should not need to set the
     //                initial focus explicitly.
-    browser->tab_strip_model()->GetActiveWebContents()->
-        GetView()->SetInitialFocus();
+    browser->tab_strip_model()->GetActiveWebContents()->SetInitialFocus();
 
     if (!browser_shown_) {
       browser_shown_ = true;
@@ -1219,6 +1199,24 @@ Browser* SessionRestore::RestoreSession(
       (behavior & ALWAYS_CREATE_TABBED_BROWSER) != 0,
       urls_to_open);
   return restorer->Restore();
+}
+
+// static
+void SessionRestore::RestoreSessionAfterCrash(Browser* browser) {
+   uint32 behavior = 0;
+  if (browser->tab_strip_model()->count() == 1) {
+    const content::WebContents* active_tab =
+        browser->tab_strip_model()->GetWebContentsAt(0);
+    if (active_tab->GetURL() == GURL(chrome::kChromeUINewTabURL) ||
+        chrome::IsInstantNTP(active_tab)) {
+      // There is only one tab and its the new tab page, make session restore
+      // clobber it.
+      behavior = SessionRestore::CLOBBER_CURRENT_TAB;
+    }
+  }
+  SessionRestore::RestoreSession(browser->profile(), browser,
+                                 browser->host_desktop_type(), behavior,
+                                 std::vector<GURL>());
 }
 
 // static

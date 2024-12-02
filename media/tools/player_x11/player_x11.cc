@@ -17,6 +17,7 @@
 #include "media/audio/audio_manager.h"
 #include "media/audio/null_audio_sink.h"
 #include "media/base/audio_hardware_config.h"
+#include "media/base/bind_to_current_loop.h"
 #include "media/base/decryptor.h"
 #include "media/base/filter_collection.h"
 #include "media/base/media.h"
@@ -79,21 +80,6 @@ bool InitX11() {
   return true;
 }
 
-void SetOpaque(bool /*opaque*/) {
-}
-
-typedef base::Callback<void(media::VideoFrame*)> PaintCB;
-void Paint(base::MessageLoop* message_loop, const PaintCB& paint_cb,
-           const scoped_refptr<media::VideoFrame>& video_frame) {
-  if (message_loop != base::MessageLoop::current()) {
-    message_loop->PostTask(FROM_HERE, base::Bind(
-        &Paint, message_loop, paint_cb, video_frame));
-    return;
-  }
-
-  paint_cb.Run(video_frame.get());
-}
-
 static void DoNothing() {}
 
 static void OnStatus(media::PipelineStatus status) {}
@@ -117,9 +103,8 @@ void InitPipeline(
     media::Pipeline* pipeline,
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     media::Demuxer* demuxer,
-    const PaintCB& paint_cb,
-    bool /* enable_audio */,
-    base::MessageLoop* paint_message_loop) {
+    const media::VideoRendererImpl::PaintCB& paint_cb,
+    bool /* enable_audio */) {
   // Create our filter factories.
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
@@ -131,13 +116,13 @@ void InitPipeline(
       task_runner,
       video_decoders.Pass(),
       media::SetDecryptorReadyCB(),
-      base::Bind(&Paint, paint_message_loop, paint_cb),
-      base::Bind(&SetOpaque),
+      paint_cb,
       true));
   collection->SetVideoRenderer(video_renderer.Pass());
 
   ScopedVector<media::AudioDecoder> audio_decoders;
-  audio_decoders.push_back(new media::FFmpegAudioDecoder(task_runner));
+  audio_decoders.push_back(new media::FFmpegAudioDecoder(task_runner,
+                                                         media::LogCB()));
   media::AudioParameters out_params(
       media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
       media::CHANNEL_LAYOUT_STEREO,
@@ -281,13 +266,13 @@ int main(int argc, char** argv) {
   base::Thread media_thread("MediaThread");
   media_thread.Start();
 
-  PaintCB paint_cb;
+  media::VideoRendererImpl::PaintCB paint_cb;
   if (command_line->HasSwitch("use-gl")) {
-    paint_cb = base::Bind(
-        &GlVideoRenderer::Paint, new GlVideoRenderer(g_display, g_window));
+    paint_cb = media::BindToCurrentLoop(base::Bind(
+        &GlVideoRenderer::Paint, new GlVideoRenderer(g_display, g_window)));
   } else {
-    paint_cb = base::Bind(
-        &X11VideoRenderer::Paint, new X11VideoRenderer(g_display, g_window));
+    paint_cb = media::BindToCurrentLoop(base::Bind(
+        &X11VideoRenderer::Paint, new X11VideoRenderer(g_display, g_window)));
   }
 
   scoped_ptr<media::DataSource> data_source(new DataSourceLogger(
@@ -299,7 +284,7 @@ int main(int argc, char** argv) {
   media::Pipeline pipeline(media_thread.message_loop_proxy(),
                            new media::MediaLog());
   InitPipeline(&pipeline, media_thread.message_loop_proxy(), demuxer.get(),
-               paint_cb, command_line->HasSwitch("audio"), &message_loop);
+               paint_cb, command_line->HasSwitch("audio"));
 
   // Main loop of the application.
   g_running = true;

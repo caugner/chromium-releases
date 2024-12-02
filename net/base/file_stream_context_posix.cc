@@ -22,6 +22,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/task_runner.h"
 #include "base/task_runner_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -44,53 +45,21 @@ COMPILE_ASSERT(FROM_BEGIN   == SEEK_SET &&
                FROM_CURRENT == SEEK_CUR &&
                FROM_END     == SEEK_END, whence_matches_system);
 
-FileStream::Context::Context(const BoundNetLog& bound_net_log,
-                             const scoped_refptr<base::TaskRunner>& task_runner)
-    : record_uma_(false),
-      async_in_progress_(false),
+FileStream::Context::Context(const scoped_refptr<base::TaskRunner>& task_runner)
+    : async_in_progress_(false),
       orphaned_(false),
-      async_(false),
-      bound_net_log_(bound_net_log),
       task_runner_(task_runner) {
 }
 
 FileStream::Context::Context(base::File file,
-                             const BoundNetLog& bound_net_log,
                              const scoped_refptr<base::TaskRunner>& task_runner)
     : file_(file.Pass()),
-      record_uma_(false),
       async_in_progress_(false),
       orphaned_(false),
-      async_(false),
-      bound_net_log_(bound_net_log),
-      task_runner_(task_runner) {
-}
-
-FileStream::Context::Context(base::File file,
-                             int flags,
-                             const BoundNetLog& bound_net_log,
-                             const scoped_refptr<base::TaskRunner>& task_runner)
-    : file_(file.Pass()),
-      record_uma_(false),
-      async_in_progress_(false),
-      orphaned_(false),
-      async_((flags & base::File::FLAG_ASYNC) == base::File::FLAG_ASYNC),
-      bound_net_log_(bound_net_log),
       task_runner_(task_runner) {
 }
 
 FileStream::Context::~Context() {
-}
-
-int64 FileStream::Context::GetFileSize() const {
-  struct stat info;
-  if (fstat(file_.GetPlatformFile(), &info) != 0) {
-    IOResult result = IOResult::FromOSError(errno);
-    RecordError(result, FILE_ERROR_SOURCE_GET_SIZE);
-    return result.result;
-  }
-
-  return static_cast<int64>(info.st_size);
 }
 
 int FileStream::Context::ReadAsync(IOBuffer* in_buf,
@@ -103,21 +72,13 @@ int FileStream::Context::ReadAsync(IOBuffer* in_buf,
       task_runner_.get(),
       FROM_HERE,
       base::Bind(&Context::ReadFileImpl, base::Unretained(this), buf, buf_len),
-      base::Bind(&Context::ProcessAsyncResult,
+      base::Bind(&Context::OnAsyncCompleted,
                  base::Unretained(this),
-                 IntToInt64(callback),
-                 FILE_ERROR_SOURCE_READ));
+                 IntToInt64(callback)));
   DCHECK(posted);
 
   async_in_progress_ = true;
   return ERR_IO_PENDING;
-}
-
-int FileStream::Context::ReadSync(char* in_buf, int buf_len) {
-  scoped_refptr<IOBuffer> buf = new WrappedIOBuffer(in_buf);
-  IOResult result = ReadFileImpl(buf, buf_len);
-  RecordError(result, FILE_ERROR_SOURCE_READ);
-  return result.result;
 }
 
 int FileStream::Context::WriteAsync(IOBuffer* in_buf,
@@ -130,31 +91,13 @@ int FileStream::Context::WriteAsync(IOBuffer* in_buf,
       task_runner_.get(),
       FROM_HERE,
       base::Bind(&Context::WriteFileImpl, base::Unretained(this), buf, buf_len),
-      base::Bind(&Context::ProcessAsyncResult,
+      base::Bind(&Context::OnAsyncCompleted,
                  base::Unretained(this),
-                 IntToInt64(callback),
-                 FILE_ERROR_SOURCE_WRITE));
+                 IntToInt64(callback)));
   DCHECK(posted);
 
   async_in_progress_ = true;
   return ERR_IO_PENDING;
-}
-
-int FileStream::Context::WriteSync(const char* in_buf, int buf_len) {
-  scoped_refptr<IOBuffer> buf = new WrappedIOBuffer(in_buf);
-  IOResult result = WriteFileImpl(buf, buf_len);
-  RecordError(result, FILE_ERROR_SOURCE_WRITE);
-  return result.result;
-}
-
-int FileStream::Context::Truncate(int64 bytes) {
-  if (ftruncate(file_.GetPlatformFile(), bytes) != 0) {
-    IOResult result = IOResult::FromOSError(errno);
-    RecordError(result, FILE_ERROR_SOURCE_SET_EOF);
-    return result.result;
-  }
-
-  return bytes;
 }
 
 FileStream::Context::IOResult FileStream::Context::SeekFileImpl(Whence whence,

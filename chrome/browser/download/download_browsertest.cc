@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
@@ -42,7 +43,6 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
-#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -62,6 +62,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/infobars/core/infobar.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -84,7 +85,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/feature_switch.h"
 #include "grit/generated_resources.h"
-#include "net/base/net_util.h"
+#include "net/base/filename_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -2795,7 +2796,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsInfobar) {
   ASSERT_EQ(1u, infobar_service->infobar_count());
 
   // Get the infobar at index 0.
-  InfoBar* infobar = infobar_service->infobar_at(0);
+  infobars::InfoBar* infobar = infobar_service->infobar_at(0);
   ConfirmInfoBarDelegate* confirm_infobar =
       infobar->delegate()->AsConfirmInfoBarDelegate();
   ASSERT_TRUE(confirm_infobar != NULL);
@@ -2872,8 +2873,6 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_CrazyFilenames) {
   };
 
   std::vector<DownloadItem*> download_items;
-  static const int kFlags = (base::PLATFORM_FILE_CREATE |
-               base::PLATFORM_FILE_WRITE);
   base::FilePath origin(FILE_PATH_LITERAL("origin"));
   ASSERT_TRUE(base::CreateDirectory(DestinationFile(browser(), origin)));
 
@@ -2892,15 +2891,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_CrazyFilenames) {
         )));
 
     // Create the file.
-    bool created = false;
-    base::PlatformFileError error = base::PLATFORM_FILE_ERROR_MAX;
-    base::PlatformFile fd = base::CreatePlatformFile(
-        file_path, kFlags, &created, &error);
     EXPECT_EQ(static_cast<int>(crazy8.size()),
-              base::WritePlatformFileAtCurrentPos(
-                  fd, crazy8.c_str(), crazy8.size()));
-    EXPECT_TRUE(base::ClosePlatformFile(fd));
-    fd = base::kInvalidPlatformFileValue;
+              base::WriteFile(file_path, crazy8.c_str(), crazy8.size()));
     GURL file_url(net::FilePathToFileURL(file_path));
 
     // Download the file and check that the filename is correct.
@@ -2980,18 +2972,12 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_PercentComplete) {
   // Write a huge file.
   base::FilePath file_path(DestinationFile(
       browser(), base::FilePath(FILE_PATH_LITERAL("DownloadTest_BigZip.zip"))));
-  int flags = (base::PLATFORM_FILE_CREATE |
-               base::PLATFORM_FILE_WRITE);
-  bool created = false;
-  base::PlatformFileError error = base::PLATFORM_FILE_ERROR_MAX;
-  base::PlatformFile fd = base::CreatePlatformFile(
-      file_path, flags, &created, &error);
-  int64 size = 1 << 29;
-  EXPECT_EQ(size, base::SeekPlatformFile(
-      fd, base::PLATFORM_FILE_FROM_BEGIN, size));
-  EXPECT_EQ(1, base::WritePlatformFileAtCurrentPos(fd, "a", 1));
-  EXPECT_TRUE(base::ClosePlatformFile(fd));
-  fd = base::kInvalidPlatformFileValue;
+  base::File file(file_path, base::File::FLAG_CREATE | base::File::FLAG_WRITE);
+  ASSERT_TRUE(file.IsValid());
+  int64 size = 1 << 25;
+  EXPECT_EQ(1, file.Write(size, "a", 1));
+  file.Close();
+
 #if defined(OS_POSIX)
   // Make it readable by chronos on chromeos
   base::SetPosixFilePermissions(file_path, 0755);
@@ -3029,11 +3015,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_PercentComplete) {
   int64 downloaded_size = 0;
   ASSERT_TRUE(base::GetFileSize(
       download_items[0]->GetTargetFilePath(), &downloaded_size));
-#if defined(OS_WIN)
-  ASSERT_EQ(1, downloaded_size);
-#else
   ASSERT_EQ(size + 1, downloaded_size);
-#endif
   ASSERT_TRUE(base::DieFileDie(file_path, false));
   ASSERT_TRUE(base::DieFileDie(download_items[0]->GetTargetFilePath(), false));
 }

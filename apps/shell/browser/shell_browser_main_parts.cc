@@ -4,8 +4,6 @@
 
 #include "apps/shell/browser/shell_browser_main_parts.h"
 
-#include "apps/browser_context_keyed_service_factories.h"
-#include "apps/shell/browser/shell_apps_client.h"
 #include "apps/shell/browser/shell_browser_context.h"
 #include "apps/shell/browser/shell_desktop_controller.h"
 #include "apps/shell/browser/shell_extension_system.h"
@@ -24,7 +22,11 @@
 #include "extensions/browser/extension_system.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/views/widget/widget.h"
+
+#if defined(OS_CHROMEOS)
+#include "apps/shell/browser/shell_network_controller_chromeos.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#endif
 
 using content::BrowserContext;
 using extensions::Extension;
@@ -36,7 +38,6 @@ namespace {
 // Register additional KeyedService factories here. See
 // ChromeBrowserMainExtraPartsProfiles for details.
 void EnsureBrowserContextKeyedServiceFactoriesBuilt() {
-  apps::EnsureBrowserContextKeyedServiceFactoriesBuilt();
   extensions::EnsureBrowserContextKeyedServiceFactoriesBuilt();
   extensions::ShellExtensionSystemFactory::GetInstance();
 }
@@ -47,7 +48,9 @@ namespace apps {
 
 ShellBrowserMainParts::ShellBrowserMainParts(
     const content::MainFunctionParams& parameters)
-    : extension_system_(NULL), parameters_(parameters) {}
+    : extension_system_(NULL),
+      parameters_(parameters),
+      run_message_loop_(true) {}
 
 ShellBrowserMainParts::~ShellBrowserMainParts() {
 }
@@ -57,6 +60,10 @@ void ShellBrowserMainParts::PreMainMessageLoopStart() {
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopStart() {
+#if defined(OS_CHROMEOS)
+  chromeos::DBusThreadManager::Initialize();
+  network_controller_.reset(new ShellNetworkController);
+#endif
 }
 
 void ShellBrowserMainParts::PreEarlyInitialization() {
@@ -70,6 +77,9 @@ int ShellBrowserMainParts::PreCreateThreads() {
 }
 
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
+  // Initialize our "profile" equivalent.
+  browser_context_.reset(new ShellBrowserContext);
+
   desktop_controller_.reset(new ShellDesktopController);
   desktop_controller_->GetWindowTreeHost()->AddObserver(this);
 
@@ -77,18 +87,12 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   // TODO(jamescook): Initialize chromeos::UserManager.
   net_log_.reset(new content::ShellNetLog("app_shell"));
 
-  // Initialize our "profile" equivalent.
-  browser_context_.reset(new ShellBrowserContext);
-
   extensions_client_.reset(new ShellExtensionsClient());
   extensions::ExtensionsClient::Set(extensions_client_.get());
 
   extensions_browser_client_.reset(
       new extensions::ShellExtensionsBrowserClient(browser_context_.get()));
   extensions::ExtensionsBrowserClient::Set(extensions_browser_client_.get());
-
-  apps_client_.reset(new ShellAppsClient(browser_context_.get()));
-  AppsClient::Set(apps_client_.get());
 
   // Create our custom ExtensionSystem first because other
   // KeyedServices depend on it.
@@ -102,27 +106,26 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   devtools_delegate_.reset(
       new content::ShellDevToolsDelegate(browser_context_.get()));
 
-  // For running browser tests.
-  // TODO(yoz): This is set up to exit prematurely because we don't have
-  // any tests yet.
-  if (parameters_.ui_task) {
-    parameters_.ui_task->Run();
-    delete parameters_.ui_task;
-    return;
-  }
-
   const std::string kAppSwitch = "app";
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(kAppSwitch)) {
     base::FilePath app_dir(command_line->GetSwitchValueNative(kAppSwitch));
     base::FilePath app_absolute_dir = base::MakeAbsoluteFilePath(app_dir);
     extension_system_->LoadAndLaunchApp(app_absolute_dir);
+  } else if (parameters_.ui_task) {
+    // For running browser tests.
+    parameters_.ui_task->Run();
+    delete parameters_.ui_task;
+    run_message_loop_ = false;
   } else {
     LOG(ERROR) << "--" << kAppSwitch << " unset; boredom is in your future";
   }
 }
 
 bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code)  {
+  if (!run_message_loop_)
+    return true;
+  // TODO(yoz): just return false here?
   base::RunLoop run_loop;
   run_loop.Run();
   *result_code = content::RESULT_CODE_NORMAL_EXIT;
@@ -141,9 +144,16 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
   desktop_controller_.reset();
 }
 
+void ShellBrowserMainParts::PostDestroyThreads() {
+#if defined(OS_CHROMEOS)
+  network_controller_.reset();
+  chromeos::DBusThreadManager::Shutdown();
+#endif
+}
+
 void ShellBrowserMainParts::OnHostCloseRequested(
     const aura::WindowTreeHost* host) {
-  extension_system_->CloseApp();
+  desktop_controller_->CloseAppWindow();
   base::MessageLoop::current()->PostTask(FROM_HERE,
                                          base::MessageLoop::QuitClosure());
 }

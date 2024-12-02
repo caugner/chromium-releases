@@ -8,12 +8,42 @@
 #include "base/memory/ref_counted.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/ozone/surface_factory_ozone.h"
+#include "ui/gfx/ozone/surface_ozone_egl.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_surface_osmesa.h"
 #include "ui/gl/gl_surface_stub.h"
 
 namespace gfx {
+
+namespace {
+
+// A thin wrapper around GLSurfaceEGL that owns the EGLNativeWindow
+class GL_EXPORT GLSurfaceOzoneEGL : public NativeViewGLSurfaceEGL {
+ public:
+  GLSurfaceOzoneEGL(scoped_ptr<SurfaceOzoneEGL> ozone_surface)
+      : NativeViewGLSurfaceEGL(ozone_surface->GetNativeWindow()),
+        ozone_surface_(ozone_surface.Pass()) {}
+
+  virtual bool Resize(const gfx::Size& size) OVERRIDE {
+    if (!ozone_surface_->ResizeNativeWindow(size))
+      return false;
+
+    return NativeViewGLSurfaceEGL::Resize(size);
+  }
+
+ private:
+  virtual ~GLSurfaceOzoneEGL() {
+    Destroy();  // EGL surface must be destroyed before SurfaceOzone
+  }
+
+  // The native surface. Deleting this is allowed to free the EGLNativeWindow.
+  scoped_ptr<SurfaceOzoneEGL> ozone_surface_;
+
+  DISALLOW_COPY_AND_ASSIGN(GLSurfaceOzoneEGL);
+};
+
+}  // namespace
 
 // static
 bool GLSurface::InitializeOneOffInternal() {
@@ -29,10 +59,14 @@ bool GLSurface::InitializeOneOffInternal() {
         LOG(ERROR) << "GLSurfaceEGL::InitializeOneOff failed.";
         return false;
       }
+
+      return true;
+    case kGLImplementationOSMesaGL:
+    case kGLImplementationMockGL:
+      return true;
     default:
-      break;
+      return false;
   }
-  return true;
 }
 
 // static
@@ -46,16 +80,18 @@ scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
   }
   DCHECK(GetGLImplementation() == kGLImplementationEGLGLES2);
   if (window != kNullAcceleratedWidget) {
-    EGLNativeWindowType egl_window =
-        gfx::SurfaceFactoryOzone::GetInstance()->RealizeAcceleratedWidget(
-            window);
-    scoped_ptr<VSyncProvider> sync_provider =
-        gfx::SurfaceFactoryOzone::GetInstance()->CreateVSyncProvider(
-            egl_window);
-    scoped_refptr<NativeViewGLSurfaceEGL> surface =
-        new NativeViewGLSurfaceEGL(egl_window);
-    if (surface->Initialize(sync_provider.Pass()))
-      return surface;
+    scoped_ptr<SurfaceOzoneEGL> surface_ozone =
+        SurfaceFactoryOzone::GetInstance()->CreateEGLSurfaceForWidget(window);
+    if (!surface_ozone)
+      return NULL;
+
+    scoped_ptr<VSyncProvider> vsync_provider =
+        surface_ozone->CreateVSyncProvider();
+    scoped_refptr<GLSurfaceOzoneEGL> surface =
+        new GLSurfaceOzoneEGL(surface_ozone.Pass());
+    if (!surface->Initialize(vsync_provider.Pass()))
+      return NULL;
+    return surface;
   } else {
     scoped_refptr<GLSurface> surface = new GLSurfaceStub();
     if (surface->Initialize())

@@ -13,7 +13,6 @@
 
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_pump_x11.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
 #include "ui/events/x/device_data_manager.h"
@@ -138,6 +137,10 @@ int GetEventFlagsFromXState(unsigned int state) {
     flags |= ui::EF_ALT_DOWN;
   if (state & LockMask)
     flags |= ui::EF_CAPS_LOCK_DOWN;
+  if (state & Mod3Mask)
+    flags |= ui::EF_MOD3_DOWN;
+  if (state & Mod4Mask)
+    flags |= ui::EF_COMMAND_DOWN;
   if (state & Mod5Mask)
     flags |= ui::EF_ALTGR_DOWN;
   if (state & Button1Mask)
@@ -460,8 +463,21 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
     case GenericEvent: {
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
-      return gfx::Point(static_cast<int>(xievent->event_x),
-                        static_cast<int>(xievent->event_y));
+      float x = xievent->event_x;
+      float y = xievent->event_y;
+#if defined(OS_CHROMEOS)
+      switch (xievent->evtype) {
+        case XI_TouchBegin:
+        case XI_TouchUpdate:
+        case XI_TouchEnd:
+          ui::DeviceDataManager::GetInstance()->ApplyTouchTransformer(
+              xievent->deviceid, &x, &y);
+          break;
+        default:
+          break;
+      }
+#endif  // defined(OS_CHROMEOS)
+      return gfx::Point(static_cast<int>(x), static_cast<int>(y));
     }
   }
   return gfx::Point();
@@ -558,6 +574,18 @@ gfx::Vector2d GetMouseWheelOffset(const base::NativeEvent& native_event) {
     default:
       return gfx::Vector2d();
   }
+}
+
+base::NativeEvent CopyNativeEvent(const base::NativeEvent& event) {
+  if (!event || event->type == GenericEvent)
+    return NULL;
+  XEvent* copy = new XEvent;
+  *copy = *event;
+  return copy;
+}
+
+void ReleaseCopiedNativeEvent(const base::NativeEvent& event) {
+  delete event;
 }
 
 void ClearTouchIdIfReleased(const base::NativeEvent& xev) {
@@ -691,14 +719,6 @@ bool GetGestureTimes(const base::NativeEvent& native_event,
   DeviceDataManager::GetInstance()->GetGestureTimes(
       native_event, start_time, end_time);
   return true;
-}
-
-void SetNaturalScroll(bool enabled) {
-  DeviceDataManager::GetInstance()->set_natural_scroll_enabled(enabled);
-}
-
-bool IsNaturalScrollEnabled() {
-  return DeviceDataManager::GetInstance()->natural_scroll_enabled();
 }
 
 bool IsTouchpadEvent(const base::NativeEvent& event) {

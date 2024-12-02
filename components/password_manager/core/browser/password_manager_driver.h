@@ -7,15 +7,18 @@
 
 #include <vector>
 
-class PasswordGenerationManager;
-class PasswordManager;
-
 namespace autofill {
 class AutofillManager;
 struct FormData;
 struct PasswordForm;
 struct PasswordFormFillData;
 }  // namespace autofill
+
+namespace password_manager {
+
+class PasswordAutofillManager;
+class PasswordGenerationManager;
+class PasswordManager;
 
 // Interface that allows PasswordManager core code to interact with its driver
 // (i.e., obtain information from it and give information to it).
@@ -35,15 +38,6 @@ class PasswordManagerDriver {
   // If this browsing session should not be persisted.
   virtual bool IsOffTheRecord() = 0;
 
-  // Returns the PasswordGenerationManager associated with this instance.
-  virtual PasswordGenerationManager* GetPasswordGenerationManager() = 0;
-
-  // Returns the PasswordManager associated with this instance.
-  virtual PasswordManager* GetPasswordManager() = 0;
-
-  // Returns the AutofillManager associated with this instance.
-  virtual autofill::AutofillManager* GetAutofillManager() = 0;
-
   // Informs the driver that |form| can be used for password generation.
   virtual void AllowPasswordGenerationForForm(autofill::PasswordForm* form) = 0;
 
@@ -51,8 +45,28 @@ class PasswordManagerDriver {
   virtual void AccountCreationFormsFound(
       const std::vector<autofill::FormData>& forms) = 0;
 
+  // Tells the driver to accept the password autofill suggestion for |username|
+  // and fill the password with |password|.
+  virtual void AcceptPasswordAutofillSuggestion(
+      const base::string16& username,
+      const base::string16& password) = 0;
+
+  // Returns the PasswordGenerationManager associated with this instance.
+  virtual PasswordGenerationManager* GetPasswordGenerationManager() = 0;
+
+  // Returns the PasswordManager associated with this instance.
+  virtual PasswordManager* GetPasswordManager() = 0;
+
+  // Returns the PasswordAutofillManager associated with this instance.
+  virtual PasswordAutofillManager* GetPasswordAutofillManager() = 0;
+
+  // Returns the AutofillManager associated with this instance.
+  virtual autofill::AutofillManager* GetAutofillManager() = 0;
+
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerDriver);
 };
+
+}  // namespace password_manager
 
 #endif  // COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_DRIVER_H_

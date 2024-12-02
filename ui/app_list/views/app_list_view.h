@@ -35,7 +35,6 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
                                     public AppListViewDelegateObserver,
                                     public SpeechUIModelObserver {
  public:
-
   // Takes ownership of |delegate|.
   explicit AppListView(AppListViewDelegate* delegate);
   virtual ~AppListView();
@@ -75,6 +74,9 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   void Close();
 
   void UpdateBounds();
+
+  // Returns true if the app list should be centered and in landscape mode.
+  bool ShouldCenterWindow() const;
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;

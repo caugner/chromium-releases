@@ -35,7 +35,7 @@ namespace chrome_browser {
 extern const char kMissingLocaleDataTitle[];
 #endif
 
-#if defined(OS_WIN) || defined(TOOLKIT_GTK)
+#if defined(OS_WIN)
 extern const char kMissingLocaleDataMessage[];
 #endif
 }
@@ -106,9 +106,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Starts recording of metrics. This can only be called after we have a file
   // thread.
   void StartMetricsRecording();
-
-  // Returns true if the user opted in to sending metric reports.
-  bool IsMetricsReportingEnabled();
 
   // Record time from process startup to present time in an UMA histogram.
   void RecordBrowserStartupTime();

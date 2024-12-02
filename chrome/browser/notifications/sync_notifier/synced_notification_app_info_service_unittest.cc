@@ -4,10 +4,11 @@
 
 #include "chrome/browser/notifications/sync_notifier/synced_notification_app_info_service.h"
 
+#include "chrome/browser/notifications/sync_notifier/sync_notifier_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_browser_thread.h"
 #include "sync/api/fake_sync_change_processor.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_change_processor.h"
@@ -25,18 +26,6 @@ using syncer::SYNCED_NOTIFICATION_APP_INFO;
 using notifier::SyncedNotificationAppInfo;
 using notifier::SyncedNotificationAppInfoService;
 using sync_pb::SyncedNotificationAppInfoSpecifics;
-
-namespace {
-const char kSendingService1Name[] = "TestService1";
-const char kSendingService2Name[] = "TestService2";
-const char kSendingService3Name[] = "TestService3";
-const char kAppId1[] = "service1_appid1";
-const char kAppId2[] = "service1_appid2";
-const char kAppId3[] = "service1_appid3";
-const char kAppId4[] = "service2_appid1";
-const char kAppId5[] = "service2_appid2";
-const char kTestIconUrl[] = "https://www.google.com/someicon.png";
-}  // namespace
 
 namespace notifier {
 
@@ -114,29 +103,29 @@ class SyncedNotificationAppInfoServiceTest : public testing::Test {
     // Create the app_info struct, setting the settings display name.
 
     // The sending_service_infos_ list will take ownership of this pointer.
-    SyncedNotificationAppInfo* test_item1 =
-        new SyncedNotificationAppInfo(kSendingService1Name);
+    SyncedNotificationAppInfo* test_item1 = new SyncedNotificationAppInfo(
+        NULL, kSendingService1Name, app_info_service);
 
     // Add some App IDs.
     test_item1->AddAppId(kAppId1);
     test_item1->AddAppId(kAppId2);
 
     // Set this icon GURL.
-    test_item1->SetSettingsIcon(GURL(kTestIconUrl));
+    test_item1->SetSettingsURLs(GURL(kTestIconUrl), GURL());
 
     // Add to the list.
     app_info_service->sending_service_infos_.push_back(test_item1);
 
     // Add a second test item for another service.
-    SyncedNotificationAppInfo* test_item2 =
-        new SyncedNotificationAppInfo(kSendingService2Name);
+    SyncedNotificationAppInfo* test_item2 = new SyncedNotificationAppInfo(
+        NULL, kSendingService2Name, app_info_service);
 
     // Add some App IDs.
     test_item2->AddAppId(kAppId4);
     test_item2->AddAppId(kAppId5);
 
     // Set thi icon GURL.
-    test_item2->SetSettingsIcon(GURL(kTestIconUrl));
+    test_item2->SetSettingsURLs(GURL(kTestIconUrl), GURL());
 
     // Add to the list.
     app_info_service->sending_service_infos_.push_back(test_item2);
@@ -148,6 +137,7 @@ class SyncedNotificationAppInfoServiceTest : public testing::Test {
     protobuf.add_app_id(std::string(kAppId1));
     protobuf.add_app_id(std::string(kAppId2));
     protobuf.set_settings_display_name(kSendingService1Name);
+    protobuf.set_info_url(kTestInfoUrl);
     protobuf.mutable_icon()->set_url(kTestIconUrl);
   }
 
@@ -161,6 +151,7 @@ class SyncedNotificationAppInfoServiceTest : public testing::Test {
   // Helper to create syncer::SyncChange.
   static SyncChange CreateSyncChange(SyncChange::SyncChangeType type,
                                      const std::string& settings_display_name,
+                                     const std::string& info_url,
                                      const std::string& icon_url,
                                      const std::string& app_id1,
                                      const std::string& app_id2) {
@@ -168,11 +159,13 @@ class SyncedNotificationAppInfoServiceTest : public testing::Test {
     return SyncChange(
         FROM_HERE,
         type,
-        CreateSyncData(settings_display_name, icon_url, app_id1, app_id2));
+        CreateSyncData(
+            settings_display_name, info_url, icon_url, app_id1, app_id2));
   }
 
   // Build a SyncData object to look like what Sync would deliver.
   static SyncData CreateSyncData(const std::string& settings_display_name,
+                                 const std::string& info_url,
                                  const std::string& icon_url,
                                  const std::string& app_id1,
                                  const std::string& app_id2) {
@@ -190,6 +183,9 @@ class SyncedNotificationAppInfoServiceTest : public testing::Test {
 
     // Add the key, the settings display name.
     app_info->set_settings_display_name(settings_display_name);
+
+    // Add the welcome notification info URL.
+    app_info->set_info_url(info_url);
 
     // Add the icon URL.
     app_info->mutable_icon()->set_url(icon_url);
@@ -225,7 +221,6 @@ class SyncedNotificationAppInfoServiceTest : public testing::Test {
  private:
   scoped_ptr<syncer::SyncChangeProcessor> sync_processor_;
   scoped_ptr<syncer::SyncChangeProcessor> sync_processor_delegate_;
-  content::TestBrowserThreadBundle thread_bundle_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncedNotificationAppInfoServiceTest);
 };
@@ -248,11 +243,13 @@ TEST_F(SyncedNotificationAppInfoServiceTest, MergeDataAndStartSyncingTest) {
 TEST_F(SyncedNotificationAppInfoServiceTest, ProcessSyncChangesEmptyModel) {
   // We initially have no data.
   SyncedNotificationAppInfoService app_info_service(profile_.get());
+  app_info_service.set_avoid_bitmap_fetching_for_test(true);
 
   // Set up an ADD.
   SyncChangeList changes;
   changes.push_back(CreateSyncChange(SyncChange::ACTION_ADD,
                                      kSendingService1Name,
+                                     kTestInfoUrl,
                                      kTestIconUrl,
                                      kAppId1,
                                      kAppId2));
@@ -274,6 +271,7 @@ TEST_F(SyncedNotificationAppInfoServiceTest, ProcessSyncChangesEmptyModel) {
 // Process sync changes when there is local data.
 TEST_F(SyncedNotificationAppInfoServiceTest, ProcessSyncChangesNonEmptyModel) {
     SyncedNotificationAppInfoService app_info_service(profile_.get());
+    app_info_service.set_avoid_bitmap_fetching_for_test(true);
 
   // Create some local fake data. We rely on the specific ids set up here.
   AddTestingAppInfosToList(&app_info_service);
@@ -283,6 +281,7 @@ TEST_F(SyncedNotificationAppInfoServiceTest, ProcessSyncChangesNonEmptyModel) {
 
   changes.push_back(CreateSyncChange(SyncChange::ACTION_UPDATE,
                                      kSendingService1Name,
+                                     kTestInfoUrl,
                                      kTestIconUrl,
                                      kAppId1,
                                      kAppId3));
@@ -306,6 +305,7 @@ TEST_F(SyncedNotificationAppInfoServiceTest,
        ProcessIncomingAppInfoProtobufAddTest) {
   // Get an app info service object.
   SyncedNotificationAppInfoService app_info_service(profile_.get());
+  app_info_service.set_avoid_bitmap_fetching_for_test(true);
 
   // Get an app info protobuf.
   sync_pb::SyncedNotificationAppInfo protobuf;
@@ -330,6 +330,7 @@ TEST_F(SyncedNotificationAppInfoServiceTest,
        ProcessIncomingAppInfoProtobufUpdateTest) {
   // Get an app info service object.
   SyncedNotificationAppInfoService app_info_service(profile_.get());
+  app_info_service.set_avoid_bitmap_fetching_for_test(true);
 
   // Make an app info with the same display name as the first one in the test
   // data.
@@ -368,23 +369,25 @@ TEST_F(SyncedNotificationAppInfoServiceTest,
 // Test our function that creates a synced notification from a protobuf.
 TEST_F(SyncedNotificationAppInfoServiceTest,
        CreateSyncedNotificationAppInfoFromProtobufTest) {
+  SyncedNotificationAppInfoService app_info_service(profile_.get());
   // Build a protobuf and fill it with data.
   sync_pb::SyncedNotificationAppInfo protobuf;
   FillProtobufWithTestData1(protobuf);
 
   scoped_ptr<SyncedNotificationAppInfo> app_info;
-  app_info = SyncedNotificationAppInfoService::
-      CreateSyncedNotificationAppInfoFromProtobuf(protobuf);
+  app_info =
+      app_info_service.CreateSyncedNotificationAppInfoFromProtobuf(protobuf);
 
   // Ensure the app info class has the fields we expect.
   EXPECT_EQ(std::string(kSendingService1Name),
             app_info->settings_display_name());
+  EXPECT_EQ(GURL(kTestInfoUrl), app_info->welcome_link_url());
   EXPECT_TRUE(app_info->HasAppId(kAppId1));
   EXPECT_TRUE(app_info->HasAppId(kAppId2));
   EXPECT_EQ(GURL(std::string(kTestIconUrl)), app_info->settings_icon_url());
 }
 
-// Test our find function.
+// Test our find by sending service name function.
 TEST_F(SyncedNotificationAppInfoServiceTest,
        FindSyncedNotificationAppInfoByNameTest) {
   SyncedNotificationAppInfoService app_info_service(profile_.get());
@@ -404,6 +407,41 @@ TEST_F(SyncedNotificationAppInfoServiceTest,
   EXPECT_EQ(NULL, found);
 }
 
+// Test our find by AppId function.
+TEST_F(SyncedNotificationAppInfoServiceTest,
+       FindSyncedNotificationAppInfoByAppIdTest) {
+  SyncedNotificationAppInfoService app_info_service(profile_.get());
+
+  AddTestingAppInfosToList(&app_info_service);
+
+  SyncedNotificationAppInfo* found;
+
+  found = app_info_service.FindSyncedNotificationAppInfoByAppId(kAppId1);
+
+  EXPECT_NE(static_cast<SyncedNotificationAppInfo*>(NULL), found);
+  EXPECT_EQ(std::string(kSendingService1Name), found->settings_display_name());
+
+  found = app_info_service.FindSyncedNotificationAppInfoByName(kAppId5);
+  EXPECT_EQ(NULL, found);
+}
+
+// Test our find sending service name by app id function.
+TEST_F(SyncedNotificationAppInfoServiceTest,
+       FindSendingServiceNameFromAppIdTest) {
+  SyncedNotificationAppInfoService app_info_service(profile_.get());
+
+  AddTestingAppInfosToList(&app_info_service);
+
+  std::string found_name;
+
+  found_name = app_info_service.FindSendingServiceNameFromAppId(kAppId1);
+
+  EXPECT_EQ(std::string(kSendingService1Name), found_name);
+
+  found_name = app_info_service.FindSendingServiceNameFromAppId(kAppId6);
+  EXPECT_TRUE(found_name.empty());
+}
+
 // Test our delete function.
 TEST_F(SyncedNotificationAppInfoServiceTest,
        FreeSyncedNotificationAppInfoByNameTest) {
@@ -417,6 +455,20 @@ TEST_F(SyncedNotificationAppInfoServiceTest,
   found = app_info_service.FindSyncedNotificationAppInfoByName(
       kSendingService1Name);
   EXPECT_EQ(NULL, found);
+}
+
+TEST_F(SyncedNotificationAppInfoServiceTest,
+       GetAllSendingServiceSettingsDataTest) {
+  SyncedNotificationAppInfoService app_info_service(profile_.get());
+
+  AddTestingAppInfosToList(&app_info_service);
+
+  std::vector<SyncedNotificationSendingServiceSettingsData> data;
+  data = app_info_service.GetAllSendingServiceSettingsData();
+
+  EXPECT_EQ(static_cast<unsigned int>(2), data.size());
+  EXPECT_EQ(kSendingService1Name, data[0].settings_display_name);
+  EXPECT_EQ(kSendingService2Name, data[1].settings_display_name);
 }
 
 }  // namespace notifier

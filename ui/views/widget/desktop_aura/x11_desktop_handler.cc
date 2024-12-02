@@ -12,12 +12,10 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/x/x11_menu_list.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/x/x11_error_tracker.h"
-
-#if !defined(OS_CHROMEOS)
 #include "ui/views/ime/input_method.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h"
-#endif
 
 namespace {
 
@@ -44,10 +42,12 @@ X11DesktopHandler* X11DesktopHandler::get() {
 X11DesktopHandler::X11DesktopHandler()
     : xdisplay_(gfx::GetXDisplay()),
       x_root_window_(DefaultRootWindow(xdisplay_)),
+      wm_user_time_ms_(0),
       current_window_(None),
       atom_cache_(xdisplay_, kAtomsToCache),
       wm_supports_active_window_(false) {
-  base::MessagePumpX11::Current()->AddDispatcherForRootWindow(this);
+  if (ui::PlatformEventSource::GetInstance())
+    ui::PlatformEventSource::GetInstance()->AddPlatformEventDispatcher(this);
   aura::Env::GetInstance()->AddObserver(this);
 
   XWindowAttributes attr;
@@ -64,7 +64,8 @@ X11DesktopHandler::X11DesktopHandler()
 
 X11DesktopHandler::~X11DesktopHandler() {
   aura::Env::GetInstance()->RemoveObserver(this);
-  base::MessagePumpX11::Current()->RemoveDispatcherForRootWindow(this);
+  if (ui::PlatformEventSource::GetInstance())
+    ui::PlatformEventSource::GetInstance()->RemovePlatformEventDispatcher(this);
 }
 
 void X11DesktopHandler::ActivateWindow(::Window window) {
@@ -78,7 +79,7 @@ void X11DesktopHandler::ActivateWindow(::Window window) {
     xclient.xclient.message_type = atom_cache_.GetAtom("_NET_ACTIVE_WINDOW");
     xclient.xclient.format = 32;
     xclient.xclient.data.l[0] = 1;  // Specified we are an app.
-    xclient.xclient.data.l[1] = CurrentTime;
+    xclient.xclient.data.l[1] = wm_user_time_ms_;
     xclient.xclient.data.l[2] = None;
     xclient.xclient.data.l[3] = 0;
     xclient.xclient.data.l[4] = 0;
@@ -102,7 +103,7 @@ bool X11DesktopHandler::IsActiveWindow(::Window window) const {
   return window == current_window_;
 }
 
-void X11DesktopHandler::ProcessXEvent(const base::NativeEvent& event) {
+void X11DesktopHandler::ProcessXEvent(XEvent* event) {
   switch (event->type) {
     case FocusIn:
       if (current_window_ != event->xfocus.window)
@@ -117,14 +118,19 @@ void X11DesktopHandler::ProcessXEvent(const base::NativeEvent& event) {
   }
 }
 
-uint32_t X11DesktopHandler::Dispatch(const base::NativeEvent& event) {
-  // Check for a change to the active window.
+bool X11DesktopHandler::CanDispatchEvent(const ui::PlatformEvent& event) {
+  return event->type == CreateNotify || event->type == DestroyNotify ||
+         (event->type == PropertyNotify &&
+          event->xproperty.window == x_root_window_);
+}
+
+uint32_t X11DesktopHandler::DispatchEvent(const ui::PlatformEvent& event) {
   switch (event->type) {
     case PropertyNotify: {
+      // Check for a change to the active window.
+      CHECK_EQ(x_root_window_, event->xproperty.window);
       ::Atom active_window_atom = atom_cache_.GetAtom("_NET_ACTIVE_WINDOW");
-
-      if (event->xproperty.window == x_root_window_ &&
-          event->xproperty.atom == active_window_atom) {
+      if (event->xproperty.atom == active_window_atom) {
         ::Window window;
         if (ui::GetXIDProperty(x_root_window_, "_NET_ACTIVE_WINDOW", &window) &&
             window) {
@@ -133,6 +139,7 @@ uint32_t X11DesktopHandler::Dispatch(const base::NativeEvent& event) {
       }
       break;
     }
+
     // Menus created by Chrome can be drag and drop targets. Since they are
     // direct children of the screen root window and have override_redirect
     // we cannot use regular _NET_CLIENT_LIST_STACKING property to find them
@@ -153,9 +160,11 @@ uint32_t X11DesktopHandler::Dispatch(const base::NativeEvent& event) {
       ui::XMenuList::GetInstance()->MaybeUnregisterMenu(xdwe->window);
       break;
     }
+    default:
+      NOTREACHED();
   }
 
-  return POST_DISPATCH_NONE;
+  return ui::POST_DISPATCH_NONE;
 }
 
 void X11DesktopHandler::OnWindowInitialized(aura::Window* window) {
@@ -174,12 +183,13 @@ void X11DesktopHandler::OnActiveWindowChanged(::Window xid) {
   if (old_host)
     old_host->HandleNativeWidgetActivationChanged(false);
 
+  // Update the current window ID to effectively change the active widget.
+  current_window_ = xid;
+
   DesktopWindowTreeHostX11* new_host =
       views::DesktopWindowTreeHostX11::GetHostForXID(xid);
   if (new_host)
     new_host->HandleNativeWidgetActivationChanged(true);
-
-  current_window_ = xid;
 }
 
 }  // namespace views

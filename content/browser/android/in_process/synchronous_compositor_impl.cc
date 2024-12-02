@@ -7,10 +7,10 @@
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "cc/input/input_handler.h"
-#include "cc/input/layer_scroll_offset_delegate.h"
 #include "content/browser/android/in_process/synchronous_compositor_factory_impl.h"
 #include "content/browser/android/in_process/synchronous_input_event_filter.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
+#include "content/common/input/did_overscroll_params.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -100,8 +100,7 @@ bool SynchronousCompositorImpl::InitializeHwDraw(
   scoped_refptr<cc::ContextProvider> onscreen_context =
   g_factory.Get().CreateOnscreenContextProviderForCompositorThread(surface);
 
-  bool success =
-      output_surface_->InitializeHwDraw(onscreen_context, offscreen_context);
+  bool success = output_surface_->InitializeHwDraw(onscreen_context);
 
   if (success)
     g_factory.Get().CompositorInitializedHardwareDraw();
@@ -140,7 +139,7 @@ void SynchronousCompositorImpl::SetMemoryPolicy(
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
 
-  return output_surface_->SetMemoryPolicy(policy);
+  output_surface_->SetMemoryPolicy(policy);
 }
 
 void SynchronousCompositorImpl::DidChangeRootLayerScrollOffset() {
@@ -184,7 +183,7 @@ void SynchronousCompositorImpl::SetInputHandler(
 }
 
 void SynchronousCompositorImpl::DidOverscroll(
-    const cc::DidOverscrollParams& params) {
+    const DidOverscrollParams& params) {
   if (compositor_client_) {
     compositor_client_->DidOverscroll(params.accumulated_overscroll,
                                       params.latest_overscroll_delta,

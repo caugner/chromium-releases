@@ -8,7 +8,10 @@ namespace chromeos {
 
 FakeUpdateEngineClient::FakeUpdateEngineClient()
     : update_check_result_(UpdateEngineClient::UPDATE_RESULT_SUCCESS),
-      reboot_after_update_call_count_(0) {
+      can_rollback_stub_result_(false),
+      reboot_after_update_call_count_(0),
+      rollback_call_count_(0),
+      can_rollback_call_count_(0) {
 }
 
 FakeUpdateEngineClient::~FakeUpdateEngineClient() {
@@ -18,9 +21,11 @@ void FakeUpdateEngineClient::Init(dbus::Bus* bus) {
 }
 
 void FakeUpdateEngineClient::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
 }
 
 void FakeUpdateEngineClient::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 bool FakeUpdateEngineClient::HasObserver(Observer* observer) {
@@ -33,10 +38,13 @@ void FakeUpdateEngineClient::RequestUpdateCheck(
 }
 
 void FakeUpdateEngineClient::Rollback() {
+  rollback_call_count_++;
 }
 
 void FakeUpdateEngineClient::CanRollbackCheck(
     const RollbackCheckCallback& callback) {
+  can_rollback_call_count_++;
+  callback.Run(can_rollback_stub_result_);
 }
 
 void FakeUpdateEngineClient::RebootAfterUpdate() {
@@ -50,6 +58,11 @@ UpdateEngineClient::Status FakeUpdateEngineClient::GetLastStatus() {
   UpdateEngineClient::Status last_status = status_queue_.front();
   status_queue_.pop();
   return last_status;
+}
+
+void FakeUpdateEngineClient::NotifyObserversThatStatusChanged(
+    const UpdateEngineClient::Status& status) {
+  FOR_EACH_OBSERVER(Observer, observers_, UpdateStatusChanged(status));
 }
 
 void FakeUpdateEngineClient::SetChannel(const std::string& target_channel,

@@ -148,6 +148,7 @@ CandidateWindowView::CandidateWindowView(gfx::NativeView parent)
       should_show_at_composition_head_(false),
       should_show_upper_side_(false),
       was_candidate_window_open_(false) {
+  set_use_focusless(true);
   set_parent_window(parent);
   set_margins(gfx::Insets());
 
@@ -282,12 +283,12 @@ void CandidateWindowView::UpdateCandidates(
         const ui::CandidateWindow::Entry& entry =
             new_candidate_window.candidates()[candidate_index];
         candidate_view->SetEntry(entry);
-        candidate_view->SetState(views::Button::STATE_NORMAL);
+        candidate_view->SetEnabled(true);
         candidate_view->SetInfolistIcon(!entry.description_title.empty());
       } else {
         // Disable the empty row.
         candidate_view->SetEntry(ui::CandidateWindow::Entry());
-        candidate_view->SetState(views::Button::STATE_DISABLED);
+        candidate_view->SetEnabled(false);
         candidate_view->SetInfolistIcon(false);
       }
       if (new_candidate_window.orientation() == ui::CandidateWindow::VERTICAL) {
@@ -327,8 +328,8 @@ void CandidateWindowView::UpdateCandidates(
     if (0 <= selected_candidate_index_in_page_ &&
         static_cast<size_t>(selected_candidate_index_in_page_) <
         candidate_views_.size()) {
-      candidate_views_[selected_candidate_index_in_page_]->SetState(
-          views::Button::STATE_NORMAL);
+      candidate_views_[selected_candidate_index_in_page_]->SetHighlighted(
+          false);
       selected_candidate_index_in_page_ = -1;
     }
   }
@@ -387,7 +388,7 @@ void CandidateWindowView::SelectCandidateAt(int index_in_page) {
   selected_candidate_index_in_page_ = index_in_page;
 
   // Select the candidate specified by index_in_page.
-  candidate_views_[index_in_page]->SetState(views::Button::STATE_PRESSED);
+  candidate_views_[index_in_page]->SetHighlighted(true);
 
   // Update the cursor indexes in the model.
   candidate_window_.set_cursor_position(cursor_absolute_index);

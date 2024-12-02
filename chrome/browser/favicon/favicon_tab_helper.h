@@ -9,7 +9,8 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "chrome/browser/favicon/favicon_handler_delegate.h"
+#include "components/favicon/core/browser/favicon_client.h"
+#include "components/favicon/core/favicon_driver.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "content/public/common/favicon_url.h"
@@ -30,7 +31,8 @@ class SkBitmap;
 // downloaded and saved in the history backend.
 //
 class FaviconTabHelper : public content::WebContentsObserver,
-                         public FaviconHandlerDelegate,
+                         public FaviconClient,
+                         public FaviconDriver,
                          public content::WebContentsUserData<FaviconTabHelper> {
  public:
   virtual ~FaviconTabHelper();
@@ -60,16 +62,16 @@ class FaviconTabHelper : public content::WebContentsObserver,
   // content::WebContentsObserver override. Must be public, because also
   // called from PrerenderContents.
   virtual void DidUpdateFaviconURL(
-      int32 page_id,
       const std::vector<content::FaviconURL>& candidates) OVERRIDE;
 
   // Saves the favicon for the current page.
   void SaveFavicon();
 
-  // FaviconHandlerDelegate methods.
+  // FaviconDriver methods.
   virtual content::NavigationEntry* GetActiveEntry() OVERRIDE;
   virtual int StartDownload(const GURL& url, int max_bitmap_size) OVERRIDE;
   virtual void NotifyFaviconUpdated(bool icon_url_changed) OVERRIDE;
+  virtual bool IsOffTheRecord() OVERRIDE;
 
   // Favicon download callback.
   void DidDownloadFavicon(
@@ -78,6 +80,10 @@ class FaviconTabHelper : public content::WebContentsObserver,
       const GURL& image_url,
       const std::vector<SkBitmap>& bitmaps,
       const std::vector<gfx::Size>& original_bitmap_sizes);
+
+  // FaviconClient implementation:
+  virtual FaviconService* GetFaviconService() OVERRIDE;
+  virtual bool IsBookmarked(const GURL& url) OVERRIDE;
 
  private:
   explicit FaviconTabHelper(content::WebContents* web_contents);

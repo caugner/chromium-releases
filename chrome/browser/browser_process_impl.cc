@@ -21,7 +21,6 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/apps/chrome_apps_client.h"
-#include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_content_browser_client.h"
@@ -45,8 +44,8 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/browser/metrics/metrics_services_manager.h"
 #include "chrome/browser/metrics/thread_watcher.h"
-#include "chrome/browser/metrics/variations/variations_service.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
@@ -64,7 +63,6 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/status_icons/status_tray.h"
-#include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
@@ -72,14 +70,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/chrome_extensions_client.h"
-#include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/switch_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "components/policy/core/common/policy_service.h"
-#include "components/rappor/rappor_service.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
@@ -88,6 +84,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_l10n_util.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -145,8 +142,7 @@ using content::ResourceDispatcherHost;
 BrowserProcessImpl::BrowserProcessImpl(
     base::SequencedTaskRunner* local_state_task_runner,
     const CommandLine& command_line)
-    : created_metrics_service_(false),
-      created_watchdog_thread_(false),
+    : created_watchdog_thread_(false),
       created_browser_policy_connector_(false),
       created_profile_manager_(false),
       created_local_state_(false),
@@ -200,17 +196,6 @@ BrowserProcessImpl::~BrowserProcessImpl() {
 
 void BrowserProcessImpl::StartTearDown() {
     TRACE_EVENT0("shutdown", "BrowserProcessImpl::StartTearDown");
-#if defined(ENABLE_AUTOMATION)
-  // Delete the AutomationProviderList before NotificationService,
-  // since it may try to unregister notifications
-  // Both NotificationService and AutomationProvider are singleton instances in
-  // the BrowserProcess. Since AutomationProvider may have some active
-  // notification observers, it is essential that it gets destroyed before the
-  // NotificationService. NotificationService won't be destroyed until after
-  // this destructor is run.
-  automation_provider_list_.reset();
-#endif
-
   // We need to shutdown the SdchDictionaryFetcher as it regularly holds
   // a pointer to a URLFetcher, and that URLFetcher (upon destruction) will do
   // a PostDelayedTask onto the IO thread.  This shutdown call will both discard
@@ -218,15 +203,13 @@ void BrowserProcessImpl::StartTearDown() {
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(&SdchDictionaryFetcher::Shutdown));
 
-  // We need to destroy the MetricsService, RapporService, VariationsService,
-  // IntranetRedirectDetector, PromoResourceService, and SafeBrowsing
-  // ClientSideDetectionService (owned by the SafeBrowsingService) before the
-  // io_thread_ gets destroyed, since their destructors can call the URLFetcher
-  // destructor, which does a PostDelayedTask operation on the IO thread. (The
-  // IO thread will handle that URLFetcher operation before going away.)
-  metrics_service_.reset();
-  rappor_service_.reset();
-  variations_service_.reset();
+  // We need to destroy the MetricsServicesManager, IntranetRedirectDetector,
+  // PromoResourceService, and SafeBrowsing ClientSideDetectionService (owned by
+  // the SafeBrowsingService) before the io_thread_ gets destroyed, since their
+  // destructors can call the URLFetcher destructor, which does a
+  // PostDelayedTask operation on the IO thread. (The IO thread will handle that
+  // URLFetcher operation before going away.)
+  metrics_services_manager_.reset();
   intranet_redirect_detector_.reset();
 #if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
   if (safe_browsing_service_.get())
@@ -425,16 +408,12 @@ void BrowserProcessImpl::EndSession() {
 
 MetricsService* BrowserProcessImpl::metrics_service() {
   DCHECK(CalledOnValidThread());
-  if (!created_metrics_service_)
-    CreateMetricsService();
-  return metrics_service_.get();
+  return GetMetricsServicesManager()->GetMetricsService();
 }
 
 rappor::RapporService* BrowserProcessImpl::rappor_service() {
   DCHECK(CalledOnValidThread());
-  if (!rappor_service_.get())
-    rappor_service_.reset(new rappor::RapporService());
-  return rappor_service_.get();
+  return GetMetricsServicesManager()->GetRapporService();
 }
 
 IOThread* BrowserProcessImpl::io_thread() {
@@ -472,11 +451,7 @@ net::URLRequestContextGetter* BrowserProcessImpl::system_request_context() {
 
 chrome_variations::VariationsService* BrowserProcessImpl::variations_service() {
   DCHECK(CalledOnValidThread());
-  if (!variations_service_.get()) {
-    variations_service_.reset(
-        chrome_variations::VariationsService::Create(local_state()));
-  }
-  return variations_service_.get();
+  return GetMetricsServicesManager()->GetVariationsService();
 }
 
 BrowserProcessPlatformPart* BrowserProcessImpl::platform_part() {
@@ -543,17 +518,6 @@ GpuModeManager* BrowserProcessImpl::gpu_mode_manager() {
   if (!gpu_mode_manager_.get())
     gpu_mode_manager_.reset(new GpuModeManager());
   return gpu_mode_manager_.get();
-}
-
-AutomationProviderList* BrowserProcessImpl::GetAutomationProviderList() {
-  DCHECK(CalledOnValidThread());
-#if defined(ENABLE_AUTOMATION)
-  if (automation_provider_list_.get() == NULL)
-    automation_provider_list_.reset(new AutomationProviderList());
-  return automation_provider_list_.get();
-#else
-  return NULL;
-#endif
 }
 
 void BrowserProcessImpl::CreateDevToolsHttpProtocolHandler(
@@ -628,14 +592,6 @@ void BrowserProcessImpl::SetApplicationLocale(const std::string& locale) {
 
 DownloadStatusUpdater* BrowserProcessImpl::download_status_updater() {
   return download_status_updater_.get();
-}
-
-BookmarkPromptController* BrowserProcessImpl::bookmark_prompt_controller() {
-#if defined(OS_ANDROID)
-  return NULL;
-#else
-  return bookmark_prompt_controller_.get();
-#endif
 }
 
 MediaFileSystemRegistry* BrowserProcessImpl::media_file_system_registry() {
@@ -816,13 +772,6 @@ void BrowserProcessImpl::ResourceDispatcherHostCreated() {
   ApplyAllowCrossOriginAuthPromptPolicy();
 }
 
-void BrowserProcessImpl::CreateMetricsService() {
-  DCHECK(!created_metrics_service_ && metrics_service_.get() == NULL);
-  created_metrics_service_ = true;
-
-  metrics_service_.reset(new MetricsService);
-}
-
 void BrowserProcessImpl::CreateWatchdogThread() {
   DCHECK(!created_watchdog_thread_ && watchdog_thread_.get() == NULL);
   created_watchdog_thread_ = true;
@@ -941,13 +890,6 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
     promo_resource_service_->StartAfterDelay();
   }
 
-#if !defined(OS_ANDROID)
-  if (browser_defaults::bookmarks_enabled &&
-      BookmarkPromptController::IsEnabled()) {
-    bookmark_prompt_controller_.reset(new BookmarkPromptController());
-  }
-#endif
-
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   storage_monitor::StorageMonitor::Create();
 #endif
@@ -1016,6 +958,13 @@ void BrowserProcessImpl::CreateSafeBrowsingService() {
   safe_browsing_service_ = SafeBrowsingService::CreateSafeBrowsingService();
   safe_browsing_service_->Initialize();
 #endif
+}
+
+MetricsServicesManager* BrowserProcessImpl::GetMetricsServicesManager() {
+  DCHECK(CalledOnValidThread());
+  if (!metrics_services_manager_)
+    metrics_services_manager_.reset(new MetricsServicesManager(local_state()));
+  return metrics_services_manager_.get();
 }
 
 void BrowserProcessImpl::ApplyDefaultBrowserPolicy() {

@@ -12,29 +12,38 @@ namespace content {
 
 // static
 BrowserAccessibilityManager* BrowserAccessibilityManager::Create(
-    const ui::AXNodeData& src,
+    const ui::AXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory) {
-  return new BrowserAccessibilityManagerMac(NULL, src, delegate, factory);
+  return new BrowserAccessibilityManagerMac(
+      NULL, initial_tree, delegate, factory);
 }
 
 BrowserAccessibilityManagerMac::BrowserAccessibilityManagerMac(
     NSView* parent_view,
-    const ui::AXNodeData& src,
+    const ui::AXTreeUpdate& initial_tree,
     BrowserAccessibilityDelegate* delegate,
     BrowserAccessibilityFactory* factory)
-    : BrowserAccessibilityManager(src, delegate, factory),
+    : BrowserAccessibilityManager(initial_tree, delegate, factory),
       parent_view_(parent_view) {
 }
 
 // static
-ui::AXNodeData BrowserAccessibilityManagerMac::GetEmptyDocument() {
+ui::AXTreeUpdate BrowserAccessibilityManagerMac::GetEmptyDocument() {
   ui::AXNodeData empty_document;
   empty_document.id = 0;
   empty_document.role = ui::AX_ROLE_ROOT_WEB_AREA;
   empty_document.state =
       1 << ui::AX_STATE_READ_ONLY;
-  return empty_document;
+  ui::AXTreeUpdate update;
+  update.nodes.push_back(empty_document);
+  return update;
+}
+
+BrowserAccessibility* BrowserAccessibilityManagerMac::GetFocus(
+    BrowserAccessibility* root) {
+  BrowserAccessibility* node = GetActiveDescendantFocus(root);
+  return node;
 }
 
 void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
@@ -47,10 +56,16 @@ void BrowserAccessibilityManagerMac::NotifyAccessibilityEvent(
   NSString* event_id = @"";
   switch (event_type) {
     case ui::AX_EVENT_ACTIVEDESCENDANTCHANGED:
-      if (node->role() == ui::AX_ROLE_TREE)
+      if (node->GetRole() == ui::AX_ROLE_TREE) {
         event_id = NSAccessibilitySelectedRowsChangedNotification;
-      else
+      } else {
         event_id = NSAccessibilityFocusedUIElementChangedNotification;
+        BrowserAccessibility* active_descendant_focus =
+            GetActiveDescendantFocus(GetRoot());
+        if (active_descendant_focus)
+          node = active_descendant_focus;
+      }
+
       break;
     case ui::AX_EVENT_ALERT:
       // Not used on Mac.

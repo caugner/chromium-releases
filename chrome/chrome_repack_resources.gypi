@@ -21,10 +21,16 @@
     ],
     'pak_output': '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak',
     'conditions': [
+      ['chromeos==1', {
+        'pak_inputs': [
+          '<(SHARED_INTERMEDIATE_DIR)/ui/file_manager/file_manager_resources.pak',
+        ],
+      }],
       ['OS != "ios"', {
         'pak_inputs': [
           '<(SHARED_INTERMEDIATE_DIR)/content/browser/tracing/tracing_resources.pak',
           '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',
+          '<(SHARED_INTERMEDIATE_DIR)/extensions/extensions_resources.pak',
           '<(SHARED_INTERMEDIATE_DIR)/webkit/blink_resources.pak',
         ],
       }],

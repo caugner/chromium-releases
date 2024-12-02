@@ -218,8 +218,8 @@ UserShare* FakeSyncManager::GetUserShare() {
   return test_user_share_.user_share();
 }
 
-syncer::SyncCore* FakeSyncManager::GetSyncCore() {
-  return NULL;
+syncer::SyncCoreProxy* FakeSyncManager::GetSyncCoreProxy() {
+  return &null_sync_core_proxy_;
 }
 
 const std::string FakeSyncManager::cache_guid() {
@@ -239,9 +239,32 @@ SyncEncryptionHandler* FakeSyncManager::GetEncryptionHandler() {
   return fake_encryption_handler_.get();
 }
 
+ScopedVector<syncer::ProtocolEvent>
+FakeSyncManager::GetBufferedProtocolEvents() {
+  return ScopedVector<syncer::ProtocolEvent>();
+}
+
+scoped_ptr<base::ListValue> FakeSyncManager::GetAllNodesForType(
+    syncer::ModelType type) {
+  return scoped_ptr<base::ListValue>(new base::ListValue());
+}
+
 void FakeSyncManager::RefreshTypes(ModelTypeSet types) {
   last_refresh_request_types_ = types;
 }
+
+void FakeSyncManager::RegisterDirectoryTypeDebugInfoObserver(
+    syncer::TypeDebugInfoObserver* observer) {}
+
+void FakeSyncManager::UnregisterDirectoryTypeDebugInfoObserver(
+    syncer::TypeDebugInfoObserver* observer) {}
+
+bool FakeSyncManager::HasDirectoryTypeDebugInfoObserver(
+    syncer::TypeDebugInfoObserver* observer) {
+  return false;
+}
+
+void FakeSyncManager::RequestEmitDebugInfo() {}
 
 void FakeSyncManager::OnIncomingInvalidation(
       const ObjectIdInvalidationMap& invalidation_map) {

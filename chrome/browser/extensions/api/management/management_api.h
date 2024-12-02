@@ -42,7 +42,7 @@ class ManagementGetAllFunction : public ManagementFunction {
   virtual ~ManagementGetAllFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class ManagementGetFunction : public ManagementFunction {
@@ -53,7 +53,7 @@ class ManagementGetFunction : public ManagementFunction {
   virtual ~ManagementGetFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class ManagementGetPermissionWarningsByIdFunction : public ManagementFunction {
@@ -65,7 +65,7 @@ class ManagementGetPermissionWarningsByIdFunction : public ManagementFunction {
   virtual ~ManagementGetPermissionWarningsByIdFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class ManagementGetPermissionWarningsByManifestFunction
@@ -83,7 +83,7 @@ class ManagementGetPermissionWarningsByManifestFunction
   virtual ~ManagementGetPermissionWarningsByManifestFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class ManagementLaunchAppFunction : public ManagementFunction {
@@ -94,7 +94,7 @@ class ManagementLaunchAppFunction : public ManagementFunction {
   virtual ~ManagementLaunchAppFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class ManagementSetEnabledFunction : public AsyncManagementFunction,
@@ -108,7 +108,7 @@ class ManagementSetEnabledFunction : public AsyncManagementFunction,
   virtual ~ManagementSetEnabledFunction();
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 
   // ExtensionInstallPrompt::Delegate.
   virtual void InstallUIProceed() OVERRIDE;
@@ -140,7 +140,7 @@ class ManagementUninstallFunctionBase : public AsyncManagementFunction,
 
   // If should_uninstall is true, this method does the actual uninstall.
   // If |show_uninstall_dialog|, then this function will be called by one of the
-  // Accepted/Canceled callbacks. Otherwise, it's called directly from RunImpl.
+  // Accepted/Canceled callbacks. Otherwise, it's called directly from RunAsync.
   void Finish(bool should_uninstall);
 
   std::string extension_id_;
@@ -156,7 +156,7 @@ class ManagementUninstallFunction : public ManagementUninstallFunctionBase {
  private:
   virtual ~ManagementUninstallFunction();
 
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class ManagementUninstallSelfFunction : public ManagementUninstallFunctionBase {
@@ -169,7 +169,24 @@ class ManagementUninstallSelfFunction : public ManagementUninstallFunctionBase {
  private:
   virtual ~ManagementUninstallSelfFunction();
 
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
+};
+
+class ManagementCreateAppShortcutFunction : public AsyncManagementFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("management.createAppShortcut",
+      MANAGEMENT_CREATEAPPSHORTCUT);
+
+  ManagementCreateAppShortcutFunction();
+
+  void OnCloseShortcutPrompt(bool created);
+
+  static void SetAutoConfirmForTest(bool should_proceed);
+
+ protected:
+  virtual ~ManagementCreateAppShortcutFunction();
+
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class ManagementEventRouter : public content::NotificationObserver {

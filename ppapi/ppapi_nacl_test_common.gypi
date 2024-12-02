@@ -19,12 +19,14 @@
       'nacl_newlib_out_dir': '<(PRODUCT_DIR)/>(nexe_destination_dir)/newlib',
       'nacl_glibc_out_dir': '<(PRODUCT_DIR)/>(nexe_destination_dir)/glibc',
       'nacl_pnacl_newlib_out_dir': '<(PRODUCT_DIR)/>(nexe_destination_dir)/pnacl',
+      'nacl_pnacl_newlib_nonsfi_out_dir': '<(PRODUCT_DIR)/>(nexe_destination_dir)/nonsfi',
       'target_conditions': [
         ['nexe_target!=""', {
           # These variables are used for nexe building and for library building.
           'out_newlib32%': '>(nacl_newlib_out_dir)/>(nexe_target)_newlib_x86_32.nexe',
           'out_newlib64%': '>(nacl_newlib_out_dir)/>(nexe_target)_newlib_x86_64.nexe',
           'out_newlib_arm%': '>(nacl_newlib_out_dir)/>(nexe_target)_newlib_arm.nexe',
+          'out_newlib_mips%': '>(nacl_newlib_out_dir)/>(nexe_target)_newlib_mips32.nexe',
           'nmf_newlib%': '>(nacl_newlib_out_dir)/>(nexe_target).nmf',
           'out_glibc32%': '>(nacl_glibc_out_dir)/>(nexe_target)_glibc_x86_32.nexe',
           'out_glibc64%': '>(nacl_glibc_out_dir)/>(nexe_target)_glibc_x86_64.nexe',
@@ -32,6 +34,7 @@
           'nmf_glibc%': '>(nacl_glibc_out_dir)/>(nexe_target).nmf',
           'out_pnacl_newlib%': '>(nacl_pnacl_newlib_out_dir)/>(nexe_target)_newlib_pnacl.pexe',
           'nmf_pnacl_newlib%': '>(nacl_pnacl_newlib_out_dir)/>(nexe_target).nmf',
+          'out_pnacl_newlib_x86_32_nonsfi_nexe': '>(nacl_pnacl_newlib_nonsfi_out_dir)/>(nexe_target)_pnacl_newlib_x32_nonsfi.nexe',
         }],
       ],
     },
@@ -51,7 +54,7 @@
           },
         ],
       }],
-      ['test_files!=[] and "<(target_arch)"!="arm" and disable_glibc==0 and build_glibc==1', {
+      ['test_files!=[] and "<(target_arch)"!="arm" and "<(target_arch)"!="mipsel" and disable_glibc==0 and build_glibc==1', {
         'copies': [
           {
             'destination': '>(nacl_glibc_out_dir)',
@@ -61,10 +64,21 @@
           },
         ],
       }],
-      ['test_files!=[] and build_pnacl_newlib==1 and disable_pnacl==0', {
+      # Nonsfi pnacl copy is covered below. Currently, these are exclusive.
+      ['test_files!=[] and build_pnacl_newlib==1 and disable_pnacl==0 and enable_x86_32_nonsfi==0', {
         'copies': [
           {
             'destination': '>(nacl_pnacl_newlib_out_dir)',
+            'files': [
+              '>@(test_files)',
+            ],
+          },
+        ],
+      }],
+      ['test_files!=[] and build_pnacl_newlib==1 and enable_x86_32_nonsfi==1', {
+        'copies': [
+          {
+            'destination': '>(nacl_pnacl_newlib_nonsfi_out_dir)',
             'files': [
               '>@(test_files)',
             ],
@@ -78,6 +92,7 @@
           'enable_x86_64%': 0,
           'enable_x86_32%': 0,
           'enable_arm%': 0,
+          'enable_mips%': 0,
           'include_dirs': [
             '<(DEPTH)',
           ],
@@ -118,11 +133,15 @@
                     'inputs': ['>(out_newlib_arm)'],
                     'action': ['>(out_newlib_arm)'],
                   }],
+                  ['enable_mips==1', {
+                    'inputs': ['>(out_newlib_mips)'],
+                    'action': ['>(out_newlib_mips)'],
+                  }],
                 ],
               },
             ],
           }],
-          ['"<(target_arch)"!="arm" and generate_nmf==1 and disable_glibc==0 and build_glibc==1', {
+          ['"<(target_arch)"!="arm" and "<(target_arch)"!="mipsel" and generate_nmf==1 and disable_glibc==0 and build_glibc==1', {
             'variables': {
               # NOTE: Use /lib, not /lib64 here; it is a symbolic link which
               # doesn't work on Windows.

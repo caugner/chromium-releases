@@ -13,6 +13,7 @@
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/network/managed_state.h"
@@ -48,15 +49,6 @@ class NetworkTypePattern;
 // keep properties up to date by managing the appropriate Shill observers.
 // It will invoke its own more specific observer methods when the specified
 // changes occur.
-//
-// Most *ByType or *ForType methods will accept any of the following for |type|.
-// See individual methods for specific notes.
-// * Any type defined in service_constants.h (e.g. shill::kTypeWifi)
-// * kMatchTypeDefault returns the default (active) network
-// * kMatchTypeNonVirtual returns the primary non virtual network
-// * kMatchTypeWired returns the primary wired network
-// * kMatchTypeWireless returns the primary wireless network
-// * kMatchTypeMobile returns the primary cellular or wimax network
 
 class CHROMEOS_EXPORT NetworkStateHandler
     : public internal::ShillPropertyHandler::Listener {
@@ -121,9 +113,10 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // observe this class and implement NetworkPropertyChanged().
   const NetworkState* GetNetworkState(const std::string& service_path) const;
 
-  // Returns the default network (which includes VPNs) based on the
-  // Shill Manager.DefaultNetwork property. Normally this is the same as
-  // ConnectedNetworkByType(kMatchTypeDefault), but the timing might differ.
+  // Returns the default network (which includes VPNs) based on the Shill
+  // Manager.DefaultNetwork property. Normally this is the same as
+  // ConnectedNetworkByType(NetworkTypePattern::Default()), but the timing might
+  // differ.
   const NetworkState* DefaultNetwork() const;
 
   // Returns the FavoriteState associated to DefaultNetwork. Returns NULL if,
@@ -219,11 +212,6 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // connected using EAP, returns NULL.
   const FavoriteState* GetEAPForEthernet(const std::string& service_path) const;
 
-  // Generates a DictionaryValue of all NetworkState properties. Currently
-  // provided for debugging purposes only.
-  void GetNetworkStatePropertiesForTest(
-      base::DictionaryValue* dictionary) const;
-
   // Construct and initialize an instance for testing.
   static NetworkStateHandler* InitializeForTest();
 
@@ -264,6 +252,14 @@ class CHROMEOS_EXPORT NetworkStateHandler
       const std::string& device_path,
       const std::string& key,
       const base::Value& value) OVERRIDE;
+
+  // Called by ShillPropertyHandler when a watched network or device
+  // IPConfig property changes.
+  virtual void UpdateIPConfigProperties(
+      ManagedState::ManagedType type,
+      const std::string& path,
+      const std::string& ip_config_path,
+      const base::DictionaryValue& properties) OVERRIDE;
 
   // Called by ShillPropertyHandler when the portal check list manager property
   // changes.
@@ -327,8 +323,13 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // Called whenever Device.Scanning state transitions to false.
   void ScanCompleted(const std::string& type);
 
-  // Returns the technology type for |type|.
+  // Returns one technology type for |type|. This technology will be the
+  // highest priority technology in the type pattern.
   std::string GetTechnologyForType(const NetworkTypePattern& type) const;
+
+  // Returns all the technology types for |type|.
+  ScopedVector<std::string> GetTechnologiesForType(
+      const NetworkTypePattern& type) const;
 
   // Shill property handler instance, owned by this class.
   scoped_ptr<internal::ShillPropertyHandler> shill_property_handler_;

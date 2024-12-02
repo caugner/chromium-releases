@@ -28,23 +28,6 @@ class AutocompleteInput {
     FORCED_QUERY,   // Input forced to be a query by an initial '?'
   };
 
-  // Enumeration of the possible match query types. Callers who only need some
-  // of the matches for a particular input can get answers more quickly by
-  // specifying that upfront.
-  enum MatchesRequested {
-    // Only the best match in the whole result set matters.  Providers should at
-    // most return synchronously-available matches, and if possible do even less
-    // work, so that it's safe to ask for these repeatedly in the course of one
-    // higher-level "synchronous" query.
-    BEST_MATCH,
-
-    // Only synchronous matches should be returned.
-    SYNCHRONOUS_MATCHES,
-
-    // All matches should be fetched.
-    ALL_MATCHES,
-  };
-
   // The type of page currently displayed.
   // Note: when adding an element to this enum, please add it at the end
   // and update omnibox_event.proto::PageClassification and
@@ -141,7 +124,7 @@ class AutocompleteInput {
                     bool prevent_inline_autocomplete,
                     bool prefer_keyword,
                     bool allow_exact_keyword_match,
-                    MatchesRequested matches_requested);
+                    bool want_asynchronous_matches);
   ~AutocompleteInput();
 
   // If type is |FORCED_QUERY| and |text| starts with '?', it is removed.
@@ -159,7 +142,7 @@ class AutocompleteInput {
   // not guaranteed to be valid, especially if the parsed type is, e.g., QUERY.
   static Type Parse(const base::string16& text,
                     const base::string16& desired_tld,
-                    url_parse::Parsed* parts,
+                    url::Parsed* parts,
                     base::string16* scheme,
                     GURL* canonicalized_url);
 
@@ -168,8 +151,8 @@ class AutocompleteInput {
   // is view-source, this function returns the positions of scheme and host
   // in the URL qualified by "view-source:" prefix.
   static void ParseForEmphasizeComponents(const base::string16& text,
-                                          url_parse::Component* scheme,
-                                          url_parse::Component* host);
+                                          url::Component* scheme,
+                                          url::Component* host);
 
   // Code that wants to format URLs with a format flag including
   // net::kFormatUrlOmitTrailingSlashOnBareHostname risk changing the meaning if
@@ -182,7 +165,7 @@ class AutocompleteInput {
       const base::string16& formatted_url);
 
   // Returns the number of non-empty components in |parts| besides the host.
-  static int NumNonHostComponents(const url_parse::Parsed& parts);
+  static int NumNonHostComponents(const url::Parsed& parts);
 
   // Returns whether |text| begins "http:" or "view-source:http:".
   static bool HasHTTPScheme(const base::string16& text);
@@ -199,7 +182,7 @@ class AutocompleteInput {
   // that they're not changing the type/scheme/etc. should use this.
   void UpdateText(const base::string16& text,
                   size_t cursor_position,
-                  const url_parse::Parsed& parts);
+                  const url::Parsed& parts);
 
   // The current URL, or an invalid GURL if query refinement is not desired.
   const GURL& current_url() const { return current_url_; }
@@ -214,7 +197,7 @@ class AutocompleteInput {
   Type type() const { return type_; }
 
   // Returns parsed URL components.
-  const url_parse::Parsed& parts() const { return parts_; }
+  const url::Parsed& parts() const { return parts_; }
 
   // The scheme parsed from the provided text; only meaningful when type_ is
   // URL.
@@ -237,8 +220,9 @@ class AutocompleteInput {
   // keyword search, even if the input is "<keyword> <search string>".
   bool allow_exact_keyword_match() const { return allow_exact_keyword_match_; }
 
-  // See description of enum for details.
-  MatchesRequested matches_requested() const { return matches_requested_; }
+  // Returns whether providers should be allowed to make asynchronous requests
+  // when processing this input.
+  bool want_asynchronous_matches() const { return want_asynchronous_matches_; }
 
   // Resets all internal variables to the null-constructed state.
   void Clear();
@@ -253,13 +237,13 @@ class AutocompleteInput {
   GURL current_url_;
   AutocompleteInput::PageClassification current_page_classification_;
   Type type_;
-  url_parse::Parsed parts_;
+  url::Parsed parts_;
   base::string16 scheme_;
   GURL canonicalized_url_;
   bool prevent_inline_autocomplete_;
   bool prefer_keyword_;
   bool allow_exact_keyword_match_;
-  MatchesRequested matches_requested_;
+  bool want_asynchronous_matches_;
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_INPUT_H_

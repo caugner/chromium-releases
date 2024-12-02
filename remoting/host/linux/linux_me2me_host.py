@@ -20,6 +20,7 @@ import logging
 import optparse
 import os
 import pipes
+import platform
 import psutil
 import platform
 import signal
@@ -37,10 +38,15 @@ LOG_FILE_ENV_VAR = "CHROME_REMOTE_DESKTOP_LOG_FILE"
 # list of sizes in this environment variable.
 DEFAULT_SIZES_ENV_VAR = "CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES"
 
-# By default, provide a relatively small size to handle the case where resize-
-# to-client is disabled, and a much larger size to support clients with large
-# or mulitple monitors. These defaults can be overridden in ~/.profile.
+# By default, provide a maximum size that is large enough to support clients
+# with large or multiple monitors. This is a comma-separated list of
+# resolutions that will be made available if the X server supports RANDR. These
+# defaults can be overridden in ~/.profile.
 DEFAULT_SIZES = "1600x1200,3840x1600"
+
+# If RANDR is not available, use a smaller default size. Only a single
+# resolution is supported in this case.
+DEFAULT_SIZE_NO_RANDR = "1600x1200"
 
 SCRIPT_PATH = sys.path[0]
 
@@ -56,6 +62,7 @@ CHROME_REMOTING_GROUP_NAME = "chrome-remote-desktop"
 HOME_DIR = os.environ["HOME"]
 CONFIG_DIR = os.path.join(HOME_DIR, ".config/chrome-remote-desktop")
 SESSION_FILE_PATH = os.path.join(HOME_DIR, ".chrome-remote-desktop-session")
+SYSTEM_SESSION_FILE_PATH = "/etc/chrome-remote-desktop-session"
 
 X_LOCK_FILE_TEMPLATE = "/tmp/.X%d-lock"
 FIRST_X_DISPLAY_NUMBER = 20
@@ -77,15 +84,30 @@ MAX_LAUNCH_FAILURES = SHORT_BACKOFF_THRESHOLD + 10
 g_desktops = []
 g_host_hash = hashlib.md5(socket.gethostname()).hexdigest()
 
+
 def is_supported_platform():
   # Always assume that the system is supported if the config directory or
   # session file exist.
-  if os.path.isdir(CONFIG_DIR) or os.path.isfile(SESSION_FILE_PATH):
+  if (os.path.isdir(CONFIG_DIR) or os.path.isfile(SESSION_FILE_PATH) or
+      os.path.isfile(SYSTEM_SESSION_FILE_PATH)):
     return True
 
   # The host has been tested only on Ubuntu.
   distribution = platform.linux_distribution()
   return (distribution[0]).lower() == 'ubuntu'
+
+
+def get_randr_supporting_x_server():
+  """Returns a path to an X server that supports the RANDR extension, if this
+  is found on the system. Otherwise returns None."""
+  try:
+    xvfb = "/usr/bin/Xvfb-randr"
+    if not os.path.exists(xvfb):
+      xvfb = locate_executable("Xvfb-randr")
+    return xvfb
+  except Exception:
+    return None
+
 
 class Config:
   def __init__(self, path):
@@ -233,6 +255,14 @@ class Desktop:
       if os.environ.has_key(key):
         self.child_env[key] = os.environ[key]
 
+    # Ensure that the software-rendering GL drivers are loaded by the desktop
+    # session, instead of any hardware GL drivers installed on the system.
+    self.child_env["LD_LIBRARY_PATH"] = (
+        "/usr/lib/%(arch)s-linux-gnu/mesa:"
+        "/usr/lib/%(arch)s-linux-gnu/dri:"
+        "/usr/lib/%(arch)s-linux-gnu/gallium-pipe" %
+        { "arch": platform.machine() })
+
     # Read from /etc/environment if it exists, as it is a standard place to
     # store system-wide environment settings. During a normal login, this would
     # typically be done by the pam_env PAM module, depending on the local PAM
@@ -325,15 +355,10 @@ class Desktop:
     max_width = max([width for width, height in self.sizes])
     max_height = max([height for width, height in self.sizes])
 
-    try:
-      # TODO(jamiewalch): This script expects to be installed alongside
-      # Xvfb-randr, but that's no longer the case. Fix this once we have
-      # a Xvfb-randr package that installs somewhere sensible.
-      xvfb = "/usr/bin/Xvfb-randr"
-      if not os.path.exists(xvfb):
-        xvfb = locate_executable("Xvfb-randr")
+    xvfb = get_randr_supporting_x_server()
+    if xvfb:
       self.server_supports_exact_resize = True
-    except Exception:
+    else:
       xvfb = "Xvfb"
       self.server_supports_exact_resize = False
 
@@ -488,12 +513,19 @@ def get_daemon_pid():
   uid = os.getuid()
   this_pid = os.getpid()
 
+  # Support new & old psutil API. This is the right way to check, according to
+  # http://grodola.blogspot.com/2014/01/psutil-20-porting.html
+  if psutil.version_info >= (2, 0):
+    psget = lambda x: x()
+  else:
+    psget = lambda x: x
+
   for process in psutil.process_iter():
     # Skip any processes that raise an exception, as processes may terminate
     # during iteration over the list.
     try:
       # Skip other users' processes.
-      if process.uids.real != uid:
+      if psget(process.uids).real != uid:
         continue
 
       # Skip the process for this instance.
@@ -501,12 +533,12 @@ def get_daemon_pid():
         continue
 
       # |cmdline| will be [python-interpreter, script-file, other arguments...]
-      cmdline = process.cmdline
+      cmdline = psget(process.cmdline)
       if len(cmdline) < 2:
         continue
       if cmdline[0] == sys.executable and cmdline[1] == sys.argv[0]:
         return process.pid
-    except psutil.error.Error:
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
       continue
 
   return 0
@@ -521,14 +553,9 @@ def choose_x_session():
     the first parameter of subprocess.Popen().  If a suitable session cannot
     be found, returns None.
   """
-  # If the session wrapper script (see below) is given a specific session as an
-  # argument (such as ubuntu-2d on Ubuntu 12.04), the wrapper will run that
-  # session instead of looking for custom .xsession files in the home directory.
-  # So it's necessary to test for these files here.
   XSESSION_FILES = [
     SESSION_FILE_PATH,
-    "~/.xsession",
-    "~/.Xsession" ]
+    SYSTEM_SESSION_FILE_PATH ]
   for startup_file in XSESSION_FILES:
     startup_file = os.path.expanduser(startup_file)
     if os.path.exists(startup_file):
@@ -1014,9 +1041,15 @@ Web Store: https://chrome.google.com/remotedesktop"""
     print >> sys.stderr, EPILOG
     return 1
 
+  # If a RANDR-supporting Xvfb is not available, limit the default size to
+  # something more sensible.
+  if get_randr_supporting_x_server():
+    default_sizes = DEFAULT_SIZES
+  else:
+    default_sizes = DEFAULT_SIZE_NO_RANDR
+
   # Collate the list of sizes that XRANDR should support.
   if not options.size:
-    default_sizes = DEFAULT_SIZES
     if os.environ.has_key(DEFAULT_SIZES_ENV_VAR):
       default_sizes = os.environ[DEFAULT_SIZES_ENV_VAR]
     options.size = default_sizes.split(",")

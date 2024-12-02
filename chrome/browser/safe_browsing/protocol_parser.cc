@@ -65,19 +65,22 @@ bool SafeBrowsingProtocolParser::ParseGetHash(
       return false;
 
     SBFullHashResult full_hash;
-    full_hash.list_name = cmd_parts[0];
-    full_hash.add_chunk_id = atoi(cmd_parts[1].c_str());
+    full_hash.list_id = safe_browsing_util::GetListId(cmd_parts[0]);
+    // Ignore cmd_parts[1] (add_chunk_id), as we no longer use it with SB 2.3
+    // caching rules.
     int full_hash_len = atoi(cmd_parts[2].c_str());
 
+    if (full_hash_len < 0 || full_hash_len > length)
+      return false;
+
     // Ignore hash results from lists we don't recognize.
-    if (safe_browsing_util::GetListId(full_hash.list_name) < 0) {
+    if (full_hash.list_id < 0) {
       data += full_hash_len;
       length -= full_hash_len;
       continue;
     }
 
-    while (full_hash_len > 0) {
-      DCHECK(static_cast<size_t>(full_hash_len) >= sizeof(SBFullHash));
+    while (static_cast<size_t>(full_hash_len) >= sizeof(SBFullHash)) {
       memcpy(&full_hash.hash, data, sizeof(SBFullHash));
       full_hashes->push_back(full_hash);
       data += sizeof(SBFullHash);
@@ -221,7 +224,7 @@ bool SafeBrowsingProtocolParser::ParseChunk(const std::string& list_name,
 
     const int chunk_len = atoi(cmd_parts[3].c_str());
 
-    if (remaining < chunk_len)
+    if (chunk_len < 0 || chunk_len > remaining)
       return false;  // parse error.
 
     chunks->push_back(SBChunk());

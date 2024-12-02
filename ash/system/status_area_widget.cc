@@ -28,12 +28,10 @@
 
 namespace ash {
 
-namespace internal {
-
 const char StatusAreaWidget::kNativeViewName[] = "StatusAreaWidget";
 
 StatusAreaWidget::StatusAreaWidget(aura::Window* status_container)
-    : status_area_widget_delegate_(new internal::StatusAreaWidgetDelegate),
+    : status_area_widget_delegate_(new StatusAreaWidgetDelegate),
       overview_button_tray_(NULL),
       system_tray_(NULL),
       web_notification_tray_(NULL),
@@ -187,7 +185,8 @@ void StatusAreaWidget::UpdateAfterLoginStatusChange(
   if (logout_button_tray_)
     logout_button_tray_->UpdateAfterLoginStatusChange(login_status);
 #endif
+  if (overview_button_tray_)
+    overview_button_tray_->UpdateAfterLoginStatusChange(login_status);
 }
 
-}  // namespace internal
 }  // namespace ash

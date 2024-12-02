@@ -15,9 +15,28 @@
   height: 100%;
 }
 
+#managed-user-creation .nofocus:focus {
+  outline: none;
+}
+
 #managed-user-creation .step-controls {
   -webkit-padding-end: 20px;
+  align-items: center;
   bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+}
+
+#managed-user-creation .controls-links {
+  align-items: center;
+  display: flex;
+  justify-content: flex-start;
+}
+
+#managed-user-creation .controls-buttons {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
 }
 
 #managed-user-creation .logo-padded-text {
@@ -39,7 +58,6 @@
 #managed-user-creation .button-link {
   font-size: small;
   padding: 0 20px;
-  position: absolute;
 }
 
 .below-marketing::-webkit-scrollbar {
@@ -208,14 +226,16 @@ input.managed-user-creation-manager-password,
 .import-pod {
   height: 32px;
   opacity: 0.8;
-  padding: 6px;
+  padding: 20px;
   width: 626px;
 }
 
 .import-pod .import-pod-name {
   color: #000;
-  display: inline;
-  max-height: 30px;
+  display: inline-block;
+  height: 32px;
+  max-height: 32px;
+  padding-top: 6px;
   vertical-align: top;
 }
 
@@ -327,6 +347,11 @@ input.managed-user-creation-manager-password,
   height: 400px;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+#managed-user-creation-import .page-title-explanation {
+  padding-bottom: 10px;
+  padding-top: 6px;
 }
 
 .manager-pod .password-error,

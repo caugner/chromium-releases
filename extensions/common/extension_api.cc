@@ -230,6 +230,8 @@ void ExtensionAPI::InitDefaultConfiguration() {
 
   // Schemas to be loaded from resources.
   CHECK(unloaded_schemas_.empty());
+  RegisterSchemaResource("accessibilityPrivate",
+                         IDR_EXTENSION_API_JSON_ACCESSIBILITYPRIVATE);
   RegisterSchemaResource("app", IDR_EXTENSION_API_JSON_APP);
   RegisterSchemaResource("browserAction", IDR_EXTENSION_API_JSON_BROWSERACTION);
   RegisterSchemaResource("commands", IDR_EXTENSION_API_JSON_COMMANDS);
@@ -251,8 +253,6 @@ void ExtensionAPI::InitDefaultConfiguration() {
   RegisterSchemaResource("tts", IDR_EXTENSION_API_JSON_TTS);
   RegisterSchemaResource("types", IDR_EXTENSION_API_JSON_TYPES);
   RegisterSchemaResource("types.private", IDR_EXTENSION_API_JSON_TYPES_PRIVATE);
-  RegisterSchemaResource("webRequestInternal",
-      IDR_EXTENSION_API_JSON_WEBREQUESTINTERNAL);
   RegisterSchemaResource("webstore", IDR_EXTENSION_API_JSON_WEBSTORE);
   RegisterSchemaResource("webViewRequest",
       IDR_EXTENSION_API_JSON_WEBVIEW_REQUEST);
@@ -296,7 +296,10 @@ Feature::Availability ExtensionAPI::IsAvailable(const std::string& full_name,
                                                 Feature::Context context,
                                                 const GURL& url) {
   Feature* feature = GetFeatureDependency(full_name);
-  CHECK(feature) << full_name;
+  if (!feature) {
+    return Feature::CreateAvailability(Feature::NOT_PRESENT,
+        std::string("Unknown feature: ") + full_name);
+  }
   return IsAvailable(*feature, extension, context, url);
 }
 

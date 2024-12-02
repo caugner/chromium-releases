@@ -4,7 +4,6 @@
 
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/automation/automation_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -58,11 +57,11 @@ scoped_ptr<net::test_server::HttpResponse> HandleExpectAndSetCookieRequest(
   size_t query_string_pos = request.relative_url.find('?');
   std::string query_string =
       request.relative_url.substr(query_string_pos + 1);
-  url_parse::Component query(0, query_string.length()), key_pos, value_pos;
+  url::Component query(0, query_string.length()), key_pos, value_pos;
   bool expectations_satisfied = true;
   std::vector<std::string> cookies_to_set;
-  while (url_parse::ExtractQueryKeyValue(
-             query_string.c_str(), &query, &key_pos, &value_pos)) {
+  while (url::ExtractQueryKeyValue(query_string.c_str(), &query, &key_pos,
+                                   &value_pos)) {
     std::string escaped_key(query_string.substr(key_pos.begin, key_pos.len));
     std::string escaped_value(
         query_string.substr(value_pos.begin, value_pos.len));
@@ -103,8 +102,8 @@ class IsolatedAppTest : public ExtensionBrowserTest {
   bool WARN_UNUSED_RESULT HasCookie(WebContents* contents, std::string cookie) {
     int value_size;
     std::string actual_cookie;
-    automation_util::GetCookies(contents->GetURL(), contents, &value_size,
-                                &actual_cookie);
+    ui_test_utils::GetCookies(contents->GetURL(), contents, &value_size,
+                              &actual_cookie);
     return actual_cookie.find(cookie) != std::string::npos;
   }
 

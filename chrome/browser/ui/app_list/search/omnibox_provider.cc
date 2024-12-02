@@ -8,9 +8,10 @@
 #include "chrome/browser/autocomplete/autocomplete_controller.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
+#include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/common/metrics/proto/omnibox_event.pb.h"
+#include "components/metrics/proto/omnibox_event.pb.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -135,7 +136,9 @@ OmniboxProvider::OmniboxProvider(Profile* profile)
       controller_(new AutocompleteController(
           profile,
           this,
-          AutocompleteClassifier::kDefaultOmniboxProviders)) {
+          AutocompleteClassifier::kDefaultOmniboxProviders &
+              ~AutocompleteProvider::TYPE_ZERO_SUGGEST)) {
+  controller_->search_provider()->set_in_app_list();
 }
 
 OmniboxProvider::~OmniboxProvider() {}
@@ -149,7 +152,7 @@ void OmniboxProvider::Start(const base::string16& query) {
                                        false,
                                        false,
                                        true,
-                                       AutocompleteInput::ALL_MATCHES));
+                                       true));
 }
 
 void OmniboxProvider::Stop() {

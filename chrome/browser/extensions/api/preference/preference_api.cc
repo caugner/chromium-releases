@@ -14,6 +14,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
 #include "chrome/browser/extensions/api/preference/preference_api_constants.h"
 #include "chrome/browser/extensions/api/preference/preference_helpers.h"
 #include "chrome/browser/extensions/api/proxy/proxy_api.h"
@@ -26,7 +27,6 @@
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_prefs_factory.h"
-#include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/pref_names.h"
@@ -412,20 +412,19 @@ PreferenceAPI::PreferenceAPI(content::BrowserContext* context)
     bool rv = PrefMapping::GetInstance()->FindEventForBrowserPref(
         kPrefMapping[i].browser_pref, &event_name, &permission);
     DCHECK(rv);
-    ExtensionSystem::Get(profile_)->event_router()->RegisterObserver(
-        this, event_name);
+    EventRouter::Get(profile_)->RegisterObserver(this, event_name);
   }
-  extension_prefs()->content_settings_store()->AddObserver(this);
+  content_settings_store()->AddObserver(this);
 }
 
 PreferenceAPI::~PreferenceAPI() {
 }
 
 void PreferenceAPI::Shutdown() {
-  ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
+  EventRouter::Get(profile_)->UnregisterObserver(this);
   if (!extension_prefs()->extensions_disabled())
     ClearIncognitoSessionOnlyContentSettings();
-  extension_prefs()->content_settings_store()->RemoveObserver(this);
+  content_settings_store()->RemoveObserver(this);
 }
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<PreferenceAPI> >
@@ -444,7 +443,7 @@ PreferenceAPI* PreferenceAPI::Get(content::BrowserContext* context) {
 
 void PreferenceAPI::OnListenerAdded(const EventListenerInfo& details) {
   preference_event_router_.reset(new PreferenceEventRouter(profile_));
-  ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
+  EventRouter::Get(profile_)->UnregisterObserver(this);
 }
 
 void PreferenceAPI::OnContentSettingChanged(const std::string& extension_id,
@@ -453,13 +452,13 @@ void PreferenceAPI::OnContentSettingChanged(const std::string& extension_id,
     extension_prefs()->UpdateExtensionPref(
         extension_id,
         pref_names::kPrefIncognitoContentSettings,
-        extension_prefs()->content_settings_store()->GetSettingsForExtension(
+        content_settings_store()->GetSettingsForExtension(
             extension_id, kExtensionPrefsScopeIncognitoPersistent));
   } else {
     extension_prefs()->UpdateExtensionPref(
         extension_id,
         pref_names::kPrefContentSettings,
-        extension_prefs()->content_settings_store()->GetSettingsForExtension(
+        content_settings_store()->GetSettingsForExtension(
             extension_id, kExtensionPrefsScopeRegular));
   }
 }
@@ -469,10 +468,8 @@ void PreferenceAPI::ClearIncognitoSessionOnlyContentSettings() {
   extension_prefs()->GetExtensions(&extension_ids);
   for (ExtensionIdList::iterator extension_id = extension_ids.begin();
        extension_id != extension_ids.end(); ++extension_id) {
-    extension_prefs()->content_settings_store()->
-        ClearContentSettingsForExtension(
-            *extension_id,
-            kExtensionPrefsScopeIncognitoSessionOnly);
+    content_settings_store()->ClearContentSettingsForExtension(
+        *extension_id, kExtensionPrefsScopeIncognitoSessionOnly);
   }
 }
 
@@ -484,9 +481,14 @@ ExtensionPrefValueMap* PreferenceAPI::extension_pref_value_map() {
   return ExtensionPrefValueMapFactory::GetForBrowserContext(profile_);
 }
 
+scoped_refptr<ContentSettingsStore> PreferenceAPI::content_settings_store() {
+  return ContentSettingsService::Get(profile_)->content_settings_store();
+}
+
 template <>
 void
 BrowserContextKeyedAPIFactory<PreferenceAPI>::DeclareFactoryDependencies() {
+  DependsOn(ContentSettingsService::GetFactoryInstance());
   DependsOn(ExtensionPrefsFactory::GetInstance());
   DependsOn(ExtensionPrefValueMapFactory::GetInstance());
   DependsOn(ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
@@ -519,7 +521,7 @@ bool PreferenceFunction::ValidateBrowserPref(
 
 GetPreferenceFunction::~GetPreferenceFunction() { }
 
-bool GetPreferenceFunction::RunImpl() {
+bool GetPreferenceFunction::RunSync() {
   std::string pref_key;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &pref_key));
   base::DictionaryValue* details = NULL;
@@ -581,7 +583,7 @@ bool GetPreferenceFunction::RunImpl() {
 
 SetPreferenceFunction::~SetPreferenceFunction() { }
 
-bool SetPreferenceFunction::RunImpl() {
+bool SetPreferenceFunction::RunSync() {
   std::string pref_key;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &pref_key));
   base::DictionaryValue* details = NULL;
@@ -667,7 +669,7 @@ bool SetPreferenceFunction::RunImpl() {
 
 ClearPreferenceFunction::~ClearPreferenceFunction() { }
 
-bool ClearPreferenceFunction::RunImpl() {
+bool ClearPreferenceFunction::RunSync() {
   std::string pref_key;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &pref_key));
   base::DictionaryValue* details = NULL;

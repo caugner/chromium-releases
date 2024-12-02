@@ -5,11 +5,19 @@
 #include "chromeos/dbus/fake_bluetooth_gatt_service_client.h"
 
 #include "base/bind.h"
+#include "base/message_loop/message_loop.h"
+#include "base/time/time.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_bluetooth_gatt_characteristic_client.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
 namespace chromeos {
+
+namespace {
+
+const int kExposeCharacteristicsDelayIntervalMs = 100;
+
+}  // namespace
 
 // static
 const char FakeBluetoothGattServiceClient::kHeartRateServicePathComponent[] =
@@ -46,7 +54,8 @@ void FakeBluetoothGattServiceClient::Properties::Set(
   callback.Run(false);
 }
 
-FakeBluetoothGattServiceClient::FakeBluetoothGattServiceClient() {
+FakeBluetoothGattServiceClient::FakeBluetoothGattServiceClient()
+    : weak_ptr_factory_(this) {
 }
 
 FakeBluetoothGattServiceClient::~FakeBluetoothGattServiceClient() {
@@ -82,7 +91,7 @@ FakeBluetoothGattServiceClient::GetProperties(
 
 void FakeBluetoothGattServiceClient::ExposeHeartRateService(
     const dbus::ObjectPath& device_path) {
-  if (heart_rate_service_properties_.get()) {
+  if (IsHeartRateVisible()) {
     DCHECK(!heart_rate_service_path_.empty());
     VLOG(1) << "Fake Heart Rate Service already exposed.";
     return;
@@ -94,19 +103,23 @@ void FakeBluetoothGattServiceClient::ExposeHeartRateService(
       &FakeBluetoothGattServiceClient::OnPropertyChanged,
       base::Unretained(this),
       dbus::ObjectPath(heart_rate_service_path_))));
-  heart_rate_service_properties_->uuid.ReplaceValue(heart_rate_service_path_);
+  heart_rate_service_properties_->uuid.ReplaceValue(kHeartRateServiceUUID);
+  heart_rate_service_properties_->device.ReplaceValue(device_path);
+  heart_rate_service_properties_->primary.ReplaceValue(true);
 
   NotifyServiceAdded(dbus::ObjectPath(heart_rate_service_path_));
 
-  FakeBluetoothGattCharacteristicClient* char_client =
-      static_cast<FakeBluetoothGattCharacteristicClient*>(
-          DBusThreadManager::Get()->GetBluetoothGattCharacteristicClient());
-  char_client->ExposeHeartRateCharacteristics(
-      dbus::ObjectPath(heart_rate_service_path_));
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(
+          &FakeBluetoothGattServiceClient::ExposeHeartRateCharacteristics,
+          weak_ptr_factory_.GetWeakPtr()),
+          base::TimeDelta::FromMilliseconds(
+              kExposeCharacteristicsDelayIntervalMs));
 }
 
 void FakeBluetoothGattServiceClient::HideHeartRateService() {
-  if (!heart_rate_service_properties_.get()) {
+  if (!IsHeartRateVisible()) {
     DCHECK(heart_rate_service_path_.empty());
     VLOG(1) << "Fake Heart Rate Service already hidden.";
     return;
@@ -117,11 +130,21 @@ void FakeBluetoothGattServiceClient::HideHeartRateService() {
           DBusThreadManager::Get()->GetBluetoothGattCharacteristicClient());
   char_client->HideHeartRateCharacteristics();
 
-  heart_rate_service_properties_.reset();
-  std::string hrs_path = heart_rate_service_path_;
-  heart_rate_service_path_.clear();
+  // Notify observers before deleting the properties structure so that it
+  // can be accessed from the observer method.
+  NotifyServiceRemoved(dbus::ObjectPath(heart_rate_service_path_));
 
-  NotifyServiceRemoved(dbus::ObjectPath(hrs_path));
+  heart_rate_service_properties_.reset();
+  heart_rate_service_path_.clear();
+}
+
+bool FakeBluetoothGattServiceClient::IsHeartRateVisible() const {
+  return !!heart_rate_service_properties_.get();
+}
+
+dbus::ObjectPath
+FakeBluetoothGattServiceClient::GetHeartRateServicePath() const {
+  return dbus::ObjectPath(heart_rate_service_path_);
 }
 
 void FakeBluetoothGattServiceClient::OnPropertyChanged(
@@ -147,6 +170,18 @@ void FakeBluetoothGattServiceClient::NotifyServiceRemoved(
   FOR_EACH_OBSERVER(
       BluetoothGattServiceClient::Observer, observers_,
       GattServiceRemoved(object_path));
+}
+
+void FakeBluetoothGattServiceClient::ExposeHeartRateCharacteristics() {
+  if (!IsHeartRateVisible()) {
+    VLOG(2) << "Heart Rate service not visible. Not exposing characteristics.";
+    return;
+  }
+  FakeBluetoothGattCharacteristicClient* char_client =
+      static_cast<FakeBluetoothGattCharacteristicClient*>(
+          DBusThreadManager::Get()->GetBluetoothGattCharacteristicClient());
+  char_client->ExposeHeartRateCharacteristics(
+      dbus::ObjectPath(heart_rate_service_path_));
 }
 
 }  // namespace chromeos

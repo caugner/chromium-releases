@@ -25,6 +25,7 @@
 namespace blink {
 class WebNode;
 class WebView;
+struct WebAutocompleteParams;
 }
 
 namespace autofill {
@@ -58,15 +59,15 @@ class AutofillAgent : public content::RenderViewObserver,
  private:
   // content::RenderViewObserver:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidFinishDocumentLoad(blink::WebFrame* frame) OVERRIDE;
+  virtual void DidFinishDocumentLoad(blink::WebLocalFrame* frame) OVERRIDE;
   virtual void FrameDetached(blink::WebFrame* frame) OVERRIDE;
   virtual void FrameWillClose(blink::WebFrame* frame) OVERRIDE;
-  virtual void WillSubmitForm(blink::WebFrame* frame,
+  virtual void WillSubmitForm(blink::WebLocalFrame* frame,
                               const blink::WebFormElement& form) OVERRIDE;
   virtual void ZoomLevelChanged() OVERRIDE;
-  virtual void DidChangeScrollOffset(blink::WebFrame* frame) OVERRIDE;
+  virtual void DidChangeScrollOffset(blink::WebLocalFrame* frame) OVERRIDE;
   virtual void FocusedNodeChanged(const blink::WebNode& node) OVERRIDE;
-  virtual void OrientationChangeEvent(int orientation) OVERRIDE;
+  virtual void OrientationChangeEvent() OVERRIDE;
 
   // PageClickListener:
   virtual void FormControlElementClicked(
@@ -76,19 +77,20 @@ class AutofillAgent : public content::RenderViewObserver,
 
   // blink::WebAutofillClient:
   virtual void textFieldDidEndEditing(
-      const blink::WebInputElement& element) OVERRIDE;
+      const blink::WebInputElement& element);
   virtual void textFieldDidChange(
       const blink::WebFormControlElement& element);
   virtual void textFieldDidReceiveKeyDown(
       const blink::WebInputElement& element,
-      const blink::WebKeyboardEvent& event) OVERRIDE;
+      const blink::WebKeyboardEvent& event);
   virtual void didRequestAutocomplete(
-      blink::WebFrame* frame,
-      const blink::WebFormElement& form) OVERRIDE;
-  virtual void setIgnoreTextChanges(bool ignore) OVERRIDE;
+      const blink::WebFormElement& form,
+      const blink::WebAutocompleteParams& details);
+  virtual void setIgnoreTextChanges(bool ignore);
   virtual void didAssociateFormControls(
-      const blink::WebVector<blink::WebNode>& nodes) OVERRIDE;
+      const blink::WebVector<blink::WebNode>& nodes);
   virtual void openTextDataListChooser(const blink::WebInputElement& element);
+  virtual void firstUserGestureObserved();
 
   void OnFieldTypePredictionsAvailable(
       const std::vector<FormDataPredictions>& forms);
@@ -101,11 +103,14 @@ class AutofillAgent : public content::RenderViewObserver,
   void OnFillFieldWithValue(const base::string16& value);
   void OnPreviewFieldWithValue(const base::string16& value);
   void OnAcceptDataListSuggestion(const base::string16& value);
-  void OnAcceptPasswordAutofillSuggestion(const base::string16& username);
+  void OnAcceptPasswordAutofillSuggestion(const base::string16& username,
+                                          const base::string16& password);
 
-  // Called when interactive autocomplete finishes.
+  // Called when interactive autocomplete finishes. |message| is printed to
+  // the console if non-empty.
   void OnRequestAutocompleteResult(
       blink::WebFormElement::AutocompleteResult result,
+      const base::string16& message,
       const FormData& form_data);
 
   // Called when an autocomplete request succeeds or fails with the |result|.

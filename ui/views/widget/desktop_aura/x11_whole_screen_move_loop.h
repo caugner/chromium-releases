@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_pump_dispatcher.h"
+#include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/vector2d_f.h"
@@ -20,23 +20,29 @@ namespace aura {
 class Window;
 }
 
+namespace ui {
+class ScopedEventDispatcher;
+}
+
 namespace views {
 
 class Widget;
 
 // Runs a nested message loop and grabs the mouse. This is used to implement
 // dragging.
-class X11WholeScreenMoveLoop : public base::MessagePumpDispatcher {
+class X11WholeScreenMoveLoop : public ui::PlatformEventDispatcher {
  public:
   explicit X11WholeScreenMoveLoop(X11WholeScreenMoveLoopDelegate* delegate);
   virtual ~X11WholeScreenMoveLoop();
 
-  // Overridden from base::MessagePumpDispatcher:
-  virtual uint32_t Dispatch(const base::NativeEvent& event) OVERRIDE;
+  // ui:::PlatformEventDispatcher:
+  virtual bool CanDispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
+  virtual uint32_t DispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
 
   // Runs the nested message loop. While the mouse is grabbed, use |cursor| as
-  // the mouse cursor. Returns true if there we were able to grab the pointer
-  // and run the move loop.
+  // the mouse cursor. Returns true if the move-loop is completed successfully.
+  // If the pointer-grab fails, or the move-loop is canceled by the user (e.g.
+  // by pressing escape), then returns false.
   bool RunMoveLoop(aura::Window* window, gfx::NativeCursor cursor);
 
   // Updates the cursor while the move loop is running.
@@ -70,6 +76,7 @@ class X11WholeScreenMoveLoop : public base::MessagePumpDispatcher {
 
   // Are we running a nested message loop from RunMoveLoop()?
   bool in_move_loop_;
+  scoped_ptr<ui::ScopedEventDispatcher> nested_dispatcher_;
 
   bool should_reset_mouse_flags_;
 
@@ -79,6 +86,13 @@ class X11WholeScreenMoveLoop : public base::MessagePumpDispatcher {
   ::Window grab_input_window_;
 
   base::Closure quit_closure_;
+
+  // Keeps track of whether the move-loop is cancled by the user (e.g. by
+  // pressing escape).
+  bool canceled_;
+
+  // Keeps track of whether we still have a pointer grab at the end of the loop.
+  bool has_grab_;
 
   // A Widget is created during the drag if there is an image available to be
   // used during the drag.

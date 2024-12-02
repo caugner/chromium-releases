@@ -11,16 +11,11 @@ from telemetry.core import exceptions
 from telemetry.core import forwarders
 from telemetry.core import util
 from telemetry.core.backends.chrome import chrome_browser_backend
+from telemetry.core.backends.chrome import misc_web_contents_backend
 from telemetry.core.forwarders import cros_forwarder
 
 
 class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
-  # Some developers' workflow includes running the Chrome process from
-  # /usr/local/... instead of the default location. We have to check for both
-  # paths in order to support this workflow.
-  CHROME_PATHS = ['/opt/google/chrome/chrome ',
-                  '/usr/local/opt/google/chrome/chrome ']
-
   def __init__(self, browser_type, browser_options, cri, is_guest,
                extensions_to_load):
     super(CrOSBrowserBackend, self).__init__(
@@ -28,15 +23,15 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         browser_options=browser_options,
         output_profile_path=None, extensions_to_load=extensions_to_load)
 
-    from telemetry.core.backends.chrome import chrome_browser_options
-    assert isinstance(browser_options,
-                      chrome_browser_options.CrosBrowserOptions)
-
     # Initialize fields so that an explosion during init doesn't break in Close.
     self._browser_type = browser_type
     self._cri = cri
     self._is_guest = is_guest
     self._forwarder = None
+
+    from telemetry.core.backends.chrome import chrome_browser_options
+    assert isinstance(browser_options,
+                      chrome_browser_options.CrosBrowserOptions)
 
     self.wpr_port_pairs = forwarders.PortPairs(
         http=forwarders.PortPair(self.wpr_port_pairs.http.local_port,
@@ -46,8 +41,6 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         dns=None)
     self._remote_debugging_port = self._cri.GetRemotePort()
     self._port = self._remote_debugging_port
-
-    self._SetBranchNumber(self._GetChromeVersion())
 
     # Copy extensions to temp directories on the device.
     # Note that we also perform this copy locally to ensure that
@@ -59,19 +52,20 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       cri.Chown(extension_dir)
       e.local_path = os.path.join(extension_dir, os.path.basename(e.path))
 
-    # Ensure the UI is running and logged out.
-    self._RestartUI()
+    self._cri.RestartUI(self.browser_options.clear_enterprise_policy)
     util.WaitFor(self.IsBrowserRunning, 20)
 
     # Delete test user's cryptohome vault (user data directory).
     if not self.browser_options.dont_override_profile:
       self._cri.RunCmdOnDevice(['cryptohome', '--action=remove', '--force',
-                                '--user=%s' % self.browser_options.username])
+                                '--user=%s' % self._username])
     if self.browser_options.profile_dir:
       cri.RmRF(self.profile_directory)
       cri.PushFile(self.browser_options.profile_dir + '/Default',
                    self.profile_directory)
       cri.Chown(self.profile_directory)
+
+    self._SetBranchNumber(self._GetChromeVersion())
 
   def GetBrowserStartupArgs(self):
     args = super(CrOSBrowserBackend, self).GetBrowserStartupArgs()
@@ -89,59 +83,13 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
             '--remote-debugging-port=%i' % self._remote_debugging_port,
             # Open a maximized window.
             '--start-maximized',
-            # TODO(achuith): Re-enable this flag again before multi-profiles
-            # will become enabled by default to have telemetry mileage on it.
-            # '--multi-profiles',
-            # Debug logging for login flake (crbug.com/263527).
-            '--vmodule=*/browser/automation/*=2,*/chromeos/net/*=2,'
-                '*/chromeos/login/*=2,*/extensions/*=2,'
-                '*/device_policy_decoder_chromeos.cc=2'])
+            # Debug logging.
+            '--vmodule=*/chromeos/net/*=2,*/chromeos/login/*=2'])
 
-    if self._is_guest:
-      args.extend([
-          # Jump to the login screen, skipping network selection, eula, etc.
-          '--login-screen=login',
-          # Skip hwid check, for VMs and pre-MP lab devices.
-          '--skip-hwid-check'
-      ])
     return args
 
-  def _GetSessionManagerPid(self, procs):
-    """Returns the pid of the session_manager process, given the list of
-    processes."""
-    for pid, process, _, _ in procs:
-      if process.startswith('/sbin/session_manager '):
-        return pid
-    return None
-
-  def _GetChromeProcess(self):
-    """Locates the the main chrome browser process.
-
-    Chrome on cros is usually in /opt/google/chrome, but could be in
-    /usr/local/ for developer workflows - debug chrome is too large to fit on
-    rootfs.
-
-    Chrome spawns multiple processes for renderers. pids wrap around after they
-    are exhausted so looking for the smallest pid is not always correct. We
-    locate the session_manager's pid, and look for the chrome process that's an
-    immediate child. This is the main browser process.
-    """
-    procs = self._cri.ListProcesses()
-    session_manager_pid = self._GetSessionManagerPid(procs)
-    if not session_manager_pid:
-      return None
-
-    # Find the chrome process that is the child of the session_manager.
-    for pid, process, ppid, _ in procs:
-      if ppid != session_manager_pid:
-        continue
-      for path in self.CHROME_PATHS:
-        if process.startswith(path):
-          return {'pid': pid, 'path': path, 'args': process}
-    return None
-
   def _GetChromeVersion(self):
-    result = util.WaitFor(self._GetChromeProcess, timeout=30)
+    result = util.WaitFor(self._cri.GetChromeProcess, timeout=30)
     assert result and result['path']
     (version, _) = self._cri.RunCmdOnDevice([result['path'], '--version'])
     assert version
@@ -149,14 +97,11 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
   @property
   def pid(self):
-    result = self._GetChromeProcess()
-    if result and 'pid' in result:
-      return result['pid']
-    return None
+    return self._cri.GetChromePid()
 
   @property
   def browser_directory(self):
-    result = self._GetChromeProcess()
+    result = self._cri.GetChromeProcess()
     if result and 'path' in result:
       return os.path.dirname(result['path'])
     return None
@@ -210,20 +155,29 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     if self.browser_options.auto_login:
       if self._is_guest:
         pid = self.pid
-        self._NavigateGuestLogin()
+        self.oobe.NavigateGuestLogin()
         # Guest browsing shuts down the current browser and launches an
         # incognito browser in a separate process, which we need to wait for.
         util.WaitFor(lambda: pid != self.pid, 10)
-        self._WaitForBrowserToComeUp()
+      elif self.browser_options.gaia_login:
+        try:
+          self.oobe.NavigateGaiaLogin(self._username, self._password)
+        except util.TimeoutException:
+          self._cri.TakeScreenShot('gaia-login')
+          raise
       else:
-        self._NavigateFakeLogin()
+        self.oobe.NavigateFakeLogin(self._username, self._password)
+      self._WaitForLogin()
 
     logging.info('Browser is up!')
 
   def Close(self):
     super(CrOSBrowserBackend, self).Close()
 
-    self._RestartUI() # Logs out.
+    if self._cri:
+      self._cri.RestartUI(False) # Logs out.
+
+    util.WaitFor(lambda: not self._IsCryptohomeMounted(), 30)
 
     if self._forwarder:
       self._forwarder.Close()
@@ -249,13 +203,11 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   def GetStackTrace(self):
     return 'Cannot get stack trace on CrOS'
 
-  def _RestartUI(self):
-    if self._cri:
-      logging.info('(Re)starting the ui (logs the user out)')
-      if self._cri.IsServiceRunning('ui'):
-        self._cri.RunCmdOnDevice(['restart', 'ui'])
-      else:
-        self._cri.RunCmdOnDevice(['start', 'ui'])
+  @property
+  @decorators.Cache
+  def misc_web_contents_backend(self):
+    """Access to chrome://oobe/login page."""
+    return misc_web_contents_backend.MiscWebContentsBackend(self)
 
   @property
   def oobe(self):
@@ -265,86 +217,31 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
   def oobe_exists(self):
     return self.misc_web_contents_backend.oobe_exists
 
-  def _SigninUIState(self):
-    """Returns the signin ui state of the oobe. HIDDEN: 0, GAIA_SIGNIN: 1,
-    ACCOUNT_PICKER: 2, WRONG_HWID_WARNING: 3, MANAGED_USER_CREATION_FLOW: 4.
-    These values are in
-    chrome/browser/resources/chromeos/login/display_manager.js
-    """
-    return self.oobe.EvaluateJavaScript('''
-      loginHeader = document.getElementById('login-header-bar')
-      if (loginHeader) {
-        loginHeader.signinUIState_;
-      }
-    ''')
+  @property
+  def _username(self):
+    return self.browser_options.username
+
+  @property
+  def _password(self):
+    return self.browser_options.password
+
+  def _IsCryptohomeMounted(self):
+    username = '$guest' if self._is_guest else self._username
+    return self._cri.IsCryptohomeMounted(username, self._is_guest)
 
   def _IsLoggedIn(self):
     """Returns True if cryptohome has mounted, the browser is
     responsive to devtools requests, and the oobe has been dismissed."""
-    return (self._cri.IsCryptohomeMounted(self.browser_options.username) and
+    return (self._IsCryptohomeMounted() and
             self.HasBrowserFinishedLaunching() and
             not self.oobe_exists)
 
-  def _WaitForSigninScreen(self):
-    """Waits for oobe to be on the signin or account picker screen."""
-    def OnAccountPickerScreen():
-      signin_state = self._SigninUIState()
-      # GAIA_SIGNIN or ACCOUNT_PICKER screens.
-      return signin_state == 1 or signin_state == 2
-    try:
-      util.WaitFor(OnAccountPickerScreen, 60)
-    except util.TimeoutException:
-      self._cri.TakeScreenShot('guest-screen')
-      raise exceptions.LoginException('Timed out waiting for signin screen, '
-                                      'signin state %d' % self._SigninUIState())
-
-  def _ClickBrowseAsGuest(self):
-    """Click the Browse As Guest button on the account picker screen. This will
-    restart the browser, and we could have a tab crash or a browser crash."""
-    try:
-      self.oobe.EvaluateJavaScript("""
-          var guest = document.getElementById("guest-user-button");
-          if (guest) {
-            guest.click();
-          }
-      """)
-    except (exceptions.TabCrashException,
-            exceptions.BrowserConnectionGoneException):
-      pass
-
-  def _NavigateGuestLogin(self):
-    """Navigates through oobe login screen as guest."""
-    logging.info('Logging in as guest')
-    oobe = self.oobe
-    util.WaitFor(lambda: oobe.EvaluateJavaScript(
-        'typeof Oobe !== \'undefined\''), 10)
-
-    if oobe.EvaluateJavaScript(
-        "typeof Oobe.guestLoginForTesting != 'undefined'"):
-      oobe.ExecuteJavaScript('Oobe.guestLoginForTesting();')
-    else:
-      self._WaitForSigninScreen()
-      self._ClickBrowseAsGuest()
-
-    util.WaitFor(lambda: self._cri.IsCryptohomeMounted('$guest'), 30)
-
-  def _NavigateFakeLogin(self):
-    """Logs in using Oobe.loginForTesting."""
-    logging.info('Invoking Oobe.loginForTesting')
-    oobe = self.oobe
-    util.WaitFor(lambda: oobe.EvaluateJavaScript(
-        'typeof Oobe !== \'undefined\''), 10)
-
-    if oobe.EvaluateJavaScript(
-        'typeof Oobe.loginForTesting == \'undefined\''):
-      raise exceptions.LoginException('Oobe.loginForTesting js api missing')
-
-    oobe.ExecuteJavaScript(
-        'Oobe.loginForTesting(\'%s\', \'%s\');'
-            % (self.browser_options.username, self.browser_options.password))
-    self._WaitForLogin()
-
   def _WaitForLogin(self):
+    if self._is_guest:
+      self._WaitForBrowserToComeUp()
+      util.WaitFor(self._IsCryptohomeMounted, 30)
+      return
+
     try:
       util.WaitFor(self._IsLoggedIn, 60)
     except util.TimeoutException:
@@ -355,7 +252,7 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     try:
       self._WaitForBrowserToComeUp()
     except util.TimeoutException:
-      logging.error('Chrome args: %s' % self._GetChromeProcess()['args'])
+      logging.error('Chrome args: %s' % self._cri.GetChromeProcess()['args'])
       self._cri.TakeScreenShot('extension-timeout')
       raise
 

@@ -25,6 +25,7 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/default_activation_client.h"
 #include "ui/wm/core/wm_state.h"
 #include "ui/wm/public/tooltip_client.h"
 #include "ui/wm/public/window_types.h"
@@ -78,6 +79,7 @@ class TooltipControllerTest : public aura::test::AuraTestBase {
   virtual void SetUp() OVERRIDE {
     wm_state_.reset(new wm::WMState);
     aura::test::AuraTestBase::SetUp();
+    new wm::DefaultActivationClient(root_window());
 #if defined(OS_CHROMEOS)
     controller_.reset(new TooltipController(
           scoped_ptr<views::corewm::Tooltip>(
@@ -466,6 +468,7 @@ class TooltipControllerCaptureTest : public TooltipControllerTest {
 // Verifies when capture is released the TooltipController resets state.
 TEST_F(TooltipControllerCaptureTest, CloseOnCaptureLost) {
   view_->GetWidget()->SetCapture(view_);
+  RunAllPendingInMessageLoop();
   view_->set_tooltip_text(ASCIIToUTF16("Tooltip Text"));
   generator_->MoveMouseToCenterOf(GetWindow());
   base::string16 expected_tooltip = ASCIIToUTF16("Tooltip Text");
@@ -697,6 +700,7 @@ class TooltipControllerTest2 : public aura::test::AuraTestBase {
   virtual void SetUp() OVERRIDE {
     wm_state_.reset(new wm::WMState);
     aura::test::AuraTestBase::SetUp();
+    new wm::DefaultActivationClient(root_window());
     controller_.reset(new TooltipController(
                           scoped_ptr<corewm::Tooltip>(test_tooltip_)));
     root_window()->AddPreTargetHandler(controller_.get());

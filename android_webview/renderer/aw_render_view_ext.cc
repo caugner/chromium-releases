@@ -24,9 +24,9 @@
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebElementCollection.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebHitTestResult.h"
 #include "third_party/WebKit/public/web/WebImageCache.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -69,9 +69,10 @@ bool RemovePrefixAndAssignIfMatches(const base::StringPiece& prefix,
   const base::StringPiece spec(url.possibly_invalid_spec());
 
   if (spec.starts_with(prefix)) {
-    url_canon::RawCanonOutputW<1024> output;
-    url_util::DecodeURLEscapeSequences(spec.data() + prefix.length(),
-        spec.length() - prefix.length(), &output);
+    url::RawCanonOutputW<1024> output;
+    url::DecodeURLEscapeSequences(spec.data() + prefix.length(),
+                                  spec.length() - prefix.length(),
+                                  &output);
     std::string decoded_url = base::UTF16ToUTF8(
         base::string16(output.data(), output.length()));
     dest->assign(decoded_url.begin(), decoded_url.end());
@@ -180,7 +181,7 @@ void AwRenderViewExt::OnDocumentHasImagesRequest(int id) {
                                                    hasImages));
 }
 
-void AwRenderViewExt::DidCommitProvisionalLoad(blink::WebFrame* frame,
+void AwRenderViewExt::DidCommitProvisionalLoad(blink::WebLocalFrame* frame,
                                                bool is_new_navigation) {
   content::DocumentState* document_state =
       content::DocumentState::FromDataSource(frame->dataSource());

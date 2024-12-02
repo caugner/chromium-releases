@@ -2,9 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core import web_contents
+from telemetry.core import exceptions
 from telemetry.core.backends.chrome import inspector_backend_list
-
+from telemetry.core.backends.chrome import oobe
 
 class MiscWebContentsBackend(inspector_backend_list.InspectorBackendList):
   """A dynamic sequence of web contents not related to tabs and extensions.
@@ -14,12 +14,17 @@ class MiscWebContentsBackend(inspector_backend_list.InspectorBackendList):
 
   def __init__(self, browser_backend):
     super(MiscWebContentsBackend, self).__init__(
-        browser_backend, backend_wrapper=web_contents.WebContents)
+        browser_backend, backend_wrapper=oobe.Oobe)
 
   @property
   def oobe_exists(self):
     """Lightweight property to determine if the oobe webui is visible."""
-    return bool(len(self))
+    try:
+      return bool(len(self))
+    except (exceptions.BrowserGoneException,
+            exceptions.BrowserConnectionGoneException,
+            exceptions.TabCrashException):
+      return False
 
   def GetOobe(self):
     if not len(self):

@@ -11,6 +11,7 @@
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/browser/ui/cocoa/run_loop_testing.h"
 #import "chrome/browser/ui/cocoa/website_settings/permission_bubble_cocoa.h"
+#import "chrome/browser/ui/cocoa/website_settings/split_block_button.h"
 #include "chrome/browser/ui/website_settings/mock_permission_bubble_request.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -18,12 +19,18 @@
 #import "ui/events/test/cocoa_test_event_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+@class ConstrainedWindowButton;
+
 @interface PermissionBubbleController (ExposedForTesting)
 - (void)ok:(id)sender;
 - (void)onAllow:(id)sender;
 - (void)onBlock:(id)sender;
 - (void)onCustomize:(id)sender;
 - (void)onCheckboxChanged:(id)sender;
+@end
+
+@interface SplitBlockButton (ExposedForTesting)
+- (NSMenu*)menu;
 @end
 
 namespace {
@@ -46,6 +53,7 @@ class PermissionBubbleControllerTest : public CocoaTest,
   virtual void SetUp() OVERRIDE {
     CocoaTest::SetUp();
     bridge_.reset(new PermissionBubbleCocoa(nil));
+    AddRequest(kPermissionA);
     controller_ = [[PermissionBubbleController alloc]
         initWithParentWindow:test_window()
                       bridge:bridge_.get()];
@@ -67,19 +75,28 @@ class PermissionBubbleControllerTest : public CocoaTest,
   }
 
   NSButton* FindButtonWithTitle(const std::string& title) {
-    return FindButtonWithTitle(base::SysUTF8ToNSString(title));
+    return FindButtonWithTitle(base::SysUTF8ToNSString(title),
+                               [ConstrainedWindowButton class]);
   }
 
   NSButton* FindButtonWithTitle(int title_id) {
-    return FindButtonWithTitle(l10n_util::GetNSString(title_id));
+    return FindButtonWithTitle(l10n_util::GetNSString(title_id),
+                               [ConstrainedWindowButton class]);
   }
 
-  NSButton* FindButtonWithTitle(NSString* title) {
-    NSView* parent = base::mac::ObjCCastStrict<NSView>([controller_ bubble]);
-    for (NSView* child in [parent subviews]) {
-      NSButton* button = base::mac::ObjCCast<NSButton>(child);
-      if ([title isEqualToString:[button title]]) {
-        return button;
+  NSButton* FindMenuButtonWithTitle(int title_id) {
+    return FindButtonWithTitle(l10n_util::GetNSString(title_id),
+                               [NSPopUpButton class]);
+  }
+
+  // IDS_PERMISSION_ALLOW and IDS_PERMISSION_DENY are used for two distinct
+  // UI elements, both of which derive from NSButton.  So check the expected
+  // class, not just NSButton, as well as the title.
+  NSButton* FindButtonWithTitle(NSString* title, Class button_class) {
+    for (NSButton* view in [[controller_ bubble] subviews]) {
+      if ([view isKindOfClass:button_class] &&
+          [title isEqualToString:[view title]]) {
+        return view;
       }
     }
     return nil;
@@ -87,12 +104,41 @@ class PermissionBubbleControllerTest : public CocoaTest,
 
   NSTextField* FindTextFieldWithString(const std::string& text) {
     NSView* parent = base::mac::ObjCCastStrict<NSView>([controller_ bubble]);
-    NSString* title = base::SysUTF8ToNSString(text);
-    for (NSView* child in [parent subviews]) {
-      NSTextField* textField = base::mac::ObjCCast<NSTextField>(child);
-      if ([[textField stringValue] hasSuffix:title]) {
-        return textField;
+    return FindTextFieldWithString(parent, base::SysUTF8ToNSString(text));
+  }
+
+  NSTextField* FindTextFieldWithString(NSView* view, NSString* text) {
+    NSTextField* textField = nil;
+    for (NSView* child in [view subviews]) {
+      textField = base::mac::ObjCCast<NSTextField>(child);
+      if (![[textField stringValue] hasSuffix:text]) {
+        textField = FindTextFieldWithString(child, text);
+        if (textField)
+          break;
       }
+    }
+    return textField;
+  }
+
+  void ChangePermissionMenuSelection(NSButton* menu_button, int next_title_id) {
+    NSMenu* menu = [base::mac::ObjCCastStrict<NSPopUpButton>(menu_button) menu];
+    NSString* next_title = l10n_util::GetNSString(next_title_id);
+    EXPECT_EQ([[menu itemWithTitle:[menu_button title]] state], NSOnState);
+    NSMenuItem* next_item = [menu itemWithTitle:next_title];
+    EXPECT_EQ([next_item state], NSOffState);
+    [menu performActionForItemAtIndex:[menu indexOfItem:next_item]];
+  }
+
+  NSMenuItem* FindCustomizeMenuItem() {
+    NSButton* button = FindButtonWithTitle(IDS_PERMISSION_DENY);
+    if (!button || ![button isKindOfClass:[SplitBlockButton class]])
+      return nil;
+    NSString* customize = l10n_util::GetNSString(IDS_PERMISSION_CUSTOMIZE);
+    SplitBlockButton* block_button =
+        base::mac::ObjCCast<SplitBlockButton>(button);
+    for (NSMenuItem* item in [[block_button menu] itemArray]) {
+      if ([[item title] isEqualToString:customize])
+        return item;
     }
     return nil;
   }
@@ -111,8 +157,6 @@ TEST_F(PermissionBubbleControllerTest, ShowAndClose) {
 }
 
 TEST_F(PermissionBubbleControllerTest, ShowSinglePermission) {
-  AddRequest(kPermissionA);
-
   [controller_ showAtAnchor:NSZeroPoint
               withDelegate:this
                forRequests:requests_
@@ -123,11 +167,10 @@ TEST_F(PermissionBubbleControllerTest, ShowSinglePermission) {
   EXPECT_TRUE(FindButtonWithTitle(IDS_PERMISSION_ALLOW));
   EXPECT_TRUE(FindButtonWithTitle(IDS_PERMISSION_DENY));
   EXPECT_FALSE(FindButtonWithTitle(IDS_OK));
-  EXPECT_FALSE(FindButtonWithTitle(IDS_PERMISSION_CUSTOMIZE));
+  EXPECT_FALSE(FindCustomizeMenuItem());
 }
 
 TEST_F(PermissionBubbleControllerTest, ShowMultiplePermissions) {
-  AddRequest(kPermissionA);
   AddRequest(kPermissionB);
   AddRequest(kPermissionC);
 
@@ -143,38 +186,48 @@ TEST_F(PermissionBubbleControllerTest, ShowMultiplePermissions) {
 
   EXPECT_TRUE(FindButtonWithTitle(IDS_PERMISSION_ALLOW));
   EXPECT_TRUE(FindButtonWithTitle(IDS_PERMISSION_DENY));
-  EXPECT_TRUE(FindButtonWithTitle(IDS_PERMISSION_CUSTOMIZE));
+  EXPECT_TRUE(FindCustomizeMenuItem());
   EXPECT_FALSE(FindButtonWithTitle(IDS_OK));
 }
 
-TEST_F(PermissionBubbleControllerTest, ShowCustomizationMode) {
-  AddRequest(kPermissionA);
-  AddRequest(kPermissionB);
-
+TEST_F(PermissionBubbleControllerTest, ShowCustomizationModeAllow) {
   accept_states_.push_back(true);
-  accept_states_.push_back(false);
+  [controller_ showAtAnchor:NSZeroPoint
+               withDelegate:this
+                forRequests:requests_
+               acceptStates:accept_states_
+          customizationMode:YES];
 
+  // Test that there is one menu, with 'Allow' visible.
+  EXPECT_TRUE(FindMenuButtonWithTitle(IDS_PERMISSION_ALLOW));
+  EXPECT_FALSE(FindMenuButtonWithTitle(IDS_PERMISSION_DENY));
+
+  EXPECT_TRUE(FindButtonWithTitle(IDS_OK));
+  EXPECT_FALSE(FindButtonWithTitle(IDS_PERMISSION_ALLOW));
+  EXPECT_FALSE(FindButtonWithTitle(IDS_PERMISSION_DENY));
+  EXPECT_FALSE(FindCustomizeMenuItem());
+}
+
+TEST_F(PermissionBubbleControllerTest, ShowCustomizationModeBlock) {
+  accept_states_.push_back(false);
   [controller_ showAtAnchor:NSZeroPoint
               withDelegate:this
                forRequests:requests_
               acceptStates:accept_states_
          customizationMode:YES];
 
-  // Test that each checkbox is visible and only the first is checked.
-  NSButton* checkbox_a = FindButtonWithTitle(kPermissionA);
-  NSButton* checkbox_b = FindButtonWithTitle(kPermissionB);
-  EXPECT_TRUE(checkbox_a);
-  EXPECT_TRUE(checkbox_b);
-  EXPECT_EQ(NSOnState, [checkbox_a state]);
-  EXPECT_EQ(NSOffState, [checkbox_b state]);
+  // Test that there is one menu, with 'Block' visible.
+  EXPECT_TRUE(FindMenuButtonWithTitle(IDS_PERMISSION_DENY));
+  EXPECT_FALSE(FindMenuButtonWithTitle(IDS_PERMISSION_ALLOW));
 
   EXPECT_TRUE(FindButtonWithTitle(IDS_OK));
   EXPECT_FALSE(FindButtonWithTitle(IDS_PERMISSION_ALLOW));
   EXPECT_FALSE(FindButtonWithTitle(IDS_PERMISSION_DENY));
-  EXPECT_FALSE(FindButtonWithTitle(IDS_PERMISSION_CUSTOMIZE));
+  EXPECT_FALSE(FindCustomizeMenuItem());
 }
 
 TEST_F(PermissionBubbleControllerTest, OK) {
+  accept_states_.push_back(true);
   [controller_ showAtAnchor:NSZeroPoint
               withDelegate:this
                forRequests:requests_
@@ -207,8 +260,7 @@ TEST_F(PermissionBubbleControllerTest, Deny) {
   [FindButtonWithTitle(IDS_PERMISSION_DENY) performClick:nil];
 }
 
-TEST_F(PermissionBubbleControllerTest, ToggleCheckbox) {
-  AddRequest(kPermissionA);
+TEST_F(PermissionBubbleControllerTest, ChangePermissionSelection) {
   AddRequest(kPermissionB);
 
   accept_states_.push_back(true);
@@ -222,11 +274,14 @@ TEST_F(PermissionBubbleControllerTest, ToggleCheckbox) {
 
   EXPECT_CALL(*this, ToggleAccept(0, false)).Times(1);
   EXPECT_CALL(*this, ToggleAccept(1, true)).Times(1);
-  [FindButtonWithTitle(kPermissionA) performClick:nil];
-  [FindButtonWithTitle(kPermissionB) performClick:nil];
+  NSButton* menu_a = FindMenuButtonWithTitle(IDS_PERMISSION_ALLOW);
+  NSButton* menu_b = FindMenuButtonWithTitle(IDS_PERMISSION_DENY);
+  ChangePermissionMenuSelection(menu_a, IDS_PERMISSION_DENY);
+  ChangePermissionMenuSelection(menu_b, IDS_PERMISSION_ALLOW);
 }
 
 TEST_F(PermissionBubbleControllerTest, ClickCustomize) {
+  AddRequest(kPermissionB);
   [controller_ showAtAnchor:NSZeroPoint
               withDelegate:this
                forRequests:requests_
@@ -234,5 +289,8 @@ TEST_F(PermissionBubbleControllerTest, ClickCustomize) {
          customizationMode:NO];
 
   EXPECT_CALL(*this, SetCustomizationMode()).Times(1);
-  [FindButtonWithTitle(IDS_PERMISSION_CUSTOMIZE) performClick:nil];
+  NSMenuItem* customize_item = FindCustomizeMenuItem();
+  EXPECT_TRUE(customize_item);
+  NSMenu* menu = [customize_item menu];
+  [menu performActionForItemAtIndex:[menu indexOfItem:customize_item]];
 }

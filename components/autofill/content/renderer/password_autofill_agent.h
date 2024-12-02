@@ -38,10 +38,12 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
   bool TextFieldHandlingKeyDown(const blink::WebInputElement& element,
                                 const blink::WebKeyboardEvent& event);
 
-  // Fills the password associated with user name |username|. Returns true if
-  // the username and password fields were filled, false otherwise.
-  bool DidAcceptAutofillSuggestion(const blink::WebNode& node,
-                                   const blink::WebString& username);
+  // Fills the username and password fields of this form with the given values.
+  // Returns true if the fields were filled, false otherwise.
+  bool AcceptSuggestion(const blink::WebNode& node,
+                        const blink::WebString& username,
+                        const blink::WebString& password);
+
   // A no-op.  Password forms are not previewed, so they do not need to be
   // cleared when the selection changes.  However, this method returns
   // true when |node| is fillable by password Autofill.
@@ -52,6 +54,11 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
 
   // Called when new form controls are inserted.
   void OnDynamicFormsSeen(blink::WebFrame* frame);
+
+  // Called when the user first interacts with the page after a load. This is a
+  // signal to make autofilled values of password input elements accessible to
+  // JavaScript.
+  void FirstUserGestureObserved();
 
  protected:
   virtual bool OriginCanAccessPasswordManager(
@@ -110,20 +117,20 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
 
   // RenderViewObserver:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidStartProvisionalLoad(blink::WebFrame* frame) OVERRIDE;
+  virtual void DidStartProvisionalLoad(blink::WebLocalFrame* frame) OVERRIDE;
   virtual void DidStartLoading() OVERRIDE;
-  virtual void DidFinishDocumentLoad(blink::WebFrame* frame) OVERRIDE;
-  virtual void DidFinishLoad(blink::WebFrame* frame) OVERRIDE;
+  virtual void DidFinishDocumentLoad(blink::WebLocalFrame* frame) OVERRIDE;
+  virtual void DidFinishLoad(blink::WebLocalFrame* frame) OVERRIDE;
   virtual void FrameDetached(blink::WebFrame* frame) OVERRIDE;
   virtual void FrameWillClose(blink::WebFrame* frame) OVERRIDE;
-  virtual void WillSendSubmitEvent(blink::WebFrame* frame,
+  virtual void WillSendSubmitEvent(blink::WebLocalFrame* frame,
                                    const blink::WebFormElement& form) OVERRIDE;
-  virtual void WillSubmitForm(blink::WebFrame* frame,
+  virtual void WillSubmitForm(blink::WebLocalFrame* frame,
                               const blink::WebFormElement& form) OVERRIDE;
-  virtual void WillProcessUserGesture() OVERRIDE;
 
   // RenderView IPC handlers:
   void OnFillPasswordForm(const PasswordFormFillData& form_data);
+  void OnChangeLoggingState(bool active);
 
   // Scans the given frame for password forms and sends them up to the browser.
   // If |only_visible| is true, only forms visible in the layout are sent.
@@ -188,6 +195,9 @@ class PasswordAutofillAgent : public content::RenderViewObserver {
   FrameToPasswordFormMap provisionally_saved_forms_;
 
   PasswordValueGatekeeper gatekeeper_;
+
+  // True indicates that user debug information should be logged.
+  bool logging_state_active_;
 
   base::WeakPtrFactory<PasswordAutofillAgent> weak_ptr_factory_;
 

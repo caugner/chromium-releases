@@ -9,8 +9,8 @@
 
 #include "android_webview/common/devtools_instrumentation.h"
 #include "android_webview/native/intercepted_request_data_impl.h"
-#include "base/android/jni_helper.h"
 #include "base/android/jni_string.h"
+#include "base/android/jni_weak_ref.h"
 #include "base/lazy_instance.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
@@ -112,7 +112,7 @@ class ClientMapEntryUpdater : public content::WebContentsObserver {
 
   virtual void RenderFrameCreated(RenderFrameHost* render_frame_host) OVERRIDE;
   virtual void RenderFrameDeleted(RenderFrameHost* render_frame_host) OVERRIDE;
-  virtual void WebContentsDestroyed(WebContents* web_contents) OVERRIDE;
+  virtual void WebContentsDestroyed() OVERRIDE;
 
  private:
   JavaObjectWeakGlobalRef jdelegate_;
@@ -142,7 +142,7 @@ void ClientMapEntryUpdater::RenderFrameDeleted(RenderFrameHost* rfh) {
   RfhToIoThreadClientMap::GetInstance()->Erase(GetRenderFrameHostIdPair(rfh));
 }
 
-void ClientMapEntryUpdater::WebContentsDestroyed(WebContents* web_contents) {
+void ClientMapEntryUpdater::WebContentsDestroyed() {
   delete this;
 }
 

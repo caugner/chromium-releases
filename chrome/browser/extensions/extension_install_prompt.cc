@@ -15,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/image_loader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -22,18 +23,17 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/identity/oauth2_manifest_handler.h"
-#include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/extension_icon_set.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/pref_names.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_icon_set.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
@@ -137,8 +137,8 @@ int GetSizeForMaxScaleFactor(int size_in_dip) {
 // pixel size under maximal supported scale factor.
 SkBitmap GetDefaultIconBitmapForMaxScaleFactor(bool is_app) {
   const gfx::ImageSkia& image = is_app ?
-      extensions::IconsInfo::GetDefaultAppIcon() :
-      extensions::IconsInfo::GetDefaultExtensionIcon();
+      extensions::util::GetDefaultAppIcon() :
+      extensions::util::GetDefaultExtensionIcon();
   return image.GetRepresentation(
       gfx::ImageSkia::GetMaxSupportedScale()).sk_bitmap();
 }
@@ -186,7 +186,7 @@ gfx::NativeWindow NativeWindowForWebContents(content::WebContents* contents) {
   if (!contents)
     return NULL;
 
-  return contents->GetView()->GetTopLevelNativeWindow();
+  return contents->GetTopLevelNativeWindow();
 }
 
 }  // namespace

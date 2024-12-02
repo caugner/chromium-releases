@@ -35,7 +35,6 @@
 #include "chrome/browser/extensions/extension_warning_set.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/common/extensions/api/web_request.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
@@ -45,6 +44,7 @@
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_message_filter.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -302,7 +302,7 @@ base::DictionaryValue* ToHeaderDictionary(const std::string& name,
                                           const std::string& value) {
   base::DictionaryValue* header = new base::DictionaryValue();
   header->SetString(keys::kHeaderNameKey, name);
-  if (IsStringUTF8(value)) {
+  if (base::IsStringUTF8(value)) {
     header->SetString(keys::kHeaderValueKey, value);
   } else {
     header->Set(keys::kHeaderBinaryValueKey,
@@ -345,14 +345,13 @@ void RemoveEventListenerOnUI(
   const std::string& event_name,
   int process_id,
   const std::string& extension_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   Profile* profile = reinterpret_cast<Profile*>(profile_id);
   if (!g_browser_process->profile_manager()->IsValidProfile(profile))
     return;
 
-  extensions::EventRouter* event_router =
-      extensions::ExtensionSystem::Get(profile)->event_router();
+  extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
   if (!event_router)
     return;
 
@@ -371,7 +370,7 @@ void SendOnMessageEventOnUI(
     void* profile_id,
     const std::string& extension_id,
     scoped_ptr<base::DictionaryValue> event_argument) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   Profile* profile = reinterpret_cast<Profile*>(profile_id);
   if (!g_browser_process->profile_manager()->IsValidProfile(profile))
@@ -380,8 +379,7 @@ void SendOnMessageEventOnUI(
   scoped_ptr<base::ListValue> event_args(new base::ListValue);
   event_args->Append(event_argument.release());
 
-  extensions::EventRouter* event_router =
-      extensions::ExtensionSystem::Get(profile)->event_router();
+  extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
 
   scoped_ptr<extensions::Event> event(new extensions::Event(
       declarative_keys::kOnMessage, event_args.Pass(), profile,
@@ -404,8 +402,7 @@ namespace extensions {
 
 WebRequestAPI::WebRequestAPI(content::BrowserContext* context)
     : browser_context_(context) {
-  EventRouter* event_router =
-      ExtensionSystem::Get(browser_context_)->event_router();
+  EventRouter* event_router = EventRouter::Get(browser_context_);
   for (size_t i = 0; i < arraysize(kWebRequestEvents); ++i) {
     // Observe the webRequest event.
     std::string event_name = kWebRequestEvents[i];
@@ -418,9 +415,7 @@ WebRequestAPI::WebRequestAPI(content::BrowserContext* context)
 }
 
 WebRequestAPI::~WebRequestAPI() {
-  ExtensionSystem::Get(browser_context_)
-      ->event_router()
-      ->UnregisterObserver(this);
+  EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<WebRequestAPI> >
@@ -433,7 +428,7 @@ WebRequestAPI::GetFactoryInstance() {
 }
 
 void WebRequestAPI::OnListenerRemoved(const EventListenerInfo& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Note that details.event_name includes the sub-event details (e.g. "/123").
   BrowserThread::PostTask(BrowserThread::IO,
                           FROM_HERE,
@@ -2149,7 +2144,7 @@ void ClearCacheQuotaHeuristic::OnPageLoad(Bucket* bucket) {
   bucket->DeductToken();
 }
 
-bool WebRequestAddEventListener::RunImpl() {
+bool WebRequestInternalAddEventListenerFunction::RunSync() {
   // Argument 0 is the callback, which we don't use here.
   ExtensionWebRequestEventRouter::RequestFilter filter;
   base::DictionaryValue* value = NULL;
@@ -2179,8 +2174,8 @@ bool WebRequestAddEventListener::RunImpl() {
   int webview_instance_id = 0;
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(5, &webview_instance_id));
 
-  base::WeakPtr<ChromeRenderMessageFilter> ipc_sender = ipc_sender_weak();
-
+  base::WeakPtr<extensions::ExtensionMessageFilter> ipc_sender =
+      ipc_sender_weak();
   int embedder_process_id =
       ipc_sender.get() ? ipc_sender->render_process_id() : -1;
 
@@ -2229,7 +2224,7 @@ bool WebRequestAddEventListener::RunImpl() {
   return true;
 }
 
-void WebRequestEventHandled::RespondWithError(
+void WebRequestInternalEventHandledFunction::RespondWithError(
     const std::string& event_name,
     const std::string& sub_event_name,
     uint64 request_id,
@@ -2245,7 +2240,7 @@ void WebRequestEventHandled::RespondWithError(
       response.release());
 }
 
-bool WebRequestEventHandled::RunImpl() {
+bool WebRequestInternalEventHandledFunction::RunSync() {
   std::string event_name;
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &event_name));
 
@@ -2422,10 +2417,10 @@ void WebRequestHandlerBehaviorChangedFunction::OnQuotaExceeded(
                  profile_id(), warnings));
 
   // Continue gracefully.
-  Run();
+  RunSync();
 }
 
-bool WebRequestHandlerBehaviorChangedFunction::RunImpl() {
+bool WebRequestHandlerBehaviorChangedFunction::RunSync() {
   helpers::ClearCacheOnNavigation();
   return true;
 }

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <gtest/gtest.h>
+#include <stdint.h>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -21,13 +22,15 @@ namespace media {
 namespace cast {
 namespace transport {
 
-static const int64 kStartMillisecond = GG_INT64_C(12345678900000);
+static const int64 kStartMillisecond = INT64_C(12345678900000);
 
 class FakePacketSender : public transport::PacketSender {
  public:
   FakePacketSender() {}
 
-  virtual bool SendPacket(const Packet& packet) OVERRIDE { return true; }
+  virtual bool SendPacket(PacketRef packet, const base::Closure& cb) OVERRIDE {
+    return true;
+  }
 };
 
 class CastTransportSenderImplTest : public ::testing::Test {

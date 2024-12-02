@@ -8,9 +8,11 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 
 namespace base {
 class SequencedTaskRunner;
+class SingleThreadTaskRunner;
 }
 
 namespace drive {
@@ -28,28 +30,37 @@ class MetadataDatabase;
 
 class SyncEngineContext {
  public:
-  SyncEngineContext(scoped_ptr<drive::DriveServiceInterface> drive_service,
-                    scoped_ptr<drive::DriveUploaderInterface> drive_uploader,
-                    base::SequencedTaskRunner* task_runner);
+  SyncEngineContext(
+      scoped_ptr<drive::DriveServiceInterface> drive_service,
+      scoped_ptr<drive::DriveUploaderInterface> drive_uploader,
+      base::SingleThreadTaskRunner* ui_task_runner,
+      base::SequencedTaskRunner* worker_task_runner,
+      base::SequencedTaskRunner* file_task_runner);
   ~SyncEngineContext();
+
+  void SetMetadataDatabase(scoped_ptr<MetadataDatabase> metadata_database);
+  void SetRemoteChangeProcessor(
+      RemoteChangeProcessor* remote_change_processor);
 
   drive::DriveServiceInterface* GetDriveService();
   drive::DriveUploaderInterface* GetDriveUploader();
   MetadataDatabase* GetMetadataDatabase();
   RemoteChangeProcessor* GetRemoteChangeProcessor();
-  base::SequencedTaskRunner* GetBlockingTaskRunner();
-
-  void SetMetadataDatabase(scoped_ptr<MetadataDatabase> metadata_database);
-  void SetRemoteChangeProcessor(RemoteChangeProcessor* remote_change_processor);
+  base::SingleThreadTaskRunner* GetUITaskRunner();
+  base::SequencedTaskRunner* GetWorkerTaskRunner();
+  base::SequencedTaskRunner* GetFileTaskRunner();
 
   scoped_ptr<MetadataDatabase> PassMetadataDatabase();
 
  private:
   scoped_ptr<drive::DriveServiceInterface> drive_service_;
   scoped_ptr<drive::DriveUploaderInterface> drive_uploader_;
-  scoped_ptr<MetadataDatabase> metadata_database_;
   RemoteChangeProcessor* remote_change_processor_;  // Do not own
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+
+  scoped_ptr<MetadataDatabase> metadata_database_;
+  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> worker_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncEngineContext);
 };

@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_member.h"
+#include "base/time/time.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browser_thread_delegate.h"
@@ -167,6 +168,7 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<bool> enable_quic;
     Optional<bool> enable_quic_https;
     Optional<bool> enable_quic_pacing;
+    Optional<bool> enable_quic_time_based_loss_detection;
     Optional<bool> enable_quic_persist_server_info;
     Optional<bool> enable_quic_port_selection;
     Optional<size_t> quic_max_packet_length;
@@ -212,6 +214,8 @@ class IOThread : public content::BrowserThreadDelegate {
   void ClearHostCache();
 
   void InitializeNetworkSessionParams(net::HttpNetworkSession::Params* params);
+
+  base::TimeTicks creation_time() const;
 
  private:
   // Provide SystemURLRequestContextGetter with access to
@@ -289,6 +293,12 @@ class IOThread : public content::BrowserThreadDelegate {
   bool ShouldEnableQuicPacing(const base::CommandLine& command_line,
                               base::StringPiece quic_trial_group);
 
+  // Returns true if QUIC time-base loss detection should be negotiated during
+  // the QUIC handshake.
+  bool ShouldEnableQuicTimeBasedLossDetection(
+      const base::CommandLine& command_line,
+      base::StringPiece quic_trial_group);
+
   // Returns true if Chromium should persist QUIC server config information to
   // disk cache.
   bool ShouldEnableQuicPersistServerInfo(const base::CommandLine& command_line);
@@ -358,6 +368,8 @@ class IOThread : public content::BrowserThreadDelegate {
   bool is_spdy_disabled_by_policy_;
 
   base::WeakPtrFactory<IOThread> weak_factory_;
+
+  const base::TimeTicks creation_time_;
 
   DISALLOW_COPY_AND_ASSIGN(IOThread);
 };

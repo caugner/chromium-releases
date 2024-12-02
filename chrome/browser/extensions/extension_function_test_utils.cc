@@ -27,7 +27,7 @@ namespace keys = extensions::tabs_constants;
 namespace {
 
 class TestFunctionDispatcherDelegate
-    : public ExtensionFunctionDispatcher::Delegate {
+    : public extensions::ExtensionFunctionDispatcher::Delegate {
  public:
   explicit TestFunctionDispatcherDelegate(Browser* browser) :
       browser_(browser) {}
@@ -251,15 +251,15 @@ bool RunFunction(UIThreadExtensionFunction* function,
   function->SetArgs(parsed_args.get());
 
   TestFunctionDispatcherDelegate dispatcher_delegate(browser);
-  ExtensionFunctionDispatcher dispatcher(
-      browser->profile(), &dispatcher_delegate);
+  extensions::ExtensionFunctionDispatcher dispatcher(browser->profile(),
+                                                     &dispatcher_delegate);
   function->set_dispatcher(dispatcher.AsWeakPtr());
 
   function->set_browser_context(browser->profile());
   function->set_include_incognito(flags & INCLUDE_INCOGNITO);
-  function->Run();
+  function->Run()->Execute();
 
-  // If the RunImpl of |function| didn't already call SendResponse, run the
+  // If the RunAsync of |function| didn't already call SendResponse, run the
   // message loop until they do.
   if (!response_delegate.HasResponse()) {
     response_delegate.set_should_post_quit(true);

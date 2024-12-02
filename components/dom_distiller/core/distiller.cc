@@ -29,17 +29,15 @@ const size_t kMaxPagesInArticle = 32;
 namespace dom_distiller {
 
 DistillerFactoryImpl::DistillerFactoryImpl(
-    scoped_ptr<DistillerPageFactory> distiller_page_factory,
     scoped_ptr<DistillerURLFetcherFactory> distiller_url_fetcher_factory)
-  : distiller_page_factory_(distiller_page_factory.Pass()),
-    distiller_url_fetcher_factory_(distiller_url_fetcher_factory.Pass()) {}
+    : distiller_url_fetcher_factory_(distiller_url_fetcher_factory.Pass()) {
+}
 
 DistillerFactoryImpl::~DistillerFactoryImpl() {}
 
 scoped_ptr<Distiller> DistillerFactoryImpl::CreateDistiller() {
-  scoped_ptr<DistillerImpl> distiller(new DistillerImpl(
-      *distiller_page_factory_, *distiller_url_fetcher_factory_));
-  distiller->Init();
+  scoped_ptr<DistillerImpl> distiller(
+      new DistillerImpl(*distiller_url_fetcher_factory_));
   return distiller.PassAs<Distiller>();
 }
 
@@ -48,22 +46,15 @@ DistillerImpl::DistilledPageData::DistilledPageData() {}
 DistillerImpl::DistilledPageData::~DistilledPageData() {}
 
 DistillerImpl::DistillerImpl(
-    const DistillerPageFactory& distiller_page_factory,
     const DistillerURLFetcherFactory& distiller_url_fetcher_factory)
     : distiller_url_fetcher_factory_(distiller_url_fetcher_factory),
       max_pages_in_article_(kMaxPagesInArticle),
       destruction_allowed_(true),
       weak_factory_(this) {
-  page_distiller_.reset(new PageDistiller(distiller_page_factory));
 }
 
 DistillerImpl::~DistillerImpl() {
   DCHECK(destruction_allowed_);
-}
-
-void DistillerImpl::Init() {
-  DCHECK(AreAllPagesFinished());
-  page_distiller_->Init();
 }
 
 void DistillerImpl::SetMaxNumPagesInArticle(size_t max_num_pages) {
@@ -102,9 +93,11 @@ DistillerImpl::DistilledPageData* DistillerImpl::GetPageAtIndex(size_t index)
 }
 
 void DistillerImpl::DistillPage(const GURL& url,
+                                scoped_ptr<DistillerPage> distiller_page,
                                 const DistillationFinishedCallback& finished_cb,
                                 const DistillationUpdateCallback& update_cb) {
   DCHECK(AreAllPagesFinished());
+  distiller_page_ = distiller_page.Pass();
   finished_cb_ = finished_cb;
   update_cb_ = update_cb;
 
@@ -125,7 +118,7 @@ void DistillerImpl::DistillNextPage() {
     seen_urls_.insert(url.spec());
     pages_.push_back(new DistilledPageData());
     started_pages_index_[page_num] = pages_.size() - 1;
-    page_distiller_->DistillPage(
+    distiller_page_->DistillPage(
         url,
         base::Bind(&DistillerImpl::OnPageDistillationFinished,
                    weak_factory_.GetWeakPtr(),

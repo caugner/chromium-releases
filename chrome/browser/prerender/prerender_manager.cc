@@ -60,7 +60,6 @@
 #include "content/public/browser/session_storage_namespace.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
@@ -636,7 +635,7 @@ WebContents* PrerenderManager::SwapInternal(
     // TODO(davidben): Honor the beforeunload event. http://crbug.com/304932
     on_close_web_contents_deleters_.push_back(
         new OnCloseWebContentsDeleter(this, old_web_contents));
-    old_web_contents->GetMainFrame()->DispatchBeforeUnload(false);
+    old_web_contents->DispatchBeforeUnload(false);
   } else {
     // No unload handler to run, so delete asap.
     ScheduleDeleteOldWebContents(old_web_contents, NULL);
@@ -1119,8 +1118,7 @@ void PrerenderManager::PendingSwap::DidFailProvisionalLoad(
   prerender_data_->ClearPendingSwap();
 }
 
-void PrerenderManager::PendingSwap::WebContentsDestroyed(
-    content::WebContents* web_contents) {
+void PrerenderManager::PendingSwap::WebContentsDestroyed() {
   prerender_data_->ClearPendingSwap();
 }
 
@@ -1263,16 +1261,15 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   // true, so that case needs to be explicitly checked for.
   // TODO(tburkard): Figure out how to cancel prerendering in the opposite
   // case, when a new tab is added to a process used for prerendering.
-  // On Android we do reuse processes as we have a limited number of them and we
-  // still want the benefits of prerendering even when several tabs are open.
-#if !defined(OS_ANDROID)
+  // TODO(ppi): Check whether there are usually enough render processes
+  // available on Android. If not, kill an existing renderers so that we can
+  // create a new one.
   if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost(
           profile_, url) &&
       !content::RenderProcessHost::run_renderer_in_process()) {
     RecordFinalStatus(origin, experiment, FINAL_STATUS_TOO_MANY_PROCESSES);
     return NULL;
   }
-#endif
 
   // Check if enough time has passed since the last prerender.
   if (!DoesRateLimitAllowPrerender(origin)) {

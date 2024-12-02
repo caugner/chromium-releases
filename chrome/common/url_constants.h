@@ -113,6 +113,7 @@ extern const char kChromeUIOobeURL[];
 extern const char kChromeUIOSCreditsURL[];
 extern const char kChromeUIProxySettingsURL[];
 extern const char kChromeUIScreenlockIconURL[];
+extern const char kChromeUISetTimeURL[];
 extern const char kChromeUISimUnlockURL[];
 extern const char kChromeUISlideshowURL[];
 extern const char kChromeUISlowURL[];
@@ -273,6 +274,7 @@ extern const char kChromeUIPowerHost[];
 extern const char kChromeUIProxySettingsHost[];
 extern const char kChromeUIRotateHost[];
 extern const char kChromeUIScreenlockIconHost[];
+extern const char kChromeUISetTimeHost[];
 extern const char kChromeUISimUnlockHost[];
 extern const char kChromeUISlideshowHost[];
 extern const char kChromeUISlowHost[];
@@ -335,8 +337,9 @@ extern const char kAutoPasswordGenerationLearnMoreURL[];
 
 extern const char kPasswordManagerLearnMoreURL[];
 
-// "Learn more" URL for the Settings API bubble.
-extern const char kSettingsApiLearnMoreURL[];
+// "Learn more" URL for the Settings API, NTP bubble and other settings bubbles
+// showing which extension is controlling them.
+extern const char kExtensionControlledSettingLearnMoreURL[];
 
 // General help links for Chrome, opened using various actions.
 extern const char kChromeHelpViaKeyboardURL[];
@@ -422,9 +425,6 @@ extern const char kOutdatedPluginLearnMoreURL[];
 // The URL for the "Learn more" page for the blocked plugin infobar.
 extern const char kBlockedPluginLearnMoreURL[];
 
-// The URL for the "About Voice Recognition" menu item.
-extern const char kSpeechInputAboutURL[];
-
 // The URL for the "Learn more" page for hotword search voice trigger.
 extern const char kHotwordLearnMoreURL[];
 
@@ -453,10 +453,6 @@ extern const char kSyncEncryptionHelpURL[];
 // The URL for the "Learn more" link when there is a sync error.
 extern const char kSyncErrorsHelpURL[];
 
-// The URL for the "Learn more" link displayed when disconnecting a managed
-// profile.
-extern const char kEnterpriseManagedAccountHelpURL[];
-
 #if defined(OS_CHROMEOS)
 // The URL for the "Learn more" link for natural scrolling on ChromeOS.
 extern const char kNaturalScrollHelpURL[];
@@ -467,6 +463,9 @@ extern const char kLearnMoreEnterpriseURL[];
 
 // The URL for the Learn More link of the non-CWS bubble.
 extern const char kRemoveNonCWSExtensionURL[];
+
+// The URL for the Learn More link for the corrupt extension message.
+extern const char kCorruptExtensionURL[];
 
 extern const char kNotificationsHelpURL[];
 

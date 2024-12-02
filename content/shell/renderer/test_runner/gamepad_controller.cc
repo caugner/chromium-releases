@@ -68,6 +68,8 @@ void GamepadControllerBindings::Install(
 
   gin::Handle<GamepadControllerBindings> bindings =
       gin::CreateHandle(isolate, new GamepadControllerBindings(controller));
+  if (bindings.IsEmpty())
+    return;
   v8::Handle<v8::Object> global = context->Global();
   global->Set(gin::StringToV8(isolate, "gamepadController"), bindings.ToV8());
 }
@@ -148,7 +150,7 @@ void GamepadController::Install(WebFrame* frame) {
   GamepadControllerBindings::Install(weak_factory_.GetWeakPtr(), frame);
 }
 
-void GamepadController::SetDelegate(WebTestRunner::WebTestDelegate* delegate) {
+void GamepadController::SetDelegate(WebTestDelegate* delegate) {
   delegate_ = delegate;
 }
 

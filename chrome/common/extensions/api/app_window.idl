@@ -105,9 +105,22 @@ namespace app.window {
     // nested elements.<br>
     DOMString? type;
     // Allows the frame color to be set. Frame coloring is only available if the
-    // frame type is <code>chrome</code>.
-    // Frame coloring is experimental and only available in dev channel.
+    // frame type is <code>chrome</code>.<br>
+    // Frame coloring is new in Chrome 36.
     DOMString? color;
+    // Allows the frame color of the window when active to be set. Frame
+    // coloring is only available if the frame type is <code>chrome</code>.<br>
+    // Frame coloring is only available if the frame type is
+    // <code>chrome</code>.<br>
+    // Frame coloring is new in Chrome 36.
+    DOMString? activeColor;
+    // Allows the frame color of the window when inactive to be set differently
+    // to the active color. Frame
+    // coloring is only available if the frame type is <code>chrome</code>.<br>
+    // <code>inactiveColor</code> must be used in conjunction with <code>
+    // color</code>.<br>
+    // Frame coloring is new in Chrome 36.
+    DOMString? inactiveColor;
   };
 
   // State of a window: normal, fullscreen, maximized, minimized.
@@ -117,7 +130,7 @@ namespace app.window {
   // (Currently experimental, Ash only).
   [nodoc] enum WindowType { shell, panel };
 
-  dictionary CreateWindowOptions {
+  [noinline_doc] dictionary CreateWindowOptions {
     // Id to identify the window. This will be used to remember the size
     // and position of the window and restore that geometry when a window
     // with the same id is later opened.
@@ -137,7 +150,7 @@ namespace app.window {
     // <code>innerBounds</code> and <code>outerBounds</code> will result in an
     // error.
     //
-    // Currently only available on the Dev channel from Chrome 35.
+    // This property is new in Chrome 36.
     BoundsSpecification? innerBounds;
 
     // Used to specify the initial position, initial size and constraints of the
@@ -151,7 +164,7 @@ namespace app.window {
     // <code>innerBounds</code> and <code>outerBounds</code> will result in an
     // error.
     //
-    // Currently only available on the Dev channel from Chrome 35.
+    // This property is new in Chrome 36.
     BoundsSpecification? outerBounds;
 
     // Default width of the window.
@@ -179,16 +192,16 @@ namespace app.window {
     [nodoc, deprecated="Use $(ref:BoundsSpecification)."] long? top;
 
     // Minimum width of the window.
-    long? minWidth;
+    [deprecated="Use innerBounds or outerBounds."] long? minWidth;
 
     // Minimum height of the window.
-    long? minHeight;
+    [deprecated="Use innerBounds or outerBounds."] long? minHeight;
 
     // Maximum width of the window.
-    long? maxWidth;
+    [deprecated="Use innerBounds or outerBounds."] long? maxWidth;
 
     // Maximum height of the window.
-    long? maxHeight;
+    [deprecated="Use innerBounds or outerBounds."] long? maxHeight;
 
     // Type of window to create.
     [nodoc] WindowType? type;
@@ -199,13 +212,13 @@ namespace app.window {
     // draggability to the app's window. <code>-webkit-app-region: drag</code>
     // can be used to mark regions draggable. <code>no-drag</code> can be used
     // to disable this style on nested elements.<br>
-    // Use of <code>FrameOptions</code> is only supported in dev channel.
+    // Use of <code>FrameOptions</code> is new in M36.
     (DOMString or FrameOptions)? frame;
 
     // Size and position of the content in the window (excluding the titlebar).
     // If an id is also specified and a window with a matching id has been shown
     // before, the remembered bounds of the window will be used instead.
-    ContentBounds? bounds;
+    [deprecated="Use innerBounds or outerBounds."] ContentBounds? bounds;
 
     // Enable window background transparency.
     // Only supported in ash. Requires experimental API permission.
@@ -231,7 +244,7 @@ namespace app.window {
 
     // If true, the window will stay above most other windows. If there are
     // multiple windows of this kind, the currently focused window will be in
-    // the foreground. Requires the <code>"app.window.alwaysOnTop"</code>
+    // the foreground. Requires the <code>"alwaysOnTopWindows"</code>
     // permission. Defaults to false.<br>
     // Call <code>setAlwaysOnTop()</code> on the window to change this property
     // after creation.<br>
@@ -258,9 +271,8 @@ namespace app.window {
     // Fullscreens the window.<br>
     // The user will be able to restore the window by pressing ESC. An
     // application can prevent the fullscreen state to be left when ESC is
-    // pressed by requesting the <b>app.window.fullscreen.overrideEsc</b>
-    // permission and canceling the event by calling .preventDefault(), like
-    // this:<br>
+    // pressed by requesting the <b>overrideEscFullscreen</b> permission and
+    // canceling the event by calling .preventDefault(), like this:<br>
     // <code>window.onKeyDown = function(e) { if (e.keyCode == 27 /* ESC */) {
     // e.preventDefault(); } };</code>
     static void fullscreen();
@@ -306,10 +318,10 @@ namespace app.window {
     static void hide();
 
     // Get the window's inner bounds as a $(ref:ContentBounds) object.
-    [nocompile] static ContentBounds getBounds();
+    [nocompile, deprecated="Use innerBounds or outerBounds."] static ContentBounds getBounds();
 
     // Set the window's inner bounds.
-    [nocompile] static void setBounds(ContentBounds bounds);
+    [nocompile, deprecated="Use innerBounds or outerBounds."] static void setBounds(ContentBounds bounds);
 
     // Set the app icon for the window (experimental).
     // Currently this is only being implemented on Ash.
@@ -329,10 +341,11 @@ namespace app.window {
 
     // Accessors for testing.
     [nodoc] boolean hasFrameColor;
-    [nodoc] long frameColor;
+    [nodoc] long activeFrameColor;
+    [nodoc] long inactiveFrameColor;
 
     // Set whether the window should stay above most other windows. Requires the
-    // <code>"app.window.alwaysOnTop"</code> permission.
+    // <code>"alwaysOnTopWindows"</code> permission.
     static void setAlwaysOnTop(boolean alwaysOnTop);
 
     // The JavaScript 'window' object for the created child.
@@ -343,12 +356,12 @@ namespace app.window {
 
     // The position, size and constraints of the window's content, which does
     // not include window decorations.
-    // Currently only available on the Dev channel from Chrome 35.
+    // This property is new in Chrome 36.
     Bounds innerBounds;
 
     // The position, size and constraints of the window, which includes window
     // decorations, such as the title bar and frame.
-    // Currently only available on the Dev channel from Chrome 35.
+    // This property is new in Chrome 36.
     Bounds outerBounds;
   };
 
@@ -358,11 +371,14 @@ namespace app.window {
     // all, in which case a default size and platform dependent position will
     // be used.
     //
-    // Another option is to use the <code>bounds</code> property, which will put
-    // the window at the specified coordinates with the specified size. If the
-    // window has a frame, it's total size will be the size given plus the size
-    // of the frame; that is, the size in bounds is the content size, not the
-    // window size.
+    // To set the position, size and constraints of the window, use the
+    // <code>innerBounds</code> or <code>outerBounds</code> properties. Inner
+    // bounds do not include window decorations. Outer bounds include the
+    // window's title bar and frame. Note that the padding between the inner and
+    // outer bounds is determined by the OS. Therefore setting the same property
+    // for both inner and outer bounds is considered an error (for example,
+    // setting both <code>innerBounds.left</code> and
+    // <code>outerBounds.left</code>).
     //
     // To automatically remember the positions of windows you can give them ids.
     // If a window has an id, This id is used to remember the size and position

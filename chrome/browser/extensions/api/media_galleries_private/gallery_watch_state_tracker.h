@@ -90,8 +90,12 @@ class GalleryWatchStateTracker
   typedef std::map<std::string, WatchedGalleriesMap> WatchedExtensionsMap;
 
   // extensions::ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(const Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(const Extension* extension) OVERRIDE;
+  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
+                                 const Extension* extension) OVERRIDE;
+  virtual void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                                   const Extension* extension,
+                                   UnloadedExtensionInfo::Reason reason)
+      OVERRIDE;
 
   // Syncs media gallery watch data for the given extension to/from the state
   // storage.
@@ -134,8 +138,8 @@ class GalleryWatchStateTracker
   // Current profile.
   Profile* profile_;
 
-  ScopedObserver<ExtensionRegistry,
-                 ExtensionRegistryObserver> scoped_extension_registry_observer_;
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 
   // A map of watched gallery details, per extension.
   WatchedExtensionsMap watched_extensions_map_;

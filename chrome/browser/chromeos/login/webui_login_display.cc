@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 
 #include "ash/shell.h"
-#include "ash/wm/user_activity_detector.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
@@ -14,12 +13,13 @@
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chromeos/ime/ime_keyboard.h"
 #include "chromeos/ime/input_method_manager.h"
-#include "chromeos/ime/xkeyboard.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/user_activity_detector.h"
 
 namespace chromeos {
 
@@ -34,7 +34,7 @@ const int kPasswordClearTimeoutSec = 60;
 WebUILoginDisplay::~WebUILoginDisplay() {
   if (webui_handler_)
     webui_handler_->ResetSigninScreenHandlerDelegate();
-  ash::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
+  wm::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
       user_activity_detector();
   if (activity_detector->HasObserver(this))
     activity_detector->RemoveObserver(this);
@@ -66,7 +66,7 @@ void WebUILoginDisplay::Init(const UserList& users,
   show_users_ = show_users;
   show_new_user_ = show_new_user;
 
-  ash::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
+  wm::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
       user_activity_detector();
   if (!activity_detector->HasObserver(this))
     activity_detector->AddObserver(this);
@@ -195,7 +195,7 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
     // Display a warning if Caps Lock is on.
     input_method::InputMethodManager* ime_manager =
         input_method::InputMethodManager::Get();
-    if (ime_manager->GetXKeyboard()->CapsLockIsEnabled()) {
+    if (ime_manager->GetImeKeyboard()->CapsLockIsEnabled()) {
       // TODO(ivankr): use a format string instead of concatenation.
       error_text += "\n" +
           l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_CAPS_LOCK_HINT);
@@ -339,11 +339,6 @@ void WebUILoginDisplay::ShowEnterpriseEnrollmentScreen() {
 void WebUILoginDisplay::ShowKioskEnableScreen() {
   if (delegate_)
     delegate_->OnStartKioskEnableScreen();
-}
-
-void WebUILoginDisplay::ShowResetScreen() {
-  if (delegate_)
-    delegate_->OnStartDeviceReset();
 }
 
 void WebUILoginDisplay::ShowKioskAutolaunchScreen() {

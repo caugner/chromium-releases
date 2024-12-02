@@ -31,8 +31,8 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/dbus/cros_dbus_service.h"
 #include "chrome/browser/chromeos/events/event_rewriter.h"
-#include "chrome/browser/chromeos/events/system_key_event_listener.h"
-#include "chrome/browser/chromeos/events/xinput_hierarchy_changed_event_listener.h"
+#include "chrome/browser/chromeos/events/event_rewriter_controller.h"
+#include "chrome/browser/chromeos/events/keyboard_driven_event_rewriter.h"
 #include "chrome/browser/chromeos/extensions/default_app_order.h"
 #include "chrome/browser/chromeos/extensions/extension_system_event_observer.h"
 #include "chrome/browser/chromeos/external_metrics.h"
@@ -48,6 +48,7 @@
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
+#include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
@@ -55,6 +56,7 @@
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/chromeos/options/cert_library.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/power/idle_action_warning_observer.h"
 #include "chrome/browser/chromeos/power/peripheral_battery_observer.h"
 #include "chrome/browser/chromeos/power/power_button_observer.h"
@@ -65,8 +67,10 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/chromeos/settings/owner_key_util.h"
 #include "chrome/browser/chromeos/status/data_promo_notification.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/profiles/profile.h"
@@ -90,8 +94,8 @@
 #include "chromeos/dbus/power_policy_controller.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
+#include "chromeos/ime/ime_keyboard.h"
 #include "chromeos/ime/input_method_manager.h"
-#include "chromeos/ime/xkeyboard.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/network_change_notifier_chromeos.h"
 #include "chromeos/network/network_change_notifier_factory_chromeos.h"
@@ -113,6 +117,8 @@
 // Exclude X11 dependents for ozone
 #if defined(USE_X11)
 #include "chrome/browser/chromeos/device_uma.h"
+#include "chrome/browser/chromeos/events/system_key_event_listener.h"
+#include "chrome/browser/chromeos/events/xinput_hierarchy_changed_event_listener.h"
 #endif
 
 namespace chromeos {
@@ -162,10 +168,13 @@ class StubLogin : public LoginStatusConsumer,
 
   // LoginUtils::Delegate implementation:
   virtual void OnProfilePrepared(Profile* profile) OVERRIDE {
-    std::string login_user =
+    const std::string login_user =
         CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             chromeos::switches::kLoginUser);
-    profile->GetPrefs()->SetString(prefs::kGoogleServicesUsername, login_user);
+    if (!policy::IsDeviceLocalAccountUser(login_user, NULL)) {
+      profile->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
+                                     login_user);
+    }
     profile_prepared_ = true;
     LoginUtils::Get()->DoBrowserLaunch(profile, NULL);
     delete this;
@@ -197,10 +206,7 @@ void OptionallyRunChromeOSLoginManager(const CommandLine& parsed_command_line,
   if (ShouldAutoLaunchKioskApp(parsed_command_line)) {
     RunAutoLaunchKioskApp();
   } else if (parsed_command_line.HasSwitch(switches::kLoginManager)) {
-    const std::string first_screen =
-        parsed_command_line.HasSwitch(switches::kLoginScreen) ?
-            WizardController::kLoginScreenName : std::string();
-    ShowLoginWizard(first_screen);
+    ShowLoginWizard(std::string());
 
     if (KioskModeSettings::Get()->IsKioskModeEnabled())
       InitializeKioskModeScreensaver();
@@ -241,16 +247,6 @@ namespace internal {
 class DBusServices {
  public:
   explicit DBusServices(const content::MainFunctionParams& parameters) {
-    if (!base::SysInfo::IsRunningOnChromeOS()) {
-      // Override this path on the desktop, so that the user policy key can be
-      // stored by the stub SessionManagerClient.
-      base::FilePath user_data_dir;
-      if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
-        PathService::Override(chromeos::DIR_USER_POLICY_KEYS,
-                              user_data_dir.AppendASCII("stub_user_policy"));
-      }
-    }
-
     // Initialize DBusThreadManager for the browser. This must be done after
     // the main message loop is started, as it uses the message loop.
     DBusThreadManager::Initialize();
@@ -288,7 +284,9 @@ class DBusServices {
 
     if (base::SysInfo::IsRunningOnChromeOS()) {
       // Disable Num Lock on X start up for http://crosbug.com/29169.
-      input_method::InputMethodManager::Get()->GetXKeyboard()->DisableNumLock();
+      input_method::InputMethodManager::Get()
+          ->GetImeKeyboard()
+          ->DisableNumLock();
     }
 
     // Initialize the device settings service so that we'll take actions per
@@ -396,6 +394,15 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopStart() {
 }
 
 void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
+  base::FilePath user_data_dir;
+  if (!base::SysInfo::IsRunningOnChromeOS() &&
+      PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
+    // Override some paths with stub locations so that cloud policy and
+    // enterprise enrollment work on desktop builds, for ease of
+    // development.
+    chromeos::RegisterStubPathOverrides(user_data_dir);
+  }
+
   dbus_services_.reset(new internal::DBusServices(parameters()));
 
   ChromeBrowserMainPartsLinux::PostMainMessageLoopStart();
@@ -424,15 +431,6 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
   CHECK(PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &downloads_directory));
   imageburner::BurnManager::Initialize(
       downloads_directory, g_browser_process->system_request_context());
-
-  // Listen for system key events so that the user will be able to adjust the
-  // volume on the login screen, if Chrome is running on Chrome OS
-  // (i.e. not Linux desktop), and in non-test mode.
-  // Note: SystemKeyEventListener depends on the DBus thread.
-  if (base::SysInfo::IsRunningOnChromeOS() &&
-      !parameters().ui_task) {  // ui_task is non-NULL when running tests.
-    SystemKeyEventListener::Initialize();
-  }
 
   DeviceOAuth2TokenServiceFactory::Initialize();
 
@@ -525,15 +523,28 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
   ChromeBrowserMainPartsLinux::PreProfileInit();
 
   if (immediate_login) {
-    std::string username =
+    const std::string user_id =
         parsed_command_line().GetSwitchValueASCII(switches::kLoginUser);
     UserManager* user_manager = UserManager::Get();
+
+    if (policy::IsDeviceLocalAccountUser(user_id, NULL) &&
+        !user_manager->IsKnownUser(user_id)) {
+      // When a device-local account is removed, its policy is deleted from disk
+      // immediately. If a session using this account happens to be in progress,
+      // the session is allowed to continue with policy served from an in-memory
+      // cache. If Chrome crashes later in the session, the policy becomes
+      // completely unavailable. Exit the session in that case, rather than
+      // allowing it to continue without policy.
+      chrome::AttemptUserExit();
+      return;
+    }
+
     // In case of multi-profiles --login-profile will contain user_id_hash.
-    std::string username_hash =
+    std::string user_id_hash =
         parsed_command_line().GetSwitchValueASCII(switches::kLoginProfile);
-    user_manager->UserLoggedIn(username, username_hash, true);
-    VLOG(1) << "Relaunching browser for user: " << username
-            << " with hash: " << username_hash;
+    user_manager->UserLoggedIn(user_id, user_id_hash, true);
+    VLOG(1) << "Relaunching browser for user: " << user_id
+            << " with hash: " << user_id_hash;
   }
 }
 
@@ -691,17 +702,29 @@ void ChromeBrowserMainPartsChromeos::PreBrowserStart() {
 
   g_browser_process->metrics_service()->StartExternalMetrics();
 
+#if defined(USE_X11)
+  // Listen for system key events so that the user will be able to adjust the
+  // volume on the login screen, if Chrome is running on Chrome OS
+  // (i.e. not Linux desktop), and in non-test mode.
+  // Note: SystemKeyEventListener depends on the DBus thread.
+  if (base::SysInfo::IsRunningOnChromeOS() &&
+      !parameters().ui_task) {  // ui_task is non-NULL when running tests.
+    SystemKeyEventListener::Initialize();
+  }
+
   // Listen for XI_HierarchyChanged events. Note: if this is moved to
   // PreMainMessageLoopRun() then desktopui_PageCyclerTests fail for unknown
   // reasons, see http://crosbug.com/24833.
   XInputHierarchyChangedEventListener::GetInstance();
 
-#if defined(USE_X11)
   // Start the CrOS input device UMA watcher
   DeviceUMA::GetInstance();
 #endif
-
-  event_rewriter_.reset(new EventRewriter());
+  keyboard_event_rewriters_.reset(new EventRewriterController());
+  keyboard_event_rewriters_->AddEventRewriter(
+      scoped_ptr<ui::EventRewriter>(new KeyboardDrivenEventRewriter()));
+  keyboard_event_rewriters_->AddEventRewriter(
+      scoped_ptr<ui::EventRewriter>(new EventRewriter()));
 
   // -- This used to be in ChromeBrowserMainParts::PreMainMessageLoopRun()
   // -- immediately after ChildProcess::WaitForDebugger().
@@ -714,7 +737,7 @@ void ChromeBrowserMainPartsChromeos::PreBrowserStart() {
   if (ui::ShouldDefaultToNaturalScroll()) {
     CommandLine::ForCurrentProcess()->AppendSwitch(
         chromeos::switches::kNaturalScrollDefault);
-    ui::SetNaturalScroll(true);
+    system::InputDeviceSettings::Get()->SetTapToClick(true);
   }
 
   ChromeBrowserMainPartsLinux::PreBrowserStart();
@@ -725,6 +748,7 @@ void ChromeBrowserMainPartsChromeos::PostBrowserStart() {
   // initialized.
   power_button_observer_.reset(new PowerButtonObserver);
   data_promo_notification_.reset(new DataPromoNotification()),
+  keyboard_event_rewriters_->Init();
 
   ChromeBrowserMainPartsLinux::PostBrowserStart();
 }
@@ -764,24 +788,25 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   retail_mode_power_save_blocker_.reset();
   peripheral_battery_observer_.reset();
   power_prefs_.reset();
-  event_rewriter_.reset();
 
   // Let the ScreenLocker unregister itself from SessionManagerClient before
   // DBusThreadManager is shut down.
   if (!KioskModeSettings::Get()->IsKioskModeEnabled())
     ScreenLocker::ShutDownClass();
 
+  keyboard_event_rewriters_.reset();
+#if defined(USE_X11)
   // The XInput2 event listener needs to be shut down earlier than when
   // Singletons are finally destroyed in AtExitManager.
   XInputHierarchyChangedEventListener::GetInstance()->Stop();
 
-#if defined(USE_X11)
   DeviceUMA::GetInstance()->Stop();
-#endif
 
   // SystemKeyEventListener::Shutdown() is always safe to call,
   // even if Initialize() wasn't called.
   SystemKeyEventListener::Shutdown();
+#endif
+
   imageburner::BurnManager::Shutdown();
   CrasAudioHandler::Shutdown();
 

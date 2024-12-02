@@ -10,14 +10,15 @@
 #include <vector>
 
 #include "base/memory/singleton.h"
+#include "base/scoped_observer.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine_interface.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
 
 class Profile;
@@ -28,16 +29,16 @@ class ImeObserver;
 }  // namespace chromeos
 
 namespace extensions {
+class ExtensionRegistry;
 struct InputComponentInfo;
 
 class InputImeEventRouter {
  public:
   static InputImeEventRouter* GetInstance();
 
-  bool RegisterIme(Profile* profile,
-                   const std::string& extension_id,
+  bool RegisterIme(const std::string& extension_id,
                    const extensions::InputComponentInfo& component);
-  void UnregisterAllImes(Profile* profile, const std::string& extension_id);
+  void UnregisterAllImes(const std::string& extension_id);
   chromeos::InputMethodEngineInterface* GetEngine(
       const std::string& extension_id,
       const std::string& engine_id);
@@ -61,9 +62,15 @@ class InputImeEventRouter {
   InputImeEventRouter();
   ~InputImeEventRouter();
 
+  // The engine map for event routing.
+  //   { Profile : { extension_id : { engine_id : Engine } } }.
+  // TODO(shuchen): reuse the engine map in InputMethodManagerImpl.
   typedef std::map<std::string, chromeos::InputMethodEngineInterface*>
       EngineMap;
-  std::map<std::string, EngineMap> engines_;
+  typedef std::map<std::string, EngineMap> ExtensionMap;
+  typedef std::map<Profile*, ExtensionMap, ProfileCompare>
+      ProfileEngineMap;
+  ProfileEngineMap profile_engine_map_;
 
   unsigned int next_request_id_;
   RequestMap request_map_;
@@ -80,7 +87,7 @@ class InputImeSetCompositionFunction : public SyncExtensionFunction {
   virtual ~InputImeSetCompositionFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeClearCompositionFunction : public SyncExtensionFunction {
@@ -92,7 +99,7 @@ class InputImeClearCompositionFunction : public SyncExtensionFunction {
   virtual ~InputImeClearCompositionFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeCommitTextFunction : public SyncExtensionFunction {
@@ -103,7 +110,7 @@ class InputImeCommitTextFunction : public SyncExtensionFunction {
   virtual ~InputImeCommitTextFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeSetCandidateWindowPropertiesFunction
@@ -116,7 +123,7 @@ class InputImeSetCandidateWindowPropertiesFunction
   virtual ~InputImeSetCandidateWindowPropertiesFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeSetCandidatesFunction : public SyncExtensionFunction {
@@ -127,7 +134,7 @@ class InputImeSetCandidatesFunction : public SyncExtensionFunction {
   virtual ~InputImeSetCandidatesFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeSetCursorPositionFunction : public SyncExtensionFunction {
@@ -139,7 +146,7 @@ class InputImeSetCursorPositionFunction : public SyncExtensionFunction {
   virtual ~InputImeSetCursorPositionFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeSetMenuItemsFunction : public SyncExtensionFunction {
@@ -150,7 +157,7 @@ class InputImeSetMenuItemsFunction : public SyncExtensionFunction {
   virtual ~InputImeSetMenuItemsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeUpdateMenuItemsFunction : public SyncExtensionFunction {
@@ -162,7 +169,7 @@ class InputImeUpdateMenuItemsFunction : public SyncExtensionFunction {
   virtual ~InputImeUpdateMenuItemsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeDeleteSurroundingTextFunction : public SyncExtensionFunction {
@@ -173,7 +180,7 @@ class InputImeDeleteSurroundingTextFunction : public SyncExtensionFunction {
   virtual ~InputImeDeleteSurroundingTextFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class InputImeKeyEventHandledFunction : public AsyncExtensionFunction {
@@ -185,7 +192,7 @@ class InputImeKeyEventHandledFunction : public AsyncExtensionFunction {
   virtual ~InputImeKeyEventHandledFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class InputImeSendKeyEventsFunction : public AsyncExtensionFunction {
@@ -197,7 +204,7 @@ class InputImeSendKeyEventsFunction : public AsyncExtensionFunction {
   virtual ~InputImeSendKeyEventsFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class InputImeHideInputViewFunction : public AsyncExtensionFunction {
@@ -209,11 +216,11 @@ class InputImeHideInputViewFunction : public AsyncExtensionFunction {
   virtual ~InputImeHideInputViewFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
 };
 
 class InputImeAPI : public BrowserContextKeyedAPI,
-                    public content::NotificationObserver,
+                    public ExtensionRegistryObserver,
                     public EventRouter::Observer {
  public:
   explicit InputImeAPI(content::BrowserContext* context);
@@ -222,10 +229,13 @@ class InputImeAPI : public BrowserContextKeyedAPI,
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<InputImeAPI>* GetFactoryInstance();
 
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // ExtensionRegistryObserver implementation.
+  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
+                                 const Extension* extension) OVERRIDE;
+  virtual void OnExtensionUnloaded(
+      content::BrowserContext* browser_context,
+      const Extension* extension,
+      UnloadedExtensionInfo::Reason reason) OVERRIDE;
 
   // EventRouter::Observer implementation.
   virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
@@ -240,8 +250,11 @@ class InputImeAPI : public BrowserContextKeyedAPI,
   }
   static const bool kServiceIsNULLWhileTesting = true;
 
-  Profile* const profile_;
-  content::NotificationRegistrar registrar_;
+  content::BrowserContext* const browser_context_;
+
+  // Listen to extension load, unloaded notifications.
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
+      extension_registry_observer_;
 };
 
 }  // namespace extensions

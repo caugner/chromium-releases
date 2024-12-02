@@ -109,7 +109,7 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     }
 
     // For phishing we only classify HTTP pages.
-    if (!params_.url.SchemeIs(content::kHttpScheme)) {
+    if (!params_.url.SchemeIs(url::kHttpScheme)) {
       VLOG(1) << "Skipping phishing classification for URL: " << params_.url
               << " because it is not HTTP: "
               << params_.socket_address.host();
@@ -281,10 +281,18 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     // Everything checks out, so start classification.
     // |web_contents_| is safe to call as we will be destructed
     // before it is.
-    if (ShouldClassifyForPhishing())
+    if (ShouldClassifyForPhishing()) {
       start_phishing_classification_cb_.Run(true);
-    if (ShouldClassifyForMalware())
+      // Reset the callback to make sure ShouldClassifyForPhishing()
+      // returns false.
+      start_phishing_classification_cb_.Reset();
+    }
+    if (ShouldClassifyForMalware()) {
       start_malware_classification_cb_.Run(true);
+      // Reset the callback to make sure ShouldClassifyForMalware()
+      // returns false.
+      start_malware_classification_cb_.Reset();
+    }
   }
 
   content::FrameNavigateParams params_;
@@ -313,7 +321,7 @@ ClientSideDetectionHost::ClientSideDetectionHost(WebContents* tab)
       classification_request_(NULL),
       should_extract_malware_features_(true),
       should_classify_for_malware_(false),
-      onload_complete_(false),
+      pageload_complete_(false),
       weak_factory_(this),
       unsafe_unique_page_id_(-1) {
   DCHECK(tab);
@@ -389,7 +397,7 @@ void ClientSideDetectionHost::DidNavigateMainFrame(
 
   should_extract_malware_features_ = true;
   should_classify_for_malware_ = false;
-  onload_complete_ = false;
+  pageload_complete_ = false;
 
   // Check whether we can cassify the current URL for phishing or malware.
   classification_request_ = new ShouldClassifyUrlRequest(
@@ -471,8 +479,7 @@ bool ClientSideDetectionHost::DidPageReceiveSafeBrowsingMatch() const {
   return entry->GetExtraData(kSafeBrowsingMatchKey, &value);
 }
 
-void ClientSideDetectionHost::WebContentsDestroyed(WebContents* tab) {
-  DCHECK(tab);
+void ClientSideDetectionHost::WebContentsDestroyed() {
   // Tell any pending classification request that it is being canceled.
   if (classification_request_.get()) {
     classification_request_->Cancel();
@@ -504,19 +511,12 @@ void ClientSideDetectionHost::OnMalwarePreClassificationDone(
   MaybeStartMalwareFeatureExtraction();
 }
 
-void ClientSideDetectionHost::DocumentOnLoadCompletedInMainFrame(
-    int32 page_id) {
+void ClientSideDetectionHost::DidStopLoading(content::RenderViewHost* rvh) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!csd_service_ || !browse_info_.get())
     return;
-  DVLOG(2) << "Main frame onload hander called.";
-  if (browse_info_->page_id != page_id) {
-    // Something weird is happening here.  The BrowseInfo page ID
-    // should always be the same as the most recent load.
-    UMA_HISTOGRAM_BOOLEAN("SBClientMalware.UnexpectedPageId", 1);
-    return;
-  }
-  onload_complete_ = true;
+  DVLOG(2) << "Page finished loading.";
+  pageload_complete_ = true;
   MaybeStartMalwareFeatureExtraction();
 }
 
@@ -524,7 +524,7 @@ void ClientSideDetectionHost::MaybeStartMalwareFeatureExtraction() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (csd_service_ && browse_info_.get() &&
       should_classify_for_malware_ &&
-      onload_complete_) {
+      pageload_complete_) {
     scoped_ptr<ClientMalwareRequest> malware_request(
         new ClientMalwareRequest);
     // Start browser-side malware feature extraction.  Once we're done it will

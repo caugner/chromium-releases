@@ -12,7 +12,7 @@
 #include "ash/desktop_background/user_wallpaper_delegate.h"
 #include "ash/display/display_manager.h"
 #include "ash/root_window_controller.h"
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/window_animations.h"
@@ -28,7 +28,6 @@
 #include "ui/views/widget/widget.h"
 
 namespace ash {
-namespace internal {
 namespace {
 
 // For our scaling ratios we need to round positive numbers.
@@ -224,5 +223,4 @@ views::Widget* CreateDesktopBackground(aura::Window* root_window,
   return desktop_widget;
 }
 
-}  // namespace internal
 }  // namespace ash

@@ -55,8 +55,8 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/ime/ime_keyboard.h"
 #include "chromeos/ime/input_method_manager.h"
-#include "chromeos/ime/xkeyboard.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "content/public/browser/browser_thread.h"
@@ -108,7 +108,7 @@ const char kSourceAccountPicker[] = "account-picker";
 // The Task posted to PostTaskAndReply in StartClearingDnsCache on the IO
 // thread.
 void ClearDnsCache(IOThread* io_thread) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (browser_shutdown::IsTryingToQuit())
     return;
 
@@ -437,6 +437,8 @@ void SigninScreenHandler::DeclareLocalizedValues(
 
   builder->Add("fatalEnrollmentError",
                IDS_ENTERPRISE_ENROLLMENT_AUTH_FATAL_ERROR);
+  builder->Add("insecureURLEnrollmentError",
+               IDS_ENTERPRISE_ENROLLMENT_AUTH_INSECURE_URL_ERROR);
 
   if (chromeos::KioskModeSettings::Get()->IsKioskModeEnabled())
     builder->Add("demoLoginMessage", IDS_KIOSK_MODE_LOGIN_MESSAGE);
@@ -501,8 +503,9 @@ void SigninScreenHandler::ShowImpl() {
     SendUserList(false);
 
     // Reset Caps Lock state when login screen is shown.
-    input_method::InputMethodManager::Get()->GetXKeyboard()->
-        SetCapsLockEnabled(false);
+    input_method::InputMethodManager::Get()
+        ->GetImeKeyboard()
+        ->SetCapsLockEnabled(false);
 
     base::DictionaryValue params;
     params.SetBoolean("disableAddUser", AllWhitelistedUsersPresent());
@@ -765,16 +768,12 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleToggleEnrollmentScreen);
   AddCallback("toggleKioskEnableScreen",
               &SigninScreenHandler::HandleToggleKioskEnableScreen);
-  AddCallback("toggleResetScreen",
-              &SigninScreenHandler::HandleToggleResetScreen);
   AddCallback("createAccount", &SigninScreenHandler::HandleCreateAccount);
   AddCallback("accountPickerReady",
               &SigninScreenHandler::HandleAccountPickerReady);
   AddCallback("wallpaperReady", &SigninScreenHandler::HandleWallpaperReady);
   AddCallback("loginWebuiReady", &SigninScreenHandler::HandleLoginWebuiReady);
   AddCallback("signOutUser", &SigninScreenHandler::HandleSignOutUser);
-  AddCallback("networkErrorShown",
-              &SigninScreenHandler::HandleNetworkErrorShown);
   AddCallback("openProxySettings",
               &SigninScreenHandler::HandleOpenProxySettings);
   AddCallback("loginVisible", &SigninScreenHandler::HandleLoginVisible);
@@ -964,7 +963,7 @@ void SigninScreenHandler::ShowSigninScreenForCreds(
 }
 
 void SigninScreenHandler::OnCookiesCleared(base::Closure on_clear_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   cookies_cleared_ = true;
   on_clear_callback.Run();
 }
@@ -1005,7 +1004,7 @@ void SigninScreenHandler::Observe(int type,
 }
 
 void SigninScreenHandler::OnDnsCleared() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   dns_clear_task_running_ = false;
   dns_cleared_ = true;
   ShowSigninScreenIfReady();
@@ -1274,13 +1273,6 @@ void SigninScreenHandler::HandleToggleKioskEnableScreen() {
   }
 }
 
-void SigninScreenHandler::HandleToggleResetScreen() {
-  policy::BrowserPolicyConnectorChromeOS* connector =
-      g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  if (delegate_ && !connector->IsEnterpriseManaged())
-    delegate_->ShowResetScreen();
-}
-
 void SigninScreenHandler::HandleToggleKioskAutolaunchScreen() {
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
@@ -1420,8 +1412,10 @@ void SigninScreenHandler::HandleAccountPickerReady() {
 
   PrefService* prefs = g_browser_process->local_state();
   if (prefs->GetBoolean(prefs::kFactoryResetRequested)) {
-    HandleToggleResetScreen();
-    return;
+    if (core_oobe_actor_) {
+      core_oobe_actor_->ShowDeviceResetScreen();
+      return;
+    }
   }
 
   is_account_picker_showing_first_time_ = true;
@@ -1454,12 +1448,7 @@ void SigninScreenHandler::HandleLoginWebuiReady() {
         LoginDisplayHostImpl::GetGaiaAuthIframe(web_ui()->GetWebContents());
     frame->ExecuteJavaScript(base::ASCIIToUTF16(code));
   }
-  if (!gaia_silent_load_) {
-    content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_LOGIN_WEBUI_LOADED,
-        content::NotificationService::AllSources(),
-        content::NotificationService::NoDetails());
-  } else {
+  if (gaia_silent_load_) {
     focus_stolen_ = true;
     // Prevent focus stealing by the Gaia page.
     // TODO(altimofeev): temporary solution, until focus parameters are
@@ -1483,13 +1472,6 @@ void SigninScreenHandler::HandleLoginWebuiReady() {
 void SigninScreenHandler::HandleSignOutUser() {
   if (delegate_)
     delegate_->Signout();
-}
-
-void SigninScreenHandler::HandleNetworkErrorShown() {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 }
 
 void SigninScreenHandler::HandleCreateAccount() {
@@ -1784,7 +1766,6 @@ void SigninScreenHandler::OnShowAddUser(const std::string& email) {
     cookies_cleared_ = true;
     ShowSigninScreenIfReady();
   } else {
-    LOG(ERROR) << "OnShowAddUser 2";
     StartClearingDnsCache();
     StartClearingCookies(base::Bind(
         &SigninScreenHandler::ShowSigninScreenIfReady,

@@ -14,7 +14,8 @@ class TouchDispositionGestureFilterTest
     : public testing::Test,
       public TouchDispositionGestureFilterClient {
  public:
-  TouchDispositionGestureFilterTest() : sent_gesture_count_(0) {}
+  TouchDispositionGestureFilterTest()
+      : cancel_after_next_gesture_(false), sent_gesture_count_(0) {}
   virtual ~TouchDispositionGestureFilterTest() {}
 
   // testing::Test
@@ -29,7 +30,13 @@ class TouchDispositionGestureFilterTest
   // TouchDispositionGestureFilterClient
   virtual void ForwardGestureEvent(const GestureEventData& event) OVERRIDE {
     ++sent_gesture_count_;
+    last_sent_gesture_time_ = event.time;
     sent_gestures_.push_back(event.type);
+    if (cancel_after_next_gesture_) {
+      CancelTouchPoint();
+      SendTouchNotConsumedAck();
+      cancel_after_next_gesture_ = false;
+    }
   }
 
  protected:
@@ -90,10 +97,11 @@ class TouchDispositionGestureFilterTest
   }
 
   void SendTouchGestures() {
+    touch_event_.SetTime(base::TimeTicks::Now());
+    EXPECT_EQ(TouchDispositionGestureFilter::SUCCESS,
+              SendTouchGestures(touch_event_, pending_gesture_packet_));
     GestureEventDataPacket gesture_packet;
     std::swap(gesture_packet, pending_gesture_packet_);
-    EXPECT_EQ(TouchDispositionGestureFilter::SUCCESS,
-              SendTouchGestures(touch_event_, gesture_packet));
   }
 
   TouchDispositionGestureFilter::PacketResult
@@ -121,13 +129,9 @@ class TouchDispositionGestureFilterTest
     queue_->OnTouchEventAck(event_consumed);
   }
 
-  void SendTouchConsumedAck() {
-    SendTouchEventAck(true);
-  }
+  void SendTouchConsumedAck() { SendTouchEventAck(true); }
 
-  void SendTouchNotConsumedAck() {
-    SendTouchEventAck(false);
-  }
+  void SendTouchNotConsumedAck() { SendTouchEventAck(false); }
 
   void PushGesture(EventType type) {
     pending_gesture_packet_.Push(CreateGesture(type));
@@ -153,13 +157,19 @@ class TouchDispositionGestureFilterTest
     SendTouchGestures();
   }
 
-  bool GesturesSent() const {
-    return !sent_gestures_.empty();
+  void ResetTouchPoints() { touch_event_ = MockMotionEvent(); }
+
+  bool GesturesSent() const { return !sent_gestures_.empty(); }
+
+  base::TimeTicks LastSentGestureTime() const {
+    return last_sent_gesture_time_;
   }
 
-  bool IsEmpty() const {
-    return queue_->IsEmpty();
+  base::TimeTicks CurrentTouchTime() const {
+    return touch_event_.GetEventTime();
   }
+
+  bool IsEmpty() const { return queue_->IsEmpty(); }
 
   GestureList GetAndResetSentGestures() {
     GestureList sent_gestures;
@@ -167,15 +177,22 @@ class TouchDispositionGestureFilterTest
     return sent_gestures;
   }
 
+  void SetCancelAfterNextGesture(bool cancel_after_next_gesture) {
+    cancel_after_next_gesture_ = cancel_after_next_gesture;
+  }
+
   static GestureEventData CreateGesture(EventType type) {
-    return GestureEventData(type, base::TimeTicks(), 0, 0);
+    return GestureEventData(
+        type, 0, base::TimeTicks(), 0, 0, 1, gfx::RectF(0, 0, 0, 0));
   }
 
  private:
   scoped_ptr<TouchDispositionGestureFilter> queue_;
+  bool cancel_after_next_gesture_;
   MockMotionEvent touch_event_;
   GestureEventDataPacket pending_gesture_packet_;
   size_t sent_gesture_count_;
+  base::TimeTicks last_sent_gesture_time_;
   GestureList sent_gestures_;
 };
 
@@ -200,33 +217,43 @@ TEST_F(TouchDispositionGestureFilterTest, BasicNoGestures) {
 
 TEST_F(TouchDispositionGestureFilterTest, BasicGestures) {
   // An unconsumed touch's gesture should be sent.
+  PushGesture(ET_GESTURE_BEGIN);
   PushGesture(ET_GESTURE_SCROLL_BEGIN);
   PressTouchPoint(1, 1);
   EXPECT_FALSE(GesturesSent());
   SendTouchNotConsumedAck();
-  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_BEGIN),
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_BEGIN, ET_GESTURE_SCROLL_BEGIN),
                             GetAndResetSentGestures()));
 
   // Multiple gestures can be queued for a single event.
   PushGesture(ET_SCROLL_FLING_START);
   PushGesture(ET_SCROLL_FLING_CANCEL);
+  PushGesture(ET_GESTURE_END);
   ReleaseTouchPoint();
   EXPECT_FALSE(GesturesSent());
   SendTouchNotConsumedAck();
   EXPECT_TRUE(GesturesMatch(Gestures(ET_SCROLL_FLING_START,
-                                     ET_SCROLL_FLING_CANCEL),
+                                     ET_SCROLL_FLING_CANCEL,
+                                     ET_GESTURE_END),
                             GetAndResetSentGestures()));
 }
 
 TEST_F(TouchDispositionGestureFilterTest, BasicGesturesConsumed) {
   // A consumed touch's gesture should not be sent.
+  PushGesture(ET_GESTURE_BEGIN);
   PushGesture(ET_GESTURE_SCROLL_BEGIN);
   PressTouchPoint(1, 1);
   SendTouchConsumedAck();
   EXPECT_FALSE(GesturesSent());
 
+  PushGesture(ET_GESTURE_SCROLL_UPDATE);
+  MoveTouchPoint(0, 2, 2);
+  SendTouchConsumedAck();
+  EXPECT_FALSE(GesturesSent());
+
   PushGesture(ET_SCROLL_FLING_START);
   PushGesture(ET_SCROLL_FLING_CANCEL);
+  PushGesture(ET_GESTURE_END);
   ReleaseTouchPoint();
   SendTouchConsumedAck();
   EXPECT_FALSE(GesturesSent());
@@ -522,51 +549,78 @@ TEST_F(TouchDispositionGestureFilterTest, MultipleTouchSequences) {
 
 TEST_F(TouchDispositionGestureFilterTest, FlingCancelledOnNewTouchSequence) {
   // Simulate a fling.
+  PushGesture(ET_GESTURE_TAP_DOWN);
   PushGesture(ET_GESTURE_SCROLL_BEGIN);
   PressTouchPoint(1, 1);
   SendTouchNotConsumedAck();
-  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_BEGIN),
-                            GetAndResetSentGestures()));
+  EXPECT_TRUE(GesturesMatch(
+      Gestures(
+          ET_GESTURE_TAP_DOWN, ET_GESTURE_TAP_CANCEL, ET_GESTURE_SCROLL_BEGIN),
+      GetAndResetSentGestures()));
   PushGesture(ET_SCROLL_FLING_START);
   ReleaseTouchPoint();
   SendTouchNotConsumedAck();
   EXPECT_TRUE(GesturesMatch(Gestures(ET_SCROLL_FLING_START),
                             GetAndResetSentGestures()));
 
-  // A new touch seqeuence should cancel the outstanding fling.
+  // A new touch sequence should cancel the outstanding fling.
   PressTouchPoint(1, 1);
   SendTouchNotConsumedAck();
   EXPECT_TRUE(GesturesMatch(Gestures(ET_SCROLL_FLING_CANCEL),
                             GetAndResetSentGestures()));
+  EXPECT_EQ(CurrentTouchTime(), LastSentGestureTime());
   ReleaseTouchPoint();
   SendTouchNotConsumedAck();
   EXPECT_FALSE(GesturesSent());
 }
 
-TEST_F(TouchDispositionGestureFilterTest, ScrollEndedOnNewTouchSequence) {
+TEST_F(TouchDispositionGestureFilterTest, ScrollEndedOnTouchReleaseIfNoFling) {
   // Simulate a scroll.
+  PushGesture(ET_GESTURE_TAP_DOWN);
   PushGesture(ET_GESTURE_SCROLL_BEGIN);
   PressTouchPoint(1, 1);
   SendTouchNotConsumedAck();
-  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_BEGIN),
-                            GetAndResetSentGestures()));
+  EXPECT_TRUE(GesturesMatch(
+      Gestures(
+          ET_GESTURE_TAP_DOWN, ET_GESTURE_TAP_CANCEL, ET_GESTURE_SCROLL_BEGIN),
+      GetAndResetSentGestures()));
   ReleaseTouchPoint();
   SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_END),
+                            GetAndResetSentGestures()));
+  EXPECT_EQ(CurrentTouchTime(), LastSentGestureTime());
+}
 
-  // A new touch seqeuence should end the outstanding scroll.
+TEST_F(TouchDispositionGestureFilterTest, ScrollEndedOnNewTouchSequence) {
+  // Simulate a scroll.
+  PushGesture(ET_GESTURE_TAP_DOWN);
+  PushGesture(ET_GESTURE_SCROLL_BEGIN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(
+      Gestures(
+          ET_GESTURE_TAP_DOWN, ET_GESTURE_TAP_CANCEL, ET_GESTURE_SCROLL_BEGIN),
+      GetAndResetSentGestures()));
+
+  // A new touch sequence should end the outstanding scroll.
+  ResetTouchPoints();
   PressTouchPoint(1, 1);
   SendTouchConsumedAck();
   EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_END),
                             GetAndResetSentGestures()));
+  EXPECT_EQ(CurrentTouchTime(), LastSentGestureTime());
 }
 
 TEST_F(TouchDispositionGestureFilterTest, FlingCancelledOnScrollBegin) {
   // Simulate a fling sequence.
+  PushGesture(ET_GESTURE_TAP_DOWN);
   PushGesture(ET_GESTURE_SCROLL_BEGIN);
   PushGesture(ET_SCROLL_FLING_START);
   PressTouchPoint(1, 1);
   SendTouchNotConsumedAck();
-  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_BEGIN,
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN,
+                                     ET_GESTURE_TAP_CANCEL,
+                                     ET_GESTURE_SCROLL_BEGIN,
                                      ET_SCROLL_FLING_START),
                             GetAndResetSentGestures()));
 
@@ -650,7 +704,8 @@ TEST_F(TouchDispositionGestureFilterTest,
   PushGesture(ET_GESTURE_TAP);
   ReleaseTouchPoint();
   SendTouchNotConsumedAck();
-  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP),
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SHOW_PRESS,
+                                     ET_GESTURE_TAP),
                             GetAndResetSentGestures()));
 
   // The tap should not be cancelled as it was terminated by a |ET_GESTURE_TAP|.
@@ -662,9 +717,11 @@ TEST_F(TouchDispositionGestureFilterTest,
 TEST_F(TouchDispositionGestureFilterTest, TimeoutGestures) {
   // If the sequence is allowed, and there are no preceding gestures, the
   // timeout gestures should be forwarded immediately.
+  PushGesture(ET_GESTURE_TAP_DOWN);
   PressTouchPoint(1, 1);
   SendTouchNotConsumedAck();
-  EXPECT_FALSE(GesturesSent());
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN),
+                            GetAndResetSentGestures()));
 
   SendTimeoutGesture(ET_GESTURE_SHOW_PRESS);
   EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SHOW_PRESS),
@@ -674,11 +731,16 @@ TEST_F(TouchDispositionGestureFilterTest, TimeoutGestures) {
   EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_LONG_PRESS),
                             GetAndResetSentGestures()));
 
+  PushGesture(ET_GESTURE_LONG_TAP);
   ReleaseTouchPoint();
   SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_CANCEL,
+                                     ET_GESTURE_LONG_TAP),
+                            GetAndResetSentGestures()));
 
   // If the sequence is disallowed, and there are no preceding gestures, the
   // timeout gestures should be dropped immediately.
+  PushGesture(ET_GESTURE_TAP_DOWN);
   PressTouchPoint(1, 1);
   SendTouchConsumedAck();
   EXPECT_FALSE(GesturesSent());
@@ -690,6 +752,7 @@ TEST_F(TouchDispositionGestureFilterTest, TimeoutGestures) {
 
   // If the sequence has a pending ack, the timeout gestures should
   // remain queued until the ack is received.
+  PushGesture(ET_GESTURE_TAP_DOWN);
   PressTouchPoint(1, 1);
   EXPECT_FALSE(GesturesSent());
 
@@ -697,7 +760,8 @@ TEST_F(TouchDispositionGestureFilterTest, TimeoutGestures) {
   EXPECT_FALSE(GesturesSent());
 
   SendTouchNotConsumedAck();
-  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_LONG_PRESS),
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN,
+                                     ET_GESTURE_LONG_PRESS),
                             GetAndResetSentGestures()));
 }
 
@@ -761,15 +825,185 @@ TEST_F(TouchDispositionGestureFilterTest, TimeoutEventAfterRelease) {
   PressTouchPoint(1, 1);
   SendTouchNotConsumedAck();
   EXPECT_FALSE(GesturesSent());
+  PushGesture(ET_GESTURE_TAP_DOWN);
   PushGesture(ET_GESTURE_TAP_UNCONFIRMED);
   ReleaseTouchPoint();
   SendTouchNotConsumedAck();
+  EXPECT_TRUE(
+      GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN, ET_GESTURE_TAP_UNCONFIRMED),
+                    GetAndResetSentGestures()));
+
+  SendTimeoutGesture(ET_GESTURE_TAP);
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SHOW_PRESS, ET_GESTURE_TAP),
+                            GetAndResetSentGestures()));
+}
+
+TEST_F(TouchDispositionGestureFilterTest, ShowPressInsertedBeforeTap) {
+  PushGesture(ET_GESTURE_TAP_DOWN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN),
+                            GetAndResetSentGestures()));
+
+  SendTimeoutGesture(ET_GESTURE_TAP_UNCONFIRMED);
   EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_UNCONFIRMED),
                             GetAndResetSentGestures()));
 
-  SendTimeoutGesture(ET_GESTURE_TAP);
+  PushGesture(ET_GESTURE_TAP);
+  ReleaseTouchPoint();
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SHOW_PRESS,
+                                     ET_GESTURE_TAP),
+                            GetAndResetSentGestures()));
+}
+
+TEST_F(TouchDispositionGestureFilterTest, ShowPressNotInsertedIfAlreadySent) {
+  PushGesture(ET_GESTURE_TAP_DOWN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN),
+                            GetAndResetSentGestures()));
+
+  SendTimeoutGesture(ET_GESTURE_SHOW_PRESS);
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SHOW_PRESS),
+                            GetAndResetSentGestures()));
+
+  PushGesture(ET_GESTURE_TAP);
+  ReleaseTouchPoint();
+  SendTouchNotConsumedAck();
   EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP),
                             GetAndResetSentGestures()));
+}
+
+TEST_F(TouchDispositionGestureFilterTest, TapAndScrollCancelledOnTouchCancel) {
+  PushGesture(ET_GESTURE_TAP_DOWN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN),
+                            GetAndResetSentGestures()));
+
+  // A cancellation motion event should cancel the tap.
+  CancelTouchPoint();
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_CANCEL),
+                            GetAndResetSentGestures()));
+  EXPECT_EQ(CurrentTouchTime(), LastSentGestureTime());
+
+  PushGesture(ET_GESTURE_SCROLL_BEGIN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_BEGIN),
+                            GetAndResetSentGestures()));
+
+  // A cancellation motion event should end the scroll, even if the touch was
+  // consumed.
+  CancelTouchPoint();
+  SendTouchConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_END),
+                            GetAndResetSentGestures()));
+  EXPECT_EQ(CurrentTouchTime(), LastSentGestureTime());
+}
+
+TEST_F(TouchDispositionGestureFilterTest,
+       ConsumedScrollUpdateMakesFlingScrollEnd) {
+  // A consumed touch's gesture should not be sent.
+  PushGesture(ET_GESTURE_BEGIN);
+  PushGesture(ET_GESTURE_SCROLL_BEGIN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+
+  EXPECT_TRUE(
+      GesturesMatch(Gestures(ET_GESTURE_BEGIN, ET_GESTURE_SCROLL_BEGIN),
+                    GetAndResetSentGestures()));
+
+  PushGesture(ET_GESTURE_SCROLL_UPDATE);
+  MoveTouchPoint(0, 2, 2);
+  SendTouchConsumedAck();
+  EXPECT_FALSE(GesturesSent());
+
+  PushGesture(ET_SCROLL_FLING_START);
+  PushGesture(ET_SCROLL_FLING_CANCEL);
+  PushGesture(ET_GESTURE_END);
+  ReleaseTouchPoint();
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_END, ET_GESTURE_SCROLL_END),
+                            GetAndResetSentGestures()));
+
+  PushGesture(ET_GESTURE_BEGIN);
+  PushGesture(ET_GESTURE_SCROLL_BEGIN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_BEGIN, ET_GESTURE_SCROLL_BEGIN),
+                            GetAndResetSentGestures()));
+}
+
+TEST_F(TouchDispositionGestureFilterTest, TapCancelledOnTouchCancel) {
+  PushGesture(ET_GESTURE_TAP_DOWN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN),
+                            GetAndResetSentGestures()));
+
+  // A cancellation motion event should cancel the tap.
+  CancelTouchPoint();
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_CANCEL),
+                            GetAndResetSentGestures()));
+  EXPECT_EQ(CurrentTouchTime(), LastSentGestureTime());
+}
+
+// Test that a GestureEvent whose dispatch causes a cancel event to be fired
+// won't cause a crash.
+TEST_F(TouchDispositionGestureFilterTest, TestCancelMidGesture) {
+  SetCancelAfterNextGesture(true);
+  PushGesture(ET_GESTURE_TAP_DOWN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_TAP_DOWN,
+                                     ET_GESTURE_TAP_CANCEL),
+                            GetAndResetSentGestures()));
+}
+
+// Test that a MultiFingerSwipe event is dispatched when appropriate.
+TEST_F(TouchDispositionGestureFilterTest, TestAllowedMultiFingerSwipe) {
+  PushGesture(ET_GESTURE_SCROLL_BEGIN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_SCROLL_BEGIN),
+                            GetAndResetSentGestures()));
+
+  PushGesture(ET_GESTURE_PINCH_BEGIN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_PINCH_BEGIN),
+                            GetAndResetSentGestures()));
+
+  PushGesture(ET_GESTURE_MULTIFINGER_SWIPE);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_TRUE(GesturesMatch(Gestures(ET_GESTURE_MULTIFINGER_SWIPE),
+                            GetAndResetSentGestures()));
+}
+
+  // Test that a MultiFingerSwipe event is dispatched when appropriate.
+TEST_F(TouchDispositionGestureFilterTest, TestDisallowedMultiFingerSwipe) {
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+
+  PushGesture(ET_GESTURE_SCROLL_BEGIN);
+  MoveTouchPoint(0, 0, 0);
+  SendTouchConsumedAck();
+  EXPECT_FALSE(GesturesSent());
+
+  PushGesture(ET_GESTURE_PINCH_BEGIN);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_FALSE(GesturesSent());
+
+  PushGesture(ET_GESTURE_MULTIFINGER_SWIPE);
+  PressTouchPoint(1, 1);
+  SendTouchNotConsumedAck();
+  EXPECT_FALSE(GesturesSent());
 }
 
 }  // namespace ui

@@ -4,6 +4,7 @@
 
 #include "ash/system/chromeos/virtual_keyboard/virtual_keyboard_tray.h"
 
+#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray_notifier.h"
@@ -19,8 +20,6 @@
 #include "ui/views/controls/button/image_button.h"
 
 namespace ash {
-namespace internal {
-
 namespace {
 
 class VirtualKeyboardButton : public views::ImageButton {
@@ -43,7 +42,7 @@ VirtualKeyboardButton::~VirtualKeyboardButton() {
 }
 
 gfx::Size VirtualKeyboardButton::GetPreferredSize() {
-  const int virtual_keyboard_button_height = GetShelfItemHeight();
+  const int virtual_keyboard_button_height = kShelfSize;
   gfx::Size size = ImageButton::GetPreferredSize();
   int padding = virtual_keyboard_button_height - size.height();
   size.set_height(virtual_keyboard_button_height);
@@ -100,7 +99,7 @@ bool VirtualKeyboardTray::ClickedOutsideBubble() {
 }
 
 bool VirtualKeyboardTray::PerformAction(const ui::Event& event) {
-  Shell::GetInstance()->keyboard_controller()->ShowAndLockKeyboard();
+  keyboard::KeyboardController::GetInstance()->ShowKeyboard(true);
   return true;
 }
 
@@ -116,5 +115,4 @@ void VirtualKeyboardTray::OnAccessibilityModeChanged(
       IsVirtualKeyboardEnabled());
 }
 
-}  // namespace internal
 }  // namespace ash

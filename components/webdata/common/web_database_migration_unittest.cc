@@ -12,6 +12,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -155,6 +156,14 @@ void CheckNoBackupData(const sql::Connection& connection,
   EXPECT_FALSE(connection.DoesTableExist("keywords_backup"));
 }
 
+std::string RemoveQuotes(const std::string& has_quotes) {
+  // SQLite quotes: http://www.sqlite.org/lang_keywords.html
+  static const char kQuotes[] = "\"[]`";
+  std::string no_quotes;
+  base::RemoveChars(has_quotes, kQuotes, &no_quotes);
+  return no_quotes;
+}
+
 }  // anonymous namespace
 
 // The WebDatabaseMigrationTest encapsulates testing of database migrations.
@@ -248,7 +257,7 @@ class WebDatabaseMigrationTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(WebDatabaseMigrationTest);
 };
 
-const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 55;
+const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 56;
 
 void WebDatabaseMigrationTest::LoadDatabase(
     const base::FilePath::StringType& file) {
@@ -258,6 +267,25 @@ void WebDatabaseMigrationTest::LoadDatabase(
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
   ASSERT_TRUE(connection.Execute(contents.data()));
+}
+
+// Tests that migrating from the golden files version_XX.sql results in the same
+// schema as migrating from an empty database.
+TEST_F(WebDatabaseMigrationTest, VersionXxSqlFilesAreGolden) {
+  DoMigration();
+  sql::Connection connection;
+  ASSERT_TRUE(connection.Open(GetDatabasePath()));
+  const std::string& expected_schema = RemoveQuotes(connection.GetSchema());
+  static const int kFirstVersion = 53;
+  for (int i = kFirstVersion; i < kCurrentTestedVersionNumber; ++i) {
+    connection.Raze();
+    const base::FilePath& file_name = base::FilePath::FromUTF8Unsafe(
+        "version_" + base::IntToString(i) + ".sql");
+    ASSERT_NO_FATAL_FAILURE(LoadDatabase(file_name.value()))
+        << "Failed to load " << file_name.MaybeAsASCII();
+    DoMigration();
+    EXPECT_EQ(expected_schema, RemoveQuotes(connection.GetSchema()));
+  }
 }
 
 // Tests that the all migrations from an empty database succeed.
@@ -2578,5 +2606,68 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion54ToCurrent) {
 
     // No more entries expected.
     ASSERT_FALSE(s.Step());
+  }
+}
+
+// Tests that migrating from version 55 to version 56 adds the language_code
+// column to autofill_profiles table.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion55ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_55.sql")));
+
+  // Verify pre-conditions. These are expectations for version 55 of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    EXPECT_FALSE(
+        connection.DoesColumnExist("autofill_profiles", "language_code"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions. These are expectations for current version of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    // The language_code column should have been added to autofill_profiles
+    // table.
+    EXPECT_TRUE(
+        connection.DoesColumnExist("autofill_profiles", "language_code"));
+
+    // Data should have been preserved. Language code should have been set to
+    // empty string.
+    sql::Statement s_profiles(
+        connection.GetUniqueStatement(
+            "SELECT guid, company_name, street_address, dependent_locality,"
+            " city, state, zipcode, sorting_code, country_code, date_modified,"
+            " origin, language_code "
+            "FROM autofill_profiles"));
+
+    ASSERT_TRUE(s_profiles.Step());
+    EXPECT_EQ("00000000-0000-0000-0000-000000000001",
+              s_profiles.ColumnString(0));
+    EXPECT_EQ(ASCIIToUTF16("Google Inc"), s_profiles.ColumnString16(1));
+    EXPECT_EQ(ASCIIToUTF16("340 Main St"),
+              s_profiles.ColumnString16(2));
+    EXPECT_EQ(base::string16(), s_profiles.ColumnString16(3));
+    EXPECT_EQ(ASCIIToUTF16("Los Angeles"), s_profiles.ColumnString16(4));
+    EXPECT_EQ(ASCIIToUTF16("CA"), s_profiles.ColumnString16(5));
+    EXPECT_EQ(ASCIIToUTF16("90291"), s_profiles.ColumnString16(6));
+    EXPECT_EQ(base::string16(), s_profiles.ColumnString16(7));
+    EXPECT_EQ(ASCIIToUTF16("US"), s_profiles.ColumnString16(8));
+    EXPECT_EQ(1395948829, s_profiles.ColumnInt(9));
+    EXPECT_EQ(ASCIIToUTF16("Chrome settings"), s_profiles.ColumnString16(10));
+    EXPECT_EQ(std::string(), s_profiles.ColumnString(11));
+
+    // No more entries expected.
+    ASSERT_FALSE(s_profiles.Step());
   }
 }

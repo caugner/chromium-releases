@@ -12,6 +12,7 @@ import android.util.Log;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.widget.Toast;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -31,10 +32,12 @@ import org.chromium.chrome.shell.sync.SyncController;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.content.browser.ActivityContentVideoViewClient;
 import org.chromium.content.browser.BrowserStartupController;
-import org.chromium.content.browser.ContentView;
+import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.DeviceUtils;
+import org.chromium.content.common.ContentSwitches;
 import org.chromium.printing.PrintManagerDelegateImpl;
 import org.chromium.printing.PrintingController;
+import org.chromium.sync.signin.AccountManagerHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.WindowAndroid;
@@ -130,7 +133,27 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
 
         mWindow = sWindowAndroidFactory.getActivityWindowAndroid(this);
         mWindow.restoreInstanceState(savedInstanceState);
-        mTabManager.initialize(mWindow, new ActivityContentVideoViewClient(this));
+        mTabManager.initialize(mWindow, new ActivityContentVideoViewClient(this) {
+            @Override
+            public boolean onShowCustomView(View view) {
+                if (mTabManager == null) return false;
+                boolean success = super.onShowCustomView(view);
+                if (!CommandLine.getInstance().hasSwitch(
+                        ContentSwitches.DISABLE_OVERLAY_FULLSCREEN_VIDEO_SUBTITLE)) {
+                    mTabManager.setOverlayVideoMode(true);
+                }
+                return success;
+            }
+
+            @Override
+            public void onDestroyContentVideoView() {
+                super.onDestroyContentVideoView();
+                if (mTabManager != null && !CommandLine.getInstance().hasSwitch(
+                        ContentSwitches.DISABLE_OVERLAY_FULLSCREEN_VIDEO_SUBTITLE)) {
+                    mTabManager.setOverlayVideoMode(false);
+                }
+            }
+        });
 
         String startupUrl = getUrlFromIntent(getIntent());
         if (!TextUtils.isEmpty(startupUrl)) {
@@ -193,16 +216,16 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
     protected void onStop() {
         super.onStop();
 
-        ContentView view = getActiveContentView();
-        if (view != null) view.onHide();
+        ContentViewCore viewCore = getActiveContentViewCore();
+        if (viewCore != null) viewCore.onHide();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
 
-        ContentView view = getActiveContentView();
-        if (view != null) view.onShow();
+        ContentViewCore viewCore = getActiveContentViewCore();
+        if (viewCore != null) viewCore.onShow();
 
         if (mSyncController != null) {
             mSyncController.onStart();
@@ -229,11 +252,11 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
     }
 
     /**
-     * @return The ContentView of the active tab.
+     * @return The ContentViewCore of the active tab.
      */
-    public ContentView getActiveContentView() {
+    public ContentViewCore getActiveContentViewCore() {
         ChromeShellTab tab = getActiveTab();
-        return tab != null ? tab.getContentView() : null;
+        return tab != null ? tab.getContentViewCore() : null;
     }
 
     /**
@@ -265,8 +288,10 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
             case R.id.signin:
                 if (ChromeSigninController.get(this).isSignedIn()) {
                     SyncController.openSignOutDialog(getFragmentManager());
-                } else {
+                } else if (AccountManagerHelper.get(this).hasGoogleAccounts()) {
                     SyncController.openSigninDialog(getFragmentManager());
+                } else {
+                    Toast.makeText(this, R.string.signin_no_account, Toast.LENGTH_SHORT).show();
                 }
                 return true;
             case R.id.print:
@@ -347,8 +372,8 @@ public class ChromeShellActivity extends Activity implements AppMenuPropertiesDe
         MenuItem distillPageItem = menu.findItem(R.id.distill_page);
         if (CommandLine.getInstance().hasSwitch(ChromeShellSwitches.ENABLE_DOM_DISTILLER)) {
             String url = activeTab != null ? activeTab.getUrl() : null;
-            distillPageItem.setEnabled(!TextUtils.isEmpty(url) &&
-                    !url.startsWith(CHROME_DISTILLER_SCHEME));
+            distillPageItem.setEnabled(!DomDistillerUrlUtils.isUrlReportable(
+                    CHROME_DISTILLER_SCHEME, url));
             distillPageItem.setVisible(true);
         } else {
             distillPageItem.setVisible(false);

@@ -23,6 +23,7 @@
 #include "base/linux_util.h"
 #include "base/native_library.h"
 #include "base/pickle.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/posix/unix_domain_socket_linux.h"
 #include "base/rand_util.h"
 #include "base/sys_info.h"
@@ -344,19 +345,10 @@ static void ZygotePreSandboxInit() {
       new FontConfigIPC(GetSandboxFD()))->unref();
 }
 
-static void CloseFdAndHandleEintr(int fd) {
-  close(fd);
-}
-
 static bool CreateInitProcessReaper() {
-  // This "magic" socket must only appear in one process, so make sure
-  // it gets closed in the parent after fork().
-  base::Closure zygoteid_fd_closer =
-      base::Bind(CloseFdAndHandleEintr, kZygoteIdFd);
   // The current process becomes init(1), this function returns from a
   // newly created process.
-  const bool init_created =
-      sandbox::CreateInitProcessReaper(&zygoteid_fd_closer);
+  const bool init_created = sandbox::CreateInitProcessReaper(NULL);
   if (!init_created) {
     LOG(ERROR) << "Error creating an init process to reap zombies";
     return false;
@@ -428,7 +420,10 @@ static bool EnterSuidSandbox(sandbox::SetuidSandboxClient* setuid_sandbox) {
   return true;
 }
 
-static void EnterLayerOneSandbox(LinuxSandbox* linux_sandbox) {
+// If |is_suid_sandbox_child|, then make sure that the setuid sandbox is
+// engaged.
+static void EnterLayerOneSandbox(LinuxSandbox* linux_sandbox,
+                                 bool is_suid_sandbox_child) {
   DCHECK(linux_sandbox);
 
   ZygotePreSandboxInit();
@@ -441,7 +436,7 @@ static void EnterLayerOneSandbox(LinuxSandbox* linux_sandbox) {
   sandbox::SetuidSandboxClient* setuid_sandbox =
       linux_sandbox->setuid_sandbox_client();
 
-  if (setuid_sandbox->IsSuidSandboxChild()) {
+  if (is_suid_sandbox_child) {
     CHECK(EnterSuidSandbox(setuid_sandbox)) << "Failed to enter setuid sandbox";
   }
 }
@@ -455,17 +450,31 @@ bool ZygoteMain(const MainFunctionParams& params,
   // This will pre-initialize the various sandboxes that need it.
   linux_sandbox->PreinitializeSandbox();
 
+  const bool must_enable_setuid_sandbox =
+      linux_sandbox->setuid_sandbox_client()->IsSuidSandboxChild();
+  if (must_enable_setuid_sandbox) {
+    linux_sandbox->setuid_sandbox_client()->CloseDummyFile();
+
+    // Let the ZygoteHost know we're booting up.
+    CHECK(UnixDomainSocket::SendMsg(kZygoteSocketPairFd,
+                                    kZygoteBootMessage,
+                                    sizeof(kZygoteBootMessage),
+                                    std::vector<int>()));
+  }
+
   if (forkdelegate != NULL) {
     VLOG(1) << "ZygoteMain: initializing fork delegate";
-    forkdelegate->Init(GetSandboxFD());
+    forkdelegate->Init(GetSandboxFD(), must_enable_setuid_sandbox);
   } else {
     VLOG(1) << "ZygoteMain: fork delegate is NULL";
   }
 
   // Turn on the first layer of the sandbox if the configuration warrants it.
-  EnterLayerOneSandbox(linux_sandbox);
+  EnterLayerOneSandbox(linux_sandbox, must_enable_setuid_sandbox);
 
   int sandbox_flags = linux_sandbox->GetStatus();
+  bool setuid_sandbox_engaged = sandbox_flags & kSandboxLinuxSUID;
+  CHECK_EQ(must_enable_setuid_sandbox, setuid_sandbox_engaged);
 
   Zygote zygote(sandbox_flags, forkdelegate);
   // This function call can return multiple times, once per fork().

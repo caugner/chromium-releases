@@ -21,6 +21,7 @@
 #include "base/values.h"
 #include "cc/base/switches.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/common/chrome_constants.h"
@@ -35,6 +36,7 @@
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/base/media_switches.h"
+#include "third_party/cros_system_api/switches/chrome_switches.h"
 #include "ui/app_list/app_list_switches.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/compositor/compositor_switches.h"
@@ -71,18 +73,17 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableAccelerated2dCanvas,
     ::switches::kDisableAcceleratedOverflowScroll,
     ::switches::kDisableAcceleratedVideoDecode,
-    ::switches::kDisableBrowserPluginCompositing,
     ::switches::kDisableDelegatedRenderer,
+    ::switches::kDisableDistanceFieldText,
     ::switches::kDisableFastTextAutosizing,
     ::switches::kDisableFiltersOverIPC,
-    ::switches::kDisableForceCompositingMode,
     ::switches::kDisableGpuShaderDiskCache,
     ::switches::kDisableGpuWatchdog,
     ::switches::kDisableGpuCompositing,
     ::switches::kDisableGpuRasterization,
     ::switches::kDisableImplSidePainting,
     ::switches::kDisableLowResTiling,
-    ::switches::kDisableMapImage,
+    ::switches::kDisableMediaSource,
     ::switches::kDisablePrefixedEncryptedMedia,
     ::switches::kDisablePanelFitting,
     ::switches::kDisableRepaintAfterLayout,
@@ -92,9 +93,8 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableTouchDragDrop,
     ::switches::kDisableTouchEditing,
     ::switches::kDisableUniversalAcceleratedOverflowScroll,
-    ::switches::kDisableUnprefixedMediaSource,
-    ::switches::kDisableWebKitMediaSource,
     ::switches::kDisableAcceleratedFixedRootBackground,
+    ::switches::kDisableZeroCopy,
     ::switches::kEnableAcceleratedFixedRootBackground,
     ::switches::kEnableAcceleratedOverflowScroll,
     ::switches::kEnableBeginFrameScheduling,
@@ -106,11 +106,13 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableGestureTapHighlight,
     ::switches::kDisableGpuSandbox,
     ::switches::kEnableDeferredFilters,
+    ::switches::kEnableContainerCulling,
+    ::switches::kEnableDistanceFieldText,
     ::switches::kEnableGpuRasterization,
     ::switches::kEnableImplSidePainting,
     ::switches::kEnableLogging,
     ::switches::kEnableLowResTiling,
-    ::switches::kEnableMapImage,
+    ::switches::kEnableOneCopy,
     ::switches::kEnablePinch,
     ::switches::kEnableRepaintAfterLayout,
     ::switches::kEnableThreadedCompositing,
@@ -119,6 +121,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kEnableUniversalAcceleratedOverflowScroll,
     ::switches::kEnableViewport,
     ::switches::kEnableViewportMeta,
+    ::switches::kEnableZeroCopy,
     ::switches::kMainFrameResizesAreOrientationChanges,
     ::switches::kForceDeviceScaleFactor,
     ::switches::kForceGpuRasterization,
@@ -142,7 +145,6 @@ std::string DeriveCommandLine(const GURL& start_url,
 #endif
     ::switches::kTouchDevices,
     ::switches::kTouchEvents,
-    ::switches::kTouchOptimizedUI,
     ::switches::kUIDisableThreadedCompositing,
     ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
@@ -181,6 +183,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     cc::switches::kDisableCompositorTouchHitTesting,
     cc::switches::kDisableMainFrameBeforeActivation,
     cc::switches::kDisableMainFrameBeforeDraw,
+    cc::switches::kDisablePinchVirtualViewport,
     cc::switches::kDisableThreadedAnimation,
     cc::switches::kEnableGpuBenchmarking,
     cc::switches::kEnablePinchVirtualViewport,
@@ -199,15 +202,19 @@ std::string DeriveCommandLine(const GURL& start_url,
     cc::switches::kShowSurfaceDamageRects,
     cc::switches::kSlowDownRasterScaleFactor,
     cc::switches::kUIDisablePartialSwap,
+    chromeos::switches::kConsumerDeviceManagementUrl,
     chromeos::switches::kDbusStub,
     chromeos::switches::kDisableLoginAnimations,
+    chromeos::switches::kEnableConsumerManagement,
+    chromeos::switches::kEnterpriseEnableForcedReEnrollment,
     chromeos::switches::kHasChromeOSDiamondKey,
     chromeos::switches::kHasChromeOSKeyboard,
     chromeos::switches::kLoginProfile,
     chromeos::switches::kNaturalScrollDefault,
+    chromeos::switches::kSystemInDevMode,
+    policy::switches::kDeviceManagementUrl,
     ::switches::kEnableBrowserTextSubpixelPositioning,
     ::switches::kEnableWebkitTextSubpixelPositioning,
-    policy::switches::kDeviceManagementUrl,
     wm::switches::kWindowAnimationsDisabled,
   };
   command_line->CopySwitchesFrom(base_command_line,
@@ -359,6 +366,7 @@ std::string GetOffTheRecordCommandLine(
 
 void RestartChrome(const std::string& command_line) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  BootTimesLoader::Get()->set_restart_requested();
 
   static bool restart_requested = false;
   if (restart_requested) {

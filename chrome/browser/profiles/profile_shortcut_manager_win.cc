@@ -23,8 +23,8 @@
 #include "chrome/browser/app_icon_win.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_info_cache_observer.h"
-#include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_switches.h"
@@ -43,8 +43,7 @@
 #include "ui/gfx/icon_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_family.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/skia_util.h"
+
 
 using content::BrowserThread;
 
@@ -103,6 +102,7 @@ const int kProfileAvatarIconResources2x[] = {
   IDR_PROFILE_AVATAR_2X_23,
   IDR_PROFILE_AVATAR_2X_24,
   IDR_PROFILE_AVATAR_2X_25,
+  IDR_PROFILE_AVATAR_2X_26,
 };
 
 // Badges |app_icon_bitmap| with |avatar_bitmap| at the bottom right corner and
@@ -110,20 +110,8 @@ const int kProfileAvatarIconResources2x[] = {
 SkBitmap BadgeIcon(const SkBitmap& app_icon_bitmap,
                    const SkBitmap& avatar_bitmap,
                    int scale_factor) {
-  // TODO(rlp): Share this chunk of code with
-  // avatar_menu_button::DrawTaskBarDecoration.
-  SkBitmap source_bitmap = avatar_bitmap;
-  if ((avatar_bitmap.width() == scale_factor * profiles::kAvatarIconWidth) &&
-      (avatar_bitmap.height() == scale_factor * profiles::kAvatarIconHeight)) {
-    // Shave a couple of columns so the bitmap is more square. So when
-    // resized to a square aspect ratio it looks pretty.
-    gfx::Rect frame(scale_factor * profiles::kAvatarIconWidth,
-                    scale_factor * profiles::kAvatarIconHeight);
-    frame.Inset(scale_factor * 2, 0, scale_factor * 2, 0);
-    avatar_bitmap.extractSubset(&source_bitmap, gfx::RectToSkIRect(frame));
-  } else {
-    NOTREACHED();
-  }
+  SkBitmap source_bitmap =
+      profiles::GetAvatarIconAsSquare(avatar_bitmap, scale_factor);
   int avatar_badge_size = kProfileAvatarBadgeSize;
   if (app_icon_bitmap.width() != kShortcutIconSize) {
     avatar_badge_size =
@@ -666,7 +654,7 @@ ProfileShortcutManagerWin::ProfileShortcutManagerWin(ProfileManager* manager)
     : profile_manager_(manager) {
   DCHECK_EQ(
       arraysize(kProfileAvatarIconResources2x),
-      profile_manager_->GetProfileInfoCache().GetDefaultAvatarIconCount());
+      profiles::GetDefaultAvatarIconCount());
 
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CREATED,
                  content::NotificationService::AllSources());
@@ -823,7 +811,7 @@ void ProfileShortcutManagerWin::CreateOrUpdateShortcutsForProfileAtPath(
     const size_t icon_index =
         cache->GetAvatarIconIndexOfProfileAtIndex(profile_index);
     const int resource_id_1x =
-        cache->GetDefaultAvatarIconResourceIDAtIndex(icon_index);
+        profiles::GetDefaultAvatarIconResourceIDAtIndex(icon_index);
     const int resource_id_2x = kProfileAvatarIconResources2x[icon_index];
     // Make a copy of the SkBitmaps to ensure that we can safely use the image
     // data on the FILE thread.

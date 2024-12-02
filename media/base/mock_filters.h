@@ -39,6 +39,8 @@ class MockDemuxer : public Demuxer {
   MOCK_METHOD0(OnAudioRendererDisabled, void());
   MOCK_METHOD1(GetStream, DemuxerStream*(DemuxerStream::Type));
   MOCK_CONST_METHOD0(GetStartTime, base::TimeDelta());
+  MOCK_CONST_METHOD0(GetTimelineOffset, base::Time());
+  MOCK_CONST_METHOD0(GetLiveness, Liveness());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockDemuxer);
@@ -74,12 +76,13 @@ class MockVideoDecoder : public VideoDecoder {
   virtual ~MockVideoDecoder();
 
   // VideoDecoder implementation.
-  MOCK_METHOD2(Initialize, void(const VideoDecoderConfig& config,
+  MOCK_METHOD3(Initialize, void(const VideoDecoderConfig& config,
+                                bool low_delay,
                                 const PipelineStatusCB&));
   MOCK_METHOD2(Decode, void(const scoped_refptr<DecoderBuffer>& buffer,
                             const DecodeCB&));
   MOCK_METHOD1(Reset, void(const base::Closure&));
-  MOCK_METHOD1(Stop, void(const base::Closure&));
+  MOCK_METHOD0(Stop, void());
   MOCK_CONST_METHOD0(HasAlpha, bool());
 
  private:
@@ -98,7 +101,7 @@ class MockAudioDecoder : public AudioDecoder {
                void(const scoped_refptr<DecoderBuffer>& buffer,
                     const DecodeCB&));
   MOCK_METHOD1(Reset, void(const base::Closure&));
-  MOCK_METHOD1(Stop, void(const base::Closure&));
+  MOCK_METHOD0(Stop, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAudioDecoder);
@@ -110,7 +113,8 @@ class MockVideoRenderer : public VideoRenderer {
   virtual ~MockVideoRenderer();
 
   // VideoRenderer implementation.
-  MOCK_METHOD8(Initialize, void(DemuxerStream* stream,
+  MOCK_METHOD9(Initialize, void(DemuxerStream* stream,
+                                bool low_delay,
                                 const PipelineStatusCB& init_cb,
                                 const StatisticsCB& statistics_cb,
                                 const TimeCB& time_cb,
@@ -135,13 +139,12 @@ class MockAudioRenderer : public AudioRenderer {
   virtual ~MockAudioRenderer();
 
   // AudioRenderer implementation.
-  MOCK_METHOD8(Initialize, void(DemuxerStream* stream,
+  MOCK_METHOD7(Initialize, void(DemuxerStream* stream,
                                 const PipelineStatusCB& init_cb,
                                 const StatisticsCB& statistics_cb,
                                 const base::Closure& underflow_cb,
                                 const TimeCB& time_cb,
                                 const base::Closure& ended_cb,
-                                const base::Closure& disabled_cb,
                                 const PipelineStatusCB& error_cb));
   MOCK_METHOD1(Play, void(const base::Closure& callback));
   MOCK_METHOD1(Pause, void(const base::Closure& callback));

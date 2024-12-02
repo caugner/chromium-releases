@@ -127,12 +127,9 @@ make[1]: Entering directory `pepper_31/examples/api/core'
 make[1]: Leaving directory `pepper_31/examples/api/core'
 make TOOLCHAIN=pnacl
 make[1]: Entering directory `pepper_31/examples/api/core'
-  CXX  pnacl/Debug/core_pnacl.o
-  LINK pnacl/Debug/core.bc
-  FINALIZE pnacl/Debug/core.pexe
-  TRANSLATE pnacl/Debug/core_x86_32.nexe
-  TRANSLATE pnacl/Debug/core_x86_64.nexe
-  TRANSLATE pnacl/Debug/core_arm.nexe
+  CXX  pnacl/Debug/core.o
+  LINK pnacl/Debug/core_unstripped.bc
+  FINALIZE pnacl/Debug/core_unstripped.pexe
   CREATE_NMF pnacl/Debug/core.nmf
 make[1]: Leaving directory `pepper_31/examples/api/core'
 make TOOLCHAIN=linux
@@ -214,7 +211,7 @@ $ make run TOOLCHAIN=pnacl CONFIG=Debug
 <span id="run-sdk-examples-as-packaged"></span><h2 id="run-the-sdk-examples-as-packaged-apps"><span id="run-sdk-examples-as-packaged"></span>Run the SDK examples as packaged apps</h2>
 <p>Each example can also be launched as a packaged app. For more information about
 using Native Client for packaged apps, see <a class="reference internal" href="/native-client/devguide/distributing.html#distributing-packaged"><em>Packaged appliction</em></a>.  For general information about packaged apps, see the
-<a class="reference external" href="http://developer.chrome.com/apps/about_apps.html">Chrome apps documentation</a>.</p>
+<a class="reference external" href="/apps/about_apps">Chrome apps documentation</a>.</p>
 <p>Some Pepper features, such as TCP/UDP socket access, are only allowed in
 packaged apps. The examples that use these features must be run as packaged
 apps, by using the <code>make run_package</code> command:</p>

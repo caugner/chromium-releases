@@ -9,13 +9,13 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/infobars/infobar.h"
-#include "chrome/browser/infobars/infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/managed_mode/managed_user_service.h"
 #include "chrome/browser/managed_mode/managed_user_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/infobars/core/infobar.h"
+#include "components/infobars/core/infobar_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
@@ -33,6 +33,19 @@
 
 using content::BrowserThread;
 
+// static
+void ManagedModeInterstitial::Show(content::WebContents* web_contents,
+                                   const GURL& url,
+                                   const base::Callback<void(bool)>& callback) {
+  ManagedModeInterstitial* interstitial =
+      new ManagedModeInterstitial(web_contents, url, callback);
+
+  // If Init() does not complete fully, immediately delete the interstitial.
+  if (!interstitial->Init())
+    delete interstitial;
+  // Otherwise |interstitial_page_| is responsible for deleting it.
+}
+
 ManagedModeInterstitial::ManagedModeInterstitial(
     content::WebContents* web_contents,
     const GURL& url,
@@ -40,19 +53,22 @@ ManagedModeInterstitial::ManagedModeInterstitial(
     : web_contents_(web_contents),
       interstitial_page_(NULL),
       url_(url),
-      callback_(callback) {
+      callback_(callback) {}
+
+ManagedModeInterstitial::~ManagedModeInterstitial() {}
+
+bool ManagedModeInterstitial::Init() {
   if (ShouldProceed()) {
     // It can happen that the site was only allowed very recently and the URL
     // filter on the IO thread had not been updated yet. Proceed with the
     // request without showing the interstitial.
     DispatchContinueRequest(true);
-    delete this;
-    return;
+    return false;
   }
 
-  InfoBarService* service = InfoBarService::FromWebContents(web_contents);
+  InfoBarService* service = InfoBarService::FromWebContents(web_contents_);
   if (service) {
-    // Remove all the infobars which are attached to |web_contents| and for
+    // Remove all the infobars which are attached to |web_contents_| and for
     // which ShouldExpire() returns true.
     content::LoadCommittedDetails details;
     // |details.is_in_page| is default false, and |details.is_main_frame| is
@@ -60,7 +76,7 @@ ManagedModeInterstitial::ManagedModeInterstitial(
     // true.
     DCHECK(details.is_navigation_to_different_page());
     const content::NavigationController& controller =
-        web_contents->GetController();
+        web_contents_->GetController();
     details.entry = controller.GetActiveEntry();
     if (controller.GetLastCommittedEntry()) {
       details.previous_entry_index = controller.GetLastCommittedEntryIndex();
@@ -68,14 +84,17 @@ ManagedModeInterstitial::ManagedModeInterstitial(
     }
     details.type = content::NAVIGATION_TYPE_NEW_PAGE;
     for (int i = service->infobar_count() - 1; i >= 0; --i) {
-      if (service->infobar_at(i)->delegate()->ShouldExpire(details))
-        service->RemoveInfoBar(service->infobar_at(i));
+      infobars::InfoBar* infobar = service->infobar_at(i);
+      if (infobar->delegate()->ShouldExpire(
+              InfoBarService::NavigationDetailsFromLoadCommittedDetails(
+                  details)))
+        service->RemoveInfoBar(infobar);
     }
   }
 
   // TODO(bauerb): Extract an observer callback on ManagedUserService for this.
   Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext());
   PrefService* prefs = profile->GetPrefs();
   pref_change_registrar_.Init(prefs);
   pref_change_registrar_.Add(
@@ -93,11 +112,11 @@ ManagedModeInterstitial::ManagedModeInterstitial(
 
   languages_ = prefs->GetString(prefs::kAcceptLanguages);
   interstitial_page_ =
-      content::InterstitialPage::Create(web_contents, true, url_, this);
+      content::InterstitialPage::Create(web_contents_, true, url_, this);
   interstitial_page_->Show();
-}
 
-ManagedModeInterstitial::~ManagedModeInterstitial() {}
+  return true;
+}
 
 std::string ManagedModeInterstitial::GetHTMLContents() {
   base::DictionaryValue strings;
@@ -205,6 +224,11 @@ void ManagedModeInterstitial::OnFilteringPrefsChanged() {
 }
 
 void ManagedModeInterstitial::DispatchContinueRequest(bool continue_request) {
+  // If there is no history entry to go back to, close the tab instead.
+  int nav_entry_count = web_contents_->GetController().GetEntryCount();
+  if (!continue_request && nav_entry_count == 0)
+    web_contents_->Close();
+
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE, base::Bind(callback_, continue_request));
 }

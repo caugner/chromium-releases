@@ -37,6 +37,7 @@
       'layers/layer_utils_unittest.cc',
       'layers/nine_patch_layer_impl_unittest.cc',
       'layers/nine_patch_layer_unittest.cc',
+      'layers/painted_scrollbar_layer_impl_unittest.cc',
       'layers/picture_image_layer_impl_unittest.cc',
       'layers/picture_layer_impl_unittest.cc',
       'layers/picture_layer_unittest.cc',
@@ -59,6 +60,7 @@
       'output/output_surface_unittest.cc',
       'output/overlay_unittest.cc',
       'output/renderer_pixeltest.cc',
+      'output/renderer_unittest.cc',
       'output/shader_unittest.cc',
       'output/software_renderer_unittest.cc',
       'quads/draw_quad_unittest.cc',
@@ -79,9 +81,9 @@
       'resources/texture_mailbox_deleter_unittest.cc',
       'resources/texture_uploader_unittest.cc',
       'resources/tile_manager_unittest.cc',
+      'resources/tile_priority_unittest.cc',
       'resources/video_resource_updater_unittest.cc',
       'scheduler/delay_based_time_source_unittest.cc',
-      'scheduler/frame_rate_controller_unittest.cc',
       'scheduler/scheduler_state_machine_unittest.cc',
       'scheduler/scheduler_unittest.cc',
       'test/layer_tree_json_parser_unittest.cc',
@@ -106,7 +108,6 @@
       'trees/layer_tree_host_unittest_scroll.cc',
       'trees/layer_tree_host_unittest_video.cc',
       'trees/occlusion_tracker_unittest.cc',
-      'trees/quad_culler_unittest.cc',
       'trees/tree_synchronizer_unittest.cc',
     ],
     'cc_surfaces_unit_tests_source_files': [
@@ -154,6 +155,8 @@
       'test/fake_picture_pile_impl.h',
       'test/fake_proxy.cc',
       'test/fake_proxy.h',
+      'test/fake_renderer_client.cc',
+      'test/fake_renderer_client.h',
       'test/fake_rendering_stats_instrumentation.h',
       'test/fake_scoped_ui_resource.cc',
       'test/fake_scoped_ui_resource.h',
@@ -169,8 +172,6 @@
       'test/fake_video_frame_provider.h',
       'test/geometry_test_utils.cc',
       'test/geometry_test_utils.h',
-      'test/gpu_rasterization_settings.h',
-      'test/hybrid_rasterization_settings.h',
       'test/test_in_process_context_provider.cc',
       'test/test_in_process_context_provider.h',
       'test/impl_side_painting_settings.h',
@@ -267,8 +268,7 @@
         [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"',
           {
             'conditions': [
-              # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-              [ '(use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1)',
+              [ 'use_allocator!="none"',
                 {
                   'dependencies': [
                     '../base/allocator/allocator.gyp:allocator',
@@ -303,6 +303,7 @@
         'layers/layer_perftest.cc',
         'layers/picture_layer_impl_perftest.cc',
         'resources/picture_layer_tiling_perftest.cc',
+        'resources/picture_pile_impl_perftest.cc',
         'resources/raster_worker_pool_perftest.cc',
         'resources/task_graph_runner_perftest.cc',
         'resources/tile_manager_perftest.cc',
@@ -326,8 +327,7 @@
           }
         ],
         # See http://crbug.com/162998#c4 for why this is needed.
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))',
+        ['OS=="linux" and use_allocator!="none"',
           {
             'dependencies': [
               '../base/allocator/allocator.gyp:allocator',
@@ -351,6 +351,7 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../gpu/gpu.gyp:gles2_c_lib',
         '../gpu/gpu.gyp:gles2_implementation',
+        '../gpu/gpu.gyp:gl_in_process_context',
         '../gpu/gpu.gyp:gpu_unittest_utils',
         '../gpu/skia_bindings/skia_bindings.gyp:gpu_skia_bindings',
         '../skia/skia.gyp:skia',
@@ -383,7 +384,6 @@
             ],
             'variables': {
               'test_suite_name': 'cc_unittests',
-              'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)cc_unittests<(SHARED_LIB_SUFFIX)',
             },
             'includes': [ '../build/apk_test.gypi' ],
           },
@@ -395,7 +395,6 @@
             ],
             'variables': {
               'test_suite_name': 'cc_perftests',
-              'input_shlib_path': '<(SHARED_LIB_DIR)/<(SHARED_LIB_PREFIX)cc_perftests<(SHARED_LIB_SUFFIX)',
             },
             'includes': [ '../build/apk_test.gypi' ],
           },

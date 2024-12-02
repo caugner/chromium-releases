@@ -119,6 +119,7 @@ class QuicNetworkTransactionTest
     request_.method = "GET";
     request_.url = GURL("http://www.google.com/");
     request_.load_flags = 0;
+    clock_->AdvanceTime(QuicTime::Delta::FromMilliseconds(20));
   }
 
   virtual void SetUp() {
@@ -135,13 +136,6 @@ class QuicNetworkTransactionTest
     base::MessageLoop::current()->RunUntilIdle();
     HttpStreamFactory::set_use_alternate_protocols(false);
     HttpStreamFactory::SetNextProtos(std::vector<NextProto>());
-  }
-
-  scoped_ptr<QuicEncryptedPacket> ConstructRstPacket(
-      QuicPacketSequenceNumber num,
-      QuicStreamId stream_id) {
-    return maker_.MakeRstPacket(
-        num, false, stream_id, QUIC_STREAM_NO_ERROR);
   }
 
   scoped_ptr<QuicEncryptedPacket> ConstructConnectionClosePacket(
@@ -285,6 +279,15 @@ class QuicNetworkTransactionTest
         session_->http_server_properties()->GetAlternateProtocol(
             HostPortPair::FromURL(request_.url));
     EXPECT_EQ(ALTERNATE_PROTOCOL_BROKEN, alternate.protocol);
+  }
+
+  void ExpectQuicAlternateProtocolMapping() {
+    ASSERT_TRUE(session_->http_server_properties()->HasAlternateProtocol(
+        HostPortPair::FromURL(request_.url)));
+    const PortAlternateProtocolPair alternate =
+        session_->http_server_properties()->GetAlternateProtocol(
+            HostPortPair::FromURL(request_.url));
+    EXPECT_EQ(QUIC, alternate.protocol);
   }
 
   void AddHangingNonAlternateProtocolSocketData() {
@@ -645,6 +648,48 @@ TEST_P(QuicNetworkTransactionTest, ZeroRTTWithNoHttpRace) {
   SendRequestAndExpectQuicResponse("hello!");
 }
 
+TEST_P(QuicNetworkTransactionTest, ZeroRTTWithProxy) {
+  proxy_service_.reset(
+      ProxyService::CreateFixedFromPacResult("PROXY myproxy:70"));
+  HttpStreamFactory::EnableNpnSpdy3();  // Enables QUIC too.
+
+  // Since we are using a proxy, the QUIC job will not succeed.
+  MockWrite http_writes[] = {
+    MockWrite(SYNCHRONOUS, 0, "GET http://www.google.com/ HTTP/1.1\r\n"),
+    MockWrite(SYNCHRONOUS, 1, "Host: www.google.com\r\n"),
+    MockWrite(SYNCHRONOUS, 2, "Proxy-Connection: keep-alive\r\n\r\n")
+  };
+
+  MockRead http_reads[] = {
+    MockRead(SYNCHRONOUS, 3, "HTTP/1.1 200 OK\r\n"),
+    MockRead(SYNCHRONOUS, 4, kQuicAlternateProtocolHttpHeader),
+    MockRead(SYNCHRONOUS, 5, "hello world"),
+    MockRead(SYNCHRONOUS, OK, 6)
+  };
+
+  StaticSocketDataProvider http_data(http_reads, arraysize(http_reads),
+                                     http_writes, arraysize(http_writes));
+  socket_factory_.AddSocketDataProvider(&http_data);
+
+  // In order for a new QUIC session to be established via alternate-protocol
+  // without racing an HTTP connection, we need the host resolution to happen
+  // synchronously.
+  host_resolver_.set_synchronous_mode(true);
+  host_resolver_.rules()->AddIPLiteralRule("www.google.com", "192.168.0.1", "");
+  HostResolver::RequestInfo info(HostPortPair("www.google.com", 80));
+  AddressList address;
+  host_resolver_.Resolve(info,
+                         DEFAULT_PRIORITY,
+                         &address,
+                         CompletionCallback(),
+                         NULL,
+                         net_log_.bound());
+
+  CreateSession();
+  AddQuicAlternateProtocolMapping(MockCryptoClientStream::ZERO_RTT);
+  SendRequestAndExpectHttpResponse("hello world");
+}
+
 TEST_P(QuicNetworkTransactionTest, ZeroRTTWithConfirmationRequired) {
   HttpStreamFactory::EnableNpnSpdy3();  // Enables QUIC too.
 
@@ -788,6 +833,33 @@ TEST_P(QuicNetworkTransactionTest, FailedZeroRttBrokenAlternateProtocol) {
 
   EXPECT_TRUE(quic_data.at_read_eof());
   EXPECT_TRUE(quic_data.at_write_eof());
+}
+
+TEST_P(QuicNetworkTransactionTest, NoBrokenAlternateProtocolOnConnectFailure) {
+  HttpStreamFactory::EnableNpnSpdy3();  // Enables QUIC too.
+
+  // Alternate-protocol job will fail before creating a QUIC session.
+  StaticSocketDataProvider quic_data(NULL, 0, NULL, 0);
+  quic_data.set_connect_data(MockConnect(SYNCHRONOUS,
+                                         ERR_INTERNET_DISCONNECTED));
+  socket_factory_.AddSocketDataProvider(&quic_data);
+
+  // Main job which will succeed even though the alternate job fails.
+  MockRead http_reads[] = {
+    MockRead("HTTP/1.1 200 OK\r\n\r\n"),
+    MockRead("hello from http"),
+    MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
+    MockRead(ASYNC, OK)
+  };
+
+  StaticSocketDataProvider http_data(http_reads, arraysize(http_reads),
+                                     NULL, 0);
+  socket_factory_.AddSocketDataProvider(&http_data);
+
+  CreateSession();
+  AddQuicAlternateProtocolMapping(MockCryptoClientStream::COLD_START);
+  SendRequestAndExpectHttpResponse("hello from http");
+  ExpectQuicAlternateProtocolMapping();
 }
 
 TEST_P(QuicNetworkTransactionTest, ConnectionCloseDuringConnect) {

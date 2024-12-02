@@ -94,8 +94,8 @@ bool IsHTTPRef(const std::string& url) {
   if (url.empty())
     return true;
   GURL gurl(url);
-  return gurl.is_valid() && (gurl.SchemeIs(content::kHttpScheme) ||
-                             gurl.SchemeIs(content::kHttpsScheme));
+  return gurl.is_valid() && (gurl.SchemeIs(url::kHttpScheme) ||
+                             gurl.SchemeIs(url::kHttpsScheme));
 }
 
 }  // namespace
@@ -252,8 +252,8 @@ void TemplateURLParsingContext::EndElementImpl(void* ctx, const xmlChar* name) {
         // favicon from the URL.
         context->derive_image_from_url_ = true;
       } else if (context->image_is_valid_for_favicon_ && image_url.is_valid() &&
-                 (image_url.SchemeIs(content::kHttpScheme) ||
-                  image_url.SchemeIs(content::kHttpsScheme))) {
+                 (image_url.SchemeIs(url::kHttpScheme) ||
+                  image_url.SchemeIs(url::kHttpsScheme))) {
         context->data_.favicon_url = image_url;
       }
       context->image_is_valid_for_favicon_ = false;
@@ -423,10 +423,10 @@ void TemplateURLParsingContext::ProcessURLParams() {
   std::string new_query;
   bool modified = false;
   if (parameter_filter_) {
-    url_parse::Component query = url.parsed_for_possibly_invalid_spec().query;
-    url_parse::Component key, value;
+    url::Component query = url.parsed_for_possibly_invalid_spec().query;
+    url::Component key, value;
     const char* url_spec = url.spec().c_str();
-    while (url_parse::ExtractQueryKeyValue(url_spec, &query, &key, &value)) {
+    while (url::ExtractQueryKeyValue(url_spec, &query, &key, &value)) {
       std::string key_str(url_spec, key.begin, key.len);
       std::string value_str(url_spec, value.begin, value.len);
       if (parameter_filter_->KeepParameter(key_str, value_str)) {

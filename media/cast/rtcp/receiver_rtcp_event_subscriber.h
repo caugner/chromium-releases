@@ -52,10 +52,10 @@ class ReceiverRtcpEventSubscriber : public RawEventSubscriber {
   // RawEventSubscriber implementation.
   virtual void OnReceiveFrameEvent(const FrameEvent& frame_event) OVERRIDE;
   virtual void OnReceivePacketEvent(const PacketEvent& packet_event) OVERRIDE;
-  virtual void OnReceiveGenericEvent(const GenericEvent& generic_event)
-      OVERRIDE;
 
-  const RtcpEventMultiMap& get_rtcp_events() const { return rtcp_events_; }
+  // Assigns events collected to |rtcp_events| and clears them from this
+  // object.
+  void GetRtcpEventsAndReset(RtcpEventMultiMap* rtcp_events);
 
  private:
   // If |rtcp_events_.size()| exceeds |max_size_to_retain_|, remove an oldest

@@ -29,6 +29,15 @@ class TwoClientThemesSyncTest : public SyncTest {
   DISALLOW_COPY_AND_ASSIGN(TwoClientThemesSyncTest);
 };
 
+class LegacyTwoClientThemesSyncTest : public SyncTest {
+ public:
+  LegacyTwoClientThemesSyncTest() : SyncTest(TWO_CLIENT_LEGACY) {}
+  virtual ~LegacyTwoClientThemesSyncTest() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(LegacyTwoClientThemesSyncTest);
+};
+
 // TODO(akalin): Add tests for model association (i.e., tests that
 // start with SetupClients(), change the theme state, then call
 // SetupSync()).
@@ -196,7 +205,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest, CustomCustomRace) {
 }
 
 // TCM ID - 3723272.
-IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest, DisableThemes) {
+IN_PROC_BROWSER_TEST_F(LegacyTwoClientThemesSyncTest, DisableThemes) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_FALSE(UsingCustomTheme(GetProfile(0)));
@@ -206,7 +215,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest, DisableThemes) {
   ASSERT_TRUE(GetClient(1)->DisableSyncForDatatype(syncer::THEMES));
   UseCustomTheme(GetProfile(0), 0);
   UseCustomTheme(verifier(), 0);
-  ASSERT_TRUE(AwaitCommitActivityCompletion(GetClient(0)->service()));
+  ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
 
   ASSERT_EQ(GetCustomTheme(0), GetThemeID(GetProfile(0)));
   ASSERT_FALSE(UsingCustomTheme(GetProfile(1)));
@@ -233,7 +242,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientThemesSyncTest, DisableSync) {
   UseCustomTheme(GetProfile(0), 0);
   UseCustomTheme(verifier(), 0);
   ASSERT_TRUE(
-      AwaitCommitActivityCompletion(GetClient(0)->service()));
+      AwaitCommitActivityCompletion(GetSyncService((0))));
 
   ASSERT_EQ(GetCustomTheme(0), GetThemeID(GetProfile(0)));
   ASSERT_FALSE(UsingCustomTheme(GetProfile(1)));

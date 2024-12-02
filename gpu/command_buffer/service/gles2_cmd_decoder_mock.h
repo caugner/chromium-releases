@@ -61,7 +61,6 @@ class MockGLES2Decoder : public GLES2Decoder {
       RestoreAllTextureUnitBindings, void(const ContextState* state));
   MOCK_CONST_METHOD1(
       RestoreActiveTextureUnitBinding, void(unsigned int target));
-  MOCK_CONST_METHOD1(RestoreAttribute, void(unsigned index));
   MOCK_CONST_METHOD0(RestoreBufferBindings, void());
   MOCK_CONST_METHOD0(RestoreFramebufferBindings, void());
   MOCK_CONST_METHOD0(RestoreGlobalState, void());
@@ -82,6 +81,7 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(ResetAsyncPixelTransferManagerForTest, void());
   MOCK_METHOD1(SetAsyncPixelTransferManagerForTest,
       void(AsyncPixelTransferManager*));
+  MOCK_METHOD1(SetIgnoreCachedStateForTest, void(bool ignore));
   MOCK_METHOD3(DoCommand, error::Error(unsigned int command,
                                        unsigned int arg_count,
                                        const void* cmd_data));

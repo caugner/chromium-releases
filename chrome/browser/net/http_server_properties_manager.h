@@ -89,7 +89,7 @@ class HttpServerPropertiesManager
 
   // Returns true if |server| supports SPDY. Should only be called from IO
   // thread.
-  virtual bool SupportsSpdy(const net::HostPortPair& server) const OVERRIDE;
+  virtual bool SupportsSpdy(const net::HostPortPair& server) OVERRIDE;
 
   // Add |server| as the SPDY server which supports SPDY protocol into the
   // persisitent store. Should only be called from IO thread.
@@ -112,6 +112,14 @@ class HttpServerPropertiesManager
 
   // Sets the Alternate-Protocol for |server| to be BROKEN.
   virtual void SetBrokenAlternateProtocol(
+      const net::HostPortPair& server) OVERRIDE;
+
+  // Returns true if Alternate-Protocol for |server| was recently BROKEN.
+  virtual bool WasAlternateProtocolRecentlyBroken(
+      const net::HostPortPair& server) OVERRIDE;
+
+  // Confirms that Alternate-Protocol for |server| is working.
+  virtual void ConfirmAlternateProtocol(
       const net::HostPortPair& server) OVERRIDE;
 
   // Clears the Alternate-Protocol for |server|.

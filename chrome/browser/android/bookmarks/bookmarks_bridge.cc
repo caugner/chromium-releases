@@ -6,15 +6,16 @@
 
 #include "base/android/jni_string.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/pref_names.h"
+#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/core/browser/bookmark_utils.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/BookmarksBridge_jni.h"
 
@@ -233,20 +234,16 @@ ScopedJavaLocalRef<jobject> BookmarksBridge::CreateJavaBookmark(
       IsEditable(node));
 }
 
-void BookmarksBridge::ExtractBookmarkNodeInformation(
-    const BookmarkNode* node,
-    jobject j_result_obj) {
+void BookmarksBridge::ExtractBookmarkNodeInformation(const BookmarkNode* node,
+                                                     jobject j_result_obj) {
   JNIEnv* env = AttachCurrentThread();
   if (!IsReachable(node))
     return;
   Java_BookmarksBridge_addToList(
-      env,
-      j_result_obj,
-      CreateJavaBookmark(node).obj());
+      env, j_result_obj, CreateJavaBookmark(node).obj());
 }
 
-const BookmarkNode* BookmarksBridge::GetNodeByID(long node_id,
-                                                 int type) {
+const BookmarkNode* BookmarksBridge::GetNodeByID(long node_id, int type) {
   const BookmarkNode* node;
   if (type == kBookmarkTypeManaged) {
     node = managed_bookmarks_shim_->GetNodeByID(
@@ -255,13 +252,13 @@ const BookmarkNode* BookmarksBridge::GetNodeByID(long node_id,
     node = partner_bookmarks_shim_->GetNodeByID(
         static_cast<int64>(node_id));
   } else {
-    node = bookmark_model_->GetNodeByID(static_cast<int64>(node_id));
+    node = GetBookmarkNodeByID(bookmark_model_, static_cast<int64>(node_id));
   }
   return node;
 }
 
-const BookmarkNode* BookmarksBridge::GetFolderWithFallback(
-    long folder_id, int type) {
+const BookmarkNode* BookmarksBridge::GetFolderWithFallback(long folder_id,
+                                                           int type) {
   const BookmarkNode* folder = GetNodeByID(folder_id, type);
   if (!folder || folder->type() == BookmarkNode::URL ||
       !IsFolderAvailable(folder)) {
@@ -408,7 +405,8 @@ void BookmarksBridge::BookmarkNodeAdded(BookmarkModel* model,
 void BookmarksBridge::BookmarkNodeRemoved(BookmarkModel* model,
                                           const BookmarkNode* parent,
                                           int old_index,
-                                          const BookmarkNode* node) {
+                                          const BookmarkNode* node,
+                                          const std::set<GURL>& removed_urls) {
   if (!IsLoaded())
     return;
 

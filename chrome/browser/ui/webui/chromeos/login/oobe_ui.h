@@ -23,7 +23,6 @@ class DictionaryValue;
 namespace chromeos {
 class AppLaunchSplashScreenActor;
 class BaseScreenHandler;
-class CoreOobeHandler;
 class ErrorScreenHandler;
 class KioskAppMenuHandler;
 class KioskEnableScreenActor;
@@ -51,7 +50,16 @@ class OobeUI : public OobeDisplay,
         Screen current_screen, Screen new_screen) = 0;
   };
 
+  // List of known types of OobeUI. Type added as path in chrome://oobe url, for
+  // example chrome://oobe/user-adding.
+  static const char kOobeDisplay[];
+  static const char kLoginDisplay[];
+  static const char kLockDisplay[];
+  static const char kUserAddingDisplay[];
+  static const char kAppLaunchSplashDisplay[];
+
   // JS oobe/login screens names.
+  static const char kScreenOobeHIDDetection[];
   static const char kScreenOobeNetwork[];
   static const char kScreenOobeEula[];
   static const char kScreenOobeUpdate[];
@@ -71,6 +79,7 @@ class OobeUI : public OobeDisplay,
   static const char kScreenAppLaunchSplash[];
   static const char kScreenConfirmPassword[];
   static const char kScreenFatalError[];
+  static const char kScreenHIDDetection[];
 
   OobeUI(content::WebUI* web_ui, const GURL& url);
   virtual ~OobeUI();
@@ -78,6 +87,7 @@ class OobeUI : public OobeDisplay,
   // OobeDisplay implementation:
   virtual void ShowScreen(WizardScreen* screen) OVERRIDE;
   virtual void HideScreen(WizardScreen* screen) OVERRIDE;
+  virtual CoreOobeActor* GetCoreOobeActor() OVERRIDE;
   virtual UpdateScreenActor* GetUpdateScreenActor() OVERRIDE;
   virtual NetworkScreenActor* GetNetworkScreenActor() OVERRIDE;
   virtual EulaScreenActor* GetEulaScreenActor() OVERRIDE;
@@ -96,6 +106,7 @@ class OobeUI : public OobeDisplay,
       GetAppLaunchSplashScreenActor() OVERRIDE;
   virtual bool IsJSReady(const base::Closure& display_is_ready_callback)
       OVERRIDE;
+  virtual HIDDetectionScreenActor* GetHIDDetectionScreenActor() OVERRIDE;
 
   // Collects localized strings from the owned handlers.
   void GetLocalizedStrings(base::DictionaryValue* localized_strings);
@@ -128,6 +139,10 @@ class OobeUI : public OobeDisplay,
   void RemoveObserver(Observer* observer);
 
   Screen current_screen() const { return current_screen_; }
+
+  Screen previous_screen() const { return previous_screen_; }
+
+  const std::string& display_type() const { return display_type_; }
 
   const std::string& GetScreenName(Screen screen) const;
 
@@ -163,6 +178,7 @@ class OobeUI : public OobeDisplay,
   NetworkScreenActor* network_screen_actor_;
   EulaScreenActor* eula_screen_actor_;
   EnrollmentScreenActor* enrollment_screen_actor_;
+  HIDDetectionScreenActor* hid_detection_screen_actor_;
   ResetScreenActor* reset_screen_actor_;
   KioskAutolaunchScreenActor* autolaunch_screen_actor_;
   KioskEnableScreenActor* kiosk_enable_screen_actor_;
@@ -192,6 +208,9 @@ class OobeUI : public OobeDisplay,
 
   // Id of the current oobe/login screen.
   Screen current_screen_;
+
+  // Id of the previous oobe/login screen.
+  Screen previous_screen_;
 
   // Maps JS screen names to screen ids.
   std::map<std::string, Screen> screen_ids_;

@@ -150,6 +150,14 @@ class SpellCheckObserver : public content::WebContentsObserver {
   [historySwiper_ touchesEndedWithEvent:event];
 }
 
+- (BOOL)canRubberbandLeft:(NSView*)view {
+  return [historySwiper_ canRubberbandLeft:view];
+}
+
+- (BOOL)canRubberbandRight:(NSView*)view {
+  return [historySwiper_ canRubberbandRight:view];
+}
+
 // HistorySwiperDelegate methods
 
 - (BOOL)shouldAllowHistorySwiping {
@@ -210,7 +218,10 @@ class SpellCheckObserver : public content::WebContentsObserver {
   // that we want to replace the selected word in the text with.
   NSString* newWord = [[sender selectedCell] stringValue];
   if (newWord != nil) {
-    renderWidgetHost_->Replace(base::SysNSStringToUTF16(newWord));
+    content::WebContents* webContents =
+        content::WebContents::FromRenderViewHost(
+            RenderViewHost::From(renderWidgetHost_));
+    webContents->Replace(base::SysNSStringToUTF16(newWord));
   }
 }
 

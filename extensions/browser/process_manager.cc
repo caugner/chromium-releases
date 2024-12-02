@@ -14,7 +14,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -34,6 +33,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/process_manager_observer.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -229,7 +229,8 @@ ProcessManager::ProcessManager(BrowserContext* context,
     weak_ptr_factory_(this) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
                  content::Source<BrowserContext>(original_context));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<BrowserContext>(original_context));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<BrowserContext>(original_context));
@@ -289,6 +290,14 @@ const ProcessManager::ViewSet ProcessManager::GetAllViews() const {
     result.insert(iter->first);
   }
   return result;
+}
+
+void ProcessManager::AddObserver(ProcessManagerObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void ProcessManager::RemoveObserver(ProcessManagerObserver* observer) {
+  observer_list_.RemoveObserver(observer);
 }
 
 bool ProcessManager::CreateBackgroundHost(const Extension* extension,
@@ -642,7 +651,7 @@ void ProcessManager::Observe(int type,
       break;
     }
 
-    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
       BrowserContext* context = content::Source<BrowserContext>(source).ptr();
       ExtensionSystem* system = ExtensionSystem::Get(context);
       if (system->ready().is_signaled()) {
@@ -780,8 +789,9 @@ void ProcessManager::CreateBackgroundHostsForProfileStartup() {
        ++extension) {
     CreateBackgroundHostForExtensionLoad(this, extension->get());
 
-    RuntimeEventRouter::DispatchOnStartupEvent(GetBrowserContext(),
-                                               (*extension)->id());
+    FOR_EACH_OBSERVER(ProcessManagerObserver,
+                      observer_list_,
+                      OnBackgroundHostStartup(*extension));
   }
   startup_background_hosts_created_ = true;
 

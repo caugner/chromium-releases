@@ -30,10 +30,14 @@ class HotwordPrivateEventService : public BrowserContextKeyedAPI {
 
   void OnEnabledChanged(const std::string& pref_name);
 
+  void OnHotwordSessionRequested();
+
+  void OnHotwordSessionStopped();
+
  private:
   friend class BrowserContextKeyedAPIFactory<HotwordPrivateEventService>;
 
-  void SignalEvent();
+  void SignalEvent(const std::string& event_name);
 
   Profile* profile_;
   PrefChangeRegistrar pref_change_registrar_;
@@ -49,7 +53,7 @@ class HotwordPrivateSetEnabledFunction : public ChromeSyncExtensionFunction {
   virtual ~HotwordPrivateSetEnabledFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class HotwordPrivateSetAudioLoggingEnabledFunction
@@ -62,7 +66,7 @@ class HotwordPrivateSetAudioLoggingEnabledFunction
   virtual ~HotwordPrivateSetAudioLoggingEnabledFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
 };
 
 class HotwordPrivateGetStatusFunction : public ChromeSyncExtensionFunction {
@@ -74,7 +78,33 @@ class HotwordPrivateGetStatusFunction : public ChromeSyncExtensionFunction {
   virtual ~HotwordPrivateGetStatusFunction() {}
 
   // ExtensionFunction:
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunSync() OVERRIDE;
+};
+
+class HotwordPrivateSetHotwordSessionStateFunction
+    : public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("hotwordPrivate.setHotwordSessionState",
+                             HOTWORDPRIVATE_SETHOTWORDSESSIONSTATE);
+
+ protected:
+  virtual ~HotwordPrivateSetHotwordSessionStateFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunSync() OVERRIDE;
+};
+
+class HotwordPrivateNotifyHotwordRecognitionFunction
+    : public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("hotwordPrivate.notifyHotwordRecognition",
+                             HOTWORDPRIVATE_NOTIFYHOTWORDRECOGNITION);
+
+ protected:
+  virtual ~HotwordPrivateNotifyHotwordRecognitionFunction() {}
+
+  // ExtensionFunction:
+  virtual bool RunSync() OVERRIDE;
 };
 
 }  // namespace extensions

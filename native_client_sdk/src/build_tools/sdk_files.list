@@ -40,6 +40,7 @@ examples/Makefile
 examples/tutorial/debugging/*
 examples/tutorial/dlopen/*
 examples/tutorial/load_progress/*
+examples/tutorial/multi_platform/*
 [win]examples/tutorial/make.bat
 examples/tutorial/Makefile
 examples/tutorial/testing/*
@@ -72,11 +73,9 @@ include/pnacl/netinet6/*
 include/pnacl/sys/*
 include/ppapi/c/*
 include/ppapi/c/dev/*
-include/ppapi/c/extensions/dev/*
 include/ppapi/c/private/*
 include/ppapi/cpp/*
 include/ppapi/cpp/dev/*
-include/ppapi/cpp/extensions/*
 include/ppapi/cpp/private/*
 include/ppapi/gles2/*
 include/ppapi/lib/gl/gles2/*
@@ -415,11 +414,13 @@ tools/create_nmf.py
 tools/decode_dump.py
 [linux,mac]tools/dump_syms
 tools/fix_deps.py
+tools/fix_manifest.py
 tools/genhttpfs.py
 tools/getos.py
 tools/host_gcc.mk
 tools/host_vc.mk
 tools/httpd.py
+[linux]tools/irt_core_arm.nexe
 tools/irt_core_x86_32.nexe
 tools/irt_core_x86_64.nexe
 tools/lib/elf.py
@@ -430,6 +431,7 @@ tools/lib/quote.py
 [linux,mac]tools/minidump_stackwalk
 tools/nacl_config.py
 tools/nacl_gcc.mk
+[linux]tools/nacl_helper_bootstrap_arm
 [linux]tools/nacl_helper_bootstrap_x86_32
 [linux]tools/nacl_helper_bootstrap_x86_64
 tools/nacl_llvm.mk
@@ -438,5 +440,6 @@ tools/ncval.py
 tools/oshelpers.py
 tools/run.py
 tools/sel_ldr.py
+[linux]tools/sel_ldr_arm
 tools/sel_ldr_x86_32${EXE_EXT}
 tools/sel_ldr_x86_64${EXE_EXT}

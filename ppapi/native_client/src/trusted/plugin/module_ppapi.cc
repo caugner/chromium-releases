@@ -12,6 +12,7 @@
 #include "ppapi/native_client/src/trusted/plugin/module_ppapi.h"
 #include "ppapi/native_client/src/trusted/plugin/nacl_entry_points.h"
 #include "ppapi/native_client/src/trusted/plugin/plugin.h"
+#include "ppapi/native_client/src/trusted/plugin/utility.h"
 
 namespace plugin {
 
@@ -41,6 +42,7 @@ bool ModulePpapi::Init() {
                    "GetBrowserInterface returned NULL\n"));
     return false;
   }
+  SetNaClInterface(private_interface_);
 
   launch_nacl_process = reinterpret_cast<LaunchNaClProcessFunc>(
       private_interface_->LaunchSelLdr);
@@ -70,7 +72,7 @@ pp::Instance* ModulePpapi::CreateInstance(PP_Instance pp_instance) {
   MODULE_PRINTF(("ModulePpapi::CreateInstance (pp_instance=%" NACL_PRId32
                  ")\n",
                  pp_instance));
-  Plugin* plugin = Plugin::New(pp_instance);
+  Plugin* plugin = new Plugin(pp_instance);
   MODULE_PRINTF(("ModulePpapi::CreateInstance (return %p)\n",
                  static_cast<void* >(plugin)));
   return plugin;

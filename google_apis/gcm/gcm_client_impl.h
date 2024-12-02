@@ -15,11 +15,14 @@
 #include "base/stl_util.h"
 #include "google_apis/gcm/base/mcs_message.h"
 #include "google_apis/gcm/engine/gcm_store.h"
+#include "google_apis/gcm/engine/gservices_settings.h"
 #include "google_apis/gcm/engine/mcs_client.h"
 #include "google_apis/gcm/engine/registration_request.h"
 #include "google_apis/gcm/engine/unregistration_request.h"
 #include "google_apis/gcm/gcm_client.h"
+#include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
 #include "google_apis/gcm/protocol/android_checkin.pb.h"
+#include "google_apis/gcm/protocol/checkin.pb.h"
 #include "net/base/net_log.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -27,7 +30,12 @@ class GURL;
 
 namespace base {
 class Clock;
+class Time;
 }  // namespace base
+
+namespace mcs_proto {
+class DataMessageStanza;
+}  // namespace mcs_proto
 
 namespace net {
 class HttpNetworkSession;
@@ -51,12 +59,14 @@ class GCM_EXPORT GCMInternalsBuilder {
       const std::string& version,
       base::Clock* clock,
       ConnectionFactory* connection_factory,
-      GCMStore* gcm_store);
+      GCMStore* gcm_store,
+      GCMStatsRecorder* recorder);
   virtual scoped_ptr<ConnectionFactory> BuildConnectionFactory(
       const std::vector<GURL>& endpoints,
       const net::BackoffEntry::Policy& backoff_policy,
       scoped_refptr<net::HttpNetworkSession> network_session,
-      net::NetLog* net_log);
+      net::NetLog* net_log,
+      GCMStatsRecorder* recorder);
 };
 
 // Implements the GCM Client. It is used to coordinate MCS Client (communication
@@ -86,6 +96,8 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
   virtual void Send(const std::string& app_id,
                     const std::string& receiver_id,
                     const OutgoingMessage& message) OVERRIDE;
+  virtual void SetRecording(bool recording) OVERRIDE;
+  virtual void ClearActivityLogs() OVERRIDE;
   virtual GCMStatistics GetStatistics() const OVERRIDE;
 
  private:
@@ -162,12 +174,23 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
   void OnReady();
 
   // Starts a first time device checkin.
-  void StartCheckin(const CheckinInfo& checkin_info);
-  // Completes the device checkin request.
-  // |android_id| and |security_token| are expected to be non-zero or an error
-  // is triggered. Function also cleans up the pending checkin.
-  void OnCheckinCompleted(uint64 android_id,
-                          uint64 security_token);
+  void StartCheckin();
+  // Completes the device checkin request by parsing the |checkin_response|.
+  // Function also cleans up the pending checkin.
+  void OnCheckinCompleted(
+      const checkin_proto::AndroidCheckinResponse& checkin_response);
+
+  // Callback passed to GCMStore::SetGServicesSettings.
+  void SetGServicesSettingsCallback(bool success);
+
+  // Schedules next periodic device checkin and makes sure there is at most one
+  // pending checkin at a time. This function is meant to be called after a
+  // successful checkin.
+  void SchedulePeriodicCheckin();
+  // Gets the time until next checkin.
+  base::TimeDelta GetTimeToNextCheckin() const;
+  // Callback for setting last checkin time in the |gcm_store_|.
+  void SetLastCheckinTimeCallback(bool success);
 
   // Callback for persisting device credentials in the |gcm_store_|.
   void SetDeviceCredentialsCallback(bool success);
@@ -205,6 +228,9 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
 
   // Builder for the GCM internals (mcs client, etc.).
   scoped_ptr<GCMInternalsBuilder> internals_builder_;
+
+  // Recorder that logs GCM activities.
+  GCMStatsRecorder recorder_;
 
   // State of the GCM Client Implementation.
   State state_;
@@ -251,6 +277,15 @@ class GCM_EXPORT GCMClientImpl : public GCMClient {
   PendingUnregistrationRequests pending_unregistration_requests_;
   STLValueDeleter<PendingUnregistrationRequests>
       pending_unregistration_requests_deleter_;
+
+  // G-services settings that were provided by MCS.
+  GServicesSettings gservices_settings_;
+
+  // Time of the last successful checkin.
+  base::Time last_checkin_time_;
+
+  // Factory for creating references when scheduling periodic checkin.
+  base::WeakPtrFactory<GCMClientImpl> periodic_checkin_ptr_factory_;
 
   // Factory for creating references in callbacks.
   base::WeakPtrFactory<GCMClientImpl> weak_ptr_factory_;

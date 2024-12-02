@@ -23,7 +23,6 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/insets.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
@@ -84,8 +83,6 @@ ExtensionPopup::ExtensionPopup(extensions::ExtensionViewHost* host,
   host->view()->set_container(this);
   // Use OnNativeFocusChange to check for child window activation on deactivate.
   set_close_on_deactivate(false);
-  // Make the bubble move with its anchor (during inspection, etc.).
-  set_move_with_anchor(true);
 
   // Wait to show the popup until the contained host finishes loading.
   registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
@@ -161,7 +158,10 @@ void ExtensionPopup::OnWidgetDestroying(views::Widget* widget) {
   aura::Window* bubble_window = GetWidget()->GetNativeWindow();
   aura::client::ActivationClient* activation_client =
       aura::client::GetActivationClient(bubble_window->GetRootWindow());
-  activation_client->RemoveObserver(this);
+  // If the popup was being inspected with devtools and the browser window was
+  // closed, then the root window and activation client are already destroyed.
+  if (activation_client)
+    activation_client->RemoveObserver(this);
 #endif
 }
 
@@ -251,7 +251,7 @@ void ExtensionPopup::ShowBubble() {
   GetWidget()->Show();
 
   // Focus on the host contents when the bubble is first shown.
-  host()->host_contents()->GetView()->Focus();
+  host()->host_contents()->Focus();
 
   if (inspect_with_devtools_) {
     DevToolsWindow::OpenDevToolsWindow(host()->render_view_host(),

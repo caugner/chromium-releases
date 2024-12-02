@@ -14,7 +14,6 @@
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_cert_request_info.h"
@@ -155,7 +154,8 @@ void SSLClientCertificateSelector::Init() {
   DCHECK(modal_delegate);
   window_ = views::Widget::CreateWindowAsFramelessChild(
       this, modal_delegate->GetWebContentsModalDialogHost()->GetHostView());
-  web_contents_modal_dialog_manager->ShowDialog(window_->GetNativeView());
+  web_contents_modal_dialog_manager->ShowModalDialog(
+      window_->GetNativeView());
 
   // Select the first row automatically.  This must be done after the dialog has
   // been created.
@@ -266,7 +266,7 @@ void SSLClientCertificateSelector::ButtonPressed(
     net::X509Certificate* cert = GetSelectedCert();
     if (cert)
       ShowCertificateViewer(web_contents_,
-                            web_contents_->GetView()->GetTopLevelNativeWindow(),
+                            web_contents_->GetTopLevelNativeWindow(),
                             cert);
   }
 }
@@ -309,7 +309,7 @@ void ShowSSLClientCertificateSelector(
     net::SSLCertRequestInfo* cert_request_info,
     const chrome::SelectCertificateCallback& callback) {
   DVLOG(1) << __FUNCTION__ << " " << contents;
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   (new SSLClientCertificateSelector(
        contents, network_session, cert_request_info, callback))->Init();
 }

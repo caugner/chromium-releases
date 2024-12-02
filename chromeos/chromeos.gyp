@@ -7,8 +7,7 @@
     'chromium_code': 1,
   },
   'includes': [
-    'chromeos_memory.gypi',
-    'chromeos_tools.gypi',
+    'chromeos_tools.gypi'
   ],
   'targets': [
     {
@@ -17,6 +16,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_prefs',
+        '../components/components.gyp:cloud_policy_proto',
         '../components/components.gyp:onc_component',
         '../crypto/crypto.gyp:crypto',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -26,6 +26,7 @@
         '../net/net.gyp:net',
         '../third_party/icu/icu.gyp:icui18n',
         '../third_party/libxml/libxml.gyp:libxml',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../ui/gfx/gfx.gyp:gfx_geometry',
         '../url/url.gyp:url_lib',
         'cryptohome_proto',
@@ -86,10 +87,18 @@
         'dbus/bluetooth_device_client.h',
         'dbus/bluetooth_gatt_characteristic_client.cc',
         'dbus/bluetooth_gatt_characteristic_client.h',
+        'dbus/bluetooth_gatt_characteristic_service_provider.cc',
+        'dbus/bluetooth_gatt_characteristic_service_provider.h',
         'dbus/bluetooth_gatt_descriptor_client.cc',
         'dbus/bluetooth_gatt_descriptor_client.h',
+        'dbus/bluetooth_gatt_descriptor_service_provider.cc',
+        'dbus/bluetooth_gatt_descriptor_service_provider.h',
+        'dbus/bluetooth_gatt_manager_client.cc',
+        'dbus/bluetooth_gatt_manager_client.h',
         'dbus/bluetooth_gatt_service_client.cc',
         'dbus/bluetooth_gatt_service_client.h',
+        'dbus/bluetooth_gatt_service_service_provider.cc',
+        'dbus/bluetooth_gatt_service_service_provider.h',
         'dbus/bluetooth_input_client.cc',
         'dbus/bluetooth_input_client.h',
         'dbus/bluetooth_profile_manager_client.cc',
@@ -121,10 +130,18 @@
         'dbus/fake_bluetooth_device_client.h',
         'dbus/fake_bluetooth_gatt_characteristic_client.cc',
         'dbus/fake_bluetooth_gatt_characteristic_client.h',
+        'dbus/fake_bluetooth_gatt_characteristic_service_provider.cc',
+        'dbus/fake_bluetooth_gatt_characteristic_service_provider.h',
         'dbus/fake_bluetooth_gatt_descriptor_client.cc',
         'dbus/fake_bluetooth_gatt_descriptor_client.h',
+        'dbus/fake_bluetooth_gatt_descriptor_service_provider.cc',
+        'dbus/fake_bluetooth_gatt_descriptor_service_provider.h',
+        'dbus/fake_bluetooth_gatt_manager_client.cc',
+        'dbus/fake_bluetooth_gatt_manager_client.h',
         'dbus/fake_bluetooth_gatt_service_client.cc',
         'dbus/fake_bluetooth_gatt_service_client.h',
+        'dbus/fake_bluetooth_gatt_service_service_provider.cc',
+        'dbus/fake_bluetooth_gatt_service_service_provider.h',
         'dbus/fake_bluetooth_input_client.cc',
         'dbus/fake_bluetooth_input_client.h',
         'dbus/fake_bluetooth_profile_manager_client.cc',
@@ -141,6 +158,8 @@
         'dbus/fake_gsm_sms_client.h',
         'dbus/fake_introspectable_client.cc',
         'dbus/fake_introspectable_client.h',
+        'dbus/fake_lorgnette_manager_client.cc',
+        'dbus/fake_lorgnette_manager_client.h',
         'dbus/fake_modem_messaging_client.cc',
         'dbus/fake_modem_messaging_client.h',
         'dbus/fake_nfc_adapter_client.cc',
@@ -203,10 +222,14 @@
         'dbus/image_burner_client.h',
         'dbus/introspectable_client.cc',
         'dbus/introspectable_client.h',
+        'dbus/lorgnette_manager_client.cc',
+        'dbus/lorgnette_manager_client.h',
         'dbus/modem_messaging_client.cc',
         'dbus/modem_messaging_client.h',
         'dbus/permission_broker_client.cc',
         'dbus/permission_broker_client.h',
+        'dbus/pipe_reader.cc',
+        'dbus/pipe_reader.h',
         'dbus/power_manager_client.cc',
         'dbus/power_manager_client.h',
         'dbus/power_policy_controller.cc',
@@ -227,8 +250,8 @@
         'ime/component_extension_ime_manager.h',
         'ime/extension_ime_util.cc',
         'ime/extension_ime_util.h',
-        'ime/fake_xkeyboard.cc',
-        'ime/fake_xkeyboard.h',
+        'ime/fake_ime_keyboard.cc',
+        'ime/fake_ime_keyboard.h',
         'ime/composition_text.cc',
         'ime/composition_text.h',
         'ime/input_method_delegate.h',
@@ -238,8 +261,9 @@
         'ime/input_method_manager.h',
         'ime/input_method_whitelist.cc',
         'ime/input_method_whitelist.h',
-        'ime/xkeyboard.cc',
-        'ime/xkeyboard.h',
+        'ime/ime_keyboard.h',
+        'ime/ime_keyboard_ozone.cc',
+        'ime/ime_keyboard_x11.cc',
         'login/login_state.cc',
         'login/login_state.h',
         'network/certificate_pattern.cc',
@@ -354,12 +378,13 @@
         ['use_x11 == 1', {
           'dependencies': [
             '../build/linux/system.gyp:x11',
+            '../ui/gfx/gfx.gyp:gfx_x11',
           ],
         }, {
           # use_x11 == 0
           'sources!': [
-            'ime/xkeyboard.cc',
-            'ime/xkeyboard.h',
+            'ime/keyboard_controller.cc',
+            'ime/ime_keyboard.h',
           ],
         }],
       ],
@@ -489,7 +514,7 @@
         'ime/composition_text_unittest.cc',
         'ime/input_method_manager.h',
         'ime/input_method_whitelist_unittest.cc',
-        'ime/xkeyboard_unittest.cc',
+        'ime/ime_keyboard_x11_unittest.cc',
         'login/login_state_unittest.cc',
         'network/client_cert_resolver_unittest.cc',
         'network/geolocation_handler_unittest.cc',
@@ -522,13 +547,17 @@
         '..',
       ],
       'conditions': [
-        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
-        [ '(use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1)', {
+        [ 'use_allocator!="none"', {
            'dependencies': [
               '../base/allocator/allocator.gyp:allocator',
             ],
           },
         ],
+        ['use_x11 == 1', {
+          'dependencies': [
+            '../ui/gfx/gfx.gyp:gfx_x11',
+          ],
+        }]
       ],
     },
     {

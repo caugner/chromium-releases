@@ -106,13 +106,14 @@ class MediaSourceDelegate : public media::DemuxerHost {
   // Called on the main thread to check whether the video stream is encrypted.
   bool IsVideoEncrypted();
 
+  // Gets the ChunkDemuxer timeline offset.
+  base::Time GetTimelineOffset() const;
+
  private:
   // This is private to enforce use of the Destroyer.
   virtual ~MediaSourceDelegate();
 
   // Methods inherited from DemuxerHost.
-  virtual void SetTotalBytes(int64 total_bytes) OVERRIDE;
-  virtual void AddBufferedByteRange(int64 start, int64 end) OVERRIDE;
   virtual void AddBufferedTimeRange(base::TimeDelta start,
                                     base::TimeDelta end) OVERRIDE;
   virtual void SetDuration(base::TimeDelta duration) OVERRIDE;
@@ -170,7 +171,7 @@ class MediaSourceDelegate : public media::DemuxerHost {
                      const scoped_refptr<media::DecoderBuffer>& buffer);
 
   // Helper function for calculating duration.
-  int GetDurationMs();
+  base::TimeDelta GetDuration() const;
 
   bool IsSeeking() const;
 

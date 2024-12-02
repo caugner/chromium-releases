@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 
 #include "net/base/ip_endpoint.h"
+#include "net/quic/congestion_control/tcp_receiver.h"
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/quic_random.h"
 #include "net/quic/quic_clock.h"
@@ -29,6 +30,7 @@
 
 const int kEpollFlags = EPOLLIN | EPOLLOUT | EPOLLET;
 static const char kSourceAddressTokenSecret[] = "secret";
+const uint32 kServerInitialFlowControlWindow = 100 * net::kMaxPacketSize;
 
 namespace net {
 namespace tools {
@@ -40,17 +42,17 @@ QuicServer::QuicServer()
       overflow_supported_(false),
       use_recvmmsg_(false),
       crypto_config_(kSourceAddressTokenSecret, QuicRandom::GetInstance()),
-      supported_versions_(QuicSupportedVersions()) {
+      supported_versions_(QuicSupportedVersions()),
+      server_initial_flow_control_receive_window_(
+          kServerInitialFlowControlWindow) {
   // Use hardcoded crypto parameters for now.
   config_.SetDefaults();
-  config_.set_initial_round_trip_time_us(kMaxInitialRoundTripTimeUs, 0);
-  config_.set_server_initial_congestion_window(kMaxInitialWindow,
-                                               kDefaultInitialWindow);
   Initialize();
 }
 
 QuicServer::QuicServer(const QuicConfig& config,
-                       const QuicVersionVector& supported_versions)
+                       const QuicVersionVector& supported_versions,
+                       uint32 server_initial_flow_control_receive_window)
     : port_(0),
       fd_(-1),
       packets_dropped_(0),
@@ -58,7 +60,9 @@ QuicServer::QuicServer(const QuicConfig& config,
       use_recvmmsg_(false),
       config_(config),
       crypto_config_(kSourceAddressTokenSecret, QuicRandom::GetInstance()),
-      supported_versions_(supported_versions) {
+      supported_versions_(supported_versions),
+      server_initial_flow_control_receive_window_(
+          server_initial_flow_control_receive_window) {
   Initialize();
 }
 
@@ -107,6 +111,19 @@ bool QuicServer::Listen(const IPEndPoint& address) {
     overflow_supported_ = true;
   }
 
+  // These send and receive buffer sizes are sized for a single connection,
+  // because the default usage of QuicServer is as a test server with one or
+  // two clients.  Adjust higher for use with many clients.
+  if (!QuicSocketUtils::SetReceiveBufferSize(fd_,
+                                             TcpReceiver::kReceiveWindowTCP)) {
+    return false;
+  }
+
+  if (!QuicSocketUtils::SetSendBufferSize(fd_,
+                                          TcpReceiver::kReceiveWindowTCP)) {
+    return false;
+  }
+
   // Enable the socket option that allows the local address to be
   // returned if the socket is bound to more than on address.
   int get_local_ip = 1;
@@ -148,7 +165,11 @@ bool QuicServer::Listen(const IPEndPoint& address) {
 
   epoll_server_.RegisterFD(fd_, this, kEpollFlags);
   dispatcher_.reset(new QuicDispatcher(
-      config_, crypto_config_, supported_versions_, &epoll_server_));
+      config_,
+      crypto_config_,
+      supported_versions_,
+      &epoll_server_,
+      server_initial_flow_control_receive_window_));
   dispatcher_->Initialize(fd_);
 
   return true;

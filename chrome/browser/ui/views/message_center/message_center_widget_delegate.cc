@@ -12,7 +12,6 @@
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/gfx/screen.h"
 #include "ui/message_center/message_center_style.h"
-#include "ui/message_center/message_center_util.h"
 #include "ui/message_center/views/message_center_view.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/border.h"
@@ -92,9 +91,15 @@ const views::Widget* MessageCenterWidgetDelegate::GetWidget() const {
 void MessageCenterWidgetDelegate::OnWidgetActivationChanged(
     views::Widget* widget,
     bool active) {
+  // Some Linux users set 'focus-follows-mouse' where the activation is lost
+  // immediately after the mouse exists from the bubble, which is a really bad
+  // experience. Disable hiding until the bug around the focus is fixed.
+  // TODO(erg, pkotwicz): fix the activation issue and then remove this ifdef.
+#if !defined(OS_LINUX)
   if (!active) {
     tray_->SendHideMessageCenter();
   }
+#endif
 }
 
 void MessageCenterWidgetDelegate::OnWidgetClosing(views::Widget* widget) {

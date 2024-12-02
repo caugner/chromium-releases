@@ -14,7 +14,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "jni/OmniboxPrerender_jni.h"
 #include "url/gurl.h"
 
@@ -47,6 +46,7 @@ void OmniboxPrerender::Clear(JNIEnv* env,
   AutocompleteActionPredictor* action_predictor =
       AutocompleteActionPredictorFactory::GetForProfile(profile);
   action_predictor->ClearTransitionalMatches();
+  action_predictor->CancelPrerender();
 }
 
 void OmniboxPrerender::InitializeForProfile(
@@ -134,8 +134,7 @@ void OmniboxPrerender::DoPrerender(const AutocompleteMatch& match,
   DCHECK(web_contents);
   if (!web_contents)
     return;
-  gfx::Rect container_bounds;
-  web_contents->GetView()->GetContainerBounds(&container_bounds);
+  gfx::Rect container_bounds = web_contents->GetContainerBounds();
   predictors::AutocompleteActionPredictorFactory::GetForProfile(profile)->
       StartPrerendering(
           match.destination_url,

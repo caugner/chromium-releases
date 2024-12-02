@@ -10,13 +10,35 @@
   ],
   'targets': [
   {
+    'target_name': 'untar_pnacl_translator',
+    'type': 'none',
+    'actions': [{
+      'action_name': 'Untar pnacl_translator',
+      'description': 'Untar pnacl_translator',
+      'inputs': [
+        '<(DEPTH)/native_client/build/package_version/package_version.py',
+        '<(DEPTH)/native_client/toolchain/.tars/<(OS)_x86/pnacl_translator.json',
+      ],
+      'outputs': ['<(SHARED_INTERMEDIATE_DIR)/<(OS)_x86/pnacl_translator/pnacl_translator.json'],
+      'action': [
+        'python',
+        '<(DEPTH)/native_client/build/package_version/package_version.py',
+        '--packages', 'pnacl_translator',
+        '--tar-dir', '<(DEPTH)/native_client/toolchain/.tars',
+        '--dest-dir', '<(SHARED_INTERMEDIATE_DIR)',
+        'extract',
+      ],
+    }],
+  },
+  {
     'target_name': 'pnacl_support_extension',
     'type': 'none',
     'conditions': [
       ['disable_nacl==0 and disable_pnacl==0 and disable_nacl_untrusted==0', {
         'dependencies': [
-          '../../../../../ppapi/native_client/src/untrusted/pnacl_irt_shim/pnacl_irt_shim.gyp:pnacl_irt_shim_browser',
+          '../../../../../ppapi/native_client/src/untrusted/pnacl_irt_shim/pnacl_irt_shim.gyp:shim_browser',
           '../../../../../native_client/tools.gyp:prep_toolchain',
+          'untar_pnacl_translator',
         ],
         'sources': [
           'pnacl_component_crx_gen.py',
@@ -29,9 +51,9 @@
             'inputs': [
               'pnacl_component_crx_gen.py',
               # A stamp file representing the contents of pnacl_translator.
-              '<(DEPTH)/native_client/toolchain/pnacl_translator/SOURCE_SHA1',
+              '<(SHARED_INTERMEDIATE_DIR)/<(OS)_x86/pnacl_translator/pnacl_translator.json',
               '<(DEPTH)/native_client/pnacl/driver/pnacl_info_template.json',
-              '<(DEPTH)/native_client/TOOL_REVISIONS',
+              '<(DEPTH)/native_client/toolchain_revisions/pnacl_newlib.json',
             ],
             'conditions': [
                 # On windows we need both ia32 and x64.
@@ -161,7 +183,9 @@
               '<@(lib_overrides)',
               '--target_arch=<(target_arch)',
               '--info_template_path=<(DEPTH)/native_client/pnacl/driver/pnacl_info_template.json',
-              '--tool_revisions_path=<(DEPTH)/native_client/TOOL_REVISIONS',
+              '--pnacl_translator_path=<(SHARED_INTERMEDIATE_DIR)/<(OS)_x86/pnacl_translator',
+              '--package_version_path=<(DEPTH)/native_client/build/package_version/package_version.py',
+              '--pnacl_package_name=pnacl_newlib',
               # ABI Version Number.
               '1',
             ],

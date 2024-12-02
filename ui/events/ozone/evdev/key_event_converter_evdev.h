@@ -18,11 +18,12 @@ namespace ui {
 
 class EVENTS_EXPORT KeyEventConverterEvdev
     : public EventConverterEvdev,
-      base::MessagePumpLibevent::Watcher {
+      public base::MessagePumpLibevent::Watcher {
  public:
   KeyEventConverterEvdev(int fd,
                          base::FilePath path,
-                         EventModifiersEvdev* modifiers);
+                         EventModifiersEvdev* modifiers,
+                         const EventDispatchCallback& dispatch);
   virtual ~KeyEventConverterEvdev();
 
   // Start & stop watching for events.

@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/ash/session_state_delegate_chromeos.h"
 
 #include "ash/multi_profile_uma.h"
-#include "ash/session_state_observer.h"
+#include "ash/session/session_state_observer.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
@@ -20,13 +20,29 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "chromeos/login/login_state.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 
-SessionStateDelegateChromeos::SessionStateDelegateChromeos() {
+SessionStateDelegateChromeos::SessionStateDelegateChromeos()
+    : session_state_(SESSION_STATE_LOGIN_PRIMARY) {
   chromeos::UserManager::Get()->AddSessionStateObserver(this);
+  chromeos::UserAddingScreen::Get()->AddObserver(this);
+
+  // LoginState is not initialized in unit_tests.
+  if (chromeos::LoginState::IsInitialized()) {
+    chromeos::LoginState::Get()->AddObserver(this);
+    SetSessionState(chromeos::LoginState::Get()->IsUserLoggedIn() ?
+        SESSION_STATE_ACTIVE : SESSION_STATE_LOGIN_PRIMARY, true);
+  }
 }
 
 SessionStateDelegateChromeos::~SessionStateDelegateChromeos() {
+  chromeos::UserManager::Get()->RemoveSessionStateObserver(this);
+  chromeos::UserAddingScreen::Get()->RemoveObserver(this);
+
+  // LoginState is not initialized in unit_tests.
+  if (chromeos::LoginState::IsInitialized())
+    chromeos::LoginState::Get()->RemoveObserver(this);
 }
 
 content::BrowserContext* SessionStateDelegateChromeos::GetBrowserContextByIndex(
@@ -111,36 +127,26 @@ bool SessionStateDelegateChromeos::IsUserSessionBlocked() const {
          chromeos::UserAddingScreen::Get()->IsRunning();
 }
 
-const base::string16 SessionStateDelegateChromeos::GetUserDisplayName(
-    ash::MultiProfileIndex index) const {
-  DCHECK_LT(index, NumberOfLoggedInUsers());
-  return chromeos::UserManager::Get()->
-             GetLRULoggedInUsers()[index]->display_name();
+ash::SessionStateDelegate::SessionState
+SessionStateDelegateChromeos::GetSessionState() const {
+  return session_state_;
 }
 
-const std::string SessionStateDelegateChromeos::GetUserEmail(
+const ash::UserInfo* SessionStateDelegateChromeos::GetUserInfo(
     ash::MultiProfileIndex index) const {
   DCHECK_LT(index, NumberOfLoggedInUsers());
-  return chromeos::UserManager::Get()->
-             GetLRULoggedInUsers()[index]->display_email();
+  return chromeos::UserManager::Get()->GetLRULoggedInUsers()[index];
 }
 
-const std::string SessionStateDelegateChromeos::GetUserID(
-    ash::MultiProfileIndex index) const {
-  DCHECK_LT(index, NumberOfLoggedInUsers());
-  return gaia::CanonicalizeEmail(gaia::SanitizeEmail(
-      chromeos::UserManager::Get()->
-             GetLRULoggedInUsers()[index]->email()));
-}
-
-const gfx::ImageSkia& SessionStateDelegateChromeos::GetUserImage(
+const ash::UserInfo* SessionStateDelegateChromeos::GetUserInfo(
     content::BrowserContext* context) const {
   DCHECK(context);
   return chromeos::UserManager::Get()->GetUserByProfile(
-      Profile::FromBrowserContext(context))->image();
+      Profile::FromBrowserContext(context));
 }
 
-bool SessionStateDelegateChromeos::ShouldShowAvatar(aura::Window* window) {
+bool SessionStateDelegateChromeos::ShouldShowAvatar(
+    aura::Window* window) const {
   return chrome::MultiUserWindowManager::GetInstance()->
       ShouldShowAvatar(window);
 }
@@ -208,6 +214,11 @@ void SessionStateDelegateChromeos::RemoveSessionStateObserver(
   session_state_observer_list_.RemoveObserver(observer);
 }
 
+void SessionStateDelegateChromeos::LoggedInStateChanged() {
+  SetSessionState(chromeos::LoginState::Get()->IsUserLoggedIn() ?
+      SESSION_STATE_ACTIVE : SESSION_STATE_LOGIN_PRIMARY, false);
+}
+
 void SessionStateDelegateChromeos::ActiveUserChanged(
     const chromeos::User* active_user) {
   FOR_EACH_OBSERVER(ash::SessionStateObserver,
@@ -220,4 +231,27 @@ void SessionStateDelegateChromeos::UserAddedToSession(
   FOR_EACH_OBSERVER(ash::SessionStateObserver,
                     session_state_observer_list_,
                     UserAddedToSession(added_user->email()));
+}
+
+void SessionStateDelegateChromeos::OnUserAddingStarted() {
+  SetSessionState(SESSION_STATE_LOGIN_SECONDARY, false);
+}
+
+void SessionStateDelegateChromeos::OnUserAddingFinished() {
+  SetSessionState(SESSION_STATE_ACTIVE, false);
+}
+
+void SessionStateDelegateChromeos::SetSessionState(SessionState new_state,
+                                                   bool force) {
+  if (session_state_ == new_state && !force)
+    return;
+
+  session_state_ = new_state;
+  NotifySessionStateChanged();
+}
+
+void SessionStateDelegateChromeos::NotifySessionStateChanged() {
+  FOR_EACH_OBSERVER(ash::SessionStateObserver,
+                    session_state_observer_list_,
+                    SessionStateChanged(session_state_));
 }

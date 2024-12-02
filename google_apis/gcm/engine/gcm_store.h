@@ -9,20 +9,16 @@
 #include <string>
 #include <vector>
 
+#include <google/protobuf/message_lite.h>
+
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time/time.h"
 #include "google_apis/gcm/base/gcm_export.h"
 #include "google_apis/gcm/engine/registration_info.h"
-#include "google_apis/gcm/protocol/mcs.pb.h"
-
-namespace google {
-namespace protobuf {
-class MessageLite;
-}  // namespace protobuf
-}  // namespace google
 
 namespace gcm {
 
@@ -47,6 +43,9 @@ class GCM_EXPORT GCMStore {
     RegistrationInfoMap registrations;
     std::vector<std::string> incoming_messages;
     OutgoingMessageMap outgoing_messages;
+    std::map<std::string, std::string> gservices_settings;
+    std::string gservices_digest;
+    base::Time last_checkin_time;
   };
 
   typedef std::vector<std::string> PersistentIdList;
@@ -100,6 +99,18 @@ class GCM_EXPORT GCMStore {
                                      const UpdateCallback& callback) = 0;
   virtual void RemoveOutgoingMessages(const PersistentIdList& persistent_ids,
                                       const UpdateCallback& callback) = 0;
+
+  // Sets last device's checkin time.
+  virtual void SetLastCheckinTime(const base::Time& last_checkin_time,
+                                  const UpdateCallback& callback) = 0;
+
+  // G-service settings handling.
+  // Persists |settings| and |settings_digest|. It completely replaces the
+  // existing data.
+  virtual void SetGServicesSettings(
+      const std::map<std::string, std::string>& settings,
+      const std::string& settings_digest,
+      const UpdateCallback& callback) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GCMStore);

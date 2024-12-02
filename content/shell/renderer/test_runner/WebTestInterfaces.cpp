@@ -13,7 +13,7 @@
 
 using namespace blink;
 
-namespace WebTestRunner {
+namespace content {
 
 WebTestInterfaces::WebTestInterfaces()
     : m_interfaces(new TestInterfaces())
@@ -89,4 +89,4 @@ WebAudioDevice* WebTestInterfaces::createAudioDevice(double sampleRate)
     return new MockWebAudioDevice(sampleRate);
 }
 
-}
+}  // namespace content

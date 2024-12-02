@@ -14,11 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/window_controller.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/app_window.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "content/public/browser/notification_registrar.h"
@@ -28,17 +24,12 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/image_util.h"
 #include "extensions/common/switches.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
 #include "url/gurl.h"
-
-#if defined(USE_ASH)
-#include "ash/shell.h"
-#include "ui/aura/window.h"
-#include "ui/aura/window_event_dispatcher.h"
-#endif
 
 using apps::AppWindow;
 
@@ -52,11 +43,9 @@ const char kInvalidWindowId[] =
     "The window id can not be more than 256 characters long.";
 const char kInvalidColorSpecification[] =
     "The color specification could not be parsed.";
-const char kInvalidChannelForFrameOptions[] =
-    "frameOptions is only available in dev channel.";
 const char kColorWithFrameNone[] = "Windows with no frame cannot have a color.";
-const char kInvalidChannelForBounds[] =
-    "innerBounds and outerBounds are only available in dev channel.";
+const char kInactiveColorWithoutColor[] =
+    "frame.inactiveColor must be used with frame.color.";
 const char kConflictingBoundsOptions[] =
     "The $1 property cannot be specified for both inner and outer bounds.";
 }  // namespace app_window_constants
@@ -148,7 +137,7 @@ void AppWindowCreateFunction::SendDelayedResponse() {
   SendResponse(true);
 }
 
-bool AppWindowCreateFunction::RunImpl() {
+bool AppWindowCreateFunction::RunAsync() {
   // Don't create app window if the system is shutting down.
   if (extensions::ExtensionsBrowserClient::Get()->IsShuttingDown())
     return false;
@@ -189,9 +178,9 @@ bool AppWindowCreateFunction::RunImpl() {
       }
 
       if (!options->singleton || *options->singleton) {
-        AppWindow* window = apps::AppWindowRegistry::Get(GetProfile())
+        AppWindow* window = apps::AppWindowRegistry::Get(browser_context())
                                 ->GetAppWindowForAppAndKey(
-                                      extension_id(), create_params.window_key);
+                                    extension_id(), create_params.window_key);
         if (window) {
           content::RenderViewHost* created_view =
               window->web_contents()->GetRenderViewHost();
@@ -270,17 +259,15 @@ bool AppWindowCreateFunction::RunImpl() {
     }
   }
 
-  UpdateFrameOptionsForChannel(&create_params);
-
   create_params.creator_process_id =
       render_view_host_->GetProcess()->GetID();
 
-  AppWindow* app_window =
-      apps::AppsClient::Get()->CreateAppWindow(GetProfile(), GetExtension());
+  AppWindow* app_window = apps::AppsClient::Get()->CreateAppWindow(
+      browser_context(), GetExtension());
   app_window->Init(
       url, new apps::AppWindowContentsImpl(app_window), create_params);
 
-  if (chrome::IsRunningInForcedAppMode())
+  if (ExtensionsBrowserClient::Get()->IsRunningInForcedAppMode())
     app_window->ForcedFullscreen();
 
   content::RenderViewHost* created_view =
@@ -297,7 +284,7 @@ bool AppWindowCreateFunction::RunImpl() {
   app_window->GetSerializedState(result);
   SetResult(result);
 
-  if (apps::AppWindowRegistry::Get(GetProfile())
+  if (apps::AppWindowRegistry::Get(browser_context())
           ->HadDevToolsAttached(created_view)) {
     new DevToolsRestorer(this, created_view);
     return true;
@@ -318,11 +305,6 @@ bool AppWindowCreateFunction::GetBoundsSpec(
     // Parse the inner and outer bounds specifications. If developers use the
     // new API, the deprecated fields will be ignored - do not attempt to merge
     // them.
-
-    if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
-      *error = app_window_constants::kInvalidChannelForBounds;
-      return false;
-    }
 
     const extensions::api::app_window::BoundsSpecification* inner_bounds =
         options.inner_bounds.get();
@@ -452,11 +434,6 @@ bool AppWindowCreateFunction::GetFrameOptions(
     return true;
   }
 
-  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
-    error_ = app_window_constants::kInvalidChannelForFrameOptions;
-    return false;
-  }
-
   if (options.frame->as_frame_options->type)
     create_params->frame =
         GetFrameFromString(*options.frame->as_frame_options->type);
@@ -467,32 +444,34 @@ bool AppWindowCreateFunction::GetFrameOptions(
       return false;
     }
 
-    if (ExtensionActionFunction::ParseCSSColorString(
+    if (!image_util::ParseCSSColorString(
             *options.frame->as_frame_options->color,
-            &create_params->frame_color)) {
-      create_params->has_frame_color = true;
-      return true;
+            &create_params->active_frame_color)) {
+      error_ = app_window_constants::kInvalidColorSpecification;
+      return false;
     }
 
-    error_ = app_window_constants::kInvalidColorSpecification;
+    create_params->has_frame_color = true;
+    create_params->inactive_frame_color = create_params->active_frame_color;
+
+    if (options.frame->as_frame_options->inactive_color.get()) {
+      if (!image_util::ParseCSSColorString(
+              *options.frame->as_frame_options->inactive_color,
+              &create_params->inactive_frame_color)) {
+        error_ = app_window_constants::kInvalidColorSpecification;
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  if (options.frame->as_frame_options->inactive_color.get()) {
+    error_ = app_window_constants::kInactiveColorWithoutColor;
     return false;
   }
 
   return true;
-}
-
-void AppWindowCreateFunction::UpdateFrameOptionsForChannel(
-    apps::AppWindow::CreateParams* create_params) {
-#if defined(OS_WIN)
-  if (create_params->frame == AppWindow::FRAME_CHROME &&
-      GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV) {
-    // If not on trunk or dev channel, always use the standard white frame.
-    // TODO(benwells): Remove this code once we get agreement to use the new
-    // native style frame.
-    create_params->has_frame_color = true;
-    create_params->frame_color = SK_ColorWHITE;
-  }
-#endif
 }
 
 }  // namespace extensions

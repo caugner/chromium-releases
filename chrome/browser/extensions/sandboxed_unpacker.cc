@@ -25,8 +25,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/common/common_param_traits.h"
@@ -34,8 +32,11 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/crx_file.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_l10n_util.h"
+#include "extensions/common/file_util.h"
 #include "extensions/common/id_util.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/icons_handler.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -167,7 +168,7 @@ bool FindWritableTempLocation(const base::FilePath& extensions_dir,
     return true;
 #endif
 
-  *temp_dir = extension_file_util::GetInstallTempDir(extensions_dir);
+  *temp_dir = file_util::GetInstallTempDir(extensions_dir);
   if (VerifyJunctionFreeLocation(temp_dir))
     return true;
   // Neither paths is link free chances are good installation will fail.

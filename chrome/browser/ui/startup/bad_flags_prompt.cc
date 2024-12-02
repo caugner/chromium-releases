@@ -15,6 +15,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/switch_utils.h"
+#include "components/nacl/common/nacl_switches.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/translate/core/common/translate_switches.h"
 #include "content/public/common/content_switches.h"
@@ -41,11 +42,11 @@ void ShowBadFlagsPrompt(Browser* browser) {
     switches::kDisableSeccompFilterSandbox,
     switches::kDisableSetuidSandbox,
     switches::kDisableWebSecurity,
+    switches::kNaClDangerousNoSandboxNonSfi,
     switches::kNoSandbox,
     switches::kSingleProcess,
 
     // These flags disable or undermine the Same Origin Policy.
-    switches::kEnableBrowserPluginForAllViewTypes,
     switches::kTrustedSpdyProxy,
     translate::switches::kTranslateSecurityOrigin,
 
@@ -78,7 +79,7 @@ void ShowBadFlagsPrompt(Browser* browser) {
     if (CommandLine::ForCurrentProcess()->HasSwitch(*flag)) {
       SimpleAlertInfoBarDelegate::Create(
           InfoBarService::FromWebContents(web_contents),
-          InfoBarDelegate::kNoIconID,
+          infobars::InfoBarDelegate::kNoIconID,
           l10n_util::GetStringFUTF16(IDS_BAD_FLAGS_WARNING_MESSAGE,
                                      base::UTF8ToUTF16(
                                          std::string("--") + *flag)),

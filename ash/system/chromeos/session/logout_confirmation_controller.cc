@@ -4,7 +4,7 @@
 
 #include "ash/system/chromeos/session/logout_confirmation_controller.h"
 
-#include "ash/session_state_delegate.h"
+#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/system/chromeos/session/logout_confirmation_dialog.h"
 #include "base/location.h"
@@ -13,7 +13,6 @@
 #include "ui/views/widget/widget.h"
 
 namespace ash {
-namespace internal {
 
 LogoutConfirmationController::LogoutConfirmationController(
     const base::Closure& logout_closure)
@@ -83,5 +82,4 @@ void LogoutConfirmationController::OnDialogClosed() {
   logout_timer_.Stop();
 }
 
-}  // namespace internal
 }  // namespace ash

@@ -107,7 +107,7 @@ class SpdySessionTest : public PlatformTest,
         test_url_(kTestUrl),
         test_host_port_pair_(kTestHost, kTestPort),
         key_(test_host_port_pair_, ProxyServer::Direct(),
-             kPrivacyModeDisabled) {
+             PRIVACY_MODE_DISABLED) {
   }
 
   virtual ~SpdySessionTest() {
@@ -182,8 +182,7 @@ INSTANTIATE_TEST_CASE_P(
     NextProto,
     SpdySessionTest,
     testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4a2,
-                    kProtoHTTP2Draft04));
+                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
 
 // Try to create a SPDY session that will fail during
 // initialization. Nothing should blow up.
@@ -1278,7 +1277,7 @@ TEST_P(SpdySessionTest, SendInitialDataOnNewSession) {
           kSessionFlowControlStreamId,
           kDefaultInitialRecvWindowSize - kSpdySessionInitialWindowSize));
   std::vector<MockWrite> writes;
-  if (GetParam() == kProtoHTTP2Draft04) {
+  if (GetParam() == kProtoSPDY4) {
     writes.push_back(
         MockWrite(ASYNC,
                   kHttp2ConnectionHeaderPrefix,
@@ -2719,7 +2718,7 @@ TEST_P(SpdySessionTest, CloseOneIdleConnection) {
 
   // Create an idle SPDY session.
   SpdySessionKey key1(HostPortPair("1.com", 80), ProxyServer::Direct(),
-                      kPrivacyModeDisabled);
+                      PRIVACY_MODE_DISABLED);
   base::WeakPtr<SpdySession> session1 =
       CreateInsecureSpdySession(http_session_, key1, BoundNetLog());
   EXPECT_FALSE(pool->IsStalled());
@@ -2779,14 +2778,14 @@ TEST_P(SpdySessionTest, CloseOneIdleConnectionWithAlias) {
 
   // Create an idle SPDY session.
   SpdySessionKey key1(HostPortPair("1.com", 80), ProxyServer::Direct(),
-                      kPrivacyModeDisabled);
+                      PRIVACY_MODE_DISABLED);
   base::WeakPtr<SpdySession> session1 =
       CreateInsecureSpdySession(http_session_, key1, BoundNetLog());
   EXPECT_FALSE(pool->IsStalled());
 
   // Set up an alias for the idle SPDY session, increasing its ref count to 2.
   SpdySessionKey key2(HostPortPair("2.com", 80), ProxyServer::Direct(),
-                      kPrivacyModeDisabled);
+                      PRIVACY_MODE_DISABLED);
   HostResolver::RequestInfo info(key2.host_port_pair());
   AddressList addresses;
   // Pre-populate the DNS cache, since a synchronous resolution is required in
@@ -2867,7 +2866,7 @@ TEST_P(SpdySessionTest, CloseSessionOnIdleWhenPoolStalled) {
   // Create a SPDY session.
   GURL url1(kDefaultURL);
   SpdySessionKey key1(HostPortPair(url1.host(), 80),
-                      ProxyServer::Direct(), kPrivacyModeDisabled);
+                      ProxyServer::Direct(), PRIVACY_MODE_DISABLED);
   base::WeakPtr<SpdySession> session1 =
       CreateInsecureSpdySession(http_session_, key1, BoundNetLog());
   EXPECT_FALSE(pool->IsStalled());
@@ -2928,9 +2927,9 @@ TEST_P(SpdySessionTest, SpdySessionKeyPrivacyMode) {
 
   HostPortPair host_port_pair("www.google.com", 443);
   SpdySessionKey key_privacy_enabled(host_port_pair, ProxyServer::Direct(),
-                                     kPrivacyModeEnabled);
+                                     PRIVACY_MODE_ENABLED);
   SpdySessionKey key_privacy_disabled(host_port_pair, ProxyServer::Direct(),
-                                     kPrivacyModeDisabled);
+                                     PRIVACY_MODE_DISABLED);
 
   EXPECT_FALSE(HasSpdySession(spdy_session_pool_, key_privacy_enabled));
   EXPECT_FALSE(HasSpdySession(spdy_session_pool_, key_privacy_disabled));
@@ -3613,7 +3612,6 @@ void SpdySessionTest::RunResumeAfterUnstallTest(
 
   EXPECT_TRUE(delegate.send_headers_completed());
   EXPECT_EQ("200", delegate.GetResponseHeaderValue(":status"));
-  EXPECT_EQ("HTTP/1.1", delegate.GetResponseHeaderValue(":version"));
   EXPECT_EQ(std::string(), delegate.TakeReceivedData());
   EXPECT_TRUE(data.at_write_eof());
 }
@@ -3810,12 +3808,10 @@ TEST_P(SpdySessionTest, ResumeByPriorityAfterSendWindowSizeIncrease) {
 
   EXPECT_TRUE(delegate1.send_headers_completed());
   EXPECT_EQ("200", delegate1.GetResponseHeaderValue(":status"));
-  EXPECT_EQ("HTTP/1.1", delegate1.GetResponseHeaderValue(":version"));
   EXPECT_EQ(std::string(), delegate1.TakeReceivedData());
 
   EXPECT_TRUE(delegate2.send_headers_completed());
   EXPECT_EQ("200", delegate2.GetResponseHeaderValue(":status"));
-  EXPECT_EQ("HTTP/1.1", delegate2.GetResponseHeaderValue(":version"));
   EXPECT_EQ(std::string(), delegate2.TakeReceivedData());
 
   EXPECT_TRUE(data.at_write_eof());
@@ -3999,7 +3995,6 @@ TEST_P(SpdySessionTest, SendWindowSizeIncreaseWithDeletedStreams) {
 
   EXPECT_TRUE(delegate2.send_headers_completed());
   EXPECT_EQ("200", delegate2.GetResponseHeaderValue(":status"));
-  EXPECT_EQ("HTTP/1.1", delegate2.GetResponseHeaderValue(":version"));
   EXPECT_EQ(std::string(), delegate2.TakeReceivedData());
 
   EXPECT_TRUE(delegate3.send_headers_completed());
@@ -4140,9 +4135,12 @@ TEST(MapRstStreamStatusToProtocolError, MapsValues) {
   CHECK_EQ(STATUS_CODE_PROTOCOL_ERROR,
            MapRstStreamStatusToProtocolError(
                RST_STREAM_PROTOCOL_ERROR));
-  CHECK_EQ(STATUS_CODE_FRAME_TOO_LARGE,
+  CHECK_EQ(STATUS_CODE_FRAME_SIZE_ERROR,
            MapRstStreamStatusToProtocolError(
-               RST_STREAM_FRAME_TOO_LARGE));
+               RST_STREAM_FRAME_SIZE_ERROR));
+  CHECK_EQ(STATUS_CODE_ENHANCE_YOUR_CALM,
+           MapRstStreamStatusToProtocolError(
+               RST_STREAM_ENHANCE_YOUR_CALM));
 }
 
 }  // namespace net

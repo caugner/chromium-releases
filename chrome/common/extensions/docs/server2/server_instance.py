@@ -93,21 +93,9 @@ class ServerInstance(object):
         host_fs_at_trunk,
         compiled_fs_factory)
 
-    self.api_data_source_factory = APIDataSource.Factory(
-        self.compiled_fs_factory,
-        host_fs_at_trunk,
-        self.availability_finder,
+    self.ref_resolver = ReferenceResolver(
         self.api_models,
-        self.features_bundle,
-        self.object_store_creator)
-
-    self.ref_resolver_factory = ReferenceResolver.Factory(
-        self.api_data_source_factory,
-        self.api_models,
-        object_store_creator)
-
-    self.api_data_source_factory.SetReferenceResolverFactory(
-        self.ref_resolver_factory)
+        self.object_store_creator.Create(ReferenceResolver))
 
     # Note: samples are super slow in the dev server because it doesn't support
     # async fetch, so disable them.
@@ -124,11 +112,8 @@ class ServerInstance(object):
         extension_samples_fs,
         app_samples_fs,
         CompiledFileSystem.Factory(object_store_creator),
-        self.ref_resolver_factory,
+        self.ref_resolver,
         base_path)
-
-    self.api_data_source_factory.SetSamplesDataSourceFactory(
-        self.samples_data_source_factory)
 
     self.content_providers = ContentProviders(
         object_store_creator,
@@ -149,7 +134,7 @@ class ServerInstance(object):
         TableOfContentsRenderer(host_fs_at_trunk,
                                 compiled_fs_factory,
                                 self.template_renderer),
-        self.ref_resolver_factory.Create())
+        self.ref_resolver)
 
   @staticmethod
   def ForTest(file_system=None, file_system_provider=None, base_path='/'):

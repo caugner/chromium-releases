@@ -22,11 +22,17 @@
 #include "sync/test/local_sync_test_server.h"
 
 class Profile;
+class ProfileSyncService;
 class ProfileSyncServiceHarness;
 class P2PInvalidationForwarder;
 
 namespace base {
 class CommandLine;
+}
+
+namespace fake_server {
+class FakeServer;
+class FakeServerInvalidationService;
 }
 
 namespace net {
@@ -45,18 +51,26 @@ class SyncTest : public InProcessBrowserTest {
   // The different types of live sync tests that can be implemented.
   enum TestType {
     // Tests where only one client profile is synced with the server. Typically
-    // sanity level tests. Safe to run against the FakeServer, not just the
-    // older python test server.
+    // sanity level tests.
     SINGLE_CLIENT,
 
-    // Tests where only one client profile is synced with the server. "Legacy"
-    // means that the scenario isn't yet supported by the FakeServer so they
-    // should be run against the python server instead.
+    // Tests that use one client profile and are not compatible with
+    // FakeServer.
+    // TODO(pvalenzuela): Delete this value when all SINGLE_CLIENT_LEGACY tests
+    // are compatible with FakeServer and switched to SINGLE_CLIENT. See
+    // crbug.com/323265.
     SINGLE_CLIENT_LEGACY,
 
     // Tests where two client profiles are synced with the server. Typically
     // functionality level tests.
     TWO_CLIENT,
+
+    // Tests that use two client profiles and are not compatible with
+    // FakeServer.
+    // TODO(pvalenzuela): Delete this value when all TWO_CLIENT_LEGACY tests are
+    // compatible with FakeServer and switched to TWO_CLIENT. See
+    // crbug.com/323265.
+    TWO_CLIENT_LEGACY,
 
     // Tests where three or more client profiles are synced with the server.
     // Typically, these tests create client side races and verify that sync
@@ -141,6 +155,12 @@ class SyncTest : public InProcessBrowserTest {
     return clients_.get();
   }
 
+  // Returns a ProfileSyncService at the given index.
+  ProfileSyncService* GetSyncService(int index);
+
+  // Returns the set of ProfileSyncServices.
+  std::vector<ProfileSyncService*> GetSyncServices();
+
   // Returns a pointer to the sync profile that is used to verify changes to
   // individual sync profiles. Callee owns the object and manages its lifetime.
   Profile* verifier() WARN_UNUSED_RESULT;
@@ -164,6 +184,14 @@ class SyncTest : public InProcessBrowserTest {
 
   // Disable outgoing network connections for the given profile.
   virtual void DisableNetwork(Profile* profile);
+
+  // Sets whether or not the sync clients in this test should respond to
+  // notifications of their own commits.  Real sync clients do not do this, but
+  // many test assertions require this behavior.
+  //
+  // Default is to return true.  Test should override this if they require
+  // different behavior.
+  virtual bool TestUsesSelfNotifications();
 
   // Kicks off encryption for profile |index|.
   bool EnableEncryption(int index);
@@ -232,6 +260,10 @@ class SyncTest : public InProcessBrowserTest {
 
   // Triggers the creation the Synced Bookmarks folder on the server.
   void TriggerCreateSyncedBookmarks();
+
+  // Returns the FakeServer being used for the test or NULL if FakeServer is
+  // not being used.
+  fake_server::FakeServer* GetFakeServer() const;
 
  protected:
   // Add custom switches needed for running the test.
@@ -332,6 +364,10 @@ class SyncTest : public InProcessBrowserTest {
   // of test being run and command line args passed in.
   void DecideServerType();
 
+  // Sets up the client-side invalidations infrastructure depending on the
+  // value of |server_type_|.
+  void InitializeInvalidations(int index);
+
   // Python sync test server, started on demand.
   syncer::LocalSyncTestServer sync_server_;
 
@@ -367,6 +403,10 @@ class SyncTest : public InProcessBrowserTest {
   // A set of objects to listen for commit activity and broadcast notifications
   // of this activity to its peer sync clients.
   ScopedVector<P2PInvalidationForwarder> invalidation_forwarders_;
+
+  // Collection of pointers to FakeServerInvalidation objects for each profile.
+  std::vector<fake_server::FakeServerInvalidationService*>
+      fake_server_invalidation_services_;
 
   // Sync profile against which changes to individual profiles are verified. We
   // don't need a corresponding verifier sync client because the contents of the

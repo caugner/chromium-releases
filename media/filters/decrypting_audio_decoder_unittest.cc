@@ -104,7 +104,6 @@ class DecryptingAudioDecoderTest : public testing::Test {
                                                     channels,
                                                     kSampleRate,
                                                     kFakeAudioFrameSize,
-                                                    kNoTimestamp(),
                                                     kNoTimestamp());
     decoded_frame_list_.push_back(decoded_frame_);
 
@@ -123,7 +122,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
 
     config_.Initialize(kCodecVorbis, kSampleFormatPlanarF32,
                        CHANNEL_LAYOUT_STEREO, kSampleRate, NULL, 0, true, true,
-                       base::TimeDelta(), base::TimeDelta());
+                       base::TimeDelta(), 0);
     InitializeAndExpectStatus(config_, PIPELINE_OK);
   }
 
@@ -131,7 +130,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
     ReinitializeConfigChange(config_);
   }
 
-  void ReinitializeConfigChange(AudioDecoderConfig& new_config) {
+  void ReinitializeConfigChange(const AudioDecoderConfig& new_config) {
     EXPECT_CALL(*decryptor_, DeinitializeDecoder(Decryptor::kAudio));
     EXPECT_CALL(*decryptor_, InitializeAudioDecoder(_, _))
         .WillOnce(RunCallback<1>(true));
@@ -249,7 +248,7 @@ class DecryptingAudioDecoderTest : public testing::Test {
         .WillRepeatedly(InvokeWithoutArgs(
             this, &DecryptingAudioDecoderTest::AbortAllPendingCBs));
 
-    decoder_->Stop(NewExpectedClosure());
+    decoder_->Stop();
     message_loop_.RunUntilIdle();
   }
 
@@ -363,14 +362,12 @@ TEST_F(DecryptingAudioDecoderTest, DecryptAndDecode_MultipleFrames) {
       ChannelLayoutToChannelCount(config_.channel_layout()),
       kSampleRate,
       kFakeAudioFrameSize,
-      kNoTimestamp(),
       kNoTimestamp());
   scoped_refptr<AudioBuffer> frame_b = AudioBuffer::CreateEmptyBuffer(
       config_.channel_layout(),
       ChannelLayoutToChannelCount(config_.channel_layout()),
       kSampleRate,
       kFakeAudioFrameSize,
-      kNoTimestamp(),
       kNoTimestamp());
   decoded_frame_list_.push_back(frame_a);
   decoded_frame_list_.push_back(frame_b);

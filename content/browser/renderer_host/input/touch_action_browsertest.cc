@@ -13,11 +13,11 @@
 #include "content/browser/renderer_host/input/synthetic_smooth_scroll_gesture.h"
 #include "content/browser/renderer_host/input/touch_event_queue.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input_messages.h"
-#include "content/port/browser/render_widget_host_view_port.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/content_switches.h"
@@ -165,8 +165,8 @@ class TouchActionBrowserTest : public ContentBrowserTest {
 // http://crbug.com/348539 and is flaky on XP, see
 // http://crbug.com/354763
 //
-// Mac and Linux GTK don't yet have a gesture recognizer, so can't support
-// turning touch events into scroll gestures.
+// Mac doesn't yet have a gesture recognizer, so can't support turning touch
+// events into scroll gestures.
 // Will be fixed with http://crbug.com/337142
 //
 // Verify the test infrastructure works - we can touch-scroll the page and get a
@@ -189,15 +189,14 @@ IN_PROC_BROWSER_TEST_F(TouchActionBrowserTest, DISABLED_DefaultAuto) {
   }
 }
 
-// TouchActionBrowserTest.TouchActionNone fails under ThreadSanitizer v2,
-// see http://crbug.com/357505.
-#if defined(THREAD_SANITIZER)
+// Verify that touching a touch-action: none region disables scrolling and
+// enables all touch events to be sent.
+// Disabled on MacOS because it doesn't support touch input.
+#if defined(OS_MACOSX)
 #define MAYBE_TouchActionNone DISABLED_TouchActionNone
 #else
 #define MAYBE_TouchActionNone TouchActionNone
 #endif
-// Verify that touching a touch-action: none region disables scrolling and
-// enables all touch events to be sent.
 IN_PROC_BROWSER_TEST_F(TouchActionBrowserTest, MAYBE_TouchActionNone) {
   LoadURL();
 

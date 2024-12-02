@@ -410,16 +410,11 @@ bool InstallUtil::IsFirstRunSentinelPresent() {
 }
 
 // static
-bool InstallUtil::GetSentinelFilePath(const base::FilePath::CharType* file,
-                                      BrowserDistribution* dist,
-                                      base::FilePath* path) {
-  // TODO(msw): Use PathService to obtain the correct DIR_USER_DATA.
-  std::vector<base::FilePath> user_data_dir_paths;
-  installer::GetChromeUserDataPaths(dist, &user_data_dir_paths);
-
-  if (user_data_dir_paths.empty())
+bool InstallUtil::GetEULASentinelFilePath(base::FilePath* path) {
+  base::FilePath user_data_dir;
+  if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
     return false;
-  *path = user_data_dir_paths[0].Append(file);
+  *path = user_data_dir.Append(installer::kEULASentinelFile);
   return true;
 }
 

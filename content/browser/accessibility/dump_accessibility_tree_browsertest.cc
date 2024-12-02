@@ -18,7 +18,7 @@
 #include "content/browser/accessibility/browser_accessibility.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
-#include "content/port/browser/render_widget_host_view_port.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
@@ -181,7 +181,7 @@ void DumpAccessibilityTreeTest::RunTest(
   NavigateToURL(shell(), url);
   waiter.WaitForNotification();
 
-  RenderWidgetHostViewPort* host_view = RenderWidgetHostViewPort::FromRWHV(
+  RenderWidgetHostViewBase* host_view = static_cast<RenderWidgetHostViewBase*>(
       shell()->web_contents()->GetRenderWidgetHostView());
   AccessibilityTreeFormatter formatter(
       host_view->GetBrowserAccessibilityManager()->GetRoot());
@@ -292,6 +292,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaLevel) {
   RunTest(FILE_PATH_LITERAL("aria-level.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaList) {
+  RunTest(FILE_PATH_LITERAL("aria-list.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaMenu) {
   RunTest(FILE_PATH_LITERAL("aria-menu.html"));
 }
@@ -392,9 +396,8 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityHR) {
   RunTest(FILE_PATH_LITERAL("hr.html"));
 }
 
-// crbug.com/179717 and crbug.com/224659
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityIframeCoordinates) {
+                       AccessibilityIframeCoordinates) {
   RunTest(FILE_PATH_LITERAL("iframe-coordinates.html"));
 }
 
@@ -459,10 +462,8 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunTest(FILE_PATH_LITERAL("modal-dialog-in-iframe-closed.html"));
 }
 
-// TODO(dmazzoni): fix this test after Blink change that broke it lands.
-// http://crbug.com/353067
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       DISABLED_AccessibilityModalDialogInIframeOpened) {
+                       AccessibilityModalDialogInIframeOpened) {
   RunTest(FILE_PATH_LITERAL("modal-dialog-in-iframe-opened.html"));
 }
 
@@ -520,6 +521,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityUl) {
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityWbr) {
   RunTest(FILE_PATH_LITERAL("wbr.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       AccessibilityAriaActivedescendant) {
+  RunTest(FILE_PATH_LITERAL("aria-activedescendant.html"));
 }
 
 }  // namespace content

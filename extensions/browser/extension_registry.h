@@ -36,7 +36,7 @@ class ExtensionRegistry : public KeyedService {
     EVERYTHING = (1 << 4) - 1,
   };
 
-  ExtensionRegistry();
+  explicit ExtensionRegistry(content::BrowserContext* browser_context);
   virtual ~ExtensionRegistry();
 
   // Returns the instance for the given |browser_context|.
@@ -71,7 +71,8 @@ class ExtensionRegistry : public KeyedService {
 
   // Invokes the observer method OnExtensionUnloaded(). The extension must not
   // be enabled at the time of the call.
-  void TriggerOnUnloaded(const Extension* extension);
+  void TriggerOnUnloaded(const Extension* extension,
+                         UnloadedExtensionInfo::Reason reason);
 
   // Find an extension by ID using |include_mask| to pick the sets to search:
   //  * enabled_extensions()     --> ExtensionRegistry::ENABLED
@@ -136,6 +137,8 @@ class ExtensionRegistry : public KeyedService {
   ExtensionSet blacklisted_extensions_;
 
   ObserverList<ExtensionRegistryObserver> observers_;
+
+  content::BrowserContext* const browser_context_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionRegistry);
 };

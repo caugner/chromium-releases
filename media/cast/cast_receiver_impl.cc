@@ -12,13 +12,6 @@
 namespace media {
 namespace cast {
 
-// The callback should not be used, as the receiver is using the external
-// transport. Implementation is required as the pacer is common to sender and
-// receiver.
-static void DoNothingCastTransportStatus(
-    transport::CastTransportStatus status) {
-  NOTREACHED() << "Internal transport used in CastReceiver";
-}
 // The video and audio receivers should only be called from the main thread.
 // LocalFrameReciever posts tasks to the main thread, making the cast interface
 // thread safe.
@@ -49,16 +42,12 @@ class LocalFrameReceiver : public FrameReceiver {
                                            callback));
   }
 
-  virtual void GetRawAudioFrame(int number_of_10ms_blocks,
-                                int desired_frequency,
-                                const AudioFrameDecodedCallback& callback)
+  virtual void GetRawAudioFrame(const AudioFrameDecodedCallback& callback)
       OVERRIDE {
     cast_environment_->PostTask(CastEnvironment::MAIN,
                                 FROM_HERE,
                                 base::Bind(&AudioReceiver::GetRawAudioFrame,
                                            audio_receiver_->AsWeakPtr(),
-                                           number_of_10ms_blocks,
-                                           desired_frequency,
                                            callback));
   }
 
@@ -103,9 +92,7 @@ CastReceiverImpl::CastReceiverImpl(
       audio_receiver_(cast_environment, audio_config, &pacer_),
       video_receiver_(cast_environment,
                       video_config,
-                      &pacer_,
-                      base::Bind(&CastReceiverImpl::UpdateTargetDelay,
-                                 base::Unretained(this))),
+                      &pacer_),
       frame_receiver_(new LocalFrameReceiver(cast_environment,
                                              &audio_receiver_,
                                              &video_receiver_)),
@@ -149,10 +136,6 @@ void CastReceiverImpl::ReceivedPacket(scoped_ptr<Packet> packet) {
     VLOG(1) << "Received a packet with a non matching sender SSRC "
             << ssrc_of_sender;
   }
-}
-
-void CastReceiverImpl::UpdateTargetDelay(base::TimeDelta target_delay_ms) {
-  audio_receiver_.SetTargetDelay(target_delay_ms);
 }
 
 transport::PacketReceiverCallback CastReceiverImpl::packet_receiver() {

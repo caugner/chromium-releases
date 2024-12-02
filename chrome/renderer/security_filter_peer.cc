@@ -11,11 +11,8 @@
 #include "net/http/http_response_headers.h"
 #include "ui/base/l10n/l10n_util.h"
 
-SecurityFilterPeer::SecurityFilterPeer(
-    webkit_glue::ResourceLoaderBridge* resource_loader_bridge,
-    webkit_glue::ResourceLoaderBridge::Peer* peer)
-    : original_peer_(peer),
-      resource_loader_bridge_(resource_loader_bridge) {
+SecurityFilterPeer::SecurityFilterPeer(content::RequestPeer* peer)
+    : original_peer_(peer) {
 }
 
 SecurityFilterPeer::~SecurityFilterPeer() {
@@ -23,9 +20,9 @@ SecurityFilterPeer::~SecurityFilterPeer() {
 
 // static
 SecurityFilterPeer*
-    SecurityFilterPeer::CreateSecurityFilterPeerForDeniedRequest(
+SecurityFilterPeer::CreateSecurityFilterPeerForDeniedRequest(
     ResourceType::Type resource_type,
-    webkit_glue::ResourceLoaderBridge::Peer* peer,
+    content::RequestPeer* peer,
     int os_error) {
   // Create a filter for SSL and CERT errors.
   switch (os_error) {
@@ -46,7 +43,7 @@ SecurityFilterPeer*
       if (ResourceType::IsFrame(resource_type))
         return CreateSecurityFilterPeerForFrame(peer, os_error);
       // Any other content is entirely filtered-out.
-      return new ReplaceContentPeer(NULL, peer, std::string(), std::string());
+      return new ReplaceContentPeer(peer, std::string(), std::string());
     default:
       // For other errors, we use our normal error handling.
       return NULL;
@@ -55,7 +52,8 @@ SecurityFilterPeer*
 
 // static
 SecurityFilterPeer* SecurityFilterPeer::CreateSecurityFilterPeerForFrame(
-    webkit_glue::ResourceLoaderBridge::Peer* peer, int os_error) {
+    content::RequestPeer* peer,
+    int os_error) {
   // TODO(jcampan): use a different message when getting a phishing/malware
   // error.
   std::string html = base::StringPrintf(
@@ -63,7 +61,7 @@ SecurityFilterPeer* SecurityFilterPeer::CreateSecurityFilterPeerForFrame(
       "<body style='background-color:#990000;color:white;'>"
       "%s</body></html>",
       l10n_util::GetStringUTF8(IDS_UNSAFE_FRAME_MESSAGE).c_str());
-  return new ReplaceContentPeer(NULL, peer, "text/html", html);
+  return new ReplaceContentPeer(peer, "text/html", html);
 }
 
 void SecurityFilterPeer::OnUploadProgress(uint64 position, uint64 size) {
@@ -132,13 +130,9 @@ void ProcessResponseInfo(
 ////////////////////////////////////////////////////////////////////////////////
 // BufferedPeer
 
-BufferedPeer::BufferedPeer(
-    webkit_glue::ResourceLoaderBridge* resource_loader_bridge,
-    webkit_glue::ResourceLoaderBridge::Peer* peer,
-    const std::string& mime_type)
-    : SecurityFilterPeer(resource_loader_bridge, peer),
-      mime_type_(mime_type) {
-}
+BufferedPeer::BufferedPeer(content::RequestPeer* peer,
+                           const std::string& mime_type)
+    : SecurityFilterPeer(peer), mime_type_(mime_type) {}
 
 BufferedPeer::~BufferedPeer() {
 }
@@ -187,15 +181,12 @@ void BufferedPeer::OnCompletedRequest(int error_code,
 ////////////////////////////////////////////////////////////////////////////////
 // ReplaceContentPeer
 
-ReplaceContentPeer::ReplaceContentPeer(
-    webkit_glue::ResourceLoaderBridge* resource_loader_bridge,
-    webkit_glue::ResourceLoaderBridge::Peer* peer,
-    const std::string& mime_type,
-    const std::string& data)
-    : SecurityFilterPeer(resource_loader_bridge, peer),
+ReplaceContentPeer::ReplaceContentPeer(content::RequestPeer* peer,
+                                       const std::string& mime_type,
+                                       const std::string& data)
+    : SecurityFilterPeer(peer),
       mime_type_(mime_type),
-      data_(data) {
-}
+      data_(data) {}
 
 ReplaceContentPeer::~ReplaceContentPeer() {
 }

@@ -13,10 +13,8 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/browser/web_contents_view.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/runtime_data.h"
 #include "extensions/common/extension_messages.h"
@@ -44,7 +42,7 @@ class ExtensionViewHost::AssociatedWebContentsObserver
   virtual ~AssociatedWebContentsObserver() {}
 
   // content::WebContentsObserver:
-  virtual void WebContentsDestroyed(WebContents* web_contents) OVERRIDE {
+  virtual void WebContentsDestroyed() OVERRIDE {
     // Deleting |this| from here is safe.
     host_->SetAssociatedWebContents(NULL);
   }
@@ -85,9 +83,6 @@ void ExtensionViewHost::CreateView(Browser* browser) {
   view_->set_owned_by_client();
 #elif defined(OS_MACOSX)
   view_.reset(new ExtensionViewMac(this, browser));
-  view_->Init();
-#elif defined(TOOLKIT_GTK)
-  view_.reset(new ExtensionViewGtk(this, browser));
   view_->Init();
 #else
   // TODO(port)
@@ -280,7 +275,7 @@ ExtensionViewHost::GetWebContentsModalDialogHost() {
 }
 
 bool ExtensionViewHost::IsWebContentsVisible(WebContents* web_contents) {
-  return platform_util::IsVisible(web_contents->GetView()->GetNativeView());
+  return platform_util::IsVisible(web_contents->GetNativeView());
 }
 
 gfx::NativeView ExtensionViewHost::GetHostView() const {
@@ -290,7 +285,7 @@ gfx::NativeView ExtensionViewHost::GetHostView() const {
 gfx::Point ExtensionViewHost::GetDialogPosition(const gfx::Size& size) {
   if (!GetVisibleWebContents())
     return gfx::Point();
-  gfx::Rect bounds = GetVisibleWebContents()->GetView()->GetViewBounds();
+  gfx::Rect bounds = GetVisibleWebContents()->GetViewBounds();
   return gfx::Point(
       std::max(0, (bounds.width() - size.width()) / 2),
       std::max(0, (bounds.height() - size.height()) / 2));
@@ -299,7 +294,7 @@ gfx::Point ExtensionViewHost::GetDialogPosition(const gfx::Size& size) {
 gfx::Size ExtensionViewHost::GetMaximumDialogSize() {
   if (!GetVisibleWebContents())
     return gfx::Size();
-  return GetVisibleWebContents()->GetView()->GetViewBounds().size();
+  return GetVisibleWebContents()->GetViewBounds().size();
 }
 
 void ExtensionViewHost::AddObserver(
@@ -344,7 +339,7 @@ void ExtensionViewHost::InsertInfobarCSS() {
       ResourceBundle::GetSharedInstance().GetRawDataResource(
       IDR_EXTENSIONS_INFOBAR_CSS));
 
-  host_contents()->GetMainFrame()->InsertCSS(css.as_string());
+  host_contents()->InsertCSS(css.as_string());
 }
 
 }  // namespace extensions

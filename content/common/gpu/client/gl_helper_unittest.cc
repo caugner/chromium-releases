@@ -27,7 +27,6 @@
 #include "content/common/gpu/client/gl_helper_scaling.h"
 #include "content/public/test/unittest_test_suite.h"
 #include "content/test/content_test_suite.h"
-#include "gpu/config/gpu_util.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -37,10 +36,6 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/scoped_nsautorelease_pool.h"
-#endif
-
-#if defined(TOOLKIT_GTK)
-#include "ui/gfx/gtk_util.h"
 #endif
 
 namespace content {
@@ -1671,10 +1666,6 @@ int main(int argc, char** argv) {
 #if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool pool;
 #endif
-#if defined(TOOLKIT_GTK)
-  gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
-#endif
-  gpu::ApplyGpuDriverBugWorkarounds(CommandLine::ForCurrentProcess());
 
   content::UnitTestTestSuite runner(suite);
   base::MessageLoop message_loop;

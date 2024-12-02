@@ -10,7 +10,7 @@
 #include "base/command_line.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/profiles/profile_info_util.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 
@@ -50,7 +50,7 @@ void ProfileListChromeOS::RebuildMenu() {
     size_t i = profile_info_->GetIndexOfProfileWithPath(
         ProfileHelper::GetProfilePathByUserIdHash((*it)->username_hash()));
 
-    gfx::Image icon = gfx::Image((*it)->image());
+    gfx::Image icon = gfx::Image((*it)->GetImage());
     if (!CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kNewProfileManagement)) {
       // old avatar menu uses resized-small images

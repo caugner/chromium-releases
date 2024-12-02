@@ -59,6 +59,12 @@ var KEY_ASPECT_RATIO_PORTRAIT = 1;
 var KEY_ASPECT_RATIO_LANDSCAPE = 1.46;
 
 /**
+ * The ratio between the height and width of the compact keyboard.
+ * @type {number}
+ */
+var DEFAULT_KEYBOARD_ASPECT_RATIO = 0.41;
+
+/**
  * The default weight of a key.
  * @type {number}
  */
@@ -80,10 +86,17 @@ var KEY_PADDING_TOP = 1;
 var KEY_PADDING_BOTTOM = 1;
 
 /**
+ * The greatest distance between a key and a touch point for a PointerEvent
+ * to be processed.
+ * @type {number}
+ */
+var MAX_TOUCH_FUZZ_DISTANCE = 20;
+
+/**
  * The maximum number of extra pixels before a resize is triggered.
  * @type {number}
  */
-var RESIZE_THRESHOLD = 50;
+var RESIZE_THRESHOLD = 20;
 
 /**
  * The size of the pool to use for playing audio sounds on key press. This is to
@@ -92,3 +105,9 @@ var RESIZE_THRESHOLD = 50;
  * @type {number}
  */
 var SOUND_POOL_SIZE = 10;
+
+/**
+ * Whether or not to enable sounds on key press.
+ * @type {boolean}
+ */
+var SOUND_ENABLED = false;

@@ -17,7 +17,17 @@ FakePictureLayerImpl::FakePictureLayerImpl(
     : PictureLayerImpl(tree_impl, id),
       append_quads_count_(0) {
   pile_ = pile;
-  SetBounds(pile_->size());
+  CHECK(pile->tiling_rect().origin() == gfx::Point());
+  SetBounds(pile_->tiling_rect().size());
+}
+
+FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl,
+                                           int id,
+                                           scoped_refptr<PicturePileImpl> pile,
+                                           const gfx::Size& layer_bounds)
+    : PictureLayerImpl(tree_impl, id), append_quads_count_(0) {
+  pile_ = pile;
+  SetBounds(layer_bounds);
 }
 
 FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl, int id)
@@ -85,6 +95,19 @@ void FakePictureLayerImpl::SetAllTilesVisible() {
       priority.priority_bin = TilePriority::NOW;
       priority.distance_to_visible = 0.f;
       tile->SetPriority(tree, priority);
+    }
+  }
+}
+
+void FakePictureLayerImpl::ResetAllTilesPriorities() {
+  for (size_t tiling_idx = 0; tiling_idx < tilings_->num_tilings();
+       ++tiling_idx) {
+    PictureLayerTiling* tiling = tilings_->tiling_at(tiling_idx);
+    std::vector<Tile*> tiles = tiling->AllTilesForTesting();
+    for (size_t tile_idx = 0; tile_idx < tiles.size(); ++tile_idx) {
+      Tile* tile = tiles[tile_idx];
+      tile->SetPriority(ACTIVE_TREE, TilePriority());
+      tile->SetPriority(PENDING_TREE, TilePriority());
     }
   }
 }

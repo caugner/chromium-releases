@@ -125,8 +125,6 @@ class SearchProviderInstallDataTest : public testing::Test {
   virtual void SetUp() OVERRIDE;
   virtual void TearDown() OVERRIDE;
 
-  void SimulateDefaultSearchIsManaged(const std::string& url);
-
  protected:
   TemplateURL* AddNewTemplateURL(const std::string& url,
                                  const base::string16& keyword);
@@ -172,27 +170,6 @@ void SearchProviderInstallDataTest::TearDown() {
   testing::Test::TearDown();
 }
 
-void SearchProviderInstallDataTest::SimulateDefaultSearchIsManaged(
-    const std::string& url) {
-  ASSERT_FALSE(url.empty());
-  TestingPrefServiceSyncable* service =
-      util_.profile()->GetTestingPrefService();
-  service->SetManagedPref(prefs::kDefaultSearchProviderEnabled,
-                          base::Value::CreateBooleanValue(true));
-  service->SetManagedPref(prefs::kDefaultSearchProviderSearchURL,
-                          base::Value::CreateStringValue(url));
-  service->SetManagedPref(prefs::kDefaultSearchProviderName,
-                          base::Value::CreateStringValue("managed"));
-  // Clear the IDs that are not specified via policy.
-  service->SetManagedPref(prefs::kDefaultSearchProviderID,
-                          new base::StringValue(std::string()));
-  service->SetManagedPref(prefs::kDefaultSearchProviderPrepopulateID,
-                          new base::StringValue(std::string()));
-  util_.model()->Observe(chrome::NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
-                         content::NotificationService::AllSources(),
-                         content::NotificationService::NoDetails());
-}
-
 TemplateURL* SearchProviderInstallDataTest::AddNewTemplateURL(
     const std::string& url,
     const base::string16& keyword) {
@@ -225,7 +202,7 @@ TEST_F(SearchProviderInstallDataTest, GetInstallState) {
   TemplateURL* default_url =
       AddNewTemplateURL("http://" + default_host + "/",
                         base::ASCIIToUTF16("mmm"));
-  util_.model()->SetDefaultSearchProvider(default_url);
+  util_.model()->SetUserSelectedDefaultSearchProvider(default_url);
   test_get_install_state.RunTests(host, default_host);
 }
 
@@ -237,8 +214,17 @@ TEST_F(SearchProviderInstallDataTest, ManagedDefaultSearch) {
 
   // Set a managed preference that establishes a default search provider.
   std::string host2 = "www.managedtest.com";
-  std::string url2 = "http://" + host2 + "/p{searchTerms}";
-  SimulateDefaultSearchIsManaged(url2);
+  util_.SetManagedDefaultSearchPreferences(
+      true,
+      "managed",
+      "managed",
+      "http://" + host2 + "/p{searchTerms}",
+      std::string(),
+      std::string(),
+      std::string(),
+      std::string(),
+      std::string());
+
   EXPECT_TRUE(util_.model()->is_default_search_managed());
 
   // Wait for the changes to be saved.
@@ -264,7 +250,7 @@ TEST_F(SearchProviderInstallDataTest, GoogleBaseUrlChange) {
                     base::ASCIIToUTF16("t"));
   TemplateURL* default_url =
       AddNewTemplateURL("http://d.com/", base::ASCIIToUTF16("d"));
-  util_.model()->SetDefaultSearchProvider(default_url);
+  util_.model()->SetUserSelectedDefaultSearchProvider(default_url);
 
   // Wait for the changes to be saved.
   base::RunLoop().RunUntilIdle();

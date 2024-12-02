@@ -6,6 +6,7 @@
 #define UI_APP_LIST_VIEWS_APPS_GRID_VIEW_H_
 
 #include <set>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
@@ -50,6 +51,7 @@ class AppsGridViewTestApi;
 class ApplicationDragAndDropHost;
 class AppListItemView;
 class AppsGridViewDelegate;
+class AppsGridViewFolderDelegate;
 class PageSwitcher;
 class PaginationModel;
 
@@ -81,6 +83,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   int cols() { return cols_; }
   int rows_per_page() { return rows_per_page_; }
 
+  // This resets the grid view to a fresh state for showing the app list.
+  void ResetForShowApps();
+
   // Sets |model| to use. Note this does not take ownership of |model|.
   void SetModel(AppListModel* model);
 
@@ -110,11 +115,8 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   void UpdateDrag(Pointer pointer, const gfx::Point& point);
   void EndDrag(bool cancel);
   bool IsDraggedView(const views::View* view) const;
-
-  void StartSettingUpSynchronousDrag();
-  bool RunSynchronousDrag();
-  void CleanUpSynchronousDrag();
-  void OnGotShortcutPath(const base::FilePath& path);
+  void ClearDragState();
+  void SetDragViewVisible(bool visible);
 
   // Set the drag and drop host for application links.
   void SetDragAndDropHostOfCurrentAppList(
@@ -122,6 +124,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // Prerenders the icons on and around |page_index|.
   void Prerender(int page_index);
+
+  // Return true if the |bounds_animator_| is animating |view|.
+  bool IsAnimatingView(views::View* view);
 
   bool has_dragged_view() const { return drag_view_ != NULL; }
   bool dragging() const { return drag_pointer_ != NONE; }
@@ -163,18 +168,20 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Updates drag in the root level grid view when receiving the drag event
   // dispatched from the hidden grid view for reparenting a folder item.
   void UpdateDragFromReparentItem(Pointer pointer,
-      const ui::LocatedEvent& event);
+                                  const gfx::Point& drag_point);
 
   // Dispatches the drag event from hidden grid view to the top level grid view.
   void DispatchDragEventForReparent(Pointer pointer,
-      const ui::LocatedEvent& event);
+                                    const gfx::Point& drag_point);
 
   // Handles EndDrag event dispatched from the hidden folder grid view in the
   // root level grid view to end reparenting a folder item.
   // |events_forwarded_to_drag_drop_host|: True if the dragged item is dropped
   // to the drag_drop_host, eg. dropped on shelf.
+  // |cancel_drag|: True if the drag is ending because it has been canceled.
   void EndDragFromReparentItemInRootLevel(
-      bool events_forwarded_to_drag_drop_host);
+      bool events_forwarded_to_drag_drop_host,
+      bool cancel_drag);
 
   // Handles EndDrag event in the hidden folder grid view to end reparenting
   // a folder item.
@@ -195,7 +202,9 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
     return forward_events_to_drag_and_drop_host_;
   }
 
-  void set_is_root_level(bool value) { is_root_level_ = value; }
+  void set_folder_delegate(AppsGridViewFolderDelegate* folder_delegate) {
+    folder_delegate_ = folder_delegate;
+  }
 
   AppListItemView* activated_item_view() const {
     return activated_item_view_;
@@ -419,7 +428,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // Updates drag state for dragging inside a folder's grid view.
   void UpdateDragStateInsideFolder(Pointer pointer,
-      const ui::LocatedEvent& event);
+                                   const gfx::Point& drag_point);
 
   // Returns true if drag event is happening in the root level AppsGridView
   // for reparenting a folder item.
@@ -427,7 +436,7 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
 
   // Returns true if drag event is happening in the hidden AppsGridView of the
   // folder during reparenting a folder item.
-  bool IsDraggingForReprentInHiddenGridView() const;
+  bool IsDraggingForReparentInHiddenGridView() const;
 
   // Returns the target icon bounds for |drag_item_view| to fly back
   // to its parent |folder_item_view| in animation.
@@ -437,9 +446,21 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   // Returns true if the grid view is under an OEM folder.
   bool IsUnderOEMFolder();
 
+  void StartSettingUpSynchronousDrag();
+  bool RunSynchronousDrag();
+  void CleanUpSynchronousDrag();
+#if defined(OS_WIN)
+  void OnGotShortcutPath(scoped_refptr<SynchronousDrag> drag,
+                         const base::FilePath& path);
+#endif
+
   AppListModel* model_;  // Owned by AppListView.
   AppListItemList* item_list_;  // Not owned.
   AppsGridViewDelegate* delegate_;
+
+  // This can be NULL. Only grid views inside folders have a folder delegate.
+  AppsGridViewFolderDelegate* folder_delegate_;
+
   PaginationModel* pagination_model_;  // Owned by AppListController.
   PageSwitcher* page_switcher_view_;  // Owned by views hierarchy.
 
@@ -513,9 +534,6 @@ class APP_LIST_EXPORT AppsGridView : public views::View,
   int page_flip_delay_in_ms_;
 
   views::BoundsAnimator bounds_animator_;
-
-  // If true, AppsGridView is rending items at the root level of the app list.
-  bool is_root_level_;
 
   // The most recent activated item view.
   AppListItemView* activated_item_view_;

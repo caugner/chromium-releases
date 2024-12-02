@@ -47,7 +47,7 @@ const char kInvalidGalleryIDError[] = "Invalid gallery ID";
 // Handles the profile shutdown event on the file thread to clean up
 // GalleryWatchManager.
 void HandleProfileShutdownOnFileThread(void* profile_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
   GalleryWatchManager::OnProfileShutdown(profile_id);
 }
 
@@ -84,7 +84,7 @@ MediaGalleriesPrivateAPI::MediaGalleriesPrivateAPI(
     content::BrowserContext* context)
     : profile_(Profile::FromBrowserContext(context)), weak_ptr_factory_(this) {
   DCHECK(profile_);
-  EventRouter* event_router = ExtensionSystem::Get(profile_)->event_router();
+  EventRouter* event_router = EventRouter::Get(profile_);
   event_router->RegisterObserver(
       this, media_galleries_private::OnGalleryChanged::kEventName);
 }
@@ -93,7 +93,7 @@ MediaGalleriesPrivateAPI::~MediaGalleriesPrivateAPI() {
 }
 
 void MediaGalleriesPrivateAPI::Shutdown() {
-  ExtensionSystem::Get(profile_)->event_router()->UnregisterObserver(this);
+  EventRouter::Get(profile_)->UnregisterObserver(this);
   weak_ptr_factory_.InvalidateWeakPtrs();
   content::BrowserThread::PostTask(
       content::BrowserThread::FILE, FROM_HERE,
@@ -159,9 +159,9 @@ MediaGalleriesPrivateAddGalleryWatchFunction::
 ~MediaGalleriesPrivateAddGalleryWatchFunction() {
 }
 
-bool MediaGalleriesPrivateAddGalleryWatchFunction::RunImpl() {
+bool MediaGalleriesPrivateAddGalleryWatchFunction::RunAsync() {
   DCHECK(GetProfile());
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
@@ -220,7 +220,7 @@ void MediaGalleriesPrivateAddGalleryWatchFunction::OnPreferencesInit(
 void MediaGalleriesPrivateAddGalleryWatchFunction::HandleResponse(
     MediaGalleryPrefId gallery_id,
     bool success) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   media_galleries_private::AddGalleryWatchResult result;
   result.gallery_id = base::Uint64ToString(gallery_id);
   result.success = success;
@@ -245,8 +245,8 @@ MediaGalleriesPrivateRemoveGalleryWatchFunction::
 ~MediaGalleriesPrivateRemoveGalleryWatchFunction() {
 }
 
-bool MediaGalleriesPrivateRemoveGalleryWatchFunction::RunImpl() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+bool MediaGalleriesPrivateRemoveGalleryWatchFunction::RunAsync() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
@@ -304,8 +304,8 @@ MediaGalleriesPrivateGetAllGalleryWatchFunction::
 ~MediaGalleriesPrivateGetAllGalleryWatchFunction() {
 }
 
-bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunImpl() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+bool MediaGalleriesPrivateGetAllGalleryWatchFunction::RunAsync() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
@@ -342,8 +342,8 @@ MediaGalleriesPrivateRemoveAllGalleryWatchFunction::
 ~MediaGalleriesPrivateRemoveAllGalleryWatchFunction() {
 }
 
-bool MediaGalleriesPrivateRemoveAllGalleryWatchFunction::RunImpl() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+bool MediaGalleriesPrivateRemoveAllGalleryWatchFunction::RunAsync() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!render_view_host() || !render_view_host()->GetProcess())
     return false;
 
@@ -377,8 +377,8 @@ MediaGalleriesPrivateGetHandlersFunction::
 ~MediaGalleriesPrivateGetHandlersFunction() {
 }
 
-bool MediaGalleriesPrivateGetHandlersFunction::RunImpl() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+bool MediaGalleriesPrivateGetHandlersFunction::RunAsync() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   ExtensionService* service =
       extensions::ExtensionSystem::Get(GetProfile())->extension_service();

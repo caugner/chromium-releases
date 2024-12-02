@@ -51,8 +51,9 @@ bool EditSearchEngineController::IsURLValid(
   // If this is going to be the default search engine, it must support
   // replacement.
   if (!template_ref.SupportsReplacement() &&
-      (template_url_ == TemplateURLServiceFactory::GetForProfile(profile_)->
-          GetDefaultSearchProvider()))
+      template_url_ &&
+      template_url_ == TemplateURLServiceFactory::GetForProfile(profile_)->
+          GetDefaultSearchProvider())
     return false;
 
   // Replace any search term with a placeholder string and make sure the
@@ -137,7 +138,7 @@ std::string EditSearchEngineController::GetFixedUpURL(
   TemplateURL t_url(profile_, data);
   std::string expanded_url(t_url.url_ref().ReplaceSearchTerms(
       TemplateURLRef::SearchTermsArgs(base::ASCIIToUTF16("x"))));
-  url_parse::Parsed parts;
+  url::Parsed parts;
   std::string scheme(URLFixerUpper::SegmentURL(expanded_url, &parts));
   if (!parts.scheme.is_valid())
     url.insert(0, scheme + "://");

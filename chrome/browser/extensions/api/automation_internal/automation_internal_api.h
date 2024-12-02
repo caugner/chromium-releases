@@ -8,7 +8,6 @@
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
-#include "extensions/browser/event_router.h"
 
 namespace content {
 struct AXEventNotificationDetails;
@@ -28,7 +27,27 @@ class AutomationInternalEnableCurrentTabFunction
  protected:
   virtual ~AutomationInternalEnableCurrentTabFunction() {}
 
-  virtual bool RunImpl() OVERRIDE;
+  virtual bool RunAsync() OVERRIDE;
+};
+
+class AutomationInternalPerformActionFunction
+    : public ChromeAsyncExtensionFunction {
+  DECLARE_EXTENSION_FUNCTION("automationInternal.performAction",
+                             AUTOMATIONINTERNAL_PERFORMACTION)
+ protected:
+  virtual ~AutomationInternalPerformActionFunction() {}
+
+  virtual bool RunAsync() OVERRIDE;
+};
+
+class AutomationInternalEnableDesktopFunction
+    : public ChromeAsyncExtensionFunction {
+  DECLARE_EXTENSION_FUNCTION("automationInternal.enableDesktop",
+                             AUTOMATIONINTERNAL_ENABLEDESKTOP)
+ protected:
+  virtual ~AutomationInternalEnableDesktopFunction() {}
+
+  virtual bool RunAsync() OVERRIDE;
 };
 
 }  // namespace extensions

@@ -102,9 +102,11 @@ uint32_t WallpaperResizer::GetImageId(const gfx::ImageSkia& image) {
 WallpaperResizer::WallpaperResizer(int image_resource_id,
                                    const gfx::Size& target_size,
                                    WallpaperLayout layout)
-    : image_(*(ui::ResourceBundle::GetSharedInstance().
-          GetImageNamed(image_resource_id).ToImageSkia())),
+    : image_(*(ui::ResourceBundle::GetSharedInstance()
+                   .GetImageNamed(image_resource_id)
+                   .ToImageSkia())),
       original_image_id_(GetImageId(image_)),
+      resource_id_(image_resource_id),
       target_size_(target_size),
       layout_(layout),
       weak_ptr_factory_(this) {
@@ -116,6 +118,7 @@ WallpaperResizer::WallpaperResizer(const gfx::ImageSkia& image,
                                    WallpaperLayout layout)
     : image_(image),
       original_image_id_(GetImageId(image_)),
+      resource_id_(DesktopBackgroundController::kInvalidResourceID),
       target_size_(target_size),
       layout_(layout),
       weak_ptr_factory_(this) {

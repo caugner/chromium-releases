@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "third_party/WebKit/public/platform/WebScreenOrientation.h"
+#include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
@@ -26,11 +26,11 @@ struct WebSize;
 struct WebURLError;
 }
 
-namespace WebTestRunner {
+namespace content {
 
-struct WebPreferences;
 class WebTask;
 class WebTestProxyBase;
+struct TestPreferences;
 
 class WebTestDelegate {
 public:
@@ -54,7 +54,7 @@ public:
     virtual void setDeviceOrientationData(const blink::WebDeviceOrientationData&) = 0;
 
     // Set orientation to set when registering via Platform::setScreenOrientationListener().
-    virtual void setScreenOrientation(const blink::WebScreenOrientation&) = 0;
+    virtual void setScreenOrientation(const blink::WebScreenOrientationType&) = 0;
 
     // Add a message to the text dump for the layout test.
     virtual void printMessage(const std::string& message) = 0;
@@ -82,7 +82,7 @@ public:
     virtual blink::WebURL rewriteLayoutTestsURL(const std::string& utf8URL) = 0;
 
     // Manages the settings to used for layout tests.
-    virtual WebPreferences* preferences() = 0;
+    virtual TestPreferences* preferences() = 0;
     virtual void applyPreferences() = 0;
 
     // Enables or disables synchronous resize mode. When enabled, all window-sizing machinery is
@@ -100,7 +100,8 @@ public:
     virtual void clearDevToolsLocalStorage() = 0;
 
     // Opens and closes the inspector.
-    virtual void showDevTools(const std::string& settings) = 0;
+    virtual void showDevTools(const std::string& settings,
+                              const std::string& frontend_url) = 0;
     virtual void closeDevTools() = 0;
 
     // Evaluate the given script in the DevTools agent.
@@ -112,6 +113,9 @@ public:
 
     // Controls the device scale factor of the main WebView for hidpi tests.
     virtual void setDeviceScaleFactor(float) = 0;
+
+    // Change the device color profile while running a layout test.
+    virtual void setDeviceColorProfile(const std::string& name) = 0;
 
     // Controls which WebView should be focused.
     virtual void setFocus(WebTestProxyBase*, bool) = 0;
@@ -146,11 +150,11 @@ public:
     // Returns true if resource requests to external URLs should be permitted.
     virtual bool allowExternalPages() = 0;
 
-    // Returns the back/forward history for the WebView associated with the
-    // given WebTestProxyBase as well as the index of the current entry.
-    virtual void captureHistoryForWindow(WebTestProxyBase*, blink::WebVector<blink::WebHistoryItem>*, size_t* currentEntryIndex) = 0;
+    // Returns a text dump the back/forward history for the WebView associated
+    // with the given WebTestProxyBase.
+    virtual std::string dumpHistoryForWindow(WebTestProxyBase*) = 0;
 };
 
-}
+}  // namespace content
 
 #endif  // CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBTESTDELEGATE_H_

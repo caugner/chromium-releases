@@ -37,6 +37,7 @@ class APIPermission {
     // Real permissions.
     kAccessibilityFeaturesModify,
     kAccessibilityFeaturesRead,
+    kAccessibilityPrivate,
     kActiveTab,
     kActivityLogPrivate,
     kAdView,
@@ -47,6 +48,7 @@ class APIPermission {
     kAutomation,
     kAutoTestPrivate,
     kBackground,
+    kBluetoothPrivate,
     kBookmark,
     kBookmarkManagerPrivate,
     kBrailleDisplayPrivate,
@@ -155,11 +157,11 @@ class APIPermission {
     kVirtualKeyboardPrivate,
     kWallpaper,
     kWallpaperPrivate,
+    kWebcamPrivate,
     kWebConnectable,  // for externally_connectable manifest key
     kWebNavigation,
     kWebRequest,
     kWebRequestBlocking,
-    kWebRequestInternal,
     kWebrtcAudioPrivate,
     kWebrtcLoggingPrivate,
     kWebstorePrivate,
@@ -172,6 +174,7 @@ class APIPermission {
     kSystemInfoCpu,
     kSystemInfoMemory,
     kFirstRunPrivate,
+    kBrowser,
     kEnumBoundary
   };
 
@@ -209,8 +212,13 @@ class APIPermission {
   virtual bool Equal(const APIPermission* rhs) const = 0;
 
   // Parses the APIPermission from |value|. Returns false if an error happens
-  // and optionally set |error| if |error| is not NULL.
-  virtual bool FromValue(const base::Value* value, std::string* error) = 0;
+  // and optionally set |error| if |error| is not NULL. If |value| represents
+  // multiple permissions, some are invalid, and |unhandled_permissions| is
+  // not NULL, the invalid ones are put into |unhandled_permissions| and the
+  // function returns true.
+  virtual bool FromValue(const base::Value* value,
+                         std::string* error,
+                         std::vector<std::string>* unhandled_permissions) = 0;
 
   // Stores this into a new created |value|.
   virtual scoped_ptr<base::Value> ToValue() const = 0;
@@ -315,17 +323,25 @@ class APIPermissionInfo {
  private:
   // Instances should only be constructed from within a PermissionsProvider.
   friend class ChromeAPIPermissions;
+  friend class ExtensionsAPIPermissions;
   // Implementations of APIPermission will want to get the permission message,
   // but this class's implementation should be hidden from everyone else.
   friend class APIPermission;
 
-  explicit APIPermissionInfo(
-      APIPermission::ID id,
-      const char* name,
-      int l10n_message_id,
-      PermissionMessage::ID message_id,
-      int flags,
-      APIPermissionConstructor api_permission_constructor);
+  // This exists to allow aggregate initialization, so that default values
+  // for flags, etc. can be omitted.
+  // TODO(yoz): Simplify the way initialization is done. APIPermissionInfo
+  // should be the simple data struct.
+  struct InitInfo {
+    APIPermission::ID id;
+    const char* name;
+    int flags;
+    int l10n_message_id;
+    PermissionMessage::ID message_id;
+    APIPermissionInfo::APIPermissionConstructor constructor;
+  };
+
+  explicit APIPermissionInfo(const InitInfo& info);
 
   // Returns the localized permission message associated with this api.
   // Use GetMessage_ to avoid name conflict with macro GetMessage on Windows.
