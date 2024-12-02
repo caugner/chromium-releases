@@ -13,7 +13,9 @@
 
   var testData = [
     {
-      'args': {'sessionId': sessionId},
+      'args': {'data': {'sessionId': sessionId, 'frames': [
+        {'frame': 'frame1', 'url': 'frameurl', 'name': 'frame-name'}
+      ]}},
       'cat': 'disabled-by-default-devtools.timeline',
       'name': 'TracingStartedInPage',
       'ph': 'I',
@@ -280,7 +282,7 @@
   tabbedPane.selectTab(Timeline.TimelineDetailsView.Tab.EventLog);
   const view = tabbedPane.visibleView;
 
-  view.setModel(model);
+  view.setModel(model, PerformanceTestRunner.mainTrack());
   view.updateContents(Timeline.TimelineSelection.fromRange(
       model.timelineModel().minimumRecordTime(), model.timelineModel().maximumRecordTime()));
   function printEventMessage(event, level) {

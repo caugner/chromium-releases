@@ -955,7 +955,15 @@ CrSettingsSiteDetailsTest.prototype = {
   ]),
 };
 
-TEST_F('CrSettingsSiteDetailsTest', 'All', function() {
+// Disabling on Windows debug due to flaky timeout on Win7 Tests (dbg)(1) bot.
+// https://crbug.com/825304
+GEN('#if defined(OS_WIN) && !defined(NDEBUG)');
+GEN('#define MAYBE_All DISABLED_All');
+GEN('#else');
+GEN('#define MAYBE_All All');
+GEN('#endif');
+
+TEST_F('CrSettingsSiteDetailsTest', 'MAYBE_All', function() {
   mocha.run();
 });
 
@@ -1866,3 +1874,28 @@ CrSettingsOnStartupPageTest.prototype = {
 TEST_F('CrSettingsOnStartupPageTest', 'All', function() {
   mocha.run();
 });
+GEN('#if defined(OS_CHROMEOS)');
+
+/**
+ * @constructor
+ * @extends {CrSettingsBrowserTest}
+ */
+function CrSettingsDisplaySizeSliderTest() {}
+
+CrSettingsDisplaySizeSliderTest.prototype = {
+  __proto__: CrSettingsBrowserTest.prototype,
+
+  /** @override */
+  browsePreload: 'chrome://settings/device_page/display_size_slider.html',
+
+  /** @override */
+  extraLibraries: CrSettingsBrowserTest.prototype.extraLibraries.concat([
+    'display_size_slider_test.js',
+  ]),
+};
+
+TEST_F('CrSettingsDisplaySizeSliderTest', 'All', function() {
+  mocha.run();
+});
+GEN('#endif  // defined(OS_CHROMEOS)');
+

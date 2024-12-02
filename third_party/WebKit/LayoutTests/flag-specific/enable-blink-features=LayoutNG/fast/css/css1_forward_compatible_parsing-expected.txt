@@ -14,8 +14,8 @@ layer at (0,0) size 800x427
             text run at (0,0) width 776: "Second sentence: this text should be green according to CSS 1 but it should be red according to CSS 2.1. The markup code"
             text run at (0,20) width 751: "is also invalid according to W3C HTML validator but the CSS code is perfectly valid according to W3C CSS validator."
       LayoutNGBlockFlow {H3} at (0,114.72) size 784x46 [color=#008000] [bgcolor=#FFFFFF]
-        LayoutText {#text} at (0,0) size 766x45
-          text run at (0,0) width 766: "Third sentence: this text should be green. The markup code is valid according to W3C HTML"
+        LayoutText {#text} at (0,0) size 767x45
+          text run at (0,0) width 767: "Third sentence: this text should be green. The markup code is valid according to W3C HTML"
           text run at (0,23) width 579: "validator but the CSS code is invalid according to W3C CSS validator."
       LayoutNGBlockFlow {H4} at (0,181.98) size 784x60 [color=#FF0000] [bgcolor=#FFFFFF]
         LayoutText {#text} at (0,0) size 776x59

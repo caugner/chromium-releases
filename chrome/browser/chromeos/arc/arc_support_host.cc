@@ -20,6 +20,7 @@
 #include "chrome/browser/consent_auditor/consent_auditor_factory.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/consent_auditor/consent_auditor.h"
+#include "components/signin/core/browser/signin_manager_base.h"
 #include "components/user_manager/known_user.h"
 #include "extensions/browser/extension_registry.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -516,6 +518,11 @@ bool ArcSupportHost::Initialize() {
   loadtime_data->SetString(
       "textBackupRestore",
       l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_DIALOG_BACKUP_RESTORE));
+  loadtime_data->SetString("textPaiService",
+                           l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_PAI));
+  loadtime_data->SetString(
+      "textGoogleServiceConfirmation",
+      l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_GOOGLE_SERVICE_CONFIRMATION));
   loadtime_data->SetString(
       "textLocationService",
       l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_LOCATION_SETTING));
@@ -534,6 +541,9 @@ bool ArcSupportHost::Initialize() {
   loadtime_data->SetString(
       "learnMoreLocationServices",
       l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_LEARN_MORE_LOCATION_SERVICES));
+  loadtime_data->SetString(
+      "learnMorePaiService",
+      l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_LEARN_MORE_PAI_SERVICE));
   loadtime_data->SetString(
       "overlayClose",
       l10n_util::GetStringUTF16(IDS_ARC_OPT_IN_LEARN_MORE_CLOSE));
@@ -637,10 +647,15 @@ void ArcSupportHost::OnMessage(const base::DictionaryValue& message) {
       return;
     }
 
+    SigninManagerBase* signin_manager =
+        SigninManagerFactory::GetForProfile(profile_);
+    DCHECK(signin_manager->IsAuthenticated());
+    std::string account_id = signin_manager->GetAuthenticatedAccountId();
+
     // Record acceptance of ToS if it was shown to the user.
     if (tos_shown) {
       ConsentAuditorFactory::GetForProfile(profile_)->RecordGaiaConsent(
-          consent_auditor::Feature::PLAY_STORE,
+          account_id, consent_auditor::Feature::PLAY_STORE,
           ComputePlayToSConsentIds(tos_content),
           IDS_ARC_OPT_IN_DIALOG_BUTTON_AGREE,
           consent_auditor::ConsentStatus::GIVEN);
@@ -649,7 +664,7 @@ void ArcSupportHost::OnMessage(const base::DictionaryValue& message) {
     // If the user - not policy - chose Backup and Restore, record consent.
     if (is_backup_restore_enabled && !is_backup_restore_managed) {
       ConsentAuditorFactory::GetForProfile(profile_)->RecordGaiaConsent(
-          consent_auditor::Feature::BACKUP_AND_RESTORE,
+          account_id, consent_auditor::Feature::BACKUP_AND_RESTORE,
           {IDS_ARC_OPT_IN_DIALOG_BACKUP_RESTORE},
           IDS_ARC_OPT_IN_DIALOG_BUTTON_AGREE,
           consent_auditor::ConsentStatus::GIVEN);
@@ -658,7 +673,7 @@ void ArcSupportHost::OnMessage(const base::DictionaryValue& message) {
     // If the user - not policy - chose Location Services, record consent.
     if (is_location_service_enabled && !is_location_service_managed) {
       ConsentAuditorFactory::GetForProfile(profile_)->RecordGaiaConsent(
-          consent_auditor::Feature::GOOGLE_LOCATION_SERVICE,
+          account_id, consent_auditor::Feature::GOOGLE_LOCATION_SERVICE,
           {IDS_ARC_OPT_IN_LOCATION_SETTING}, IDS_ARC_OPT_IN_DIALOG_BUTTON_AGREE,
           consent_auditor::ConsentStatus::GIVEN);
     }

@@ -352,6 +352,16 @@
     ]
   },
 
+  "UserNativePrintersAllowed": {
+    "os": ["chromeos"],
+    "test_policy": {
+      "UserNativePrintersAllowed": true
+    },
+    "pref_mappings": [
+      { "pref": "native_printing.user_native_printers_allowed" }
+    ]
+  },
+
   "SafeBrowsingEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
     "can_be_recommended": true,
@@ -985,7 +995,7 @@
         },
         "bcdefghijklmnopabcdefghijklmnopa" : {
           "installation_mode": "force_installed",
-          "update_url": "http://example.com/update_url",
+          "update_url": "https://clients2.google.com/service/update2/crx",
           "allowed_permissions": ["downloads"]
         },
         "*": {
@@ -1523,6 +1533,14 @@
     "test_policy": { "DefaultWebBluetoothGuardSetting": 2 },
     "pref_mappings": [
       { "pref": "profile.managed_default_content_settings.web_bluetooth_guard" }
+    ]
+  },
+
+  "DefaultWebUsbGuardSetting": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "DefaultWebUsbGuardSetting": 2 },
+    "pref_mappings": [
+      { "pref": "profile.managed_default_content_settings.web_usb_guard" }
     ]
   },
 
@@ -2214,6 +2232,22 @@
     ]
   },
 
+  "CertificateTransparencyEnforcementDisabledForCas": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "CertificateTransparencyEnforcementDisabledForCas": ["sha256/AAAAAAAAAAAAAAAAAAAAAA=="] },
+    "pref_mappings": [
+      { "pref": "certificate_transparency.excluded_spkis" }
+    ]
+  },
+
+  "CertificateTransparencyEnforcementDisabledForLegacyCas": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "CertificateTransparencyEnforcementDisabledForLegacyCas": ["sha256/AAAAAAAAAAAAAAAAAAAAAA=="] },
+    "pref_mappings": [
+      { "pref": "certificate_transparency.excluded_legacy_spkis" }
+    ]
+  },
+
   "RC4Enabled": {
     "note": "This policy is retired, see https://crbug.com/375342."
   },
@@ -2288,6 +2322,16 @@
     ]
   },
 
+  "MediaRouterCastAllowAllIPs": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "MediaRouterCastAllowAllIPs": false },
+    "pref_mappings": [
+      { "pref": "media_router.cast_allow_all_ips",
+        "local_state": true
+      }
+    ]
+  },
+
   "NTPContentSuggestionsEnabled": {
     "os": ["android"],
     "test_policy": { "NTPContentSuggestionsEnabled": false },
@@ -2341,7 +2385,13 @@
   },
 
   "RelaunchNotificationPeriod": {
-    "note": "This policy is waiting for M67; see https://crbug.com/807072."
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "RelaunchNotificationPeriod": 86400000},
+    "pref_mappings": [
+      { "pref": "browser.relaunch_notification_period",
+        "local_state": true
+      }
+    ]
   },
 
   "----- Chrome OS policies ------------------------------------------------": {},
@@ -3156,11 +3206,13 @@
   },
 
   "DeviceRollbackAllowedMilestones": {
-    "note": "Chrome OS device policy used by update_engine only, not used in Chrome. TODO(hunyadym): add os field when M67 in dev."
+    "os": ["chromeos"],
+    "note": "Chrome OS device policy used by update_engine only, not used in Chrome."
   },
 
   "DeviceRollbackToTargetVersion": {
-    "note": "Chrome OS device policy used by update_engine only, not used in Chrome. TODO(hunyadym): add os field when M67 in dev."
+    "os": ["chromeos"],
+    "note": "Chrome OS device policy used by update_engine only, not used in Chrome."
   },
 
   "DeviceTargetVersionPrefix": {
@@ -3586,6 +3638,42 @@
     "pref_mappings": [
       { "pref": "media.autoplay_allowed" }
     ]
+  },
+
+  "AutoplayWhitelist": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": {
+      "AutoplayWhitelist": [
+        "https://mydomain.com", "https://test.mydomain.com"
+      ]
+    },
+    "pref_mappings": [
+      { "pref": "media.autoplay_whitelist" }
+    ]
+  },
+
+  "TabUnderAllowed": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": {
+      "TabUnderAllowed": false
+    },
+    "pref_mappings": [
+      { "pref": "tab_under_allowed"}
+    ]
+  },
+
+  "ArcAppInstallEventLoggingEnabled": {
+    "os": ["chromeos"],
+    "test_policy": { "ArcAppInstallEventLoggingEnabled": true },
+    "pref_mappings": [
+      { "pref": "arc.app_install_event_logging_enabled" }
+    ]
+  },
+
+  "EnableSyncConsent": {
+    "os": ["chromeos"],
+    "test_policy": { "EnableSyncConsent": false },
+    "pref_mappings": [{ "pref": "sync_consent.enabled" }]
   },
 
   "----- Chrome Frame policies -------------------------------------------": {},

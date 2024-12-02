@@ -19,6 +19,7 @@ suite('ProtocolHandlers', function() {
       handlers: [{
         host: 'www.google.com',
         protocol: 'mailto',
+        protocol_name: 'email',
         spec: 'http://www.google.com/%s',
         is_default: true
       }],
@@ -29,12 +30,14 @@ suite('ProtocolHandlers', function() {
         {
           host: 'www.google1.com',
           protocol: 'webcal',
+          protocol_name: 'web calendar',
           spec: 'http://www.google1.com/%s',
           is_default: true
         },
         {
           host: 'www.google2.com',
           protocol: 'webcal',
+          protocol_name: 'web calendar',
           spec: 'http://www.google2.com/%s',
           is_default: false
         }
@@ -50,6 +53,7 @@ suite('ProtocolHandlers', function() {
   const ignoredProtocols = [{
     host: 'www.google.com',
     protocol: 'web+ignored',
+    protocol_name: 'web+ignored',
     spec: 'https://www.google.com/search?q=ignored+%s',
     is_default: false
   }];
@@ -145,17 +149,17 @@ suite('ProtocolHandlers', function() {
   function testButtonFlow(button, browserProxyHandler) {
     return initPage().then(() => {
       // Initiating the elements
-      const menuButtons =
-          testElement.root.querySelectorAll('button.icon-more-vert');
+      const menuButtons = testElement.root.querySelectorAll(
+          'paper-icon-button-light.icon-more-vert');
       assertEquals(3, menuButtons.length);
-      const dialog = testElement.$$('dialog[is=cr-action-menu]');
+      const dialog = testElement.$$('cr-action-menu');
       return Promise.all([[0, 0], [1, 0], [1, 1]].map((indices, menuIndex) => {
         const protocolIndex = indices[0];
         const handlerIndex = indices[1];
         // Test the button for the first protocol handler
         browserProxy.reset();
         assertFalse(dialog.open);
-        MockInteractions.tap(menuButtons[menuIndex]);
+        MockInteractions.tap(menuButtons[menuIndex].querySelector('button'));
         assertTrue(dialog.open);
         MockInteractions.tap(testElement.$[button]);
         assertFalse(dialog.open);
@@ -180,17 +184,16 @@ suite('ProtocolHandlers', function() {
   test('default button works', function() {
     browserProxy.setProtocolHandlers(protocols);
     return testButtonFlow('defaultButton', 'setProtocolDefault').then(() => {
-      const menuButtons =
-          testElement.root.querySelectorAll('button.icon-more-vert');
-      const closeMenu = () =>
-          testElement.$$('dialog[is=cr-action-menu]').close();
-      MockInteractions.tap(menuButtons[0]);
+      const menuButtons = testElement.root.querySelectorAll(
+          'paper-icon-button-light.icon-more-vert');
+      const closeMenu = () => testElement.$$('cr-action-menu').close();
+      MockInteractions.tap(menuButtons[0].querySelector('button'));
       assertTrue(testElement.$.defaultButton.hidden);
       closeMenu();
-      MockInteractions.tap(menuButtons[1]);
+      MockInteractions.tap(menuButtons[1].querySelector('button'));
       assertTrue(testElement.$.defaultButton.hidden);
       closeMenu();
-      MockInteractions.tap(menuButtons[2]);
+      MockInteractions.tap(menuButtons[2].querySelector('button'));
       assertFalse(testElement.$.defaultButton.hidden);
     });
   });

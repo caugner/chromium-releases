@@ -69,7 +69,7 @@ TEST_F('SettingsPasswordSectionBrowserTest', 'uiTests', function() {
           node.$$('#originUrl').href);
       assertEquals(
           passwordInfo.loginPair.username,
-          node.$$('#username').textContent.trim());
+          node.$$('#username').value);
       assertEquals(passwordInfo.numCharactersInPassword,
           node.$$('#password').value.length);
     }
@@ -120,7 +120,7 @@ TEST_F('SettingsPasswordSectionBrowserTest', 'uiTests', function() {
 
   /**
    * Helper method used to create a password section for the given lists.
-   * @param {!PasswordManager} passwordManager
+   * @param {!PasswordManagerProxy} passwordManager
    * @param {!Array<!chrome.passwordsPrivate.PasswordUiEntry>} passwordList
    * @param {!Array<!chrome.passwordsPrivate.ExceptionEntry>} exceptionList
    * @return {!Object}
@@ -128,7 +128,7 @@ TEST_F('SettingsPasswordSectionBrowserTest', 'uiTests', function() {
    */
   function createPasswordsSection(passwordManager, passwordList,
       exceptionList) {
-    // Override the PasswordManager data for testing.
+    // Override the PasswordManagerProxy data for testing.
     passwordManager.data.passwords = passwordList;
     passwordManager.data.exceptions = exceptionList;
 
@@ -504,7 +504,7 @@ TEST_F('SettingsPasswordSectionBrowserTest', 'uiTests', function() {
       // Text should be readable.
       assertEquals('text',
                    passwordDialog.$.passwordInput.type);
-      assertTrue(passwordDialog.$.showPasswordButton.hidden);
+      assertTrue(passwordDialog.$.showPasswordButtonContainer.hidden);
     });
 
     test('showSavedPasswordEditDialog', function() {
@@ -513,7 +513,7 @@ TEST_F('SettingsPasswordSectionBrowserTest', 'uiTests', function() {
           'goo.gl', 'bart', PASSWORD.length);
       const passwordDialog = createPasswordDialog(item);
 
-      assertFalse(passwordDialog.$.showPasswordButton.hidden);
+      assertFalse(passwordDialog.$.showPasswordButtonContainer.hidden);
 
       passwordDialog.set('item.password', PASSWORD);
       Polymer.dom.flush();
@@ -523,7 +523,7 @@ TEST_F('SettingsPasswordSectionBrowserTest', 'uiTests', function() {
       // Password should be visible.
       assertEquals('text',
                    passwordDialog.$.passwordInput.type);
-      assertFalse(passwordDialog.$.showPasswordButton.hidden);
+      assertFalse(passwordDialog.$.showPasswordButtonContainer.hidden);
     });
 
     test('showSavedPasswordListItem', function() {
@@ -544,7 +544,7 @@ TEST_F('SettingsPasswordSectionBrowserTest', 'uiTests', function() {
       assertFalse(passwordListItem.$$('#password').disabled);
 
       // Hide Password Button should be shown.
-      assertTrue(passwordListItem.$$('#showPasswordButton')
+      assertTrue(passwordListItem.$$('#showPasswordButtonContainer')
                      .classList.contains('icon-visibility-off'));
     });
 

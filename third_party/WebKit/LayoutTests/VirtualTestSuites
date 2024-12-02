@@ -22,6 +22,11 @@
   },
   {
     "prefix": "threaded",
+    "base": "external/wpt/offscreen-canvas/convert-to-blob",
+    "args": ["--enable-threaded-compositing"]
+  },
+  {
+    "prefix": "threaded",
     "base": "compositing/visibility",
     "args": ["--enable-threaded-compositing"]
   },
@@ -140,6 +145,15 @@
   {
     "prefix": "android",
     "base": "url-bar",
+    "args": ["--enable-features=OverlayScrollbar", "--enable-threaded-compositing",
+             "--enable-fixed-position-compositing", "--enable-prefer-compositing-to-lcd-text",
+             "--enable-composited-scrolling-for-frames", "--enable-gesture-tap-highlight", "--enable-pinch",
+             "--force-overlay-fullscreen-video", "--enable-overscroll-notifications",
+             "--enable-viewport", "--disable-canvas-aa", "--disable-composited-antialiasing"]
+  },
+  {
+    "prefix": "android",
+    "base": "frame-size",
     "args": ["--enable-features=OverlayScrollbar", "--enable-threaded-compositing",
              "--enable-fixed-position-compositing", "--enable-prefer-compositing-to-lcd-text",
              "--enable-composited-scrolling-for-frames", "--enable-gesture-tap-highlight", "--enable-pinch",
@@ -287,6 +301,12 @@
     "base": "printing",
     "args": ["--disable-blink-features=SlimmingPaintV175"]
   },
+  {
+    "prefix": "disable-rls",
+    "base": "compositing/squashing",
+    "args": ["--disable-blink-features=RootLayerScrolling"]
+  },
+
   {
     "prefix": "scalefactor200",
     "base": "fast/hidpi/static",
@@ -436,6 +456,31 @@
     "base": "fast/writing-mode",
     "args": ["--enable-blink-features=LayoutNG",
              "--enable-slimming-paint-v175"]
+  },
+  {
+    "prefix": "layout_ng_experimental",
+    "base": "external/wpt/css/css-multicol",
+    "args": ["--enable-blink-features=LayoutNGBlockFragmentation"]
+  },
+  {
+    "prefix": "layout_ng_experimental",
+    "base": "fast/multicol",
+    "args": ["--enable-blink-features=LayoutNGBlockFragmentation"]
+  },
+  {
+    "prefix": "layout_ng_experimental",
+    "base": "fast/pagination",
+    "args": ["--enable-blink-features=LayoutNGBlockFragmentation"]
+  },
+  {
+    "prefix": "layout_ng_experimental",
+    "base": "fragmentation",
+    "args": ["--enable-blink-features=LayoutNGBlockFragmentation"]
+  },
+  {
+    "prefix": "layout_ng_experimental",
+    "base": "printing",
+    "args": ["--enable-blink-features=LayoutNGBlockFragmentation"]
   },
   {
     "prefix": "print_browser",
@@ -599,8 +644,48 @@
     "args": ["--enable-features=NavigationMojoResponse"]
   },
   {
-    "prefix": "enable-webauthn",
-    "base": "http/tests/credentialmanager/",
-    "args": ["--enable-features=WebAuthentication"]
+    "prefix": "htxg",
+    "base": "http/tests/loading/htxg",
+    "args": ["--enable-features=SignedHTTPExchange"]
+  },
+  {
+    "prefix": "htxg-with-network-service",
+    "base": "http/tests/loading/htxg",
+    "args": ["--enable-features=SignedHTTPExchange,NetworkService"]
+  },
+  {
+    "prefix": "picture-in-picture",
+    "base": "external/wpt/picture-in-picture",
+    "args": ["--enable-features=PictureInPicture,UseSurfaceLayerForVideo"]
+  },
+  {
+    "prefix": "picture-in-picture",
+    "base": "external/wpt/feature-policy",
+    "args": ["--enable-features=PictureInPicture,UseSurfaceLayerForVideo"]
+  },
+  {
+    "prefix": "picture-in-picture",
+    "base": "media/picture-in-picture",
+    "args": ["--enable-features=PictureInPicture,UseSurfaceLayerForVideo"]
+  },
+  {
+    "prefix": "off-main-thread-websocket",
+    "base": "external/wpt/websockets",
+    "args": ["--enable-features=OffMainThreadWebSocket"]
+  },
+  {
+    "prefix": "off-main-thread-websocket",
+    "base": "http/tests/websocket",
+    "args": ["--enable-features=OffMainThreadWebSocket"]
+  },
+  {
+    "prefix": "off-main-thread-websocket",
+    "base": "http/tests/security/mixedContent/websocket",
+    "args": ["--enable-features=OffMainThreadWebSocket"]
+  },
+  {
+    "prefix": "webrtc-wpt-unified-plan",
+    "base": "external/wpt/webrtc",
+    "args": ["--enable-blink-features=RTCUnifiedPlanByDefault"]
   }
 ]
