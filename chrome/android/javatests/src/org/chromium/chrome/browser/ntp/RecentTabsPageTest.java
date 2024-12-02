@@ -11,6 +11,7 @@ import static androidx.test.espresso.matcher.ViewMatchers.withId;
 import static androidx.test.espresso.matcher.ViewMatchers.withParent;
 
 import static org.hamcrest.core.AllOf.allOf;
+import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.MockitoAnnotations.initMocks;
@@ -20,6 +21,7 @@ import android.view.View;
 
 import androidx.test.filters.LargeTest;
 import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.hamcrest.Matchers;
 import org.junit.After;
@@ -34,7 +36,9 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Criteria;
 import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
@@ -330,6 +334,21 @@ public class RecentTabsPageTest {
                                 withId(R.id.empty_state_container),
                                 withParent(withId(R.id.legacy_sync_promo_view_frame_layout))))
                 .check(matches(isDisplayed()));
+    }
+
+    @Test
+    @SmallTest
+    @EnableFeatures(ChromeFeatureList.DYNAMIC_TOP_CHROME)
+    public void testTabStripHeightChangeCallback() {
+        mPage = loadRecentTabsPage();
+        var tabStripHeightChangeCallback = mPage.getTabStripHeightChangeCallbackForTesting();
+        int newTabStripHeight = 40;
+        TestThreadUtils.runOnUiThreadBlocking(
+                () -> tabStripHeightChangeCallback.onResult(newTabStripHeight));
+        assertEquals(
+                "Top padding of page view should be updated when tab strip height changes.",
+                newTabStripHeight,
+                mPage.getView().getPaddingTop());
     }
 
     private CoreAccountInfo addAccountWithNonDisplayableEmail(String name) {

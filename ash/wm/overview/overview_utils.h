@@ -12,12 +12,14 @@
 #include "ash/wm/overview/overview_focusable_view.h"
 #include "ash/wm/overview/overview_types.h"
 #include "ash/wm/splitview/split_view_drag_indicators.h"
-#include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/geometry/transform.h"
 
 namespace aura {
 class Window;
 }  // namespace aura
+
+namespace gfx {
+class Rect;
+}  // namespace gfx
 
 namespace views {
 class Widget;
@@ -62,12 +64,6 @@ void ImmediatelyCloseWidgetOnExit(std::unique_ptr<views::Widget> widget);
 // window's transient hierarchy.
 gfx::RectF GetUnionScreenBoundsForWindow(aura::Window* window);
 
-// Applies the `transform` to `window` and all of its transient children. Note
-// `transform` is the transform that is applied to `window` and needs to be
-// adjusted for the transient child windows.
-ASH_EXPORT void SetTransform(aura::Window* window,
-                             const gfx::Transform& transform);
-
 // Maximize the window if it is snapped without animation.
 void MaximizeIfSnapped(aura::Window* window);
 
@@ -76,7 +72,7 @@ void MaximizeIfSnapped(aura::Window* window);
 // `divider_changed` is true, maybe clamp the bounds to a minimum size and shift
 // the bounds offscreen. If `account_for_hotseat` is true and we are in tablet
 // mode, inset the bounds by the hotseat size.
-gfx::Rect GetGridBoundsInScreen(aura::Window* target_root);
+ASH_EXPORT gfx::Rect GetGridBoundsInScreen(aura::Window* target_root);
 gfx::Rect GetGridBoundsInScreen(
     aura::Window* target_root,
     std::optional<SplitViewDragIndicators::WindowDraggingState>
